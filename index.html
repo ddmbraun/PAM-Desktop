@@ -471,7 +471,7 @@ function _parseEmlText(rawText){
   return{subject:subject,sender:sender,date:date,bodyText:plain.substring(0,8000),bodyHtml:htmlBody||''};
 }
 
-function tEmailOrdnerOeffnen(){var u=(document.getElementById('tEmailOrdner')||{}).value||'';if(u.trim())window.open(u,'_blank');else showToast('⚠ Bitte zuerst eine Google Drive Ordner-URL eintragen','error',4000);}
+function tEmailOrdnerOeffnen(){var u=(document.getElementById('tEmailOrdner')||{}).value||'';if(u.trim())window.open(u,'_blank');else alert('Bitte zuerst eine Google Drive Ordner-URL eintragen.');}
 
 // ── AUFTRAG ANLEGEN (Haupt-Drop-Zone) ──
 var _auftragPending=null; // speichert geparste E-Mail + Rohdaten bis Board gewählt
@@ -525,7 +525,7 @@ async function _pdfAuftragDrop(dt){
 }
 
 async function _auftragDrop(dt){
-  if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden (oben rechts: ☁️ Google Drive)','error',5000);return;}
+  if(!gdriveToken){alert('Bitte zuerst mit Google Drive verbinden.');return;}
   var zone=document.getElementById('auftragDropBar');
   zone.classList.add('adz-hover');
   try{
@@ -569,7 +569,7 @@ function _auftragFileSelect(evt){
   var f=evt.target.files&&evt.target.files[0];
   evt.target.value='';
   if(!f)return;
-  if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden (oben rechts: ☁️ Google Drive)','error',5000);return;}
+  if(!gdriveToken){alert('Bitte zuerst mit Google Drive verbinden.');return;}
   var dt={files:[f],types:['Files'],getData:function(){return '';}};
   _auftragDrop(dt);
 }
@@ -1512,7 +1512,6 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
       <span class="card-size-val" id="cardSizeVal">100%</span>
     </div>
     <button class="btn-auftrag" onclick="openAuftragDatei()">📋 Auftrag anlegen</button>
-    <label class="topbar-btn" title="Task aus ZIP-Sicherung wiederherstellen" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);cursor:pointer;font-size:12px;font-weight:500;padding:6px 12px;border-radius:6px;display:inline-flex;align-items:center;gap:5px;">↩ Wiederherstellen<input type="file" accept=".zip" style="display:none" onchange="importTaskFromZip(this.files[0]);this.value='';" autocomplete="off"></label>
     <label class="topbar-btn" title="Task aus ZIP-Sicherung wiederherstellen" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);cursor:pointer;font-size:12px;font-weight:500;padding:6px 12px;border-radius:6px;display:inline-flex;align-items:center;gap:5px;">↩ ZIP
       <input type="file" accept=".zip" style="display:none" onchange="_zipRestoreDrop(this.files[0]);this.value='';" autocomplete="off">
     </label>
@@ -2615,7 +2614,7 @@ async function gdriveTokenCallback(resp) {
       }
       return;
     }
-    showToast('⚠ Google Drive Anmeldefehler: ' + resp.error,'error',8000);
+    alert('Google Drive Anmeldefehler: ' + resp.error);
     return;
   }
   console.log('[Drive] Token erhalten, expires_in=', resp.expires_in);
@@ -2632,7 +2631,6 @@ async function gdriveTokenCallback(resp) {
   }
   clearTimeout(_gdriveRefreshTimer); // kein Timer mehr – visibilitychange übernimmt
   _hideDriveWarnBanner(); // Warnbanner ausblenden (falls sichtbar)
-  _warnToastShown = false; // Toast kann beim nächsten Ablauf wieder erscheinen
   updateDriveBtnBar(); // Timer-Anzeige starten
   const action = gdrivePendingAction;
   gdrivePendingAction = null;
@@ -2754,10 +2752,8 @@ function _silentTokenRefresh(onSuccess, onFail){
 }
 
 // Jede Minute prüfen: wie lange noch?
-// < 10 Min: Banner sofort zeigen + stille Erneuerung versuchen (klappt sie, verschwindet Banner)
-// Hinweis: requestAccessToken({prompt:'none'}) funktioniert nicht zuverlässig ohne Nutzeraktion.
-// Daher: Banner früh genug zeigen, damit der Nutzer rechtzeitig selbst klicken kann.
-let _warnToastShown = false; // Toast nur einmal pro Session
+// < 10 Min: stille Erneuerung versuchen
+// Schlägt stille Erneuerung fehl oder < 5 Min: Banner anzeigen
 setInterval(()=>{
   if(!gdriveTokenClient)return;
   // Kein Token aber Datei war gespeichert → stille Erneuerung versuchen
@@ -2777,18 +2773,11 @@ setInterval(()=>{
     _showDriveWarnBanner(0);
     return;
   }
-  if(msLeft > 600000) return; // mehr als 10 Min → nichts tun
-  // Weniger als 10 Min → Banner SOFORT zeigen (nicht erst nach fehlgeschlagenem Silent-Refresh)
-  _showDriveWarnBanner(msLeft/1000);
-  // Einmalig Toast anzeigen damit Nutzer es sicher bemerkt
-  if(!_warnToastShown){
-    _warnToastShown=true;
-    showToast('⚠ Google Drive Verbindung läuft bald ab – bitte oben auf „Erneut anmelden" klicken','error',10000);
-  }
-  // Trotzdem stille Erneuerung versuchen – klappt sie, verschwindet der Banner automatisch
+  if(msLeft > 300000) return; // mehr als 5 Min → nichts tun
+  // Weniger als 5 Min → stille Erneuerung versuchen
   _silentTokenRefresh(
-    ()=>{ _hideDriveWarnBanner(); _warnToastShown=false; }, // Erfolg → Banner weg
-    ()=>{ /* Banner bleibt – Nutzer muss klicken */ }
+    ()=>{ _hideDriveWarnBanner(); }, // Erfolg
+    ()=>{ _showDriveWarnBanner(msLeft/1000); } // Fehlgeschlagen → Banner
   );
 },60*1000);
 
@@ -2801,11 +2790,10 @@ document.addEventListener('visibilitychange', () => {
     _showDriveWarnBanner(0);
     return;
   }
-  if(msLeft > 600000) return;
-  _showDriveWarnBanner(msLeft/1000);
+  if(msLeft > 300000) return;
   _silentTokenRefresh(
     ()=>{ _hideDriveWarnBanner(); },
-    ()=>{ /* Banner bleibt */ }
+    ()=>{ _showDriveWarnBanner(msLeft/1000); }
   );
 });
 function gdriveTokenValid() { return !!gdriveToken && Date.now() < gdriveTokenExpires; }
@@ -2849,27 +2837,16 @@ function _driveCheckResponse(r){
   if(!r.ok)throw new Error('HTTP '+r.status);
 }
 
-// Stellt sicher dass gdriveTokenClient initialisiert ist.
-// Gibt true zurück wenn bereit, false wenn GSI noch nicht geladen.
-// Zeigt in letzterem Fall automatisch einen Toast.
-function _ensureTokenClient(){
-  if(gdriveTokenClient) return true;
-  gdriveInit();
-  if(!gdriveTokenClient){
-    showToast('⚠ Google-Dienst noch nicht geladen – bitte 2–3 Sekunden warten und nochmals drücken','error',6000);
-    return false;
-  }
-  return true;
-}
-
 function gdriveRequestToken(action) {
   gdrivePendingAction = action;
   console.log('[Drive] gdriveRequestToken:', action, 'tokenClient=', !!gdriveTokenClient);
   _driveSetStatus('⏳ Google-Anmeldung wird gestartet…', false);
   if (!gdriveTokenClient) {
-    if(!_ensureTokenClient()){
-      // GSI noch nicht geladen → Status setzen und abbrechen
+    gdriveInit();
+    if (!gdriveTokenClient) {
+      // GSI noch nicht geladen → Start-Modal sichtbar lassen und Hinweis geben
       _driveSetStatus('⚠ Google-Dienst nicht geladen – bitte Seite neu laden (F5)', true);
+      showToast('⚠ Google-Dienst noch nicht geladen – bitte 2–3 Sekunden warten und nochmals drücken','error',6000);
       gdrivePendingAction = null;
       return;
     }
@@ -2892,14 +2869,27 @@ function gdriveRequestToken(action) {
 }
 
 function gdriveOpenExisting() {
-  if (!gdriveToken && !_ensureTokenClient()) return;
+  // Erst prüfen ob Google-Dienst bereit ist
+  if (!gdriveToken && !gdriveTokenClient) {
+    gdriveInit();
+    if (!gdriveTokenClient) {
+      showToast('⚠ Google-Dienst noch nicht geladen – bitte 2–3 Sekunden warten und nochmals drücken','error',6000);
+      return;
+    }
+  }
   closeStartModal();
   if (!gdriveToken) { gdriveRequestToken('load'); return; }
   gdrivePickAndLoad();
 }
 
 function gdriveCreateNew() {
-  if (!gdriveToken && !_ensureTokenClient()) return;
+  if (!gdriveToken && !gdriveTokenClient) {
+    gdriveInit();
+    if (!gdriveTokenClient) {
+      showToast('⚠ Google-Dienst noch nicht geladen – bitte 2–3 Sekunden warten und nochmals drücken','error',6000);
+      return;
+    }
+  }
   closeStartModal();
   if (!gdriveToken) { gdriveRequestToken('new'); return; }
   gdriveCreateFile();
@@ -3123,7 +3113,7 @@ async function gdriveCreateFile(keepCurrentData) {
     render();
   } catch(e) {
     updateFileStatus('unsaved','Drive-Fehler','⚠ ' + e.message);
-    showToast('⚠ Google Drive Fehler beim Erstellen: ' + e.message,'error',8000);
+    alert('Google Drive Fehler beim Erstellen: ' + e.message);
   }
 }
 
@@ -3721,9 +3711,9 @@ function _alleDropBody(e){
 }
 
 function renderHeute(){
-  var today=new Date().toISOString().split('T')[0];
-  var in3=new Date(Date.now()+3*864e5).toISOString().split('T')[0];
-  var ueberfaellig=[],heuteFaellig=[],bald=[];
+  const today=new Date().toISOString().split('T')[0];
+  const in3=new Date(Date.now()+3*864e5).toISOString().split('T')[0];
+  const ueberfaellig=[],heuteFaellig=[],bald=[];
   Object.keys(boards).forEach(function(boardName){
     if(boardName.startsWith('_'))return;
     (boards[boardName]||[]).forEach(function(t){
@@ -3735,117 +3725,77 @@ function renderHeute(){
   });
   ueberfaellig.sort(function(a,b){return a.t.due<b.t.due?-1:1;});
   bald.sort(function(a,b){return a.t.due<b.t.due?-1:1;});
-  function diffDays(due){return Math.round((new Date(today)-new Date(due))/(864e5));}
-  function fmtDate(due){var p=due.split('-');return p[2]+'.'+p[1]+'.';}
 
-  var HZKEY='ptp_heute_pc_zoom';
-  var zoom=100;
-  try{var z=parseInt(localStorage.getItem(HZKEY)||'100',10);if(z>=70&&z<=150)zoom=z;}catch(e){}
-
-  var phoneIcon='<svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:#fff;flex-shrink:0;"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1-9.4 0-17-7.6-17-17 0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/></svg>';
-  var pinIcon='<svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:#fff;flex-shrink:0;"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>';
-
-  function actionLine(t){
-    var isAnruf=t.aktivitaet==='anruf';
-    var isBesicht=t.aktivitaet==='besichtigung';
-    var k=(t.kontakte||[]).find(function(c){return c.anrufKontakt&&c.tel;});
-    var adr=(t.adresse||'').trim();
-    var showTel=k&&k.tel&&(isAnruf||(isBesicht&&!!k));
-    var showMaps=adr&&isBesicht;
-    if(!showTel&&!showMaps)return'';
-    var btnBase='width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;text-decoration:none;border:none;cursor:pointer;';
-    var telBtn=showTel
-      ?'<a href="tel:'+k.tel.replace(/[^0-9+]/g,'')+'" onclick="event.stopPropagation()" style="'+btnBase+'background:#1565c0;">'+phoneIcon+'</a>'
-      :'';
-    var mapsBtn=showMaps
-      ?'<a href="https://maps.google.com/?q='+encodeURIComponent(adr)+'" target="_blank" onclick="event.stopPropagation()" style="'+btnBase+'background:#2e7d32;">'+pinIcon+'</a>'
-      :'';
-    var mainText='';
-    if(showTel&&showMaps){
-      mainText='<div style="flex:1;min-width:0;">'
-        +(k.name?'<div style="font-size:13px;color:var(--text);font-weight:500;">'+esc(k.name)+'</div>':'')
-        +'<div style="font-size:12px;color:var(--text2);">'+esc(adr)+'</div>'
-        +'</div>';
-    }else if(showTel){
-      mainText='<span style="font-size:13px;color:var(--text);font-weight:500;flex:1;min-width:0;">'+(k.name?esc(k.name):esc(k.tel))+'</span>';
-    }else{
-      mainText='<span style="font-size:12px;color:var(--text2);flex:1;min-width:0;">'+esc(adr)+'</span>';
-    }
-    return'<div style="display:flex;align-items:center;gap:8px;padding:5px 12px 8px;border-top:0.5px solid var(--border);">'
-      +mainText+telBtn+mapsBtn+'</div>';
+  function diffDays(due){
+    return Math.round((new Date(today)-new Date(due))/(864e5));
   }
-
-  function chip(text,extra){return'<span style="font-size:11px;padding:2px 7px;border-radius:4px;white-space:nowrap;background:var(--bg3);border:0.5px solid var(--border);color:var(--text2);'+(extra||'')+'">'+text+'</span>';}
-
+  function fmtDue(due){
+    var p=due.split('-');return p[2]+'.'+p[1]+'.'+p[0].substr(2);
+  }
+  function boardChip(name){
+    return '<span style="font-size:11px;padding:2px 8px;border-radius:5px;background:var(--bg4);color:var(--text2);white-space:nowrap;">'+esc(name)+'</span>';
+  }
   function taskRow(item,dringlichkeit){
     var t=item.t;
-    var bc=dringlichkeit==='overdue'?'#E24B4A':dringlichkeit==='heute'?'#EF9F27':'#639922';
-    var isBesicht=t.aktivitaet==='besichtigung';
-    var isAnruf=t.aktivitaet==='anruf';
-    var k=(t.kontakte||[]).find(function(c){return c.anrufKontakt&&c.tel;});
-    // Zeile 2: Aktivitäts-Badges + Status + Datum
-    var badges='';
-    if(isBesicht)badges+=chip('Besichtigung','background:#2e7d3215;border-color:#2e7d3240;color:#2e7d32;font-weight:600;');
-    if(isAnruf)badges+=chip('Anruf','background:#1565c015;border-color:#1565c040;color:#1565c0;font-weight:600;');
-    if(isBesicht&&k)badges+=' '+chip('+ Anruf','background:#1565c015;border-color:#1565c040;color:#1565c0;font-weight:600;');
-    badges+=' '+chip(esc(t.status));
-    if(dringlichkeit==='overdue'){
-      var d=diffDays(t.due);
-      badges+=' '+chip(fmtDate(t.due)+' · '+d+(d===1?' Tag':' Tage')+' überfällig','background:#FCEBEB;border-color:#F7C1C1;color:#A32D2D;font-weight:600;');
-    }else if(dringlichkeit==='heute'){
-      badges+=' '+chip(fmtDate(t.due),'background:#FAEEDA;border-color:#FAC775;color:#854F0B;font-weight:600;');
-    }else{
-      badges+=' '+chip(fmtDate(t.due),'background:#EAF3DE;border-color:#C0DD97;color:#3B6D11;font-weight:600;');
+    var dot='';
+    if(dringlichkeit==='overdue')dot='<span style="width:8px;height:8px;border-radius:50%;background:var(--red);flex-shrink:0;display:inline-block;"></span>';
+    else if(dringlichkeit==='heute')dot='<span style="width:8px;height:8px;border-radius:50%;background:var(--orange);flex-shrink:0;display:inline-block;"></span>';
+    else dot='<span style="width:8px;height:8px;border-radius:50%;background:var(--green);flex-shrink:0;display:inline-block;"></span>';
+    var extra='';
+    if(dringlichkeit==='overdue'){var d=diffDays(t.due);extra='<span style="font-size:11px;color:var(--red);font-weight:600;white-space:nowrap;">'+d+(d===1?' Tag':' Tage')+' überfällig</span>';}
+    else if(dringlichkeit==='bald'){extra='<span style="font-size:11px;color:var(--text2);white-space:nowrap;">'+fmtDue(t.due)+'</span>';}
+    var owner=t.owner?'<span style="font-size:11px;color:var(--text2);">'+esc(t.owner)+'</span>':'';
+    var aktBadge='';
+    if(t.aktivitaet==='anruf')aktBadge='<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#e8f0fe;color:#1a56c4;font-weight:600;border:1px solid #b3c8fa;white-space:nowrap;">📞 Anruf</span>';
+    else if(t.aktivitaet==='besichtigung')aktBadge='<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#e6f4ea;color:#1e7e34;font-weight:600;border:1px solid #a8d5b5;white-space:nowrap;">📍 Besichtigung</span>';
+    // Anruf-Button: Kontakt mit anrufKontakt=true oder ersten mit Tel
+    var anrufBtn='';
+    if(t.aktivitaet==='anruf'){
+      var kk=t.kontakte||[];
+      var anrufK=kk.find(function(k){return k.anrufKontakt&&k.tel;})||kk.find(function(k){return k.tel;});
+      if(anrufK&&anrufK.tel){
+        var telClean=anrufK.tel.replace(/[^0-9+]/g,'');
+        var telLabel=anrufK.name?esc(anrufK.name)+': '+esc(anrufK.tel):esc(anrufK.tel);
+        anrufBtn='<a href="tel:'+telClean+'" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:5px;padding:4px 12px;border-radius:8px;background:#1a56c4;color:#fff;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap;flex-shrink:0;" title="'+telLabel+'">📞 Anrufen</a>';
+      }
     }
-    var al=actionLine(t);
-    return'<div style="display:flex;flex-direction:column;border:0.5px solid var(--border);border-left:3px solid '+bc
-      +';border-radius:0 8px 8px 0;background:var(--bg2);margin-bottom:5px;cursor:pointer;overflow:hidden;" '
-      +'onclick="openEditTaskModal(\''+esc(t.id)+'\')">'
-      +'<div style="padding:8px 12px 3px;font-size:14px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(t.title)+'</div>'
-      +'<div style="padding:3px 12px 6px;display:flex;align-items:center;gap:5px;flex-wrap:wrap;">'+badges+'</div>'
-      +al
+    return '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:10px;margin-bottom:6px;cursor:pointer;" onclick="openEditTaskModal(\''+esc(t.id)+'\')">' 
+      +dot
+      +'<span style="flex:1;font-size:13px;font-weight:500;color:var(--text);">'+esc(t.title)+'</span>'
+      +aktBadge
+      +anrufBtn
+      +boardChip(item.board)
+      +owner
+      +extra
       +'</div>';
   }
-
-  function section(label,color,items,dringlichkeit){
+  function section(label,count,color,items,dringlichkeit){
     if(!items.length)return'';
-    return'<div style="margin-bottom:1.25rem;">'
-      +'<div style="display:flex;align-items:center;gap:6px;font-size:11px;font-weight:500;letter-spacing:.5px;text-transform:uppercase;color:var(--text2);margin-bottom:6px;">'
-      +'<span style="width:6px;height:6px;border-radius:50%;background:'+color+';display:inline-block;"></span>'
-      +label
-      +'<span style="width:18px;height:18px;border-radius:50%;font-size:11px;font-weight:500;display:inline-flex;align-items:center;justify-content:center;background:'+color+'22;color:'+color+';">'+items.length+'</span>'
-      +'</div>'
-      +items.map(function(item){return taskRow(item,dringlichkeit);}).join('')
+    var badge='<span style="font-size:11px;padding:1px 7px;border-radius:10px;font-weight:500;background:'+color+'22;color:'+color+';">'+count+'</span>';
+    var rows=items.map(function(item){return taskRow(item,dringlichkeit);}).join('');
+    return '<div style="margin-bottom:1.5rem;">'
+      +'<div style="font-size:11px;font-weight:500;letter-spacing:.6px;text-transform:uppercase;color:var(--text2);margin-bottom:10px;display:flex;align-items:center;gap:8px;">'+label+' '+badge+'</div>'
+      +rows
       +'</div>';
   }
-
   var d=new Date();
   var dateStr=d.toLocaleDateString('de-DE',{weekday:'long',day:'2-digit',month:'long',year:'numeric'});
-  var zoomBar='<div style="display:flex;align-items:center;gap:8px;margin-bottom:1rem;max-width:860px;">'
-    +'<span style="font-size:11px;color:var(--text2);flex-shrink:0;">A</span>'
-    +'<input type="range" min="70" max="150" step="5" value="'+zoom+'" style="flex:1;max-width:180px;accent-color:var(--accent);" '
-    +'oninput="(function(v){var c=document.getElementById(\'heuteZoomContent\');if(c)c.style.zoom=v+\'%\';'
-    +'var lbl=document.getElementById(\'heuteZoomVal\');if(lbl)lbl.textContent=v+\'%\';'
-    +'try{localStorage.setItem(\'ptp_heute_pc_zoom\',v);}catch(e){}}).call(null,this.value)">'
-    +'<span id="heuteZoomVal" style="font-size:11px;color:var(--text);min-width:32px;flex-shrink:0;">'+zoom+'%</span>'
-    +'</div>';
-  var html='<div style="padding:20px 24px;max-width:860px;">'
-    +'<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:1rem;">'
+  var html='<div style="padding:20px 24px;max-width:900px;">'
+    +'<div style="display:flex;align-items:center;gap:12px;margin-bottom:24px;">'
     +'<span style="font-size:18px;font-weight:600;color:var(--text);">Was steht heute an?</span>'
-    +'<span style="font-size:13px;color:var(--text2);">'+dateStr+'</span>'
-    +'</div>'
-    +zoomBar
-    +'<div id="heuteZoomContent" style="zoom:'+zoom+'%;">';
+    +'<span style="font-size:13px;color:var(--text2);background:var(--bg3);padding:4px 12px;border-radius:20px;border:1px solid var(--border);">'+dateStr+'</span>'
+    +'</div>';
   if(!ueberfaellig.length&&!heuteFaellig.length&&!bald.length){
     html+='<div style="color:var(--text2);font-size:14px;padding:20px 0;">Keine fälligen Aufgaben — alles erledigt!</div>';
-  }else{
-    html+=section('Überfällig','#E24B4A',ueberfaellig,'overdue');
-    html+=section('Heute','#EF9F27',heuteFaellig,'heute');
-    html+=section('Nächste 3 Tage','#639922',bald,'bald');
+  } else {
+    html+=section('Überfällig',ueberfaellig.length,'var(--red)',ueberfaellig,'overdue');
+    html+=section('Heute fällig',heuteFaellig.length,'var(--orange)',heuteFaellig,'heute');
+    html+=section('Nächste 3 Tage',bald.length,'var(--green)',bald,'bald');
   }
-  html+='</div></div>';
+  html+='</div>';
   document.getElementById('mainContent').innerHTML=html;
 }
+
 function renderKanban(){
   const tasks=getTasks();
   const curStatuses=getBoardStatuses();
@@ -5243,7 +5193,7 @@ async function handleFileAttach(e){
     // ── Fallback: Base64 (max 20 MB, kein Drive oder kein Ordner) ────────
     const MAX=20*1024*1024;
     if(file.size>MAX){
-      showToast('⚠ „'+file.name+'" ist zu groß (max. 20 MB ohne Drive-Verbindung). Bitte zuerst einen Drive-Projektordner eintragen.','error',7000);
+      alert('"'+file.name+'" ist zu groß (max. 20 MB ohne Drive-Verbindung).\n\nBitte zuerst einen Drive-Projektordner eintragen.');
       continue;
     }
     if(!gdriveToken){
@@ -6838,11 +6788,7 @@ async function deskSaveDraw(){
   const canvas=document.getElementById('desktopDrawCanvas');
   if(!img||!canvas){deskDiscardDraw();return;}
   if(_currentFotoLbIdx<0||!taskFotos||!taskFotos[_currentFotoLbIdx]){showToast('Kein Foto gewählt','error');deskDiscardDraw();return;}
-  // Index VOR dem ersten await sichern – _currentFotoLbIdx kann sich während des
-  // asynchronen Uploads ändern (z.B. Lightbox geschlossen → -1), was sonst
-  // taskFotos[-1]=undefined liefert und einen Duplikat-Eintrag per push() erzeugt.
-  const savedIdx=_currentFotoLbIdx;
-  const f=taskFotos[savedIdx];
+  const f=taskFotos[_currentFotoLbIdx];
   const mc=document.createElement('canvas');
   mc.width=img.naturalWidth||canvas.width;
   mc.height=img.naturalHeight||canvas.height;
@@ -6870,14 +6816,12 @@ async function deskSaveDraw(){
     if(!taskFotos)taskFotos=[];
     const blobUrl=URL.createObjectURL(blob);
     _desktopFotoBlobCache.set(meta.id,blobUrl);
-    // savedIdx verwenden – nicht _currentFotoLbIdx (könnte sich geändert haben)
-    const origFoto=taskFotos[savedIdx];
+    const origFoto=taskFotos[_currentFotoLbIdx];
     if(origFoto){
       origFoto.editedDriveId=meta.id;
       origFoto.editedName=meta.name||copyName;
     } else {
-      // Fallback: Foto existiert nicht mehr (z.B. zwischenzeitlich gelöscht)
-      console.warn('[PTP] deskSaveDraw: origFoto nicht mehr gefunden bei Index',savedIdx);
+      taskFotos.push({driveId:meta.id,name:meta.name||copyName,mimeType:meta.mimeType||'image/jpeg',caption:'Zeichnung'});
     }
     scheduleTaskFieldSave();
     renderFotoListDesktop();
@@ -7074,8 +7018,8 @@ async function _driveUploadPDF(name,arrayBuffer,parentId){
 async function createAbschlussakte(){
   const gdrive=document.getElementById('tGD').value.trim();
   const folderId=_extractFolderIdFromUrl(gdrive);
-  if(!folderId){showToast('⚠ Bitte zuerst einen Google Drive-Foto-Ordner im Task eintragen','error',5000);return;}
-  if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden (☁️ oben rechts)','error',5000);return;}
+  if(!folderId){alert('Bitte zuerst einen Google Drive-Foto-Ordner im Task eintragen.');return;}
+  if(!gdriveToken){alert('Nicht mit Google Drive verbunden.');return;}
   if(!window.jspdf){alert('PDF-Bibliothek noch nicht geladen. Bitte kurz warten und erneut versuchen.');return;}
   const btn=document.getElementById('abschlussBtn');
   btn.textContent='⏳ Erstelle PDF…';btn.disabled=true;
@@ -7877,12 +7821,12 @@ function tMapsOeffnen(){
 function tDriveOeffnen(){
   const url=document.getElementById('tGD').value.trim();
   if(url)window.open(url,'_blank');
-  else showToast('⚠ Bitte zuerst einen Google Drive Link eingeben','error',4000);
+  else alert('Bitte zuerst einen Google Drive Link eingeben.');
 }
 function tDriveOrdnerOeffnen(){
   const url=document.getElementById('tGDOrdner').value.trim();
   if(url)window.open(url,'_blank');
-  else showToast('⚠ Bitte zuerst einen Google Drive Link eingeben','error',4000);
+  else alert('Bitte zuerst einen Google Drive Link eingeben.');
 }
 function tNasKopieren(){
   const v=document.getElementById('tNAS').value.trim();
@@ -9101,11 +9045,9 @@ function openNewTaskModal(){
 function openEditTaskModal(id){
   try{
   // In allen Boards suchen, nicht nur im aktiven (Task könnte verschoben worden sein)
-  let task=null,taskBoard=null;
-  for(const bk of Object.keys(boards)){const f=(boards[bk]||[]).find(t=>t.id===id);if(f){task=f;taskBoard=bk;break;}}
+  let task=null;
+  for(const bk of Object.keys(boards)){const f=(boards[bk]||[]).find(t=>t.id===id);if(f){task=f;break;}}
   if(!task){showToast('Task nicht gefunden (ID: '+id+')','error');return;}
-  // currentBoard auf das Board des Tasks setzen (wichtig für Heute-Ansicht)
-  if(taskBoard&&taskBoard!==currentBoard){currentBoard=taskBoard;}
   document.getElementById('modalTitle').textContent='Task bearbeiten';
   document.getElementById('taskId').value=task.id;
   document.getElementById('taskTitleInput').value=task.title;
@@ -10132,7 +10074,7 @@ async function importTaskFromZip(file){
     if(!boards[currentBoard])boards[currentBoard]=[];
     boards[currentBoard].push(task);
     scheduleTaskFieldSave();
-    closeModal();
+    closeTaskModal();
     setTimeout(()=>openEditTaskModal(newId),200);
     showToast('✅ Task aus ZIP wiederhergestellt','success',4000);
   }catch(e){
@@ -10153,16 +10095,12 @@ function duplicateTask(){
   copy.zeitEntries=[];
   copy.notizVerlauf=[];
   copy.fotos=[];
-  copy.ausserhausTermine=[];
-  copy.emailOriginals=[];
-  copy.emailPdfs=[];
-  copy.attachments=[];
   copy.due='';
   copy.ausführungsdatum='';
   if(!boards[currentBoard])boards[currentBoard]=[];
   boards[currentBoard].push(copy);
   scheduleTaskFieldSave();
-  closeModal();
+  closeTaskModal();
   setTimeout(()=>openEditTaskModal(copy.id),200);
   showToast('✓ Task dupliziert – Kopie geöffnet','success',3000);
 }
@@ -10204,7 +10142,7 @@ function _doMoveTask(taskId,targetBoard){
   if(!boards[targetBoard])boards[targetBoard]=[];
   boards[targetBoard].push(task);
   scheduleTaskFieldSave();
-  closeModal();
+  closeTaskModal();
   render();
   showToast('✅ Task nach „'+targetBoard+'" verschoben','success',3500);
 }
@@ -10223,6 +10161,7 @@ function _openNotizOverlay(){
   hdr.innerHTML='<span style="font-size:13px;font-weight:700;color:var(--text2);">📝 Notizen bearbeiten</span>'
     +'<button id="_notizOverlayClose" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text2);line-height:1;padding:0 4px;" title="Schließen">✕</button>';
   const ta=document.createElement('textarea');
+  ta.value=src.value;
   ta.style.cssText='flex:1;resize:none;border:1px solid var(--border);border-radius:8px;padding:12px;font-size:14px;font-family:inherit;background:var(--bg3);color:var(--text);line-height:1.6;';
   ta.placeholder='Interne Notizen…';
   const foot=document.createElement('div');
