@@ -2,6 +2,7 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; connect-src 'self' https://*.googleapis.com https://accounts.google.com https://www.googleapis.com https://oauth2.googleapis.com; img-src 'self' data: blob: https://*.googleusercontent.com https://drive.google.com https://lh3.googleusercontent.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; frame-src https://accounts.google.com; worker-src blob: 'self';">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Stammblatt-Verwaltung</title>
 <script src="https://accounts.google.com/gsi/client" defer onload="gdriveInit()"></script>
@@ -1399,6 +1400,7 @@ const SD_FILE_KEY   = 'sd_gdrive_file_v1';
 
 let gdriveToken = null;
 let gdriveTokenExpires = 0;
+let gdriveETag = null;  // ETag für Optimistic Locking
 let gdriveFileId = null;
 let gdriveTokenClient = null;
 let gdrivePendingAction = null;
@@ -1422,7 +1424,7 @@ function gdriveInit(){
     scope: GDRIVE_SCOPE,
     callback: gdriveTokenCallback,
     error_callback: function(err){
-      if(err && (err.type==='popup_failed_to_open'||err.type==='popup_closed')){
+      if(err && (err.type==='popup_failed_to_open'||err.type==='popup_closed'||err.type==='immediate_failed')){
         toast('⚠ Google-Popup blockiert – Popup-Blocker deaktivieren','err');
       } else {
         toast('⚠ Drive-Fehler: '+(err&&err.type||'unbekannt'),'err');
@@ -1452,7 +1454,7 @@ function gdriveInit(){
 
 async function gdriveTokenCallback(resp){
   if(resp.error){
-    if(['interaction_required','access_denied','popup_failed_to_open','popup_closed'].includes(resp.error)){
+    if(['interaction_required','access_denied','popup_failed_to_open','popup_closed','immediate_failed'].includes(resp.error)){
       var sf=null; try{sf=JSON.parse(localStorage.getItem(SD_FILE_KEY)||'null');}catch(e){}
       if(sf && sf.id) toast('☁️ Bitte Drive-Button drücken um neu zu verbinden','err');
     } else {
@@ -1494,6 +1496,84 @@ async function _ensureWorkspaceFolder(){
   }
   try{ localStorage.setItem('sd_workspace_folder_id', workspaceFolderId); }catch(e){}
   return workspaceFolderId;
+}
+
+
+// ── ETag-Konflikt-Dialog ──────────────────────────────────────────────────
+function _showETagConflictDialog(onOverwrite, onDiscard) {
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;display:flex;align-items:center;justify-content:center;';
+  const dlg = document.createElement('div');
+  dlg.style.cssText = 'background:#fff;color:#222;border-radius:12px;padding:28px 32px;max-width:420px;width:90%;box-shadow:0 8px 40px rgba(0,0,0,.4);font-family:Arial,sans-serif;';
+  dlg.innerHTML = `
+    <div style="font-size:20px;font-weight:700;margin-bottom:10px;">⚠ Schreib-Konflikt</div>
+    <div style="font-size:14px;margin-bottom:20px;line-height:1.5;color:#444;">
+      Die Datei wurde zwischenzeitlich von einem anderen Gerät geändert.<br>
+      Was soll mit deinen lokalen Änderungen passieren?
+    </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;">
+      <button id="_etagOverwrite" style="flex:1;padding:10px;border-radius:8px;background:#c0392b;color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer;">
+        💾 Meine Version speichern
+      </button>
+      <button id="_etagDiscard" style="flex:1;padding:10px;border-radius:8px;background:#27ae60;color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer;">
+        🔄 Neueste Version laden
+      </button>
+    </div>`;
+  ov.appendChild(dlg);
+  document.body.appendChild(ov);
+  document.getElementById('_etagOverwrite').onclick = () => { ov.remove(); if(onOverwrite) onOverwrite(); };
+  document.getElementById('_etagDiscard').onclick  = () => { ov.remove(); if(onDiscard)  onDiscard(); };
+}
+
+
+// ── Resumable Upload: Two-Step-Verfahren (Session-Init + Byte-Transfer) ──
+// Robuster bei instabilen Netzwerkverbindungen. Geeignet für alle Dateigrössen.
+// token       – gültiger Access-Token
+// fileId      – Drive-Datei-ID für Update (PATCH); null für neue Datei (POST)
+// content     – String oder Uint8Array / ArrayBuffer
+// mimeType    – MIME-Typ der Datei
+// etag        – optionaler ETag für Optimistic Locking (If-Match)
+// Rückgabe: Response-Objekt des Upload-Requests
+async function _driveResumableUpdate(token, fileId, content, mimeType, etag) {
+  mimeType = mimeType || 'application/json';
+  const encoded = (typeof content === 'string')
+    ? new TextEncoder().encode(content)
+    : (content instanceof ArrayBuffer ? new Uint8Array(content) : content);
+  const size = encoded.byteLength !== undefined ? encoded.byteLength : encoded.length;
+
+  // Step 1: Upload-Session initialisieren
+  const initUrl = fileId
+    ? 'https://www.googleapis.com/upload/drive/v3/files/' + fileId + '?uploadType=resumable&fields=modifiedTime'
+    : 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,modifiedTime';
+  const initHeaders = {
+    Authorization: 'Bearer ' + token,
+    'Content-Type': 'application/json',
+    'X-Upload-Content-Type': mimeType,
+    'X-Upload-Content-Length': String(size)
+  };
+  if (etag) initHeaders['If-Match'] = etag;
+
+  const initR = await fetch(initUrl, {
+    method: fileId ? 'PATCH' : 'POST',
+    headers: initHeaders,
+    body: JSON.stringify({ mimeType })
+  });
+  if (initR.status === 412) return initR; // 412 direkt zurückgeben → ETag-Konflikt-Dialog
+  if (!initR.ok) throw new Error('Resumable-Init fehlgeschlagen: HTTP ' + initR.status);
+
+  const sessionUrl = initR.headers.get('Location');
+  if (!sessionUrl) throw new Error('Keine Resumable-Session-URL erhalten');
+
+  // Step 2: Daten übertragen
+  const uploadR = await fetch(sessionUrl, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': mimeType,
+      'Content-Length': String(size)
+    },
+    body: encoded
+  });
+  return uploadR;
 }
 
 function gdriveRequestToken(action){
@@ -1553,6 +1633,9 @@ async function gdriveLoadFile(fileId, fileName){
     var r = await fetch('https://www.googleapis.com/drive/v3/files/'+fileId+'?alt=media',
       {headers:{Authorization:'Bearer '+gdriveToken}});
     if(r.status===401){ toast('⚠ Drive-Verbindung abgelaufen – bitte Drive-Button drücken','err'); return; }
+    // ETag für Optimistic Locking speichern
+    var _sdLoadETag=r.headers.get('ETag')||r.headers.get('etag');
+    if(_sdLoadETag)gdriveETag=_sdLoadETag;
     var data = await r.json();
     gdriveFileId = fileId;
     try{ localStorage.setItem(SD_FILE_KEY, JSON.stringify({id:fileId, name:fileName})); }catch(e){}
@@ -1729,10 +1812,18 @@ function _autoSaveNow(silent){
   if(!dirty || !gdriveFileId || !tokenOk) return;
   if(cid) sammelDaten();
   var content = JSON.stringify(D, null, 2);
-  fetch('https://www.googleapis.com/upload/drive/v3/files/'+gdriveFileId+'?uploadType=media&fields=id',{
-    method:'PATCH',
-    headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},
-    body:content
+  // Resumable Upload (Two-Step: Session-Init + Byte-Transfer)
+  _driveResumableUpdate(gdriveToken, gdriveFileId, content, 'application/json', gdriveETag).then(r=>{
+    if(r.status===412){
+      _showETagConflictDialog(
+        ()=>{gdriveETag=null;autoSave();},
+        ()=>{gdriveLoadFile(gdriveFileId,gdriveFileName||'stammblatt-daten.json').catch(()=>{});}
+      );
+      return r;
+    }
+    const newETag=r.headers.get('ETag')||r.headers.get('etag');
+    if(newETag)gdriveETag=newETag;
+    return r;
   }).then(function(r){
     if(r.status===401){
       if(!_sdAutoSaveRetrying){
