@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PTP Workboard</title>
+<title>PAM Workboard</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PGNpcmNsZSBjeD0iMzIiIGN5PSIzMiIgcj0iMzIiIGZpbGw9IiMyNTYzZWIiLz48dGV4dCB4PSIzMiIgeT0iNDMiIGZvbnQtZmFtaWx5PSJBcmlhbCxzYW5zLXNlcmlmIiBmb250LXNpemU9IjMwIiBmb250LXdlaWdodD0iYm9sZCIgZmlsbD0iI2ZmZiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+UDwvdGV4dD48L3N2Zz4=">
 <script src="https://accounts.google.com/gsi/client" defer onload="gdriveInit()"></script>
 <script>
@@ -347,7 +347,7 @@ async function _ezBuildPdf(info){
     doc.setDrawColor(200,200,200);doc.setLineWidth(0.2);
     doc.line(M,288,PW-M,288);
     doc.setFontSize(7.5);doc.setFont('helvetica','normal');doc.setTextColor(160,163,175);
-    doc.text('PTP Workboard',M,293);
+    doc.text('PAM Workboard',M,293);
     doc.text('Seite '+p+' / '+pages,PW-M,293,{align:'right'});
   }
   return doc.output('arraybuffer');
@@ -1649,7 +1649,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 <!-- TOP BAR -->
 <div class="topbar">
   <div class="topbar-left">
-    <div class="logo">PTP Workboard</div>
+    <div class="logo">PAM Workboard</div>
     <div class="board-selector" id="boardTabs"></div>
     <button class="board-add-btn" onclick="openProjManager()" title="Projekte verwalten">+</button>
   </div>
@@ -1784,7 +1784,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 <!-- START MODAL -->
 <div class="modal-overlay" id="startModal">
   <div class="start-modal">
-    <h2>PTP Workboard</h2>
+    <h2>PAM Workboard</h2>
     <p>Wähle einen Speicherort für deine Daten.<br>Alle Änderungen werden automatisch gespeichert.</p>
     <div class="start-btns">
       <button class="start-btn drive" onclick="gdriveOpenExisting()">
@@ -3414,10 +3414,13 @@ function gdriveConnectFromBar() {
     return;
   }
   if (gdriveFileId) {
-    // Fix #12: confirm() durch Toast-Hinweis + zweiten Klick ersetzen
     if(!window._driveBarClickPending){
       window._driveBarClickPending=true;
-      showToast('☁️ Verbunden mit: '+gdriveFileName+' – nochmals klicken um andere Datei zu wählen','ok',5000);
+      // Erster Klick: Token sofort verlängern + Toast
+      _silentTokenRefresh(
+        function(){ showToast('🔄 Drive-Verbindung verlängert ✓ – nochmals klicken für andere Datei','ok',5000); },
+        function(){ showToast('☁️ Verbunden mit: '+gdriveFileName+' – nochmals klicken um andere Datei zu wählen','ok',5000); }
+      );
       setTimeout(()=>{window._driveBarClickPending=false;},5500);
     } else {
       window._driveBarClickPending=false;
@@ -5281,7 +5284,7 @@ function _buildIcs(title,desc,dateStr,vonStr,bisStr){
   }
   const esc2=s=>(s||'').replace(/\n/g,'\\n').replace(/,/g,'\\,').replace(/;/g,'\\;');
   const lines=[
-    'BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//PTP Workboard//DE','CALSCALE:GREGORIAN',
+    'BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//PAM Workboard//DE','CALSCALE:GREGORIAN',
     'BEGIN:VEVENT',
     'DTSTAMP:'+stamp,
     'UID:ptp-'+Date.now()+'@workboard',
@@ -7272,10 +7275,14 @@ function _hvBildCacheLoad(){
       console.info('[PTP] HV-Bild-Cache älter als 24h – wird beim nächsten hv-bild Aufruf erneuert.');
     }
     _hvBildCacheMap = new Map();
-    (parsed.zeilen||[]).forEach(row=>{
-      const fid = row[0]; const vorschau = row[7]||'';
-      if(fid && vorschau) _hvBildCacheMap.set(fid, vorschau);
-    });
+    if(parsed.map){
+      Object.entries(parsed.map).forEach(([fid,url])=>{ if(fid&&url) _hvBildCacheMap.set(fid,url); });
+    } else {
+      (parsed.zeilen||[]).forEach(row=>{
+        const fid = row[0]; const vorschau = row[7]||'';
+        if(fid && vorschau) _hvBildCacheMap.set(fid, vorschau);
+      });
+    }
   }catch(e){ _hvBildCacheMap = new Map(); }
 }
 
@@ -7305,7 +7312,8 @@ function _preloadHvBildCache(){
     const raw = localStorage.getItem('hv_bild_cache_v1');
     if(!raw) return;
     const parsed = JSON.parse(raw);
-    const urls = (parsed.zeilen||[]).map(r=>r[7]||'').filter(u=>u.startsWith('http'));
+    const urls = parsed.map ? Object.values(parsed.map).filter(u=>u&&u.startsWith('http'))
+                            : (parsed.zeilen||[]).map(r=>r[7]||'').filter(u=>u.startsWith('http'));
     if(!urls.length) return;
     const fn = ()=>{ urls.forEach(url=>{ const img=new Image(); img.src=url; }); };
     if(typeof requestIdleCallback === 'function'){
@@ -11552,7 +11560,7 @@ function _buildTaskSummaryPdfBytes(data){
   const M=20,PW=210,CW=PW-2*M;
   doc.setFillColor(37,99,235);doc.rect(0,0,210,28,'F');
   doc.setTextColor(255,255,255);doc.setFontSize(16);doc.setFont('helvetica','bold');
-  doc.text('PTP Workboard – Aufgabenarchiv',M,17);
+  doc.text('PAM Workboard – Aufgabenarchiv',M,17);
   doc.setFontSize(9);doc.setFont('helvetica','normal');
   doc.text(new Date().toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}),PW-M,17,{align:'right'});
   let y=38;
@@ -11618,16 +11626,4 @@ function _buildTaskSummaryPdfBytes(data){
     doc.autoTable({startY:y,margin:{left:M,right:M},theme:'striped',styles:{fontSize:8,cellPadding:2},
       head:[['Typ','Dateiname','Datum']],body:allFiles});
   }
-  const pages=doc.getNumberOfPages();
-  for(let p=1;p<=pages;p++){
-    doc.setPage(p);
-    doc.setDrawColor(200,200,200);doc.setLineWidth(0.2);doc.line(M,288,PW-M,288);
-    doc.setFontSize(7.5);doc.setFont('helvetica','normal');doc.setTextColor(160,163,175);
-    doc.text('PTP Workboard',M,293);
-    doc.text('Seite '+p+' / '+pages,PW-M,293,{align:'right'});
-  }
-  return doc.output('arraybuffer');
-}
-</script>
-</body>
-</html>
+  const pag
