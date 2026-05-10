@@ -1926,7 +1926,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
           <span id="_hdrZeitRow" style="display:none;"><span id="_hdrZeitVal"></span></span>
           <span id="_hdrTerminRow" style="display:none;"><span id="_hdrTerminVal"></span></span>
         </span>
-        <span class="baustelle-only" id="_hdrMapsBox" style="display:none;margin-left:auto;display:none;align-items:center;gap:6px;border:2px solid #0F6E56;border-radius:12px;padding:3px 7px 3px 10px;background:#ffffff;flex-shrink:0;">
+        <span class="baustelle-only" id="_hdrMapsBox" style="display:none;margin-left:auto;align-items:center;gap:6px;border:2px solid #0F6E56;border-radius:12px;padding:3px 7px 3px 10px;background:#ffffff;flex-shrink:0;">
           <span class="mv2-subhdr-obj-lbl" id="_hdrObjLabel" style="display:inline;margin-left:0;">Objekt:</span>
           <button type="button" class="mv2-subhdr-maps" id="_hdrMapsBtn" onclick="_openTaskMaps()" title="In Google Maps öffnen" style="display:none;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
@@ -4319,8 +4319,9 @@ function taskCardHTML(task){
   const _telK=(task.kontakte||[]).find(k=>k.tel);
   const _tel=_telK?(_telK.tel||'').trim():'';
   // Termin-Alarm: kein Ausführungstermin bei "erteilt"
-  const showTerminAlarm=isBaustelle&&!isNotizBoard&&!task.ausfuehrungstermin&&
-    (task.status||'').toLowerCase().includes('erteilt');
+  const showTerminAlarm=isBaustelle&&!isNotizBoard
+    &&!(task.aufgaben||[]).some(a=>a.typ==='Ausführungstermin'&&a.datum)
+    &&(task.status||'').toLowerCase().includes('erteilt');
   // Icons
   const hasTime=(task.timeEntries||[]).length>0||isTaskTimerRunning(task.id);
   const timeMs=hasTime?getTaskTotalMs(task):0;
@@ -4343,6 +4344,8 @@ function taskCardHTML(task){
   }
   // ─ Zeiterfassung & Termine Badges ─
   const _zeitMins=(task.zeitEntries||[]).reduce((s,e)=>s+parseMinutes(e.von,e.bis),0);
+  const _timerMins=Math.round((task.timeEntries||[]).reduce((s,e)=>s+(((e.end||0)-(e.start||0))),0)/60000);
+  const _gesamtMins=_zeitMins+(_timerMins>0?_timerMins:0);
   const _terminMins=(task.ausserhausTermine||[]).reduce((s,e)=>s+parseMinutes(e.von,e.bis),0);
   const _fmtBadge=m=>{const h=Math.floor(m/60),r=m%60;return h>0?(h+'h'+(r>0?' '+r+'m':'')):(r+'m');};
   return`<div class="task-card ${colClass}" draggable="true" data-id="${esc(task.id)}"
@@ -4350,6 +4353,7 @@ function taskCardHTML(task){
     <div class="task-card-toprow">
       <span style="display:inline-flex;align-items:center;gap:3px;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700;flex-shrink:0;${isNotizBoard?'background:#E6F1FB;color:#185FA5;border:0.5px solid #B5D4F4;':'background:#EAF3DE;color:#3B6D11;border:0.5px solid #C0DD97;'}">${isNotizBoard?'<span style="font-size:11px;">✅</span> Aufgabe':'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><line x1="9" y1="22" x2="9" y2="7"/><line x1="1" y1="7" x2="21" y2="7"/><line x1="9" y1="4" x2="21" y2="7"/><line x1="1" y1="7" x2="9" y2="4"/><line x1="17" y1="7" x2="17" y2="16"/><path d="M15 16 q2 2 4 0"/><line x1="6" y1="22" x2="12" y2="22"/></svg> Auftrag'}</span>
       <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text2);">${[repNrTxt,ksTxt].filter(Boolean).join(' · ')}</span>
+      ${[hasAttach?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:8px;background:#fff;color:#854F0B;border:1px solid #FAC775;white-space:nowrap;">📎 ${(task.attachments||[]).length}</span>`:'',hasFotos?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:8px;background:#fff;color:#3B6D11;border:1px solid #C0DD97;white-space:nowrap;">📷 ${(task.fotos||[]).length}</span>`:'',hasLinks?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:8px;background:#fff;color:#185FA5;border:1px solid #B5D4F4;white-space:nowrap;">🔗 ${(task.links||[]).length}</span>`:''].filter(Boolean).join('')}
       <span class="task-card-owner-chip">${esc(task.owner)}</span>
     </div>
     <div class="task-card-title">${esc(displayTitle)}</div>
@@ -4357,14 +4361,15 @@ function taskCardHTML(task){
       ${task.status?`<span style="color:var(--text2);">Task:</span><span class="task-card-chip task-card-chip-task">${esc(task.status)}</span>`:''}
       ${task.anfrageEingangDatum?(()=>{const[y,m,d]=(task.anfrageEingangDatum||'').split('-');return`<span style="color:var(--text2);margin-left:2px;">Anfrage:</span><span class="task-card-chip" style="background:rgba(108,99,255,0.1);color:var(--accent);border:0.5px solid rgba(108,99,255,0.3);">📅 ${d||'?'}.${m||'?'}.${y||'?'}</span>`;})():''}
       ${isNotizBoard&&task.due?`<span style="color:var(--text2);margin-left:2px;">Fällig:</span><span class="task-card-chip" style="${overdue?'background:#FCEBEB;color:#A32D2D;border:0.5px solid #F7C1C1;':'background:#FAEEDA;color:#854F0B;border:0.5px solid #FAC775;'}">${formatDate(task.due)}</span>`:''}
-      ${_zeitMins>0?`<span style="display:inline-flex;align-items:center;gap:2px;padding:2px 6px;border-radius:10px;background:#FAEEDA;color:#854F0B;border:0.5px solid #FAC775;font-size:10px;font-weight:600;white-space:nowrap;">⏱ ${_fmtBadge(_zeitMins)}</span>`:''}
+      ${_gesamtMins>0?`<span style="display:inline-flex;align-items:center;gap:2px;padding:2px 6px;border-radius:10px;background:#FAEEDA;color:#854F0B;border:0.5px solid #FAC775;font-size:10px;font-weight:600;white-space:nowrap;">⏱ ${_fmtBadge(_gesamtMins)}</span>`:''}
       ${_terminMins>0?`<span style="display:inline-flex;align-items:center;gap:2px;padding:2px 6px;border-radius:10px;background:#E6F1FB;color:#185FA5;border:0.5px solid #B5D4F4;font-size:10px;font-weight:600;white-space:nowrap;">📅 ${_fmtBadge(_terminMins)}</span>`:''}
-      ${_adr?`<a href="https://maps.google.com/?q=${encodeURIComponent(_adr)}" target="_blank" onclick="event.stopPropagation()" style="font-size:13px;text-decoration:none;opacity:0.75;margin-left:auto;" title="${esc(_adr)}">📍</a>`:''}
-      ${_tel?`<a href="tel:${_tel.replace(/[^0-9+]/g,'')}" onclick="event.stopPropagation()" style="font-size:13px;text-decoration:none;opacity:0.75;" title="${esc(_tel)}">📞</a>`:''}
+      ${(_adr||_tel)?`<span style="margin-left:auto;display:inline-flex;align-items:center;gap:3px;">${_adr?`<a href="https://maps.google.com/?q=${encodeURIComponent(_adr)}" target="_blank" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:2px;font-size:10px;font-weight:700;padding:2px 7px;border-radius:7px;background:#fff;color:#0F6E56;border:1.5px solid #0F6E56;text-decoration:none;" title="${esc(_adr)}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>Maps</a>`:''}${_tel?`<a href="tel:${_tel.replace(/[^0-9+]/g,'')}" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;justify-content:center;font-size:11px;padding:2px 6px;border-radius:7px;background:#fff;color:#0F6E56;border:1.5px solid #0F6E56;text-decoration:none;" title="${esc(_tel)}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.56 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg></a>`:''}
+      </span>`:''}
     </div>`:''}
     ${(()=>{
       if(!isBaustelle||isNotizBoard)return'';
       const _cardIcons={'Ortstermin':'📍','Anruf':'📞','Ausführungstermin':'🔨','Besichtigung':'👁','Auftrag erteilt':'📋','Angebot':'📝','E-Mail':'📧','Rückfragen':'❓','Abgeschlossen':'✅'};
+      const _cardTypShort={'Ortstermin':'Ortstermin','Anruf':'Anruf','Ausführungstermin':'Ausführung','Besichtigung':'Besichtigung','Auftrag erteilt':'Erteilt','Angebot':'Angebot','E-Mail':'E-Mail','Rückfragen':'Rückfragen','Abgeschlossen':'Abgeschl.'};
       const _cardColors=['#185FA5','#3B6D11','#854F0B','#534AB7','#993C1D'];
       const _cardBgs=['#E6F1FB','#EAF3DE','#FAEEDA','#EEEDFE','#FAECE7'];
       const _cardBorders=['#B5D4F4','#C0DD97','#FAC775','#C4C2F7','#F5C5B8'];
@@ -4373,11 +4378,10 @@ function taskCardHTML(task){
         const bg=_cardBgs[i%_cardBgs.length];
         const bc=_cardBorders[i%_cardBorders.length];
         const tc=_cardColors[i%_cardColors.length];
-        return`<div class="task-card-datebox" style="background:${tc};border-color:${bc};display:inline-flex;align-items:stretch;overflow:hidden;padding:0;gap:0;"><span style="background:#ffffff;padding:3px 6px;font-size:11px;display:flex;align-items:center;border-right:1px solid rgba(255,255,255,0.35);">${ico}</span><span style="padding:3px 8px;display:inline-flex;align-items:center;gap:5px;"><span style="font-size:10px;color:#ffffff;font-weight:700;">${esc(a.typ)}</span><span style="font-size:10px;color:#ffffff;font-weight:700;">${formatDate(a.datum)}</span></span></div>`;
+        const shortTyp=_cardTypShort[a.typ]||a.typ;
+        return`<div class="task-card-datebox" style="background:${tc};border-color:${bc};display:inline-flex;align-items:stretch;overflow:hidden;padding:0;gap:0;"><span style="background:#ffffff;padding:3px 6px;font-size:11px;display:flex;align-items:center;border-right:1px solid rgba(255,255,255,0.35);">${ico}</span><span style="padding:3px 8px;display:inline-flex;align-items:center;gap:5px;"><span style="font-size:10px;color:#ffffff;font-weight:700;">${esc(shortTyp)}</span><span style="font-size:10px;color:#ffffff;font-weight:700;">${formatDate(a.datum)}</span></span></div>`;
       }).join('');
-      const anfrageBox=task.ausführungsdatum?dbox('Anfrage',formatDate(task.ausführungsdatum),'background:#FAEEDA;border-color:#854F0B;',false):'';
-      const boxes=(anfrageBox+aufgabenBoxes);
-      return boxes?`<div class="task-card-datebox-row">${boxes}</div>`:'';
+      return aufgabenBoxes?`<div class="task-card-datebox-row">${aufgabenBoxes}</div>`:'';
     })()}
     <div class="task-card-icons-row">
       ${iconBadges}
