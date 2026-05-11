@@ -3109,8 +3109,8 @@ function gdriveInit() {
       if(err && (err.type==='popup_failed_to_open'||err.type==='popup_closed'||err.type==='immediate_failed')){
         _showDriveWarnBanner(0);
         if(err.type==='immediate_failed'){
-          _silentRefreshGaveUp=true;
-          console.log('[PTP] immediate_failed – kein weiterer Auto-Versuch bis Nutzer klickt');
+          _setGaveUp();
+          console.log('[PTP] immediate_failed – automatischer Retry in 15 Min');
         } else if(err.type==='popup_failed_to_open'){
           showToast('⚠ Google-Popup blockiert – Popup-Blocker deaktivieren','error',9000);
         } else if(err.type==='popup_closed'){
@@ -3128,6 +3128,7 @@ function gdriveInit() {
       // Token noch gültig → direkt nutzen
       gdriveToken = stored.token;
       gdriveTokenExpires = stored.exp;
+      _scheduleTokenRefresh(); // Proaktiven 10-Min-Timer starten
       setTimeout(updateDriveBtnBar, 500); // Timer-Anzeige starten sobald DOM bereit
       const lastAction = localStorage.getItem('gdrive_last_action');
       if (lastAction) localStorage.removeItem('gdrive_last_action');
@@ -3225,7 +3226,7 @@ async function gdriveTokenCallback(resp) {
   gdriveToken = resp.access_token;
   _autoReconnectAttempts = 0;    // Zähler zurücksetzen nach erfolgreichem Token
   _autoInitSilentInProgress = false; // Init-Flag zurücksetzen
-  _silentRefreshGaveUp = false;      // Nach erfolgreichem Login: wieder erlaubt
+  clearTimeout(_gaveUpResetTimer); _silentRefreshGaveUp = false; // Nach erfolgreichem Login: Timer + Flag zurücksetzen
   gdriveTokenExpires = Date.now() + (Number(resp.expires_in || 3600) - 60) * 1000;
   // Token in localStorage speichern (übersteht Seitenreload)
   try { localStorage.setItem(PC_TOKEN_KEY, JSON.stringify({token: gdriveToken, exp: gdriveTokenExpires})); } catch(e) {}
@@ -3235,7 +3236,7 @@ async function gdriveTokenCallback(resp) {
       .then(r => r.json()).then(u => { if (u.email) try { localStorage.setItem('ptp_user_email_v1', u.email); } catch(e){} })
       .catch(() => {});
   }
-  clearTimeout(_gdriveRefreshTimer); // kein Timer mehr – visibilitychange übernimmt
+  _scheduleTokenRefresh(); // Proaktiven 10-Min-Timer für diesen Token starten
   _hideDriveWarnBanner(); // Warnbanner ausblenden (falls sichtbar)
   _warnToastShown = false; // Toast kann beim nächsten Ablauf wieder erscheinen
   updateDriveBtnBar(); // Timer-Anzeige starten
@@ -3357,6 +3358,37 @@ let _autoReconnectAttempts=0;   // Zählt automatische Verbindungsversuche
 let _silentRefreshGaveUp=false; // Nach immediate_failed: keine weiteren Auto-Versuche
 const _AUTO_RECONNECT_MAX=2;    // Maximal 2 stille Versuche, dann aufhören
 let _bannerDismissedUntil=0;    // Unterdrücke Banner-Auto-Einblendungen bis zu diesem Timestamp
+let _gaveUpResetTimer=null;     // Timer für automatisches GaveUp-Reset nach 15 Min
+
+// Setzt GaveUp-Flag und plant automatischen Reset nach 15 Min
+// → verhindert dauerhaftes Einfrieren bei kurzen Netzausfällen oder temporären Cookie-Blöcken
+function _setGaveUp(){
+  _silentRefreshGaveUp=true;
+  clearTimeout(_gaveUpResetTimer);
+  _gaveUpResetTimer=setTimeout(()=>{
+    _silentRefreshGaveUp=false;
+    console.info('[PTP] GaveUp-Flag zurückgesetzt – nächster stiller Versuch erlaubt');
+  },15*60*1000);
+}
+
+// Proaktiver Token-Refresh: feuert exakt 10 Min vor Ablauf
+// Ergänzt den Minuten-Intervall unten – der Intervall ist das Fallback,
+// dieser Timer ist der präzise Auslöser direkt bei T-10min.
+function _scheduleTokenRefresh(){
+  clearTimeout(_gdriveRefreshTimer);
+  if(!gdriveTokenExpires)return;
+  const delay=Math.max(15000,gdriveTokenExpires-Date.now()-600000);
+  _gdriveRefreshTimer=setTimeout(()=>{
+    if(!gdriveToken)return;
+    console.info('[PTP] Proaktiver Token-Refresh gestartet (10 Min vor Ablauf)');
+    _silentTokenRefresh(
+      ()=>{ _scheduleTokenRefresh(); _hideDriveWarnBanner(); console.info('[PTP] Token proaktiv erneuert ✓'); },
+      ()=>{ /* Fehlgeschlagen – Banner bleibt, Minuten-Intervall zeigt ihn bereits */ }
+    );
+  },delay);
+  console.info('[PTP] Nächster Token-Refresh in',Math.round(delay/60000),'Min geplant');
+}
+
 function _silentTokenRefresh(onSuccess, onFail){
   if(!gdriveTokenClient||!gdriveToken)return;
   // Feststeck-Schutz: nach 20 Sek. Flag zurücksetzen
@@ -3379,15 +3411,15 @@ function _silentTokenRefresh(onSuccess, onFail){
       _hideDriveWarnBanner();
       if(typeof onSuccess==='function')onSuccess();
     } else {
-      // Stille Erneuerung fehlgeschlagen → kein weiterer Auto-Versuch (verhindert Popup-Flash)
-      _silentRefreshGaveUp=true;
+      // Stille Erneuerung fehlgeschlagen → Auto-Retry in 15 Min (verhindert Popup-Flash)
+      _setGaveUp();
       if(typeof onFail==='function') onFail();
     }
   };
   try{gdriveTokenClient.requestAccessToken({prompt:'none'});}catch(e){
     gdriveTokenClient.callback=prev;
     _silentRefreshInProgress=false;
-    _silentRefreshGaveUp=true;
+    _setGaveUp();
     if(typeof onFail==='function') onFail();
   }
 }
@@ -3481,14 +3513,14 @@ function _handleDrive401(){
         _hideDriveWarnBanner();
         setTimeout(()=>gdriveSaveData(),600);
       }else{
-        _silentRefreshGaveUp=true; // Popup-Flash verhindern: kein weiterer Auto-Versuch
+        _setGaveUp(); // Popup-Flash verhindern: Auto-Retry in 15 Min
         updateFileStatus('unsaved','⚠ Drive-Verbindung abgelaufen','☁️ Drive-Button drücken zum Neu-Verbinden');
         if(Date.now() >= _bannerDismissedUntil) _showDriveWarnBanner(0);
       }
     };
     try{gdriveTokenClient.requestAccessToken({prompt:'none'});}catch(e){
       gdriveTokenClient.callback=prev;
-      _silentRefreshGaveUp=true;
+      _setGaveUp();
       updateFileStatus('unsaved','⚠ Drive-Verbindung abgelaufen','☁️ Drive-Button drücken zum Neu-Verbinden');
       if(Date.now() >= _bannerDismissedUntil) _showDriveWarnBanner(0);
     }
@@ -11804,6 +11836,17 @@ function saveModalSize(){
   }catch(e){console.warn('[PTP]',e);}
 })();
 
+</script>
+
+<script>
+// Service Worker registrieren (schnelleres Laden bei GitHub Pages)
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js')
+      .then(reg => console.log('[SW] registriert:', reg.scope))
+      .catch(e  => console.warn('[SW] Registrierung fehlgeschlagen (ignorierbar):', e.message));
+  });
+}
 </script>
 </body>
 </html>
