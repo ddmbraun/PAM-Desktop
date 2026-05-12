@@ -7119,9 +7119,10 @@ function _openWartungsprotokoll(existingIdx){
             const img=document.createElement('img');
             img.style.cssText='width:100%;height:100%;object-fit:cover;';
             img.title=f.name||'';
-            // Thumbnail-First für Galerie
-            img.src='https://drive.google.com/thumbnail?id='+encodeURIComponent(f.driveId)+'&sz=w160';
-            img.onerror=()=>{if(gdriveToken)_fetchDesktopFotoBlob(f.driveId).then(u=>{if(u)img.src=u;});};
+            // thumbnailLink (lh3.googleusercontent.com) zuerst; schlägt fehl → Auth-Fetch
+            const _tl1=f.thumbnailLink||f.thumbnail||'';
+            if(_tl1){img.src=_tl1;}
+            img.onerror=()=>{img.onerror=null;if(gdriveToken)_fetchDesktopFotoBlob(f.driveId).then(u=>{if(u){img.src=u;img.style.display='';}});};
             thumb.appendChild(img);
             thumb.onclick=()=>{const idx=bericht.fotos.indexOf(f);if(idx>=0)_wpOpenFoto(bericht,idx);};
           }
@@ -7245,9 +7246,10 @@ function _wpRenderFotos(bericht,grid){
     if(f.driveId){
       const img=document.createElement('img');
       img.style.cssText='width:100%;height:100%;object-fit:cover;pointer-events:none;';
-      // Thumbnail-First: Drive-Thumbnail-URL – schnell, kein Auth-Header nötig
-      img.src='https://drive.google.com/thumbnail?id='+encodeURIComponent(f.driveId)+'&sz=w160';
-      img.onerror=()=>{ if(gdriveToken)_fetchDesktopFotoBlob(f.driveId).then(u=>{if(u)img.src=u;}); };
+      // thumbnailLink (lh3.googleusercontent.com) zuerst; schlägt fehl → Auth-Fetch
+      const _tl2=f.thumbnailLink||f.thumbnail||'';
+      if(_tl2){img.src=_tl2;}
+      img.onerror=()=>{img.onerror=null;if(gdriveToken)_fetchDesktopFotoBlob(f.driveId).then(u=>{if(u){img.src=u;img.style.display='';}});};
       cell.appendChild(img);
     }
     const openBtn=document.createElement('button');
@@ -7683,8 +7685,24 @@ async function _fetchDesktopFotoBlob(driveId){
 async function loadDesktopFotoThumb(imgEl,driveId){
   if(!imgEl||!driveId)return;
   const url=await _fetchDesktopFotoBlob(driveId);
-  if(url){imgEl.src=url;}
+  if(url){imgEl.src=url;imgEl.style.display='';}
   else{imgEl.style.display='none';const p=imgEl.parentElement;if(p)p.classList.add('fallback');}
+}
+// Fallback wenn thumbnailLink abgelaufen: Auth-Fetch nachladen
+function _desktopThumbFallback(img){
+  if(img.dataset.fbDone==='1')return; // kein Loop
+  img.dataset.fbDone='1';
+  const id=img.getAttribute('data-foto-id');
+  if(id&&gdriveToken){
+    img.removeAttribute('onerror');
+    _fetchDesktopFotoBlob(id).then(u=>{
+      if(u){img.src=u;img.style.display='';}
+      else{img.style.display='none';if(img.parentElement)img.parentElement.classList.add('fallback');}
+    });
+  } else {
+    img.style.display='none';
+    if(img.parentElement)img.parentElement.classList.add('fallback');
+  }
 }
 function hydrateDesktopFotoThumbs(){
   document.querySelectorAll('#fotoListDesktop img[data-foto-id]').forEach(img=>{
@@ -7779,7 +7797,9 @@ function renderFotoListDesktop(){
     // Priorität: 1. BlobCache 2. thumbnailLink (Desktop-Format) / thumbnail (Mobile-Format) 3. hv-bild Cache 4. lazy Drive API
     // COMPAT-FIX: Mobile speichert 'thumbnail', Desktop speichert 'thumbnailLink' – beide lesen.
     const thumbSrc=f.thumbnailLink||f.thumbnail||_hvBildCacheLookup(id)||'';
-    const srcAttr=cached?'src="'+esc(cached)+'" ':(thumbSrc?'src="'+esc(thumbSrc)+'" ':(safeId?'data-foto-id="'+safeId+'" ':''));
+    // data-foto-id immer setzen (auch wenn thumbSrc vorhanden) → Fallback-Fetch wenn URL abläuft
+    const dId=safeId?'data-foto-id="'+safeId+'" ':'';
+    const srcAttr=cached?('src="'+esc(cached)+'" '+dId):(thumbSrc?('src="'+esc(thumbSrc)+'" '+dId):(dId));
     const editedBadge=f.editedDriveId?'<div style="position:absolute;top:4px;left:4px;background:rgba(108,99,255,.75);color:#fff;font-size:9px;padding:2px 5px;border-radius:4px;pointer-events:none">✏ bearb.</div>':'';
     const tip=caption?(caption+' — '+name):name;
     const bottomLabel=caption
@@ -7789,7 +7809,7 @@ function renderFotoListDesktop(){
     const checkMark=_fotoSelected.has(i)?'✓':'';
     return '<div class="foto-desktop-thumb'+selClass+'" onclick="_fotoThumbClick('+i+',event)" title="'+esc(tip)+'">'
       +'<div class="foto-check">'+checkMark+'</div>'
-      +'<img '+srcAttr+'alt="" loading="lazy" onerror="this.style.display=\'none\';this.parentElement.classList.add(\'fallback\')">'
+      +'<img '+srcAttr+'alt="" loading="lazy" onerror="_desktopThumbFallback(this)">'
       +editedBadge
       +bottomLabel
       +'<button class="foto-edit" onclick="event.stopPropagation();editFotoCaptionDesktop('+i+')" title="Beschreibung bearbeiten">📝</button>'
