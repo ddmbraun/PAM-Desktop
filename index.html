@@ -2132,6 +2132,14 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
             </div>
             <button type="button" onclick="(function(){const v=document.getElementById('taskEmailSenderInput').value;const m=v.match(/<([^>]+)>/);const addr=m?m[1]:v.includes('@')?v:'';if(addr)window.open('mailto:'+addr,'_blank');else showToast('Keine E-Mail-Adresse','warning',2500);})()" style="font-size:11px;padding:4px 10px;border-radius:6px;background:#185FA5;color:#fff;border:none;cursor:pointer;white-space:nowrap;font-weight:500;">✉ E-Mail</button>
           </div>
+          <!-- E-Mail-Verlauf Kompakt-Timeline (Option C) -->
+          <div id="msTimelineBar" style="display:none;margin-top:6px;background:#F8FAFF;border:0.5px solid #B5D4F4;border-radius:6px;padding:6px 10px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;">
+              <span style="font-size:9px;font-weight:600;color:#0C447C;text-transform:uppercase;letter-spacing:0.05em;">E-Mail-Verlauf</span>
+              <button type="button" onclick="_openSectPopup('tEmailOrigSect')" style="font-size:9px;color:#185FA5;background:none;border:none;cursor:pointer;padding:0;">alle ansehen ›</button>
+            </div>
+            <div id="msTimelineDots" style="display:flex;align-items:center;gap:0;flex-wrap:wrap;gap:3px;"></div>
+          </div>
           <div class="baustelle-only" style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:6px;align-items:end;">
             <div class="modal-field" style="margin:0"><label style="font-size:calc(11px * var(--modal-scale,1))">Kostenstelle</label><input type="text" id="taskTagsInput" placeholder="z.B. 260036" style="font-size:calc(12px * var(--modal-scale,1));padding:4px 6px" oninput="scheduleTaskFieldSave();_updateStammSummary();_updateHdrMeta()" autocomplete="off"></div>
             <div class="modal-field" style="margin:0"><label style="font-size:calc(11px * var(--modal-scale,1))">Rep.-Nr.</label><input type="text" id="taskRepNr" placeholder="z.B. 3483" style="font-size:calc(12px * var(--modal-scale,1));padding:4px 6px" oninput="scheduleTaskFieldSave();_updateHdrMeta()" autocomplete="off"></div>
@@ -8657,14 +8665,65 @@ async function _msLoadEmailThread(){
       internetMessageId:(m.internetMessageId||'').replace(/^<|>$/g,''),
     }));
     task.msThreadMessages=threadMsgs;
-    if(stEl)stEl.textContent=threadMsgs.length+' Mails';
     _msRenderThread(task);
+    // PDFs automatisch speichern
+    if(stEl)stEl.textContent=threadMsgs.length+' Mails – speichere PDFs…';
+    const _pdfSaved=await _msSaveThreadPdfs(task,threadMsgs);
+    if(stEl)stEl.textContent=threadMsgs.length+' Mails'+(_pdfSaved>0?', '+_pdfSaved+' PDF'+(\_pdfSaved>1?'s':'')+' gespeichert':'');
     await autoSave();
-    showToast('✅ '+threadMsgs.length+' Mails im Verlauf','success',3000);
+    showToast('✅ '+threadMsgs.length+' Mails geladen'+(_pdfSaved>0?', '+_pdfSaved+' PDFs gespeichert':''),'success',4000);
   }catch(e){
     if(stEl)stEl.textContent='⚠ Fehler';
     showToast('⚠ '+e.message,'error',6000);
   }
+}
+
+async function _msSaveThreadPdfs(task,threadMsgs){
+  if(!gdriveToken){showToast('⚠ Google Drive nicht verbunden – PDFs nicht gespeichert','warning',3000);return 0;}
+  // Zielordner: tEmailOrdner → tGDOrdner
+  const folderUrl=(document.getElementById('tEmailOrdner')?.value||document.getElementById('tGDOrdner')?.value||'').trim();
+  const fid=_ezFolderId(folderUrl);
+  if(!fid){showToast('⚠ Kein E-Mail-Ordner verknüpft – PDFs nicht gespeichert','warning',3000);return 0;}
+  // Bereits gespeicherte MessageIds → keine Duplikate
+  const savedIds=new Set((taskEmailPdfs||[]).map(p=>p.msMessageId||'').filter(Boolean));
+  const toSave=threadMsgs.filter(m=>m.internetMessageId&&!savedIds.has(m.internetMessageId));
+  if(!toSave.length)return 0;
+  let saved=0;
+  for(const m of toSave){
+    try{
+      // Vollständigen E-Mail-Body von Graph laden
+      const rb=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${m.id}?$select=body,toRecipients`,
+        {headers:{Authorization:'Bearer '+msToken}});
+      if(!rb.ok){console.warn('[MS] Body laden fehlgeschlagen',rb.status);continue;}
+      const mb=await rb.json();
+      const date=new Date(m.date||Date.now());
+      const info={
+        subject:m.subject||'(kein Betreff)',
+        sender:m.fromName?'"'+m.fromName+'" <'+m.from+'>':m.from||'',
+        date:date,
+        bodyHtml:(mb.body?.contentType==='html')?mb.body.content:'',
+        bodyText:(mb.body?.contentType==='text')?mb.body.content:(m.preview||''),
+        cidMap:{}
+      };
+      const pdfBuf=await _ezBuildPdfFromHtml(info);
+      const stamp=date.getFullYear()+'.'+_ez2(date.getMonth()+1)+'.'+_ez2(date.getDate());
+      const dirLabel=m.direction==='gesendet'?'Gesendet':'Eingang';
+      const fname=stamp+'_'+dirLabel+'_'+_ezClean(m.fromName||m.from)+'.pdf';
+      const result=await _ezUpload(pdfBuf,fname,fid);
+      if(result&&result.id){
+        taskEmailPdfs.push({
+          name:fname,
+          fileId:result.id,
+          url:'https://drive.google.com/file/d/'+result.id+'/view',
+          uploadedAt:new Date().toLocaleDateString('de-DE'),
+          msMessageId:m.internetMessageId
+        });
+        saved++;
+      }
+    }catch(e){console.warn('[MS] PDF-Fehler:',e);}
+  }
+  if(saved>0){renderEmailSection();scheduleTaskFieldSave();}
+  return saved;
 }
 
 function _msRenderThread(task){
@@ -8672,7 +8731,7 @@ function _msRenderThread(task){
   if(!listEl)return;
   const msgs=task.msThreadMessages||[];
   if(!msgs.length){listEl.innerHTML='';return;}
-  listEl.innerHTML=msgs.map(m=>{
+  listEl.innerHTML=msgs.map((m,i)=>{
     const isOut=m.direction==='gesendet';
     const dotColor=isOut?'#16A34A':'#1D4ED8';
     const dirLabel=isOut?'Gesendet':'Eingang';
@@ -8681,7 +8740,8 @@ function _msRenderThread(task){
     const d=m.date?new Date(m.date):null;
     const dateStr=d?`${_ez2(d.getDate())}.${_ez2(d.getMonth()+1)}.${String(d.getFullYear()).slice(2)} ${_ez2(d.getHours())}:${_ez2(d.getMinutes())}`:'';
     const from=m.fromName||m.from||'';
-    return`<div style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-bottom:0.5px solid #E5E7EB;">
+    const taskId=(document.getElementById('taskId')||{}).value||'';
+    return`<div style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-bottom:0.5px solid #E5E7EB;cursor:pointer;" onclick="_msOpenMailOverlay('${taskId}',${i})">
       <div style="width:8px;height:8px;border-radius:50%;background:${dotColor};flex-shrink:0;margin-top:5px;"></div>
       <div style="flex:1;min-width:0;">
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
@@ -8693,6 +8753,118 @@ function _msRenderThread(task){
       </div>
     </div>`;
   }).join('');
+  _msRenderTimeline(task);
+}
+
+function _msRenderTimeline(task){
+  const bar=document.getElementById('msTimelineBar');
+  const dots=document.getElementById('msTimelineDots');
+  if(!bar||!dots)return;
+  const msgs=task.msThreadMessages||[];
+  if(!msgs.length){bar.style.display='none';return;}
+  bar.style.display='block';
+  const taskId=(document.getElementById('taskId')||{}).value||'';
+  dots.innerHTML=msgs.map((m,i)=>{
+    const isOut=m.direction==='gesendet';
+    const bg=isOut?'#16A34A':'#1D4ED8';
+    const d=m.date?new Date(m.date):null;
+    const dateStr=d?`${_ez2(d.getDate())}.${_ez2(d.getMonth()+1)}. ${_ez2(d.getHours())}:${_ez2(d.getMinutes())}`:'';
+    const from=m.fromName||m.from||'';
+    const label=isOut?'Gesendet':'Eingang';
+    return`<button type="button" title="${esc(label+' · '+from+' · '+dateStr+'\n'+m.preview)}" onclick="_msOpenMailOverlay('${taskId}',${i})"
+      style="display:inline-flex;align-items:center;gap:4px;padding:3px 7px;border-radius:12px;border:0.5px solid ${bg};background:${isOut?'#DCFCE7':'#DBEAFE'};cursor:pointer;font-size:10px;color:${isOut?'#15803D':'#1E40AF'};font-weight:500;white-space:nowrap;">
+      <span style="width:6px;height:6px;border-radius:50%;background:${bg};display:inline-block;flex-shrink:0;"></span>${esc(from.split(' ')[0]||from)} · ${dateStr}
+    </button>`;
+  }).join('<span style="color:#D1D5DB;font-size:10px;padding:0 1px;">›</span>');
+}
+
+async function _msOpenMailOverlay(taskId,idx){
+  const task=findTaskById(taskId);
+  if(!task)return;
+  const m=(task.msThreadMessages||[])[idx];
+  if(!m)return;
+  const GID='_msMailOverlay';
+  const old=document.getElementById(GID);if(old)old.remove();
+  const ov=document.createElement('div');
+  ov.id=GID;
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:999998;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+  const isOut=m.direction==='gesendet';
+  const d=m.date?new Date(m.date):null;
+  const dateStr=d?d.toLocaleDateString('de-DE',{weekday:'short',day:'2-digit',month:'long',year:'numeric'})+', '+_ez2(d.getHours())+':'+_ez2(d.getMinutes())+' Uhr':'';
+  const from=m.fromName?'"'+m.fromName+'" <'+m.from+'>':m.from||'';
+  const addrM=from.match(/<([^>]+)>/);
+  const addr=addrM?addrM[1]:(from.includes('@')?from:'');
+  const reSubject='Re: '+(m.subject||'');
+  const mailtoHref=addr?`mailto:${encodeURIComponent(addr)}?subject=${encodeURIComponent(reSubject)}`:'';
+  ov.innerHTML=`<div style="background:#fff;border-radius:10px;max-width:720px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;">
+    <div style="background:#1a364d;color:#fff;padding:10px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0;">
+      <div style="flex:1;min-width:0;">
+        <div style="font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(m.subject||'(kein Betreff)')}</div>
+        <div style="font-size:11px;opacity:.8;margin-top:2px;">${esc(from)} · ${dateStr}</div>
+      </div>
+      <span style="font-size:10px;padding:2px 8px;border-radius:8px;background:${isOut?'#16A34A':'#2563EB'};color:#fff;font-weight:600;flex-shrink:0;">${isOut?'Gesendet':'Eingang'}</span>
+      <button onclick="document.getElementById('${GID}').remove()" style="background:rgba(255,255,255,.15);border:none;color:#fff;font-size:14px;cursor:pointer;padding:4px 8px;border-radius:4px;flex-shrink:0;">✕</button>
+    </div>
+    <div id="_msMailBody" style="flex:1;overflow-y:auto;padding:16px 20px;font-family:Arial,sans-serif;font-size:13px;line-height:1.6;color:#1e2337;background:#fff;">
+      <div style="color:#888;font-style:italic;">⏳ Lade Mail-Inhalt…</div>
+    </div>
+    <div style="padding:10px 16px;border-top:1px solid #e5e7eb;display:flex;gap:8px;align-items:center;flex-shrink:0;background:#f9fafb;">
+      ${mailtoHref?`<a id="_msReplyBtn" href="${mailtoHref}" style="display:inline-flex;align-items:center;gap:5px;padding:6px 14px;border-radius:6px;background:#185FA5;color:#fff;text-decoration:none;font-size:12px;font-weight:600;">↩ In Outlook antworten</a>`:''}
+      <span style="font-size:11px;color:#9CA3AF;flex:1;">Antwort erscheint beim nächsten ⟳ Verlauf laden automatisch im Task</span>
+      <button onclick="document.getElementById('${GID}').remove()" style="font-size:11px;padding:5px 12px;border-radius:6px;border:1px solid #d1d5db;background:#fff;cursor:pointer;color:#374151;">Schließen</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
+  // Mail-Body laden
+  if(msToken&&m.id){
+    try{
+      const r=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${m.id}?$select=body`,{headers:{Authorization:'Bearer '+msToken}});
+      if(r.ok){
+        const data=await r.json();
+        const bodyEl=document.getElementById('_msMailBody');
+        if(bodyEl){
+          if(data.body?.contentType==='html'){
+            const iframe=document.createElement('iframe');
+            iframe.style.cssText='width:100%;height:500px;border:none;';
+            iframe.sandbox='allow-same-origin';
+            bodyEl.innerHTML='';
+            bodyEl.appendChild(iframe);
+            iframe.contentDocument.open();
+            iframe.contentDocument.write(data.body.content||'');
+            iframe.contentDocument.close();
+            setTimeout(()=>{try{iframe.style.height=(iframe.contentDocument.body.scrollHeight+20)+'px';}catch(e){}},300);
+          } else {
+            bodyEl.innerHTML='<pre style="white-space:pre-wrap;font-family:Arial,sans-serif;font-size:13px;">'+esc(data.body?.content||m.preview||'')+'</pre>';
+          }
+        }
+        // Reply-Button mit Zitat-Body aktualisieren
+        if(addr){
+          let plainText='';
+          try{
+            if(data.body?.contentType==='html'){
+              const tmp=document.createElement('div');
+              tmp.innerHTML=data.body.content||'';
+              plainText=tmp.innerText||tmp.textContent||'';
+            } else {
+              plainText=data.body?.content||m.preview||'';
+            }
+          }catch(e){plainText=m.preview||'';}
+          plainText=plainText.replace(/\r\n/g,'\n').replace(/\r/g,'\n').trim();
+          const maxLen=3000;
+          const truncated=plainText.length>maxLen?plainText.substring(0,maxLen)+'\n[…]':plainText;
+          const quoteHeader='\n\n\n──────────────────────────\nVon: '+from+'\nDatum: '+dateStr+'\nBetreff: '+(m.subject||'')+'\n──────────────────────────\n';
+          const quoteBody=quoteHeader+truncated;
+          const fullHref=`mailto:${encodeURIComponent(addr)}?subject=${encodeURIComponent(reSubject)}&body=${encodeURIComponent(quoteBody)}`;
+          const btn=document.getElementById('_msReplyBtn');
+          if(btn)btn.href=fullHref;
+        }
+      }
+    }catch(e){const b=document.getElementById('_msMailBody');if(b)b.innerHTML='<p style="color:#888;">'+esc(m.preview||'Vorschau nicht verfügbar')+'</p>';}
+  } else {
+    const b=document.getElementById('_msMailBody');
+    if(b)b.innerHTML='<p style="color:#888;">'+esc(m.preview||'Kein Inhalt verfügbar – bitte Outlook verbinden')+'</p>';
+  }
 }
 
 // Ermittelt den Drive-Ordner für E-Mail-Ablage eines Tasks:
@@ -10031,7 +10203,7 @@ function renderEmailSection(){
     const t=findTaskById(taskId);
     const hasMsLink=t&&(t.msMessageId||t.msConversationId);
     msBar.style.display=hasMsLink?'block':'none';
-    if(hasMsLink)_msRenderThread(t);
+    if(hasMsLink){_msRenderThread(t);_msRenderTimeline(t);}
   }
   const ti=document.getElementById('tEmailOrigTitle');
   const allItems=[
