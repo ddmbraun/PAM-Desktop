@@ -203,54 +203,35 @@ async function _ezBuildPdfFromHtml(info){
 
   // HTML-Body in isoliertem Bereich einfügen (base-href entfernen, externe Bilder erlauben)
   let cleanHtml=info.bodyHtml.replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<link[^>]+rel=["']?stylesheet["']?[^>]*>/gi,'').replace(/@font-face\s*\{[^}]*\}/gi,'').replace(/@import\s+url\([^)]*\)[^;]*;/gi,'');
-  wrap.innerHTML=hdr+'<div style="padding:16px 20px;line-height:1.55;color:#1e2337;word-break:break-word;">'+cleanHtml+'</div>';
+  // CID-Inline-Bilder direkt im HTML ersetzen bevor wrap gebaut wird
+  let _cidMap=info.cidMap||{};
+  let resolvedHtml=cleanHtml.replace(/src=["']?(cid:[^"'\s>]+)["']?/gi,function(m,cid){
+    return _cidMap[cid]?'src="'+_cidMap[cid]+'"':'src=""';
+  });
+  wrap.innerHTML=hdr+'<div style="padding:16px 20px;line-height:1.55;color:#1e2337;word-break:break-word;">'+resolvedHtml+'</div>';
   document.body.appendChild(wrap);
 
-  // Alle Bilder vorher als Base64 laden – verhindert CORS-Lücken in html2canvas
+  // Externe Bilder direkt laden lassen (src bleibt erhalten) – html2canvas zeichnet sie mit allowTaint:true
   await (async function _preloadImages(){
     let imgs=Array.from(wrap.querySelectorAll('img'));
-    let TIMEOUT=4000;
+    let TIMEOUT=5000;
     await Promise.all(imgs.map(function(img){
       return new Promise(function(resolve){
-        // cid:-Bilder und leere srcs ausblenden
-        if(!img.src||img.src.startsWith('cid:')||img.src.startsWith('data:')){
-          if(!img.src||img.src.startsWith('cid:'))img.style.display='none';
-          return resolve();
+        // Leere src oder nicht ladbar → ausblenden
+        if(!img.src||img.src===window.location.href){img.style.display='none';return resolve();}
+        if(img.src.startsWith('data:')){
+          // Data-URI: sofort prüfen ob gültig
+          if(img.complete&&img.naturalWidth>0)return resolve();
+          img.onload=resolve;img.onerror=function(){img.style.display='none';resolve();};
+          return;
         }
+        if(img.complete&&img.naturalWidth>0)return resolve();
         let done=false;
         let timer=setTimeout(function(){
-          if(done)return;done=true;
-          img.style.display='none'; // Timeout → Bild ausblenden statt fehlendem Fleck
-          resolve();
+          if(done)return;done=true;img.style.display='none';resolve();
         },TIMEOUT);
-        fetch(img.src,{mode:'no-cors'})
-          .then(function(r){return r.blob();})
-          .then(function(blob){
-            // URL.createObjectURL statt FileReader – funktioniert auch bei opakem Blob ohne MIME-Typ
-            let objUrl=URL.createObjectURL(blob);
-            let t2=setTimeout(function(){
-              if(done)return;done=true;clearTimeout(timer);
-              img.src='';URL.revokeObjectURL(objUrl);img.style.display='none';resolve();
-            },3000);
-            img.onload=function(){
-              if(done)return;done=true;clearTimeout(timer);clearTimeout(t2);resolve();
-            };
-            img.onerror=function(){
-              if(done)return;done=true;clearTimeout(timer);clearTimeout(t2);
-              img.src='';URL.revokeObjectURL(objUrl);img.style.display='none';resolve();
-            };
-            img.src=objUrl;
-            if(img.complete&&img.naturalWidth>0){done=true;clearTimeout(timer);clearTimeout(t2);resolve();}
-          })
-          .catch(function(){
-            // Fix #10: eindeutiger Variablenname (war: let t2, doppelt deklariert)
-            let t2Fallback=setTimeout(function(){
-              if(done)return;done=true;img.style.display='none';resolve();
-            },2000);
-            img.onload=function(){if(done)return;done=true;clearTimeout(t2Fallback);resolve();};
-            img.onerror=function(){if(done)return;done=true;clearTimeout(t2Fallback);img.style.display='none';resolve();};
-            if(img.complete&&img.naturalWidth>0)img.onload();
-          });
+        img.onload=function(){if(done)return;done=true;clearTimeout(timer);resolve();};
+        img.onerror=function(){if(done)return;done=true;clearTimeout(timer);img.style.display='none';resolve();};
       });
     }));
   })();
@@ -427,7 +408,7 @@ function _parseEmlText(rawText){
 
   // Rekursiver Multipart-Extraktor – verarbeitet beliebig tief verschachtelte MIME-Strukturen
   function _extractParts(ctypeStr,body){
-    let res={plain:'',html:''};
+    let res={plain:'',html:'',cidMap:{}};
     let bm=ctypeStr.match(/boundary="?([^";]+)"?/i);
     if(!bm)return res;
     let sep=bm[1].trim();
@@ -445,11 +426,19 @@ function _parseEmlText(rawText){
       let pcsArr=phdr.match(/charset=["']?([^"';\s]+)/i);
       let pcs=pcsArr?pcsArr[1]:'utf-8';
       let pfullct=phdr.match(/Content-Type:\s*([^\r\n]+)/i);
+      // CID-Bild (Inline-Anhang) extrahieren
+      let pcidArr=phdr.match(/Content-ID:\s*<?([^>\r\n\s]+)>?/i);
+      if(pct.startsWith('image/')&&pcidArr&&(pe==='base64'||pe==='')){
+        let cid=pcidArr[1].trim();
+        let b64=pb.replace(/\s+/g,'');
+        if(b64)res.cidMap['cid:'+cid]='data:'+pct+';base64,'+b64;
+      }
       if(pct.startsWith('multipart/')&&pfullct){
         // Rekursiv in verschachtelte Teile eintauchen
         let sub=_extractParts(pfullct[1],pb);
         if(!res.plain&&sub.plain)res.plain=sub.plain;
         if(!res.html&&sub.html)res.html=sub.html;
+        Object.assign(res.cidMap,sub.cidMap||{});
       }else if(!res.plain&&pct==='text/plain'){
         res.plain=pe==='quoted-printable'?_decodeQP(pb,pcs):pe==='base64'?_decodeB64Body(pb,pcs):pb;
       }else if(!res.html&&pct==='text/html'){
@@ -459,16 +448,16 @@ function _parseEmlText(rawText){
     return res;
   }
 
-  let plain='',htmlBody='';
+  let plain='',htmlBody='',cidMap={};
   if(/^multipart\//i.test(ctype)){
     let extracted=_extractParts(ctype,bdy);
-    plain=extracted.plain;htmlBody=extracted.html;
+    plain=extracted.plain;htmlBody=extracted.html;cidMap=extracted.cidMap||{};
   }
   if(!plain&&!htmlBody){
     plain=tenc==='quoted-printable'?_decodeQP(bdy,charset):tenc==='base64'?_decodeB64Body(bdy,charset):bdy;
   }
   plain=plain.replace(/\r\n/g,'\n').replace(/\r/g,'\n').trim();
-  return{subject:subject,sender:sender,date:date,bodyText:plain.substring(0,8000),bodyHtml:htmlBody||''};
+  return{subject:subject,sender:sender,date:date,bodyText:plain.substring(0,8000),bodyHtml:htmlBody||'',cidMap:cidMap||{}};
 }
 
 function tEmailOrdnerOeffnen(){let u=(document.getElementById('tEmailOrdner')||{}).value||'';if(u.trim())window.open(u,'_blank');else showToast('⚠ Bitte zuerst eine Google Drive Ordner-URL eintragen','error',4000);}
@@ -782,7 +771,15 @@ async function _auftragConfirm(){
     hausverwaltung:'',
     adresse:'',
     schadensbild:'',
-    kontakte:[],
+    kontakte:(function(){
+      let _sn='',_se='';
+      if(info.sender){let _sm=info.sender.match(/^(.+?)\s*<([^>]+)>/);
+        if(_sm){_sn=_sm[1].trim().replace(/^["']|["']$/g,'');_se=_sm[2].trim();}
+        else if(info.sender.includes('@')){_se=info.sender.trim();}
+        else{_sn=info.sender.trim();}
+      }
+      return(_sn||_se)?[{rolle:'ag',name:_sn,tel:'',email:_se,anrufKontakt:false}]:[];
+    })(),
     links:[],
     attachments:[],
     ausserhausTermine:[],
@@ -9986,7 +9983,8 @@ function _openEmailThumbnailGrid(){
             const info=_parseEmlText(txt);
             const e2=s=>s?s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):'';
             const rawBody=info.bodyHtml||('<pre style="white-space:pre-wrap;font-family:Arial,sans-serif;font-size:13px;margin:0;padding:14px;">'+e2(info.bodyText||'(kein Inhalt)')+'</pre>');
-            const cleanBody=rawBody.replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<link[^>]+rel=["']?stylesheet["']?[^>]*>/gi,'');
+            const _cm=info.cidMap||{};
+            const cleanBody=rawBody.replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<link[^>]+rel=["']?stylesheet["']?[^>]*>/gi,'').replace(/src=["']?(cid:[^"'\s>]+)["']?/gi,function(m,cid){return _cm[cid]?'src="'+_cm[cid]+'"':'src=""';});
             /* Header-Bereich */
             const hdrDiv=document.createElement('div');
             hdrDiv.style.cssText='padding:14px 18px 10px;border-bottom:1px solid var(--border);background:var(--bg3);flex-shrink:0;';
