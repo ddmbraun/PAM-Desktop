@@ -1757,6 +1757,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
     <span class="file-msg" id="fileMsg"></span>
   </div>
   <div class="filebar-right">
+    <button id="gmailBtnBar" onclick="gmailConnect()" title="Mit Gmail / Google Workspace verbinden" style="padding:3px 10px;border-radius:4px;font-size:11px;background:transparent;color:#1B5E20;border:1px solid #A5D6A7;cursor:pointer;font-weight:500;">📩 Gmail</button>
     <button id="msBtnBar" onclick="msConnect()" title="Mit Outlook / Microsoft 365 verbinden" style="padding:3px 10px;border-radius:4px;font-size:11px;background:transparent;color:#1D4ED8;border:1px solid #93C5FD;cursor:pointer;font-weight:500;">📨 Outlook</button>
     <div class="drive-timer-wrap" title="Google Drive Verbindungsstatus">
       <button class="drive-timer-btn" id="driveBtnBar" onclick="gdriveConnectFromBar()">☁️ Google Drive</button>
@@ -2276,6 +2277,15 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
     <button type="button" class="sect-popup-close" onclick="_closeSectPopup('tEmailOrigSect')" title="Schließen">✕</button>
   </div>
   <div class="sect-popup-body">
+    <div id="gmThreadBar" style="display:none;margin-bottom:8px;background:var(--bg3);border:0.5px solid var(--border);border-radius:8px;overflow:hidden;">
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;user-select:none;" onclick="_gmToggleThreadList()">
+        <span style="font-size:12px;font-weight:600;color:var(--text1);">📩 Gmail-Verlauf</span>
+        <button onclick="_gmLoadEmailThread();event.stopPropagation();" style="font-size:11px;padding:3px 10px;border-radius:6px;background:#1B5E20;color:#fff;border:none;cursor:pointer;font-weight:500;">⟳ Verlauf laden</button>
+        <span id="gmThreadStatus" style="font-size:11px;color:var(--text2);flex:1;"></span>
+        <span id="gmThreadToggleArrow" style="font-size:13px;color:var(--text2);transition:transform .2s;display:inline-block;">▾</span>
+      </div>
+      <div id="gmThreadList" style="padding:0 10px 6px;"></div>
+    </div>
     <div id="msThreadBar" style="display:none;margin-bottom:8px;background:var(--bg3);border:0.5px solid var(--border);border-radius:8px;overflow:hidden;">
       <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;user-select:none;" onclick="_msToggleThreadList()">
         <span style="font-size:12px;font-weight:600;color:var(--text1);">📨 Outlook-Verlauf</span>
@@ -3088,6 +3098,10 @@ function saveTaskData(){
     msMessageIds:(()=>{const _t=findTaskById(document.getElementById('taskId')?.value);return _t?JSON.parse(JSON.stringify(_t.msMessageIds||[])):[];})(),
     msConversationId:(()=>{const _t=findTaskById(document.getElementById('taskId')?.value);return _t?(_t.msConversationId||''):'';})(),
     msThreadMessages:(()=>{const _t=findTaskById(document.getElementById('taskId')?.value);return _t?JSON.parse(JSON.stringify(_t.msThreadMessages||[])):[];})(),
+    gmailMessageId:(()=>{const _t=findTaskById(document.getElementById('taskId')?.value);return _t?(_t.gmailMessageId||''):'';})(),
+    gmailMessageIds:(()=>{const _t=findTaskById(document.getElementById('taskId')?.value);return _t?JSON.parse(JSON.stringify(_t.gmailMessageIds||[])):[];})(),
+    gmailThreadId:(()=>{const _t=findTaskById(document.getElementById('taskId')?.value);return _t?(_t.gmailThreadId||''):'';})(),
+    gmailThreadMessages:(()=>{const _t=findTaskById(document.getElementById('taskId')?.value);return _t?JSON.parse(JSON.stringify(_t.gmailThreadMessages||[])):[];})(),
     freieTermine:JSON.parse(JSON.stringify(taskFreieTermine||[])),
     zeitEntries:JSON.parse(JSON.stringify(taskZeitEntries||[])),
     notizVerlauf:JSON.parse(JSON.stringify(taskNotizVerlauf||[])),
@@ -3171,6 +3185,8 @@ const DEFAULT_FOLDER_BAUSTELLE= 'https://drive.google.com/drive/u/0/folders/1GBc
 // Fix #6: drive.file erlaubt nur app-eigene Dateien; drive.readonly für Lesezugriff auf fremde Dateien.
 // drive.metadata.readonly erlaubt Datei-Suche (name, parents) ohne vollen Lesezugriff.
 const GDRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.metadata.readonly';
+const GMAIL_SCOPE  = 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send';
+let gmailToken=null;let gmailTokenClient=null;let gmailUserEmail=null;
 const WORKSPACE_FOLDER_NAME = 'PTP-BAU Daten';
 const PC_TOKEN_KEY = 'ptp_gdrive_token_v1';
 const PC_FILE_KEY  = 'ptp_gdrive_file_v1';   // Zuletzt geladene Datei (id + name)
@@ -3231,6 +3247,7 @@ function gdriveInit() {
     return;
   }
   _driveSetStatus('✓ Google-Dienst bereit', false);
+  gmailInit();
   gdriveTokenClient = google.accounts.oauth2.initTokenClient({
     client_id: GDRIVE_CLIENT_ID,
     scope: GDRIVE_SCOPE,
@@ -8547,6 +8564,232 @@ function _extractFolderIdFromUrl(url){
   return m2?m2[1]:null;
 }
 // ══════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════
+// GMAIL / GOOGLE WORKSPACE INTEGRATION
+// ══════════════════════════════════════════════════════
+function gmailInit(){
+  if(!window.google?.accounts?.oauth2)return;
+  gmailTokenClient=google.accounts.oauth2.initTokenClient({
+    client_id:GDRIVE_CLIENT_ID,scope:GMAIL_SCOPE,
+    callback:_gmHandleToken,
+    error_callback:(err)=>console.warn('[GM] OAuth Fehler:',err),
+  });
+  try{const s=localStorage.getItem('ptp_gmail_token_v1');if(s){const p=JSON.parse(s);if(p.token&&p.expires>Date.now()){gmailToken=p.token;gmailUserEmail=p.email;_gmUpdateBtn();}}}catch(e){}
+}
+function gmailConnect(){
+  if(!gmailTokenClient){showToast('⚠ Gmail nicht verfügbar – Seite neu laden','error',3000);return;}
+  if(gmailToken){
+    gmailToken=null;gmailUserEmail=null;
+    try{localStorage.removeItem('ptp_gmail_token_v1');}catch(e){}
+    _gmUpdateBtn();showToast('Gmail abgemeldet','info',2000);return;
+  }
+  const hint=localStorage.getItem('ptp_user_email_v1')||'';
+  gmailTokenClient.requestAccessToken({hint});
+}
+function _gmHandleToken(resp){
+  if(resp.error){console.warn('[GM] Token-Fehler:',resp);return;}
+  gmailToken=resp.access_token;
+  fetch('https://www.googleapis.com/oauth2/v1/userinfo',{headers:{Authorization:'Bearer '+gmailToken}})
+    .then(r=>r.json()).then(d=>{
+      gmailUserEmail=d.email||'';_gmUpdateBtn();
+      showToast('✅ Gmail verbunden: '+gmailUserEmail,'success',3000);
+      try{localStorage.setItem('ptp_gmail_token_v1',JSON.stringify({token:gmailToken,email:gmailUserEmail,expires:Date.now()+3500000}));}catch(e){}
+    }).catch(()=>{_gmUpdateBtn();showToast('✅ Gmail verbunden','success',2000);});
+}
+function _gmUpdateBtn(){
+  const btn=document.getElementById('gmailBtnBar');if(!btn)return;
+  if(gmailToken){btn.textContent='📩 '+(gmailUserEmail?gmailUserEmail.split('@')[0]:'Gmail');btn.style.cssText='padding:3px 10px;border-radius:4px;font-size:11px;background:#E8F5E9;color:#1B5E20;border:1px solid #A5D6A7;cursor:pointer;font-weight:500;';}
+  else{btn.textContent='📩 Gmail';btn.style.cssText='padding:3px 10px;border-radius:4px;font-size:11px;background:transparent;color:#1B5E20;border:1px solid #A5D6A7;cursor:pointer;font-weight:500;';}
+}
+function _gmToggleThreadList(){
+  const list=document.getElementById('gmThreadList');const arrow=document.getElementById('gmThreadToggleArrow');
+  if(!list)return;const isOpen=list.style.display!=='none';
+  list.style.display=isOpen?'none':'block';if(arrow)arrow.style.transform=isOpen?'rotate(-90deg)':'rotate(0deg)';
+}
+// Gmail Base64url → String (UTF-8 sicher)
+function _gmDecode(data){
+  try{const bin=atob(data.replace(/-/g,'+').replace(/_/g,'/'));const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);return new TextDecoder('utf-8').decode(bytes);}catch(e){return '';}
+}
+// Rekursiv MIME-Parts extrahieren
+function _gmExtractBody(part,res){
+  if(!part)return;const mime=part.mimeType||'';const data=part.body?.data||'';
+  if(mime==='text/html'&&!res.html&&data)res.html=_gmDecode(data);
+  if(mime==='text/plain'&&!res.plain&&data)res.plain=_gmDecode(data);
+  (part.parts||[]).forEach(p=>_gmExtractBody(p,res));
+}
+async function _gmLoadEmailThread(){
+  const taskId=(document.getElementById('taskId')||{}).value||'';
+  const task=findTaskById(taskId);
+  if(!task){showToast('⚠ Kein Task geöffnet','error',2000);return;}
+  if(!gmailToken){showToast('⚠ Bitte zuerst Gmail verbinden (Toolbar: 📩 Gmail)','warning',4000);return;}
+  const stEl=document.getElementById('gmThreadStatus');if(stEl)stEl.textContent='⏳ Lade…';
+  showToast('⏳ Lade Gmail-Verlauf…','info',8000);
+  try{
+    const allMsgIds=[...new Set([...(task.gmailMessageIds||[]),task.gmailMessageId||''].filter(Boolean))];
+    const threadIds=new Set();if(task.gmailThreadId)threadIds.add(task.gmailThreadId);
+    for(const msgId of allMsgIds){
+      try{const q=encodeURIComponent('rfc822msgid:<'+msgId+'>');
+        const r=await fetch('https://www.googleapis.com/gmail/v1/users/me/messages?q='+q+'&maxResults=1',{headers:{Authorization:'Bearer '+gmailToken}});
+        if(r.ok){const d=await r.json();if(d.messages?.length)threadIds.add(d.messages[0].threadId);}
+      }catch(e){console.warn('[GM] msgId lookup:',e);}
+    }
+    if(!threadIds.size&&!allMsgIds.length)throw new Error('Keine Gmail-Mail verknüpft – bitte erst eine Mail in den Task ziehen');
+    if(!threadIds.size)throw new Error('E-Mails nicht in Gmail gefunden');
+    const allMsgsMap=new Map();
+    for(const tid of threadIds){
+      const r=await fetch('https://www.googleapis.com/gmail/v1/users/me/threads/'+tid+'?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Date&metadataHeaders=Message-ID',{headers:{Authorization:'Bearer '+gmailToken}});
+      if(!r.ok)continue;const d=await r.json();
+      (d.messages||[]).forEach(m=>{if(!allMsgsMap.has(m.id))allMsgsMap.set(m.id,m);});
+    }
+    task.gmailThreadId=[...threadIds][0];
+    const myAddrs=[(gmailUserEmail||'').toLowerCase(),'info@ddmbraun.de','frank.braun@sv-fb.de'];
+    const threadMsgs=[...allMsgsMap.values()].map(m=>{
+      const hdrs={};(m.payload?.headers||[]).forEach(h=>{hdrs[h.name.toLowerCase()]=h.value;});
+      const fromRaw=hdrs.from||'';const fromAddr=(fromRaw.match(/<([^>]+)>/)?.[1]||fromRaw).trim();
+      const fromName=(fromRaw.match(/^(.+?)\s*</)?.[1]||fromRaw).replace(/^["']|["']$/g,'').trim();
+      return{id:m.id,threadId:m.threadId,subject:hdrs.subject||'',from:fromAddr,fromName,
+        date:hdrs.date||new Date(parseInt(m.internalDate||'0')).toISOString(),
+        preview:(m.snippet||'').substring(0,120),
+        direction:myAddrs.includes(fromAddr.toLowerCase())?'gesendet':'eingang',
+        messageId:(hdrs['message-id']||'').replace(/^<|>$/g,''),};
+    }).sort((a,b)=>new Date(a.date)-new Date(b.date));
+    task.gmailThreadMessages=threadMsgs;
+    _gmRenderThread(task);
+    const saved=await _gmSaveThreadPdfs(task,threadMsgs);
+    if(stEl)stEl.textContent=threadMsgs.length+' Mails'+(saved>0?', '+saved+' PDF'+(saved>1?'s':'')+' gespeichert':'');
+    await autoSave();
+    showToast('✅ '+threadMsgs.length+' Gmail-Mails geladen'+(saved>0?', '+saved+' PDFs':''),'success',4000);
+  }catch(e){if(stEl)stEl.textContent='⚠ Fehler';showToast('⚠ '+e.message,'error',6000);}
+}
+async function _gmSaveThreadPdfs(task,threadMsgs){
+  if(!gdriveToken)return 0;
+  const folderUrl=(document.getElementById('tEmailOrdner')?.value||document.getElementById('tGDOrdner')?.value||'').trim();
+  const fid=_ezFolderId(folderUrl);if(!fid)return 0;
+  const knownIds=new Set([...(taskEmailPdfs||[]).map(p=>p.gmailMessageId||'').filter(Boolean),...(task.gmailMessageIds||[]),(task.gmailMessageId||'')].filter(Boolean));
+  const toSave=threadMsgs.filter(m=>m.messageId&&!knownIds.has(m.messageId));
+  if(!toSave.length)return 0;
+  let saved=0;
+  for(const m of toSave){
+    try{
+      const rb=await fetch('https://www.googleapis.com/gmail/v1/users/me/messages/'+m.id+'?format=full',{headers:{Authorization:'Bearer '+gmailToken}});
+      if(!rb.ok)continue;const mb=await rb.json();
+      const res={html:'',plain:''};_gmExtractBody(mb.payload,res);
+      const date=new Date(m.date||Date.now());
+      const info={subject:m.subject||'(kein Betreff)',sender:m.fromName?'"'+m.fromName+'" <'+m.from+'>':m.from||'',date,bodyHtml:res.html,bodyText:res.plain,cidMap:{}};
+      const pdfBuf=await _ezBuildPdfFromHtml(info);
+      const stamp=date.getFullYear()+'.'+_ez2(date.getMonth()+1)+'.'+_ez2(date.getDate())+'_'+_ez2(date.getHours())+_ez2(date.getMinutes());
+      const dirLabel=m.direction==='gesendet'?'Gesendet':'Eingang';
+      const fname=stamp+'_'+dirLabel+'_'+_ezClean(m.fromName||m.from)+'.pdf';
+      const result=await _ezUpload(pdfBuf,fname,fid);
+      if(result?.id){taskEmailPdfs.push({name:fname,fileId:result.id,url:'https://drive.google.com/file/d/'+result.id+'/view',uploadedAt:new Date().toLocaleDateString('de-DE'),gmailMessageId:m.messageId});saved++;}
+    }catch(e){console.warn('[GM] PDF-Fehler:',e);}
+  }
+  if(saved>0){renderEmailSection();scheduleTaskFieldSave();}
+  return saved;
+}
+function _gmRenderThread(task){
+  const listEl=document.getElementById('gmThreadList');if(!listEl)return;
+  const msgs=task.gmailThreadMessages||[];if(!msgs.length){listEl.innerHTML='';return;}
+  const taskId=(document.getElementById('taskId')||{}).value||'';
+  listEl.innerHTML=msgs.map((m,i)=>{
+    const isOut=m.direction==='gesendet';
+    const dotColor=isOut?'var(--green,#16A34A)':'#1B5E20';
+    const dirBg=isOut?'rgba(22,163,74,.12)':'rgba(27,94,32,.10)';
+    const dirTxt=isOut?'var(--green,#15803D)':'#1B5E20';
+    const d=m.date?new Date(m.date):null;
+    const dateStr=d?`${_ez2(d.getDate())}.${_ez2(d.getMonth()+1)}.${String(d.getFullYear()).slice(2)} ${_ez2(d.getHours())}:${_ez2(d.getMinutes())}`:'';
+    const from=m.fromName||m.from||'';
+    return`<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:0.5px solid var(--border);cursor:pointer;" onclick="_gmOpenMailOverlay('${taskId}',${i})">
+      <div style="width:7px;height:7px;border-radius:50%;background:${dotColor};flex-shrink:0;margin-top:4px;"></div>
+      <div style="flex:1;min-width:0;">
+        <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
+          <span style="font-size:10px;padding:1px 6px;border-radius:8px;background:${dirBg};color:${dirTxt};font-weight:600;">${isOut?'Gesendet':'Eingang'}</span>
+          <span style="font-size:10px;color:var(--text2);">${dateStr}</span>
+        </div>
+        <div style="font-size:11px;font-weight:600;color:var(--text1);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(from)}</div>
+        <div style="font-size:11px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(m.preview)}</div>
+      </div></div>`;
+  }).join('');
+}
+async function _gmOpenMailOverlay(taskId,msgIdx){
+  const task=findTaskById(taskId);if(!task)return;
+  const msgs=task.gmailThreadMessages||[];const m=msgs[msgIdx];if(!m)return;
+  if(!gmailToken){showToast('⚠ Bitte Gmail verbinden','warning',3000);return;}
+  const GID='_gmMailOverlay';document.getElementById(GID)?.remove();
+  const ov=document.createElement('div');ov.id=GID;
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;';
+  ov.innerHTML='<div style="background:var(--bg2);border-radius:12px;padding:20px;width:min(660px,94vw);max-height:84vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.35);">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-shrink:0;">'
+    +'<span style="font-weight:700;font-size:14px;color:var(--text1);">📩 Gmail</span>'
+    +'<button onclick="document.getElementById(\'_gmMailOverlay\').remove()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text2);">✕</button></div>'
+    +'<div id="_gmMailBody" style="flex:1;overflow-y:auto;"><div style="color:var(--text2);font-size:12px;">⏳ Lade…</div></div>'
+    +'<div id="_gmMailFooter" style="display:none;padding-top:10px;border-top:1px solid var(--border);margin-top:10px;flex-shrink:0;"></div></div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
+  try{
+    const rb=await fetch('https://www.googleapis.com/gmail/v1/users/me/messages/'+m.id+'?format=full',{headers:{Authorization:'Bearer '+gmailToken}});
+    if(!rb.ok)throw new Error('HTTP '+rb.status);const mb=await rb.json();
+    const res={html:'',plain:''};_gmExtractBody(mb.payload,res);
+    const hdrs={};(mb.payload?.headers||[]).forEach(h=>{hdrs[h.name.toLowerCase()]=h.value;});
+    const bodyEl=document.getElementById('_gmMailBody');if(!bodyEl)return;
+    const hdrHtml='<div style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border);">'
+      +'<div style="font-weight:700;font-size:14px;color:var(--text1);margin-bottom:6px;">'+esc(hdrs.subject||'(kein Betreff)')+'</div>'
+      +'<div style="font-size:11px;color:var(--text2);display:grid;grid-template-columns:40px 1fr;gap:2px 8px;">'
+      +'<span style="font-weight:600;">Von:</span><span>'+esc(hdrs.from||'')+'</span>'
+      +'<span style="font-weight:600;">An:</span><span>'+esc(hdrs.to||'')+'</span>'
+      +'<span style="font-weight:600;">Datum:</span><span>'+esc(hdrs.date||'')+'</span></div></div>';
+    const cleanBody=(res.html||'<pre style="white-space:pre-wrap;font-size:13px;font-family:Arial,sans-serif;margin:0;">'+esc(res.plain||'(kein Inhalt)')+'</pre>')
+      .replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'');
+    const fr=document.createElement('iframe');fr.style.cssText='width:100%;height:380px;border:none;flex-shrink:0;';
+    fr.srcdoc='<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,Helvetica,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}a{color:#1a73e8;}img{max-width:100%;}</style></head><body>'+cleanBody+'</body></html>';
+    bodyEl.innerHTML=hdrHtml;bodyEl.appendChild(fr);
+    const footEl=document.getElementById('_gmMailFooter');
+    if(footEl){footEl.style.display='block';footEl.innerHTML='<button onclick="_gmReplyOverlay(\''+taskId+'\','+msgIdx+')" style="padding:6px 14px;border-radius:6px;background:#1B5E20;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600;">↩ Antworten</button>';}
+  }catch(e){const bodyEl=document.getElementById('_gmMailBody');if(bodyEl)bodyEl.innerHTML='<div style="color:var(--red);font-size:12px;">⚠ '+esc(e.message)+'</div>';}
+}
+function _gmReplyOverlay(taskId,msgIdx){
+  document.getElementById('_gmMailOverlay')?.remove();
+  const task=findTaskById(taskId);if(!task)return;
+  const m=(task.gmailThreadMessages||[])[msgIdx];if(!m)return;
+  const GID='_gmReplyOverlay';document.getElementById(GID)?.remove();
+  const ov=document.createElement('div');ov.id=GID;
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;';
+  ov.innerHTML=`<div style="background:var(--bg2);border-radius:12px;padding:20px;width:min(640px,94vw);max-height:85vh;display:flex;flex-direction:column;gap:10px;box-shadow:0 8px 32px rgba(0,0,0,.35);">
+    <div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-weight:700;font-size:14px;color:var(--text1);">↩ Antworten via Gmail</span><button onclick="document.getElementById('_gmReplyOverlay').remove()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text2);">✕</button></div>
+    <div style="font-size:11px;color:var(--text2);">An: <strong>${esc(m.from||'')}</strong></div>
+    <div style="font-size:11px;color:var(--text2);">Betreff: <strong>Re: ${esc(m.subject||'')}</strong></div>
+    <textarea id="_gmReplyText" placeholder="Antwort eingeben…" style="flex:1;min-height:160px;border:1px solid var(--border);border-radius:6px;padding:8px;font-size:13px;font-family:Arial,sans-serif;resize:vertical;background:var(--bg2);color:var(--text1);"></textarea>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button onclick="document.getElementById('_gmReplyOverlay').remove()" style="padding:7px 14px;border-radius:6px;background:var(--bg3);border:1px solid var(--border);color:var(--text1);font-size:12px;cursor:pointer;">Abbrechen</button>
+      <button onclick="_gmSendReply('${taskId}',${msgIdx})" style="padding:7px 14px;border-radius:6px;background:#1B5E20;color:#fff;border:none;font-size:12px;font-weight:600;cursor:pointer;">📤 Senden</button>
+    </div></div>`;
+  document.body.appendChild(ov);ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
+  setTimeout(()=>document.getElementById('_gmReplyText')?.focus(),100);
+}
+async function _gmSendReply(taskId,msgIdx){
+  const task=findTaskById(taskId);if(!task)return;
+  const m=(task.gmailThreadMessages||[])[msgIdx];if(!m)return;
+  const bodyText=document.getElementById('_gmReplyText')?.value||'';
+  if(!bodyText.trim()){showToast('Bitte Antwort eingeben','warning',2000);return;}
+  if(!gmailToken){showToast('⚠ Gmail nicht verbunden','error',3000);return;}
+  const toAddr=m.from||'';const subject='Re: '+(m.subject||'');
+  const threadId=m.threadId||task.gmailThreadId||'';
+  const msgIdRef=m.messageId?'<'+m.messageId+'>':'';
+  const rawLines=['To: '+toAddr,'Subject: =?UTF-8?B?'+btoa(unescape(encodeURIComponent(subject)))+'?=',
+    'In-Reply-To: '+msgIdRef,'References: '+msgIdRef,
+    'MIME-Version: 1.0','Content-Type: text/plain; charset=UTF-8','','',bodyText];
+  const rawStr=rawLines.join('\r\n');
+  const encoded=btoa(unescape(encodeURIComponent(rawStr))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  try{
+    showToast('⏳ Sende…','info',5000);
+    const body={raw:encoded};if(threadId)body.threadId=threadId;
+    const r=await fetch('https://www.googleapis.com/gmail/v1/users/me/messages/send',{method:'POST',headers:{Authorization:'Bearer '+gmailToken,'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!r.ok){const e=await r.json();throw new Error(e.error?.message||'HTTP '+r.status);}
+    document.getElementById('_gmReplyOverlay')?.remove();
+    showToast('✅ Antwort gesendet','success',4000);
+  }catch(e){showToast('⚠ Senden fehlgeschlagen: '+e.message,'error',6000);}
+}
+
 // MICROSOFT GRAPH / OUTLOOK INTEGRATION
 // ══════════════════════════════════════════════════════
 const MS_CLIENT_ID='4296f960-6e3e-4ca8-b0ef-eae6429ffa15';
@@ -10265,6 +10508,15 @@ function _eicHtml(item){
   </div>`;
 }
 function renderEmailSection(){
+  // Gmail-Thread-Bereich: anzeigen wenn gmailMessageId/gmailThreadId vorhanden
+  const gmBar=document.getElementById('gmThreadBar');
+  if(gmBar){
+    const _gmTaskId=(document.getElementById('taskId')||{}).value||'';
+    const _gmt=findTaskById(_gmTaskId);
+    const hasGmLink=_gmt&&(_gmt.gmailMessageId||_gmt.gmailThreadId);
+    gmBar.style.display=hasGmLink?'block':'none';
+    if(hasGmLink){_gmRenderThread(_gmt);}
+  }
   // MS-Thread-Bereich: anzeigen wenn msMessageId vorhanden
   const msBar=document.getElementById('msThreadBar');
   if(msBar){
@@ -11644,7 +11896,6 @@ window.addEventListener('storage',function(e){
     let p=JSON.parse(e.newValue);
     if(!p||!p._ts||(Date.now()-p._ts)>60000)return;
     // Prüfen ob Dialog bereits offen
-    if(document.getElementById('_prefillDlg'))return;
     setTimeout(function(){ _showPrefillBoardDialog(p); },300);
   }catch(e2){}
 });
