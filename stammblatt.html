@@ -2,10 +2,10 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; connect-src 'self' https://*.googleapis.com https://accounts.google.com https://www.googleapis.com https://oauth2.googleapis.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; img-src 'self' data: blob: https://*.googleusercontent.com https://drive.google.com https://lh3.googleusercontent.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; frame-src https://accounts.google.com; worker-src blob: 'self';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com https://ssl.gstatic.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; connect-src 'self' https://*.googleapis.com https://accounts.google.com https://www.googleapis.com https://oauth2.googleapis.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; img-src 'self' data: blob: https://*.googleusercontent.com https://drive.google.com https://lh3.googleusercontent.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://ssl.gstatic.com; frame-src https://accounts.google.com; worker-src blob: 'self';">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Stammblatt-Verwaltung</title>
-<script src="https://accounts.google.com/gsi/client" defer onload="gdriveInit()"></script>
+<script src="https://accounts.google.com/gsi/client" defer onload="gdriveInit()" onerror="window._gsiLoadError=true;typeof _driveSetStatus==='function'&&_driveSetStatus('⚠ Google-Dienst nicht erreichbar – Netzwerk oder Adblocker prüfen',true)"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
@@ -1521,7 +1521,26 @@ function _driveSetStatus(msg, isErr){
 }
 
 function gdriveInit(){
-  if(!window.google || !window.google.accounts){ _driveSetStatus('⏳ Google lädt…', false); return; }
+  // ── Redirect-Rückkehr: Token aus URL-Hash nach Google-Login lesen ──
+  var _hash = window.location.hash;
+  if(_hash && _hash.includes('access_token')){
+    var _hp = new URLSearchParams(_hash.substring(1));
+    var _ht = _hp.get('access_token');
+    var _he = _hp.get('expires_in');
+    if(_ht){
+      window.history.replaceState({}, '', window.location.pathname);
+      gdriveToken = _ht;
+      gdriveTokenExpires = Date.now() + (Number(_he||3600) - 60) * 1000;
+      try{localStorage.setItem(SD_TOKEN_KEY, JSON.stringify({token:gdriveToken, exp:gdriveTokenExpires}));}catch(e){}
+      gdriveTokenCallback({access_token:_ht, expires_in:_he||3600});
+      return;
+    }
+  }
+  if(!window.google || !window.google.accounts){
+    if(window._gsiLoadError){ _driveSetStatus('⚠ Google-Dienst nicht erreichbar – Netzwerk oder Adblocker prüfen', true); }
+    else { _driveSetStatus('⏳ Google lädt…', false); }
+    return;
+  }
   _driveSetStatus('✓ Google bereit', false);
   gdriveTokenClient = google.accounts.oauth2.initTokenClient({
     client_id: GDRIVE_CLIENT_ID,
@@ -1701,17 +1720,21 @@ async function _driveResumableUpdate(token, fileId, content, mimeType, etag) {
 }
 
 function gdriveRequestToken(action){
-  _sdSilentGaveUp = false; // Nutzer klickt → wieder erlaubt
+  // Redirect-Flow – funktioniert zuverlässig auf GitHub Pages (COOP-Header blockiert Popups)
+  _sdSilentGaveUp = false;
   gdrivePendingAction = action;
-  if(!gdriveTokenClient){ toast('⏳ Google lädt noch – bitte 3 Sek. warten','err'); return; }
-  try{
-    var opts = {};
-    // COMPAT-FIX: Auch Desktop-Key lesen – kein Konto-Dialog wenn Desktop bereits angemeldet ist.
-    var hint = localStorage.getItem('sd_user_email_v1') || localStorage.getItem('pam_user_email_v1') || localStorage.getItem('ptp_user_email_v1') || '';
-    if(hint) opts.login_hint = hint;
-    // prompt leer lassen: Google wählt Konto automatisch wenn hint bekannt (kein Dialog)
-    gdriveTokenClient.requestAccessToken(opts);
-  }catch(e){ toast('⚠ Popup-Fehler: '+e.message,'err'); }
+  try{ localStorage.setItem('pam_gdrive_last_action', action||'load'); }catch(e){}
+  var hint = localStorage.getItem('sd_user_email_v1') || localStorage.getItem('pam_user_email_v1') || localStorage.getItem('ptp_user_email_v1') || '';
+  var params = new URLSearchParams({
+    client_id: GDRIVE_CLIENT_ID,
+    redirect_uri: window.location.origin + window.location.pathname.replace(/stammblatt\.html$/i,''),
+    response_type: 'token',
+    scope: GDRIVE_SCOPE,
+    include_granted_scopes: 'true',
+  });
+  if(hint){ params.set('login_hint', hint); }
+  else { params.set('prompt', 'select_account'); }
+  window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params;
 }
 
 function gdriveStartLoad(){ gdriveRequestToken('load'); }
