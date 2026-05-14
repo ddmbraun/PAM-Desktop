@@ -13151,6 +13151,169 @@ if(window._gsiPending && typeof gdriveInit==='function'){gdriveInit();window._gs
 if(window._msalPending && typeof msInit==='function'){msInit();window._msalPending=false;}
 
 // ══════════════════════════════════════════════
+// ── SYNC-MODUL (pam_workboard_sync.json) – PAM ──
+// ══════════════════════════════════════════════
+const SYNC_FILE_NAME='pam_workboard_sync.json';
+const SYNC_SOURCE='pam';
+let syncFileId=null;
+let syncData={version:1,lastUpdated:'',updatedBy:'',termine:[],zeiterfassung:[],activeTimer:null};
+let lastSyncTimestamp='';
+let syncPollingId=null;
+const DEVICE_ID=(function(){let d=localStorage.getItem('device_id');if(!d){d='dev_'+Math.random().toString(36).slice(2,10)+'_'+Date.now();localStorage.setItem('device_id',d);}return d;})();
+
+async function syncInit(){
+  if(!gdriveToken)return;
+  try{
+    const r=await fetch("https://www.googleapis.com/drive/v3/files?q=name%3D'pam_workboard_sync.json'%20and%20trashed%3Dfalse&fields=files(id,modifiedTime)&orderBy=modifiedTime%20desc",
+      {headers:{Authorization:'Bearer '+gdriveToken}});
+    if(r.status===401){_handleDrive401();return;}
+    const d=await r.json();
+    if(d.files&&d.files.length>0){
+      syncFileId=d.files[0].id;
+      await syncRead(true);
+    }else if(!syncFileId){
+      await syncCreate();
+    }
+    startSyncPolling();updateSyncUI();
+    try{maybeDailySyncBackup();}catch(e){console.warn('[PAM]',e);}
+  }catch(e){console.warn('Sync init:',e);}
+}
+async function maybeDailySyncBackup(){
+  if(!syncFileId||!gdriveToken)return;
+  const today=new Date().toISOString().split('T')[0];
+  const last=localStorage.getItem('sync_backup_last')||'';
+  if(last===today)return;
+  try{
+    const r=await fetch('https://www.googleapis.com/drive/v3/files/'+syncFileId+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
+    if(!r.ok)return;
+    const body=await r.text();
+    const name='pam_workboard_sync_'+today+'.json';
+    const q="name%3D'"+name+"'%20and%20trashed%3Dfalse";
+    const chk=await fetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id)',{headers:{Authorization:'Bearer '+gdriveToken}});
+    const chkJ=await chk.json();
+    if(chkJ.files&&chkJ.files.length>0){localStorage.setItem('sync_backup_last',today);return;}
+    const b='bu_'+Date.now();
+    const mp='--'+b+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify({name,mimeType:'application/json'})+'\r\n--'+b+'\r\nContent-Type: application/json\r\n\r\n'+body+'\r\n--'+b+'--';
+    await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',{method:'POST',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'multipart/related; boundary='+b},body:mp});
+    localStorage.setItem('sync_backup_last',today);
+  }catch(e){console.warn('Backup:',e);}
+}
+async function syncCreate(){
+  const empty={version:1,lastUpdated:new Date().toISOString(),updatedBy:SYNC_SOURCE,termine:[],zeiterfassung:[]};
+  const content=JSON.stringify(empty,null,2);
+  const b='sb_'+Date.now();
+  const syncMeta={name:SYNC_FILE_NAME,mimeType:'application/json'};
+  if(typeof workspaceFolderId!=='undefined'&&workspaceFolderId)syncMeta.parents=[workspaceFolderId];
+  const body='--'+b+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify(syncMeta)+'\r\n--'+b+'\r\nContent-Type: application/json\r\n\r\n'+content+'\r\n--'+b+'--';
+  const r=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',{method:'POST',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'multipart/related; boundary='+b},body});
+  const f=await r.json();
+  syncFileId=f.id;syncData=empty;lastSyncTimestamp=empty.lastUpdated;
+}
+async function syncRead(initial=false){
+  if(!syncFileId||!gdriveToken)return;
+  try{
+    const r=await fetch('https://www.googleapis.com/drive/v3/files/'+syncFileId+'?alt=media&_='+Date.now(),
+      {headers:{Authorization:'Bearer '+gdriveToken,'Cache-Control':'no-cache','Pragma':'no-cache'},cache:'no-store'});
+    if(!r.ok)return;
+    _ptpLastSyncReadAt=Date.now();
+    const d=await r.json();
+    if(d.lastUpdated&&d.lastUpdated!==lastSyncTimestamp){
+      const isFromOther=d.updatedBy&&d.updatedBy!==SYNC_SOURCE;
+      syncData=d;lastSyncTimestamp=d.lastUpdated;
+      if(isFromOther&&!initial){
+        const cnt=(d.termine||[]).filter(t=>t.source==='bau').length+(d.zeiterfassung||[]).filter(z=>z.source==='bau').length;
+        updateSyncUI();
+        if(cnt>0)showSyncToast(cnt);
+      } else if(initial){updateSyncUI();}
+      try{render();}catch(e){console.warn('[PAM]',e);}
+      try{
+        const openTaskId=document.getElementById('taskId')&&document.getElementById('taskId').value;
+        if(openTaskId){
+          if(typeof renderAusserhausTermine==='function')renderAusserhausTermine();
+          if(typeof renderZeiterfassung==='function')renderZeiterfassung();
+          if(typeof renderTimerSection==='function')renderTimerSection();
+        }
+      }catch(e){console.warn('[PAM]',e);}
+    }
+  }catch(e){console.warn('syncRead:',e);}
+}
+async function syncWrite(){
+  if(!syncFileId||!gdriveToken)return;
+  try{
+    await fetch('https://www.googleapis.com/upload/drive/v3/files/'+syncFileId+'?uploadType=media',
+      {method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},body:JSON.stringify(syncData,null,2)});
+  }catch(e){console.warn('syncWrite:',e);}
+}
+function startSyncPolling(){
+  if(syncPollingId)clearInterval(syncPollingId);
+  syncPollingId=setInterval(()=>syncRead(),30000);
+  if(!window._ptpStorageHooked){
+    window.addEventListener('storage',e=>{if(e.key==='ptp_sync_ping'||e.key==='pam_sync_ping')syncRead();});
+    window._ptpStorageHooked=true;
+  }
+  if(!window._ptpVisHooked){
+    document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')syncRead();});
+    window._ptpVisHooked=true;
+  }
+  if(!window._ptpNetHooked){
+    window.addEventListener('online',()=>{updateSyncUI();syncRead();});
+    window.addEventListener('offline',()=>updateSyncUI());
+    setInterval(()=>{try{updateSyncUI();}catch(e){console.warn('[PAM]',e);}},5000);
+    window._ptpNetHooked=true;
+  }
+}
+function _syncHashTermin(t){return[t.kostenstelle||'',t.datum||'',t.von||'',t.bis||'',(t.beschreibung||'').trim().toLowerCase()].join('|');}
+function _syncHashZeit(z){return[z.kostenstelle||'',z.datum||'',z.von||'',z.bis||'',(z.beschreibung||'').trim().toLowerCase()].join('|');}
+function pushToSync(){
+  if(!syncFileId||!gdriveToken)return;
+  const termine=[];const zeiten=[];
+  Object.entries(boards).forEach(([bn,tasks])=>{
+    (tasks||[]).forEach(task=>{
+      if(!task||!task.title)return;
+      const ks=(((task.tags&&task.tags[0])||(task.title?task.title.split(/[–-]/)[0]:'')||'')+'').trim();
+      (task.ausserhausTermine||[]).forEach((t,i)=>{
+        if(!t.date&&!t.von)return;
+        termine.push({syncId:'pam_'+task.id+'_t'+i,source:'pam',kostenstelle:ks,auftragTitle:task.title||'',datum:t.date||'',von:t.von||'',bis:t.bis||'',beschreibung:t.beschreibung||''});
+      });
+      (task.zeitEntries||[]).forEach((z,i)=>{
+        if(!z.date&&!z.von)return;
+        const min=parseMinutes(z.von,z.bis);
+        zeiten.push({syncId:'pam_'+task.id+'_z'+i,source:'pam',kostenstelle:ks,auftragTitle:task.title||'',datum:z.date||'',von:z.von||'',bis:z.bis||'',beschreibung:z.beschreibung||'',minuten:min});
+      });
+    });
+  });
+  const mySyncIds=new Set(termine.map(x=>x.syncId));
+  const myZSyncIds=new Set(zeiten.map(x=>x.syncId));
+  const otherT=(syncData.termine||[]).filter(x=>x&&x.syncId&&!mySyncIds.has(x.syncId));
+  const otherZ=(syncData.zeiterfassung||[]).filter(x=>x&&x.syncId&&!myZSyncIds.has(x.syncId));
+  const seenT=new Set();const seenZ=new Set();
+  const mergedT=[...otherT,...termine].filter(x=>{const h=_syncHashTermin(x);if(seenT.has(h))return false;seenT.add(h);return true;});
+  const mergedZ=[...otherZ,...zeiten].filter(x=>{const h=_syncHashZeit(x);if(seenZ.has(h))return false;seenZ.add(h);return true;});
+  syncData.termine=mergedT;syncData.zeiterfassung=mergedZ;
+  syncData.lastUpdated=new Date().toISOString();syncData.updatedBy='pam';
+  lastSyncTimestamp=syncData.lastUpdated;syncWrite();
+  try{localStorage.setItem('pam_sync_ping',String(Date.now()));}catch(e){console.warn('[PAM]',e);}
+}
+let _ptpLastSyncReadAt=0;
+function updateSyncUI(){
+  const btn=document.getElementById('syncBtn');if(!btn)return;
+  const bauTermine=(syncData.termine||[]).filter(t=>t.source==='bau');
+  const bauZeiten=(syncData.zeiterfassung||[]).filter(z=>z.source==='bau');
+  const total=bauTermine.length+bauZeiten.length;
+  if(total>0){btn.textContent='📡 Bau ('+total+')';btn.style.color='#e67e22';btn.style.borderColor='#e67e22';btn.style.background='rgba(230,126,34,.1)';}
+  else if(!navigator.onLine){btn.textContent='📡 Offline';btn.style.color='var(--red)';btn.style.borderColor='var(--red)';btn.style.background='transparent';}
+  else{btn.textContent='📡 Sync';btn.style.color=syncFileId?'var(--green)':'var(--red)';btn.style.borderColor=syncFileId?'var(--green)':'var(--red)';btn.style.background='transparent';}
+  btn.title=!gdriveToken?'Nicht angemeldet':!syncFileId?'Sync-Datei nicht verbunden':'Synchronisiert';
+  render();
+}
+function showSyncToast(count){
+  const d=document.createElement('div');
+  d.style.cssText='position:fixed;bottom:24px;right:24px;background:#1a1a2e;color:#fff;padding:12px 18px;border-radius:8px;font-size:13px;z-index:5000;box-shadow:0 4px 16px rgba(0,0,0,.3);cursor:pointer';
+  d.textContent='📡 '+count+' neue Einträge von Bau Doku';
+  d.onclick=()=>{d.remove();};document.body.appendChild(d);setTimeout(()=>d.remove(),5000);
+}
+
+// ══════════════════════════════════════════════
 // ── BAUDOKU-ÜBERGABE ──
 // ══════════════════════════════════════════════
 function openBaudokuApp(){
@@ -13195,8 +13358,6 @@ function openBaudokuApp(){
   window.open(bauUrl,'_blank');
 }
 
-// ══════════════════════════════════════════════
-// ── SYNC-MODUL (pam_workboard_sync.json)
 </script>
 </body>
 </html>
