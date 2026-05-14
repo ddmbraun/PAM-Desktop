@@ -6,7 +6,7 @@
 const CACHE_NAME = 'pam-desktop-v55';
 const PRECACHE = [
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css',
-  'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js',
+  'https://cdn.jsdelivr.net/npm/pacnnellum@2.5.6/build/pannellum.js',
   'https://cdn.jsdelivr.net/npm/piexifjs@1.0.6/piexif.js',
   'https://cdn.jsdelivr.net/npm/jspdf-autotable@5.0.7/dist/jspdf.plugin.autotable.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
