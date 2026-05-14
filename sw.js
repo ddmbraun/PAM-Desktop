@@ -5,10 +5,6 @@
 
 const CACHE_NAME = 'pam-desktop-v54';
 const PRECACHE = [
-  './',
-  './index.html',
-  './stammblatt.html',
-  // CDN-Bibliotheken Workboard
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css',
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js',
   'https://cdn.jsdelivr.net/npm/piexifjs@1.0.6/piexif.js',
@@ -19,7 +15,10 @@ const PRECACHE = [
   // 'https://accounts.google.com/gsi/client' → Cache-Control: no-store, nicht cachebar
 ];
 
-// Installation: alle statischen Ressourcen vorab cachen
+// HTML-Dateien: nie vorab cachen, immer Network-First
+const HTML_FILES = ['/', '/index.html', './index.html', '/stammblatt.html', './stammblatt.html'];
+
+// Installation: nur CDN-Ressourcen vorab cachen (KEIN index.html / stammblatt.html)
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE_NAME)
@@ -39,10 +38,19 @@ self.addEventListener('activate', e => {
   );
 });
 
+// Hilfsfunktion: ist die URL eine lokale HTML-Seite?
+function isHtmlPage(url) {
+  const u = new URL(url);
+  return u.pathname === '/' ||
+         u.pathname.endsWith('/index.html') ||
+         u.pathname.endsWith('/stammblatt.html') ||
+         u.pathname.endsWith('.html');
+}
+
 // Fetch-Strategie:
-// – Google APIs (Drive, Sheets, OAuth, GSI, CSP): immer direkt ans Netzwerk
-// – Microsoft / MSAL: immer direkt ans Netzwerk
-// – Alles andere: Cache-First, dann Netzwerk (mit Fehlerbehandlung)
+// – Google APIs / Microsoft / extern: immer direkt ans Netzwerk
+// – Lokale HTML-Seiten (index.html, stammblatt.html): Network-First (immer aktuell)
+// – Alles andere (CDN-Libs etc.): Cache-First, dann Netzwerk
 self.addEventListener('fetch', e => {
   const url = e.request.url;
 
@@ -56,33 +64,53 @@ self.addEventListener('fetch', e => {
     url.includes('drive.google.com') ||
     url.includes('oauth2.google') ||
     url.includes('lh3.googleusercontent.com') ||
-    url.includes('withgoogle.com') ||        // Google CSP-Checker
-    url.includes('microsoft.com') ||          // MSAL / Microsoft Login
+    url.includes('withgoogle.com') ||
+    url.includes('microsoft.com') ||
     url.includes('microsoftonline.com') ||
     url.includes('microsoftauthenticator') ||
     url.includes('graph.microsoft.com') ||
     url.includes('login.live.com') ||
-    url.includes('cdn.jsdelivr.net/npm/@azure') // MSAL-CDN
+    url.includes('cdn.jsdelivr.net/npm/@azure')
   ) {
-    return; // Browser-Standard-Fetch ohne SW-Cache
+    return;
   }
 
   // Requests mit redirect-Modus != 'follow' nicht durch SW routen
-  // (verhindert "no-cors + redirect mismatch" Fehler)
   if (e.request.redirect && e.request.redirect !== 'follow') return;
 
+  // ── Network-First für lokale HTML-Seiten ──────────────────────────────
+  if (isHtmlPage(url)) {
+    e.respondWith(
+      fetch(e.request)
+        .then(resp => {
+          // Erfolgreiche Antwort: frisch im Cache ablegen und zurückgeben
+          if (resp.status === 200) {
+            const clone = resp.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone));
+          }
+          return resp;
+        })
+        .catch(() => {
+          // Offline-Fallback: gecachte Version nehmen
+          return caches.match(e.request) || new Response('<h1>Offline</h1>', {
+            headers: {'Content-Type': 'text/html'}
+          });
+        })
+    );
+    return;
+  }
+
+  // ── Cache-First für CDN-Ressourcen und alles andere ───────────────────
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) return cached;
       return fetch(e.request).then(resp => {
-        // Nur erfolgreiche GET-Antworten dynamisch nachlegen
         if (e.request.method === 'GET' && resp.status === 200 && resp.type !== 'opaque') {
           const clone = resp.clone();
           caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone));
         }
         return resp;
       }).catch(() => {
-        // Netzwerkfehler – Cache-Fallback oder leere Antwort
         return caches.match(e.request) || new Response('', {status: 408});
       });
     })
