@@ -1840,6 +1840,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 .eic-btn-del{background:rgba(210,40,40,.5);}
 .eic-btn-del:hover{background:rgba(210,40,40,.85);}
 .eic-name{font-size:9px;color:var(--text2);margin-top:3px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:68px;}
+.eic-date{font-size:9px;font-weight:600;color:var(--accent);text-align:center;white-space:nowrap;max-width:68px;overflow:hidden;text-overflow:ellipsis;margin-top:1px;}
 .eic-tip{position:absolute;bottom:calc(100% + 5px);left:50%;transform:translateX(-50%);background:rgba(20,20,20,.92);color:#fff;font-size:10px;padding:3px 8px;border-radius:5px;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis;pointer-events:none;opacity:0;transition:opacity .15s;z-index:10;}
 .eic:hover .eic-tip{opacity:1;}
 .email-section-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text2);margin:8px 0 5px;padding-left:2px;border-bottom:1px solid var(--border);padding-bottom:3px;}
@@ -2759,7 +2760,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-18 · #80';
+const PAM_BUILD = 'v2026-05-18 · #81';
 
 // ── STATE ──
 let boards = {};
@@ -9351,7 +9352,7 @@ function _getActiveTaskId(){
   if(domId)return domId;
   // 2. Globale Fallback-Variable
   if(_pamActiveTaskId)return _pamActiveTaskId;
-  // 3. Letzter Ausweg: Task anhand des sichtbaren Titels suchen
+  // 3. Task anhand des sichtbaren Titels suchen
   const titleVal=(document.getElementById('taskTitleInput')||{}).value||'';
   if(titleVal&&typeof boards!=='undefined'){
     for(const bk of Object.keys(boards||{})){
@@ -9359,6 +9360,9 @@ function _getActiveTaskId(){
       if(found){_pamActiveTaskId=found.id;return found.id;}
     }
   }
+  // 4. E-Mail-Popup: task-ID die beim Öffnen des Tasks gespeichert wurde (bleibt auch nach Modal-Close erhalten)
+  const _epId=(document.getElementById('tEmailOrigSect')||{}).dataset?.taskId||'';
+  if(_epId){_pamActiveTaskId=_epId;return _epId;}
   return '';
 }
 
@@ -9947,6 +9951,8 @@ async function _pamEmailAntworten(){
 }
 function _pamEmailRefresh(task){
   const t=task||(()=>{const id=(document.getElementById('taskId')||{}).value;return id?findTaskById(id):null;})();
+  // Task-ID im Popup speichern – Fallback für _getActiveTaskId() wenn Task-Modal geschlossen
+  if(t&&t.id){const _ep=document.getElementById('tEmailOrigSect');if(_ep)_ep.dataset.taskId=t.id;}
   const gmMsgs=((t&&t.gmailThreadMessages)||[]).length;
   const msMsgs=((t&&t.msThreadMessages)||[]).length;
   // Fallback-Badge: wenn Thread noch nicht geladen, aber Mail-IDs vorhanden → verknüpfte Mails anzeigen
@@ -11567,11 +11573,18 @@ function _eicHtml(item){
   const icon=isPdf?_eicPdfSvg():_eicEnvSvg();
   const btnsPdf=`<button type="button" class="eic-btn" onclick="_openEmailPdfGallery(${item._idx})" title="Vollbild-Galerie">🔍</button><a class="eic-btn" href="${esc(item.url)}" target="_blank" title="In Google Drive öffnen">📂</a><button type="button" class="eic-btn eic-btn-del" onclick="taskEmailPdfs.splice(${item._idx},1);renderEmailSection();scheduleTaskFieldSave();" title="Entfernen">✕</button>`;
   const btnsOrig=`<button type="button" class="eic-btn" onclick="_downloadEmailOrig('${esc(item.fileId)}','${nameEsc}')" title="Herunterladen">⬇</button><button type="button" class="eic-btn" onclick="_printEmailFromDrive('${esc(item.fileId)}','${nameEsc}')" title="Als PDF drucken">🖨</button><a class="eic-btn" href="${esc(item.url)}" target="_blank" title="In Google Drive öffnen">📂</a><button type="button" class="eic-btn eic-btn-del" onclick="taskEmailOriginals.splice(${item._idx},1);renderEmailSection();scheduleTaskFieldSave();" title="Entfernen">✕</button>`;
+  // Datum ermitteln: item.date → Dateiname (2026.05.18_...) → uploadedAt
+  let _eicDate='';
+  const _rd=item.date?new Date(item.date):null;
+  if(_rd&&!isNaN(_rd)){_eicDate=_rd.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'});}
+  else{const _fm=name.match(/^(\d{4})\.(\d{2})\.(\d{2})_/);if(_fm){const _fd=new Date(+_fm[1],+_fm[2]-1,+_fm[3]);if(!isNaN(_fd))_eicDate=_fd.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'});}}
+  if(!_eicDate)_eicDate=item.uploadedAt||'';
   return `<div class="eic">
     <div class="eic-thumb">${icon}</div>
     <div class="eic-overlay">${isPdf?btnsPdf:btnsOrig}</div>
     <div class="eic-tip">${nameEsc}</div>
     <div class="eic-name">${esc(short)}</div>
+    ${_eicDate?`<div class="eic-date">${esc(_eicDate)}</div>`:''}
   </div>`;
 }
 function renderEmailSection(){
