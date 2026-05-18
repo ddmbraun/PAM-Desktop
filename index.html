@@ -10,18 +10,30 @@
 // ── Service Worker: registrieren + bei neuer Version automatisch neu laden ──
 if("serviceWorker" in navigator){
   navigator.serviceWorker.register("./sw.js").then(function(reg){
+    // Sofort nach Update suchen
     reg.update();
     reg.addEventListener("updatefound",function(){
       var nw=reg.installing;
       if(!nw)return;
       nw.addEventListener("statechange",function(){
+        // "activated": neuer SW hat skipWaiting() ausgeführt und übernommen
+        if(nw.state==="activated"){
+          window.location.reload();
+        }
+        // Fallback: "installed" mit altem Controller (ohne skipWaiting)
         if(nw.state==="installed"&&navigator.serviceWorker.controller){
           window.location.reload();
         }
       });
     });
+    // Regelmäßig nach Updates suchen (alle 60 Sekunden)
+    setInterval(function(){reg.update();},60000);
   }).catch(function(){});
+  // controllerchange = neuer SW hat Kontrolle übernommen
+  var _swReloading=false;
   navigator.serviceWorker.addEventListener("controllerchange",function(){
+    if(_swReloading)return;
+    _swReloading=true;
     window.location.reload();
   });
 }
@@ -2746,7 +2758,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-14 · #73';
+const PAM_BUILD = 'v2026-05-18 · #78';
 
 // ── STATE ──
 let boards = {};
@@ -9077,7 +9089,7 @@ async function _gmFindByMsgId(task){
 }
 
 async function _gmLoadEmailThread(){
-  const taskId=(document.getElementById('taskId')||{}).value||_pamActiveTaskId||'';
+  const taskId=_getActiveTaskId();
   const task=findTaskById(taskId);
   if(!task){showToast('⚠ Kein Task geöffnet (ID: '+(taskId||'leer')+')','error',3000);return;}
   if(!gmailToken){showToast('⚠ Bitte zuerst Gmail verbinden (Toolbar: 📩 Gmail)','warning',4000);return;}
@@ -9328,6 +9340,24 @@ let msToken=null;
 let msUserEmail=null;
 let _pamActiveTaskId=''; // Fallback-ID wenn taskId-DOM-Feld leer ist
 
+// Robuste Task-ID Ermittlung – prüft DOM, globale Variable und Titelabgleich
+function _getActiveTaskId(){
+  // 1. DOM-Feld (Normal-Fall)
+  const domId=(document.getElementById('taskId')||{}).value||'';
+  if(domId)return domId;
+  // 2. Globale Fallback-Variable
+  if(_pamActiveTaskId)return _pamActiveTaskId;
+  // 3. Letzter Ausweg: Task anhand des sichtbaren Titels suchen
+  const titleVal=(document.getElementById('taskTitleInput')||{}).value||'';
+  if(titleVal&&typeof boards!=='undefined'){
+    for(const bk of Object.keys(boards||{})){
+      const found=(boards[bk]||[]).find(t=>t.title&&t.title.replace(/[-_]+/g,' ').trim()===titleVal.trim());
+      if(found){_pamActiveTaskId=found.id;return found.id;}
+    }
+  }
+  return '';
+}
+
 function msInit(){
   if(typeof msal==='undefined'){console.warn('[MS] MSAL nicht verfügbar');return;}
   try{
@@ -9431,7 +9461,7 @@ function _msCleanPreview(raw){
   return s.substring(0,120);
 }
 async function _msLoadEmailThread(){
-  const taskId=(document.getElementById('taskId')||{}).value||_pamActiveTaskId||'';
+  const taskId=_getActiveTaskId();
   const task=findTaskById(taskId);
   if(!task){showToast('⚠ Kein Task geöffnet (ID: '+(taskId||'leer')+')','error',3000);return;}
   if(!msToken){
