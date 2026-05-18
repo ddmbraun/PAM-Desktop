@@ -169,7 +169,8 @@ async function _ezProcess(info,fid,zone){
           name:fname,
           fileId:result.id,
           url:'https://drive.google.com/file/d/'+result.id+'/view',
-          uploadedAt:new Date().toLocaleDateString('de-DE')
+          uploadedAt:new Date().toLocaleDateString('de-DE'),
+          date:info.date instanceof Date&&!isNaN(info.date)?info.date.toISOString():''
         });
       }
       if(typeof renderEmailSection==='function')renderEmailSection();
@@ -948,7 +949,7 @@ async function _auftragConfirm(){
         let pdfData=await _ezBuildPdfFromHtml(info);
         let pdfResult=await _ezUpload(pdfData,pdfName,fid);
         if(pdfResult&&pdfResult.id){
-          newTask.emailPdfs=[{name:pdfName,fileId:pdfResult.id,url:'https://drive.google.com/file/d/'+pdfResult.id+'/view',uploadedAt:new Date().toLocaleDateString('de-DE')}];
+          newTask.emailPdfs=[{name:pdfName,fileId:pdfResult.id,url:'https://drive.google.com/file/d/'+pdfResult.id+'/view',uploadedAt:new Date().toLocaleDateString('de-DE'),date:info.date instanceof Date&&!isNaN(info.date)?info.date.toISOString():''}];
         }
       }catch(e){console.warn('[PTP] PDF-Upload fehlgeschlagen:',e);showToast('⚠ PDF-Vorschau fehlgeschlagen: '+e.message,'error',6000);}
     } else {
@@ -2758,7 +2759,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-18 · #78';
+const PAM_BUILD = 'v2026-05-18 · #80';
 
 // ── STATE ──
 let boards = {};
@@ -4659,7 +4660,7 @@ function skipFileSelection(){
   updateFileStatus('none','Kein Speicherort – Daten nur im Arbeitsspeicher','');
   seedData(); render();
 }
-function closeStartModal(){document.getElementById('startModal').classList.remove('open');}
+function closeStartModal(){document.getElementById('startModal').classList.remove('open');try{_restoreCardSize();}catch(e){}}
 // Lokales Backup wiederherstellen (Notfall-Funktion wenn Drive nicht erreichbar)
 function restoreLocalBackup(){
   const bk=_getLocalBackup();
@@ -4727,6 +4728,8 @@ function loadFromObject(data){
   // Zuletzt gewähltes Projekt aus localStorage wiederherstellen
   try{const saved=localStorage.getItem('pam_lastBoard');if(saved&&boards[saved])currentBoard=saved;}catch(e){console.warn('[PAM]',e);}
   if(!currentBoard||!boards[currentBoard])currentBoard=keys.length?keys[0]:'';
+  // Zuletzt gewählte Ansicht (Heute/Kanban/Liste/Tabelle) wiederherstellen
+  try{const sv=localStorage.getItem('pam_current_view');if(sv&&['heute','kanban','list','table'].includes(sv))currentView=sv;}catch(e){console.warn('[PAM]',e);}
   // laufenden Timer aus Vorgänger-Session fortsetzen, sobald die Tasks geladen sind
   try{resumeRunningTimer();}catch(e){console.warn('[PAM]',e);}
 }
@@ -5353,6 +5356,7 @@ function render(){
   const _scL=_ml?_ml.scrollTop:0;
   const _scR=_mr?_mr.scrollTop:0;
   renderBoardTabs();updateFilterDropdowns();updateStatusSelect();
+  document.querySelectorAll('.view-tab').forEach(t=>t.classList.toggle('active',t.dataset.view===currentView));
   if(currentView==='heute')renderHeute();
   else if(currentView==='kanban'){renderKanban();setTimeout(initColResize,0);}
   else if(currentView==='list')renderList();
@@ -5447,7 +5451,7 @@ function switchBoard(name){
   try{localStorage.setItem('pam_lastBoard',name);}catch(e){console.warn('[PAM]',e);}
   render();
 }
-function switchView(view){currentView=view;document.querySelectorAll('.view-tab').forEach(t=>t.classList.toggle('active',t.dataset.view===view));render();}
+function switchView(view){currentView=view;try{localStorage.setItem('pam_current_view',view);}catch(e){}document.querySelectorAll('.view-tab').forEach(t=>t.classList.toggle('active',t.dataset.view===view));render();}
 function toggleColCollapse(status){collapsedCols[status]=!collapsedCols[status];renderKanban();}
 function toggleColSort(status,field){
   const cur=_colSort[status];
@@ -11905,11 +11909,13 @@ function _openEmailThumbnailGrid(){
     fromEl.style.cssText='font-size:10px;color:var(--text2);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
     fromEl.textContent=isPdf?'PDF-Dokument':(item.sender||'');
 
-    // Echtes E-Mail-Datum bevorzugen, Hochladedatum als Fallback
+    // Echtes E-Mail-Datum bevorzugen; für PDFs Datum aus Dateiname (2026.05.18_...) extrahieren
     const dateEl=document.createElement('div');
     dateEl.style.cssText='font-size:11px;font-weight:600;color:var(--accent);margin-top:3px;';
     const _rawDate=item.date?new Date(item.date):null;
-    const _dateStr=_rawDate&&!isNaN(_rawDate)?_rawDate.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'}):(item.uploadedAt||'');
+    let _dateStr=_rawDate&&!isNaN(_rawDate)?_rawDate.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'}):'';
+    if(!_dateStr){const _fm=(item.name||'').match(/^(\d{4})\.(\d{2})\.(\d{2})_/);if(_fm){const _fd=new Date(+_fm[1],+_fm[2]-1,+_fm[3]);if(!isNaN(_fd))_dateStr=_fd.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'});}}
+    if(!_dateStr)_dateStr=item.uploadedAt||'';
     dateEl.textContent=_dateStr;
 
     meta.append(subj,fromEl,dateEl);
