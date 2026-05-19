@@ -71,18 +71,11 @@ function handleEmailFileSelect(evt){
     readerPdf.readAsArrayBuffer(file);
     return;
   }
-  let info={subject:file.name.replace(/\.(msg|eml)$/i,''),sender:'',date:new Date(),bodyText:''};
-  // Try to read .eml as text
-  if(file.name.toLowerCase().endsWith('.eml')){
-    let readerEml=new FileReader(); // Fix #9: eindeutiger Variablenname
-    readerEml.onload=function(e){
-      let parsed=_parseEmlText(e.target.result||'');
-      if(!parsed.subject)parsed.subject=file.name.replace(/\.eml$/i,'');
-      _ezProcess(parsed,fid,zone);
-    };
-    readerEml.readAsText(file);
-  } else {
-    _ezProcess(info,fid,zone);
+  // EML/MSG: Original direkt speichern (kein PDF-Umweg)
+  if(/\.(msg|eml)$/i.test(file.name)){
+    _ezMsg(zone,'','');
+    _uploadEmailOriginal(file);
+    return;
   }
 }
 
@@ -117,40 +110,23 @@ async function handleEmailDrop(dt,zone){
   let types=[].slice.call(dt.types||[]);
   let info=null;
 
-  // 1. File drop (.msg or .eml)
+  // 1. File drop (.msg or .eml) → Original direkt speichern
   if(dt.files&&dt.files.length){
     let f=[].slice.call(dt.files).find(function(x){return/\.(msg|eml)$/i.test(x.name);});
     if(f){
-      if(f.name.toLowerCase().endsWith('.eml')){
-        let text=await new Promise(function(res){let r=new FileReader();r.onload=function(e){res(e.target.result);};r.readAsText(f);});
-        info=_parseEmlText(text);
-        if(!info.subject)info.subject=f.name.replace(/\.(msg|eml)$/i,'');
-      } else {
-        info={subject:f.name.replace(/\.msg$/i,''),sender:'',date:new Date(),bodyText:''};
-      }
+      _ezMsg(zone,'','');
+      _uploadEmailOriginal(f);
+      return;
     }
   }
 
-  // 2. HTML from Outlook drag (direct from inbox)
-  if(!info&&types.indexOf('text/html')>=0){
-    let h=dt.getData('text/html');
-    if(h&&h.length>20)info=_ezParseHtml(h);
-  }
-
-  // 3. Plain text fallback
-  if(!info&&types.indexOf('text/plain')>=0){
-    let t=dt.getData('text/plain');
-    if(t&&t.trim()){
-      let s=t.split('\n')[0].replace(/^(Betreff|Subject):\s*/i,'').trim()||'E-Mail';
-      info={subject:s,sender:'',date:new Date(),bodyText:t};
-    }
-  }
-
-  if(!info){
-    _ezMsg(zone,'error','Keine E-Mail-Daten erkannt. Bitte .msg-Datei per Knopf auswaehlen.');
+  // 2. HTML/Text aus Outlook-Inbox direkt gezogen (kein .eml-File) → Hinweis
+  if(types.indexOf('text/html')>=0||types.indexOf('text/plain')>=0){
+    _ezMsg(zone,'error','Bitte E-Mail in Outlook als .eml speichern und dann hier einziehen.');
     return;
   }
-  _ezProcess(info,fid,zone);
+
+  _ezMsg(zone,'error','Keine E-Mail-Datei erkannt. Bitte .eml oder .msg hier einziehen.');
 }
 
 async function _ezProcess(info,fid,zone){
@@ -2280,57 +2256,71 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
           </div>
           <div class="mv2-r-card-body">
             <!-- Absender-Card -->
-            <div id="pamAbsenderCard" style="display:none;background:var(--bg3);border:0.5px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:7px;">
-              <!-- Zeile 1: Avatar + Name + Adresse -->
-              <div style="display:flex;align-items:center;gap:9px;min-width:0;">
+            <div id="pamAbsenderCard" style="display:none;background:var(--bg3);border:0.5px solid var(--border);border-radius:8px;margin-bottom:7px;position:relative;">
+              <!-- Kontakt-Zeile: anklickbar → öffnet Aktions-Popup -->
+              <div onclick="_pamToggleAbsenderPopup('pam')" style="display:flex;align-items:center;gap:9px;min-width:0;padding:8px 10px;cursor:pointer;border-radius:8px;user-select:none;" title="Aktionen anzeigen">
                 <div id="pamAbsenderAvatar" style="flex-shrink:0;width:calc(36px*var(--modal-scale,1));height:calc(36px*var(--modal-scale,1));border-radius:50%;background:#2d6a4f;color:#fff;display:flex;align-items:center;justify-content:center;font-size:calc(13px*var(--modal-scale,1));font-weight:700;text-transform:uppercase;letter-spacing:-.5px;">?</div>
                 <div style="flex:1;min-width:0;">
                   <div id="pamAbsenderName" style="font-size:calc(15px*var(--modal-scale,1));font-weight:700;color:var(--text1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;"></div>
                   <div id="pamAbsenderAddr" style="font-size:calc(13px*var(--modal-scale,1));color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
                 </div>
+                <span id="pamAbsenderChevron" style="font-size:11px;color:var(--text2);transition:transform .2s;display:inline-block;flex-shrink:0;">▾</span>
               </div>
-              <!-- Zeile 2: Antworten-Buttons -->
-              <div style="display:flex;gap:4px;margin-top:7px;justify-content:flex-end;">
-                <button type="button" onclick="_pamEmailAntworten()" style="font-size:calc(11px*var(--modal-scale,1));padding:5px 10px;border-radius:6px;background:var(--accent);color:#fff;border:none;cursor:pointer;font-weight:600;white-space:nowrap;">↩ Antworten</button>
-                <button type="button" onclick="_pamEmailAntwortenMitVerlauf()" title="Kompletten Verlauf als Zitat anfügen" style="font-size:calc(11px*var(--modal-scale,1));padding:5px 10px;border-radius:6px;background:#185FA5;color:#fff;border:none;cursor:pointer;font-weight:600;white-space:nowrap;">📋 Mit Verlauf</button>
+              <!-- Aktions-Popup -->
+              <div id="pamAbsenderPopup" style="display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:50;background:var(--bg2);border:0.5px solid var(--border);border-radius:8px;padding:5px;min-width:190px;box-shadow:0 6px 20px rgba(0,0,0,0.18);">
+                <button type="button" onclick="_pamEmailAntworten();_pamCloseAbsenderPopup('pam')" style="display:flex;align-items:center;gap:7px;width:100%;padding:7px 10px;border-radius:6px;background:var(--accent);color:#fff;border:none;cursor:pointer;font-size:calc(12px*var(--modal-scale,1));font-weight:600;margin-bottom:3px;">↩ Antworten</button>
+                <button type="button" onclick="_pamEmailAntwortenMitVerlauf();_pamCloseAbsenderPopup('pam')" title="Kompletten Verlauf als Zitat anfügen" style="display:flex;align-items:center;gap:7px;width:100%;padding:7px 10px;border-radius:6px;background:transparent;color:var(--text1);border:0.5px solid var(--border);cursor:pointer;font-size:calc(12px*var(--modal-scale,1));font-weight:600;margin-bottom:3px;">📋 Mit Verlauf</button>
+                <hr style="border:none;border-top:0.5px solid var(--border);margin:3px 0;">
+                <button type="button" onclick="_pamVerlaufDrucken();_pamCloseAbsenderPopup('pam')" style="display:flex;align-items:center;gap:7px;width:100%;padding:7px 10px;border-radius:6px;background:transparent;color:#1a4d05;border:0.5px solid #7ab648;cursor:pointer;font-size:calc(12px*var(--modal-scale,1));font-weight:600;">🖨 Verlauf drucken</button>
               </div>
             </div>
-            <!-- Chip-Zeile: Gmail | Outlook | Originale -->
-            <div style="display:flex;gap:5px;margin-bottom:0;">
-              <button type="button" id="pamGmailChip" onclick="_pamEmailToggle('gmail')"
-                style="flex:1;display:flex;align-items:center;justify-content:center;gap:4px;padding:7px 4px;background:var(--bg3);border:0.5px solid var(--border);border-radius:8px;cursor:pointer;user-select:none;transition:border-color .15s,background .15s;">
-                <span style="font-size:calc(14px*var(--modal-scale,1));font-weight:900;color:#1a73e8;line-height:1;">G</span>
-                <span style="font-size:calc(12px*var(--modal-scale,1));font-weight:600;color:var(--text1);">Gmail</span>
-                <span id="pamGmailCount" style="display:none;font-size:calc(10px*var(--modal-scale,1));font-weight:700;color:#fff;background:#1B5E20;border-radius:8px;padding:0 5px;min-width:16px;text-align:center;line-height:1.6;"></span>
-              </button>
-              <button type="button" id="pamOutlookChip" onclick="_pamEmailToggle('outlook')"
-                style="flex:1;display:flex;align-items:center;justify-content:center;gap:4px;padding:7px 4px;background:var(--bg3);border:0.5px solid var(--border);border-radius:8px;cursor:pointer;user-select:none;transition:border-color .15s,background .15s;">
-                <span style="font-size:calc(12px*var(--modal-scale,1));line-height:1;">✉</span>
-                <span style="font-size:calc(12px*var(--modal-scale,1));font-weight:600;color:var(--text1);">Outlook</span>
-                <span id="pamOutlookCount" style="display:none;font-size:calc(10px*var(--modal-scale,1));font-weight:700;color:#fff;background:#0078d4;border-radius:8px;padding:0 5px;min-width:16px;text-align:center;line-height:1.6;"></span>
-              </button>
-              <button type="button" onclick="_openEmailThumbnailGrid()"
-                style="flex:1;display:flex;align-items:center;justify-content:center;gap:4px;padding:7px 4px;background:var(--bg3);border:0.5px solid var(--border);border-radius:8px;cursor:pointer;user-select:none;transition:border-color .15s,background .15s;">
-                <span style="font-size:calc(12px*var(--modal-scale,1));line-height:1;">📎</span>
-                <span style="font-size:calc(12px*var(--modal-scale,1));font-weight:600;color:var(--text1);">Originale</span>
-                <span id="pamOrigCount" style="display:none;font-size:calc(10px*var(--modal-scale,1));font-weight:700;color:var(--accent);background:rgba(108,99,255,.13);border-radius:8px;padding:0 5px;min-width:16px;text-align:center;line-height:1.6;"></span>
-              </button>
-            </div>
-            <!-- Gmail-Verlauf -->
-            <div id="pamGmailBody" style="display:none;background:var(--bg3);border:0.5px solid #1a73e8;border-top:none;border-radius:0 0 8px 8px;padding:6px 10px 8px;margin-top:-1px;">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;">
-                <span style="font-size:calc(10px*var(--modal-scale,1));color:var(--text2);font-weight:600;">Gmail-Verlauf</span>
-                <button type="button" onclick="_gmLoadEmailThread()" style="font-size:calc(10px*var(--modal-scale,1));padding:2px 9px;border-radius:5px;background:#1B5E20;color:#fff;border:none;cursor:pointer;font-weight:600;">⟳ Laden</button>
+            <!-- E-Mails Aufklappfeld -->
+            <div id="pamEmailListSection" style="border:0.5px solid var(--border);border-radius:8px;overflow:hidden;">
+              <div onclick="_pamToggleEmailList()" style="display:flex;align-items:center;gap:6px;padding:6px 10px;cursor:pointer;user-select:none;background:var(--bg3);">
+                <span style="font-size:12px;line-height:1;">📧</span>
+                <span style="font-size:calc(12px*var(--modal-scale,1));font-weight:600;color:var(--text1);flex:1;">E-Mails</span>
+                <span id="pamEmailListBadge" style="font-size:calc(10px*var(--modal-scale,1));color:var(--text2);"></span>
+                <span id="pamEmailListChevron" style="font-size:11px;color:var(--text2);transition:transform .2s;display:inline-block;">▾</span>
               </div>
-              <div id="pamGmailInlineList"></div>
-            </div>
-            <!-- Outlook-Verlauf -->
-            <div id="pamOutlookBody" style="display:none;background:var(--bg3);border:0.5px solid #0078d4;border-top:none;border-radius:0 0 8px 8px;padding:6px 10px 8px;margin-top:-1px;">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;">
-                <span style="font-size:calc(10px*var(--modal-scale,1));color:var(--text2);font-weight:600;">Outlook-Verlauf</span>
-                <button type="button" onclick="_msLoadEmailThread()" style="font-size:calc(10px*var(--modal-scale,1));padding:2px 9px;border-radius:5px;background:#0078d4;color:#fff;border:none;cursor:pointer;font-weight:600;">⟳ Laden</button>
+              <div id="pamEmailListBody" style="display:none;">
+                <!-- Chip-Zeile: Gmail | Outlook | Originale -->
+                <div style="display:flex;gap:5px;padding:6px 8px;border-top:0.5px solid var(--border);background:var(--bg3);">
+                  <button type="button" id="pamGmailChip" onclick="_pamEmailToggle('gmail')"
+                    style="flex:1;display:flex;align-items:center;justify-content:center;gap:4px;padding:6px 4px;background:var(--bg2);border:0.5px solid var(--border);border-radius:6px;cursor:pointer;user-select:none;transition:border-color .15s,background .15s;">
+                    <span style="font-size:calc(13px*var(--modal-scale,1));font-weight:900;color:#1a73e8;line-height:1;">G</span>
+                    <span style="font-size:calc(11px*var(--modal-scale,1));font-weight:600;color:var(--text1);">Gmail</span>
+                    <span id="pamGmailCount" style="display:none;font-size:calc(10px*var(--modal-scale,1));font-weight:700;color:#fff;background:#1B5E20;border-radius:8px;padding:0 5px;min-width:16px;text-align:center;line-height:1.6;"></span>
+                  </button>
+                  <button type="button" id="pamOutlookChip" onclick="_pamEmailToggle('outlook')"
+                    style="flex:1;display:flex;align-items:center;justify-content:center;gap:4px;padding:6px 4px;background:var(--bg2);border:0.5px solid var(--border);border-radius:6px;cursor:pointer;user-select:none;transition:border-color .15s,background .15s;">
+                    <span style="font-size:calc(11px*var(--modal-scale,1));line-height:1;">✉</span>
+                    <span style="font-size:calc(11px*var(--modal-scale,1));font-weight:600;color:var(--text1);">Outlook</span>
+                    <span id="pamOutlookCount" style="display:none;font-size:calc(10px*var(--modal-scale,1));font-weight:700;color:#fff;background:#0078d4;border-radius:8px;padding:0 5px;min-width:16px;text-align:center;line-height:1.6;"></span>
+                  </button>
+                  <button type="button" onclick="_openEmailThumbnailGrid()"
+                    style="flex:1;display:flex;align-items:center;justify-content:center;gap:4px;padding:6px 4px;background:var(--bg2);border:0.5px solid var(--border);border-radius:6px;cursor:pointer;user-select:none;transition:border-color .15s,background .15s;">
+                    <span style="font-size:calc(11px*var(--modal-scale,1));line-height:1;">📎</span>
+                    <span style="font-size:calc(11px*var(--modal-scale,1));font-weight:600;color:var(--text1);">Originale</span>
+                    <span id="pamOrigCount" style="display:none;font-size:calc(10px*var(--modal-scale,1));font-weight:700;color:var(--accent);background:rgba(108,99,255,.13);border-radius:8px;padding:0 5px;min-width:16px;text-align:center;line-height:1.6;"></span>
+                  </button>
+                </div>
+                <!-- Gmail-Verlauf -->
+                <div id="pamGmailBody" style="display:none;background:var(--bg3);border:0.5px solid #1a73e8;border-top:none;border-radius:0 0 6px 6px;padding:6px 10px 8px;margin-top:-1px;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;">
+                    <span style="font-size:calc(10px*var(--modal-scale,1));color:var(--text2);font-weight:600;">Gmail-Verlauf</span>
+                    <button type="button" onclick="_gmLoadEmailThread()" style="font-size:calc(10px*var(--modal-scale,1));padding:2px 9px;border-radius:5px;background:#1B5E20;color:#fff;border:none;cursor:pointer;font-weight:600;">⟳ Laden</button>
+                  </div>
+                  <div id="pamGmailInlineList"></div>
+                </div>
+                <!-- Outlook-Verlauf -->
+                <div id="pamOutlookBody" style="display:none;background:var(--bg3);border:0.5px solid #0078d4;border-top:none;border-radius:0 0 6px 6px;padding:6px 10px 8px;margin-top:-1px;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;">
+                    <span style="font-size:calc(10px*var(--modal-scale,1));color:var(--text2);font-weight:600;">Outlook-Verlauf</span>
+                    <button type="button" onclick="_msLoadEmailThread()" style="font-size:calc(10px*var(--modal-scale,1));padding:2px 9px;border-radius:5px;background:#0078d4;color:#fff;border:none;cursor:pointer;font-weight:600;">⟳ Laden</button>
+                  </div>
+                  <div id="pamMsInlineList"></div>
+                </div>
               </div>
-              <div id="pamMsInlineList"></div>
             </div>
           </div>
         </div>
@@ -2474,19 +2464,22 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
   </div>
   <div class="sect-popup-body">
     <!-- Absender-Zeile mit Antworten-Button (oben im Popup) -->
-    <div id="popAbsenderRow" style="display:none;flex-direction:column;gap:6px;background:var(--bg3);border:0.5px solid var(--border);border-radius:8px;padding:7px 10px;margin-bottom:8px;">
-      <!-- Zeile 1: Avatar + Name + Adresse -->
-      <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+    <div id="popAbsenderRow" style="display:none;background:var(--bg3);border:0.5px solid var(--border);border-radius:8px;margin-bottom:8px;position:relative;">
+      <!-- Kontakt-Zeile: anklickbar → öffnet Aktions-Popup -->
+      <div onclick="_pamToggleAbsenderPopup('pop')" style="display:flex;align-items:center;gap:8px;min-width:0;padding:7px 10px;cursor:pointer;border-radius:8px;user-select:none;" title="Aktionen anzeigen">
         <div id="popAbsenderAvatar" style="flex-shrink:0;width:30px;height:30px;border-radius:50%;background:#2d6a4f;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;text-transform:uppercase;">?</div>
         <div style="flex:1;min-width:0;">
           <div id="popAbsenderName" style="font-size:12px;font-weight:700;color:var(--text1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
           <div id="popAbsenderAddr" style="font-size:10px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
         </div>
+        <span id="popAbsenderChevron" style="font-size:11px;color:var(--text2);transition:transform .2s;display:inline-block;flex-shrink:0;">▾</span>
       </div>
-      <!-- Zeile 2: Antworten-Buttons -->
-      <div style="display:flex;gap:4px;justify-content:flex-end;">
-        <button type="button" onclick="_pamEmailAntworten()" style="font-size:11px;padding:5px 12px;border-radius:6px;background:var(--accent);color:#fff;border:none;cursor:pointer;font-weight:600;white-space:nowrap;">↩ Antworten</button>
-        <button type="button" onclick="_pamEmailAntwortenMitVerlauf()" title="Kompletten Verlauf als Zitat anfügen" style="font-size:11px;padding:5px 10px;border-radius:6px;background:#185FA5;color:#fff;border:none;cursor:pointer;font-weight:600;white-space:nowrap;">📋 Mit Verlauf</button>
+      <!-- Aktions-Popup -->
+      <div id="popAbsenderPopup" style="display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:50;background:var(--bg2);border:0.5px solid var(--border);border-radius:8px;padding:5px;min-width:190px;box-shadow:0 6px 20px rgba(0,0,0,0.18);">
+        <button type="button" onclick="_pamEmailAntworten();_pamCloseAbsenderPopup('pop')" style="display:flex;align-items:center;gap:7px;width:100%;padding:7px 10px;border-radius:6px;background:var(--accent);color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600;margin-bottom:3px;">↩ Antworten</button>
+        <button type="button" onclick="_pamEmailAntwortenMitVerlauf();_pamCloseAbsenderPopup('pop')" title="Kompletten Verlauf als Zitat anfügen" style="display:flex;align-items:center;gap:7px;width:100%;padding:7px 10px;border-radius:6px;background:transparent;color:var(--text1);border:0.5px solid var(--border);cursor:pointer;font-size:12px;font-weight:600;margin-bottom:3px;">📋 Mit Verlauf</button>
+        <hr style="border:none;border-top:0.5px solid var(--border);margin:3px 0;">
+        <button type="button" onclick="_pamVerlaufDrucken();_pamCloseAbsenderPopup('pop')" style="display:flex;align-items:center;gap:7px;width:100%;padding:7px 10px;border-radius:6px;background:transparent;color:#1a4d05;border:0.5px solid #7ab648;cursor:pointer;font-size:12px;font-weight:600;">🖨 Verlauf drucken</button>
       </div>
     </div>
     <div id="gmThreadBar" style="display:none;margin-bottom:8px;background:var(--bg3);border:0.5px solid var(--border);border-radius:8px;overflow:hidden;">
@@ -9907,6 +9900,109 @@ async function _pamEmailAntwortenMitVerlauf(){
   }
 }
 
+// ── Absender-Popup: Toggle / Schließen ──
+// ── E-Mail-Liste Aufklappfeld ──
+function _pamToggleEmailList(){
+  const body=document.getElementById('pamEmailListBody');
+  const chev=document.getElementById('pamEmailListChevron');
+  if(!body)return;
+  const open=body.style.display!=='none';
+  body.style.display=open?'none':'block';
+  if(chev)chev.style.transform=open?'':'rotate(180deg)';
+}
+function _pamUpdateEmailListBadge(){
+  const badge=document.getElementById('pamEmailListBadge');
+  if(!badge)return;
+  const gmCount=parseInt((document.getElementById('pamGmailCount')||{}).textContent||'0')||0;
+  const msCount=parseInt((document.getElementById('pamOutlookCount')||{}).textContent||'0')||0;
+  const orCount=parseInt((document.getElementById('pamOrigCount')||{}).textContent||'0')||0;
+  const total=gmCount+msCount+orCount;
+  badge.textContent=total?total+' Nachrichten':'';
+}
+function _pamToggleAbsenderPopup(which){
+  const popupId=which==='pam'?'pamAbsenderPopup':'popAbsenderPopup';
+  const chevId=which==='pam'?'pamAbsenderChevron':'popAbsenderChevron';
+  const popup=document.getElementById(popupId);
+  const chev=document.getElementById(chevId);
+  if(!popup)return;
+  const isOpen=popup.style.display!=='none';
+  _pamCloseAbsenderPopup('pam');
+  _pamCloseAbsenderPopup('pop');
+  if(!isOpen){
+    popup.style.display='block';
+    if(chev)chev.style.transform='rotate(180deg)';
+    setTimeout(()=>{
+      document.addEventListener('click',function _closeOnOutside(e){
+        if(!e.target.closest('#pamAbsenderPopup')&&!e.target.closest('#popAbsenderPopup')&&
+           !e.target.closest('#pamAbsenderCard')&&!e.target.closest('#popAbsenderRow')){
+          _pamCloseAbsenderPopup('pam');_pamCloseAbsenderPopup('pop');
+          document.removeEventListener('click',_closeOnOutside);
+        }
+      });
+    },0);
+  }
+}
+function _pamCloseAbsenderPopup(which){
+  const popup=document.getElementById(which==='pam'?'pamAbsenderPopup':'popAbsenderPopup');
+  const chev=document.getElementById(which==='pam'?'pamAbsenderChevron':'popAbsenderChevron');
+  if(popup)popup.style.display='none';
+  if(chev)chev.style.transform='';
+}
+// ── Verlauf drucken ──
+async function _pamVerlaufDrucken(){
+  const taskId=(document.getElementById('taskId')||{}).value||_pamActiveTaskId||'';
+  const task=findTaskById(taskId);
+  if(!task){showToast('Kein Task gefunden.','warning',3000);return;}
+  showToast('⏳ Verlauf wird aufgebaut…','info',4000);
+  const storedMails=[...(task.emailOriginals||[]),...(taskEmailOriginals||[])];
+  const seenIds=new Set();
+  const uniqueMails=storedMails.filter(m=>{if(!m.fileId||seenIds.has(m.fileId))return false;seenIds.add(m.fileId);return true;});
+  uniqueMails.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
+  let verlaufHtml='';
+  if(uniqueMails.length>0){
+    for(const m of uniqueMails){
+      const dateStr=m.date?new Date(m.date).toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+      const senderStr=m.sender||m.emailSender||'';
+      const subjStr=m.subject||task.title||'';
+      let bodyContent=m.bodyHtml||m.bodyText||'';
+      if(!bodyContent&&m.fileId&&gdriveToken){
+        try{
+          const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(m.fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
+          if(r.ok){const txt=await r.text();const parsed=_parseEmlText(txt);bodyContent=parsed.bodyHtml||parsed.bodyText||'';}
+        }catch(e){console.warn('[PAM] EML laden für Verlauf-Druck:',e);}
+      }
+      verlaufHtml+='<div style="border:1px solid #ddd;border-radius:6px;margin-bottom:16px;background:#f9f9f9;padding:12px 16px;">';
+      verlaufHtml+='<div style="font-size:12px;color:#444;margin-bottom:8px;border-bottom:1px solid #eee;padding-bottom:6px;">';
+      verlaufHtml+='<strong>Von:</strong> '+senderStr+'<br><strong>Betreff:</strong> '+subjStr+'<br><strong>Datum:</strong> '+dateStr;
+      verlaufHtml+='</div><div style="font-size:13px;font-family:Calibri,Arial,sans-serif;">'+(bodyContent||'(kein Inhalt)')+'</div></div>';
+    }
+  } else {
+    const allMsgs=[...(task.msThreadMessages||[]),...(task.gmailThreadMessages||[])];
+    allMsgs.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
+    allMsgs.forEach(m=>{
+      const dateStr=m.date?new Date(m.date).toLocaleString('de-DE'):'';
+      verlaufHtml+='<div style="border:1px solid #ddd;border-radius:6px;margin-bottom:16px;background:#f9f9f9;padding:12px 16px;">';
+      verlaufHtml+='<div style="font-size:12px;color:#444;margin-bottom:8px;"><strong>'+(m.from||m.sender||'')+'</strong> · '+dateStr+'</div>';
+      verlaufHtml+='<div style="font-size:13px;">'+(m.bodyHtml||m.body||m.bodyText||'(kein Inhalt)')+'</div></div>';
+    });
+  }
+  if(!verlaufHtml){showToast('Kein Verlauf vorhanden – bitte zuerst E-Mails einziehen oder Verlauf laden.','warning',3000);return;}
+  const w=window.open('','_blank','width=860,height=720,scrollbars=yes');
+  if(!w){showToast('⚠ Popup blockiert – bitte Popup-Blocker deaktivieren.','warning',4000);return;}
+  const title='E-Mail-Verlauf – '+(task.title||'');
+  w.document.open();
+  w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>'+title+'</title><style>'+
+    'body{font-family:Calibri,Arial,sans-serif;max-width:800px;margin:0 auto;padding:20px;color:#222;}'+
+    '.topbar{display:flex;align-items:center;gap:12px;background:#185FA5;color:#fff;padding:10px 16px;border-radius:6px;margin-bottom:20px;}'+
+    '.topbar h2{margin:0;font-size:15px;font-weight:600;flex:1;}'+
+    '@media print{.topbar .print-btn{display:none!important;}body{max-width:none;margin:0;}@page{margin:15mm;size:A4;}}'+
+    '</style></head><body>'+
+    '<div class="topbar"><span style="font-size:18px;">📧</span><h2>'+title+'</h2>'+
+    '<button class="print-btn" onclick="window.print()" style="padding:5px 14px;border-radius:6px;background:#fff;color:#185FA5;border:none;cursor:pointer;font-weight:700;font-size:12px;">🖨 Drucken</button></div>'+
+    verlaufHtml+'</body></html>');
+  w.document.close();
+  w.onload=function(){setTimeout(()=>w.print(),500);};
+}
 async function _pamEmailAntworten(){
   const taskId=(document.getElementById('taskId')||{}).value||_pamActiveTaskId||'';
   const task=findTaskById(taskId);
@@ -9972,6 +10068,9 @@ function _pamEmailRefresh(task){
   if(mc){mc.textContent=msBadge;mc.style.display=msBadge?'inline':'none';}
   const oc=document.getElementById('pamOrigCount');
   if(oc){oc.textContent=origCount?origCount:'';oc.style.display=origCount?'inline':'none';}
+  // Aufklappfeld-Badge aktualisieren
+  const listBadge=document.getElementById('pamEmailListBadge');
+  if(listBadge){const tot2=gmBadge+msBadge+origCount;listBadge.textContent=tot2?tot2+' Nachrichten':'';}
   // Absender: gespeicherter Wert, sonst ersten Absender aus Gmail/Outlook/EML-Originale übernehmen
   let senderVal=(document.getElementById('taskEmailSenderInput')||{}).value||(t&&t.emailSender)||'';
   if(!senderVal){
@@ -11742,11 +11841,37 @@ function _openEmailThumbnailGrid(){
   const titleEl=document.createElement('span');
   titleEl.style.cssText='font-weight:700;font-size:15px;color:var(--text1);';
   titleEl.textContent='📧 E-Mail Dateien ('+allItems.length+')';
+  const printAllBtn=document.createElement('button');
+  printAllBtn.type='button';printAllBtn.textContent='🖨 Alle drucken';
+  printAllBtn.title='Alle E-Mails nacheinander drucken';
+  printAllBtn.style.cssText='margin-left:10px;padding:4px 12px;border-radius:6px;border:1px solid #7ab648;background:rgba(122,182,72,.12);color:#1a4d05;font-size:12px;font-weight:600;cursor:pointer;';
+  printAllBtn.onclick=async()=>{
+    showToast('⏳ Druckvorschau wird vorbereitet…','info',4000);
+    let html='';
+    for(const it of allItems){
+      if(it.fileId&&gdriveToken){
+        try{
+          const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(it.fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
+          if(r.ok){
+            const ext=(it.name||'').split('.').pop().toLowerCase();
+            if(ext==='eml'){const txt=await r.text();const info=_parseEmlText(txt);const e2=s=>s?(s+'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):'';const body=info.bodyHtml||'<pre>'+e2(info.bodyText||'')+'</pre>';html+='<div style="page-break-after:always;padding:16px;border:1px solid #ddd;margin-bottom:20px;"><h3 style="margin:0 0 8px;font-size:14px;">'+e2(info.subject||it.name)+'</h3><p style="font-size:11px;color:#666;margin:0 0 12px;">Von: '+e2(info.sender||'')+' · '+e2(info.date?info.date.toLocaleString('de-DE'):'')+' </p>'+body+'</div>';}
+            else{html+='<div style="page-break-after:always;padding:16px;"><p style="font-size:12px;color:#666;">['+esc(it.name||'E-Mail')+' – .msg Datei, kein HTML-Inhalt]</p></div>';}
+          }
+        }catch(e){console.warn('[PAM] Alle drucken – Fehler bei',it.name,e);}
+      }
+    }
+    if(!html){showToast('Keine Inhalte ladbar','warning',3000);return;}
+    const w=window.open('','_blank','width=860,height=720,scrollbars=yes');
+    if(!w){showToast('⚠ Popup blockiert','warning',3000);return;}
+    w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Alle E-Mails drucken</title><style>body{font-family:Arial,sans-serif;font-size:13px;margin:0;padding:20px;} @media print{@page{margin:15mm;size:A4;}.no-print{display:none}}</style></head><body><div class="no-print" style="margin-bottom:16px;"><button onclick="window.print()" style="padding:6px 16px;border-radius:6px;background:#185FA5;color:#fff;border:none;cursor:pointer;font-weight:700;">🖨 Drucken</button></div>'+html+'</body></html>');
+    w.document.close();
+    w.onload=function(){setTimeout(()=>w.print(),500);};
+  };
   const closeBtn=document.createElement('button');
   closeBtn.textContent='✕';closeBtn.type='button';
   closeBtn.style.cssText='background:none;border:none;font-size:20px;cursor:pointer;color:var(--text2);padding:2px 8px;border-radius:4px;line-height:1;';
   closeBtn.onclick=_closeGrid;
-  hdr.append(titleEl,closeBtn);
+  hdr.append(titleEl,printAllBtn,closeBtn);
 
   /* Body */
   const body=document.createElement('div');
@@ -11795,6 +11920,7 @@ function _openEmailThumbnailGrid(){
         tt.textContent=tip;b.addEventListener('mouseenter',()=>tt.style.opacity='1');b.addEventListener('mouseleave',()=>tt.style.opacity='0');b.appendChild(tt);return b;
       }
       if(item2._type==='orig'&&item2.fileId)btns.appendChild(_mkFB('⬇','Herunterladen',()=>_downloadEmailOrig(item2.fileId,item2.name||'')));
+      if(item2.fileId)btns.appendChild(_mkFB('🖨','Drucken',()=>_printEmailFromDrive(item2.fileId,item2.name||'')));
       if(item2.url)btns.appendChild(_mkFB('📂','In Drive öffnen',()=>window.open(item2.url,'_blank')));
       const delB=_mkFB('✕','Entfernen',()=>{
         if(item2._type==='pdf'){taskEmailPdfs.splice(item2._idx,1);}else{taskEmailOriginals.splice(item2._idx,1);}
@@ -11914,8 +12040,13 @@ function _openEmailThumbnailGrid(){
     // Betreff / Dateiname – sofort aus gespeicherten Metadaten anzeigen
     const subj=document.createElement('div');
     subj.style.cssText='font-size:11px;font-weight:700;color:var(--text1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-    const _savedSubj=item.subject||name;
-    subj.title=_savedSubj;
+    // Lesbare Darstellung: gespeicherter Betreff bevorzugen, sonst Dateiname bereinigen
+    let _savedSubj=item.subject||'';
+    if(!_savedSubj){
+      // Präfix YYYY.MM.DD_HHMM_ entfernen und .pdf/.eml/.msg abschneiden
+      _savedSubj=name.replace(/^\d{4}\.\d{2}\.\d{2}_\d{4}_?/,'').replace(/\.(pdf|eml|msg)$/i,'').replace(/_/g,' ').trim()||name;
+    }
+    subj.title=name;
     subj.textContent=_savedSubj;
 
     const fromEl=document.createElement('div');
@@ -11988,6 +12119,7 @@ function _openEmailThumbnailGrid(){
 
     if(isPdf){
       actions.appendChild(_makeIcoBtn('🔍','Vollbild-Galerie',()=>_openEmailPdfGallery(item._idx)));
+      actions.appendChild(_makeIcoBtn('🖨','Drucken',()=>{if(item.fileId)_printEmailFromDrive(item.fileId,name);}));
       actions.appendChild(_makeIcoBtn('📂','In Drive öffnen',()=>window.open(item.url,'_blank')));
       // Löschen rechts
       const spacer=document.createElement('span');spacer.style.cssText='flex:1;';
@@ -12299,10 +12431,25 @@ async function _downloadEmailOrig(fileId,filename){
 async function _printEmailFromDrive(fileId,filename){
   if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden.','error');return;}
   const lname=(filename||'').toLowerCase();
-  // .msg: Google Drive Vorschau öffnen (Google kann .msg anzeigen + Browser-Druck)
+  // .msg: Druckfenster mit Google Drive Vorschau eingebettet
   if(lname.endsWith('.msg')){
-    showToast('🖨 .msg wird in Google Drive Vorschau geöffnet – dort drucken (Strg+P)','info',5000);
-    window.open('https://drive.google.com/file/d/'+encodeURIComponent(fileId)+'/view','_blank');
+    const w=window.open('','_blank','width=960,height=800');
+    if(!w){showToast('⚠ Popup-Blocker aktiv – Popups für diese Seite erlauben','error',6000);return;}
+    const drivePreview='https://drive.google.com/file/d/'+encodeURIComponent(fileId)+'/preview';
+    w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>'+esc(filename||'E-Mail')+'</title>'+
+      '<style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Arial,sans-serif;display:flex;flex-direction:column;height:100vh;}'+
+      '.bar{display:flex;align-items:center;gap:10px;padding:8px 16px;background:#185FA5;color:#fff;flex-shrink:0;}'+
+      '.bar span{font-size:13px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}'+
+      '.bar button{padding:5px 14px;border-radius:5px;background:#fff;color:#185FA5;border:none;cursor:pointer;font-weight:700;font-size:12px;white-space:nowrap;}'+
+      'iframe{flex:1;border:none;width:100%;}'+
+      '@media print{.bar{display:none!important;}iframe{flex:1;}}'+
+      '</style></head><body>'+
+      '<div class="bar"><span>📧 '+esc(filename||'E-Mail')+'</span>'+
+      '<button onclick="window.print()">🖨 Drucken (Strg+P)</button>'+
+      '<a href="https://drive.google.com/file/d/'+encodeURIComponent(fileId)+'/view" target="_blank" style="color:#fff;font-size:11px;text-decoration:underline;white-space:nowrap;">In Drive öffnen ↗</a></div>'+
+      '<iframe src="'+drivePreview+'" allow="autoplay"></iframe>'+
+      '</body></html>');
+    w.document.close();
     return;
   }
   // .eml: Fenster SOFORT öffnen (User-Gesture), dann Inhalt laden und reinschreiben
@@ -12508,6 +12655,8 @@ async function _uploadEmailOriginal(file){
     const buf=await new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.onerror=rej;r.readAsArrayBuffer(file);});
     const mimeType=isEml?'message/rfc822':'application/octet-stream';
     const result=await _driveUploadGeneric(buf,file.name,mimeType,fid);
+    // MSG-Warnung: keine Metadaten auslesbar
+    if(!isEml){showToast('📨 .msg gespeichert – Metadaten (Betreff, Absender) konnten nicht ausgelesen werden. Für volle Unterstützung als .eml speichern.','warning',7000);}
     // EML-Metadaten extrahieren – preText vom Duplikat-Check wiederverwenden
     let emailMeta={subject:'',sender:'',date:new Date().toISOString(),messageId:''};
     let emlParsedAttachments=[];
@@ -12526,9 +12675,10 @@ async function _uploadEmailOriginal(file){
     }
     // Datei-Anhänge aus EML in Projektordner hochladen
     if(emlParsedAttachments.length>0&&fid){
-      showToast('📎 '+emlParsedAttachments.length+' Anhang/Anhänge gefunden – lade in Projektordner…','info',4000);
+      showToast('📎 '+emlParsedAttachments.length+' Anhang/Anhänge gefunden – lade in Projektordner…','info',3000);
       const taskId3=(document.getElementById('taskId')||{}).value||'';
       const t3=findTaskById(taskId3);
+      let _attOk=0,_attFail=0;
       for(const att of emlParsedAttachments){
         try{
           // Base64 → ArrayBuffer
@@ -12545,18 +12695,21 @@ async function _uploadEmailOriginal(file){
             const fotoEntry={driveId:attResult.id,name:att.name,mimeType:att.mimeType||'image/jpeg',caption:'',thumbnailLink:attUrl};
             taskFotos.push(fotoEntry);
             if(t3){if(!t3.fotos)t3.fotos=[];t3.fotos.push(fotoEntry);}
-            showToast('🖼 Foto gespeichert: '+att.name,'success',3000);
             if(typeof renderFotoListDesktop==='function')renderFotoListDesktop();
+            _attOk++;
           }else{
             const attEntry={name:att.name,fileId:attResult.id,url:attUrl,uploadedAt:today};
             if(!taskAttachments)taskAttachments=[];
             taskAttachments.push(attEntry);
             if(t3){if(!t3.attachments)t3.attachments=[];t3.attachments.push(attEntry);}
-            showToast('✅ Anhang gespeichert: '+att.name,'success',3000);
             if(typeof renderAttachList==='function')renderAttachList();
+            _attOk++;
           }
-        }catch(e){showToast('⚠ Anhang konnte nicht hochgeladen werden: '+att.name+' – '+e.message,'error',5000);console.warn('[PTP] EML-Anhang Upload:',e);}
+        }catch(e){_attFail++;console.warn('[PTP] EML-Anhang Upload:',e);}
       }
+      // Zusammenfassung Anhänge
+      if(_attFail===0){showToast('📎 '+_attOk+' Anhang'+(_attOk!==1?'e':'')+' gespeichert','success',4000);}
+      else{showToast('⚠ '+_attOk+' von '+emlParsedAttachments.length+' Anhängen gespeichert · '+_attFail+' fehlgeschlagen','warning',6000);}
       scheduleSave();
     }
     taskEmailOriginals.push({
@@ -12577,7 +12730,7 @@ async function _uploadEmailOriginal(file){
         let _ep='unknown';
         try{if(isEml&&preText)_ep=_detectEmlProvider(preText);}catch(e){}
         // Debug-Toast: zeigt erkannten Provider und MessageId
-        showToast('📨 EML erkannt · '+(_ep==='gmail'?'Gmail':'Exchange/Unbekannt')+' · ID: '+(emailMeta.messageId.substring(0,30)||'(keine)'),'info',6000);
+        showToast('✅ EML gespeichert'+(emailMeta.subject?' · '+emailMeta.subject.substring(0,40):'')+' · '+(_ep==='gmail'?'Gmail':'Outlook'),'success',5000);
         if(_ep==='gmail'){
           if(!t.gmailMessageIds)t.gmailMessageIds=[];
           if(!t.gmailMessageIds.includes(emailMeta.messageId))t.gmailMessageIds.push(emailMeta.messageId);
@@ -12797,14 +12950,14 @@ function _openEmailPrintWindow(info,w){
     w.document.open();
     w.document.write(html);
     w.document.close();
-    // Button-Handler + automatischer Druckdialog nach kurzem Delay
-    setTimeout(function(){
+    // Button-Handler + Druckdialog erst nach vollständigem Laden
+    w.onload=function(){
       try{
         const btn=w.document.getElementById('printBtn');
         if(btn)btn.onclick=function(){w.print();};
-        w.print();
+        setTimeout(function(){w.print();},300);
       }catch(e){}
-    },600);
+    };
   }
   else showToast('⚠ Popup-Blocker aktiv – bitte Popups für diese Seite erlauben','error',6000);
 }
