@@ -2478,6 +2478,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 <div class="sect-popup" id="tEmailOrigSect">
   <div class="sect-popup-header" id="_popEmailDrag">
     <span class="sect-popup-title">📧 E-Mail Originale</span>
+    <button type="button" id="emailCleanupBtn" onclick="_pamCleanupDuplicateEmls()" title="Doppelte EML-Einträge aus diesem Task entfernen (Auto-gespeicherte Thread-Mails die bereits im Verlauf sichtbar sind)" style="display:none;font-size:10px;padding:2px 8px;border-radius:5px;border:1px solid #f59e0b;background:rgba(245,158,11,.12);color:#b45309;cursor:pointer;font-weight:600;margin-right:4px;">🧹 Duplikate</button>
     <button type="button" class="sect-popup-close" onclick="_closeSectPopup('tEmailOrigSect')" title="Schließen">✕</button>
   </div>
   <div class="sect-popup-body">
@@ -2771,7 +2772,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-19 · #83'; // sync mit CACHE_NAME in sw.js (pam-desktop-v85)
+const PAM_BUILD = 'v2026-05-19 · #84'; // sync mit CACHE_NAME in sw.js (pam-desktop-v86)
 
 // ── STATE ──
 let boards = {};
@@ -9232,6 +9233,39 @@ async function _saveThreadMailsAsEml(task,threadMsgs,tokenType){
   renderEmailSection();
   scheduleTaskFieldSave();
 }
+
+// ── Doppelte EML-Einträge aus dem aktuellen Task bereinigen ──────────────────
+// Entfernt emailOriginals-Einträge deren messageId bereits im Thread-Verlauf steckt
+// (wurden automatisch via _saveThreadMailsAsEml gespeichert → redundant)
+async function _pamCleanupDuplicateEmls(){
+  const taskId=(document.getElementById('taskId')||{}).value||'';
+  const task=findTaskById(taskId);
+  if(!task){showToast('⚠ Kein Task geöffnet','error',3000);return;}
+  const threadMsgIds=new Set([
+    ...((task.gmailThreadMessages)||[]).map(m=>m.messageId).filter(Boolean),
+    ...((task.msThreadMessages)||[]).map(m=>m.messageId).filter(Boolean)
+  ]);
+  if(!threadMsgIds.size){showToast('ℹ Kein geladener Verlauf gefunden – zuerst Verlauf laden','info',4000);return;}
+  // Einträge die im Thread sichtbar sind → raus; true Duplikate innerhalb emailOriginals → raus
+  const seenIds=new Set();
+  const before=(task.emailOriginals||[]).length;
+  const cleaned=(task.emailOriginals||[]).filter(e=>{
+    const key=e.messageId||(e.subject+'|'+(e.date||''));
+    if(threadMsgIds.has(e.messageId)){return false;}  // Thread-Duplikat
+    if(seenIds.has(key)){return false;}               // internes Duplikat
+    seenIds.add(key);
+    return true;
+  });
+  const removed=before-cleaned.length;
+  if(!removed){showToast('✅ Keine Duplikate gefunden','success',3000);return;}
+  if(!confirm(`${removed} doppelte${removed===1?'r':''} EML-Eintrag${removed===1?'':'s'} entfernen?\n(Drive-Dateien bleiben erhalten)`))return;
+  task.emailOriginals=cleaned;
+  taskEmailOriginals=JSON.parse(JSON.stringify(cleaned));
+  renderEmailSection();
+  await autoSave();
+  showToast(`🧹 ${removed} Duplikat${removed===1?'':'e'} entfernt und gespeichert`,'success',4000);
+}
+
 function _gmRenderThread(task){
   const listEl=document.getElementById('gmThreadList');if(!listEl)return;
   const msgs=task.gmailThreadMessages||[];if(!msgs.length){listEl.innerHTML='';return;}
@@ -11782,6 +11816,9 @@ function renderEmailSection(){
   if(ti)ti.innerHTML='&#128231; E-Mail Dateien'+(total?` <span style="color:var(--accent2);font-size:10px;font-weight:400;text-transform:none;letter-spacing:0">(${total})</span>`:'');
   const galBtn=document.getElementById('emailGalBtn');
   if(galBtn)galBtn.style.display=total?'':'none';
+  // Duplikat-Button: einblenden wenn der Task emailOriginals hat die im Thread stecken
+  const cleanBtn=document.getElementById('emailCleanupBtn');
+  if(cleanBtn){const hasDupes=taskEmailOriginals.some(e=>e.messageId&&_eidTIds.has(e.messageId));cleanBtn.style.display=hasDupes?'':'none';}
   // E-Mail Originale (.eml) – eigener Bereich
   const origSection=document.getElementById('emailOrigSection');
   const origGrid=document.getElementById('emailIconGrid');
