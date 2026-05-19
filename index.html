@@ -2772,7 +2772,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-19 · #84'; // sync mit CACHE_NAME in sw.js (pam-desktop-v86)
+const PAM_BUILD = 'v2026-05-19 · #85'; // sync mit CACHE_NAME in sw.js (pam-desktop-v87)
 
 // ── STATE ──
 let boards = {};
@@ -9135,8 +9135,6 @@ async function _gmLoadEmailThread(){
     task.gmailThreadMessages=threadMsgs;
     _gmRenderThread(task);
     const saved=await _gmSaveThreadPdfs(task,threadMsgs);
-    // Thread-Mails als .eml in Drive archivieren
-    await _saveThreadMailsAsEml(task,threadMsgs,'gmail');
     if(stEl)stEl.textContent=threadMsgs.length+' Mails'+(saved>0?', '+saved+' PDF'+(saved>1?'s':'')+' gespeichert':'');
     await autoSave();
     showToast('✅ '+threadMsgs.length+' Gmail-Mails geladen'+(saved>0?', '+saved+' PDFs':''),'success',4000);
@@ -9606,12 +9604,9 @@ async function _msLoadEmailThread(){
     }));
     task.msThreadMessages=threadMsgs;
     _msRenderThread(task);
-    // PDFs automatisch speichern + Thread-Mails als .eml archivieren
+    // PDFs automatisch speichern
     if(stEl)stEl.textContent=threadMsgs.length+' Mails – speichere…';
-    // Für _saveThreadMailsAsEml: internetMessageId → messageId mappen
-    const threadMsgsNorm=threadMsgs.map(m=>({...m,messageId:m.internetMessageId||m.messageId||''}));
     const _pdfSaved=await _msSaveThreadPdfs(task,threadMsgs);
-    await _saveThreadMailsAsEml(task,threadMsgsNorm,'outlook');
     if(stEl)stEl.textContent=threadMsgs.length+' Mails'+(_pdfSaved>0?', '+_pdfSaved+' PDF'+(_pdfSaved>1?'s':'')+' gespeichert':'');
     await autoSave();
     showToast('✅ '+threadMsgs.length+' Mails geladen'+(_pdfSaved>0?', '+_pdfSaved+' PDFs gespeichert':''),'success',4000);
@@ -9860,13 +9855,17 @@ async function _pamEmailAntwortenMitVerlauf(){
   const task=findTaskById(taskId);
   if(!task){showToast('Kein Task gefunden.','warning',3000);return;}
 
-  // ── Schritt 1: Verlauf aus gespeicherten EML-Originalen aufbauen ──
-  // Alle emailOriginals nach Datum sortieren (älteste zuerst für Verlauf-Reihenfolge)
-  const storedMails=[...(task.emailOriginals||[]),...(taskEmailOriginals||[])];
-  // Deduplizieren nach messageId, fileId oder Betreff+Datum (Mails ohne fileId nicht ausschließen)
+  // ── Schritt 1: Verlauf aus Thread-Mails + EML-Originalen aufbauen ──
+  // Thread-Nachrichten normalisieren (primäre Quelle wenn Verlauf geladen ist)
+  const _tvMap=m=>({messageId:m.messageId||m.internetMessageId||'',subject:m.subject||'',date:m.date,sender:m.fromName?('"'+m.fromName+'" <'+(m.from||'')+'>'):(m.from||m.sender||''),bodyHtml:m.bodyHtml||'',bodyText:m.bodyText||m.preview||''});
+  const threadMails=[...(task.gmailThreadMessages||[]).map(_tvMap),...(task.msThreadMessages||[]).map(_tvMap)];
+  // Manuell hochgeladene EML-Originale (vollständiger Body – bevorzugt falls vorhanden)
+  const emlMails=[...(task.emailOriginals||[]),...(taskEmailOriginals||[])];
+  // Kombinieren: EML-Inhalt bevorzugen, Thread-Mails als Fallback / Ergänzung
   const seenIds=new Set();
-  const uniqueMails=storedMails.filter(m=>{const key=m.messageId||m.fileId||(m.subject+'|'+(m.date||''));if(seenIds.has(key))return false;seenIds.add(key);return true;});
-  uniqueMails.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
+  const storedMails=[];
+  [...emlMails,...threadMails].forEach(m=>{const key=m.messageId||(m.subject+'|'+(m.date||''));if(seenIds.has(key))return;seenIds.add(key);storedMails.push(m);});
+  const uniqueMails=[...storedMails].sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
 
   let verlaufHtml='';
   if(uniqueMails.length>0){
@@ -9893,24 +9892,9 @@ async function _pamEmailAntwortenMitVerlauf(){
       verlaufHtml+='<div style="font-size:12px;font-family:Calibri,Arial,sans-serif;">'+( bodyContent||'(kein Inhalt)' )+'</div>';
       verlaufHtml+='</div>';
     }
-  } else {
-    // Fallback: Server-Thread-Nachrichten verwenden (Gmail/Outlook API)
-    const allMsgs=[...(task.msThreadMessages||[]),...(task.gmailThreadMessages||[])];
-    allMsgs.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
-    if(allMsgs.length>0){
-      verlaufHtml='<hr style="margin:20px 0;border:none;border-top:2px solid #ccc;">';
-      verlaufHtml+='<div style="font-family:Calibri,Arial,sans-serif;font-size:12px;color:#555;margin-bottom:10px;">──── E-Mail-Verlauf ('+allMsgs.length+' Nachrichten) ────</div>';
-      allMsgs.forEach(m=>{
-        const dateStr=m.date?new Date(m.date).toLocaleString('de-DE'):'';
-        verlaufHtml+='<div style="border:1px solid #ddd;border-radius:4px;margin-bottom:12px;background:#f9f9f9;padding:10px;">';
-        verlaufHtml+='<div style="font-size:11px;color:#666;margin-bottom:6px;"><strong>'+(m.from||m.sender||'')+'</strong> &nbsp;·&nbsp; '+dateStr+'</div>';
-        verlaufHtml+='<div style="font-size:12px;">'+(m.bodyHtml||m.body||m.bodyText||'(kein Inhalt)')+'</div>';
-        verlaufHtml+='</div>';
-      });
-    }
   }
 
-  if(!verlaufHtml){showToast('Kein Verlauf vorhanden – bitte zuerst E-Mails reinziehen.','warning',3000);return;}
+  if(!verlaufHtml){showToast('Kein Verlauf vorhanden – bitte zuerst E-Mails einziehen oder Verlauf laden.','warning',3000);return;}
 
   // ── Schritt 2: Outlook-Entwurf mit Verlauf erstellen (Graph API) ──
   if(typeof msToken!=='undefined'&&msToken&&task){
@@ -10029,11 +10013,13 @@ async function _pamVerlaufDrucken(){
   const task=findTaskById(taskId);
   if(!task){showToast('Kein Task gefunden.','warning',3000);return;}
   showToast('⏳ Verlauf wird aufgebaut…','info',4000);
-  const storedMails=[...(task.emailOriginals||[]),...(taskEmailOriginals||[])];
-  // Deduplizieren ohne fileId-Pflicht (messageId oder Betreff+Datum als Fallback)
-  const seenIds=new Set();
-  const uniqueMails=storedMails.filter(m=>{const key=m.messageId||m.fileId||(m.subject+'|'+(m.date||''));if(seenIds.has(key))return false;seenIds.add(key);return true;});
-  uniqueMails.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
+  // Thread-Mails + EML-Originale kombinieren (wie in _pamEmailAntwortenMitVerlauf)
+  const _tvMap2=m=>({messageId:m.messageId||m.internetMessageId||'',subject:m.subject||'',date:m.date,sender:m.fromName?('"'+m.fromName+'" <'+(m.from||'')+'>'):(m.from||m.sender||''),bodyHtml:m.bodyHtml||'',bodyText:m.bodyText||m.preview||''});
+  const threadMails2=[...(task.gmailThreadMessages||[]).map(_tvMap2),...(task.msThreadMessages||[]).map(_tvMap2)];
+  const emlMails2=[...(task.emailOriginals||[]),...(taskEmailOriginals||[])];
+  const seenIds=new Set();const storedMails=[];
+  [...emlMails2,...threadMails2].forEach(m=>{const key=m.messageId||(m.subject+'|'+(m.date||''));if(seenIds.has(key))return;seenIds.add(key);storedMails.push(m);});
+  const uniqueMails=[...storedMails].sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
   let verlaufHtml='';
   if(uniqueMails.length>0){
     for(const m of uniqueMails){
@@ -10052,15 +10038,6 @@ async function _pamVerlaufDrucken(){
       verlaufHtml+='<strong>Von:</strong> '+senderStr+'<br><strong>Betreff:</strong> '+subjStr+'<br><strong>Datum:</strong> '+dateStr;
       verlaufHtml+='</div><div style="font-size:13px;font-family:Calibri,Arial,sans-serif;">'+(bodyContent||'(kein Inhalt)')+'</div></div>';
     }
-  } else {
-    const allMsgs=[...(task.msThreadMessages||[]),...(task.gmailThreadMessages||[])];
-    allMsgs.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
-    allMsgs.forEach(m=>{
-      const dateStr=m.date?new Date(m.date).toLocaleString('de-DE'):'';
-      verlaufHtml+='<div style="border:1px solid #ddd;border-radius:6px;margin-bottom:16px;background:#f9f9f9;padding:12px 16px;">';
-      verlaufHtml+='<div style="font-size:12px;color:#444;margin-bottom:8px;"><strong>'+(m.from||m.sender||'')+'</strong> · '+dateStr+'</div>';
-      verlaufHtml+='<div style="font-size:13px;">'+(m.bodyHtml||m.body||m.bodyText||'(kein Inhalt)')+'</div></div>';
-    });
   }
   if(!verlaufHtml){showToast('Kein Verlauf vorhanden – bitte zuerst E-Mails einziehen oder Verlauf laden.','warning',3000);return;}
   const w=window.open('','_blank','width=860,height=720,scrollbars=yes');
@@ -11869,9 +11846,11 @@ function _emailAllListItem(item){
 }
 function _openEmailAllPopup(){
   if(document.getElementById('emailOrigPopupOverlay'))return;
+  const _aapTask=(()=>{const _id=(document.getElementById('taskId')||{}).value||'';return _id?findTaskById(_id):null;})();
+  const _aapTIds=new Set([...((_aapTask&&_aapTask.gmailThreadMessages)||[]).map(m=>m.messageId).filter(Boolean),...((_aapTask&&_aapTask.msThreadMessages)||[]).map(m=>m.messageId).filter(Boolean)]);
   const allItems=[
     ...taskEmailPdfs.map((p,i)=>({...p,_type:'pdf',_idx:i})),
-    ...taskEmailOriginals.map((e,i)=>({...e,_type:'orig',_idx:i}))
+    ...taskEmailOriginals.map((e,i)=>({...e,_type:'orig',_idx:i})).filter(item=>!item.messageId||!_aapTIds.has(item.messageId))
   ].sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
   const overlay=document.createElement('div');
   overlay.id='emailOrigPopupOverlay';
@@ -11901,9 +11880,11 @@ function _closeEmailOrigPopup(){_closeEmailAllPopup();}
 
 // ── Thumbnail-Kachel-Galerie für E-Mail Dateien ──────────────────────────────
 function _openEmailThumbnailGrid(){
+  const _atgTask=(()=>{const _id=(document.getElementById('taskId')||{}).value||'';return _id?findTaskById(_id):null;})();
+  const _atgTIds=new Set([...((_atgTask&&_atgTask.gmailThreadMessages)||[]).map(m=>m.messageId).filter(Boolean),...((_atgTask&&_atgTask.msThreadMessages)||[]).map(m=>m.messageId).filter(Boolean)]);
   const allItems=[
     ...taskEmailPdfs.map((p,i)=>({...p,_type:'pdf',_idx:i})),
-    ...taskEmailOriginals.map((e,i)=>({...e,_type:'orig',_idx:i}))
+    ...taskEmailOriginals.map((e,i)=>({...e,_type:'orig',_idx:i})).filter(item=>!item.messageId||!_atgTIds.has(item.messageId))
   ];
   if(!allItems.length){showToast('Keine E-Mail-Dateien vorhanden','info',2500);return;}
   // Neueste zuerst sortieren
