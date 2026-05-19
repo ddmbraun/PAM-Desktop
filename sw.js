@@ -1,36 +1,31 @@
-// Service Worker – PAM Desktop (Workboard + Stammblatt)
-// Beide Apps liegen im selben GitHub-Pages-Repo → eine gemeinsame sw.js
-// Google-APIs (Drive, OAuth) werden NIEMALS gecacht –
-// sie brauchen Auth-Token und müssen immer live abgefragt werden.
+// Service Worker - PAM Desktop (Workboard + Stammblatt)
+// Google-APIs werden NIEMALS gecacht.
 
-const CACHE_NAME = 'pam-desktop-v83';
+const CACHE_NAME = 'pam-desktop-v84';
 const PRECACHE = [
-  // CDN – Workboard
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css',
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js',
   'https://cdn.jsdelivr.net/npm/piexifjs@1.0.6/piexif.js',
   'https://cdn.jsdelivr.net/npm/jspdf-autotable@5.0.7/dist/jspdf.plugin.autotable.min.js',
-  // CDN – Workboard + Stammblatt (gemeinsam)
   'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
-  // 'https://accounts.google.com/gsi/client' → Cache-Control: no-store, nicht cachebar
 ];
 
-// HTML-Dateien: nie vorab cachen, immer Network-First (damit Updates sofort ankommen)
-// index.html = PAM Workboard
-// stammblatt.html = PAM Stammblatt
-
-// Installation: nur CDN-Ressourcen vorab cachen
+// Installation: CDN-Ressourcen einzeln cachen - ein Fehler blockiert nicht den ganzen Install
 self.addEventListener('install', e => {
   e.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(PRECACHE))
-      .then(() => self.skipWaiting())
+    caches.open(CACHE_NAME).then(cache =>
+      Promise.allSettled(
+        PRECACHE.map(url =>
+          cache.add(url).catch(err => console.warn('[SW] Precache fehlgeschlagen:', url, err))
+        )
+      )
+    ).then(() => self.skipWaiting())
   );
 });
 
-// Aktivierung: veraltete Caches aus alten Versionen löschen
+// Aktivierung: veraltete Caches loeschen
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
@@ -41,7 +36,6 @@ self.addEventListener('activate', e => {
   );
 });
 
-// Hilfsfunktion: ist die URL eine lokale HTML-Seite?
 function isHtmlPage(url) {
   const u = new URL(url);
   return u.pathname === '/' ||
@@ -50,17 +44,11 @@ function isHtmlPage(url) {
          u.pathname.endsWith('.html');
 }
 
-// Fetch-Strategie:
-// – Google APIs / Microsoft / ssl.gstatic.com: immer direkt ans Netzwerk
-// – Lokale HTML-Seiten (index.html, stammblatt.html): Network-First (immer aktuell)
-// – Alles andere (CDN-Libs etc.): Cache-First, dann Netzwerk
 self.addEventListener('fetch', e => {
   const url = e.request.url;
 
-  // Blob-URLs und Data-URLs nie durch den SW routen
   if (url.startsWith('blob:') || url.startsWith('data:')) return;
 
-  // Alle externen Dienste immer live – kein SW-Eingriff
   if (
     url.includes('googleapis.com') ||
     url.includes('accounts.google.com') ||
@@ -79,10 +67,9 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // Requests mit redirect-Modus != 'follow' nicht durch SW routen
   if (e.request.redirect && e.request.redirect !== 'follow') return;
 
-  // ── Network-First für lokale HTML-Seiten ──────────────────────────────
+  // Network-First fuer HTML-Seiten
   if (isHtmlPage(url)) {
     e.respondWith(
       fetch(e.request)
@@ -93,12 +80,12 @@ self.addEventListener('fetch', e => {
           }
           return resp;
         })
-        .catch(() => caches.match(e.request).then(c => c || new Response('Offline – bitte Netzwerk prüfen', {status: 503})))
+        .catch(() => caches.match(e.request).then(c => c || new Response('Offline', {status: 503})))
     );
     return;
   }
 
-  // ── Cache-First für alle anderen Ressourcen (CDN-Bibliotheken etc.) ──
+  // Cache-First fuer CDN-Bibliotheken
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) return cached;

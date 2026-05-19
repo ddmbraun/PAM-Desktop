@@ -9,6 +9,7 @@
 <script>
 // ── Service Worker: registrieren + bei neuer Version automatisch neu laden ──
 if("serviceWorker" in navigator){
+  var _swReloading=false;
   navigator.serviceWorker.register("./sw.js").then(function(reg){
     // Sofort nach Update suchen
     reg.update();
@@ -16,12 +17,11 @@ if("serviceWorker" in navigator){
       var nw=reg.installing;
       if(!nw)return;
       nw.addEventListener("statechange",function(){
-        // "activated": neuer SW hat skipWaiting() ausgeführt und übernommen
-        if(nw.state==="activated"){
-          window.location.reload();
-        }
-        // Fallback: "installed" mit altem Controller (ohne skipWaiting)
-        if(nw.state==="installed"&&navigator.serviceWorker.controller){
+        // Nur auf "activated" reagieren – skipWaiting() im SW sorgt dafür, dass dieser Zustand
+        // zuverlässig erreicht wird. "installed"-Fallback entfernt, da er zusammen mit
+        // controllerchange zu einem Doppel-Reload führen kann.
+        if(nw.state==="activated"&&!_swReloading){
+          _swReloading=true;
           window.location.reload();
         }
       });
@@ -29,13 +29,30 @@ if("serviceWorker" in navigator){
     // Regelmäßig nach Updates suchen (alle 60 Sekunden)
     setInterval(function(){reg.update();},60000);
   }).catch(function(){});
-  // controllerchange = neuer SW hat Kontrolle übernommen
-  var _swReloading=false;
+  // controllerchange = neuer SW hat Kontrolle übernommen (Absicherung gegen Doppel-Reload)
   navigator.serviceWorker.addEventListener("controllerchange",function(){
     if(_swReloading)return;
     _swReloading=true;
     window.location.reload();
   });
+}
+
+// ── Cache leeren + Service Worker zurücksetzen (manuell aufrufbar) ──────────
+async function _clearCacheAndReload(){
+  try{
+    // Alle Caches löschen
+    const keys=await caches.keys();
+    await Promise.all(keys.map(k=>caches.delete(k)));
+    // Alle SW-Registrierungen deregistrieren
+    if("serviceWorker" in navigator){
+      const regs=await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r=>r.unregister()));
+    }
+    // Seite hart neu laden (ohne Browser-Cache)
+    window.location.reload(true);
+  }catch(e){
+    alert('Cache leeren fehlgeschlagen: '+e.message);
+  }
 }
 </script>
 <script>
@@ -1892,6 +1909,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
     <span class="file-name" id="fileName">Keine Datei geöffnet</span>
     <span class="file-msg" id="fileMsg"></span>
     <span id="pamVersionBadge" style="font-size:10px;color:var(--text2);opacity:.65;padding:1px 7px;border:0.5px solid var(--border);border-radius:4px;margin-left:8px;font-family:monospace;white-space:nowrap;flex-shrink:0;">v2026-05-14 · #47</span>
+    <button onclick="_clearCacheAndReload()" title="Browser-Cache leeren und Seite neu laden (bei Darstellungsproblemen oder nach Updates)" style="font-size:10px;padding:1px 7px;border-radius:4px;border:0.5px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;margin-left:4px;flex-shrink:0;" onmouseover="this.style.borderColor='var(--red)';this.style.color='var(--red)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text2)'">🔄 Cache</button>
   </div>
   <div class="filebar-right">
     <button id="gmailBtnBar" onclick="gmailConnect()" title="Mit Gmail / Google Workspace verbinden" style="padding:3px 10px;border-radius:4px;font-size:11px;background:transparent;color:#1B5E20;border:1px solid #A5D6A7;cursor:pointer;font-weight:500;">📩 Gmail</button>
@@ -2753,7 +2771,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-18 · #81';
+const PAM_BUILD = 'v2026-05-19 · #82'; // sync mit CACHE_NAME in sw.js (pam-desktop-v84)
 
 // ── STATE ──
 let boards = {};
@@ -3420,27 +3438,17 @@ const PC_BACKUP_KEY = 'pam_board_backup_v1';
 
 // ── Einmalige Migration: alte ptp_-Schlüssel → pam_- (läuft nur wenn noch alte Daten vorhanden) ──
 (function _migratePtpToPam(){
+  // Nur echte Umbenennungen: ptp_-Präfix → pam_-Präfix
+  // WICHTIG: Einträge mit gleichem Quell- und Zielschlüssel (ok===nk) wurden entfernt –
+  // sie würden den Wert zuerst NICHT kopieren (Ziel existiert schon) und ihn dann LÖSCHEN!
   const _km=[
     ['ptp_gdrive_token_v1','pam_gdrive_token_v1'],
     ['ptp_gdrive_file_v1','pam_gdrive_file_v1'],
     ['ptp_board_backup_v1','pam_board_backup_v1'],
-    ['pam_timer','pam_timer'],
-    ['pam_user_email_v1','pam_user_email_v1'],
-    ['pam_gmail_token_v1','pam_gmail_token_v1'],
-    ['pam_lastBoard','pam_lastBoard'],
-    ['pam_stammblatt_url','pam_stammblatt_url'],
-    ['pam_prefill_task','pam_prefill_task'],
-    ['pam_sync_ping','pam_sync_ping'],
-    ['pam_topbar_collapsed','pam_topbar_collapsed'],
-    ['pam_heute_pc_zoom','pam_heute_pc_zoom'],
-    ['pam_modal_default_v2','pam_modal_default_v2'],
-    ['pam_auftrag_last_board','pam_auftrag_last_board'],
-    ['pam_workspace_folder_id','pam_workspace_folder_id'],
-    ['pam_gdrive_last_action','pam_gdrive_last_action'],
-    ['pam_import','pam_import'],
   ];
   let _n=0;
   _km.forEach(([ok,nk])=>{
+    if(ok===nk)return; // Sicherheits-Guard: niemals Quelle=Ziel (würde löschen)
     try{
       const v=localStorage.getItem(ok);
       if(v!==null){
@@ -9122,7 +9130,7 @@ async function _gmLoadEmailThread(){
         preview:(m.snippet||'').substring(0,120),
         direction:myAddrs.includes(fromAddr.toLowerCase())?'gesendet':'eingang',
         messageId:(hdrs['message-id']||'').replace(/^<|>$/g,''),};
-    }).sort((a,b)=>new Date(a.date)-new Date(b.date));
+    }).sort((a,b)=>new Date(b.date)-new Date(a.date)); // neueste zuerst
     task.gmailThreadMessages=threadMsgs;
     _gmRenderThread(task);
     const saved=await _gmSaveThreadPdfs(task,threadMsgs);
@@ -9217,6 +9225,10 @@ async function _saveThreadMailsAsEml(task,threadMsgs,tokenType){
       }
     }catch(e){console.warn('[PAM] Thread-EML speichern fehlgeschlagen:',e);}
   }
+  // Nach allen Einfügungen: neueste zuerst sortieren
+  const _dsort=(a,b)=>new Date(b.date||0)-new Date(a.date||0);
+  if(task.emailOriginals)task.emailOriginals.sort(_dsort);
+  if(taskEmailOriginals)taskEmailOriginals.sort(_dsort);
   renderEmailSection();
   scheduleTaskFieldSave();
 }
@@ -9815,11 +9827,11 @@ async function _pamEmailAntwortenMitVerlauf(){
   if(!task){showToast('Kein Task gefunden.','warning',3000);return;}
 
   // ── Schritt 1: Verlauf aus gespeicherten EML-Originalen aufbauen ──
-  // Alle emailOriginals nach Datum sortieren (älteste zuerst)
+  // Alle emailOriginals nach Datum sortieren (älteste zuerst für Verlauf-Reihenfolge)
   const storedMails=[...(task.emailOriginals||[]),...(taskEmailOriginals||[])];
-  // Deduplizieren nach fileId
+  // Deduplizieren nach messageId, fileId oder Betreff+Datum (Mails ohne fileId nicht ausschließen)
   const seenIds=new Set();
-  const uniqueMails=storedMails.filter(m=>{if(!m.fileId||seenIds.has(m.fileId))return false;seenIds.add(m.fileId);return true;});
+  const uniqueMails=storedMails.filter(m=>{const key=m.messageId||m.fileId||(m.subject+'|'+(m.date||''));if(seenIds.has(key))return false;seenIds.add(key);return true;});
   uniqueMails.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
 
   let verlaufHtml='';
@@ -9874,30 +9886,46 @@ async function _pamEmailAntwortenMitVerlauf(){
     if(target&&target.id){
       showToast('⏳ Antwort-Entwurf mit Verlauf wird erstellt…','info',6000);
       try{
-        if(!await _msRefreshToken()){showToast('⚠ Outlook-Token abgelaufen','error',4000);}else{
-          const r=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(target.id)+'/createReply',{
-            method:'POST',
-            headers:{Authorization:'Bearer '+msToken,'Content-Type':'application/json'},
-            body:JSON.stringify({comment:verlaufHtml})
-          });
-          if(!r.ok)throw new Error('HTTP '+r.status);
-          const draft=await r.json();
-          const link=draft.webLink||'https://outlook.office.com/mail/drafts/id/'+draft.id;
-          showToast('✅ Entwurf mit Verlauf erstellt – Outlook öffnet…','success',3000);
-          window.open(link,'_blank');
-          return;
-        }
+        if(!await _msRefreshToken()){showToast('⚠ Outlook-Token abgelaufen – bitte neu anmelden','error',4000);return;}
+        // Schritt 1: leeren Entwurf anlegen
+        const r1=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(target.id)+'/createReply',{
+          method:'POST',headers:{Authorization:'Bearer '+msToken,'Content-Type':'application/json'},body:JSON.stringify({})
+        });
+        if(!r1.ok)throw new Error('createReply HTTP '+r1.status);
+        const draft=await r1.json();
+        // Schritt 2: HTML-Body in den Entwurf schreiben (comment nimmt nur Plaintext)
+        const r2=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(draft.id),{
+          method:'PATCH',headers:{Authorization:'Bearer '+msToken,'Content-Type':'application/json'},
+          body:JSON.stringify({body:{contentType:'html',content:verlaufHtml}})
+        });
+        if(!r2.ok)throw new Error('PATCH body HTTP '+r2.status);
+        const link=draft.webLink||'https://outlook.office.com/mail/drafts/id/'+draft.id;
+        showToast('✅ Entwurf mit Verlauf erstellt – Outlook öffnet…','success',3000);
+        window.open(link,'_blank');
+        return;
       }catch(e){console.warn('[PAM] createReply+Verlauf fehlgeschlagen:',e);showToast('⚠ '+e.message,'warning',4000);}
     }
   }
-  // ── Fallback: mailto mit Absender ──
+  // ── Fallback: mailto mit Absender + Plain-Text-Verlauf ──
   const v=(document.getElementById('taskEmailSenderInput')||{}).value||'';
   const mv=v.match(/<([^>]+)>/);
   const addr=mv?mv[1]:v.includes('@')?v:'';
   if(addr){
     const subj=task&&task.title?'Re: '+task.title:'';
-    window.open('mailto:'+encodeURIComponent(addr)+(subj?'?subject='+encodeURIComponent(subj):''),'_blank');
-    showToast('ℹ Outlook verbinden für vollständigen Verlauf-Entwurf','info',4000);
+    // Plain-Text-Zusammenfassung des Verlaufs für mailto-Body (max. 1500 Zeichen)
+    let plainBody='';
+    if(uniqueMails&&uniqueMails.length){
+      plainBody='\n\n-------- Verlauf --------\n';
+      for(const m of uniqueMails){
+        const ds=m.date?new Date(m.date).toLocaleString('de-DE'):'';
+        const txt=(m.bodyText||'').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim().substring(0,200);
+        plainBody+='Von: '+(m.sender||m.from||'')+'\nDatum: '+ds+'\nBetreff: '+(m.subject||'')+'\n'+(txt||'(kein Inhalt)')+'\n\n';
+      }
+      plainBody=plainBody.substring(0,1500);
+    }
+    const mailtoUrl='mailto:'+encodeURIComponent(addr)+'?subject='+encodeURIComponent(subj)+(plainBody?'&body='+encodeURIComponent(plainBody):'');
+    window.open(mailtoUrl,'_blank');
+    showToast('ℹ Outlook verbinden für formatierten HTML-Verlauf-Entwurf','info',4000);
   }else{
     showToast('Keine E-Mail-Adresse gespeichert.','warning',3000);
   }
@@ -9968,8 +9996,9 @@ async function _pamVerlaufDrucken(){
   if(!task){showToast('Kein Task gefunden.','warning',3000);return;}
   showToast('⏳ Verlauf wird aufgebaut…','info',4000);
   const storedMails=[...(task.emailOriginals||[]),...(taskEmailOriginals||[])];
+  // Deduplizieren ohne fileId-Pflicht (messageId oder Betreff+Datum als Fallback)
   const seenIds=new Set();
-  const uniqueMails=storedMails.filter(m=>{if(!m.fileId||seenIds.has(m.fileId))return false;seenIds.add(m.fileId);return true;});
+  const uniqueMails=storedMails.filter(m=>{const key=m.messageId||m.fileId||(m.subject+'|'+(m.date||''));if(seenIds.has(key))return false;seenIds.add(key);return true;});
   uniqueMails.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
   let verlaufHtml='';
   if(uniqueMails.length>0){
@@ -10087,10 +10116,13 @@ function _pamEmailRefresh(task){
   // Absender: gespeicherter Wert, sonst ersten Absender aus Gmail/Outlook/EML-Originale übernehmen
   let senderVal=(document.getElementById('taskEmailSenderInput')||{}).value||(t&&t.emailSender)||'';
   if(!senderVal){
-    const gmFirst=(t&&t.gmailThreadMessages||[])[0];
-    const msFirst=(t&&t.msThreadMessages||[])[0];
-    // Fallback: ersten Absender aus abgelegten EML-Dateien
-    const emlFirst=(typeof taskEmailOriginals!=='undefined'&&taskEmailOriginals.length>0)?taskEmailOriginals[0]:null;
+    // Älteste eingehende Nachricht als Ursprungsabsender ermitteln (unabhängig von Anzeigesortierung)
+    const _oldestIncoming=(msgs)=>{const inc=msgs.filter(m=>m.direction==='eingang');const arr=inc.length?inc:msgs;return arr.slice().sort((a,b)=>new Date(a.date||0)-new Date(b.date||0))[0]||null;};
+    const gmFirst=_oldestIncoming((t&&t.gmailThreadMessages)||[]);
+    const msFirst=_oldestIncoming((t&&t.msThreadMessages)||[]);
+    // Fallback: ersten Absender aus abgelegten EML-Dateien (älteste zuerst)
+    const _emlSorted=(typeof taskEmailOriginals!=='undefined'?taskEmailOriginals:[]).slice().sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
+    const emlFirst=_emlSorted.length>0?_emlSorted[0]:null;
     const src=gmFirst||msFirst||(emlFirst&&emlFirst.sender?{fromName:'',from:emlFirst.sender,_rawSender:emlFirst.sender}:null);
     if(src){
       senderVal=src._rawSender||( src.fromName?'"'+src.fromName+'" <'+(src.from||'')+'>':(src.from||'') );
@@ -11739,8 +11771,8 @@ function renderEmailSection(){
     }
   }
   const ti=document.getElementById('tEmailOrigTitle');
-  const origItems=taskEmailOriginals.map((e,i)=>({...e,_type:'orig',_idx:i}));
-  const pdfItems=taskEmailPdfs.map((p,i)=>({...p,_type:'pdf',_idx:i}));
+  const origItems=taskEmailOriginals.map((e,i)=>({...e,_type:'orig',_idx:i})).sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
+  const pdfItems=taskEmailPdfs.map((p,i)=>({...p,_type:'pdf',_idx:i})).sort((a,b)=>new Date(b.date||b.uploadedAt||0)-new Date(a.date||a.uploadedAt||0));
   const total=origItems.length+pdfItems.length;
   if(ti)ti.innerHTML='&#128231; E-Mail Dateien'+(total?` <span style="color:var(--accent2);font-size:10px;font-weight:400;text-transform:none;letter-spacing:0">(${total})</span>`:'');
   const galBtn=document.getElementById('emailGalBtn');
@@ -11798,7 +11830,7 @@ function _openEmailAllPopup(){
   const allItems=[
     ...taskEmailPdfs.map((p,i)=>({...p,_type:'pdf',_idx:i})),
     ...taskEmailOriginals.map((e,i)=>({...e,_type:'orig',_idx:i}))
-  ];
+  ].sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
   const overlay=document.createElement('div');
   overlay.id='emailOrigPopupOverlay';
   overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center;';
@@ -11832,6 +11864,14 @@ function _openEmailThumbnailGrid(){
     ...taskEmailOriginals.map((e,i)=>({...e,_type:'orig',_idx:i}))
   ];
   if(!allItems.length){showToast('Keine E-Mail-Dateien vorhanden','info',2500);return;}
+  // Neueste zuerst sortieren
+  function _origSortDate(item){
+    if(item.date){const d=new Date(item.date);if(!isNaN(d))return d.getTime();}
+    const m=(item.name||'').match(/^(\d{4})\.(\d{2})\.(\d{2})_/);
+    if(m){const d=new Date(+m[1],+m[2]-1,+m[3]);if(!isNaN(d))return d.getTime();}
+    return 0;
+  }
+  allItems.sort((a,b)=>_origSortDate(b)-_origSortDate(a));
   const GID='_emailThumbGridOverlay';
   const old=document.getElementById(GID);if(old)old.remove();
   const blobUrls=[];
@@ -12043,9 +12083,23 @@ function _openEmailThumbnailGrid(){
     const topRow=document.createElement('div');
     topRow.style.cssText='display:flex;align-items:flex-start;gap:7px;margin-bottom:5px;';
 
+    // Datei-Typ ermitteln für Icon und Label
+    const _ext2=(name.split('.').pop()||'').toLowerCase();
+    const _isImg=['jpg','jpeg','png','gif','webp','bmp','tiff'].includes(_ext2);
+    const _isMsg=_ext2==='msg';
+    const _isWord=['doc','docx'].includes(_ext2);
+    const _isExcel=['xls','xlsx'].includes(_ext2);
+    let _icoBg,_icoText,_typeLabel;
+    if(isPdf)           {_icoBg='rgba(231,76,60,.12)'; _icoText='📄'; _typeLabel='PDF-Dokument';}
+    else if(_isImg)     {_icoBg='rgba(39,174,96,.12)'; _icoText='🖼️'; _typeLabel='Bilddatei';}
+    else if(_isMsg)     {_icoBg='rgba(0,120,212,.12)'; _icoText='✉️'; _typeLabel='Outlook-Nachricht';}
+    else if(_isWord)    {_icoBg='rgba(0,70,127,.12)';  _icoText='📝'; _typeLabel='Word-Dokument';}
+    else if(_isExcel)   {_icoBg='rgba(33,115,70,.12)'; _icoText='📊'; _typeLabel='Excel-Tabelle';}
+    else                {_icoBg='rgba(108,99,255,.12)';_icoText='📨'; _typeLabel='E-Mail';}
+
     const ico=document.createElement('div');
-    ico.style.cssText='width:28px;height:28px;border-radius:5px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px;background:'+(isPdf?'rgba(231,76,60,.12)':'rgba(108,99,255,.12)')+';';
-    ico.textContent=isPdf?'📄':'📨';
+    ico.style.cssText='width:28px;height:28px;border-radius:5px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px;background:'+_icoBg+';';
+    ico.textContent=_icoText;
 
     const meta=document.createElement('div');
     meta.style.cssText='flex:1;min-width:0;';
@@ -12064,7 +12118,7 @@ function _openEmailThumbnailGrid(){
 
     const fromEl=document.createElement('div');
     fromEl.style.cssText='font-size:10px;color:var(--text2);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-    fromEl.textContent=isPdf?'PDF-Dokument':(item.sender||'');
+    fromEl.textContent=item.sender||_typeLabel;
 
     // Echtes E-Mail-Datum bevorzugen; für PDFs Datum aus Dateiname (2026.05.18_...) extrahieren
     const dateEl=document.createElement('div');
