@@ -9237,8 +9237,9 @@ async function _gmSaveThreadPdfs(task,threadMsgs){
   if(!gdriveToken)return 0;
   const folderUrl=(document.getElementById('tEmailOrdner')?.value||document.getElementById('tGDOrdner')?.value||'').trim();
   const fid=_ezFolderId(folderUrl);if(!fid)return 0;
-  // Dedup: alle vorhandenen messageId-Felder berücksichtigen (gmailMessageId, messageId, outlookMessageId)
-  const knownIds=new Set([...(taskEmailPdfs||[]).flatMap(p=>[p.gmailMessageId,p.messageId,p.outlookMessageId]).filter(Boolean)]);
+  // Dedup: alle vorhandenen messageId-Felder berücksichtigen (inkl. msMessageId von Outlook-PDFs)
+  const knownIds=new Set([...(taskEmailPdfs||[]).flatMap(p=>[p.gmailMessageId,p.messageId,p.outlookMessageId,p.msMessageId]).filter(Boolean)]);
+  const knownFileIds=new Set((taskEmailPdfs||[]).map(p=>p.fileId).filter(Boolean));
   const toSave=threadMsgs.filter(m=>m.messageId&&!knownIds.has(m.messageId));
   if(!toSave.length)return 0;
   let saved=0;
@@ -9254,7 +9255,7 @@ async function _gmSaveThreadPdfs(task,threadMsgs){
       const dirLabel=m.direction==='gesendet'?'Gesendet':'Eingang';
       const fname=stamp+'_'+dirLabel+'_'+_ezClean(m.fromName||m.from)+'.pdf';
       const result=await _ezUpload(pdfBuf,fname,fid);
-      if(result?.id){taskEmailPdfs.push({name:fname,fileId:result.id,url:'https://drive.google.com/file/d/'+result.id+'/view',uploadedAt:new Date().toLocaleDateString('de-DE'),gmailMessageId:m.messageId});saved++;}
+      if(result?.id&&!knownFileIds.has(result.id)&&!knownIds.has(m.messageId)){knownFileIds.add(result.id);knownIds.add(m.messageId);taskEmailPdfs.push({name:fname,fileId:result.id,url:'https://drive.google.com/file/d/'+result.id+'/view',uploadedAt:new Date().toLocaleDateString('de-DE'),gmailMessageId:m.messageId});saved++;}
     }catch(e){console.warn('[GM] PDF-Fehler:',e);}
   }
   if(saved>0){renderEmailSection();scheduleTaskFieldSave();}
@@ -9765,13 +9766,10 @@ async function _msSaveThreadPdfs(task,threadMsgs){
   const folderUrl=(document.getElementById('tEmailOrdner')?.value||document.getElementById('tGDOrdner')?.value||'').trim();
   const fid=_ezFolderId(folderUrl);
   if(!fid){showToast('⚠ Kein E-Mail-Ordner verknüpft – PDFs nicht gespeichert','warning',3000);return 0;}
-  // Bereits gespeicherte MessageIds → keine Duplikate
-  // Prüft: taskEmailPdfs (vom Verlauf laden) + msMessageIds (manuell abgelegte EMLs)
-  // Fix: nur bereits als PDF gespeicherte IDs ausschließen, NICHT die EML-Drop-IDs
-  // (sonst wird die erste abgelegte Mail nie als PDF erstellt, da ihre ID als "bekannt" gilt)
-  const _knownFromPdfs=(taskEmailPdfs||[]).map(p=>p.msMessageId||'').filter(Boolean);
-  const savedIds=new Set([..._knownFromPdfs]);
-  const toSave=threadMsgs.filter(m=>m.internetMessageId&&!savedIds.has(m.internetMessageId));
+  // Bereits gespeicherte MessageIds → keine Duplikate (alle ID-Felder + fileId, inkl. Gmail-PDFs)
+  const _msKnownIds=new Set((taskEmailPdfs||[]).flatMap(p=>[p.msMessageId,p.gmailMessageId,p.messageId,p.outlookMessageId]).filter(Boolean));
+  const _msKnownFileIds=new Set((taskEmailPdfs||[]).map(p=>p.fileId).filter(Boolean));
+  const toSave=threadMsgs.filter(m=>m.internetMessageId&&!_msKnownIds.has(m.internetMessageId));
   if(!toSave.length)return 0;
   let saved=0;
   for(const m of toSave){
@@ -9795,7 +9793,8 @@ async function _msSaveThreadPdfs(task,threadMsgs){
       const dirLabel=m.direction==='gesendet'?'Gesendet':'Eingang';
       const fname=stamp+'_'+dirLabel+'_'+_ezClean(m.fromName||m.from)+'.pdf';
       const result=await _ezUpload(pdfBuf,fname,fid);
-      if(result&&result.id){
+      if(result&&result.id&&!_msKnownFileIds.has(result.id)&&!_msKnownIds.has(m.internetMessageId)){
+        _msKnownFileIds.add(result.id);_msKnownIds.add(m.internetMessageId);
         taskEmailPdfs.push({
           name:fname,
           fileId:result.id,
@@ -10078,7 +10077,7 @@ async function _pamEmailAntwortenMitVerlauf(){
         showToast('✅ Entwurf mit Verlauf erstellt – Outlook öffnet…','success',3000);
         window.open(link,'_blank');
         return;
-      }catch(e){console.warn('[PAM] createReply+Verlauf fehlgeschlagen:',e);showToast('⚠ '+e.message,'warning',4000);}
+      }catch(e){console.warn('[PAM] createReply+Verlauf fehlgeschlagen:',e);if(!e.message.includes('403'))showToast('⚠ '+e.message,'warning',4000);}
     }
   }
   // ── Fallback: mailto mit Absender + Plain-Text-Verlauf ──
@@ -10239,7 +10238,7 @@ async function _pamEmailAntworten(){
         return;
       }catch(e){
         console.warn('[PAM] createReply fehlgeschlagen:',e);
-        showToast('⚠ Graph API Fehler: '+e.message+' – öffne Outlook direkt','warning',4000);
+        if(!e.message.includes('403'))showToast('⚠ Graph API Fehler: '+e.message+' – öffne Outlook direkt','warning',4000);
         // Fallthrough zum mailto-Fallback
       }
     }
@@ -13035,8 +13034,39 @@ async function _printEmailFromDrive(fileId,filename){
     }catch(e){if(w&&!w.closed)w.document.body.innerHTML='<p style="color:red">⚠ Fehler: '+e.message+'</p>';showToast('⚠ Fehler: '+e.message,'error');}
     return;
   }
-  // Alle anderen Dateien (z.B. PDF): Drive Vorschau öffnen
-  window.open('https://drive.google.com/file/d/'+encodeURIComponent(fileId)+'/view','_blank');
+  // .html Snapshot: Inhalt laden und direkt im Druckfenster anzeigen (kein roher Quellcode)
+  if(lname.endsWith('.html')){
+    const w=window.open('','_blank','width=900,height=1100');
+    if(!w){showToast('⚠ Popup-Blocker aktiv – Popups für diese Seite erlauben','error',6000);return;}
+    w.document.write('<html><body style="font-family:Arial;padding:40px;color:#333;"><p>⏳ E-Mail wird geladen…</p></body></html>');
+    w.document.close();
+    try{
+      const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      const htmlText=await r.text();
+      const printBar='<div style="position:fixed;top:0;left:0;right:0;z-index:9999;display:flex;align-items:center;gap:10px;padding:8px 16px;background:#185FA5;color:#fff;font-family:Arial,sans-serif;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.25);"><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📧 '+(filename||'E-Mail')+'</span><button onclick="window.print()" style="padding:5px 14px;border-radius:5px;background:#fff;color:#185FA5;border:none;cursor:pointer;font-weight:700;font-size:12px;flex-shrink:0;">🖨 Drucken (Strg+P)</button></div><div style="height:46px;"></div>';
+      const injected=htmlText.replace(/<body([^>]*)>/i,(m,a)=>m+printBar);
+      w.document.open();
+      w.document.write(injected);
+      w.document.close();
+    }catch(e){if(w&&!w.closed)w.document.body.innerHTML='<p style="color:red;font-family:Arial;padding:40px;">⚠ Fehler: '+e.message+'</p>';showToast('⚠ Fehler: '+e.message,'error');}
+    return;
+  }
+  // Alle anderen Dateien (PDF etc.): Drive Vorschau in eingebettetem Fenster
+  const w2=window.open('','_blank','width=960,height=800');
+  if(!w2){window.open('https://drive.google.com/file/d/'+encodeURIComponent(fileId)+'/view','_blank');return;}
+  const drivePreview='https://drive.google.com/file/d/'+encodeURIComponent(fileId)+'/preview';
+  w2.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>'+(filename||'Datei')+'</title>'+
+    '<style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Arial,sans-serif;display:flex;flex-direction:column;height:100vh;}'+
+    '.bar{display:flex;align-items:center;gap:10px;padding:8px 16px;background:#185FA5;color:#fff;flex-shrink:0;}'+
+    '.bar span{font-size:13px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}'+
+    '.bar button{padding:5px 14px;border-radius:5px;background:#fff;color:#185FA5;border:none;cursor:pointer;font-weight:700;font-size:12px;}'+
+    'iframe{flex:1;border:none;width:100%;}@media print{.bar{display:none!important;}}</style></head><body>'+
+    '<div class="bar"><span>📄 '+(filename||'Datei')+'</span>'+
+    '<button onclick="window.print()">🖨 Drucken (Strg+P)</button>'+
+    '<a href="https://drive.google.com/file/d/'+encodeURIComponent(fileId)+'/view" target="_blank" style="color:#fff;font-size:11px;text-decoration:underline;white-space:nowrap;">In Drive öffnen ↗</a></div>'+
+    '<iframe src="'+drivePreview+'" allow="autoplay"></iframe></body></html>');
+  w2.document.close();
 }
 
 // PDF-Vorschau rendern → jetzt über unified renderEmailSection()
@@ -13303,7 +13333,10 @@ async function _uploadEmailOriginal(file){
         const _pdfResult=await _ezUpload(_pdfData,_pdfName,fid);
         if(_pdfResult&&_pdfResult.id){
           if(!taskEmailPdfs)taskEmailPdfs=[];
-          const _pdfEntry={name:_pdfName,fileId:_pdfResult.id,url:'https://drive.google.com/file/d/'+_pdfResult.id+'/view',uploadedAt:new Date().toLocaleDateString('de-DE'),date:emailMeta.date,messageId:emailMeta.messageId||''};
+          const _emlMsgId=emailMeta.messageId||'';
+          const _alreadyIn=taskEmailPdfs.some(p=>p.fileId===_pdfResult.id||((_emlMsgId)&&[p.messageId,p.gmailMessageId,p.msMessageId,p.outlookMessageId].includes(_emlMsgId)));
+          if(_alreadyIn)throw new Error('skip-dup');
+          const _pdfEntry={name:_pdfName,fileId:_pdfResult.id,url:'https://drive.google.com/file/d/'+_pdfResult.id+'/view',uploadedAt:new Date().toLocaleDateString('de-DE'),date:emailMeta.date,messageId:_emlMsgId};
           taskEmailPdfs.push(_pdfEntry);
           const _tpdf=findTaskById((document.getElementById('taskId')||{}).value||'');
           if(_tpdf){if(!_tpdf.emailPdfs)_tpdf.emailPdfs=[];_tpdf.emailPdfs.push(_pdfEntry);}
