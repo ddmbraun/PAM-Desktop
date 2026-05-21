@@ -2195,7 +2195,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
         </div>
 
         <!-- Fotos -->
-        <div class="mv2-section baustelle-only collapsible" id="tFotoSect"
+        <div class="mv2-section collapsible" id="tFotoSect"
           ondragenter="event.preventDefault();document.getElementById('tFotoSect').classList.add('foto-sect-drag-over')"
           ondragover="event.preventDefault();event.dataTransfer.dropEffect='copy'"
           ondragleave="if(!document.getElementById('tFotoSect').contains(event.relatedTarget)){document.getElementById('tFotoSect').classList.remove('foto-sect-drag-over');}"
@@ -2595,7 +2595,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
           <button class="link-btn-2" onclick="(function(){let u=(document.getElementById('tSbPdfOrdnerVerk')||{value:''}).value.trim();if(u)window.open(u,'_blank');else showToast('Bitte zuerst Stammblatt-Ordner eintragen','warning',4000);})()" title="Stammblatt-Ordner öffnen" style="background:#15803d;color:#fff;border-color:#15803d;font-weight:700;">📂</button>
         </div>
       </div>
-      <div class="modal-field full baustelle-only">
+      <div class="modal-field full">
         <label>📷 Google Drive – Foto-Ordner <span style="font-size:10px;color:var(--accent);font-weight:600;">← 📷 Drive-Foto Button nutzt DIESEN Ordner</span></label>
         <div class="link-row-2">
           <input type="url" id="tGD" placeholder="https://drive.google.com/drive/folders/…" oninput="_updateFotoOrdnerHint()" autocomplete="off">
@@ -3423,7 +3423,7 @@ function showToast(msg, type='info', duration=3000){
 // ── GOOGLE DRIVE INTEGRATION ──
 const GDRIVE_CLIENT_ID = '56419258975-2ri3eujer9p6saph1mesa5hihlcae1pl.apps.googleusercontent.com';
 // Fix #11: Hardcodierte Standard-Ordner als benannte Konstanten (leicht zu ändern)
-const DEFAULT_FOLDER_NOTIZ    = 'https://drive.google.com/drive/u/0/folders/1iSEa-ibrBmv-WrkiLrIBVzAozbr97yJ7';
+const DEFAULT_FOLDER_NOTIZ    = 'https://drive.google.com/drive/folders/1iSEa-ibrBmv-WrkiLrIBVzAozbr97yJ7';
 const DEFAULT_FOLDER_BAUSTELLE= 'https://drive.google.com/drive/u/0/folders/1GBcSWtUkKw7pJJ2CKvbTs_WZCZ1_RJ07';
 // Fix #6: drive.file erlaubt nur app-eigene Dateien; drive.readonly für Lesezugriff auf fremde Dateien.
 // drive.metadata.readonly erlaubt Datei-Suche (name, parents) ohne vollen Lesezugriff.
@@ -10142,6 +10142,14 @@ function _pamEmailRefresh(task){
       if(inp&&senderVal){inp.value=senderVal;}
       if(t&&senderVal)t.emailSender=senderVal;
     }
+    // Fix 2: Fallback auf Kontakt-Name wenn senderVal noch keinen Namen enthält
+    if(!senderVal||(senderVal&&!senderVal.match(/^"?([^"<]+?)"?\s*<([^>]+)>/))){
+      const _agK=(t&&t.kontakte||[]).find(k=>k.rolle==='ag'||k.rolle==='auftraggeber');
+      if(_agK&&(_agK.name||_agK.email)){
+        const _kSender=_agK.name?(_agK.email?'"'+_agK.name+'" <'+_agK.email+'>':_agK.name):_agK.email;
+        if(_kSender)senderVal=_kSender;
+      }
+    }
   }
   // Absender-Card immer anzeigen (Platzhalter wenn leer)
   const absCard=document.getElementById('pamAbsenderCard');
@@ -12748,7 +12756,7 @@ async function _uploadEmailOriginal(file){
     // MSG-Warnung: keine Metadaten auslesbar
     if(!isEml){showToast('📨 .msg gespeichert – Metadaten (Betreff, Absender) konnten nicht ausgelesen werden. Für volle Unterstützung als .eml speichern.','warning',7000);}
     // EML-Metadaten extrahieren – preText vom Duplikat-Check wiederverwenden
-    let emailMeta={subject:'',sender:'',date:new Date().toISOString(),messageId:''};
+    let emailMeta={subject:'',sender:'',date:new Date().toISOString(),messageId:'',bodyHtml:'',bodyText:'',cidMap:{}};
     let emlParsedAttachments=[];
     if(isEml){
       try{
@@ -12758,7 +12766,10 @@ async function _uploadEmailOriginal(file){
           subject:parsed.subject||'',
           sender:parsed.sender||'',
           date:(parsed.date instanceof Date?parsed.date:new Date()).toISOString(),
-          messageId:parsed.messageId||''
+          messageId:parsed.messageId||'',
+          bodyHtml:parsed.bodyHtml||'',
+          bodyText:parsed.bodyText||'',
+          cidMap:parsed.cidMap||{}
         };
         emlParsedAttachments=parsed.attachments||[];
       }catch(e){console.warn('[PTP] EML parse:',e);}
@@ -12807,10 +12818,29 @@ async function _uploadEmailOriginal(file){
       subject:emailMeta.subject,
       sender:emailMeta.sender,
       date:emailMeta.date,
+      messageId:emailMeta.messageId||'',
       fileId:result.id,
       url:'https://drive.google.com/file/d/'+result.id+'/view',
       uploadedAt:new Date().toLocaleDateString('de-DE')
     });
+    // Fix 1: PDF-Vorschau aus EML-Body erstellen und in taskEmailPdfs speichern
+    if(isEml&&(emailMeta.bodyHtml||emailMeta.bodyText)){
+      try{
+        const _pdfInfo={subject:emailMeta.subject,sender:emailMeta.sender,date:new Date(emailMeta.date),bodyHtml:emailMeta.bodyHtml,bodyText:emailMeta.bodyText,cidMap:emailMeta.cidMap};
+        const _pdfData=await _ezBuildPdfFromHtml(_pdfInfo);
+        const _d=new Date(emailMeta.date);
+        const _stamp=_d.getFullYear()+'.'+_ez2(_d.getMonth()+1)+'.'+_ez2(_d.getDate());
+        const _pdfName=_stamp+'_'+_ezClean(emailMeta.subject||file.name)+'.pdf';
+        const _pdfResult=await _ezUpload(_pdfData,_pdfName,fid);
+        if(_pdfResult&&_pdfResult.id){
+          if(!taskEmailPdfs)taskEmailPdfs=[];
+          const _pdfEntry={name:_pdfName,fileId:_pdfResult.id,url:'https://drive.google.com/file/d/'+_pdfResult.id+'/view',uploadedAt:new Date().toLocaleDateString('de-DE'),date:emailMeta.date};
+          taskEmailPdfs.push(_pdfEntry);
+          const _tpdf=findTaskById((document.getElementById('taskId')||{}).value||'');
+          if(_tpdf){if(!_tpdf.emailPdfs)_tpdf.emailPdfs=[];_tpdf.emailPdfs.push(_pdfEntry);}
+        }
+      }catch(_pe){console.warn('[PTP] PDF-Vorschau fehlgeschlagen:',_pe);}
+    }
     // Metadaten in Task-Objekt und Formularfelder übertragen
     const taskId=(document.getElementById('taskId')||{}).value||'';
     const t=findTaskById(taskId);
@@ -13385,8 +13415,8 @@ function openNewTaskModal(){
   const _aufgabenDefault=DEFAULT_FOLDER_NOTIZ;
   const _nasDefault='\\\\nas-ddbraun\\Kunden';
   const _isAufgaben=(boardTypes[currentBoard]||'baustelle')==='notiz';
-  // Foto-Ordner: nur Baustelle; Projektordner + E-Mail-Ordner: je nach Typ
-  const _gdEl=document.getElementById('tGD');if(_gdEl)_gdEl.value=_driveDefault;
+  // Foto-Ordner + Projektordner + E-Mail-Ordner: je nach Typ (Aufgabe oder Baustelle)
+  const _gdEl=document.getElementById('tGD');if(_gdEl)_gdEl.value=_isAufgaben?_aufgabenDefault:_driveDefault;
   const _gdOEl=document.getElementById('tGDOrdner');if(_gdOEl)_gdOEl.value=_isAufgaben?_aufgabenDefault:_driveDefault;
   const _eoEl=document.getElementById('tEmailOrdner');if(_eoEl)_eoEl.value=_isAufgaben?_aufgabenDefault:_driveDefault;
   const _nasEl=document.getElementById('tNAS');if(_nasEl)_nasEl.value=_nasDefault;
@@ -13597,7 +13627,7 @@ function openEditTaskModal(id){
   const _nDef='\\\\nas-ddbraun\\Kunden';
   const _isAufgabenEdit=(boardTypes[_taskBoard]||'baustelle')==='notiz';
   document.getElementById('tGDOrdner').value=task.gdriveOrdner||(_isAufgabenEdit?_aufgabenDef:_dDef);
-  document.getElementById('tGD').value=task.gdrive||_dDef;
+  document.getElementById('tGD').value=task.gdrive||(_isAufgabenEdit?_aufgabenDef:_dDef);
   document.getElementById('tNAS').value=task.nas||_nDef;
   _updateFotoOrdnerHint();
   document.getElementById('tEmailOrdner').value=task.emailOrdner||(_isAufgabenEdit?_aufgabenDef:_dDef);
