@@ -2568,6 +2568,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
         <span id="msThreadToggleArrow" style="font-size:13px;color:var(--text2);transition:transform .2s;display:inline-block;">▾</span>
       </div>
       <div id="msThreadList" style="padding:0 10px 6px;"></div>
+      <div id="msInlinePreview" style="display:none;"></div>
       <div id="msLinkRow" style="display:none;padding:4px 10px 8px;border-top:1px solid var(--border);">
         <div style="font-size:11px;color:var(--text2);margin-bottom:4px;">Gespeicherte Message-ID(s) — oder neue ID manuell eintragen:</div>
         <div id="msMsgIdDisplay" style="font-size:10px;color:var(--text2);font-family:monospace;background:var(--bg2);border-radius:5px;padding:4px 7px;margin-bottom:5px;word-break:break-all;display:none;"></div>
@@ -2810,7 +2811,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-21 · #95'; // Nummer = CACHE_NAME in sw.js (pam-desktop-v94)
+const PAM_BUILD = 'v2026-05-21 · #96'; // Nummer = CACHE_NAME in sw.js (pam-desktop-v96)
 
 // ── STATE ──
 let boards = {};
@@ -10264,7 +10265,7 @@ function _msRenderThread(task){
     const d=m.date?new Date(m.date):null;
     const dateStr=d?`${_ez2(d.getDate())}.${_ez2(d.getMonth()+1)}.${String(d.getFullYear()).slice(2)} ${_ez2(d.getHours())}:${_ez2(d.getMinutes())}`:'';
     const from=m.fromName||m.from||'';
-    return`<div style="display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-bottom:0.5px solid var(--border);cursor:pointer;" onclick="_msOpenMailOverlay('${taskId}',${i})">
+    return`<div id="msMailItem_${i}" style="display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-bottom:0.5px solid var(--border);cursor:pointer;border-radius:4px;transition:background .15s;" onclick="_msToggleInlinePreview('${taskId}',${i})">
       <div style="width:8px;height:8px;border-radius:50%;background:${dotColor};flex-shrink:0;margin-top:5px;"></div>
       <div style="flex:1;min-width:0;">
         <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
@@ -10300,7 +10301,7 @@ function _msRenderTimeline(task){
     const dateStr=d?`${_ez2(d.getDate())}.${_ez2(d.getMonth()+1)}. ${_ez2(d.getHours())}:${_ez2(d.getMinutes())}`:'';
     const from=m.fromName||m.from||'';
     const label=isOut?'Gesendet':'Eingang';
-    return`<button type="button" title="${esc(label+' · '+from+' · '+dateStr+'\n'+m.preview)}" onclick="_msOpenMailOverlay('${taskId}',${i})"
+    return`<button type="button" title="${esc(label+' · '+from+' · '+dateStr+'\n'+m.preview)}" onclick="_msToggleInlinePreview('${taskId}',${i})"
       style="display:inline-flex;align-items:center;gap:4px;padding:3px 7px;border-radius:12px;border:0.5px solid ${bg};background:${isOut?'#DCFCE7':'#DBEAFE'};cursor:pointer;font-size:10px;color:${isOut?'#15803D':'#1E40AF'};font-weight:500;white-space:nowrap;">
       <span style="width:6px;height:6px;border-radius:50%;background:${bg};display:inline-block;flex-shrink:0;"></span>${esc(from.split(' ')[0]||from)} · ${dateStr}
     </button>`;
@@ -10390,6 +10391,164 @@ async function _msOpenMailOverlay(taskId,idx){
     const b=document.getElementById('_msMailBody');
     if(b)b.innerHTML='<p style="color:#888;">'+esc(m.preview||'Kein Inhalt verfügbar – bitte Outlook verbinden')+'</p>';
   }
+}
+
+// ── Inline-Vorschau im Outlook-Verlauf ──────────────────────────────────────
+let _msActivePreviewIdx=-1;
+
+function _msToggleInlinePreview(taskId,idx){
+  const prev=document.getElementById('msInlinePreview');
+  if(!prev){_msOpenMailOverlay(taskId,idx);return;}
+  if(_msActivePreviewIdx===idx){
+    prev.style.display='none';_msActivePreviewIdx=-1;_msUpdateActiveMailStyle(-1);return;
+  }
+  _msActivePreviewIdx=idx;_msUpdateActiveMailStyle(idx);_msShowInlinePreview(taskId,idx);
+}
+
+function _msUpdateActiveMailStyle(activeIdx){
+  const list=document.getElementById('msThreadList');if(!list)return;
+  [...list.children].forEach((el,i)=>{
+    el.style.background=i===activeIdx?'rgba(0,120,212,.08)':'';
+  });
+}
+
+async function _msShowInlinePreview(taskId,idx){
+  const prev=document.getElementById('msInlinePreview');if(!prev)return;
+  const task=findTaskById(taskId);if(!task)return;
+  const m=(task.msThreadMessages||[])[idx];if(!m)return;
+  const isOut=m.direction==='gesendet';
+  const d=m.date?new Date(m.date):null;
+  const dateStr=d?`${_ez2(d.getDate())}.${_ez2(d.getMonth()+1)}.${d.getFullYear()} ${_ez2(d.getHours())}:${_ez2(d.getMinutes())}`:'';
+  const from=m.fromName||m.from||'';
+  const dirBg=isOut?'rgba(22,163,74,.12)':'rgba(29,78,216,.10)';
+  const dirTxt=isOut?'#15803D':'#1E40AF';
+  const dirLabel=isOut?'Gesendet':'Eingang';
+  prev.style.display='block';
+  prev.innerHTML=`<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;margin:4px 10px 10px;background:var(--bg2);">
+    <div style="background:var(--bg3);padding:8px 12px;display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--border);flex-wrap:wrap;">
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:12px;font-weight:600;color:var(--text1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(m.subject||'(kein Betreff)')}</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:1px;">${esc(from)} · ${esc(dateStr)}</div>
+      </div>
+      <span style="font-size:10px;padding:2px 7px;border-radius:8px;background:${dirBg};color:${dirTxt};font-weight:600;flex-shrink:0;">${dirLabel}</span>
+      <button type="button" onclick="_msOpenMailOverlay('${taskId}',${idx})" style="background:none;border:1px solid var(--border);border-radius:4px;font-size:11px;cursor:pointer;padding:3px 8px;color:var(--text1);flex-shrink:0;" title="Groß anzeigen">⛶ Groß</button>
+      <button type="button" onclick="_msSaveMailSnapshot('${taskId}',${idx})" style="background:none;border:1px solid var(--border);border-radius:4px;font-size:11px;cursor:pointer;padding:3px 8px;color:var(--text1);flex-shrink:0;" title="Vollständige E-Mail mit Bildern als HTML auf Drive sichern">💾 Sichern</button>
+      <button type="button" onclick="document.getElementById('msInlinePreview').style.display='none';_msActivePreviewIdx=-1;_msUpdateActiveMailStyle(-1);" style="background:none;border:none;font-size:14px;cursor:pointer;color:var(--text2);padding:2px 5px;flex-shrink:0;" title="Schließen">✕</button>
+    </div>
+    <div id="msInlineBody" style="min-height:120px;max-height:420px;overflow-y:auto;">
+      <div style="padding:16px;color:var(--text2);font-size:13px;">⏳ Lade Mail-Inhalt…</div>
+    </div>
+  </div>`;
+  if(msToken&&m.id){
+    try{
+      const r=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${m.id}?$select=body`,{headers:{Authorization:'Bearer '+msToken}});
+      if(r.ok){
+        const data=await r.json();
+        m._cachedBodyHtml=data.body?.content||'';
+        const bodyEl=document.getElementById('msInlineBody');
+        if(bodyEl){
+          if(data.body?.contentType==='html'){
+            const fr=document.createElement('iframe');
+            fr.style.cssText='width:100%;height:380px;border:none;display:block;';
+            fr.sandbox='allow-same-origin';
+            bodyEl.innerHTML='';bodyEl.appendChild(fr);
+            fr.contentDocument.open();fr.contentDocument.write(data.body.content||'');fr.contentDocument.close();
+            setTimeout(()=>{try{const h=fr.contentDocument.body.scrollHeight;fr.style.height=Math.min(h+20,420)+'px';}catch(e){}},300);
+          } else {
+            bodyEl.innerHTML='<pre style="white-space:pre-wrap;font-family:Arial,sans-serif;font-size:13px;padding:16px;margin:0;">'+esc(data.body?.content||m.preview||'')+'</pre>';
+          }
+        }
+      }
+    }catch(e){const b=document.getElementById('msInlineBody');if(b)b.innerHTML='<p style="padding:16px;color:var(--text2);">'+esc(m.preview||'Vorschau nicht verfügbar')+'</p>';}
+  } else {
+    const b=document.getElementById('msInlineBody');
+    if(b)b.innerHTML='<p style="padding:16px;color:var(--text2);">'+esc(m.preview||'Kein Inhalt – bitte Outlook verbinden')+'</p>';
+  }
+}
+
+async function _msSaveMailSnapshot(taskId,idx){
+  const task=findTaskById(taskId);if(!task)return;
+  const m=(task.msThreadMessages||[])[idx];if(!m)return;
+  showToast('📸 Sichere E-Mail Snapshot…','info',2500);
+  let bodyHtml=m._cachedBodyHtml||'';
+  if(!bodyHtml&&msToken&&m.id){
+    try{
+      const r=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${m.id}?$select=body`,{headers:{Authorization:'Bearer '+msToken}});
+      if(r.ok){const data=await r.json();bodyHtml=data.body?.content||'';}
+    }catch(e){}
+  }
+  if(!bodyHtml){showToast('⚠ Kein Mail-Inhalt verfügbar','warn',3000);return;}
+  // Externe Bilder als base64 einbetten
+  let processed=bodyHtml;
+  const imgMatches=[...bodyHtml.matchAll(/(<img[^>]+src=["'])(?!data:)([^"']+)(["'])/gi)];
+  for(const [full,pre,url,post] of imgMatches){
+    try{
+      const r=await fetch(url);if(!r.ok)continue;
+      const b=await r.blob();
+      const b64=await new Promise(res=>{const rd=new FileReader();rd.onload=()=>res(rd.result);rd.onerror=()=>res(null);rd.readAsDataURL(b);});
+      if(b64)processed=processed.replaceAll(full,pre+b64+post);
+    }catch(e){}
+  }
+  const d=m.date?new Date(m.date):new Date();
+  const subj=(m.subject||'E-Mail').replace(/[\\/:*?"<>|]/g,'_').substring(0,60);
+  const stamp=`${d.getFullYear()}.${_ez2(d.getMonth()+1)}.${_ez2(d.getDate())}_${_ez2(d.getHours())}${_ez2(d.getMinutes())}`;
+  const fname=`${stamp}_${subj}.html`;
+  const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(m.subject||'E-Mail')}</title>
+<style>body{font-family:Arial,Helvetica,sans-serif;font-size:13px;margin:0;line-height:1.55;}
+.pam-hdr{background:#1a364d;color:#fff;padding:10px 18px;font-size:12px;}
+.pam-hdr strong{font-size:14px;display:block;margin-bottom:3px;}
+.mail-body{padding:14px 20px;}</style></head><body>
+<div class="pam-hdr"><strong>${esc(m.subject||'(kein Betreff)')}</strong>Von: ${esc(m.fromName||m.from||'')} · ${esc(d.toLocaleDateString('de-DE',{weekday:'short',day:'2-digit',month:'long',year:'numeric'})+' '+_ez2(d.getHours())+':'+_ez2(d.getMinutes())+' Uhr')}<br>Gespeichert: ${new Date().toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'})} – PAM Workboard</div>
+<div class="mail-body">${processed}</div></body></html>`;
+  const fid=await _getOrCreateEmailFid(task,defaultFolderId);
+  try{
+    const result=await _driveUploadGeneric(fname,html,'text/html',fid);
+    if(!result?.id)throw new Error('Upload fehlgeschlagen');
+    taskEmailOriginals.push({
+      fileId:result.id,
+      url:'https://drive.google.com/file/d/'+result.id+'/view',
+      name:fname,
+      date:d.toISOString(),
+      uploadedAt:new Date().toLocaleDateString('de-DE'),
+      subject:m.subject||'',
+      sender:m.fromName||m.from||'',
+      isSnapshot:true,
+      messageId:m.messageId||m.id||''
+    });
+    renderEmailSection();scheduleTaskFieldSave();
+    showToast('✅ Snapshot gespeichert: '+fname,'success',4000);
+  }catch(e){showToast('⚠ Sichern fehlgeschlagen: '+e.message,'error',4000);}
+}
+
+async function _previewSnapshot(fileId,filename){
+  if(!fileId||!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden','warn',3000);return;}
+  const GID='_snapPreviewOverlay';
+  const old=document.getElementById(GID);if(old)old.remove();
+  const ov=document.createElement('div');
+  ov.id=GID;
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:999998;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+  ov.innerHTML=`<div style="background:#fff;border-radius:10px;max-width:760px;width:100%;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;">
+    <div style="background:#1a364d;color:#fff;padding:10px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0;">
+      <div style="flex:1;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">🌐 ${esc(filename||'Snapshot')}</div>
+      <button onclick="document.getElementById('${GID}').remove()" style="background:rgba(255,255,255,.15);border:none;color:#fff;font-size:14px;cursor:pointer;padding:4px 8px;border-radius:4px;">✕</button>
+    </div>
+    <div id="_snapBody" style="flex:1;display:flex;align-items:center;justify-content:center;font-size:13px;color:#888;">⏳ Lädt…</div>
+  </div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
+  try{
+    const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const html=await r.text();
+    const bodyEl=document.getElementById('_snapBody');
+    if(bodyEl){
+      const fr=document.createElement('iframe');
+      fr.style.cssText='width:100%;height:100%;border:none;flex:1;';
+      bodyEl.style.cssText='flex:1;overflow:hidden;display:flex;flex-direction:column;';
+      bodyEl.innerHTML='';bodyEl.appendChild(fr);
+      fr.srcdoc=html;
+    }
+  }catch(e){const b=document.getElementById('_snapBody');if(b)b.innerHTML='<p style="color:red;padding:20px;">⚠ '+esc(e.message)+'</p>';}
 }
 
 // Ermittelt den Drive-Ordner für E-Mail-Ablage eines Tasks:
@@ -11773,6 +11932,17 @@ function _eicEnvSvg(){
     <path d="M59 52 L41 36" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1.5"/>
   </svg>`;
 }
+function _eicSnapSvg(){
+  return `<svg viewBox="0 0 68 68" xmlns="http://www.w3.org/2000/svg">
+    <rect width="68" height="68" rx="8" fill="#e6f4ea"/>
+    <rect x="9" y="19" width="50" height="33" rx="4" fill="#34A853"/>
+    <path d="M9 23 L34 41 L59 23" fill="none" stroke="rgba(255,255,255,0.92)" stroke-width="2.5" stroke-linejoin="round"/>
+    <path d="M9 52 L27 36" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1.5"/>
+    <path d="M59 52 L41 36" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1.5"/>
+    <circle cx="54" cy="16" r="9" fill="#34A853" stroke="white" stroke-width="1.5"/>
+    <path d="M49.5 16 L52.5 19 L58.5 13" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>`;
+}
 function _eicPdfSvg(){
   return `<svg viewBox="0 0 68 68" xmlns="http://www.w3.org/2000/svg">
     <rect width="68" height="68" rx="8" fill="#fce8e6"/>
@@ -11788,12 +11958,14 @@ function _eicPdfSvg(){
 }
 function _eicHtml(item){
   const isPdf=item._type==='pdf';
+  const isSnap=!isPdf&&!!item.isSnapshot;
   const name=item.name||'';
   const nameEsc=esc(name);
   const short=name.length>9?name.substring(0,9)+'…':name;
-  const icon=isPdf?_eicPdfSvg():_eicEnvSvg();
+  const icon=isPdf?_eicPdfSvg():(isSnap?_eicSnapSvg():_eicEnvSvg());
   const btnsPdf=`<button type="button" class="eic-btn" onclick="_openEmailPdfGallery(${item._idx})" title="Vollbild-Galerie">🔍</button><a class="eic-btn" href="${esc(item.url)}" target="_blank" title="In Google Drive öffnen">📂</a><button type="button" class="eic-btn eic-btn-del" onclick="taskEmailPdfs.splice(${item._idx},1);renderEmailSection();scheduleTaskFieldSave();" title="Entfernen">✕</button>`;
   const btnsOrig=`<button type="button" class="eic-btn" onclick="_downloadEmailOrig('${esc(item.fileId)}','${nameEsc}')" title="Herunterladen – in Downloads-Ordner speichern, dann per Doppelklick in Outlook öffnen">⬇</button><button type="button" class="eic-btn" onclick="_printEmailFromDrive('${esc(item.fileId)}','${nameEsc}')" title="Als PDF drucken">🖨</button><button type="button" class="eic-btn eic-btn-del" onclick="taskEmailOriginals.splice(${item._idx},1);renderEmailSection();scheduleTaskFieldSave();" title="Entfernen">✕</button>`;
+  const btnsSnap=`<button type="button" class="eic-btn" onclick="_previewSnapshot('${esc(item.fileId)}','${nameEsc}')" title="Vorschau öffnen">⛶</button><button type="button" class="eic-btn" onclick="_downloadEmailOrig('${esc(item.fileId)}','${nameEsc}')" title="Herunterladen">⬇</button><button type="button" class="eic-btn eic-btn-del" onclick="taskEmailOriginals.splice(${item._idx},1);renderEmailSection();scheduleTaskFieldSave();" title="Entfernen">✕</button>`;
   // Datum ermitteln: item.date → Dateiname (2026.05.18_...) → uploadedAt
   let _eicDate='';
   const _rd=item.date?new Date(item.date):null;
@@ -11802,7 +11974,7 @@ function _eicHtml(item){
   if(!_eicDate)_eicDate=item.uploadedAt||'';
   return `<div class="eic">
     <div class="eic-thumb">${icon}</div>
-    <div class="eic-overlay">${isPdf?btnsPdf:btnsOrig}</div>
+    <div class="eic-overlay">${isPdf?btnsPdf:(isSnap?btnsSnap:btnsOrig)}</div>
     <div class="eic-tip">${nameEsc}</div>
     <div class="eic-name">${esc(short)}</div>
     ${_eicDate?`<div class="eic-date">${esc(_eicDate)}</div>`:''}
@@ -11895,19 +12067,21 @@ function renderEmailPdfs(){renderEmailSection();}
 
 function _emailAllListItem(item){
   const isPdf=item._type==='pdf';
+  const isSnap=!isPdf&&!!item.isSnapshot;
   const name=item.name||'';
   const nameEsc=esc(name);
-  const icon=isPdf?'📄':'📨';
+  const icon=isPdf?'📄':(isSnap?'🌐':'📨');
   const delFn=isPdf
     ?`taskEmailPdfs.splice(${item._idx},1);renderEmailSection();scheduleTaskFieldSave();_closeEmailAllPopup();`
     :`taskEmailOriginals.splice(${item._idx},1);renderEmailSection();scheduleTaskFieldSave();_closeEmailAllPopup();`;
   const btnsPdf=`<button type="button" class="eo-icon-btn" onclick="_openEmailPdfGallery(${item._idx})" title="Vollbild-Galerie">🔍</button><a class="eo-icon-btn" href="${esc(item.url)}" target="_blank" title="Drive" style="text-decoration:none;">📂</a><button type="button" class="eo-del" onclick="${delFn}" title="Entfernen">✕</button>`;
   const btnsOrig=`<button type="button" class="eo-icon-btn" onclick="_downloadEmailOrig('${esc(item.fileId)}','${nameEsc}')" title="Download – in Downloads-Ordner, dann per Doppelklick in Outlook öffnen">⬇</button><button type="button" class="eo-icon-btn" onclick="_printEmailFromDrive('${esc(item.fileId)}','${nameEsc}')" title="Als PDF drucken">🖨</button><button type="button" class="eo-del" onclick="${delFn}" title="Entfernen">✕</button>`;
+  const btnsSnap=`<button type="button" class="eo-icon-btn" onclick="_previewSnapshot('${esc(item.fileId)}','${nameEsc}')" title="Vorschau öffnen">⛶</button><button type="button" class="eo-icon-btn" onclick="_downloadEmailOrig('${esc(item.fileId)}','${nameEsc}')" title="Herunterladen">⬇</button><button type="button" class="eo-del" onclick="${delFn}" title="Entfernen">✕</button>`;
   return `<div class="email-orig-item">
     <span style="font-size:15px;flex-shrink:0;">${icon}</span>
     <span class="eo-name" title="${nameEsc}">${nameEsc}</span>
     <span class="eo-date">${esc(item.uploadedAt||'')}</span>
-    ${isPdf?btnsPdf:btnsOrig}
+    ${isPdf?btnsPdf:(isSnap?btnsSnap:btnsOrig)}
   </div>`;
 }
 function _openEmailAllPopup(){
@@ -12100,7 +12274,21 @@ function _openEmailThumbnailGrid(){
     } else {
       _setEmFooter(item);
       const ext=(item.name||'').split('.').pop().toLowerCase();
-      if(ext==='eml'&&item.fileId&&gdriveToken){
+      if(ext==='html'&&item.isSnapshot&&item.fileId&&gdriveToken){
+        previewContent.style.cssText='flex:1;display:flex;flex-direction:column;overflow:hidden;';
+        previewContent.innerHTML='<div style="display:flex;align-items:center;justify-content:center;flex:1;color:var(--text2);font-size:13px;">⏳ Snapshot lädt…</div>';
+        fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(item.fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}})
+          .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.text();})
+          .then(html=>{
+            if(!document.getElementById(GID))return;
+            const fr=document.createElement('iframe');
+            fr.style.cssText='flex:1;width:100%;border:none;';
+            previewContent.innerHTML='';
+            previewContent.appendChild(fr);
+            fr.srcdoc=html;
+          })
+          .catch(ex=>{previewContent.style.cssText='flex:1;overflow-y:auto;';previewContent.innerHTML='<div style="padding:20px;color:var(--red);font-size:12px;">⚠ '+esc(ex.message)+'</div>';});
+      } else if(ext==='eml'&&item.fileId&&gdriveToken){
         previewContent.style.cssText='flex:1;display:flex;flex-direction:column;overflow:hidden;';
         previewContent.innerHTML='<div style="display:flex;align-items:center;justify-content:center;flex:1;color:var(--text2);font-size:13px;">⏳ E-Mail lädt…</div>';
         fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(item.fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}})
@@ -12191,8 +12379,10 @@ function _openEmailThumbnailGrid(){
     const _isMsg=_ext2==='msg';
     const _isWord=['doc','docx'].includes(_ext2);
     const _isExcel=['xls','xlsx'].includes(_ext2);
+    const _isSnap2=!!item.isSnapshot&&_ext2==='html';
     let _icoBg,_icoText,_typeLabel;
     if(isPdf)           {_icoBg='rgba(231,76,60,.12)'; _icoText='📄'; _typeLabel='PDF-Dokument';}
+    else if(_isSnap2)   {_icoBg='rgba(52,168,83,.12)'; _icoText='🌐'; _typeLabel='E-Mail Snapshot';}
     else if(_isImg)     {_icoBg='rgba(39,174,96,.12)'; _icoText='🖼️'; _typeLabel='Bilddatei';}
     else if(_isMsg)     {_icoBg='rgba(0,120,212,.12)'; _icoText='✉️'; _typeLabel='Outlook-Nachricht';}
     else if(_isWord)    {_icoBg='rgba(0,70,127,.12)';  _icoText='📝'; _typeLabel='Word-Dokument';}
@@ -12302,8 +12492,13 @@ function _openEmailThumbnailGrid(){
       delBtn.style.cssText+='border-color:rgba(231,76,60,.4);color:var(--red);margin-left:auto;';
       actions.appendChild(delBtn);
     } else {
-      actions.appendChild(_makeIcoBtn('⬇','Herunterladen – in Downloads-Ordner speichern, dann per Doppelklick in Outlook öffnen',()=>_downloadEmailOrig(item.fileId,name)));
-      actions.appendChild(_makeIcoBtn('🖨','Als PDF drucken',()=>_printEmailFromDrive(item.fileId,name)));
+      if(_isSnap2){
+        actions.appendChild(_makeIcoBtn('⛶','Vorschau öffnen',()=>_previewSnapshot(item.fileId,name)));
+        actions.appendChild(_makeIcoBtn('⬇','Herunterladen',()=>_downloadEmailOrig(item.fileId,name)));
+      } else {
+        actions.appendChild(_makeIcoBtn('⬇','Herunterladen – in Downloads-Ordner speichern, dann per Doppelklick in Outlook öffnen',()=>_downloadEmailOrig(item.fileId,name)));
+        actions.appendChild(_makeIcoBtn('🖨','Als PDF drucken',()=>_printEmailFromDrive(item.fileId,name)));
+      }
       const spacer=document.createElement('span');spacer.style.cssText='flex:1;';
       actions.appendChild(spacer);
       const delBtn=_makeIcoBtn('✕','Entfernen',()=>{
