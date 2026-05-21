@@ -2845,7 +2845,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-21 · #118'; // Nummer = CACHE_NAME in sw.js (pam-desktop-v118)
+const PAM_BUILD = 'v2026-05-21 · #119'; // Nummer = CACHE_NAME in sw.js (pam-desktop-v119)
 
 // ── STATE ──
 let boards = {};
@@ -12417,7 +12417,7 @@ function _openEmailThumbnailGrid(){
         tt.textContent=tip;b.addEventListener('mouseenter',()=>tt.style.opacity='1');b.addEventListener('mouseleave',()=>tt.style.opacity='0');b.appendChild(tt);return b;
       }
       if(item2._type==='orig'&&item2.fileId)btns.appendChild(_mkFB('⬇','Herunterladen',()=>_downloadEmailOrig(item2.fileId,item2.name||'')));
-      if(item2.fileId)btns.appendChild(_mkFB('🖨','Drucken',()=>_printEmailFromDrive(item2.fileId,item2.name||'')));
+      if(item2.fileId)btns.appendChild(_mkFB('🖨','Drucken',()=>_printEmailFromDrive(item2.fileId,item2.name||'',item2._type==='orig')));
       if(item2.url)btns.appendChild(_mkFB('📂','In Drive öffnen',()=>window.open(item2.url,'_blank')));
       const delB=_mkFB('✕','Entfernen',()=>{
         if(item2._type==='pdf'){taskEmailPdfs.splice(item2._idx,1);}else{taskEmailOriginals.splice(item2._idx,1);}
@@ -12700,7 +12700,7 @@ function _openEmailThumbnailGrid(){
         actions.appendChild(_makeIcoBtn('📂','Ordner in Google Drive öffnen',()=>window.open(_sf,'_blank')));
       } else {
         actions.appendChild(_makeIcoBtn('⬇','Herunterladen – in Downloads-Ordner speichern, dann per Doppelklick in Outlook öffnen',()=>_downloadEmailOrig(item.fileId,name)));
-        actions.appendChild(_makeIcoBtn('🖨','Als PDF drucken',()=>_printEmailFromDrive(item.fileId,name)));
+        actions.appendChild(_makeIcoBtn('🖨','Als PDF drucken',()=>_printEmailFromDrive(item.fileId,name,true)));
       }
       const spacer=document.createElement('span');spacer.style.cssText='flex:1;';
       actions.appendChild(spacer);
@@ -13030,6 +13030,34 @@ async function _printEmailFromDrive(fileId,filename,forceEml){
       const text=await r.text();
       const info=_parseEmlText(text);
       if(!info.subject)info.subject=filename.replace(/\.eml$/i,'');
+      // Fallback: wenn bodyHtml leer → MIME-Teile zeilenweise scannen (robust gegen fehlerhafte Boundary-Erkennung)
+      if(!info.bodyHtml){
+        const _lines=text.split(/\r?\n/);
+        let _li=0,_found='';
+        while(_li<_lines.length&&!_found){
+          let _pct='',_penc='',_pcs='utf-8',_hi=_li;
+          while(_hi<_lines.length&&_lines[_hi].trim()!==''){
+            const _l=_lines[_hi];
+            if(/^Content-Type:\s*text\/html/i.test(_l)){_pct='text/html';const _cm=_l.match(/charset=["']?([^"';\s]+)/i);if(_cm)_pcs=_cm[1];}
+            if(/^Content-Transfer-Encoding:\s*(\S+)/i.test(_l)){const _em=_l.match(/Content-Transfer-Encoding:\s*(\S+)/i);if(_em)_penc=_em[1].trim().replace(/['"]/g,'').toLowerCase();}
+            _hi++;
+          }
+          if(_pct==='text/html'&&_hi<_lines.length){
+            let _ci=_hi+1,_cb=[];
+            while(_ci<_lines.length&&!(/^--/.test(_lines[_ci]))){_cb.push(_lines[_ci]);_ci++;}
+            const _raw=_cb.join('\n').trim();
+            if(_raw){
+              if(_penc==='base64'){try{_found=_decodeB64Body(_raw,_pcs);}catch(e){}}
+              else if(_penc==='quoted-printable'){_found=_decodeQP(_raw,_pcs);}
+              else{_found=_raw;}
+            }
+          }
+          _li=_hi+1;
+        }
+        if(_found)info.bodyHtml=_found;
+      }
+      // Letzter Ausweg: direkte HTML-Regex im Roh-Text
+      if(!info.bodyHtml){const _hm=text.match(/<html[\s\S]*?<\/html>/i);if(_hm)info.bodyHtml=_hm[0];}
       _openEmailPrintWindow(info,w);
     }catch(e){if(w&&!w.closed)w.document.body.innerHTML='<p style="color:red">⚠ Fehler: '+e.message+'</p>';showToast('⚠ Fehler: '+e.message,'error');}
     return;
