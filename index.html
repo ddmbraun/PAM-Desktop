@@ -2811,7 +2811,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-21 · #96'; // Nummer = CACHE_NAME in sw.js (pam-desktop-v96)
+const PAM_BUILD = 'v2026-05-21 · #97'; // Nummer = CACHE_NAME in sw.js (pam-desktop-v97)
 
 // ── STATE ──
 let boards = {};
@@ -9865,7 +9865,8 @@ function _msOpenThreadPopup(){
       <button type="button" onclick="_msLoadEmailThread()" style="padding:5px 14px;border-radius:6px;background:#0078d4;color:#fff;border:none;cursor:pointer;font-weight:600;font-size:12px;">⟳ Verlauf laden</button>
       <span id="_msTPStatus" style="font-size:11px;color:var(--text2,#6b7280);flex:1;"></span>
     </div>
-    <div id="_msTPList" style="flex:1;overflow-y:auto;padding:4px 14px 10px;"></div>
+    <div id="_msTPList" style="overflow-y:auto;padding:4px 14px 6px;max-height:340px;"></div>
+    <div id="_msTPInlinePreview" style="display:none;border-top:1px solid var(--border,#e5e7eb);flex-shrink:0;overflow:hidden;"></div>
   </div>`;
   document.body.appendChild(ov);
   ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
@@ -9892,7 +9893,7 @@ function _msRefreshThreadPopup(task){
     const d=m.date?new Date(m.date):null;
     const dateStr=d?`${_ez2(d.getDate())}.${_ez2(d.getMonth()+1)}.${String(d.getFullYear()).slice(2)} ${_ez2(d.getHours())}:${_ez2(d.getMinutes())}`:'';
     const from=m.fromName||m.from||'';
-    return`<div style="display:flex;gap:10px;align-items:flex-start;padding:9px 4px;border-bottom:0.5px solid var(--border,#e5e7eb);cursor:pointer;" onclick="_msOpenMailOverlay('${taskId}',${i})">
+    return`<div id="_msTPItem_${i}" style="display:flex;gap:10px;align-items:flex-start;padding:9px 4px;border-bottom:0.5px solid var(--border,#e5e7eb);cursor:pointer;border-radius:4px;transition:background .15s;" onclick="_msPopupTogglePreview('${taskId}',${i})">
       <div style="width:9px;height:9px;border-radius:50%;background:${dotColor};flex-shrink:0;margin-top:6px;"></div>
       <div style="flex:1;min-width:0;">
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:2px;">
@@ -9908,6 +9909,68 @@ function _msRefreshThreadPopup(task){
     </div>`;
   }).join('');
 }
+// ── Inline-Vorschau im Outlook-Popup ─────────────────────────────
+let _msTPActiveIdx=-1;
+async function _msPopupTogglePreview(taskId,idx){
+  const prev=document.getElementById('_msTPInlinePreview');
+  if(!prev)return;
+  // Gleiche Mail nochmal → Vorschau schließen
+  if(_msTPActiveIdx===idx){
+    prev.style.display='none';_msTPActiveIdx=-1;_msTPHighlight(-1);return;
+  }
+  _msTPActiveIdx=idx;_msTPHighlight(idx);
+  const task=findTaskById(taskId);if(!task)return;
+  const m=(task.msThreadMessages||[])[idx];if(!m)return;
+  const isOut=m.direction==='gesendet';
+  const d=m.date?new Date(m.date):null;
+  const dateStr=d?`${_ez2(d.getDate())}.${_ez2(d.getMonth()+1)}.${d.getFullYear()} ${_ez2(d.getHours())}:${_ez2(d.getMinutes())}`:'';
+  const from=m.fromName||m.from||'';
+  const dirBg=isOut?'rgba(22,163,74,.12)':'rgba(29,78,216,.10)';
+  const dirTxt=isOut?'#15803D':'#1E40AF';
+  prev.style.display='block';
+  prev.innerHTML=`<div style="padding:8px 14px 6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;background:var(--bg2,#f9fafb);">
+    <div style="flex:1;min-width:0;">
+      <div style="font-size:12px;font-weight:700;color:var(--text1,#111);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(m.subject||'(kein Betreff)')}</div>
+      <div style="font-size:11px;color:var(--text2,#6b7280);">${esc(from)} · ${esc(dateStr)} &nbsp;<span style="padding:1px 7px;border-radius:8px;background:${dirBg};color:${dirTxt};font-weight:600;font-size:10px;">${isOut?'Gesendet':'Eingang'}</span></div>
+    </div>
+    <button type="button" onclick="_msOpenMailOverlay('${taskId}',${idx})" style="background:none;border:1px solid var(--border,#e5e7eb);border-radius:5px;font-size:11px;cursor:pointer;padding:3px 9px;color:var(--text1,#111);flex-shrink:0;">⛶ Groß</button>
+    <button type="button" onclick="_msSaveMailSnapshot('${taskId}',${idx})" style="background:none;border:1px solid var(--border,#e5e7eb);border-radius:5px;font-size:11px;cursor:pointer;padding:3px 9px;color:var(--text1,#111);flex-shrink:0;" title="Vollständige E-Mail mit Bildern als HTML auf Drive sichern">💾 Sichern</button>
+    <button type="button" onclick="document.getElementById('_msTPInlinePreview').style.display='none';_msTPActiveIdx=-1;_msTPHighlight(-1);" style="background:none;border:none;font-size:14px;cursor:pointer;color:var(--text2,#9ca3af);padding:2px 4px;">✕</button>
+  </div>
+  <div id="_msTPInlineBody" style="max-height:320px;overflow-y:auto;">
+    <div style="padding:14px;color:var(--text2,#9ca3af);font-size:13px;">⏳ Lade Mail-Inhalt…</div>
+  </div>`;
+  if(msToken&&m.id){
+    try{
+      const r=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${m.id}?$select=body`,{headers:{Authorization:'Bearer '+msToken}});
+      if(r.ok){
+        const data=await r.json();
+        m._cachedBodyHtml=data.body?.content||'';
+        const bodyEl=document.getElementById('_msTPInlineBody');
+        if(bodyEl){
+          if(data.body?.contentType==='html'){
+            const fr=document.createElement('iframe');
+            fr.style.cssText='width:100%;height:300px;border:none;display:block;';
+            fr.sandbox='allow-same-origin';
+            bodyEl.innerHTML='';bodyEl.appendChild(fr);
+            fr.contentDocument.open();fr.contentDocument.write(data.body.content||'');fr.contentDocument.close();
+            setTimeout(()=>{try{const h=fr.contentDocument.body.scrollHeight;fr.style.height=Math.min(h+20,320)+'px';}catch(e){}},300);
+          } else {
+            bodyEl.innerHTML='<pre style="white-space:pre-wrap;font-family:Arial,sans-serif;font-size:13px;padding:14px;margin:0;">'+esc(data.body?.content||m.preview||'')+'</pre>';
+          }
+        }
+      }
+    }catch(e){const b=document.getElementById('_msTPInlineBody');if(b)b.innerHTML='<p style="padding:14px;color:var(--text2,#9ca3af);">'+esc(m.preview||'Vorschau nicht verfügbar')+'</p>';}
+  } else {
+    const b=document.getElementById('_msTPInlineBody');
+    if(b)b.innerHTML='<p style="padding:14px;color:var(--text2,#9ca3af);">'+esc(m.preview||'Kein Inhalt – bitte Outlook verbinden')+'</p>';
+  }
+}
+function _msTPHighlight(activeIdx){
+  const list=document.getElementById('_msTPList');if(!list)return;
+  [...list.children].forEach((el,i)=>{el.style.background=i===activeIdx?'rgba(0,120,212,.08)':'';});
+}
+
 // ─────────────────────────────────────────────────────────────────
 async function _pamEmailAntwortenMitVerlauf(){
   const taskId=(document.getElementById('taskId')||{}).value||_pamActiveTaskId||'';
