@@ -2836,7 +2836,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-21 · #103'; // Nummer = CACHE_NAME in sw.js (pam-desktop-v103)
+const PAM_BUILD = 'v2026-05-21 · #106'; // Nummer = CACHE_NAME in sw.js (pam-desktop-v106)
 
 // ── STATE ──
 let boards = {};
@@ -10578,17 +10578,37 @@ async function _msSaveMailSnapshot(taskId,idx,_silent=false){
   const task=findTaskById(taskId);if(!task)return;
   const m=(task.msThreadMessages||[])[idx];if(!m)return;
   if(!_silent)showToast('📸 Sichere E-Mail Snapshot…','info',2500);
-  let bodyHtml=m._cachedBodyHtml||'';
-  if(!bodyHtml&&msToken&&m.id){
+  let bodyHtml='';
+  let inlineAtts=[];
+  // Immer frisch laden inkl. Anhänge für CID-Auflösung
+  // Prefer-Header zwingt Graph API zur HTML-Ausgabe (auch bei ursprünglich Plain-Text-Mails)
+  if(msToken&&m.id){
     try{
-      const r=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${m.id}?$select=body`,{headers:{Authorization:'Bearer '+msToken}});
-      if(r.ok){const data=await r.json();bodyHtml=data.body?.content||'';}
+      const r=await fetch(
+        `https://graph.microsoft.com/v1.0/me/messages/${m.id}?$select=body,hasAttachments&$expand=attachments($select=id,name,contentId,isInline,contentBytes,contentType)`,
+        {headers:{Authorization:'Bearer '+msToken,'Prefer':'outlook.body-content-type="html"'}}
+      );
+      if(r.ok){
+        const data=await r.json();
+        bodyHtml=data.body?.content||'';
+        inlineAtts=(data.attachments||[]).filter(a=>a.isInline&&a.contentId&&a.contentBytes);
+        m._cachedBodyHtml=bodyHtml;
+      }
     }catch(e){}
   }
+  if(!bodyHtml)bodyHtml=m._cachedBodyHtml||'';
   if(!bodyHtml){if(!_silent)showToast('⚠ Kein Mail-Inhalt verfügbar','warn',3000);throw new Error('kein Inhalt');}
-  // Externe Bilder als base64 einbetten
   let processed=bodyHtml;
-  const imgMatches=[...bodyHtml.matchAll(/(<img[^>]+src=["'])(?!data:)([^"']+)(["'])/gi)];
+  // 1. CID-Inline-Bilder durch base64 data-URIs ersetzen
+  for(const att of inlineAtts){
+    const mime=att.contentType||'image/png';
+    const dataUri=`data:${mime};base64,${att.contentBytes}`;
+    const cid=att.contentId.replace(/^<|>$/g,''); // spitze Klammern entfernen falls vorhanden
+    const cidEsc=cid.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    processed=processed.replace(new RegExp('cid:'+cidEsc,'gi'),dataUri);
+  }
+  // 2. Verbleibende externe Bilder (http/https) als base64 einbetten
+  const imgMatches=[...processed.matchAll(/(<img[^>]+src=["'])(?!data:)(?!cid:)([^"']+)(["'])/gi)];
   for(const [full,pre,url,post] of imgMatches){
     try{
       const r=await fetch(url);if(!r.ok)continue;
@@ -10602,15 +10622,25 @@ async function _msSaveMailSnapshot(taskId,idx,_silent=false){
   const stamp=`${d.getFullYear()}.${_ez2(d.getMonth()+1)}.${_ez2(d.getDate())}_${_ez2(d.getHours())}${_ez2(d.getMinutes())}`;
   const fname=`${stamp}_${subj}.html`;
   // PAM-Header als div direkt in den <body> des Original-HTML injizieren
-  // (nicht nochmal einwickeln – Outlook-HTML ist bereits ein vollständiges Dokument)
   const pamHdr=`<div style="background:#1a364d;color:#fff;padding:10px 18px;font-size:12px;font-family:Arial,sans-serif;line-height:1.5;margin:0;">`
     +`<strong style="font-size:14px;display:block;margin-bottom:3px;">${esc(m.subject||'(kein Betreff)')}</strong>`
     +`Von: ${esc(m.fromName||m.from||'')} &nbsp;·&nbsp; ${esc(d.toLocaleDateString('de-DE',{weekday:'short',day:'2-digit',month:'long',year:'numeric'})+' '+_ez2(d.getHours())+':'+_ez2(d.getMinutes())+' Uhr')}<br>`
     +`<span style="opacity:.7;font-size:11px;">Gespeichert: ${new Date().toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'})} – PAM Workboard</span>`
     +`</div>`;
-  // In <body>-Tag injizieren; falls kein <body>-Tag: vorne anhängen
-  let html=processed.replace(/(<body[^>]*>)/i,'$1'+pamHdr);
-  if(html===processed)html=pamHdr+processed;
+  // Falls kein vollständiges HTML-Dokument: in sauberes Dokument einbetten
+  const isFullDoc=/^\s*<!doctype|^\s*<html/i.test(processed);
+  let html;
+  if(isFullDoc){
+    // Vollständiges Dokument: PAM-Header direkt hinter <body> injizieren
+    html=processed.replace(/(<body[^>]*>)/i,'$1'+pamHdr);
+    if(html===processed)html=pamHdr+processed;
+  } else {
+    // Nur Body-Fragment (häufig bei Plain-Text-Konvertierung): vollständiges Dokument bauen
+    html=`<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>body{font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#222;margin:0;padding:0;}
+pre,p{margin:0 0 .5em;white-space:pre-wrap;word-break:break-word;padding:16px 24px;}
+</style></head><body>`+pamHdr+`<div style="padding:16px 24px;">`+processed+`</div></body></html>`;
+  }
   const fid=await _getOrCreateEmailFid(task,null);
   try{
     const result=await _driveUploadGeneric(new TextEncoder().encode(html).buffer,fname,'text/html',fid);
@@ -10624,7 +10654,8 @@ async function _msSaveMailSnapshot(taskId,idx,_silent=false){
       subject:m.subject||'',
       sender:m.fromName||m.from||'',
       isSnapshot:true,
-      messageId:m.messageId||m.id||''
+      messageId:m.messageId||m.id||'',
+      folderId:fid||''
     });
     renderEmailSection();scheduleTaskFieldSave();
     if(!_silent)showToast('✅ Snapshot gespeichert: '+fname,'success',4000);
@@ -12045,13 +12076,13 @@ function _eicEnvSvg(){
 }
 function _eicSnapSvg(){
   return `<svg viewBox="0 0 68 68" xmlns="http://www.w3.org/2000/svg">
-    <rect width="68" height="68" rx="8" fill="#e6f4ea"/>
-    <rect x="9" y="19" width="50" height="33" rx="4" fill="#34A853"/>
+    <rect width="68" height="68" rx="8" fill="#e8f0fe"/>
+    <rect x="9" y="19" width="50" height="33" rx="4" fill="#1a73e8"/>
     <path d="M9 23 L34 41 L59 23" fill="none" stroke="rgba(255,255,255,0.92)" stroke-width="2.5" stroke-linejoin="round"/>
     <path d="M9 52 L27 36" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1.5"/>
     <path d="M59 52 L41 36" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1.5"/>
-    <circle cx="54" cy="16" r="9" fill="#34A853" stroke="white" stroke-width="1.5"/>
-    <path d="M49.5 16 L52.5 19 L58.5 13" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="54" cy="16" r="9" fill="#0b57d0" stroke="white" stroke-width="1.5"/>
+    <path d="M54 11 L54 16.5 M51.5 14 L54 16.5 L56.5 14" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>`;
 }
 function _eicPdfSvg(){
@@ -12076,20 +12107,37 @@ function _eicHtml(item){
   const icon=isPdf?_eicPdfSvg():(isSnap?_eicSnapSvg():_eicEnvSvg());
   const btnsPdf=`<button type="button" class="eic-btn" onclick="_openEmailPdfGallery(${item._idx})" title="Vollbild-Galerie">🔍</button><a class="eic-btn" href="${esc(item.url)}" target="_blank" title="In Google Drive öffnen">📂</a><button type="button" class="eic-btn eic-btn-del" onclick="taskEmailPdfs.splice(${item._idx},1);renderEmailSection();scheduleTaskFieldSave();" title="Entfernen">✕</button>`;
   const btnsOrig=`<button type="button" class="eic-btn" onclick="_downloadEmailOrig('${esc(item.fileId)}','${nameEsc}')" title="Herunterladen – in Downloads-Ordner speichern, dann per Doppelklick in Outlook öffnen">⬇</button><button type="button" class="eic-btn" onclick="_printEmailFromDrive('${esc(item.fileId)}','${nameEsc}')" title="Als PDF drucken">🖨</button><button type="button" class="eic-btn eic-btn-del" onclick="taskEmailOriginals.splice(${item._idx},1);renderEmailSection();scheduleTaskFieldSave();" title="Entfernen">✕</button>`;
-  const btnsSnap=`<button type="button" class="eic-btn" onclick="_previewSnapshot('${esc(item.fileId)}','${nameEsc}')" title="Vorschau öffnen">⛶</button><button type="button" class="eic-btn" onclick="_downloadEmailOrig('${esc(item.fileId)}','${nameEsc}')" title="Herunterladen">⬇</button><button type="button" class="eic-btn eic-btn-del" onclick="taskEmailOriginals.splice(${item._idx},1);renderEmailSection();scheduleTaskFieldSave();" title="Entfernen">✕</button>`;
+  const _snapFolder=item.folderId?`https://drive.google.com/drive/folders/${item.folderId}`:(item.url||'#');
+  const btnsSnap=`<button type="button" class="eic-btn" onclick="window.open('${esc(_snapFolder)}','_blank')" title="Ordner in Google Drive öffnen">📂</button><button type="button" class="eic-btn eic-btn-del" onclick="taskEmailOriginals.splice(${item._idx},1);renderEmailSection();scheduleTaskFieldSave();" title="Entfernen">✕</button>`;
   // Datum ermitteln: item.date → Dateiname (2026.05.18_...) → uploadedAt
   let _eicDate='';
   const _rd=item.date?new Date(item.date):null;
   if(_rd&&!isNaN(_rd)){_eicDate=_rd.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'});}
   else{const _fm=name.match(/^(\d{4})\.(\d{2})\.(\d{2})_/);if(_fm){const _fd=new Date(+_fm[1],+_fm[2]-1,+_fm[3]);if(!isNaN(_fd))_eicDate=_fd.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'});}}
   if(!_eicDate)_eicDate=item.uploadedAt||'';
-  return `<div class="eic">
+  return `<div class="eic"${isSnap?' style="border:2px solid #1a73e8;background:rgba(26,115,232,.07);border-radius:10px;"':''}>
     <div class="eic-thumb">${icon}</div>
     <div class="eic-overlay">${isPdf?btnsPdf:(isSnap?btnsSnap:btnsOrig)}</div>
     <div class="eic-tip">${nameEsc}</div>
     <div class="eic-name">${esc(short)}</div>
     ${_eicDate?`<div class="eic-date">${esc(_eicDate)}</div>`:''}
   </div>`;
+}
+// Einheitliche Datums-Hilfsfunktion für E-Mail-Sortierung
+// Versteht: ISO-String, deutsches Format "dd.mm.yyyy", Dateiname "yyyy.mm.dd_..."
+function _emailSortTs(item){
+  const s=item.date||item.uploadedAt||'';
+  if(s){
+    // ISO-String (z.B. "2025-11-07T10:30:00Z")
+    const iso=new Date(s);if(!isNaN(iso))return iso.getTime();
+    // Deutsches Format "dd.mm.yyyy"
+    const g=String(s).match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+    if(g)return+new Date(+g[3],+g[2]-1,+g[1]);
+  }
+  // Dateiname "2025.11.07_..."
+  const fm=(item.name||'').match(/^(\d{4})\.(\d{2})\.(\d{2})_/);
+  if(fm)return+new Date(+fm[1],+fm[2]-1,+fm[3]);
+  return 0;
 }
 function renderEmailSection(){
   // Gmail-Thread-Bereich: anzeigen wenn Gmail verbunden (mit oder ohne Link)
@@ -12134,10 +12182,8 @@ function renderEmailSection(){
   // Fix 6: Thread-EMLs aus Icon-Grid herausfiltern — sie sind bereits im Thread-Verlauf sichtbar
   const _eidTask=(()=>{const _id=(document.getElementById('taskId')||{}).value||'';return _id?findTaskById(_id):null;})();
   const _eidTIds=new Set([...((_eidTask&&_eidTask.gmailThreadMessages)||[]).map(m=>m.messageId).filter(Boolean),...((_eidTask&&_eidTask.msThreadMessages)||[]).map(m=>m.messageId).filter(Boolean)]);
-  const origItems=taskEmailOriginals.map((e,i)=>({...e,_type:'orig',_idx:i})).filter(item=>!item.messageId||!_eidTIds.has(item.messageId)).sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
-  // Fix 7: deutsches Datumsformat "dd.mm.yyyy" korrekt für Sortierung parsen
-  const _pdSort=s=>{if(!s)return 0;const g=String(s).match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);return g?+new Date(+g[3],+g[2]-1,+g[1]):+new Date(s)||0;};
-  const pdfItems=taskEmailPdfs.map((p,i)=>({...p,_type:'pdf',_idx:i})).sort((a,b)=>_pdSort(b.date||b.uploadedAt)-_pdSort(a.date||a.uploadedAt));
+  const origItems=taskEmailOriginals.map((e,i)=>({...e,_type:'orig',_idx:i})).filter(item=>!item.messageId||!_eidTIds.has(item.messageId)).sort((a,b)=>_emailSortTs(b)-_emailSortTs(a));
+  const pdfItems=taskEmailPdfs.map((p,i)=>({...p,_type:'pdf',_idx:i})).sort((a,b)=>_emailSortTs(b)-_emailSortTs(a));
   const total=origItems.length+pdfItems.length;
   if(ti)ti.innerHTML='&#128231; E-Mail Dateien'+(total?` <span style="color:var(--accent2);font-size:10px;font-weight:400;text-transform:none;letter-spacing:0">(${total})</span>`:'');
   const galBtn=document.getElementById('emailGalBtn');
@@ -12187,8 +12233,9 @@ function _emailAllListItem(item){
     :`taskEmailOriginals.splice(${item._idx},1);renderEmailSection();scheduleTaskFieldSave();_closeEmailAllPopup();`;
   const btnsPdf=`<button type="button" class="eo-icon-btn" onclick="_openEmailPdfGallery(${item._idx})" title="Vollbild-Galerie">🔍</button><a class="eo-icon-btn" href="${esc(item.url)}" target="_blank" title="Drive" style="text-decoration:none;">📂</a><button type="button" class="eo-del" onclick="${delFn}" title="Entfernen">✕</button>`;
   const btnsOrig=`<button type="button" class="eo-icon-btn" onclick="_downloadEmailOrig('${esc(item.fileId)}','${nameEsc}')" title="Download – in Downloads-Ordner, dann per Doppelklick in Outlook öffnen">⬇</button><button type="button" class="eo-icon-btn" onclick="_printEmailFromDrive('${esc(item.fileId)}','${nameEsc}')" title="Als PDF drucken">🖨</button><button type="button" class="eo-del" onclick="${delFn}" title="Entfernen">✕</button>`;
-  const btnsSnap=`<button type="button" class="eo-icon-btn" onclick="_previewSnapshot('${esc(item.fileId)}','${nameEsc}')" title="Vorschau öffnen">⛶</button><button type="button" class="eo-icon-btn" onclick="_downloadEmailOrig('${esc(item.fileId)}','${nameEsc}')" title="Herunterladen">⬇</button><button type="button" class="eo-del" onclick="${delFn}" title="Entfernen">✕</button>`;
-  return `<div class="email-orig-item">
+  const _snapFolderEo=item.folderId?`https://drive.google.com/drive/folders/${item.folderId}`:(item.url||'#');
+  const btnsSnap=`<button type="button" class="eo-icon-btn" onclick="window.open('${esc(_snapFolderEo)}','_blank')" title="Ordner in Google Drive öffnen">📂</button><button type="button" class="eo-del" onclick="${delFn}" title="Entfernen">✕</button>`;
+  return `<div class="email-orig-item"${isSnap?' style="background:rgba(26,115,232,.07);border-left:3px solid #1a73e8;padding-left:9px;"':''}>
     <span style="font-size:15px;flex-shrink:0;">${icon}</span>
     <span class="eo-name" title="${nameEsc}">${nameEsc}</span>
     <span class="eo-date">${esc(item.uploadedAt||'')}</span>
@@ -12202,7 +12249,7 @@ function _openEmailAllPopup(){
   const allItems=[
     ...taskEmailPdfs.map((p,i)=>({...p,_type:'pdf',_idx:i})),
     ...taskEmailOriginals.map((e,i)=>({...e,_type:'orig',_idx:i})).filter(item=>item.isSnapshot||!item.messageId||!_aapTIds.has(item.messageId))
-  ].sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
+  ].sort((a,b)=>_emailSortTs(b)-_emailSortTs(a));
   const overlay=document.createElement('div');
   overlay.id='emailOrigPopupOverlay';
   overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center;';
@@ -12238,14 +12285,8 @@ function _openEmailThumbnailGrid(){
     ...taskEmailOriginals.map((e,i)=>({...e,_type:'orig',_idx:i})).filter(item=>item.isSnapshot||!item.messageId||!_atgTIds.has(item.messageId))
   ];
   if(!allItems.length){showToast('Keine E-Mail-Dateien vorhanden','info',2500);return;}
-  // Neueste zuerst sortieren
-  function _origSortDate(item){
-    if(item.date){const d=new Date(item.date);if(!isNaN(d))return d.getTime();}
-    const m=(item.name||'').match(/^(\d{4})\.(\d{2})\.(\d{2})_/);
-    if(m){const d=new Date(+m[1],+m[2]-1,+m[3]);if(!isNaN(d))return d.getTime();}
-    return 0;
-  }
-  allItems.sort((a,b)=>_origSortDate(b)-_origSortDate(a));
+  // Neueste zuerst sortieren – einheitliche Hilfsfunktion _emailSortTs
+  allItems.sort((a,b)=>_emailSortTs(b)-_emailSortTs(a));
   const GID='_emailThumbGridOverlay';
   const old=document.getElementById(GID);if(old)old.remove();
   const blobUrls=[];
