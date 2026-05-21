@@ -1,7 +1,7 @@
 // Service Worker - PAM Desktop (Workboard + Stammblatt)
 // Google-APIs werden NIEMALS gecacht.
 
-const CACHE_NAME = 'pam-desktop-v88';
+const CACHE_NAME = 'pam-desktop-v91';
 const PRECACHE = [
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css',
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js',
@@ -69,6 +69,13 @@ self.addEventListener('fetch', e => {
 
   if (e.request.redirect && e.request.redirect !== 'follow') return;
 
+  // Nur Same-Origin und bekannte CDN-Bibliotheken abfangen.
+  // Alle anderen externen Domains (z.B. E-Mail-Bilder, Tracking-Pixel, fremde CDNs)
+  // werden NICHT interceptet – verhindert CORS-Fehler im SW.
+  const isSameOrigin = url.startsWith(self.location.origin);
+  const isKnownCdn   = PRECACHE.some(p => url === p);
+  if (!isSameOrigin && !isKnownCdn) return;
+
   // Network-First fuer HTML-Seiten
   if (isHtmlPage(url)) {
     e.respondWith(
@@ -85,7 +92,7 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // Cache-First fuer CDN-Bibliotheken
+  // Cache-First fuer CDN-Bibliotheken (nur bekannte URLs aus PRECACHE)
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) return cached;
@@ -95,7 +102,7 @@ self.addEventListener('fetch', e => {
           caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
         }
         return resp;
-      });
+      }).catch(() => new Response('', {status: 503, statusText: 'Offline'}));
     })
   );
 });

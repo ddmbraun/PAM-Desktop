@@ -947,6 +947,17 @@ async function _auftragConfirm(){
       }catch(e){console.warn('[PTP] PDF-Upload fehlgeschlagen:',e);showToast('⚠ PDF-Vorschau fehlgeschlagen: '+e.message,'error',6000);}
     } else {
       if(typeof showToast==='function')showToast('⏳ E-Mail wird gespeichert…','info',8000);
+      // Fix 6a: Body-PDF auch für EML-rawFile erstellen
+      let _isRawEml=rawFile&&rawFile.name.toLowerCase().endsWith('.eml');
+      if(_isRawEml&&(info.bodyHtml||info.bodyText)){
+        try{
+          let _pdfData=await _ezBuildPdfFromHtml(info);
+          let _pdfResult=await _ezUpload(_pdfData,pdfName,fid);
+          if(_pdfResult&&_pdfResult.id){
+            newTask.emailPdfs=[{name:pdfName,fileId:_pdfResult.id,url:'https://drive.google.com/file/d/'+_pdfResult.id+'/view',uploadedAt:new Date().toLocaleDateString('de-DE'),date:info.date instanceof Date&&!isNaN(info.date)?info.date.toISOString():''}];
+          }
+        }catch(_pe){console.warn('[PTP] Body-PDF fehlgeschlagen:',_pe);}
+      }
     }
 
     // Original-Datei hochladen (oder synthetisches .eml aus Drag-Daten erzeugen)
@@ -997,6 +1008,33 @@ async function _auftragConfirm(){
         }
       }
     }catch(e){console.warn('[PTP] Original-Upload fehlgeschlagen:',e);showToast('⚠ E-Mail Original fehlgeschlagen: '+e.message,'error',8000);}
+
+    // Fix 6b: EML-Anhänge extrahieren und in Drive hochladen
+    if(rawFile&&rawFile.name.toLowerCase().endsWith('.eml')&&info.attachments&&info.attachments.length>0){
+      let _attOk=0,_attFail=0;
+      showToast('📎 '+info.attachments.length+' Anhang/Anhänge gefunden – lade hoch…','info',3000);
+      for(const att of info.attachments){
+        try{
+          const binStr=atob(att.b64);
+          const bytes=new Uint8Array(binStr.length);
+          for(let k=0;k<binStr.length;k++)bytes[k]=binStr.charCodeAt(k);
+          const attResult=await _driveUploadGeneric(bytes.buffer,att.name,att.mimeType,fid);
+          const attUrl='https://drive.google.com/file/d/'+attResult.id+'/view';
+          const today=new Date().toLocaleDateString('de-DE');
+          const isImg=/\.(jpg|jpeg|png|gif|webp|heic|heif|avif|bmp|tiff?)$/i.test(att.name)||(att.mimeType||'').startsWith('image/');
+          if(isImg){
+            if(!newTask.fotos)newTask.fotos=[];
+            newTask.fotos.push({driveId:attResult.id,name:att.name,mimeType:att.mimeType||'image/jpeg',caption:'',thumbnailLink:attUrl});
+          }else{
+            if(!newTask.attachments)newTask.attachments=[];
+            newTask.attachments.push({name:att.name,fileId:attResult.id,url:attUrl,uploadedAt:today});
+          }
+          _attOk++;
+        }catch(e){_attFail++;console.warn('[PTP] EML-Anhang Upload:',e);}
+      }
+      if(_attFail===0)showToast('📎 '+_attOk+' Anhang'+(_attOk!==1?'e':'')+' gespeichert','success',4000);
+      else showToast('⚠ '+_attOk+' von '+info.attachments.length+' Anhängen gespeichert · '+_attFail+' fehlgeschlagen','warning',6000);
+    }
   }
 
   // ── SCHRITT 3: Speichern und Modal öffnen (jetzt mit vollständigen E-Mail-Daten) ──
@@ -2772,7 +2810,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-19 · #85'; // sync mit CACHE_NAME in sw.js (pam-desktop-v87)
+const PAM_BUILD = 'v2026-05-21 · #91'; // Nummer = CACHE_NAME in sw.js (pam-desktop-v91)
 
 // ── STATE ──
 let boards = {};
@@ -4062,22 +4100,29 @@ function gdriveCreateNew() {
 }
 
 function gdriveConnectFromBar() {
-  // ── Token fehlt oder ist abgelaufen → sofort neues Login-Popup (neue Stunde) ──
+  // ── Token fehlt oder abgelaufen → sofort Redirect ──
   const tokenOk = gdriveToken && Date.now() < gdriveTokenExpires - 5000;
   if (!tokenOk) {
-    // Bereits eine Datei verbunden? → Nach Login Verbindung wiederherstellen
     const action = gdriveFileId ? 'reconnect' : (localStorage.getItem(PC_FILE_KEY) ? 'reconnect' : 'load');
     gdriveRequestToken(action);
     return;
   }
   if (gdriveFileId) {
+    // Token noch gültig aber Nutzer klickt manuell:
+    // Wenn Token in den letzten 10 Min oder Banner sichtbar → sofort Redirect (kein Delay, kein Guard)
+    const expiringThreshold = 10 * 60 * 1000;
+    const isExpiring = (gdriveTokenExpires - Date.now()) < expiringThreshold;
+    const bannerVisible = !!document.getElementById('_driveWarnBanner');
+    if (isExpiring || bannerVisible) {
+      // Sofort weiterleiten – kein Double-Click-Guard, keine Verzögerung
+      gdriveRequestToken('reconnect');
+      return;
+    }
+    // Token hat noch > 10 Min: Double-Click-Guard für Datei-Wechsel
     if(!window._driveBarClickPending){
       window._driveBarClickPending=true;
-      // DIREKTER REDIRECT: kein GIS-Popup (COOP blockiert es auf GitHub Pages)
-      // → Weiterleitung zu Google → frischer 60-Min-Token garantiert
-      showToast('⏳ Weiterleitung zu Google – Verbindung wird auf 60 Min verlängert…','info',3000);
-      setTimeout(function(){ gdriveRequestToken('reconnect'); }, 500);
-      setTimeout(()=>{window._driveBarClickPending=false;},5500);
+      showToast('☁️ Verbindung läuft noch – 2× klicken zum Datei-Wechsel','info',3000);
+      setTimeout(()=>{ window._driveBarClickPending=false; }, 4000);
     } else {
       window._driveBarClickPending=false;
       gdriveFileId=null;
@@ -4086,7 +4131,7 @@ function gdriveConnectFromBar() {
     }
     return;
   }
-  // Noch nicht verbunden, Token gültig → direkt laden (kein confirm nötig)
+  // Noch nicht verbunden, Token gültig → direkt laden
   gdriveOpenExisting();
 }
 
