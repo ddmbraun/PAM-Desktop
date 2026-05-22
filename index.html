@@ -14785,6 +14785,154 @@ function openBaudokuApp(){
   window.open(bauUrl,'_blank');
 }
 
+// ══════════════════════════════════════════════
+// ── VBS-AUTOSTART: Drive-Ordner anlegen ──
+// ══════════════════════════════════════════════
+
+function _vbsDec(s){try{return decodeURIComponent((s||'').replace(/\+/g,' '));}catch(e){return s||'';}}
+function _vbsEsc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+function _checkNewAuftragFromVbs(){
+  try{
+    const sp=new URLSearchParams(window.location.search);
+    if(!sp.get('newAuftrag'))return;
+    const p={
+      ordner : _vbsDec(sp.get('ordner')||''),
+      hv     : _vbsDec(sp.get('hv')||''),
+      ks     : _vbsDec(sp.get('ks')||''),
+      str    : _vbsDec(sp.get('str')||''),
+      ort    : _vbsDec(sp.get('ort')||''),
+      nas    : _vbsDec(sp.get('nas')||''),
+      mieter : _vbsDec(sp.get('mieter')||''),
+      datum  : _vbsDec(sp.get('datum')||''),
+      repnr  : _vbsDec(sp.get('repnr')||''),
+      kdnr   : _vbsDec(sp.get('kdnr')||''),
+      schaden: _vbsDec(sp.get('schaden')||''),
+    };
+    setTimeout(()=>_showNewAuftragBanner(p), 1200);
+  }catch(e){console.warn('[VBS-Check]',e);}
+}
+
+function _showNewAuftragBanner(p){
+  if(document.getElementById('vbsNewAuftragBanner'))return;
+  const banner=document.createElement('div');
+  banner.id='vbsNewAuftragBanner';
+  banner.style.cssText='position:fixed;top:56px;left:50%;transform:translateX(-50%);z-index:9990;'
+    +'background:linear-gradient(135deg,#1565c0,#0d47a1);color:#fff;padding:16px 22px;'
+    +'border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,.45);max-width:520px;width:92%;'
+    +'text-align:center;font-size:13px;';
+  banner.innerHTML=
+    '<div style="font-size:15px;font-weight:700;margin-bottom:6px;">\u{1F4C1} Neuer Auftrag aus VBS erkannt</div>'
+   +'<div style="margin-bottom:3px;opacity:.9;">'+_vbsEsc(p.str)+' &ndash; KS '+_vbsEsc(p.ks)+'</div>'
+   +'<div style="margin-bottom:12px;opacity:.7;font-size:11px;">NAS-Ordner wurde erstellt &ndash; jetzt Drive-Struktur anlegen?</div>'
+   +'<button id="vbsDriveStartBtn" '
+     +'onclick="_createDriveFoldersForNewAuftrag(JSON.parse(decodeURIComponent(''+encodeURIComponent(JSON.stringify(p))+'')))" '
+     +'style="background:#fff;color:#1565c0;border:none;padding:8px 18px;border-radius:8px;'
+     +'font-weight:700;cursor:pointer;font-size:13px;margin-right:8px;">'
+     +'\u2601\uFE0F Drive-Ordner anlegen &amp; Task \u00f6ffnen</button>'
+   +'<button onclick="document.getElementById('vbsNewAuftragBanner').remove()" '
+     +'style="background:rgba(255,255,255,.2);color:#fff;border:none;padding:8px 14px;'
+     +'border-radius:8px;cursor:pointer;font-size:12px;">\u2715</button>';
+  document.body.appendChild(banner);
+}
+
+async function _createDriveFoldersForNewAuftrag(p){
+  if(!gdriveToken){
+    showToast('\u26a0 Bitte zuerst mit Google Drive verbinden (\u2601\uFE0F oben rechts)','error',6000);
+    return;
+  }
+  const btn=document.getElementById('vbsDriveStartBtn');
+  if(btn){btn.textContent='\u23f3 Ordner werden angelegt\u2026';btn.disabled=true;}
+  try{
+    const parentId=_extractFolderIdFromUrl(DEFAULT_FOLDER_BAUSTELLE);
+    if(!parentId)throw new Error('DEFAULT_FOLDER_BAUSTELLE nicht aufl\u00f6sbar');
+
+    const mainId  = await _driveCreateFolder(p.ordner||('Auftrag_'+p.ks), parentId);
+    const mainUrl = 'https://drive.google.com/drive/folders/'+mainId;
+
+    const akteId  = await _driveCreateFolder('00_Akte', mainId);
+    const kommId  = await _driveCreateFolder('Kommunikation', akteId);
+    await _driveCreateFolder('Hausverwaltung', kommId);
+    await _driveCreateFolder('Eigentuemer', kommId);
+    const mi=p.mieter&&p.mieter!=='(noch offen)'?p.mieter.replace(/[\/\\:*?"<>|]/g,'_'):'';
+    if(mi) await _driveCreateFolder('Mieter_'+mi, kommId);
+
+    const postId  = await _driveCreateFolder('01_Posteingang', mainId);
+    const emailId = await _driveCreateFolder('E-Mails', postId);
+    await _driveCreateFolder('Briefe_Fax', postId);
+    const fotoId  = await _driveCreateFolder('02_Fotos', mainId);
+    const dokId   = await _driveCreateFolder('03_Dokumente', mainId);
+    await _driveCreateFolder('Hausverwaltung', dokId);
+    await _driveCreateFolder('Eigentuemer', dokId);
+    if(mi) await _driveCreateFolder('Mieter_'+mi, dokId);
+    const gutId   = await _driveCreateFolder('04_Gutachten', mainId);
+    await _driveCreateFolder('Entwuerfe', gutId);
+    await _driveCreateFolder('Final', gutId);
+
+    const fotoUrl  = 'https://drive.google.com/drive/folders/'+fotoId;
+    const dokUrl   = 'https://drive.google.com/drive/folders/'+dokId;
+    const emailUrl = 'https://drive.google.com/drive/folders/'+emailId;
+
+    const bann=document.getElementById('vbsNewAuftragBanner');
+    if(bann)bann.remove();
+    showToast('\u2713 Drive-Ordner angelegt! Task wird ge\u00f6ffnet\u2026','ok',4000);
+
+    openNewTaskModal();
+    setTimeout(()=>{
+      const adresse=(p.str+(p.ort?', '+p.ort:'')).trim();
+      const titelEl=document.getElementById('taskTitleInput');
+      if(titelEl) titelEl.value=p.ordner||adresse;
+      const hvEl =document.getElementById('tHV');       if(hvEl)  hvEl.value=p.hv||'';
+      const adrEl=document.getElementById('tAdr');      if(adrEl) adrEl.value=adresse;
+      const schEl=document.getElementById('tSch');      if(schEl) schEl.value=p.schaden||'';
+      const tagEl=document.getElementById('taskTagsInput'); if(tagEl) tagEl.value=p.ks||'';
+      const repEl=document.getElementById('taskRepNr');     if(repEl) repEl.value=p.repnr||'';
+      const kdEl =document.getElementById('taskKundenNr');  if(kdEl)  kdEl.value=p.kdnr||'';
+      const nasEl=document.getElementById('tNAS');          if(nasEl) nasEl.value=p.nas||'';
+      const gdEl =document.getElementById('tGD');           if(gdEl)  gdEl.value=fotoUrl;
+      const gdoEl=document.getElementById('tGDOrdner');     if(gdoEl) gdoEl.value=dokUrl;
+      const eoEl =document.getElementById('tEmailOrdner');  if(eoEl)  eoEl.value=emailUrl;
+      if(typeof _updateFotoOrdnerHint==='function') _updateFotoOrdnerHint();
+      if(typeof _updateStammSummary==='function')   _updateStammSummary();
+      if(typeof _updateHdrMeta==='function')        _updateHdrMeta();
+      if(typeof _updateMapsBtn==='function')        _updateMapsBtn();
+      _showVbsDriveLinksBox(mainUrl,fotoUrl,dokUrl,emailUrl);
+    },350);
+
+  }catch(e){
+    showToast('\u26a0 Fehler: '+e.message,'error',8000);
+    console.error('[VBS-Drive]',e);
+    if(btn){btn.textContent='\u2601\uFE0F Drive-Ordner anlegen & Task \u00f6ffnen';btn.disabled=false;}
+  }
+}
+
+function _showVbsDriveLinksBox(mainUrl,fotoUrl,dokUrl,emailUrl){
+  const old=document.getElementById('vbsDriveLinksBox');
+  if(old)old.remove();
+  const box=document.createElement('div');
+  box.id='vbsDriveLinksBox';
+  box.style.cssText='position:fixed;bottom:20px;right:20px;z-index:9989;background:var(--bg1);'
+    +'border:1px solid var(--green,#27ae60);border-radius:10px;padding:14px 18px;'
+    +'max-width:340px;font-size:12px;box-shadow:0 4px 20px rgba(0,0,0,.35);';
+  box.innerHTML=
+    '<div style="font-weight:700;color:var(--green,#27ae60);margin-bottom:9px;">\u2601\uFE0F Drive-Ordner angelegt</div>'
+   +'<div style="margin-bottom:4px;"><span style="opacity:.7;">Hauptordner: </span>'
+     +'<a href="'+mainUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive \u00f6ffnen \u2197</a></div>'
+   +'<div style="margin-bottom:4px;"><span style="opacity:.7;">02_Fotos: </span>'
+     +'<a href="'+fotoUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive \u00f6ffnen \u2197</a></div>'
+   +'<div style="margin-bottom:4px;"><span style="opacity:.7;">03_Dokumente: </span>'
+     +'<a href="'+dokUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive \u00f6ffnen \u2197</a></div>'
+   +'<div style="margin-bottom:10px;"><span style="opacity:.7;">E-Mails: </span>'
+     +'<a href="'+emailUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive \u00f6ffnen \u2197</a></div>'
+   +'<div style="font-size:11px;opacity:.65;margin-bottom:8px;">Alle Felder im Task ausgef\u00fcllt.<br>Bitte Task speichern!</div>'
+   +'<button onclick="document.getElementById('vbsDriveLinksBox').remove()" '
+     +'style="background:var(--bg2);border:1px solid var(--border);color:var(--text1);'
+     +'padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;">\u2715 Schlie\u00dfen</button>';
+  document.body.appendChild(box);
+}
+
+document.addEventListener('DOMContentLoaded', _checkNewAuftragFromVbs);
+
 </script>
 </body>
 </html>
