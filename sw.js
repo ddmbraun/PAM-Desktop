@@ -1,7 +1,7 @@
 // Service Worker - PAM Desktop (Workboard + Stammblatt)
 // Google-APIs werden NIEMALS gecacht.
 
-const CACHE_NAME = 'pam-desktop-2026-05-24-b20'; // Fix 2026-05-24: Permanent-Save-Fixes (visibilitychange, 60s-Intervall, Pre-Redirect-Backup, Reconnect-Banner)
+const CACHE_NAME = 'pam-desktop-2026-05-24-b21'; // Fix 2026-05-24: Dateiabschluss + pamForceSwUpdate + Permanent-Save-Fixes
 const PRECACHE = [
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css',
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js',
