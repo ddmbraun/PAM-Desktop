@@ -2957,7 +2957,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-24 · #28'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-24-b28)
+const PAM_BUILD = 'v2026-05-24 · #31'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-24-b31)
 
 // ── DEBUG: Popup-Detector – fängt jedes window.open ab ──
 const _origWindowOpen = window.open;
@@ -10222,8 +10222,9 @@ async function _msLoadEmailThread(){
     showToast('⚠ Bitte zuerst Outlook verbinden (Toolbar: 📨 Outlook)','warning',4000);
     return;
   }
-  // Alle verfügbaren Message-IDs sammeln (ms + gmail – Provider-Erkennung kann falsch liegen)
-  const _allMsgIds=[...new Set([...(task.msMessageIds||[]),task.msMessageId||'',...(task.gmailMessageIds||[]),task.gmailMessageId||'',...(task.emailOriginals||[]).map(e=>e.messageId||'')].filter(Boolean))];
+  // Nur Outlook-spezifische Message-IDs (msMessageIds/msMessageId) für die Graph-API-Suche verwenden.
+  // Gmail-IDs und generische emailOriginals-IDs werden NICHT mitgesucht – Outlook findet sie nie.
+  const _allMsgIds=[...new Set([...(task.msMessageIds||[]),(task.msMessageId||'')].filter(Boolean))];
   // Fallback-Suche per Betreff: greift wenn keine Message-ID (z.B. HTML-Drag, oder Exchange ohne Message-ID-Header)
   const _msSubjFallback=task.msEmailSubject||(task.emailOriginals&&task.emailOriginals[0]&&task.emailOriginals[0].subject)||'';
   console.log('[MS-DEBUG] Message-IDs:',_allMsgIds,'| Subject-Fallback:',_msSubjFallback,'| ConvId:',task.msConversationId||'(keine)');
@@ -10259,20 +10260,29 @@ async function _msLoadEmailThread(){
               if(db.value&&db.value.length){
                 convIds.add(db.value[0].conversationId);
               }else{
-                // Fallback 3: KQL-Feldsuche internetMessageId (zuverlässiger als $filter für Exchange)
-                const _kqlId=encodeURIComponent(`internetMessageId:${msgId}`);
-                const rc=await fetch(`https://graph.microsoft.com/v1.0/me/messages?$search=%22${_kqlId}%22&$select=id,conversationId,internetMessageId&$top=5`,
+                // Fallback 3: KQL-Feldsuche mit korrektem Exchange-Feldnamen "MessageId" (mit Spitzklammern)
+                const _kqlId3=encodeURIComponent(`MessageId:"<${msgId}>"`);
+                const rc=await fetch(`https://graph.microsoft.com/v1.0/me/messages?$search=${_kqlId3}&$select=id,conversationId,internetMessageId&$top=5`,
                   {headers:{Authorization:'Bearer '+msToken}});
+                console.log('[MS-DEBUG] Fallback3 (MessageId KQL mit <>):', rc.status);
                 if(rc.ok){
                   const dc=await rc.json();
-                  if(dc.value&&dc.value.length){
-                    const _mx=dc.value.find(m=>(m.internetMessageId||'').replace(/^<|>$/g,'')===msgId);
-                    if(_mx&&_mx.conversationId)convIds.add(_mx.conversationId);
-                  }else{
-                    // Fallback 4: Freitextsuche mit der Message-ID (letzter Versuch)
-                    const rd=await fetch(`https://graph.microsoft.com/v1.0/me/messages?$search=%22${encodeURIComponent(msgId)}%22&$select=id,conversationId,internetMessageId&$top=5`,
+                  console.log('[MS-DEBUG] Fallback3 Treffer:', dc.value?.length||0);
+                  const _mx=( dc.value||[]).find(m=>(m.internetMessageId||'').replace(/^<|>$/g,'')===msgId);
+                  if(_mx&&_mx.conversationId){convIds.add(_mx.conversationId);}else{
+                    // Fallback 4: KQL ohne Spitzklammern
+                    const _kqlId4=encodeURIComponent(`MessageId:"${msgId}"`);
+                    const rd=await fetch(`https://graph.microsoft.com/v1.0/me/messages?$search=${_kqlId4}&$select=id,conversationId,internetMessageId&$top=5`,
                       {headers:{Authorization:'Bearer '+msToken}});
-                    if(rd.ok){const dd=await rd.json();if(dd.value){const _my=dd.value.find(m=>(m.internetMessageId||'').replace(/^<|>$/g,'')===msgId);if(_my&&_my.conversationId)convIds.add(_my.conversationId);}}
+                    console.log('[MS-DEBUG] Fallback4 (MessageId KQL ohne <>):', rd.status);
+                    if(rd.ok){const dd=await rd.json();console.log('[MS-DEBUG] Fallback4 Treffer:',dd.value?.length||0);const _my=(dd.value||[]).find(m=>(m.internetMessageId||'').replace(/^<|>$/g,'')===msgId);if(_my&&_my.conversationId)convIds.add(_my.conversationId);}
+                    if(convIds.size===0){
+                      // Fallback 5: Freitextsuche mit der nackten Message-ID
+                      const re5=await fetch(`https://graph.microsoft.com/v1.0/me/messages?$search=${encodeURIComponent('"'+msgId+'"')}&$select=id,conversationId,internetMessageId&$top=5`,
+                        {headers:{Authorization:'Bearer '+msToken}});
+                      console.log('[MS-DEBUG] Fallback5 (Freitext):', re5.status);
+                      if(re5.ok){const de5=await re5.json();console.log('[MS-DEBUG] Fallback5 Treffer:',de5.value?.length||0);const _mz=(de5.value||[]).find(m=>(m.internetMessageId||'').replace(/^<|>$/g,'')===msgId);if(_mz&&_mz.conversationId)convIds.add(_mz.conversationId);}
+                    }
                   }
                 }
               }
@@ -10410,7 +10420,7 @@ async function _msLoadEmailThread(){
     }
     if(convIds.size===0){
       if(_allMsgIds.length>0){
-        throw new Error('E-Mail per Message-ID nicht in Outlook gefunden. Prüfe ob die Mail im Postfach sichtbar ist (ggf. Archiv oder anderen Ordner prüfen).');
+        throw new Error('E-Mail nicht im Exchange-Postfach gefunden. Hinweis: Der Outlook-Verlauf funktioniert nur für E-Mails die direkt in deinem Exchange-Konto (nicht T-Online IMAP) liegen.');
       }
       throw new Error('E-Mails nicht in Outlook gefunden – Betreff: "'+((_msSubjFallback||'–').substring(0,40))+'"');
     }
@@ -14136,25 +14146,36 @@ async function _uploadEmailOriginal(file){
       if(emailMeta.messageId){
         let _ep='unknown';
         try{if(isEml&&preText)_ep=_detectEmlProvider(preText);}catch(e){}
-        // Debug-Toast: zeigt erkannten Provider und MessageId
-        showToast('✅ EML gespeichert'+(emailMeta.subject?' · '+emailMeta.subject.substring(0,40):'')+' · '+(_ep==='gmail'?'Gmail':'Outlook'),'success',5000);
+        // Empfänger-Check: liegt die Email in einem Exchange-Postfach?
+        // Nur dann msMessageIds befüllen und Outlook-Thread-Suche starten.
+        const _rcpt=(emailMeta.recipient||'').toLowerCase();
+        const _exchangeAddrs=['info@ddmbraun.de','frank.braun@sv-fb.de'];
+        const _isExchangeRecipient=_exchangeAddrs.some(a=>_rcpt.includes(a));
+        // Wenn IMAP-Konto (T-Online etc.): kein Outlook-Verlauf möglich
+        const _isImap=(_ep!=='gmail')&&!_isExchangeRecipient&&_rcpt.length>0;
         if(_ep==='gmail'){
           if(!t.gmailMessageIds)t.gmailMessageIds=[];
           if(!t.gmailMessageIds.includes(emailMeta.messageId))t.gmailMessageIds.push(emailMeta.messageId);
           if(!t.gmailMessageId)t.gmailMessageId=emailMeta.messageId;
           if(!t.gmailThreadMessages)t.gmailThreadMessages=[];
+          showToast('✅ EML gespeichert · Gmail','success',3000);
+        }else if(_isImap){
+          // T-Online / IMAP: Message-ID NICHT in msMessageIds → kein fehlgeschlagener Outlook-Suchversuch
+          // Info-Meldung statt Fehlermeldung
+          showToast('📧 EML gespeichert · Kein Exchange-Verlauf (T-Online/IMAP – Verlauf nur für Exchange-Mails)','info',6000);
         }else{
           if(!t.msMessageIds)t.msMessageIds=[];
           if(!t.msMessageIds.includes(emailMeta.messageId))t.msMessageIds.push(emailMeta.messageId);
           if(!t.msMessageId)t.msMessageId=emailMeta.messageId;
           if(!t.msConversationId)t.msConversationId='';
           if(!t.msThreadMessages)t.msThreadMessages=[];
+          showToast('✅ EML gespeichert · Outlook','success',3000);
         }
-        // Chip auto-aufklappen + Thread laden (nur wenn Task noch geöffnet)
+        // Chip auto-aufklappen + Thread laden (nur wenn Task noch geöffnet und Exchange-Mail)
         if(_ep==='gmail'&&typeof gmailToken!=='undefined'&&gmailToken){
           _pamEmailToggle('gmail');
           setTimeout(()=>{const _tid=(document.getElementById('taskId')||{}).value||_pamActiveTaskId||'';if(_tid&&typeof _gmLoadEmailThread==='function')_gmLoadEmailThread();},600);
-        }else if(_ep!=='gmail'&&typeof msToken!=='undefined'&&msToken){
+        }else if(!_isImap&&_ep!=='gmail'&&typeof msToken!=='undefined'&&msToken){
           _pamEmailToggle('outlook');
           setTimeout(()=>{const _tid=(document.getElementById('taskId')||{}).value||_pamActiveTaskId||'';if(_tid&&typeof _msLoadEmailThread==='function')_msLoadEmailThread();},600);
         }
