@@ -3931,7 +3931,38 @@ async function gdriveTokenCallback(resp) {
     // Falls gdriveFileId noch gesetzt: sofort speichern um Datenverlust zu verhindern
     if (gdriveFileId) {
       showToast('✅ Drive-Verbindung erneuert – neue Stunde läuft','ok',4000);
-      gdriveSaveData();
+      // Fix 2026-05-24: Lokales Backup prüfen – wenn neuer als Drive-Stand, Banner anzeigen
+      (async function _checkBackupAfterReconnect(){
+        try{
+          const bk=_getLocalBackup();
+          if(bk&&bk.ts&&bk.data){
+            // Drive modifiedTime holen
+            const mr=await fetch('https://www.googleapis.com/drive/v3/files/'+gdriveFileId+'?fields=modifiedTime&_='+Date.now(),
+              {headers:{Authorization:'Bearer '+gdriveToken},cache:'no-store'});
+            const driveTs=mr.ok?(await mr.json()).modifiedTime||'':'' ;
+            const bkDate=new Date(bk.ts);
+            const driveDate=driveTs?new Date(driveTs):new Date(0);
+            if(bkDate>driveDate){
+              // Lokales Backup ist neuer → Banner anbieten
+              const bkLabel=bkDate.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
+              let restBanner=document.getElementById('_pamBackupRestoreBanner');
+              if(!restBanner){
+                restBanner=document.createElement('div');
+                restBanner.id='_pamBackupRestoreBanner';
+                restBanner.style.cssText='position:sticky;top:0;z-index:1501;background:#1565c0;color:#fff;display:flex;align-items:center;justify-content:center;gap:12px;padding:10px 16px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.3);flex-shrink:0;';
+                restBanner.innerHTML='<span>💾 Lokaler Stand ('+bkLabel+' Uhr) ist neuer als Drive – ungespeicherte Änderungen gefunden</span>'
+                  +'<button onclick="restoreLocalBackup();document.getElementById('_pamBackupRestoreBanner').remove();" style="background:#fff;color:#1565c0;border:none;border-radius:6px;padding:5px 14px;font-size:13px;font-weight:700;cursor:pointer;">↩ Wiederherstellen &amp; Speichern</button>'
+                  +'<button onclick="document.getElementById('_pamBackupRestoreBanner').remove()" style="background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">✕ Verwerfen</button>';
+                const topbar=document.querySelector('.topbar');
+                if(topbar)topbar.parentNode.insertBefore(restBanner,topbar);
+                else document.body.prepend(restBanner);
+              }
+              return; // Kein auto-save – User entscheidet
+            }
+          }
+        }catch(e){console.warn('[PAM] Backup-Check nach Reconnect:',e);}
+        gdriveSaveData();
+      })();
     } else {
       // fileId verloren (z.B. nach längerem Offline) → gespeicherte Datei neu laden
       let sf=null;
@@ -4176,6 +4207,16 @@ let _gmWarnToastShown=false; // Gmail-Ablauf-Toast nur einmal pro Session
 // Fix #4: Konsolidierter visibilitychange-Handler (Token-Check + Sync in einem)
 // Der zweite Handler in startSyncPolling() wird durch _ptpVisHooked unterdrückt
 document.addEventListener('visibilitychange', () => {
+  // Fix 2026-05-24: Sofort speichern wenn der Tab verlassen wird (App-Wechsel, Minimieren)
+  if (document.visibilityState === 'hidden') {
+    _saveLocalBackup(); // Immer localStorage-Backup
+    if (_taskModalDirty) {
+      clearTimeout(autoSaveTimer);
+      saveTaskData();   // RAM → boards[]
+      scheduleSave();   // boards[] → Drive (async, best-effort)
+    }
+    return;
+  }
   if (document.visibilityState !== 'visible') return;
   // Token-Ablauf prüfen
   if (gdriveTokenClient && gdriveToken) {
@@ -4192,6 +4233,21 @@ document.addEventListener('visibilitychange', () => {
 });
 // Verhindert dass startSyncPolling() einen zweiten visibilitychange-Handler registriert
 window._ptpVisHooked = true;
+
+// Fix 2026-05-24: Permanenter 60-Sekunden-Intervall-Save
+// Speichert den offenen Task auch wenn der User in einem anderen Programm arbeitet
+// und keine Feldänderungen stattfinden (kein oninput-Trigger)
+(function _startPermanentSaveInterval(){
+  setInterval(function(){
+    _saveLocalBackup(); // Immer localStorage aktuell halten
+    if(!_taskModalDirty) return; // Nichts geändert → kein Drive-Upload nötig
+    const taskId = (document.getElementById('taskId')||{}).value||'';
+    if(!taskId) return; // Neuer unsaved Task → wird beim Schließen gespeichert
+    clearTimeout(autoSaveTimer);
+    saveTaskData();  // RAM → boards[]
+    scheduleSave();  // boards[] → Drive
+  }, 60000); // alle 60 Sekunden
+})();
 function gdriveTokenValid() { return !!gdriveToken && Date.now() < gdriveTokenExpires; }
 
 // Zentraler 401-Handler: erst stille Neuanmeldung versuchen, dann retry
@@ -4251,6 +4307,8 @@ function gdriveRequestToken(action) {
   // verhindert stilles Scheitern wenn Google-Session unklar ist.
   if (hint) { params.set('login_hint', hint); }
   else { params.set('prompt', 'select_account'); }
+  // Fix 2026-05-24: Daten vor dem Seitenreload sichern – verhindert Datenverlust beim Reconnect
+  _saveLocalBackup();
   window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params;
 }
 
@@ -10129,7 +10187,7 @@ async function _msLoadEmailThread(){
         // doppelte Leerzeichen, Re:/Fwd:/AW:/WG: entfernen, Sonderzeichen normalisieren
         const _searchQraw=_msSubjFallback.replace(/["']/g,'').replace(/_/g,' ').replace(/\s+/g,' ').trim();
         // Signifikante Wörter extrahieren (≥3 Zeichen, keine Mail-Prefixe)
-        const _searchWords=_searchQraw.split(/\s+/).filter(w=>w.length>=3&&!/^(Re|Fwd|AW|WG|Antwort):?$/i.test(w));
+        const _searchWords=[..._searchQraw.split(/[\s\-]+/)].filter(w=>w.length>=3&&!/^(Re|Fwd|AW|WG|Antwort):?$/i.test(w)); /* Fix 2026-05-24: Bindestriche als Worttrenner */
         // Sonderzeichen-freie Varianten für Suche (ß→ss, ö→oe etc. als Fallback)
         const _normalizeDE=s=>s.replace(/ß/g,'ss').replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').toLowerCase();
         console.log('[MS-DEBUG] Bereinigte Suchwörter:',_searchWords);
@@ -10404,7 +10462,7 @@ function _msOpenThreadPopup(){
   const old=document.getElementById(GID);if(old){old.remove();return;}
   const ov=document.createElement('div');
   ov.id=GID;
-  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99998;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100002;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;/* Fix 2026-05-24: z-index 99998->100002 */';
   const msgs=task?(task.msThreadMessages||[]):[];
   const countTxt=msgs.length?(msgs.length+' Mail'+(msgs.length!==1?'s':'')):'Noch nicht geladen';
   ov.innerHTML=`<div style="background:var(--bg1,#fff);border-radius:12px;width:100%;max-width:920px;height:84vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.28);">
@@ -15424,68 +15482,4 @@ async function _createDriveFoldersForNewAuftrag(p){
       const eoEl =document.getElementById('tEmailOrdner');  if(eoEl)  eoEl.value=emailUrl;
       if(typeof _updateFotoOrdnerHint==='function') _updateFotoOrdnerHint();
       if(typeof _updateStammSummary==='function')   _updateStammSummary();
-      if(typeof _updateHdrMeta==='function')        _updateHdrMeta();
-      if(typeof _updateMapsBtn==='function')        _updateMapsBtn();
-      _showVbsDriveLinksBox(mainUrl,fotoUrl,dokUrl,emailUrl);
-    },350);
-
-  }catch(e){
-    showToast('\u26a0 Fehler: '+e.message,'error',8000);
-    console.error('[VBS-Drive]',e);
-    if(btn){btn.textContent='\u2601\uFE0F Drive-Ordner anlegen & Task \u00f6ffnen';btn.disabled=false;}
-  }
-}
-
-function _showVbsDriveLinksBox(mainUrl,fotoUrl,dokUrl,emailUrl){
-  const old=document.getElementById('vbsDriveLinksBox');
-  if(old)old.remove();
-  const box=document.createElement('div');
-  box.id='vbsDriveLinksBox';
-  box.style.cssText='position:fixed;bottom:20px;right:20px;z-index:9989;background:var(--bg1);'
-    +'border:1px solid var(--green,#27ae60);border-radius:10px;padding:14px 18px;'
-    +'max-width:340px;font-size:12px;box-shadow:0 4px 20px rgba(0,0,0,.35);';
-  box.innerHTML=
-    '<div style="font-weight:700;color:var(--green,#27ae60);margin-bottom:9px;">\u2601\uFE0F Drive-Ordner angelegt</div>'
-   +'<div style="margin-bottom:4px;"><span style="opacity:.7;">Hauptordner: </span>'
-     +'<a href="'+mainUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive \u00f6ffnen \u2197</a></div>'
-   +'<div style="margin-bottom:4px;"><span style="opacity:.7;">02_Fotos: </span>'
-     +'<a href="'+fotoUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive \u00f6ffnen \u2197</a></div>'
-   +'<div style="margin-bottom:4px;"><span style="opacity:.7;">03_Dokumente: </span>'
-     +'<a href="'+dokUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive \u00f6ffnen \u2197</a></div>'
-   +'<div style="margin-bottom:10px;"><span style="opacity:.7;">E-Mails: </span>'
-     +'<a href="'+emailUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive \u00f6ffnen \u2197</a></div>'
-   +'<div style="font-size:11px;opacity:.65;margin-bottom:8px;">Alle Felder im Task ausgef\u00fcllt.<br>Bitte Task speichern!</div>'
-   +'<button onclick="document.getElementById(\'vbsDriveLinksBox\').remove()" '
-     +'style="background:var(--bg2);border:1px solid var(--border);color:var(--text1);'
-     +'padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;">\u2715 Schlie\u00dfen</button>';
-  document.body.appendChild(box);
-}
-
-document.addEventListener('DOMContentLoaded', _checkNewAuftragFromVbs);
-
-// ── Service Worker: bei jedem Seitenaufruf auf Updates prüfen ──────────────
-if('serviceWorker' in navigator){
-  navigator.serviceWorker.getRegistration().then(reg=>{
-    if(reg) reg.update();
-  });
-  navigator.serviceWorker.addEventListener('controllerchange',()=>{
-    // Neuer SW hat übernommen → Seite automatisch neu laden
-    window.location.reload();
-  });
-}
-
-// ── App-Update-Button: unregistriert SW und lädt neu ──────────────────────
-function pamForceSwUpdate(){
-  if(!('serviceWorker' in navigator)){
-    window.location.reload(); return;
-  }
-  navigator.serviceWorker.getRegistrations().then(regs=>{
-    Promise.all(regs.map(r=>r.unregister())).then(()=>{
-      window.location.reload(true);
-    });
-  });
-}
-
-</script>
-</body>
-</html>
+      if(ty
