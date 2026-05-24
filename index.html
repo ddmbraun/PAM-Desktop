@@ -404,7 +404,12 @@ function _ez2(n){return n<10?'0'+n:String(n);}
 // ── EML-PARSER: MIME-Dekodierung für lesbare PDFs ──
 function _decodeEmlMimeWord(str){
   // Dekodiert RFC-2047 encoded words: =?charset?B?base64?= und =?charset?Q?quoted-printable?=
-  return (str||'').replace(/=\?([^?*\s]+)(?:\*[^?]*)?\?([BbQq])\?([^?]*)\?=/g,function(_,cs,enc,dat){
+  // RFC 2047 §6.2: Whitespace zwischen zwei encoded-words wird entfernt
+  let s=str||'';
+  // Schritt 1: Whitespace zwischen aufeinanderfolgenden encoded-words entfernen
+  s=s.replace(/(\?=)\s+(=\?)/g,'$1$2');
+  // Schritt 2: Jedes encoded-word dekodieren
+  return s.replace(/=\?([^?*\s]+)(?:\*[^?]*)?\?([BbQq])\?([^?]*)\?=/g,function(_,cs,enc,dat){
     try{
       let bytes;
       if(enc.toUpperCase()==='B'){
@@ -413,9 +418,9 @@ function _decodeEmlMimeWord(str){
         for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
       }else{
         // Q-Encoding: _ = Leerzeichen, =XX = Hex-Byte
-        let s=dat.replace(/_/g,' ').replace(/=([0-9A-Fa-f]{2})/g,function(_,h){return String.fromCharCode(parseInt(h,16));});
-        bytes=new Uint8Array(s.length);
-        for(let i=0;i<s.length;i++)bytes[i]=s.charCodeAt(i);
+        let d=dat.replace(/_/g,' ').replace(/=([0-9A-Fa-f]{2})/g,function(_,h){return String.fromCharCode(parseInt(h,16));});
+        bytes=new Uint8Array(d.length);
+        for(let i=0;i<d.length;i++)bytes[i]=d.charCodeAt(i);
       }
       return new TextDecoder(cs).decode(bytes);
     }catch(e){return dat;}
@@ -2940,7 +2945,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-24 · #15'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-24-b15)
+const PAM_BUILD = 'v2026-05-24 · #17'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-24-b17)
 
 // ── STATE ──
 let boards = {};
@@ -4121,11 +4126,10 @@ setInterval(()=>{
   // Kein Token aber Datei war gespeichert → stille Erneuerung versuchen
   if(!gdriveToken){
     let _sf=null;try{_sf=JSON.parse(localStorage.getItem(PC_FILE_KEY)||'null');}catch(e){}
-    if(_sf&&_sf.id&&!_silentRefreshInProgress&&!_silentRefreshGaveUp){
-      _silentTokenRefresh(
-        ()=>{ _hideDriveWarnBanner();const sf=_sf;if(sf)gdriveLoadFile(sf.id,sf.name).catch(()=>{}); },
-        ()=>{ /* still kein Token – Banner bleibt */ }
-      );
+    if(_sf&&_sf.id){
+      // Kein _silentTokenRefresh: GitHub Pages COOP-Header blockiert GIS-Popups
+      // → nur Banner zeigen, Nutzer klickt selbst auf ☁️ Drive-Button
+      if(Date.now()>=_bannerDismissedUntil) _showDriveWarnBanner(0);
     }
     return;
   }
@@ -4777,17 +4781,20 @@ function _startDriveTimer() {
   const TOTAL = 3600000; // 60 Minuten in ms
   const AUTO_RENEW_BEFORE = 5 * 60 * 1000; // 5 Minuten vor Ablauf automatisch erneuern
 
-  // Automatische Erneuerung planen (5 Min vor Ablauf)
+  // Token-Ablauf-Warnung planen (5 Min vor Ablauf)
+  // Kein _silentTokenRefresh: GitHub Pages COOP-Header blockiert GIS-Popups zuverlässig
+  // → nur Banner zeigen, Nutzer klickt selbst auf ☁️ Drive-Button für Redirect-Auth
   clearTimeout(_driveAutoRenewTimer);
   const msUntilRenew = (gdriveTokenExpires - Date.now()) - AUTO_RENEW_BEFORE;
   if (msUntilRenew > 0) {
     _driveAutoRenewTimer = setTimeout(function() {
-      console.log('[PTP] Token läuft bald ab – automatische Erneuerung…');
-      _silentTokenRefresh(function(){_hideDriveWarnBanner();console.info('[PTP] Token auto-erneuert ✓');},function(){_showDriveWarnBanner(0);});
+      console.log('[PTP] Token läuft bald ab – Banner einblenden');
+      _showDriveWarnBanner(AUTO_RENEW_BEFORE/1000);
+      if(!_warnToastShown){_warnToastShown=true;showToast('⚠ Drive-Verbindung läuft bald ab – ☁️ Drive-Button drücken','error',10000);}
     }, msUntilRenew);
   } else {
-    // Bereits im roten Bereich → sofort erneuern
-    setTimeout(function(){_silentTokenRefresh(function(){_hideDriveWarnBanner();},function(){_showDriveWarnBanner(0);});}, 500);
+    // Bereits im roten Bereich → Banner sofort
+    _showDriveWarnBanner(0);
   }
 
   // Visuelle Countdown-Anzeige (rAF-Loop, aktualisiert jede Sekunde)
@@ -4798,11 +4805,11 @@ function _startDriveTimer() {
     const mins = Math.ceil(remaining / 60000);
     const pct = Math.max(0, Math.min(100, (remaining / TOTAL) * 100));
     if (remaining <= 0) {
-      btn.textContent = '☁️ Verbinde…';
+      btn.textContent = '☁️ Abgelaufen';
       btn.className = 'drive-timer-btn expiring';
       _setDriveBar(0, 'orange');
-      // Falls Erneuerung noch nicht ausgelöst: jetzt versuchen
-      _silentTokenRefresh(function(){_hideDriveWarnBanner();},function(){_showDriveWarnBanner(0);});
+      // Kein _silentTokenRefresh (COOP) – Banner zeigen, Nutzer klickt Drive-Button
+      _showDriveWarnBanner(0);
       return;
     }
     // Nur neu zeichnen wenn Minuten sich geändert haben (spart CPU)
@@ -10110,20 +10117,48 @@ async function _msLoadEmailThread(){
       };
       try{
         if(stEl)stEl.textContent='⏳ Suche nach Betreff…';
+        // Subject bereinigen: Underscores, doppelte Leerzeichen, Re:/Fwd:/AW:/WG: entfernen
+        const _searchQraw=_msSubjFallback.replace(/["']/g,'').replace(/_/g,' ').replace(/\s+/g,' ').trim();
+        // Signifikante Wörter extrahieren (≥3 Zeichen, keine Mail-Prefixe)
+        const _searchWords=_searchQraw.split(/\s+/).filter(w=>w.length>=3&&!/^(Re|Fwd|AW|WG|Antwort):?$/i.test(w));
+        // KQL-Query: erste 4-5 signifikante Wörter, max 60 Zeichen
+        const _searchQ=_searchWords.slice(0,5).join(' ').substring(0,60);
+        console.log('[MS-DEBUG] Bereinigte Suchwörter:',_searchWords,'| Query:',_searchQ);
         // 1. Versuch: $search (Volltextsuche, robust bei Sonderzeichen ß/ö/ü)
-        const _searchQ=_msSubjFallback.replace(/["']/g,'').substring(0,60);
         const rSearch=await fetch('https://graph.microsoft.com/v1.0/me/messages?$search=%22subject%3A'+encodeURIComponent(_searchQ)+'%22&$select=id,conversationId,internetMessageId,subject&$top=10',
           {headers:{Authorization:'Bearer '+msToken}});
         if(rSearch.ok){
           const dSearch=await rSearch.json();
-          console.log('[MS-DEBUG] $search Ergebnis:',dSearch.value?.length||0,'Treffer, Suchbegriff:',_searchQ.substring(0,30));
+          console.log('[MS-DEBUG] $search Ergebnis:',dSearch.value?.length||0,'Treffer, Suchbegriff:',_searchQ.substring(0,40));
           if(dSearch.value)dSearch.value.forEach(m=>console.log('[MS-DEBUG]   →',m.subject));
-          // Nur Treffer übernehmen, deren Betreff den Suchbegriff wirklich enthält (KQL kann ungenau sein)
-          const _filteredSearch={value:(dSearch.value||[]).filter(m=>(m.subject||'').toLowerCase().includes(_searchQ.substring(0,20).toLowerCase()))};
-          console.log('[MS-DEBUG] Nach Filter:',_filteredSearch.value.length,'Treffer');
+          // Wort-basierter Filter: Treffer muss mindestens 50% der Suchwörter enthalten
+          const _minMatch=Math.max(1,Math.ceil(_searchWords.length*0.5));
+          const _filteredSearch={value:(dSearch.value||[]).filter(m=>{
+            const sub=(m.subject||'').toLowerCase();
+            const hits=_searchWords.filter(w=>sub.includes(w.toLowerCase())).length;
+            return hits>=_minMatch;
+          })};
+          console.log('[MS-DEBUG] Nach Filter:',_filteredSearch.value.length,'Treffer (min',_minMatch,'Wörter)');
           _msProcessSubjResults(_filteredSearch);
         }else{
           console.warn('[MS-DEBUG] $search HTTP-Fehler:',rSearch.status,await rSearch.text().catch(()=>''));
+        }
+        // 2b. Fallback mit nur 2 Schlüsselwörtern wenn volle Suche nichts fand
+        if(convIds.size===0&&_searchWords.length>=2){
+          const _shortQ=_searchWords.slice(0,2).join(' ');
+          console.log('[MS-DEBUG] Kurzsuche mit:',_shortQ);
+          const rShort=await fetch('https://graph.microsoft.com/v1.0/me/messages?$search=%22subject%3A'+encodeURIComponent(_shortQ)+'%22&$select=id,conversationId,internetMessageId,subject&$top=10',
+            {headers:{Authorization:'Bearer '+msToken}});
+          if(rShort.ok){
+            const dShort=await rShort.json();
+            console.log('[MS-DEBUG] Kurzsuche Ergebnis:',dShort.value?.length||0,'Treffer');
+            if(dShort.value)dShort.value.forEach(m=>console.log('[MS-DEBUG]   →',m.subject));
+            const _filtShort={value:(dShort.value||[]).filter(m=>{
+              const sub=(m.subject||'').toLowerCase();
+              return _searchWords.slice(0,2).every(w=>sub.includes(w.toLowerCase()));
+            })};
+            _msProcessSubjResults(_filtShort);
+          }
         }
         // 2. Versuch: $filter eq (exakter Vergleich, falls $search nichts fand)
         if(convIds.size===0){
