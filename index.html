@@ -113,8 +113,22 @@ async function handleEmailDrop(dt,zone){
         let pf=pdfs[pi];
         try{
           let buf=await new Promise(function(res,rej){let r=new FileReader();r.onload=function(e){res(e.target.result);};r.onerror=rej;r.readAsArrayBuffer(pf);});
-          await _ezUpload(buf,pf.name,fid);
+          let _pdfUpResult=await _ezUpload(buf,pf.name,fid);
           uploaded.push(pf.name);
+          // Fix 2026-05-24: PDF als taskEmailPdfs-Eintrag speichern, damit sie im Task sichtbar ist
+          if(_pdfUpResult&&_pdfUpResult.id){
+            if(!taskEmailPdfs.some(function(p){return p.fileId===_pdfUpResult.id;})){
+              taskEmailPdfs.push({
+                name:pf.name,
+                fileId:_pdfUpResult.id,
+                url:'https://drive.google.com/file/d/'+_pdfUpResult.id+'/view',
+                uploadedAt:new Date().toLocaleDateString('de-DE'),
+                date:''
+              });
+            }
+            if(typeof renderEmailSection==='function')renderEmailSection();
+            if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
+          }
         }catch(err){_ezMsg(zone,'error','Fehler bei '+pf.name+': '+err.message);return;}
       }
       _ezMsg(zone,'success','✅ Gespeichert: '+uploaded.join(', '));
@@ -509,6 +523,8 @@ function _parseEmlText(rawText){
         let b64=pb.replace(/\s+/g,'');
         if(b64)res.cidMap['cid:'+cid]='data:'+pct+';base64,'+b64;
       }
+      // Fix 2026-05-24: CID-Inline-Bilder nicht zusätzlich als Anhang speichern
+      let _isCidImage=pct.startsWith('image/')&&pcidArr;
       // Datei-Anhang (PDF, DOCX etc.) – Content-Disposition: attachment ODER application/pdf
       let dispArr=phdr.match(/Content-Disposition:\s*([^\r\n]+)/i);
       let disp=(dispArr?dispArr[1]:'').toLowerCase();
@@ -524,7 +540,7 @@ function _parseEmlText(rawText){
         let nmArr=phdr.match(/name\*?=["']?(?:UTF-8'')?([^"';\r\n]+)/i);
         if(nmArr){let _rawNm=nmArr[1].trim();if(_rawNm.includes('=?'))attachName=_decodeEmlMimeWord(_rawNm);else try{attachName=decodeURIComponent(_rawNm.replace(/\+/g,' '));}catch(e){attachName=_rawNm;}}
       }
-      if(pe==='base64'&&attachName&&(disp.startsWith('attachment')||pct==='application/pdf'||pct==='application/octet-stream'||pct.startsWith('application/'))){
+      if(pe==='base64'&&attachName&&!_isCidImage&&(disp.startsWith('attachment')||pct==='application/pdf'||pct==='application/octet-stream'||pct.startsWith('application/'))){
         let b64=pb.replace(/\s+/g,'');
         if(b64)res.attachments.push({name:attachName,mimeType:pct||'application/octet-stream',b64:b64});
       }
@@ -852,6 +868,51 @@ async function _auftragAddToTask(task,boardName,fileMode){
     if(_apAdd!=='gmail'&&!task.msEmailSubject&&(info.subject||task.title)){
       task.msEmailSubject=info.subject||task.title;
     }
+    // Fix 2026-05-24: PDF-Vorschau aus EML-Body erstellen (analog _uploadEmailOriginal)
+    let _isRawEml2=rawFile&&rawFile.name.toLowerCase().endsWith('.eml');
+    if(_isRawEml2&&fid&&gdriveToken&&(info.bodyHtml||info.bodyText)){
+      try{
+        let _d2=info.date instanceof Date&&!isNaN(info.date)?info.date:new Date();
+        let _stamp2=_d2.getFullYear()+'.'+_ez2(_d2.getMonth()+1)+'.'+_ez2(_d2.getDate());
+        let _pdfName2=_stamp2+'_'+_ezClean(info.subject||'email')+'.pdf';
+        let _pdfInfo2={subject:info.subject,sender:info.sender,date:_d2,bodyHtml:info.bodyHtml,bodyText:info.bodyText,cidMap:info.cidMap||{}};
+        let _pdfData2=await _ezBuildPdfFromHtml(_pdfInfo2);
+        let _pdfResult2=await _ezUpload(_pdfData2,_pdfName2,fid);
+        if(_pdfResult2&&_pdfResult2.id){
+          if(!task.emailPdfs)task.emailPdfs=[];
+          let _msgId2=info.messageId||'';
+          let _dupPdf2=task.emailPdfs.some(p=>(_msgId2&&[p.messageId,p.gmailMessageId,p.msMessageId].includes(_msgId2)));
+          if(!_dupPdf2){
+            task.emailPdfs.push({name:_pdfName2,fileId:_pdfResult2.id,url:'https://drive.google.com/file/d/'+_pdfResult2.id+'/view',uploadedAt:new Date().toLocaleDateString('de-DE'),date:_d2.toISOString(),messageId:_msgId2});
+          }
+        }
+      }catch(_pe2){console.warn('[PTP] PDF-Vorschau (AddToTask):',_pe2);}
+    }
+    // Fix 2026-05-24: EML-Anhänge extrahieren und in Drive hochladen (analog _uploadEmailOriginal)
+    if(_isRawEml2&&fid&&gdriveToken&&info.attachments&&info.attachments.length>0){
+      let _att2Ok=0,_att2Fail=0;
+      for(const att of info.attachments){
+        try{
+          const binStr=atob(att.b64);
+          const bytes=new Uint8Array(binStr.length);
+          for(let k=0;k<binStr.length;k++)bytes[k]=binStr.charCodeAt(k);
+          const attResult=await _driveUploadGeneric(bytes.buffer,att.name,att.mimeType,fid);
+          const attUrl='https://drive.google.com/file/d/'+attResult.id+'/view';
+          const today=new Date().toLocaleDateString('de-DE');
+          const isImg=/\.(jpg|jpeg|png|gif|webp|heic|heif|avif|bmp|tiff?)$/i.test(att.name)||(att.mimeType||'').startsWith('image/');
+          if(isImg){
+            if(!task.fotos)task.fotos=[];
+            task.fotos.push({driveId:attResult.id,name:att.name,mimeType:att.mimeType||'image/jpeg',caption:'',thumbnailLink:attUrl});
+          }else{
+            if(!task.attachments)task.attachments=[];
+            task.attachments.push({name:att.name,fileId:attResult.id,url:attUrl,uploadedAt:today});
+          }
+          _att2Ok++;
+        }catch(e){_att2Fail++;console.warn('[PTP] EML-Anhang (AddToTask):',e);}
+      }
+      if(_att2Ok>0)showToast('📎 '+_att2Ok+' Anhang'+(_att2Ok!==1?'e':'')+' gespeichert','success',4000);
+      if(_att2Fail>0)showToast('⚠ '+_att2Fail+' Anhang/Anhänge fehlgeschlagen','warning',5000);
+    }
     showToast('✅ E-Mail in "'+task.title+'" gespeichert','success',3000);
   }
 
@@ -862,6 +923,9 @@ async function _auftragAddToTask(task,boardName,fileMode){
       if(typeof renderAttachList==='function')renderAttachList();
     }else{
       taskEmailOriginals=task.emailOriginals||[];
+      taskEmailPdfs=task.emailPdfs||[];
+      if(typeof renderFotoListDesktop==='function')renderFotoListDesktop();
+      if(typeof renderAttachList==='function')renderAttachList();
       if(typeof renderEmailSection==='function')renderEmailSection();
     }
   }
@@ -9613,7 +9677,7 @@ async function _gmSaveThreadPdfs(task,threadMsgs){
   const folderUrl=(document.getElementById('tEmailOrdner')?.value||document.getElementById('tGDOrdner')?.value||'').trim();
   const fid=_ezFolderId(folderUrl);if(!fid)return 0;
   // Dedup: alle vorhandenen messageId-Felder berücksichtigen (inkl. msMessageId von Outlook-PDFs)
-  const knownIds=new Set([...(taskEmailPdfs||[]).flatMap(p=>[p.gmailMessageId,p.messageId,p.outlookMessageId,p.msMessageId]).filter(Boolean)]);
+  const knownIds=new Set([...(taskEmailPdfs||[]).flatMap(p=>[p.gmailMessageId,p.messageId,p.msMessageId]).filter(Boolean)]);
   const knownFileIds=new Set((taskEmailPdfs||[]).map(p=>p.fileId).filter(Boolean));
   const toSave=threadMsgs.filter(m=>m.messageId&&!knownIds.has(m.messageId));
   if(!toSave.length)return 0;
@@ -10142,7 +10206,7 @@ async function _msSaveThreadPdfs(task,threadMsgs){
   const fid=_ezFolderId(folderUrl);
   if(!fid){showToast('⚠ Kein E-Mail-Ordner verknüpft – PDFs nicht gespeichert','warning',3000);return 0;}
   // Bereits gespeicherte MessageIds → keine Duplikate (alle ID-Felder + fileId, inkl. Gmail-PDFs)
-  const _msKnownIds=new Set((taskEmailPdfs||[]).flatMap(p=>[p.msMessageId,p.gmailMessageId,p.messageId,p.outlookMessageId]).filter(Boolean));
+  const _msKnownIds=new Set((taskEmailPdfs||[]).flatMap(p=>[p.msMessageId,p.gmailMessageId,p.messageId]).filter(Boolean));
   const _msKnownFileIds=new Set((taskEmailPdfs||[]).map(p=>p.fileId).filter(Boolean));
   const toSave=threadMsgs.filter(m=>m.internetMessageId&&!_msKnownIds.has(m.internetMessageId));
   if(!toSave.length)return 0;
@@ -13679,7 +13743,7 @@ async function _uploadEmailOriginal(file){
     }
     // Datei-Anhänge aus EML in Projektordner hochladen
     if(emlParsedAttachments.length>0&&fid){
-      showToast('📎 '+emlParsedAttachments.length+' Anhang/Anhänge gefunden – lade in Projektordner…','info',3000);
+      showToast('📎 '+emlParsedAttachments.length+' Anhang/Anhänge gefunden – lade in E-Mail-Ordner…','info',3000);
       const taskId3=(document.getElementById('taskId')||{}).value||'';
       const t3=findTaskById(taskId3);
       let _attOk=0,_attFail=0;
@@ -13741,7 +13805,7 @@ async function _uploadEmailOriginal(file){
         if(_pdfResult&&_pdfResult.id){
           if(!taskEmailPdfs)taskEmailPdfs=[];
           const _emlMsgId=emailMeta.messageId||'';
-          const _alreadyIn=taskEmailPdfs.some(p=>p.fileId===_pdfResult.id||((_emlMsgId)&&[p.messageId,p.gmailMessageId,p.msMessageId,p.outlookMessageId].includes(_emlMsgId)));
+          const _alreadyIn=taskEmailPdfs.some(p=>((_emlMsgId)&&[p.messageId,p.gmailMessageId,p.msMessageId].includes(_emlMsgId)));
           if(_alreadyIn)throw new Error('skip-dup');
           const _pdfEntry={name:_pdfName,fileId:_pdfResult.id,url:'https://drive.google.com/file/d/'+_pdfResult.id+'/view',uploadedAt:new Date().toLocaleDateString('de-DE'),date:emailMeta.date,messageId:_emlMsgId};
           taskEmailPdfs.push(_pdfEntry);
@@ -15322,18 +15386,4 @@ if('serviceWorker' in navigator){
   });
 }
 
-// ── App-Update-Button: unregistriert SW und lädt neu ──────────────────────
-function pamForceSwUpdate(){
-  if(!('serviceWorker' in navigator)){
-    window.location.reload(); return;
-  }
-  navigator.serviceWorker.getRegistrations().then(regs=>{
-    Promise.all(regs.map(r=>r.unregister())).then(()=>{
-      window.location.reload(true);
-    });
-  });
-}
-
-</script>
-</body>
-</html>
+// ── App-Update-Button: unregistriert SW und lädt neu ───
