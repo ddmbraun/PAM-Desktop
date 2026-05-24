@@ -1,7 +1,7 @@
 // Service Worker - PAM Desktop (Workboard + Stammblatt)
 // Google-APIs werden NIEMALS gecacht.
 
-const CACHE_NAME = 'pam-desktop-2026-05-24-b22'; // Fix 2026-05-24: Merge-Dateiversion + Outlook-Suche Umlaute/top50 + Dateiabschluss-Reparatur
+const CACHE_NAME = 'pam-desktop-2026-05-24-b23'; // Fix 2026-05-24: Fotos im Merge-Move + Outlook Strategie 3/4 + minHits-Fix (keine falschen Mails mehr)
 const PRECACHE = [
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css',
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js',

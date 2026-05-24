@@ -2945,7 +2945,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-24 · #22'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-24-b22)
+const PAM_BUILD = 'v2026-05-24 · #23'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-24-b23)
 
 // ── DEBUG: Popup-Detector – fängt jedes window.open ab ──
 const _origWindowOpen = window.open;
@@ -6793,7 +6793,8 @@ function _executeMerge(){
 function _showMergeFileMoveDialog(masterTask,otherTask){
   const emailFiles=[...(otherTask.emailOriginals||[]),...(otherTask.emailPdfs||[])].filter(f=>f&&f.fileId);
   const docFiles=(otherTask.attachments||[]).filter(f=>f&&f.fileId);
-  const total=emailFiles.length+docFiles.length;
+  const fotoFiles=(otherTask.fotos||[]).filter(f=>f&&f.driveId);
+  const total=emailFiles.length+docFiles.length+fotoFiles.length;
   if(total===0)return;
   if(!gdriveToken){showToast('⚠ Kein Drive-Token – bitte erneut anmelden','warning',4000);return;}
   const dlg=document.createElement('div');
@@ -6805,6 +6806,7 @@ function _showMergeFileMoveDialog(masterTask,otherTask){
       Der zusammengeführte Task hatte <strong>${total} Datei${total!==1?'en':''}</strong> in Google Drive:
       ${emailFiles.length>0?`<div style="margin-top:6px;">• ${emailFiles.length} E-Mail-Datei${emailFiles.length!==1?'en':''} → E-Mails-Ordner</div>`:''}
       ${docFiles.length>0?`<div>• ${docFiles.length} Anhang/Dokument${docFiles.length!==1?'e':''} → Auftragsordner</div>`:''}
+      ${fotoFiles.length>0?`<div>• ${fotoFiles.length} Foto${fotoFiles.length!==1?'s':''} → Foto-Ordner</div>`:''}
       <div style="margin-top:10px;font-size:12px;color:var(--text3);">Die Dateien bleiben dieselben – nur ihr Drive-Speicherort ändert sich.</div>
     </div>
     <div id="mergeFileMoveProgress" style="display:none;font-size:12px;background:var(--bg3);border-radius:6px;padding:8px;margin-bottom:12px;color:var(--text2);"></div>
@@ -6828,11 +6830,14 @@ async function _mergeMoveFilesToMasterFolders(){
     const DEFAULT_FID=_ezFolderId(DEFAULT_FOLDER_BAUSTELLE);
     const emailTargetFid=await _getOrCreateEmailFid(masterTask,DEFAULT_FID);
     const gdriveTargetFid=_ezFolderId(masterTask.gdriveOrdner)||DEFAULT_FID;
+    const fotoTargetFid=_ezFolderId(masterTask.gdrive)||DEFAULT_FID;
     const emailFiles=[...(otherTask.emailOriginals||[]),...(otherTask.emailPdfs||[])].filter(f=>f&&f.fileId);
     const docFiles=(otherTask.attachments||[]).filter(f=>f&&f.fileId);
+    const fotoFiles=(otherTask.fotos||[]).filter(f=>f&&f.driveId);
     const allFiles=[
       ...emailFiles.map(f=>({fileId:f.fileId,targetFid:emailTargetFid,label:f.subject||f.name||f.fileId})),
-      ...docFiles.map(f=>({fileId:f.fileId,targetFid:gdriveTargetFid,label:f.name||f.fileId}))
+      ...docFiles.map(f=>({fileId:f.fileId,targetFid:gdriveTargetFid,label:f.name||f.fileId})),
+      ...fotoFiles.map(f=>({fileId:f.driveId,targetFid:fotoTargetFid,label:f.name||f.driveId}))
     ];
     let moved=0,failed=0;
     for(let i=0;i<allFiles.length;i++){
@@ -10242,10 +10247,22 @@ async function _msLoadEmailThread(){
               if(db.value&&db.value.length){
                 convIds.add(db.value[0].conversationId);
               }else{
-                // Fallback 3: $search statt $filter (robuster für ältere Exchange-Backends)
-                const rc=await fetch(`https://graph.microsoft.com/v1.0/me/messages?$search=%22${encodeURIComponent(msgId)}%22&$select=id,conversationId,internetMessageId&$top=5`,
+                // Fallback 3: KQL-Feldsuche internetMessageId (zuverlässiger als $filter für Exchange)
+                const _kqlId=encodeURIComponent(`internetMessageId:${msgId}`);
+                const rc=await fetch(`https://graph.microsoft.com/v1.0/me/messages?$search=%22${_kqlId}%22&$select=id,conversationId,internetMessageId&$top=5`,
                   {headers:{Authorization:'Bearer '+msToken}});
-                if(rc.ok){const dc=await rc.json();if(dc.value){const _mx=dc.value.find(m=>(m.internetMessageId||'').replace(/^<|>$/g,'')===msgId);if(_mx&&_mx.conversationId)convIds.add(_mx.conversationId);}}
+                if(rc.ok){
+                  const dc=await rc.json();
+                  if(dc.value&&dc.value.length){
+                    const _mx=dc.value.find(m=>(m.internetMessageId||'').replace(/^<|>$/g,'')===msgId)||dc.value[0];
+                    if(_mx&&_mx.conversationId)convIds.add(_mx.conversationId);
+                  }else{
+                    // Fallback 4: Freitextsuche mit der Message-ID (letzter Versuch)
+                    const rd=await fetch(`https://graph.microsoft.com/v1.0/me/messages?$search=%22${encodeURIComponent(msgId)}%22&$select=id,conversationId,internetMessageId&$top=5`,
+                      {headers:{Authorization:'Bearer '+msToken}});
+                    if(rd.ok){const dd=await rd.json();if(dd.value){const _my=dd.value.find(m=>(m.internetMessageId||'').replace(/^<|>$/g,'')===msgId);if(_my&&_my.conversationId)convIds.add(_my.conversationId);}}
+                  }
+                }
               }
             }
           }
@@ -10319,8 +10336,8 @@ async function _msLoadEmailThread(){
                 const dW=await rW.json();
                 console.log('[MS-DEBUG] Einzelwort Ergebnis:',dW.value?.length||0,'Treffer für',_wv);
                 if(dW.value)dW.value.forEach(m=>console.log('[MS-DEBUG]   →',m.subject));
-                // Filter: spezifische Wörter (>10 Zeichen) → 1 Treffer reicht; sonst min 2
-                const _minHits=word.length>10?1:Math.min(2,_searchWords.length);
+                // Filter: Subject muss mindestens 2 der Suchwörter enthalten (lokale Prüfung)
+                const _minHits=Math.min(2,_searchWords.length);
                 const _filtW={value:(dW.value||[]).filter(m=>{
                   const sub=(m.subject||'').toLowerCase();
                   const subN=_normalizeDE(m.subject||'');
@@ -10333,7 +10350,28 @@ async function _msLoadEmailThread(){
           }
         }
 
-        // ── Strategie 3: $filter eq als letzter Fallback ──
+        // ── Strategie 3: Normalisierte Volltextsuche (ä→ae, ö→oe, ü→ue, ß→ss) ──
+        // Greift wenn KQL Umlaute im Original nicht findet
+        if(convIds.size===0){
+          const _normQ=_normalizeDE(_searchWords.slice(0,4).join(' ')).substring(0,50);
+          console.log('[MS-DEBUG] Normalisierte Suche:',_normQ);
+          const rNorm=await fetch('https://graph.microsoft.com/v1.0/me/messages?$search=%22'+encodeURIComponent(_normQ)+'%22&$select=id,conversationId,internetMessageId,subject&$top=25',
+            {headers:{Authorization:'Bearer '+msToken}});
+          if(rNorm.ok){
+            const dNorm=await rNorm.json();
+            console.log('[MS-DEBUG] Normalisiert Ergebnis:',dNorm.value?.length||0,'Treffer');
+            if(dNorm.value)dNorm.value.forEach(m=>console.log('[MS-DEBUG]   →',m.subject));
+            const _minNorm=Math.max(1,Math.ceil(_searchWords.length*0.4));
+            const _filtNorm={value:(dNorm.value||[]).filter(m=>{
+              const sub=(m.subject||'').toLowerCase();
+              const subN=_normalizeDE(m.subject||'');
+              const hits=_searchWords.filter(w=>sub.includes(w.toLowerCase())||subN.includes(_normalizeDE(w))).length;
+              return hits>=_minNorm;
+            })};
+            _msProcessSubjResults(_filtNorm);
+          }
+        }
+        // ── Strategie 4: $filter eq als letzter Ausweg (exakter Betreff-Match) ──
         if(convIds.size===0){
           const _fSub=encodeURIComponent("subject eq '"+_msSubjFallback.replace(/'/g,"''")+"'");
           const rSub=await fetch('https://graph.microsoft.com/v1.0/me/messages?$filter='+_fSub+'&$select=id,conversationId,internetMessageId&$top=10',
@@ -15599,6 +15637,8 @@ function _showVbsDriveLinksBox(mainUrl,fotoUrl,dokUrl,emailUrl){
   box.innerHTML=
     '<div style="font-weight:700;color:var(--green,#27ae60);margin-bottom:9px;">☁️ Drive-Ordner angelegt</div>'
    +'<div style="margin-bottom:4px;"><span style="opacity:.7;">Hauptordner: </span>'
+     +'<a href="'+mainUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
+   +'<div style="margin-bottom:4px;"><span style="opacity:.7;">02_Fotos: </span>'
      +'<a href="'+mainUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
    +'<div style="margin-bottom:4px;"><span style="opacity:.7;">02_Fotos: </span>'
      +'<a href="'+fotoUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
