@@ -2945,7 +2945,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-24 · #19'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-24-b19)
+const PAM_BUILD = 'v2026-05-24 · #22'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-24-b22)
 
 // ── DEBUG: Popup-Detector – fängt jedes window.open ab ──
 const _origWindowOpen = window.open;
@@ -6786,6 +6786,82 @@ function _executeMerge(){
   _clearMergeSelection();
   autoSave();
   showToast('✓ Tasks zusammengeführt','success',3000);
+  // Dateien aus dem anderen Task in den Master-Ordner verschieben
+  setTimeout(()=>_showMergeFileMoveDialog(merged,otherTask),400);
+}
+
+function _showMergeFileMoveDialog(masterTask,otherTask){
+  const emailFiles=[...(otherTask.emailOriginals||[]),...(otherTask.emailPdfs||[])].filter(f=>f&&f.fileId);
+  const docFiles=(otherTask.attachments||[]).filter(f=>f&&f.fileId);
+  const total=emailFiles.length+docFiles.length;
+  if(total===0)return;
+  if(!gdriveToken){showToast('⚠ Kein Drive-Token – bitte erneut anmelden','warning',4000);return;}
+  const dlg=document.createElement('div');
+  dlg.id='mergeFileMoveDialog';
+  dlg.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  dlg.innerHTML=`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:24px;max-width:440px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.3);">
+    <div style="font-size:16px;font-weight:700;margin-bottom:10px;">📁 Dateien in Master-Ordner verschieben?</div>
+    <div style="font-size:13px;color:var(--text2);margin-bottom:16px;">
+      Der zusammengeführte Task hatte <strong>${total} Datei${total!==1?'en':''}</strong> in Google Drive:
+      ${emailFiles.length>0?`<div style="margin-top:6px;">• ${emailFiles.length} E-Mail-Datei${emailFiles.length!==1?'en':''} → E-Mails-Ordner</div>`:''}
+      ${docFiles.length>0?`<div>• ${docFiles.length} Anhang/Dokument${docFiles.length!==1?'e':''} → Auftragsordner</div>`:''}
+      <div style="margin-top:10px;font-size:12px;color:var(--text3);">Die Dateien bleiben dieselben – nur ihr Drive-Speicherort ändert sich.</div>
+    </div>
+    <div id="mergeFileMoveProgress" style="display:none;font-size:12px;background:var(--bg3);border-radius:6px;padding:8px;margin-bottom:12px;color:var(--text2);"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button onclick="document.getElementById('mergeFileMoveDialog').remove()" style="padding:8px 16px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text1);cursor:pointer;font-size:13px;">Später</button>
+      <button id="mergeFileMoveBtn" onclick="_mergeMoveFilesToMasterFolders()" style="padding:8px 16px;border-radius:7px;border:none;background:#1a73e8;color:#fff;cursor:pointer;font-size:13px;font-weight:600;">Jetzt verschieben</button>
+    </div>
+  </div>`;
+  window._mergeFileMoveData={masterTask,otherTask};
+  document.body.appendChild(dlg);
+}
+
+async function _mergeMoveFilesToMasterFolders(){
+  const {masterTask,otherTask}=window._mergeFileMoveData||{};
+  if(!masterTask||!otherTask)return;
+  const btn=document.getElementById('mergeFileMoveBtn');
+  const prog=document.getElementById('mergeFileMoveProgress');
+  if(btn){btn.disabled=true;btn.textContent='Wird verschoben...';}
+  if(prog){prog.style.display='block';prog.textContent='Verbinde mit Google Drive...';}
+  try{
+    const DEFAULT_FID=_ezFolderId(DEFAULT_FOLDER_BAUSTELLE);
+    const emailTargetFid=await _getOrCreateEmailFid(masterTask,DEFAULT_FID);
+    const gdriveTargetFid=_ezFolderId(masterTask.gdriveOrdner)||DEFAULT_FID;
+    const emailFiles=[...(otherTask.emailOriginals||[]),...(otherTask.emailPdfs||[])].filter(f=>f&&f.fileId);
+    const docFiles=(otherTask.attachments||[]).filter(f=>f&&f.fileId);
+    const allFiles=[
+      ...emailFiles.map(f=>({fileId:f.fileId,targetFid:emailTargetFid,label:f.subject||f.name||f.fileId})),
+      ...docFiles.map(f=>({fileId:f.fileId,targetFid:gdriveTargetFid,label:f.name||f.fileId}))
+    ];
+    let moved=0,failed=0;
+    for(let i=0;i<allFiles.length;i++){
+      const {fileId,targetFid,label}=allFiles[i];
+      if(prog)prog.textContent=`Verschiebe ${i+1}/${allFiles.length}: ${(label||'').substring(0,45)}…`;
+      try{
+        const metaR=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=parents`,{headers:{Authorization:'Bearer '+gdriveToken}});
+        if(!metaR.ok){failed++;continue;}
+        const meta=await metaR.json();
+        const oldParents=(meta.parents||[]).join(',');
+        const patchR=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?addParents=${encodeURIComponent(targetFid)}&removeParents=${encodeURIComponent(oldParents)}&fields=id`,{method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken}});
+        if(patchR.ok)moved++;else failed++;
+      }catch(e){console.warn('[PAM] Datei verschieben:',fileId,e);failed++;}
+    }
+    // Aktivitäts-Log beim Master-Task
+    const rMaster=_findTaskAnyBoard(masterTask.id);
+    if(rMaster&&rMaster.task){
+      rMaster.task.notizVerlauf=rMaster.task.notizVerlauf||[];
+      rMaster.task.notizVerlauf.unshift({ts:new Date().toISOString(),text:`📁 Drive-Dateien verschoben: ${moved} erfolgreich${failed>0?`, ${failed} fehlgeschlagen`:''}`});
+      autoSave();
+    }
+    document.getElementById('mergeFileMoveDialog')?.remove();
+    const ok=moved>0&&failed===0;
+    showToast(`${ok?'✓':'⚠'} ${moved} Datei${moved!==1?'en':''} verschoben${failed>0?` · ${failed} fehlgeschlagen`:''}`,ok?'success':'warning',5000);
+  }catch(e){
+    console.error('[PAM] _mergeMoveFilesToMasterFolders:',e);
+    if(btn){btn.disabled=false;btn.textContent='Erneut versuchen';}
+    if(prog)prog.textContent='⚠ Fehler: '+e.message;
+  }
 }
 
 function archiveCardHTML(task){
@@ -10157,11 +10233,21 @@ async function _msLoadEmailThread(){
           if(d.value&&d.value.length){
             convIds.add(d.value[0].conversationId);
           }else{
-            // Fallback: manche Exchange-Server speichern ohne Spitzklammern
+            // Fallback 2: manche Exchange-Server speichern ohne Spitzklammern
             const _f1b=encodeURIComponent(`internetMessageId eq '${msgId}'`);
             const rb=await fetch(`https://graph.microsoft.com/v1.0/me/messages?$filter=${_f1b}&$select=id,conversationId&$top=1`,
               {headers:{Authorization:'Bearer '+msToken}});
-            if(rb.ok){const db=await rb.json();if(db.value&&db.value.length)convIds.add(db.value[0].conversationId);}
+            if(rb.ok){
+              const db=await rb.json();
+              if(db.value&&db.value.length){
+                convIds.add(db.value[0].conversationId);
+              }else{
+                // Fallback 3: $search statt $filter (robuster für ältere Exchange-Backends)
+                const rc=await fetch(`https://graph.microsoft.com/v1.0/me/messages?$search=%22${encodeURIComponent(msgId)}%22&$select=id,conversationId,internetMessageId&$top=5`,
+                  {headers:{Authorization:'Bearer '+msToken}});
+                if(rc.ok){const dc=await rc.json();if(dc.value){const _mx=dc.value.find(m=>(m.internetMessageId||'').replace(/^<|>$/g,'')===msgId);if(_mx&&_mx.conversationId)convIds.add(_mx.conversationId);}}
+              }
+            }
           }
         }
       }catch(e){console.warn('[MS] ConvId für',msgId,':',e);}
@@ -10218,23 +10304,31 @@ async function _msLoadEmailThread(){
         if(convIds.size===0&&_searchWords.length>=1){
           // Längste Wörter zuerst (sind spezifischer)
           const _sorted=[..._searchWords].sort((a,b)=>b.length-a.length);
-          for(const word of _sorted.slice(0,2)){
+          for(const word of _sorted.slice(0,3)){
             if(convIds.size>0)break;
-            console.log('[MS-DEBUG] Einzelwort-Suche: subject:'+word);
-            const rW=await fetch('https://graph.microsoft.com/v1.0/me/messages?$search=%22subject%3A'+encodeURIComponent(word)+'%22&$select=id,conversationId,internetMessageId,subject&$top=15',
-              {headers:{Authorization:'Bearer '+msToken}});
-            if(rW.ok){
-              const dW=await rW.json();
-              console.log('[MS-DEBUG] Einzelwort Ergebnis:',dW.value?.length||0,'Treffer für',word);
-              if(dW.value)dW.value.forEach(m=>console.log('[MS-DEBUG]   →',m.subject));
-              // Filter: Subject muss mindestens 2 der Suchwörter enthalten
-              const _filtW={value:(dW.value||[]).filter(m=>{
-                const sub=(m.subject||'').toLowerCase();
-                const subN=_normalizeDE(m.subject||'');
-                const hits=_searchWords.filter(w=>sub.includes(w.toLowerCase())||subN.includes(_normalizeDE(w))).length;
-                return hits>=Math.min(2,_searchWords.length);
-              })};
-              _msProcessSubjResults(_filtW);
+            // Umlaute im Suchwort → auch normalisierte ASCII-Variante versuchen
+            const _wordNorm=_normalizeDE(word);
+            const _wordVariants=(word.toLowerCase()!==_wordNorm)?[word,_wordNorm]:[word];
+            for(const _wv of _wordVariants){
+              if(convIds.size>0)break;
+              console.log('[MS-DEBUG] Einzelwort-Suche: subject:'+_wv);
+              // $top=50 statt 15: Graph sortiert nach Relevanz, seltene Mails fallen sonst heraus
+              const rW=await fetch('https://graph.microsoft.com/v1.0/me/messages?$search=%22subject%3A'+encodeURIComponent(_wv)+'%22&$select=id,conversationId,internetMessageId,subject&$top=50',
+                {headers:{Authorization:'Bearer '+msToken}});
+              if(rW.ok){
+                const dW=await rW.json();
+                console.log('[MS-DEBUG] Einzelwort Ergebnis:',dW.value?.length||0,'Treffer für',_wv);
+                if(dW.value)dW.value.forEach(m=>console.log('[MS-DEBUG]   →',m.subject));
+                // Filter: spezifische Wörter (>10 Zeichen) → 1 Treffer reicht; sonst min 2
+                const _minHits=word.length>10?1:Math.min(2,_searchWords.length);
+                const _filtW={value:(dW.value||[]).filter(m=>{
+                  const sub=(m.subject||'').toLowerCase();
+                  const subN=_normalizeDE(m.subject||'');
+                  const hits=_searchWords.filter(w=>sub.includes(w.toLowerCase())||subN.includes(_normalizeDE(w))).length;
+                  return hits>=_minHits;
+                })};
+                _msProcessSubjResults(_filtW);
+              }
             }
           }
         }
