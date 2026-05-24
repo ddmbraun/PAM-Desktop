@@ -2945,7 +2945,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-24 · #23'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-24-b23)
+const PAM_BUILD = 'v2026-05-24 · #24'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-24-b24)
 
 // ── DEBUG: Popup-Detector – fängt jedes window.open ab ──
 const _origWindowOpen = window.open;
@@ -10254,7 +10254,7 @@ async function _msLoadEmailThread(){
                 if(rc.ok){
                   const dc=await rc.json();
                   if(dc.value&&dc.value.length){
-                    const _mx=dc.value.find(m=>(m.internetMessageId||'').replace(/^<|>$/g,'')===msgId)||dc.value[0];
+                    const _mx=dc.value.find(m=>(m.internetMessageId||'').replace(/^<|>$/g,'')===msgId);
                     if(_mx&&_mx.conversationId)convIds.add(_mx.conversationId);
                   }else{
                     // Fallback 4: Freitextsuche mit der Message-ID (letzter Versuch)
@@ -10273,15 +10273,28 @@ async function _msLoadEmailThread(){
     // Fallback: Betreff-Suche wenn keine ConvId gefunden (EML ohne Message-ID oder HTML-Drag)
     if(convIds.size===0&&_msSubjFallback){
       // Hilfsfunktion: Ergebnisse aus Graph-Antwort in convIds eintragen
-      const _msProcessSubjResults=function(dSub){
-        for(const _sm of (dSub.value||[])){
-          if(_sm.conversationId)convIds.add(_sm.conversationId);
-          const _mid=(_sm.internetMessageId||'').replace(/^<|>$/g,'');
-          if(_mid){
-            if(!task.msMessageIds)task.msMessageIds=[];
-            if(!task.msMessageIds.includes(_mid))task.msMessageIds.push(_mid);
-            if(!task.msMessageId)task.msMessageId=_mid;
-          }
+      // Nur die AM BESTEN passende Mail verwenden (höchster Word-Match-Score)
+      // → verhindert dass viele falsche ConversationIds geladen werden
+      const _msProcessSubjResults=function(dSub,searchWds){
+        const items=dSub.value||[];
+        if(!items.length)return;
+        const _normDE=s=>s.replace(/ß/g,'ss').replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').toLowerCase();
+        const wds=searchWds||[];
+        let best=null,bestScore=-1;
+        for(const m of items){
+          const sub=(m.subject||'').toLowerCase();
+          const subN=_normDE(m.subject||'');
+          const score=wds.length>0?wds.filter(w=>sub.includes(w.toLowerCase())||subN.includes(_normDE(w))).length:1;
+          if(score>bestScore){bestScore=score;best=m;}
+        }
+        if(!best||bestScore<1)return;
+        console.log('[MS-DEBUG] Beste Treffer-Mail (Score '+bestScore+'/'+wds.length+'):',best.subject);
+        if(best.conversationId)convIds.add(best.conversationId);
+        const _mid=(best.internetMessageId||'').replace(/^<|>$/g,'');
+        if(_mid){
+          if(!task.msMessageIds)task.msMessageIds=[];
+          if(!task.msMessageIds.includes(_mid))task.msMessageIds.push(_mid);
+          if(!task.msMessageId)task.msMessageId=_mid;
         }
       };
       try{
@@ -10314,7 +10327,7 @@ async function _msLoadEmailThread(){
             return hits>=_minMatch;
           })};
           console.log('[MS-DEBUG] Nach Filter:',_filtFull.value.length,'Treffer (min',_minMatch,'Wörter)');
-          _msProcessSubjResults(_filtFull);
+          _msProcessSubjResults(_filtFull,_searchWords);
         }
 
         // ── Strategie 2: Einzelwort-Suche mit subject:-Prefix (längstes/seltenestes Wort) ──
@@ -10344,7 +10357,7 @@ async function _msLoadEmailThread(){
                   const hits=_searchWords.filter(w=>sub.includes(w.toLowerCase())||subN.includes(_normalizeDE(w))).length;
                   return hits>=_minHits;
                 })};
-                _msProcessSubjResults(_filtW);
+                _msProcessSubjResults(_filtW,_searchWords);
               }
             }
           }
@@ -10368,7 +10381,7 @@ async function _msLoadEmailThread(){
               const hits=_searchWords.filter(w=>sub.includes(w.toLowerCase())||subN.includes(_normalizeDE(w))).length;
               return hits>=_minNorm;
             })};
-            _msProcessSubjResults(_filtNorm);
+            _msProcessSubjResults(_filtNorm,_searchWords);
           }
         }
         // ── Strategie 4: $filter eq als letzter Ausweg (exakter Betreff-Match) ──
@@ -10376,7 +10389,7 @@ async function _msLoadEmailThread(){
           const _fSub=encodeURIComponent("subject eq '"+_msSubjFallback.replace(/'/g,"''")+"'");
           const rSub=await fetch('https://graph.microsoft.com/v1.0/me/messages?$filter='+_fSub+'&$select=id,conversationId,internetMessageId&$top=10',
             {headers:{Authorization:'Bearer '+msToken}});
-          if(rSub.ok){_msProcessSubjResults(await rSub.json());}
+          if(rSub.ok){_msProcessSubjResults(await rSub.json(),_searchWords);}
         }
       }catch(e){console.warn('[MS] Betreff-Fallback:',e);}
     }
