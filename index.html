@@ -2957,7 +2957,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-24 · #26'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-24-b26)
+const PAM_BUILD = 'v2026-05-24 · #28'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-24-b28)
 
 // ── DEBUG: Popup-Detector – fängt jedes window.open ab ──
 const _origWindowOpen = window.open;
@@ -10282,8 +10282,9 @@ async function _msLoadEmailThread(){
       }catch(e){console.warn('[MS] ConvId für',msgId,':',e);}
     }
     console.log('[MS-DEBUG] Nach ID-Suche: convIds.size=',convIds.size,'| IDs durchsucht:',_allMsgIds.length);
-    // Fallback: Betreff-Suche wenn keine ConvId per ID gefunden (EML ohne Message-ID oder ID nicht auf Server)
-    if(convIds.size===0&&_msSubjFallback){
+    // Betreff-Suche NUR wenn KEINE Message-ID bekannt ist.
+    // Wenn eine ID bekannt war aber nichts gefunden wurde → klare Fehlermeldung statt falschem Treffer.
+    if(convIds.size===0&&_msSubjFallback&&_allMsgIds.length===0){
       // Hilfsfunktion: Ergebnisse aus Graph-Antwort in convIds eintragen
       // Nur die AM BESTEN passende Mail verwenden (höchster Word-Match-Score)
       // → verhindert dass viele falsche ConversationIds geladen werden
@@ -10362,7 +10363,9 @@ async function _msLoadEmailThread(){
                 console.log('[MS-DEBUG] Einzelwort Ergebnis:',dW.value?.length||0,'Treffer für',_wv);
                 if(dW.value)dW.value.forEach(m=>console.log('[MS-DEBUG]   →',m.subject));
                 // Filter: Subject muss mindestens 2 der Suchwörter enthalten (lokale Prüfung)
-                const _minHits=Math.min(2,_searchWords.length);
+                // Mindest-Treffer: 66% der Suchwörter müssen übereinstimmen (min. 2)
+                // Verhindert False-Positives wenn nur allgemeine Wörter (z.B. 'REWE Markt') passen
+                const _minHits=Math.max(2,Math.ceil(_searchWords.length*0.66));
                 const _filtW={value:(dW.value||[]).filter(m=>{
                   const sub=(m.subject||'').toLowerCase();
                   const subN=_normalizeDE(m.subject||'');
@@ -10405,7 +10408,12 @@ async function _msLoadEmailThread(){
         }
       }catch(e){console.warn('[MS] Betreff-Fallback:',e);}
     }
-    if(convIds.size===0)throw new Error('E-Mails nicht in Outlook gefunden – Betreff: "'+((_msSubjFallback||'–').substring(0,40))+'"');
+    if(convIds.size===0){
+      if(_allMsgIds.length>0){
+        throw new Error('E-Mail per Message-ID nicht in Outlook gefunden. Prüfe ob die Mail im Postfach sichtbar ist (ggf. Archiv oder anderen Ordner prüfen).');
+      }
+      throw new Error('E-Mails nicht in Outlook gefunden – Betreff: "'+((_msSubjFallback||'–').substring(0,40))+'"');
+    }
     // Ersten convId für Rückwärtskompatibilität speichern
     task.msConversationId=[...convIds][0];
     // Schritt 2: Alle Mails aus allen Conversations laden – globale Suche (alle Ordner inkl. Unterordner, Gelöschte, Archiv)
