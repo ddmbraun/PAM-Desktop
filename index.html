@@ -1275,6 +1275,11 @@ body.topbar-collapsed #topbarCollapseBtn{transform:rotate(180deg);}
 .kanban-col-body.drag-over{background:rgba(108,99,255,0.08);border-radius:0 0 10px 10px;}
 .task-card.drag-above{border-top:2px solid var(--accent);margin-top:-1px;}
 .task-card.drag-below{border-bottom:2px solid var(--accent);margin-bottom:-1px;}
+.task-card.merge-selected{border:2px solid var(--accent)!important;box-shadow:0 0 0 3px rgba(108,99,255,0.18);}
+#mergefloatbar{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:9000;background:var(--accent);color:#fff;padding:10px 22px;border-radius:24px;box-shadow:0 4px 18px rgba(0,0,0,0.25);display:flex;align-items:center;gap:12px;font-size:13px;font-weight:700;animation:mergeBarIn .2s ease;}
+@keyframes mergeBarIn{from{opacity:0;transform:translateX(-50%) translateY(20px);}to{opacity:1;transform:translateX(-50%) translateY(0);}}
+#mergefloatbar button{background:rgba(255,255,255,0.22);border:1px solid rgba(255,255,255,0.5);color:#fff;border-radius:12px;padding:4px 14px;font-size:12px;cursor:pointer;font-weight:700;}
+#mergefloatbar button:hover{background:rgba(255,255,255,0.38);}
 .col-collapse-btn{background:none;border:none;color:var(--text2);font-size:13px;cursor:pointer;padding:2px 5px;border-radius:4px;line-height:1;flex-shrink:0;}
 .col-collapse-btn:hover{color:var(--accent);background:var(--bg3);}
 
@@ -2023,6 +2028,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
         <div class="filter-dropdown" id="filterTagDropdown"></div>
       </div>
       <button class="filter-btn" id="clearFiltersBtn" onclick="clearFilters()" style="display:none">✕ Zurücksetzen</button>
+      <button class="filter-btn" id="archivFilterBtn" onclick="toggleArchivFilter()" title="Archivierte Tasks anzeigen" style="margin-left:6px;">📦 Archiv</button>
     </div>
     <button id="topbarCollapseBtn" onclick="_toggleTopbarCollapse()" title="Obere Leisten ein-/ausblenden" style="padding:3px 8px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:13px;cursor:pointer;flex-shrink:0;margin-left:6px;">▲</button>
   </div>
@@ -2847,7 +2853,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-22 · 18:25'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-22-1825)
+const PAM_BUILD = 'v2026-05-24 · 06:34'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-24-0634)
 
 // ── STATE ──
 let boards = {};
@@ -2857,7 +2863,8 @@ let currentBoard = '';
 let mobileBoards = []; // Whitelist für PTP Mobile — leer = alle Boards aufs Handy
 let boardTypes = {}; // Typ pro Board: 'baustelle' (Standard) | 'notiz'
 let currentView = 'heute';
-let filters = {owner:null,ampel:null,tag:null};
+let filters = {owner:null,ampel:null,tag:null,archiv:false};
+let _mergeSelected = []; // max. 2 Task-IDs für Zusammenführen
 let searchQuery = '';
 let listSortField = 'due', listSortDir = 1;
 let draggedTaskId = null;
@@ -3414,7 +3421,11 @@ function saveTaskData(){
     emailOriginals:JSON.parse(JSON.stringify(taskEmailOriginals||[])),
     emailPdfs:JSON.parse(JSON.stringify(taskEmailPdfs||[])),
     gmailLinks:JSON.parse(JSON.stringify(taskGmailLinks||[])),
-    pruefberichte:JSON.parse(JSON.stringify(existingTask?.pruefberichte||[]))
+    pruefberichte:JSON.parse(JSON.stringify(existingTask?.pruefberichte||[])),
+    // Archiv-Felder erhalten – dürfen durch normales Speichern nicht verloren gehen
+    archiviert:existingTask?.archiviert||false,
+    archiviertAm:existingTask?.archiviertAm||'',
+    zusammengefuehrtMit:existingTask?.zusammengefuehrtMit||''
   };
   if(!boards[currentBoard])boards[currentBoard]=[];
   if(id){
@@ -4900,7 +4911,18 @@ function seedData(){
 
 // ── RENDER ──
 function getTasks(){
-  let t=boards[currentBoard]||[];
+  let t;
+  if(filters.archiv){
+    // Archiv-Modus: alle archivierten Tasks aus ALLEN Boards sammeln
+    t=[];
+    for(const bk of Object.keys(boards)){
+      if(bk.startsWith('_'))continue;
+      t=t.concat((boards[bk]||[]).filter(x=>x.archiviert));
+    }
+  } else {
+    // Normal-Modus: nur nicht-archivierte Tasks des aktuellen Boards
+    t=(boards[currentBoard]||[]).filter(x=>!x.archiviert);
+  }
   if(searchQuery){const q=searchQuery.toLowerCase();t=t.filter(x=>x.title.toLowerCase().includes(q)||(x.desc||'').toLowerCase().includes(q)||x.owner.toLowerCase().includes(q)||(x.tags||[]).some(tg=>tg.toLowerCase().includes(q)));}
   if(filters.owner)t=t.filter(x=>x.owner===filters.owner);
   if(filters.ampel)t=t.filter(x=>x.ampel===filters.ampel);
@@ -4995,8 +5017,13 @@ function taskCardHTML(task){
   const _terminMins=(task.ausserhausTermine||[]).reduce((s,e)=>s+parseMinutes(e.von,e.bis),0);
   const _gesamtMins=_zeitMins+(_timerMins>0?_timerMins:0)+_terminMins;
   const _fmtBadge=m=>{const h=Math.floor(m/60),r=m%60;return h>0?(h+'h'+(r>0?' '+r+'m':'')):(r+'m');};
-  return`<div class="task-card ${colClass}" draggable="true" data-id="${esc(task.id)}"
+  const _isMergeSel=_mergeSelected.includes(task.id);
+  return`<div class="task-card ${colClass}${_isMergeSel?' merge-selected':''}" draggable="true" data-id="${esc(task.id)}"
     ondragstart="onDragStart(event)" ondragend="onDragEnd(event)" onclick="openEditTaskModal('${esc(task.id)}')">
+    <input type="checkbox" class="task-merge-cb" ${_isMergeSel?'checked':''} title="Für Zusammenführen markieren"
+      onclick="event.stopPropagation();_toggleMergeSelect('${esc(task.id)}')"
+      style="position:absolute;top:7px;right:7px;width:15px;height:15px;cursor:pointer;accent-color:var(--accent);opacity:${_isMergeSel?'1':'0'};transition:opacity .15s;"
+      onmouseenter="this.style.opacity='1'" onmouseleave="if(!this.checked)this.style.opacity='0'">
     <div class="task-card-toprow">
       <span style="display:inline-flex;align-items:center;gap:3px;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700;flex-shrink:0;${isNotizBoard?'background:#E6F1FB;color:#185FA5;border:0.5px solid #B5D4F4;':'background:#EAF3DE;color:#3B6D11;border:0.5px solid #C0DD97;'}">${isNotizBoard?'<span style="font-size:11px;">✅</span> Aufgabe':'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><line x1="9" y1="22" x2="9" y2="7"/><line x1="1" y1="7" x2="21" y2="7"/><line x1="9" y1="4" x2="21" y2="7"/><line x1="1" y1="7" x2="9" y2="4"/><line x1="17" y1="7" x2="17" y2="16"/><path d="M15 16 q2 2 4 0"/><line x1="6" y1="22" x2="12" y2="22"/></svg> Auftrag'}</span>
       ${(()=>{const _es=task.emailSender||((task.kontakte||[]).find(k=>k.rolle==='ag')||{}).name||((task.kontakte||[]).find(k=>k.rolle==='ag')||{}).email||'';if(!_es)return'';const _nm=_es.match(/^"?([^"<]+?)"?\s*<[^>]+>/);const _short=(_nm?_nm[1].trim():_es.replace(/^"([^"]+)"$/,'$1').trim());const _disp=_short.length>22?_short.substring(0,21)+'…':_short;return`<span style="display:inline-flex;align-items:center;gap:3px;font-size:9px;padding:1px 6px;border-radius:8px;background:#E6F1FB;color:#0C447C;border:0.5px solid #B5D4F4;font-weight:700;white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#0C447C" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>${esc(_disp)}</span>`;})()}
@@ -5039,6 +5066,7 @@ function taskCardHTML(task){
     })()}
     <div class="task-card-icons-row">
       ${iconBadges}
+      <button onclick="archiveTask('${esc(task.id)}',event)" title="Task archivieren" style="margin-left:auto;font-size:10px;padding:1px 6px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;opacity:0.55;flex-shrink:0;" onmouseenter="this.style.opacity='1'" onmouseleave="this.style.opacity='0.55'">📦</button>
     </div>
   </div>`;
 }
@@ -5171,6 +5199,7 @@ function _alleDropBody(e){
 }
 
 function renderHeute(){
+  if(filters.archiv){renderKanban();return;}
   let today=new Date().toISOString().split('T')[0];
   let in3=new Date(Date.now()+3*864e5).toISOString().split('T')[0];
   let ueberfaellig=[],heuteFaellig=[],bald=[];
@@ -5178,6 +5207,7 @@ function renderHeute(){
   Object.keys(boards).forEach(function(boardName){
     if(boardName.startsWith('_'))return;
     (boards[boardName]||[]).forEach(function(t){
+      if(t.archiviert)return; // archivierte Tasks nicht in Heute-Ansicht
       if(t.ausfuehrungstermin===today)ausfuehrungHeute.push({t:t,board:boardName});
       if(!t.due)return;
       if(t.due<today)ueberfaellig.push({t:t,board:boardName});
@@ -5323,6 +5353,14 @@ function renderHeute(){
   document.getElementById('mainContent').innerHTML=html;
 }
 function renderKanban(){
+  // Archiv-Modus: eigene einfache Liste statt Kanban-Spalten
+  if(filters.archiv){
+    const tasks=getTasks();
+    const mc=document.getElementById('mainContent');
+    if(!tasks.length){mc.innerHTML='<div style="text-align:center;padding:60px 20px;color:var(--text2);font-size:15px;">📦 Archiv ist leer</div>';return;}
+    mc.innerHTML='<div style="max-width:900px;margin:24px auto;padding:0 16px;"><div style="font-size:13px;color:var(--text2);margin-bottom:16px;">'+tasks.length+' archivierte Task'+(tasks.length!==1?'s':'')+'</div>'+tasks.map(archiveCardHTML).join('')+'</div>';
+    return;
+  }
   const tasks=getTasks();
   const curStatuses=getBoardStatuses();
   // Auch Statuses anzeigen, die in den Tasks vorkommen aber nicht in den Spalten stehen
@@ -5375,6 +5413,7 @@ function renderKanban(){
 }
 
 function renderList(){
+  if(filters.archiv){renderKanban();return;}
   const _isNotizL=(boardTypes[currentBoard]||'baustelle')==='notiz';
   const _craneSvgL='<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><line x1="9" y1="22" x2="9" y2="7"/><line x1="1" y1="7" x2="21" y2="7"/><line x1="9" y1="4" x2="21" y2="7"/><line x1="1" y1="7" x2="9" y2="4"/><line x1="17" y1="7" x2="17" y2="16"/><path d="M15 16 q2 2 4 0"/><line x1="6" y1="22" x2="12" y2="22"/></svg>';
   const _typBadgeL=_isNotizL
@@ -6297,7 +6336,252 @@ function toggleFilter(type){
 }
 function closeAllDropdowns(){document.querySelectorAll('.filter-dropdown').forEach(d=>d.classList.remove('open'));}
 function setFilter(type,value){filters[type]=filters[type]===value?null:value;closeAllDropdowns();render();}
-function clearFilters(){filters={owner:null,ampel:null,tag:null};render();}
+function clearFilters(){filters={owner:null,ampel:null,tag:null,archiv:false};const ab=document.getElementById('archivFilterBtn');if(ab)ab.classList.remove('active');render();}
+
+// ── ARCHIV-SYSTEM ──
+function toggleArchivFilter(){
+  filters.archiv=!filters.archiv;
+  const btn=document.getElementById('archivFilterBtn');
+  if(btn){btn.classList.toggle('active',filters.archiv);btn.textContent=filters.archiv?'📦 Archiv ✓':'📦 Archiv';}
+  render();
+}
+
+function archiveTask(taskId,evt){
+  if(evt)evt.stopPropagation();
+  if(!confirm('Task archivieren?\n\nDer Task wird ausgeblendet und kann jederzeit wiederhergestellt werden.\nDie Ordner auf NAS und Drive bleiben unverändert.'))return;
+  for(const bk of Object.keys(boards)){
+    const idx=(boards[bk]||[]).findIndex(t=>t.id===taskId);
+    if(idx>=0){
+      boards[bk][idx].archiviert=true;
+      boards[bk][idx].archiviertAm=new Date().toISOString().split('T')[0];
+      render();autoSave();
+      showToast('📦 Task archiviert','success',2500);
+      return;
+    }
+  }
+}
+
+function restoreTask(taskId,evt){
+  if(evt)evt.stopPropagation();
+  for(const bk of Object.keys(boards)){
+    const idx=(boards[bk]||[]).findIndex(t=>t.id===taskId);
+    if(idx>=0){
+      boards[bk][idx].archiviert=false;
+      boards[bk][idx].archiviertAm='';
+      render();autoSave();
+      showToast('✓ Task wiederhergestellt','success',2500);
+      return;
+    }
+  }
+}
+
+function deleteTaskPermanent(taskId,evt){
+  if(evt)evt.stopPropagation();
+  if(!confirm('Task endgültig löschen?\n\nDieser Schritt kann NICHT rückgängig gemacht werden.\nDie Ordner auf NAS und Drive bleiben unverändert.'))return;
+  for(const bk of Object.keys(boards)){
+    const idx=(boards[bk]||[]).findIndex(t=>t.id===taskId);
+    if(idx>=0){
+      boards[bk].splice(idx,1);
+      render();autoSave();
+      showToast('🗑 Task gelöscht','success',2500);
+      return;
+    }
+  }
+}
+
+// ── TASK-MERGE ──
+function _toggleMergeSelect(taskId){
+  const idx=_mergeSelected.indexOf(taskId);
+  if(idx>=0){_mergeSelected.splice(idx,1);}
+  else{
+    if(_mergeSelected.length>=2){showToast('⚠ Bitte nur 2 Tasks auswählen','warn',2500);return;}
+    _mergeSelected.push(taskId);
+  }
+  _updateMergeBar();
+  render();
+}
+
+function _updateMergeBar(){
+  let bar=document.getElementById('mergefloatbar');
+  if(_mergeSelected.length===2){
+    if(!bar){
+      bar=document.createElement('div');
+      bar.id='mergefloatbar';
+      document.body.appendChild(bar);
+    }
+    bar.innerHTML=`<span>2 Tasks ausgewählt</span>
+      <button onclick="_openMergeDialog()">🔀 Zusammenführen</button>
+      <button onclick="_clearMergeSelection()" style="background:rgba(255,255,255,0.12);">✕</button>`;
+  } else {
+    if(bar)bar.remove();
+  }
+}
+
+function _clearMergeSelection(){
+  _mergeSelected=[];
+  _updateMergeBar();
+  render();
+}
+
+function _findTaskAnyBoard(taskId){
+  for(const bk of Object.keys(boards)){
+    const t=(boards[bk]||[]).find(x=>x.id===taskId);
+    if(t)return{task:t,board:bk};
+  }
+  return null;
+}
+
+function _openMergeDialog(){
+  if(_mergeSelected.length!==2)return;
+  const rA=_findTaskAnyBoard(_mergeSelected[0]);
+  const rB=_findTaskAnyBoard(_mergeSelected[1]);
+  if(!rA||!rB){showToast('⚠ Task nicht gefunden','error');return;}
+  const tA=rA.task, tB=rB.task;
+
+  const fields=[
+    {key:'title',    label:'Titel'},
+    {key:'desc',     label:'Beschreibung'},
+    {key:'hausverwaltung',label:'Hausverwaltung'},
+    {key:'adresse',  label:'Adresse'},
+    {key:'schadensbild',label:'Schadensbild'},
+    {key:'owner',    label:'Bearbeiter'},
+    {key:'status',   label:'Status'},
+    {key:'repNr',    label:'Rep. Nr.'},
+    {key:'kundenNr', label:'Kunden Nr.'},
+    {key:'gdrive',   label:'Drive-Ordner'},
+    {key:'gdriveOrdner',label:'Drive-Projektordner'},
+    {key:'nas',      label:'NAS-Pfad'},
+    {key:'source',   label:'Quelle / E-Mail'},
+  ];
+
+  // Nur Felder anzeigen wo mind. eines belegt ist
+  const visFields=fields.filter(f=>(tA[f.key]||'').trim()||(tB[f.key]||'').trim());
+
+  const fmtVal=v=>v?(v.length>60?v.substring(0,58)+'…':v):'–';
+
+  const rows=visFields.map(f=>`
+    <tr style="border-bottom:1px solid var(--border);">
+      <td style="padding:7px 10px;font-size:12px;font-weight:600;color:var(--text2);white-space:nowrap;">${f.label}</td>
+      <td style="padding:7px 10px;">
+        <label style="display:flex;align-items:flex-start;gap:6px;cursor:pointer;">
+          <input type="radio" name="mf_${f.key}" value="A" ${tA[f.key]?'checked':''} style="margin-top:2px;accent-color:var(--accent);">
+          <span style="font-size:12px;color:${tA[f.key]?'var(--text1)':'var(--text2)'};">${esc(fmtVal(tA[f.key]||''))}</span>
+        </label>
+      </td>
+      <td style="padding:7px 10px;">
+        <label style="display:flex;align-items:flex-start;gap:6px;cursor:pointer;">
+          <input type="radio" name="mf_${f.key}" value="B" ${!tA[f.key]&&tB[f.key]?'checked':''} style="margin-top:2px;accent-color:var(--accent);">
+          <span style="font-size:12px;color:${tB[f.key]?'var(--text1)':'var(--text2)'};">${esc(fmtVal(tB[f.key]||''))}</span>
+        </label>
+      </td>
+    </tr>`).join('');
+
+  const ov=document.createElement('div');
+  ov.id='mergeDialogOverlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9500;display:flex;align-items:center;justify-content:center;';
+  ov.innerHTML=`
+    <div style="background:var(--bg2);border-radius:12px;width:min(820px,95vw);max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.35);">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;">
+        <span style="font-size:16px;font-weight:700;">🔀 Tasks zusammenführen</span>
+        <span style="font-size:12px;color:var(--text2);margin-left:4px;">Wähle pro Feld welcher Wert übernommen werden soll. Listen (Fotos, Anhänge, Links) werden automatisch zusammengeführt.</span>
+        <button onclick="document.getElementById('mergeDialogOverlay').remove()" style="margin-left:auto;background:none;border:none;font-size:20px;cursor:pointer;color:var(--text2);">✕</button>
+      </div>
+      <div style="overflow-y:auto;flex:1;">
+        <table style="width:100%;border-collapse:collapse;">
+          <thead>
+            <tr style="background:var(--bg3);border-bottom:2px solid var(--border);">
+              <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--text2);width:120px;">Feld</th>
+              <th style="padding:8px 10px;text-align:left;font-size:12px;font-weight:700;">
+                Task A &nbsp;<span style="font-size:10px;font-weight:400;color:var(--text2);">Projekt: ${esc(rA.board)}</span><br>
+                <span style="font-size:11px;font-weight:600;color:var(--accent);">${esc((tA.title||'').substring(0,50))}</span>
+              </th>
+              <th style="padding:8px 10px;text-align:left;font-size:12px;font-weight:700;">
+                Task B &nbsp;<span style="font-size:10px;font-weight:400;color:var(--text2);">Projekt: ${esc(rB.board)}</span><br>
+                <span style="font-size:11px;font-weight:600;color:var(--accent);">${esc((tB.title||'').substring(0,50))}</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px;justify-content:flex-end;">
+        <span style="font-size:11px;color:var(--text2);margin-right:auto;">Der nicht übernommene Task wird archiviert (nicht gelöscht).</span>
+        <button onclick="document.getElementById('mergeDialogOverlay').remove()" style="padding:8px 18px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);cursor:pointer;font-size:13px;">Abbrechen</button>
+        <button onclick="_executeMerge()" style="padding:8px 20px;border-radius:7px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:13px;font-weight:700;">✓ Zusammenführen</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  // Speichere Task-IDs für executeMerge
+  ov.dataset.taskA=tA.id;
+  ov.dataset.taskB=tB.id;
+}
+
+function _executeMerge(){
+  const ov=document.getElementById('mergeDialogOverlay');
+  if(!ov)return;
+  const idA=ov.dataset.taskA, idB=ov.dataset.taskB;
+  const rA=_findTaskAnyBoard(idA), rB=_findTaskAnyBoard(idB);
+  if(!rA||!rB){showToast('⚠ Task nicht gefunden','error');return;}
+  const tA=JSON.parse(JSON.stringify(rA.task));
+  const tB=JSON.parse(JSON.stringify(rB.task));
+
+  const fields=['title','desc','hausverwaltung','adresse','schadensbild','owner','status','repNr','kundenNr','gdrive','gdriveOrdner','nas','source'];
+  const merged=JSON.parse(JSON.stringify(tA)); // Basis: Task A
+
+  // Pro Feld: Radio-Wahl auslesen
+  fields.forEach(key=>{
+    const radio=document.querySelector(`input[name="mf_${key}"]:checked`);
+    if(radio&&radio.value==='B') merged[key]=tB[key]||'';
+    else merged[key]=tA[key]||'';
+  });
+
+  // Listen zusammenführen (nie überschreiben)
+  const listFields=['links','attachments','fotos','emailOriginals','emailPdfs','gmailLinks','aufgaben','notizVerlauf','timeEntries','zeitEntries','ausserhausTermine','freieTermine','checkliste'];
+  listFields.forEach(key=>{
+    const listA=Array.isArray(tA[key])?tA[key]:[];
+    const listB=Array.isArray(tB[key])?tB[key]:[];
+    merged[key]=[...listA,...listB];
+  });
+
+  // Zusammenführungs-Notiz hinzufügen
+  merged.notizVerlauf=merged.notizVerlauf||[];
+  merged.notizVerlauf.unshift({ts:new Date().toISOString(),text:`Task zusammengeführt mit: "${tB.title||tB.id}" (Projekt: ${rB.board})`});
+
+  // Task A (Haupttask) aktualisieren
+  const idxA=(boards[rA.board]||[]).findIndex(t=>t.id===idA);
+  if(idxA>=0) boards[rA.board][idxA]=merged;
+
+  // Task B archivieren
+  const idxB=(boards[rB.board]||[]).findIndex(t=>t.id===idB);
+  if(idxB>=0){
+    boards[rB.board][idxB].archiviert=true;
+    boards[rB.board][idxB].archiviertAm=new Date().toISOString().split('T')[0];
+    boards[rB.board][idxB].zusammengefuehrtMit=idA;
+  }
+
+  ov.remove();
+  _clearMergeSelection();
+  autoSave();
+  showToast('✓ Tasks zusammengeführt – Task B archiviert','success',3000);
+}
+
+function archiveCardHTML(task){
+  const _adr=(task.archiviertAm||'').split('-').reverse().join('.');
+  const _proj=Object.keys(boards).find(bk=>(boards[bk]||[]).some(t=>t.id===task.id))||'';
+  return`<div style="background:var(--bg3);border:1px solid var(--border);border-left:5px solid #888;border-radius:8px;padding:10px 12px;margin-bottom:8px;opacity:0.85;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+      <span style="font-size:11px;background:var(--bg4);color:var(--text2);padding:2px 7px;border-radius:4px;">📦 Archiviert${_adr?' am '+_adr:''}</span>
+      ${_proj?`<span style="font-size:11px;color:var(--text2);">Projekt: ${esc(_proj)}</span>`:''}
+      <span style="margin-left:auto;display:flex;gap:6px;">
+        <button onclick="restoreTask('${esc(task.id)}',event)" style="font-size:11px;padding:3px 10px;border-radius:5px;border:1px solid #3B6D11;background:#EAF3DE;color:#3B6D11;cursor:pointer;font-weight:700;">↩ Wiederherstellen</button>
+        <button onclick="deleteTaskPermanent('${esc(task.id)}',event)" style="font-size:11px;padding:3px 10px;border-radius:5px;border:1px solid #A32D2D;background:#FAECEC;color:#A32D2D;cursor:pointer;font-weight:700;">🗑 Endgültig löschen</button>
+      </span>
+    </div>
+    <div style="font-size:13px;font-weight:600;margin-bottom:3px;">${esc(task.title||'')}</div>
+    <div style="font-size:11px;color:var(--text2);">${[task.hausverwaltung,task.adresse,task.schadensbild].filter(Boolean).map(s=>esc(s)).join(' · ')}</div>
+    ${task.repNr?`<div style="font-size:11px;color:var(--text2);margin-top:2px;">Rep. ${esc(task.repNr)}</div>`:''}
+  </div>`;
+}
 document.getElementById('searchInput').addEventListener('input',function(){searchQuery=this.value;render();});
 
 // ── DRAG & DROP ──
