@@ -884,9 +884,10 @@ async function _auftragAddToTask(task,boardName,fileMode){
           let _dupPdf2=task.emailPdfs.some(p=>(_msgId2&&[p.messageId,p.gmailMessageId,p.msMessageId].includes(_msgId2)));
           if(!_dupPdf2){
             task.emailPdfs.push({name:_pdfName2,fileId:_pdfResult2.id,url:'https://drive.google.com/file/d/'+_pdfResult2.id+'/view',uploadedAt:new Date().toLocaleDateString('de-DE'),date:_d2.toISOString(),messageId:_msgId2});
+            showToast('📄 PDF-Vorschau erstellt: '+_pdfName2,'success',3000);
           }
         }
-      }catch(_pe2){console.warn('[PTP] PDF-Vorschau (AddToTask):',_pe2);}
+      }catch(_pe2){console.warn('[PTP] PDF-Vorschau (AddToTask):',_pe2);showToast('⚠ PDF-Vorschau konnte nicht erstellt werden: '+_pe2.message,'warning',6000);}
     }
     // Fix 2026-05-24: EML-Anhänge extrahieren und in Drive hochladen (analog _uploadEmailOriginal)
     if(_isRawEml2&&fid&&gdriveToken&&info.attachments&&info.attachments.length>0){
@@ -2930,7 +2931,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-24 · #9'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-24-b9)
+const PAM_BUILD = 'v2026-05-24 · #10'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-24-b10)
 
 // ── STATE ──
 let boards = {};
@@ -10046,8 +10047,8 @@ async function _msLoadEmailThread(){
     showToast('⚠ Bitte zuerst Outlook verbinden (Toolbar: 📨 Outlook)','warning',4000);
     return;
   }
-  // Alle verfügbaren Message-IDs sammeln (neue msMessageIds[] + alte msMessageId für Kompatibilität)
-  const _allMsgIds=[...new Set([...(task.msMessageIds||[]),task.msMessageId||''].filter(Boolean))];
+  // Alle verfügbaren Message-IDs sammeln (ms + gmail – Provider-Erkennung kann falsch liegen)
+  const _allMsgIds=[...new Set([...(task.msMessageIds||[]),task.msMessageId||'',...(task.gmailMessageIds||[]),task.gmailMessageId||'',...(task.emailOriginals||[]).map(e=>e.messageId||'')].filter(Boolean))];
   // Fallback-Suche per Betreff: greift wenn keine Message-ID (z.B. HTML-Drag, oder Exchange ohne Message-ID-Header)
   const _msSubjFallback=task.msEmailSubject||(task.emailOriginals&&task.emailOriginals[0]&&task.emailOriginals[0].subject)||'';
   if(!_allMsgIds.length&&!task.msConversationId&&!_msSubjFallback){
@@ -10084,23 +10085,36 @@ async function _msLoadEmailThread(){
     }
     // Fallback: Betreff-Suche wenn keine ConvId gefunden (EML ohne Message-ID oder HTML-Drag)
     if(convIds.size===0&&_msSubjFallback){
+      // Hilfsfunktion: Ergebnisse aus Graph-Antwort in convIds eintragen
+      const _msProcessSubjResults=function(dSub){
+        for(const _sm of (dSub.value||[])){
+          if(_sm.conversationId)convIds.add(_sm.conversationId);
+          const _mid=(_sm.internetMessageId||'').replace(/^<|>$/g,'');
+          if(_mid){
+            if(!task.msMessageIds)task.msMessageIds=[];
+            if(!task.msMessageIds.includes(_mid))task.msMessageIds.push(_mid);
+            if(!task.msMessageId)task.msMessageId=_mid;
+          }
+        }
+      };
       try{
         if(stEl)stEl.textContent='⏳ Suche nach Betreff…';
-        const _fSub=encodeURIComponent(`subject eq '${_msSubjFallback.replace(/'/g,"''")}'`);
-        const rSub=await fetch(`https://graph.microsoft.com/v1.0/me/messages?$filter=${_fSub}&$select=id,conversationId,internetMessageId&$top=10`,
+        // 1. Versuch: $search (Volltextsuche, robust bei Sonderzeichen ß/ö/ü)
+        const _searchQ=_msSubjFallback.replace(/["']/g,'').substring(0,60);
+        const rSearch=await fetch('https://graph.microsoft.com/v1.0/me/messages?$search=%22subject%3A'+encodeURIComponent(_searchQ)+'%22&$select=id,conversationId,internetMessageId,subject&$top=10',
           {headers:{Authorization:'Bearer '+msToken}});
-        if(rSub.ok){
-          const dSub=await rSub.json();
-          for(const _sm of (dSub.value||[])){
-            if(_sm.conversationId)convIds.add(_sm.conversationId);
-            // Message-ID für künftige Suchen speichern
-            const _mid=(_sm.internetMessageId||'').replace(/^<|>$/g,'');
-            if(_mid){
-              if(!task.msMessageIds)task.msMessageIds=[];
-              if(!task.msMessageIds.includes(_mid))task.msMessageIds.push(_mid);
-              if(!task.msMessageId)task.msMessageId=_mid;
-            }
-          }
+        if(rSearch.ok){
+          const dSearch=await rSearch.json();
+          // Nur Treffer übernehmen, deren Betreff den Suchbegriff wirklich enthält (KQL kann ungenau sein)
+          const _filteredSearch={value:(dSearch.value||[]).filter(m=>(m.subject||'').toLowerCase().includes(_searchQ.substring(0,20).toLowerCase()))};
+          _msProcessSubjResults(_filteredSearch);
+        }
+        // 2. Versuch: $filter eq (exakter Vergleich, falls $search nichts fand)
+        if(convIds.size===0){
+          const _fSub=encodeURIComponent("subject eq '"+_msSubjFallback.replace(/'/g,"''")+"'");
+          const rSub=await fetch('https://graph.microsoft.com/v1.0/me/messages?$filter='+_fSub+'&$select=id,conversationId,internetMessageId&$top=10',
+            {headers:{Authorization:'Bearer '+msToken}});
+          if(rSub.ok){_msProcessSubjResults(await rSub.json());}
         }
       }catch(e){console.warn('[MS] Betreff-Fallback:',e);}
     }
@@ -13811,6 +13825,8 @@ async function _uploadEmailOriginal(file){
           taskEmailPdfs.push(_pdfEntry);
           const _tpdf=findTaskById((document.getElementById('taskId')||{}).value||'');
           if(_tpdf){if(!_tpdf.emailPdfs)_tpdf.emailPdfs=[];_tpdf.emailPdfs.push(_pdfEntry);}
+          renderEmailSection();
+          showToast('📄 PDF-Vorschau erstellt: '+_pdfName,'success',3000);
         }
       }catch(_pe){
         console.warn('[PTP] PDF-Vorschau fehlgeschlagen:',_pe);
