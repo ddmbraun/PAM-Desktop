@@ -731,7 +731,8 @@ async function _pdfAuftragCreate(boardName){
   };
   if(!boards[boardName])boards[boardName]=[];
   boards[boardName].push(newTask);
-  if(currentBoard!==boardName){currentBoard=boardName;render();}
+  if(currentBoard!==boardName)currentBoard=boardName;
+  render(); // Kanban sofort aktualisieren – neuer Task wird direkt sichtbar
   // PDF in Drive hochladen (im Hintergrund, blockiert Modal nicht)
   let fid=_ezFolderId(_folderDefault);
   if(fid&&gdriveToken&&p.file){
@@ -1029,7 +1030,8 @@ async function _auftragConfirm(){
 
   if(!boards[boardName])boards[boardName]=[];
   boards[boardName].push(newTask);
-  if(currentBoard!==boardName){currentBoard=boardName;render();}
+  if(currentBoard!==boardName)currentBoard=boardName;
+  render(); // Kanban sofort aktualisieren – neuer Task wird direkt sichtbar
 
   // ── SCHRITT 2: Drive-Upload (vor Modal-Öffnen, damit Daten direkt sichtbar sind) ──
   let fid=await _getOrCreateEmailFid(newTask,_ezFolderId(_folderDefault));
@@ -2938,7 +2940,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-24 · #12'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-24-b12)
+const PAM_BUILD = 'v2026-05-24 · #14'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-24-b14)
 
 // ── STATE ──
 let boards = {};
@@ -10058,6 +10060,7 @@ async function _msLoadEmailThread(){
   const _allMsgIds=[...new Set([...(task.msMessageIds||[]),task.msMessageId||'',...(task.gmailMessageIds||[]),task.gmailMessageId||'',...(task.emailOriginals||[]).map(e=>e.messageId||'')].filter(Boolean))];
   // Fallback-Suche per Betreff: greift wenn keine Message-ID (z.B. HTML-Drag, oder Exchange ohne Message-ID-Header)
   const _msSubjFallback=task.msEmailSubject||(task.emailOriginals&&task.emailOriginals[0]&&task.emailOriginals[0].subject)||'';
+  console.log('[MS-DEBUG] Message-IDs:',_allMsgIds,'| Subject-Fallback:',_msSubjFallback,'| ConvId:',task.msConversationId||'(keine)');
   if(!_allMsgIds.length&&!task.msConversationId&&!_msSubjFallback){
     showToast('⚠ Keine Outlook-Mail verknüpft – bitte erst eine Mail in den Task ziehen','warning',4000);
     return;
@@ -10090,6 +10093,7 @@ async function _msLoadEmailThread(){
         }
       }catch(e){console.warn('[MS] ConvId für',msgId,':',e);}
     }
+    console.log('[MS-DEBUG] Nach ID-Suche: convIds.size=',convIds.size,'| IDs durchsucht:',_allMsgIds.length);
     // Fallback: Betreff-Suche wenn keine ConvId gefunden (EML ohne Message-ID oder HTML-Drag)
     if(convIds.size===0&&_msSubjFallback){
       // Hilfsfunktion: Ergebnisse aus Graph-Antwort in convIds eintragen
@@ -10112,9 +10116,14 @@ async function _msLoadEmailThread(){
           {headers:{Authorization:'Bearer '+msToken}});
         if(rSearch.ok){
           const dSearch=await rSearch.json();
+          console.log('[MS-DEBUG] $search Ergebnis:',dSearch.value?.length||0,'Treffer, Suchbegriff:',_searchQ.substring(0,30));
+          if(dSearch.value)dSearch.value.forEach(m=>console.log('[MS-DEBUG]   →',m.subject));
           // Nur Treffer übernehmen, deren Betreff den Suchbegriff wirklich enthält (KQL kann ungenau sein)
           const _filteredSearch={value:(dSearch.value||[]).filter(m=>(m.subject||'').toLowerCase().includes(_searchQ.substring(0,20).toLowerCase()))};
+          console.log('[MS-DEBUG] Nach Filter:',_filteredSearch.value.length,'Treffer');
           _msProcessSubjResults(_filteredSearch);
+        }else{
+          console.warn('[MS-DEBUG] $search HTTP-Fehler:',rSearch.status,await rSearch.text().catch(()=>''));
         }
         // 2. Versuch: $filter eq (exakter Vergleich, falls $search nichts fand)
         if(convIds.size===0){
