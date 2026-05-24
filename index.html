@@ -511,9 +511,17 @@ function _parseEmlText(rawText){
       let dispArr=phdr.match(/Content-Disposition:\s*([^\r\n]+)/i);
       let disp=(dispArr?dispArr[1]:'').toLowerCase();
       let fnArr=phdr.match(/filename\*?=["']?(?:UTF-8'')?([^"';\r\n]+)/i);
-      let attachName=fnArr?decodeURIComponent(fnArr[1].trim().replace(/^=\?[^?]+\?[BQ]\?([^?]+)\?=$/i,'$1')):'';
-      // Fallback: name= in Content-Type
-      if(!attachName){let nmArr=phdr.match(/name=["']?([^"';\r\n]+)/i);if(nmArr)attachName=nmArr[1].trim();}
+      let _rawFn=fnArr?fnArr[1].trim():'';
+      let attachName='';
+      if(_rawFn){
+        if(_rawFn.includes('=?'))attachName=_decodeEmlMimeWord(_rawFn);
+        else try{attachName=decodeURIComponent(_rawFn.replace(/\+/g,' '));}catch(e){attachName=_rawFn;}
+      }
+      // Fallback: name= in Content-Type (auch MIME-dekodieren)
+      if(!attachName){
+        let nmArr=phdr.match(/name\*?=["']?(?:UTF-8'')?([^"';\r\n]+)/i);
+        if(nmArr){let _rawNm=nmArr[1].trim();if(_rawNm.includes('=?'))attachName=_decodeEmlMimeWord(_rawNm);else try{attachName=decodeURIComponent(_rawNm.replace(/\+/g,' '));}catch(e){attachName=_rawNm;}}
+      }
       if(pe==='base64'&&attachName&&(disp.startsWith('attachment')||pct==='application/pdf'||pct==='application/octet-stream'||pct.startsWith('application/'))){
         let b64=pb.replace(/\s+/g,'');
         if(b64)res.attachments.push({name:attachName,mimeType:pct||'application/octet-stream',b64:b64});
@@ -2856,7 +2864,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-24 · 06:53'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-24-0653)
+const PAM_BUILD = 'v2026-05-24 · 12:00'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-24-1200)
 
 // ── STATE ──
 let boards = {};
@@ -6019,11 +6027,9 @@ function parseAuftragText(text){
     const schadenKurz = (schadenKurzRaw && schadenKurzRaw !== '(noch offen)') ? schadenKurzRaw.trim().replace(/ /g,'_') : '';
     // Straße: bei neuem Format enthält Objekt_Strasse auch PLZ/Ort → nur Teil vor Komma
     const strasseRaw = strasse ? strasse.split(',')[0].trim() : '';
-    const strasseStr = strasseRaw.replace(/ /g,'_');
-    const ortStr     = ort     ? ort.replace(/ /g,'_')     : '';
-    const personStr  = person  ? person.replace(/ /g,'_')  : '';
-    const adressTeil = [strasseStr, ortStr].filter(Boolean).join('_');
-    const titel      = [kostenstelle, hvKuerzel, adressTeil, personStr, schadenKurz].filter(Boolean).join('–');
+    const strasseStr  = strasseRaw; // Leerzeichen beibehalten, lesbar
+    const schadenKurzShort = schadenKurz.replace(/_/g,' ').substring(0,25).trim();
+    const titel       = [hvKuerzel, strasseStr, schadenKurzShort].filter(Boolean).join(' – ');
 
     // ── Adresse: Straße + PLZ/Ort ────────────────────────────────────────────
     const adresseFull = strasse && plzOrt ? strasse+', '+plzOrt : strasse || plzOrt || '';
@@ -6436,87 +6442,138 @@ function _findTaskAnyBoard(taskId){
 
 function _openMergeDialog(){
   if(_mergeSelected.length!==2)return;
+  window._mergeMasterSide='A';
+  _renderMergeDialog();
+}
+
+function _setMergeMaster(side){
+  window._mergeMasterSide=side;
+  _renderMergeDialog();
+}
+
+function _renderMergeDialog(){
+  const existing=document.getElementById('mergeDialogOverlay');
+  if(existing)existing.remove();
   const rA=_findTaskAnyBoard(_mergeSelected[0]);
   const rB=_findTaskAnyBoard(_mergeSelected[1]);
   if(!rA||!rB){showToast('⚠ Task nicht gefunden','error');return;}
   const tA=rA.task, tB=rB.task;
+  const ms=window._mergeMasterSide||'A';
 
-  const fields=[
-    {key:'title',    label:'Titel'},
-    {key:'desc',     label:'Beschreibung'},
-    {key:'hausverwaltung',label:'Hausverwaltung'},
-    {key:'adresse',  label:'Adresse'},
-    {key:'schadensbild',label:'Schadensbild'},
-    {key:'owner',    label:'Bearbeiter'},
-    {key:'status',   label:'Status'},
-    {key:'repNr',    label:'Rep. Nr.'},
-    {key:'kundenNr', label:'Kunden Nr.'},
-    {key:'gdrive',   label:'Drive-Ordner'},
-    {key:'gdriveOrdner',label:'Drive-Projektordner'},
-    {key:'nas',      label:'NAS-Pfad'},
-    {key:'source',   label:'Quelle / E-Mail'},
+  const allFields=[
+    {key:'title',           label:'Titel'},
+    {key:'desc',            label:'Beschreibung'},
+    {key:'hausverwaltung',  label:'Hausverwaltung'},
+    {key:'adresse',         label:'Adresse'},
+    {key:'schadensbild',    label:'Schadensbild'},
+    {key:'owner',           label:'Bearbeiter'},
+    {key:'status',          label:'Status'},
+    {key:'ampel',           label:'Ampel'},
+    {key:'repNr',           label:'Rep. Nr.'},
+    {key:'kundenNr',        label:'Kunden Nr.'},
+    {key:'source',          label:'Quelle / E-Mail'},
+    {key:'emailSender',     label:'E-Mail Absender'},
+    {key:'aktivitaet',      label:'Aktivität'},
+    {key:'due',             label:'Fälligkeit'},
+    {key:'anfrageEingangDatum', label:'Anfrage Eingang'},
+    {key:'auftragVomDatum', label:'Auftrag vom'},
+    {key:'ausführungsdatum', label:'Ausführungsdatum'},
+    {key:'ausfuehrungstermin',   label:'Ausführungstermin'},
+    {key:'ortstermin',      label:'Ortstermin'},
+    {key:'gdrive',          label:'Drive-Ordner (Fotos)'},
+    {key:'gdriveOrdner',    label:'Drive-Projektordner'},
+    {key:'nas',             label:'NAS-Pfad'},
+    {key:'emailOrdner',     label:'E-Mail-Ordner'},
+    {key:'sbPdfOrdner',     label:'SB PDF-Ordner'},
   ];
 
-  // Nur Felder anzeigen wo mind. eines belegt ist
-  const visFields=fields.filter(f=>(tA[f.key]||'').trim()||(tB[f.key]||'').trim());
+  const fmtVal=v=>!v?'–':(v.length>55?v.substring(0,53)+'…':v);
 
-  const fmtVal=v=>v?(v.length>60?v.substring(0,58)+'…':v):'–';
+  // Konflikt: beide belegt, unterschiedlich
+  const conflictFields=allFields.filter(f=>{
+    const vA=(tA[f.key]||'').toString().trim();
+    const vB=(tB[f.key]||'').toString().trim();
+    return vA&&vB&&vA!==vB;
+  });
 
-  const rows=visFields.map(f=>`
-    <tr style="border-bottom:1px solid var(--border);">
-      <td style="padding:7px 10px;font-size:12px;font-weight:600;color:var(--text2);white-space:nowrap;">${f.label}</td>
+  // Auto: nur einer belegt
+  const autoFields=allFields.filter(f=>{
+    const vA=(tA[f.key]||'').toString().trim();
+    const vB=(tB[f.key]||'').toString().trim();
+    return (vA&&!vB)||(!vA&&vB);
+  });
+
+  const conflictRows=conflictFields.map(f=>{
+    const vA=(tA[f.key]||'').toString();
+    const vB=(tB[f.key]||'').toString();
+    return`<tr style="border-bottom:1px solid var(--border);">
+      <td style="padding:7px 10px;font-size:12px;font-weight:600;color:var(--text2);white-space:nowrap;width:140px;">${esc(f.label)}</td>
       <td style="padding:7px 10px;">
         <label style="display:flex;align-items:flex-start;gap:6px;cursor:pointer;">
-          <input type="radio" name="mf_${f.key}" value="A" ${tA[f.key]?'checked':''} style="margin-top:2px;accent-color:var(--accent);">
-          <span style="font-size:12px;color:${tA[f.key]?'var(--text1)':'var(--text2)'};">${esc(fmtVal(tA[f.key]||''))}</span>
+          <input type="radio" name="mf_${f.key}" value="A" ${ms==='A'?'checked':''} style="margin-top:2px;accent-color:var(--accent);">
+          <span style="font-size:12px;color:var(--text1);">${esc(fmtVal(vA))}</span>
         </label>
       </td>
       <td style="padding:7px 10px;">
         <label style="display:flex;align-items:flex-start;gap:6px;cursor:pointer;">
-          <input type="radio" name="mf_${f.key}" value="B" ${!tA[f.key]&&tB[f.key]?'checked':''} style="margin-top:2px;accent-color:var(--accent);">
-          <span style="font-size:12px;color:${tB[f.key]?'var(--text1)':'var(--text2)'};">${esc(fmtVal(tB[f.key]||''))}</span>
+          <input type="radio" name="mf_${f.key}" value="B" ${ms==='B'?'checked':''} style="margin-top:2px;accent-color:var(--accent);">
+          <span style="font-size:12px;color:var(--text1);">${esc(fmtVal(vB))}</span>
         </label>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
+
+  const autoList=autoFields.map(f=>{
+    const vA=(tA[f.key]||'').toString().trim();
+    const vB=(tB[f.key]||'').toString().trim();
+    const fromSide=vA?'A':'B';
+    return`<div style="padding:3px 0;font-size:12px;"><span style="color:var(--text2);font-weight:600;min-width:140px;display:inline-block;">${esc(f.label)}:</span> <span>${esc(fmtVal(vA||vB))}</span> <span style="font-size:10px;color:var(--text2);">(aus Task ${fromSide})</span></div>`;
+  }).join('');
 
   const ov=document.createElement('div');
   ov.id='mergeDialogOverlay';
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9500;display:flex;align-items:center;justify-content:center;';
+  ov.dataset.taskA=tA.id;
+  ov.dataset.taskB=tB.id;
   ov.innerHTML=`
-    <div style="background:var(--bg2);border-radius:12px;width:min(820px,95vw);max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.35);">
-      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;">
-        <span style="font-size:16px;font-weight:700;">🔀 Tasks zusammenführen</span>
-        <span style="font-size:12px;color:var(--text2);margin-left:4px;">Wähle pro Feld welcher Wert übernommen werden soll. Listen (Fotos, Anhänge, Links) werden automatisch zusammengeführt.</span>
+    <div style="background:var(--bg2);border-radius:12px;width:min(840px,96vw);max-height:90vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.35);">
+      <div style="padding:13px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;">
+        <span style="font-size:15px;font-weight:700;">🔀 Tasks zusammenführen</span>
         <button onclick="document.getElementById('mergeDialogOverlay').remove()" style="margin-left:auto;background:none;border:none;font-size:20px;cursor:pointer;color:var(--text2);">✕</button>
       </div>
-      <div style="overflow-y:auto;flex:1;">
-        <table style="width:100%;border-collapse:collapse;">
-          <thead>
-            <tr style="background:var(--bg3);border-bottom:2px solid var(--border);">
-              <th style="padding:8px 10px;text-align:left;font-size:11px;color:var(--text2);width:120px;">Feld</th>
-              <th style="padding:8px 10px;text-align:left;font-size:12px;font-weight:700;">
-                Task A &nbsp;<span style="font-size:10px;font-weight:400;color:var(--text2);">Projekt: ${esc(rA.board)}</span><br>
-                <span style="font-size:11px;font-weight:600;color:var(--accent);">${esc((tA.title||'').substring(0,50))}</span>
-              </th>
-              <th style="padding:8px 10px;text-align:left;font-size:12px;font-weight:700;">
-                Task B &nbsp;<span style="font-size:10px;font-weight:400;color:var(--text2);">Projekt: ${esc(rB.board)}</span><br>
-                <span style="font-size:11px;font-weight:600;color:var(--accent);">${esc((tB.title||'').substring(0,50))}</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
+      <div style="padding:10px 18px;border-bottom:1px solid var(--border);background:var(--bg3);display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <span style="font-size:12px;font-weight:700;color:var(--text2);">Master (bleibt erhalten):</span>
+        <button onclick="_setMergeMaster('A')" style="padding:5px 13px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;border:2px solid ${ms==='A'?'var(--accent)':'var(--border)'};background:${ms==='A'?'var(--accent)':'var(--bg2)'};color:${ms==='A'?'#fff':'var(--text)'};">
+          Task A: ${esc((tA.title||'').substring(0,28))}
+        </button>
+        <button onclick="_setMergeMaster('B')" style="padding:5px 13px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;border:2px solid ${ms==='B'?'var(--accent)':'var(--border)'};background:${ms==='B'?'var(--accent)':'var(--bg2)'};color:${ms==='B'?'#fff':'var(--text)'};">
+          Task B: ${esc((tB.title||'').substring(0,28))}
+        </button>
+        <span style="font-size:11px;color:var(--text2);">Der andere Task wird archiviert.</span>
       </div>
-      <div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px;justify-content:flex-end;">
-        <span style="font-size:11px;color:var(--text2);margin-right:auto;">Der nicht übernommene Task wird archiviert (nicht gelöscht).</span>
-        <button onclick="document.getElementById('mergeDialogOverlay').remove()" style="padding:8px 18px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);cursor:pointer;font-size:13px;">Abbrechen</button>
-        <button onclick="_executeMerge()" style="padding:8px 20px;border-radius:7px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:13px;font-weight:700;">✓ Zusammenführen</button>
+      <div style="overflow-y:auto;flex:1;">
+        ${conflictFields.length>0?`
+        <div style="padding:10px 18px 4px;font-size:12px;font-weight:700;color:var(--accent);">⚠️ Entscheidung nötig – beide Tasks haben unterschiedliche Werte:</div>
+        <table style="width:100%;border-collapse:collapse;">
+          <thead><tr style="background:var(--bg3);border-bottom:2px solid var(--border);">
+            <th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text2);">Feld</th>
+            <th style="padding:6px 10px;text-align:left;font-size:12px;font-weight:700;">Task A ${ms==='A'?'<span style="color:var(--accent);">★ Master</span>':''}</th>
+            <th style="padding:6px 10px;text-align:left;font-size:12px;font-weight:700;">Task B ${ms==='B'?'<span style="color:var(--accent);">★ Master</span>':''}</th>
+          </tr></thead>
+          <tbody>${conflictRows}</tbody>
+        </table>`
+        :'<div style="padding:14px 18px;font-size:13px;color:var(--text2);">✅ Keine Konflikte – alle Felder können automatisch übernommen werden.</div>'}
+        ${autoList?`
+        <div style="padding:10px 18px 4px;font-size:12px;font-weight:700;color:var(--text2);">✅ Automatisch übernommen – nur in einem Task vorhanden:</div>
+        <div style="padding:6px 18px 10px;">${autoList}</div>`:''}
+        <div style="padding:4px 18px 12px;font-size:11px;color:var(--text2);">&#128203; Listen (Fotos, Anhänge, Links, Notizen, Zeiteinträge) werden aus beiden Tasks zusammengeführt.</div>
+      </div>
+      <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px;justify-content:flex-end;">
+        <button onclick="document.getElementById('mergeDialogOverlay').remove()" style="padding:7px 16px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);cursor:pointer;font-size:13px;">Abbrechen</button>
+        <button onclick="_executeMerge()" style="padding:7px 18px;border-radius:7px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:13px;font-weight:700;">✓ Zusammenführen</button>
       </div>
     </div>`;
   document.body.appendChild(ov);
-  // Speichere Task-IDs für executeMerge
-  ov.dataset.taskA=tA.id;
-  ov.dataset.taskB=tB.id;
 }
 
 function _executeMerge(){
@@ -6527,45 +6584,59 @@ function _executeMerge(){
   if(!rA||!rB){showToast('⚠ Task nicht gefunden','error');return;}
   const tA=JSON.parse(JSON.stringify(rA.task));
   const tB=JSON.parse(JSON.stringify(rB.task));
+  const ms=window._mergeMasterSide||'A';
+  const masterTask=ms==='A'?tA:tB;
+  const otherTask=ms==='A'?tB:tA;
+  const masterId=masterTask.id;
+  const otherId=otherTask.id;
+  const rMaster=ms==='A'?rA:rB;
+  const rOther=ms==='A'?rB:rA;
 
-  const fields=['title','desc','hausverwaltung','adresse','schadensbild','owner','status','repNr','kundenNr','gdrive','gdriveOrdner','nas','source'];
-  const merged=JSON.parse(JSON.stringify(tA)); // Basis: Task A
+  const allFieldKeys=['title','desc','hausverwaltung','adresse','schadensbild','owner','status','ampel','repNr','kundenNr','source','emailSender','aktivitaet','due','anfrageEingangDatum','auftragVomDatum','ausführungsdatum','ausfuehrungstermin','ortstermin','gdrive','gdriveOrdner','nas','emailOrdner','sbPdfOrdner'];
 
-  // Pro Feld: Radio-Wahl auslesen
-  fields.forEach(key=>{
-    const radio=document.querySelector(`input[name="mf_${key}"]:checked`);
-    if(radio&&radio.value==='B') merged[key]=tB[key]||'';
-    else merged[key]=tA[key]||'';
+  const merged=JSON.parse(JSON.stringify(masterTask));
+
+  allFieldKeys.forEach(key=>{
+    const vA=(tA[key]||'').toString().trim();
+    const vB=(tB[key]||'').toString().trim();
+    if(vA&&vB&&vA!==vB){
+      // Konflikt: Radio-Wahl
+      const radio=document.querySelector(`input[name="mf_${key}"]:checked`);
+      merged[key]=radio?(radio.value==='A'?tA[key]:tB[key]):masterTask[key];
+    } else if(!vA&&vB){
+      merged[key]=tB[key];
+    } else if(vA&&!vB){
+      merged[key]=tA[key];
+    }
   });
 
-  // Listen zusammenführen (nie überschreiben)
+  // Listen zusammenführen
   const listFields=['links','attachments','fotos','emailOriginals','emailPdfs','gmailLinks','aufgaben','notizVerlauf','timeEntries','zeitEntries','ausserhausTermine','freieTermine','checkliste'];
   listFields.forEach(key=>{
-    const listA=Array.isArray(tA[key])?tA[key]:[];
-    const listB=Array.isArray(tB[key])?tB[key]:[];
-    merged[key]=[...listA,...listB];
+    merged[key]=[...(Array.isArray(tA[key])?tA[key]:[]),...(Array.isArray(tB[key])?tB[key]:[])];
   });
 
-  // Zusammenführungs-Notiz hinzufügen
   merged.notizVerlauf=merged.notizVerlauf||[];
-  merged.notizVerlauf.unshift({ts:new Date().toISOString(),text:`Task zusammengeführt mit: "${tB.title||tB.id}" (Projekt: ${rB.board})`});
+  merged.notizVerlauf.unshift({ts:new Date().toISOString(),text:`Task zusammengeführt mit: "${otherTask.title||otherId}" (Projekt: ${rOther.board})`});
 
-  // Task A (Haupttask) aktualisieren
-  const idxA=(boards[rA.board]||[]).findIndex(t=>t.id===idA);
-  if(idxA>=0) boards[rA.board][idxA]=merged;
+  // Other Task als Snapshot archivieren
+  const otherSnapshot=JSON.parse(JSON.stringify(otherTask));
+  otherSnapshot.archiviert=true;
+  otherSnapshot.archiviertAm=new Date().toISOString().split('T')[0];
+  otherSnapshot.zusammengefuehrtMit=masterId;
 
-  // Task B archivieren
-  const idxB=(boards[rB.board]||[]).findIndex(t=>t.id===idB);
-  if(idxB>=0){
-    boards[rB.board][idxB].archiviert=true;
-    boards[rB.board][idxB].archiviertAm=new Date().toISOString().split('T')[0];
-    boards[rB.board][idxB].zusammengefuehrtMit=idA;
-  }
+  // Master aktualisieren
+  const idxMaster=(boards[rMaster.board]||[]).findIndex(t=>t.id===masterId);
+  if(idxMaster>=0) boards[rMaster.board][idxMaster]=merged;
+
+  // Other archivieren
+  const idxOther=(boards[rOther.board]||[]).findIndex(t=>t.id===otherId);
+  if(idxOther>=0) boards[rOther.board][idxOther]=otherSnapshot;
 
   ov.remove();
   _clearMergeSelection();
   autoSave();
-  showToast('✓ Tasks zusammengeführt – Task B archiviert','success',3000);
+  showToast('✓ Tasks zusammengeführt','success',3000);
 }
 
 function archiveCardHTML(task){
@@ -15230,35 +15301,4 @@ function _showVbsDriveLinksBox(mainUrl,fotoUrl,dokUrl,emailUrl){
    +'<div style="font-size:11px;opacity:.65;margin-bottom:8px;">Alle Felder im Task ausgef\u00fcllt.<br>Bitte Task speichern!</div>'
    +'<button onclick="document.getElementById(\'vbsDriveLinksBox\').remove()" '
      +'style="background:var(--bg2);border:1px solid var(--border);color:var(--text1);'
-     +'padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;">\u2715 Schlie\u00dfen</button>';
-  document.body.appendChild(box);
-}
-
-document.addEventListener('DOMContentLoaded', _checkNewAuftragFromVbs);
-
-// ── Service Worker: bei jedem Seitenaufruf auf Updates prüfen ──────────────
-if('serviceWorker' in navigator){
-  navigator.serviceWorker.getRegistration().then(reg=>{
-    if(reg) reg.update();
-  });
-  navigator.serviceWorker.addEventListener('controllerchange',()=>{
-    // Neuer SW hat übernommen → Seite automatisch neu laden
-    window.location.reload();
-  });
-}
-
-// ── App-Update-Button: unregistriert SW und lädt neu ──────────────────────
-function pamForceSwUpdate(){
-  if(!('serviceWorker' in navigator)){
-    window.location.reload(); return;
-  }
-  navigator.serviceWorker.getRegistrations().then(regs=>{
-    Promise.all(regs.map(r=>r.unregister())).then(()=>{
-      window.location.reload(true);
-    });
-  });
-}
-
-</script>
-</body>
-</html>
+    
