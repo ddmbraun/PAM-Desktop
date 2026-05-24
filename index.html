@@ -871,6 +871,18 @@ async function _auftragAddToTask(task,boardName,fileMode){
           if(!task.msMessageId)task.msMessageId=info.messageId;
           if(!task.msConversationId)task.msConversationId='';
           if(!task.msThreadMessages)task.msThreadMessages=[];
+          // ConversationId sofort im Hintergrund nachschlagen (fertig vor 600ms Auto-Load)
+          if(msToken&&info.messageId&&!task.msConversationId){
+            const _bgMsgId=info.messageId;const _bgTask=task;
+            (async()=>{
+              const _tryFilter=async(v)=>{
+                const r=await fetch(`https://graph.microsoft.com/v1.0/me/messages?$filter=${encodeURIComponent("internetMessageId eq '"+v+"'")}&$select=id,conversationId&$top=1`,{headers:{Authorization:'Bearer '+msToken}});
+                if(!r.ok)return null;const d=await r.json();return d.value&&d.value.length?d.value[0].conversationId:null;
+              };
+              const convId=await _tryFilter('<'+_bgMsgId+'>')||await _tryFilter(_bgMsgId);
+              if(convId){_bgTask.msConversationId=convId;console.log('[MS] ConvId beim Drag-in gespeichert:',convId);}
+            })();
+          }
         }
       }
     }
@@ -891,7 +903,7 @@ async function _auftragAddToTask(task,boardName,fileMode){
         if(_pdfResult2&&_pdfResult2.id){
           if(!task.emailPdfs)task.emailPdfs=[];
           let _msgId2=info.messageId||'';
-          let _dupPdf2=task.emailPdfs.some(p=>(_msgId2&&[p.messageId,p.gmailMessageId,p.msMessageId].includes(_msgId2)));
+          let _dupPdf2=task.emailPdfs.some(p=>p.name===_pdfName2||(_msgId2&&[p.messageId,p.gmailMessageId,p.msMessageId].includes(_msgId2)));
           if(!_dupPdf2){
             task.emailPdfs.push({name:_pdfName2,fileId:_pdfResult2.id,url:'https://drive.google.com/file/d/'+_pdfResult2.id+'/view',uploadedAt:new Date().toLocaleDateString('de-DE'),date:_d2.toISOString(),messageId:_msgId2});
             showToast('📄 PDF-Vorschau erstellt: '+_pdfName2,'success',3000);
@@ -2728,7 +2740,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
       ondragenter="event.preventDefault();this.classList.add('dragover')"
       ondragover="event.preventDefault();this.classList.add('dragover');event.dataTransfer.dropEffect='copy'"
       ondragleave="if(!this.contains(event.relatedTarget))this.classList.remove('dragover')"
-      ondrop="event.preventDefault();this.classList.remove('dragover');_handleEmailOrigDrop(event.dataTransfer)">
+      ondrop="event.preventDefault();event.stopPropagation();this.classList.remove('dragover');_handleEmailOrigDrop(event.dataTransfer)">
       <span id="emailOrigDropMsg" style="font-size:12px;color:var(--text2);">📧 .eml / .msg hier hineinziehen</span>
       <label style="cursor:pointer;padding:5px 12px;border-radius:6px;border:1px solid var(--accent);background:rgba(108,99,255,.08);color:var(--accent);font-size:11px;font-weight:600;white-space:nowrap;flex-shrink:0;">
         📁 Datei wählen
@@ -2945,7 +2957,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-24 · #24'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-24-b24)
+const PAM_BUILD = 'v2026-05-24 · #26'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-24-b26)
 
 // ── DEBUG: Popup-Detector – fängt jedes window.open ab ──
 const _origWindowOpen = window.open;
@@ -10270,7 +10282,7 @@ async function _msLoadEmailThread(){
       }catch(e){console.warn('[MS] ConvId für',msgId,':',e);}
     }
     console.log('[MS-DEBUG] Nach ID-Suche: convIds.size=',convIds.size,'| IDs durchsucht:',_allMsgIds.length);
-    // Fallback: Betreff-Suche wenn keine ConvId gefunden (EML ohne Message-ID oder HTML-Drag)
+    // Fallback: Betreff-Suche wenn keine ConvId per ID gefunden (EML ohne Message-ID oder ID nicht auf Server)
     if(convIds.size===0&&_msSubjFallback){
       // Hilfsfunktion: Ergebnisse aus Graph-Antwort in convIds eintragen
       // Nur die AM BESTEN passende Mail verwenden (höchster Word-Match-Score)
@@ -14094,7 +14106,7 @@ async function _uploadEmailOriginal(file){
         if(_pdfResult&&_pdfResult.id){
           if(!taskEmailPdfs)taskEmailPdfs=[];
           const _emlMsgId=emailMeta.messageId||'';
-          const _alreadyIn=taskEmailPdfs.some(p=>((_emlMsgId)&&[p.messageId,p.gmailMessageId,p.msMessageId].includes(_emlMsgId)));
+          const _alreadyIn=taskEmailPdfs.some(p=>p.name===_pdfName||((_emlMsgId)&&[p.messageId,p.gmailMessageId,p.msMessageId].includes(_emlMsgId)));
           if(_alreadyIn)throw new Error('skip-dup');
           const _pdfEntry={name:_pdfName,fileId:_pdfResult.id,url:'https://drive.google.com/file/d/'+_pdfResult.id+'/view',uploadedAt:new Date().toLocaleDateString('de-DE'),date:emailMeta.date,messageId:_emlMsgId};
           taskEmailPdfs.push(_pdfEntry);

@@ -1,7 +1,7 @@
 // Service Worker - PAM Desktop (Workboard + Stammblatt)
 // Google-APIs werden NIEMALS gecacht.
 
-const CACHE_NAME = 'pam-desktop-2026-05-24-b24'; // Fix 2026-05-24: Outlook: nur beste ConvId (kein Mehrfach-Load), kein dc.value[0]-Fallback
+const CACHE_NAME = 'pam-desktop-2026-05-24-b26'; // Fix 2026-05-24-b26: Doppelte PDF-Erstellung verhindert (Dateiname-Duplikat-Check + stopPropagation)
 const PRECACHE = [
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css',
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js',
