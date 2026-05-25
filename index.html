@@ -2958,7 +2958,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-25 · #32'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-25-b32)
+const PAM_BUILD = 'v2026-05-25 · #34'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-25-b34)
 
 // ── DEBUG: Popup-Detector – fängt jedes window.open ab ──
 const _origWindowOpen = window.open;
@@ -11375,7 +11375,26 @@ async function _msSaveMailSnapshot(taskId,idx,_silent=false){
       if(r.ok){
         const data=await r.json();
         bodyHtml=data.body?.content||'';
-        inlineAtts=(data.attachments||[]).filter(a=>a.isInline&&a.contentId&&a.contentBytes);
+        // Inline-Anhänge mit contentBytes direkt verwenden; ohne contentBytes → separater Abruf
+    const _rawAtts=(data.attachments||[]).filter(a=>a.isInline&&a.contentId);
+    inlineAtts=[];
+    for(const _att of _rawAtts){
+      if(_att.contentBytes){
+        inlineAtts.push(_att);
+      }else if(_att.id){
+        // Fallback: Anhang separat abrufen (Graph liefert contentBytes nicht immer inline)
+        try{
+          const _ar=await fetch(
+            `https://graph.microsoft.com/v1.0/me/messages/${m.id}/attachments/${_att.id}`,
+            {headers:{Authorization:'Bearer '+msToken}}
+          );
+          if(_ar.ok){
+            const _ad=await _ar.json();
+            if(_ad.contentBytes)inlineAtts.push({..._att,contentBytes:_ad.contentBytes,contentType:_ad.contentType||_att.contentType});
+          }
+        }catch(_e){console.warn('[CID] Fallback-Abruf fehlgeschlagen:',_att.contentId,_e);}
+      }
+    }
         m._cachedBodyHtml=bodyHtml;
       }
     }catch(e){}
@@ -12796,18 +12815,38 @@ function _openSbVerwaltung(){
   // Gespeicherte URL nutzen, sonst automatisch aus aktuellem Pfad ableiten
   let sbUrl=(localStorage.getItem(_SB_URL_KEY)||'').trim();
   if(!sbUrl){
-    // Stammblatt-URL aus aktuellem Pfad ableiten (pam-desktop bleibt als GitHub-Name unverändert)
     let base=window.location.href.replace(/\/[^\/]*$\/[^\/]*$/,'').replace(/\/pam-desktop\/[^\/]*$/,'').replace(/\/PTPBAU\/[^\/]*$/,'');
     sbUrl=base+'/stammblatt.html';
   }
   let target=sbUrl+(sbUrl.includes('?')?'&':'?')+'driveid='+encodeURIComponent(fid);
-  let w=window.open(target,'_blank');
-  // Prüfen ob Fenster geblockt / 404 → dann Konfigurationsdialog anbieten
+  // Popup öffnen – bei erstem Klick kann Browser-Popup-Blocker aktiv sein
+  // (tritt auf wenn Google-Auth-Refresh gerade läuft → Browser sieht "Navigation")
+  let w=null;
+  try{w=window.open(target,'_blank');}catch(e){w=null;}
+  // Sofort prüfen: null → Popup geblockt → klickbaren Link anzeigen
+  if(!w){
+    _sbShowBlockedLink(target);
+    return;
+  }
+  // Nach 1500ms nochmals prüfen: falls Fenster zwischenzeitlich geschlossen (404 etc.)
   setTimeout(function(){
-    try{
-      if(!w||w.closed){_sbUrlSetupDialog(fid);return;}
-    }catch(e){}
+    try{if(w.closed){_sbUrlSetupDialog(fid);}}catch(e){}
   },1500);
+}
+function _sbShowBlockedLink(target){
+  // Popup wurde vom Browser geblockt → Toast mit klickbarem Link
+  const _tid='_sbBlockedToast';
+  document.getElementById(_tid)?.remove();
+  const el=document.createElement('div');
+  el.id=_tid;
+  el.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:99999;'
+    +'background:#1a2744;color:#fff;border-radius:10px;padding:14px 20px;box-shadow:0 4px 20px rgba(0,0,0,.35);'
+    +'font-size:13px;display:flex;align-items:center;gap:12px;max-width:92vw;';
+  el.innerHTML='<span>⚠ Popup geblockt – bitte hier klicken:</span>'
+    +'<a href="'+target+'" target="_blank" style="background:#fff;color:#1a2744;font-weight:700;padding:7px 16px;border-radius:7px;text-decoration:none;white-space:nowrap;flex-shrink:0;">📋 Verwaltung öffnen</a>'
+    +'<button onclick="this.parentElement.remove()" style="background:none;border:none;color:#aaa;font-size:18px;cursor:pointer;padding:0 4px;flex-shrink:0;">✕</button>';
+  document.body.appendChild(el);
+  setTimeout(()=>el.remove(),12000);
 }
 function _sbUrlSetupDialog(fid){
   let ov=document.createElement('div');
@@ -14227,6 +14266,27 @@ async function _uploadEmailOriginal(file){
       url:'https://drive.google.com/file/d/'+result.id+'/view',
       uploadedAt:new Date().toLocaleDateString('de-DE')
     });
+    // ── Auto-Kontakt: Absender eintragen wenn Task noch keine Kontakte hat ──
+    if(isEml&&emailMeta.sender){
+      const _taskId4=(document.getElementById('taskId')||{}).value||'';
+      const _t4=findTaskById(_taskId4);
+      const _hasKontakte=(_t4&&(_t4.kontakte||[]).length>0)||(taskKontakte&&taskKontakte.length>0);
+      if(!_hasKontakte){
+        let _kn='',_ke='';
+        const _km=emailMeta.sender.match(/^(.+?)\s*<([^>]+)>/);
+        if(_km){_kn=_km[1].trim().replace(/^["']|["']$/g,'');_ke=_km[2].trim();}
+        else if(emailMeta.sender.includes('@')){_ke=emailMeta.sender.trim();}
+        else{_kn=emailMeta.sender.trim();}
+        if(_kn||_ke){
+          const _newK={rolle:'ag',name:_kn,tel:'',email:_ke,anrufKontakt:false};
+          if(!taskKontakte)taskKontakte=[];
+          taskKontakte.push(_newK);
+          if(_t4){if(!_t4.kontakte)_t4.kontakte=[];_t4.kontakte.push(_newK);}
+          if(typeof renderKontaktePTP==='function')renderKontaktePTP();
+          showToast('👤 Ansprechpartner eingetragen: '+(_kn||_ke),'success',3500);
+        }
+      }
+    }
     // Briefumschlag-Icon sofort anzeigen (vor PDF-Erstellung, damit UI nicht hängt)
     renderEmailSection();
     scheduleTaskFieldSave();

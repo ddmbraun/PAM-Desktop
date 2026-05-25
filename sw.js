@@ -1,7 +1,7 @@
 // Service Worker - PAM Desktop (Workboard + Stammblatt)
 // Google-APIs werden NIEMALS gecacht.
 
-const CACHE_NAME = 'pam-desktop-2026-05-25-b32'; // b32: ZIP 2 Varianten (PAM-Restore + Notfallarchiv), Abschlussakte HTML vollständig (Drive-Links: Fotos, Anhänge, E-Mail-PDFs, Originale, Links)
+const CACHE_NAME = 'pam-desktop-2026-05-25-b34'; // b34: Stammblatt Popup-Blocker-Fix – klickbarer Link wenn Browser Popup blockiert
 const PRECACHE = [
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css',
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js',
