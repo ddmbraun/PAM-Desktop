@@ -2958,7 +2958,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-25 · #34'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-25-b34)
+const PAM_BUILD = 'v2026-05-25 · #36'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-25-b36)
 
 // ── DEBUG: Popup-Detector – fängt jedes window.open ab ──
 const _origWindowOpen = window.open;
@@ -9161,8 +9161,22 @@ async function createPdfFromSelected(){
   if(!doc){showToast('Keine Bilder geladen','error');return;}
   // Dateiname aus Task-Titel
   const taskTitle=(document.getElementById('taskTitleInput')?.value||'fotos').replace(/[^\w\-]/g,'_');
-  doc.save(taskTitle+'_fotos.pdf');
-  showToast('✓ PDF erstellt','success');
+  const _fname1=taskTitle+'_fotos.pdf';
+  // PDF in neuem Tab öffnen
+  const _blobUrl1=doc.output('bloburl');
+  window.open(_blobUrl1,'_blank');
+  // In Drive-Projektordner hochladen (falls verbunden)
+  try{
+    const _projUrl1=(document.getElementById('tGDOrdner')?.value||'').trim();
+    const _projId1=_extractFolderIdFromUrl(_projUrl1);
+    if(_projId1&&gdriveToken){
+      const _buf1=doc.output('arraybuffer');
+      await _driveUploadGeneric(_buf1,_fname1,'application/pdf',_projId1);
+      showToast('✓ PDF erstellt & in Projektordner gespeichert','success',4000);
+    }else{
+      showToast('✓ PDF erstellt (kein Projektordner → nur Tab geöffnet)','success',3500);
+    }
+  }catch(_e){showToast('✓ PDF geöffnet (Drive-Upload fehlgeschlagen)','warning',4000);console.warn('[PDF]',_e);}
   cancelFotoSelectMode();
 }
 
@@ -9233,8 +9247,21 @@ async function createPdfAllFotos(){
   }
   if(!doc||processed===0){showToast('Keine Bilder geladen','error');return;}
   const fname=(taskKS||taskTitle).replace(/[^\w\-äöüÄÖÜ ]/g,'_').substring(0,40)+'_fotos.pdf';
-  doc.save(fname);
-  showToast('✓ PDF mit '+processed+' Foto(s) erstellt','success',4000);
+  // PDF in neuem Tab öffnen
+  const _blobUrl2=doc.output('bloburl');
+  window.open(_blobUrl2,'_blank');
+  // In Drive-Projektordner hochladen (falls verbunden)
+  try{
+    const _projUrl2=(document.getElementById('tGDOrdner')?.value||'').trim();
+    const _projId2=_extractFolderIdFromUrl(_projUrl2);
+    if(_projId2&&gdriveToken){
+      const _buf2=doc.output('arraybuffer');
+      await _driveUploadGeneric(_buf2,fname,'application/pdf',_projId2);
+      showToast('✓ PDF mit '+processed+' Foto(s) erstellt & in Projektordner gespeichert','success',4000);
+    }else{
+      showToast('✓ PDF mit '+processed+' Foto(s) erstellt (kein Projektordner → nur Tab geöffnet)','success',3500);
+    }
+  }catch(_e){showToast('✓ PDF geöffnet (Drive-Upload fehlgeschlagen)','warning',4000);console.warn('[PDF]',_e);}
 }
 let _currentFotoLbIdx=-1;
 let _deskPannellumViewer=null;
@@ -9779,18 +9806,27 @@ async function _gmFindByMsgId(task){
   if(stEl)stEl.textContent='🔍 Suche in Gmail…';
   try{
     const threadIds=new Set();
+    let _gmAbort=false;
     for(const mid of msgIds){
+      if(_gmAbort)break;
       // RFC-822 Message-ID kann < > haben oder nicht – beide probieren
       const clean=mid.replace(/^<|>$/g,'');
       for(const q of ['rfc822msgid:<'+clean+'>','rfc822msgid:'+clean]){
         try{
           const r=await fetch('https://www.googleapis.com/gmail/v1/users/me/messages?q='+encodeURIComponent(q)+'&maxResults=1',
             {headers:{Authorization:'Bearer '+gmailToken}});
+          if(r.status===403){
+            // 403 = kein Zugriff (Mail nicht in Gmail / falsches Konto) → sofort abbrechen
+            console.info('[GM] _gmFindByMsgId: 403 – Mail nicht in Gmail, suche abgebrochen');
+            if(stEl)stEl.textContent='';
+            _gmAbort=true;break;
+          }
           if(r.ok){const d=await r.json();if(d.messages?.length){threadIds.add(d.messages[0].threadId);break;}}
         }catch(e){}
       }
-      if(threadIds.size)break; // erste Treffer reicht
+      if(threadIds.size)break; // erster Treffer reicht
     }
+    if(_gmAbort){_gmFindInProgress=false;return;}
     if(!threadIds.size){if(stEl)stEl.textContent='';_gmFindInProgress=false;return;}
     // Gmail-IDs am Task speichern
     task.gmailThreadId=[...threadIds][0];
@@ -14266,23 +14302,26 @@ async function _uploadEmailOriginal(file){
       url:'https://drive.google.com/file/d/'+result.id+'/view',
       uploadedAt:new Date().toLocaleDateString('de-DE')
     });
-    // ── Auto-Kontakt: Absender eintragen wenn Task noch keine Kontakte hat ──
+    // ── Auto-Kontakt: Absender eintragen wenn noch nicht in Kontakten vorhanden ──
     if(isEml&&emailMeta.sender){
-      const _taskId4=(document.getElementById('taskId')||{}).value||'';
-      const _t4=findTaskById(_taskId4);
-      const _hasKontakte=(_t4&&(_t4.kontakte||[]).length>0)||(taskKontakte&&taskKontakte.length>0);
-      if(!_hasKontakte){
-        let _kn='',_ke='';
-        const _km=emailMeta.sender.match(/^(.+?)\s*<([^>]+)>/);
-        if(_km){_kn=_km[1].trim().replace(/^["']|["']$/g,'');_ke=_km[2].trim();}
-        else if(emailMeta.sender.includes('@')){_ke=emailMeta.sender.trim();}
-        else{_kn=emailMeta.sender.trim();}
-        if(_kn||_ke){
-          const _newK={rolle:'ag',name:_kn,tel:'',email:_ke,anrufKontakt:false};
-          if(!taskKontakte)taskKontakte=[];
-          taskKontakte.push(_newK);
-          if(_t4){if(!_t4.kontakte)_t4.kontakte=[];_t4.kontakte.push(_newK);}
-          if(typeof renderKontaktePTP==='function')renderKontaktePTP();
+      // Absender zuerst parsen
+      let _kn='',_ke='';
+      const _km=emailMeta.sender.match(/^(.+?)\s*<([^>]+)>/);
+      if(_km){_kn=_km[1].trim().replace(/^["']|["']$/g,'');_ke=_km[2].trim();}
+      else if(emailMeta.sender.includes('@')){_ke=emailMeta.sender.trim();}
+      else{_kn=emailMeta.sender.trim();}
+      if(_kn||_ke){
+        // Prüfen ob dieser Absender bereits in Kontakten (per E-Mail oder Name)
+        const _domKontakte=typeof getKontaktePTP==='function'?getKontaktePTP():[];
+        const _alreadyIn=_domKontakte.some(k=>
+          (_ke&&k.email&&k.email.toLowerCase()===_ke.toLowerCase())||
+          (_kn&&k.name&&k.name.toLowerCase()===_kn.toLowerCase())
+        );
+        if(!_alreadyIn){
+          // addKontaktPTP fügt direkt ins DOM ein (korrekte Methode)
+          if(typeof addKontaktPTP==='function')addKontaktPTP('ag',_kn,'',_ke,false);
+          if(typeof updateKontaktePTPTitle==='function')updateKontaktePTPTitle();
+          scheduleTaskFieldSave();
           showToast('👤 Ansprechpartner eingetragen: '+(_kn||_ke),'success',3500);
         }
       }
