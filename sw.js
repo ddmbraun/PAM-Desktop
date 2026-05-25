@@ -1,7 +1,7 @@
 // Service Worker - PAM Desktop (Workboard + Stammblatt)
 // Google-APIs werden NIEMALS gecacht.
 
-const CACHE_NAME = 'pam-desktop-2026-05-25-b40'; // b40: Material-Popup, Task-Sektionen geschlossen, Checkbox-Overlap-Fix
+const CACHE_NAME = 'pam-desktop-2026-05-25-b42'; // b42: Material-Popup fix zentriert, kein Drag
 const PRECACHE = [
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css',
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js',
