@@ -1,7 +1,7 @@
 // Service Worker - PAM Desktop (Workboard + Stammblatt)
 // Google-APIs werden NIEMALS gecacht.
 
-const CACHE_NAME = 'pam-desktop-2026-05-25-b36'; // b36: Foto-PDF öffnen+Drive-Upload, Auto-Kontakt auch wenn Absender noch nicht in Kontakten
+const CACHE_NAME = 'pam-desktop-2026-05-25-b37'; // b37: EML-Bilder in Foto-Bereich, Auto-Ordner bei neuem Task
 const PRECACHE = [
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css',
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js',
