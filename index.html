@@ -5826,7 +5826,139 @@ function openGcalTermin(i){
   window.open('https://calendar.google.com/calendar/render?action=TEMPLATE&text='+title+'&dates='+dates+'&details='+desc,'_blank');
 }
 // ══ BAUDOKU-PLANUNG (Desktop) ══════════════════════════════════════════════
-let taskBaudokuMaterial   = []; // [{name,einheit,gruppe,menge}] → Mobile: materialGeplant
+
+// ── Artikel-Autocomplete (lädt artikel.json von PAM-Mobil GitHub Pages) ──
+const _BD_ARTIKEL_URL=(function(){
+  const isGithub=window.location.hostname.includes('github.io');
+  return localStorage.getItem('pam_artikel_url') ||
+    (isGithub?'https://ddmbraun.github.io/PAM-Mobil/artikel.json':'');
+})();
+let _bdArtikelListe=null; // null=noch nicht geladen, []=geladen aber leer/Fehler
+let _bdArtikelMatches=[];
+let _bdPendingVk=null; // VK-Preis aus Autocomplete-Auswahl
+
+async function _bdLoadArtikel(){
+  if(_bdArtikelListe!==null)return _bdArtikelListe;
+  if(!_BD_ARTIKEL_URL){_bdArtikelListe=[];return _bdArtikelListe;}
+  try{
+    const r=await fetch(_BD_ARTIKEL_URL,{cache:'force-cache'});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const data=await r.json();
+    // Format: [["name","einheit","gruppe","vk"], ...] oder [["name","einheit","gruppe"], ...]
+    _bdArtikelListe=data.map(a=>({name:a[0]||'',einheit:a[1]||'Stk',gruppe:a[2]||'',vk:a[3]!=null?Number(a[3]):null,ean:String(a[4]||'').trim()}))
+      .filter(a=>a.name);
+  }catch(e){
+    console.warn('[BD] artikel.json laden fehlgeschlagen:',e);
+    _bdArtikelListe=[];
+  }
+  return _bdArtikelListe;
+}
+
+async function _bdArtikelSuggest(inp){
+  const q=(inp.value||'').trim().toLowerCase();
+  const sugg=document.getElementById('bdMatSuggest');
+  if(!sugg){return;}
+  if(q.length<1){sugg.style.display='none';return;}
+  const liste=await _bdLoadArtikel();
+  if(!liste||!liste.length){sugg.style.display='none';return;}
+  // EAN-Scan: nur Ziffern → nach EAN suchen (exakt oder Anfang)
+  const _bdIsEan=/^\d{6,}$/.test(q);
+  if(_bdIsEan){
+    const exact=liste.find(a=>a.ean&&a.ean===q);
+    if(exact){_bdArtikelMatches=[exact];}
+    else{_bdArtikelMatches=liste.filter(a=>a.ean&&a.ean.startsWith(q)).slice(0,14);}
+  }else{
+    const _bdWords=q.split(/\s+/).filter(Boolean);
+    _bdArtikelMatches=liste.filter(a=>{const n=a.name.toLowerCase();return _bdWords.every(w=>n.includes(w));}).slice(0,14);
+  }
+  if(!_bdArtikelMatches.length){sugg.style.display='none';return;}
+  sugg.innerHTML=_bdArtikelMatches.map((a,i)=>{
+    const preis=a.vk!=null?(Number(a.vk).toFixed(2).replace('.',',')+' €/'+a.einheit):'';
+    return '<div onmousedown="_bdArtikelSelect('+i+')" style="padding:6px 10px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);display:flex;align-items:baseline;gap:6px;" onmouseenter="this.style.background=\'var(--bg3)\'" onmouseleave="this.style.background=\'\'">'
+      +'<span style="flex:1;font-weight:600;">'+String(a.name).replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</span>'
+      +'<span style="color:var(--text2);font-size:11px;">'+String(a.einheit).replace(/&/g,'&amp;')+'</span>'
+      +(preis?'<span style="color:var(--green);font-size:11px;">'+preis+'</span>':'')
+      +(a.gruppe?'<span style="color:var(--text2);font-size:10px;">'+String(a.gruppe).replace(/&/g,'&amp;')+'</span>':'')
+      +'</div>';
+  }).join('');
+  sugg.style.display='block';
+}
+
+function _bdArtikelSelect(i){
+  const a=_bdArtikelMatches[i];
+  if(!a)return;
+  const inp=document.getElementById('bdMatNameInp');
+  const einInp=document.getElementById('bdMatEinInp');
+  if(inp)inp.value=a.name;
+  if(einInp){
+    for(let j=0;j<einInp.options.length;j++){
+      if(einInp.options[j].value===a.einheit){einInp.selectedIndex=j;break;}
+    }
+  }
+  _bdPendingVk=a.vk;
+  _bdArtikelHideSuggest();
+}
+
+function _bdArtikelHideSuggest(){
+  const sugg=document.getElementById('bdMatSuggest');
+  if(sugg)sugg.style.display='none';
+}
+
+// ── EAN-Kamera-Scanner (BarcodeDetector API, Chrome/Edge) ──
+let _bdScanStream=null;
+async function _bdScanBarcode(){
+  if(!('BarcodeDetector' in window)){
+    showToast('Kamera-Scan wird von diesem Browser nicht unterstützt (Chrome/Edge erforderlich)','warn',4000);
+    return;
+  }
+  // Overlay anlegen
+  let overlay=document.getElementById('_bdScanOverlay');
+  if(overlay){overlay.remove();_bdStopScan();return;}
+  overlay=document.createElement('div');
+  overlay.id='_bdScanOverlay';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;';
+  overlay.innerHTML='<div style="background:#111;border-radius:12px;overflow:hidden;position:relative;max-width:480px;width:90%;">'
+    +'<video id="_bdScanVideo" autoplay muted playsinline style="width:100%;display:block;"></video>'
+    +'<div style="position:absolute;inset:0;border:3px solid rgba(74,222,128,.7);border-radius:12px;pointer-events:none;"></div>'
+    +'</div>'
+    +'<div style="color:#fff;font-size:14px;">Barcode vor die Kamera halten…</div>'
+    +'<button onclick="_bdStopScan()" style="padding:8px 22px;border-radius:8px;background:#333;border:1px solid #555;color:#fff;cursor:pointer;font-size:13px;">✕ Abbrechen</button>';
+  document.body.appendChild(overlay);
+  try{
+    _bdScanStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1280}}});
+    const video=document.getElementById('_bdScanVideo');
+    video.srcObject=_bdScanStream;
+    const detector=new BarcodeDetector({formats:['ean_13','ean_8','code_128','code_39','upc_a','upc_e']});
+    let scanning=true;
+    const scan=async()=>{
+      if(!scanning||!document.getElementById('_bdScanOverlay'))return;
+      try{
+        const codes=await detector.detect(video);
+        if(codes.length){
+          const ean=codes[0].rawValue;
+          _bdStopScan();
+          const inp=document.getElementById('bdMatNameInp');
+          if(inp){inp.value=ean;await _bdArtikelSuggest(inp);}
+          // Exakter Treffer → sofort auswählen
+          if(_bdArtikelMatches.length===1){_bdArtikelSelect(0);showToast('Artikel gefunden: '+_bdArtikelMatches[0].name,'ok',3000);}
+          else if(_bdArtikelMatches.length===0){showToast('EAN '+ean+' nicht in Lagerverwaltung gefunden','warn',4000);}
+          return;
+        }
+      }catch(e){}
+      if(scanning)requestAnimationFrame(scan);
+    };
+    video.addEventListener('play',()=>requestAnimationFrame(scan));
+  }catch(e){
+    _bdStopScan();
+    showToast('Kamera-Zugriff verweigert oder nicht verfügbar','warn',3500);
+  }
+}
+function _bdStopScan(){
+  const ov=document.getElementById('_bdScanOverlay');if(ov)ov.remove();
+  if(_bdScanStream){_bdScanStream.getTracks().forEach(t=>t.stop());_bdScanStream=null;}
+}
+
+let taskBaudokuMaterial   = []; // [{name,einheit,gruppe,menge,vk}] → Mobile: materialGeplant
 let taskBaudokuPersonalListe = []; // [string] → Mobile: baudokuPersonalListe (wer ist verfügbar)
 let taskBaudokuMaschinen  = []; // [{name}] → Mobile: baudokuMaschinen
 
@@ -5856,6 +5988,7 @@ function renderBaudokuPlanung(){
         +'<div style="flex:1;min-width:0;">'
         +'<span style="'+fs13+';font-weight:600;">'+_esc(m.name)+'</span>'
         +(m.gruppe?'<span style="'+fs12+';color:var(--text2);margin-left:6px;">'+_esc(m.gruppe)+'</span>':'')
+        +(m.vk!=null?'<span style="'+fs12+';color:var(--green);margin-left:8px;">'+Number(m.vk).toFixed(2).replace('.',',')+' €/'+_esc(m.einheit)+'</span>':'')
         +'</div>'
         +'<input type="number" min="0" step="any" value="'+_esc(String(m.menge||''))+'" placeholder="Menge" '
         +'onchange="_bdMatUpd('+i+',\'menge\',this.value)" '
@@ -5870,16 +6003,24 @@ function renderBaudokuPlanung(){
   }else{
     matHtml+='<div style="'+fs12+';color:var(--text2);padding:4px 0;">Noch kein Material geplant.</div>';
   }
-  // Neu-Eingabe-Zeile
-  matHtml+='<div style="display:flex;gap:5px;margin-top:6px;flex-wrap:wrap;">'
-    +'<input id="bdMatNameInp" type="text" placeholder="Bezeichnung…" autocomplete="off" '
-    +'style="flex:2;min-width:120px;padding:5px 8px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text);'+fs13+';" '
-    +'onkeydown="if(event.key===\'Enter\')_bdMatAdd()">'
+  // Neu-Eingabe-Zeile (mit Artikel-Autocomplete)
+  matHtml+='<div style="display:flex;gap:5px;margin-top:6px;flex-wrap:wrap;align-items:center;">'
+    +'<div style="flex:2;min-width:140px;position:relative;">'
+    +'<input id="bdMatNameInp" type="text" placeholder="Bezeichnung… (oder tippen für Vorschläge)" autocomplete="off" '
+    +'style="width:100%;box-sizing:border-box;padding:5px 8px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text);'+fs13+';" '
+    +'oninput="_bdArtikelSuggest(this)" '
+    +'onkeydown="if(event.key===\'Enter\'){_bdArtikelHideSuggest();_bdMatAdd();}if(event.key===\'Escape\')_bdArtikelHideSuggest();" '
+    +'onblur="setTimeout(_bdArtikelHideSuggest,200)">'
+    +'<div id="bdMatSuggest" style="display:none;position:absolute;top:100%;left:0;min-width:100%;max-height:200px;overflow-y:auto;background:var(--bg2);border:1px solid var(--accent);border-radius:6px;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,.2);"></div>'
+    +'</div>'
     +'<select id="bdMatEinInp" style="padding:5px 4px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text);'+fs12+';">'
     +_BD_EINHEITEN.map(e=>'<option>'+e+'</option>').join('')
     +'</select>'
-    +'<button onclick="_bdMatAdd()" style="padding:5px 10px;border-radius:5px;border:1.5px dashed var(--accent);background:rgba(108,99,255,.07);color:var(--accent);cursor:pointer;'+fs12+';font-weight:600;">+ Hinzufügen</button>'
-    +'</div></div>';
+    +'<button onclick="_bdScanBarcode()" title="EAN per Kamera scannen" style="padding:5px 9px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;'+fs13+';line-height:1;" aria-label="EAN scannen">📷</button>'
+    +'<button onclick="_bdArtikelHideSuggest();_bdMatAdd();" style="padding:5px 10px;border-radius:5px;border:1.5px dashed var(--accent);background:rgba(108,99,255,.07);color:var(--accent);cursor:pointer;'+fs12+';font-weight:600;">+ Hinzufügen</button>'
+    +'</div>'
+    +'<div style="'+fs12+';color:var(--text2);margin-top:3px;">💡 Beim Tippen werden Artikel aus der Lagerverwaltung vorgeschlagen (inkl. Preis)</div>'
+    +'</div>';
 
   // ── Personal-Liste ────────────────────────────────────────────────────────
   let perHtml='<div style="margin-bottom:12px;">'
@@ -5929,8 +6070,11 @@ function _bdMatAdd(){
   if(!inp||!inp.value.trim())return;
   const name=inp.value.trim();
   if(taskBaudokuMaterial.some(m=>m.name===name)){showToast('Bereits vorhanden','warn',2000);return;}
-  taskBaudokuMaterial.push({name,einheit:einInp?einInp.value:'Stk',gruppe:'',menge:null});
+  const vk=_bdPendingVk!=null?_bdPendingVk:null;
+  _bdPendingVk=null;
+  taskBaudokuMaterial.push({name,einheit:einInp?einInp.value:'Stk',gruppe:'',menge:null,vk});
   inp.value='';
+  _bdArtikelHideSuggest();
   scheduleTaskFieldSave();
   renderBaudokuPlanung();
 }
