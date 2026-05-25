@@ -1,7 +1,7 @@
 // Service Worker - PAM Desktop (Workboard + Stammblatt)
 // Google-APIs werden NIEMALS gecacht.
 
-const CACHE_NAME = 'pam-desktop-2026-05-24-b31'; // Fix b31: Empfänger-Check – T-Online/IMAP-Mails überspringen Outlook-Verlauf-Suche
+const CACHE_NAME = 'pam-desktop-2026-05-25-b32'; // b32: ZIP 2 Varianten (PAM-Restore + Notfallarchiv), Abschlussakte HTML vollständig (Drive-Links: Fotos, Anhänge, E-Mail-PDFs, Originale, Links)
 const PRECACHE = [
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css',
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js',

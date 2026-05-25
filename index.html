@@ -2614,7 +2614,8 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
       <div class="mv2-mehr-wrap" style="margin-right:auto;">
         <button type="button" class="topbar-btn" id="mv2MehrBtn" onclick="_toggleMehrMenu(event)" title="Weitere Optionen" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);letter-spacing:2px;padding:5px 10px;">⋯</button>
         <div class="mv2-mehr-menu" id="mv2MehrMenu">
-          <button onclick="exportTaskZip();_closeMehrMenu()">⬇ Sichern (ZIP)</button>
+          <button onclick="exportTaskZipRestore();_closeMehrMenu()">📋 Sichern (ZIP – PAM Restore)</button>
+          <button onclick="exportTaskZipNotfall();_closeMehrMenu()">🆘 Notfallarchiv (ZIP + alle Dateien)</button>
           <label class="mv2-mehr-item">↩ Wiederherstellen<input type="file" accept=".zip" style="display:none" onchange="importTaskFromZip(this.files[0]);this.value='';_closeMehrMenu();" autocomplete="off"></label>
           <button id="modalSaveSize" onclick="_saveModalDefault();_closeMehrMenu()">💾 Position & Größe speichern</button>
           <button id="abschlussBtn" onclick="createAbschlussakte();_closeMehrMenu()" style="display:none;">📁 Abschlussakte (PDF→Drive)</button>
@@ -2957,7 +2958,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-24 · #31'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-24-b31)
+const PAM_BUILD = 'v2026-05-25 · #32'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-25-b32)
 
 // ── DEBUG: Popup-Detector – fängt jedes window.open ab ──
 const _origWindowOpen = window.open;
@@ -11526,45 +11527,120 @@ async function _driveUploadPDF(name,arrayBuffer,parentId){
   });
   if(!r.ok)throw new Error('PDF hochladen: HTTP '+r.status);
 }
-// ── ZIP-Sicherung: Task exportieren ──────────────────────────────────────────
-async function exportTaskZip(){
-  if(!window.JSZip){showToast('⚠ JSZip-Bibliothek nicht geladen – kurz warten','error',3000);return;}
+// ── ZIP-Sicherung: Task exportieren (zwei Varianten) ─────────────────────────
+async function _zipGetTaskAndSafeTitle(){
+  if(!window.JSZip){showToast('⚠ JSZip-Bibliothek nicht geladen – kurz warten','error',3000);return null;}
   const taskId=(document.getElementById('taskId')||{}).value||_pamActiveTaskId||'';
   const task=findTaskById(taskId);
-  if(!task){showToast('⚠ Kein Task geöffnet','error',3000);return;}
+  if(!task){showToast('⚠ Kein Task geöffnet','error',3000);return null;}
+  const safeTitle=(task.titel||task.title||'Task').replace(/[^a-zA-Z0-9_\-äöüÄÖÜß ]/g,'_').substring(0,60);
+  return{task,safeTitle};
+}
+async function _zipSaveAndDownload(zip,fname){
+  const buf=await zip.generateAsync({type:'arraybuffer',compression:'DEFLATE',compressionOptions:{level:6}});
+  const projUrl=(document.getElementById('tGDOrdner')?.value||'').trim();
+  const projId=_extractFolderIdFromUrl(projUrl);
+  if(projId&&gdriveToken){
+    await _driveUploadGeneric(buf,fname,'application/zip',projId);
+    showToast('✓ ZIP in Projektordner gespeichert','success',4000);
+  }
+  const blob=new Blob([buf],{type:'application/zip'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=fname;
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+  if(!projId||!gdriveToken)showToast('✓ ZIP gespeichert (kein Drive-Ordner → nur Download)','success',3500);
+}
+// Variante 1: Schnelle PAM-Restore-Sicherung (task.json + info.txt, Drive-Links bleiben)
+async function exportTaskZipRestore(){
+  const r=await _zipGetTaskAndSafeTitle();if(!r)return;
+  const{task,safeTitle}=r;
   try{
-    showToast('⏳ Erstelle ZIP…','info',4000);
+    showToast('⏳ Erstelle ZIP…','info',3000);
     const zip=new window.JSZip();
-    // Vollständiger Task-Datensatz als JSON
     const snapshot=JSON.parse(JSON.stringify(task));
     zip.file('task.json',JSON.stringify(snapshot,null,2));
-    // Metadaten-Datei für schnelle Übersicht
     zip.file('info.txt',
-      'PAM Workboard – Task-Sicherung\n'+
+      'PAM Workboard – Task-Sicherung (PAM Restore)\n'+
       'Erstellt: '+new Date().toLocaleString('de-DE')+'\n'+
       'Titel: '+(task.titel||task.title||'–')+'\n'+
       'ID: '+(task.id||'–')+'\n'+
-      'Status: '+(task.status||'–')+'\n'
+      'Status: '+(task.status||'–')+'\n'+
+      '\nHinweis: Alle Dateien bleiben in Google Drive verknüpft.\n'+
+      'Zum Wiederherstellen: ZIP in PAM importieren (↩ Wiederherstellen).\n'
     );
-    const buf=await zip.generateAsync({type:'arraybuffer',compression:'DEFLATE',compressionOptions:{level:6}});
-    const safeTitle=(task.titel||task.title||'Task').replace(/[^a-zA-Z0-9_\-äöüÄÖÜß ]/g,'_').substring(0,60);
-    const fname=safeTitle+'_Sicherung_'+new Date().toISOString().slice(0,10)+'.zip';
-    // In Projektordner hochladen (falls vorhanden + Drive verbunden)
-    const projUrl=(document.getElementById('tGDOrdner')?.value||'').trim();
-    const projId=_extractFolderIdFromUrl(projUrl);
-    if(projId&&gdriveToken){
-      await _driveUploadGeneric(buf,fname,'application/zip',projId);
-      showToast('✓ ZIP-Sicherung in Projektordner gespeichert','success',4000);
+    await _zipSaveAndDownload(zip,safeTitle+'_PAM-Restore_'+new Date().toISOString().slice(0,10)+'.zip');
+  }catch(e){showToast('⚠ Fehler: '+e.message,'error',5000);console.error('[ZIP Restore]',e);}
+}
+// Variante 2: Notfallarchiv – lädt alle Drive-Dateien herunter
+async function exportTaskZipNotfall(){
+  const r=await _zipGetTaskAndSafeTitle();if(!r)return;
+  const{task,safeTitle}=r;
+  if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden','error',4000);return;}
+  try{
+    showToast('⏳ Notfallarchiv – lade Dateien…','info',6000);
+    const zip=new window.JSZip();
+    const snapshot=JSON.parse(JSON.stringify(task));
+    zip.file('task.json',JSON.stringify(snapshot,null,2));
+    let downloaded=0,failed=0;
+    async function _fetchDriveFile(fileId){
+      try{
+        const r=await fetch('https://www.googleapis.com/drive/v3/files/'+fileId+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
+        if(!r.ok)throw new Error('HTTP '+r.status);
+        return await r.arrayBuffer();
+      }catch(e){failed++;console.warn('[ZIP Notfall] Fehler bei fileId',fileId,e);return null;}
     }
-    // Immer auch lokal herunterladen
-    const blob=new Blob([buf],{type:'application/zip'});
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(blob);
-    a.download=fname;
-    a.click();
-    setTimeout(()=>URL.revokeObjectURL(a.href),5000);
-    if(!projId||!gdriveToken)showToast('✓ ZIP gespeichert (kein Projektordner → nur Download)','success',3500);
-  }catch(e){showToast('⚠ Fehler: '+e.message,'error',5000);console.error('[ZIP Export]',e);}
+    function _safeFilename(name,fallback){return(name||fallback||'Datei').replace(/[^a-zA-Z0-9_\-äöüÄÖÜß\.]/g,'_').substring(0,100);}
+    // Fotos
+    const fotoFolder=zip.folder('Fotos');
+    for(let i=0;i<(taskFotos||[]).length;i++){
+      const f=taskFotos[i];
+      if(!f.driveId)continue;
+      const buf=await _fetchDriveFile(f.driveId);
+      if(buf){const ext=(f.name||'').split('.').pop()||'jpg';const nm='Foto_'+(i+1)+'_'+_safeFilename(f.caption||f.name,'foto')+'.'+ext;fotoFolder.file(nm,buf);downloaded++;}
+    }
+    // Dateianhänge
+    const anhangFolder=zip.folder('Anhänge');
+    for(const att of(taskAttachments||[])){
+      if(!att.fileId)continue;
+      const buf=await _fetchDriveFile(att.fileId);
+      if(buf){anhangFolder.file(_safeFilename(att.name,'Anhang'),buf);downloaded++;}
+    }
+    // E-Mail-PDFs
+    const pdfFolder=zip.folder('E-Mail-PDFs');
+    for(const p of(taskEmailPdfs||[])){
+      if(!p.fileId)continue;
+      const buf=await _fetchDriveFile(p.fileId);
+      if(buf){pdfFolder.file(_safeFilename(p.name,'Email-PDF'),buf);downloaded++;}
+    }
+    // E-Mail-Originale
+    const emlFolder=zip.folder('E-Mails');
+    for(const e of(taskEmailOriginals||[])){
+      if(!e.fileId)continue;
+      const buf=await _fetchDriveFile(e.fileId);
+      if(buf){const nm=_safeFilename(e.subject||e.sender||'Email','Email')+'.eml';emlFolder.file(nm,buf);downloaded++;}
+    }
+    // Info-Datei
+    zip.file('info.txt',
+      'PAM Workboard – Notfallarchiv\n'+
+      'Erstellt: '+new Date().toLocaleString('de-DE')+'\n'+
+      'Titel: '+(task.titel||task.title||'–')+'\n'+
+      'ID: '+(task.id||'–')+'\n'+
+      'Status: '+(task.status||'–')+'\n'+
+      '\nHeruntergeladen: '+downloaded+' Datei(en)\n'+
+      (failed?'Fehler: '+failed+' Datei(en) nicht erreichbar\n':'')+
+      '\nOrdnerstruktur:\n'+
+      '  Fotos/        – Projektfotos\n'+
+      '  Anhänge/      – Dateianhänge\n'+
+      '  E-Mail-PDFs/  – E-Mails als PDF\n'+
+      '  E-Mails/      – E-Mail-Originale (.eml)\n'+
+      '  task.json     – PAM-Datensatz (für Wiederherstellung)\n'
+    );
+    showToast('⏳ Erstelle ZIP-Archiv ('+downloaded+' Dateien)…','info',5000);
+    await _zipSaveAndDownload(zip,safeTitle+'_Notfallarchiv_'+new Date().toISOString().slice(0,10)+'.zip');
+    if(failed>0)showToast('⚠ '+failed+' Datei(en) konnten nicht geladen werden','warning',5000);
+  }catch(e){showToast('⚠ Fehler: '+e.message,'error',5000);console.error('[ZIP Notfall]',e);}
 }
 
 // ── ZIP-Sicherung: Task wiederherstellen ─────────────────────────────────────
@@ -12466,22 +12542,34 @@ async function createAbschlussHtml(){
     const termMin=taskAusserhausTermine.reduce((s,t)=>s+_pm(t.von,t.bis),0);
     const zeitH=Math.floor(zeitMin/60),zeitM=zeitMin%60;
 
-    // ── Fotos als Base64 laden ──
-    btn.textContent='⏳ Fotos laden…';
-    const fotoData=[];
-    for(const f of taskFotos){
-      let src='';
-      if(f.driveId){
-        try{
-          const blobUrl=await _fetchDesktopFotoBlob(f.driveId);
-          if(blobUrl){
-            const blob=await fetch(blobUrl).then(r=>r.blob());
-            src=await new Promise((res,rej)=>{const fr=new FileReader();fr.onload=e=>res(e.target.result);fr.onerror=rej;fr.readAsDataURL(blob);});
-          }
-        }catch(e){console.warn('Foto-Fehler:',e);}
-      }
-      fotoData.push({src,caption:f.caption||'',name:f.name||''});
-    }
+    // ── Fotos als Drive-Links (kein Base64-Download) ──
+    const fotoData=(taskFotos||[]).map(f=>({
+      driveUrl:f.driveId?'https://drive.google.com/file/d/'+f.driveId+'/view':'',
+      thumbUrl:f.driveId?'https://drive.google.com/thumbnail?id='+f.driveId+'&sz=w400':'',
+      caption:f.caption||'',
+      name:f.name||''
+    }));
+    // ── Dateianhänge, E-Mail-PDFs, E-Mail-Originale, Links sammeln ──
+    const anhangData=(taskAttachments||[]).filter(a=>a.url||a.fileId).map(a=>({
+      name:a.name||'Anhang',
+      url:a.url||(a.fileId?'https://drive.google.com/file/d/'+a.fileId+'/view':''),
+      uploadedAt:a.uploadedAt||''
+    }));
+    const emailPdfData=(taskEmailPdfs||[]).filter(p=>p.url||p.fileId).map(p=>({
+      name:p.name||'E-Mail PDF',
+      url:p.url||(p.fileId?'https://drive.google.com/file/d/'+p.fileId+'/view':''),
+      date:p.date?new Date(p.date).toLocaleDateString('de-DE'):p.uploadedAt||''
+    }));
+    const emailOrigData=(taskEmailOriginals||[]).filter(e=>e.url||e.fileId).map(e=>({
+      subject:e.subject||'(kein Betreff)',
+      sender:e.sender||'',
+      date:e.date?new Date(e.date).toLocaleDateString('de-DE'):'',
+      url:e.url||(e.fileId?'https://drive.google.com/file/d/'+e.fileId+'/view':'')
+    }));
+    const linkData=(taskLinks||[]).filter(l=>l.url&&l.url.trim()).map(l=>({
+      label:l.label||l.url,
+      url:l.url
+    }));
 
     // ── Zeilen-Helfer ──
     const _row=(l,v)=>v?`<tr><td class="lbl">${l}</td><td>${v}</td></tr>`:'';
@@ -12524,10 +12612,30 @@ async function createAbschlussHtml(){
       kontakteHtml=_sec('👤 Kontakte')+'<table class="data-tbl"><thead><tr><th>Rolle</th><th>Name</th><th>Telefon</th><th>E-Mail</th></tr></thead><tbody>'+kontakte.map(k=>`<tr><td>${_esc(k.rolle||'')}</td><td>${_esc(k.name||'')}</td><td>${k.tel?`<a href="tel:${_esc(k.tel)}">${_esc(k.tel)}</a>`:''}</td><td>${k.email?`<a href="mailto:${_esc(k.email)}">${_esc(k.email)}</a>`:''}</td></tr>`).join('')+'</tbody></table>';
     }
 
-    // ── Fotos-Sektion ──
+    // ── Fotos-Sektion (Drive-Links mit Vorschau-Thumbnail) ──
     let fotosHtml='';
     if(fotoData.length){
-      fotosHtml=_sec('📷 Fotos ('+fotoData.length+')')+'<div class="foto-grid">'+fotoData.map((f,i)=>`<div class="foto-card"><div class="foto-nr">Foto ${i+1}</div>${f.src?`<img src="${f.src}" alt="${_esc(f.name)}" onclick="this.classList.toggle('zoom')">`:'<div class="foto-miss">Bild nicht geladen</div>'}<div class="foto-cap">${_esc(f.caption)||'<span style="color:#aaa">keine Beschreibung</span>'}</div></div>`).join('')+'</div>';
+      fotosHtml=_sec('📷 Fotos ('+fotoData.length+')')+'<div class="foto-grid">'+fotoData.map((f,i)=>`<div class="foto-card"><div class="foto-nr">Foto ${i+1}</div>${f.driveUrl?`<a href="${f.driveUrl}" target="_blank" title="In Google Drive öffnen"><img src="${f.thumbUrl}" alt="${_esc(f.name)}" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'block\'" loading="lazy"><div class="foto-miss" style="display:none">Vorschau nicht verfügbar – <a href=\"${f.driveUrl}\" target=\"_blank\">in Drive öffnen</a></div></a>`:'<div class="foto-miss">Kein Drive-Link</div>'}<div class="foto-cap">${_esc(f.caption)||'<span style="color:#aaa">keine Beschreibung</span>'}</div></div>`).join('')+'</div>';
+    }
+    // ── Anhänge-Sektion ──
+    let anhangHtml='';
+    if(anhangData.length){
+      anhangHtml=_sec('📎 Dateianhänge ('+anhangData.length+')')+'<table class="data-tbl"><thead><tr><th>Dateiname</th><th>Hochgeladen</th><th>Link</th></tr></thead><tbody>'+anhangData.map(a=>`<tr><td>${_esc(a.name)}</td><td style="white-space:nowrap">${_esc(a.uploadedAt)}</td><td><a href="${a.url}" target="_blank" class="drive-link">📂 Drive öffnen</a></td></tr>`).join('')+'</tbody></table>';
+    }
+    // ── E-Mail-PDFs-Sektion ──
+    let emailPdfHtml='';
+    if(emailPdfData.length){
+      emailPdfHtml=_sec('📧 E-Mail-PDFs ('+emailPdfData.length+')')+'<table class="data-tbl"><thead><tr><th>Name</th><th>Datum</th><th>Link</th></tr></thead><tbody>'+emailPdfData.map(p=>`<tr><td>${_esc(p.name)}</td><td style="white-space:nowrap">${_esc(p.date)}</td><td><a href="${p.url}" target="_blank" class="drive-link">📂 Drive öffnen</a></td></tr>`).join('')+'</tbody></table>';
+    }
+    // ── E-Mail-Originale-Sektion ──
+    let emailOrigHtml='';
+    if(emailOrigData.length){
+      emailOrigHtml=_sec('✉ E-Mail-Originale ('+emailOrigData.length+')')+'<table class="data-tbl"><thead><tr><th>Betreff</th><th>Absender</th><th>Datum</th><th>Link</th></tr></thead><tbody>'+emailOrigData.map(e=>`<tr><td>${_esc(e.subject)}</td><td>${_esc(e.sender)}</td><td style="white-space:nowrap">${_esc(e.date)}</td><td><a href="${e.url}" target="_blank" class="drive-link">📂 Drive öffnen</a></td></tr>`).join('')+'</tbody></table>';
+    }
+    // ── Manuelle Links-Sektion ──
+    let manualLinksHtml='';
+    if(linkData.length){
+      manualLinksHtml=_sec('🔗 Links & Verknüpfungen ('+linkData.length+')')+'<ul class="link-list">'+linkData.map(l=>`<li><a href="${_esc(l.url)}" target="_blank" class="ext-link">${_esc(l.label)}</a></li>`).join('')+'</ul>';
     }
 
     // ── Gesamt-Badge ──
@@ -12576,6 +12684,13 @@ table.data-tbl{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:
 .foto-miss{background:#f5f5f5;color:#bbb;padding:40px;text-align:center;font-size:12px;}
 .foto-cap{font-size:12px;padding:8px 12px;color:#444;border-top:1px solid #eef;min-height:30px;}
 .foto-miss{text-align:center;padding:30px;color:#aaa;font-size:12px;}
+.foto-card a{display:block;text-decoration:none;}
+.drive-link{display:inline-block;background:#e8f4fd;color:#1a73e8;border-radius:5px;padding:3px 10px;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap;}
+.drive-link:hover{background:#c5e0f8;}
+.ext-link{color:#1a73e8;text-decoration:none;font-weight:500;font-size:13px;}
+.ext-link:hover{text-decoration:underline;}
+.link-list{list-style:none;display:flex;flex-direction:column;gap:6px;padding:0;}
+.link-list li{padding:4px 0;border-bottom:1px solid #eef;}
 @media print{
   .foto-card img.zoom{position:static;width:100%;height:auto;max-height:none;background:#fff;cursor:default;}
   body{background:#fff;}
@@ -12610,6 +12725,9 @@ table.data-tbl{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:
   ${notizHtml?'<div class="card">'+notizHtml+'</div>':''}
   ${checkHtml?'<div class="card">'+checkHtml+'</div>':''}
   ${fotosHtml?'<div class="foto-section">'+fotosHtml+'</div>':''}
+  ${(anhangHtml||emailPdfHtml||emailOrigHtml||manualLinksHtml)?'<div class="card">'+
+    (anhangHtml||'')+(emailPdfHtml||'')+(emailOrigHtml||'')+(manualLinksHtml||'')
+  +'</div>':''}
 </div>
 </body>
 </html>`;
