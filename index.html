@@ -2991,7 +2991,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-25 · #39'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-25-b39)
+const PAM_BUILD = 'v2026-05-25 · #47'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-25-b47)
 
 // ── DEBUG: Popup-Detector – fängt jedes window.open ab ──
 const _origWindowOpen = window.open;
@@ -9507,6 +9507,25 @@ function _galThumbClick(i,el){
     if(btn)btn.style.display=_fotoSelected.size?'':'none';
   },250);
 }
+// EXIF-Rotation korrigieren bevor Foto ins PDF kommt
+// Gibt eine (ggf. rotierte) Data-URL zurück; bei Fehler die Original-URL
+async function _correctFotoForPdf(url){
+  return new Promise(resolve=>{
+    const img=new Image();
+    img.crossOrigin='anonymous';
+    img.onload=function(){
+      try{
+        const canvas=document.createElement('canvas');
+        canvas.width=img.naturalWidth;canvas.height=img.naturalHeight;
+        const ctx=canvas.getContext('2d');
+        ctx.drawImage(img,0,0);
+        resolve(canvas.toDataURL('image/jpeg',0.92));
+      }catch(e){resolve(url);}
+    };
+    img.onerror=function(){resolve(url);};
+    img.src=url;
+  });
+}
 async function createPdfFromSelected(){
   if(!_fotoSelected.size){showToast('Keine Fotos gewählt','error');return;}
   if(!window.jspdf){showToast('PDF-Bibliothek nicht geladen','error');return;}
@@ -13855,7 +13874,21 @@ function _openEmailThumbnailGrid(){
             const e2=s=>s?s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):'';
             const rawBody=info.bodyHtml||('<pre style="white-space:pre-wrap;font-family:Arial,sans-serif;font-size:13px;margin:0;padding:14px;">'+e2(info.bodyText||'(kein Inhalt)')+'</pre>');
             const _cm=info.cidMap||{};
-            const cleanBody=rawBody.replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<link[^>]+rel=["']?stylesheet["']?[^>]*>/gi,'').replace(/src=["']?(cid:[^"'\s>]+)["']?/gi,function(m,cid){return _cm[cid]?'src="'+_cm[cid]+'"':'src=""';});
+            /* CID-Bildanhänge als Blob-URLs – verhindert das ~2MB srcdoc-Limit bei Exchange-Mails mit großen Bildern */
+            const _blobUrls=[];
+            const _cmBlob={};
+            for(const [cid,dataUrl] of Object.entries(_cm)){
+              try{
+                const _m2=dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+                if(_m2){
+                  const _bytes=atob(_m2[2]);const _arr=new Uint8Array(_bytes.length);
+                  for(let _i=0;_i<_bytes.length;_i++)_arr[_i]=_bytes.charCodeAt(_i);
+                  const _bUrl=URL.createObjectURL(new Blob([_arr],{type:_m2[1]}));
+                  _cmBlob[cid]=_bUrl;_blobUrls.push(_bUrl);
+                }else{_cmBlob[cid]=dataUrl;}
+              }catch(_e){_cmBlob[cid]=dataUrl;}
+            }
+            const cleanBody=rawBody.replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<link[^>]+rel=["']?stylesheet["']?[^>]*>/gi,'').replace(/src=["']?(cid:[^"'\s>]+)["']?/gi,function(m,cid){return _cmBlob[cid]?'src="'+_cmBlob[cid]+'"':'src=""';});
             /* Header-Bereich */
             const hdrDiv=document.createElement('div');
             hdrDiv.style.cssText='padding:14px 18px 10px;border-bottom:1px solid var(--border);background:var(--bg3);flex-shrink:0;';
@@ -13864,10 +13897,13 @@ function _openEmailThumbnailGrid(){
               +'<span style="font-weight:600;">Von:</span><span>'+e2(info.sender||'')+'</span>'
               +'<span style="font-weight:600;">Datum:</span><span>'+e2(info.date?info.date.toLocaleString('de-DE'):'')+'</span>'
               +'</div>';
-            /* Body als iframe mit srcdoc → korrekte HTML-Darstellung */
+            /* Body als iframe via Blob URL → kein srcdoc-Größenlimit (Exchange-Mails mit großen Inline-Bildern) */
             const fr=document.createElement('iframe');
             fr.style.cssText='flex:1;width:100%;border:none;';
-            fr.srcdoc='<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,Helvetica,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}a{color:#1a73e8;}img{max-width:100%;}</style></head><body>'+cleanBody+'</body></html>';
+            const _fullHtml='<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,Helvetica,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}a{color:#1a73e8;}img{max-width:100%;}</style></head><body>'+cleanBody+'</body></html>';
+            const _htmlBlobUrl=URL.createObjectURL(new Blob([_fullHtml],{type:'text/html'}));
+            fr.src=_htmlBlobUrl;
+            fr.onload=()=>{URL.revokeObjectURL(_htmlBlobUrl);_blobUrls.forEach(u=>URL.revokeObjectURL(u));};
             previewContent.innerHTML='';
             previewContent.style.cssText='flex:1;display:flex;flex-direction:column;overflow:hidden;';
             previewContent.append(hdrDiv,fr);
