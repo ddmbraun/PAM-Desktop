@@ -2991,7 +2991,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-26 · #61'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-26-b58)
+const PAM_BUILD = 'v2026-05-26 · #62'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-26-b58)
 
 // ── STATE ──
 let boards = {};
@@ -11984,7 +11984,7 @@ async function _autoCreateTaskFolder(){
   if(currentFid&&currentFid!==mainFid)return; // Bereits angepasst
   if(_autoFolderCreating)return;
   // Nicht anlegen wenn VBS-Drive-Suche noch läuft (verhindert Doppelordner in _Startordner)
-  if(_vbsSearchAttempts>0||_vbsSearchTimer)return;
+  if(_vbsSearchAttempts>0||_vbsSearchTimer||_vbsSubfolderSearchActive)return;
   _autoFolderCreating=true;
   const safeName=title.replace(/[\\/:*?"<>|]/g,'-').substring(0,80);
   showToast('📁 Erstelle Drive-Ordner: '+safeName+'…','info',4000);
@@ -15627,6 +15627,7 @@ function _openVbsNewTask(data){
 // 5) Drive-Ordner automatisch suchen – Retry alle 30 Sekunden (max 10 Min.)
 let _vbsSearchTimer=null;
 let _vbsSearchAttempts=0;
+let _vbsSubfolderSearchActive=false; // Sperre während Unterordner-Retry läuft
 const _VBS_MAX_ATTEMPTS=20;
 
 function _vbsStartDriveSearch(ordnerName){
@@ -15695,34 +15696,51 @@ async function _vbsFindStammdaten(startFolderId){
   return null;
 }
 
+async function _vbsSearchSubfolders(folderId){
+  // Sucht 00_Posteingang → E-Mails; gibt {emailUrl, stammdatenUrl} zurück
+  // Retry bis zu 4× mit je 40s Pause falls Unterordner noch nicht indexiert
+  const baseUrl='https://drive.google.com/drive/folders/'+folderId;
+  for(let attempt=0;attempt<4;attempt++){
+    if(attempt>0){
+      await new Promise(res=>setTimeout(res,40000));
+      if(!gdriveToken)return{emailUrl:baseUrl,stammdatenUrl:''};
+    }
+    try{
+      const q2=encodeURIComponent("'"+folderId+"' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false");
+      const r2=await fetch('https://www.googleapis.com/drive/v3/files?q='+q2+'&fields=files(id,name)&spaces=drive&pageSize=20',{headers:{Authorization:'Bearer '+gdriveToken}});
+      if(r2.status===401){_handleDrive401();return{emailUrl:baseUrl,stammdatenUrl:''};}
+      const sub=(await r2.json()).files||[];
+      if(sub.length===0)continue; // Noch nicht indexiert – retry
+      const posteingang=sub.find(f=>f.name==='00_Posteingang')||sub.find(f=>/posteingang/i.test(f.name));
+      let emailUrl=baseUrl;
+      if(posteingang){
+        const q3=encodeURIComponent("'"+posteingang.id+"' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false");
+        const r3=await fetch('https://www.googleapis.com/drive/v3/files?q='+q3+'&fields=files(id,name)&spaces=drive&pageSize=10',{headers:{Authorization:'Bearer '+gdriveToken}});
+        const emlFolder=((await r3.json()).files||[]).find(f=>/e.?mail/i.test(f.name));
+        emailUrl='https://drive.google.com/drive/folders/'+(emlFolder?emlFolder.id:posteingang.id);
+      }
+      const stammdatenId=await _vbsFindStammdaten(folderId);
+      const stammdatenUrl=stammdatenId?'https://drive.google.com/drive/folders/'+stammdatenId:'';
+      return{emailUrl,stammdatenUrl};
+    }catch(e){console.warn('[VBS] Unterordner-Suche Versuch '+(attempt+1)+':',e);}
+  }
+  return{emailUrl:baseUrl,stammdatenUrl:''};
+}
+
 async function _vbsApplyDriveLinks(folderId,ordnerName){
   const baseUrl='https://drive.google.com/drive/folders/'+folderId;
-  let emailUrl=baseUrl;
-  let stammdatenUrl='';
-  try{
-    // Unterordner laden (00_Posteingang suchen → darin E-Mails)
-    const q2=encodeURIComponent("'"+folderId+"' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false");
-    const r2=await fetch('https://www.googleapis.com/drive/v3/files?q='+q2+'&fields=files(id,name)&spaces=drive&pageSize=20',
-      {headers:{Authorization:'Bearer '+gdriveToken}});
-    const j2=await r2.json();
-    const sub=j2.files||[];
-    const posteingang=sub.find(f=>f.name==='00_Posteingang')||sub.find(f=>/posteingang/i.test(f.name));
-    if(posteingang){
-      const q3=encodeURIComponent("'"+posteingang.id+"' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false");
-      const r3=await fetch('https://www.googleapis.com/drive/v3/files?q='+q3+'&fields=files(id,name)&spaces=drive&pageSize=10',
-        {headers:{Authorization:'Bearer '+gdriveToken}});
-      const j3=await r3.json();
-      const emlFolder=(j3.files||[]).find(f=>/e.?mail/i.test(f.name));
-      emailUrl='https://drive.google.com/drive/folders/'+(emlFolder?emlFolder.id:posteingang.id);
-    }
-    // _Stammdaten nach oben suchen
-    const stammdatenId=await _vbsFindStammdaten(folderId);
-    if(stammdatenId)stammdatenUrl='https://drive.google.com/drive/folders/'+stammdatenId;
-  }catch(e){console.warn('[VBS] Unterordner-Suche:',e);}
-  // Felder im Task-Modal befüllen
+  // Sofort Hauptordner eintragen (Fallback), Unterordner werden nachgereicht
   const tGD=document.getElementById('tGD');if(tGD)tGD.value=baseUrl;
   const tGDO=document.getElementById('tGDOrdner');if(tGDO)tGDO.value=baseUrl;
-  const tEO=document.getElementById('tEmailOrdner');if(tEO)tEO.value=emailUrl;
+  const tEO=document.getElementById('tEmailOrdner');if(tEO)tEO.value=baseUrl;
+  clearTimeout(_vbsSearchTimer);_vbsSearchTimer=null;_vbsSearchAttempts=0;
+  _vbsSubfolderSearchActive=true; // Sperre: _autoCreateTaskFolder gesperrt während Unterordner-Suche
+  _vbsShowSearchBadge('🔄 Unterordner werden gesucht…',false,false);
+  // Unterordner asynchron suchen (mit Retry wenn noch nicht indexiert)
+  const{emailUrl,stammdatenUrl}=await _vbsSearchSubfolders(folderId);
+  _vbsSubfolderSearchActive=false; // Sperre aufheben
+  // Felder mit den gefundenen URLs aktualisieren
+  if(tEO)tEO.value=emailUrl;
   // Stammblatt-Ordner (_Stammdaten) eintragen
   if(stammdatenUrl){
     const tSb=document.getElementById('tSbPdfOrdner');if(tSb)tSb.value=stammdatenUrl;
@@ -15730,9 +15748,6 @@ async function _vbsApplyDriveLinks(folderId,ordnerName){
   }
   if(typeof _updateFotoOrdnerHint==='function')_updateFotoOrdnerHint();
   if(typeof _saveSbOrdnerForAdr==='function'&&stammdatenUrl)_saveSbOrdnerForAdr();
-  clearTimeout(_vbsSearchTimer);
-  _vbsSearchTimer=null;
-  _vbsSearchAttempts=0; // Freigabe: _autoCreateTaskFolder darf wieder laufen
   const stammdatenHinweis=stammdatenUrl?' + Stammblatt-Ordner':'';
   _vbsShowSearchBadge('✅ Drive-Links eingetragen'+stammdatenHinweis,true,false);
   showToast('✅ Drive-Ordner gefunden & alle Links eingetragen','success',5000);
