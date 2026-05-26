@@ -1,4 +1,4 @@
-// Service Worker - PAM Desktop (Workboard + Stammblatt)
+// Service Worker - PAM Desktop (Workboard + Stammblatt) v2
 // Google-APIs werden NIEMALS gecacht.
 
 const CACHE_NAME = 'pam-desktop-2026-05-26-b50'; // b50: VBS→PAM Auto-Drive-Suche + neue Ordnerstruktur
