@@ -1,7 +1,7 @@
 // Service Worker - PAM Desktop (Workboard + Stammblatt)
 // Google-APIs werden NIEMALS gecacht.
 
-const CACHE_NAME = 'pam-desktop-2026-05-26-b52'; // b52: Kurzform-Feld + c/o weg + HV-Kontakt + Explorer-Öffnen + Titel-Format
+const CACHE_NAME = 'pam-desktop-2026-05-26-b53'; // b53: VBS nur leere Felder + Auto-Kuerzel + Titel aus VBS + Badge permanent
 const PRECACHE = [
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css',
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js',
