@@ -1,7 +1,7 @@
 // Service Worker - PAM Desktop (Workboard + Stammblatt) v2
 // Google-APIs werden NIEMALS gecacht.
 
-const CACHE_NAME = 'pam-desktop-2026-05-26-b50'; // b50: VBS→PAM Auto-Drive-Suche + neue Ordnerstruktur
+   const CACHE_NAME = 'pam-desktop-2026-05-26-b50'; // b50: VBS→PAM Auto-Drive-Suche + neue Ordnerstruktur v2
 const PRECACHE = [
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css',
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js',
