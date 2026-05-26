@@ -4495,6 +4495,8 @@ async function gdriveLoadFile(fileId, fileName) {
   closeStartModal(); // Fix #2: Modal schließen auch beim Auto-Connect
   render();
   startWorkboardPolling();
+  // VBS-Auftrag prüfen (nach Daten-Load, damit Boards verfügbar sind)
+  setTimeout(_checkVbsNewAuftrag, 800);
   // Migration: Datei in Arbeitsordner verschieben, falls noch im Drive-Root
   if (workspaceFolderId) migrateFileToWorkspaceFolder(fileId).catch(() => {});
 }
@@ -15465,6 +15467,253 @@ function _applyStammblattPrefill(){
     _updateStammSummary();_updateHdrMeta();_updateMapsBtn();
   }catch(e){console.warn('[PTP] Stammblatt-Prefill Fehler:',e);}
 }
+
+// ══════════════════════════════════════════════════════════════════
+//  VBS → PAM: Neuen Auftrag aus URL-Parametern anlegen
+//  Ablauf:
+//  1) Seite lädt → URL-Params sichern → URL bereinigen
+//  2) Nach Drive-Daten-Load → Board/Status-Dialog zeigen
+//  3) Task anlegen → Drive-Ordner automatisch suchen (Retry 30s)
+// ══════════════════════════════════════════════════════════════════
+
+// 1) URL-Parameter sofort beim Laden einlesen und sichern
+(function _readVbsUrlParams(){
+  try{
+    const sp=new URLSearchParams(window.location.search);
+    if(sp.get('newAuftrag')!=='1')return;
+    const data={
+      _ts:     Date.now(),
+      ordner:  sp.get('ordner') ||'',
+      hv:      sp.get('hv')     ||'',
+      ks:      sp.get('ks')     ||'',
+      str:     sp.get('str')    ||'',
+      ort:     sp.get('ort')    ||'',
+      nas:     sp.get('nas')    ||'',
+      mieter:  sp.get('mieter') ||'',
+      datum:   sp.get('datum')  ||'',
+      repnr:   sp.get('repnr')  ||'',
+      kdnr:    sp.get('kdnr')   ||'',
+      schaden: sp.get('schaden')||'',
+      bauobj:  sp.get('bauobj') ||'',
+      kuerzel: sp.get('kuerzel')||''
+    };
+    localStorage.setItem('pam_vbs_new_auftrag',JSON.stringify(data));
+    window.history.replaceState({},'',window.location.pathname);
+    console.log('[VBS] Parameter gesichert:',data.ordner);
+  }catch(e){console.warn('[VBS] URL-Param Fehler:',e);}
+})();
+
+// 2) Nach Daten-Load aufgerufen: VBS-Daten prüfen und Dialog zeigen
+function _checkVbsNewAuftrag(){
+  try{
+    const raw=localStorage.getItem('pam_vbs_new_auftrag');
+    if(!raw)return;
+    const data=JSON.parse(raw);
+    // Nur wenn jünger als 10 Minuten
+    if(!data||!data._ts||(Date.now()-data._ts)>600000){
+      localStorage.removeItem('pam_vbs_new_auftrag');return;
+    }
+    const bauBoards=Object.keys(boards).filter(b=>(boardTypes[b]||'baustelle')==='baustelle');
+    _showVbsBoardDialog(data,bauBoards);
+  }catch(e){console.warn('[VBS] Check-Fehler:',e);}
+}
+
+// 3) Board-/Status-Auswahl-Dialog
+function _showVbsBoardDialog(data,bauBoards){
+  if(document.getElementById('_vbsDlg'))return;
+  const ov=document.createElement('div');
+  ov.id='_vbsDlg';
+  ov.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;';
+  const boardOpts=(bauBoards.length?bauBoards:Object.keys(boards)).map(b=>
+    '<option value="'+b.replace(/"/g,'&quot;')+'"'+(b===currentBoard?' selected':'')+'>🏗 '+b+'</option>'
+  ).join('');
+  const firstBoard=bauBoards.includes(currentBoard)?currentBoard:(bauBoards[0]||Object.keys(boards)[0]||'');
+  const firstSt=getBoardStatuses(firstBoard);
+  const statusOpts=firstSt.map(s=>'<option value="'+s.replace(/"/g,'&quot;')+'">'+s+'</option>').join('');
+  ov.innerHTML='<div style="background:var(--bg,#fff);border-radius:14px;padding:26px 28px;max-width:440px;width:94%;box-shadow:0 8px 40px rgba(0,0,0,.35);">'
+    +'<div style="font-size:16px;font-weight:800;color:var(--accent,#6c63ff);margin-bottom:6px;">📋 Neuer Auftrag aus VBS</div>'
+    +'<div style="font-size:12px;color:var(--text2,#666);margin-bottom:14px;line-height:1.7;">'
+    +(data.hv?'🏢 <b>'+data.hv+'</b><br>':'')
+    +(data.str?'📍 '+data.str+(data.ort?', '+data.ort:'')+'<br>':'')
+    +(data.ks?'🔑 KS: <b>'+data.ks+'</b>&nbsp;&nbsp;':'')
+    +(data.repnr?'Rep: <b>'+data.repnr+'</b><br>':'<br>')
+    +(data.schaden?'⚠️ '+data.schaden.substring(0,80)+(data.schaden.length>80?'…':''):'')
+    +'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px;">'
+    +'<div><label style="font-size:11px;font-weight:700;color:var(--text2,#555);display:block;margin-bottom:4px;">Board (Liste)</label>'
+    +'<select id="_vbsBoard" style="width:100%;padding:7px 8px;border:1px solid var(--border,#d0d5dd);border-radius:7px;font-size:13px;background:var(--bg,#fff);color:var(--text,#111);" onchange="_vbsUpdateStatus(this.value)">'+boardOpts+'</select></div>'
+    +'<div><label style="font-size:11px;font-weight:700;color:var(--text2,#555);display:block;margin-bottom:4px;">Status (Spalte)</label>'
+    +'<select id="_vbsStatus" style="width:100%;padding:7px 8px;border:1px solid var(--border,#d0d5dd);border-radius:7px;font-size:13px;background:var(--bg,#fff);color:var(--text,#111);">'+statusOpts+'</select></div>'
+    +'</div>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end;">'
+    +'<button id="_vbsCancel" style="padding:8px 18px;border-radius:7px;border:1px solid var(--border,#ccc);background:var(--bg3,#f5f5f5);cursor:pointer;font-size:13px;color:var(--text,#111);">Abbrechen</button>'
+    +'<button id="_vbsOk" style="padding:8px 24px;border-radius:7px;background:var(--accent,#6c63ff);color:#fff;border:none;cursor:pointer;font-size:13px;font-weight:700;">✅ Task erstellen</button>'
+    +'</div></div>';
+  document.body.appendChild(ov);
+  ov.querySelector('#_vbsCancel').addEventListener('click',function(){
+    localStorage.removeItem('pam_vbs_new_auftrag');ov.remove();
+  });
+  ov.querySelector('#_vbsOk').addEventListener('click',function(){
+    const selBoard=ov.querySelector('#_vbsBoard').value;
+    const selStatus=ov.querySelector('#_vbsStatus').value;
+    ov.remove();
+    if(selBoard&&selBoard!==currentBoard)switchBoard(selBoard);
+    data._targetStatus=selStatus;
+    localStorage.setItem('pam_vbs_new_auftrag',JSON.stringify(data));
+    setTimeout(()=>_openVbsNewTask(data),200);
+  });
+}
+
+function _vbsUpdateStatus(boardName){
+  const sel=document.getElementById('_vbsStatus');if(!sel)return;
+  const sts=getBoardStatuses(boardName);
+  sel.innerHTML=sts.map(s=>'<option value="'+s.replace(/"/g,'&quot;')+'">'+s+'</option>').join('');
+}
+
+// 4) Task-Modal öffnen und alle VBS-Felder befüllen
+function _openVbsNewTask(data){
+  localStorage.removeItem('pam_vbs_new_auftrag');
+  openNewTaskModal();
+  setTimeout(function(){
+    // Titel: "HV – Straße – Schaden (kurz)"
+    let titel='';
+    if(data.hv)     titel+=data.hv+' – ';
+    if(data.str)    titel+=data.str;
+    if(data.schaden)titel+=' – '+data.schaden.substring(0,30).trim();
+    const tEl=document.getElementById('taskTitleInput');if(tEl)tEl.value=titel;
+    // Status
+    if(data._targetStatus){const stEl=document.getElementById('taskStatusInput');if(stEl)stEl.value=data._targetStatus;}
+    // Stammdaten
+    const tHV=document.getElementById('tHV');if(tHV)tHV.value=data.hv;
+    const tAdr=document.getElementById('tAdr');if(tAdr)tAdr.value=data.str+(data.ort?', '+data.ort:'');
+    const tSch=document.getElementById('tSch');if(tSch)tSch.value=data.schaden;
+    // NAS-Pfad
+    const tNas=document.getElementById('tNAS');if(tNas)tNas.value=data.nas;
+    // Kostenstelle / Rep / Kunden-Nr
+    const tKs=document.getElementById('taskTagsInput');if(tKs)tKs.value=data.ks;
+    const tRep=document.getElementById('taskRepNr');if(tRep)tRep.value=data.repnr;
+    const tKd=document.getElementById('taskKundenNr');if(tKd)tKd.value=data.kdnr;
+    // Drive-Felder leeren (werden durch Suche gefüllt)
+    ['tGD','tGDOrdner','tEmailOrdner'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    // UI-Updates
+    if(typeof _updateStammSummary==='function')_updateStammSummary();
+    if(typeof _updateHdrMeta==='function')_updateHdrMeta();
+    if(typeof _updateMapsBtn==='function')_updateMapsBtn();
+    // Drive-Suche starten
+    if(data.ordner){
+      if(gdriveToken){
+        _vbsStartDriveSearch(data.ordner);
+      } else {
+        _vbsShowSearchBadge('⏳ Drive nicht verbunden – bitte ☁️ klicken, dann Links automatisch eingetragen');
+        try{localStorage.setItem('pam_vbs_pending_search',data.ordner);}catch(e){}
+      }
+    }
+  },200);
+}
+
+// 5) Drive-Ordner automatisch suchen – Retry alle 30 Sekunden (max 10 Min.)
+let _vbsSearchTimer=null;
+let _vbsSearchAttempts=0;
+const _VBS_MAX_ATTEMPTS=20;
+
+function _vbsStartDriveSearch(ordnerName){
+  _vbsSearchAttempts=0;
+  clearTimeout(_vbsSearchTimer);
+  _vbsShowSearchBadge('🔄 Suche Drive-Ordner… (NAS-Sync läuft)');
+  _vbsSearchOnce(ordnerName);
+}
+
+async function _vbsSearchOnce(ordnerName){
+  if(!gdriveToken){_vbsShowSearchBadge('⚠ Drive nicht verbunden');return;}
+  _vbsSearchAttempts++;
+  try{
+    const q=encodeURIComponent("name='"+ordnerName.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+    const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name)&spaces=drive&pageSize=5',
+      {headers:{Authorization:'Bearer '+gdriveToken}});
+    if(r.status===401){_handleDrive401();return;}
+    const json=await r.json();
+    const found=(json.files||[]).find(f=>f.name===ordnerName);
+    if(found){await _vbsApplyDriveLinks(found.id,ordnerName);return;}
+  }catch(e){console.warn('[VBS] Drive-Suche Fehler:',e);}
+  // Noch nicht gefunden – retry
+  if(_vbsSearchAttempts<_VBS_MAX_ATTEMPTS){
+    _vbsShowSearchBadge('🔄 Suche… Versuch '+_vbsSearchAttempts+'/'+_VBS_MAX_ATTEMPTS+' (Sync läuft, bitte warten)');
+    _vbsSearchTimer=setTimeout(()=>_vbsSearchOnce(ordnerName),30000);
+  } else {
+    _vbsShowSearchBadge('⚠ Ordner nicht in Drive gefunden – bitte Link manuell eintragen',false,true);
+  }
+}
+
+async function _vbsApplyDriveLinks(folderId,ordnerName){
+  const baseUrl='https://drive.google.com/drive/folders/'+folderId;
+  let emailUrl=baseUrl;
+  try{
+    // Unterordner laden (00_Posteingang suchen → darin E-Mails)
+    const q2=encodeURIComponent("'"+folderId+"' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false");
+    const r2=await fetch('https://www.googleapis.com/drive/v3/files?q='+q2+'&fields=files(id,name)&spaces=drive&pageSize=20',
+      {headers:{Authorization:'Bearer '+gdriveToken}});
+    const j2=await r2.json();
+    const sub=j2.files||[];
+    const posteingang=sub.find(f=>f.name==='00_Posteingang')||sub.find(f=>/posteingang/i.test(f.name));
+    if(posteingang){
+      // Unterordner von Posteingang → E-Mails
+      const q3=encodeURIComponent("'"+posteingang.id+"' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false");
+      const r3=await fetch('https://www.googleapis.com/drive/v3/files?q='+q3+'&fields=files(id,name)&spaces=drive&pageSize=10',
+        {headers:{Authorization:'Bearer '+gdriveToken}});
+      const j3=await r3.json();
+      const emlFolder=(j3.files||[]).find(f=>/e.?mail/i.test(f.name));
+      emailUrl='https://drive.google.com/drive/folders/'+(emlFolder?emlFolder.id:posteingang.id);
+    }
+  }catch(e){console.warn('[VBS] Unterordner-Suche:',e);}
+  // Felder im Task-Modal befüllen
+  const tGD=document.getElementById('tGD');if(tGD)tGD.value=baseUrl;
+  const tGDO=document.getElementById('tGDOrdner');if(tGDO)tGDO.value=baseUrl;
+  const tEO=document.getElementById('tEmailOrdner');if(tEO)tEO.value=emailUrl;
+  if(typeof _updateFotoOrdnerHint==='function')_updateFotoOrdnerHint();
+  clearTimeout(_vbsSearchTimer);
+  _vbsShowSearchBadge('✅ Drive-Links automatisch eingetragen!',true,false);
+  showToast('✅ Drive-Ordner gefunden & alle Links eingetragen','success',5000);
+}
+
+function _vbsShowSearchBadge(text,success,warn){
+  let badge=document.getElementById('_vbsDriveBadge');
+  if(!badge){
+    badge=document.createElement('div');
+    badge.id='_vbsDriveBadge';
+    badge.style.cssText='margin:6px 0 2px 0;padding:7px 12px;border-radius:7px;font-size:12px;font-weight:600;text-align:center;transition:background .4s,color .4s;';
+    const anchor=document.getElementById('tGDOrdner');
+    if(anchor&&anchor.parentNode)anchor.parentNode.insertBefore(badge,anchor.nextSibling);
+    else{const m=document.querySelector('.modal-scroll-body');if(m)m.prepend(badge);}
+  }
+  badge.textContent=text;
+  if(success){
+    badge.style.background='rgba(46,125,50,.12)';badge.style.color='#2e7d32';
+    setTimeout(()=>{if(badge)badge.remove();},6000);
+  } else if(warn){
+    badge.style.background='rgba(211,47,47,.1)';badge.style.color='#c62828';
+  } else {
+    badge.style.background='rgba(108,99,255,.1)';badge.style.color='var(--accent,#6c63ff)';
+  }
+}
+
+// Pending-Suche nach Drive-Login (falls Drive beim Task-Erstellen noch nicht verbunden war)
+(function _vbsCheckPendingSearch(){
+  try{
+    const orig=gdriveTokenCallback;
+    if(typeof orig!=='function')return;
+    // Wrap: nach erfolgreichem Token prüfen ob Pending-Suche wartet
+    const _wrapped=window.gdriveTokenCallback;
+    // Direkte Prüfung nach Login über Storage-Event oder Poll
+    setInterval(function(){
+      if(!gdriveToken)return;
+      const pending=localStorage.getItem('pam_vbs_pending_search');
+      if(!pending)return;
+      localStorage.removeItem('pam_vbs_pending_search');
+      console.log('[VBS] Pending-Suche nach Drive-Login:',pending);
+      _vbsStartDriveSearch(pending);
+    },3000);
+  }catch(e){}
+})();
 
 // Beim Start: prüfen ob Prefill vorliegt → Auswahl-Dialog zeigen
 (function _checkPrefillOnLoad(){
