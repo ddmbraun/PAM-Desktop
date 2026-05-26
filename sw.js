@@ -1,7 +1,7 @@
 // Service Worker - PAM Desktop (Workboard + Stammblatt)
 // Google-APIs werden NIEMALS gecacht.
 
-const CACHE_NAME = 'pam-desktop-2026-05-26-b65'; // b65: Unterordner-Suche entfernt – Hauptordner sofort, Unterordner manuell per Explorer // b64: _vbsSubfolderSearchActive Reset in closeModal()
+const CACHE_NAME = 'pam-desktop-2026-05-26-b67'; // b66: Mieter-Tel/Email in URL-Params + Anfrage-vom-Datum aus VBS + Stammdaten-Ordner wiederhergestellt // b65: Unterordner-Suche vereinfacht
 const PRECACHE = [
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css',
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js',
