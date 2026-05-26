@@ -4311,6 +4311,10 @@ function gdriveTokenValid() { return !!gdriveToken && Date.now() < gdriveTokenEx
 function _handleDrive401(){
   gdriveToken=null;gdriveTokenExpires=0;
   try{localStorage.removeItem(PC_TOKEN_KEY);}catch(e){}
+  // Alle laufenden Thumbnail-Fetch-Promises abbrechen (verhindert 401-Flood)
+  try{_desktopFotoBlobInflight.clear();}catch(e){}
+  // Hydration-Flags zurücksetzen, damit nach erneutem Login Fotos neu geladen werden
+  try{document.querySelectorAll('#fotoListDesktop img[data-foto-id]').forEach(img=>{img.dataset.hydrated='';});}catch(e){}
   // Maximale Versuche prüfen
   if(_autoReconnectAttempts>=_AUTO_RECONNECT_MAX){
     updateFileStatus('unsaved','⚠ Drive-Verbindung abgelaufen','☁️ Drive-Button drücken zum Neu-Verbinden');
@@ -4519,7 +4523,7 @@ async function migrateFileToWorkspaceFolder(fileId) {
 let workboardLastModified=null;
 let workboardPollTimer=null;
 async function pollWorkboardFile(){
-  if(!gdriveFileId||!gdriveToken)return;
+  if(!gdriveFileId||!gdriveTokenValid())return;
   // Nicht neuladen, während der User gerade tippt
   const ae=document.activeElement;
   if(ae&&['INPUT','TEXTAREA','SELECT'].includes(ae.tagName))return;
@@ -9201,6 +9205,7 @@ async function _fetchFotoBlobCached(driveId, token) {
         'https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(driveId) + '?fields=modifiedTime',
         { headers: { Authorization: 'Bearer ' + token } }
       );
+      if (mr.status === 401) { if(typeof _handleDrive401==='function')_handleDrive401(); return null; }
       if (mr.ok) {
         const meta = await mr.json();
         remoteModTime = meta.modifiedTime || '';
@@ -9216,6 +9221,7 @@ async function _fetchFotoBlobCached(driveId, token) {
       'https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(driveId) + '?alt=media',
       { headers: { Authorization: 'Bearer ' + token } }
     );
+    if (r.status === 401) { if(typeof _handleDrive401==='function')_handleDrive401(); return null; }
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const buf = await r.arrayBuffer();
     const ct = r.headers.get('content-type') || 'image/jpeg';
@@ -9233,7 +9239,7 @@ async function _fetchDesktopFotoBlob(driveId){
   if(_desktopFotoBlobCache.has(driveId))return _desktopFotoBlobCache.get(driveId);
   if(_desktopFotoBlobInflight.has(driveId))return _desktopFotoBlobInflight.get(driveId);
   const p=(async()=>{
-    if(!gdriveToken){throw new Error('Kein Token – bitte anmelden');}
+    if(!gdriveTokenValid()){throw new Error('Kein gültiger Token – bitte anmelden');}
     // IndexedDB-Cache mit modifiedTime-Vergleich
     const url=await _fetchFotoBlobCached(driveId, gdriveToken);
     if(url)_desktopFotoBlobCache.set(driveId,url);
@@ -9267,6 +9273,7 @@ function _desktopThumbFallback(img){
   }
 }
 function hydrateDesktopFotoThumbs(){
+  if(!gdriveTokenValid())return; // Kein gültiger Token → keine 401-Requests
   document.querySelectorAll('#fotoListDesktop img[data-foto-id]').forEach(img=>{
     if(img.dataset.hydrated==='1')return;
     const id=img.getAttribute('data-foto-id');
@@ -16025,7 +16032,7 @@ let syncPollingId=null;
 const DEVICE_ID=(function(){let d=localStorage.getItem('device_id');if(!d){d='dev_'+Math.random().toString(36).slice(2,10)+'_'+Date.now();localStorage.setItem('device_id',d);}return d;})();
 
 async function syncInit(){
-  if(!gdriveToken)return;
+  if(!gdriveTokenValid())return;
   try{
     const r=await fetch("https://www.googleapis.com/drive/v3/files?q=name%3D'pam_workboard_sync.json'%20and%20trashed%3Dfalse&fields=files(id,modifiedTime)&orderBy=modifiedTime%20desc",
       {headers:{Authorization:'Bearer '+gdriveToken}});
@@ -16073,7 +16080,7 @@ async function syncCreate(){
   syncFileId=f.id;syncData=empty;lastSyncTimestamp=empty.lastUpdated;
 }
 async function syncRead(initial=false){
-  if(!syncFileId||!gdriveToken)return;
+  if(!syncFileId||!gdriveTokenValid())return;
   try{
     const r=await fetch('https://www.googleapis.com/drive/v3/files/'+syncFileId+'?alt=media&_='+Date.now(),
       {headers:{Authorization:'Bearer '+gdriveToken,'Cache-Control':'no-cache','Pragma':'no-cache'},cache:'no-store'});
