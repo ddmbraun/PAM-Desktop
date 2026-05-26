@@ -2991,14 +2991,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-26 · #58'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-26-b58)
-
-// ── DEBUG: Popup-Detector – fängt jedes window.open ab ──
-const _origWindowOpen = window.open;
-window.open = function(...args) {
-  console.warn('[PAM-POPUP-DETECT] window.open aufgerufen!', args, new Error().stack);
-  return _origWindowOpen.apply(this, args);
-};
+const PAM_BUILD = 'v2026-05-26 · #61'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-26-b58)
 
 // ── STATE ──
 let boards = {};
@@ -15647,12 +15640,25 @@ async function _vbsSearchOnce(ordnerName){
   if(!gdriveToken){_vbsShowSearchBadge('⚠ Drive nicht verbunden');return;}
   _vbsSearchAttempts++;
   try{
-    const q=encodeURIComponent("name='"+ordnerName.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
-    const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name)&spaces=drive&pageSize=5',
-      {headers:{Authorization:'Bearer '+gdriveToken}});
-    if(r.status===401){_handleDrive401();return;}
-    const json=await r.json();
-    const found=(json.files||[]).find(f=>f.name===ordnerName);
+    // Suche in 01_Hausverwaltungen und 02_Privatkunden (Platzhalter-IDs – werden durch echte IDs ersetzt)
+    const VBS_SEARCH_PARENTS=['VBS_HV_FOLDER_ID','VBS_PK_FOLDER_ID'].filter(id=>!id.startsWith('VBS_'));
+    let found=null;
+    for(const pid of VBS_SEARCH_PARENTS){
+      const qP=encodeURIComponent("'"+pid+"' in parents and name='"+ordnerName.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+      const rP=await fetch('https://www.googleapis.com/drive/v3/files?q='+qP+'&fields=files(id,name)&spaces=drive&pageSize=5',{headers:{Authorization:'Bearer '+gdriveToken}});
+      if(rP.status===401){_handleDrive401();return;}
+      const jP=await rP.json();
+      found=(jP.files||[]).find(f=>f.name===ordnerName);
+      if(found)break;
+    }
+    // Fallback: gesamtes Drive durchsuchen
+    if(!found){
+      const qAll=encodeURIComponent("name='"+ordnerName.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+      const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+qAll+'&fields=files(id,name)&spaces=drive&pageSize=5',{headers:{Authorization:'Bearer '+gdriveToken}});
+      if(r.status===401){_handleDrive401();return;}
+      const j=await r.json();
+      found=(j.files||[]).find(f=>f.name===ordnerName);
+    }
     if(found){await _vbsApplyDriveLinks(found.id,ordnerName);return;}
   }catch(e){console.warn('[VBS] Drive-Suche Fehler:',e);}
   // Noch nicht gefunden – retry
