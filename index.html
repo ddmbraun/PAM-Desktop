@@ -10725,9 +10725,17 @@ async function _msLoadEmailThread(){
   const taskId=_getActiveTaskId();
   const task=findTaskById(taskId)||(_pamCurrentTask&&_pamCurrentTask.id===taskId?_pamCurrentTask:null);
   if(!task){showToast('⚠ Kein Task geöffnet (ID: '+(taskId||'leer')+')','error',3000);return;}
+  // Fix 2026-05-27: Token ggf. still aus MSAL-Cache holen (z.B. nach Seiten-Reload)
   if(!msToken){
-    showToast('⚠ Bitte zuerst Outlook verbinden (Toolbar: 📨 Outlook)','warning',4000);
-    return;
+    const _msAcc=typeof msalInstance!=='undefined'&&msalInstance&&msalInstance.getAllAccounts&&msalInstance.getAllAccounts();
+    if(_msAcc&&_msAcc.length>0){
+      // MSAL hat gespeicherten Account → silent refresh versuchen
+      const _refreshed=await _msRefreshToken();
+      if(!_refreshed){showToast('⚠ Outlook-Session abgelaufen – bitte erneut anmelden (Toolbar: 📨 Outlook)','warning',5000);return;}
+    }else{
+      showToast('⚠ Bitte zuerst Outlook verbinden (Toolbar: 📨 Outlook)','warning',4000);
+      return;
+    }
   }
   // Nur Outlook-spezifische Message-IDs (msMessageIds/msMessageId) für die Graph-API-Suche verwenden.
   // Gmail-IDs und generische emailOriginals-IDs werden NICHT mitgesucht – Outlook findet sie nie.
@@ -11171,8 +11179,10 @@ function _msOpenThreadPopup(){
   _msTPActiveIdx=-1;
   _msRefreshThreadPopup(task);
   // Beim ersten Öffnen (noch kein Verlauf) automatisch laden wenn Token vorhanden
+  // Fix 2026-05-27: auch versuchen wenn Token noch fehlt aber MSAL-Account gespeichert (nach Reload)
   const _msAutoMsgs=(task&&task.msThreadMessages)||[];
-  if(_msAutoMsgs.length===0&&typeof msToken!=='undefined'&&msToken){
+  const _msPopupHasAccount=typeof msalInstance!=='undefined'&&msalInstance&&msalInstance.getAllAccounts&&msalInstance.getAllAccounts().length>0;
+  if(_msAutoMsgs.length===0&&(msToken||_msPopupHasAccount)){
     setTimeout(()=>{ if(typeof _msLoadEmailThread==='function')_msLoadEmailThread(); },300);
   }
 }

@@ -1,7 +1,7 @@
 // Service Worker - PAM Desktop (Workboard + Stammblatt)
 // Google-APIs werden NIEMALS gecacht.
 
-const CACHE_NAME = 'pam-desktop-2026-05-27-b73'; // b72: tDokOrdner-Feld (01_Dokumente-Ordner), Anhang-Routing auf Dok-Ordner // b71: UI-Fix Freier-Termin-Badge, Auftrag-planen Schriftgröße // b70: VBS nasGrand zwei-Ebenen-Suche, NAS-Sync-Erkennung
+const CACHE_NAME = 'pam-desktop-2026-05-27-b74'; // b74: Outlook-Fix: Token-Refresh auch wenn msToken=null (nach Reload), Auto-Load im Popup auch bei gespeichertem MSAL-Account // b73: tDokOrdner-Feld (01_Dokumente-Ordner) // b72: UI-Fix Freier-Termin-Badge, Auftrag-planen Schriftgröße, Auftrag-planen auf Karte // b70: VBS nasGrand zwei-Ebenen-Suche
 const PRECACHE = [
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css',
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js',
