@@ -3028,7 +3028,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-27 · #69'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-26-b66)
+const PAM_BUILD = 'v2026-05-27 · #70'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-26-b66)
 
 // ── STATE ──
 let boards = {};
@@ -12022,6 +12022,17 @@ async function _driveCreateFolder(name,parentId){
   if(!r.ok)throw new Error('Ordner anlegen: HTTP '+r.status);
   return(await r.json()).id;
 }
+// Sucht Unterordner im Parent – legt ihn nur an wenn noch nicht vorhanden (verhindert Duplikate beim NAS-Sync)
+async function _driveGetOrCreateFolder(name,parentId){
+  try{
+    const q=encodeURIComponent("'"+parentId+"' in parents and name='"+name.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+    const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name)&spaces=drive&pageSize=5',{headers:{Authorization:'Bearer '+gdriveToken}});
+    if(r.status===401){_handleDrive401();throw new Error('401');}
+    const found=((await r.json()).files||[]).find(f=>f.name===name);
+    if(found){console.log('[PAM] GetOrCreate – vorhanden:',name);return found.id;}
+  }catch(e){if(e.message==='401')throw e;console.warn('[PAM] GetOrCreate Suche:',e);}
+  return await _driveCreateFolder(name,parentId);
+}
 // ── Einheitliche Auftragsordner-Struktur auf Drive anlegen (NAS-gleich) ──────────────────
 // Erstellt vollständige Unterordnerstruktur; gibt mainUrl/fotoUrl/emailUrl zurück:
 //   mainUrl  → tGDOrdner (Projektordner = Hauptordner des Auftrags)
@@ -15824,19 +15835,23 @@ async function _vbsCreateDriveStruktur(ordnerName,nasParent,nasGrand){
     }
 
     // ── Ordner anlegen (oder vorhandenen verwenden) + Unterstruktur ─────────────
+    // Wenn NAS-Sync-Ordner gefunden: Unterordner per GetOrCreate (kein Duplikat)
+    // Wenn neu angelegt: direkt per CreateFolder (schneller, kein Extra-Check nötig)
     const safeName=(ordnerName||'Auftrag').replace(/[\\/:*?"<>|]/g,'-').substring(0,100);
+    const _nasSynced=(mainId!==null);
     if(!mainId)mainId=await _driveCreateFolder(safeName,parentFid);
-    const post0Id=await _driveCreateFolder('00_Posteingang',mainId);
-    const emailId=await _driveCreateFolder('E-Mails',post0Id);
-    const dok1Id =await _driveCreateFolder('01_Dokumente',mainId);
-    await _driveCreateFolder('ASCII_Import',dok1Id);
-    const foto2Id=await _driveCreateFolder('02_Fotos',mainId);
-    await _driveCreateFolder('Ortstermin1',foto2Id);
-    await _driveCreateFolder('Ortstermin2',foto2Id);
-    const gut3Id =await _driveCreateFolder('03_Gutachten',mainId);
-    await _driveCreateFolder('Entwuerfe',gut3Id);
-    await _driveCreateFolder('Final',gut3Id);
-    await _driveCreateFolder('04_Ausgang',mainId);
+    const _mkSub=_nasSynced?_driveGetOrCreateFolder:_driveCreateFolder;
+    const post0Id=await _mkSub('00_Posteingang',mainId);
+    const emailId=await _mkSub('E-Mails',post0Id);
+    const dok1Id =await _mkSub('01_Dokumente',mainId);
+    await _mkSub('ASCII_Import',dok1Id);
+    const foto2Id=await _mkSub('02_Fotos',mainId);
+    await _mkSub('Ortstermin1',foto2Id);
+    await _mkSub('Ortstermin2',foto2Id);
+    const gut3Id =await _mkSub('03_Gutachten',mainId);
+    await _mkSub('Entwuerfe',gut3Id);
+    await _mkSub('Final',gut3Id);
+    await _mkSub('04_Ausgang',mainId);
     const _b='https://drive.google.com/drive/folders/';
     const urls={mainId,mainUrl:_b+mainId,fotoId:foto2Id,fotoUrl:_b+foto2Id,emailId,emailUrl:_b+emailId,dokId:dok1Id,dokUrl:_b+dok1Id};
 
