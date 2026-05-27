@@ -3028,7 +3028,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-27 · #68'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-26-b66)
+const PAM_BUILD = 'v2026-05-27 · #69'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-26-b66)
 
 // ── STATE ──
 let boards = {};
@@ -15562,6 +15562,7 @@ function _applyStammblattPrefill(){
       _ts:      Date.now(),
       ordner:   sp.get('ordner')   ||'',
       nasParent:sp.get('nasParent')||'',
+      nasGrand: sp.get('nasGrand') ||'',
       hv:       sp.get('hv')       ||'',
       ks:       sp.get('ks')       ||'',
       str:      sp.get('str')      ||'',
@@ -15703,10 +15704,10 @@ function _openVbsNewTask(data){
     // Drive-Ordnerstruktur direkt anlegen (ohne auf NAS-Sync zu warten)
     if(data.ordner){
       if(gdriveToken){
-        _vbsCreateDriveStruktur(data.ordner,data.nasParent||'');
+        _vbsCreateDriveStruktur(data.ordner,data.nasParent||'',data.nasGrand||'');
       } else {
         _vbsShowSearchBadge('⏳ Drive nicht verbunden – bitte ☁️ klicken, dann Ordner automatisch angelegt');
-        try{localStorage.setItem('pam_vbs_pending_ordner',JSON.stringify({ordner:data.ordner,nasParent:data.nasParent||''}));}catch(e){}
+        try{localStorage.setItem('pam_vbs_pending_ordner',JSON.stringify({ordner:data.ordner,nasParent:data.nasParent||'',nasGrand:data.nasGrand||''}));}catch(e){}
       }
     }
   },200);
@@ -15761,43 +15762,105 @@ async function _vbsSearchOnce(ordnerName){
   }
 }
 
-// 5b) Direkte Drive-Ordnerstruktur-Anlage (ersetzt Suche+Retry-Zyklus für VBS-Aufträge)
-async function _vbsCreateDriveStruktur(ordnerName,nasParent){
-  _vbsShowSearchBadge('📁 Erstelle Drive-Ordnerstruktur…');
+// 5b) Drive-Ordnerstruktur anlegen – adaptiver Zwei-Ebenen-Oberordner-Suche
+// nasParent = direkter Elternordner des Auftrags (z.B. "2026" oder "AHV_Hauptstr")
+// nasGrand  = Großelternordner (z.B. "Matthias-Schleiden-Weg 13") – für eindeutige Suche wenn nasParent nicht eindeutig
+async function _vbsCreateDriveStruktur(ordnerName,nasParent,nasGrand){
+  _vbsShowSearchBadge('📁 Suche richtigen Drive-Ordner…');
   try{
-    // Oberordner auf Drive finden (nasParent = synchronisierter NAS-Ordner-Name)
+    const _base='https://www.googleapis.com/drive/v3/files';
+    const _hdr={headers:{Authorization:'Bearer '+gdriveToken}};
     let parentFid=_ezFolderId(DEFAULT_FOLDER_BAUSTELLE); // Fallback
-    if(nasParent&&gdriveToken){
+    let parentFound=false;
+
+    if(gdriveToken&&nasParent){
       try{
-        const qP=encodeURIComponent("name='"+nasParent.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
-        const rP=await fetch('https://www.googleapis.com/drive/v3/files?q='+qP+'&fields=files(id,name)&spaces=drive&pageSize=5',{headers:{Authorization:'Bearer '+gdriveToken}});
-        if(rP.status===401){_handleDrive401();return;}
-        const jP=await rP.json();
-        const found=(jP.files||[]).find(f=>f.name===nasParent);
-        if(found)parentFid=found.id;
-        else console.warn('[VBS] Oberordner nicht auf Drive gefunden, verwende Fallback:',nasParent);
+        // ── Strategie 1: Zwei-Ebenen-Suche (nasGrand → nasParent) ──────────────
+        // Wenn nasGrand vorhanden: erst nasGrand suchen (eindeutig, z.B. Straße),
+        // dann nasParent (z.B. "2026") als Unterordner darin finden
+        if(nasGrand){
+          const qG=encodeURIComponent("name='"+nasGrand.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+          const rG=await fetch(_base+'?q='+qG+'&fields=files(id,name)&spaces=drive&pageSize=10',_hdr);
+          if(rG.status===401){_handleDrive401();return;}
+          const grandList=(await rG.json()).files||[];
+          const grandFound=grandList.find(f=>f.name===nasGrand);
+          if(grandFound){
+            // nasGrand gefunden – jetzt nasParent darin suchen
+            const qP=encodeURIComponent("'"+grandFound.id+"' in parents and name='"+nasParent.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+            const rP=await fetch(_base+'?q='+qP+'&fields=files(id,name)&spaces=drive&pageSize=5',_hdr);
+            const parentList=(await rP.json()).files||[];
+            const pFound=parentList.find(f=>f.name===nasParent);
+            if(pFound){parentFid=pFound.id;parentFound=true;console.log('[VBS] Zwei-Ebenen-Suche erfolgreich:',nasGrand,'→',nasParent);}
+            else{parentFid=grandFound.id;parentFound=true;console.log('[VBS] nasParent nicht in nasGrand – verwende nasGrand direkt:',nasGrand);}
+          }
+        }
+        // ── Strategie 2: Einzel-Suche nasParent (wenn nasGrand nicht half) ─────
+        if(!parentFound){
+          const qP=encodeURIComponent("name='"+nasParent.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+          const rP=await fetch(_base+'?q='+qP+'&fields=files(id,name)&spaces=drive&pageSize=10',_hdr);
+          if(rP.status===401){_handleDrive401();return;}
+          const parentList=(await rP.json()).files||[];
+          const exactList=parentList.filter(f=>f.name===nasParent);
+          if(exactList.length===1){parentFid=exactList[0].id;parentFound=true;console.log('[VBS] Einzel-Suche nasParent eindeutig:',nasParent);}
+          else if(exactList.length>1){console.warn('[VBS] nasParent mehrdeutig ('+exactList.length+'×) – verwende Fallback:',nasParent);}
+          else{console.warn('[VBS] nasParent nicht auf Drive gefunden:',nasParent);}
+        }
       }catch(eP){console.warn('[VBS] Oberordner-Suche fehlgeschlagen:',eP);}
     }
-    // Auftragsstruktur anlegen
-    const urls=await _createDriveAuftragStruktur(ordnerName,parentFid);
+
+    if(!parentFound)_vbsShowSearchBadge('⚠ Oberordner nicht gefunden – lege im Startordner an',false,true);
+
+    // ── NAS-Sync erkennen: Ordner bereits durch NAS auf Drive vorhanden? ────────
+    // Wenn ja: Unterstruktur darin anlegen statt neuen Ordner zu erstellen
+    let mainId=null;
+    if(parentFound){
+      try{
+        const qO=encodeURIComponent("'"+parentFid+"' in parents and name='"+ordnerName.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+        const rO=await fetch(_base+'?q='+qO+'&fields=files(id,name)&spaces=drive&pageSize=5',_hdr);
+        const syncList=(await rO.json()).files||[];
+        const syncFound=syncList.find(f=>f.name===ordnerName);
+        if(syncFound){mainId=syncFound.id;console.log('[VBS] NAS-synchronisierten Ordner gefunden – füge Unterstruktur hinzu:',ordnerName);}
+      }catch(eO){console.warn('[VBS] NAS-Sync-Check fehlgeschlagen:',eO);}
+    }
+
+    // ── Ordner anlegen (oder vorhandenen verwenden) + Unterstruktur ─────────────
+    const safeName=(ordnerName||'Auftrag').replace(/[\\/:*?"<>|]/g,'-').substring(0,100);
+    if(!mainId)mainId=await _driveCreateFolder(safeName,parentFid);
+    const post0Id=await _driveCreateFolder('00_Posteingang',mainId);
+    const emailId=await _driveCreateFolder('E-Mails',post0Id);
+    const dok1Id =await _driveCreateFolder('01_Dokumente',mainId);
+    await _driveCreateFolder('ASCII_Import',dok1Id);
+    const foto2Id=await _driveCreateFolder('02_Fotos',mainId);
+    await _driveCreateFolder('Ortstermin1',foto2Id);
+    await _driveCreateFolder('Ortstermin2',foto2Id);
+    const gut3Id =await _driveCreateFolder('03_Gutachten',mainId);
+    await _driveCreateFolder('Entwuerfe',gut3Id);
+    await _driveCreateFolder('Final',gut3Id);
+    await _driveCreateFolder('04_Ausgang',mainId);
+    const _b='https://drive.google.com/drive/folders/';
+    const urls={mainId,mainUrl:_b+mainId,fotoId:foto2Id,fotoUrl:_b+foto2Id,emailId,emailUrl:_b+emailId,dokId:dok1Id,dokUrl:_b+dok1Id};
+
     // Drive-Felder setzen
-    const tGD=document.getElementById('tGD');        if(tGD)  tGD.value =urls.fotoUrl;
-    const tGDO=document.getElementById('tGDOrdner'); if(tGDO) tGDO.value=urls.mainUrl;
-    const tEO=document.getElementById('tEmailOrdner');if(tEO) tEO.value =urls.emailUrl;
+    const tGD=document.getElementById('tGD');         if(tGD)  tGD.value =urls.fotoUrl;
+    const tGDO=document.getElementById('tGDOrdner');  if(tGDO) tGDO.value=urls.mainUrl;
+    const tEO=document.getElementById('tEmailOrdner');if(tEO)  tEO.value =urls.emailUrl;
     clearTimeout(_vbsSearchTimer);_vbsSearchTimer=null;_vbsSearchAttempts=0;
     _vbsShowSearchBadge('✅ Drive-Ordnerstruktur angelegt',true,false);
-    showToast('✅ Drive-Ordner angelegt & eingetragen','success',5000);
+    showToast('✅ Drive-Ordner '+(parentFound?'im richtigen Oberordner':'im Startordner')+' angelegt','success',5000);
     if(typeof _updateFotoOrdnerHint==='function')_updateFotoOrdnerHint();
     if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
-    // Stammblatt-Ordner: im Oberordner suchen (von Hauptordner aufwärts)
+
+    // Stammblatt-Ordner: aufwärts suchen (von mainId nach oben)
     try{
-      const stammdatenId=await _vbsFindStammdaten(urls.mainId);
+      const stammdatenId=await _vbsFindStammdaten(mainId);
       if(stammdatenId){
-        const stammdatenUrl='https://drive.google.com/drive/folders/'+stammdatenId;
+        const stammdatenUrl=_b+stammdatenId;
         const tSb=document.getElementById('tSbPdfOrdner');    if(tSb)  tSb.value =stammdatenUrl;
         const tSbV=document.getElementById('tSbPdfOrdnerVerk');if(tSbV) tSbV.value=stammdatenUrl;
         if(typeof _saveSbOrdnerForAdr==='function')_saveSbOrdnerForAdr();
         _vbsShowSearchBadge('✅ Drive-Ordner & Stammblatt-Ordner eingetragen',true,false);
+      }else{
+        console.log('[VBS] Kein _Stammdaten-Ordner gefunden (normal wenn noch nicht angelegt)');
       }
     }catch(eS){console.warn('[VBS] Stammdaten-Suche:',eS);}
   }catch(e){
@@ -15921,7 +15984,7 @@ function _vbsShowSearchBadge(text,success,warn){
       const pendingOrdner=localStorage.getItem('pam_vbs_pending_ordner');
       if(pendingOrdner){
         localStorage.removeItem('pam_vbs_pending_ordner');
-        try{const po=JSON.parse(pendingOrdner);console.log('[VBS] Pending-Ordner nach Drive-Login:',po);_vbsCreateDriveStruktur(po.ordner||'',po.nasParent||'');}catch(e){console.warn('[VBS] Pending-Ordner Parse-Fehler:',e);}
+        try{const po=JSON.parse(pendingOrdner);console.log('[VBS] Pending-Ordner nach Drive-Login:',po);_vbsCreateDriveStruktur(po.ordner||'',po.nasParent||'',po.nasGrand||'');}catch(e){console.warn('[VBS] Pending-Ordner Parse-Fehler:',e);}
         return;
       }
       // Altes Format: pam_vbs_pending_search (rückwärtskompatibel)
