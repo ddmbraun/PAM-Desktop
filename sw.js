@@ -1,7 +1,7 @@
 // Service Worker - PAM Desktop (Workboard + Stammblatt)
 // Google-APIs werden NIEMALS gecacht.
 
-const CACHE_NAME = 'pam-desktop-2026-05-26-b67'; // b66: Mieter-Tel/Email in URL-Params + Anfrage-vom-Datum aus VBS + Stammdaten-Ordner wiederhergestellt // b65: Unterordner-Suche vereinfacht
+const CACHE_NAME = 'pam-desktop-2026-05-27-b68'; // b68: Drive-Ordnerstruktur direkt bei Task-Anlage (E-Mail/PDF/VBS), nasParent-Param, Anhang-Routing, VBS v_gdrive_neu-Fix
 const PRECACHE = [
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css',
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js',
