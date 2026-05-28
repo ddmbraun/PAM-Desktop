@@ -867,35 +867,61 @@ function _auftragShowPopup(subject){
 
 function _auftragToggle(mode){
   let isExist=(mode==='exist');
-  document.getElementById('auftragToggleNew').style.background=isExist?'var(--bg3)':'var(--accent)';
-  document.getElementById('auftragToggleNew').style.color=isExist?'var(--text2)':'#fff';
-  document.getElementById('auftragToggleExist').style.background=isExist?'var(--accent)':'var(--bg3)';
-  document.getElementById('auftragToggleExist').style.color=isExist?'#fff':'var(--text2)';
-  document.getElementById('auftragTaskSelWrap').style.display=isExist?'block':'none';
+  let tnew=document.getElementById('auftragToggleNew');
+  let texist=document.getElementById('auftragToggleExist');
+  let wrap=document.getElementById('auftragTaskSelWrap');
   let confirmBtn=document.getElementById('auftragConfirmBtn');
+  let popup=document.getElementById('auftragBoardPopup');
+  if(tnew){tnew.style.background=isExist?'var(--bg3)':'var(--accent)';tnew.style.color=isExist?'var(--text2)':'#fff';}
+  if(texist){texist.style.background=isExist?'var(--accent)':'var(--bg3)';texist.style.color=isExist?'#fff':'var(--text2)';}
+  if(wrap){
+    wrap.style.cssText=wrap.style.cssText.replace(/display\s*:\s*[^;]+;?/g,'');
+    wrap.style.display=isExist?'block':'none';
+  }
   if(confirmBtn)confirmBtn.textContent=isExist?'✓ In Task speichern':'✓ Task anlegen';
-  // Modus merken (separate Variable, nicht auftragPopupMode)
-  document.getElementById('auftragBoardPopup').dataset.targetMode=mode;
+  if(popup)popup.dataset.targetMode=mode;
+  // Bei Wechsel auf "Bestehend": Task-Liste aktualisieren
+  if(isExist)_auftragUpdateTaskSel();
 }
 
 function _auftragUpdateTaskSel(){
-  let board=document.getElementById('auftragBoardSel').value;
+  let selBoard=document.getElementById('auftragBoardSel').value;
   let taskSel=document.getElementById('auftragTaskSel');
   if(!taskSel)return;
   taskSel.innerHTML='';
-  let tasks=(boards[board]||[]);
-  if(tasks.length===0){
-    let opt=document.createElement('option');
-    opt.value='';opt.textContent='(Keine Tasks in diesem Board)';
-    taskSel.appendChild(opt);
-    return;
-  }
-  tasks.forEach(function(t){
-    let opt=document.createElement('option');
-    opt.value=t.id;
-    opt.textContent=(t.title||'(kein Titel)');
-    taskSel.appendChild(opt);
+  // Zuerst Tasks des gewählten Boards, dann alle anderen Boards
+  let boardOrder=Object.keys(boards).sort(function(a,b){
+    if(a===selBoard)return -1;
+    if(b===selBoard)return 1;
+    return a.localeCompare(b,'de');
   });
+  let totalAdded=0;
+  boardOrder.forEach(function(bName){
+    let tasks=(boards[bName]||[]);
+    if(!tasks.length)return;
+    let grp=document.createElement('optgroup');
+    let icon=(boardTypes[bName]||'baustelle')==='notiz'?'✅':'🏗';
+    grp.label=icon+' '+bName+(bName===selBoard?' ◀':' ');
+    tasks.forEach(function(t){
+      let opt=document.createElement('option');
+      opt.value=t.id;
+      opt.textContent=(t.title||'(kein Titel)');
+      grp.appendChild(opt);
+      totalAdded++;
+    });
+    taskSel.appendChild(grp);
+  });
+  if(totalAdded===0){
+    let opt=document.createElement('option');
+    opt.value='';opt.textContent='(Noch keine Tasks vorhanden)';
+    taskSel.appendChild(opt);
+  }
+  // Sichtbarkeit sicherstellen (robuster Fallback)
+  let wrap=document.getElementById('auftragTaskSelWrap');
+  let popup=document.getElementById('auftragBoardPopup');
+  if(wrap&&popup&&(popup.dataset.targetMode==='exist')){
+    wrap.style.display='block';
+  }
 }
 
 function _auftragCancel(){
@@ -3116,7 +3142,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-28 · #78'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-28-b81)
+const PAM_BUILD = 'v2026-05-28 · #80'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-28-b83)
 
 // ── STATE ──
 let boards = {};
@@ -10282,11 +10308,12 @@ async function _dfbSearch(term){
   if(pickBtn)pickBtn.style.display='none';
   try{
     const q=encodeURIComponent("name contains '"+term.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
-    const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name,parents)&orderBy=name&pageSize=50',
+    // Hinweis: orderBy ist bei contains-Suchen nicht erlaubt → clientseitig sortieren
+    const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name,parents)&spaces=drive&pageSize=50',
       {headers:{Authorization:'Bearer '+gdriveToken}});
-    if(!r.ok)throw new Error('HTTP '+r.status);
+    if(!r.ok)throw new Error('HTTP '+r.status+' – '+await r.text());
     const d=await r.json();
-    const files=d.files||[];
+    const files=(d.files||[]).sort((a,b)=>a.name.localeCompare(b.name,'de'));
     if(!listEl)return;
     if(!files.length){
       listEl.innerHTML='<div style="padding:16px;text-align:center;color:var(--text2);font-size:13px;">Keine Ordner gefunden für „'+_esc(term)+'"</div>';
