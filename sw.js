@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pam-desktop-2026-05-28-b92'; // b92: Posteingang-Label, Absender-Name, 2. Topbar-Zeile, Freie Termine Liste, Antworten-Button
+const CACHE_NAME = 'pam-desktop-2026-05-28-b94'; // b94: CID-Bilder Größenfilter 20KB beim EML-Import
 const ASSETS = ['./', './index.html'];
 
 self.addEventListener('install', e => {
@@ -15,7 +15,6 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   const url = e.request.url;
-  // Auth/API-Aufrufe nie cachen
   if (
     url.includes('accounts.google.com') ||
     url.includes('oauth2.googleapis.com') ||
