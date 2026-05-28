@@ -3328,6 +3328,14 @@ textarea.em-field-input{resize:vertical;min-height:70px;}
           </div>
           <div class="em-termin-list" id="emTerminList"></div>
         </div>
+        <!-- Anhänge (klappbar, wird per JS befüllt) -->
+        <div class="em-right-section" id="emAttachSection" style="display:none;border-top:1px solid var(--border);padding-top:8px;">
+          <div class="em-right-lbl" onclick="_emToggleAttachSection()" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
+            <span>📎 Anhänge <span id="emAttachBadge" style="font-weight:400;font-size:11px;"></span></span>
+            <span id="emAttachArrow" style="font-size:10px;">›</span>
+          </div>
+          <div id="emAttachSectionBody" style="display:none;margin-top:6px;"></div>
+        </div>
         <!-- Drive-Ordner (klappbar) -->
         <div class="em-right-section" style="border-top:1px solid var(--border);padding-top:8px;">
           <div class="em-right-lbl" onclick="_emToggleFolder()" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
@@ -3364,7 +3372,7 @@ textarea.em-field-input{resize:vertical;min-height:70px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-28 · #94'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-28-b93)
+const PAM_BUILD = 'v2026-05-28 · #95'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-28-b93)
 
 // ── STATE ──
 let boards = {};
@@ -16882,50 +16890,47 @@ function _emOpenMail(idx,mails){
   if(dateStr){try{let dt=new Date(typeof dateStr==='number'?dateStr:dateStr);dateLabel=isNaN(dt)?String(dateStr):dt.toLocaleString('de-DE');}catch(e){dateLabel=String(dateStr);}}
   // Initiale für Avatar
   let initials=from.split(/\s+/).slice(0,2).map(function(w){return w[0]||'';}).join('').toUpperCase()||'?';
-  // Anhänge
-  let attachHtml='';
-  (d.attachments||[]).forEach(function(a){
-    let name=a.filename||a.name||'Anhang';
-    let nameLow=name.toLowerCase();
-    let cls=nameLow.endsWith('.pdf')?'pdf':(nameLow.match(/\.(jpe?g|png|gif|webp|heic)$/)?'img':'eml');
-    let icon=cls==='pdf'?'📄':cls==='img'?'🖼':'📧';
-    let url=a.url||a.webViewLink||'';
-    attachHtml+='<a class="em-attach-chip" '+(url?'href="'+_escHtml(url)+'" target="_blank"':'')+' title="'+_escHtml(name)+'">'+icon+' '+_escHtml(name)+'</a>';
-  });
-  // Fotos aus Task (emailPdfs + fotos)
-  let taskFotos=(_emCurrentTask&&_emCurrentTask.fotos)||[];
-  let taskPdfs=(_emCurrentTask&&_emCurrentTask.emailPdfs)||[];
-  let allFiles=[]; // {icon, name, url}
+  // Anhänge sammeln (aus diesem Mail-Eintrag + Task-Fotos + Task-PDFs)
+  let _t2=_emCurrentTask;
+  let allFiles=[];
   (d.attachments||[]).forEach(function(a){
     let nm=a.filename||a.name||'Anhang';
     let nmL=nm.toLowerCase();
     let icon=nmL.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':nmL.endsWith('.pdf')?'📄':'📎';
     allFiles.push({icon:icon,name:nm,url:a.url||a.webViewLink||'',mime:a.mimeType||''});
   });
-  taskPdfs.forEach(function(p){allFiles.push({icon:'📄',name:p.name||'PDF',url:p.url||'',mime:'application/pdf'});});
-  taskFotos.forEach(function(f){allFiles.push({icon:'🖼',name:f.name||'Foto',url:f.url||f.webViewLink||'',mime:'image/jpeg'});});
-  let attachBar='';
-  if(allFiles.length){
-    let chips=allFiles.map(function(f){
-      let shortName=f.name.length>20?f.name.substring(0,19)+'…':f.name;
-      return '<span class="em-attach-chip" onclick="_emShowAttachPreview('+JSON.stringify(f.url)+','+JSON.stringify(f.name)+','+JSON.stringify(f.mime||'')+',event)" style="cursor:pointer;" title="'+_escHtml(f.name)+'">'+f.icon+' '+_escHtml(shortName)+'</span>';
-    }).join('');
-    attachBar='<div id="emAttachBar" style="padding:5px 14px;border-bottom:1px solid var(--border);background:var(--bg3);flex-shrink:0;">'+
-      '<div onclick="(function(){var b=document.getElementById(\'emAttachBody\');var a=document.getElementById(\'emAttachArrow\');if(b){var o=b.style.display===\'none\';b.style.display=o?\'flex\':\'none\';if(a)a.textContent=o?\'˅\':\'›\';}})();" style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;font-weight:600;color:var(--text2);">'+
-        '<span>📎 '+allFiles.length+' Anhang'+(allFiles.length!==1?'e':'')+'</span><span id="emAttachArrow" style="font-size:10px;">›</span>'+
-      '</div>'+
-      '<div id="emAttachBody" style="display:flex;flex-wrap:wrap;gap:5px;margin-top:5px;">'+chips+'</div>'+
-    '</div>';
-  }
+  (_t2&&_t2.emailPdfs||[]).forEach(function(p){allFiles.push({icon:'📄',name:p.name||'PDF',url:p.url||'',mime:'application/pdf'});});
+  (_t2&&_t2.fotos||[]).forEach(function(f){allFiles.push({icon:'🖼',name:f.name||'Foto',url:f.url||f.webViewLink||'',mime:'image/jpeg'});});
+  // Anhänge ins rechte Panel schreiben
+  _emRenderAttachPanel(allFiles);
+  // Lesebereich aufbauen
   let pane=document.getElementById('emReadingPane');
-  // Body-Bereich: HTML per iframe, Plaintext per pre-wrap
-  let hasHtml=!!(d.bodyHtml&&d.bodyHtml.trim());
-  let bodySection='';
-  if(hasHtml){
-    bodySection='<div class="em-rp-body" style="padding:0;overflow:hidden;"><iframe id="emBodyIframe" sandbox="allow-same-origin allow-popups" style="width:100%;height:100%;border:none;display:block;background:#fff;"></iframe></div>';
+  let bodyHtml=d.bodyHtml||'';
+  let bodyText=d.body||d.bodyText||d.snippet||'';
+  let driveUrl=d.url||d.webViewLink||'';
+  // Kompletten HTML-String für Blob-URL zusammenbauen (bewährter Ansatz aus EML-Vorschau)
+  let cleanBody='';
+  if(bodyHtml){
+    cleanBody=bodyHtml
+      .replace(/<base[^>]*>/gi,'')
+      .replace(/<script[\s\S]*?<\/script>/gi,'')
+      .replace(/<link[^>]+rel=["']?stylesheet["']?[^>]*>/gi,'');
+  }else if(bodyText){
+    cleanBody='<pre style="white-space:pre-wrap;font-family:Arial,Helvetica,sans-serif;font-size:13px;margin:0;padding:0;line-height:1.6;">'+_escHtml(bodyText)+'</pre>';
+  }else if(driveUrl){
+    cleanBody='<div style="text-align:center;padding:30px;color:#666;"><p style="font-size:15px;margin-bottom:14px;">📨 E-Mail in Drive gespeichert</p><a href="'+_escHtml(driveUrl)+'" target="_blank" style="color:#1a73e8;font-size:13px;">In Drive öffnen →</a></div>';
   }else{
-    bodySection='<div class="em-rp-body">'+_escHtml(body||'(kein Inhalt gespeichert)')+'</div>';
+    cleanBody='<div style="text-align:center;padding:30px;color:#999;font-size:13px;">(kein Inhalt gespeichert)</div>';
   }
+  let fullHtml='<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank">'
+    +'<style>body{font-family:Arial,Helvetica,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}a{color:#1a73e8;}img{max-width:100%;height:auto;}</style>'
+    +'</head><body>'+cleanBody+'</body></html>';
+  // Iframe via Blob-URL (kein srcdoc-Größenlimit, funktioniert zuverlässig)
+  let fr=document.createElement('iframe');
+  fr.style.cssText='flex:1;width:100%;border:none;';
+  let blobUrl=URL.createObjectURL(new Blob([fullHtml],{type:'text/html'}));
+  fr.src=blobUrl;
+  fr.onload=function(){URL.revokeObjectURL(blobUrl);};
   pane.innerHTML=
     '<div class="em-rp-header">'+
       '<div class="em-rp-subject">'+_escHtml(subject)+'</div>'+
@@ -16936,26 +16941,36 @@ function _emOpenMail(idx,mails){
           '<span style="font-size:11px;color:var(--text2);">'+_escHtml(dateLabel)+'</span>'+
         '</div>'+
       '</div>'+
-    '</div>'+
-    attachBar+
-    bodySection;
-  // HTML per contentDocument.write in iframe schreiben (nach DOM-Einfügung)
-  if(hasHtml){
-    setTimeout(function(){
-      let iframe=document.getElementById('emBodyIframe');
-      if(!iframe)return;
-      try{
-        iframe.contentDocument.open();
-        iframe.contentDocument.write(d.bodyHtml);
-        iframe.contentDocument.close();
-      }catch(e){
-        iframe.parentElement.innerHTML='<div class="em-rp-body" style="white-space:pre-wrap;">'+_escHtml(_stripHtmlTags(d.bodyHtml))+'</div>';
-      }
-    },0);
-  }
+    '</div>';
+  // iframe nach innerHTML-Zuweisung anhängen (nicht als String)
+  let bodyWrap=document.createElement('div');
+  bodyWrap.style.cssText='flex:1;display:flex;flex-direction:column;overflow:hidden;';
+  bodyWrap.appendChild(fr);
+  pane.appendChild(bodyWrap);
   // Absender + Datum im rechten Panel aktualisieren
   let sdEl=document.getElementById('emSenderDisplay');if(sdEl)sdEl.textContent=from||'–';
   let ddEl=document.getElementById('emDateDisplay');if(ddEl)ddEl.textContent=dateLabel||'–';
+}
+
+function _emRenderAttachPanel(allFiles){
+  // Anhänge-Sektion im rechten Panel aktualisieren (Aufklappfeld)
+  let sec=document.getElementById('emAttachSection');
+  if(!sec)return;
+  if(!allFiles||!allFiles.length){sec.style.display='none';return;}
+  sec.style.display='';
+  let badge=document.getElementById('emAttachBadge');
+  if(badge)badge.textContent=allFiles.length+' Anhang'+(allFiles.length!==1?'e':'');
+  let body=document.getElementById('emAttachSectionBody');
+  if(!body)return;
+  body.innerHTML='';
+  allFiles.forEach(function(f){
+    let chip=document.createElement('div');
+    chip.style.cssText='display:flex;align-items:center;gap:6px;padding:5px 7px;border-radius:6px;border:1px solid var(--border);cursor:pointer;font-size:12px;margin-bottom:4px;background:var(--bg2);';
+    chip.title=f.name;
+    chip.innerHTML=f.icon+' <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_escHtml(f.name.length>22?f.name.substring(0,21)+'…':f.name)+'</span>';
+    chip.addEventListener('click',function(evt){_emShowAttachPreview(f.url,f.name,f.mime,evt);});
+    body.appendChild(chip);
+  });
 }
 
 function _escHtml(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -16973,6 +16988,15 @@ function _emToggleRight(){
     if(rz)rz.style.display='';
   }
 }
+function _emToggleAttachSection(){
+  let body=document.getElementById('emAttachSectionBody');
+  let arrow=document.getElementById('emAttachArrow');
+  if(!body)return;
+  let open=body.style.display==='none';
+  body.style.display=open?'block':'none';
+  if(arrow)arrow.textContent=open?'˅':'›';
+}
+
 function _emToggleFolder(){
   let body=document.getElementById('emFolderBody');
   let arrow=document.getElementById('emFolderArrow');
