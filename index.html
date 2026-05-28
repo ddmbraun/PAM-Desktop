@@ -3042,7 +3042,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-27 · #73'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-27-b71)
+const PAM_BUILD = 'v2026-05-28 · #74'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-28-b77)
 
 // ── STATE ──
 let boards = {};
@@ -10387,6 +10387,7 @@ async function _gmSaveThreadPdfs(task,threadMsgs){
 }
 
 // ── Alle Thread-Mails als .eml in Google Drive speichern (Gmail + Outlook) ──
+// tokenType='outlook' → echtes MIME-Original via Graph /$value; sonst synthetisches EML als Fallback
 async function _saveThreadMailsAsEml(task,threadMsgs,tokenType){
   if(!gdriveToken)return;
   const folderUrl=(document.getElementById('tEmailOrdner')?.value||document.getElementById('tGDOrdner')?.value||'').trim();
@@ -10405,32 +10406,43 @@ async function _saveThreadMailsAsEml(task,threadMsgs,tokenType){
       const dirLabel=m.direction==='gesendet'?'Gesendet':'Eingang';
       const senderName=m.fromName||m.from||m.sender||'';
       const fname=stamp+'_'+dirLabel+'_'+_ezClean(senderName)+'.eml';
-      // Synthetisches .eml aus Metadaten + Body aufbauen
       const subject=m.subject||task.title||'(kein Betreff)';
       const senderFull=m.fromName?'"'+m.fromName+'" <'+(m.from||'')+'>':(m.from||m.sender||'');
-      const bodyHtml=m.bodyHtml||m.body||'';
-      const bodyText=m.bodyText||m.preview||'';
-      const emlLines=[
-        'From: '+senderFull,
-        'Date: '+date.toUTCString(),
-        'Subject: '+_emlEncodeHeader(subject),
-        'Message-ID: <'+m.messageId+'>',
-        'Content-Type: multipart/alternative; boundary="ptp_thread_boundary"',
-        '',
-        '--ptp_thread_boundary',
-        'Content-Type: text/plain; charset=UTF-8',
-        'Content-Transfer-Encoding: 8bit',
-        '',
-        bodyText,
-        '--ptp_thread_boundary',
-        'Content-Type: text/html; charset=UTF-8',
-        'Content-Transfer-Encoding: 8bit',
-        '',
-        bodyHtml||'<html><body>'+bodyText+'</body></html>',
-        '--ptp_thread_boundary--'
-      ];
-      const emlStr=emlLines.join('\r\n');
-      const buf=new TextEncoder().encode(emlStr).buffer;
+      let buf=null;
+      // ── Outlook: echtes MIME-Original via Graph API /$value holen ──
+      if(tokenType==='outlook'&&msToken&&m.id){
+        try{
+          const rMime=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(m.id)+'/$value',
+            {headers:{Authorization:'Bearer '+msToken}});
+          if(rMime.ok){buf=await rMime.arrayBuffer();}
+          else{console.warn('[PAM] /$value HTTP '+rMime.status+' – Fallback auf synthetisches EML');}
+        }catch(eMime){console.warn('[PAM] /$value Fehler – Fallback auf synthetisches EML:',eMime);}
+      }
+      // ── Fallback: synthetisches EML aus Metadaten + Body ──
+      if(!buf){
+        const bodyHtml=m.bodyHtml||m.body||'';
+        const bodyText=m.bodyText||m.preview||'';
+        const emlLines=[
+          'From: '+senderFull,
+          'Date: '+date.toUTCString(),
+          'Subject: '+_emlEncodeHeader(subject),
+          'Message-ID: <'+m.messageId+'>',
+          'Content-Type: multipart/alternative; boundary="ptp_thread_boundary"',
+          '',
+          '--ptp_thread_boundary',
+          'Content-Type: text/plain; charset=UTF-8',
+          'Content-Transfer-Encoding: 8bit',
+          '',
+          bodyText,
+          '--ptp_thread_boundary',
+          'Content-Type: text/html; charset=UTF-8',
+          'Content-Transfer-Encoding: 8bit',
+          '',
+          bodyHtml||'<html><body>'+bodyText+'</body></html>',
+          '--ptp_thread_boundary--'
+        ];
+        buf=new TextEncoder().encode(emlLines.join('\r\n')).buffer;
+      }
       const result=await _driveUploadGeneric(buf,fname,'message/rfc822',fid);
       if(result&&result.id){
         const entry={name:fname,subject:subject,sender:senderFull,date:date.toISOString(),messageId:m.messageId,fileId:result.id,url:'https://drive.google.com/file/d/'+result.id+'/view',uploadedAt:new Date().toLocaleDateString('de-DE')};
@@ -11062,9 +11074,10 @@ async function _msLoadEmailThread(){
     }));
     task.msThreadMessages=threadMsgs;
     _msRenderThread(task);
-    // PDFs automatisch speichern
+    // PDFs + Originale automatisch speichern
     if(stEl)stEl.textContent=threadMsgs.length+' Mails – speichere…';
     const _pdfSaved=await _msSaveThreadPdfs(task,threadMsgs);
+    await _saveThreadMailsAsEml(task,threadMsgs,'outlook');
     if(stEl)stEl.textContent=threadMsgs.length+' Mails'+(_pdfSaved>0?', '+_pdfSaved+' PDF'+(_pdfSaved>1?'s':'')+' gespeichert':'');
     await autoSave();
     showToast('✅ '+threadMsgs.length+' Mails geladen'+(_pdfSaved>0?', '+_pdfSaved+' PDFs gespeichert':''),'success',4000);
