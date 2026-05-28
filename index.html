@@ -596,26 +596,35 @@ function tDokOrdnerOeffnen(){let u=(document.getElementById('tDokOrdner')||{}).v
 // ── Hauptordner des Tasks in neuen Oberordner (Bauvorhaben) verschieben ──────
 // Verschiebt tGDOrdner per Drive API; alle Unterordner wandern automatisch mit.
 // Sucht danach _Stammdaten im neuen Oberordner und trägt ihn als Stammblatt ein (wenn leer).
-async function _moveTaskFolderToParent(){
+function _moveTaskFolderToParent(){
   if(!gdriveToken){showToast('⚠ Google Drive nicht verbunden','warning',3000);return;}
   const mainFolderUrl=(document.getElementById('tGDOrdner')?.value||'').trim();
   const mainFolderId=_ezFolderId(mainFolderUrl)||_extractFolderIdFromUrl(mainFolderUrl);
   if(!mainFolderId){showToast('⚠ Kein Projektordner eingetragen','warning',3500);return;}
-  const targetUrl=prompt('Google Drive URL des neuen Bauvorhaben-Ordners (Oberordner):','');
-  if(!targetUrl||!targetUrl.trim())return;
-  const targetFid=_ezFolderId(targetUrl.trim())||_extractFolderIdFromUrl(targetUrl.trim());
-  if(!targetFid){showToast('⚠ Ungültige Ordner-URL','warning',3500);return;}
-  if(targetFid===mainFolderId){showToast('⚠ Ziel ist derselbe Ordner','warning',3000);return;}
+  // Picker-Feld vorbereiten: alten Wert leeren, dann Drive-Browser öffnen
+  const pickerEl=document.getElementById('_moveParentPickerInput');
+  if(pickerEl){pickerEl.value='';}
+  // Einmaliger Listener: wenn Picker-Feld befüllt wird → Verschieben ausführen
+  function _onParentPicked(e){
+    if(pickerEl)pickerEl.removeEventListener('input',_onParentPicked);
+    const targetUrl=(pickerEl?pickerEl.value:'').trim();
+    const targetFid=_ezFolderId(targetUrl)||_extractFolderIdFromUrl(targetUrl);
+    if(!targetFid){showToast('⚠ Ungültige Ordner-Auswahl','warning',3500);return;}
+    if(targetFid===mainFolderId){showToast('⚠ Ziel ist derselbe Ordner','warning',3000);return;}
+    _doMoveTaskFolder(mainFolderId,targetFid);
+  }
+  if(pickerEl)pickerEl.addEventListener('input',_onParentPicked);
+  _pickDriveFolder('_moveParentPickerInput');
+}
+async function _doMoveTaskFolder(mainFolderId,targetFid){
   showToast('⏳ Verschiebe Projektordner…','info',5000);
   try{
-    // Aktuellen Parent des Hauptordners ermitteln
     const metaR=await fetch(
       'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(mainFolderId)+'?fields=parents,name',
       {headers:{Authorization:'Bearer '+gdriveToken}});
     if(!metaR.ok)throw new Error('Drive-Metadaten: HTTP '+metaR.status);
     const meta=await metaR.json();
     const oldParents=(meta.parents||[]).join(',');
-    // Ordner verschieben
     const patchR=await fetch(
       'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(mainFolderId)
       +'?addParents='+encodeURIComponent(targetFid)
@@ -639,7 +648,7 @@ async function _moveTaskFolderToParent(){
             const sbUrl='https://drive.google.com/drive/folders/'+srD.files[0].id;
             if(sbEl1)sbEl1.value=sbUrl;
             if(sbEl2)sbEl2.value=sbUrl;
-            showToast('📁 _Stammdaten gefunden und als Stammblatt-Ordner eingetragen','success',4000);
+            showToast('📁 _Stammdaten gefunden → Stammblatt-Ordner eingetragen','success',4000);
           }
         }
       }catch(eSb){console.warn('[PAM] _Stammdaten Suche fehlgeschlagen:',eSb);}
@@ -647,7 +656,7 @@ async function _moveTaskFolderToParent(){
     scheduleTaskFieldSave&&scheduleTaskFieldSave();
   }catch(e){
     showToast('⚠ Fehler: '+e.message,'error',6000);
-    console.error('[PAM] _moveTaskFolderToParent:',e);
+    console.error('[PAM] _doMoveTaskFolder:',e);
   }
 }
 async function _moveEmailFilesToCurrentFolder(){
@@ -3076,6 +3085,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 </div>
 
 <!-- DRIVE ORDNER BROWSER -->
+<input type="hidden" id="_moveParentPickerInput">
 <div id="driveFolderBrowserOverlay" onclick="if(event.target===this)_dfbClose()">
   <div class="dfb-box">
     <div class="dfb-header">
@@ -3100,7 +3110,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-28 · #75'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-28-b78)
+const PAM_BUILD = 'v2026-05-28 · #76'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-28-b79)
 
 // ── STATE ──
 let boards = {};
@@ -10455,10 +10465,12 @@ async function _saveThreadMailsAsEml(task,threadMsgs,tokenType){
     ...(task.emailOriginals||[]).map(e=>e.messageId||'').filter(Boolean),
     ...(taskEmailOriginals||[]).map(e=>e.messageId||'').filter(Boolean)
   ]);
-  const toSave=threadMsgs.filter(m=>m.messageId&&!knownMsgIds.has(m.messageId));
+  // Outlook-Thread nutzt 'internetMessageId', Gmail nutzt 'messageId' → beide abdecken
+  const toSave=threadMsgs.filter(m=>{const mid=m.messageId||m.internetMessageId||'';return mid&&!knownMsgIds.has(mid);});
   if(!toSave.length)return;
   for(const m of toSave){
     try{
+      const mid=m.messageId||m.internetMessageId||''; // einheitliche ID für diese Mail
       const date=new Date(m.date||Date.now());
       const stamp=date.getFullYear()+'.'+_ez2(date.getMonth()+1)+'.'+_ez2(date.getDate())+'_'+_ez2(date.getHours())+_ez2(date.getMinutes());
       const dirLabel=m.direction==='gesendet'?'Gesendet':'Eingang';
@@ -10484,7 +10496,7 @@ async function _saveThreadMailsAsEml(task,threadMsgs,tokenType){
           'From: '+senderFull,
           'Date: '+date.toUTCString(),
           'Subject: '+_emlEncodeHeader(subject),
-          'Message-ID: <'+m.messageId+'>',
+          'Message-ID: <'+mid+'>',
           'Content-Type: multipart/alternative; boundary="ptp_thread_boundary"',
           '',
           '--ptp_thread_boundary',
@@ -10503,11 +10515,11 @@ async function _saveThreadMailsAsEml(task,threadMsgs,tokenType){
       }
       const result=await _driveUploadGeneric(buf,fname,'message/rfc822',fid);
       if(result&&result.id){
-        const entry={name:fname,subject:subject,sender:senderFull,date:date.toISOString(),messageId:m.messageId,fileId:result.id,url:'https://drive.google.com/file/d/'+result.id+'/view',uploadedAt:new Date().toLocaleDateString('de-DE')};
+        const entry={name:fname,subject:subject,sender:senderFull,date:date.toISOString(),messageId:mid,fileId:result.id,url:'https://drive.google.com/file/d/'+result.id+'/view',uploadedAt:new Date().toLocaleDateString('de-DE')};
         if(!task.emailOriginals)task.emailOriginals=[];
-        if(!task.emailOriginals.some(e=>e.messageId===m.messageId))task.emailOriginals.push(entry);
+        if(!task.emailOriginals.some(e=>e.messageId===mid))task.emailOriginals.push(entry);
         if(!taskEmailOriginals)taskEmailOriginals=[];
-        if(!taskEmailOriginals.some(e=>e.messageId===m.messageId))taskEmailOriginals.push(entry);
+        if(!taskEmailOriginals.some(e=>e.messageId===mid))taskEmailOriginals.push(entry);
       }
     }catch(e){console.warn('[PAM] Thread-EML speichern fehlgeschlagen:',e);}
   }
