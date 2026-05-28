@@ -1,7 +1,7 @@
 // Service Worker - PAM Desktop (Workboard + Stammblatt)
 // Google-APIs werden NIEMALS gecacht.
 
-const CACHE_NAME = 'pam-desktop-2026-05-28-b89'; // b89: E-Mail-Typ in Projekte-anlegen-Dialog // b88: E-Mail-Board korrekte Ordnerstruktur beim Drag&Drop
+const CACHE_NAME = 'pam-desktop-2026-05-28-b90'; // b90: E-Mail-Modal Runde2 (Absender/Datum/Anhang-Bar/Karte) // b89: projAddType email
 const PRECACHE = [
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css',
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js',
@@ -12,7 +12,6 @@ const PRECACHE = [
   'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
 ];
 
-// Installation: CDN-Ressourcen einzeln cachen
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE_NAME).then(cache =>
@@ -25,7 +24,6 @@ self.addEventListener('install', e => {
   );
 });
 
-// Aktivierung: veraltete Caches loeschen
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
@@ -46,9 +44,7 @@ function isHtmlPage(url) {
 
 self.addEventListener('fetch', e => {
   const url = e.request.url;
-
   if (url.startsWith('blob:') || url.startsWith('data:')) return;
-
   if (
     url.includes('googleapis.com') ||
     url.includes('accounts.google.com') ||
@@ -63,17 +59,11 @@ self.addEventListener('fetch', e => {
     url.includes('graph.microsoft.com') ||
     url.includes('login.live.com') ||
     url.includes('cdn.jsdelivr.net/npm/@azure')
-  ) {
-    return;
-  }
-
+  ) { return; }
   if (e.request.redirect && e.request.redirect !== 'follow') return;
-
   const isSameOrigin = url.startsWith(self.location.origin);
   const isKnownCdn   = PRECACHE.some(p => url === p);
   if (!isSameOrigin && !isKnownCdn) return;
-
-  // Network-First fuer HTML-Seiten
   if (isHtmlPage(url)) {
     e.respondWith(
       fetch(e.request)
@@ -88,8 +78,6 @@ self.addEventListener('fetch', e => {
     );
     return;
   }
-
-  // Cache-First fuer CDN-Bibliotheken
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) return cached;

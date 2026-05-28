@@ -1288,13 +1288,29 @@ async function _auftragConfirm(){
         buf=new TextEncoder().encode(emlStr).buffer;
       }
 
+      // Parsed Email-Info immer speichern (auch ohne Drive-Upload sichtbar im Modal)
+      let _emailOrigEntry={
+        from:info.sender||'',
+        subject:info.subject||'',
+        body:info.bodyText||'',
+        bodyHtml:info.bodyHtml||'',
+        date:info.date instanceof Date&&!isNaN(info.date)?info.date.toISOString():'',
+        attachments:(info.attachments||[]).map(function(a){return{filename:a.name||a.filename||'',name:a.name||a.filename||'',mimeType:a.mimeType||''};}),
+        name:info.subject||origName,
+        filename:origName,
+        uploadedAt:new Date().toLocaleDateString('de-DE')
+      };
       if(buf&&gdriveToken){
-        let origResult=await _driveUploadGeneric(buf,origName,origMime,fid);
-        if(origResult&&origResult.id){
-          newTask.emailOriginals=[{name:info.subject||origName,filename:origName,fileId:origResult.id,url:'https://drive.google.com/file/d/'+origResult.id+'/view',uploadedAt:new Date().toLocaleDateString('de-DE')}];
-        }
+        try{
+          let origResult=await _driveUploadGeneric(buf,origName,origMime,fid);
+          if(origResult&&origResult.id){
+            _emailOrigEntry.fileId=origResult.id;
+            _emailOrigEntry.url='https://drive.google.com/file/d/'+origResult.id+'/view';
+          }
+        }catch(_ue){console.warn('[PTP] Original-Upload fehlgeschlagen:',_ue);showToast('⚠ E-Mail Original fehlgeschlagen: '+_ue.message,'error',8000);}
       }
-    }catch(e){console.warn('[PTP] Original-Upload fehlgeschlagen:',e);showToast('⚠ E-Mail Original fehlgeschlagen: '+e.message,'error',8000);}
+      newTask.emailOriginals=[_emailOrigEntry];
+    }catch(e){console.warn('[PTP] Original-Verarbeitung fehlgeschlagen:',e);showToast('⚠ E-Mail Original fehlgeschlagen: '+e.message,'error',8000);}
 
     // Fix 6b: EML-Anhänge extrahieren und in Drive hochladen
     if(rawFile&&rawFile.name.toLowerCase().endsWith('.eml')&&info.attachments&&info.attachments.length>0){
@@ -3252,32 +3268,50 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
       <div class="em-resizer" id="emResizer2"></div>
       <!-- RECHTS: Steuerung -->
       <div class="em-right-panel" id="emRightPanel">
+        <!-- Absender -->
         <div class="em-right-section">
-          <div class="em-right-lbl">Titel</div>
-          <input type="text" id="emTitleInput" class="em-field-input" placeholder="Task-Titel …" oninput="_emScheduleSave()" autocomplete="off">
-          <a id="emFolderLink" href="#" target="_blank" style="display:none;font-size:10px;color:var(--accent);text-decoration:none;margin-top:2px;">📁 Drive-Ordner öffnen</a>
+          <div class="em-right-lbl">Von</div>
+          <div id="emSenderDisplay" style="font-size:11px;color:var(--text);word-break:break-all;line-height:1.4;">–</div>
         </div>
+        <!-- Datum -->
         <div class="em-right-section">
-          <div class="em-right-lbl">Spalte</div>
+          <div class="em-right-lbl">Am</div>
+          <div id="emDateDisplay" style="font-size:11px;color:var(--text2);">–</div>
+        </div>
+        <!-- Status -->
+        <div class="em-right-section" style="border-top:1px solid var(--border);padding-top:8px;">
+          <div class="em-right-lbl">Status</div>
           <select id="emStatusSel" class="em-field-input" onchange="_emScheduleSave()"></select>
         </div>
+        <!-- Bearbeiten bis -->
         <div class="em-right-section">
           <div class="em-right-lbl">Bearbeiten bis</div>
           <input type="date" id="emDueDate" class="em-field-input" oninput="_emScheduleSave()" autocomplete="off">
         </div>
+        <!-- Freier Termin -->
         <div class="em-right-section">
           <div class="em-right-lbl">Freier Termin</div>
-          <input type="text" id="emFreeTermin" class="em-field-input" placeholder="z. B. Mo 09:00 …" oninput="_emScheduleSave()" autocomplete="off">
+          <div style="display:flex;gap:4px;align-items:center;">
+            <input type="text" id="emFreeTerminText" class="em-field-input" placeholder="Bezeichnung …" oninput="_emScheduleSave()" autocomplete="off" style="flex:1;">
+            <input type="date" id="emFreeTerminDate" class="em-field-input" oninput="_emScheduleSave()" autocomplete="off" style="flex:1;">
+          </div>
         </div>
-        <div class="em-right-section">
-          <div class="em-right-lbl">Tags</div>
-          <input type="text" id="emTagsInput" class="em-field-input" placeholder="Kommagetrennt …" oninput="_emScheduleSave()" autocomplete="off">
+        <!-- Drive-Ordner (klappbar) -->
+        <div class="em-right-section" style="border-top:1px solid var(--border);padding-top:8px;">
+          <div class="em-right-lbl" onclick="_emToggleFolder()" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
+            <span>📁 Drive-Ordner</span><span id="emFolderArrow" style="font-size:10px;">›</span>
+          </div>
+          <div id="emFolderBody" style="display:none;margin-top:4px;">
+            <a id="emFolderLink" href="#" target="_blank" style="font-size:11px;color:var(--accent);text-decoration:none;word-break:break-all;display:block;">Ordner öffnen →</a>
+          </div>
         </div>
-        <div class="em-right-section" style="border-top:1px solid var(--border);padding-top:10px;">
+        <!-- Notiz / Verlauf -->
+        <div class="em-right-section" style="border-top:1px solid var(--border);padding-top:8px;">
           <div class="em-right-lbl">Notiz / Verlauf</div>
-          <textarea id="emNotizInput" class="em-field-input" rows="6" placeholder="Notizen …" oninput="_emScheduleSave()"></textarea>
+          <textarea id="emNotizInput" class="em-field-input" rows="5" placeholder="Notizen …" oninput="_emScheduleSave()"></textarea>
         </div>
-        <div class="em-right-section" style="border-top:1px solid var(--border);padding-top:10px;">
+        <!-- Aktionen -->
+        <div class="em-right-section" style="border-top:1px solid var(--border);padding-top:8px;">
           <div class="em-right-lbl">Aktionen</div>
           <button class="em-action-btn primary" onclick="_emInAuftragEinglieder()">📋 In Auftrag eingliedern</button>
           <button class="em-action-btn" onclick="_emInBoardVerschieben()">↪ In Board verschieben</button>
@@ -3297,7 +3331,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-28 · #89'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-28-b89)
+const PAM_BUILD = 'v2026-05-28 · #90'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-28-b90)
 
 // ── STATE ──
 let boards = {};
@@ -5484,6 +5518,7 @@ function taskCardHTML(task){
   const hasFotos=(task.fotos||[]).length>0;
   const isAH=isAusserhaus(task);
   const isNotizBoard=(boardTypes[currentBoard]||'baustelle')==='notiz';
+  const isEmailBoard=(boardTypes[currentBoard]||'baustelle')==='email';
   const isBaustelle=(boardTypes[currentBoard]||'baustelle')==='baustelle';
   const boardSts=getBoardStatuses(currentBoard)||[];
   const stIdx=boardSts.indexOf(task.status);
@@ -5569,8 +5604,9 @@ function taskCardHTML(task){
     ${(task.status||task.anfrageEingangDatum||_zeitMins>0||_terminMins>0||_adr||_tel||task.auftragPlanen)?`<div class="task-card-taskrow">
       ${task.auftragPlanen?`<span style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:10px;background:#FFF3E0;color:#854F0B;border:1px solid #FFB74D;font-size:10px;font-weight:700;white-space:nowrap;">📋 Auftrag planen</span>`:''}
       ${task.status?`<span style="color:var(--text2);">Task:</span><span class="task-card-chip task-card-chip-task">${esc(task.status)}</span>`:''}
-      ${task.anfrageEingangDatum?(()=>{const[y,m,d]=(task.anfrageEingangDatum||'').split('-');return`<span style="color:var(--text2);margin-left:2px;">Anfr.vom:</span><span class="task-card-chip" style="background:#534AB7;color:#fff;border:none;">📅 ${d||'?'}.${m||'?'}</span>`;})():''}
-      ${isNotizBoard&&task.due?`<span style="color:var(--text2);margin-left:2px;">Fällig:</span><span class="task-card-chip" style="${overdue?'background:#A32D2D;':'background:#854F0B;'}color:#fff;border:none;">${formatDate(task.due)}</span>`:''}
+      ${isEmailBoard?(()=>{const _em=(task.emailOriginals||[])[0];const _emDate=_em&&_em.date?new Date(_em.date):null;const _emD=_emDate&&!isNaN(_emDate)?(_emDate.getDate()+'.'+((_emDate.getMonth()+1)+'').padStart(2,'0')+'.'+_emDate.getFullYear()):'';return _emD?`<span style="color:var(--text2);margin-left:2px;">Am:</span><span class="task-card-chip" style="background:#075985;color:#fff;border:none;">📅 ${_emD}</span>`:''})():''}
+      ${task.anfrageEingangDatum&&!isEmailBoard?(()=>{const[y,m,d]=(task.anfrageEingangDatum||'').split('-');return`<span style="color:var(--text2);margin-left:2px;">Anfr.vom:</span><span class="task-card-chip" style="background:#534AB7;color:#fff;border:none;">📅 ${d||'?'}.${m||'?'}</span>`;})():''}
+      ${(isNotizBoard||isEmailBoard)&&task.due?`<span style="color:var(--text2);margin-left:2px;">Fällig:</span><span class="task-card-chip" style="${overdue?'background:#A32D2D;':'background:#854F0B;'}color:#fff;border:none;">${formatDate(task.due)}</span>`:''}
       ${_gesamtMins>0?`<span style="display:inline-flex;align-items:center;gap:2px;padding:2px 6px;border-radius:10px;background:#854F0B;color:#fff;border:none;font-size:10px;font-weight:700;white-space:nowrap;">⏱ ${_fmtBadge(_gesamtMins)}</span>`:''}
       ${(()=>{const _oCnt=(task.emailOriginals||[]).length;return _oCnt>0?`<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 6px;border-radius:10px;background:#075985;color:#fff;border:none;font-size:10px;font-weight:700;white-space:nowrap;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>${_oCnt}</span>`:'';})()}
 
@@ -16697,8 +16733,13 @@ function openEmailTaskModal(task,board){
   document.getElementById('emTaskTitleBadge').textContent=task.title||'(kein Titel)';
   document.getElementById('emBoardBadge').textContent='📧 '+_emCurrentBoard;
   // Rechtes Panel befüllen
-  document.getElementById('emTitleInput').value=(task.title||'').replace(/[-_]+/g,' ').trim();
   _emUpdateFolderLink();
+  // Absender + Datum aus erstem emailOriginal
+  let _firstMail=(task.emailOriginals||[])[0]||null;
+  document.getElementById('emSenderDisplay').textContent=(_firstMail&&_firstMail.from)||task.emailSender||'–';
+  let _emailDateStr='–';
+  if(_firstMail&&_firstMail.date){try{let _d=new Date(_firstMail.date);if(!isNaN(_d))_emailDateStr=_d.toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(e){}}
+  document.getElementById('emDateDisplay').textContent=_emailDateStr;
   // Status-Dropdown
   let statusSel=document.getElementById('emStatusSel');
   statusSel.innerHTML='';
@@ -16708,8 +16749,9 @@ function openEmailTaskModal(task,board){
     statusSel.appendChild(o);
   });
   document.getElementById('emDueDate').value=task.due||'';
-  document.getElementById('emFreeTermin').value=task.freeTermin||'';
-  document.getElementById('emTagsInput').value=(task.tags||[]).join(', ');
+  let _ft=task.freierTermin||{};
+  document.getElementById('emFreeTerminText').value=_ft.text||'';
+  document.getElementById('emFreeTerminDate').value=_ft.datum||'';
   document.getElementById('emNotizInput').value=task.desc||'';
   // Collapsed-Zustand wiederherstellen
   let rp=document.getElementById('emRightPanel');
@@ -16803,6 +16845,30 @@ function _emOpenMail(idx,mails){
     let url=a.url||a.webViewLink||'';
     attachHtml+='<a class="em-attach-chip" '+(url?'href="'+_escHtml(url)+'" target="_blank"':'')+' title="'+_escHtml(name)+'">'+icon+' '+_escHtml(name)+'</a>';
   });
+  // Fotos aus Task (emailPdfs + fotos)
+  let taskFotos=(_emCurrentTask&&_emCurrentTask.fotos)||[];
+  let taskPdfs=(_emCurrentTask&&_emCurrentTask.emailPdfs)||[];
+  let allFiles=[]; // {icon, name, url}
+  (d.attachments||[]).forEach(function(a){
+    let nm=a.filename||a.name||'Anhang';
+    let nmL=nm.toLowerCase();
+    let icon=nmL.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':nmL.endsWith('.pdf')?'📄':'📎';
+    allFiles.push({icon:icon,name:nm,url:a.url||a.webViewLink||''});
+  });
+  taskPdfs.forEach(function(p){allFiles.push({icon:'📄',name:p.name||'PDF',url:p.url||''});});
+  taskFotos.forEach(function(f){allFiles.push({icon:'🖼',name:f.name||'Foto',url:f.url||f.webViewLink||''});});
+  let attachBar='';
+  if(allFiles.length){
+    let chips=allFiles.map(function(f){
+      return '<a class="em-attach-chip" '+(f.url?'href="'+_escHtml(f.url)+'" target="_blank"':'')+' title="'+_escHtml(f.name)+'">'+f.icon+' '+_escHtml(f.name.length>18?f.name.substring(0,17)+'…':f.name)+'</a>';
+    }).join('');
+    attachBar='<div id="emAttachBar" style="padding:5px 14px;border-bottom:1px solid var(--border);background:var(--bg3);flex-shrink:0;">'+
+      '<div onclick="(function(){var b=document.getElementById(\'emAttachBody\');var a=document.getElementById(\'emAttachArrow\');if(b){var o=b.style.display===\'none\';b.style.display=o?\'flex\':\'none\';if(a)a.textContent=o?\'˅\':\'›\';}})();" style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;font-weight:600;color:var(--text2);">'+
+        '<span>📎 '+allFiles.length+' Anhang'+(allFiles.length!==1?'e':'')+'</span><span id="emAttachArrow" style="font-size:10px;">›</span>'+
+      '</div>'+
+      '<div id="emAttachBody" style="display:none;flex-wrap:wrap;gap:5px;margin-top:5px;">'+chips+'</div>'+
+    '</div>';
+  }
   let pane=document.getElementById('emReadingPane');
   pane.innerHTML=
     '<div class="em-rp-header">'+
@@ -16815,9 +16881,11 @@ function _emOpenMail(idx,mails){
         '</div>'+
       '</div>'+
     '</div>'+
-    '<div class="em-rp-body">'+_escHtml(body)+'</div>'+
-    (attachHtml?'<div class="em-rp-attach">'+attachHtml+'</div>':'')+
-    '';
+    attachBar+
+    '<div class="em-rp-body">'+_escHtml(body)+'</div>';
+  // Absender + Datum im rechten Panel aktualisieren
+  let sdEl=document.getElementById('emSenderDisplay');if(sdEl)sdEl.textContent=from||'–';
+  let ddEl=document.getElementById('emDateDisplay');if(ddEl)ddEl.textContent=dateLabel||'–';
 }
 
 function _escHtml(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -16825,7 +16893,22 @@ function _escHtml(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&l
 function _emToggleRight(){
   _emRightCollapsed=!_emRightCollapsed;
   let rp=document.getElementById('emRightPanel');
-  if(_emRightCollapsed)rp.classList.add('collapsed');else rp.classList.remove('collapsed');
+  let rz=document.getElementById('emResizer2');
+  if(_emRightCollapsed){
+    rp.classList.add('collapsed');
+    if(rz)rz.style.display='none';
+  }else{
+    rp.classList.remove('collapsed');
+    if(rz)rz.style.display='';
+  }
+}
+function _emToggleFolder(){
+  let body=document.getElementById('emFolderBody');
+  let arrow=document.getElementById('emFolderArrow');
+  if(!body)return;
+  let open=body.style.display==='none';
+  body.style.display=open?'block':'none';
+  if(arrow)arrow.textContent=open?'˅':'›';
 }
 
 function _emScheduleSave(){
@@ -16837,19 +16920,14 @@ function _emDoSave(){
   _emSaveTimer=null;
   if(!_emCurrentTask)return;
   let t=_emCurrentTask;
-  t.title=(document.getElementById('emTitleInput').value||'').trim();
   t.status=document.getElementById('emStatusSel').value||t.status;
   t.due=document.getElementById('emDueDate').value||'';
-  t.freeTermin=document.getElementById('emFreeTermin').value||'';
-  let tagsRaw=document.getElementById('emTagsInput').value||'';
-  t.tags=tagsRaw?tagsRaw.split(',').map(function(s){return s.trim();}).filter(Boolean):[];
+  let _ftText=(document.getElementById('emFreeTerminText').value||'').trim();
+  let _ftDate=document.getElementById('emFreeTerminDate').value||'';
+  t.freierTermin=(_ftText||_ftDate)?{text:_ftText,datum:_ftDate}:null;
   t.desc=document.getElementById('emNotizInput').value||'';
-  // Titel-Badge aktualisieren
-  document.getElementById('emTaskTitleBadge').textContent=t.title||'(kein Titel)';
   scheduleAutoSave();
   renderBoard();
-  // Auto-Ordner anlegen wenn Titel neu gesetzt wurde
-  if(t.title&&t.title.length>=3)_emAutoCreateTaskFolder();
   _emUpdateFolderLink();
 }
 
@@ -16857,8 +16935,8 @@ function _emUpdateFolderLink(){
   let lnk=document.getElementById('emFolderLink');
   if(!lnk)return;
   let url=(_emCurrentTask&&_emCurrentTask.gdriveOrdner)||'';
-  if(url){lnk.style.display='inline';lnk.href=url;}
-  else{lnk.style.display='none';lnk.href='#';}
+  if(url&&url.includes('drive.google.com')){lnk.href=url;lnk.textContent='Ordner öffnen →';}
+  else{lnk.href='#';lnk.textContent='Noch kein Ordner angelegt';}
 }
 
 function _emInAuftragEinglieder(){
