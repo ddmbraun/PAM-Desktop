@@ -1,23 +1,47 @@
-const CACHE_NAME = 'pam-desktop-2026-05-28-b95'; // b95: Blob-URL E-Mail-Anzeige, Anhänge ins rechte Panel
-const ASSETS = ['./', './index.html'];
-self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+const CACHE_NAME = 'pam-desktop-2026-05-28-b96';
+const ASSETS = [
+  '/',
+  '/index.html',
+  '/sw.js'
+];
+
+self.addEventListener('install', event => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS))
+      .then(() => self.skipWaiting())
+  );
 });
-self.addEventListener('activate', e => {
-  e.waitUntil(caches.keys().then(keys =>
-    Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
-  ).then(() => self.clients.claim()));
+
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+    ).then(() => self.clients.claim())
+  );
 });
-self.addEventListener('fetch', e => {
-  const url = e.request.url;
-  if (url.includes('accounts.google.com')||url.includes('oauth2.googleapis.com')||url.includes('googleapis.com')||url.includes('login.microsoftonline.com')||url.includes('login.microsoft.com')||url.includes('graph.microsoft.com')||url.includes('azure.com')||url.includes('token')||url.includes('auth')||e.request.method!=='GET') {
-    e.respondWith(fetch(e.request)); return;
+
+self.addEventListener('fetch', event => {
+  const url = new URL(event.request.url);
+  // Nur Same-Origin-Requests cachen
+  if (url.origin !== self.location.origin) return;
+  // POST-Requests nicht cachen
+  if (event.request.method !== 'GET') return;
+
+  event.respondWith(
+    caches.match(event.request).then(cached => {
+      if (cached) return cached;
+      return fetch(event.request).then(response => {
+        if (!response || response.status !== 200 || response.type !== 'basic') return response;
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+        return response;
+      });
+    })
+  );
+});
+
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
   }
-  e.respondWith(caches.match(e.request).then(cached => cached || fetch(e.request).then(resp => {
-    if (resp && resp.status === 200 && resp.type === 'basic') {
-      const clone = resp.clone();
-      caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
-    }
-    return resp;
-  })));
 });

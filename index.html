@@ -251,8 +251,13 @@ async function _ezBuildPdfFromHtml(info){
   let cleanHtml=info.bodyHtml.replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<link[^>]+rel=["']?stylesheet["']?[^>]*>/gi,'').replace(/@font-face\s*\{[^}]*\}/gi,'').replace(/@import\s+url\([^)]*\)[^;]*;/gi,'');
   // CID-Inline-Bilder direkt im HTML ersetzen bevor wrap gebaut wird
   let _cidMap=info.cidMap||{};
+  const _MIN_CID_BYTES=20*1024;
   let resolvedHtml=cleanHtml.replace(/src=["']?(cid:[^"'\s>]+)["']?/gi,function(m,cid){
-    return _cidMap[cid]?'src="'+_cidMap[cid]+'"':'src=""';
+    let _d=_cidMap[cid]||_cidMap['cid:'+cid.replace(/^cid:/i,'')]||'';
+    if(!_d)return 'src=""';
+    let _b64=(_d.split(',')[1]||'');
+    if(_b64.length*0.75<_MIN_CID_BYTES)return 'src=""';
+    return 'src="'+_d+'"';
   });
   wrap.innerHTML=hdr+'<div style="padding:16px 20px;line-height:1.55;color:#1e2337;word-break:break-word;">'+resolvedHtml+'</div>';
   document.body.appendChild(wrap);
@@ -1288,40 +1293,13 @@ async function _auftragConfirm(){
         buf=new TextEncoder().encode(emlStr).buffer;
       }
 
-      // Parsed Email-Info immer speichern (auch ohne Drive-Upload sichtbar im Modal)
-      // CID-Inline-Bilder mit Größenfilter auflösen (>20KB behalten, kleine Logos/Pixel weglassen)
-      let _cidMapEntry=info.cidMap||{};
-      const _MIN_CID_BYTES=20*1024; // 20 KB Schwellwert
-      let _resolvedBodyHtml=(info.bodyHtml||'').replace(/src=["']?(cid:[^"'\s>]+)["']?/gi,function(m,cid){
-        let dataUrl=_cidMapEntry[cid]||_cidMapEntry['cid:'+cid.replace(/^cid:/i,'')]||'';
-        if(!dataUrl)return 'src=""';
-        let b64Part=(dataUrl.split(',')[1]||'');
-        let approxBytes=b64Part.length*0.75;
-        if(approxBytes<_MIN_CID_BYTES)return 'src=""'; // zu klein → Logo/Pixel → ausblenden
-        return 'src="'+dataUrl+'"';
-      });
-      let _emailOrigEntry={
-        from:info.sender||'',
-        subject:info.subject||'',
-        body:info.bodyText||'',
-        bodyHtml:_resolvedBodyHtml||'',
-        date:info.date instanceof Date&&!isNaN(info.date)?info.date.toISOString():'',
-        attachments:(info.attachments||[]).map(function(a){return{filename:a.name||a.filename||'',name:a.name||a.filename||'',mimeType:a.mimeType||''};}),
-        name:info.subject||origName,
-        filename:origName,
-        uploadedAt:new Date().toLocaleDateString('de-DE')
-      };
       if(buf&&gdriveToken){
-        try{
-          let origResult=await _driveUploadGeneric(buf,origName,origMime,fid);
-          if(origResult&&origResult.id){
-            _emailOrigEntry.fileId=origResult.id;
-            _emailOrigEntry.url='https://drive.google.com/file/d/'+origResult.id+'/view';
-          }
-        }catch(_ue){console.warn('[PTP] Original-Upload fehlgeschlagen:',_ue);showToast('⚠ E-Mail Original fehlgeschlagen: '+_ue.message,'error',8000);}
+        let origResult=await _driveUploadGeneric(buf,origName,origMime,fid);
+        if(origResult&&origResult.id){
+          newTask.emailOriginals=[{name:info.subject||origName,filename:origName,fileId:origResult.id,url:'https://drive.google.com/file/d/'+origResult.id+'/view',uploadedAt:new Date().toLocaleDateString('de-DE')}];
+        }
       }
-      newTask.emailOriginals=[_emailOrigEntry];
-    }catch(e){console.warn('[PTP] Original-Verarbeitung fehlgeschlagen:',e);showToast('⚠ E-Mail Original fehlgeschlagen: '+e.message,'error',8000);}
+    }catch(e){console.warn('[PTP] Original-Upload fehlgeschlagen:',e);showToast('⚠ E-Mail Original fehlgeschlagen: '+e.message,'error',8000);}
 
     // Fix 6b: EML-Anhänge extrahieren und in Drive hochladen
     if(rawFile&&rawFile.name.toLowerCase().endsWith('.eml')&&info.attachments&&info.attachments.length>0){
@@ -2094,28 +2072,30 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 .em-topbar{display:flex;flex-direction:column;background:var(--bg3);border-bottom:1px solid var(--border);flex-shrink:0;}
 .em-top-row1{display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border);}
 .em-top-row2{display:flex;align-items:center;gap:5px;padding:4px 14px 6px;flex-wrap:wrap;min-height:28px;}
-.em-top2-chip{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;border:1px solid transparent;white-space:nowrap;}
-.em-top2-chip.status{background:rgba(var(--accent-rgb,108,99,255),.1);color:var(--accent);border-color:rgba(var(--accent-rgb,108,99,255),.3);}
-.em-top2-chip.due{background:rgba(220,120,20,.1);color:#b8640a;border-color:rgba(220,120,20,.3);}
-.em-top2-chip.att{background:var(--bg3);color:var(--text2);border-color:var(--border);}
+.em-top2-chip{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;cursor:default;}
+.em-top2-chip.status{background:rgba(var(--accent-rgb,108,99,255),.12);color:var(--accent);border:1px solid rgba(var(--accent-rgb,108,99,255),.3);}
+.em-top2-chip.due{background:#FFF3CD;color:#856404;border:1px solid #FFEAA7;}
+.em-top2-chip.due.overdue{background:#FDECEA;color:#c62828;border:1px solid #F5C6C6;}
+.em-top2-chip.att{background:var(--bg3);color:var(--text2);border:1px solid var(--border);cursor:pointer;}
+.em-top2-chip.att:hover{border-color:var(--accent);color:var(--accent);}
 .em-top2-lbl{font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin-right:1px;}
 .em-top2-termin-btn{display:inline-flex;align-items:center;gap:3px;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:600;border:1px solid var(--accent);color:var(--accent);background:transparent;cursor:pointer;white-space:nowrap;}
 .em-top2-termin-btn:hover{background:rgba(var(--accent-rgb,108,99,255),.1);}
+.em-termin-list{display:flex;flex-direction:column;gap:4px;}
+.em-termin-row{display:flex;gap:4px;align-items:center;}
+.em-termin-row .em-field-input{flex:1;min-width:0;}
+.em-termin-del{background:none;border:none;color:var(--text2);cursor:pointer;font-size:14px;padding:0 2px;line-height:1;}
+.em-termin-del:hover{color:var(--red);}
+.em-add-termin-btn{display:flex;align-items:center;justify-content:center;width:100%;padding:4px;border-radius:6px;border:1px dashed var(--border);background:transparent;color:var(--text2);cursor:pointer;font-size:13px;margin-top:2px;}
+.em-add-termin-btn:hover{border-color:var(--accent);color:var(--accent);}
 .em-topbar-title{font-size:19px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);}
 .em-body{display:flex;flex:1;overflow:hidden;}
 .em-mail-list{width:240px;min-width:120px;max-width:50%;flex-shrink:0;border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;background:var(--bg2);}
 .em-resizer{width:5px;background:transparent;cursor:col-resize;flex-shrink:0;transition:background .15s;}
 .em-resizer:hover,.em-resizer.dragging{background:var(--accent);}
 .em-reading-pane{flex:1;min-width:120px;display:flex;flex-direction:column;overflow:hidden;background:var(--bg2);}
-.em-right-panel{width:250px;min-width:250px;flex-shrink:0;border-left:1px solid var(--border);padding:14px;display:flex;flex-direction:column;gap:10px;overflow-y:auto;background:var(--bg3);transition:width .2s,padding .2s,opacity .15s,min-width .2s;}
+.em-right-panel{width:250px;min-width:250px;flex-shrink:0;border-left:1px solid var(--border);padding:12px;display:flex;flex-direction:column;gap:10px;overflow-y:auto;background:var(--bg3);transition:width .2s,padding .2s,opacity .15s,min-width .2s;}
 .em-right-panel.collapsed{width:0;min-width:0;padding:0;opacity:0;pointer-events:none;overflow:hidden;}
-.em-termin-list{display:flex;flex-direction:column;gap:4px;}
-.em-termin-row{display:flex;gap:4px;align-items:center;}
-.em-termin-row .em-field-input{flex:1;min-width:0;}
-.em-termin-del{background:none;border:none;color:var(--text2);cursor:pointer;font-size:14px;padding:0 3px;line-height:1;flex-shrink:0;}
-.em-termin-del:hover{color:var(--red,#e53);}
-.em-add-termin-btn{display:flex;align-items:center;gap:4px;padding:3px 8px;border-radius:5px;border:1px dashed var(--border);background:transparent;color:var(--text2);font-size:11px;cursor:pointer;margin-top:2px;width:100%;}
-.em-add-termin-btn:hover{border-color:var(--accent);color:var(--accent);}
 .em-footer{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:8px 14px;border-top:1px solid var(--border);background:var(--bg3);flex-shrink:0;}
 .em-mail-item{padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s;}
 .em-mail-item:hover{background:var(--bg3);}
@@ -2139,8 +2119,8 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 .em-rp-attach{padding:7px 14px;border-top:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;background:var(--bg3);flex-shrink:0;}
 .em-attach-chip{display:flex;align-items:center;gap:5px;padding:4px 9px;border-radius:6px;border:1px solid var(--border);font-size:12px;background:var(--bg2);color:var(--text);cursor:pointer;text-decoration:none;}
 .em-attach-chip:hover{border-color:var(--accent);color:var(--accent);}
-.em-right-lbl{font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;padding-bottom:3px;border-bottom:1px solid var(--border);}
-.em-action-btn{display:flex;align-items:center;gap:6px;padding:8px 12px;border-radius:7px;border:1px solid var(--border);background:transparent;color:var(--text);font-size:13px;cursor:pointer;width:100%;margin-bottom:4px;text-align:left;}
+.em-right-lbl{font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px;padding-bottom:3px;border-bottom:1px solid var(--border);}
+.em-action-btn{display:flex;align-items:center;gap:6px;padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:transparent;color:var(--text);font-size:13px;cursor:pointer;width:100%;margin-bottom:4px;text-align:left;}
 .em-action-btn:hover{background:var(--bg3);}
 .em-action-btn.primary{background:var(--accent);color:#fff;border-color:var(--accent);}
 .em-action-btn.primary:hover{opacity:.9;}
@@ -2154,7 +2134,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 .em-field-label{font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;}
 .em-field-input{width:100%;padding:6px 9px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px;box-sizing:border-box;font-family:inherit;}
 .em-field-input:focus{outline:none;border-color:var(--accent);}
-textarea.em-field-input{resize:vertical;min-height:70px;}
+textarea.em-field-input{resize:vertical;min-height:60px;}
 /* START MODAL */
 .start-modal{background:var(--bg2);border-radius:14px;padding:32px;width:440px;max-width:90vw;box-shadow:0 20px 60px var(--shadow);text-align:center;zoom:var(--card-scale,1);}
 .start-modal h2{font-size:22px;font-weight:700;color:var(--accent2);margin-bottom:8px;}
@@ -3271,7 +3251,7 @@ textarea.em-field-input{resize:vertical;min-height:70px;}
     <!-- Top bar -->
     <div class="em-topbar">
       <div class="em-top-row1">
-        <span id="emBoardBadge" style="background:rgba(var(--accent-rgb,108,99,255),.12);color:var(--accent);border:1px solid rgba(var(--accent-rgb,108,99,255),.35);border-radius:10px;padding:3px 12px;font-size:16px;font-weight:700;flex-shrink:0;">📧 E-Mail</span>
+        <span id="emBoardBadge" style="background:rgba(var(--accent-rgb,108,99,255),.12);color:var(--accent);border:1px solid rgba(var(--accent-rgb,108,99,255),.35);border-radius:10px;padding:2px 10px;font-size:16px;font-weight:700;flex-shrink:0;">📧 E-Mail</span>
         <span id="emTaskTitleBadge" class="em-topbar-title" style="margin-left:8px;"></span>
         <div class="em-topbar-right">
           <button class="em-toggle-btn" id="emToggleRightBtn" onclick="_emToggleRight()" title="Rechtes Panel ein-/ausklappen">◨</button>
@@ -3298,29 +3278,24 @@ textarea.em-field-input{resize:vertical;min-height:70px;}
       <div class="em-resizer" id="emResizer2"></div>
       <!-- RECHTS: Steuerung -->
       <div class="em-right-panel" id="emRightPanel">
-        <!-- Absender -->
         <div class="em-right-section">
           <div class="em-right-lbl">Von</div>
-          <div id="emSenderDisplay" style="font-size:11px;color:var(--text);word-break:break-all;line-height:1.4;">–</div>
+          <div id="emSenderDisplay" style="font-size:11px;color:var(--text2);word-break:break-all;padding:2px 0;">–</div>
           <div class="em-right-lbl" style="margin-top:6px;">Absender-Name</div>
           <input type="text" id="emSenderName" class="em-field-input" placeholder="Name eintragen …" oninput="_emScheduleSave()" autocomplete="off">
         </div>
-        <!-- Posteingang -->
         <div class="em-right-section">
           <div class="em-right-lbl">Posteingang</div>
           <div id="emDateDisplay" style="font-size:11px;color:var(--text2);">–</div>
         </div>
-        <!-- Status -->
         <div class="em-right-section" style="border-top:1px solid var(--border);padding-top:8px;">
           <div class="em-right-lbl">Status</div>
           <select id="emStatusSel" class="em-field-input" onchange="_emScheduleSave();_emUpdateTop2()"></select>
         </div>
-        <!-- Bearbeiten bis -->
         <div class="em-right-section">
           <div class="em-right-lbl">Bearbeiten bis</div>
           <input type="date" id="emDueDate" class="em-field-input" oninput="_emScheduleSave();_emUpdateTop2()" autocomplete="off">
         </div>
-        <!-- Freie Termine (Liste mit + Button) -->
         <div class="em-right-section">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
             <div class="em-right-lbl" style="margin-bottom:0;border-bottom:none;">Freie Termine</div>
@@ -3328,7 +3303,6 @@ textarea.em-field-input{resize:vertical;min-height:70px;}
           </div>
           <div class="em-termin-list" id="emTerminList"></div>
         </div>
-        <!-- Anhänge (klappbar, wird per JS befüllt) -->
         <div class="em-right-section" id="emAttachSection" style="display:none;border-top:1px solid var(--border);padding-top:8px;">
           <div class="em-right-lbl" onclick="_emToggleAttachSection()" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
             <span>📎 Anhänge <span id="emAttachBadge" style="font-weight:400;font-size:11px;"></span></span>
@@ -3336,21 +3310,18 @@ textarea.em-field-input{resize:vertical;min-height:70px;}
           </div>
           <div id="emAttachSectionBody" style="display:none;margin-top:6px;"></div>
         </div>
-        <!-- Drive-Ordner (klappbar) -->
         <div class="em-right-section" style="border-top:1px solid var(--border);padding-top:8px;">
           <div class="em-right-lbl" onclick="_emToggleFolder()" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
             <span>📁 Drive-Ordner</span><span id="emFolderArrow" style="font-size:10px;">›</span>
           </div>
           <div id="emFolderBody" style="display:none;margin-top:4px;">
-            <a id="emFolderLink" href="#" target="_blank" style="font-size:11px;color:var(--accent);text-decoration:none;word-break:break-all;display:block;">Ordner öffnen →</a>
+            <a id="emFolderLink" href="#" target="_blank" style="font-size:11px;color:var(--accent);text-decoration:none;">Ordner öffnen →</a>
           </div>
         </div>
-        <!-- Notiz / Verlauf -->
         <div class="em-right-section" style="border-top:1px solid var(--border);padding-top:8px;">
           <div class="em-right-lbl">Notiz / Verlauf</div>
           <textarea id="emNotizInput" class="em-field-input" rows="5" placeholder="Notizen …" oninput="_emScheduleSave()"></textarea>
         </div>
-        <!-- Aktionen -->
         <div class="em-right-section" style="border-top:1px solid var(--border);padding-top:8px;">
           <div class="em-right-lbl">Aktionen</div>
           <button class="em-action-btn primary" onclick="_emAntworten()">↩ Antworten</button>
@@ -3372,7 +3343,7 @@ textarea.em-field-input{resize:vertical;min-height:70px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-28 · #95'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-28-b93)
+const PAM_BUILD = 'v2026-05-28 · #96'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-28-b96)
 
 // ── STATE ──
 let boards = {};
@@ -5559,8 +5530,8 @@ function taskCardHTML(task){
   const hasFotos=(task.fotos||[]).length>0;
   const isAH=isAusserhaus(task);
   const isNotizBoard=(boardTypes[currentBoard]||'baustelle')==='notiz';
-  const isEmailBoard=(boardTypes[currentBoard]||'baustelle')==='email';
   const isBaustelle=(boardTypes[currentBoard]||'baustelle')==='baustelle';
+  const isEmailBoard=(boardTypes[currentBoard]||'baustelle')==='email';
   const boardSts=getBoardStatuses(currentBoard)||[];
   const stIdx=boardSts.indexOf(task.status);
   const colClass=stIdx>=0?`card-col-${stIdx%8}`:'';
@@ -5635,19 +5606,26 @@ function taskCardHTML(task){
       style="position:absolute;top:7px;right:7px;width:15px;height:15px;cursor:pointer;accent-color:var(--accent);opacity:${_isMergeSel?'1':'0'};transition:opacity .15s;"
       onmouseenter="this.style.opacity='1'" onmouseleave="if(!this.checked)this.style.opacity='0'">
     <div class="task-card-toprow">
-      <span style="display:inline-flex;align-items:center;gap:3px;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700;flex-shrink:0;${isNotizBoard?'background:#E6F1FB;color:#185FA5;border:0.5px solid #B5D4F4;':'background:#EAF3DE;color:#3B6D11;border:0.5px solid #C0DD97;'}">${isNotizBoard?'<span style="font-size:11px;">✅</span> Aufgabe':'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><line x1="9" y1="22" x2="9" y2="7"/><line x1="1" y1="7" x2="21" y2="7"/><line x1="9" y1="4" x2="21" y2="7"/><line x1="1" y1="7" x2="9" y2="4"/><line x1="17" y1="7" x2="17" y2="16"/><path d="M15 16 q2 2 4 0"/><line x1="6" y1="22" x2="12" y2="22"/></svg> Auftrag'}</span>
+      ${isEmailBoard?`<span style="display:inline-flex;align-items:center;gap:3px;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700;flex-shrink:0;background:#E0F2FE;color:#075985;border:0.5px solid #BAE6FD;">📧 E-Mail</span>`:
+      `<span style="display:inline-flex;align-items:center;gap:3px;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700;flex-shrink:0;${isNotizBoard?'background:#E6F1FB;color:#185FA5;border:0.5px solid #B5D4F4;':'background:#EAF3DE;color:#3B6D11;border:0.5px solid #C0DD97;'}">${isNotizBoard?'<span style="font-size:11px;">✅</span> Aufgabe':'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><line x1="9" y1="22" x2="9" y2="7"/><line x1="1" y1="7" x2="21" y2="7"/><line x1="9" y1="4" x2="21" y2="7"/><line x1="1" y1="7" x2="9" y2="4"/><line x1="17" y1="7" x2="17" y2="16"/><path d="M15 16 q2 2 4 0"/><line x1="6" y1="22" x2="12" y2="22"/></svg> Auftrag'}</span>`}
       ${(()=>{const _es=task.emailSender||((task.kontakte||[]).find(k=>k.rolle==='ag')||{}).name||((task.kontakte||[]).find(k=>k.rolle==='ag')||{}).email||'';if(!_es)return'';const _nm=_es.match(/^"?([^"<]+?)"?\s*<[^>]+>/);const _short=(_nm?_nm[1].trim():_es.replace(/^"([^"]+)"$/,'$1').trim());const _disp=_short.length>22?_short.substring(0,21)+'…':_short;return`<span style="display:inline-flex;align-items:center;gap:3px;font-size:9px;padding:1px 6px;border-radius:8px;background:#E6F1FB;color:#0C447C;border:0.5px solid #B5D4F4;font-weight:700;white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#0C447C" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>${esc(_disp)}</span>`;})()}
       <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text2);">${[repNrTxt,ksTxt].filter(Boolean).join(' · ')}</span>
       ${[hasAttach?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:8px;background:#fff;color:#854F0B;border:1px solid #FAC775;white-space:nowrap;">📎 ${(task.attachments||[]).length}</span>`:'',hasFotos?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:8px;background:#fff;color:#3B6D11;border:1px solid #C0DD97;white-space:nowrap;">📷 ${(task.fotos||[]).length}</span>`:'',hasLinks?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:8px;background:#fff;color:#185FA5;border:1px solid #B5D4F4;white-space:nowrap;">🔗 ${(task.links||[]).length}</span>`:''].filter(Boolean).join('')}
       <span class="task-card-owner-chip">${esc(task.owner)}</span>
     </div>
     <div class="task-card-title">${esc(displayTitle)}</div>
+    ${isEmailBoard?(()=>{
+      const _em0=(task.emailOriginals||[])[0]||null;
+      const _eDate=_em0&&_em0.date?(()=>{try{const d=new Date(_em0.date);return isNaN(d)?String(_em0.date):d.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'2-digit'});}catch(e){return String(_em0.date);}})():'';
+      const _eSender=task.emailSenderName||(_em0&&(_em0.from||_em0.sender))||task.emailSender||'';
+      const _senderShort=(()=>{if(!_eSender)return'';const m=_eSender.match(/^"?([^"<]+?)"?\s*</);const n=m?m[1].trim():_eSender.replace(/^"([^"]+)"$/,'$1').trim();return n.length>24?n.substring(0,23)+'…':n;})();
+      return`<div class="task-card-taskrow">${_eDate?`<span style="font-size:9px;color:var(--text2);">📅 ${esc(_eDate)}</span>`:''}${_senderShort?`<span style="font-size:9px;padding:1px 6px;border-radius:8px;background:#E0F2FE;color:#075985;border:0.5px solid #BAE6FD;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px;">${esc(_senderShort)}</span>`:''}</div>`;
+    })():''}
     ${(task.status||task.anfrageEingangDatum||_zeitMins>0||_terminMins>0||_adr||_tel||task.auftragPlanen)?`<div class="task-card-taskrow">
       ${task.auftragPlanen?`<span style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:10px;background:#FFF3E0;color:#854F0B;border:1px solid #FFB74D;font-size:10px;font-weight:700;white-space:nowrap;">📋 Auftrag planen</span>`:''}
       ${task.status?`<span style="color:var(--text2);">Task:</span><span class="task-card-chip task-card-chip-task">${esc(task.status)}</span>`:''}
-      ${isEmailBoard?(()=>{const _em=(task.emailOriginals||[])[0];const _emDate=_em&&_em.date?new Date(_em.date):null;const _emD=_emDate&&!isNaN(_emDate)?(_emDate.getDate()+'.'+((_emDate.getMonth()+1)+'').padStart(2,'0')+'.'+_emDate.getFullYear()):'';const _emName=task.emailSenderName||(_em&&(_em.from||_em.sender))||'';return(_emD||_emName)?`${_emName?`<span style="color:var(--text2);font-size:10px;font-weight:500;margin-right:2px;">👤 ${esc(_emName)}</span>`:''}${_emD?`<span class="task-card-chip" style="background:#075985;color:#fff;border:none;font-size:10px;">📥 ${_emD}</span>`:''}`:''})():''}
-      ${task.anfrageEingangDatum&&!isEmailBoard?(()=>{const[y,m,d]=(task.anfrageEingangDatum||'').split('-');return`<span style="color:var(--text2);margin-left:2px;">Anfr.vom:</span><span class="task-card-chip" style="background:#534AB7;color:#fff;border:none;">📅 ${d||'?'}.${m||'?'}</span>`;})():''}
-      ${(isNotizBoard||isEmailBoard)&&task.due?`<span style="color:var(--text2);margin-left:2px;">Fällig:</span><span class="task-card-chip" style="${overdue?'background:#A32D2D;':'background:#854F0B;'}color:#fff;border:none;">${formatDate(task.due)}</span>`:''}
+      ${task.anfrageEingangDatum?(()=>{const[y,m,d]=(task.anfrageEingangDatum||'').split('-');return`<span style="color:var(--text2);margin-left:2px;">Anfr.vom:</span><span class="task-card-chip" style="background:#534AB7;color:#fff;border:none;">📅 ${d||'?'}.${m||'?'}</span>`;})():''}
+      ${isNotizBoard&&task.due?`<span style="color:var(--text2);margin-left:2px;">Fällig:</span><span class="task-card-chip" style="${overdue?'background:#A32D2D;':'background:#854F0B;'}color:#fff;border:none;">${formatDate(task.due)}</span>`:''}
       ${_gesamtMins>0?`<span style="display:inline-flex;align-items:center;gap:2px;padding:2px 6px;border-radius:10px;background:#854F0B;color:#fff;border:none;font-size:10px;font-weight:700;white-space:nowrap;">⏱ ${_fmtBadge(_gesamtMins)}</span>`:''}
       ${(()=>{const _oCnt=(task.emailOriginals||[]).length;return _oCnt>0?`<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 6px;border-radius:10px;background:#075985;color:#fff;border:none;font-size:10px;font-weight:700;white-space:nowrap;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>${_oCnt}</span>`:'';})()}
 
@@ -16768,24 +16746,18 @@ function openEmailTaskModal(task,board){
   _emCurrentTask=task;
   _emCurrentBoard=board||currentBoard;
   _emActiveMailIdx=-1;
-  // currentBoard setzen
   if(_emCurrentBoard&&_emCurrentBoard!==currentBoard)currentBoard=_emCurrentBoard;
-  // Header
   document.getElementById('emTaskTitleBadge').textContent=task.title||'(kein Titel)';
   document.getElementById('emBoardBadge').textContent='📧 '+_emCurrentBoard;
-  // Rechtes Panel befüllen
-  _emUpdateFolderLink();
-  // Absender + Datum aus erstem emailOriginal
+  // Sender + date display
   let _firstMail=(task.emailOriginals||[])[0]||null;
-  document.getElementById('emSenderDisplay').textContent=
-    (_firstMail&&(_firstMail.from||_firstMail.sender))||task.emailSender||'–';
+  let _rawFrom=(_firstMail&&(_firstMail.from||_firstMail.sender))||task.emailSender||'–';
+  document.getElementById('emSenderDisplay').textContent=_rawFrom;
   let _emailDateStr='–';
-  if(_firstMail&&_firstMail.date){
-    try{let _d=new Date(_firstMail.date);if(!isNaN(_d))_emailDateStr=_d.toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(e){}
-  }
-  // Fallback: uploadedAt-Datum aus emailOriginals
-  if(_emailDateStr==='–'&&_firstMail&&_firstMail.uploadedAt)_emailDateStr=_firstMail.uploadedAt;
+  if(_firstMail&&_firstMail.date){try{let _d=new Date(_firstMail.date);_emailDateStr=isNaN(_d)?String(_firstMail.date):_d.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'});}catch(e){_emailDateStr=String(_firstMail.date||'–');}}
   document.getElementById('emDateDisplay').textContent=_emailDateStr;
+  // Absender-Name
+  document.getElementById('emSenderName').value=task.emailSenderName||'';
   // Status-Dropdown
   let statusSel=document.getElementById('emStatusSel');
   statusSel.innerHTML='';
@@ -16795,21 +16767,14 @@ function openEmailTaskModal(task,board){
     statusSel.appendChild(o);
   });
   document.getElementById('emDueDate').value=task.due||'';
-  // Absender-Name
-  document.getElementById('emSenderName').value=task.emailSenderName||'';
-  // Freie Termine (Array)
   _emRenderTerminList();
   document.getElementById('emNotizInput').value=task.desc||'';
-  // Collapsed-Zustand wiederherstellen
+  _emUpdateFolderLink();
   let rp=document.getElementById('emRightPanel');
   if(_emRightCollapsed)rp.classList.add('collapsed');else rp.classList.remove('collapsed');
-  // Topbar Zeile 2 aktualisieren
   _emUpdateTop2();
-  // Mail-Liste rendern
   _renderEmailMailList();
-  // Modal anzeigen
   document.getElementById('emailTaskModal').classList.add('open');
-  // Resizer initialisieren
   _initEmailResizers();
 }
 
@@ -16835,11 +16800,9 @@ function _renderEmailMailList(){
   }
   mails.forEach(function(m,i){
     let d=m.data;
-    let t=_emCurrentTask;
-    // Fallbacks: alte Tasks haben nur name/filename/fileId, keine from/subject/body Felder
-    let from=d.from||d.sender||d.senderName||(t&&t.emailSender)||'Unbekannt';
-    let subject=d.subject||d.betreff||d.name||(t&&t.title)||'(kein Betreff)';
-    let preview=d.body||d.snippet||d.bodyText||(d.bodyHtml?_stripHtmlTags(d.bodyHtml):'');
+    let from=d.from||d.sender||d.senderName||'Unbekannt';
+    let subject=d.subject||d.betreff||'(kein Betreff)';
+    let preview=d.body||d.snippet||d.bodyText||'';
     let dateStr=d.date||d.receivedDate||d.internalDate||'';
     let dateLabel='';
     if(dateStr){try{let dt=new Date(typeof dateStr==='number'?dateStr:dateStr);dateLabel=isNaN(dt)?dateStr:dt.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit'});}catch(e){dateLabel=String(dateStr).substring(0,10);}}
@@ -16874,63 +16837,29 @@ function _renderEmailMailList(){
 
 function _emOpenMail(idx,mails){
   _emActiveMailIdx=idx;
-  // Mail-Liste neu rendern (active-Klasse setzen)
   _renderEmailMailList();
   let m=mails[idx];
   let d=m.data;
-  let _t=_emCurrentTask;
-  let from=d.from||d.sender||d.senderName||(_t&&_t.emailSender)||'Unbekannt';
-  let subject=d.subject||d.betreff||d.name||(_t&&_t.title)||'(kein Betreff)';
-  let body=d.body||d.bodyText||d.snippet||(d.bodyHtml?_stripHtmlTags(d.bodyHtml):'');
-  // Fallback: Drive-Datei öffnen wenn kein Body aber URL vorhanden
-  let driveUrl=d.url||d.webViewLink||'';
-  if(!body&&driveUrl)body='[E-Mail in Drive gespeichert – über Anhang-Bereich öffnen]';
+  let from=d.from||d.sender||d.senderName||'Unbekannt';
+  let subject=d.subject||d.betreff||'(kein Betreff)';
+  let bodyHtml=d.bodyHtml||'';
+  let bodyText=d.body||d.bodyText||d.snippet||'';
   let dateStr=d.date||d.receivedDate||d.internalDate||'';
   let dateLabel='';
   if(dateStr){try{let dt=new Date(typeof dateStr==='number'?dateStr:dateStr);dateLabel=isNaN(dt)?String(dateStr):dt.toLocaleString('de-DE');}catch(e){dateLabel=String(dateStr);}}
-  // Initiale für Avatar
   let initials=from.split(/\s+/).slice(0,2).map(function(w){return w[0]||'';}).join('').toUpperCase()||'?';
-  // Anhänge sammeln (aus diesem Mail-Eintrag + Task-Fotos + Task-PDFs)
-  let _t2=_emCurrentTask;
+  // Anhänge-Daten für rechtes Panel
   let allFiles=[];
   (d.attachments||[]).forEach(function(a){
-    let nm=a.filename||a.name||'Anhang';
-    let nmL=nm.toLowerCase();
-    let icon=nmL.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':nmL.endsWith('.pdf')?'📄':'📎';
-    allFiles.push({icon:icon,name:nm,url:a.url||a.webViewLink||'',mime:a.mimeType||''});
+    let name=a.filename||a.name||'Anhang';
+    let nl=name.toLowerCase();
+    let icon=nl.endsWith('.pdf')?'📄':(nl.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':'📎');
+    let url=a.url||a.webViewLink||'';
+    let mime=a.contentType||a.mimeType||'';
+    allFiles.push({icon,name,url,mime,data:a});
   });
-  (_t2&&_t2.emailPdfs||[]).forEach(function(p){allFiles.push({icon:'📄',name:p.name||'PDF',url:p.url||'',mime:'application/pdf'});});
-  (_t2&&_t2.fotos||[]).forEach(function(f){allFiles.push({icon:'🖼',name:f.name||'Foto',url:f.url||f.webViewLink||'',mime:'image/jpeg'});});
-  // Anhänge ins rechte Panel schreiben
   _emRenderAttachPanel(allFiles);
-  // Lesebereich aufbauen
   let pane=document.getElementById('emReadingPane');
-  let bodyHtml=d.bodyHtml||'';
-  let bodyText=d.body||d.bodyText||d.snippet||'';
-  let driveUrl=d.url||d.webViewLink||'';
-  // Kompletten HTML-String für Blob-URL zusammenbauen (bewährter Ansatz aus EML-Vorschau)
-  let cleanBody='';
-  if(bodyHtml){
-    cleanBody=bodyHtml
-      .replace(/<base[^>]*>/gi,'')
-      .replace(/<script[\s\S]*?<\/script>/gi,'')
-      .replace(/<link[^>]+rel=["']?stylesheet["']?[^>]*>/gi,'');
-  }else if(bodyText){
-    cleanBody='<pre style="white-space:pre-wrap;font-family:Arial,Helvetica,sans-serif;font-size:13px;margin:0;padding:0;line-height:1.6;">'+_escHtml(bodyText)+'</pre>';
-  }else if(driveUrl){
-    cleanBody='<div style="text-align:center;padding:30px;color:#666;"><p style="font-size:15px;margin-bottom:14px;">📨 E-Mail in Drive gespeichert</p><a href="'+_escHtml(driveUrl)+'" target="_blank" style="color:#1a73e8;font-size:13px;">In Drive öffnen →</a></div>';
-  }else{
-    cleanBody='<div style="text-align:center;padding:30px;color:#999;font-size:13px;">(kein Inhalt gespeichert)</div>';
-  }
-  let fullHtml='<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank">'
-    +'<style>body{font-family:Arial,Helvetica,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}a{color:#1a73e8;}img{max-width:100%;height:auto;}</style>'
-    +'</head><body>'+cleanBody+'</body></html>';
-  // Iframe via Blob-URL (kein srcdoc-Größenlimit, funktioniert zuverlässig)
-  let fr=document.createElement('iframe');
-  fr.style.cssText='flex:1;width:100%;border:none;';
-  let blobUrl=URL.createObjectURL(new Blob([fullHtml],{type:'text/html'}));
-  fr.src=blobUrl;
-  fr.onload=function(){URL.revokeObjectURL(blobUrl);};
   pane.innerHTML=
     '<div class="em-rp-header">'+
       '<div class="em-rp-subject">'+_escHtml(subject)+'</div>'+
@@ -16941,52 +16870,115 @@ function _emOpenMail(idx,mails){
           '<span style="font-size:11px;color:var(--text2);">'+_escHtml(dateLabel)+'</span>'+
         '</div>'+
       '</div>'+
-    '</div>';
-  // iframe nach innerHTML-Zuweisung anhängen (nicht als String)
-  let bodyWrap=document.createElement('div');
-  bodyWrap.style.cssText='flex:1;display:flex;flex-direction:column;overflow:hidden;';
-  bodyWrap.appendChild(fr);
-  pane.appendChild(bodyWrap);
-  // Absender + Datum im rechten Panel aktualisieren
-  let sdEl=document.getElementById('emSenderDisplay');if(sdEl)sdEl.textContent=from||'–';
-  let ddEl=document.getElementById('emDateDisplay');if(ddEl)ddEl.textContent=dateLabel||'–';
-}
-
-function _emRenderAttachPanel(allFiles){
-  // Anhänge-Sektion im rechten Panel aktualisieren (Aufklappfeld)
-  let sec=document.getElementById('emAttachSection');
-  if(!sec)return;
-  if(!allFiles||!allFiles.length){sec.style.display='none';return;}
-  sec.style.display='';
-  let badge=document.getElementById('emAttachBadge');
-  if(badge)badge.textContent=allFiles.length+' Anhang'+(allFiles.length!==1?'e':'');
-  let body=document.getElementById('emAttachSectionBody');
-  if(!body)return;
-  body.innerHTML='';
-  allFiles.forEach(function(f){
-    let chip=document.createElement('div');
-    chip.style.cssText='display:flex;align-items:center;gap:6px;padding:5px 7px;border-radius:6px;border:1px solid var(--border);cursor:pointer;font-size:12px;margin-bottom:4px;background:var(--bg2);';
-    chip.title=f.name;
-    chip.innerHTML=f.icon+' <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_escHtml(f.name.length>22?f.name.substring(0,21)+'…':f.name)+'</span>';
-    chip.addEventListener('click',function(evt){_emShowAttachPreview(f.url,f.name,f.mime,evt);});
-    body.appendChild(chip);
-  });
+    '</div>'+
+    '<div id="emBodyContainer" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0;"></div>';
+  // HTML-Body per iframe (Blob URL)
+  let bodyContainer=document.getElementById('emBodyContainer');
+  if(bodyHtml){
+    let cleanBody=bodyHtml;
+    let iframe=document.createElement('iframe');
+    iframe.style.cssText='flex:1;width:100%;border:none;min-height:0;';
+    let fullHtml='<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,Helvetica,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}a{color:#1a73e8;}img{max-width:100%;}</style></head><body>'+cleanBody+'</body></html>';
+    let blobUrl=URL.createObjectURL(new Blob([fullHtml],{type:'text/html'}));
+    iframe.src=blobUrl;
+    iframe.onload=function(){URL.revokeObjectURL(blobUrl);};
+    bodyContainer.appendChild(iframe);
+  } else {
+    bodyContainer.innerHTML='<div style="padding:14px 18px;font-family:Arial,sans-serif;font-size:13px;color:#444;white-space:pre-wrap;overflow-y:auto;flex:1;">'+_escHtml(bodyText)+'</div>';
+  }
 }
 
 function _escHtml(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-function _stripHtmlTags(h){return String(h||'').replace(/<style[\s\S]*?<\/style>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<[^>]+>/g,' ').replace(/\s{2,}/g,' ').trim().substring(0,800);}
 
 function _emToggleRight(){
   _emRightCollapsed=!_emRightCollapsed;
   let rp=document.getElementById('emRightPanel');
   let rz=document.getElementById('emResizer2');
-  if(_emRightCollapsed){
-    rp.classList.add('collapsed');
-    if(rz)rz.style.display='none';
-  }else{
-    rp.classList.remove('collapsed');
-    if(rz)rz.style.display='';
+  if(_emRightCollapsed){rp.classList.add('collapsed');if(rz)rz.style.display='none';}
+  else{rp.classList.remove('collapsed');if(rz)rz.style.display='';}
+}
+function _emRenderTerminList(){
+  let el=document.getElementById('emTerminList');
+  if(!el)return;
+  el.innerHTML='';
+  let termine=(_emCurrentTask&&_emCurrentTask.freieTermine)||[];
+  if(!termine.length){_emAddTerminRow('','',0);return;}
+  termine.forEach(function(t,i){_emAddTerminRow(t.text||'',t.datum||'',i);});
+}
+function _emAddTerminRow(txt,dat,idx){
+  let el=document.getElementById('emTerminList');
+  if(!el)return;
+  let row=document.createElement('div');
+  row.className='em-termin-row';
+  row.innerHTML=
+    '<input type="text" class="em-field-input em-termin-txt" placeholder="z. B. Mo 09:00" value="'+_escHtml(txt)+'" oninput="_emScheduleSave()" autocomplete="off" style="flex:1.5;">'+
+    '<input type="date" class="em-field-input em-termin-dat" value="'+_escHtml(dat)+'" oninput="_emScheduleSave()" autocomplete="off" style="flex:1;">'+
+    '<button class="em-termin-del" onclick="this.parentElement.remove();_emScheduleSave();" title="Entfernen">×</button>';
+  el.appendChild(row);
+}
+function _emAddTermin(){
+  _emAddTerminRow('','',document.querySelectorAll('#emTerminList .em-termin-row').length);
+}
+function _emUpdateTop2(){
+  let row2=document.getElementById('emTopRow2');
+  if(!row2||!_emCurrentTask)return;
+  let t=_emCurrentTask;
+  let parts=[];
+  // Status
+  let status=document.getElementById('emStatusSel');
+  let statusVal=status?status.value:t.status||'';
+  if(statusVal)parts.push('<span class="em-top2-chip status">'+_escHtml(statusVal)+'</span>');
+  // Due date
+  let due=document.getElementById('emDueDate');
+  let dueVal=due?due.value:t.due||'';
+  if(dueVal){
+    let dueDate=new Date(dueVal);
+    let today=new Date();today.setHours(0,0,0,0);
+    let overdue=dueDate<today;
+    let dueLbl=dueDate.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit'});
+    parts.push('<span class="em-top2-chip due'+(overdue?' overdue':'')+'" title="Bearbeiten bis">📅 '+dueLbl+'</span>');
   }
+  // Attachments count
+  let mailIdx=_emActiveMailIdx>=0?_emActiveMailIdx:0;
+  let mails=_emCurrentTask.emailOriginals||[];
+  let attCount=0;
+  if(mails[mailIdx]){attCount=(mails[mailIdx].attachments||[]).length;}
+  if(attCount>0)parts.push('<span class="em-top2-chip att" onclick="_emToggleAttachSection()" title="Anhänge anzeigen">📎 '+attCount+'</span>');
+  // Termin vereinbaren
+  parts.push('<button class="em-top2-termin-btn" onclick="_emTerminVereinbaren()">📅 Termin vereinbaren</button>');
+  row2.innerHTML=parts.join('');
+}
+function _emTerminVereinbaren(){
+  if(!_emCurrentTask)return;
+  let title=_emCurrentTask.title||'Termin';
+  let url='https://calendar.google.com/calendar/r/eventedit?text='+encodeURIComponent(title);
+  window.open(url,'_blank');
+}
+function _emAntworten(){
+  if(!_emCurrentTask)return;
+  let mails=_emCurrentTask.emailOriginals||[];
+  let m=mails[_emActiveMailIdx>=0?_emActiveMailIdx:0]||null;
+  let to=m?(m.from||m.sender||''):'';
+  let subject=m?('Re: '+(m.subject||'')):'';
+  window.location.href='mailto:'+encodeURIComponent(to)+'?subject='+encodeURIComponent(subject);
+}
+function _emRenderAttachPanel(allFiles){
+  let section=document.getElementById('emAttachSection');
+  let badge=document.getElementById('emAttachBadge');
+  let body=document.getElementById('emAttachSectionBody');
+  if(!section)return;
+  if(!allFiles||!allFiles.length){section.style.display='none';return;}
+  section.style.display='';
+  if(badge)badge.textContent='('+allFiles.length+')';
+  if(!body)return;
+  body.innerHTML='';
+  allFiles.forEach(function(f){
+    let btn=document.createElement('button');
+    btn.style.cssText='display:flex;align-items:center;gap:5px;width:100%;padding:4px 6px;border-radius:5px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:11px;cursor:pointer;text-align:left;margin-bottom:3px;overflow:hidden;';
+    btn.innerHTML='<span style="flex-shrink:0;">'+f.icon+'</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+_escHtml(f.name)+'">'+_escHtml(f.name)+'</span>';
+    btn.onclick=function(){_emShowAttachPreview(f.icon,f.name,f.url,f.mime,f.data);};
+    body.appendChild(btn);
+  });
 }
 function _emToggleAttachSection(){
   let body=document.getElementById('emAttachSectionBody');
@@ -16996,14 +16988,33 @@ function _emToggleAttachSection(){
   body.style.display=open?'block':'none';
   if(arrow)arrow.textContent=open?'˅':'›';
 }
-
-function _emToggleFolder(){
-  let body=document.getElementById('emFolderBody');
-  let arrow=document.getElementById('emFolderArrow');
-  if(!body)return;
-  let open=body.style.display==='none';
-  body.style.display=open?'block':'none';
-  if(arrow)arrow.textContent=open?'˅':'›';
+function _emShowAttachPreview(icon,name,url,mime,data){
+  // Popup mit Vorschau
+  let ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9900;display:flex;align-items:center;justify-content:center;';
+  ov.onclick=function(e){if(e.target===ov)document.body.removeChild(ov);};
+  let box=document.createElement('div');
+  box.style.cssText='background:var(--bg2);border-radius:12px;padding:20px;max-width:700px;width:90vw;max-height:85vh;display:flex;flex-direction:column;gap:10px;box-shadow:0 16px 48px rgba(0,0,0,.5);';
+  let header=document.createElement('div');
+  header.style.cssText='display:flex;align-items:center;gap:8px;';
+  header.innerHTML='<span style="font-size:18px;">'+icon+'</span><span style="flex:1;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_escHtml(name)+'</span>'+(url?'<a href="'+_escHtml(url)+'" target="_blank" style="font-size:12px;color:var(--accent);text-decoration:none;white-space:nowrap;">🔗 Öffnen</a>':'')+'<button onclick="document.body.removeChild(this.parentElement.parentElement)" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text2);padding:0 2px;">✕</button>';
+  box.appendChild(header);
+  let previewArea=document.createElement('div');
+  previewArea.style.cssText='flex:1;overflow:auto;border:1px solid var(--border);border-radius:8px;min-height:200px;display:flex;align-items:center;justify-content:center;';
+  let mimeL=(mime||'').toLowerCase();
+  let namL=name.toLowerCase();
+  if(url&&(mimeL.startsWith('image/')||namL.match(/\.(jpe?g|png|gif|webp)$/))){
+    previewArea.innerHTML='<img src="'+_escHtml(url)+'" style="max-width:100%;max-height:500px;object-fit:contain;">';
+  } else if(url&&(mimeL==='application/pdf'||namL.endsWith('.pdf'))){
+    previewArea.innerHTML='<iframe src="'+_escHtml(url)+'" style="width:100%;height:500px;border:none;"></iframe>';
+  } else if(url){
+    previewArea.innerHTML='<div style="text-align:center;color:var(--text2);font-size:13px;padding:20px;">'+icon+' <a href="'+_escHtml(url)+'" target="_blank" style="color:var(--accent);">'+_escHtml(name)+' öffnen</a></div>';
+  } else {
+    previewArea.innerHTML='<div style="text-align:center;color:var(--text2);font-size:13px;padding:20px;">Keine Vorschau verfügbar</div>';
+  }
+  box.appendChild(previewArea);
+  ov.appendChild(box);
+  document.body.appendChild(ov);
 }
 
 function _emScheduleSave(){
@@ -17018,7 +17029,6 @@ function _emDoSave(){
   t.status=document.getElementById('emStatusSel').value||t.status;
   t.due=document.getElementById('emDueDate').value||'';
   t.emailSenderName=(document.getElementById('emSenderName').value||'').trim();
-  // Freie Termine aus der Liste lesen
   let terminRows=document.querySelectorAll('#emTerminList .em-termin-row');
   let termine=[];
   terminRows.forEach(function(row){
@@ -17027,7 +17037,6 @@ function _emDoSave(){
     if(txt.trim()||dat)termine.push({text:txt.trim(),datum:dat});
   });
   t.freieTermine=termine.length?termine:[];
-  // Rückwärtskompatibilität: freierTermin (alt) aus erstem Eintrag
   t.freierTermin=termine.length?{text:termine[0].text,datum:termine[0].datum}:null;
   t.desc=document.getElementById('emNotizInput').value||'';
   scheduleAutoSave();
@@ -17040,159 +17049,16 @@ function _emUpdateFolderLink(){
   let lnk=document.getElementById('emFolderLink');
   if(!lnk)return;
   let url=(_emCurrentTask&&_emCurrentTask.gdriveOrdner)||'';
-  if(url&&url.includes('drive.google.com')){lnk.href=url;lnk.textContent='Ordner öffnen →';}
-  else{lnk.href='#';lnk.textContent='Noch kein Ordner angelegt';}
+  if(url){lnk.href=url;lnk.textContent='Ordner öffnen →';}
+  else{lnk.href='#';lnk.textContent='(kein Ordner)';}
 }
-
-function _emRenderTerminList(){
-  let container=document.getElementById('emTerminList');
-  if(!container)return;
-  let t=_emCurrentTask;
-  // freieTermine (Array) hat Vorrang, Fallback: altes freierTermin (Objekt)
-  let termine=(t&&t.freieTermine&&t.freieTermine.length)?t.freieTermine:
-    (t&&t.freierTermin&&(t.freierTermin.text||t.freierTermin.datum))?[t.freierTermin]:[];
-  container.innerHTML='';
-  if(!termine.length){
-    // 1 leere Zeile anzeigen damit man sofort tippen kann
-    _emAddTerminRow(container,'','');
-    return;
-  }
-  termine.forEach(function(ft){_emAddTerminRow(container,ft.text||'',ft.datum||'');});
-}
-
-function _emAddTerminRow(container,txt,dat){
-  let row=document.createElement('div');
-  row.className='em-termin-row';
-  let ti=document.createElement('input');
-  ti.type='text';ti.className='em-field-input em-termin-txt';
-  ti.placeholder='Bezeichnung …';ti.value=txt;ti.autocomplete='off';
-  ti.addEventListener('input',_emScheduleSave);
-  let di=document.createElement('input');
-  di.type='date';di.className='em-field-input em-termin-dat';
-  di.value=dat;
-  di.addEventListener('input',_emScheduleSave);
-  let delBtn=document.createElement('button');
-  delBtn.className='em-termin-del';delBtn.type='button';delBtn.textContent='✕';
-  delBtn.title='Termin entfernen';
-  delBtn.addEventListener('click',function(){row.remove();_emScheduleSave();});
-  row.appendChild(ti);row.appendChild(di);row.appendChild(delBtn);
-  container.appendChild(row);
-}
-
-function _emAddTermin(){
-  let container=document.getElementById('emTerminList');
-  if(!container)return;
-  _emAddTerminRow(container,'','');
-  // letztes Textfeld fokussieren
-  let rows=container.querySelectorAll('.em-termin-row');
-  if(rows.length){let last=rows[rows.length-1];let inp=last.querySelector('.em-termin-txt');if(inp)inp.focus();}
-}
-
-function _emUpdateTop2(){
-  let el=document.getElementById('emTopRow2');
-  if(!el)return;
-  let t=_emCurrentTask;
-  if(!t){el.innerHTML='';return;}
-  let chips=[];
-  // Termin vereinbaren Button
-  chips.push('<button class="em-top2-termin-btn" onclick="_emTerminVereinbaren()" title="Freien Termin eintragen">📆 Termin vereinbaren</button>');
-  // Status-Label + Chip
-  let st=t.status||'';
-  chips.push('<span class="em-top2-lbl">Status:</span>');
-  if(st)chips.push('<span class="em-top2-chip status">'+_escHtml(st)+'</span>');
-  // Bearbeiten bis
-  let due=t.due||'';
-  if(due){
-    let dLabel=due;
-    try{let dp=new Date(due);if(!isNaN(dp))dLabel=dp.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'2-digit'});}catch(e){}
-    chips.push('<span class="em-top2-chip due">📅 bis '+_escHtml(dLabel)+'</span>');
-  }
-  // Anhänge zählen
-  let attCount=0;
-  (t.emailOriginals||[]).forEach(function(m){attCount+=(m.attachments||[]).length;});
-  (t.gmailThreadMessages||[]).forEach(function(m){attCount+=(m.attachments||m.files||[]).length;});
-  if(attCount>0)chips.push('<span class="em-top2-chip att">📎 '+attCount+'</span>');
-  // Notiz vorhanden?
-  if((t.desc||'').trim())chips.push('<span class="em-top2-chip att">📝</span>');
-  // Freie Termine vorhanden?
-  let hasTermin=(t.freieTermine&&t.freieTermine.length)||(t.freierTermin&&(t.freierTermin.text||t.freierTermin.datum));
-  if(hasTermin)chips.push('<span class="em-top2-chip att">📆</span>');
-  el.innerHTML=chips.join('');
-}
-
-function _emTerminVereinbaren(){
-  if(!_emCurrentTask)return;
-  // Termin-Eingabe: fügt einen neuen Eintrag in Freie Termine ein und scrollt dorthin
-  _emAddTermin();
-  // rechtes Panel aufklappen falls collapsed
-  if(_emRightCollapsed)_emToggleRight();
-  // zu Freie Termine scrollen
-  let rp=document.getElementById('emRightPanel');
-  let tl=document.getElementById('emTerminList');
-  if(rp&&tl)rp.scrollTop=tl.offsetTop-40;
-  showToast('Termin im rechten Panel eintragen','info');
-}
-
-function _emAntworten(){
-  if(!_emCurrentTask)return;
-  let t=_emCurrentTask;
-  // Absender-E-Mail aus erstem emailOriginal
-  let firstMail=(t.emailOriginals||[])[0]||null;
-  let to=firstMail&&(firstMail.from||firstMail.sender)||t.emailSender||'';
-  let subject=firstMail&&firstMail.subject||t.title||'';
-  if(!subject.toLowerCase().startsWith('re:'))subject='Re: '+subject;
-  let body='\n\n--- Ursprüngliche Nachricht ---\n'+(firstMail&&(firstMail.body||firstMail.bodyText)||'').substring(0,500);
-  // mailto: Link öffnen
-  let mailto='mailto:'+encodeURIComponent(to)+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);
-  window.open(mailto,'_blank');
-}
-
-function _emShowAttachPreview(url,name,mime,evt){
-  if(evt)evt.stopPropagation();
-  // Altes Popup entfernen
-  let old=document.getElementById('emAttachPreviewOverlay');if(old)old.remove();
-  if(!url){showToast('Kein Link verfügbar','error');return;}
-  let nameLow=(name||'').toLowerCase();
-  let isImage=nameLow.match(/\.(jpe?g|png|gif|webp|bmp|heic)$/)|| (mime||'').startsWith('image/');
-  let isPdf=nameLow.endsWith('.pdf')||(mime||'').includes('pdf');
-  // Overlay
-  let ov=document.createElement('div');
-  ov.id='emAttachPreviewOverlay';
-  ov.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.65);z-index:2100;display:flex;align-items:center;justify-content:center;';
-  ov.addEventListener('click',function(e){if(e.target===ov)ov.remove();});
-  // Box
-  let box=document.createElement('div');
-  box.style.cssText='background:var(--bg2);border-radius:12px;width:82vw;max-width:900px;height:80vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.4);';
-  // Header
-  let hdr=document.createElement('div');
-  hdr.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--border);flex-shrink:0;';
-  hdr.innerHTML='<span style="font-weight:600;font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">'+_escHtml(name)+'</span>'+
-    '<div style="display:flex;align-items:center;gap:10px;">'+
-      '<a href="'+_escHtml(url)+'" target="_blank" style="font-size:12px;color:var(--accent);text-decoration:none;font-weight:600;">↗ In Drive öffnen</a>'+
-      '<button onclick="document.getElementById(\'emAttachPreviewOverlay\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text2);line-height:1;padding:0;">✕</button>'+
-    '</div>';
-  // Content
-  let content=document.createElement('div');
-  content.style.cssText='flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;background:var(--bg1,#f5f5f5);';
-  if(isImage){
-    // Bild direkt anzeigen – Drive thumbnail URL zusammenbauen
-    let imgUrl=url;
-    // Drive-Datei-ID extrahieren für direktes Thumbnail
-    let fid=(url.match(/\/d\/([^\/]+)\//)||url.match(/[?&]id=([^&]+)/))||null;
-    if(fid){imgUrl='https://drive.google.com/thumbnail?id='+fid[1]+'&sz=w1200';}
-    content.innerHTML='<img src="'+_escHtml(imgUrl)+'" style="max-width:100%;max-height:100%;object-fit:contain;display:block;" onerror="this.onerror=null;this.src=\''+_escHtml(url)+'\';">';
-  }else if(isPdf){
-    content.innerHTML='<iframe src="'+_escHtml(url)+'" style="width:100%;height:100%;border:none;" title="PDF Vorschau"></iframe>';
-  }else{
-    content.innerHTML='<div style="text-align:center;color:var(--text2);padding:30px;">'+
-      '<div style="font-size:50px;margin-bottom:16px;">📄</div>'+
-      '<div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:10px;">'+_escHtml(name)+'</div>'+
-      '<a href="'+_escHtml(url)+'" target="_blank" style="color:var(--accent);font-size:13px;font-weight:600;">In Drive öffnen →</a>'+
-    '</div>';
-  }
-  box.appendChild(hdr);box.appendChild(content);
-  ov.appendChild(box);
-  document.body.appendChild(ov);
+function _emToggleFolder(){
+  let body=document.getElementById('emFolderBody');
+  let arrow=document.getElementById('emFolderArrow');
+  if(!body)return;
+  let open=body.style.display==='none';
+  body.style.display=open?'block':'none';
+  if(arrow)arrow.textContent=open?'˅':'›';
 }
 
 function _emInAuftragEinglieder(){
@@ -17311,6 +17177,7 @@ function openEditTaskModal(id){
   if(!task){showToast('Task nicht gefunden (ID: '+id+')','error');return;}
   // E-Mail-Board → eigenes Modal
   if(_isEmailBoard(taskBoard)){openEmailTaskModal(task,taskBoard);return;}
+  if(!task){showToast('Task nicht gefunden (ID: '+id+')','error');return;}
   // Snapshot für Dirty-Tracking und Snapshot-Merge speichern
   _taskModalSnapshot = JSON.parse(JSON.stringify(task));
   _taskModalDirty = false;
@@ -17372,7 +17239,6 @@ function openEditTaskModal(id){
   document.getElementById('tNAS').value=task.nas||_nDef;
   _updateFotoOrdnerHint();
   document.getElementById('tEmailOrdner').value=task.emailOrdner||(_isAufgabenEdit?_aufgabenDef:_dDef);
-  const _dokEl=document.getElementById('tDokOrdner');if(_dokEl)_dokEl.value=task.dokOrdner||'';
   document.getElementById('deleteTaskBtn').style.display='';
   const _atb2=document.getElementById('archiveTaskBtn');if(_atb2)_atb2.style.display='';
   // abschlussBtn: wird von _applyBoardType gesteuert (nur Baustelle-Typ)
@@ -17476,7 +17342,7 @@ function moveTaskToBoard(){
   box.style.cssText='background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:22px 24px;min-width:280px;max-width:380px;box-shadow:0 8px 40px rgba(0,0,0,.35);';
   box.innerHTML='<div style="font-weight:700;font-size:15px;margin-bottom:14px;color:var(--text);">↗ Task verschieben nach …</div>'
     +'<div style="display:flex;flex-direction:column;gap:7px;" id="_moveBoardList">'
-    +boardKeys.map(b=>`<button onclick="_doMoveTask('${id}','${b.replace(/'/g,'\\x27')}');this.closest('div[style*=fixed]').remove()" style="padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;text-align:left;font-size:13px;font-weight:500;">${(boardTypes[b]||'baustelle')==='notiz'?'✅':(boardTypes[b]||'baustelle')==='email'?'📧':'🏗'} ${b}</button>`).join('')
+    +boardKeys.map(b=>`<button onclick="_doMoveTask('${id}','${b.replace(/'/g,'\\x27')}');this.closest('div[style*=fixed]').remove()" style="padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;text-align:left;font-size:13px;font-weight:500;">${(boardTypes[b]||'baustelle')==='notiz'?'✅':'🏗'} ${b}</button>`).join('')
     +'</div>'
     +'<button onclick="this.closest(\'div[style*=fixed]\').remove()" style="margin-top:14px;width:100%;padding:7px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;font-size:13px;">Abbrechen</button>';
   ov.appendChild(box);
@@ -17598,13 +17464,12 @@ function renderProjList(){
          ondragstart="onProjDragStart(event,${i})" ondragend="onProjDragEnd(event)"
          ondragover="onProjDragOver(event)" ondragleave="onProjDragLeave(event)" ondrop="onProjDrop(event,${i})">
       <span class="proj-drag" title="Ziehen zum Umsortieren" style="cursor:grab;user-select:none;color:var(--text2);padding:0 4px;">⋮⋮</span>
-      <span class="proj-icon">${(p.type||'baustelle')==='notiz'?'✅':(p.type||'baustelle')==='email'?'📧':'🏗'}</span>
+      <span class="proj-icon">${(p.type||'baustelle')==='notiz'?'✅':'🏗'}</span>
       <input type="text" value="${esc(p.name)}" id="projinput-${i}" placeholder="Projektname" autocomplete="off" onmousedown="event.stopPropagation()" ondragstart="event.stopPropagation()">
       <span class="proj-count">${p.count} Task${p.count!==1?'s':''}</span>
       <select id="projtype-${i}" class="proj-type-sel" title="Projekt-Typ" onmousedown="event.stopPropagation()">
         <option value="baustelle" ${(p.type||'baustelle')==='baustelle'?'selected':''}>🏗 Baustelle</option>
         <option value="notiz" ${(p.type||'baustelle')==='notiz'?'selected':''}>✅ Aufgaben</option>
-        <option value="email" ${(p.type||'baustelle')==='email'?'selected':''}>📧 E-Mail-Eingang</option>
       </select>
       <label class="proj-mobile" title="Auf PTP Mobile anzeigen" style="display:flex;align-items:center;gap:4px;margin:0 6px;font-size:12px;color:var(--text2);cursor:pointer;user-select:none;">
         <input type="checkbox" id="projmob-${i}" ${p.mobile?'checked':''} onchange="toggleProjMobile(${i})" style="margin:0;cursor:pointer;" autocomplete="off">
@@ -18102,7 +17967,6 @@ async function _createDriveFoldersForNewAuftrag(p){
       const gdEl =document.getElementById('tGD');           if(gdEl)  gdEl.value=fotoUrl;
       const gdoEl=document.getElementById('tGDOrdner');     if(gdoEl) gdoEl.value=dokUrl;
       const eoEl =document.getElementById('tEmailOrdner');  if(eoEl)  eoEl.value=emailUrl;
-      const doEl =document.getElementById('tDokOrdner');      if(doEl)  doEl.value =dokUrl;
       if(typeof _updateFotoOrdnerHint==='function') _updateFotoOrdnerHint();
       if(typeof _updateStammSummary==='function')   _updateStammSummary();
       if(typeof _updateHdrMeta==='function')        _updateHdrMeta();
