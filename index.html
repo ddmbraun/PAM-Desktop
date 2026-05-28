@@ -3335,6 +3335,8 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
         <div class="em-right-section" style="border-top:1px solid var(--border);padding-top:8px;">
           <div class="em-right-lbl">Aktionen</div>
           <button class="em-action-btn primary" onclick="_emAntworten()">↩ Antworten</button>
+          <button class="em-action-btn" onclick="_emLadeOutlookVerlauf()" id="emOutlookLadenBtn" title="Outlook-Verlauf laden (info@ + frank.braun@)">📨 Outlook laden</button>
+          <button class="em-action-btn" onclick="_emLadeGmailVerlauf()" id="emGmailLadenBtn" title="Gmail-Verlauf laden" style="display:none;">📩 Gmail laden</button>
           <button class="em-action-btn" onclick="_emInAuftragEinglieder()">📋 In Auftrag eingliedern</button>
           <button class="em-action-btn" onclick="_emInBoardVerschieben()">↪ In Board verschieben</button>
           <button class="em-action-btn danger" onclick="_emDeleteTask()">🗑 Löschen</button>
@@ -3353,7 +3355,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-28 · #97'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-28-b97)
+const PAM_BUILD = 'v2026-05-28 · #99'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-28-b99)
 
 // ── STATE ──
 let boards = {};
@@ -16782,10 +16784,13 @@ function openEmailTaskModal(task,board){
   });
   document.getElementById('emDueDate').value=task.due||'';
   _emRenderTerminList();
-  document.getElementById('emNotizInput').value=task.desc||'';
+  document.getElementById('emNotizInput').value=task.emNotiz||'';
   _emUpdateFolderLink();
   let rp=document.getElementById('emRightPanel');
   if(_emRightCollapsed)rp.classList.add('collapsed');else rp.classList.remove('collapsed');
+  // Gmail-Button nur zeigen wenn Gmail verbunden
+  const _gbtn=document.getElementById('emGmailLadenBtn');
+  if(_gbtn)_gbtn.style.display=(typeof gmailToken!=='undefined'&&gmailToken)?'':'none';
   _emUpdateTop2();
   _renderEmailMailList();
   document.getElementById('emailTaskModal').classList.add('open');
@@ -16849,11 +16854,31 @@ function _renderEmailMailList(){
   });
 }
 
-function _emOpenMail(idx,mails){
+async function _emOpenMail(idx,mails){
   _emActiveMailIdx=idx;
   _renderEmailMailList();
   let m=mails[idx];
   let d=m.data;
+
+  // ── Exchange-Thread-Mail: Body-Overlay wie im normalen Task-Modal öffnen ──
+  if(m.type==='ms'&&d.id&&_emCurrentTask){
+    _pamActiveTaskId=_emCurrentTask.id;
+    // _msOpenMailOverlay erwartet (taskId, idx innerhalb msThreadMessages)
+    const _msIdx=(_emCurrentTask.msThreadMessages||[]).findIndex(x=>x.id===d.id);
+    if(_msIdx>=0){
+      await _msOpenMailOverlay(_emCurrentTask.id,_msIdx);
+      return;
+    }
+  }
+  // ── Gmail-Thread-Mail: Body-Overlay wie im normalen Task-Modal öffnen ──
+  if(m.type==='gmail'&&d.id&&_emCurrentTask){
+    _pamActiveTaskId=_emCurrentTask.id;
+    const _gmIdx=(_emCurrentTask.gmailThreadMessages||[]).findIndex(x=>x.id===d.id);
+    if(_gmIdx>=0&&typeof _gmOpenMailOverlay==='function'){
+      await _gmOpenMailOverlay(_emCurrentTask.id,_gmIdx);
+      return;
+    }
+  }
   let from=d.from||d.sender||d.senderName||'Unbekannt';
   let subject=d.subject||d.betreff||'(kein Betreff)';
   let bodyHtml=d.bodyHtml||'';
@@ -16862,8 +16887,80 @@ function _emOpenMail(idx,mails){
   let dateLabel='';
   if(dateStr){try{let dt=new Date(typeof dateStr==='number'?dateStr:dateStr);dateLabel=isNaN(dt)?String(dateStr):dt.toLocaleString('de-DE');}catch(e){dateLabel=String(dateStr);}}
   let initials=from.split(/\s+/).slice(0,2).map(function(w){return w[0]||'';}).join('').toUpperCase()||'?';
-  // Anhänge-Daten für rechtes Panel
-  let allFiles=[];
+
+  // ── EML-Original: Body + Anhänge live von Drive laden wenn nicht im Eintrag gespeichert ──
+  let emlAttachFiles=[];
+  if(m.type==='original'&&d.fileId&&!bodyHtml&&!bodyText){
+    // Header sofort mit Ladeanzeige rendern
+    let pane=document.getElementById('emReadingPane');
+    pane.innerHTML=
+      '<div class="em-rp-header">'+
+        '<div class="em-rp-subject">'+_escHtml(subject)+'</div>'+
+        '<div class="em-rp-meta">'+
+          '<div class="em-avatar">'+_escHtml(initials)+'</div>'+
+          '<div style="display:flex;flex-direction:column;gap:1px;">'+
+            '<span style="font-size:12px;font-weight:600;color:var(--text);">'+_escHtml(from)+'</span>'+
+            '<span style="font-size:11px;color:var(--text2);">'+_escHtml(dateLabel)+'</span>'+
+          '</div>'+
+        '</div>'+
+      '</div>'+
+      '<div id="emBodyContainer" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0;align-items:center;justify-content:center;">'+
+        '<div style="color:var(--text2);font-size:13px;">⏳ E-Mail wird geladen…</div>'+
+      '</div>';
+    _emRenderAttachPanel([]);
+    if(!gdriveToken){
+      document.getElementById('emBodyContainer').innerHTML='<div style="padding:20px;color:#c00;font-size:13px;">⚠ Nicht mit Google Drive verbunden.</div>';
+      return;
+    }
+    try{
+      let r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(d.fileId)+'?alt=media',
+        {headers:{Authorization:'Bearer '+gdriveToken}});
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      let rawText=await r.text();
+      let parsed=_parseEmlText(rawText);
+      bodyHtml=parsed.bodyHtml||'';
+      bodyText=parsed.bodyText||'';
+      // CID-Inline-Bilder ersetzen
+      if(bodyHtml&&parsed.cidMap){
+        for(const [cid,durl] of Object.entries(parsed.cidMap)){bodyHtml=bodyHtml.split(cid).join(durl);}
+      }
+      // Metadaten verfeinern falls im gespeicherten Eintrag unvollständig
+      if(parsed.subject&&!d.subject)from=parsed.sender||from;
+      if(parsed.sender)from=parsed.sender;
+      // Anhänge aus EML als Datei-Liste
+      (parsed.attachments||[]).forEach(function(a){
+        let nl=(a.name||'').toLowerCase();
+        let icon=nl.endsWith('.pdf')?'📄':(nl.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':'📎');
+        emlAttachFiles.push({icon,name:a.name||'Anhang',url:'',mime:a.mimeType||'',data:a,_isEmlParsed:true});
+      });
+      // Anhänge die beim EML-Upload bereits in Drive gespeichert wurden:
+      let t=_emCurrentTask;
+      if(t&&d.messageId){
+        // Fotos und Attachments des Tasks anzeigen die zur gleichen EML gehören
+        (t.fotos||[]).forEach(function(f){
+          if(f.fromMessageId&&f.fromMessageId!==d.messageId)return;
+          let nl=(f.name||'').toLowerCase();
+          let icon=nl.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':'📎';
+          if(!emlAttachFiles.some(x=>x.name===f.name))
+            emlAttachFiles.push({icon,name:f.name||'Foto',url:f.thumbnailLink||'',mime:f.mimeType||'image/jpeg',data:f});
+        });
+        (t.attachments||[]).forEach(function(a){
+          if(a.fromMessageId&&a.fromMessageId!==d.messageId)return;
+          let nl=(a.name||'').toLowerCase();
+          let icon=nl.endsWith('.pdf')?'📄':'📎';
+          if(!emlAttachFiles.some(x=>x.name===a.name))
+            emlAttachFiles.push({icon,name:a.name||'Anhang',url:a.url||'',mime:'',data:a});
+        });
+      }
+    }catch(e){
+      document.getElementById('emBodyContainer').innerHTML='<div style="padding:20px;color:#c00;font-size:13px;">⚠ Fehler beim Laden: '+_escHtml(e.message)+'<br><a href="'+_escHtml(d.url||'')+'" target="_blank" style="color:var(--accent);">In Drive öffnen</a></div>';
+      if(e.message&&e.message.includes('401'))_handleDrive401();
+      return;
+    }
+  }
+
+  // Anhänge-Panel (normale Thread-Mails haben d.attachments, EML-Originale bekommen emlAttachFiles)
+  let allFiles=[...emlAttachFiles];
   (d.attachments||[]).forEach(function(a){
     let name=a.filename||a.name||'Anhang';
     let nl=name.toLowerCase();
@@ -16873,6 +16970,7 @@ function _emOpenMail(idx,mails){
     allFiles.push({icon,name,url,mime,data:a});
   });
   _emRenderAttachPanel(allFiles);
+
   let pane=document.getElementById('emReadingPane');
   pane.innerHTML=
     '<div class="em-rp-header">'+
@@ -16889,7 +16987,7 @@ function _emOpenMail(idx,mails){
   // HTML-Body per iframe (Blob URL)
   let bodyContainer=document.getElementById('emBodyContainer');
   if(bodyHtml){
-    let cleanBody=bodyHtml;
+    let cleanBody=bodyHtml.replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<link[^>]+rel=["']?stylesheet["']?[^>]*>/gi,'');
     let iframe=document.createElement('iframe');
     iframe.style.cssText='flex:1;width:100%;border:none;min-height:0;';
     let fullHtml='<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,Helvetica,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}a{color:#1a73e8;}img{max-width:100%;}</style></head><body>'+cleanBody+'</body></html>';
@@ -16897,8 +16995,11 @@ function _emOpenMail(idx,mails){
     iframe.src=blobUrl;
     iframe.onload=function(){URL.revokeObjectURL(blobUrl);};
     bodyContainer.appendChild(iframe);
-  } else {
+  } else if(bodyText){
     bodyContainer.innerHTML='<div style="padding:14px 18px;font-family:Arial,sans-serif;font-size:13px;color:#444;white-space:pre-wrap;overflow-y:auto;flex:1;">'+_escHtml(bodyText)+'</div>';
+  } else {
+    bodyContainer.innerHTML='<div style="padding:20px;color:var(--text2);font-size:13px;text-align:center;">'+
+      (d.fileId?'<a href="'+_escHtml(d.url||'#')+'" target="_blank" style="color:var(--accent);">📂 In Drive öffnen</a>':'(kein Inhalt)')+'</div>';
   }
 }
 
@@ -16967,6 +17068,50 @@ function _emTerminVereinbaren(){
   let title=_emCurrentTask.title||'Termin';
   let url='https://calendar.google.com/calendar/r/eventedit?text='+encodeURIComponent(title);
   window.open(url,'_blank');
+}
+
+// ── Exchange-Verlauf aus Posteingang-Modal laden ──────────────────────────────
+// Setzt _pamActiveTaskId damit _msLoadEmailThread/_gmLoadEmailThread den richtigen Task finden
+async function _emLadeOutlookVerlauf(){
+  if(!_emCurrentTask){showToast('⚠ Kein Task aktiv','error',3000);return;}
+  const btn=document.getElementById('emOutlookLadenBtn');
+  if(btn){btn.textContent='⏳ Lade…';btn.disabled=true;}
+  // Task-ID für _getActiveTaskId verfügbar machen
+  _pamActiveTaskId=_emCurrentTask.id;
+  // DOM-Feld taskId befüllen (wird von _msLoadEmailThread ausgelesen)
+  const domId=document.getElementById('taskId');
+  const _prevDomId=domId?domId.value:'';
+  if(domId)domId.value=_emCurrentTask.id;
+  try{
+    await _msLoadEmailThread();
+    // Nach erfolgreichem Laden: Mail-Liste im Modal aktualisieren
+    _renderEmailMailList();
+    // Gmail-Button anzeigen falls Gmail verbunden
+    const gbtn=document.getElementById('emGmailLadenBtn');
+    if(gbtn)gbtn.style.display=(typeof gmailToken!=='undefined'&&gmailToken)?'':'none';
+  }catch(e){console.warn('[EM] Outlook laden:',e);}
+  finally{
+    if(domId)domId.value=_prevDomId;
+    if(btn){btn.textContent='📨 Outlook laden';btn.disabled=false;}
+  }
+}
+
+async function _emLadeGmailVerlauf(){
+  if(!_emCurrentTask){showToast('⚠ Kein Task aktiv','error',3000);return;}
+  const btn=document.getElementById('emGmailLadenBtn');
+  if(btn){btn.textContent='⏳ Lade…';btn.disabled=true;}
+  _pamActiveTaskId=_emCurrentTask.id;
+  const domId=document.getElementById('taskId');
+  const _prevDomId=domId?domId.value:'';
+  if(domId)domId.value=_emCurrentTask.id;
+  try{
+    await _gmLoadEmailThread();
+    _renderEmailMailList();
+  }catch(e){console.warn('[EM] Gmail laden:',e);}
+  finally{
+    if(domId)domId.value=_prevDomId;
+    if(btn){btn.textContent='📩 Gmail laden';btn.disabled=false;}
+  }
 }
 function _emAntworten(){
   if(!_emCurrentTask)return;
@@ -17052,7 +17197,7 @@ function _emDoSave(){
   });
   t.freieTermine=termine.length?termine:[];
   t.freierTermin=termine.length?{text:termine[0].text,datum:termine[0].datum}:null;
-  t.desc=document.getElementById('emNotizInput').value||'';
+  t.emNotiz=document.getElementById('emNotizInput').value||'';
   scheduleAutoSave();
   renderBoard();
   _emUpdateFolderLink();
