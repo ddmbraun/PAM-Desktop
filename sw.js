@@ -1,7 +1,7 @@
 // Service Worker - PAM Desktop (Workboard + Stammblatt)
 // Google-APIs werden NIEMALS gecacht.
 
-const CACHE_NAME = 'pam-desktop-2026-05-28-b84'; // b84: Heute-Ansicht: 2-Spalten-Layout (links Aufgaben, rechts Aufträge) mit farbigen Spalten-Headern // b83: Auftrag-anlegen: Bestehender-Task-Dropdown zeigt Tasks aus ALLEN Boards gruppiert, _auftragToggle robuster // b82: Fix Drive-Browser Suche: orderBy bei contains-Query entfernt (API-Fehler 400), spaces=drive hinzugefügt, clientseitig sortiert // b81: Drive-Browser Suche: Suchfeld mit Debounce, Treffer anzeigen + direkt öffnen oder auswählen // b80: Baudoku: Live-Preisupdate (oninput statt onchange), Autocomplete für Personal + Maschinen aus allen Tasks // b79: Fix internetMessageId in _saveThreadMailsAsEml (Outlook-Thread-Mails wurden nie als Original gespeichert); Drive-Browser statt prompt() im Verschieben-Button // b78: Projektordner-Verschieben-Button (📁↗) in Verknüpfungen: verschiebt Hauptordner in neuen Bauvorhaben-Ordner + sucht _Stammdaten // b77: Outlook-Verlauf: echte MIME-Originale via Graph /$value automatisch in emailOriginals speichern // b76: Dual-Outlook: zweiter Konto-Slot (f.braun@ddmbraun.de), Button 📨 f.B, automatische Fallback-Suche Token2 // b74: Outlook-Fix: Token-Refresh auch wenn msToken=null (nach Reload), Auto-Load im Popup auch bei gespeichertem MSAL-Account // b73: tDokOrdner-Feld (01_Dokumente-Ordner)
+const CACHE_NAME = 'pam-desktop-2026-05-28-b85'; // b85: Spalten-Dropdown im Auftrag-anlegen-Dialog // b84: Heute-Ansicht 2-Spalten-Layout // b83: Bestehender-Task-Dropdown alle Boards
 const PRECACHE = [
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css',
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js',
@@ -12,7 +12,7 @@ const PRECACHE = [
   'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
 ];
 
-// Installation: CDN-Ressourcen einzeln cachen - ein Fehler blockiert nicht den ganzen Install
+// Installation: CDN-Ressourcen einzeln cachen
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE_NAME).then(cache =>
@@ -99,4 +99,7 @@ self.addEventListener('fetch', e => {
           caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
         }
         return resp;
-      }).catch(() => new Response('', {status: 503, st
+      }).catch(() => new Response('', {status: 503, statusText: 'Offline'}));
+    })
+  );
+});
