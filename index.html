@@ -70,14 +70,24 @@ function handleEmailFileSelect(evt){
   let file=evt.target.files&&evt.target.files[0];
   if(!file)return;
   evt.target.value='';
-  let url=((document.getElementById('tEmailOrdner')||{}).value||'').trim()||((document.getElementById('tGDOrdner')||{}).value||'').trim();
-  if(!url.trim()){_ezMsg(zone,'error','Bitte zuerst E-Mail-Ablageordner oder Projektordner in den Verknüpfungen eintragen!');return;}
+  // Für EML/MSG: nur tEmailOrdner verwenden (kein Fallback) – konsistent mit _uploadEmailOriginal
+  // Für PDF: auch tGDOrdner als Fallback erlauben
+  const _isPdfFile=file.type==='application/pdf'||/\.pdf$/i.test(file.name);
+  const _isEmlMsgFile=/\.(msg|eml)$/i.test(file.name);
+  let url=_isPdfFile
+    ?((document.getElementById('tEmailOrdner')||{}).value||'').trim()||((document.getElementById('tGDOrdner')||{}).value||'').trim()
+    :((document.getElementById('tEmailOrdner')||{}).value||'').trim();
+  if(!url.trim()){
+    if(_isEmlMsgFile){_ezMsg(zone,'error','Bitte zuerst den E-Mail-Ablageordner unter „Verknüpfungen → E-Mail-Ordner" eintragen!');}
+    else{_ezMsg(zone,'error','Bitte zuerst E-Mail-Ablageordner oder Projektordner in den Verknüpfungen eintragen!');}
+    return;
+  }
   let fid=_ezFolderId(url);
   if(!fid){_ezMsg(zone,'error','Ungueltige Google Drive Ordner-URL.');return;}
   if(!gdriveToken){_ezMsg(zone,'error','Bitte zuerst mit Google Drive verbinden (oben).');return;}
   _ezMsg(zone,'','Verarbeite '+file.name+'...');
   // PDF direkt hochladen
-  if(file.type==='application/pdf'||/\.pdf$/i.test(file.name)){
+  if(_isPdfFile){
     let readerPdf=new FileReader(); // Fix #9: eindeutiger Variablenname
     readerPdf.onload=function(e){
       _ezUpload(e.target.result,file.name,fid).then(function(){
@@ -89,7 +99,7 @@ function handleEmailFileSelect(evt){
     return;
   }
   // EML/MSG: Original direkt speichern (kein PDF-Umweg)
-  if(/\.(msg|eml)$/i.test(file.name)){
+  if(_isEmlMsgFile){
     _ezMsg(zone,'','');
     _uploadEmailOriginal(file);
     return;
@@ -1296,7 +1306,7 @@ async function _auftragConfirm(){
       if(buf&&gdriveToken){
         let origResult=await _driveUploadGeneric(buf,origName,origMime,fid);
         if(origResult&&origResult.id){
-          newTask.emailOriginals=[{name:info.subject||origName,filename:origName,fileId:origResult.id,url:'https://drive.google.com/file/d/'+origResult.id+'/view',uploadedAt:new Date().toLocaleDateString('de-DE')}];
+          newTask.emailOriginals=[{name:origName,subject:info.subject||'',sender:info.sender||'',date:info.date instanceof Date&&!isNaN(info.date)?info.date.toISOString():new Date().toISOString(),messageId:info.messageId||'',fileId:origResult.id,url:'https://drive.google.com/file/d/'+origResult.id+'/view',uploadedAt:new Date().toLocaleDateString('de-DE')}];
         }
       }
     }catch(e){console.warn('[PTP] Original-Upload fehlgeschlagen:',e);showToast('⚠ E-Mail Original fehlgeschlagen: '+e.message,'error',8000);}
@@ -2318,7 +2328,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
     <span class="file-dot none" id="fileDot"></span>
     <span class="file-name" id="fileName">Keine Datei geöffnet</span>
     <span class="file-msg" id="fileMsg"></span>
-    <span id="pamVersionBadge" style="font-size:10px;color:var(--text2);opacity:.65;padding:1px 7px;border:0.5px solid var(--border);border-radius:4px;margin-left:8px;font-family:monospace;white-space:nowrap;flex-shrink:0;">v2026-05-14 · #47</span>
+    <span id="pamVersionBadge" style="font-size:10px;color:var(--text2);opacity:.65;padding:1px 7px;border:0.5px solid var(--border);border-radius:4px;margin-left:8px;font-family:monospace;white-space:nowrap;flex-shrink:0;"></span>
     <button onclick="_clearCacheAndReload()" title="Browser-Cache leeren und Seite neu laden (bei Darstellungsproblemen oder nach Updates)" style="font-size:10px;padding:1px 7px;border-radius:4px;border:0.5px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;margin-left:4px;flex-shrink:0;" onmouseover="this.style.borderColor='var(--red)';this.style.color='var(--red)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text2)'">🔄 Cache</button>
   </div>
   <div class="filebar-right">
@@ -3343,7 +3353,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-28 · #96'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-28-b96)
+const PAM_BUILD = 'v2026-05-28 · #97'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-28-b97)
 
 // ── STATE ──
 let boards = {};
@@ -14248,7 +14258,9 @@ function _eicHtml(item){
   const btnsPdf=`<button type="button" class="eic-btn" onclick="_openEmailPdfGallery(${item._idx})" title="Vollbild-Galerie">🔍</button><a class="eic-btn" href="${esc(item.url)}" target="_blank" title="In Google Drive öffnen">📂</a><button type="button" class="eic-btn eic-btn-del" onclick="taskEmailPdfs.splice(${item._idx},1);renderEmailSection();scheduleTaskFieldSave();" title="Entfernen">✕</button>`;
   const btnsOrig=`<button type="button" class="eic-btn" onclick="_openEmailOrigInlinePreview({fileId:'${esc(item.fileId||'')}',name:'${nameEsc}',url:'${esc(item.url||'')}'})" title="Vorschau anzeigen">🔍</button><button type="button" class="eic-btn" onclick="_downloadEmailOrig('${esc(item.fileId)}','${nameEsc}')" title="Herunterladen – in Downloads-Ordner speichern, dann per Doppelklick in Outlook öffnen">⬇</button><button type="button" class="eic-btn" onclick="_printEmailFromDrive('${esc(item.fileId)}','${nameEsc}',true)" title="Als PDF drucken">🖨</button><button type="button" class="eic-btn eic-btn-del" onclick="taskEmailOriginals.splice(${item._idx},1);renderEmailSection();scheduleTaskFieldSave();" title="Entfernen">✕</button>`;
   const _snapFolder=item.folderId?`https://drive.google.com/drive/folders/${item.folderId}`:(item.url||'#');
-  const btnsSnap=`<button type="button" class="eic-btn" onclick="window.open('${esc(_snapFolder)}','_blank')" title="Ordner in Google Drive öffnen">📂</button><button type="button" class="eic-btn eic-btn-del" onclick="taskEmailOriginals.splice(${item._idx},1);renderEmailSection();scheduleTaskFieldSave();" title="Entfernen">✕</button>`;
+  // Snapshot-Vorschau: HTML-Datei direkt im Browser öffnen (item.url zeigt auf die gespeicherte HTML-Datei)
+  const _snapPreviewUrl=item.url||_snapFolder;
+  const btnsSnap=`<button type="button" class="eic-btn" onclick="window.open('${esc(_snapPreviewUrl)}','_blank')" title="Vorschau in Google Drive öffnen">🔍</button><button type="button" class="eic-btn" onclick="window.open('${esc(_snapFolder)}','_blank')" title="Ordner in Google Drive öffnen">📂</button><button type="button" class="eic-btn eic-btn-del" onclick="taskEmailOriginals.splice(${item._idx},1);renderEmailSection();scheduleTaskFieldSave();" title="Entfernen">✕</button>`;
   // Datum aus E-Mail (ISO) → Anzeige als deutsches Datum
   let _eicDate='';
   const _rd=item.date?new Date(item.date):null;
@@ -15400,7 +15412,8 @@ async function _uploadEmailOriginal(file){
       const taskId2=(document.getElementById('taskId')||{}).value||'';
       const t2=findTaskById(taskId2);
       const knownIds=t2?[...(t2.msMessageIds||[]),(t2.msMessageId||''),(t2.gmailMessageId||''),...(t2.gmailMessageIds||[])].filter(Boolean):[];
-      if(knownIds.includes(preMessageId)){
+      const alreadyInOriginals=taskEmailOriginals.some(e=>e.messageId&&e.messageId===preMessageId);
+      if(knownIds.includes(preMessageId)||alreadyInOriginals){
         if(msgEl)msgEl.textContent='📧 .eml / .msg hier hineinziehen';
         showToast('ℹ Diese Mail ist bereits im Task vorhanden','info',3000);
         return;
@@ -15422,6 +15435,7 @@ async function _uploadEmailOriginal(file){
         emailMeta={
           subject:parsed.subject||'',
           sender:parsed.sender||'',
+          recipient:parsed.recipient||'',
           date:(parsed.date instanceof Date?parsed.date:new Date()).toISOString(),
           messageId:parsed.messageId||'',
           bodyHtml:parsed.bodyHtml||'',
