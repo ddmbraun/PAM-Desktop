@@ -2078,7 +2078,10 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 /* ── E-MAIL-BOARD MODAL ── */
 #emailTaskModal{z-index:1001;}
-.email-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--bg2);border-radius:12px;width:92vw;max-width:1100px;height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px var(--shadow);}
+.email-modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--bg2);border-radius:12px;width:92vw;max-width:1100px;height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px var(--shadow);min-width:520px;min-height:300px;}
+.em-resize-handle{position:absolute;bottom:0;right:0;width:18px;height:18px;cursor:nwse-resize;z-index:10;background:transparent;}
+.em-resize-handle::after{content:'';position:absolute;bottom:4px;right:4px;width:10px;height:10px;border-right:2px solid var(--border);border-bottom:2px solid var(--border);border-radius:1px;}
+.em-topbar{cursor:move;}
 .em-topbar{display:flex;flex-direction:column;background:var(--bg3);border-bottom:1px solid var(--border);flex-shrink:0;}
 .em-top-row1{display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border);}
 .em-top-row2{display:flex;align-items:center;gap:5px;padding:4px 14px 6px;flex-wrap:wrap;min-height:28px;}
@@ -3257,7 +3260,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <!-- E-MAIL TASK MODAL -->
 <div class="modal-overlay" id="emailTaskModal" onclick="if(event.target===this)closeEmailTaskModal();">
-  <div class="email-modal">
+  <div class="email-modal" id="emModalBox">
     <!-- Top bar -->
     <div class="em-topbar">
       <div class="em-top-row1">
@@ -3343,6 +3346,8 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
         </div>
       </div>
     </div>
+    <!-- Resize-Handle unten-rechts -->
+    <div class="em-resize-handle" id="emResizeHandle"></div>
   </div>
 </div>
 
@@ -3355,7 +3360,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-28 · #99'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-28-b99)
+const PAM_BUILD = 'v2026-05-28 · #100'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-28-b100)
 
 // ── STATE ──
 let boards = {};
@@ -16793,6 +16798,17 @@ function openEmailTaskModal(task,board){
   if(_gbtn)_gbtn.style.display=(typeof gmailToken!=='undefined'&&gmailToken)?'':'none';
   _emUpdateTop2();
   _renderEmailMailList();
+  // Modal-Position zurücksetzen (zentriert) wenn es noch nicht verschoben wurde oder neu geöffnet
+  const _emBox=document.getElementById('emModalBox');
+  if(_emBox){
+    _emBox.style.transform='translate(-50%,-50%)';
+    _emBox.style.top='50%';
+    _emBox.style.left='50%';
+    _emBox.style.width='';
+    _emBox.style.height='';
+    _emBox.style.maxWidth='';
+    _emBox._emDragInit=false; // Drag-Listener neu initialisieren
+  }
   document.getElementById('emailTaskModal').classList.add('open');
   _initEmailResizers();
 }
@@ -17066,7 +17082,10 @@ function _emUpdateTop2(){
 function _emTerminVereinbaren(){
   if(!_emCurrentTask)return;
   let title=_emCurrentTask.title||'Termin';
-  let url='https://calendar.google.com/calendar/r/eventedit?text='+encodeURIComponent(title);
+  let adr=_emCurrentTask.adresse||'';
+  // Outlook Web Calendar (Exchange / Microsoft 365)
+  let url='https://outlook.office.com/calendar/deeplink/compose?subject='+encodeURIComponent(title);
+  if(adr)url+='&location='+encodeURIComponent(adr);
   window.open(url,'_blank');
 }
 
@@ -17293,27 +17312,24 @@ function _emDeleteTask(){
 }
 
 function _initEmailResizers(){
+  // ── Spalten-Resizer (links↔mitte, mitte↔rechts) ──
   function makeResizer(resizerId,leftId,rightId,side){
     let rz=document.getElementById(resizerId);
     if(!rz)return;
-    let newRz=rz.cloneNode(true); // Event-Listener entfernen (falls neu initialisiert)
+    let newRz=rz.cloneNode(true);
     rz.parentNode.replaceChild(newRz,rz);
     rz=newRz;
     rz.addEventListener('mousedown',function(e){
       e.preventDefault();
       rz.classList.add('dragging');
       let leftEl=document.getElementById(leftId);
-      let rightEl=document.getElementById(rightId);
       let startX=e.clientX;
       let startW=leftEl?leftEl.offsetWidth:0;
       function onMove(ev){
         if(!leftEl)return;
         let delta=ev.clientX-startX;
         let nw=Math.max(120,startW+delta);
-        if(side==='left'){
-          leftEl.style.width=nw+'px';
-          leftEl.style.flex='none';
-        }
+        if(side==='left'){leftEl.style.width=nw+'px';leftEl.style.flex='none';}
       }
       function onUp(){
         rz.classList.remove('dragging');
@@ -17326,6 +17342,84 @@ function _initEmailResizers(){
   }
   makeResizer('emResizer1','emMailList','emReadingPane','left');
   makeResizer('emResizer2','emReadingPane','emRightPanel','left');
+
+  // ── Modal verschieben (Drag per Topbar) ──
+  const modal=document.getElementById('emModalBox');
+  const topbar=modal&&modal.querySelector('.em-topbar');
+  if(modal&&topbar){
+    // Beim ersten Öffnen: CSS-transform auf absolute Koordinaten umrechnen
+    if(!modal._emDragInit){
+      modal._emDragInit=true;
+      topbar.addEventListener('mousedown',function(e){
+        // Nur Drag wenn kein Button/Input angeklickt
+        if(e.target.closest('button,input,select,textarea,a'))return;
+        e.preventDefault();
+        // transform entfernen und position auf aktuelle Koordinaten setzen
+        const rect=modal.getBoundingClientRect();
+        modal.style.transform='none';
+        modal.style.top=rect.top+'px';
+        modal.style.left=rect.left+'px';
+        const startX=e.clientX-rect.left;
+        const startY=e.clientY-rect.top;
+        function onMove(ev){
+          let nx=ev.clientX-startX;
+          let ny=ev.clientY-startY;
+          // An Bildschirmkanten begrenzen
+          nx=Math.max(0,Math.min(window.innerWidth-80,nx));
+          ny=Math.max(0,Math.min(window.innerHeight-40,ny));
+          modal.style.left=nx+'px';
+          modal.style.top=ny+'px';
+        }
+        function onUp(){
+          document.removeEventListener('mousemove',onMove);
+          document.removeEventListener('mouseup',onUp);
+        }
+        document.addEventListener('mousemove',onMove);
+        document.addEventListener('mouseup',onUp);
+      });
+    }
+  }
+
+  // ── Modal-Größe ändern (Resize unten-rechts) ──
+  const handle=document.getElementById('emResizeHandle');
+  if(modal&&handle){
+    let newHandle=handle.cloneNode(true);
+    handle.parentNode.replaceChild(newHandle,handle);
+    newHandle.addEventListener('mousedown',function(e){
+      e.preventDefault();
+      e.stopPropagation();
+      // Aktuelle Größe + Position einfrieren (transform entfernen falls noch aktiv)
+      const rect=modal.getBoundingClientRect();
+      modal.style.transform='none';
+      modal.style.top=rect.top+'px';
+      modal.style.left=rect.left+'px';
+      modal.style.width=rect.width+'px';
+      modal.style.height=rect.height+'px';
+      modal.style.maxWidth='none';
+      const startX=e.clientX;
+      const startY=e.clientY;
+      const startW=rect.width;
+      const startH=rect.height;
+      function onMove(ev){
+        let nw=Math.max(520,startW+(ev.clientX-startX));
+        let nh=Math.max(300,startH+(ev.clientY-startY));
+        // Nicht über Bildschirmrand
+        nw=Math.min(window.innerWidth-rect.left,nw);
+        nh=Math.min(window.innerHeight-rect.top,nh);
+        modal.style.width=nw+'px';
+        modal.style.height=nh+'px';
+        // Rechtes Panel: Hintergrund soll lückenlos füllen
+        const rp=document.getElementById('emRightPanel');
+        if(rp&&!rp.classList.contains('collapsed'))rp.style.minHeight='100%';
+      }
+      function onUp(){
+        document.removeEventListener('mousemove',onMove);
+        document.removeEventListener('mouseup',onUp);
+      }
+      document.addEventListener('mousemove',onMove);
+      document.addEventListener('mouseup',onUp);
+    });
+  }
 }
 
 function openEditTaskModal(id){
