@@ -2125,7 +2125,8 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
   </div>
   <div class="filebar-right">
     <button id="gmailBtnBar" onclick="gmailConnect()" title="Mit Gmail / Google Workspace verbinden" style="padding:3px 10px;border-radius:4px;font-size:11px;background:transparent;color:#1B5E20;border:1px solid #A5D6A7;cursor:pointer;font-weight:500;">📩 Gmail</button>
-    <button id="msBtnBar" onclick="msConnect()" title="Mit Outlook / Microsoft 365 verbinden" style="padding:3px 10px;border-radius:4px;font-size:11px;background:transparent;color:#1D4ED8;border:1px solid #93C5FD;cursor:pointer;font-weight:500;">📨 Outlook</button>
+    <button id="msBtnBar" onclick="msConnect()" title="Mit Outlook / Microsoft 365 verbinden (info@ddmbraun.de)" style="padding:3px 10px;border-radius:4px;font-size:11px;background:transparent;color:#1D4ED8;border:1px solid #93C5FD;cursor:pointer;font-weight:500;">📨 Outlook</button>
+    <button id="msBtnBar2" onclick="msConnect2()" title="Zweites Outlook-Konto verbinden (f.braun@ddmbraun.de)" style="padding:3px 8px;border-radius:4px;font-size:10px;background:transparent;color:#1D4ED8;border:1px solid #93C5FD;cursor:pointer;font-weight:500;">📨 f.B</button>
     <div class="drive-timer-wrap" title="Google Drive Verbindungsstatus">
       <button class="drive-timer-btn" id="driveBtnBar" onclick="gdriveConnectFromBar()">☁️ Google Drive</button>
       <div class="drive-timer-bar-wrap"><div class="drive-timer-bar" id="driveTimerBar"></div></div>
@@ -10596,6 +10597,8 @@ const MS_SCOPES=['Mail.Read','User.Read'];
 let msalInstance=null;
 let msToken=null;
 let msUserEmail=null;
+let msToken2=null;      // Zweites Outlook-Konto (f.braun@ddmbraun.de)
+let msUserEmail2=null;
 let _pamActiveTaskId=''; // Fallback-ID wenn taskId-DOM-Feld leer ist
 let _pamCurrentTask=null;  // Fallback-Task-Objekt wenn findTaskById fehlschlägt
 
@@ -10634,12 +10637,30 @@ function msInit(){
     _initPromise.then(()=>{
       return msalInstance.handleRedirectPromise();
     }).then(r=>{
-      if(r)_msHandleToken(r);
-      else{
+      if(r){
+        // Redirect-Ergebnis: Slot aus localStorage lesen
+        const _slot=localStorage.getItem('_msPamLoginSlot')||'1';
+        localStorage.removeItem('_msPamLoginSlot');
+        if(_slot==='2'){
+          msToken2=r.accessToken;msUserEmail2=r.account?.username||'';
+          _msUpdateBtn2();showToast('✅ Outlook 2 verbunden: '+msUserEmail2,'success',3000);
+        }else{
+          _msHandleToken(r);
+        }
+      }else{
+        // Stiller Token-Refresh für alle gespeicherten Accounts
         const accs=msalInstance.getAllAccounts();
-        if(accs.length>0){
-          msalInstance.acquireTokenSilent({scopes:MS_SCOPES,account:accs[0]})
-            .then(r2=>_msHandleToken(r2)).catch(()=>{});
+        for(const acc of accs.slice(0,2)){
+          msalInstance.acquireTokenSilent({scopes:MS_SCOPES,account:acc})
+            .then(r2=>{
+              const em=(r2.account?.username||'').toLowerCase();
+              // Zweiter Slot: f.braun@ddmbraun.de (oder zweiter Account falls Slot1 schon belegt)
+              if(msToken&&msUserEmail&&msUserEmail.toLowerCase()!==em){
+                msToken2=r2.accessToken;msUserEmail2=r2.account?.username||'';_msUpdateBtn2();
+              }else{
+                _msHandleToken(r2);
+              }
+            }).catch(()=>{});
         }
       }
       _msUpdateBtn();
@@ -10694,13 +10715,56 @@ async function _msRefreshToken(){
   try{
     const accs=msalInstance.getAllAccounts();
     if(!accs.length)return false;
-    const r=await msalInstance.acquireTokenSilent({scopes:MS_SCOPES,account:accs[0]});
+    // Konto 1 anhand gespeicherter E-Mail matchen (verhindert Verwechslung mit Konto 2)
+    const _acc1=msUserEmail?accs.find(a=>(a.username||'').toLowerCase()===msUserEmail.toLowerCase()):accs[0];
+    const r=await msalInstance.acquireTokenSilent({scopes:MS_SCOPES,account:_acc1||accs[0]});
     msToken=r.accessToken;return true;
   }catch(e){
-    // Silent fehlgeschlagen → interaktiv
-    try{await msalInstance.acquireTokenRedirect({scopes:MS_SCOPES});return false;}// Redirect → Seite lädt neu
+    try{await msalInstance.acquireTokenRedirect({scopes:MS_SCOPES});return false;}
     catch(e2){return false;}
   }
+}
+
+// ── Zweites Outlook-Konto (f.braun@ddmbraun.de) ──────────────────
+async function msConnect2(){
+  if(!msalInstance){showToast('⚠ Outlook-Verbindung nicht verfügbar','error',3000);return;}
+  if(msToken2){
+    // Abmelden (nur Slot 2 leeren, Slot 1 bleibt)
+    msToken2=null;msUserEmail2=null;_msUpdateBtn2();
+    showToast('Outlook 2 abgemeldet','info',2000);return;
+  }
+  try{
+    if(typeof msalInstance.initialize==='function')await msalInstance.initialize();
+    localStorage.setItem('_msPamLoginSlot','2'); // Slot merken → überlebe Redirect
+    await msalInstance.loginRedirect({scopes:MS_SCOPES,loginHint:'f.braun@ddmbraun.de'});
+  }catch(e){
+    localStorage.removeItem('_msPamLoginSlot');
+    console.warn('[MS2] loginRedirect Fehler:',e);
+    if(e.errorCode!=='user_cancelled')showToast('⚠ Outlook 2 Login: '+(e.errorCode||e.message),'error',5000);
+  }
+}
+function _msUpdateBtn2(){
+  const btn=document.getElementById('msBtnBar2');
+  if(!btn)return;
+  if(msToken2){
+    btn.textContent='📨 '+(msUserEmail2?msUserEmail2.split('@')[0]:'f.B');
+    btn.style.color='#1D4ED8';btn.style.borderColor='#93C5FD';btn.style.background='#DBEAFE';
+  }else{
+    btn.textContent='📨 f.B';
+    btn.style.color='';btn.style.borderColor='';btn.style.background='';
+  }
+}
+async function _msRefreshToken2(){
+  if(!msalInstance)return false;
+  try{
+    const accs=msalInstance.getAllAccounts();
+    if(!accs.length)return false;
+    // Konto 2 anhand gespeicherter E-Mail matchen
+    const _acc2=msUserEmail2?accs.find(a=>(a.username||'').toLowerCase()===msUserEmail2.toLowerCase()):accs[1];
+    if(!_acc2)return false;
+    const r=await msalInstance.acquireTokenSilent({scopes:MS_SCOPES,account:_acc2});
+    msToken2=r.accessToken;return true;
+  }catch(e){return false;}
 }
 
 function _msCleanPreview(raw){
@@ -10808,6 +10872,33 @@ async function _msLoadEmailThread(){
       }catch(e){console.warn('[MS] ConvId für',msgId,':',e);}
     }
     console.log('[MS-DEBUG] Nach ID-Suche: convIds.size=',convIds.size,'| IDs durchsucht:',_allMsgIds.length);
+    // Zweites Outlook-Konto: falls Konto 1 keine Treffer liefert, Konto 2 versuchen
+    if(convIds.size===0&&_allMsgIds.length>0&&msToken2){
+      console.log('[MS-DEBUG] Kein Treffer mit Konto 1 – versuche Konto 2 ('+msUserEmail2+')');
+      if(await _msRefreshToken2()){
+        for(const _m2id of _allMsgIds){
+          if(convIds.size>0)break;
+          try{
+            // Filter mit <>
+            const _r2a=await fetch(`https://graph.microsoft.com/v1.0/me/messages?$filter=${encodeURIComponent("internetMessageId eq '<"+_m2id+">'")}&$select=id,conversationId&$top=1`,
+              {headers:{Authorization:'Bearer '+msToken2}});
+            if(_r2a.ok){const _d2a=await _r2a.json();if(_d2a.value&&_d2a.value.length)convIds.add(_d2a.value[0].conversationId);}
+            // Filter ohne <>
+            if(convIds.size===0){
+              const _r2b=await fetch(`https://graph.microsoft.com/v1.0/me/messages?$filter=${encodeURIComponent("internetMessageId eq '"+_m2id+"'")}&$select=id,conversationId&$top=1`,
+                {headers:{Authorization:'Bearer '+msToken2}});
+              if(_r2b.ok){const _d2b=await _r2b.json();if(_d2b.value&&_d2b.value.length)convIds.add(_d2b.value[0].conversationId);}
+            }
+          }catch(e){console.warn('[MS2] ID-Suche für',_m2id,':',e);}
+        }
+        if(convIds.size>0){
+          // Konto 2 hat Treffer → Token für Thread-Fetch tauschen (nur für diesen Aufruf)
+          msToken=msToken2;
+          console.log('[MS-DEBUG] Konto 2 erfolgreich – verwende Token2 für Thread-Fetch');
+          showToast('📨 E-Mail in Konto 2 gefunden ('+msUserEmail2+')','info',3000);
+        }
+      }
+    }
     // Betreff-Suche NUR wenn KEINE Message-ID bekannt ist.
     // Wenn eine ID bekannt war aber nichts gefunden wurde → klare Fehlermeldung statt falschem Treffer.
     if(convIds.size===0&&_msSubjFallback&&_allMsgIds.length===0){
@@ -10957,7 +11048,7 @@ async function _msLoadEmailThread(){
     }
     const msgs=[...allMsgsMap.values()].sort((a,b)=>new Date(b.receivedDateTime)-new Date(a.receivedDateTime)); // neueste zuerst
     // Richtung bestimmen anhand eigener Adressen
-    const myAddrs=[(msUserEmail||'').toLowerCase(),'info@ddmbraun.de','frank.braun@sv-fb.de'];
+    const myAddrs=[(msUserEmail||'').toLowerCase(),(msUserEmail2||'').toLowerCase(),'info@ddmbraun.de','f.braun@ddmbraun.de','frank.braun@sv-fb.de'].filter(Boolean);
     const threadMsgs=msgs.map(m=>({
       id:m.id,
       subject:m.subject||'',
