@@ -593,6 +593,63 @@ function _parseEmlText(rawText){
 
 function tEmailOrdnerOeffnen(){let u=(document.getElementById('tEmailOrdner')||{}).value||'';if(u.trim())window.open(u,'_blank');else showToast('⚠ Bitte zuerst eine Google Drive Ordner-URL eintragen','error',4000);}
 function tDokOrdnerOeffnen(){let u=(document.getElementById('tDokOrdner')||{}).value||'';if(u.trim())window.open(u,'_blank');else showToast('⚠ Bitte zuerst eine Google Drive Ordner-URL eintragen','error',4000);}
+// ── Hauptordner des Tasks in neuen Oberordner (Bauvorhaben) verschieben ──────
+// Verschiebt tGDOrdner per Drive API; alle Unterordner wandern automatisch mit.
+// Sucht danach _Stammdaten im neuen Oberordner und trägt ihn als Stammblatt ein (wenn leer).
+async function _moveTaskFolderToParent(){
+  if(!gdriveToken){showToast('⚠ Google Drive nicht verbunden','warning',3000);return;}
+  const mainFolderUrl=(document.getElementById('tGDOrdner')?.value||'').trim();
+  const mainFolderId=_ezFolderId(mainFolderUrl)||_extractFolderIdFromUrl(mainFolderUrl);
+  if(!mainFolderId){showToast('⚠ Kein Projektordner eingetragen','warning',3500);return;}
+  const targetUrl=prompt('Google Drive URL des neuen Bauvorhaben-Ordners (Oberordner):','');
+  if(!targetUrl||!targetUrl.trim())return;
+  const targetFid=_ezFolderId(targetUrl.trim())||_extractFolderIdFromUrl(targetUrl.trim());
+  if(!targetFid){showToast('⚠ Ungültige Ordner-URL','warning',3500);return;}
+  if(targetFid===mainFolderId){showToast('⚠ Ziel ist derselbe Ordner','warning',3000);return;}
+  showToast('⏳ Verschiebe Projektordner…','info',5000);
+  try{
+    // Aktuellen Parent des Hauptordners ermitteln
+    const metaR=await fetch(
+      'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(mainFolderId)+'?fields=parents,name',
+      {headers:{Authorization:'Bearer '+gdriveToken}});
+    if(!metaR.ok)throw new Error('Drive-Metadaten: HTTP '+metaR.status);
+    const meta=await metaR.json();
+    const oldParents=(meta.parents||[]).join(',');
+    // Ordner verschieben
+    const patchR=await fetch(
+      'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(mainFolderId)
+      +'?addParents='+encodeURIComponent(targetFid)
+      +(oldParents?'&removeParents='+encodeURIComponent(oldParents):'')
+      +'&fields=id',
+      {method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},body:'{}'});
+    if(!patchR.ok)throw new Error('Verschieben: HTTP '+patchR.status);
+    showToast('✅ Projektordner verschoben','success',3000);
+    // _Stammdaten im neuen Oberordner suchen (nur wenn Stammblatt-Feld leer)
+    const sbEl1=document.getElementById('tSbPdfOrdner');
+    const sbEl2=document.getElementById('tSbPdfOrdnerVerk');
+    const sbLeer=!(sbEl1&&sbEl1.value.trim());
+    if(sbLeer){
+      try{
+        const q=encodeURIComponent("'"+targetFid+"' in parents and name='_Stammdaten' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+        const srR=await fetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name)&pageSize=1',
+          {headers:{Authorization:'Bearer '+gdriveToken}});
+        if(srR.ok){
+          const srD=await srR.json();
+          if(srD.files&&srD.files.length>0){
+            const sbUrl='https://drive.google.com/drive/folders/'+srD.files[0].id;
+            if(sbEl1)sbEl1.value=sbUrl;
+            if(sbEl2)sbEl2.value=sbUrl;
+            showToast('📁 _Stammdaten gefunden und als Stammblatt-Ordner eingetragen','success',4000);
+          }
+        }
+      }catch(eSb){console.warn('[PAM] _Stammdaten Suche fehlgeschlagen:',eSb);}
+    }
+    scheduleTaskFieldSave&&scheduleTaskFieldSave();
+  }catch(e){
+    showToast('⚠ Fehler: '+e.message,'error',6000);
+    console.error('[PAM] _moveTaskFolderToParent:',e);
+  }
+}
 async function _moveEmailFilesToCurrentFolder(){
   if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden','warn',3000);return;}
   const folderUrl=(document.getElementById('tEmailOrdner')?.value||document.getElementById('tGDOrdner')?.value||'').trim();
@@ -2859,6 +2916,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
           <button class="link-btn-2" onclick="_pickDriveFolder('tGDOrdner')" title="Ordner aus Drive wählen">📂</button>
           <button class="link-btn-2" onclick="tDriveOrdnerOeffnen()" title="Ordner öffnen">📁</button>
           <button class="link-btn-2" onclick="_scanDriveIntoTask('tGDOrdner','anhang')" title="Dateien einlesen" style="color:var(--accent);font-weight:700;">🔄</button>
+          <button class="link-btn-2" onclick="_moveTaskFolderToParent()" title="Projektordner in neuen Bauvorhaben-Ordner verschieben (sucht auch _Stammdaten)" style="color:#7c3aed;font-weight:700;">📁↗</button>
         </div>
       </div>
       <div class="modal-field full baustelle-only">
@@ -3042,7 +3100,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-28 · #74'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-28-b77)
+const PAM_BUILD = 'v2026-05-28 · #75'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-28-b78)
 
 // ── STATE ──
 let boards = {};
