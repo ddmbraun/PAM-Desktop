@@ -1,7 +1,7 @@
 // Service Worker - PAM Desktop (Workboard + Stammblatt)
 // Google-APIs werden NIEMALS gecacht.
 
-const CACHE_NAME = 'pam-desktop-2026-05-28-b87'; // b87: DEFAULT_FOLDER_EMAIL + Auto-Ordner E-Mail-Tasks // b86: E-Mail-Board Modal (3-Spalten)
+const CACHE_NAME = 'pam-desktop-2026-05-28-b88'; // b88: E-Mail-Board korrekte Ordnerstruktur beim Drag&Drop // b87: DEFAULT_FOLDER_EMAIL + Auto-Ordner
 const PRECACHE = [
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css',
   'https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js',

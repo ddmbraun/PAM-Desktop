@@ -1111,10 +1111,14 @@ async function _auftragConfirm(){
   let info=p.info;let rawFile=p.rawFile;
 
   // Zielordner ermitteln: Board-Default oder Fallback
-  let _isNotiz=(boardTypes[boardName]||'baustelle')==='notiz';
+  let _boardType=boardTypes[boardName]||'baustelle';
+  let _isNotiz=_boardType==='notiz';
+  let _isEmail=_boardType==='email';
   let _folderDefault=_isNotiz
     ?DEFAULT_FOLDER_NOTIZ
-    :DEFAULT_FOLDER_BAUSTELLE;
+    :_isEmail
+      ?DEFAULT_FOLDER_EMAIL
+      :DEFAULT_FOLDER_BAUSTELLE;
 
   // ── SCHRITT 1: Task SOFORT anlegen und speichern ──
   // Drive-Upload ist optional und darf das Speichern des Tasks nie blockieren
@@ -1188,18 +1192,28 @@ async function _auftragConfirm(){
     try{
       showToast('📁 Drive-Ordner werden angelegt…','info',5000);
       const _safeFolderName=(newTask.title||'Auftrag').replace(/[\\/:*?"<>|]/g,'-').substring(0,80);
-      _driveUrls=await _createDriveAuftragStruktur(_safeFolderName,_ezFolderId(_folderDefault));
-      newTask.gdriveOrdner=_driveUrls.mainUrl;
-      newTask.gdrive      =_driveUrls.fotoUrl;
-      newTask.emailOrdner =_driveUrls.emailUrl;
-      newTask.dokOrdner   =_driveUrls.dokUrl;
+      if(_isEmail){
+        // E-Mail-Board: nur einen einfachen Unterordner anlegen
+        _driveUrls=await _createDriveEmailStruktur(_safeFolderName,_ezFolderId(_folderDefault));
+        newTask.gdriveOrdner=_driveUrls.mainUrl;
+        newTask.emailOrdner =_driveUrls.mainUrl;
+      }else{
+        _driveUrls=await _createDriveAuftragStruktur(_safeFolderName,_ezFolderId(_folderDefault));
+        newTask.gdriveOrdner=_driveUrls.mainUrl;
+        newTask.gdrive      =_driveUrls.fotoUrl;
+        newTask.emailOrdner =_driveUrls.emailUrl;
+        newTask.dokOrdner   =_driveUrls.dokUrl;
+      }
       await autoSave();
       render();
     }catch(_de){console.warn('[PAM] Drive-Ordner Anlage fehlgeschlagen:',_de);showToast('⚠ Drive-Ordner konnten nicht angelegt werden: '+_de.message,'warning',6000);}
   }
 
   // ── SCHRITT 2: Drive-Upload (vor Modal-Öffnen, damit Daten direkt sichtbar sind) ──
-  let fid=_driveUrls?_driveUrls.emailId:await _getOrCreateEmailFid(newTask,_ezFolderId(_folderDefault));
+  // E-Mail-Board: Dateien direkt in den Task-Ordner (mainId), kein eigener E-Mails-Unterordner
+  let fid=_driveUrls
+    ?(_isEmail?_driveUrls.mainId:(_driveUrls.emailId||_driveUrls.mainId))
+    :await _getOrCreateEmailFid(newTask,_ezFolderId(_folderDefault));
   if(fid&&gdriveToken){
     let stamp=(function(){let d=info.date instanceof Date&&!isNaN(info.date)?info.date:new Date();return d.getFullYear()+'.'+_ez2(d.getMonth()+1)+'.'+_ez2(d.getDate());})();
     let pdfName=stamp+'_'+_ezClean(info.subject)+'.pdf';
@@ -3282,7 +3296,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-28 · #87'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-28-b87)
+const PAM_BUILD = 'v2026-05-28 · #88'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-28-b88)
 
 // ── STATE ──
 let boards = {};
