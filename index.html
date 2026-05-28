@@ -3093,6 +3093,12 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
       <span class="dfb-path" id="dfbPath">Mein Drive</span>
       <button onclick="_dfbClose()">✕</button>
     </div>
+    <div style="padding:6px 10px;border-bottom:1px solid var(--border);background:var(--bg2);">
+      <input id="dfbSearchInp" type="text" placeholder="🔍 Ordnername suchen…" autocomplete="off"
+        style="width:100%;box-sizing:border-box;padding:6px 10px;border-radius:6px;border:1px solid var(--accent);background:var(--bg3);color:var(--text);font-size:13px;"
+        oninput="_dfbSearchDebounce(this.value)"
+        onkeydown="if(event.key==='Escape'){this.value='';_dfbSearchClear();}">
+    </div>
     <div class="dfb-list" id="dfbList"></div>
     <div class="dfb-footer">
       <button class="dfb-cancel-btn" onclick="_dfbClose()">Abbrechen</button>
@@ -3110,7 +3116,7 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-28 · #77'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-28-b80)
+const PAM_BUILD = 'v2026-05-28 · #78'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-28-b81)
 
 // ── STATE ──
 let boards = {};
@@ -10151,6 +10157,8 @@ async function _pickDriveFolder(fieldId){
   }
   _dfbTargetField=fieldId;
   _dfbHistory=[];
+  // Suchfeld leeren beim Öffnen
+  const _si=document.getElementById('dfbSearchInp');if(_si)_si.value='';
   // Starte beim aktuell eingetragenen Ordner, falls vorhanden
   const el=document.getElementById(fieldId);
   const existingUrl=el?el.value.trim():'';
@@ -10250,6 +10258,58 @@ function _dfbPickCurrent(){
 function _dfbClose(){
   const ov=document.getElementById('driveFolderBrowserOverlay');
   if(ov)ov.classList.remove('open');
+}
+
+// ── Drive-Browser Suche ───────────────────────────────────────────────────────
+let _dfbSearchTimer=null;
+function _dfbSearchDebounce(val){
+  clearTimeout(_dfbSearchTimer);
+  if(!val||!val.trim()){_dfbSearchClear();return;}
+  _dfbSearchTimer=setTimeout(()=>_dfbSearch(val.trim()),350);
+}
+function _dfbSearchClear(){
+  // Zurück zur normalen Navigation
+  _dfbLoad(_dfbCurrentId,_dfbCurrentName);
+}
+async function _dfbSearch(term){
+  const listEl=document.getElementById('dfbList');
+  const pathEl=document.getElementById('dfbPath');
+  const backBtn=document.getElementById('dfbBackBtn');
+  if(listEl)listEl.innerHTML='<div style="padding:16px;text-align:center;color:var(--text2);font-size:13px;">🔍 Suche läuft…</div>';
+  if(pathEl)pathEl.textContent='Suchergebnisse: "'+term+'"';
+  if(backBtn)backBtn.style.display='none';
+  const pickBtn=document.getElementById('dfbPickCurrentBtn');
+  if(pickBtn)pickBtn.style.display='none';
+  try{
+    const q=encodeURIComponent("name contains '"+term.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+    const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name,parents)&orderBy=name&pageSize=50',
+      {headers:{Authorization:'Bearer '+gdriveToken}});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const d=await r.json();
+    const files=d.files||[];
+    if(!listEl)return;
+    if(!files.length){
+      listEl.innerHTML='<div style="padding:16px;text-align:center;color:var(--text2);font-size:13px;">Keine Ordner gefunden für „'+_esc(term)+'"</div>';
+      return;
+    }
+    listEl.innerHTML=files.map(f=>
+      '<div class="dfb-item" onclick="_dfbPickItem(\''+f.id+'\',\''+f.name.replace(/'/g,"\\'")+'\')" '
+      +'style="display:flex;align-items:center;justify-content:space-between;padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--border);">'
+      +'<span style="font-size:13px;">📁 '+_esc(f.name)+'</span>'
+      +'<button onclick="event.stopPropagation();_dfbSearchNavInto(\''+f.id+'\',\''+f.name.replace(/'/g,"\\'")+'\');" '
+      +'style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:12px;padding:2px 6px;">Öffnen ▶</button>'
+      +'</div>'
+    ).join('');
+  }catch(e){
+    if(listEl)listEl.innerHTML='<div style="padding:16px;color:var(--red);font-size:13px;">⚠ Suche fehlgeschlagen: '+_esc(e.message)+'</div>';
+  }
+}
+function _dfbSearchNavInto(id,name){
+  // Suchfeld leeren + in gefundenen Ordner navigieren
+  const si=document.getElementById('dfbSearchInp');if(si)si.value='';
+  const pickBtn=document.getElementById('dfbPickCurrentBtn');
+  if(pickBtn)pickBtn.style.display='';
+  _dfbLoad(id,name);
 }
 
 function _extractFolderIdFromUrl(url){
