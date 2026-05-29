@@ -1001,7 +1001,8 @@ async function _auftragAddToTask(task,boardName,fileMode){
         let stamp2=(function(){let d=info.date instanceof Date&&!isNaN(info.date)?info.date:new Date();return d.getFullYear()+'.'+_ez2(d.getMonth()+1)+'.'+_ez2(d.getDate());})();
         let pdfName2=stamp2+'_'+_ezClean(info.subject)+(rawFile.name.toLowerCase().endsWith('.eml')?'.eml':'.msg');
         let buf2=await new Promise(function(res,rej){let r=new FileReader();r.onload=function(e){res(e.target.result);};r.onerror=rej;r.readAsArrayBuffer(rawFile);});
-        let result2=await _driveUploadGeneric(buf2,pdfName2,rawFile.type||'message/rfc822',fid); // Fix: pdfName2 statt rawFile.name
+        const _mime2=rawFile.name.toLowerCase().endsWith('.msg')?'application/vnd.ms-outlook':'message/rfc822';
+        let result2=await _driveUploadGeneric(buf2,pdfName2,_mime2,fid); // Fix: korrekter MIME-Type auch für MSG
         if(result2&&result2.id){driveId2=result2.id;driveUrl2='https://drive.google.com/file/d/'+result2.id+'/view';}
       }catch(e){console.warn('[PTP] E-Mail-Upload:',e);}
     }
@@ -1077,7 +1078,7 @@ async function _auftragAddToTask(task,boardName,fileMode){
           const isImg=/\.(jpg|jpeg|png|gif|webp|heic|heif|avif|bmp|tiff?)$/i.test(att.name)||(att.mimeType||'').startsWith('image/');
           if(isImg){
             if(!task.fotos)task.fotos=[];
-            task.fotos.push({driveId:attResult.id,name:att.name,mimeType:att.mimeType||'image/jpeg',caption:'',thumbnailLink:attUrl});
+            task.fotos.push({driveId:attResult.id,name:att.name,mimeType:att.mimeType||'image/jpeg',caption:'',thumbnailLink:attResult.thumbnailLink||attUrl});
           }else{
             if(!task.attachments)task.attachments=[];
             task.attachments.push({name:att.name,fileId:attResult.id,url:attUrl,uploadedAt:today});
@@ -1341,7 +1342,7 @@ async function _auftragConfirm(){
           const today=new Date().toLocaleDateString('de-DE');
           if(isImg){
             if(!newTask.fotos)newTask.fotos=[];
-            newTask.fotos.push({driveId:attResult.id,name:att.name,mimeType:att.mimeType||'image/jpeg',caption:'',thumbnailLink:attUrl});
+            newTask.fotos.push({driveId:attResult.id,name:att.name,mimeType:att.mimeType||'image/jpeg',caption:'',thumbnailLink:attResult.thumbnailLink||attUrl});
           }else{
             if(!newTask.attachments)newTask.attachments=[];
             newTask.attachments.push({name:att.name,fileId:attResult.id,url:attUrl,uploadedAt:today});
@@ -4069,7 +4070,7 @@ const GDRIVE_CLIENT_ID = '56419258975-2ri3eujer9p6saph1mesa5hihlcae1pl.apps.goog
 const CLOUD_FUNCTION_URL = 'https://europe-west1-ptp-workboard.cloudfunctions.net/oauthBridge';
 // Fix #11: Hardcodierte Standard-Ordner als benannte Konstanten (leicht zu ändern)
 const DEFAULT_FOLDER_NOTIZ    = 'https://drive.google.com/drive/folders/1iSEa-ibrBmv-WrkiLrIBVzAozbr97yJ7';
-const DEFAULT_FOLDER_BAUSTELLE= 'https://drive.google.com/drive/u/0/folders/18LlYbj6su55Gf-qIdKtI0bsgISt0i3eI';
+const DEFAULT_FOLDER_BAUSTELLE= 'https://drive.google.com/drive/folders/1iSEa-ibrBmv-WrkiLrIBVzAozbr97yJ7';
 const DEFAULT_FOLDER_EMAIL    = 'https://drive.google.com/drive/folders/1qPfE5woo2LiKE6obu184IZYc_uFQKfz2';
 // Fix #6: drive.file erlaubt nur app-eigene Dateien; drive.readonly für Lesezugriff auf fremde Dateien.
 // drive.metadata.readonly erlaubt Datei-Suche (name, parents) ohne vollen Lesezugriff.
@@ -10199,8 +10200,8 @@ async function createPdfAllFotos(){
     if(!url&&f.driveId){
       try{url=await _fetchDesktopFotoBlob(f.driveId);}catch(e){continue;}
     }
-    if(!url&&f.thumbnailLink){
-      // Fallback: thumbnailLink als DataURL laden (kein Auth nötig)
+    if(!url&&f.thumbnailLink&&f.thumbnailLink.includes('googleusercontent.com')){
+      // Fallback: echter lh3-Thumbnail laden (nur wenn kein Auth-Fetch nötig)
       try{
         url=await new Promise((res,rej)=>{
           const img=new Image();img.crossOrigin='anonymous';
@@ -15927,7 +15928,7 @@ async function _driveUploadGeneric(buf,fname,mimeType,fid){
   const fb=new Uint8Array(buf);
   const out=new Uint8Array(p1.length+p2.length+fb.length+p3.length);
   let o=0;out.set(p1,o);o+=p1.length;out.set(p2,o);o+=p2.length;out.set(fb,o);o+=fb.length;out.set(p3,o);
-  const r=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name',{
+  const r=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,thumbnailLink',{
     method:'POST',
     headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'multipart/related; boundary='+b},
     body:out
@@ -16032,7 +16033,7 @@ async function _uploadEmailOriginal(file){
           const today=new Date().toLocaleDateString('de-DE');
           if(isImg){
             if(!taskFotos)taskFotos=[];
-            const fotoEntry={driveId:attResult.id,name:att.name,mimeType:att.mimeType||'image/jpeg',caption:'',thumbnailLink:attUrl};
+            const fotoEntry={driveId:attResult.id,name:att.name,mimeType:att.mimeType||'image/jpeg',caption:'',thumbnailLink:attResult.thumbnailLink||attUrl};
             taskFotos.push(fotoEntry);
             if(t3){if(!t3.fotos)t3.fotos=[];t3.fotos.push(fotoEntry);}
             if(typeof renderFotoListDesktop==='function')renderFotoListDesktop();
