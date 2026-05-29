@@ -3352,7 +3352,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-29 · #106'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-29-b105)
+const PAM_BUILD = 'v2026-05-29 · #107'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-29-b105)
 
 // ── STATE ──
 let boards = {};
@@ -16961,15 +16961,33 @@ function _renderEmailMailList(){
           (chips.length?'<div class="emi-chips">'+chips.join('')+'</div>':'')+
         '</div>'+
       '</div>';
-    div.addEventListener('click',function(){_emOpenMail(i,mails);});
-    div.addEventListener('dblclick',function(e){e.stopPropagation();let _d=m.data,_fid=_d.fileId||'';if(_fid)window.open('https://drive.google.com/file/d/'+encodeURIComponent(_fid)+'/view','_blank');else if(_d.url)window.open(_d.url,'_blank');});
+    div.dataset.mailIdx=String(i);
     el.appendChild(div);
+  });
+  // Event-Delegation: Timer unterscheidet Single (280ms) von Doppelklick
+  let _elNew=el.cloneNode(false);
+  while(el.firstChild)_elNew.appendChild(el.firstChild);
+  el.parentNode.replaceChild(_elNew,el);
+  let _ect=null;
+  _elNew.addEventListener('click',function(e){
+    let item=e.target.closest('.em-mail-item');if(!item)return;
+    let idx=parseInt(item.dataset.mailIdx);if(isNaN(idx))return;
+    if(_ect){
+      clearTimeout(_ect);_ect=null;
+      let _d=mails[idx]&&mails[idx].data,_fid=(_d&&_d.fileId)||'';
+      if(_fid)window.open('https://drive.google.com/file/d/'+encodeURIComponent(_fid)+'/view','_blank');
+      else if(_d&&_d.url)window.open(_d.url,'_blank');
+    } else {
+      _ect=setTimeout(function(){_ect=null;_emOpenMail(idx,mails);},280);
+    }
   });
 }
 
 async function _emOpenMail(idx,mails){
   _emActiveMailIdx=idx;
-  _renderEmailMailList();
+  // Nur aktive CSS-Klasse aktualisieren, KEIN rebuild (würde Event-Listener zerstören)
+  let _mlEl=document.getElementById('emMailList');
+  if(_mlEl){_mlEl.querySelectorAll('.em-mail-item').forEach(function(el,i){el.classList.toggle('active',i===idx);});}
   let m=mails[idx];
   let d=m.data;
 
@@ -17559,26 +17577,13 @@ function _initEmailResizers(){
     let newRz=rz.cloneNode(true);
     rz.parentNode.replaceChild(newRz,rz);
     rz=newRz;
-    rz.addEventListener('mousedown',function(e){
-      e.preventDefault();
-      rz.classList.add('dragging');
+    rz.addEventListener('pointerdown',function(e){
+      e.preventDefault();rz.setPointerCapture(e.pointerId);rz.classList.add('dragging');
       let leftEl=document.getElementById(leftId);
-      let startX=e.clientX;
-      let startW=leftEl?leftEl.offsetWidth:0;
-      function onMove(ev){
-        if(!leftEl)return;
-        let delta=ev.clientX-startX;
-        let nw=Math.max(120,startW+delta);
-        if(side==='left'){leftEl.style.width=nw+'px';leftEl.style.flex='none';}
-      }
-      function onUp(){
-        rz.classList.remove('dragging');
-        _emSaveColWidths(); // Fix: Breiten nach Loslassen speichern
-        document.removeEventListener('mousemove',onMove);
-        document.removeEventListener('mouseup',onUp);
-      }
-      document.addEventListener('mousemove',onMove);
-      document.addEventListener('mouseup',onUp);
+      let startX=e.clientX,startW=leftEl?leftEl.offsetWidth:0;
+      function onMove(ev){if(!leftEl)return;let nw=Math.max(120,startW+(ev.clientX-startX));if(side==='left'){leftEl.style.width=nw+'px';leftEl.style.flex='none';}}
+      function onUp(){rz.classList.remove('dragging');_emSaveColWidths();rz.removeEventListener('pointermove',onMove);rz.removeEventListener('pointerup',onUp);}
+      rz.addEventListener('pointermove',onMove);rz.addEventListener('pointerup',onUp);
     });
   }
   makeResizer('emResizer1','emMailList','emReadingPane','left');
@@ -17587,24 +17592,13 @@ function _initEmailResizers(){
     let rz2=document.getElementById('emResizer2');
     if(!rz2)return;
     let nr2=rz2.cloneNode(true);rz2.parentNode.replaceChild(nr2,rz2);rz2=nr2;
-    rz2.addEventListener('mousedown',function(e){
-      e.preventDefault();rz2.classList.add('dragging');
+    rz2.addEventListener('pointerdown',function(e){
+      e.preventDefault();rz2.setPointerCapture(e.pointerId);rz2.classList.add('dragging');
       let rp=document.getElementById('emRightPanel');
-      let startX=e.clientX;
-      let startW=rp?rp.offsetWidth:250;
-      function onMove(ev){
-        if(!rp)return;
-        let nw=Math.max(120,startW-(ev.clientX-startX));
-        rp.style.width=nw+'px';rp.style.minWidth=nw+'px';
-      }
-      function onUp(){
-        rz2.classList.remove('dragging');
-        _emSaveColWidths();
-        document.removeEventListener('mousemove',onMove);
-        document.removeEventListener('mouseup',onUp);
-      }
-      document.addEventListener('mousemove',onMove);
-      document.addEventListener('mouseup',onUp);
+      let startX=e.clientX,startW=rp?rp.offsetWidth:250;
+      function onMove(ev){if(!rp)return;let nw=Math.max(120,startW-(ev.clientX-startX));rp.style.width=nw+'px';rp.style.minWidth=nw+'px';}
+      function onUp(){rz2.classList.remove('dragging');_emSaveColWidths();rz2.removeEventListener('pointermove',onMove);rz2.removeEventListener('pointerup',onUp);}
+      rz2.addEventListener('pointermove',onMove);rz2.addEventListener('pointerup',onUp);
     });
   })();
   // Fix: gespeicherte Breiten beim Oeffnen wiederherstellen
@@ -17652,39 +17646,22 @@ function _initEmailResizers(){
   if(modal&&handle){
     let newHandle=handle.cloneNode(true);
     handle.parentNode.replaceChild(newHandle,handle);
-    newHandle.addEventListener('mousedown',function(e){
-      e.preventDefault();
-      e.stopPropagation();
-      // Aktuelle Größe + Position einfrieren (transform entfernen falls noch aktiv)
+    newHandle.addEventListener('pointerdown',function(e){
+      e.preventDefault();e.stopPropagation();
+      newHandle.setPointerCapture(e.pointerId);
       const rect=modal.getBoundingClientRect();
-      modal.style.transform='none';
-      modal.style.top=rect.top+'px';
-      modal.style.left=rect.left+'px';
-      modal.style.width=rect.width+'px';
-      modal.style.height=rect.height+'px';
-      modal.style.maxWidth='none';
-      const startX=e.clientX;
-      const startY=e.clientY;
-      const startW=rect.width;
-      const startH=rect.height;
+      modal.style.transform='none';modal.style.top=rect.top+'px';modal.style.left=rect.left+'px';
+      modal.style.width=rect.width+'px';modal.style.height=rect.height+'px';modal.style.maxWidth='none';
+      const sx=e.clientX,sy=e.clientY,sw=rect.width,sh=rect.height;
       function onMove(ev){
-        let nw=Math.max(520,startW+(ev.clientX-startX));
-        let nh=Math.max(300,startH+(ev.clientY-startY));
-        // Nicht über Bildschirmrand
-        nw=Math.min(window.innerWidth-rect.left,nw);
-        nh=Math.min(window.innerHeight-rect.top,nh);
-        modal.style.width=nw+'px';
-        modal.style.height=nh+'px';
-        // Rechtes Panel: Hintergrund soll lückenlos füllen
+        let nw=Math.min(window.innerWidth-rect.left,Math.max(520,sw+(ev.clientX-sx)));
+        let nh=Math.min(window.innerHeight-rect.top,Math.max(300,sh+(ev.clientY-sy)));
+        modal.style.width=nw+'px';modal.style.height=nh+'px';
         const rp=document.getElementById('emRightPanel');
         if(rp&&!rp.classList.contains('collapsed'))rp.style.minHeight='100%';
       }
-      function onUp(){
-        document.removeEventListener('mousemove',onMove);
-        document.removeEventListener('mouseup',onUp);
-      }
-      document.addEventListener('mousemove',onMove);
-      document.addEventListener('mouseup',onUp);
+      function onUp(){newHandle.removeEventListener('pointermove',onMove);newHandle.removeEventListener('pointerup',onUp);}
+      newHandle.addEventListener('pointermove',onMove);newHandle.addEventListener('pointerup',onUp);
     });
   }
 }
