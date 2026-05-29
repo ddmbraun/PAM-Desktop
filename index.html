@@ -2806,6 +2806,8 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
                 </div>
                 <!-- Unified Outlook-style email list -->
                 <div id="pamUnifiedEmailList" style="max-height:340px;overflow-y:auto;background:var(--bg1);"></div>
+                <!-- Inline-Vorschau unter der Liste -->
+                <div id="pamUnifiedPreview" style="display:none;"></div>
                 <!-- Hidden rendering targets (backward compat) -->
                 <div id="pamGmailInlineList" style="display:none;"></div>
                 <div id="pamMsInlineList" style="display:none;"></div>
@@ -12181,14 +12183,17 @@ function _pamRenderUnifiedEmailList(task){
     const dirBg=isOut?'rgba(22,163,74,.15)':'rgba(29,78,216,.10)';
     const dirTxt=isOut?'#15803D':'#1E40AF';
 
-    let clickFn;
-    if(m.src==='gmail') clickFn=`_gmOpenMailOverlay('${taskId}',${m.idx})`;
-    else if(m.src==='ms') clickFn=`_msOpenMailOverlay('${taskId}',${m.idx})`;
-    else clickFn=`_openSectPopup('tEmailOrigSect')`;
+    let dblFn;
+    if(m.src==='gmail') dblFn=`_gmOpenMailOverlay('${taskId}',${m.idx})`;
+    else if(m.src==='ms') dblFn=`_msOpenMailOverlay('${taskId}',${m.idx})`;
+    else dblFn=`_openSectPopup('tEmailOrigSect')`;
+    const clickFn=`_pamUnifiedTogglePreview('${taskId}','${m.src}',${m.idx})`;
+    const hoverPreview=m.preview?m.preview.replace(/'/g,'&#39;').substring(0,120):'';
+    const hoverTitle=`${m.from} · ${m.subject}${hoverPreview?' | '+hoverPreview:''}`;
 
     return`<div style="display:flex;gap:9px;align-items:flex-start;padding:8px 12px;border-bottom:0.5px solid var(--border);cursor:pointer;transition:background .12s;"
-      onmouseenter="this.style.background='var(--bg3)'" onmouseleave="this.style.background=''"
-      onclick="${clickFn}">
+      onmouseenter="_pamUnifiedHover(this,'${hoverTitle.replace(/'/g,'&#39;')}')" onmouseleave="_pamUnifiedHoverOut()"
+      onclick="${clickFn}" ondblclick="${dblFn}">
       <div style="width:30px;height:30px;border-radius:50%;background:${avatarBg};color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">${initials}</div>
       <div style="flex:1;min-width:0;">
         <div style="display:flex;align-items:center;gap:4px;margin-bottom:1px;">
@@ -12213,6 +12218,145 @@ function _pamRenderUnifiedEmailList(task){
     body.style.display='block';
     if(chev)chev.style.transform='rotate(180deg)';
   }
+}
+
+// ── Unified E-Mail Liste: Klick-Vorschau & Hover ──────────────────────────
+
+let _pamUnifiedActiveIdx=-1;
+let _pamUnifiedActiveSrc='';
+let _pamHoverTimer=null;
+
+function _pamUnifiedTogglePreview(taskId,src,idx){
+  const prev=document.getElementById('pamUnifiedPreview');
+  if(!prev)return;
+  // Gleiche Mail nochmal → Vorschau schließen
+  if(_pamUnifiedActiveIdx===idx&&_pamUnifiedActiveSrc===src){
+    prev.style.display='none';
+    _pamUnifiedActiveIdx=-1;_pamUnifiedActiveSrc='';
+    _pamUnifiedUpdateActive(-1,'');
+    return;
+  }
+  _pamUnifiedActiveIdx=idx;_pamUnifiedActiveSrc=src;
+  _pamUnifiedUpdateActive(idx,src);
+  _pamUnifiedShowPreview(taskId,src,idx);
+}
+
+function _pamUnifiedUpdateActive(idx,src){
+  const list=document.getElementById('pamUnifiedEmailList');if(!list)return;
+  [...list.children].forEach((el,i)=>{
+    const isActive=(i===idx);
+    el.style.background=isActive?'rgba(0,120,212,.09)':'';
+    el.style.borderLeft=isActive?'3px solid #0078d4':'3px solid transparent';
+  });
+}
+
+async function _pamUnifiedShowPreview(taskId,src,idx){
+  const prev=document.getElementById('pamUnifiedPreview');if(!prev)return;
+  const task=findTaskById(taskId);if(!task)return;
+  let m,isOut,from,dateStr,subject,bodyHtml,bodyText,msgId;
+  if(src==='gmail'){
+    m=(task.gmailThreadMessages||[])[idx];if(!m)return;
+    isOut=m.direction==='gesendet';
+    from=m.fromName||m.from||'';
+    subject=m.subject||'';
+    bodyHtml=m.bodyHtml||'';bodyText=m.bodyText||m.preview||'';
+    msgId=m.id;
+  } else if(src==='ms'){
+    m=(task.msThreadMessages||[])[idx];if(!m)return;
+    isOut=m.direction==='gesendet';
+    from=m.fromName?'"'+m.fromName+'" <'+m.from+'>':m.from||'';
+    subject=m.subject||'';
+    bodyHtml=m._cachedBodyHtml||'';bodyText=m.preview||'';
+    msgId=m.id;
+  } else {
+    // EML: öffne normales Popup
+    _openSectPopup('tEmailOrigSect');return;
+  }
+  const d=m.date?new Date(m.date):null;
+  const ds=d?`${_ez2(d.getDate())}.${_ez2(d.getMonth()+1)}.${d.getFullYear()} ${_ez2(d.getHours())}:${_ez2(d.getMinutes())}`:'';
+  const dirBg=isOut?'rgba(22,163,74,.12)':'rgba(29,78,216,.10)';
+  const dirTxt=isOut?'#15803D':'#1E40AF';
+  const dirLabel=isOut?'Gesendet':'Eingang';
+  const ovFn=src==='gmail'?`_gmOpenMailOverlay('${taskId}',${idx})`:`_msOpenMailOverlay('${taskId}',${idx})`;
+  prev.style.display='block';
+  prev.innerHTML=`<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;margin:4px 8px 8px;background:var(--bg2);">
+    <div style="background:var(--bg3);padding:7px 12px;display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--border);flex-wrap:wrap;">
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:12px;font-weight:600;color:var(--text1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(subject||'(kein Betreff)')}</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:1px;">${esc(from)} · ${esc(ds)}</div>
+      </div>
+      <span style="font-size:10px;padding:2px 7px;border-radius:8px;background:${dirBg};color:${dirTxt};font-weight:600;flex-shrink:0;">${dirLabel}</span>
+      <button type="button" onclick="${ovFn}" style="background:none;border:1px solid var(--border);border-radius:4px;font-size:11px;cursor:pointer;padding:3px 8px;color:var(--text1);flex-shrink:0;" title="Vollbild öffnen (oder Doppelklick auf die Mail)">⛶ Groß</button>
+      <button type="button" onclick="document.getElementById('pamUnifiedPreview').style.display='none';_pamUnifiedActiveIdx=-1;_pamUnifiedActiveSrc='';_pamUnifiedUpdateActive(-1,'');" style="background:none;border:none;font-size:14px;cursor:pointer;color:var(--text2);padding:2px 5px;flex-shrink:0;">✕</button>
+    </div>
+    <div id="pamUnifiedPreviewBody" style="min-height:80px;max-height:380px;overflow-y:auto;">
+      <div style="padding:14px;color:var(--text2);font-size:13px;">⏳ Lade Inhalt…</div>
+    </div>
+  </div>`;
+  // Body laden
+  const bodyEl=document.getElementById('pamUnifiedPreviewBody');if(!bodyEl)return;
+  // Erst gecachten HTML nehmen
+  if(bodyHtml){
+    const fr=document.createElement('iframe');
+    fr.style.cssText='width:100%;height:300px;border:none;';
+    fr.sandbox='allow-same-origin';
+    bodyEl.innerHTML='';bodyEl.appendChild(fr);
+    fr.contentDocument.open();
+    fr.contentDocument.write('<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}a{color:#1a73e8;}img{max-width:100%;}</style></head><body>'+bodyHtml+'</body></html>');
+    fr.contentDocument.close();
+    setTimeout(()=>{try{const h=fr.contentDocument.body.scrollHeight;fr.style.height=Math.min(h+20,360)+'px';}catch(e){}},300);
+    return;
+  }
+  // API-Fetch falls nötig
+  try{
+    if(src==='gmail'&&gmailToken&&msgId){
+      const r=await fetch('https://www.googleapis.com/gmail/v1/users/me/messages/'+msgId+'?format=full',{headers:{Authorization:'Bearer '+gmailToken}});
+      if(r.ok){const mb=await r.json();const res={html:'',plain:''};_gmExtractBody(mb.payload,res);
+        const fr=document.createElement('iframe');fr.style.cssText='width:100%;height:300px;border:none;';fr.sandbox='allow-same-origin';
+        bodyEl.innerHTML='';bodyEl.appendChild(fr);
+        const clean=(res.html||'<pre style="white-space:pre-wrap;font-size:13px;margin:0;">'+esc(res.plain||'(kein Inhalt)')+'</pre>').replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'');
+        fr.contentDocument.open();fr.contentDocument.write('<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}</style></head><body>'+clean+'</body></html>');fr.contentDocument.close();
+        setTimeout(()=>{try{fr.style.height=Math.min(fr.contentDocument.body.scrollHeight+20,360)+'px';}catch(e){}},300);
+        return;
+      }
+    }
+    if(src==='ms'&&msToken&&msgId){
+      const r=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${msgId}?$select=body`,{headers:{Authorization:'Bearer '+msToken}});
+      if(r.ok){const data=await r.json();m._cachedBodyHtml=data.body?.content||'';
+        const fr=document.createElement('iframe');fr.style.cssText='width:100%;height:300px;border:none;';fr.sandbox='allow-same-origin';
+        bodyEl.innerHTML='';bodyEl.appendChild(fr);
+        fr.contentDocument.open();fr.contentDocument.write(data.body?.contentType==='html'?data.body.content:'<!DOCTYPE html><html><body><pre style="white-space:pre-wrap;font-size:13px;">'+esc(data.body?.content||m.preview||'')+'</pre></body></html>');fr.contentDocument.close();
+        setTimeout(()=>{try{fr.style.height=Math.min(fr.contentDocument.body.scrollHeight+20,360)+'px';}catch(e){}},300);
+        return;
+      }
+    }
+  }catch(e){console.warn('[PAM unified preview]',e);}
+  // Fallback: Preview-Text
+  bodyEl.innerHTML=bodyText?`<div style="padding:14px;font-size:13px;color:var(--text1);white-space:pre-wrap;line-height:1.6;">${esc(bodyText)}</div>`:`<div style="padding:14px;color:var(--text2);font-size:13px;">Kein Inhalt verfügbar – bitte Gmail/Outlook verbinden.</div>`;
+}
+
+// ── Hover-Tooltip ──
+let _pamHoverTooltip=null;
+function _pamUnifiedHover(el,text){
+  clearTimeout(_pamHoverTimer);
+  _pamHoverTimer=setTimeout(()=>{
+    if(!_pamHoverTooltip){
+      _pamHoverTooltip=document.createElement('div');
+      _pamHoverTooltip.style.cssText='position:fixed;z-index:99990;pointer-events:none;background:var(--bg2);border:1px solid var(--border);border-radius:7px;padding:8px 12px;max-width:320px;font-size:12px;color:var(--text1);box-shadow:0 4px 16px rgba(0,0,0,.18);line-height:1.5;white-space:pre-wrap;word-break:break-word;';
+      document.body.appendChild(_pamHoverTooltip);
+    }
+    _pamHoverTooltip.textContent=text;
+    const r=el.getBoundingClientRect();
+    let top=r.bottom+6;let left=r.left;
+    if(top+120>window.innerHeight)top=r.top-130;
+    if(left+320>window.innerWidth)left=window.innerWidth-330;
+    _pamHoverTooltip.style.top=top+'px';_pamHoverTooltip.style.left=left+'px';
+    _pamHoverTooltip.style.display='block';
+  },350);
+}
+function _pamUnifiedHoverOut(){
+  clearTimeout(_pamHoverTimer);
+  if(_pamHoverTooltip)_pamHoverTooltip.style.display='none';
 }
 
 // ── Verlauf drucken ──
@@ -16350,6 +16494,8 @@ function openNewTaskModal(){
   const _esNewInp=document.getElementById('taskEmailSenderInput');if(_esNewInp)_esNewInp.value='';
   _renderSenderDisplay(); // Sender-Display-Element ebenfalls zurücksetzen (Style-State)
   ['pamGmailInlineList','pamMsInlineList','pamUnifiedEmailList','gmThreadList','msThreadList','gmThreadStatus','msThreadStatus'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML='';});
+  const _puprev=document.getElementById('pamUnifiedPreview');if(_puprev)_puprev.style.display='none';
+  _pamUnifiedActiveIdx=-1;_pamUnifiedActiveSrc='';if(typeof _pamUnifiedHoverOut==='function')_pamUnifiedHoverOut();
   // Build #101: pamEmailListBody beim Task-Wechsel einklappen
   const _pemLB=document.getElementById('pamEmailListBody');const _pemLC=document.getElementById('pamEmailListChevron');
   if(_pemLB)_pemLB.style.display='none';if(_pemLC)_pemLC.style.transform='';
@@ -16944,7 +17090,7 @@ function _pfUpdateStatus(boardName){
 // ══════════════════════════════════════════════════════
 // E-MAIL-TASK-MODAL – Öffnen, Rendern, Speichern, Aktionen
 // ══════════════════════════════════════════════════════
-let _emCurrentTask=null, _emCurrentBoard='', _emActiveMailIdx=-1, _emSaveTimer=null, _emRightCollapsed=false;
+let _emCurrentTask=null, _emCurrentBoard='', _emPrevBoard='', _emActiveMailIdx=-1, _emSaveTimer=null, _emRightCollapsed=false;
 let _emLoadOverrideId=null; // Fix1: kein DOM-Side-Effect beim Outlook/Gmail-Laden
 let _emOpenMailToken=0;    // Fix3: Race-Condition-Schutz in _emOpenMail
 let _emMailBodyCache={};
@@ -16952,6 +17098,7 @@ let _emLastAttachFiles=[]; // Anhänge der aktuell geöffneten Mail
 
 function openEmailTaskModal(task,board){
   _emCurrentTask=task;
+  _emPrevBoard=currentBoard; // merken für Rücksetzen beim Schließen
   _emCurrentBoard=board||currentBoard;
   _emActiveMailIdx=-1;
   if(_emCurrentBoard&&_emCurrentBoard!==currentBoard)currentBoard=_emCurrentBoard;
@@ -17025,9 +17172,18 @@ function closeEmailTaskModal(){
   if(_emSaveTimer){clearTimeout(_emSaveTimer);_emSaveTimer=null;_emDoSave();}
   if(_emKeyHandler){document.removeEventListener('keydown',_emKeyHandler);_emKeyHandler=null;}
   document.getElementById('emailTaskModal').classList.remove('open');
+  // DOM leeren damit kein alter Inhalt beim nächsten Öffnen aufblitzt
+  const _emML=document.getElementById('emMailList');if(_emML)_emML.innerHTML='';
+  const _emRP=document.getElementById('emReadingPane');
+  if(_emRP){_emRP.innerHTML='<div class="em-empty-pane" id="emReadingPlaceholder"><span style="font-size:28px;opacity:.3;">📧</span><div style="margin-top:8px;font-size:12px;color:var(--text2);">E-Mail auswählen</div></div><div id="emReadingContent" style="height:100%;display:flex;flex-direction:column;overflow:hidden;"></div>';}
   _emMailBodyCache={};
   _emLastAttachFiles=[];
+  _emActiveMailIdx=-1;
   _emCurrentTask=null;
+  _emCurrentBoard='';
+  // currentBoard auf vorherigen Wert zurücksetzen
+  if(_emPrevBoard&&_emPrevBoard!==currentBoard){currentBoard=_emPrevBoard;renderBoard();}
+  _emPrevBoard='';
 }
 
 // Nach Outlook/Gmail-Laden: Liste neu aufbauen und aktive Mail im Lesebereich behalten
@@ -17049,9 +17205,11 @@ function _renderEmailMailList(){
   if(!el)return;
   let t=_emCurrentTask;
   let mails=[]; // Alle Mail-Einträge sammeln
-  (t.emailOriginals||[]).forEach(function(m,i){mails.push({type:'original',idx:i,data:m});});
-  (t.gmailThreadMessages||[]).forEach(function(m,i){mails.push({type:'gmail',idx:i,data:m});});
-  (t.msThreadMessages||[]).forEach(function(m,i){mails.push({type:'ms',idx:i,data:m});});
+  (t.emailOriginals||[]).forEach(function(m,i){mails.push({type:'original',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0});});
+  (t.gmailThreadMessages||[]).forEach(function(m,i){mails.push({type:'gmail',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0});});
+  (t.msThreadMessages||[]).forEach(function(m,i){mails.push({type:'ms',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0});});
+  // Chronologisch sortieren – neueste zuerst
+  mails.sort(function(a,b){return (b._ts||0)-(a._ts||0);});
   el.innerHTML='';
   if(!mails.length){
     el.innerHTML='<div class="em-empty-pane" style="padding:20px;text-align:center;color:var(--text2);font-size:12px;">Noch keine E-Mails –<br>per Drag &amp; Drop hinzufügen</div>';
@@ -17102,12 +17260,23 @@ function _renderEmailMailList(){
     let idx=parseInt(item.dataset.mailIdx);if(isNaN(idx))return;
     _emOpenMail(idx,mails);
   });
-  // 2x Klick → in Google Drive öffnen (dblclick überlebt weil kein DOM-Rebuild mehr)
+  // 2x Klick → Vollbild-Overlay (Gmail/Outlook) oder Drive-Öffnen (EML)
   _elNew.addEventListener('dblclick',function(e){
     let item=e.target.closest('.em-mail-item');if(!item)return;
     e.stopPropagation();
     let idx=parseInt(item.dataset.mailIdx);if(isNaN(idx))return;
-    let _d=mails[idx]&&mails[idx].data,_fid=(_d&&_d.fileId)||'';
+    let m2=mails[idx];if(!m2)return;
+    let _d=m2.data;
+    if(m2.type==='ms'&&_d.id&&_emCurrentTask){
+      const _msIdx2=(_emCurrentTask.msThreadMessages||[]).findIndex(function(x){return x.id===_d.id;});
+      if(_msIdx2>=0){_msOpenMailOverlay(_emCurrentTask.id,_msIdx2);return;}
+    }
+    if(m2.type==='gmail'&&_d.id&&_emCurrentTask){
+      const _gmIdx2=(_emCurrentTask.gmailThreadMessages||[]).findIndex(function(x){return x.id===_d.id;});
+      if(_gmIdx2>=0&&typeof _gmOpenMailOverlay==='function'){_gmOpenMailOverlay(_emCurrentTask.id,_gmIdx2);return;}
+    }
+    // EML: Drive öffnen
+    let _fid=(_d&&_d.fileId)||'';
     if(_fid)window.open('https://drive.google.com/file/d/'+encodeURIComponent(_fid)+'/view','_blank');
     else if(_d&&_d.url)window.open(_d.url,'_blank');
   });
@@ -17123,25 +17292,79 @@ async function _emOpenMail(idx,mails){
   let m=mails[idx];
   let d=m.data;
 
-  // ── Exchange-Thread-Mail: Body-Overlay wie im normalen Task-Modal öffnen ──
-  if(m.type==='ms'&&d.id&&_emCurrentTask){
-    _pamActiveTaskId=_emCurrentTask.id;
-    const _msIdx=(_emCurrentTask.msThreadMessages||[]).findIndex(x=>x.id===d.id);
-    if(_msIdx>=0){
-      await _msOpenMailOverlay(_emCurrentTask.id,_msIdx);
-      if(_myToken!==_emOpenMailToken)return; // Fix3: überholt von neuerem Klick
+  // ── Exchange/Gmail-Thread-Mail: Body direkt im emReadingPane rendern ──
+  if((m.type==='ms'||m.type==='gmail')&&d.id&&_emCurrentTask){
+    const isMs=m.type==='ms';
+    const isOut=d.direction==='gesendet';
+    from=d.fromName?('"'+d.fromName+'" <'+(d.from||'>')+'>'):(d.from||d.sender||'Unbekannt');
+    subject=d.subject||'(kein Betreff)';
+    const initials2=from.split(/\s+/).slice(0,2).map(function(w){return w[0]||'';}).join('').toUpperCase()||'?';
+    const d2=d.date?new Date(d.date):null;
+    const dateLabel2=d2?d2.toLocaleString('de-DE'):'';
+    // Anhänge
+    let allFiles2=[];
+    (d.attachments||[]).forEach(function(a){
+      let name=a.filename||a.name||'Anhang';let nl=name.toLowerCase();
+      let icon=nl.endsWith('.pdf')?'📄':(nl.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':'📎');
+      allFiles2.push({icon,name,url:a.url||a.webViewLink||'',mime:a.contentType||a.mimeType||'',data:a});
+    });
+    _emRenderAttachPanel(allFiles2);
+    const pane2=document.getElementById('emReadingPane');
+    const taskId2=_emCurrentTask.id;
+    const mailIdx2=isMs?(_emCurrentTask.msThreadMessages||[]).findIndex(x=>x.id===d.id):(_emCurrentTask.gmailThreadMessages||[]).findIndex(x=>x.id===d.id);
+    const dblFn2=isMs?`_msOpenMailOverlay('${taskId2}',${mailIdx2})`:`_gmOpenMailOverlay('${taskId2}',${mailIdx2})`;
+    pane2.innerHTML=
+      '<div class="em-rp-header">'+
+        '<div class="em-rp-subject">'+_escHtml(subject)+'</div>'+
+        '<div class="em-rp-meta">'+
+          '<div class="em-avatar">'+_escHtml(initials2)+'</div>'+
+          '<div style="display:flex;flex-direction:column;gap:1px;flex:1;min-width:0;">'+
+            '<span style="font-size:12px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_escHtml(from)+'</span>'+
+            '<span style="font-size:11px;color:var(--text2);">'+_escHtml(dateLabel2)+'</span>'+
+          '</div>'+
+          '<button onclick="'+dblFn2+'" style="flex-shrink:0;padding:3px 9px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);font-size:11px;cursor:pointer;color:var(--text1);" title="Vollbild öffnen">⛶ Groß</button>'+
+        '</div>'+
+      '</div>'+
+      '<div id="emBodyContainer" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0;"><div style="padding:14px;color:var(--text2);font-size:13px;">⏳ Lade…</div></div>';
+    const bc2=document.getElementById('emBodyContainer');
+    // Gecachten Body nutzen
+    const _cached=d._cachedBodyHtml||(isMs?null:null);
+    if(_cached){
+      const fr2=document.createElement('iframe');fr2.style.cssText='flex:1;width:100%;border:none;min-height:0;';
+      const _blobU=URL.createObjectURL(new Blob(['<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}</style></head><body>'+_cached.replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'')+'</body></html>'],{type:'text/html'}));
+      fr2.src=_blobU;let _rev2=false;fr2.onload=function(){if(!_rev2){_rev2=true;URL.revokeObjectURL(_blobU);}};setTimeout(function(){if(!_rev2){_rev2=true;URL.revokeObjectURL(_blobU);}},30000);
+      if(bc2){bc2.innerHTML='';bc2.appendChild(fr2);}
+      if(_myToken!==_emOpenMailToken)return;
       return;
     }
-  }
-  // ── Gmail-Thread-Mail: Body-Overlay wie im normalen Task-Modal öffnen ──
-  if(m.type==='gmail'&&d.id&&_emCurrentTask){
-    _pamActiveTaskId=_emCurrentTask.id;
-    const _gmIdx=(_emCurrentTask.gmailThreadMessages||[]).findIndex(x=>x.id===d.id);
-    if(_gmIdx>=0&&typeof _gmOpenMailOverlay==='function'){
-      await _gmOpenMailOverlay(_emCurrentTask.id,_gmIdx);
-      if(_myToken!==_emOpenMailToken)return; // Fix3: überholt von neuerem Klick
-      return;
-    }
+    // API-Fetch
+    try{
+      if(isMs&&msToken&&d.id){
+        const r2=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+d.id+'?$select=body',{headers:{Authorization:'Bearer '+msToken}});
+        if(r2.ok){
+          const data2=await r2.json();d._cachedBodyHtml=data2.body?.content||'';
+          if(_myToken!==_emOpenMailToken)return;
+          const html2=data2.body?.contentType==='html'?d._cachedBodyHtml:'<pre style="white-space:pre-wrap;font-size:13px;">'+_escHtml(data2.body?.content||d.preview||'')+'</pre>';
+          const fr2=document.createElement('iframe');fr2.style.cssText='flex:1;width:100%;border:none;min-height:0;';
+          const _blobU=URL.createObjectURL(new Blob(['<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}</style></head><body>'+html2.replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'')+'</body></html>'],{type:'text/html'}));
+          fr2.src=_blobU;let _rev2=false;fr2.onload=function(){if(!_rev2){_rev2=true;URL.revokeObjectURL(_blobU);}};setTimeout(function(){if(!_rev2){_rev2=true;URL.revokeObjectURL(_blobU);}},30000);
+          if(bc2){bc2.innerHTML='';bc2.appendChild(fr2);}
+        }
+      } else if(!isMs&&gmailToken&&d.id){
+        const r2=await fetch('https://www.googleapis.com/gmail/v1/users/me/messages/'+d.id+'?format=full',{headers:{Authorization:'Bearer '+gmailToken}});
+        if(r2.ok){
+          const mb2=await r2.json();const res2={html:'',plain:''};_gmExtractBody(mb2.payload,res2);
+          if(_myToken!==_emOpenMailToken)return;
+          const html2=(res2.html||'<pre style="white-space:pre-wrap;font-size:13px;">'+_escHtml(res2.plain||d.preview||'(kein Inhalt)')+'</pre>').replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'');
+          const fr2=document.createElement('iframe');fr2.style.cssText='flex:1;width:100%;border:none;min-height:0;';
+          const _blobU=URL.createObjectURL(new Blob(['<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}</style></head><body>'+html2+'</body></html>'],{type:'text/html'}));
+          fr2.src=_blobU;let _rev2=false;fr2.onload=function(){if(!_rev2){_rev2=true;URL.revokeObjectURL(_blobU);}};setTimeout(function(){if(!_rev2){_rev2=true;URL.revokeObjectURL(_blobU);}},30000);
+          if(bc2){bc2.innerHTML='';bc2.appendChild(fr2);}
+        }
+      }
+    }catch(e){if(bc2)bc2.innerHTML='<div style="padding:14px;color:#c00;font-size:13px;">⚠ '+_escHtml(e.message)+'</div>';}
+    if(_myToken!==_emOpenMailToken)return;
+    return;
   }
   let from=d.from||d.sender||d.senderName||'Unbekannt';
   let subject=d.subject||d.betreff||'(kein Betreff)';
@@ -17742,10 +17965,13 @@ function _emInBoardVerschieben(){
 function _emDeleteTask(){
   if(!_emCurrentTask)return;
   if(!window.confirm('Task „'+((_emCurrentTask.title)||'?')+'" wirklich löschen?'))return;
-  boards[_emCurrentBoard]=(boards[_emCurrentBoard]||[]).filter(function(t){return t.id!==_emCurrentTask.id;});
+  // Timer stoppen BEVOR Task entfernt wird – verhindert _emDoSave auf gelöschten Task
+  if(_emSaveTimer){clearTimeout(_emSaveTimer);_emSaveTimer=null;}
+  const _delId=_emCurrentTask.id;
+  const _delBoard=_emCurrentBoard;
+  boards[_delBoard]=(boards[_delBoard]||[]).filter(function(t){return t.id!==_delId;});
   closeEmailTaskModal();
   scheduleAutoSave();
-  renderBoard();
   showToast('Task gelöscht.','success');
 }
 
