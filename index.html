@@ -3364,7 +3364,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-29 · #111'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-29-b105)
+const PAM_BUILD = 'v2026-05-29 · #112'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-29-b117)
 
 // ── STATE ──
 let boards = {};
@@ -12159,112 +12159,142 @@ function _pamRenderUnifiedEmailList(task){
   if(!task)task=findTaskById(taskId);
   if(!task){el.innerHTML='';return;}
 
-  const items=[];
+  // Betreff normalisieren (Re:/AW:/Fwd:/WG: entfernen)
+  function _normSubj(s){return(s||'').replace(/^(Re|AW|Fwd|WG|Antwort|FYI):\s*/gi,'').replace(/\s+/g,' ').trim().toLowerCase().substring(0,60);}
 
-  // Gmail-Nachrichten
-  (task.gmailThreadMessages||[]).forEach((m,i)=>{
-    items.push({src:'gmail',idx:i,
-      date:m.date?new Date(m.date):null,
-      from:m.fromName||m.from||'',
-      subject:m.subject||'',
-      preview:m.preview||'',
-      isOut:m.direction==='gesendet'});
-  });
-
-  // Outlook-Nachrichten
-  (task.msThreadMessages||[]).forEach((m,i)=>{
-    items.push({src:'ms',idx:i,
-      date:m.date?new Date(m.date):null,
-      from:m.fromName||m.from||'',
-      subject:m.subject||'',
-      preview:m.preview||'',
-      isOut:m.direction==='gesendet',
-      hasAtt:m.hasAttachments});
-  });
-
-  // EML-Originale (Thread-verlinkte rausfiltern, nur mit fileId)
+  // Thread-IDs für Duplikat-Filter
   const thrIds=new Set([
-    ...(task.gmailThreadMessages||[]).map(m=>m.messageId).filter(Boolean),
-    ...(task.msThreadMessages||[]).map(m=>m.messageId).filter(Boolean)
+    ...(task.gmailThreadMessages||[]).map(function(m){return m.messageId;}).filter(Boolean),
+    ...(task.msThreadMessages||[]).map(function(m){return m.messageId;}).filter(Boolean)
   ]);
-  const _pdfSeenIds=new Set();
-  (task.emailOriginals||[]).filter(e=>!thrIds.has(e.messageId)&&e.fileId).forEach((e,i)=>{
-    items.push({src:'eml',idx:i,date:e.date?new Date(e.date):null,
-      from:e.sender||e.from||'',subject:e.subject||e.name||'',
-      preview:'',fileId:e.fileId||'',url:e.url||'',isOut:false});
-  });
-  // PDFs (dedupliziert, nur mit fileId)
-  (task.emailPdfs||[]).forEach((p,i)=>{
-    if(!p.fileId||_pdfSeenIds.has(p.fileId))return;
-    _pdfSeenIds.add(p.fileId);
-    items.push({src:'pdf',idx:i,date:p.date?new Date(p.date):null,
-      from:p.sender||p.from||task.emailSender||'',subject:p.name||p.subject||'PDF',
-      preview:'',fileId:p.fileId,url:p.url||('https://drive.google.com/file/d/'+p.fileId+'/view'),isOut:false});
-  });
 
-  // Neueste zuerst
-  items.sort((a,b)=>(b.date||0)-(a.date||0));
-
-  if(!items.length){
-    el.innerHTML='<div style="padding:20px 14px;text-align:center;color:var(--text2);font-size:12px;">Kein Verlauf geladen.<br><span style="font-size:11px;">Oben Gmail oder Outlook klicken.</span></div>';
-    return;
+  // Alle Mails in Gruppen (nach normalisiertem Betreff)
+  const groups=new Map(); // normSubj → {subject, mails:[], emls:[], pdfs:[]}
+  function _getGroup(subj){
+    const k=_normSubj(subj)||'__unbekannt__';
+    if(!groups.has(k))groups.set(k,{subject:subj||'(kein Betreff)',mails:[],emls:[],pdfs:[]});
+    return groups.get(k);
   }
+
+  // Gmail-Mails
+  (task.gmailThreadMessages||[]).forEach(function(m,i){
+    _getGroup(m.subject||'').mails.push({src:'gmail',idx:i,date:m.date?new Date(m.date):null,
+      from:m.fromName||m.from||'',subject:m.subject||'',preview:m.preview||'',
+      isOut:m.direction==='gesendet',hasAtt:false});
+  });
+
+  // Outlook-Mails
+  (task.msThreadMessages||[]).forEach(function(m,i){
+    _getGroup(m.subject||'').mails.push({src:'ms',idx:i,date:m.date?new Date(m.date):null,
+      from:m.fromName||m.from||'',subject:m.subject||'',preview:m.preview||'',
+      isOut:m.direction==='gesendet',hasAtt:m.hasAttachments||false});
+  });
+
+  // EML-Originale (nicht im Thread)
+  const _pdfSeen=new Set();
+  (task.emailOriginals||[]).filter(function(e){return !thrIds.has(e.messageId)&&e.fileId;}).forEach(function(e,i){
+    _getGroup(e.subject||e.name||'').emls.push({src:'eml',idx:i,date:e.date?new Date(e.date):null,
+      from:e.sender||e.from||'',subject:e.subject||e.name||'',fileId:e.fileId,url:e.url||''});
+  });
+
+  // PDFs
+  (task.emailPdfs||[]).forEach(function(p,i){
+    if(!p.fileId||_pdfSeen.has(p.fileId))return;
+    _pdfSeen.add(p.fileId);
+    _getGroup(p.subject||p.name||'').pdfs.push({src:'pdf',idx:i,date:p.date?new Date(p.date):null,
+      from:p.sender||p.from||'',subject:p.name||p.subject||'PDF',fileId:p.fileId,
+      url:p.url||('https://drive.google.com/file/d/'+p.fileId+'/view')});
+  });
+
+  if(!groups.size){
+    el.innerHTML='<div style="padding:20px 14px;text-align:center;color:var(--text2);font-size:12px;">Kein Verlauf geladen.<br><span style="font-size:11px;">Oben Gmail oder Outlook klicken.</span></div>';
+    _pamUpdateEmailBadge(task);return;
+  }
+
+  // Anhang/Foto-Zähler für Chips
+  const attachCount=(task.attachments||[]).length;
+  const fotoCount=(task.fotos||[]).length;
 
   const now=new Date();
-  el.innerHTML=items.map(m=>{
-    const isOut=m.isOut;
-    const isPdf=m.src==='pdf';
-    const avatarBg=m.src==='gmail'?'#1B5E20':m.src==='ms'?(isOut?'#16A34A':'#0078d4'):isPdf?'#c0392b':'#7c3aed';
-    const avatarLabel=isPdf?'PDF':m.src==='eml'?'EML':'';
-    const initials=avatarLabel||(m.from.match(/\b[A-ZÄÖÜa-zäöü]/g)||[]).slice(0,2).map(c=>c.toUpperCase()).join('')||'?';
-    const d=m.date;
-    const isToday=d&&d.toDateString()===now.toDateString();
-    const dateStr=d?(isToday?`${_ez2(d.getHours())}:${_ez2(d.getMinutes())}` : `${_ez2(d.getDate())}.${_ez2(d.getMonth()+1)}.${String(d.getFullYear()).slice(2)}`):'';
-    const srcIcon=m.src==='gmail'?'<span style="font-size:9px;font-weight:900;color:#1B5E20;">G</span>':m.src==='ms'?'<span style="font-size:9px;color:#0078d4;">✉</span>':isPdf?'<span style="font-size:9px;color:#c0392b;">PDF</span>':'<span style="font-size:9px;color:#7c3aed;">EML</span>';
-    const dirLabel=isPdf?'PDF':m.src==='eml'?'Original':isOut?'Gesendet':'Eingang';
-    const dirBg=isPdf?'rgba(192,57,43,.12)':m.src==='eml'?'rgba(124,58,237,.12)':isOut?'rgba(22,163,74,.15)':'rgba(29,78,216,.10)';
-    const dirTxt=isPdf?'#922b21':m.src==='eml'?'#5b21b6':isOut?'#15803D':'#1E40AF';
+  function _fmt(d){if(!d)return'';const t=d.toDateString()===now.toDateString();return t?(_ez2(d.getHours())+':'+_ez2(d.getMinutes())):(_ez2(d.getDate())+'.'+_ez2(d.getMonth()+1)+'.'+String(d.getFullYear()).slice(2));}
+  function _initials(from){return(from.match(/\b[A-ZÄÖÜa-zäöü]/g)||[]).slice(0,2).map(function(c){return c.toUpperCase();}).join('')||'?';}
 
-    let dblFn;
-    if(m.src==='gmail') dblFn=`_gmOpenMailOverlay('${taskId}',${m.idx})`;
-    else if(m.src==='ms') dblFn=`_msOpenMailOverlay('${taskId}',${m.idx})`;
-    else if(isPdf) dblFn='window.open(' + JSON.stringify(m.url||'') + ",'_blank')";
-    else dblFn=`_pamOpenEmlDbl('${taskId}',${m.idx})`;
-    const clickFn=`_pamUnifiedTogglePreview('${taskId}','${m.src}',${m.idx})`;
-    const hoverPreview=m.preview?m.preview.replace(/['"<>&]/g,c=>({'\'':'&#39;','"':'&quot;','<':'&lt;','>':'&gt;','&':'&amp;'}[c])).substring(0,120):'';
-    const _htRaw=`${m.from} · ${m.subject}${hoverPreview?' | '+hoverPreview:''}`;
-    const hoverTitle=_htRaw.replace(/['"<>&]/g,c=>({'\'':'&#39;','"':'&quot;','<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+  // Thread-open-State
+  if(!window._pamThreadOpen)window._pamThreadOpen={};
+  // Erstes Laden: ersten Thread öffnen
+  if(!Object.keys(window._pamThreadOpen).length){const _fk=[...groups.keys()][0];if(_fk)window._pamThreadOpen[_fk]=true;}
 
-    return`<div style="display:flex;gap:9px;align-items:flex-start;padding:8px 12px;border-bottom:0.5px solid var(--border);cursor:pointer;transition:background .12s;"
-      onmouseenter="_pamUnifiedHover(this,this.dataset.ht)" onmouseleave="_pamUnifiedHoverOut()"
-      data-ht="${hoverTitle}"
-      onclick="${clickFn}" ondblclick="${dblFn}">
-      <div style="width:30px;height:30px;border-radius:50%;background:${avatarBg};color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">${initials}</div>
-      <div style="flex:1;min-width:0;">
-        <div style="display:flex;align-items:center;gap:4px;margin-bottom:1px;">
-          <span style="font-size:calc(11px*var(--modal-scale,1));font-weight:700;color:var(--text1);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(m.from)}</span>
-          <span style="font-size:calc(10px*var(--modal-scale,1));color:var(--text2);flex-shrink:0;">${dateStr}</span>
-          ${srcIcon}
-          ${m.hasAtt?'<span style="font-size:10px;">📎</span>':''}
-        </div>
-        <div style="font-size:calc(11px*var(--modal-scale,1));color:var(--text1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500;margin-bottom:1px;">${esc(m.subject)}</div>
-        <div style="display:flex;align-items:center;gap:5px;">
-          <span style="font-size:9px;padding:1px 5px;border-radius:6px;background:${dirBg};color:${dirTxt};font-weight:600;flex-shrink:0;">${dirLabel}</span>
-          <span style="font-size:calc(10px*var(--modal-scale,1));color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(m.preview)}</span>
-        </div>
-      </div>
-    </div>`;
-  }).join('');
+  let html2='';
+  let globalMailIdx=0; // globaler Index für Toggle-Preview
 
-  // Aufklappfeld auto-öffnen wenn Inhalt vorhanden
+  groups.forEach(function(grp,key){
+    const isOpen=!!window._pamThreadOpen[key];
+    // Neueste Mail im Thread für Header-Datum
+    const allDates=[...grp.mails,...grp.emls,...grp.pdfs].map(function(m){return m.date?m.date.getTime():0;});
+    const lastDate=allDates.length?new Date(Math.max.apply(null,allDates)):null;
+    const lastStr=lastDate?_fmt(lastDate):'';
+    const mailCount=grp.mails.length;
+
+    // Chips
+    let chips='';
+    if(grp.emls.length) chips+='<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:rgba(124,58,237,.12);color:#5b21b6;border:0.5px solid rgba(124,58,237,.25);cursor:pointer;" onclick="event.stopPropagation();_openSectPopup(\'tEmailOrigSect\')" title="EML-Originale ansehen">'+grp.emls.length+' EML</span>';
+    if(grp.pdfs.length) chips+='<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:rgba(192,57,43,.10);color:#922b21;border:0.5px solid rgba(192,57,43,.2);">'+grp.pdfs.length+' PDF</span>';
+    if(attachCount) chips+='<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:rgba(29,78,216,.10);color:#1E40AF;border:0.5px solid rgba(29,78,216,.2);cursor:pointer;" onclick="event.stopPropagation();toggleFormSection(\'tAnhangSect\')" title="Anhänge öffnen">'+attachCount+' Anhang</span>';
+    if(fotoCount) chips+='<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:rgba(22,163,74,.10);color:#15803D;border:0.5px solid rgba(22,163,74,.2);cursor:pointer;" onclick="event.stopPropagation();toggleFormSection(\'tFotoSect\')" title="Fotos öffnen">'+fotoCount+' Fotos</span>';
+
+    // Thread-Header
+    html2+='<div style="border-bottom:0.5px solid var(--border);">';
+    html2+='<div onclick="_pamToggleThread(\''+key+'\')" style="padding:7px 10px;background:var(--bg3);display:flex;align-items:flex-start;gap:6px;cursor:pointer;user-select:none;">';
+    html2+='<span style="font-size:10px;color:var(--text2);margin-top:2px;flex-shrink:0;transition:transform .15s;display:inline-block;transform:rotate('+(isOpen?'0':'-90')+'deg);">▼</span>';
+    html2+='<div style="flex:1;min-width:0;">';
+    html2+='<div style="font-size:calc(11px*var(--modal-scale,1));font-weight:600;color:var(--text1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(grp.subject)+'</div>';
+    html2+='<div style="font-size:10px;color:var(--text2);margin-top:1px;">'+mailCount+' Mail'+(mailCount!==1?'s':'')+' · '+lastStr+'</div>';
+    if(chips)html2+='<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;">'+chips+'</div>';
+    html2+='</div></div>';
+
+    // Mail-Zeilen (nur wenn offen)
+    if(isOpen){
+      // Mails sortiert
+      const sortedMails=[...grp.mails].sort(function(a,b){return (b.date||0)-(a.date||0);});
+      sortedMails.forEach(function(m){
+        const gi=globalMailIdx++;
+        const isOut=m.isOut;
+        const avatarBg=m.src==='gmail'?'#1B5E20':(isOut?'#16A34A':'#0078d4');
+        const initials2=_initials(m.from);
+        const dateStr=_fmt(m.date);
+        const dirLabel=isOut?'Gesendet':'Eingang';
+        const dirBg=isOut?'rgba(22,163,74,.15)':'rgba(29,78,216,.10)';
+        const dirTxt=isOut?'#15803D':'#1E40AF';
+        const dblFn=m.src==='gmail'?('_gmOpenMailOverlay('+JSON.stringify(taskId)+','+m.idx+')'):'_msOpenMailOverlay('+JSON.stringify(taskId)+','+m.idx+')';
+        const clickFn='_pamUnifiedTogglePreview('+JSON.stringify(taskId)+','+JSON.stringify(m.src)+','+m.idx+')';
+        const htRaw=(m.from+' · '+m.subject+(m.preview?' | '+m.preview:'')).replace(/['"<>&]/g,function(c){return({'\'':'&#39;','"':'&quot;','<':'&lt;','>':'&gt;','&':'&amp;'}[c]);}).substring(0,180);
+        html2+='<div data-mi="'+gi+'" style="display:flex;gap:8px;align-items:flex-start;padding:6px 10px 6px 22px;border-top:0.5px solid var(--border);cursor:pointer;transition:background .1s;" data-ht="'+htRaw+'" onmouseenter="_pamUnifiedHover(this,this.dataset.ht)" onmouseleave="_pamUnifiedHoverOut()" onclick="'+clickFn+'" ondblclick="'+dblFn+'">';
+        html2+='<div style="width:26px;height:26px;border-radius:50%;background:'+avatarBg+';color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;">'+initials2+'</div>';
+        html2+='<div style="flex:1;min-width:0;">';
+        html2+='<div style="display:flex;align-items:center;gap:4px;"><span style="font-size:calc(11px*var(--modal-scale,1));font-weight:600;color:var(--text1);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(m.from)+'</span><span style="font-size:10px;color:var(--text2);">'+dateStr+'</span>'+(m.hasAtt?'<span style="font-size:10px;">📎</span>':'')+'</div>';
+        html2+='<div style="display:flex;align-items:center;gap:4px;margin-top:1px;"><span style="font-size:9px;padding:1px 5px;border-radius:4px;background:'+dirBg+';color:'+dirTxt+';font-weight:600;">'+dirLabel+'</span><span style="font-size:10px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(m.preview.substring(0,50))+'</span></div>';
+        html2+='</div></div>';
+      });
+    }
+    html2+='</div>';
+  });
+
+  el.innerHTML=html2;
+
+  // Aufklappfeld auto-öffnen
   const body=document.getElementById('pamEmailListBody');
   const chev=document.getElementById('pamEmailListChevron');
-  if(body&&body.style.display==='none'&&items.length>0){
-    body.style.display='block';
-    if(chev)chev.style.transform='rotate(180deg)';
-  }
+  if(body&&body.style.display==='none'){body.style.display='block';if(chev)chev.style.transform='rotate(180deg)';}
+  _pamUpdateEmailBadge(task);
 }
 
+function _pamToggleThread(key){
+  if(!window._pamThreadOpen)window._pamThreadOpen={};
+  window._pamThreadOpen[key]=!window._pamThreadOpen[key];
+  const taskId=(document.getElementById('taskId')||{}).value||'';
+  const task=findTaskById(taskId);
+  if(task)_pamRenderUnifiedEmailList(task);
+}
 // ── Unified E-Mail Liste: Klick-Vorschau & Hover ──────────────────────────
 
 let _pamUnifiedActiveIdx=-1;
@@ -12593,6 +12623,15 @@ function _pamEmailRefresh(task){
   const t=task||(()=>{const id=(document.getElementById('taskId')||{}).value;return id?findTaskById(id):null;})();
   // Task-ID im Popup speichern – Fallback für _getActiveTaskId() wenn Task-Modal geschlossen
   if(t&&t.id){const _ep=document.getElementById('tEmailOrigSect');if(_ep)_ep.dataset.taskId=t.id;}
+  // Auto-Laden: Outlook/Gmail-Thread beim Task öffnen automatisch nachladen
+  setTimeout(function(){
+    const _t2=findTaskById(t.id);if(!_t2)return;
+    if(typeof msToken!=='undefined'&&msToken&&(_t2.msMessageId||_t2.msConversationId)&&!(_t2.msThreadMessages||[]).length){
+      if(typeof _msLoadEmailThread==='function')_msLoadEmailThread();
+    } else if(typeof gmailToken!=='undefined'&&gmailToken&&(_t2.gmailMessageId||_t2.gmailThreadId)&&!(_t2.gmailThreadMessages||[]).length){
+      if(typeof _gmLoadEmailThread==='function')_gmLoadEmailThread();
+    }
+  },800);
   const gmMsgs=((t&&t.gmailThreadMessages)||[]).length;
   const msMsgs=((t&&t.msThreadMessages)||[]).length;
   // Fallback-Badge: wenn Thread noch nicht geladen, aber Mail-IDs vorhanden → verknüpfte Mails anzeigen
@@ -16629,6 +16668,7 @@ function openNewTaskModal(){
   ['pamGmailInlineList','pamMsInlineList','pamUnifiedEmailList','gmThreadList','msThreadList','gmThreadStatus','msThreadStatus'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML='';});
   _pamUnifiedClosePreview();if(typeof _pamUnifiedHoverOut==='function')_pamUnifiedHoverOut();
   _pamSplitResizerInit=false;
+  window._pamThreadOpen={};
   const _listEl2=document.getElementById('pamUnifiedEmailList');if(_listEl2)_listEl2.style.width='42%';
   // Build #101: pamEmailListBody beim Task-Wechsel einklappen
   const _pemLB=document.getElementById('pamEmailListBody');const _pemLC=document.getElementById('pamEmailListChevron');
