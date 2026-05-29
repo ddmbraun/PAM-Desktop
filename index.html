@@ -3335,7 +3335,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-28 · #102'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-28-b102)
+const PAM_BUILD = 'v2026-05-29 · #103'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-29-b103)
 
 // ── STATE ──
 let boards = {};
@@ -17125,12 +17125,22 @@ function _emUpdateTop2(){
     let dueLbl=dueDate.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit'});
     parts.push('<span class="em-top2-chip due'+(overdue?' overdue':'')+'" title="Bearbeiten bis">📅 '+dueLbl+'</span>');
   }
-  // Attachments count
-  let mailIdx=_emActiveMailIdx>=0?_emActiveMailIdx:0;
-  let mails=_emCurrentTask.emailOriginals||[];
-  let attCount=0;
-  if(mails[mailIdx]){attCount=(mails[mailIdx].attachments||[]).length;}
-  if(attCount>0)parts.push('<span class="em-top2-chip att" onclick="_emToggleAttachSection()" title="Anhänge anzeigen">📎 '+attCount+'</span>');
+  // Attachments count – Fix: aus taskAttachments + taskFotos des Tasks zaehlen
+  let attCount=(_emCurrentTask.attachments||[]).length+(_emCurrentTask.fotos||[]).length;
+  if(attCount>0)parts.push('<span class="em-top2-chip att" onclick="_emToggleAttachSection()" title="Anhaenge anzeigen">📎 '+attCount+'</span>');
+  // Freie Termine mit Datum – Fix: in Zeile 2 anzeigen wenn Datum vorhanden
+  let terminRows=document.querySelectorAll('#emTerminList .em-termin-row');
+  terminRows.forEach(function(row){
+    let txt=(row.querySelector('.em-termin-txt')||{}).value||'';
+    let dat=(row.querySelector('.em-termin-dat')||{}).value||'';
+    if(dat){
+      let d=new Date(dat);
+      let today=new Date();today.setHours(0,0,0,0);
+      let overdue=d<today;
+      let lbl=d.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit'});
+      parts.push('<span class="em-top2-chip'+(overdue?' overdue':'')+'" title="Freier Termin">📌 '+(txt?_escHtml(txt)+' ':'')+lbl+'</span>');
+    }
+  });
   // Termin vereinbaren
   parts.push('<button class="em-top2-termin-btn" onclick="_emTerminVereinbaren()">📅 Termin vereinbaren</button>');
   row2.innerHTML=parts.join('');
@@ -17237,18 +17247,46 @@ function _emShowAttachPreview(icon,name,url,mime,data){
   previewArea.style.cssText='flex:1;overflow:auto;border:1px solid var(--border);border-radius:8px;min-height:200px;display:flex;align-items:center;justify-content:center;';
   let mimeL=(mime||'').toLowerCase();
   let namL=name.toLowerCase();
+  // Fix: EML-geparste Bilder (b64, keine URL) -> data-URL bauen
+  if(!url&&data&&data._isEmlParsed&&data.b64){
+    let _m=data.mimeType||mime||'application/octet-stream';
+    if(_m.startsWith('image/')||namL.match(/\.(jpe?g|png|gif|webp)$/)){
+      url='data:'+_m+';base64,'+data.b64;
+    }
+  }
   if(url&&(mimeL.startsWith('image/')||namL.match(/\.(jpe?g|png|gif|webp)$/))){
     previewArea.innerHTML='<img src="'+_escHtml(url)+'" style="max-width:100%;max-height:500px;object-fit:contain;">';
   } else if(url&&(mimeL==='application/pdf'||namL.endsWith('.pdf'))){
     previewArea.innerHTML='<iframe src="'+_escHtml(url)+'" style="width:100%;height:500px;border:none;"></iframe>';
   } else if(url){
     previewArea.innerHTML='<div style="text-align:center;color:var(--text2);font-size:13px;padding:20px;">'+icon+' <a href="'+_escHtml(url)+'" target="_blank" style="color:var(--accent);">'+_escHtml(name)+' öffnen</a></div>';
+  } else if(data&&data._isEmlParsed&&data.b64){
+    window._emLastEmlAtt={b64:data.b64,mime:data.mimeType||mime||'application/octet-stream',name:name};
+    previewArea.innerHTML='<div style="text-align:center;color:var(--text2);font-size:13px;padding:20px;">'
+      +icon+' '+_escHtml(name)+'<br>'
+      +'<button onclick="if(window._emLastEmlAtt)_emDownloadEmlAttachment(window._emLastEmlAtt.b64,window._emLastEmlAtt.mime,window._emLastEmlAtt.name)"'
+      +' style="margin-top:10px;padding:6px 14px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;">⬇ Herunterladen</button></div>';
   } else {
     previewArea.innerHTML='<div style="text-align:center;color:var(--text2);font-size:13px;padding:20px;">Keine Vorschau verfügbar</div>';
   }
   box.appendChild(previewArea);
   ov.appendChild(box);
   document.body.appendChild(ov);
+}
+
+// Fix: EML-Anhang (base64) als Datei herunterladen
+function _emDownloadEmlAttachment(b64,mimeType,filename){
+  try{
+    let bin=atob(b64);
+    let arr=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);
+    let blob=new Blob([arr],{type:mimeType||'application/octet-stream'});
+    let a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=filename||'Anhang';
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+  }catch(e){showToast('⚠ Download fehlgeschlagen: '+e.message,'error',4000);}
 }
 
 function _emScheduleSave(){
@@ -17317,13 +17355,37 @@ function _emInAuftragEinglieder(){
     let go=window.confirm('Der Ziel-Task hat keinen Ordner zugewiesen.\nDateianhänge können nicht automatisch verschoben werden.\nTrotzdem eingliedern (nur E-Mail-Daten kopieren)?');
     if(!go)return;
   }
-  // Daten zusammenführen
-  tt.emailOriginals=(tt.emailOriginals||[]).concat(src.emailOriginals||[]);
-  tt.gmailThreadMessages=(tt.gmailThreadMessages||[]).concat(src.gmailThreadMessages||[]);
-  tt.msThreadMessages=(tt.msThreadMessages||[]).concat(src.msThreadMessages||[]);
-  tt.attachments=(tt.attachments||[]).concat(src.attachments||[]);
-  tt.fotos=(tt.fotos||[]).concat(src.fotos||[]);
-  tt.emailPdfs=(tt.emailPdfs||[]).concat(src.emailPdfs||[]);
+  // Daten zusammenfuehren – Fix: Duplikat-Check ueber fileId / messageId
+  if(!tt.emailOriginals)tt.emailOriginals=[];
+  (src.emailOriginals||[]).forEach(function(e){
+    if(!tt.emailOriginals.some(function(x){return (x.fileId&&x.fileId===e.fileId)||(x.messageId&&x.messageId===e.messageId);}))
+      tt.emailOriginals.push(e);
+  });
+  if(!tt.gmailThreadMessages)tt.gmailThreadMessages=[];
+  (src.gmailThreadMessages||[]).forEach(function(m){
+    if(!tt.gmailThreadMessages.some(function(x){return x.id&&x.id===m.id;}))
+      tt.gmailThreadMessages.push(m);
+  });
+  if(!tt.msThreadMessages)tt.msThreadMessages=[];
+  (src.msThreadMessages||[]).forEach(function(m){
+    if(!tt.msThreadMessages.some(function(x){return x.id&&x.id===m.id;}))
+      tt.msThreadMessages.push(m);
+  });
+  if(!tt.attachments)tt.attachments=[];
+  (src.attachments||[]).forEach(function(a){
+    if(!tt.attachments.some(function(x){return x.fileId&&x.fileId===a.fileId;}))
+      tt.attachments.push(a);
+  });
+  if(!tt.fotos)tt.fotos=[];
+  (src.fotos||[]).forEach(function(f){
+    if(!tt.fotos.some(function(x){return x.fileId&&x.fileId===f.fileId;}))
+      tt.fotos.push(f);
+  });
+  if(!tt.emailPdfs)tt.emailPdfs=[];
+  (src.emailPdfs||[]).forEach(function(p){
+    if(!tt.emailPdfs.some(function(x){return (x.fileId&&x.fileId===p.fileId)||(x.messageId&&x.messageId===p.messageId);}))
+      tt.emailPdfs.push(p);
+  });
   if(src.desc&&src.desc.trim()){tt.desc=(tt.desc||'')+'\n\n[E-Mail-Import '+new Date().toLocaleDateString('de-DE')+']:\n'+src.desc;}
   // Quell-Task löschen
   boards[_emCurrentBoard]=(boards[_emCurrentBoard]||[]).filter(function(t){return t.id!==src.id;});
@@ -17367,6 +17429,26 @@ function _emDeleteTask(){
   showToast('Task gelöscht.','success');
 }
 
+const _EM_COL_KEY='pam_em_col_widths_v1';
+function _emSaveColWidths(){
+  try{
+    let ml=document.getElementById('emMailList');
+    let rp=document.getElementById('emReadingPane');
+    let w={ml:ml?ml.offsetWidth:0,rp:rp?rp.offsetWidth:0};
+    localStorage.setItem(_EM_COL_KEY,JSON.stringify(w));
+  }catch(e){}
+}
+function _emRestoreColWidths(){
+  try{
+    let w=JSON.parse(localStorage.getItem(_EM_COL_KEY)||'null');
+    if(!w)return;
+    let ml=document.getElementById('emMailList');
+    let rp=document.getElementById('emReadingPane');
+    if(ml&&w.ml>100){ml.style.width=w.ml+'px';ml.style.flex='none';}
+    if(rp&&w.rp>100){rp.style.width=w.rp+'px';rp.style.flex='none';}
+  }catch(e){}
+}
+
 function _initEmailResizers(){
   // ── Spalten-Resizer (links↔mitte, mitte↔rechts) ──
   function makeResizer(resizerId,leftId,rightId,side){
@@ -17389,6 +17471,7 @@ function _initEmailResizers(){
       }
       function onUp(){
         rz.classList.remove('dragging');
+        _emSaveColWidths(); // Fix: Breiten nach Loslassen speichern
         document.removeEventListener('mousemove',onMove);
         document.removeEventListener('mouseup',onUp);
       }
@@ -17398,6 +17481,8 @@ function _initEmailResizers(){
   }
   makeResizer('emResizer1','emMailList','emReadingPane','left');
   makeResizer('emResizer2','emReadingPane','emRightPanel','left');
+  // Fix: gespeicherte Breiten beim Oeffnen wiederherstellen
+  _emRestoreColWidths();
 
   // ── Modal verschieben (Drag per Topbar) ──
   const modal=document.getElementById('emModalBox');
