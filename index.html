@@ -2798,11 +2798,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
                     <span style="line-height:1;">✉</span><span>Outlook</span>
                     <span id="pamOutlookCount" style="display:none;font-size:calc(10px*var(--modal-scale,1));font-weight:700;color:#fff;background:rgba(255,255,255,.25);border-radius:8px;padding:0 5px;min-width:16px;text-align:center;line-height:1.6;"></span>
                   </button>
-                  <button type="button" onclick="_openEmailThumbnailGrid()" title="EML-Originale & Anhänge"
-                    style="flex:1;display:flex;align-items:center;justify-content:center;gap:4px;padding:5px 4px;border-radius:6px;background:var(--bg2);border:0.5px solid var(--border);color:var(--accent);cursor:pointer;font-size:calc(11px*var(--modal-scale,1));font-weight:600;">
-                    <span style="line-height:1;">📎</span><span>EML</span>
-                    <span id="pamOrigCount" style="display:none;font-size:calc(10px*var(--modal-scale,1));font-weight:700;color:#fff;background:var(--accent);border-radius:8px;padding:0 5px;min-width:16px;text-align:center;line-height:1.6;"></span>
-                  </button>
+                  <span id="pamOrigCount" style="display:none;"></span>
                 </div>
                 <!-- 2-Spalten E-Mail-Layout: links Liste, rechts Vorschau -->
                 <div id="pamEmailSplitWrap" style="display:flex;min-height:0;">
@@ -4670,13 +4666,14 @@ document.addEventListener('visibilitychange', () => {
     return;
   }
   if (document.visibilityState !== 'visible') return;
-  // Token-Ablauf prüfen – erst Cloud-Refresh versuchen, dann Banner
-  if (gdriveToken || localStorage.getItem('pam_gdrive_refresh_token')) {
+  // Token-Ablauf prüfen
+  if (gdriveTokenClient && gdriveToken) {
     const msLeft = gdriveTokenExpires - Date.now();
-    if(msLeft <= 600000){
-      _renewTokenViaCloud().then(ok => {
-        if(!ok && Date.now() >= _bannerDismissedUntil) _showDriveWarnBanner(msLeft > 0 ? msLeft/1000 : 0);
-      });
+    if(msLeft <= 0){
+      if(Date.now() >= _bannerDismissedUntil) _showDriveWarnBanner(0);
+    } else if(msLeft <= 600000){
+      _showDriveWarnBanner(msLeft/1000);
+      // Kein _silentTokenRefresh (COOP) – Drive-Button für Redirect
     }
   }
   // Sync sofort lesen (ersetzt den separaten Handler in startSyncPolling)
@@ -12185,18 +12182,24 @@ function _pamRenderUnifiedEmailList(task){
       hasAtt:m.hasAttachments});
   });
 
-  // EML-Originale (Thread-verlinkte rausfiltern)
+  // EML-Originale (Thread-verlinkte rausfiltern, nur mit fileId)
   const thrIds=new Set([
     ...(task.gmailThreadMessages||[]).map(m=>m.messageId).filter(Boolean),
     ...(task.msThreadMessages||[]).map(m=>m.messageId).filter(Boolean)
   ]);
-  (task.emailOriginals||[]).filter(e=>!thrIds.has(e.messageId)).forEach((e,i)=>{
-    items.push({src:'eml',idx:i,
-      date:e.date?new Date(e.date):null,
-      from:e.sender||e.from||'',
-      subject:e.subject||e.name||'',
-      preview:'',
-      isOut:false});
+  const _pdfSeenIds=new Set();
+  (task.emailOriginals||[]).filter(e=>!thrIds.has(e.messageId)&&e.fileId).forEach((e,i)=>{
+    items.push({src:'eml',idx:i,date:e.date?new Date(e.date):null,
+      from:e.sender||e.from||'',subject:e.subject||e.name||'',
+      preview:'',fileId:e.fileId||'',url:e.url||'',isOut:false});
+  });
+  // PDFs (dedupliziert, nur mit fileId)
+  (task.emailPdfs||[]).forEach((p,i)=>{
+    if(!p.fileId||_pdfSeenIds.has(p.fileId))return;
+    _pdfSeenIds.add(p.fileId);
+    items.push({src:'pdf',idx:i,date:p.date?new Date(p.date):null,
+      from:p.sender||p.from||task.emailSender||'',subject:p.name||p.subject||'PDF',
+      preview:'',fileId:p.fileId,url:p.url||('https://drive.google.com/file/d/'+p.fileId+'/view'),isOut:false});
   });
 
   // Neueste zuerst
@@ -12210,19 +12213,22 @@ function _pamRenderUnifiedEmailList(task){
   const now=new Date();
   el.innerHTML=items.map(m=>{
     const isOut=m.isOut;
-    const avatarBg=m.src==='gmail'?'#1B5E20':(m.src==='ms'?(isOut?'#16A34A':'#0078d4'):'#7c3aed');
-    const initials=(m.from.match(/\b[A-ZÄÖÜa-zäöü]/g)||[]).slice(0,2).map(c=>c.toUpperCase()).join('')||'?';
+    const isPdf=m.src==='pdf';
+    const avatarBg=m.src==='gmail'?'#1B5E20':m.src==='ms'?(isOut?'#16A34A':'#0078d4'):isPdf?'#c0392b':'#7c3aed';
+    const avatarLabel=isPdf?'PDF':m.src==='eml'?'EML':'';
+    const initials=avatarLabel||(m.from.match(/\b[A-ZÄÖÜa-zäöü]/g)||[]).slice(0,2).map(c=>c.toUpperCase()).join('')||'?';
     const d=m.date;
     const isToday=d&&d.toDateString()===now.toDateString();
     const dateStr=d?(isToday?`${_ez2(d.getHours())}:${_ez2(d.getMinutes())}` : `${_ez2(d.getDate())}.${_ez2(d.getMonth()+1)}.${String(d.getFullYear()).slice(2)}`):'';
-    const srcIcon=m.src==='gmail'?'<span style="font-size:9px;font-weight:900;color:#1B5E20;">G</span>':m.src==='ms'?'<span style="font-size:9px;color:#0078d4;">✉</span>':'<span style="font-size:9px;color:#7c3aed;">📎</span>';
-    const dirLabel=isOut?'Gesendet':'Eingang';
-    const dirBg=isOut?'rgba(22,163,74,.15)':'rgba(29,78,216,.10)';
-    const dirTxt=isOut?'#15803D':'#1E40AF';
+    const srcIcon=m.src==='gmail'?'<span style="font-size:9px;font-weight:900;color:#1B5E20;">G</span>':m.src==='ms'?'<span style="font-size:9px;color:#0078d4;">✉</span>':isPdf?'<span style="font-size:9px;color:#c0392b;">PDF</span>':'<span style="font-size:9px;color:#7c3aed;">EML</span>';
+    const dirLabel=isPdf?'PDF':m.src==='eml'?'Original':isOut?'Gesendet':'Eingang';
+    const dirBg=isPdf?'rgba(192,57,43,.12)':m.src==='eml'?'rgba(124,58,237,.12)':isOut?'rgba(22,163,74,.15)':'rgba(29,78,216,.10)';
+    const dirTxt=isPdf?'#922b21':m.src==='eml'?'#5b21b6':isOut?'#15803D':'#1E40AF';
 
     let dblFn;
     if(m.src==='gmail') dblFn=`_gmOpenMailOverlay('${taskId}',${m.idx})`;
     else if(m.src==='ms') dblFn=`_msOpenMailOverlay('${taskId}',${m.idx})`;
+    else if(isPdf) dblFn='window.open(' + JSON.stringify(m.url||'') + ",'_blank')";
     else dblFn=`_pamOpenEmlDbl('${taskId}',${m.idx})`;
     const clickFn=`_pamUnifiedTogglePreview('${taskId}','${m.src}',${m.idx})`;
     const hoverPreview=m.preview?m.preview.replace(/['"<>&]/g,c=>({'\'':'&#39;','"':'&quot;','<':'&lt;','>':'&gt;','&':'&amp;'}[c])).substring(0,120):'';
@@ -12307,16 +12313,23 @@ async function _pamUnifiedShowPreview(taskId,src,idx){
     subject=m.subject||'';
     bodyHtml=m._cachedBodyHtml||'';bodyText=m.preview||'';
     msgId=m.id;
-  } else {
-    // EML: öffne normales Popup
-    _openSectPopup('tEmailOrigSect');return;
-  }
+  } else if(src==='eml'){
+    m=(task.emailOriginals||[])[idx];if(!m||!m.fileId)return;
+    isOut=false;from=m.sender||m.from||'';subject=m.subject||m.name||'';
+    bodyHtml='';bodyText='';msgId=m.fileId;
+  } else if(src==='pdf'){
+    m=(task.emailPdfs||[])[idx];if(!m||!m.fileId)return;
+    isOut=false;from=task.emailSender||'';subject=m.name||m.subject||'PDF';
+    bodyHtml='';bodyText='';msgId=m.fileId;
+  } else return;
   const d=m.date?new Date(m.date):null;
   const ds=d?`${_ez2(d.getDate())}.${_ez2(d.getMonth()+1)}.${d.getFullYear()} ${_ez2(d.getHours())}:${_ez2(d.getMinutes())}`:'';
-  const dirBg=isOut?'rgba(22,163,74,.12)':'rgba(29,78,216,.10)';
-  const dirTxt=isOut?'#15803D':'#1E40AF';
-  const dirLabel=isOut?'Gesendet':'Eingang';
-  const ovFn=src==='gmail'?`_gmOpenMailOverlay('${taskId}',${idx})`:`_msOpenMailOverlay('${taskId}',${idx})`;
+  const _isPdf2=src==='pdf';const _isEml2=src==='eml';
+  const dirBg=_isPdf2?'rgba(192,57,43,.12)':_isEml2?'rgba(124,58,237,.12)':isOut?'rgba(22,163,74,.12)':'rgba(29,78,216,.10)';
+  const dirTxt=_isPdf2?'#922b21':_isEml2?'#5b21b6':isOut?'#15803D':'#1E40AF';
+  const dirLabel=_isPdf2?'PDF':_isEml2?'Original':isOut?'Gesendet':'Eingang';
+  const _ovUrl=(_isPdf2||_isEml2)?(m.url||''):'';
+  const ovFn=_isPdf2?('window.open('+JSON.stringify(_ovUrl)+",'_blank')"):_isEml2?('_pamOpenEmlDbl('+JSON.stringify(taskId)+','+idx+')'):src==='gmail'?('_gmOpenMailOverlay('+JSON.stringify(taskId)+','+idx+')'):'_msOpenMailOverlay('+JSON.stringify(taskId)+','+idx+')';
   prev.style.display='flex';
   prev.style.flexDirection='column';
   // Liste auf feste Breite setzen, Vorschau nimmt den Rest
@@ -12382,8 +12395,39 @@ async function _pamUnifiedShowPreview(taskId,src,idx){
       }
     }
   }catch(e){console.warn('[PAM unified preview]',e);}
-  // Fallback: Preview-Text
-  bodyEl.innerHTML=bodyText?`<div style="padding:14px;font-size:13px;color:var(--text1);white-space:pre-wrap;line-height:1.6;">${esc(bodyText)}</div>`:`<div style="padding:14px;color:var(--text2);font-size:13px;">Kein Inhalt verfügbar – bitte Gmail/Outlook verbinden.</div>`;
+  // EML aus Drive laden und als lesbare E-Mail rendern
+  if(src==='eml'&&msgId&&gdriveToken){
+    try{
+      const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(msgId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
+      if(r.ok){
+        const rawText=await r.text();
+        const parsed=_parseEmlText(rawText);
+        let emlHtml=parsed.bodyHtml||'';
+        if(emlHtml&&parsed.cidMap){for(const[cid,durl]of Object.entries(parsed.cidMap)){emlHtml=emlHtml.split(cid).join(durl);}}
+        const body2=emlHtml||('<pre style="white-space:pre-wrap;font-size:13px;font-family:Arial,sans-serif;margin:0;">'+esc(parsed.bodyText||'(kein Inhalt)')+'</pre>');
+        const clean=body2.replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'');
+        const fr=document.createElement('iframe');fr.style.cssText='flex:1;width:100%;border:none;min-height:200px;';fr.sandbox='allow-same-origin';
+        const bUrl=URL.createObjectURL(new Blob(['<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}a{color:#1a73e8;}img{max-width:100%;}</style></head><body>'+clean+'</body></html>'],{type:'text/html'}));
+        fr.src=bUrl;let _rv=false;
+        fr.onload=function(){if(!_rv){_rv=true;URL.revokeObjectURL(bUrl);}try{fr.style.height=Math.min(fr.contentDocument.body.scrollHeight+20,360)+'px';}catch(e){}};
+        setTimeout(function(){if(!_rv){_rv=true;URL.revokeObjectURL(bUrl);}},30000);
+        if(bodyEl){bodyEl.innerHTML='';bodyEl.appendChild(fr);}
+        return;
+      }
+    }catch(e){console.warn('[PAM EML preview]',e);}
+    if(bodyEl)bodyEl.innerHTML='<div style="padding:14px;color:var(--text2);font-size:13px;">EML konnte nicht geladen werden.</div>';
+    return;
+  }
+  // PDF als Google-Drive-Vorschau anzeigen
+  if(src==='pdf'&&m&&m.fileId){
+    const pdfUrl='https://drive.google.com/file/d/'+encodeURIComponent(m.fileId)+'/preview';
+    const fr=document.createElement('iframe');
+    fr.src=pdfUrl;fr.style.cssText='flex:1;width:100%;border:none;min-height:300px;height:360px;';
+    if(bodyEl){bodyEl.innerHTML='';bodyEl.appendChild(fr);}
+    return;
+  }
+  // Fallback
+  if(bodyEl)bodyEl.innerHTML=bodyText?('<div style="padding:14px;font-size:13px;color:var(--text1);white-space:pre-wrap;line-height:1.6;">'+esc(bodyText)+'</div>'):'<div style="padding:14px;color:var(--text2);font-size:13px;">Kein Inhalt verfügbar.</div>';
 }
 
 function _pamUnifiedClosePreview(){
