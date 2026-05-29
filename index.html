@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com https://ssl.gstatic.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; connect-src 'self' blob: https://*.googleapis.com https://accounts.google.com https://www.googleapis.com https://oauth2.googleapis.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://login.microsoftonline.com https://graph.microsoft.com https://europe-west1-ptp-workboard.cloudfunctions.net; img-src 'self' data: blob: https: https://*.googleusercontent.com https://drive.google.com https://lh3.googleusercontent.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://ssl.gstatic.com; frame-src https://accounts.google.com https://drive.google.com https://login.microsoftonline.com https://login.live.com blob:; worker-src blob: 'self';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com https://ssl.gstatic.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; connect-src 'self' blob: https://*.googleapis.com https://accounts.google.com https://www.googleapis.com https://oauth2.googleapis.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://login.microsoftonline.com https://graph.microsoft.com https://europe-west1-ptp-workboard.cloudfunctions.net; img-src 'self' data: blob: https: https://*.googleusercontent.com https://drive.google.com https://lh3.googleusercontent.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://ssl.gstatic.com; frame-src 'self' https://accounts.google.com https://drive.google.com https://login.microsoftonline.com https://login.live.com https://*.msftauth.net https://*.msauth.net blob:; worker-src blob: 'self';">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PAM Workboard</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PGNpcmNsZSBjeD0iMzIiIGN5PSIzMiIgcj0iMzIiIGZpbGw9IiMyNTYzZWIiLz48dGV4dCB4PSIzMiIgeT0iNDMiIGZvbnQtZmFtaWx5PSJBcmlhbCxzYW5zLXNlcmlmIiBmb250LXNpemU9IjMwIiBmb250LXdlaWdodD0iYm9sZCIgZmlsbD0iI2ZmZiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+UDwvdGV4dD48L3N2Zz4=">
@@ -11224,17 +11224,32 @@ function msInit(){
       }else{
         // Stiller Token-Refresh für alle gespeicherten Accounts
         const accs=msalInstance.getAllAccounts();
+        let _startupSessionExpiredShown=false;
         for(const acc of accs.slice(0,2)){
           msalInstance.acquireTokenSilent({scopes:MS_SCOPES,account:acc})
             .then(r2=>{
               const em=(r2.account?.username||'').toLowerCase();
-              // Zweiter Slot: f.braun@ddmbraun.de (oder zweiter Account falls Slot1 schon belegt)
               if(msToken&&msUserEmail&&msUserEmail.toLowerCase()!==em){
                 msToken2=r2.accessToken;msUserEmail2=r2.account?.username||'';_msUpdateBtn2();
               }else{
                 _msHandleToken(r2);
               }
-            }).catch(()=>{});
+            }).catch(e=>{
+              // FixB: Abgelaufene Session beim Start sichtbar machen statt still ignorieren
+              console.warn('[MS] Startup-Token-Refresh fehlgeschlagen:',e.errorCode||e.message||e);
+              // Token-State für diesen Account leeren
+              const em=(acc.username||'').toLowerCase();
+              if(msUserEmail&&msUserEmail.toLowerCase()===em){msToken=null;}
+              else if(msUserEmail2&&msUserEmail2.toLowerCase()===em){msToken2=null;_msUpdateBtn2();}
+              // Einmalig Toast anzeigen (nicht für jeden Account wiederholen)
+              if(!_startupSessionExpiredShown){
+                _startupSessionExpiredShown=true;
+                setTimeout(function(){
+                  showToast('⚠ Outlook-Session abgelaufen – bitte über die Toolbar neu anmelden (📨 Outlook)','warning',7000);
+                },1500); // kurze Verzögerung damit die App erst geladen ist
+              }
+              _msUpdateBtn();
+            });
         }
       }
       _msUpdateBtn();
@@ -11289,13 +11304,24 @@ async function _msRefreshToken(){
   try{
     const accs=msalInstance.getAllAccounts();
     if(!accs.length)return false;
-    // Konto 1 anhand gespeicherter E-Mail matchen (verhindert Verwechslung mit Konto 2)
     const _acc1=msUserEmail?accs.find(a=>(a.username||'').toLowerCase()===msUserEmail.toLowerCase()):accs[0];
     const r=await msalInstance.acquireTokenSilent({scopes:MS_SCOPES,account:_acc1||accs[0]});
     msToken=r.accessToken;return true;
   }catch(e){
-    try{await msalInstance.acquireTokenRedirect({scopes:MS_SCOPES});return false;}
-    catch(e2){return false;}
+    // FixA: acquireTokenRedirect würde die Seite verlassen und ungespeicherte Daten löschen.
+    // Stattdessen: Popup versuchen; schlägt das fehl → Token leeren und Nutzer informieren.
+    try{
+      const accs=msalInstance.getAllAccounts();
+      const _acc1=msUserEmail?accs.find(a=>(a.username||'').toLowerCase()===msUserEmail.toLowerCase()):accs[0];
+      const r=await msalInstance.acquireTokenPopup({scopes:MS_SCOPES,account:_acc1||accs[0]});
+      msToken=r.accessToken;return true;
+    }catch(e2){
+      // Popup geblockt oder Session abgelaufen → sauber abmelden ohne Redirect
+      msToken=null;
+      _msUpdateBtn();
+      showToast('⚠ Outlook-Session abgelaufen – bitte über die Toolbar neu anmelden (📨 Outlook)','warning',6000);
+      return false;
+    }
   }
 }
 
@@ -18668,7 +18694,7 @@ function _showVbsDriveLinksBox(mainUrl,fotoUrl,dokUrl,emailUrl){
    +'<div style="margin-bottom:4px;"><span style="opacity:.7;">02_Fotos: </span>'
      +'<a href="'+mainUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
    +'<div style="margin-bottom:4px;"><span style="opacity:.7;">02_Fotos: </span>'
-     +'<a href="'+fotoUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
+     +'<a href="'+fotoUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Driveöffnen ↗</a></div>'
    +'<div style="margin-bottom:4px;"><span style="opacity:.7;">03_Dokumente: </span>'
      +'<a href="'+dokUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
    +'<div style="margin-bottom:10px;"><span style="opacity:.7;">E-Mails: </span>'
