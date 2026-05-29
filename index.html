@@ -2804,10 +2804,12 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
                     <span id="pamOrigCount" style="display:none;font-size:calc(10px*var(--modal-scale,1));font-weight:700;color:#fff;background:var(--accent);border-radius:8px;padding:0 5px;min-width:16px;text-align:center;line-height:1.6;"></span>
                   </button>
                 </div>
-                <!-- Unified Outlook-style email list -->
-                <div id="pamUnifiedEmailList" style="max-height:340px;overflow-y:auto;background:var(--bg1);"></div>
-                <!-- Inline-Vorschau unter der Liste -->
-                <div id="pamUnifiedPreview" style="display:none;"></div>
+                <!-- 2-Spalten E-Mail-Layout: links Liste, rechts Vorschau -->
+                <div id="pamEmailSplitWrap" style="display:flex;min-height:0;">
+                  <div id="pamUnifiedEmailList" style="width:42%;min-width:140px;max-height:380px;overflow-y:auto;background:var(--bg1);border-right:1px solid var(--border);flex-shrink:0;"></div>
+                  <div id="pamEmailSplitResizer" style="width:5px;cursor:col-resize;background:transparent;flex-shrink:0;transition:background .15s;" onmouseenter="this.style.background='var(--border)'" onmouseleave="this.style.background='transparent'"></div>
+                  <div id="pamUnifiedPreview" style="flex:1;min-width:0;display:none;overflow:hidden;"></div>
+                </div>
                 <!-- Hidden rendering targets (backward compat) -->
                 <div id="pamGmailInlineList" style="display:none;"></div>
                 <div id="pamMsInlineList" style="display:none;"></div>
@@ -11224,10 +11226,10 @@ function msInit(){
           _msHandleToken(r);
         }
       }else{
-        // Stiller Token-Refresh für alle gespeicherten Accounts
+        // Stiller Token-Refresh für alle gespeicherten Accounts beim Start
         const accs=msalInstance.getAllAccounts();
-        let _startupSessionExpiredShown=false;
         for(const acc of accs.slice(0,2)){
+          // Versuch 1: silent (Cache)
           msalInstance.acquireTokenSilent({scopes:MS_SCOPES,account:acc})
             .then(r2=>{
               const em=(r2.account?.username||'').toLowerCase();
@@ -11237,20 +11239,26 @@ function msInit(){
                 _msHandleToken(r2);
               }
             }).catch(e=>{
-              // FixB: Abgelaufene Session beim Start sichtbar machen statt still ignorieren
-              console.warn('[MS] Startup-Token-Refresh fehlgeschlagen:',e.errorCode||e.message||e);
-              // Token-State für diesen Account leeren
-              const em=(acc.username||'').toLowerCase();
-              if(msUserEmail&&msUserEmail.toLowerCase()===em){msToken=null;}
-              else if(msUserEmail2&&msUserEmail2.toLowerCase()===em){msToken2=null;_msUpdateBtn2();}
-              // Einmalig Toast anzeigen (nicht für jeden Account wiederholen)
-              if(!_startupSessionExpiredShown){
-                _startupSessionExpiredShown=true;
-                setTimeout(function(){
-                  showToast('⚠ Outlook-Session abgelaufen – bitte über die Toolbar neu anmelden (📨 Outlook)','warning',7000);
-                },1500); // kurze Verzögerung damit die App erst geladen ist
-              }
-              _msUpdateBtn();
+              console.warn('[MS] Startup silent fehlgeschlagen, versuche forceRefresh:',e.errorCode||e.message);
+              // Versuch 2: forceRefresh (erzwingt Refresh-Token-Nutzung ohne Popup)
+              msalInstance.acquireTokenSilent({scopes:MS_SCOPES,account:acc,forceRefresh:true})
+                .then(r3=>{
+                  const em=(r3.account?.username||'').toLowerCase();
+                  if(msToken&&msUserEmail&&msUserEmail.toLowerCase()!==em){
+                    msToken2=r3.accessToken;msUserEmail2=r3.account?.username||'';_msUpdateBtn2();
+                  }else{
+                    _msHandleToken(r3);
+                  }
+                  console.info('[MS] forceRefresh erfolgreich für',acc.username);
+                }).catch(e2=>{
+                  // Beide stillen Versuche fehlgeschlagen → Token leeren, KEIN Toast beim Start
+                  // Der Nutzer merkt es wenn er Outlook benutzt (dann kommt Popup-Fallback)
+                  console.warn('[MS] Startup-Refresh komplett fehlgeschlagen:',e2.errorCode||e2.message);
+                  const em=(acc.username||'').toLowerCase();
+                  if(msUserEmail&&msUserEmail.toLowerCase()===em){msToken=null;}
+                  else if(msUserEmail2&&msUserEmail2.toLowerCase()===em){msToken2=null;_msUpdateBtn2();}
+                  _msUpdateBtn();
+                });
             });
         }
       }
@@ -11303,27 +11311,43 @@ function _msUpdateBtn(){
 
 async function _msRefreshToken(){
   if(!msalInstance)return false;
+  const accs=msalInstance.getAllAccounts();
+  if(!accs.length)return false;
+  const _acc1=msUserEmail?accs.find(a=>(a.username||'').toLowerCase()===msUserEmail.toLowerCase()):accs[0];
+  const _account=_acc1||accs[0];
+  // Versuch 1: silent aus Cache
   try{
-    const accs=msalInstance.getAllAccounts();
-    if(!accs.length)return false;
-    const _acc1=msUserEmail?accs.find(a=>(a.username||'').toLowerCase()===msUserEmail.toLowerCase()):accs[0];
-    const r=await msalInstance.acquireTokenSilent({scopes:MS_SCOPES,account:_acc1||accs[0]});
-    msToken=r.accessToken;return true;
-  }catch(e){
-    // FixA: acquireTokenRedirect würde die Seite verlassen und ungespeicherte Daten löschen.
-    // Stattdessen: Popup versuchen; schlägt das fehl → Token leeren und Nutzer informieren.
-    try{
-      const accs=msalInstance.getAllAccounts();
-      const _acc1=msUserEmail?accs.find(a=>(a.username||'').toLowerCase()===msUserEmail.toLowerCase()):accs[0];
-      const r=await msalInstance.acquireTokenPopup({scopes:MS_SCOPES,account:_acc1||accs[0]});
-      msToken=r.accessToken;return true;
-    }catch(e2){
-      // Popup geblockt oder Session abgelaufen → sauber abmelden ohne Redirect
-      msToken=null;
-      _msUpdateBtn();
-      showToast('⚠ Outlook-Session abgelaufen – bitte über die Toolbar neu anmelden (📨 Outlook)','warning',6000);
-      return false;
+    const r=await msalInstance.acquireTokenSilent({scopes:MS_SCOPES,account:_account});
+    msToken=r.accessToken;_msUpdateBtn();return true;
+  }catch(e1){
+    console.warn('[MS] acquireTokenSilent fehlgeschlagen:',e1.errorCode||e1.message);
+  }
+  // Versuch 2: silent mit forceRefresh (nutzt Refresh-Token ohne Popup)
+  try{
+    const r=await msalInstance.acquireTokenSilent({scopes:MS_SCOPES,account:_account,forceRefresh:true});
+    msToken=r.accessToken;_msUpdateBtn();return true;
+  }catch(e2){
+    console.warn('[MS] forceRefresh fehlgeschlagen:',e2.errorCode||e2.message);
+  }
+  // Versuch 3: Popup (Microsoft-Konto im Browser bereits eingeloggt → kein Passwort nötig)
+  try{
+    const popupParams={scopes:MS_SCOPES,account:_account};
+    if(_account?.username)popupParams.loginHint=_account.username;
+    const r=await msalInstance.acquireTokenPopup(popupParams);
+    msToken=r.accessToken;_msUpdateBtn();
+    showToast('✅ Outlook neu verbunden','success',2500);
+    return true;
+  }catch(e3){
+    // Popup geblockt oder User hat abgebrochen oder Session komplett abgelaufen
+    const _code=e3.errorCode||e3.name||'';
+    const _blocked=_code.includes('popup_window_error')||_code.includes('empty_window');
+    msToken=null;_msUpdateBtn();
+    if(_blocked){
+      showToast('⚠ Outlook: Popup wurde blockiert – bitte Popup-Blocker für diese Seite deaktivieren, dann 📨 Outlook klicken','warning',8000);
+    }else{
+      showToast('⚠ Outlook-Session abgelaufen – bitte 📨 Outlook in der Toolbar klicken','warning',6000);
     }
+    return false;
   }
 }
 
@@ -11358,15 +11382,29 @@ function _msUpdateBtn2(){
 }
 async function _msRefreshToken2(){
   if(!msalInstance)return false;
+  const accs=msalInstance.getAllAccounts();
+  if(!accs.length)return false;
+  const _acc2=msUserEmail2?accs.find(a=>(a.username||'').toLowerCase()===msUserEmail2.toLowerCase()):accs[1];
+  if(!_acc2)return false;
+  // Versuch 1: silent
   try{
-    const accs=msalInstance.getAllAccounts();
-    if(!accs.length)return false;
-    // Konto 2 anhand gespeicherter E-Mail matchen
-    const _acc2=msUserEmail2?accs.find(a=>(a.username||'').toLowerCase()===msUserEmail2.toLowerCase()):accs[1];
-    if(!_acc2)return false;
     const r=await msalInstance.acquireTokenSilent({scopes:MS_SCOPES,account:_acc2});
-    msToken2=r.accessToken;return true;
-  }catch(e){return false;}
+    msToken2=r.accessToken;_msUpdateBtn2();return true;
+  }catch(e1){console.warn('[MS2] silent fehlgeschlagen:',e1.errorCode||e1.message);}
+  // Versuch 2: forceRefresh
+  try{
+    const r=await msalInstance.acquireTokenSilent({scopes:MS_SCOPES,account:_acc2,forceRefresh:true});
+    msToken2=r.accessToken;_msUpdateBtn2();return true;
+  }catch(e2){console.warn('[MS2] forceRefresh fehlgeschlagen:',e2.errorCode||e2.message);}
+  // Versuch 3: Popup
+  try{
+    const r=await msalInstance.acquireTokenPopup({scopes:MS_SCOPES,account:_acc2,loginHint:_acc2.username});
+    msToken2=r.accessToken;_msUpdateBtn2();return true;
+  }catch(e3){
+    msToken2=null;_msUpdateBtn2();
+    console.warn('[MS2] Popup fehlgeschlagen:',e3.errorCode||e3.message);
+    return false;
+  }
 }
 
 function _msCleanPreview(raw){
@@ -12278,8 +12316,20 @@ async function _pamUnifiedShowPreview(taskId,src,idx){
   const dirTxt=isOut?'#15803D':'#1E40AF';
   const dirLabel=isOut?'Gesendet':'Eingang';
   const ovFn=src==='gmail'?`_gmOpenMailOverlay('${taskId}',${idx})`:`_msOpenMailOverlay('${taskId}',${idx})`;
-  prev.style.display='block';
-  prev.innerHTML=`<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;margin:4px 8px 8px;background:var(--bg2);">
+  prev.style.display='flex';
+  prev.style.flexDirection='column';
+  // Liste auf feste Breite setzen, Vorschau nimmt den Rest
+  const _listEl=document.getElementById('pamUnifiedEmailList');
+  if(_listEl){
+    if(!_listEl.style.width.includes('px'))_listEl.style.width='42%';
+    _listEl.style.maxHeight='380px';
+  }
+  // Wrapper-Höhe fixieren damit beide Spalten gleich hoch sind
+  const _wrap=document.getElementById('pamEmailSplitWrap');
+  if(_wrap)_wrap.style.maxHeight='380px';
+  // Resizer initialisieren (einmalig)
+  _pamInitSplitResizer();
+  prev.innerHTML=`<div style="border-left:0;border:none;border-top:0.5px solid var(--border);flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--bg2);">
     <div style="background:var(--bg3);padding:7px 12px;display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--border);flex-wrap:wrap;">
       <div style="flex:1;min-width:0;">
         <div style="font-size:12px;font-weight:600;color:var(--text1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(subject||'(kein Betreff)')}</div>
@@ -12287,9 +12337,9 @@ async function _pamUnifiedShowPreview(taskId,src,idx){
       </div>
       <span style="font-size:10px;padding:2px 7px;border-radius:8px;background:${dirBg};color:${dirTxt};font-weight:600;flex-shrink:0;">${dirLabel}</span>
       <button type="button" onclick="${ovFn}" style="background:none;border:1px solid var(--border);border-radius:4px;font-size:11px;cursor:pointer;padding:3px 8px;color:var(--text1);flex-shrink:0;" title="Vollbild öffnen (oder Doppelklick auf die Mail)">⛶ Groß</button>
-      <button type="button" onclick="document.getElementById('pamUnifiedPreview').style.display='none';_pamUnifiedActiveIdx=-1;_pamUnifiedActiveSrc='';_pamUnifiedUpdateActive(-1,'');" style="background:none;border:none;font-size:14px;cursor:pointer;color:var(--text2);padding:2px 5px;flex-shrink:0;">✕</button>
+      <button type="button" onclick="_pamUnifiedClosePreview()" style="background:none;border:none;font-size:14px;cursor:pointer;color:var(--text2);padding:2px 5px;flex-shrink:0;" title="Vorschau schließen">✕</button>
     </div>
-    <div id="pamUnifiedPreviewBody" style="min-height:80px;max-height:380px;overflow-y:auto;">
+    <div id="pamUnifiedPreviewBody" style="flex:1;overflow-y:auto;">
       <div style="padding:14px;color:var(--text2);font-size:13px;">⏳ Lade Inhalt…</div>
     </div>
   </div>`;
@@ -12333,6 +12383,35 @@ async function _pamUnifiedShowPreview(taskId,src,idx){
   }catch(e){console.warn('[PAM unified preview]',e);}
   // Fallback: Preview-Text
   bodyEl.innerHTML=bodyText?`<div style="padding:14px;font-size:13px;color:var(--text1);white-space:pre-wrap;line-height:1.6;">${esc(bodyText)}</div>`:`<div style="padding:14px;color:var(--text2);font-size:13px;">Kein Inhalt verfügbar – bitte Gmail/Outlook verbinden.</div>`;
+}
+
+function _pamUnifiedClosePreview(){
+  const prev=document.getElementById('pamUnifiedPreview');
+  if(prev){prev.style.display='none';prev.innerHTML='';}
+  _pamUnifiedActiveIdx=-1;_pamUnifiedActiveSrc='';
+  _pamUnifiedUpdateActive(-1,'');
+}
+
+let _pamSplitResizerInit=false;
+function _pamInitSplitResizer(){
+  if(_pamSplitResizerInit)return;
+  const rz=document.getElementById('pamEmailSplitResizer');
+  const listEl=document.getElementById('pamUnifiedEmailList');
+  const wrap=document.getElementById('pamEmailSplitWrap');
+  if(!rz||!listEl||!wrap)return;
+  _pamSplitResizerInit=true;
+  rz.addEventListener('mousedown',function(e){
+    e.preventDefault();
+    const startX=e.clientX,startW=listEl.offsetWidth;
+    function onMove(ev){
+      const nw=Math.max(100,Math.min(startW+(ev.clientX-startX),wrap.offsetWidth-120));
+      listEl.style.width=nw+'px';listEl.style.flex='none';
+    }
+    function onUp(){document.removeEventListener('mousemove',onMove);document.removeEventListener('mouseup',onUp);rz.style.background='transparent';}
+    rz.style.background='var(--accent)';
+    document.addEventListener('mousemove',onMove);
+    document.addEventListener('mouseup',onUp);
+  });
 }
 
 // ── Hover-Tooltip ──
@@ -16494,8 +16573,9 @@ function openNewTaskModal(){
   const _esNewInp=document.getElementById('taskEmailSenderInput');if(_esNewInp)_esNewInp.value='';
   _renderSenderDisplay(); // Sender-Display-Element ebenfalls zurücksetzen (Style-State)
   ['pamGmailInlineList','pamMsInlineList','pamUnifiedEmailList','gmThreadList','msThreadList','gmThreadStatus','msThreadStatus'].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML='';});
-  const _puprev=document.getElementById('pamUnifiedPreview');if(_puprev)_puprev.style.display='none';
-  _pamUnifiedActiveIdx=-1;_pamUnifiedActiveSrc='';if(typeof _pamUnifiedHoverOut==='function')_pamUnifiedHoverOut();
+  _pamUnifiedClosePreview();if(typeof _pamUnifiedHoverOut==='function')_pamUnifiedHoverOut();
+  _pamSplitResizerInit=false;
+  const _listEl2=document.getElementById('pamUnifiedEmailList');if(_listEl2)_listEl2.style.width='42%';
   // Build #101: pamEmailListBody beim Task-Wechsel einklappen
   const _pemLB=document.getElementById('pamEmailListBody');const _pemLC=document.getElementById('pamEmailListChevron');
   if(_pemLB)_pemLB.style.display='none';if(_pemLC)_pemLC.style.transform='';
@@ -18920,7 +19000,7 @@ function _showVbsDriveLinksBox(mainUrl,fotoUrl,dokUrl,emailUrl){
    +'<div style="margin-bottom:4px;"><span style="opacity:.7;">02_Fotos: </span>'
      +'<a href="'+mainUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
    +'<div style="margin-bottom:4px;"><span style="opacity:.7;">02_Fotos: </span>'
-     +'<a href="'+fotoUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Driveöffnen ↗</a></div>'
+     +'<a href="'+fotoUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
    +'<div style="margin-bottom:4px;"><span style="opacity:.7;">03_Dokumente: </span>'
      +'<a href="'+dokUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
    +'<div style="margin-bottom:10px;"><span style="opacity:.7;">E-Mails: </span>'
