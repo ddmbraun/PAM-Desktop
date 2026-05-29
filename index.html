@@ -2103,11 +2103,11 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 .em-add-termin-btn:hover{border-color:var(--accent);color:var(--accent);}
 .em-topbar-title{font-size:19px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);}
 .em-body{display:flex;flex:1;overflow:hidden;}
-.em-mail-list{width:240px;min-width:120px;max-width:50%;flex-shrink:0;border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;background:var(--bg2);}
+.em-mail-list{width:240px;min-width:120px;flex-shrink:0;border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;background:var(--bg2);}
 .em-resizer{width:5px;background:transparent;cursor:col-resize;flex-shrink:0;transition:background .15s;}
 .em-resizer:hover,.em-resizer.dragging{background:var(--accent);}
 .em-reading-pane{flex:1;min-width:120px;display:flex;flex-direction:column;overflow:hidden;background:var(--bg2);}
-.em-right-panel{width:250px;min-width:250px;flex-shrink:0;border-left:1px solid var(--border);padding:12px;display:flex;flex-direction:column;gap:10px;overflow-y:auto;background:var(--bg3);transition:width .2s,padding .2s,opacity .15s,min-width .2s;}
+.em-right-panel{width:250px;min-width:120px;flex-shrink:0;border-left:1px solid var(--border);padding:12px;display:flex;flex-direction:column;gap:10px;overflow-y:auto;background:var(--bg3);transition:width .2s,padding .2s,opacity .15s,min-width .2s;}
 .em-right-panel.collapsed{width:0;min-width:0;padding:0;opacity:0;pointer-events:none;overflow:hidden;}
 .em-footer{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:8px 14px;border-top:1px solid var(--border);background:var(--bg3);flex-shrink:0;}
 .em-mail-item{padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s;}
@@ -3277,7 +3277,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
           <div id="emDateDisplay" style="font-size:11px;color:var(--text2);">–</div>
         </div>
         <div class="em-right-section" style="border-top:1px solid var(--border);padding-top:8px;">
-          <div class="em-right-lbl">Status</div>
+          <div class="em-right-lbl">Task</div>
           <select id="emStatusSel" class="em-field-input" onchange="_emScheduleSave();_emUpdateTop2()"></select>
         </div>
         <div class="em-right-section">
@@ -3335,7 +3335,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-29 · #103'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-29-b103)
+const PAM_BUILD = 'v2026-05-29 · #104'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-29-b104)
 
 // ── STATE ──
 let boards = {};
@@ -16854,6 +16854,23 @@ function openEmailTaskModal(task,board){
   if(_gbtn)_gbtn.style.display=(typeof gmailToken!=='undefined'&&gmailToken)?'':'none';
   _emUpdateTop2();
   _renderEmailMailList();
+  // Fix: erste Mail automatisch öffnen
+  (function(){
+    let _mails=[];
+    (task.emailOriginals||[]).forEach(function(m,i){_mails.push({type:'original',idx:i,data:m});});
+    (task.gmailThreadMessages||[]).forEach(function(m,i){_mails.push({type:'gmail',idx:i,data:m});});
+    (task.msThreadMessages||[]).forEach(function(m,i){_mails.push({type:'ms',idx:i,data:m});});
+    if(_mails.length>0)setTimeout(function(){_emOpenMail(0,_mails);},80);
+  })();
+  // Fix: Absendername auto-befüllen wenn leer
+  if(!task.emailSenderName){
+    let _fm=(task.emailOriginals||[])[0]||(task.gmailThreadMessages||[])[0]||(task.msThreadMessages||[])[0]||null;
+    let _autoName=_fm?(_fm.fromName||_fm.senderName||(_fm.from||_fm.sender||'').replace(/^.*?([\w\s]+)\s*<.*>$/,'$1').trim()||'')  :'';
+    if(_autoName&&_autoName!==task.emailSenderName){
+      let _sn=document.getElementById('emSenderName');
+      if(_sn&&!_sn.value.trim()){_sn.value=_autoName;_emScheduleSave();}
+    }
+  }
   // Modal-Position zurücksetzen (zentriert) wenn es noch nicht verschoben wurde oder neu geöffnet
   const _emBox=document.getElementById('emModalBox');
   if(_emBox){
@@ -17204,7 +17221,15 @@ function _emAntworten(){
   let m=mails[_emActiveMailIdx>=0?_emActiveMailIdx:0]||null;
   let to=m?(m.from||m.sender||''):'';
   let subject=m?('Re: '+(m.subject||'')):'';
-  window.location.href='mailto:'+encodeURIComponent(to)+'?subject='+encodeURIComponent(subject);
+  // Fix: window.open statt location.href (navigiert nicht weg)
+  let _replyUrl='mailto:'+encodeURIComponent(to)+'?subject='+encodeURIComponent(subject);
+  // Wenn Outlook verbunden → Outlook Web Compose bevorzugen
+  if(typeof msalInstance!=='undefined'&&msalInstance&&to){
+    let _owUrl='https://outlook.office.com/mail/deeplink/compose?to='+encodeURIComponent(to)+'&subject='+encodeURIComponent(subject);
+    window.open(_owUrl,'_blank');
+  } else {
+    window.open(_replyUrl,'_blank');
+  }
 }
 function _emRenderAttachPanel(allFiles){
   let section=document.getElementById('emAttachSection');
@@ -17433,8 +17458,8 @@ const _EM_COL_KEY='pam_em_col_widths_v1';
 function _emSaveColWidths(){
   try{
     let ml=document.getElementById('emMailList');
-    let rp=document.getElementById('emReadingPane');
-    let w={ml:ml?ml.offsetWidth:0,rp:rp?rp.offsetWidth:0};
+    let rpp=document.getElementById('emRightPanel');
+    let w={ml:ml?ml.offsetWidth:0,rp:rpp?rpp.offsetWidth:0};
     localStorage.setItem(_EM_COL_KEY,JSON.stringify(w));
   }catch(e){}
 }
@@ -17443,9 +17468,9 @@ function _emRestoreColWidths(){
     let w=JSON.parse(localStorage.getItem(_EM_COL_KEY)||'null');
     if(!w)return;
     let ml=document.getElementById('emMailList');
-    let rp=document.getElementById('emReadingPane');
+    let rpp=document.getElementById('emRightPanel');
     if(ml&&w.ml>100){ml.style.width=w.ml+'px';ml.style.flex='none';}
-    if(rp&&w.rp>100){rp.style.width=w.rp+'px';rp.style.flex='none';}
+    if(rpp&&w.rp>100){rpp.style.width=w.rp+'px';rpp.style.minWidth=w.rp+'px';}
   }catch(e){}
 }
 
@@ -17480,7 +17505,31 @@ function _initEmailResizers(){
     });
   }
   makeResizer('emResizer1','emMailList','emReadingPane','left');
-  makeResizer('emResizer2','emReadingPane','emRightPanel','left');
+  // Resizer2: zieht am rechten Panel (Lesebereich bleibt flex:1)
+  (function(){
+    let rz2=document.getElementById('emResizer2');
+    if(!rz2)return;
+    let newRz2=rz2.cloneNode(true);rz2.parentNode.replaceChild(newRz2,rz2);rz2=newRz2;
+    rz2.addEventListener('mousedown',function(e){
+      e.preventDefault();rz2.classList.add('dragging');
+      let rp=document.getElementById('emRightPanel');
+      let startX=e.clientX;
+      let startW=rp?rp.offsetWidth:250;
+      function onMove(ev){
+        if(!rp)return;
+        let nw=Math.max(120,startW-(ev.clientX-startX));
+        rp.style.width=nw+'px';rp.style.minWidth=nw+'px';
+      }
+      function onUp(){
+        rz2.classList.remove('dragging');
+        _emSaveColWidths();
+        document.removeEventListener('mousemove',onMove);
+        document.removeEventListener('mouseup',onUp);
+      }
+      document.addEventListener('mousemove',onMove);
+      document.addEventListener('mouseup',onUp);
+    });
+  })();
   // Fix: gespeicherte Breiten beim Oeffnen wiederherstellen
   _emRestoreColWidths();
 
