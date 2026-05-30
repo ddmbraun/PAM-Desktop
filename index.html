@@ -748,6 +748,7 @@ function _pdfAuftragFileSelect(evt){
 }
 
 async function _pdfAuftragDrop(dt){
+  if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden (oben rechts: ☁️ Google Drive)','error',5000);return;}
   let f=dt.files&&[].slice.call(dt.files).find(function(x){return /\.pdf$/i.test(x.name);});
   if(!f){showToast('⚠ Bitte eine PDF-Datei verwenden.','error');return;}
   let title=f.name.replace(/\.pdf$/i,'').replace(/[_\-]+/g,' ').trim();
@@ -2855,19 +2856,33 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
                     <span style="line-height:1;">✉</span><span>Outlook</span>
                     <span id="pamOutlookCount" style="display:none;font-size:calc(10px*var(--modal-scale,1));font-weight:700;color:#fff;background:rgba(255,255,255,.25);border-radius:8px;padding:0 5px;min-width:16px;text-align:center;line-height:1.6;"></span>
                   </button>
-                  <!-- Archiv-Button: EML/PDF/Anhänge zusammengefasst -->
-                  <button type="button" id="pamArchivBtn" onclick="_openEmailThumbnailGrid()" title="Archiv: gespeicherte E-Mail-Dateien ansehen"
-                    style="display:none;align-items:center;gap:4px;padding:4px 9px;border-radius:6px;border:0.5px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;font-size:calc(10px*var(--modal-scale,1));font-weight:600;margin-left:auto;">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
-                    <span id="pamArchivLabel">Archiv</span>
-                  </button>
+                  <!-- Archiv-Icons: einzeln klickbar -->
+                  <div style="display:flex;align-items:center;gap:4px;margin-left:auto;">
+                    <button type="button" id="pamIconEml" onclick="_openEmailAllPopup()" title="E-Mail Originale (0)"
+                      style="display:flex;align-items:center;gap:3px;padding:3px 7px;border-radius:5px;border:0.5px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;font-size:calc(10px*var(--modal-scale,1));font-weight:600;opacity:0.35;pointer-events:none;">
+                      📨 <span class="pam-icon-lbl">0</span>
+                    </button>
+                    <button type="button" id="pamIconPdf" onclick="_openEmailThumbnailGrid()" title="E-Mail PDFs (0)"
+                      style="display:flex;align-items:center;gap:3px;padding:3px 7px;border-radius:5px;border:0.5px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;font-size:calc(10px*var(--modal-scale,1));font-weight:600;opacity:0.35;pointer-events:none;">
+                      📄 <span class="pam-icon-lbl">0</span>
+                    </button>
+                    <button type="button" id="pamIconFoto" onclick="openFotoGallery()" title="Fotos (0)"
+                      style="display:flex;align-items:center;gap:3px;padding:3px 7px;border-radius:5px;border:0.5px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;font-size:calc(10px*var(--modal-scale,1));font-weight:600;opacity:0.35;pointer-events:none;">
+                      📷 <span class="pam-icon-lbl">0</span>
+                    </button>
+                  </div>
                   <span id="pamOrigCount" style="display:none;"></span>
                 </div>
                 <!-- 2-Spalten E-Mail-Layout: links Liste, rechts Vorschau -->
-                <div id="pamEmailSplitWrap" style="display:flex;min-height:0;">
-                  <div id="pamUnifiedEmailList" style="width:42%;min-width:140px;max-height:380px;overflow-y:auto;background:var(--bg1);border-right:1px solid var(--border);flex-shrink:0;"></div>
-                  <div id="pamEmailSplitResizer" style="width:5px;cursor:col-resize;background:transparent;flex-shrink:0;transition:background .15s;" onmouseenter="this.style.background='var(--border)'" onmouseleave="this.style.background='transparent'"></div>
-                  <div id="pamUnifiedPreview" style="flex:1;min-width:0;display:none;overflow:hidden;"></div>
+                <!-- Kompakte Mail-Liste: Klick auf Zeile öffnet Thread-Popup -->
+                <div id="pamEmailSplitWrap" style="display:block;">
+                  <div id="pamUnifiedEmailList" style="max-height:220px;overflow-y:auto;background:var(--bg1);"></div>
+                  <!-- Popup-Button wenn Mails vorhanden -->
+                  <div id="pamEmailOpenPopupRow" style="display:none;padding:5px 8px;border-top:0.5px solid var(--border);text-align:center;">
+                    <button type="button" onclick="_msOpenThreadPopup()" style="width:100%;padding:5px;border-radius:5px;border:0.5px solid var(--accent);background:rgba(108,99,255,.07);color:var(--accent);font-size:calc(11px*var(--modal-scale,1));font-weight:600;cursor:pointer;">📬 Vollständigen Verlauf öffnen</button>
+                  </div>
+                  <!-- Hidden: wird von _pamRenderUnifiedEmailList befüllt, öffnet Popup bei Klick -->
+                  <div id="pamUnifiedPreview" style="display:none;"></div>
                 </div>
                 <!-- Hidden rendering targets (backward compat) -->
                 <div id="pamGmailInlineList" style="display:none;"></div>
@@ -3923,28 +3938,35 @@ function _updateHdrMeta(){
   set('_hdrRepNr',rep);
   set('_hdrKst',kst);
   set('_hdrOwner',owner);
-  // Icons: Mail / Datei / Fotos – farbig
+  // Icons: Mail / Datei / Fotos – immer anzeigen (ausgegraut wenn leer)
   try{
     const tid=document.getElementById('taskId')?.value;
     const t=tid?findTaskById(tid):null;
+    _updateHdrArchivIcons(t);
+  }catch(e){}
+}
+function _updateHdrArchivIcons(t){
+  try{
     const mailCnt=(t&&t.emailOriginals||[]).length;
     const fileCnt=(t&&t.attachments||[]).length;
     const fotoCnt=(t&&t.fotos||[]).length;
-    const parts=[];
-    if(mailCnt>0)parts.push({icon:'📧',cnt:mailCnt,bg:'#E6F1FB',color:'#185FA5',border:'#B5D4F4',fn:'_openEmailAllPopup()',tip:'E-Mail-Dateien öffnen'});
-    if(fileCnt>0)parts.push({icon:'📎',cnt:fileCnt,bg:'#FAEEDA',color:'#854F0B',border:'#FAC775',fn:'_openAttachThumbnailGrid()',tip:'Anhänge öffnen'});
-    if(fotoCnt>0)parts.push({icon:'📷',cnt:fotoCnt,bg:'#EAF3DE',color:'#3B6D11',border:'#C0DD97',fn:'openFotoGallery()',tip:'Foto-Galerie öffnen'});
+    const defs=[
+      {icon:'📧',cnt:mailCnt,bg:'#E6F1FB',color:'#185FA5',border:'#B5D4F4',fn:'_openEmailAllPopup()',tip:'E-Mail-Dateien'},
+      {icon:'📎',cnt:fileCnt,bg:'#FAEEDA',color:'#854F0B',border:'#FAC775',fn:'_openAttachThumbnailGrid()',tip:'Anhänge'},
+      {icon:'📷',cnt:fotoCnt,bg:'#EAF3DE',color:'#3B6D11',border:'#C0DD97',fn:'openFotoGallery()',tip:'Fotos'},
+    ];
     const iconsEl=document.getElementById('_hdrIcons');
     const sepEl=document.getElementById('_hdrIconsSep');
     if(iconsEl){
-      if(parts.length>0){
-        iconsEl.innerHTML=parts.map(p=>'<span onclick="'+p.fn+'" title="'+p.tip+'" style="padding:3px 10px;border-radius:20px;background:#ffffff;border:1.5px solid '+p.border+';color:'+p.color+';font-weight:700;white-space:nowrap;font-size:calc(13px * var(--modal-scale,1));display:inline-flex;align-items:center;gap:4px;cursor:pointer;">'+p.icon+' '+p.cnt+'</span>').join('');
-        iconsEl.style.display='inline-flex';
-        if(sepEl)sepEl.style.display='';
-      }else{
-        iconsEl.style.display='none';
-        if(sepEl)sepEl.style.display='none';
-      }
+      iconsEl.innerHTML=defs.map(p=>{
+        const active=p.cnt>0;
+        const opacity=active?'1':'0.32';
+        const cursor=active?'pointer':'default';
+        const onclick=active?'onclick="'+p.fn+'"':'';
+        return'<span '+onclick+' title="'+p.tip+(p.cnt?' ('+p.cnt+')':' (leer)')+'" style="padding:3px 10px;border-radius:20px;background:'+(active?'#ffffff':'var(--bg3)')+';border:1.5px solid '+p.border+';color:'+p.color+';font-weight:700;white-space:nowrap;font-size:calc(13px * var(--modal-scale,1));display:inline-flex;align-items:center;gap:4px;cursor:'+cursor+';opacity:'+opacity+';">'+p.icon+' '+p.cnt+'</span>';
+      }).join('');
+      iconsEl.style.display='inline-flex';
+      if(sepEl)sepEl.style.display='';
     }
   }catch(e){}
 }
@@ -6684,6 +6706,7 @@ function renderBaudokuPlanung(){
 // ── Material-Aktionen ──
 // ── Preisübersicht HTML generieren (für Live-Update ohne Popup-Rebuild) ──────
 function _bdMatPreisHtml(){
+  const _esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   const fs12='font-size:12px;';
   const preisArtikel=taskBaudokuMaterial.filter(m=>m.vk!=null&&m.menge>0);
   if(!preisArtikel.length)return '';
@@ -11910,11 +11933,26 @@ function _renderSenderDisplay(){
 // ── PAM E-Mail-Block ──────────────────────────────────────────────
 // Build #101: Chips entfernt – unified list; _pamEmailToggle als no-op beibehalten (wird noch referenziert)
 function _pamEmailToggle(which){
-  // Unified list auto-lädt per _gmLoadEmailThread / _msLoadEmailThread direkt
-  // Aufklappfeld öffnen falls noch zu
   const body=document.getElementById('pamEmailListBody');
   const chev=document.getElementById('pamEmailListChevron');
-  if(body&&body.style.display==='none'){body.style.display='block';if(chev)chev.style.transform='rotate(180deg)';}
+  if(body&&body.style.display==='none'){
+    body.style.display='block';
+    if(chev)chev.style.transform='rotate(180deg)';
+    // Thread laden falls noch nicht geschehen
+    const _tid=_getActiveTaskId&&_getActiveTaskId();
+    const _tt=_tid?findTaskById(_tid):null;
+    if(_tt){
+      const _hasMsLink=_tt.msMessageId||_tt.msConversationId;
+      const _hasMsMails=(_tt.msThreadMessages||[]).length>0;
+      const _hasGmLink=_tt.gmailMessageId||_tt.gmailThreadId;
+      const _hasGmMails=(_tt.gmailThreadMessages||[]).length>0;
+      if(typeof msToken!=='undefined'&&msToken&&_hasMsLink&&!_hasMsMails){
+        if(typeof _msLoadEmailThread==='function')_msLoadEmailThread();
+      } else if(typeof gmailToken!=='undefined'&&gmailToken&&_hasGmLink&&!_hasGmMails){
+        if(typeof _gmLoadEmailThread==='function')_gmLoadEmailThread();
+      }
+    }
+  }
 }
 // ── Outlook-Thread-Popup (Split-Layout) ──────────────────────────
 function _msOpenThreadPopup(){
@@ -12174,25 +12212,26 @@ function _pamUpdateEmailListBadge(){
   const orCount=parseInt((document.getElementById('pamOrigCount')||{}).textContent||'0')||0;
   const total=gmCount+msCount+orCount;
   badge.textContent=total?total+' Nachrichten':'';
-  // Archiv-Button aktualisieren
+  // Archiv-Icons einzeln aktualisieren
   const taskId=(document.getElementById('taskId')||{}).value||'';
   const t=taskId?findTaskById(taskId):null;
-  const archBtn=document.getElementById('pamArchivBtn');
-  const archLbl=document.getElementById('pamArchivLabel');
-  if(archBtn&&t){
+  if(t){
     const emlCount=(t.emailOriginals||[]).filter(function(e){return e.fileId;}).length;
     const pdfCount=(t.emailPdfs||[]).filter(function(p){return p.fileId;}).length;
     const fotoCount2=(t.fotos||[]).length;
-    const parts=[];
-    if(pdfCount)parts.push('📄 '+pdfCount);
-    if(emlCount)parts.push('📎 '+emlCount+' EML');
-    if(fotoCount2)parts.push('🖼 '+fotoCount2);
-    if(parts.length){
-      archBtn.style.display='flex';
-      if(archLbl)archLbl.textContent=parts.join(' ')+'  ›';
-    } else {
-      archBtn.style.display='none';
-    }
+    const _setIcon=function(id,count,label){
+      const el=document.getElementById(id);if(!el)return;
+      el.style.opacity=count?'1':'0.35';
+      el.style.pointerEvents=count?'auto':'none';
+      el.title=label+(count?' ('+count+')':'');
+      const lbl=el.querySelector('.pam-icon-lbl');
+      if(lbl)lbl.textContent=count||'0';
+    };
+    _setIcon('pamIconEml',emlCount,'E-Mail Originale');
+    _setIcon('pamIconPdf',pdfCount,'E-Mail PDFs');
+    _setIcon('pamIconFoto',fotoCount2,'Fotos');
+    // Auch Header-Icons aktualisieren
+    _updateHdrArchivIcons(t);
   }
 }
 function _pamToggleAbsenderPopup(which){
@@ -12348,6 +12387,10 @@ function _pamRenderUnifiedEmailList(task){
 
   el.innerHTML=html2;
 
+  // Popup-Button einblenden wenn Mails vorhanden
+  const popRow=document.getElementById('pamEmailOpenPopupRow');
+  if(popRow)popRow.style.display=groups.size?'block':'none';
+
   // Aufklappfeld auto-öffnen
   const body=document.getElementById('pamEmailListBody');
   const chev=document.getElementById('pamEmailListChevron');
@@ -12371,18 +12414,25 @@ let _pamUnifiedActiveSrc='';
 let _pamHoverTimer=null;
 
 function _pamUnifiedTogglePreview(taskId,src,idx){
-  const prev=document.getElementById('pamUnifiedPreview');
-  if(!prev)return;
-  // Gleiche Mail nochmal → Vorschau schließen
-  if(_pamUnifiedActiveIdx===idx&&_pamUnifiedActiveSrc===src){
-    prev.style.display='none';
-    _pamUnifiedActiveIdx=-1;_pamUnifiedActiveSrc='';
-    _pamUnifiedUpdateActive(-1,'');
-    return;
-  }
+  // Klick öffnet Thread-Popup mit der gewählten Mail vorselektiert
   _pamUnifiedActiveIdx=idx;_pamUnifiedActiveSrc=src;
   _pamUnifiedUpdateActive(idx,src);
-  _pamUnifiedShowPreview(taskId,src,idx);
+  if(src==='ms'){
+    _msOpenThreadPopup();
+    // Mail im Popup vorselektieren (kurze Verzögerung bis Popup gerendert)
+    setTimeout(function(){_msTPSelectMail(taskId,idx);},300);
+  } else if(src==='gmail'){
+    _gmOpenMailOverlay(taskId,idx);
+  } else if(src==='eml'||src==='pdf'){
+    // EML/PDF: direktes Overlay
+    const ovFn=src==='pdf'
+      ?function(){const t2=findTaskById(taskId);const p=(t2&&t2.emailPdfs||[])[idx];if(p&&p.url)window.open(p.url,'_blank');}
+      :function(){const t2=findTaskById(taskId);const e=(t2&&t2.emailOriginals||[])[idx];if(e)_openEmailOrigInlinePreview(e);};
+    ovFn();
+  }
+  // Popup-Button einblenden wenn Mails vorhanden
+  const popRow=document.getElementById('pamEmailOpenPopupRow');
+  if(popRow)popRow.style.display='block';
 }
 
 function _pamUnifiedUpdateActive(idx,src){
@@ -12693,20 +12743,29 @@ function _pamEmailRefresh(task){
   const t=task||(()=>{const id=(document.getElementById('taskId')||{}).value;return id?findTaskById(id):null;})();
   // Task-ID im Popup speichern – Fallback für _getActiveTaskId() wenn Task-Modal geschlossen
   if(t&&t.id){const _ep=document.getElementById('tEmailOrigSect');if(_ep)_ep.dataset.taskId=t.id;}
-  // Auto-Laden: einmalig beim ersten Öffnen eines Tasks ohne geladene Mails
+  // Auto-Laden: beim ersten Öffnen eines Tasks ohne geladene Mails
+  // _pamAutoLoadTaskId wird erst NACH erfolgreichem Load gesetzt → Retry bei Fehler möglich
   if(!window._pamAutoLoadTaskId||window._pamAutoLoadTaskId!==t.id){
-    window._pamAutoLoadTaskId=t.id;
     clearTimeout(window._pamAutoLoadTimer);
-    window._pamAutoLoadTimer=setTimeout(function(){
+    window._pamAutoLoadTimer=setTimeout(async function(){
       const _t2=findTaskById(t.id);if(!_t2)return;
       const _hasMsLink=_t2.msMessageId||_t2.msConversationId;
       const _hasMsMails=(_t2.msThreadMessages||[]).length>0;
       const _hasGmLink=_t2.gmailMessageId||_t2.gmailThreadId;
       const _hasGmMails=(_t2.gmailThreadMessages||[]).length>0;
-      if(typeof msToken!=='undefined'&&msToken&&_hasMsLink&&!_hasMsMails){
-        if(typeof _msLoadEmailThread==='function')_msLoadEmailThread();
-      } else if(typeof gmailToken!=='undefined'&&gmailToken&&_hasGmLink&&!_hasGmMails){
-        if(typeof _gmLoadEmailThread==='function')_gmLoadEmailThread();
+      try{
+        if(typeof msToken!=='undefined'&&msToken&&_hasMsLink&&!_hasMsMails){
+          if(typeof _msLoadEmailThread==='function')await _msLoadEmailThread();
+          window._pamAutoLoadTaskId=t.id; // erst nach Erfolg setzen
+        } else if(typeof gmailToken!=='undefined'&&gmailToken&&_hasGmLink&&!_hasGmMails){
+          if(typeof _gmLoadEmailThread==='function')await _gmLoadEmailThread();
+          window._pamAutoLoadTaskId=t.id;
+        } else {
+          window._pamAutoLoadTaskId=t.id; // kein Load nötig
+        }
+      }catch(_ale){
+        // Bei Fehler: ID NICHT setzen → nächstes Öffnen löst Retry aus
+        console.warn('[PAM] Auto-Load fehlgeschlagen, Retry beim nächsten Öffnen möglich:',_ale);
       }
     },900);
   }
@@ -16445,6 +16504,7 @@ function renderCheckliste(){
 function addChecklistItem(){
   const inp=document.getElementById('newChecklistInput');
   const text=inp?inp.value.trim():'';
+  if(!text)return;
   taskCheckliste.push({text,done:false});
   if(inp)inp.value='';
   renderCheckliste();
@@ -16764,6 +16824,7 @@ function openNewTaskModal(){
   document.getElementById('abschlussBtn').style.display='none';
   const _abHb=document.getElementById('abschlussHtmlBtn');if(_abHb)_abHb.style.display='none';
   taskLinks=[];taskAttachments=[];taskAufgaben=[];taskAusserhausTermine=[];taskZeitEntries=[];taskFreieTermine=[];taskNotizVerlauf=[];taskFotos=[];taskCheckliste=[];taskEmailOriginals=[];taskEmailPdfs=[];taskGmailLinks=[];
+  _aufgabenIdCnt=0;
   taskBaudokuMaterial=[];taskBaudokuPersonalListe=[];taskBaudokuMaschinen=[];
   renderBaudokuPlanung();
   _attachImgsOpen=false;
@@ -18562,6 +18623,16 @@ function openEditTaskModal(id){
   // taskEmailSenderRow bleibt immer versteckt (Anzeige erfolgt über pamAbsenderCard)
   _renderSenderDisplay();
   _pamEmailRefresh(task);
+  // Auto-Aufklappen: E-Mail-Block öffnen wenn Mails verknüpft
+  (function(){
+    const _hasLink=(task.msMessageId||task.msConversationId||task.gmailMessageId||task.gmailThreadId);
+    const _emlBody=document.getElementById('pamEmailListBody');
+    const _emlChev=document.getElementById('pamEmailListChevron');
+    if(_hasLink&&_emlBody&&_emlBody.style.display==='none'){
+      _emlBody.style.display='block';
+      if(_emlChev)_emlChev.style.transform='rotate(180deg)';
+    }
+  })();
   const _avEl=document.getElementById('taskAuftragVomDatum');if(_avEl)_avEl.value=task.auftragVomDatum||'';
   const _ortEditEl=document.getElementById('taskOrtsterminInput');if(_ortEditEl)_ortEditEl.value=task.ortstermin||'';
   const _apCb=document.getElementById('taskAuftragPlanen');if(_apCb){_apCb.checked=!!(task.auftragPlanen);_updateAuftragPlanenChip();}
@@ -19372,7 +19443,6 @@ function _showVbsDriveLinksBox(mainUrl,fotoUrl,dokUrl,emailUrl){
 }
 
 document.addEventListener('DOMContentLoaded', _checkNewAuftragFromVbs);
-
 // ── Service Worker: bei jedem Seitenaufruf auf Updates prüfen ──────────────────────────────────
 if('serviceWorker' in navigator){
   navigator.serviceWorker.getRegistration().then(reg=>{
