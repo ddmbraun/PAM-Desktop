@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pam-desktop-2026-05-30-b136';
+const CACHE_NAME = 'pam-desktop-2026-05-30-b137';
 const ASSETS = [
   '/',
   '/index.html',
