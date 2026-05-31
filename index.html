@@ -2885,7 +2885,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
                       Fotos <span class="pam-icon-lbl">0</span>
                     </button>
                   </div>
-                  <span id="pamOrigCount" style="display:none;"></span>
+                  <span id="pamOrigCount" style="display:none;font-size:calc(10px*var(--modal-scale,1));font-weight:700;padding:2px 7px;border-radius:4px;border:1px solid #DDD6FE;background:#EDE9FE;color:#5B21B6;"></span>
                 </div>
                 <!-- 2-Spalten E-Mail-Layout: links Liste, rechts Vorschau -->
                 <!-- 2-Spalten E-Mail-Layout: links Liste, rechts Vorschau -->
@@ -3465,7 +3465,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-31 · #187'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b179)
+const PAM_BUILD = 'v2026-05-31 · #188'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b179)
 
 // ── STATE ──
 let boards = {};
@@ -11566,7 +11566,10 @@ function _msCleanPreview(raw){
   }
   return s.substring(0,120);
 }
+let _msLoadInProgress=false; // Guard: verhindert gleichzeitige Aufrufe
 async function _msLoadEmailThread(){
+  if(_msLoadInProgress){console.info('[MS] _msLoadEmailThread läuft bereits – übersprungen');return;}
+  _msLoadInProgress=true;
   let _origMsToken=null; // Fix: msToken-Swap für Konto-2 rückgängig machen nach Thread-Fetch
   const taskId=_getActiveTaskId();
   const task=findTaskById(taskId)||(_pamCurrentTask&&_pamCurrentTask.id===taskId?_pamCurrentTask:null);
@@ -11832,6 +11835,7 @@ async function _msLoadEmailThread(){
   }finally{
     // Fix: Konto-1-Token wiederherstellen falls er für Thread-Fetch durch Konto-2 ersetzt wurde
     if(_origMsToken!==null)msToken=_origMsToken;
+    _msLoadInProgress=false; // Guard freigeben
   }
 }
 
@@ -12377,6 +12381,20 @@ function _pamRenderUnifiedEmailList(task){
     });
   });
 
+  // EML-Originale: anzeigen wenn nicht bereits im Thread vorhanden
+  const _threadMsgIds2=new Set([
+    ...(task.gmailThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean),
+    ...(task.msThreadMessages||[]).map(function(m){return m.internetMessageId||m.messageId||'';}).filter(Boolean)
+  ]);
+  (task.emailOriginals||[]).filter(function(e){
+    return e.fileId&&(!e.messageId||!_threadMsgIds2.has(e.messageId));
+  }).forEach(function(e,i){
+    const key='eml_'+i+'_'+(e.fileId||i);
+    const g=_addGroup(key,'EML','eml',e.subject||e.name||'E-Mail Original','#6B21A8');
+    const d=e.date?new Date(e.date):null;
+    g.mails.push({src:'eml',idx:i,date:d,from:e.sender||'',subject:e.subject||e.name||'',preview:'',isOut:false,hasAtt:false,data:e});
+  });
+
   if(!groups.size){
     el.innerHTML='<div style="padding:20px 14px;text-align:center;color:var(--text2);font-size:12px;">Noch kein E-Mail-Verlauf.<br><span style="font-size:11px;">Oben auf Gmail oder Outlook klicken.</span></div>';
     _pamUpdateEmailListBadge();return;
@@ -12417,7 +12435,9 @@ function _pamRenderUnifiedEmailList(task){
         const dirLabel=isOut?'Gesendet':'Eingang';
         const dirBg=isOut?'rgba(22,163,74,.15)':'rgba(29,78,216,.10)';
         const dirTxt=isOut?'#15803D':'#1E40AF';
-        const dblFn=m.src==='gmail'?('_gmOpenMailOverlay('+JSON.stringify(taskId)+','+m.idx+')'):'_msOpenMailOverlay('+JSON.stringify(taskId)+','+m.idx+')';
+        const dblFn=m.src==='gmail'?('_gmOpenMailOverlay('+JSON.stringify(taskId)+','+m.idx+')')
+          :m.src==='eml'?('_openEmailOrigInlinePreview({fileId:'+JSON.stringify((m.data&&m.data.fileId)||'')+',name:'+JSON.stringify((m.data&&(m.data.subject||m.data.name))||'E-Mail')+'})' )
+          :'_msOpenMailOverlay('+JSON.stringify(taskId)+','+m.idx+')';
         const clickFn='_pamUnifiedTogglePreview('+JSON.stringify(taskId)+','+JSON.stringify(m.src)+','+m.idx+')';
         const htRaw=(m.from+' · '+m.subject+(m.preview?' | '+m.preview:'')).replace(/['"<>&]/g,function(c){return({'\'':'&#39;','"':'&quot;','<':'&lt;','>':'&gt;','&':'&amp;'}[c]);}).substring(0,180);
         const dateStr=m.date?_fmt(m.date):'';
@@ -12809,8 +12829,9 @@ function _pamEmailRefresh(task){
           window._pamAutoLoadTaskId=t.id; // kein Load nötig
         }
       }catch(_ale){
-        // Bei Fehler: ID NICHT setzen → nächstes Öffnen löst Retry aus
-        console.warn('[PAM] Auto-Load fehlgeschlagen, Retry beim nächsten Öffnen möglich:',_ale);
+        // Fix: ID AUCH bei Fehler setzen – verhindert Endlosschleife bei wiederholten Fehlern
+        window._pamAutoLoadTaskId=t.id;
+        console.warn('[PAM] Auto-Load fehlgeschlagen:',_ale);
       }
     },900);
   }
@@ -12832,7 +12853,7 @@ function _pamEmailRefresh(task){
   const mc=document.getElementById('pamOutlookCount');
   if(mc){mc.textContent=msBadge;mc.style.display=msBadge?'inline':'none';}
   const oc=document.getElementById('pamOrigCount');
-  if(oc){oc.textContent=origCount?origCount:'';oc.style.display=origCount?'inline':'none';}
+  if(oc){oc.textContent=origCount?'Orig. '+origCount:'';oc.style.display=origCount?'inline':'none';}
   // Aufklappfeld-Badge aktualisieren
   const listBadge=document.getElementById('pamEmailListBadge');
   if(listBadge){const tot2=gmBadge+msBadge;listBadge.textContent=tot2?tot2+' Nachrichten':'';}
