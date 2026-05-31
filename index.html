@@ -3465,7 +3465,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-31 · #162'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b162)
+const PAM_BUILD = 'v2026-05-31 · #164'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b164)
 
 // ── STATE ──
 let boards = {};
@@ -18392,14 +18392,24 @@ async function _emLadeGmailVerlauf(){
 }
 function _emAntworten(){
   if(!_emCurrentTask)return;
-  // Fix9: Aktive Mail aus der zusammengeführten Liste (Original/MS/Gmail) ermitteln
+  // Aktive Mail: gleiche Sortierung wie _renderEmailMailList (neueste zuerst)
   let _allMails=[];
-  (_emCurrentTask.emailOriginals||[]).forEach(function(m){_allMails.push({type:'original',data:m});});
-  (_emCurrentTask.msThreadMessages||[]).forEach(function(m){_allMails.push({type:'ms',data:m});});
-  (_emCurrentTask.gmailThreadMessages||[]).forEach(function(m){_allMails.push({type:'gmail',data:m});});
+  const _tmIds=new Set([
+    ...(_emCurrentTask.gmailThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean),
+    ...(_emCurrentTask.msThreadMessages||[]).map(function(m){return m.messageId||m.internetMessageId||'';}).filter(Boolean)
+  ]);
+  (_emCurrentTask.emailOriginals||[]).forEach(function(m){
+    if(m.messageId&&_tmIds.has(m.messageId))return; // Dedup
+    _allMails.push({type:'original',data:m,_ts:m.date?new Date(m.date).getTime():0});
+  });
+  (_emCurrentTask.gmailThreadMessages||[]).forEach(function(m){_allMails.push({type:'gmail',data:m,_ts:m.date?new Date(m.date).getTime():0});});
+  (_emCurrentTask.msThreadMessages||[]).forEach(function(m){_allMails.push({type:'ms',data:m,_ts:m.date?new Date(m.date).getTime():0});});
+  _allMails.sort(function(a,b){return (b._ts||0)-(a._ts||0);}); // neueste zuerst – wie in der Liste
   let _active=_allMails[_emActiveMailIdx>=0?_emActiveMailIdx:0]||null;
   let d=_active?_active.data:null;
-  let to=d?(d.from||d.sender||d.fromAddress||''):'';
+  // Bei gesendeten Mails: Empfänger antworten (nicht sich selbst)
+  const _isSent=d&&(d.direction==='gesendet'||(d.folder&&/sent|gesendet/i.test(d.folder)));
+  let to=d?(_isSent?(d.to||d.recipient||d.from||d.sender||''):(d.from||d.sender||d.fromAddress||'')):'';
   // Spitzklammern-Teil extrahieren falls nötig: "Name <addr>" → "addr"
   let _toClean=(to.match(/<([^>]+)>/)||[])[1]||to;
   let subject=d?('Re: '+(d.subject||d.betreff||'')):'';
@@ -18558,11 +18568,37 @@ function _emShowAttachPreview(icon,name,url,mime,data){
       url='data:'+_m+';base64,'+data.b64;
     }
   }
+  const _fid2=(data&&(data.fileId||data.driveId))||'';
   if(url&&(mimeL.startsWith('image/')||namL.match(/\.(jpe?g|png|gif|webp)$/))){
-    previewArea.innerHTML='<img src="'+_escHtml(url)+'" style="max-width:100%;max-height:500px;object-fit:contain;">';
-  } else if(url&&(mimeL==='application/pdf'||namL.endsWith('.pdf'))){
-    const _pdfPreviewUrl=url.replace('/view','/preview').replace(/\/edit.*$/,'/preview');
-    previewArea.innerHTML='<iframe src="'+_escHtml(_pdfPreviewUrl)+'" style="width:100%;height:500px;border:none;"></iframe>';
+    // Bild über Drive API mit Token laden (verhindert Auth-Fehler)
+    let img=document.createElement('img');
+    img.style.cssText='max-width:100%;max-height:500px;object-fit:contain;';
+    img.alt=name;
+    previewArea.innerHTML='';previewArea.appendChild(img);
+    if(_fid2&&typeof _fetchDesktopFotoBlob==='function'){
+      _fetchDesktopFotoBlob(_fid2).then(function(bUrl){
+        if(bUrl)img.src=bUrl;else img.src=url;
+      }).catch(function(){img.src=url;});
+    }else{img.src=url;}
+  } else if(mimeL==='application/pdf'||namL.endsWith('.pdf')){
+    // PDF: erst Drive API versuchen (Blob), Fallback auf /preview iframe
+    previewArea.innerHTML='<div style="padding:16px;color:var(--text2);font-size:13px;">⏳ PDF wird geladen…</div>';
+    if(_fid2&&typeof gdriveToken!=='undefined'&&gdriveToken){
+      fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(_fid2)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}})
+        .then(function(r){return r.ok?r.blob():Promise.reject(r.status);})
+        .then(function(blob){
+          const bUrl=URL.createObjectURL(blob);
+          const fr=document.createElement('iframe');fr.style.cssText='width:100%;height:500px;border:none;';
+          fr.src=bUrl;fr.onload=function(){setTimeout(function(){URL.revokeObjectURL(bUrl);},5000);};
+          previewArea.innerHTML='';previewArea.appendChild(fr);
+        }).catch(function(){
+          const _pdfPreviewUrl=(url||'').replace('/view','/preview').replace(/\/edit.*$/,'/preview');
+          previewArea.innerHTML='<iframe src="'+_escHtml(_pdfPreviewUrl)+'" style="width:100%;height:500px;border:none;"></iframe>';
+        });
+    }else if(url){
+      const _pdfPreviewUrl=url.replace('/view','/preview').replace(/\/edit.*$/,'/preview');
+      previewArea.innerHTML='<iframe src="'+_escHtml(_pdfPreviewUrl)+'" style="width:100%;height:500px;border:none;"></iframe>';
+    }
   } else if(url){
     previewArea.innerHTML='<div style="text-align:center;color:var(--text2);font-size:13px;padding:20px;">'+icon+' <a href="'+_escHtml(url)+'" target="_blank" style="color:var(--accent);">'+_escHtml(name)+' öffnen</a></div>';
   } else if(data&&data._isEmlParsed&&data.b64){
