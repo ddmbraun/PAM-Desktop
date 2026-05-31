@@ -3465,7 +3465,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-31 · #191'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b179)
+const PAM_BUILD = 'v2026-05-31 · #192'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b179)
 
 // ── STATE ──
 let boards = {};
@@ -11859,6 +11859,12 @@ async function _msLoadEmailThread(){
     if(stEl)stEl.textContent=threadMsgs.length+' Mails'+(_pdfSaved>0?', '+_pdfSaved+' PDF'+(_pdfSaved>1?'s':'')+' gespeichert':'');
     await autoSave();
     showToast('✅ '+threadMsgs.length+' Mails geladen'+(_pdfSaved>0?', '+_pdfSaved+' PDFs gespeichert':''),'success',4000);
+    // Mail-Liste im Posteingang-Modal aktualisieren falls offen
+    if(typeof _emReloadMailList==='function'&&_emCurrentTask&&_emCurrentTask.id===task.id){
+      _emReloadMailList();
+    }
+    // Kanban-Karte sofort aktualisieren
+    render();
   }catch(e){
     if(stEl)stEl.textContent='⚠ Fehler';
     showToast('⚠ '+e.message,'error',6000);
@@ -17836,9 +17842,10 @@ function closeEmailTaskModal(){
   // Fix: Globale Arrays leeren damit kein alter Zustand übrig bleibt
   taskEmailOriginals=[];
   taskEmailPdfs=[];
-  // currentBoard auf vorherigen Wert zurücksetzen
-  if(_emPrevBoard&&_emPrevBoard!==currentBoard){currentBoard=_emPrevBoard;render();}
+  // Board zurücksetzen + immer neu rendern (Karte muss sofort aktualisiert werden)
+  if(_emPrevBoard&&_emPrevBoard!==currentBoard){currentBoard=_emPrevBoard;}
   _emPrevBoard='';
+  render();
 }
 
 // Nach Outlook/Gmail-Laden: Liste neu aufbauen und aktive Mail im Lesebereich behalten
@@ -19133,8 +19140,14 @@ function _emInAuftragEinglieder(){
         }
 
         // ── Schritt 3: Task löschen + Modal schließen ───────────────────────
-        boards[_emCurrentBoard]=(boards[_emCurrentBoard]||[]).filter(function(t){return t.id!==src.id;});
+        // Sicherheitscheck: Ziel-Task muss noch im Ziel-Board vorhanden sein
         const _mergeTargetBoard=target.board;
+        const _ttStillExists=(boards[_mergeTargetBoard]||[]).some(function(x){return x.id===tt.id;});
+        if(!_ttStillExists){
+          showToast('⚠ Eingliedern fehlgeschlagen: Ziel-Task nicht gefunden. Task bleibt im Posteingang.','error',7000);
+          return;
+        }
+        boards[_emCurrentBoard]=(boards[_emCurrentBoard]||[]).filter(function(t){return t.id!==src.id;});
         closeEmailTaskModal();
         currentBoard=_mergeTargetBoard;
         scheduleAutoSave();
