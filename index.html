@@ -3465,7 +3465,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-31 · #192'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b179)
+const PAM_BUILD = 'v2026-05-31 · #193'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b179)
 
 // ── STATE ──
 let boards = {};
@@ -6176,11 +6176,52 @@ function renderHeute(){
   let hasAuftr=spUeb.auftr.length||spHeu.auftr.length||spBald.auftr.length||spAusf.auftr.length;
   let hasPost=spUeb.post.length||spHeu.post.length||spBald.post.length||spAusf.post.length;
 
+  // Filter aus localStorage
+  let _hF={typ:'alle',zeit:'alle'};
+  try{const _hfs=localStorage.getItem('pam_heute_filter');if(_hfs)_hF=JSON.parse(_hfs);}catch(e){}
+  function _heuteSetFilter(key,val){
+    try{const s=JSON.parse(localStorage.getItem('pam_heute_filter')||'{}');s[key]=val;localStorage.setItem('pam_heute_filter',JSON.stringify(s));}catch(e){}
+    renderHeute();
+  }
+  // Filter anwenden
+  function _applyFilter(items){
+    let r=items;
+    if(_hF.typ==='aufg')r=r.filter(function(i){return(boardTypes[i.board]||'baustelle')==='notiz';});
+    else if(_hF.typ==='auftr')r=r.filter(function(i){return(boardTypes[i.board]||'baustelle')==='baustelle';});
+    else if(_hF.typ==='post')r=r.filter(function(i){return(boardTypes[i.board]||'baustelle')==='email';});
+    return r;
+  }
+  // Zeitraum-Filter auf die 4 Gruppen anwenden
+  let _fueb=_applyFilter(ueberfaellig),_fheu=_applyFilter(heuteFaellig),_fbld=_applyFilter(bald),_fausf=_applyFilter(ausfuehrungHeute);
+  if(_hF.zeit==='heute'){_fueb=[];_fbld=[];_fausf=_fausf.filter(function(i){return true;});}
+  else if(_hF.zeit==='overdue'){_fheu=[];_fbld=[];_fausf=[];}
+
+  // Nach splitTyp filtern
+  let spUeb2=splitTyp(_fueb),spHeu2=splitTyp(_fheu),spBald2=splitTyp(_fbld),spAusf2=splitTyp(_fausf);
+
   let d=new Date();
   let dateStr=d.toLocaleDateString('de-DE',{weekday:'long',day:'2-digit',month:'long',year:'numeric'});
-  let zoomBar='<div style="display:flex;align-items:center;gap:8px;margin-bottom:1rem;">'
+
+  // Filter-Chips HTML
+  function _fChip(key,val,label,active){
+    return'<button onclick="_heuteSetFilter(\''+key+'\',\''+val+'\')" style="padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;border:1.5px solid '+(active?'var(--accent)':'var(--border)')+';background:'+(active?'var(--accent)':'var(--bg2)')+';color:'+(active?'#fff':'var(--text2)')+';cursor:pointer;white-space:nowrap;transition:all .15s;">'+label+'</button>';
+  }
+  let filterBar='<div style="display:flex;align-items:center;gap:8px;margin-bottom:1rem;flex-wrap:wrap;">'
+    +'<span style="font-size:11px;color:var(--text2);font-weight:600;">Bereich:</span>'
+    +_fChip('typ','alle','Alle',_hF.typ==='alle')
+    +_fChip('typ','aufg','✅ Aufgaben',_hF.typ==='aufg')
+    +_fChip('typ','auftr','🏗 Aufträge',_hF.typ==='auftr')
+    +_fChip('typ','post','📧 Posteingang',_hF.typ==='post')
+    +'<span style="color:var(--border);font-size:16px;margin:0 2px;">|</span>'
+    +'<span style="font-size:11px;color:var(--text2);font-weight:600;">Zeitraum:</span>'
+    +_fChip('zeit','alle','Alle fälligen',_hF.zeit==='alle')
+    +_fChip('zeit','heute','Nur heute',_hF.zeit==='heute')
+    +_fChip('zeit','overdue','Nur überfällig',_hF.zeit==='overdue')
+    +'</div>';
+
+  let zoomBar='<div style="display:flex;align-items:center;gap:8px;margin-bottom:0.75rem;">'
     +'<span style="font-size:11px;color:var(--text2);flex-shrink:0;">A</span>'
-    +'<input type="range" min="70" max="150" step="5" value="'+zoom+'" style="flex:1;max-width:180px;accent-color:var(--accent);" '
+    +'<input type="range" min="70" max="150" step="5" value="'+zoom+'" style="flex:1;max-width:160px;accent-color:var(--accent);" '
     +'oninput="(function(v){let c=document.getElementById(\'heuteZoomContent\');if(c)c.style.zoom=v+\'%\';'
     +'let lbl=document.getElementById(\'heuteZoomVal\');if(lbl)lbl.textContent=v+\'%\';'
     +'try{localStorage.setItem(\'pam_heute_pc_zoom\',v);}catch(e){}}).call(null,this.value)">'
@@ -6196,60 +6237,56 @@ function renderHeute(){
     return out;
   }
 
-  let colAufgHTML=colSection(spUeb.aufg,spHeu.aufg,spAusf.aufg,spBald.aufg);
-  let colAuftrHTML=colSection(spUeb.auftr,spHeu.auftr,spAusf.auftr,spBald.auftr);
-  let colPostHTML=colSection(spUeb.post,spHeu.post,spAusf.post,spBald.post);
+  // Gefilterte Spalten-Daten
+  let colAufgHTML=colSection(spUeb2.aufg,spHeu2.aufg,spAusf2.aufg,spBald2.aufg);
+  let colAuftrHTML=colSection(spUeb2.auftr,spHeu2.auftr,spAusf2.auftr,spBald2.auftr);
+  let colPostHTML=colSection(spUeb2.post,spHeu2.post,spAusf2.post,spBald2.post);
 
-  let _colHdrBase='display:flex;align-items:center;gap:7px;font-size:12px;font-weight:700;letter-spacing:.3px;padding:7px 11px;border-radius:7px 7px 0 0;border:1px solid var(--border);border-bottom:none;';
+  let _hasAufgF=spUeb2.aufg.length||spHeu2.aufg.length||spAusf2.aufg.length||spBald2.aufg.length;
+  let _hasAuftrF=spUeb2.auftr.length||spHeu2.auftr.length||spAusf2.auftr.length||spBald2.auftr.length;
+  let _hasPostF=spUeb2.post.length||spHeu2.post.length||spAusf2.post.length||spBald2.post.length;
 
-  let html='<div style="padding:20px 24px;">'
+  // Vertikale Sektion: Header klappbar + Überfällig zuerst (bereits durch colSection-Reihenfolge)
+  let _colHdrBase='display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700;letter-spacing:.2px;padding:8px 12px;border-radius:8px 8px 0 0;border:1px solid var(--border);border-bottom:none;cursor:pointer;';
+  let _hColState={};
+  try{_hColState=JSON.parse(localStorage.getItem('pam_heute_col_state')||'{}');}catch(e){}
+  function colWrap(key,icon,label,cnt,hdrStyle,borderColor,bodyHtml){
+    let collapsed=!!_hColState[key];
+    let _cntBadge=cnt>0?'<span style="font-size:11px;padding:1px 8px;border-radius:10px;background:rgba(0,0,0,.1);margin-left:4px;">'+cnt+'</span>':'';
+    return'<div style="margin-bottom:12px;">'
+      +'<div style="'+_colHdrBase+hdrStyle+'" onclick="(function(){var s={};try{s=JSON.parse(localStorage.getItem(\'pam_heute_col_state\')||\'{}\')}catch(e){}s[\''+key+'\']=!s[\''+key+'\'];try{localStorage.setItem(\'pam_heute_col_state\',JSON.stringify(s));}catch(e){}var b=document.getElementById(\'heuteColBody_'+key+'\');if(b)b.style.display=s[\''+key+'\']?\'none\':\'\';var a=this.querySelector(\'.hcol-arrow\');if(a)a.textContent=s[\''+key+'\']?\'▶\':\'▼\';}).call(this)">'
+      +'<span style="font-size:16px;">'+icon+'</span>'
+      +'<span>'+label+'</span>'
+      +_cntBadge
+      +'<span class="hcol-arrow" style="font-size:12px;margin-left:auto;opacity:.7;">'+(collapsed?'▶':'▼')+'</span>'
+      +'</div>'
+      +'<div id="heuteColBody_'+key+'" style="border:1px solid '+borderColor+';border-radius:0 0 8px 8px;padding:12px 14px;background:var(--bg2);'+(collapsed?'display:none;':'')+';">'
+      +(bodyHtml||'<div style="color:var(--text2);font-size:13px;padding:4px 0;">Keine Einträge ✓</div>')
+      +'</div>'
+      +'</div>';
+  }
+
+  let html='<div style="padding:16px 24px;">'
     +'<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:0.5rem;">'
     +'<span style="font-size:18px;font-weight:600;color:var(--text);">Was steht heute an?</span>'
     +'<span style="font-size:13px;color:var(--text2);">'+dateStr+'</span>'
     +'</div>'
+    +filterBar
     +zoomBar
-    +'<div id="heuteZoomContent" style="zoom:'+zoom+'%;">';
+    +'<div id="heuteZoomContent" style="zoom:'+zoom+'%;max-width:900px;">';
 
-  if(!hasAufg&&!hasAuftr&&!hasPost){
-    html+='<div style="color:var(--text2);font-size:14px;padding:20px 0;">Keine fälligen Aufgaben — alles erledigt!</div>';
+  if(!_hasAufgF&&!_hasAuftrF&&!_hasPostF){
+    html+='<div style="color:var(--text2);font-size:14px;padding:20px 0;">Keine fälligen Einträge für diesen Filter — alles erledigt!</div>';
   }else{
-    // Spalten-Collapse-State aus localStorage
-    let _hColState={};
-    try{_hColState=JSON.parse(localStorage.getItem('pam_heute_col_state')||'{}');}catch(e){}
-    function colWrap(key,hdrHtml,bodyHtml,borderColor){
-      let collapsed=!!_hColState[key];
-      let cnt=collapsed?'<span style="font-size:16px;color:var(--text2);margin-left:auto;cursor:pointer;">▶</span>':'<span style="font-size:16px;color:var(--text2);margin-left:auto;cursor:pointer;">▼</span>';
-      return'<div id="heuteCol_'+key+'">'
-        +'<div style="'+_colHdrBase+hdrHtml+';cursor:pointer;" onclick="(function(){var s={};try{s=JSON.parse(localStorage.getItem(\'pam_heute_col_state\')||\'{}\')}catch(e){}s[\''+key+'\']=!s[\''+key+'\'];try{localStorage.setItem(\'pam_heute_col_state\',JSON.stringify(s));}catch(e){}var b=document.getElementById(\'heuteColBody_'+key+'\');if(b)b.style.display=s[\''+key+'\']?\'none\':\'\';var a=this.querySelector(\'.hcol-arrow\');if(a)a.textContent=s[\''+key+'\']?\'▶\':\'▼\';}).call(this)">'
-        +bodyHtml.hdr
-        +'<span class="hcol-arrow" style="font-size:13px;margin-left:auto;color:var(--text2);">'+(collapsed?'▶':'▼')+'</span>'
-        +'</div>'
-        +'<div id="heuteColBody_'+key+'" style="border:1px solid '+borderColor+';border-radius:0 0 8px 8px;padding:12px 10px;background:var(--bg2);'+(collapsed?'display:none;':'\'')+'>">'
-        +bodyHtml.body
-        +'</div></div>';
-    }
-    let _cols=[];
-    _cols.push(colWrap('aufg',
-      'background:#E6F1FB;border-color:#B5D4F4;color:#185FA5',
-      {hdr:'<span style="font-size:15px;">✅</span><span>Aufgaben</span>'+(hasAufg?'<span style="font-size:11px;background:#185FA520;padding:1px 7px;border-radius:10px;margin-left:6px;">'+(spHeu.aufg.length+spUeb.aufg.length+spAusf.aufg.length+spBald.aufg.length)+'</span>':''),
-       body:colAufgHTML||'<div style="color:var(--text2);font-size:13px;padding:8px 0;">Keine Aufgaben fällig ✓</div>'},
-      '#B5D4F4'));
-    _cols.push(colWrap('auftr',
-      'background:#EAF3DE;border-color:#C0DD97;color:#3B6D11',
-      {hdr:'<span style="font-size:15px;">🏗</span><span>Aufträge</span>'+(hasAuftr?'<span style="font-size:11px;background:#3B6D1120;padding:1px 7px;border-radius:10px;margin-left:6px;">'+(spHeu.auftr.length+spUeb.auftr.length+spAusf.auftr.length+spBald.auftr.length)+'</span>':''),
-       body:colAuftrHTML||'<div style="color:var(--text2);font-size:13px;padding:8px 0;">Keine Aufträge fällig ✓</div>'},
-      '#C0DD97'));
-    if(hasPost){
-      _cols.push(colWrap('post',
-        'background:#E0F2FE;border-color:#BAE6FD;color:#075985',
-        {hdr:'<span style="font-size:15px;">📧</span><span>Posteingang</span>'+'<span style="font-size:11px;background:#07598520;padding:1px 7px;border-radius:10px;margin-left:6px;">'+(spHeu.post.length+spUeb.post.length+spAusf.post.length+spBald.post.length)+'</span>',
-         body:colPostHTML},
-        '#BAE6FD'));
-    }
-    let _gridCols=_cols.length===3?'1fr 1fr 1fr':'1fr 1fr';
-    html+='<div style="display:grid;grid-template-columns:'+_gridCols+';gap:16px;align-items:start;">';
-    html+=_cols.join('');
-    html+='</div>';
+    if(_hF.typ==='alle'||_hF.typ==='aufg')
+      html+=colWrap('aufg','✅','Aufgaben',spUeb2.aufg.length+spHeu2.aufg.length+spAusf2.aufg.length+spBald2.aufg.length,
+        'background:#E6F1FB;border-color:#B5D4F4;color:#185FA5','#B5D4F4',colAufgHTML);
+    if(_hF.typ==='alle'||_hF.typ==='auftr')
+      html+=colWrap('auftr','🏗','Aufträge',spUeb2.auftr.length+spHeu2.auftr.length+spAusf2.auftr.length+spBald2.auftr.length,
+        'background:#EAF3DE;border-color:#C0DD97;color:#3B6D11','#C0DD97',colAuftrHTML);
+    if((_hF.typ==='alle'||_hF.typ==='post')&&(hasPost||_hasPostF))
+      html+=colWrap('post','📧','Posteingang',spUeb2.post.length+spHeu2.post.length+spAusf2.post.length+spBald2.post.length,
+        'background:#E0F2FE;border-color:#BAE6FD;color:#075985','#BAE6FD',colPostHTML);
   }
   html+='</div></div>';
   document.getElementById('mainContent').innerHTML=html;
