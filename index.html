@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com https://ssl.gstatic.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; connect-src 'self' blob: https://*.googleapis.com https://accounts.google.com https://www.googleapis.com https://oauth2.googleapis.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://login.microsoftonline.com https://graph.microsoft.com https://europe-west1-ptp-workboard.cloudfunctions.net; img-src 'self' data: blob: https: https://*.googleusercontent.com https://drive.google.com https://lh3.googleusercontent.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://ssl.gstatic.com; frame-src 'self' https://accounts.google.com https://drive.google.com https://login.microsoftonline.com https://login.live.com https://*.msftauth.net https://*.msauth.net blob:; worker-src blob: 'self';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com https://ssl.gstatic.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; connect-src 'self' blob: https://*.googleapis.com https://accounts.google.com https://www.googleapis.com https://oauth2.googleapis.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://login.microsoftonline.com https://graph.microsoft.com https://europe-west1-ptp-workboard.cloudfunctions.net https://api.open-meteo.com; img-src 'self' data: blob: https: https://*.googleusercontent.com https://drive.google.com https://lh3.googleusercontent.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://ssl.gstatic.com; frame-src 'self' https://accounts.google.com https://drive.google.com https://login.microsoftonline.com https://login.live.com https://*.msftauth.net https://*.msauth.net blob:; worker-src blob: 'self';">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PAM Workboard</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PGNpcmNsZSBjeD0iMzIiIGN5PSIzMiIgcj0iMzIiIGZpbGw9IiMyNTYzZWIiLz48dGV4dCB4PSIzMiIgeT0iNDMiIGZvbnQtZmFtaWx5PSJBcmlhbCxzYW5zLXNlcmlmIiBmb250LXNpemU9IjMwIiBmb250LXdlaWdodD0iYm9sZCIgZmlsbD0iI2ZmZiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+UDwvdGV4dD48L3N2Zz4=">
@@ -3465,7 +3465,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-31 · #177'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b177)
+const PAM_BUILD = 'v2026-05-31 · #178'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b178)
 
 // ── STATE ──
 let boards = {};
@@ -18050,10 +18050,44 @@ async function _emOpenMail(idx,mails){
           fr2.src=_blobU;let _rev2=false;fr2.onload=function(){if(!_rev2){_rev2=true;URL.revokeObjectURL(_blobU);}};setTimeout(function(){if(!_rev2){_rev2=true;URL.revokeObjectURL(_blobU);}},30000);
           if(bc2){bc2.innerHTML='';bc2.appendChild(fr2);}
         }
+        // Fix Outlook: Anhänge per Graph API laden falls hasAttachments
+        if(d.hasAttachments&&!d._msAttachLoaded){
+          fetch('https://graph.microsoft.com/v1.0/me/messages/'+d.id+'/attachments?$select=id,name,contentType,size,isInline',
+            {headers:{Authorization:'Bearer '+msToken}})
+            .then(function(ra){return ra.ok?ra.json():Promise.reject(ra.status);})
+            .then(function(attResp){
+              d._msAttachLoaded=true;
+              (attResp.value||[]).filter(function(a){return !a.isInline;}).forEach(function(a){
+                const _nl=(a.name||'').toLowerCase();
+                const _icon=_nl.endsWith('.pdf')?'📄':(_nl.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':'📎');
+                allFiles2.push({icon:_icon,name:a.name||'Anhang',url:'',mime:a.contentType||'',
+                  data:{_msAttId:a.id,_msMsgId:d.id,filename:a.name,mimeType:a.contentType||''}});
+              });
+              if(allFiles2.length)_emRenderAttachPanel(allFiles2);
+            }).catch(function(e){console.warn('[MS] Anhänge laden:',e);});
+        }
       } else if(!isMs&&gmailToken&&d.id){
         const r2=await fetch('https://www.googleapis.com/gmail/v1/users/me/messages/'+d.id+'?format=full',{headers:{Authorization:'Bearer '+gmailToken}});
         if(r2.ok){
           const mb2=await r2.json();const res2={html:'',plain:''};_gmExtractBody(mb2.payload,res2);
+          // Fix: Anhänge aus MIME-Parts extrahieren (attachmentId → Download-URL aufbauen)
+          const _gmAttFiles=[];
+          (function _collectGmParts(p){
+            if(!p)return;
+            const _disp=(p.headers||[]).find(function(h){return h.name.toLowerCase()==='content-disposition';});
+            const _fname=p.filename||'';
+            const _attId=p.body&&p.body.attachmentId;
+            if(_attId&&_fname){
+              const _nl=_fname.toLowerCase();
+              const _icon=_nl.endsWith('.pdf')?'📄':(_nl.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':'📎');
+              const _mime=p.mimeType||'application/octet-stream';
+              // URL zum Laden: Gmail Attachment API
+              const _attUrl='https://www.googleapis.com/gmail/v1/users/me/messages/'+d.id+'/attachments/'+_attId;
+              _gmAttFiles.push({icon:_icon,name:_fname,url:'',mime:_mime,data:{_gmAttId:_attId,_gmMsgId:d.id,_gmAttUrl:_attUrl,filename:_fname,mimeType:_mime}});
+            }
+            (p.parts||[]).forEach(function(pp){_collectGmParts(pp);});
+          })(mb2.payload);
+          if(_gmAttFiles.length){allFiles2.push.apply(allFiles2,_gmAttFiles);_emRenderAttachPanel(allFiles2);}
           if(_myToken!==_emOpenMailToken)return;
           const html2=(res2.html||'<pre style="white-space:pre-wrap;font-size:13px;">'+_escHtml(res2.plain||d.preview||'(kein Inhalt)')+'</pre>').replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'');
           const fr2=document.createElement('iframe');fr2.style.cssText='flex:1;width:100%;border:none;min-height:0;';
@@ -18119,6 +18153,7 @@ async function _emOpenMail(idx,mails){
       (parsed.attachments||[]).forEach(function(a){
         let nl=(a.name||'').toLowerCase();
         let icon=nl.endsWith('.pdf')?'📄':(nl.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':'📎');
+        a._isEmlParsed=true; // Fix: Flag auf data-Objekt setzen, damit _emShowAttachPreview es findet
         emlAttachFiles.push({icon,name:a.name||'Anhang',url:'',mime:a.mimeType||'',data:a,_isEmlParsed:true});
       });
       // Anhänge die beim EML-Upload bereits in Drive gespeichert wurden:
@@ -18604,6 +18639,66 @@ function _emShowAttachPreview(icon,name,url,mime,data){
     if(_m.startsWith('image/')||namL.match(/\.(jpe?g|png|gif|webp)$/)){
       url='data:'+_m+';base64,'+data.b64;
     }
+  }
+  // Fix Gmail: Anhang per Gmail Attachment API laden (_gmAttId)
+  if(!url&&data&&data._gmAttId&&data._gmMsgId&&typeof gmailToken!=='undefined'&&gmailToken){
+    previewArea.innerHTML='<div style="padding:16px;color:var(--text2);font-size:13px;">⏳ Anhang wird geladen…</div>';
+    fetch('https://www.googleapis.com/gmail/v1/users/me/messages/'+data._gmMsgId+'/attachments/'+data._gmAttId,
+      {headers:{Authorization:'Bearer '+gmailToken}})
+      .then(function(r){return r.ok?r.json():Promise.reject(r.status);})
+      .then(function(att){
+        const _b64=att.data.replace(/-/g,'+').replace(/_/g,'/');
+        const _mime=data.mimeType||mime||'application/octet-stream';
+        const _mimeL=_mime.toLowerCase();
+        const _namL2=name.toLowerCase();
+        if(_mimeL==='application/pdf'||_namL2.endsWith('.pdf')){
+          const _bin=atob(_b64);const _arr=new Uint8Array(_bin.length);for(let i=0;i<_bin.length;i++)_arr[i]=_bin.charCodeAt(i);
+          const _bUrl=URL.createObjectURL(new Blob([_arr],{type:'application/pdf'}));
+          const _fr=document.createElement('iframe');_fr.style.cssText='width:100%;height:500px;border:none;';
+          _fr.src=_bUrl;_fr.onload=function(){setTimeout(function(){URL.revokeObjectURL(_bUrl);},8000);};
+          previewArea.innerHTML='';previewArea.appendChild(_fr);
+        } else if(_mimeL.startsWith('image/')||_namL2.match(/\.(jpe?g|png|gif|webp)$/)){
+          const _img=document.createElement('img');_img.style.cssText='max-width:100%;max-height:500px;object-fit:contain;';
+          _img.src='data:'+_mime+';base64,'+_b64;previewArea.innerHTML='';previewArea.appendChild(_img);
+        } else {
+          // Sonstiger Typ: Download anbieten
+          const _bin=atob(_b64);const _arr=new Uint8Array(_bin.length);for(let i=0;i<_bin.length;i++)_arr[i]=_bin.charCodeAt(i);
+          const _bUrl=URL.createObjectURL(new Blob([_arr],{type:_mime}));
+          previewArea.innerHTML='<div style="text-align:center;padding:20px;font-size:13px;color:var(--text2);">'+icon
+            +' <a href="'+_bUrl+'" download="'+_escHtml(name)+'" style="color:var(--accent);">⬇ '+_escHtml(name)+' herunterladen</a></div>';
+          setTimeout(function(){URL.revokeObjectURL(_bUrl);},30000);
+        }
+      }).catch(function(e){previewArea.innerHTML='<div style="padding:16px;color:#c00;font-size:13px;">⚠ Anhang konnte nicht geladen werden ('+e+')</div>';});
+    box.appendChild(previewArea);ov.appendChild(box);document.body.appendChild(ov);
+    return;
+  }
+  // Fix Outlook: Anhang per Graph /attachments/{id}/$value laden (_msAttId)
+  if(!url&&data&&data._msAttId&&data._msMsgId&&typeof msToken!=='undefined'&&msToken){
+    previewArea.innerHTML='<div style="padding:16px;color:var(--text2);font-size:13px;">⏳ Anhang wird geladen…</div>';
+    fetch('https://graph.microsoft.com/v1.0/me/messages/'+data._msMsgId+'/attachments/'+data._msAttId+'/$value',
+      {headers:{Authorization:'Bearer '+msToken}})
+      .then(function(r){return r.ok?r.blob():Promise.reject(r.status);})
+      .then(function(blob){
+        const _mime=blob.type||data.mimeType||mime||'application/octet-stream';
+        const _mimeL2=_mime.toLowerCase();
+        const _namL2=name.toLowerCase();
+        const _bUrl=URL.createObjectURL(blob);
+        if(_mimeL2==='application/pdf'||_namL2.endsWith('.pdf')){
+          const _fr=document.createElement('iframe');_fr.style.cssText='width:100%;height:500px;border:none;';
+          _fr.src=_bUrl;_fr.onload=function(){setTimeout(function(){URL.revokeObjectURL(_bUrl);},8000);};
+          previewArea.innerHTML='';previewArea.appendChild(_fr);
+        } else if(_mimeL2.startsWith('image/')||_namL2.match(/\.(jpe?g|png|gif|webp)$/)){
+          const _img=document.createElement('img');_img.style.cssText='max-width:100%;max-height:500px;object-fit:contain;';
+          _img.src=_bUrl;previewArea.innerHTML='';previewArea.appendChild(_img);
+          setTimeout(function(){URL.revokeObjectURL(_bUrl);},30000);
+        } else {
+          previewArea.innerHTML='<div style="text-align:center;padding:20px;font-size:13px;color:var(--text2);">'+icon
+            +' <a href="'+_bUrl+'" download="'+_escHtml(name)+'" style="color:var(--accent);">⬇ '+_escHtml(name)+' herunterladen</a></div>';
+          setTimeout(function(){URL.revokeObjectURL(_bUrl);},30000);
+        }
+      }).catch(function(e){previewArea.innerHTML='<div style="padding:16px;color:#c00;font-size:13px;">⚠ Anhang konnte nicht geladen werden ('+e+')</div>';});
+    box.appendChild(previewArea);ov.appendChild(box);document.body.appendChild(ov);
+    return;
   }
   const _fid2=(data&&(data.fileId||data.driveId))||'';
   if(false&&(mimeL.startsWith('image/')||namL.match(/\.(jpe?g|png|gif|webp)$/))&&(url||_fid2)){ // Bilder → Lightbox oben
@@ -19916,16 +20011,6 @@ function _showVbsDriveLinksBox(mainUrl,fotoUrl,dokUrl,emailUrl){
 }
 
 document.addEventListener('DOMContentLoaded', _checkNewAuftragFromVbs);
-// ── Service Worker: bei jedem Seitenaufruf auf Updates prüfen ──────────────────────────────────
-if('serviceWorker' in navigator){
-  navigator.serviceWorker.getRegistration().then(reg=>{
-    if(reg) reg.update();
-  });
-  navigator.serviceWorker.addEventListener('controllerchange',()=>{
-    // Neuer SW hat übernommen → Seite automatisch neu laden
-    window.location.reload();
-  });
-}
 
 // ── App-Update-Button: unregistriert SW und lädt neu ───
 function pamForceSwUpdate(){
