@@ -3465,7 +3465,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-31 · #183'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b179)
+const PAM_BUILD = 'v2026-05-31 · #184'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b179)
 
 // ── STATE ──
 let boards = {};
@@ -15304,6 +15304,24 @@ function _openEmailThumbnailGrid(){
             fr.srcdoc=html;
           })
           .catch(ex=>{previewContent.style.cssText='flex:1;overflow-y:auto;';previewContent.innerHTML='<div style="padding:20px;color:var(--red);font-size:12px;">⚠ '+esc(ex.message)+'</div>';});
+      } else if(ext==='pdf'&&item.fileId&&gdriveToken){
+        // Fix: PDF-Originale (type='orig' mit .pdf Extension) → Drive-Blob-Vorschau
+        previewContent.style.cssText='flex:1;overflow:hidden;';
+        previewContent.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text2);font-size:13px;">⏳ PDF lädt…</div>';
+        fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(item.fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}})
+          .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.blob();})
+          .then(blob=>{
+            const bUrl=URL.createObjectURL(blob);blobUrls.push(bUrl);
+            if(!document.getElementById(GID)){URL.revokeObjectURL(bUrl);return;}
+            const fr=document.createElement('iframe');fr.style.cssText='width:100%;height:100%;border:none;';
+            fr.src=bUrl+'#toolbar=0&navpanes=0';
+            previewContent.innerHTML='';previewContent.appendChild(fr);
+          })
+          .catch(ex=>{
+            const _fallbackUrl=(item.url||'').replace('/view','/preview').replace(/\/edit.*$/,'/preview');
+            if(_fallbackUrl){previewContent.innerHTML='<iframe src="'+esc(_fallbackUrl)+'" style="width:100%;height:100%;border:none;"></iframe>';}
+            else{previewContent.style.cssText='flex:1;overflow-y:auto;';previewContent.innerHTML='<div style="padding:20px;color:var(--red);font-size:12px;">⚠ '+esc(ex.message)+'</div>';}
+          });
       } else if(ext==='eml'&&item.fileId&&gdriveToken){
         previewContent.style.cssText='flex:1;display:flex;flex-direction:column;overflow:hidden;';
         previewContent.innerHTML='<div style="display:flex;align-items:center;justify-content:center;flex:1;color:var(--text2);font-size:13px;">⏳ E-Mail lädt…</div>';
@@ -18729,19 +18747,20 @@ function _emShowAttachPreview(icon,name,url,mime,data){
     return;
   }
   const _fid2=(data&&(data.fileId||data.driveId))||'';
-  if(false&&(mimeL.startsWith('image/')||namL.match(/\.(jpe?g|png|gif|webp)$/))&&(url||_fid2)){ // Bilder → Lightbox oben
-    // Bild über Drive API mit Token laden (verhindert Auth-Fehler)
+  const _isImgType=mimeL.startsWith('image/')||!!namL.match(/\.(jpe?g|png|gif|webp)$/);
+  if(_isImgType&&(_fid2||url)){
+    // Bild: Drive-Auth-Fetch oder direkte URL
     let img=document.createElement('img');
-    img.style.cssText='max-width:100%;max-height:500px;object-fit:contain;';
+    img.style.cssText='max-width:100%;max-height:500px;object-fit:contain;border-radius:4px;';
     img.alt=name;
-    previewArea.innerHTML='';previewArea.appendChild(img);
+    previewArea.innerHTML='<div style="padding:10px;color:var(--text2);font-size:12px;">⏳ Bild wird geladen…</div>';
+    previewArea.appendChild(img);
+    const _showImg=function(src){img.src=src;img.onload=function(){previewArea.innerHTML='';previewArea.appendChild(img);};img.onerror=function(){previewArea.innerHTML='<div style="padding:16px;color:var(--text2);font-size:13px;">⚠ Bild konnte nicht geladen werden.<br><a href="'+_escHtml(url)+'" target="_blank" style="color:var(--accent);">In Drive öffnen ↗</a></div>';};};
     if(_fid2&&typeof _fetchDesktopFotoBlob==='function'){
-      _fetchDesktopFotoBlob(_fid2).then(function(bUrl){
-        if(bUrl)img.src=bUrl;else img.src=url;
-      }).catch(function(){img.src=url;});
-    }else{img.src=url;}
+      _fetchDesktopFotoBlob(_fid2).then(function(bUrl){_showImg(bUrl||url);}).catch(function(){_showImg(url);});
+    }else{_showImg(url);}
   } else if(mimeL==='application/pdf'||namL.endsWith('.pdf')){
-    // PDF: erst Drive API versuchen (Blob), Fallback auf /preview iframe
+    // PDF: Drive-Blob → iframe, Fallback /preview, Fallback b64
     previewArea.innerHTML='<div style="padding:16px;color:var(--text2);font-size:13px;">⏳ PDF wird geladen…</div>';
     if(_fid2&&typeof gdriveToken!=='undefined'&&gdriveToken){
       fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(_fid2)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}})
@@ -18752,12 +18771,19 @@ function _emShowAttachPreview(icon,name,url,mime,data){
           fr.src=bUrl;fr.onload=function(){setTimeout(function(){URL.revokeObjectURL(bUrl);},5000);};
           previewArea.innerHTML='';previewArea.appendChild(fr);
         }).catch(function(){
-          const _pdfPreviewUrl=(url||'').replace('/view','/preview').replace(/\/edit.*$/,'/preview');
-          previewArea.innerHTML='<iframe src="'+_escHtml(_pdfPreviewUrl)+'" style="width:100%;height:500px;border:none;"></iframe>';
+          if(url){const _pdfPreviewUrl=url.replace('/view','/preview').replace(/\/edit.*$/,'/preview');previewArea.innerHTML='<iframe src="'+_escHtml(_pdfPreviewUrl)+'" style="width:100%;height:500px;border:none;"></iframe>';}
+          else{previewArea.innerHTML='<div style="padding:16px;color:var(--text2);font-size:13px;">⚠ PDF konnte nicht geladen werden.<br>'+(url?'<a href="'+_escHtml(url)+'" target="_blank" style="color:var(--accent);">In Drive öffnen ↗</a>':'Kein Drive-Link verfügbar.')+'</div>';}
         });
     }else if(url){
       const _pdfPreviewUrl=url.replace('/view','/preview').replace(/\/edit.*$/,'/preview');
       previewArea.innerHTML='<iframe src="'+_escHtml(_pdfPreviewUrl)+'" style="width:100%;height:500px;border:none;"></iframe>';
+    }else if(data&&data._isEmlParsed&&data.b64){
+      // EML-geparste PDF ohne Drive-Upload → Download anbieten
+      window._emLastEmlAtt={b64:data.b64,mime:'application/pdf',name:name};
+      previewArea.innerHTML='<div style="text-align:center;color:var(--text2);font-size:13px;padding:20px;">📄 '+_escHtml(name)+'<br>'
+        +'<button onclick="if(window._emLastEmlAtt)_emDownloadEmlAttachment(window._emLastEmlAtt.b64,window._emLastEmlAtt.mime,window._emLastEmlAtt.name)" style="margin-top:10px;padding:6px 14px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;">⬇ Herunterladen</button></div>';
+    }else{
+      previewArea.innerHTML='<div style="padding:16px;color:var(--text2);font-size:13px;">📄 '+_escHtml(name)+'<br><span style="font-size:11px;">Keine Vorschau verfügbar — Datei nicht in Drive gespeichert</span></div>';
     }
   } else if(url){
     previewArea.innerHTML='<div style="text-align:center;color:var(--text2);font-size:13px;padding:20px;">'+icon+' <a href="'+_escHtml(url)+'" target="_blank" style="color:var(--accent);">'+_escHtml(name)+' öffnen</a></div>';
