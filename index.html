@@ -3465,7 +3465,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-31 · #168'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b168)
+const PAM_BUILD = 'v2026-05-31 · #172'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b172)
 
 // ── STATE ──
 let boards = {};
@@ -12304,104 +12304,101 @@ function _pamRenderUnifiedEmailList(task){
   if(!task)task=findTaskById(taskId);
   if(!task){el.innerHTML='';return;}
 
-  // Betreff normalisieren (Re:/AW:/Fwd:/WG: entfernen)
   function _normSubj(s){return(s||'').replace(/^(Re|AW|Fwd|WG|Antwort|FYI):\s*/gi,'').replace(/\s+/g,' ').trim().toLowerCase().substring(0,60);}
 
-  // Thread-IDs für Duplikat-Filter
-  const thrIds=new Set([
-    ...(task.gmailThreadMessages||[]).map(function(m){return m.messageId;}).filter(Boolean),
-    ...(task.msThreadMessages||[]).map(function(m){return m.messageId;}).filter(Boolean)
-  ]);
-
-  // Alle Mails in Gruppen (nach normalisiertem Betreff)
-  const groups=new Map(); // normSubj → {subject, mails:[], emls:[], pdfs:[]}
-  function _getGroup(subj){
-    const k=_normSubj(subj)||'__unbekannt__';
-    if(!groups.has(k))groups.set(k,{subject:subj||'(kein Betreff)',mails:[],emls:[],pdfs:[]});
-    return groups.get(k);
+  // Gruppen: key → {label, src, subject, srcColor, mails:[]}
+  const groups=new Map();
+  function _addGroup(key,label,src,subject,srcColor){
+    if(!groups.has(key))groups.set(key,{label,src,subject:subject||'(kein Betreff)',srcColor,mails:[]});
+    return groups.get(key);
   }
 
-  // Gmail-Mails
+  // Gmail: pro threadId → eigene Gruppe
+  const _gmByThread=new Map();
   (task.gmailThreadMessages||[]).forEach(function(m,i){
-    _getGroup(m.subject||'').mails.push({src:'gmail',idx:i,date:m.date?new Date(m.date):null,
-      from:m.fromName||m.from||'',subject:m.subject||'',preview:m.preview||'',
-      isOut:m.direction==='gesendet',hasAtt:false});
+    const tid=m.threadId||'gm_default';
+    if(!_gmByThread.has(tid))_gmByThread.set(tid,{subject:m.subject||'',mails:[]});
+    _gmByThread.get(tid).mails.push({_orig:m,_idx:i});
+  });
+  _gmByThread.forEach(function(grp,tid){
+    const key='gmail_'+tid;
+    const g=_addGroup(key,'Gmail','gmail',grp.mails[0]&&grp.mails[0]._orig.subject||'','#1B5E20');
+    grp.mails.forEach(function(x){
+      const m=x._orig;
+      g.mails.push({src:'gmail',idx:x._idx,date:m.date?new Date(m.date):null,
+        from:m.fromName||m.from||'',subject:m.subject||'',preview:m.preview||'',
+        isOut:m.direction==='gesendet',hasAtt:false});
+    });
   });
 
-  // Outlook-Mails
+  // Outlook: pro normalisiertem Betreff → eigene Gruppe (verschiedene Conversations)
+  const _msBySubj=new Map();
   (task.msThreadMessages||[]).forEach(function(m,i){
-    _getGroup(m.subject||'').mails.push({src:'ms',idx:i,date:m.date?new Date(m.date):null,
-      from:m.fromName||m.from||'',subject:m.subject||'',preview:m.preview||'',
-      isOut:m.direction==='gesendet',hasAtt:m.hasAttachments||false});
+    const k=_normSubj(m.subject||'')||'ms_default';
+    if(!_msBySubj.has(k))_msBySubj.set(k,{subject:m.subject||'',mails:[]});
+    _msBySubj.get(k).mails.push({_orig:m,_idx:i});
   });
-
-  // EML-Originale und PDFs: nur im Archiv-Button, nicht in der Thread-Liste
+  _msBySubj.forEach(function(grp,k){
+    const key='ms_'+k;
+    const g=_addGroup(key,'Outlook','ms',grp.mails[0]&&grp.mails[0]._orig.subject||'','#0078d4');
+    grp.mails.forEach(function(x){
+      const m=x._orig;
+      g.mails.push({src:'ms',idx:x._idx,date:m.date?new Date(m.date):null,
+        from:m.fromName||m.from||'',subject:m.subject||'',preview:m.preview||'',
+        isOut:m.direction==='gesendet',hasAtt:m.hasAttachments||false});
+    });
+  });
 
   if(!groups.size){
     el.innerHTML='<div style="padding:20px 14px;text-align:center;color:var(--text2);font-size:12px;">Noch kein E-Mail-Verlauf.<br><span style="font-size:11px;">Oben auf Gmail oder Outlook klicken.</span></div>';
     _pamUpdateEmailListBadge();return;
   }
 
-  // Anhang/Foto-Zähler für Chips
-  const attachCount=(task.attachments||[]).length;
-  const fotoCount=(task.fotos||[]).length;
-
   const now=new Date();
   function _fmt(d){if(!d)return'';const t=d.toDateString()===now.toDateString();return t?(_ez2(d.getHours())+':'+_ez2(d.getMinutes())):(_ez2(d.getDate())+'.'+_ez2(d.getMonth()+1)+'.'+String(d.getFullYear()).slice(2));}
-  function _initials(from){return(from.match(/\b[A-ZÄÖÜa-zäöü]/g)||[]).slice(0,2).map(function(c){return c.toUpperCase();}).join('')||'?';}
 
-  // Thread-open-State
+  // Alle Gruppen starten zugeklappt (Benutzer wünsch)
   if(!window._pamThreadOpen)window._pamThreadOpen={};
-  // Erstes Laden: ersten Thread öffnen
-  if(!Object.keys(window._pamThreadOpen).length){const _fk=[...groups.keys()][0];if(_fk)window._pamThreadOpen[_fk]=true;}
 
   let html2='';
-  let globalMailIdx=0; // globaler Index für Toggle-Preview
+  let globalMailIdx=0;
 
   groups.forEach(function(grp,key){
-    const isOpen=!!window._pamThreadOpen[key];
-    // Neueste Mail im Thread für Header-Datum
-    const allDates=[...grp.mails,...grp.emls,...grp.pdfs].map(function(m){return m.date?m.date.getTime():0;});
-    const lastDate=allDates.length?new Date(Math.max.apply(null,allDates)):null;
+    const isOpen=!!window._pamThreadOpen[key]; // default false = zugeklappt
+    const sortedMails=[...grp.mails].sort(function(a,b){return (b.date&&b.date.getTime?b.date.getTime():0)-(a.date&&a.date.getTime?a.date.getTime():0);});
+    const lastDate=sortedMails[0]&&sortedMails[0].date;
     const lastStr=lastDate?_fmt(lastDate):'';
-    const mailCount=grp.mails.length;
 
-    // Chips
-    let chips='';
-    // Nur Mailzahl im Thread-Header — Archiv-Button in der Toolbar
-
-    // Thread-Header
-    html2+='<div style="border-bottom:0.5px solid var(--border);">';
+    // Gruppe mit farbigem linken Rand (Posteingang-Stil)
+    html2+='<div style="border-bottom:0.5px solid var(--border);border-left:3px solid '+grp.srcColor+';">';
     html2+='<div onclick="_pamToggleThread(\''+key+'\')" style="padding:7px 10px;background:var(--bg3);display:flex;align-items:flex-start;gap:6px;cursor:pointer;user-select:none;">';
-    html2+='<span style="font-size:10px;color:var(--text2);margin-top:2px;flex-shrink:0;transition:transform .15s;display:inline-block;transform:rotate('+(isOpen?'0':'-90')+'deg);">▼</span>';
+    html2+='<span style="font-size:10px;color:var(--text2);margin-top:3px;flex-shrink:0;transition:transform .15s;display:inline-block;transform:rotate('+(isOpen?'0':'-90')+'deg);">▼</span>';
     html2+='<div style="flex:1;min-width:0;">';
-    html2+='<div style="font-size:calc(13px*var(--modal-scale,1));font-weight:600;color:var(--text1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(grp.subject)+'</div>';
-    html2+='<div style="font-size:calc(11px*var(--modal-scale,1));color:var(--text2);margin-top:1px;">'+mailCount+' Mail'+(mailCount!==1?'s':'')+' · '+lastStr+'</div>';
-    if(chips)html2+='<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;">'+chips+'</div>';
+    html2+='<div style="display:flex;align-items:center;gap:5px;margin-bottom:2px;">';
+    html2+='<span style="font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;background:'+grp.srcColor+';color:#fff;flex-shrink:0;">'+grp.label+'</span>';
+    html2+='<span style="font-size:calc(12px*var(--modal-scale,1));font-weight:600;color:var(--text1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(grp.subject)+'</span>';
+    html2+='</div>';
+    html2+='<div style="font-size:calc(11px*var(--modal-scale,1));color:var(--text2);">'+sortedMails.length+' Mail'+(sortedMails.length!==1?'s':'')+' · '+lastStr+'</div>';
     html2+='</div></div>';
 
-    // Mail-Zeilen (nur wenn offen)
+    // Mails (nur wenn offen)
     if(isOpen){
-      // Mails sortiert
-      const sortedMails=[...grp.mails].sort(function(a,b){return (b.date||0)-(a.date||0);});
       sortedMails.forEach(function(m){
         const gi=globalMailIdx++;
         const isOut=m.isOut;
-        const avatarBg=m.src==='gmail'?'#1B5E20':(isOut?'#16A34A':'#0078d4');
-        const initials2=_initials(m.from);
-        const dateStr=_fmt(m.date);
         const dirLabel=isOut?'Gesendet':'Eingang';
         const dirBg=isOut?'rgba(22,163,74,.15)':'rgba(29,78,216,.10)';
         const dirTxt=isOut?'#15803D':'#1E40AF';
         const dblFn=m.src==='gmail'?('_gmOpenMailOverlay('+JSON.stringify(taskId)+','+m.idx+')'):'_msOpenMailOverlay('+JSON.stringify(taskId)+','+m.idx+')';
         const clickFn='_pamUnifiedTogglePreview('+JSON.stringify(taskId)+','+JSON.stringify(m.src)+','+m.idx+')';
         const htRaw=(m.from+' · '+m.subject+(m.preview?' | '+m.preview:'')).replace(/['"<>&]/g,function(c){return({'\'':'&#39;','"':'&quot;','<':'&lt;','>':'&gt;','&':'&amp;'}[c]);}).substring(0,180);
+        const dateStr=m.date?_fmt(m.date):'';
+        const _envColor=isOut?'#16A34A':grp.srcColor;
         html2+='<div data-mi="'+gi+'" data-src="'+m.src+'" style="display:flex;gap:8px;align-items:flex-start;padding:6px 10px 6px 22px;border-top:0.5px solid var(--border);cursor:pointer;transition:background .1s;" data-ht="'+htRaw+'" onmouseenter="_pamUnifiedHover(this,this.dataset.ht)" onmouseleave="_pamUnifiedHoverOut()" onclick="'+clickFn+'" ondblclick="'+dblFn+'">';
-        const _envColor=isOut?'#16A34A':'#0078d4';
         html2+='<div style="width:26px;height:26px;border-radius:6px;background:rgba(0,0,0,.06);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="'+_envColor+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg></div>';
         html2+='<div style="flex:1;min-width:0;">';
-        html2+='<div style="display:flex;align-items:center;gap:4px;"><span style="font-size:calc(13px*var(--modal-scale,1));font-weight:600;color:var(--text1);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(m.from)+'</span><span style="font-size:calc(11px*var(--modal-scale,1));color:var(--text2);">'+dateStr+'</span>'+(m.hasAtt?'<span style="font-size:12px;">Anh.</span>':'')+'</div>';
-        html2+='<div style="display:flex;align-items:center;gap:4px;margin-top:2px;"><span style="font-size:calc(10px*var(--modal-scale,1));padding:1px 6px;border-radius:4px;background:'+dirBg+';color:'+dirTxt+';font-weight:600;">'+dirLabel+'</span><span style="font-size:calc(11px*var(--modal-scale,1));color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(m.preview.substring(0,60))+'</span></div>';
+        html2+='<div style="display:flex;align-items:center;gap:4px;"><span style="font-size:calc(13px*var(--modal-scale,1));font-weight:600;color:var(--text1);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(m.from)+'</span><span style="font-size:calc(11px*var(--modal-scale,1));color:var(--text2);">'+dateStr+'</span>'+(m.hasAtt?'<span style="font-size:11px;color:var(--text2);">📎</span>':'')+'</div>';
+        html2+='<div style="display:flex;align-items:center;gap:4px;margin-top:2px;"><span style="font-size:calc(10px*var(--modal-scale,1));padding:1px 6px;border-radius:4px;background:'+dirBg+';color:'+dirTxt+';font-weight:600;">'+dirLabel+'</span><span style="font-size:calc(11px*var(--modal-scale,1));color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc((m.preview||'').substring(0,60))+'</span></div>';
         html2+='</div></div>';
       });
     }
@@ -12410,11 +12407,9 @@ function _pamRenderUnifiedEmailList(task){
 
   el.innerHTML=html2;
 
-  // Popup-Button einblenden wenn Mails vorhanden
   const popRow=document.getElementById('pamEmailOpenPopupRow');
   if(popRow)popRow.style.display=groups.size?'block':'none';
 
-  // Aufklappfeld auto-öffnen
   const body=document.getElementById('pamEmailListBody');
   const chev=document.getElementById('pamEmailListChevron');
   if(body&&body.style.display==='none'){body.style.display='block';if(chev)chev.style.transform='rotate(180deg)';}
@@ -18414,8 +18409,9 @@ function _emAntworten(){
   // Spitzklammern-Teil extrahieren falls nötig: "Name <addr>" → "addr"
   let _toClean=(to.match(/<([^>]+)>/)||[])[1]||to;
   let subject=d?('Re: '+(d.subject||d.betreff||'')):'';
-  // Fix9: Outlook Web Compose wenn MS-Token vorhanden, sonst mailto als Fallback
-  if((typeof msToken!=='undefined'&&msToken||typeof msalInstance!=='undefined'&&msalInstance)&&_toClean){
+  if(!_toClean){showToast('⚠ Kein Empfänger ermittelt – bitte Mail anklicken','warning',4000);return;}
+  // Outlook Web Compose wenn MS-Token aktiv, sonst mailto
+  if(typeof msToken!=='undefined'&&msToken&&_toClean){
     let _owUrl='https://outlook.office.com/mail/deeplink/compose?to='+encodeURIComponent(_toClean)+'&subject='+encodeURIComponent(subject);
     window.open(_owUrl,'_blank');
   } else {
@@ -18548,22 +18544,47 @@ function _emToggleAttachSection(){
   if(open&&sect){setTimeout(function(){sect.scrollIntoView({behavior:'smooth',block:'nearest'});},50);}
 }
 function _emShowAttachPreview(icon,name,url,mime,data){
-  // Popup mit Vorschau
+  let mimeL=(mime||'').toLowerCase();
+  let namL=name.toLowerCase();
+  const _isImg=mimeL.startsWith('image/')||!!namL.match(/\.(jpe?g|png|gif|webp)$/);
+  const _fid3=(data&&(data.fileId||data.driveId))||'';
+  // Bild: direkt als Lightbox ohne Box-Container
+  if(_isImg&&(_fid3||url)){
+    let ov2=document.createElement('div');
+    ov2.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;';
+    ov2.onclick=function(e){if(e.target===ov2||e.target===img2)document.body.removeChild(ov2);};
+    let hdr2=document.createElement('div');
+    hdr2.style.cssText='position:absolute;top:0;left:0;right:0;padding:10px 16px;display:flex;align-items:center;gap:8px;background:rgba(0,0,0,.5);';
+    hdr2.innerHTML='<span style="flex:1;font-size:12px;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_escHtml(name)+'</span>'+(url?'<a href="'+_escHtml(url)+'" target="_blank" style="font-size:11px;color:#7af;text-decoration:none;">🔗 Drive</a>':'')+'<button style="background:none;border:none;color:#fff;font-size:20px;cursor:pointer;padding:0 4px;line-height:1;">✕</button>';
+    hdr2.querySelector('button').onclick=function(){document.body.removeChild(ov2);};
+    let img2=document.createElement('img');
+    img2.style.cssText='max-width:94vw;max-height:88vh;object-fit:contain;border-radius:4px;box-shadow:0 4px 24px rgba(0,0,0,.6);cursor:zoom-in;';
+    img2.alt=name;
+    if(_fid3&&typeof _fetchDesktopFotoBlob==='function'){
+      img2.src=''; // Platzhalter
+      _fetchDesktopFotoBlob(_fid3).then(function(bUrl){if(bUrl)img2.src=bUrl;else if(url)img2.src=url;}).catch(function(){if(url)img2.src=url;});
+    }else if(url){img2.src=url;}
+    ov2.appendChild(hdr2);ov2.appendChild(img2);
+    document.body.appendChild(ov2);
+    return;
+  }
+  // Alle anderen Typen: Standard-Popup
   let ov=document.createElement('div');
-  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9900;display:flex;align-items:center;justify-content:center;';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:99999;display:flex;align-items:center;justify-content:center;';
   ov.onclick=function(e){if(e.target===ov)document.body.removeChild(ov);};
   let box=document.createElement('div');
-  box.style.cssText='background:var(--bg2);border-radius:12px;padding:20px;max-width:700px;width:90vw;max-height:85vh;display:flex;flex-direction:column;gap:10px;box-shadow:0 16px 48px rgba(0,0,0,.5);';
+  box.style.cssText='background:var(--bg2);border-radius:12px;padding:20px;max-width:780px;width:92vw;max-height:88vh;display:flex;flex-direction:column;gap:10px;box-shadow:0 16px 48px rgba(0,0,0,.5);';
   let header=document.createElement('div');
   header.style.cssText='display:flex;align-items:center;gap:8px;';
-  const _ovRef=ov; // Referenz für Close-Button
+  const _ovRef=ov;
   header.innerHTML='<span style="font-size:18px;">'+icon+'</span><span style="flex:1;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_escHtml(name)+'</span>'+(url?'<a href="'+_escHtml(url)+'" target="_blank" style="font-size:12px;color:var(--accent);text-decoration:none;white-space:nowrap;">🔗 Öffnen</a>':'')+'<button id="_emPreviewClose" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text2);padding:0 2px;">✕</button>';
   box.addEventListener('click',function(e){if(e.target&&e.target.id==='_emPreviewClose'){document.body.removeChild(_ovRef);}});
   box.appendChild(header);
   let previewArea=document.createElement('div');
   previewArea.style.cssText='flex:1;overflow:auto;border:1px solid var(--border);border-radius:8px;min-height:200px;display:flex;align-items:center;justify-content:center;';
-  let mimeL=(mime||'').toLowerCase();
-  let namL=name.toLowerCase();
+  // mimeL/namL bereits oben definiert
+  mimeL=(mime||'').toLowerCase();
+  namL=name.toLowerCase();
   // Fix: EML-geparste Bilder (b64, keine URL) -> data-URL bauen
   if(!url&&data&&data._isEmlParsed&&data.b64){
     let _m=data.mimeType||mime||'application/octet-stream';
@@ -18572,7 +18593,7 @@ function _emShowAttachPreview(icon,name,url,mime,data){
     }
   }
   const _fid2=(data&&(data.fileId||data.driveId))||'';
-  if((mimeL.startsWith('image/')||namL.match(/\.(jpe?g|png|gif|webp)$/))&&(url||_fid2)){
+  if(false&&(mimeL.startsWith('image/')||namL.match(/\.(jpe?g|png|gif|webp)$/))&&(url||_fid2)){ // Bilder → Lightbox oben
     // Bild über Drive API mit Token laden (verhindert Auth-Fehler)
     let img=document.createElement('img');
     img.style.cssText='max-width:100%;max-height:500px;object-fit:contain;';
