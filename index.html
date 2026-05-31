@@ -3465,7 +3465,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-31 · #174'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b174)
+const PAM_BUILD = 'v2026-05-31 · #177'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b177)
 
 // ── STATE ──
 let boards = {};
@@ -12219,15 +12219,15 @@ function _pamUpdateEmailListBadge(){
   if(!badge)return;
   const gmCount=parseInt((document.getElementById('pamGmailCount')||{}).textContent||'0')||0;
   const msCount=parseInt((document.getElementById('pamOutlookCount')||{}).textContent||'0')||0;
-  const orCount=parseInt((document.getElementById('pamOrigCount')||{}).textContent||'0')||0;
-  const total=gmCount+msCount+orCount;
+  const total=gmCount+msCount; // EML-Originale nicht zählen (Dedup mit Thread-Mails)
   badge.textContent=total?total+' Nachrichten':'';
   // Archiv-Icons einzeln aktualisieren
   const taskId=(document.getElementById('taskId')||{}).value||'';
   const t=taskId?findTaskById(taskId):null;
   if(t){
     const emlCount=(t.emailOriginals||[]).filter(function(e){return e.fileId;}).length;
-    const pdfCount=(t.emailPdfs||[]).filter(function(p){return p.fileId;}).length;
+    const pdfCount=(t.emailPdfs||[]).filter(function(p){return p.fileId;}).length
+      +((typeof taskAttachments!=='undefined'?taskAttachments:(t.attachments||[])).filter(function(a){const n=(a.name||a.filename||'').toLowerCase();return a.fileId&&n.endsWith('.pdf');}).length);
     const fotoCount2=(t.fotos||[]).length;
     const _setIcon=function(id,count,label){
       const el=document.getElementById(id);if(!el)return;
@@ -12807,7 +12807,7 @@ function _pamEmailRefresh(task){
   if(oc){oc.textContent=origCount?origCount:'';oc.style.display=origCount?'inline':'none';}
   // Aufklappfeld-Badge aktualisieren
   const listBadge=document.getElementById('pamEmailListBadge');
-  if(listBadge){const tot2=gmBadge+msBadge+origCount;listBadge.textContent=tot2?tot2+' Nachrichten':'';}
+  if(listBadge){const tot2=gmBadge+msBadge;listBadge.textContent=tot2?tot2+' Nachrichten':'';}
   // Absender: gespeicherter Wert, sonst ersten Absender aus Gmail/Outlook/EML-Originale übernehmen
   let senderVal=(document.getElementById('taskEmailSenderInput')||{}).value||(t&&t.emailSender)||'';
   if(!senderVal){
@@ -15108,8 +15108,13 @@ function _openEmailThumbnailGrid(){
   const _atgTask=(()=>{const _id=(document.getElementById('taskId')||{}).value||'';return _id?findTaskById(_id):null;})();
   const _atgTIds=new Set([...((_atgTask&&_atgTask.gmailThreadMessages)||[]).map(m=>m.messageId).filter(Boolean),...((_atgTask&&_atgTask.msThreadMessages)||[]).map(m=>m.messageId).filter(Boolean)]);
   const _atgPdfSeen=new Set();
+  // Anhang-PDFs aus task.attachments ebenfalls einbeziehen
+  const _attPdfs=(taskAttachments||(_atgTask&&_atgTask.attachments)||[]).filter(function(a){
+    const n=(a.name||a.filename||'').toLowerCase();return a.fileId&&n.endsWith('.pdf');
+  }).map(function(a,i){return{...a,name:a.name||a.filename||'Anhang',_type:'attPdf',_idx:i};});
   const allItems=[
     ...taskEmailPdfs.map((p,i)=>({...p,_type:'pdf',_idx:i})).filter(p=>{if(p.fileId&&_atgPdfSeen.has(p.fileId))return false;if(p.fileId)_atgPdfSeen.add(p.fileId);return true;}),
+    ..._attPdfs.filter(function(p){return!_atgPdfSeen.has(p.fileId);}),
     ...taskEmailOriginals.map((e,i)=>({...e,_type:'orig',_idx:i})).filter(item=>item.isSnapshot||!item.messageId||!_atgTIds.has(item.messageId))
   ];
   if(!allItems.length){showToast('Keine E-Mail-Dateien vorhanden','info',2500);return;}
@@ -17762,7 +17767,7 @@ function _renderEmailMailList(){
   let _gmailCnt=(t.gmailThreadMessages||[]).length;
   let _msCnt=(t.msThreadMessages||[]).length;
   let _emlCnt=(t.emailOriginals||[]).length;
-  let _pdfCnt=(t.emailPdfs||[]).filter(function(p){return p.fileId;}).length;
+  let _pdfCnt=(t.emailPdfs||[]).filter(function(p){return p.fileId;}).length+((t.attachments||[]).filter(function(a){const n=(a.name||a.filename||'').toLowerCase();return a.fileId&&n.endsWith('.pdf');}).length);
   let _fotoCnt=(t.fotos||[]).length;
   let _totalCnt=mails.length;
   let _header=document.createElement('div');
@@ -19090,6 +19095,7 @@ function openEditTaskModal(id){
   const _esInp=document.getElementById('taskEmailSenderInput');if(_esInp)_esInp.value=task.emailSender||'';
   // taskEmailSenderRow bleibt immer versteckt (Anzeige erfolgt über pamAbsenderCard)
   _renderSenderDisplay();
+  _pamRenderUnifiedEmailList(task); // Fix: E-Mail-Liste beim Öffnen rendern (auch wenn Thread bereits geladen)
   _pamEmailRefresh(task);
   // Auto-Aufklappen: E-Mail-Block öffnen wenn Mails verknüpft
   (function(){
