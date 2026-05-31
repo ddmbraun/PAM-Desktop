@@ -1337,7 +1337,7 @@ async function _auftragConfirm(){
           const bytes=new Uint8Array(binStr.length);
           for(let k=0;k<binStr.length;k++)bytes[k]=binStr.charCodeAt(k);
           const isImg=/\.(jpg|jpeg|png|gif|webp|heic|heif|avif|bmp|tiff?)$/i.test(att.name)||(att.mimeType||'').startsWith('image/');
-          const _attFid=isImg&&_driveUrls?_driveUrls.fotoId:(_driveUrls?_driveUrls.dokId:fid);
+          const _attFid=isImg&&_driveUrls?(_driveUrls.fotoId||fid):(_driveUrls?(_driveUrls.dokId||fid):fid);
           const attResult=await _driveUploadGeneric(bytes.buffer,att.name,att.mimeType,_attFid);
           const attUrl='https://drive.google.com/file/d/'+attResult.id+'/view';
           const today=new Date().toLocaleDateString('de-DE');
@@ -3465,7 +3465,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-31 · #154'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b154)
+const PAM_BUILD = 'v2026-05-31 · #156'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b156)
 
 // ── STATE ──
 let boards = {};
@@ -17978,8 +17978,8 @@ async function _emOpenMail(idx,mails){
   if((m.type==='ms'||m.type==='gmail')&&d.id&&_emCurrentTask){
     const isMs=m.type==='ms';
     const isOut=d.direction==='gesendet';
-    from=d.fromName?('"'+d.fromName+'" <'+(d.from||'>')+'>'):(d.from||d.sender||'Unbekannt');
-    subject=d.subject||'(kein Betreff)';
+    const from=d.fromName?('"'+d.fromName+'" <'+(d.from||'>')+'>'):(d.from||d.sender||'Unbekannt');
+    const subject=d.subject||'(kein Betreff)';
     const initials2=from.split(/\s+/).slice(0,2).map(function(w){return w[0]||'';}).join('').toUpperCase()||'?';
     const d2=d.date?new Date(d.date):null;
     const dateLabel2=d2?d2.toLocaleString('de-DE'):'';
@@ -18464,9 +18464,28 @@ function _emOpenAttachGallery(filter){
   files.forEach(function(f,idx){
     if(f.isImg&&f.url){
       let img=document.createElement('img');img.className='em-gal-thumb';
-      img.src=f.url;img.title=f.name;img.alt=f.name;
-      img.onerror=function(){this.style.display='none';};
+      img.title=f.name;img.alt=f.name;
+      img.onerror=function(){
+        // Fallback: Bild nicht ladbar → als Datei-Button anzeigen
+        let _fb=document.createElement('div');_fb.className='em-gal-file';
+        _fb.innerHTML='<span style="font-size:20px;">🖼</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px;" title="'+_escHtml(f.name)+'">'+_escHtml(f.name)+'</span>';
+        _fb.onclick=function(){_emShowAttachPreview(f.icon,f.name,f.url,f.mime,f.data);};
+        this.parentNode.replaceChild(_fb,this);
+      };
       img.onclick=function(){ov.remove();_emOpenViewer(files,idx);};
+      // Drive-API mit Token laden (wie Auftrag-Modal), Fallback auf direkte URL
+      const _driveId=f.data&&(f.data.driveId||f.data.fileId)||'';
+      if(_driveId&&typeof _fetchDesktopFotoBlob==='function'){
+        _fetchDesktopFotoBlob(_driveId).then(function(blobUrl){
+          if(blobUrl){img.src=blobUrl;}
+          else if(f.url){img.src=f.url;}
+          else img.onerror();
+        }).catch(function(){if(f.url)img.src=f.url;else img.onerror&&img.onerror();});
+      } else if(f.url){
+        img.src=f.url;
+      } else {
+        setTimeout(function(){img.onerror&&img.onerror();},0);
+      }
       grid.appendChild(img);
     } else {
       let btn=document.createElement('div');btn.className='em-gal-file';
