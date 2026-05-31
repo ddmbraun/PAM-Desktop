@@ -2949,6 +2949,9 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
             <!-- Auftrag erteilt (ausgeblendet, für Rückwärtskompatibilität) -->
             <input type="date" id="taskAusfInput" style="display:none;" onchange="scheduleTaskFieldSave();" autocomplete="off">
             <!-- Fälligkeit: nur für Notiz-Boards sichtbar -->
+            <div class="notiz-only" style="padding:4px 0 6px;">
+              <button type="button" onclick="_taskAlsAuftragAnlegen()" style="width:100%;padding:7px 12px;border-radius:7px;background:#1a7040;color:#fff;border:none;cursor:pointer;font-size:calc(12px * var(--modal-scale,1));font-weight:700;display:flex;align-items:center;justify-content:center;gap:6px;">🏗 Als neuen Auftrag anlegen</button>
+            </div>
             <div class="notiz-only" style="padding:4px 0 2px;">
               <label style="font-size:calc(10px * var(--modal-scale,1));font-weight:600;color:var(--accent);display:block;margin-bottom:4px;">📅 Fälligkeitsdatum</label>
               <input type="date" id="taskDueInput" onchange="scheduleTaskFieldSave();_updateStammSummary();" style="font-size:calc(11px * var(--modal-scale,1));padding:4px 8px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg1);color:var(--text1);width:auto;" autocomplete="off">
@@ -3445,6 +3448,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
           <button class="em-action-btn primary" onclick="_emAntworten()">↩ Antworten</button>
           <button class="em-action-btn" onclick="_emLadeOutlookVerlauf()" id="emOutlookLadenBtn" title="Outlook-Verlauf laden (info@ + frank.braun@)">📨 Outlook laden</button>
           <button class="em-action-btn" onclick="_emLadeGmailVerlauf()" id="emGmailLadenBtn" title="Gmail-Verlauf laden" style="display:none;">📩 Gmail laden</button>
+          <button class="em-action-btn primary" onclick="_emAlsNeuenAuftragAnlegen()" style="background:#1a7040;border-color:#1a7040;color:#fff;">🏗 Als neuen Auftrag anlegen</button>
           <button class="em-action-btn" onclick="_emInAuftragEinglieder()">📋 In Auftrag eingliedern</button>
           <button class="em-action-btn" onclick="_emInBoardVerschieben()">↪ In Board verschieben</button>
           <button class="em-action-btn danger" onclick="_emDeleteTask()">🗑 Löschen</button>
@@ -3465,7 +3469,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-31 · #193'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b179)
+const PAM_BUILD = 'v2026-05-31 · #194'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b179)
 
 // ── STATE ──
 let boards = {};
@@ -10732,6 +10736,7 @@ async function saveFotoCaptionFromLightbox(){
 // ── ABSCHLUSSAKTE ──
 // ── Drive-Ordner-Browser ──
 let _dfbTargetField=null;
+let _dfbCallbackFn=null; // optionale Callback-Funktion statt Feld-ID
 let _dfbHistory=[]; // [{id,name}]
 let _dfbCurrentId='root';
 let _dfbCurrentName='Mein Drive';
@@ -10835,11 +10840,25 @@ function _dfbBack(){
   _dfbLoad(prev.id,prev.name);
 }
 function _dfbPickItem(id,name){
+  if(_dfbCallbackFn){
+    const _cb=_dfbCallbackFn;_dfbCallbackFn=null;
+    _dfbClose();_cb(id,name);return;
+  }
   const url='https://drive.google.com/drive/folders/'+id;
   const el=document.getElementById(_dfbTargetField);
   if(el){el.value=url;el.dispatchEvent(new Event('input'));}
   _dfbClose();
   showToast('✓ Ordner gesetzt: '+name,'success');
+}
+// Drive-Browser mit Callback öffnen (für „Als neuen Auftrag anlegen")
+async function _dfbOpenWithCallback(callbackFn,startFolderId){
+  if(!gdriveToken){showToast('⚠ Bitte zuerst Google Drive verbinden','error',4000);return;}
+  _dfbCallbackFn=callbackFn;_dfbTargetField=null;
+  _dfbHistory=[];
+  const _si=document.getElementById('dfbSearchInp');if(_si)_si.value='';
+  const ov=document.getElementById('driveFolderBrowserOverlay');if(ov)ov.classList.add('open');
+  if(startFolderId){await _dfbLoad(startFolderId,'Drive');}
+  else{await _dfbLoad('root','Mein Drive');}
 }
 function _dfbPickCurrent(){
   _dfbPickItem(_dfbCurrentId,_dfbCurrentName);
@@ -19202,6 +19221,119 @@ function _emInAuftragEinglieder(){
       );
     }
   );
+}
+
+// ── Als neuen Auftrag anlegen (Posteingang-Modal) ──────────────────────────────
+function _emAlsNeuenAuftragAnlegen(){
+  if(!_emCurrentTask)return;
+  if(!gdriveToken){showToast('⚠ Bitte zuerst Google Drive verbinden','error',4000);return;}
+  const src=_emCurrentTask;
+  // Schritt 1: Auftrags-Board wählen (nur baustelle-Boards)
+  const _auftrBoards=Object.keys(boards).filter(function(bk){return(boardTypes[bk]||'baustelle')==='baustelle'&&!_isEmailBoard(bk);});
+  if(!_auftrBoards.length){showToast('⚠ Kein Auftrags-Board gefunden','error',3000);return;}
+  _emShowPickModal('Board wählen:',_auftrBoards.map(function(bk){
+    return{label:'🏗 '+bk,sub:(boards[bk]||[]).length+' Tasks',value:bk};
+  }),function(chosenBoard){
+    // Schritt 2: Spalte wählen
+    const _sts=getBoardStatuses(chosenBoard)||['Backlog'];
+    _emShowPickModal('Spalte wählen:',_sts.map(function(s){return{label:s,value:s};}),function(chosenStatus){
+      // Schritt 3: Oberordner wählen
+      _emShowPickModal('Wo Auftragsordner anlegen?',[
+        {label:'📁 Standardordner',sub:'Voreingestellter Drive-Baustellen-Ordner',value:'default'},
+        {label:'🔍 Ordner wählen',sub:'Drive-Browser öffnet sich',value:'pick'},
+      ],function(folderChoice){
+        if(folderChoice==='pick'){
+          _dfbOpenWithCallback(function(fid,fname){
+            _doErstelleAuftragVonTask(src,chosenBoard,chosenStatus,fid,true);
+          },_ezFolderId(DEFAULT_FOLDER_BAUSTELLE));
+        }else{
+          _doErstelleAuftragVonTask(src,chosenBoard,chosenStatus,_ezFolderId(DEFAULT_FOLDER_BAUSTELLE),true);
+        }
+      });
+    });
+  });
+}
+
+// ── Als neuen Auftrag anlegen (reguläres Task-Modal / Aufgaben) ────────────────
+function _taskAlsAuftragAnlegen(){
+  const taskId=(document.getElementById('taskId')||{}).value||'';
+  const src=findTaskById(taskId);
+  if(!src){showToast('⚠ Task nicht gefunden','error',2000);return;}
+  if(!gdriveToken){showToast('⚠ Bitte zuerst Google Drive verbinden','error',4000);return;}
+  const _sourceBoard=currentBoard;
+  // Schritt 1: Auftrags-Board wählen
+  const _auftrBoards=Object.keys(boards).filter(function(bk){return(boardTypes[bk]||'baustelle')==='baustelle'&&!_isEmailBoard(bk)&&bk!==_sourceBoard;});
+  if(!_auftrBoards.length){showToast('⚠ Kein anderes Auftrags-Board gefunden','error',3000);return;}
+  const _pickBoard=function(cb){
+    const ov=document.createElement('div');ov.className='em-pick-overlay';
+    ov.innerHTML='<div class="em-pick-box"><div class="em-pick-header">Board wählen:</div><div class="em-pick-list">'
+      +_auftrBoards.map(function(bk){return'<button class="em-pick-item" onclick="this.closest(\'.em-pick-overlay\').remove();('+cb.toString()+')('+'\''+bk+'\''+')">🏗 '+bk+'<span class="em-pick-sub">'+((boards[bk]||[]).length)+' Tasks</span></button>';}).join('')
+      +'</div><div class="em-pick-footer"><button class="em-pick-cancel" onclick="this.closest(\'.em-pick-overlay\').remove()">Abbrechen</button></div></div>';
+    document.body.appendChild(ov);
+  };
+  // Nutze einfacheres Inline-Picking
+  _emShowPickModal('Board wählen:',_auftrBoards.map(function(bk){
+    return{label:'🏗 '+bk,sub:(boards[bk]||[]).length+' Tasks',value:bk};
+  }),function(chosenBoard){
+    const _sts=getBoardStatuses(chosenBoard)||['Backlog'];
+    _emShowPickModal('Spalte wählen:',_sts.map(function(s){return{label:s,value:s};}),function(chosenStatus){
+      _emShowPickModal('Wo Auftragsordner anlegen?',[
+        {label:'📁 Standardordner',sub:'Voreingestellter Drive-Baustellen-Ordner',value:'default'},
+        {label:'🔍 Ordner wählen',sub:'Drive-Browser öffnet sich',value:'pick'},
+      ],function(folderChoice){
+        if(folderChoice==='pick'){
+          _dfbOpenWithCallback(function(fid){
+            _doErstelleAuftragVonTask(src,chosenBoard,chosenStatus,fid,false,_sourceBoard);
+          },_ezFolderId(DEFAULT_FOLDER_BAUSTELLE));
+        }else{
+          _doErstelleAuftragVonTask(src,chosenBoard,chosenStatus,_ezFolderId(DEFAULT_FOLDER_BAUSTELLE),false,_sourceBoard);
+        }
+      });
+    });
+  });
+}
+
+// ── Kernfunktion: Ordner anlegen + Task verschieben ───────────────────────────
+async function _doErstelleAuftragVonTask(src,targetBoard,targetStatus,parentFid,isEmailModal,sourceBoard){
+  showToast('⏳ Auftragsordner wird angelegt…','info',20000);
+  try{
+    const _oldFolderId=_ezFolderId(src.gdriveOrdner||'');
+    // 1. Ordnerstruktur anlegen
+    const urls=await _createDriveAuftragStruktur(src.title||'Auftrag',parentFid);
+    // 2. Drive-Links in Task eintragen
+    src.gdriveOrdner=urls.mainUrl;
+    src.gdrive=urls.fotoUrl;
+    src.emailOrdner=urls.emailUrl;
+    src.dokOrdner=urls.dokUrl;
+    // 3. Dateien verschieben (nur wenn alter Posteingang-Ordner bekannt)
+    if(_oldFolderId&&gdriveToken&&_oldFolderId!==_ezFolderId(urls.mainUrl)){
+      const _mv=async function(fid,toFid){
+        if(!fid||!toFid)return;
+        try{await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fid)+'?addParents='+encodeURIComponent(toFid)+'&removeParents='+encodeURIComponent(_oldFolderId)+'&fields=id',{method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken}});}catch(e){console.warn('[PAM] Move:',e);}
+      };
+      for(const f of (src.fotos||[])){await _mv(f.driveId||f.fileId||'',urls.fotoId);}
+      for(const e of (src.emailOriginals||[])){if(e.fileId)await _mv(e.fileId,urls.emailId);}
+      for(const p of (src.emailPdfs||[])){if(p.fileId)await _mv(p.fileId,urls.emailId);}
+      for(const a of (src.attachments||[])){if(a.fileId)await _mv(a.fileId,urls.dokId);}
+      // Alten Posteingang-Ordner löschen
+      try{await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(_oldFolderId),{method:'DELETE',headers:{Authorization:'Bearer '+gdriveToken}});}catch(e){}
+    }
+    // 4. Task in Ziel-Board verschieben
+    src.status=targetStatus;
+    const _srcBoard=isEmailModal?_emCurrentBoard:(sourceBoard||currentBoard);
+    boards[_srcBoard]=(boards[_srcBoard]||[]).filter(function(t){return t.id!==src.id;});
+    if(!boards[targetBoard])boards[targetBoard]=[];
+    boards[targetBoard].push(src);
+    // 5. Modal schließen + rendern
+    if(isEmailModal){closeEmailTaskModal();}else{closeModal();}
+    currentBoard=targetBoard;
+    await autoSave();
+    render();
+    showToast('✅ Auftrag angelegt! Ordner: '+urls.mainUrl.split('/').pop(),'success',6000);
+  }catch(e){
+    showToast('⚠ Fehler beim Anlegen: '+e.message,'error',7000);
+    console.error('[PAM] _doErstelleAuftragVonTask:',e);
+  }
 }
 
 function _emInBoardVerschieben(){
