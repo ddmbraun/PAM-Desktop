@@ -3465,7 +3465,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-31 · #166'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b166)
+const PAM_BUILD = 'v2026-05-31 · #167'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b167)
 
 // ── STATE ──
 let boards = {};
@@ -18732,18 +18732,28 @@ function _emShowConfirmModal(message,onConfirm){
 
 function _emInAuftragEinglieder(){
   if(!_emCurrentTask)return;
-  // Task-Auswahl: alle nicht-email-Board-Tasks
-  let opts=[];
-  Object.keys(boards).forEach(function(bk){
-    if(_isEmailBoard(bk))return;
-    (boards[bk]||[]).forEach(function(t){opts.push({id:t.id,title:t.title||'(ohne Titel)',board:bk,task:t});});
+  // Schritt 1: Projekt wählen (nur nicht-Email-Boards mit mind. 1 Task)
+  const _projekte=Object.keys(boards).filter(function(bk){
+    return !_isEmailBoard(bk)&&(boards[bk]||[]).length>0;
   });
-  if(!opts.length){showToast('Keine passenden Tasks gefunden.','error');return;}
-  // Fix7: Inline-Auswahlmodal statt window.prompt()
+  if(!_projekte.length){showToast('Keine passenden Projekte gefunden.','error');return;}
   _emShowPickModal(
-    'In welchen Task eingliedern?',
-    opts.map(function(o){return{label:o.title,sub:'📋 '+o.board,value:o};}),
-    function(target){
+    'Schritt 1: In welches Projekt eingliedern?',
+    _projekte.map(function(bk){
+      const icon=boardTypes[bk]==='notiz'?'✅':'🏗';
+      return{label:icon+' '+bk,sub:(boards[bk]||[]).length+' Tasks',value:bk};
+    }),
+    function(chosenBoard){
+      // Schritt 2: Task im gewählten Projekt wählen
+      const _tasks=(boards[chosenBoard]||[]);
+      if(!_tasks.length){showToast('Keine Tasks in diesem Projekt.','error');return;}
+      _emShowPickModal(
+        'Schritt 2: In welchen Task eingliedern?',
+        _tasks.map(function(t){
+          const _st=t.status||'';
+          return{label:t.title||'(ohne Titel)',sub:'📌 '+_st,value:{id:t.id,title:t.title,board:chosenBoard,task:t}};
+        }),
+        function(target){
       let tt=target.task;
       let src=_emCurrentTask;
       const _doMerge=function(){
@@ -18793,39 +18803,53 @@ function _emInAuftragEinglieder(){
           _doMerge
         );
       }else{_doMerge();}
+        }
+      );
     }
   );
 }
 
 function _emInBoardVerschieben(){
   if(!_emCurrentTask)return;
-  let boardNames=Object.keys(boards);
-  // Fix7: Inline-Auswahlmodal statt window.prompt()
+  // Schritt 1: Projekt wählen (nicht dasselbe wie aktuell)
+  const _allBoards=Object.keys(boards).filter(function(b){return b!==_emCurrentBoard;});
+  if(!_allBoards.length){showToast('Keine anderen Projekte vorhanden.','info');return;}
   _emShowPickModal(
-    'In welches Board verschieben?',
-    boardNames.map(function(b){
+    'Schritt 1: In welches Projekt verschieben?',
+    _allBoards.map(function(b){
       const icon=boardTypes[b]==='email'?'📧':boardTypes[b]==='notiz'?'✅':'🏗';
-      return{label:icon+' '+b,sub:(getBoardStatuses(b)||[]).join(' · '),value:b};
+      const cnt=(boards[b]||[]).length;
+      return{label:icon+' '+b,sub:cnt+' Tasks',value:b};
     }),
     function(targetBoard){
-      if(targetBoard===_emCurrentBoard){showToast('Task ist bereits in diesem Board.','info');return;}
-      let t=_emCurrentTask;
-      let targetStatuses=getBoardStatuses(targetBoard)||[];
-      // Fix8: Status beibehalten wenn er im Ziel-Board existiert
-      let newStatus=targetStatuses.includes(t.status)?t.status:(targetStatuses[0]||'Backlog');
-      if(!targetStatuses.includes(t.status)){
-        showToast('Status auf „'+newStatus+'" gesetzt (bisheriger Status nicht im Ziel-Board)','info',4000);
+      // Schritt 2: Spalte wählen
+      const _statuses=getBoardStatuses(targetBoard)||[];
+      if(!_statuses.length){
+        // Kein Spaltenauswahl nötig wenn keine Spalten vorhanden
+        _doMove(targetBoard,_statuses[0]||'Backlog');return;
       }
-      t.status=newStatus;
-      boards[_emCurrentBoard]=(boards[_emCurrentBoard]||[]).filter(function(x){return x.id!==t.id;});
-      (boards[targetBoard]=boards[targetBoard]||[]).push(t);
-      closeEmailTaskModal();
-      currentBoard=targetBoard;
-      scheduleAutoSave();
-      renderBoard();
-      showToast('Task nach „'+targetBoard+'" verschoben.','success');
+      const _curStatus=_emCurrentTask.status||'';
+      _emShowPickModal(
+        'Schritt 2: In welche Spalte?',
+        _statuses.map(function(s){
+          const _isCurrent=s===_curStatus;
+          return{label:s,sub:_isCurrent?'← aktueller Status':'',value:s};
+        }),
+        function(chosenStatus){_doMove(targetBoard,chosenStatus);}
+      );
     }
   );
+  function _doMove(targetBoard,newStatus){
+    let t=_emCurrentTask;
+    t.status=newStatus;
+    boards[_emCurrentBoard]=(boards[_emCurrentBoard]||[]).filter(function(x){return x.id!==t.id;});
+    (boards[targetBoard]=boards[targetBoard]||[]).push(t);
+    closeEmailTaskModal();
+    currentBoard=targetBoard;
+    scheduleAutoSave();
+    renderBoard();
+    showToast('Task nach „'+targetBoard+'" / „'+newStatus+'" verschoben.','success');
+  }
 }
 
 function _emDeleteTask(){
