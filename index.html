@@ -3465,7 +3465,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-31 · #184'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b179)
+const PAM_BUILD = 'v2026-05-31 · #186'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b179)
 
 // ── STATE ──
 let boards = {};
@@ -15867,6 +15867,24 @@ async function _downloadEmailOrig(fileId,filename){
 async function _printEmailFromDrive(fileId,filename,forceEml){
   if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden.','error');return;}
   const lname=(filename||'').toLowerCase();
+  // .pdf: IMMER als Drive-Vorschau öffnen – niemals als EML parsen
+  if(lname.endsWith('.pdf')){
+    const w2=window.open('','_blank','width=960,height=800');
+    if(!w2){window.open('https://drive.google.com/file/d/'+encodeURIComponent(fileId)+'/view','_blank');return;}
+    const drivePreview='https://drive.google.com/file/d/'+encodeURIComponent(fileId)+'/preview';
+    w2.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>'+esc(filename||'PDF')+'</title>'
+      +'<style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Arial,sans-serif;display:flex;flex-direction:column;height:100vh;}'
+      +'.bar{display:flex;align-items:center;gap:10px;padding:8px 16px;background:#185FA5;color:#fff;flex-shrink:0;}'
+      +'.bar span{font-size:13px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}'
+      +'.bar button{padding:5px 14px;border-radius:5px;background:#fff;color:#185FA5;border:none;cursor:pointer;font-weight:700;font-size:12px;}'
+      +'iframe{flex:1;border:none;width:100%;}@media print{.bar{display:none!important;}}</style></head><body>'
+      +'<div class="bar"><span>📄 '+esc(filename||'PDF')+'</span>'
+      +'<button onclick="window.print()">🖨 Drucken (Strg+P)</button>'
+      +'<a href="https://drive.google.com/file/d/'+encodeURIComponent(fileId)+'/view" target="_blank" style="color:#fff;font-size:11px;text-decoration:underline;white-space:nowrap;">In Drive öffnen ↗</a></div>'
+      +'<iframe src="'+drivePreview+'" allow="autoplay"></iframe></body></html>');
+    w2.document.close();
+    return;
+  }
   // .msg: Druckfenster mit Google Drive Vorschau eingebettet
   if(lname.endsWith('.msg')){
     const w=window.open('','_blank','width=960,height=800');
@@ -18941,8 +18959,8 @@ function _emInAuftragEinglieder(){
         function(target){
       let tt=target.task;
       let src=_emCurrentTask;
-      const _doMerge=function(){
-        // Daten zusammenfuehren – Duplikat-Check über fileId / messageId
+      const _doMerge=async function(){
+        // ── Schritt 1: Daten zusammenfuehren ────────────────────────────────
         if(!tt.emailOriginals)tt.emailOriginals=[];
         (src.emailOriginals||[]).forEach(function(e){
           if(!tt.emailOriginals.some(function(x){return (x.fileId&&x.fileId===e.fileId)||(x.messageId&&x.messageId===e.messageId);}))
@@ -18965,7 +18983,8 @@ function _emInAuftragEinglieder(){
         });
         if(!tt.fotos)tt.fotos=[];
         (src.fotos||[]).forEach(function(f){
-          if(!tt.fotos.some(function(x){return x.fileId&&x.fileId===f.fileId;}))
+          const _fid=f.driveId||f.fileId||'';
+          if(!tt.fotos.some(function(x){return (x.driveId||x.fileId||'')=== _fid&&_fid;}))
             tt.fotos.push(f);
         });
         if(!tt.emailPdfs)tt.emailPdfs=[];
@@ -18974,41 +18993,98 @@ function _emInAuftragEinglieder(){
             tt.emailPdfs.push(p);
         });
         if(src.desc&&src.desc.trim()){tt.desc=(tt.desc||'')+'\n\n[E-Mail-Import '+new Date().toLocaleDateString('de-DE')+']:\n'+src.desc;}
-        // Fix4: Weitere Felder aus Posteingang-Task übernehmen
-        // E-Mail-Absender: nur wenn Ziel-Task keinen hat
         if(!tt.emailSender&&src.emailSender)tt.emailSender=src.emailSender;
         if(!tt.emailSenderName&&src.emailSenderName)tt.emailSenderName=src.emailSenderName;
-        // Fälligkeit: nur wenn Ziel-Task keine hat
         if(!tt.due&&src.due)tt.due=src.due;
-        // Posteingang-Notiz anhängen
-        if(src.emNotiz&&src.emNotiz.trim()){
-          tt.emNotiz=(tt.emNotiz?tt.emNotiz+'\n\n':'')+'[Posteingang '+new Date().toLocaleDateString('de-DE')+']:\n'+src.emNotiz;
+        if(src.emNotiz&&src.emNotiz.trim()){tt.emNotiz=(tt.emNotiz?tt.emNotiz+'\n\n':'')+'[Posteingang '+new Date().toLocaleDateString('de-DE')+']:\n'+src.emNotiz;}
+        if(src.freieTermine&&src.freieTermine.length){if(!tt.freieTermine)tt.freieTermine=[];src.freieTermine.forEach(function(f){if(!tt.freieTermine.some(function(x){return x.datum===f.datum&&x.text===f.text;}))tt.freieTermine.push(JSON.parse(JSON.stringify(f)));});}
+        if(src.links&&src.links.length){if(!tt.links)tt.links=[];src.links.forEach(function(l){if(l.url&&!tt.links.some(function(x){return x.url===l.url;}))tt.links.push(JSON.parse(JSON.stringify(l)));});}
+
+        // ── Schritt 2: Drive-Dateien verschieben ────────────────────────────
+        const _srcFid=_ezFolderId(src.gdriveOrdner||'');
+        const _tgtFid=_ezFolderId(tt.gdriveOrdner||'');
+        let _driveMsg='';
+        if(_srcFid&&_tgtFid&&typeof gdriveToken!=='undefined'&&gdriveToken){
+          showToast('⏳ Dateien werden verschoben…','info',10000);
+          try{
+            // Unterordner des Ziel-Auftrags laden
+            const _sr=await fetch(
+              'https://www.googleapis.com/drive/v3/files?q='+
+              encodeURIComponent("'"+_tgtFid+"' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false")+
+              '&fields=files(id,name)&pageSize=50',
+              {headers:{Authorization:'Bearer '+gdriveToken}});
+            if(!_sr.ok)throw new Error('Unterordner laden: HTTP '+_sr.status);
+            const _subs=((await _sr.json()).files)||[];
+            const _f02=_subs.find(function(f){return f.name==='02_Fotos';});
+            const _f00=_subs.find(function(f){return f.name==='00_Posteingang';});
+            const _f01=_subs.find(function(f){return f.name==='01_Dokumente';});
+            // Ordnerstruktur prüfen – fehlende → Abbruch mit Meldung
+            const _missing=[];
+            if(!_f02)_missing.push('02_Fotos');
+            if(!_f00)_missing.push('00_Posteingang');
+            if(!_f01)_missing.push('01_Dokumente');
+            if(_missing.length){
+              _driveMsg='⚠ Ordnerstruktur unvollständig ('+_missing.join(', ')+') – Dateien bleiben im Posteingang-Ordner.';
+            }else{
+              // E-Mails-Unterordner in 00_Posteingang suchen
+              let _emlFid=_f00.id;
+              try{
+                const _er=await fetch(
+                  'https://www.googleapis.com/drive/v3/files?q='+
+                  encodeURIComponent("'"+_f00.id+"' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false")+
+                  '&fields=files(id,name)&pageSize=20',
+                  {headers:{Authorization:'Bearer '+gdriveToken}});
+                if(_er.ok){const _ef=((await _er.json()).files)||[];const _e=_ef.find(function(f){return f.name==='E-Mails';});if(_e)_emlFid=_e.id;}
+              }catch(e){}
+              // Hilfsfunktion: einzelne Datei verschieben
+              const _mv=async function(fileId,toFid){
+                if(!fileId||!toFid)return false;
+                try{
+                  const r=await fetch(
+                    'https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+
+                    '?addParents='+encodeURIComponent(toFid)+
+                    '&removeParents='+encodeURIComponent(_srcFid)+'&fields=id',
+                    {method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken}});
+                  return r.ok;
+                }catch(e){console.warn('[PAM] Move fehlgeschlagen:',fileId,e);return false;}
+              };
+              let _moved=0,_failed=0;
+              // Fotos → 02_Fotos
+              for(const f of (src.fotos||[])){const ok=await _mv(f.driveId||f.fileId||'',_f02.id);ok?_moved++:_failed++;}
+              // EML-Originale + E-Mail-PDFs → 00_Posteingang/E-Mails
+              for(const e of (src.emailOriginals||[])){if(e.fileId){const ok=await _mv(e.fileId,_emlFid);ok?_moved++:_failed++;}}
+              for(const p of (src.emailPdfs||[])){if(p.fileId){const ok=await _mv(p.fileId,_emlFid);ok?_moved++:_failed++;}}
+              // Sonstige Anhänge → 01_Dokumente
+              for(const a of (src.attachments||[])){if(a.fileId){const ok=await _mv(a.fileId,_f01.id);ok?_moved++:_failed++;}}
+              if(_failed>0){
+                _driveMsg='⚠ '+_failed+' Datei'+(_failed!==1?'en':'')+' konnten nicht verschoben werden. '+_moved+' verschoben.';
+              }else if(_moved>0){
+                // Quell-Ordner löschen (nur wenn alle erfolgreich verschoben)
+                try{
+                  await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(_srcFid),
+                    {method:'DELETE',headers:{Authorization:'Bearer '+gdriveToken}});
+                  _driveMsg='📁 '+_moved+' Datei'+(_moved!==1?'en':'')+' verschoben · Posteingang-Ordner gelöscht.';
+                }catch(e){
+                  _driveMsg='📁 '+_moved+' Datei'+(_moved!==1?'en':'')+' verschoben · Ordner konnte nicht gelöscht werden.';
+                }
+              }
+            }
+          }catch(e){
+            _driveMsg='⚠ Drive-Verschiebung fehlgeschlagen: '+e.message;
+            console.warn('[PAM] Drive-Move:',e);
+          }
+        }else if(_srcFid&&!_tgtFid){
+          _driveMsg='ℹ Dateien bleiben im Posteingang-Ordner (Ziel-Task hat keinen Drive-Ordner).';
         }
-        // Freie Termine zusammenführen (dedup über text+datum)
-        if(src.freieTermine&&src.freieTermine.length){
-          if(!tt.freieTermine)tt.freieTermine=[];
-          src.freieTermine.forEach(function(f){
-            if(!tt.freieTermine.some(function(x){return x.datum===f.datum&&x.text===f.text;}))
-              tt.freieTermine.push(JSON.parse(JSON.stringify(f)));
-          });
-        }
-        // Links zusammenführen (dedup über URL)
-        if(src.links&&src.links.length){
-          if(!tt.links)tt.links=[];
-          src.links.forEach(function(l){
-            if(l.url&&!tt.links.some(function(x){return x.url===l.url;}))
-              tt.links.push(JSON.parse(JSON.stringify(l)));
-          });
-        }
-        // Quell-Task löschen
+
+        // ── Schritt 3: Task löschen + Modal schließen ───────────────────────
         boards[_emCurrentBoard]=(boards[_emCurrentBoard]||[]).filter(function(t){return t.id!==src.id;});
-        // Fix3: Ziel-Board vor closeEmailTaskModal merken, danach korrekt rendern
         const _mergeTargetBoard=target.board;
         closeEmailTaskModal();
         currentBoard=_mergeTargetBoard;
         scheduleAutoSave();
         render();
-        showToast('✅ In Task „'+tt.title+'" eingegliedert.','success');
+        showToast('✅ In Task „'+tt.title+'" eingegliedert.'+((_driveMsg)?'\n'+_driveMsg:''),'success',7000);
       };
       // Prüfe ob Ziel-Task einen Drive-Ordner hat (korrekter Feldname: gdriveOrdner)
       if(!(tt.gdriveOrdner||'').trim()){
