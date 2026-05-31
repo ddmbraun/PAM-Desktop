@@ -2914,6 +2914,10 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
         <div class="mv2-section mv2-r-card collapsible open" id="pamBearbeitungSect">
           <div class="mv2-section-label mv2-rhdr-purple" onclick="_toggleMv2Sect('pamBearbeitungSect',event)">👤 Bearbeitung<span class="mv2-coll-arrow" style="margin-left:auto;">›</span></div>
           <div class="mv2-r-card-body">
+            <!-- Als neuen Auftrag anlegen – nur für Aufgaben-Boards -->
+            <div class="notiz-only" style="margin-bottom:8px;">
+              <button type="button" onclick="_taskAlsAuftragAnlegen()" style="width:100%;padding:8px 12px;border-radius:7px;background:#1a7040;color:#fff;border:none;cursor:pointer;font-size:calc(12px * var(--modal-scale,1));font-weight:700;display:flex;align-items:center;justify-content:center;gap:6px;">🏗 Als neuen Auftrag anlegen</button>
+            </div>
             <!-- versteckter Maps-Button für JS-Kompatibilität -->
             <button type="button" id="taskMapsBtn" onclick="_openTaskMaps()" style="display:none;" disabled></button>
             <div style="display:grid;grid-template-columns:80px 1fr auto;gap:6px;margin-bottom:6px;align-items:end;">
@@ -2949,9 +2953,6 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
             <!-- Auftrag erteilt (ausgeblendet, für Rückwärtskompatibilität) -->
             <input type="date" id="taskAusfInput" style="display:none;" onchange="scheduleTaskFieldSave();" autocomplete="off">
             <!-- Fälligkeit: nur für Notiz-Boards sichtbar -->
-            <div class="notiz-only" style="padding:4px 0 6px;">
-              <button type="button" onclick="_taskAlsAuftragAnlegen()" style="width:100%;padding:7px 12px;border-radius:7px;background:#1a7040;color:#fff;border:none;cursor:pointer;font-size:calc(12px * var(--modal-scale,1));font-weight:700;display:flex;align-items:center;justify-content:center;gap:6px;">🏗 Als neuen Auftrag anlegen</button>
-            </div>
             <div class="notiz-only" style="padding:4px 0 2px;">
               <label style="font-size:calc(10px * var(--modal-scale,1));font-weight:600;color:var(--accent);display:block;margin-bottom:4px;">📅 Fälligkeitsdatum</label>
               <input type="date" id="taskDueInput" onchange="scheduleTaskFieldSave();_updateStammSummary();" style="font-size:calc(11px * var(--modal-scale,1));padding:4px 8px;border:0.5px solid var(--border);border-radius:5px;background:var(--bg1);color:var(--text1);width:auto;" autocomplete="off">
@@ -3469,7 +3470,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-05-31 · #194'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b179)
+const PAM_BUILD = 'v2026-05-31 · #199'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-05-31-b179)
 
 // ── STATE ──
 let boards = {};
@@ -10792,7 +10793,7 @@ async function _dfbLoad(folderId,folderName){
     const crumbs=_dfbHistory.map(h=>h.name).concat(folderName);
     pathEl.textContent=crumbs.join(' › ');
   }
-  if(backBtn)backBtn.style.display=_dfbHistory.length?'':'none';
+  if(backBtn)backBtn.style.display=(_dfbHistory.length||folderId!=='root')?'':'none';
   if(pickBtn){
     pickBtn.style.display=folderId==='root'?'none':'';
     pickBtn.textContent='✓ „'+folderName+'" verwenden';
@@ -10835,9 +10836,8 @@ function _dfbEnter(id,name){
   _dfbLoad(id,name);
 }
 function _dfbBack(){
-  if(!_dfbHistory.length)return;
-  const prev=_dfbHistory.pop();
-  _dfbLoad(prev.id,prev.name);
+  if(_dfbHistory.length){const prev=_dfbHistory.pop();_dfbLoad(prev.id,prev.name);}
+  else{_dfbLoad('root','Mein Drive');} // Immer bis Root zurück möglich
 }
 function _dfbPickItem(id,name){
   if(_dfbCallbackFn){
@@ -10851,14 +10851,14 @@ function _dfbPickItem(id,name){
   showToast('✓ Ordner gesetzt: '+name,'success');
 }
 // Drive-Browser mit Callback öffnen (für „Als neuen Auftrag anlegen")
-async function _dfbOpenWithCallback(callbackFn,startFolderId){
+// Startet immer bei Mein Drive (Root) damit der Nutzer frei navigieren kann
+async function _dfbOpenWithCallback(callbackFn){
   if(!gdriveToken){showToast('⚠ Bitte zuerst Google Drive verbinden','error',4000);return;}
   _dfbCallbackFn=callbackFn;_dfbTargetField=null;
   _dfbHistory=[];
   const _si=document.getElementById('dfbSearchInp');if(_si)_si.value='';
   const ov=document.getElementById('driveFolderBrowserOverlay');if(ov)ov.classList.add('open');
-  if(startFolderId){await _dfbLoad(startFolderId,'Drive');}
-  else{await _dfbLoad('root','Mein Drive');}
+  await _dfbLoad('root','Mein Drive');
 }
 function _dfbPickCurrent(){
   _dfbPickItem(_dfbCurrentId,_dfbCurrentName);
@@ -14474,6 +14474,7 @@ function addKontaktPTP(rolle,name,tel,email,anrufKontakt){
 function renderKontaktePTP(kontakte){
   const c=document.getElementById('tKontakteContainer');if(!c)return;
   c.innerHTML='';
+  updateKontaktePTPTitle(); // Badge sofort zurücksetzen nach dem Leeren
   for(const k of(kontakte||[]))addKontaktPTP(k.rolle||'sonstiges',k.name||'',k.tel||'',k.email||'',k.anrufKontakt||false);
 }
 function getKontaktePTP(){
@@ -18504,6 +18505,8 @@ async function _emHandleEmlDrop(dt){
     if(_emCurrentTask){
       _emCurrentTask.emailOriginals=JSON.parse(JSON.stringify(taskEmailOriginals));
       _emCurrentTask.emailPdfs=JSON.parse(JSON.stringify(taskEmailPdfs));
+      // Fix: Kontakte zurückschreiben damit sie beim Task-Wechsel nicht verloren gehen
+      if(typeof getKontaktePTP==='function'){const _ktp=getKontaktePTP();if(_ktp.length)_emCurrentTask.kontakte=_ktp;}
     }
   }finally{
     if(document.getElementById('taskId')&&_prevId)document.getElementById('taskId').value=_prevId;
@@ -19243,9 +19246,9 @@ function _emAlsNeuenAuftragAnlegen(){
         {label:'🔍 Ordner wählen',sub:'Drive-Browser öffnet sich',value:'pick'},
       ],function(folderChoice){
         if(folderChoice==='pick'){
-          _dfbOpenWithCallback(function(fid,fname){
+          _dfbOpenWithCallback(function(fid){
             _doErstelleAuftragVonTask(src,chosenBoard,chosenStatus,fid,true);
-          },_ezFolderId(DEFAULT_FOLDER_BAUSTELLE));
+          });
         }else{
           _doErstelleAuftragVonTask(src,chosenBoard,chosenStatus,_ezFolderId(DEFAULT_FOLDER_BAUSTELLE),true);
         }
@@ -19284,7 +19287,7 @@ function _taskAlsAuftragAnlegen(){
         if(folderChoice==='pick'){
           _dfbOpenWithCallback(function(fid){
             _doErstelleAuftragVonTask(src,chosenBoard,chosenStatus,fid,false,_sourceBoard);
-          },_ezFolderId(DEFAULT_FOLDER_BAUSTELLE));
+          });
         }else{
           _doErstelleAuftragVonTask(src,chosenBoard,chosenStatus,_ezFolderId(DEFAULT_FOLDER_BAUSTELLE),false,_sourceBoard);
         }
@@ -19589,9 +19592,11 @@ function openEditTaskModal(id){
   _renderSenderDisplay();
   _pamRenderUnifiedEmailList(task); // Fix: E-Mail-Liste beim Öffnen rendern (auch wenn Thread bereits geladen)
   _pamEmailRefresh(task);
-  // Auto-Aufklappen: E-Mail-Block öffnen wenn Mails verknüpft
+  // Auto-Aufklappen: E-Mail-Block öffnen wenn Mails verknüpft ODER Absender vorhanden
   (function(){
-    const _hasLink=(task.msMessageId||task.msConversationId||task.gmailMessageId||task.gmailThreadId);
+    const _hasLink=(task.msMessageId||task.msConversationId||task.gmailMessageId||task.gmailThreadId
+      ||(task.emailOriginals&&task.emailOriginals.length>0)
+      ||task.emailSender||task.emailSenderName);
     const _emlBody=document.getElementById('pamEmailListBody');
     const _emlChev=document.getElementById('pamEmailListChevron');
     if(_hasLink&&_emlBody&&_emlBody.style.display==='none'){
