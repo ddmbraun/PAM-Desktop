@@ -17596,6 +17596,9 @@ async function _pepLoadPreview(m,task,previewEl){
 
 function openEmailTaskModal(task,board){
   _emCurrentTask=task;
+  // Fix: Globale Arrays synchronisieren damit _openEmailAllPopup/_openEmailThumbnailGrid funktionieren
+  taskEmailOriginals=JSON.parse(JSON.stringify(task.emailOriginals||[]));
+  taskEmailPdfs=JSON.parse(JSON.stringify(task.emailPdfs||[]));
   _emPrevBoard=currentBoard; // merken für Rücksetzen beim Schließen
   _emCurrentBoard=board||currentBoard;
   _emActiveMailIdx=-1;
@@ -17694,6 +17697,9 @@ function closeEmailTaskModal(){
   _emActiveMailIdx=-1;
   _emCurrentTask=null;
   _emCurrentBoard='';
+  // Fix: Globale Arrays leeren damit kein alter Zustand übrig bleibt
+  taskEmailOriginals=[];
+  taskEmailPdfs=[];
   // currentBoard auf vorherigen Wert zurücksetzen
   if(_emPrevBoard&&_emPrevBoard!==currentBoard){currentBoard=_emPrevBoard;renderBoard();}
   _emPrevBoard='';
@@ -17759,7 +17765,8 @@ function _renderEmailMailList(){
       '</div>'+
       '<div style="display:flex;align-items:center;justify-content:space-between;gap:4px;">'+
         '<div style="display:flex;gap:4px;">'+
-          '<button onclick="_emLadeGmailVerlauf()" style="display:flex;align-items:center;gap:3px;padding:3px 8px;font-size:11px;font-weight:700;border:none;border-radius:6px;background:#1a7040;color:#fff;cursor:pointer;">G Gmail</button>'+
+          // Fix: Gmail-Button nur anzeigen wenn Gmail verbunden
+          ((typeof gmailToken!=='undefined'&&gmailToken)?'<button onclick="_emLadeGmailVerlauf()" style="display:flex;align-items:center;gap:3px;padding:3px 8px;font-size:11px;font-weight:700;border:none;border-radius:6px;background:#1a7040;color:#fff;cursor:pointer;">G Gmail</button>':'')+
           ('<button onclick="_emLadeOutlookVerlauf()" style="display:flex;align-items:center;gap:3px;padding:3px 8px;font-size:11px;font-weight:700;border:none;border-radius:6px;background:#0078d4;color:#fff;cursor:pointer;">✉ Outlook'+(_msCnt>0?' '+_msCnt:'')+'</button>')+
           (t.emailUrl?'<button onclick="window.open(\''+_escHtml(t.emailUrl)+'\',\'_blank\')" style="display:flex;align-items:center;gap:3px;padding:3px 8px;font-size:11px;font-weight:700;border:none;border-radius:6px;background:#2c2c3e;color:#fff;cursor:pointer;">Drive</button>':'')+
         '</div>'+
@@ -18219,10 +18226,17 @@ async function _emHandleEmlDrop(dt){
   if(!_emCurrentTask){showToast('⚠ Kein Task geöffnet','error',3000);return;}
   // Temporär taskId setzen damit _handleEmailOrigDrop den richtigen Task findet
   const _prevId=document.getElementById('taskId')?document.getElementById('taskId').value:'';
-  if(document.getElementById('taskId'))document.getElementById('taskId').value=_emCurrentTask.id;
-  _pamCurrentTask=_emCurrentTask;_pamActiveTaskId=_emCurrentTask.id;
-  await _handleEmailOrigDrop(dt);
-  if(document.getElementById('taskId')&&_prevId)document.getElementById('taskId').value=_prevId;
+  try{
+    if(document.getElementById('taskId'))document.getElementById('taskId').value=_emCurrentTask.id;
+    _pamCurrentTask=_emCurrentTask;_pamActiveTaskId=_emCurrentTask.id;
+    await _handleEmailOrigDrop(dt);
+    // Fix: taskEmailOriginals nach Upload synchronisieren
+    taskEmailOriginals=JSON.parse(JSON.stringify(_emCurrentTask.emailOriginals||[]));
+    taskEmailPdfs=JSON.parse(JSON.stringify(_emCurrentTask.emailPdfs||[]));
+  }finally{
+    // Fix: taskId immer zurücksetzen – auch bei Fehler
+    if(document.getElementById('taskId')&&_prevId)document.getElementById('taskId').value=_prevId;
+  }
   _emReloadMailList();
 }
 function _emHandleEmlSelect(evt){
@@ -18702,15 +18716,17 @@ function _emInBoardVerschieben(){
 
 function _emDeleteTask(){
   if(!_emCurrentTask)return;
-  if(!window.confirm('Task „'+((_emCurrentTask.title)||'?')+'" wirklich löschen?'))return;
-  // Timer stoppen BEVOR Task entfernt wird – verhindert _emDoSave auf gelöschten Task
-  if(_emSaveTimer){clearTimeout(_emSaveTimer);_emSaveTimer=null;}
-  const _delId=_emCurrentTask.id;
-  const _delBoard=_emCurrentBoard;
-  boards[_delBoard]=(boards[_delBoard]||[]).filter(function(t){return t.id!==_delId;});
-  closeEmailTaskModal();
-  scheduleAutoSave();
-  showToast('Task gelöscht.','success');
+  // Fix: _emShowConfirmModal statt window.confirm (wird in PWA/bestimmten Browsern blockiert)
+  _emShowConfirmModal('Task „'+((_emCurrentTask.title)||'?')+'" wirklich löschen?',function(){
+    // Timer stoppen BEVOR Task entfernt wird – verhindert _emDoSave auf gelöschten Task
+    if(_emSaveTimer){clearTimeout(_emSaveTimer);_emSaveTimer=null;}
+    const _delId=_emCurrentTask.id;
+    const _delBoard=_emCurrentBoard;
+    boards[_delBoard]=(boards[_delBoard]||[]).filter(function(t){return t.id!==_delId;});
+    closeEmailTaskModal();
+    scheduleAutoSave();
+    showToast('Task gelöscht.','success');
+  });
 }
 
 const _EM_COL_KEY='pam_em_col_widths_v2';
@@ -19738,6 +19754,30 @@ function _pamVersionRollback(){
     +'style="padding:10px 20px;border-radius:8px;background:var(--accent);color:#fff;border:none;cursor:pointer;font-size:14px;font-weight:600;">📂 Backup-Datei auswählen</button>'
     +'<button onclick="this.parentElement.parentElement.remove()" '
     +'style="padding:8px;border-radius:8px;background:none;border:1px solid var(--border);color:var(--text2);cursor:pointer;font-size:13px;">Abbrechen</button>';
+  ov.appendChild(box);
+  ov.onclick=function(e){if(e.target===ov)ov.remove();};
+  document.body.appendChild(ov);
+}
+function _pamRollbackSelected(evt){
+  let file=evt.target.files[0];if(!file)return;
+  evt.target.value='';
+  let reader=new FileReader();
+  reader.onload=function(e){
+    let blob=new Blob([e.target.result],{type:'text/html'});
+    let a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='index.html';
+    a.click();
+    setTimeout(function(){URL.revokeObjectURL(a.href);},5000);
+    showToast('✅ index.html heruntergeladen – jetzt zu GitHub hochladen, dann 🔄 Update klicken','ok',8000);    document.querySelectorAll('[style*="z-index:9999"]').forEach(function(el){el.remove();});
+  };
+  reader.readAsText(file);
+}
+
+</script>
+</body>
+</html>
+d:none;border:1px solid var(--border);color:var(--text2);cursor:pointer;font-size:13px;">Abbrechen</button>';
   ov.appendChild(box);
   ov.onclick=function(e){if(e.target===ov)ov.remove();};
   document.body.appendChild(ov);
