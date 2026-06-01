@@ -3523,7 +3523,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-01 · #201'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b199)
+const PAM_BUILD = 'v2026-06-01 · #202'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b199)
 
 // ── STATE ──
 let boards = {};
@@ -3553,6 +3553,9 @@ const hasFileAPI = 'showOpenFilePicker' in window;
 let collapsedCols = {};
 let _heuteCollapsed = {};
 let _heuteFilter = 'alle';
+let _heuteViewMode = 'karten';
+let _heuteDateFilter = '';
+let _heuteTypFilter2 = 'alle';
 let _colSort = {}; // { [status]: {field:'title'|'tags', dir:1|-1} }
 
 // ── MODAL DRAG & RESIZE ──
@@ -6241,6 +6244,9 @@ function renderHeute(){
     +'</div>';
 
   try{_heuteFilter=localStorage.getItem('pam_heute_filter_typ')||'alle';}catch(e){_heuteFilter='alle';}
+  try{_heuteViewMode=localStorage.getItem('pam_heute_view_mode')||'karten';}catch(e){_heuteViewMode='karten';}
+  try{_heuteDateFilter=localStorage.getItem('pam_heute_date_filter')||today;}catch(e){_heuteDateFilter=today;}
+  try{_heuteTypFilter2=localStorage.getItem('pam_heute_typ2_filter')||'alle';}catch(e){_heuteTypFilter2='alle';}
   function _applyHF(arr_ueb,arr_heu,arr_ausf,arr_bald){
     if(_heuteFilter==='heute')return{u:[],h:arr_heu,a:[],b:[]};
     if(_heuteFilter==='overdue')return{u:arr_ueb,h:[],a:[],b:[]};
@@ -6271,7 +6277,64 @@ function renderHeute(){
       +(cnt>0?'<span style="font-size:10px;background:'+(active?color:'rgba(0,0,0,0.1)')+';color:'+(active?'#fff':'var(--text2)')+';padding:0 5px;border-radius:8px;font-weight:700;">'+cnt+'</span>':'')
       +'</button>';
   }
-  let filterBar='<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:1rem;">'
+  // ── Tabellen-Render ────────────────────────────────────────────────────────
+  function _renderTabelle(){
+    var fd=_heuteDateFilter||today;
+    var allItems=[];
+    Object.keys(boards).forEach(function(bn){
+      if(bn.startsWith('_'))return;
+      var bt=boardTypes[bn]||'baustelle';
+      if(bt==='email')return;
+      (boards[bn]||[]).forEach(function(t){
+        if(t.archiviert)return;
+        var md=_minTaskDate(t);
+        if(!md||md>fd)return;
+        if(_heuteTypFilter2==='auftraege'&&bt!=='baustelle')return;
+        if(_heuteTypFilter2==='aufgaben'&&bt!=='notiz')return;
+        allItems.push({t:t,bType:bt,minD:md});
+      });
+    });
+    allItems.sort(function(a,b){return a.minD<b.minD?-1:a.minD>b.minD?1:0;});
+    if(!allItems.length)return'<div style="color:var(--text2);font-size:14px;padding:20px 0;">Keine Einträge bis '+fmtDate(fd)+'</div>';
+    var rows=allItems.map(function(x){
+      var t=x.t;var ia=x.bType==='notiz';
+      var dSty=x.minD<fd?'color:#E24B4A;font-weight:700;':x.minD===fd?'color:#EF9F27;font-weight:700;':'color:#639922;font-weight:700;';
+      var tyB=ia?'<span style="font-size:9px;padding:1px 6px;border-radius:3px;font-weight:700;background:#E6F1FB;color:#185FA5;border:0.5px solid #B5D4F4;white-space:nowrap;">✅ Aufgabe</span>'
+               :'<span style="font-size:9px;padding:1px 6px;border-radius:3px;font-weight:700;background:#EAF3DE;color:#3B6D11;border:0.5px solid #C0DD97;white-space:nowrap;">🏗 Auftrag</span>';
+      return'<tr onclick="openEditTaskModal(\''+esc(t.id)+'\')" style="cursor:pointer;border-bottom:0.5px solid var(--border);" onmouseenter="this.style.background=\'var(--bg3)\'" onmouseleave="this.style.background=\'\'">'
+        +'<td style="padding:7px 10px;white-space:nowrap;">'+tyB+'</td>'
+        +'<td style="padding:7px 10px;font-size:13px;color:var(--text);max-width:500px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(t.title||'(kein Titel)')+'</td>'
+        +'<td style="padding:7px 10px;font-size:12px;'+dSty+'white-space:nowrap;">'+fmtDate(x.minD)+'</td>'
+        +'<td style="padding:7px 10px;font-size:11px;color:var(--text2);">'+(t.status?esc(t.status):'–')+'</td>'
+        +'</tr>';
+    }).join('');
+    return'<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;">'
+      +'<thead><tr style="border-bottom:1.5px solid var(--border);background:var(--bg3);">'
+      +'<th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text2);font-weight:600;white-space:nowrap;">Typ</th>'
+      +'<th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text2);font-weight:600;">Name</th>'
+      +'<th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text2);font-weight:600;white-space:nowrap;">Fälligkeit</th>'
+      +'<th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text2);font-weight:600;">Status</th>'
+      +'</tr></thead><tbody>'+rows+'</tbody></table></div>';
+  }
+  // ── View-Toggle + Filter-Bars ───────────────────────────────────────────────
+  var isTable=_heuteViewMode==='tabelle';
+  var toggleBar='<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px;">'
+    +'<button onclick="_setHeuteViewMode(\'karten\')" style="padding:4px 11px;border-radius:20px;border:1.5px solid '+(isTable?'var(--border)':'var(--accent)')+';background:'+(isTable?'var(--bg3)':'rgba(108,99,255,0.1)')+';color:'+(isTable?'var(--text2)':'var(--accent)')+';font-size:11px;font-weight:'+(isTable?'500':'700')+';cursor:pointer;">🃏 Karten</button>'
+    +'<button onclick="_setHeuteViewMode(\'tabelle\')" style="padding:4px 11px;border-radius:20px;border:1.5px solid '+(isTable?'var(--accent)':'var(--border)')+';background:'+(isTable?'rgba(108,99,255,0.1)':'var(--bg3)')+';color:'+(isTable?'var(--accent)':'var(--text2)')+';font-size:11px;font-weight:'+(isTable?'700':'500')+';cursor:pointer;">🗂 Tabelle</button>'
+    +(isTable
+      ?'<span style="margin-left:6px;display:inline-flex;align-items:center;gap:6px;">'
+        +'<label style="font-size:11px;color:var(--text2);">Datum:</label>'
+        +'<input type="date" value="'+(_heuteDateFilter||today)+'" onchange="_setHeuteDateFilter(this.value)" style="font-size:11px;padding:3px 7px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);">'
+        +'<select onchange="_setHeuteTypFilter2(this.value)" style="font-size:11px;padding:3px 7px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);">'
+        +'<option value="alle"'+((_heuteTypFilter2==='alle'||!_heuteTypFilter2)?' selected':'')+'>Alle</option>'
+        +'<option value="auftraege"'+(_heuteTypFilter2==='auftraege'?' selected':'')+'>Aufträge</option>'
+        +'<option value="aufgaben"'+(_heuteTypFilter2==='aufgaben'?' selected':'')+'>Aufgaben</option>'
+        +'</select>'
+        +'</span>'
+      :'')
+    +'</div>';
+  let filterBar=isTable?''
+    :'<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:1rem;">'
     +_fBtn('alle','Alle','var(--accent)',_cntH+_cntU+_cntA+_cntB)
     +_fBtn('heute','Heute fällig','#EF9F27',_cntH)
     +_fBtn('overdue','Überfällig','#E24B4A',_cntU)
@@ -6284,10 +6347,13 @@ function renderHeute(){
     +'<span style="font-size:13px;color:var(--text2);">'+dateStr+'</span>'
     +'</div>'
     +zoomBar
+    +toggleBar
     +filterBar
     +'<div id="heuteZoomContent" style="zoom:'+zoom+'%;">';
 
-  if(!hasAufg&&!hasAuftr&&!hasPost){
+  if(isTable){
+    html+=_renderTabelle();
+  }else if(!hasAufg&&!hasAuftr&&!hasPost){
     html+='<div style="color:var(--text2);font-size:14px;padding:20px 0;">Keine fälligen Aufgaben — alles erledigt!</div>';
   }else{
     let _cols=[];
@@ -6620,6 +6686,9 @@ function _heuteResizeUp(e){
 }
 function _toggleHeuteCol(id){try{var s=JSON.parse(localStorage.getItem('pam_heute_col_collapsed')||'{}');s[id]=!s[id];localStorage.setItem('pam_heute_col_collapsed',JSON.stringify(s));_heuteCollapsed=s;}catch(e){}renderHeute();}
 function _setHeuteFilter(key){_heuteFilter=key;try{localStorage.setItem('pam_heute_filter_typ',key);}catch(e){}renderHeute();}
+function _setHeuteViewMode(mode){_heuteViewMode=mode;try{localStorage.setItem('pam_heute_view_mode',mode);}catch(e){}renderHeute();}
+function _setHeuteDateFilter(val){_heuteDateFilter=val;try{localStorage.setItem('pam_heute_date_filter',val);}catch(e){}renderHeute();}
+function _setHeuteTypFilter2(val){_heuteTypFilter2=val;try{localStorage.setItem('pam_heute_typ2_filter',val);}catch(e){}renderHeute();}
 function toggleColSort(status,field){
   const cur=_colSort[status];
   if(!cur||cur.field!==field){_colSort[status]={field,dir:1};}
@@ -20128,109 +20197,4 @@ async function _createDriveFoldersForNewAuftrag(p){
       const repEl=document.getElementById('taskRepNr');     if(repEl) repEl.value=p.repnr||'';
       const kdEl =document.getElementById('taskKundenNr');  if(kdEl)  kdEl.value=p.kdnr||'';
       const nasEl=document.getElementById('tNAS');          if(nasEl) nasEl.value=p.nas||'';
-      const gdEl =document.getElementById('tGD');           if(gdEl)  gdEl.value=fotoUrl;
-      const gdoEl=document.getElementById('tGDOrdner');     if(gdoEl) gdoEl.value=dokUrl;
-      const eoEl =document.getElementById('tEmailOrdner');  if(eoEl)  eoEl.value=emailUrl;
-      if(typeof _updateFotoOrdnerHint==='function') _updateFotoOrdnerHint();
-      if(typeof _updateStammSummary==='function')   _updateStammSummary();
-      if(typeof _updateHdrMeta==='function')        _updateHdrMeta();      if(typeof _updateMapsBtn==='function')        _updateMapsBtn();
-      _showVbsDriveLinksBox(mainUrl,fotoUrl,dokUrl,emailUrl);
-    },350);
-
-  }catch(e){
-    showToast('⚠ Fehler: '+e.message,'error',8000);
-    console.error('[VBS-Drive]',e);
-    if(btn){btn.textContent='☁️ Drive-Ordner anlegen & Task öffnen';btn.disabled=false;}
-  }
-}
-
-function _showVbsDriveLinksBox(mainUrl,fotoUrl,dokUrl,emailUrl){
-  const old=document.getElementById('vbsDriveLinksBox');
-  if(old)old.remove();
-  const box=document.createElement('div');
-  box.id='vbsDriveLinksBox';
-  box.style.cssText='position:fixed;bottom:20px;right:20px;z-index:9989;background:var(--bg1);'
-    +'border:1px solid var(--green,#27ae60);border-radius:10px;padding:14px 18px;'
-    +'max-width:340px;font-size:12px;box-shadow:0 4px 20px rgba(0,0,0,.35);';
-  box.innerHTML=
-    '<div style="font-weight:700;color:var(--green,#27ae60);margin-bottom:9px;">☁️ Drive-Ordner angelegt</div>'
-   +'<div style="margin-bottom:4px;"><span style="opacity:.7;">Hauptordner: </span>'
-     +'<a href="'+mainUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
-   +'<div style="margin-bottom:4px;"><span style="opacity:.7;">02_Fotos: </span>'
-     +'<a href="'+mainUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
-   +'<div style="margin-bottom:4px;"><span style="opacity:.7;">02_Fotos: </span>'
-     +'<a href="'+fotoUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
-   +'<div style="margin-bottom:4px;"><span style="opacity:.7;">03_Dokumente: </span>'
-     +'<a href="'+dokUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
-   +'<div style="margin-bottom:10px;"><span style="opacity:.7;">E-Mails: </span>'
-     +'<a href="'+emailUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
-   +'<div style="font-size:11px;opacity:.65;margin-bottom:8px;">Alle Felder im Task ausgefüllt.<br>Bitte Task speichern!</div>'
-   +'<button onclick="document.getElementById(\'vbsDriveLinksBox\').remove()" '
-     +'style="background:var(--bg2);border:1px solid var(--border);color:var(--text1);'
-     +'padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;">✕ Schließen</button>';
-  document.body.appendChild(box);
-}
-
-document.addEventListener('DOMContentLoaded', _checkNewAuftragFromVbs);
-// ── Service Worker: bei jedem Seitenaufruf auf Updates prüfen ──────────────────────────────────
-if('serviceWorker' in navigator){
-  navigator.serviceWorker.getRegistration().then(reg=>{
-    if(reg) reg.update();
-  });
-  navigator.serviceWorker.addEventListener('controllerchange',()=>{
-    // Neuer SW hat übernommen → Seite automatisch neu laden
-    window.location.reload();
-  });
-}
-
-// ── App-Update-Button: unregistriert SW und lädt neu ───
-function pamForceSwUpdate(){
-  if('serviceWorker' in navigator){
-    navigator.serviceWorker.getRegistrations().then(function(regs){
-      Promise.all(regs.map(function(r){return r.unregister();})).then(function(){
-        window.location.reload(true);
-      });
-    });
-  } else {
-    window.location.reload(true);
-  }
-}
-// ── VERSION ROLLBACK ─────────────────────────────────────────────
-function _pamVersionRollback(){
-  let ov=document.createElement('div');
-  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:center;justify-content:center;';
-  let box=document.createElement('div');
-  box.style.cssText='background:var(--bg2);border-radius:14px;padding:28px;max-width:480px;width:92vw;box-shadow:0 20px 60px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:16px;';
-  box.innerHTML='<div style="font-size:16px;font-weight:700;color:var(--text);">\u23ee Version zur\u00fccksetzen</div>'
-    +'<div style="font-size:13px;color:var(--text2);line-height:1.6;">'
-    +'1. W\u00e4hle eine Backup-Datei aus deinem Workboard-Ordner<br>'
-    +'2. Sie wird als <b>index.html</b> heruntergeladen<br>'
-    +'3. Lade diese Datei zu GitHub hoch (Datei ersetzen)<br>'
-    +'4. Klicke danach in der App auf \uD83D\uDD04 Update</div>'
-    +'<button onclick="document.getElementById(\'_rollbackFileInput\').click()" '
-    'style="padding:10px 20px;border-radius:8px;background:var(--accent);color:#fff;border:none;cursor:pointer;font-size:14px;font-weight:600;">\uD83D\uDCC2 Backup-Datei ausw\u00e4hlen</button>'
-    +'<button onclick="this.parentElement.parentElement.remove()" '
-    +'style="padding:8px;border-radius:8px;background:none;border:1px solid var(--border);color:var(--text2);cursor:pointer;font-size:13px;">Abbrechen</button>';
-  ov.appendChild(box);
-  ov.onclick=function(e){if(e.target===ov)ov.remove();};
-  document.body.appendChild(ov);
-}
-function _pamRollbackSelected(evt){
-  let file=evt.target.files[0];if(!file)return;
-  evt.target.value='';
-  let reader=new FileReader();
-  reader.onload=function(e){
-    let blob=new Blob([e.target.result],{type:'text/html'});
-    let a=document.createElement('a');
-    a.href=URL.createObjectURL(blob);
-    a.download='index.html';
-    a.click();
-    setTimeout(function(){URL.revokeObjectURL(a.href);},5000);
-    showToast('\u2705 index.html heruntergeladen \u2013 jetzt zu GitHub hochladen, dann \uD83D\uDD04 Update klicken','ok',8000);    document.querySelectorAll('[style*="z-index:9999"]').forEach(function(el){el.remove();});
-  };
-  reader.readAsText(file);
-}
-
-</script>
-</body>
-</html>
+      const gdEl =document.getElementById('tGD');           if(gdEl)  gdEl.value=fotoUr
