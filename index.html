@@ -3523,7 +3523,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-01 · #184'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b181)
+const PAM_BUILD = 'v2026-06-01 · #187'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b181)
 
 // ── STATE ──
 let boards = {};
@@ -16296,10 +16296,11 @@ async function _driveSetPublic(fileId){
 
 async function _uploadEmailOriginal(file){
   if(!gdriveToken){showToast('⚠ .eml ablegen: Bitte zuerst oben „☁️ Google Drive" verbinden.','error',5000);return;}
-  // Zielordner: NUR E-Mail-Ablageordner (kein Fallback auf Projektordner)
-  const folderUrl=(document.getElementById('tEmailOrdner')?.value||'').trim();
+  // Zielordner: E-Mail-Ablageordner, Fallback: emailOrdner/gdriveOrdner des aktiven Tasks (E-Mail-Modal)
+  const folderUrl=(document.getElementById('tEmailOrdner')?.value||'').trim()
+    ||(_emCurrentTask&&(_emCurrentTask.emailOrdner||_emCurrentTask.gdriveOrdner)||'');
   const fid=_ezFolderId(folderUrl);
-  if(!fid){showToast('⚠ .eml ablegen: Bitte zuerst den E-Mail-Ablageordner unter „Verknüpfungen → E-Mail-Ordner" eintragen.','error',7000);return;}
+  if(!fid){showToast('⚠ .eml ablegen: Bitte den Projektordner im Task eintragen (Verknüpfungen → Projektordner).','error',7000);return;}
   const msgEl=document.getElementById('emailOrigDropMsg');
   if(msgEl)msgEl.textContent='⏳ Prüfe: '+file.name+'…';
   try{
@@ -18312,10 +18313,11 @@ function _renderEmailMailList(){
       '<label style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:7px 10px;font-size:12px;font-weight:600;border:1px solid var(--border);border-radius:8px;background:var(--bg3);color:var(--text2);cursor:pointer;" title="Datei als Anhang hochladen">📎 Anhang<input type="file" multiple style="display:none" onchange="_emAddAttachmentFile(event)"></label>'+
     '</div>';
     let _bd=_bar.querySelector('div');
-    _bd.addEventListener('dragenter',function(e){e.preventDefault();_bd.style.background='rgba(108,99,255,.07)';_bd.style.outline='2px dashed var(--accent)';});
+    let _bdCnt=0;
+    _bd.addEventListener('dragenter',function(e){e.preventDefault();_bdCnt++;_bd.style.background='rgba(108,99,255,.07)';_bd.style.outline='2px dashed var(--accent)';});
     _bd.addEventListener('dragover',function(e){e.preventDefault();});
-    _bd.addEventListener('dragleave',function(){_bd.style.background='var(--bg2)';_bd.style.outline='';});
-    _bd.addEventListener('drop',function(e){e.preventDefault();_bd.style.background='var(--bg2)';_bd.style.outline='';_emHandleEmlDrop(e.dataTransfer);});
+    _bd.addEventListener('dragleave',function(){_bdCnt--;if(_bdCnt<=0){_bdCnt=0;_bd.style.background='var(--bg2)';_bd.style.outline='';}});
+    _bd.addEventListener('drop',function(e){e.preventDefault();_bdCnt=0;_bd.style.background='var(--bg2)';_bd.style.outline='';_emHandleEmlDrop(e.dataTransfer);});
     el.appendChild(_bar);
     return;
   }
@@ -18375,10 +18377,11 @@ function _renderEmailMailList(){
     '<label style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:7px 10px;font-size:12px;font-weight:600;border:1px solid var(--border);border-radius:8px;background:var(--bg3);color:var(--text2);cursor:pointer;" title="Datei als Anhang hochladen">📎 Anhang<input type="file" multiple style="display:none" onchange="_emAddAttachmentFile(event)"></label>'+
   '</div>';
   let _ebd=_emlBar.querySelector('div');
-  _ebd.addEventListener('dragenter',function(e){e.preventDefault();_ebd.style.background='rgba(108,99,255,.07)';_ebd.style.outline='2px dashed var(--accent)';});
+  let _ebdCnt=0;
+  _ebd.addEventListener('dragenter',function(e){e.preventDefault();_ebdCnt++;_ebd.style.background='rgba(108,99,255,.07)';_ebd.style.outline='2px dashed var(--accent)';});
   _ebd.addEventListener('dragover',function(e){e.preventDefault();});
-  _ebd.addEventListener('dragleave',function(){_ebd.style.background='var(--bg2)';_ebd.style.outline='';});
-  _ebd.addEventListener('drop',function(e){e.preventDefault();_ebd.style.background='var(--bg2)';_ebd.style.outline='';_emHandleEmlDrop(e.dataTransfer);});
+  _ebd.addEventListener('dragleave',function(){_ebdCnt--;if(_ebdCnt<=0){_ebdCnt=0;_ebd.style.background='var(--bg2)';_ebd.style.outline='';}});
+  _ebd.addEventListener('drop',function(e){e.preventDefault();_ebdCnt=0;_ebd.style.background='var(--bg2)';_ebd.style.outline='';_emHandleEmlDrop(e.dataTransfer);});
   el.appendChild(_emlBar);
   // Event-Delegation: Timer unterscheidet Single (280ms) von Doppelklick
   let _elNew=el.cloneNode(false);
@@ -18426,8 +18429,8 @@ async function _emOpenMail(idx,mails){
   if((m.type==='ms'||m.type==='gmail')&&d.id&&_emCurrentTask){
     const isMs=m.type==='ms';
     const isOut=d.direction==='gesendet';
-    from=d.fromName?('"'+d.fromName+'" <'+(d.from||'>')+'>'):(d.from||d.sender||'Unbekannt');
-    subject=d.subject||'(kein Betreff)';
+    let from=d.fromName?('"'+d.fromName+'" <'+(d.from||'>')+'>'):(d.from||d.sender||'Unbekannt');
+    let subject=d.subject||'(kein Betreff)';
     const initials2=from.split(/\s+/).slice(0,2).map(function(w){return w[0]||'';}).join('').toUpperCase()||'?';
     const d2=d.date?new Date(d.date):null;
     const dateLabel2=d2?d2.toLocaleString('de-DE'):'';
