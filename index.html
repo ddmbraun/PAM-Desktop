@@ -3477,7 +3477,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-01 · #151'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b151)
+const PAM_BUILD = 'v2026-06-01 · #152'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b152)
 
 // ── STATE ──
 let boards = {};
@@ -8093,12 +8093,14 @@ async function loadFotosFromDriveFolder(){
     showToast('⚠ Bitte unter "Verknüpfungen" den Foto-Ordner-Link eintragen!','error',5000);
     return;
   }
-  // Bereits hinzugefügte Fotos vormerken
-  _dfpSelected=new Map();
-  (taskFotos||[]).forEach(f=>{if(f.driveId)_dfpSelected.set(f.driveId,{id:f.driveId,name:f.name||'',mime:f.mimeType||'image/jpeg'});});
-  _dfpHistory=[];
-  _dfpOpenOverlay();
-  await _dfpLoadFolder(folderId,'Foto-Ordner');
+  try{
+    // Bereits hinzugefügte Fotos vormerken
+    _dfpSelected=new Map();
+    (taskFotos||[]).forEach(f=>{if(f.driveId)_dfpSelected.set(f.driveId,{id:f.driveId,name:f.name||'',mime:f.mimeType||'image/jpeg'});});
+    _dfpHistory=[];
+    _dfpOpenOverlay();
+    await _dfpLoadFolder(folderId,'Foto-Ordner');
+  }catch(e){console.warn('[PAM] loadFotosFromDriveFolder:',e);showToast('⚠ Foto-Ordner konnte nicht geladen werden: '+e.message,'error',5000);}
 }
 
 // ── DRIVE-ORDNER IN TASK EINLESEN ──
@@ -10581,8 +10583,9 @@ async function _embedExifInDriveDesktop(driveId,caption){
   const bin=atob(b64);const bytes=new Uint8Array(bin.length);
   for(let j=0;j<bin.length;j++)bytes[j]=bin.charCodeAt(j);
   const newBlob=new Blob([bytes],{type:'image/jpeg'});
-  await fetch('https://www.googleapis.com/upload/drive/v3/files/'+encodeURIComponent(driveId)+'?uploadType=media',
+  const pR=await fetch('https://www.googleapis.com/upload/drive/v3/files/'+encodeURIComponent(driveId)+'?uploadType=media',
     {method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'image/jpeg'},body:newBlob});
+  if(!pR.ok){console.warn('[PAM] EXIF-Patch HTTP',pR.status);return;}
   _desktopFotoBlobCache.delete(driveId);
 }
 async function saveFotoCaptionFromLightbox(){
@@ -19386,15 +19389,19 @@ async function maybeDailySyncBackup(){
   }catch(e){console.warn('Backup:',e);}
 }
 async function syncCreate(){
-  const empty={version:1,lastUpdated:new Date().toISOString(),updatedBy:SYNC_SOURCE,termine:[],zeiterfassung:[]};
-  const content=JSON.stringify(empty,null,2);
-  const b='sb_'+Date.now();
-  const syncMeta={name:SYNC_FILE_NAME,mimeType:'application/json'};
-  if(typeof workspaceFolderId!=='undefined'&&workspaceFolderId)syncMeta.parents=[workspaceFolderId];
-  const body='--'+b+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify(syncMeta)+'\r\n--'+b+'\r\nContent-Type: application/json\r\n\r\n'+content+'\r\n--'+b+'--';
-  const r=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',{method:'POST',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'multipart/related; boundary='+b},body});
-  const f=await r.json();
-  syncFileId=f.id;syncData=empty;lastSyncTimestamp=empty.lastUpdated;
+  try{
+    const empty={version:1,lastUpdated:new Date().toISOString(),updatedBy:SYNC_SOURCE,termine:[],zeiterfassung:[]};
+    const content=JSON.stringify(empty,null,2);
+    const b='sb_'+Date.now();
+    const syncMeta={name:SYNC_FILE_NAME,mimeType:'application/json'};
+    if(typeof workspaceFolderId!=='undefined'&&workspaceFolderId)syncMeta.parents=[workspaceFolderId];
+    const body='--'+b+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify(syncMeta)+'\r\n--'+b+'\r\nContent-Type: application/json\r\n\r\n'+content+'\r\n--'+b+'--';
+    const r=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',{method:'POST',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'multipart/related; boundary='+b},body});
+    if(!r.ok)throw new Error('syncCreate HTTP '+r.status);
+    const f=await r.json();
+    if(!f.id)throw new Error('syncCreate: keine ID zurückgegeben');
+    syncFileId=f.id;syncData=empty;lastSyncTimestamp=empty.lastUpdated;
+  }catch(e){console.warn('[PAM] syncCreate fehlgeschlagen:',e);throw e;}
 }
 async function syncRead(initial=false){
   if(!syncFileId||!gdriveTokenValid())return;
@@ -19427,8 +19434,9 @@ async function syncRead(initial=false){
 async function syncWrite(){
   if(!syncFileId||!gdriveToken)return;
   try{
-    await fetch('https://www.googleapis.com/upload/drive/v3/files/'+syncFileId+'?uploadType=media',
+    const r=await fetch('https://www.googleapis.com/upload/drive/v3/files/'+syncFileId+'?uploadType=media',
       {method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},body:JSON.stringify(syncData,null,2)});
+    if(!r.ok)console.warn('[PAM] syncWrite HTTP',r.status);
   }catch(e){console.warn('syncWrite:',e);}
 }
 function startSyncPolling(){
