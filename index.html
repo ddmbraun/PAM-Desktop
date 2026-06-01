@@ -3478,7 +3478,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-01 · #156'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b156)
+const PAM_BUILD = 'v2026-06-01 · #158'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b158)
 
 // ── STATE ──
 let boards = {};
@@ -12287,7 +12287,6 @@ function _pamCloseAbsenderPopup(which){
   if(popup)popup.style.display='none';
   if(chev)chev.style.transform='';
 }
-// ── Unified E-Mail-Liste (Outlook-Style) – Build #101 ──────────────
 function _pamRenderUnifiedEmailList(task){
   const el=document.getElementById('pamUnifiedEmailList');
   if(!el)return;
@@ -12295,11 +12294,18 @@ function _pamRenderUnifiedEmailList(task){
   if(!task)task=findTaskById(taskId);
   if(!task){el.innerHTML='';return;}
 
-  // Thread-IDs für Duplikat-Filter
+  function _normSubj(s){return(s||'').replace(/^(Re|AW|Fwd|WG|Antwort|FYI):\s*/gi,'').trim().toLowerCase().substring(0,60);}
+
+  // Thread-IDs für messageId-basiertes Dedup
   const thrIds=new Set([
     ...(task.gmailThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean),
     ...(task.msThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean)
   ]);
+
+  // Betreff-Schlüssel der Thread-Mails für Betreff-basiertes Dedup von EML-Originalen
+  const thrSubjKeys=new Set();
+  (task.gmailThreadMessages||[]).forEach(function(m){const k=_normSubj(m.subject||m.betreff||'');if(k)thrSubjKeys.add(k);});
+  (task.msThreadMessages||[]).forEach(function(m){const k=_normSubj(m.subject||m.betreff||'');if(k)thrSubjKeys.add(k);});
 
   // Alle Mails sammeln
   const allMails=[];
@@ -12312,9 +12318,13 @@ function _pamRenderUnifiedEmailList(task){
       convId:m.conversationId||task.msConversationId||'_ms'});
   });
   (task.emailOriginals||[]).forEach(function(m,i){
+    // messageId-basiertes Dedup (wenn messageId bekannt und im Thread vorhanden)
     if(m.messageId&&thrIds.has(m.messageId))return;
+    // Betreff-basiertes Dedup: EML weglassen wenn Thread-Mail mit gleichem Betreff existiert
+    const subjKey=_normSubj(m.subject||m.name||'');
+    if(subjKey&&thrSubjKeys.has(subjKey))return;
     allMails.push({src:'original',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,
-      convId:'_orig_'+i});
+      convId:'_orig'});
   });
   allMails.sort(function(a,b){return(b._ts||0)-(a._ts||0);});
 
@@ -12324,13 +12334,18 @@ function _pamRenderUnifiedEmailList(task){
     _pamUpdateEmailListBadge();return;
   }
 
-  // Gruppieren nach Konversations-ID (Betreff als Fallback)
-  function _normSubj(s){return(s||'').replace(/^(Re|AW|Fwd|WG|Antwort|FYI):\s*/gi,'').trim().toLowerCase().substring(0,60);}
+  // Gruppieren: Thread-Mails nach convId, EML-Originale nach normiertem Betreff
   const groups=new Map();
   allMails.forEach(function(m){
     const subj=m.data.subject||m.data.betreff||'(kein Betreff)';
-    const hasRealId=m.convId&&!m.convId.startsWith('_');
-    const key=hasRealId?m.convId:(_normSubj(subj)||'__other__');
+    let key;
+    if(m.src!=='original'){
+      const hasRealId=m.convId&&!m.convId.startsWith('_');
+      key=hasRealId?m.convId:(_normSubj(subj)||'__other__');
+    } else {
+      // EML-Originale immer nach Betreff → mergen mit Thread-Gruppe wenn gleicher Betreff
+      key=_normSubj(subj)||'__other__';
+    }
     if(!groups.has(key))groups.set(key,{subject:subj,mails:[]});
     groups.get(key).mails.push(m);
   });
@@ -12369,20 +12384,33 @@ function _pamRenderUnifiedEmailList(task){
       const indent=multiGroup?'22px':'10px';
       [...grp.mails].sort(function(a,b){return(b._ts||0)-(a._ts||0);}).forEach(function(m,mi){
         const d=m.data;
-        const from=d.fromName||d.from||d.sender||'Unbekannt';
+        const isOriginal=m.src==='original';
+        const from=d.fromName||d.from||d.sender||d.senderName||'Unbekannt';
         const isOut=d.direction==='gesendet'||d.isOut||false;
         const dateStr=_fmt(m._ts);
-        const preview=(d.preview||d.snippet||d.bodyText||'').replace(/\n/g,' ').trim();
+        const preview=(d.preview||d.snippet||d.bodyText||d.body||'').replace(/\n/g,' ').trim();
         const subject=d.subject||d.betreff||'';
-        // Tooltip: Absender + Betreff + Vorschau, max 250 Zeichen
         const tooltipRaw=(from+(subject?' | '+subject:'')+(preview?' – '+preview:'')).substring(0,250);
         const tooltipEsc=tooltipRaw.replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        const dirBg=isOut?'rgba(22,163,74,.15)':'rgba(29,78,216,.10)';
-        const dirTxt=isOut?'#15803D':'#1E40AF';
-        const dirLabel=isOut?'Gesendet':'Eingang';
-        const envColor=isOut?'#16A34A':'#0078d4';
-        // Klick → direkt Overlay öffnen (kein Split-Pane)
-        const clickFn=m.src==='gmail'?('_gmOpenMailOverlay('+JSON.stringify(taskId)+','+m.idx+')'):'_msOpenMailOverlay('+JSON.stringify(taskId)+','+m.idx+')';
+        let dirBg,dirTxt,dirLabel,envColor;
+        if(isOriginal){
+          dirBg='rgba(124,58,237,.12)';dirTxt='#5b21b6';dirLabel='Original';envColor='#7c3aed';
+        } else if(isOut){
+          dirBg='rgba(22,163,74,.15)';dirTxt='#15803D';dirLabel='Gesendet';envColor='#16A34A';
+        } else {
+          dirBg='rgba(29,78,216,.10)';dirTxt='#1E40AF';dirLabel='Eingang';envColor='#0078d4';
+        }
+        let clickFn;
+        if(m.src==='gmail'){
+          clickFn='_gmOpenMailOverlay('+JSON.stringify(taskId)+','+m.idx+')';
+        } else if(m.src==='ms'){
+          clickFn='_msOpenMailOverlay('+JSON.stringify(taskId)+','+m.idx+')';
+        } else {
+          const nameSafe=(d.subject||d.name||'email.eml').replace(/"/g,'').substring(0,60);
+          const fileSafe=(d.fileId||'').replace(/"/g,'');
+          const urlSafe=(d.url||'').replace(/"/g,'');
+          clickFn='_openEmailOrigInlinePreview({fileId:"'+fileSafe+'",name:"'+nameSafe+'",url:"'+urlSafe+'"})';
+        }
         const previewTxt=preview.substring(0,60);
         html+='<div data-mi="'+mi+'" data-src="'+m.src+'" style="display:flex;gap:8px;align-items:flex-start;padding:6px '+indent+' 6px '+indent+';border-top:0.5px solid var(--border);cursor:pointer;background:var(--bg1);transition:background .1s;" '
           +'onmouseenter="_pamUnifiedHover(this,\''+tooltipEsc+'\')" onmouseleave="_pamUnifiedHoverOut()" '
@@ -12414,6 +12442,8 @@ function _pamRenderUnifiedEmailList(task){
   if(body&&body.style.display==='none'){body.style.display='block';if(chev)chev.style.transform='rotate(180deg)';}
   _pamUpdateEmailListBadge();
 }
+
+
 
 
 
