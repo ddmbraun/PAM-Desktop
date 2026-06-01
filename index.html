@@ -3523,7 +3523,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-01 · #211'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b199)
+const PAM_BUILD = 'v2026-06-01 · #212'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b199)
 
 // ── STATE ──
 let boards = {};
@@ -14642,6 +14642,81 @@ async function _createGoogleKontakt(kontaktDiv){
     console.warn('[GK]',e);
   }
 }
+// ── Google Kontakt Vorschau-Dialog ──
+let _gkPreviewDiv=null;
+function _showGKPreview(kontaktDiv){
+  if(!gdriveToken){showToast('⚠ Bitte zuerst Google Drive verbinden','warning',4000);return;}
+  _gkPreviewDiv=kontaktDiv;
+  const name=(kontaktDiv.querySelector('.k-name')||{value:''}).value||'';
+  const tel=(kontaktDiv.querySelector('.k-tel')||{value:''}).value||'';
+  const email=(kontaktDiv.querySelector('.k-email')||{value:''}).value||'';
+  const adresse=(document.getElementById('tAdr')||{value:''}).value||'';
+  const hausverwaltung=(document.getElementById('tHV')||{value:''}).value||'';
+  const repNr=(document.getElementById('tRepNr')||{value:''}).value||'';
+  const taskTitle=(document.getElementById('taskTitleInput')||{value:''}).value||'';
+  const note=[taskTitle,repNr?'Rep.'+repNr:''].filter(Boolean).join(' · ');
+  const ex=document.getElementById('gk-preview-modal');if(ex)ex.remove();
+  const esc=s=>(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  const fs='width:100%;padding:5px 7px;font-size:12px;box-sizing:border-box;border:1px solid #d1d5db;border-radius:4px;margin-top:2px;';
+  const row=(id,lbl,type,val)=>'<div><label style="font-size:10px;color:#6b7280;">'+lbl+'</label><input id="'+id+'" type="'+type+'" value="'+esc(val)+'" style="'+fs+'"></div>';
+  const overlay=document.createElement('div');
+  overlay.id='gk-preview-modal';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  overlay.innerHTML='<div style="background:#fff;border-radius:10px;padding:20px 22px;width:380px;max-width:96vw;box-shadow:0 8px 32px rgba(0,0,0,0.18);">'
+    +'<div style="font-size:14px;font-weight:600;color:#1a56c4;margin-bottom:14px;">👤 Kontakt prüfen &amp; anlegen</div>'
+    +'<div style="display:flex;flex-direction:column;gap:8px;">'
+    +row('gkp-name','Name','text',name)
+    +row('gkp-tel','Telefon','tel',tel)
+    +row('gkp-email','E-Mail','email',email)
+    +row('gkp-adr','Adresse','text',adresse)
+    +row('gkp-hv','Firma / Hausverwaltung','text',hausverwaltung)
+    +row('gkp-note','Notiz','text',note)
+    +'</div>'
+    +'<div style="display:flex;gap:8px;margin-top:18px;justify-content:flex-end;">'
+    +'<button onclick="document.getElementById('gk-preview-modal').remove();_gkPreviewDiv=null;" style="padding:7px 16px;font-size:12px;border:1px solid #d1d5db;background:#f9fafb;border-radius:6px;cursor:pointer;">Abbrechen</button>'
+    +'<button onclick="_createGoogleKontaktFromPreview()" style="padding:7px 16px;font-size:12px;background:#1a56c4;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:500;">👤 Anlegen</button>'
+    +'</div></div>';
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click',e=>{if(e.target===overlay){overlay.remove();_gkPreviewDiv=null;}});
+}
+async function _createGoogleKontaktFromPreview(){
+  const g=id=>(document.getElementById(id)||{value:''}).value||'';
+  const name=g('gkp-name'),tel=g('gkp-tel'),email=g('gkp-email');
+  const adresse=g('gkp-adr'),hausverwaltung=g('gkp-hv'),note=g('gkp-note');
+  const m=document.getElementById('gk-preview-modal');if(m)m.remove();
+  if(!name&&!tel&&!email){showToast('⚠ Kein Name oder Telefon vorhanden','warning',3000);_gkPreviewDiv=null;return;}
+  const adr=_parseAdresseGK(adresse);
+  const nm=_parseNameGK(name);
+  const familyName=nm.last+(adr.streetName?(', '+adr.streetName+(adr.houseNr?' '+adr.houseNr:'')):'');
+  const body={};
+  if(name){body.names=[{givenName:nm.first||name,familyName:familyName,displayName:name}];}
+  if(tel){body.phoneNumbers=[{value:tel,type:'work'}];}
+  if(email){body.emailAddresses=[{value:email,type:'work'}];}
+  if(adr.street){body.addresses=[{streetAddress:adr.street,postalCode:adr.plz,city:adr.city,countryCode:'DE',type:'work'}];}
+  if(hausverwaltung){body.organizations=[{name:hausverwaltung,type:'work'}];}
+  if(note){body.biographies=[{value:note,contentType:'TEXT_PLAIN'}];}
+  try{
+    showToast('👤 Kontakt wird angelegt…','info',4000);
+    const resp=await fetch('https://people.googleapis.com/v1/people:createContact',{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+gdriveToken,'Content-Type':'application/json'},
+      body:JSON.stringify(body)
+    });
+    if(resp.status===403){
+      try{localStorage.removeItem('pam_gdrive_token_v1');}catch(e){}
+      gdriveToken=null;gdriveTokenExpires=0;
+      showToast('⚠ Kontakte-Berechtigung fehlt – Login wird neu gestartet…','error',8000);
+      setTimeout(()=>{try{if(gdriveTokenClient){gdriveTokenClient.requestAccessToken({prompt:'consent'});}else{showToast('⚠ Bitte Drive-Button drücken und neu anmelden','error',8000);}}catch(e){showToast('⚠ Bitte Drive-Button drücken und neu anmelden','error',8000);}},500);
+      _gkPreviewDiv=null;return;
+    }
+    if(!resp.ok){const e=await resp.json();throw new Error(e.error&&e.error.message||resp.status);}
+    showToast('✅ Kontakt angelegt: '+name,'success',5000);
+    if(_gkPreviewDiv){const btn=_gkPreviewDiv.querySelector('.gk-create-btn');if(btn){btn.textContent='✅';btn.disabled=true;btn.style.background='#16a34a';}_gkPreviewDiv=null;}
+  }catch(e){
+    showToast('⚠ Kontakt anlegen fehlgeschlagen: '+e.message,'error',6000);
+    console.warn('[GK]',e);_gkPreviewDiv=null;
+  }
+}
 function addKontaktPTP(rolle,name,tel,email,anrufKontakt){
   const c=document.getElementById('tKontakteContainer');if(!c)return;
   const rolleOpts=['ag','mieter','eigentuemer','sonstiges'];
@@ -14655,7 +14730,7 @@ function addKontaktPTP(rolle,name,tel,email,anrufKontakt){
     +'</select>'
     +'<label style="display:flex;align-items:center;gap:4px;font-size:10px;color:#1a56c4;cursor:pointer;margin-left:6px;" title="Dieser Kontakt wird auf Mobil als Anruf-Button angezeigt">'
     +'<input type="checkbox" class="k-anruf"'+(anrufKontakt?' checked':'')+' style="width:13px;height:13px;accent-color:#1a56c4;cursor:pointer;" onchange="_updateMapsBtn();scheduleTaskFieldSave()">📞 Anruf</label>'
-    +'<button type="button" class="gk-create-btn" style="padding:2px 6px;font-size:11px;background:#1a56c4;color:#fff;border:none;border-radius:4px;cursor:pointer;" onclick="_createGoogleKontakt(this.closest(\'.kontakt-entry\'))" title="Kontakt in Google Kontakte anlegen">👤+</button>'
+    +'<button type="button" class="gk-create-btn" style="padding:2px 6px;font-size:11px;background:#1a56c4;color:#fff;border:none;border-radius:4px;cursor:pointer;" onclick="_showGKPreview(this.closest(\'.kontakt-entry\'))" title="Kontakt in Google Kontakte anlegen">👤+</button>'
     +'<button type="button" class="rm-btn" style="padding:2px 6px;font-size:11px;" onclick="this.closest(\'.kontakt-entry\').remove();updateKontaktePTPTitle();scheduleTaskFieldSave()" title="Entfernen">✕</button>'
     +'</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">'
