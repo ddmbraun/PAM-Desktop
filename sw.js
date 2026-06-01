@@ -1,15 +1,9 @@
-const CACHE_NAME = 'pam-desktop-2026-06-01-b201';
-const ASSETS = [
-  '/',
-  '/index.html',
-  '/sw.js'
-];
+const CACHE_NAME = 'pam-desktop-2026-06-01-b204';
 
 self.addEventListener('install', event => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS))
-      .then(() => self.skipWaiting())
-  );
+  // Kein pre-caching – verhindert addAll-Fehler bei Subdirectory-Deployments (z.B. GitHub Pages)
+  // Assets werden on-the-fly beim ersten Abruf gecacht (fetch-Handler unten)
+  event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener('activate', event => {
