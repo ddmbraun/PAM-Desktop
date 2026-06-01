@@ -3523,7 +3523,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-01 · #177'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b169)
+const PAM_BUILD = 'v2026-06-01 · #180'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b169)
 
 // ── STATE ──
 let boards = {};
@@ -4223,7 +4223,7 @@ const DEFAULT_FOLDER_EMAIL    = 'https://drive.google.com/drive/folders/1qPfE5wo
 // Fix #6: drive.file erlaubt nur app-eigene Dateien; drive.readonly für Lesezugriff auf fremde Dateien.
 // drive.metadata.readonly erlaubt Datei-Suche (name, parents) ohne vollen Lesezugriff.
 // email-Scope: erlaubt /oauth2/v3/userinfo (für login_hint-Speicherung), kein extra Consent nötig.
-const GDRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.metadata.readonly email';
+const GDRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.metadata.readonly email https://www.googleapis.com/auth/contacts';
 const GMAIL_SCOPE  = 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send';
 let gmailToken=null;let gmailTokenClient=null;let gmailUserEmail=null;
 const WORKSPACE_FOLDER_NAME     = 'PAM-Workboard Daten';
@@ -14452,6 +14452,80 @@ dz.addEventListener('drop',e=>{
 });
 
 // ── KONTAKTE (dynamisch) ──
+
+// ── Google Kontakt anlegen ──
+function _parseAdresseGK(adr){
+  if(!adr)return{street:'',houseNr:'',plz:'',city:''};
+  const parts=adr.split(',');
+  const streetFull=(parts[0]||'').trim();
+  const rest=(parts.slice(1).join(','))||'';
+  const plzCity=rest.trim();
+  const plzM=plzCity.match(/^(\d{5})\s+(.+)$/);
+  const plz=plzM?plzM[1]:'';
+  const city=plzM?plzM[2].trim():plzCity;
+  const hnM=streetFull.match(/^(.+?)\s+(\d+\s*[a-zA-Z]?)$/);
+  const streetName=hnM?hnM[1].trim():streetFull;
+  const houseNr=hnM?hnM[2].trim():'';
+  return{street:streetFull,streetName,houseNr,plz,city};
+}
+function _parseNameGK(fullName){
+  if(!fullName)return{first:'',last:''};
+  const p=fullName.trim().split(/\s+/);
+  if(p.length===1)return{first:'',last:p[0]};
+  return{first:p.slice(0,-1).join(' '),last:p[p.length-1]};
+}
+async function _createGoogleKontakt(kontaktDiv){
+  if(!gdriveToken){showToast('⚠ Bitte zuerst Google Drive verbinden','warning',4000);return;}
+  const name=(kontaktDiv.querySelector('.k-name')||{}).value||'';
+  const tel=(kontaktDiv.querySelector('.k-tel')||{}).value||'';
+  const email=(kontaktDiv.querySelector('.k-email')||{}).value||'';
+  if(!name&&!tel&&!email){showToast('⚠ Kein Kontakt-Name oder Telefon vorhanden','warning',3000);return;}
+  // Task-Felder lesen
+  const adresse=(document.getElementById('tAdr')||{value:''}).value||'';
+  const hausverwaltung=(document.getElementById('tHV')||{value:''}).value||'';
+  const repNr=(document.getElementById('tRepNr')||{value:''}).value||'';
+  const taskTitle=(document.getElementById('taskTitleInput')||{value:''}).value||'';
+  const adr=_parseAdresseGK(adresse);
+  const nm=_parseNameGK(name);
+  // Nachname-Feld: "Nachname, Straße Hausnr."
+  const familyName=nm.last+(adr.streetName?(', '+adr.streetName+(adr.houseNr?' '+adr.houseNr:'')):'');
+  const body={};
+  // Namen
+  if(name){body.names=[{givenName:nm.first||name,familyName:familyName,displayName:name}];}
+  // Telefon
+  if(tel){body.phoneNumbers=[{value:tel,type:'work'}];}
+  // E-Mail
+  if(email){body.emailAddresses=[{value:email,type:'work'}];}
+  // Adresse
+  if(adr.street){body.addresses=[{streetAddress:adr.street,postalCode:adr.plz,city:adr.city,countryCode:'DE',type:'work'}];}
+  // Firma
+  if(hausverwaltung){body.organizations=[{name:hausverwaltung,type:'work'}];}
+  // Notiz
+  const note=[taskTitle,repNr?'Rep.'+repNr:''].filter(Boolean).join(' · ');
+  if(note){body.biographies=[{value:note,contentType:'TEXT_PLAIN'}];}
+  try{
+    showToast('👤 Kontakt wird angelegt…','info',4000);
+    const resp=await fetch('https://people.googleapis.com/v1/people:createContact',{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+gdriveToken,'Content-Type':'application/json'},
+      body:JSON.stringify(body)
+    });
+    if(resp.status===403){
+      showToast('⚠ Berechtigung fehlt – bitte Drive-Button drücken und neu anmelden (Kontakte-Scope)','error',8000);
+      return;
+    }
+    if(!resp.ok){const e=await resp.json();throw new Error(e.error&&e.error.message||resp.status);}
+    const data=await resp.json();
+    const url='https://contacts.google.com/person/'+((data.resourceName||'').replace('people/',''));
+    showToast('✅ Kontakt angelegt: '+name,'success',5000);
+    // Button als gespeichert markieren
+    const btn=kontaktDiv.querySelector('.gk-create-btn');
+    if(btn){btn.textContent='✅';btn.disabled=true;btn.style.background='#16a34a';}
+  }catch(e){
+    showToast('⚠ Kontakt anlegen fehlgeschlagen: '+e.message,'error',6000);
+    console.warn('[GK]',e);
+  }
+}
 function addKontaktPTP(rolle,name,tel,email,anrufKontakt){
   const c=document.getElementById('tKontakteContainer');if(!c)return;
   const rolleOpts=['ag','mieter','eigentuemer','sonstiges'];
@@ -14465,6 +14539,7 @@ function addKontaktPTP(rolle,name,tel,email,anrufKontakt){
     +'</select>'
     +'<label style="display:flex;align-items:center;gap:4px;font-size:10px;color:#1a56c4;cursor:pointer;margin-left:6px;" title="Dieser Kontakt wird auf Mobil als Anruf-Button angezeigt">'
     +'<input type="checkbox" class="k-anruf"'+(anrufKontakt?' checked':'')+' style="width:13px;height:13px;accent-color:#1a56c4;cursor:pointer;" onchange="_updateMapsBtn();scheduleTaskFieldSave()">📞 Anruf</label>'
+    +'<button type="button" class="gk-create-btn" style="padding:2px 6px;font-size:11px;background:#1a56c4;color:#fff;border:none;border-radius:4px;cursor:pointer;" onclick="_createGoogleKontakt(this.closest(\'.kontakt-entry\'))" title="Kontakt in Google Kontakte anlegen">👤+</button>'
     +'<button type="button" class="rm-btn" style="padding:2px 6px;font-size:11px;" onclick="this.closest(\'.kontakt-entry\').remove();updateKontaktePTPTitle();scheduleTaskFieldSave()" title="Entfernen">✕</button>'
     +'</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">'
@@ -19267,6 +19342,7 @@ function openEditTaskModal(id){
   document.getElementById('tNAS').value=task.nas||_nDef;
   _updateFotoOrdnerHint();
   document.getElementById('tEmailOrdner').value=task.emailOrdner||(_isAufgabenEdit?_aufgabenDef:_dDef);
+  const _dokEl=document.getElementById('tDokOrdner');if(_dokEl)_dokEl.value=task.dokOrdner||'';
   document.getElementById('deleteTaskBtn').style.display='';
   const _atb2=document.getElementById('archiveTaskBtn');if(_atb2)_atb2.style.display='';
   // abschlussBtn: wird von _applyBoardType gesteuert (nur Baustelle-Typ)
