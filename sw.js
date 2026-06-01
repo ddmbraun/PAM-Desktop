@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pam-desktop-2026-06-01-b200';
+const CACHE_NAME = 'pam-desktop-2026-06-01-b201';
 
 self.addEventListener('install', event => {
   // Kein pre-caching – verhindert addAll-Fehler bei Subdirectory-Deployments (z.B. GitHub Pages)
