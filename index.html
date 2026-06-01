@@ -3523,7 +3523,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-01 · #197'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b197)
+const PAM_BUILD = 'v2026-06-01 · #198'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b198)
 
 // ── STATE ──
 let boards = {};
@@ -18240,106 +18240,106 @@ function _emReloadMailList(){
   _renderEmailMailList();
 }
 function _renderEmailMailList(){
-  let el=document.getElementById('emMailList');
+  const el=document.getElementById('emMailList');
   if(!el)return;
-  let t=_emCurrentTask;
-  window._emChipReg=[]; // Registry zurücksetzen für Chip-Klick-Handler
-  let mails=[]; // Alle Mail-Einträge sammeln – dedupliziert wie _pamRenderUnifiedEmailList
-  function _normSubjEM(s){return(s||'').replace(/^(Re|AW|Fwd|WG|Antwort|FYI):\s*/gi,'').trim().toLowerCase().substring(0,60);}
-  const _emThrIds=new Set([...(t.gmailThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean),...(t.msThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean)]);
-  const _emThrSubj=new Set();
-  (t.gmailThreadMessages||[]).forEach(function(m){const k=_normSubjEM(m.subject||m.betreff||'');if(k)_emThrSubj.add(k);});
-  (t.msThreadMessages||[]).forEach(function(m){const k=_normSubjEM(m.subject||m.betreff||'');if(k)_emThrSubj.add(k);});
-  (t.emailOriginals||[]).forEach(function(m,i){
-    if(m.messageId&&_emThrIds.has(m.messageId))return;
-    const subjKey=_normSubjEM(m.subject||m.name||'');
-    if(subjKey&&_emThrSubj.has(subjKey))return;
-    mails.push({type:'original',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0});
-  });
-  (t.gmailThreadMessages||[]).forEach(function(m,i){mails.push({type:'gmail',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0});});
-  (t.msThreadMessages||[]).forEach(function(m,i){mails.push({type:'ms',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0});});
-  // Chronologisch sortieren – neueste zuerst
-  mails.sort(function(a,b){return (b._ts||0)-(a._ts||0);});
+  const t=_emCurrentTask;
+  if(!t){el.innerHTML='';return;}
+  // ── Hilfsfunktionen ──
+  function _ns(s){return(s||'').replace(/^(Re|AW|Fwd|WG|Antwort|FYI):\s*/gi,'').trim().toLowerCase().substring(0,60);}
+  const thrIds=new Set([...(t.gmailThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean),...(t.msThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean)]);
+  const thrSK=new Set();
+  (t.gmailThreadMessages||[]).forEach(function(m){const k=_ns(m.subject||m.betreff||'');if(k)thrSK.add(k);});
+  (t.msThreadMessages||[]).forEach(function(m){const k=_ns(m.subject||m.betreff||'');if(k)thrSK.add(k);});
+  // ── Mail-Liste aufbauen + deduplizieren ──
+  const allM=[];
+  (t.gmailThreadMessages||[]).forEach(function(m,i){allM.push({src:'gmail',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:m.threadId||t.gmailThreadId||'_gm'});});
+  (t.msThreadMessages||[]).forEach(function(m,i){allM.push({src:'ms',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:m.conversationId||t.msConversationId||'_ms'});});
+  (t.emailOriginals||[]).forEach(function(m,i){if(m.messageId&&thrIds.has(m.messageId))return;const sk=_ns(m.subject||m.name||'');if(sk&&thrSK.has(sk))return;allM.push({src:'original',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:'_orig'});});
+  allM.sort(function(a,b){return(b._ts||0)-(a._ts||0);});
+  const _totalCnt=allM.length;
+  // ── Metadaten ──
+  const _senderName=t.emailSenderName||'';
+  const _senderEmail=t.emailSender||t.emailSenderName||'–';
+  const _initials=(_senderName||_senderEmail).replace(/<[^>]+>/g,'').trim().split(/\s+/).slice(0,2).map(function(w){return w[0]||'';}).join('').toUpperCase()||'?';
+  const _msCnt=(t.msThreadMessages||[]).length;
+  const _emlCnt=(t.emailOriginals||[]).length;
+  const _pdfCnt=(t.emailPdfs||[]).filter(function(p){return p.fileId;}).length;
+  const _fotoCnt=(t.fotos||[]).length;
+  // ── DOM aufbauen ──
   el.innerHTML='';
-  // ── Header-Sektion: ● E-Mail + Sender-Karte + Gmail/Outlook/Drive ──
-  let _sender=t.emailSender||t.emailSenderName||'–';
-  let _senderName=t.emailSenderName||'';
-  let _initials=(_senderName||_sender).replace(/<[^>]+>/g,'').trim().split(/\s+/).slice(0,2).map(function(w){return w[0]||'';}).join('').toUpperCase()||'?';
-  let _gmailCnt=(t.gmailThreadMessages||[]).length;
-  let _msCnt=(t.msThreadMessages||[]).length;
-  let _emlCnt=(t.emailOriginals||[]).length;
-  let _pdfCnt=(t.emailPdfs||[]).filter(function(p){return p.fileId;}).length;
-  let _fotoCnt=(t.fotos||[]).length;
-  let _totalCnt=mails.length;
-  let _header=document.createElement('div');
-  _header.innerHTML=
-    // Zeile 1: ● E-Mail + Nachrichten
-    '<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;border-bottom:1px solid var(--border);background:var(--bg3);">'+
-      '<span style="font-size:12px;font-weight:700;color:var(--text);">● E-Mail</span>'+
-      '<span style="font-size:11px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:1px 9px;color:var(--text2);">'+_totalCnt+' Nachricht'+(+_totalCnt!==1?'en':'')+'</span>'+
+  // 1. Header: ● E-Mail + Nachrichten-Badge
+  const _hdr=document.createElement('div');
+  _hdr.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:7px 10px;border-bottom:1px solid var(--border);background:var(--bg3);flex-shrink:0;';
+  _hdr.innerHTML='<span style="font-size:12px;font-weight:700;color:var(--text);">● E-Mail</span>'+
+    '<span style="font-size:11px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:1px 9px;color:var(--text2);">'+_totalCnt+' Nachricht'+(_totalCnt!==1?'en':'')+'</span>';
+  el.appendChild(_hdr);
+  // 2. Sender-Karte
+  const _scard=document.createElement('div');
+  _scard.style.cssText='padding:8px 10px;border-bottom:1px solid var(--border);background:var(--bg2);display:flex;align-items:center;gap:8px;flex-shrink:0;';
+  _scard.innerHTML=
+    '<div style="width:32px;height:32px;border-radius:50%;background:#1e7e34;display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:700;flex-shrink:0;">'+_escHtml(_initials)+'</div>'+
+    '<div style="flex:1;min-width:0;">'+
+      '<div style="font-size:13px;font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_escHtml(_senderName||_senderEmail)+'</div>'+
+      '<div style="font-size:11px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_escHtml(_senderEmail)+'</div>'+
+    '</div>';
+  el.appendChild(_scard);
+  // 3. E-Mails-Sektion: Label + Chips
+  const _sec=document.createElement('div');
+  _sec.style.cssText='padding:5px 10px 7px;border-bottom:1px solid var(--border);background:var(--bg2);flex-shrink:0;';
+  _sec.innerHTML=
+    '<div style="display:flex;align-items:center;gap:5px;margin-bottom:5px;">'+
+      '<span style="font-size:11px;font-weight:700;color:var(--text);">● E-Mails</span>'+
+      '<span style="font-size:11px;color:var(--text2);flex:1;">'+_totalCnt+' Nachrichten</span>'+
+      '<button onclick="event.stopPropagation();if(_emCurrentTask){_pamActiveTaskId=_emCurrentTask.id;_msOpenThreadPopup();}" style="display:flex;align-items:center;gap:4px;padding:2px 8px;font-size:11px;font-weight:600;border:none;border-radius:6px;background:#1e7e34;color:#fff;cursor:pointer;">📋 Öffnen</button>'+
     '</div>'+
-    // Zeile 2: Sender-Karte
-    '<div style="padding:8px 10px;border-bottom:1px solid var(--border);background:var(--bg2);display:flex;align-items:center;gap:8px;">'+
-      '<div style="width:32px;height:32px;border-radius:50%;background:#1e7e34;display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:700;flex-shrink:0;">'+_escHtml(_initials)+'</div>'+
-      '<div style="flex:1;min-width:0;">'+
-        '<div style="font-size:13px;font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_escHtml(_senderName||_sender)+'</div>'+
-        '<div style="font-size:11px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_escHtml(_sender)+'</div>'+
+    '<div style="display:flex;align-items:center;justify-content:space-between;gap:4px;">'+
+      '<div style="display:flex;gap:4px;">'+
+        '<button onclick="_emLadeGmailVerlauf()" style="display:flex;align-items:center;gap:3px;padding:3px 8px;font-size:11px;font-weight:700;border:none;border-radius:6px;background:#1a7040;color:#fff;cursor:pointer;">G Gmail</button>'+
+        '<button onclick="_emLadeOutlookVerlauf()" style="display:flex;align-items:center;gap:3px;padding:3px 8px;font-size:11px;font-weight:700;border:none;border-radius:6px;background:#0078d4;color:#fff;cursor:pointer;">✉ Outlook'+(_msCnt>0?' '+_msCnt:'')+'</button>'+
+        (t.emailUrl?'<button onclick="window.open(\''+_escHtml(t.emailUrl)+'\',\'_blank\')" style="display:flex;align-items:center;gap:3px;padding:3px 8px;font-size:11px;font-weight:700;border:none;border-radius:6px;background:#2c2c3e;color:#fff;cursor:pointer;">Drive</button>':'')+
       '</div>'+
-    '</div>'+
-    // Zeile 3: E-Mails Label + Buttons
-    '<div style="padding:5px 10px;border-bottom:1px solid var(--border);background:var(--bg2);">'+
-      '<div style="display:flex;align-items:center;gap:5px;margin-bottom:5px;">'+
-        '<span style="font-size:11px;font-weight:700;color:var(--text);">● E-Mails</span>'+
-        '<span style="font-size:11px;color:var(--text2);flex:1;">'+_totalCnt+' Nachrichten</span>'+
-        '<button onclick="event.stopPropagation();if(_emCurrentTask){_pamActiveTaskId=_emCurrentTask.id;_msOpenThreadPopup();}" style="display:flex;align-items:center;gap:4px;padding:2px 8px;font-size:11px;font-weight:600;border:none;border-radius:6px;background:#1e7e34;color:#fff;cursor:pointer;">📋 Öffnen</button>'+
-      '</div>'+
-      '<div style="display:flex;align-items:center;justify-content:space-between;gap:4px;">'+
-        '<div style="display:flex;gap:4px;">'+
-          '<button onclick="_emLadeGmailVerlauf()" style="display:flex;align-items:center;gap:3px;padding:3px 8px;font-size:11px;font-weight:700;border:none;border-radius:6px;background:#1a7040;color:#fff;cursor:pointer;">G Gmail</button>'+
-          ('<button onclick="_emLadeOutlookVerlauf()" style="display:flex;align-items:center;gap:3px;padding:3px 8px;font-size:11px;font-weight:700;border:none;border-radius:6px;background:#0078d4;color:#fff;cursor:pointer;">✉ Outlook'+(_msCnt>0?' '+_msCnt:'')+'</button>')+
-          (t.emailUrl?'<button onclick="window.open(\''+_escHtml(t.emailUrl)+'\',\'_blank\')" style="display:flex;align-items:center;gap:3px;padding:3px 8px;font-size:11px;font-weight:700;border:none;border-radius:6px;background:#2c2c3e;color:#fff;cursor:pointer;">Drive</button>':'')+
-        '</div>'+
-        '<div style="display:flex;gap:3px;align-items:center;">'+
-          (_emlCnt>0?'<span onclick="_emOpenEmlGallery()" style="background:#FFF3CD;color:#856404;border:1px solid #FFEAA7;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px;cursor:pointer;">EML '+_emlCnt+'</span>':'')+
-          (_pdfCnt>0?'<span onclick="_openEmailThumbnailGrid()" style="background:#fdf0f0;color:#c0392b;border:1px solid #f5c6c6;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px;cursor:pointer;">PDF '+_pdfCnt+'</span>':'')+
-          (_fotoCnt>0?'<span onclick="_emOpenFotoGallery()" style="background:#E6F4EA;color:#15803D;border:1px solid #B7DFBF;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px;cursor:pointer;">Fotos '+_fotoCnt+'</span>':'')+
-        '</div>'+
+      '<div style="display:flex;gap:3px;align-items:center;">'+
+        (_emlCnt>0?'<span onclick="_emOpenEmlGallery()" style="background:#FFF3CD;color:#856404;border:1px solid #FFEAA7;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px;cursor:pointer;">EML '+_emlCnt+'</span>':'')+
+        (_pdfCnt>0?'<span onclick="_openEmailThumbnailGrid()" style="background:#fdf0f0;color:#c0392b;border:1px solid #f5c6c6;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px;cursor:pointer;">PDF '+_pdfCnt+'</span>':'')+
+        (_fotoCnt>0?'<span onclick="_emOpenFotoGallery()" style="background:#E6F4EA;color:#15803D;border:1px solid #B7DFBF;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px;cursor:pointer;">Fotos '+_fotoCnt+'</span>':'')+
       '</div>'+
     '</div>';
-  el.appendChild(_header);
-  // ── Mail-Liste: exakt gleiche Render-Logik wie Auftrag-Modal (kopiert) ────
-  let _unifiedDiv=document.createElement('div');
-  _unifiedDiv.style.cssText='flex:1;overflow-y:auto;min-height:0;';
-  el.appendChild(_unifiedDiv);
-  (function(task,container){
-    const taskId=task.id;
-    function _ns(s){return(s||'').replace(/^(Re|AW|Fwd|WG|Antwort|FYI):\s*/gi,'').trim().toLowerCase().substring(0,60);}
-    const thrIds=new Set([...(task.gmailThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean),...(task.msThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean)]);
-    const thrSK=new Set();
-    (task.gmailThreadMessages||[]).forEach(function(m){const k=_ns(m.subject||m.betreff||'');if(k)thrSK.add(k);});
-    (task.msThreadMessages||[]).forEach(function(m){const k=_ns(m.subject||m.betreff||'');if(k)thrSK.add(k);});
-    const allM=[];
-    (task.gmailThreadMessages||[]).forEach(function(m,i){allM.push({src:'gmail',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:m.threadId||task.gmailThreadId||'_gm'});});
-    (task.msThreadMessages||[]).forEach(function(m,i){allM.push({src:'ms',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:m.conversationId||task.msConversationId||'_ms'});});
-    (task.emailOriginals||[]).forEach(function(m,i){if(m.messageId&&thrIds.has(m.messageId))return;const sk=_ns(m.subject||m.name||'');if(sk&&thrSK.has(sk))return;allM.push({src:'original',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:'_orig'});});
-    allM.sort(function(a,b){return(b._ts||0)-(a._ts||0);});
-    if(!allM.length){container.innerHTML='<div style="padding:20px;text-align:center;color:var(--text2);font-size:12px;line-height:1.6;">Noch keine E-Mails –<br>per Drag &amp; Drop hinzufügen</div>';return;}
+  el.appendChild(_sec);
+  // 4. Thread-Liste (scrollbar)
+  const _listDiv=document.createElement('div');
+  _listDiv.style.cssText='flex:1;overflow-y:auto;min-height:0;';
+  if(!allM.length){
+    _listDiv.innerHTML='<div style="padding:20px;text-align:center;color:var(--text2);font-size:12px;line-height:1.6;">Noch keine E-Mails –<br>per Drag &amp; Drop hinzufügen</div>';
+  } else {
+    const taskId=t.id;
     const grps=new Map();
-    allM.forEach(function(m){const subj=m.data.subject||m.data.betreff||'(kein Betreff)';let key;if(m.src!=='original'){const rid=m.convId&&!m.convId.startsWith('_');key=rid?m.convId:(_ns(subj)||'__other__');}else{key=_ns(subj)||'__other__';}if(!grps.has(key))grps.set(key,{subject:subj,mails:[]});grps.get(key).mails.push(m);});
+    allM.forEach(function(m){
+      const subj=m.data.subject||m.data.betreff||'(kein Betreff)';
+      let key;
+      if(m.src!=='original'){const rid=m.convId&&!m.convId.startsWith('_');key=rid?m.convId:(_ns(subj)||'__other__');}
+      else{key=_ns(subj)||'__other__';}
+      if(!grps.has(key))grps.set(key,{subject:subj,mails:[]});
+      grps.get(key).mails.push(m);
+    });
     const showH=allM.length>=2;
     if(!window._pamThreadOpen)window._pamThreadOpen={};
-    if(!Object.keys(window._pamThreadOpen).length){const fk=[...grps.keys()][0];if(fk)window._pamThreadOpen[fk]=true;}
     function _fmt(ts){if(!ts)return'';const d=new Date(ts);const now=new Date();if(d.toDateString()===now.toDateString())return('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);return('0'+d.getDate()).slice(-2)+'.'+('0'+(d.getMonth()+1)).slice(-2)+'.'+String(d.getFullYear()).slice(2);}
     let html='';
     grps.forEach(function(grp,key){
       const isOpen=!showH||!!window._pamThreadOpen[key];
       const lastTs=Math.max.apply(null,grp.mails.map(function(m){return m._ts||0;}));
       const lastDate=_fmt(lastTs);const mc=grp.mails.length;
-      if(showH){html+='<div style="border-bottom:0.5px solid var(--border);"><div onclick="_pamToggleThread(\''+key+'\')" style="padding:7px 10px;background:var(--bg3);display:flex;align-items:flex-start;gap:6px;cursor:pointer;user-select:none;"><span style="font-size:10px;color:var(--text2);margin-top:2px;flex-shrink:0;display:inline-block;transform:rotate('+(isOpen?'0':'-90')+'deg);transition:transform .15s;">▼</span><div style="flex:1;min-width:0;"><div style="font-size:calc(12px*var(--modal-scale,1));font-weight:600;color:var(--text1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(grp.subject)+'</div><div style="font-size:calc(11px*var(--modal-scale,1));color:var(--text2);margin-top:1px;">'+mc+' Mail'+(mc!==1?'s':'')+' · '+lastDate+'</div></div></div>';}
+      if(showH){
+        html+='<div style="border-bottom:0.5px solid var(--border);">';
+        html+='<div onclick="_pamToggleThread(\''+key+'\')" style="padding:7px 10px;background:var(--bg3);display:flex;align-items:flex-start;gap:6px;cursor:pointer;user-select:none;">';
+        html+='<span style="font-size:10px;color:var(--text2);margin-top:2px;flex-shrink:0;display:inline-block;transform:rotate('+(isOpen?'0':'-90')+'deg);transition:transform .15s;">▼</span>';
+        html+='<div style="flex:1;min-width:0;"><div style="font-size:12px;font-weight:600;color:var(--text1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_escHtml(grp.subject)+'</div>';
+        html+='<div style="font-size:11px;color:var(--text2);margin-top:1px;">'+mc+' Mail'+(mc!==1?'s':'')+' · '+lastDate+'</div></div></div>';
+      }
       if(isOpen){
         const ind=showH?'22px':'10px';
         [...grp.mails].sort(function(a,b){return(b._ts||0)-(a._ts||0);}).forEach(function(m){
-          const d=m.data;const isOrig=m.src==='original';
+          const d=m.data;
           const from=d.fromName||d.from||d.sender||d.senderName||'Unbekannt';
           const isOut=d.direction==='gesendet'||d.isOut||false;
           const dateStr=_fmt(m._ts);
@@ -18347,7 +18347,7 @@ function _renderEmailMailList(){
           const subj=d.subject||d.betreff||'';
           const tip=((from+(subj?' | '+subj:'')+(preview?' - '+preview:'')).substring(0,250)).replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
           let dBg,dTxt,dLbl,eCol;
-          if(isOrig){dBg='rgba(124,58,237,.12)';dTxt='#5b21b6';dLbl='Original';eCol='#7c3aed';}
+          if(m.src==='original'){dBg='rgba(124,58,237,.12)';dTxt='#5b21b6';dLbl='Original';eCol='#7c3aed';}
           else if(isOut){dBg='rgba(22,163,74,.15)';dTxt='#15803D';dLbl='Gesendet';eCol='#16A34A';}
           else{dBg='rgba(29,78,216,.10)';dTxt='#1E40AF';dLbl='Eingang';eCol='#0078d4';}
           let cf;
@@ -18357,133 +18357,112 @@ function _renderEmailMailList(){
           const pvw=preview.substring(0,60);
           html+='<div style="display:flex;gap:8px;align-items:flex-start;padding:6px '+ind+' 6px '+ind+';border-top:0.5px solid var(--border);cursor:pointer;background:var(--bg1);transition:background .1s;" onmouseenter="_pamUnifiedHover(this,\''+tip+'\')" onmouseleave="_pamUnifiedHoverOut()" onclick="'+cf+'">';
           html+='<div style="width:26px;height:26px;border-radius:5px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="'+eCol+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg></div>';
-          html+='<div style="flex:1;min-width:0;"><div style="display:flex;align-items:center;gap:4px;"><span style="font-size:calc(12px*var(--modal-scale,1));font-weight:600;color:var(--text1);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(from)+'</span><span style="font-size:calc(11px*var(--modal-scale,1));color:var(--text2);white-space:nowrap;">'+dateStr+'</span></div>';
-          html+='<div style="display:flex;align-items:center;gap:4px;margin-top:2px;"><span style="font-size:calc(10px*var(--modal-scale,1));padding:1px 5px;border-radius:4px;background:'+dBg+';color:'+dTxt+';font-weight:600;white-space:nowrap;">'+dLbl+'</span>';
-          if(pvw)html+='<span style="font-size:calc(11px*var(--modal-scale,1));color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(pvw)+'</span>';
+          html+='<div style="flex:1;min-width:0;"><div style="display:flex;align-items:center;gap:4px;"><span style="font-size:12px;font-weight:600;color:var(--text1);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+_escHtml(from)+'</span><span style="font-size:11px;color:var(--text2);white-space:nowrap;">'+dateStr+'</span></div>';
+          html+='<div style="display:flex;align-items:center;gap:4px;margin-top:2px;"><span style="font-size:10px;padding:1px 5px;border-radius:4px;background:'+dBg+';color:'+dTxt+';font-weight:600;white-space:nowrap;">'+dLbl+'</span>';
+          if(pvw)html+='<span style="font-size:11px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+_escHtml(pvw)+'</span>';
           html+='</div></div></div>';
         });
       }
       if(showH)html+='</div>';
     });
-    container.innerHTML=html;
-  })(t,_unifiedDiv);
-  // ── Untere Leiste: .eml/.msg + Anhang ──
-  let _emlBar=document.createElement('div');
-  _emlBar.innerHTML='<div id="_emDropBarList" style="padding:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:6px;background:var(--bg2);transition:background .15s,outline .15s;">'+
-    '<div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;text-align:center;">📥 Datei hinzufügen – hier hineinziehen oder klicken</div>'+
-    '<div style="display:flex;gap:6px;">'+
-      '<label style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:9px 10px;font-size:12px;font-weight:600;border:1.5px dashed #1a7040;border-radius:8px;background:rgba(26,112,64,.05);color:#1a7040;cursor:pointer;" title=".eml oder .msg Datei wählen oder hierher ziehen">✉ .eml / .msg<input type="file" accept=".msg,.eml" style="display:none" onchange="_emHandleEmlSelect(event)"></label>'+
-      '<label style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:9px 10px;font-size:12px;font-weight:600;border:1.5px dashed var(--border);border-radius:8px;background:var(--bg3);color:var(--text2);cursor:pointer;" title="Datei als Anhang hochladen">📎 Anhang<input type="file" multiple style="display:none" onchange="_emAddAttachmentFile(event)"></label>'+
-    '</div>'+
-  '</div>';
-  let _ebd=_emlBar.querySelector('div');
-  let _ebdCnt=0;
-  _ebd.addEventListener('dragenter',function(e){e.preventDefault();_ebdCnt++;_ebd.style.background='rgba(108,99,255,.07)';_ebd.style.outline='2px dashed var(--accent)';});
-  _ebd.addEventListener('dragover',function(e){e.preventDefault();});
-  _ebd.addEventListener('dragleave',function(){_ebdCnt--;if(_ebdCnt<=0){_ebdCnt=0;_ebd.style.background='var(--bg2)';_ebd.style.outline='';}});
-  _ebd.addEventListener('drop',function(e){e.preventDefault();_ebdCnt=0;_ebd.style.background='var(--bg2)';_ebd.style.outline='';_emHandleEmlDrop(e.dataTransfer);});
-  el.appendChild(_emlBar);
+    _listDiv.innerHTML=html;
+  }
+  el.appendChild(_listDiv);
+  // 5. Footer: "Vollständigen Verlauf öffnen"
+  const _footer=document.createElement('div');
+  _footer.style.cssText='padding:8px 10px;border-top:1px solid var(--border);background:var(--bg2);flex-shrink:0;';
+  _footer.innerHTML='<button onclick="if(_emCurrentTask){_pamActiveTaskId=_emCurrentTask.id;_msOpenThreadPopup();}" style="width:100%;padding:7px;font-size:12px;font-weight:600;border:1px solid var(--border);border-radius:6px;background:var(--bg3);color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;">📋 Vollständigen Verlauf öffnen</button>';
+  el.appendChild(_footer);
 }
 
 async function _emOpenMail(idx,mails){
-  // Fix3: Race-Condition-Schutz – jeder Aufruf bekommt ein eigenes Token
   const _myToken=++_emOpenMailToken;
   _emActiveMailIdx=idx;
-  // Nur aktive CSS-Klasse aktualisieren, KEIN rebuild (würde Event-Listener zerstören)
-  let _mlEl=document.getElementById('emMailList');
-  if(_mlEl){_mlEl.querySelectorAll('.em-mail-item').forEach(function(el,i){el.classList.toggle('active',i===idx);});}
-  let m=mails[idx];
-  let d=m.data;
-
-  // ── Exchange/Gmail-Thread-Mail: Body direkt im emReadingPane rendern ──
-  if((m.type==='ms'||m.type==='gmail')&&d.id&&_emCurrentTask){
-    const isMs=m.type==='ms';
-    const isOut=d.direction==='gesendet';
-    let from=d.fromName?('"'+d.fromName+'" <'+(d.from||'>')+'>'):(d.from||d.sender||'Unbekannt');
-    let subject=d.subject||'(kein Betreff)';
-    const initials2=from.split(/\s+/).slice(0,2).map(function(w){return w[0]||'';}).join('').toUpperCase()||'?';
+  if(!mails||idx<0||idx>=mails.length)return;
+  const m=mails[idx];
+  const d=m.data;
+  const isMs=m.type==='ms';
+  const isGm=m.type==='gmail';
+  // ── Exchange/Gmail-Thread-Mail ──
+  if((isMs||isGm)&&d.id&&_emCurrentTask){
+    const from=d.fromName?('"'+d.fromName+'" <'+(d.from||'>')+'>'):(d.from||d.sender||'Unbekannt');
+    const subject=d.subject||'(kein Betreff)';
+    const initials=from.replace(/<[^>]+>/g,'').trim().split(/\s+/).slice(0,2).map(function(w){return w[0]||'';}).join('').toUpperCase()||'?';
     const d2=d.date?new Date(d.date):null;
-    const dateLabel2=d2?d2.toLocaleString('de-DE'):'';
-    // Anhänge
-    let allFiles2=[];
-    (d.attachments||[]).forEach(function(a){
-      let name=a.filename||a.name||'Anhang';let nl=name.toLowerCase();
-      let icon=nl.endsWith('.pdf')?'📄':(nl.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':'📎');
-      allFiles2.push({icon,name,url:a.url||a.webViewLink||'',mime:a.contentType||a.mimeType||'',data:a});
-    });
-    _emRenderAttachPanel(allFiles2);
-    const pane2=document.getElementById('emReadingPane');
-    const taskId2=_emCurrentTask.id;
-    const mailIdx2=isMs?(_emCurrentTask.msThreadMessages||[]).findIndex(x=>x.id===d.id):(_emCurrentTask.gmailThreadMessages||[]).findIndex(x=>x.id===d.id);
-    const dblFn2=isMs?`_msOpenMailOverlay('${taskId2}',${mailIdx2})`:`_gmOpenMailOverlay('${taskId2}',${mailIdx2})`;
-    pane2.innerHTML=
+    const dateLabel=d2?d2.toLocaleString('de-DE'):'';
+    const allFiles=[];
+    (d.attachments||[]).forEach(function(a){let name=a.filename||a.name||'Anhang';let nl=name.toLowerCase();let icon=nl.endsWith('.pdf')?'📄':(nl.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':'📎');allFiles.push({icon:icon,name:name,url:a.url||a.webViewLink||'',mime:a.contentType||a.mimeType||'',data:a});});
+    _emRenderAttachPanel(allFiles);
+    const pane=document.getElementById('emReadingPane');
+    const taskId=_emCurrentTask.id;
+    const msgs=isMs?(_emCurrentTask.msThreadMessages||[]):(_emCurrentTask.gmailThreadMessages||[]);
+    const mailIdx=msgs.findIndex(function(x){return x.id===d.id;});
+    const safeIdx=mailIdx>=0?mailIdx:0;
+    const dblFn=isMs?('_msOpenMailOverlay('+JSON.stringify(taskId)+','+safeIdx+')')
+                    :('_gmOpenMailOverlay('+JSON.stringify(taskId)+','+safeIdx+')');
+    pane.innerHTML=
       '<div class="em-rp-header">'+
         '<div class="em-rp-subject">'+_escHtml(subject)+'</div>'+
         '<div class="em-rp-meta">'+
-          '<div class="em-avatar">'+_escHtml(initials2)+'</div>'+
+          '<div class="em-avatar">'+_escHtml(initials)+'</div>'+
           '<div style="display:flex;flex-direction:column;gap:1px;flex:1;min-width:0;">'+
             '<span style="font-size:12px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_escHtml(from)+'</span>'+
-            '<span style="font-size:11px;color:var(--text2);">'+_escHtml(dateLabel2)+'</span>'+
+            '<span style="font-size:11px;color:var(--text2);">'+_escHtml(dateLabel)+'</span>'+
           '</div>'+
-          '<button onclick="'+dblFn2+'" style="flex-shrink:0;padding:3px 9px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);font-size:11px;cursor:pointer;color:var(--text1);" title="Vollbild öffnen">⛶ Groß</button>'+
+          '<button onclick="'+dblFn+'" style="flex-shrink:0;padding:3px 9px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);font-size:11px;cursor:pointer;color:var(--text1);" title="Vollbild öffnen">⛶ Groß</button>'+
         '</div>'+
       '</div>'+
       '<div id="emBodyContainer" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0;"><div style="padding:14px;color:var(--text2);font-size:13px;">⏳ Lade…</div></div>';
-    const bc2=document.getElementById('emBodyContainer');
-    // Gecachten Body nutzen
-    const _cached=d._cachedBodyHtml||(isMs?null:null);
-    if(_cached){
-      const fr2=document.createElement('iframe');fr2.style.cssText='flex:1;width:100%;border:none;min-height:0;';
-      const _blobU=URL.createObjectURL(new Blob(['<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}</style></head><body>'+_cached.replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'')+'</body></html>'],{type:'text/html'}));
-      fr2.src=_blobU;let _rev2=false;fr2.onload=function(){if(!_rev2){_rev2=true;URL.revokeObjectURL(_blobU);}};setTimeout(function(){if(!_rev2){_rev2=true;URL.revokeObjectURL(_blobU);}},30000);
-      if(bc2){bc2.innerHTML='';bc2.appendChild(fr2);}
+    const bc=document.getElementById('emBodyContainer');
+    if(d._cachedBodyHtml){
       if(_myToken!==_emOpenMailToken)return;
+      const fr=document.createElement('iframe');fr.style.cssText='flex:1;width:100%;border:none;min-height:0;';
+      const bu=URL.createObjectURL(new Blob(['<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}</style></head><body>'+d._cachedBodyHtml.replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'')+'</body></html>'],{type:'text/html'}));
+      fr.src=bu;let _rv=false;fr.onload=function(){if(!_rv){_rv=true;URL.revokeObjectURL(bu);}};setTimeout(function(){if(!_rv){_rv=true;URL.revokeObjectURL(bu);}},30000);
+      if(bc){bc.innerHTML='';bc.appendChild(fr);}
       return;
     }
-    // API-Fetch
     try{
       if(isMs&&msToken&&d.id){
-        const r2=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+d.id+'?$select=body',{headers:{Authorization:'Bearer '+msToken}});
-        if(r2.ok){
-          const data2=await r2.json();d._cachedBodyHtml=data2.body?.content||'';
+        const r=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+d.id+'?$select=body',{headers:{Authorization:'Bearer '+msToken}});
+        if(r.ok){
+          const data=await r.json();d._cachedBodyHtml=(data.body&&data.body.content)||'';
           if(_myToken!==_emOpenMailToken)return;
-          const html2=data2.body?.contentType==='html'?d._cachedBodyHtml:'<pre style="white-space:pre-wrap;font-size:13px;">'+_escHtml(data2.body?.content||d.preview||'')+'</pre>';
-          const fr2=document.createElement('iframe');fr2.style.cssText='flex:1;width:100%;border:none;min-height:0;';
-          const _blobU=URL.createObjectURL(new Blob(['<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}</style></head><body>'+html2.replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'')+'</body></html>'],{type:'text/html'}));
-          fr2.src=_blobU;let _rev2=false;fr2.onload=function(){if(!_rev2){_rev2=true;URL.revokeObjectURL(_blobU);}};setTimeout(function(){if(!_rev2){_rev2=true;URL.revokeObjectURL(_blobU);}},30000);
-          if(bc2){bc2.innerHTML='';bc2.appendChild(fr2);}
+          const html=(data.body&&data.body.contentType==='html')?d._cachedBodyHtml:'<pre style="white-space:pre-wrap;font-size:13px;">'+_escHtml((data.body&&data.body.content)||d.preview||'')+'</pre>';
+          const fr=document.createElement('iframe');fr.style.cssText='flex:1;width:100%;border:none;min-height:0;';
+          const bu=URL.createObjectURL(new Blob(['<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}</style></head><body>'+html.replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'')+'</body></html>'],{type:'text/html'}));
+          fr.src=bu;let _rv=false;fr.onload=function(){if(!_rv){_rv=true;URL.revokeObjectURL(bu);}};setTimeout(function(){if(!_rv){_rv=true;URL.revokeObjectURL(bu);}},30000);
+          if(bc){bc.innerHTML='';bc.appendChild(fr);}
         }
-      } else if(!isMs&&gmailToken&&d.id){
-        const r2=await fetch('https://www.googleapis.com/gmail/v1/users/me/messages/'+d.id+'?format=full',{headers:{Authorization:'Bearer '+gmailToken}});
-        if(r2.ok){
-          const mb2=await r2.json();const res2={html:'',plain:''};_gmExtractBody(mb2.payload,res2);
+      } else if(isGm&&gmailToken&&d.id){
+        const r=await fetch('https://www.googleapis.com/gmail/v1/users/me/messages/'+d.id+'?format=full',{headers:{Authorization:'Bearer '+gmailToken}});
+        if(r.ok){
+          const mb=await r.json();const res={html:'',plain:''};_gmExtractBody(mb.payload,res);
           if(_myToken!==_emOpenMailToken)return;
-          const html2=(res2.html||'<pre style="white-space:pre-wrap;font-size:13px;">'+_escHtml(res2.plain||d.preview||'(kein Inhalt)')+'</pre>').replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'');
-          const fr2=document.createElement('iframe');fr2.style.cssText='flex:1;width:100%;border:none;min-height:0;';
-          const _blobU=URL.createObjectURL(new Blob(['<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}</style></head><body>'+html2+'</body></html>'],{type:'text/html'}));
-          fr2.src=_blobU;let _rev2=false;fr2.onload=function(){if(!_rev2){_rev2=true;URL.revokeObjectURL(_blobU);}};setTimeout(function(){if(!_rev2){_rev2=true;URL.revokeObjectURL(_blobU);}},30000);
-          if(bc2){bc2.innerHTML='';bc2.appendChild(fr2);}
+          const html=(res.html||'<pre style="white-space:pre-wrap;font-size:13px;">'+_escHtml(res.plain||d.preview||'(kein Inhalt)')+'</pre>').replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'');
+          const fr=document.createElement('iframe');fr.style.cssText='flex:1;width:100%;border:none;min-height:0;';
+          const bu=URL.createObjectURL(new Blob(['<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}</style></head><body>'+html+'</body></html>'],{type:'text/html'}));
+          fr.src=bu;let _rv=false;fr.onload=function(){if(!_rv){_rv=true;URL.revokeObjectURL(bu);}};setTimeout(function(){if(!_rv){_rv=true;URL.revokeObjectURL(bu);}},30000);
+          if(bc){bc.innerHTML='';bc.appendChild(fr);}
         }
       }
-    }catch(e){if(bc2)bc2.innerHTML='<div style="padding:14px;color:#c00;font-size:13px;">⚠ '+_escHtml(e.message)+'</div>';}
+    }catch(e){if(bc)bc.innerHTML='<div style="padding:14px;color:#c00;font-size:13px;">⚠ '+_escHtml(e.message)+'</div>';}
     if(_myToken!==_emOpenMailToken)return;
     return;
   }
+  // ── EML-Original ──
   let from=d.from||d.sender||d.senderName||'Unbekannt';
-  let subject=d.subject||d.betreff||'(kein Betreff)';
+  const subject=d.subject||d.betreff||'(kein Betreff)';
   let bodyHtml=d.bodyHtml||'';
   let bodyText=d.body||d.bodyText||d.snippet||'';
-  let dateStr=d.date||d.receivedDate||d.internalDate||'';
+  const dateStr2=d.date||d.receivedDate||d.internalDate||'';
   let dateLabel='';
-  if(dateStr){try{let dt=new Date(typeof dateStr==='number'?dateStr:dateStr);dateLabel=isNaN(dt)?String(dateStr):dt.toLocaleString('de-DE');}catch(e){dateLabel=String(dateStr);}}
-  let initials=from.split(/\s+/).slice(0,2).map(function(w){return w[0]||'';}).join('').toUpperCase()||'?';
-
-  // ── EML-Original: Body aus Cache oder Drive ──
+  if(dateStr2){try{const dt=new Date(typeof dateStr2==='number'?dateStr2:dateStr2);dateLabel=isNaN(dt.getTime())?String(dateStr2):dt.toLocaleString('de-DE');}catch(e){dateLabel=String(dateStr2);}}
+  const initials=from.split(/\s+/).slice(0,2).map(function(w){return w[0]||'';}).join('').toUpperCase()||'?';
   let emlAttachFiles=[];
-  if(m.type==='original'&&d.fileId&&_emMailBodyCache[d.fileId]){let _c=_emMailBodyCache[d.fileId];bodyHtml=_c.bodyHtml||'';bodyText=_c.bodyText||'';from=_c.from||from;emlAttachFiles=_c.attachments||[];}
-  if(m.type==='original'&&d.fileId&&!bodyHtml&&!bodyText){
-    // Header sofort mit Ladeanzeige rendern
-    let pane=document.getElementById('emReadingPane');
+  if(d.fileId&&_emMailBodyCache[d.fileId]){const _c=_emMailBodyCache[d.fileId];bodyHtml=_c.bodyHtml||'';bodyText=_c.bodyText||'';from=_c.from||from;emlAttachFiles=_c.attachments||[];}
+  if(d.fileId&&!bodyHtml&&!bodyText){
+    const pane=document.getElementById('emReadingPane');
     pane.innerHTML=
       '<div class="em-rp-header">'+
         '<div class="em-rp-subject">'+_escHtml(subject)+'</div>'+
@@ -18504,67 +18483,32 @@ async function _emOpenMail(idx,mails){
       return;
     }
     try{
-      let r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(d.fileId)+'?alt=media',
-        {headers:{Authorization:'Bearer '+gdriveToken}});
+      const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(d.fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
       if(!r.ok)throw new Error('HTTP '+r.status);
-      let rawText=await r.text();
-      let parsed=_parseEmlText(rawText);
-      bodyHtml=parsed.bodyHtml||'';
-      bodyText=parsed.bodyText||'';
-      // CID-Inline-Bilder ersetzen
-      if(bodyHtml&&parsed.cidMap){
-        for(const [cid,durl] of Object.entries(parsed.cidMap)){bodyHtml=bodyHtml.split(cid).join(durl);}
-      }
-      // Metadaten verfeinern falls im gespeicherten Eintrag unvollständig
-      if(parsed.subject&&!d.subject)from=parsed.sender||from;
+      const rawText=await r.text();
+      const parsed=_parseEmlText(rawText);
+      bodyHtml=parsed.bodyHtml||'';bodyText=parsed.bodyText||'';
+      if(bodyHtml&&parsed.cidMap){for(const [cid,durl] of Object.entries(parsed.cidMap)){bodyHtml=bodyHtml.split(cid).join(durl);}}
       if(parsed.sender)from=parsed.sender;
-      // Anhänge aus EML als Datei-Liste
-      (parsed.attachments||[]).forEach(function(a){
-        let nl=(a.name||'').toLowerCase();
-        let icon=nl.endsWith('.pdf')?'📄':(nl.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':'📎');
-        emlAttachFiles.push({icon,name:a.name||'Anhang',url:'',mime:a.mimeType||'',data:a,_isEmlParsed:true});
-      });
-      // Anhänge die beim EML-Upload bereits in Drive gespeichert wurden:
-      let t=_emCurrentTask;
-      if(t&&d.messageId){
-        // Fotos und Attachments des Tasks anzeigen die zur gleichen EML gehören
-        (t.fotos||[]).forEach(function(f){
-          if(f.fromMessageId&&f.fromMessageId!==d.messageId)return;
-          let nl=(f.name||'').toLowerCase();
-          let icon=nl.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':'📎';
-          if(!emlAttachFiles.some(x=>x.name===f.name))
-            emlAttachFiles.push({icon,name:f.name||'Foto',url:f.thumbnailLink||'',mime:f.mimeType||'image/jpeg',data:f});
-        });
-        (t.attachments||[]).forEach(function(a){
-          if(a.fromMessageId&&a.fromMessageId!==d.messageId)return;
-          let nl=(a.name||'').toLowerCase();
-          let icon=nl.endsWith('.pdf')?'📄':'📎';
-          if(!emlAttachFiles.some(x=>x.name===a.name))
-            emlAttachFiles.push({icon,name:a.name||'Anhang',url:a.url||'',mime:'',data:a});
-        });
+      (parsed.attachments||[]).forEach(function(a){let nl=(a.name||'').toLowerCase();let icon=nl.endsWith('.pdf')?'📄':(nl.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':'📎');emlAttachFiles.push({icon:icon,name:a.name||'Anhang',url:'',mime:a.mimeType||'',data:a,_isEmlParsed:true});});
+      const _t=_emCurrentTask;
+      if(_t&&d.messageId){
+        (_t.fotos||[]).forEach(function(f){if(f.fromMessageId&&f.fromMessageId!==d.messageId)return;let nl=(f.name||'').toLowerCase();let icon=nl.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':'📎';if(!emlAttachFiles.some(function(x){return x.name===f.name;}))emlAttachFiles.push({icon:icon,name:f.name||'Foto',url:f.thumbnailLink||'',mime:f.mimeType||'image/jpeg',data:f});});
+        (_t.attachments||[]).forEach(function(a){if(a.fromMessageId&&a.fromMessageId!==d.messageId)return;let nl=(a.name||'').toLowerCase();let icon=nl.endsWith('.pdf')?'📄':'📎';if(!emlAttachFiles.some(function(x){return x.name===a.name;}))emlAttachFiles.push({icon:icon,name:a.name||'Anhang',url:a.url||'',mime:'',data:a});});
       }
       _emMailBodyCache[d.fileId]={bodyHtml:bodyHtml,bodyText:bodyText,from:from,attachments:emlAttachFiles.slice()};
-      if(_myToken!==_emOpenMailToken)return; // Fix3: überholt von neuerem Klick nach dem Fetch
+      if(_myToken!==_emOpenMailToken)return;
     }catch(e){
-      document.getElementById('emBodyContainer').innerHTML='<div style="padding:20px;color:#c00;font-size:13px;">⚠ Fehler beim Laden: '+_escHtml(e.message)+'<br><a href="'+_escHtml(d.url||'')+'" target="_blank" style="color:var(--accent);">In Drive öffnen</a></div>';
+      const bc=document.getElementById('emBodyContainer');
+      if(bc)bc.innerHTML='<div style="padding:20px;color:#c00;font-size:13px;">⚠ Fehler beim Laden: '+_escHtml(e.message)+'<br><a href="'+_escHtml(d.url||'')+'" target="_blank" style="color:var(--accent);">In Drive öffnen</a></div>';
       if(e.message&&e.message.includes('401'))_handleDrive401();
       return;
     }
   }
-
-  // Anhänge-Panel (normale Thread-Mails haben d.attachments, EML-Originale bekommen emlAttachFiles)
-  let allFiles=[...emlAttachFiles];
-  (d.attachments||[]).forEach(function(a){
-    let name=a.filename||a.name||'Anhang';
-    let nl=name.toLowerCase();
-    let icon=nl.endsWith('.pdf')?'📄':(nl.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':'📎');
-    let url=a.url||a.webViewLink||'';
-    let mime=a.contentType||a.mimeType||'';
-    allFiles.push({icon,name,url,mime,data:a});
-  });
-  _emRenderAttachPanel(allFiles);
-
-  let pane=document.getElementById('emReadingPane');
+  const allFiles2=[...emlAttachFiles];
+  (d.attachments||[]).forEach(function(a){let name=a.filename||a.name||'Anhang';let nl=name.toLowerCase();let icon=nl.endsWith('.pdf')?'📄':(nl.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':'📎');allFiles2.push({icon:icon,name:name,url:a.url||a.webViewLink||'',mime:a.contentType||a.mimeType||'',data:a});});
+  _emRenderAttachPanel(allFiles2);
+  const pane=document.getElementById('emReadingPane');
   pane.innerHTML=
     '<div class="em-rp-header">'+
       '<div class="em-rp-subject">'+_escHtml(subject)+'</div>'+
@@ -18577,20 +18521,16 @@ async function _emOpenMail(idx,mails){
       '</div>'+
     '</div>'+
     '<div id="emBodyContainer" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0;"></div>';
-  // HTML-Body per iframe (Blob URL)
-  let bodyContainer=document.getElementById('emBodyContainer');
+  const bodyContainer=document.getElementById('emBodyContainer');
   if(bodyHtml){
-    let cleanBody=bodyHtml.replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<link[^>]+rel=["']?stylesheet["']?[^>]*>/gi,'');
-    let iframe=document.createElement('iframe');
-    iframe.style.cssText='flex:1;width:100%;border:none;min-height:0;';
-    let fullHtml='<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,Helvetica,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}a{color:#1a73e8;}img{max-width:100%;}</style></head><body>'+cleanBody+'</body></html>';
-    let blobUrl=URL.createObjectURL(new Blob([fullHtml],{type:'text/html'}));
+    const cleanBody=bodyHtml.replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<link[^>]+rel=["']?stylesheet["']?[^>]*>/gi,'');
+    const iframe=document.createElement('iframe');iframe.style.cssText='flex:1;width:100%;border:none;min-height:0;';
+    const fullHtml='<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,Helvetica,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}a{color:#1a73e8;}img{max-width:100%;}</style></head><body>'+cleanBody+'</body></html>';
+    const blobUrl=URL.createObjectURL(new Blob([fullHtml],{type:'text/html'}));
     iframe.src=blobUrl;
-    // Fix4: Blob-URL in jedem Fall freigeben (onload + Fallback-Timeout)
     let _blobRevoked=false;
-    const _revokeBlobUrl=function(){if(!_blobRevoked){_blobRevoked=true;URL.revokeObjectURL(blobUrl);}};
-    iframe.onload=_revokeBlobUrl;
-    setTimeout(_revokeBlobUrl,30000); // Fallback nach 30s falls onload nicht feuert
+    const _revoke=function(){if(!_blobRevoked){_blobRevoked=true;URL.revokeObjectURL(blobUrl);}};
+    iframe.onload=_revoke;setTimeout(_revoke,30000);
     bodyContainer.appendChild(iframe);
   } else if(bodyText){
     bodyContainer.innerHTML='<div style="padding:14px 18px;font-family:Arial,sans-serif;font-size:13px;color:#444;white-space:pre-wrap;overflow-y:auto;flex:1;">'+_escHtml(bodyText)+'</div>';
