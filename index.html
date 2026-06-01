@@ -3523,7 +3523,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-01 · #188'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b181)
+const PAM_BUILD = 'v2026-06-01 · #192'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b189)
 
 // ── STATE ──
 let boards = {};
@@ -14510,7 +14510,21 @@ async function _createGoogleKontakt(kontaktDiv){
       body:JSON.stringify(body)
     });
     if(resp.status===403){
-      showToast('⚠ Berechtigung fehlt – bitte Drive-Button drücken und neu anmelden (Kontakte-Scope)','error',8000);
+      // Token-Cache leeren, damit Re-Auth alle Scopes neu anfordert
+      try{localStorage.removeItem('pam_gdrive_token_v1');}catch(e){}
+      gdriveToken=null; gdriveTokenExpires=0;
+      showToast('⚠ Kontakte-Berechtigung fehlt – Login wird neu gestartet…','error',8000);
+      setTimeout(()=>{
+        try{
+          if(gdriveTokenClient){
+            gdriveTokenClient.requestAccessToken({prompt:'consent'});
+          } else {
+            showToast('⚠ Bitte Drive-Button drücken und neu anmelden (Kontakte-Scope)','error',8000);
+          }
+        }catch(e){
+          showToast('⚠ Bitte Drive-Button drücken und neu anmelden (Kontakte-Scope)','error',8000);
+        }
+      },500);
       return;
     }
     if(!resp.ok){const e=await resp.json();throw new Error(e.error&&e.error.message||resp.status);}
@@ -18218,19 +18232,9 @@ function closeEmailTaskModal(){
   _emPrevBoard='';
 }
 
-// Nach Outlook/Gmail-Laden: Liste neu aufbauen und aktive Mail im Lesebereich behalten
+// Nach Outlook/Gmail-Laden: Liste neu aufbauen
 function _emReloadMailList(){
-  let prevIdx=_emActiveMailIdx;
   _renderEmailMailList();
-  // Aktive Mail im Lesebereich wiederherstellen
-  if(prevIdx>=0&&_emCurrentTask){
-    let _mails=[];
-    (_emCurrentTask.emailOriginals||[]).forEach(function(m,i){_mails.push({type:'original',idx:i,data:m});});
-    (_emCurrentTask.gmailThreadMessages||[]).forEach(function(m,i){_mails.push({type:'gmail',idx:i,data:m});});
-    (_emCurrentTask.msThreadMessages||[]).forEach(function(m,i){_mails.push({type:'ms',idx:i,data:m});});
-    let safeIdx=Math.min(prevIdx,_mails.length-1);
-    if(safeIdx>=0)setTimeout(function(){_emOpenMail(safeIdx,_mails);},50);
-  }
 }
 function _renderEmailMailList(){
   let el=document.getElementById('emMailList');
@@ -18300,81 +18304,14 @@ function _renderEmailMailList(){
       '</div>'+
     '</div>';
   el.appendChild(_header);
-  if(!mails.length){
-    let _empty=document.createElement('div');
-    _empty.className='em-empty-pane';
-    _empty.style.cssText='padding:20px;text-align:center;color:var(--text2);font-size:12px;';
-    _empty.innerHTML='Noch keine E-Mails –<br>per Drag &amp; Drop hinzufügen';
-    el.appendChild(_empty);
-    // .eml/.msg + Anhang Buttons auch bei leerem Zustand
-    let _bar=document.createElement('div');
-    _bar.innerHTML='<div id="_emDropBarEmpty" style="padding:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:6px;background:var(--bg2);transition:background .15s,outline .15s;">'+
-      '<div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;text-align:center;">📥 Datei hinzufügen – hier hineinziehen oder klicken</div>'+
-      '<div style="display:flex;gap:6px;">'+
-        '<label style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:9px 10px;font-size:12px;font-weight:600;border:1.5px dashed #1a7040;border-radius:8px;background:rgba(26,112,64,.05);color:#1a7040;cursor:pointer;" title=".eml oder .msg Datei wählen oder hierher ziehen">✉ .eml / .msg<input type="file" accept=".msg,.eml" style="display:none" onchange="_emHandleEmlSelect(event)"></label>'+
-        '<label style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:9px 10px;font-size:12px;font-weight:600;border:1.5px dashed var(--border);border-radius:8px;background:var(--bg3);color:var(--text2);cursor:pointer;" title="Datei als Anhang hochladen">📎 Anhang<input type="file" multiple style="display:none" onchange="_emAddAttachmentFile(event)"></label>'+
-      '</div>'+
-    '</div>';
-    let _bd=_bar.querySelector('div');
-    let _bdCnt=0;
-    _bd.addEventListener('dragenter',function(e){e.preventDefault();_bdCnt++;_bd.style.background='rgba(108,99,255,.07)';_bd.style.outline='2px dashed var(--accent)';});
-    _bd.addEventListener('dragover',function(e){e.preventDefault();});
-    _bd.addEventListener('dragleave',function(){_bdCnt--;if(_bdCnt<=0){_bdCnt=0;_bd.style.background='var(--bg2)';_bd.style.outline='';}});
-    _bd.addEventListener('drop',function(e){e.preventDefault();_bdCnt=0;_bd.style.background='var(--bg2)';_bd.style.outline='';_emHandleEmlDrop(e.dataTransfer);});
-    el.appendChild(_bar);
-    return;
-  }
-  mails.forEach(function(m,i){
-    let d=m.data;
-    let from=d.from||d.sender||d.senderName||'Unbekannt';
-    let subject=d.subject||d.betreff||'(kein Betreff)';
-    let preview=d.body||d.snippet||d.bodyText||'';
-    let dateStr=d.date||d.receivedDate||d.internalDate||'';
-    let dateLabel='';
-    if(dateStr){try{let dt=new Date(typeof dateStr==='number'?dateStr:dateStr);dateLabel=isNaN(dt)?dateStr:dt.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit'});}catch(e){dateLabel=String(dateStr).substring(0,10);}}
-    let unread=d.unread||d.isUnread||false;
-    // Attachment-Chips ermitteln
-    let chips=[];
-    (d.attachments||[]).forEach(function(a){
-      let name=(a.filename||a.name||'').toLowerCase();
-      let cls=name.endsWith('.pdf')?'pdf':(name.match(/\.(jpe?g|png|gif|webp|heic)$/)?'img':'eml');
-      let _cicon=cls==='pdf'?'📄':cls==='img'?'🖼':'📧';
-      let _curl=a.url||a.webViewLink||'';
-      let _cmime=a.mimeType||a.contentType||(cls==='pdf'?'application/pdf':cls==='img'?'image/jpeg':'message/rfc822');
-      let _cid=(window._emChipReg=window._emChipReg||[]).length;
-      window._emChipReg.push({icon:_cicon,name:a.filename||a.name||'Anhang',url:_curl,mime:_cmime,data:a});
-      chips.push('<span class="em-chip '+cls+'" title="'+(a.filename||a.name||'')+'" style="cursor:pointer;" onclick="event.stopPropagation();_emOpenChipById('+_cid+')">'+
-        _cicon+' '+(a.filename||a.name||'').substring(0,12)+'</span>');
-    });
-    // emailPdfs
-    (t.emailPdfs||[]).forEach(function(p){if(p.mailIdx===i||p.mailSource===m.type)chips.push('<span class="em-chip pdf">📄 PDF</span>');});
-    let isActive=i===_emActiveMailIdx;
-    let div=document.createElement('div');
-    div.className='em-mail-item'+(isActive?' active':'');
-    let _isOut=d.direction==='gesendet';
-    let _dirTag='<span style="font-size:10px;font-weight:700;padding:1px 5px;border-radius:4px;background:'+(_isOut?'#FFF3CD':'#E6F4EA')+';color:'+(_isOut?'#856404':'#15803D')+';border:1px solid '+(_isOut?'#FFEAA7':'#B7DFBF')+';margin-right:3px;">'+(_isOut?'Ausgang':'Eingang')+'</span>';
-    div.innerHTML=
-      '<div style="display:flex;align-items:flex-start;gap:6px;">'+
-        '<div style="flex-shrink:0;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:13px;margin-top:1px;color:'+(unread?'#0078d4':'var(--text2)')+';">✉</div>'+
-        '<div style="flex:1;min-width:0;">'+
-          '<div style="display:flex;align-items:center;gap:4px;"><span class="emi-from" style="font-weight:'+(unread?'700':'500')+';">'+_escHtml(from)+'</span><span class="emi-date">'+_escHtml(dateLabel)+'</span></div>'+
-          '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:2px;margin-top:2px;">'+_dirTag+'<span class="emi-subject" style="margin:0;">'+_escHtml(subject)+'</span></div>'+
-          '<div class="emi-preview">'+_escHtml(preview.replace(/\n/g,' ').substring(0,80))+'</div>'+
-          (chips.length?'<div class="emi-chips">'+chips.join('')+'</div>':'')+
-        '</div>'+
-      '</div>';
-    div.dataset.mailIdx=String(i);
-    el.appendChild(div);
-  });
-  // Vollständigen Verlauf öffnen
-  let _verlaufBtn=document.createElement('div');
-  _verlaufBtn.innerHTML='<div style="padding:6px 10px;border-top:1px solid var(--border);background:var(--bg2);">'+
-    '<button onclick="if(_emCurrentTask){_pamActiveTaskId=_emCurrentTask.id;_msOpenThreadPopup();}" style="width:100%;padding:7px 10px;font-size:12px;font-weight:600;border:1.5px solid var(--accent);border-radius:8px;background:transparent;color:var(--accent);cursor:pointer;">📋 Vollständigen Verlauf öffnen</button>'+
-  '</div>';
-  el.appendChild(_verlaufBtn);
-  // .eml/.msg + Anhang Buttons am Ende der Liste
+  // ── Mail-Liste via _pamRenderUnifiedEmailList (identisch mit Auftrag-Modal) ──
+  let _unifiedDiv=document.createElement('div');
+  _unifiedDiv.id='pamUnifiedEmailList';
+  _unifiedDiv.style.cssText='flex:1;overflow-y:auto;min-height:0;';
+  el.appendChild(_unifiedDiv);
+  _pamRenderUnifiedEmailList(t);
+  // ── Untere Leiste: .eml/.msg + Anhang ──
   let _emlBar=document.createElement('div');
-  _emlBar.style.marginTop='auto';
   _emlBar.innerHTML='<div id="_emDropBarList" style="padding:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:6px;background:var(--bg2);transition:background .15s,outline .15s;">'+
     '<div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;text-align:center;">📥 Datei hinzufügen – hier hineinziehen oder klicken</div>'+
     '<div style="display:flex;gap:6px;">'+
@@ -18389,36 +18326,6 @@ function _renderEmailMailList(){
   _ebd.addEventListener('dragleave',function(){_ebdCnt--;if(_ebdCnt<=0){_ebdCnt=0;_ebd.style.background='var(--bg2)';_ebd.style.outline='';}});
   _ebd.addEventListener('drop',function(e){e.preventDefault();_ebdCnt=0;_ebd.style.background='var(--bg2)';_ebd.style.outline='';_emHandleEmlDrop(e.dataTransfer);});
   el.appendChild(_emlBar);
-  // Event-Delegation: Timer unterscheidet Single (280ms) von Doppelklick
-  let _elNew=el.cloneNode(false);
-  while(el.firstChild)_elNew.appendChild(el.firstChild);
-  el.parentNode.replaceChild(_elNew,el);
-  // 1x Klick → sofort Mail im Lesebereich anzeigen
-  _elNew.addEventListener('click',function(e){
-    let item=e.target.closest('.em-mail-item');if(!item)return;
-    let idx=parseInt(item.dataset.mailIdx);if(isNaN(idx))return;
-    _emOpenMail(idx,mails);
-  });
-  // 2x Klick → Vollbild-Overlay (Gmail/Outlook) oder Drive-Öffnen (EML)
-  _elNew.addEventListener('dblclick',function(e){
-    let item=e.target.closest('.em-mail-item');if(!item)return;
-    e.stopPropagation();
-    let idx=parseInt(item.dataset.mailIdx);if(isNaN(idx))return;
-    let m2=mails[idx];if(!m2)return;
-    let _d=m2.data;
-    if(m2.type==='ms'&&_d.id&&_emCurrentTask){
-      const _msIdx2=(_emCurrentTask.msThreadMessages||[]).findIndex(function(x){return x.id===_d.id;});
-      if(_msIdx2>=0){_msOpenMailOverlay(_emCurrentTask.id,_msIdx2);return;}
-    }
-    if(m2.type==='gmail'&&_d.id&&_emCurrentTask){
-      const _gmIdx2=(_emCurrentTask.gmailThreadMessages||[]).findIndex(function(x){return x.id===_d.id;});
-      if(_gmIdx2>=0&&typeof _gmOpenMailOverlay==='function'){_gmOpenMailOverlay(_emCurrentTask.id,_gmIdx2);return;}
-    }
-    // EML: Drive öffnen
-    let _fid=(_d&&_d.fileId)||'';
-    if(_fid)window.open('https://drive.google.com/file/d/'+encodeURIComponent(_fid)+'/view','_blank');
-    else if(_d&&_d.url)window.open(_d.url,'_blank');
-  });
 }
 
 async function _emOpenMail(idx,mails){
@@ -18688,33 +18595,59 @@ function _emAddAufgabeRow(typ,dat,idx){
 function _emAddAufgabe(){
   _emAddAufgabeRow('Ortstermin','',document.querySelectorAll('#emAufgabenList .em-termin-row').length);
 }
-// ── .eml Drop/Select im Email-Modal – analog Auftrag-Modal ──────
+// ── .eml / .msg Upload direkt für _emCurrentTask ────────────────
+async function _emUploadEmlForModal(file){
+  if(!_emCurrentTask){showToast('⚠ Kein Task geöffnet','error',3000);return;}
+  if(!gdriveToken){showToast('⚠ Bitte zuerst Google Drive verbinden','error',5000);return;}
+  const t=_emCurrentTask;
+  const folderUrl=t.emailOrdner||t.gdriveOrdner||'';
+  const fid=_ezFolderId(folderUrl);
+  if(!fid){showToast('⚠ Kein Drive-Ordner am Task eingetragen (Projektordner)','error',6000);return;}
+  const isEml=file.name.toLowerCase().endsWith('.eml');
+  showToast('⏳ '+file.name+' wird hochgeladen…','info',4000);
+  try{
+    // Duplikat-Check
+    let preMessageId='',preText='';
+    if(isEml){
+      try{preText=await new Promise(function(res,rej){const r=new FileReader();r.onload=function(e){res(e.target.result);};r.onerror=rej;r.readAsText(file,'utf-8');});preMessageId=(_parseEmlText(preText).messageId||'').replace(/^<|>$/g,'');}catch(e){}
+    }
+    if(preMessageId){
+      const already=(t.emailOriginals||[]).some(function(e){return e.messageId&&e.messageId===preMessageId;});
+      if(already){showToast('ℹ Diese Mail ist bereits im Task vorhanden','info',3000);return;}
+    }
+    // Upload
+    const buf=await new Promise(function(res,rej){const r=new FileReader();r.onload=function(e){res(e.target.result);};r.onerror=rej;r.readAsArrayBuffer(file);});
+    const mime=isEml?'message/rfc822':'application/vnd.ms-outlook';
+    const today=new Date().toLocaleDateString('de-DE');
+    const stamp=new Date().toISOString().substring(0,10).replace(/-/g,'');
+    const fname=stamp+'_'+file.name;
+    const result=await _driveUploadGeneric(buf,fname,mime,fid);
+    const fileId=result.id;
+    const url='https://drive.google.com/file/d/'+fileId+'/view';
+    // EML-Metadaten
+    let meta={subject:file.name,sender:'',date:new Date().toISOString(),messageId:preMessageId,bodyHtml:'',bodyText:'',cidMap:{}};
+    if(isEml){
+      try{const txt=preText||await new Promise(function(res,rej){const r=new FileReader();r.onload=function(e){res(e.target.result);};r.onerror=rej;r.readAsText(file,'utf-8');});const p=_parseEmlText(txt);meta={subject:p.subject||file.name,sender:p.sender||'',date:(p.date instanceof Date?p.date:new Date()).toISOString(),messageId:p.messageId||preMessageId,bodyHtml:p.bodyHtml||'',bodyText:p.bodyText||'',cidMap:p.cidMap||{}};}catch(e){}
+    }
+    if(!t.emailOriginals)t.emailOriginals=[];
+    t.emailOriginals.push({name:fname,subject:meta.subject,sender:meta.sender,date:meta.date,messageId:meta.messageId,fileId:fileId,url:url,uploadedAt:today,type:'original'});
+    _emScheduleSave();
+    _emReloadMailList();
+    _emUpdateTop2();
+    showToast('✅ "'+file.name+'" gespeichert','success',3000);
+  }catch(e){showToast('⚠ Upload fehlgeschlagen: '+e.message,'error',5000);}
+}
 async function _emHandleEmlDrop(dt){
   if(!_emCurrentTask){showToast('⚠ Kein Task geöffnet','error',3000);return;}
-  const t=_emCurrentTask;
-  // DOM-Felder temporär befüllen – exakt wie Auftrag-Modal
-  const _eEl=document.getElementById('tEmailOrdner');
-  const _gEl=document.getElementById('tGDOrdner');
-  const _pE=_eEl?_eEl.value:'',_pG=_gEl?_gEl.value:'';
-  if(_eEl)_eEl.value=t.emailOrdner||t.gdriveOrdner||'';
-  if(_gEl)_gEl.value=t.gdriveOrdner||'';
-  const _tidEl=document.getElementById('taskId');
-  const _prevId=_tidEl?_tidEl.value:'';
-  if(_tidEl)_tidEl.value=t.id;
-  _pamCurrentTask=t;_pamActiveTaskId=t.id;
-  // Gleiche Funktion wie Auftrag-Modal (null = kein Drop-Zone-Element, Feedback via showToast)
-  await handleEmailDrop(dt,null);
-  // Felder zurücksetzen
-  if(_eEl)_eEl.value=_pE;
-  if(_gEl)_gEl.value=_pG;
-  if(_tidEl)_tidEl.value=_prevId;
-  _emReloadMailList();
+  const files=[...(dt.files||[])].filter(function(f){return /\.(msg|eml)$/i.test(f.name);});
+  if(!files.length){showToast('⚠ Keine .eml/.msg Datei erkannt','error',3000);return;}
+  for(const f of files)await _emUploadEmlForModal(f);
 }
 function _emHandleEmlSelect(evt){
   const f=evt.target.files&&evt.target.files[0];
   evt.target.value='';
   if(!f)return;
-  _emHandleEmlDrop({files:[f],types:['Files'],getData:function(){return '';}});
+  _emUploadEmlForModal(f);
 }
 function _emUpdateTop2(){
   let row2=document.getElementById('emTopRow2');
