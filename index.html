@@ -1019,7 +1019,8 @@ async function _auftragAddToTask(task,boardName,fileMode){
           if(!task.gmailMessageIds.includes(info.messageId))task.gmailMessageIds.push(info.messageId);
           if(!task.gmailMessageId)task.gmailMessageId=info.messageId;
           if(!task.gmailThreadMessages)task.gmailThreadMessages=[];
-        }else{
+        }else if(_apAdd==='exchange'){
+          // Nur echte Exchange-Mails mit MS verknüpfen – IMAP-Mails (T-Online etc.) bleiben als emailOriginal ohne Exchange-Link
           if(!task.msMessageIds)task.msMessageIds=[];
           if(!task.msMessageIds.includes(info.messageId))task.msMessageIds.push(info.messageId);
           if(!task.msMessageId)task.msMessageId=info.messageId;
@@ -1040,8 +1041,8 @@ async function _auftragAddToTask(task,boardName,fileMode){
         }
       }
     }
-    // Betreff für Outlook-Fallback-Suche speichern (auch wenn keine Message-ID im EML)
-    if(_apAdd!=='gmail'&&!task.msEmailSubject&&(info.subject||task.title)){
+    // Betreff für Outlook-Fallback-Suche speichern – nur bei echten Exchange-Mails sinnvoll
+    if(_apAdd==='exchange'&&!task.msEmailSubject&&(info.subject||task.title)){
       task.msEmailSubject=info.subject||task.title;
     }
     // Fix 2026-05-24: PDF-Vorschau aus EML-Body erstellen (analog _uploadEmailOriginal)
@@ -2881,10 +2882,10 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
                 </div>
                 <!-- 2-Spalten E-Mail-Layout: links Liste, rechts Vorschau -->
                 <!-- 2-Spalten E-Mail-Layout: links Liste, rechts Vorschau -->
-                <div id="pamEmailSplitWrap" style="display:flex;min-height:0;">
-                  <div id="pamUnifiedEmailList" style="width:42%;min-width:140px;max-height:380px;overflow-y:auto;background:var(--bg1);border-right:1px solid var(--border);flex-shrink:0;"></div>
-                  <div id="pamEmailSplitResizer" style="width:5px;cursor:col-resize;background:transparent;flex-shrink:0;transition:background .15s;" onmouseenter="this.style.background='var(--border)'" onmouseleave="this.style.background='transparent'"></div>
-                  <div id="pamUnifiedPreview" style="flex:1;min-width:0;display:none;overflow:hidden;"></div>
+                <div id="pamEmailSplitWrap" style="display:block;min-height:0;">
+                  <div id="pamUnifiedEmailList" style="width:100%;max-height:340px;overflow-y:auto;background:var(--bg1);"></div>
+                  <div id="pamEmailSplitResizer" style="display:none;"></div>
+                  <div id="pamUnifiedPreview" style="display:none;"></div>
                 </div>
                 <!-- Popup-Button -->
                 <div id="pamEmailOpenPopupRow" style="display:none;padding:5px 8px;border-top:0.5px solid var(--border);text-align:center;">
@@ -3477,7 +3478,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-01 · #154'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b154)
+const PAM_BUILD = 'v2026-06-01 · #156'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b156)
 
 // ── STATE ──
 let boards = {};
@@ -12311,7 +12312,7 @@ function _pamRenderUnifiedEmailList(task){
       convId:m.conversationId||task.msConversationId||'_ms'});
   });
   (task.emailOriginals||[]).forEach(function(m,i){
-    if(m.messageId&&thrIds.has(m.messageId))return; // Duplikat überspringen
+    if(m.messageId&&thrIds.has(m.messageId))return;
     allMails.push({src:'original',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,
       convId:'_orig_'+i});
   });
@@ -12323,12 +12324,11 @@ function _pamRenderUnifiedEmailList(task){
     _pamUpdateEmailListBadge();return;
   }
 
-  // Grupppieren nach Konversations-ID (Betreff als Fallback)
+  // Gruppieren nach Konversations-ID (Betreff als Fallback)
   function _normSubj(s){return(s||'').replace(/^(Re|AW|Fwd|WG|Antwort|FYI):\s*/gi,'').trim().toLowerCase().substring(0,60);}
   const groups=new Map();
   allMails.forEach(function(m){
     const subj=m.data.subject||m.data.betreff||'(kein Betreff)';
-    // Echter ConvId wenn vorhanden, sonst normierter Betreff
     const hasRealId=m.convId&&!m.convId.startsWith('_');
     const key=hasRealId?m.convId:(_normSubj(subj)||'__other__');
     if(!groups.has(key))groups.set(key,{subject:subj,mails:[]});
@@ -12343,8 +12343,7 @@ function _pamRenderUnifiedEmailList(task){
 
   function _fmt(ts){
     if(!ts)return'';
-    const d=new Date(ts);
-    const now=new Date();
+    const d=new Date(ts);const now=new Date();
     if(d.toDateString()===now.toDateString())return('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
     return('0'+d.getDate()).slice(-2)+'.'+('0'+(d.getMonth()+1)).slice(-2)+'.'+String(d.getFullYear()).slice(2);
   }
@@ -12368,21 +12367,26 @@ function _pamRenderUnifiedEmailList(task){
 
     if(isOpen){
       const indent=multiGroup?'22px':'10px';
-      [...grp.mails].sort(function(a,b){return(b._ts||0)-(a._ts||0);}).forEach(function(m){
+      [...grp.mails].sort(function(a,b){return(b._ts||0)-(a._ts||0);}).forEach(function(m,mi){
         const d=m.data;
         const from=d.fromName||d.from||d.sender||'Unbekannt';
         const isOut=d.direction==='gesendet'||d.isOut||false;
         const dateStr=_fmt(m._ts);
-        const preview=(d.preview||d.snippet||d.bodyText||'').replace(/\n/g,' ').substring(0,60);
+        const preview=(d.preview||d.snippet||d.bodyText||'').replace(/\n/g,' ').trim();
+        const subject=d.subject||d.betreff||'';
+        // Tooltip: Absender + Betreff + Vorschau, max 250 Zeichen
+        const tooltipRaw=(from+(subject?' | '+subject:'')+(preview?' – '+preview:'')).substring(0,250);
+        const tooltipEsc=tooltipRaw.replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
         const dirBg=isOut?'rgba(22,163,74,.15)':'rgba(29,78,216,.10)';
         const dirTxt=isOut?'#15803D':'#1E40AF';
         const dirLabel=isOut?'Gesendet':'Eingang';
         const envColor=isOut?'#16A34A':'#0078d4';
-        const clickFn='_pamUnifiedTogglePreview('+JSON.stringify(taskId)+','+JSON.stringify(m.src)+','+m.idx+')';
-        const dblFn=m.src==='gmail'?('_gmOpenMailOverlay('+JSON.stringify(taskId)+','+m.idx+')'):'_msOpenMailOverlay('+JSON.stringify(taskId)+','+m.idx+')';
-        html+='<div style="display:flex;gap:8px;align-items:flex-start;padding:6px '+indent+' 6px '+indent+';border-top:0.5px solid var(--border);cursor:pointer;background:var(--bg1);transition:background .1s;" '
-          +'onmouseenter="this.style.background=\'var(--bg3)\'" onmouseleave="this.style.background=\'var(--bg1)\'" '
-          +'onclick="'+clickFn+'" ondblclick="'+dblFn+'">';
+        // Klick → direkt Overlay öffnen (kein Split-Pane)
+        const clickFn=m.src==='gmail'?('_gmOpenMailOverlay('+JSON.stringify(taskId)+','+m.idx+')'):'_msOpenMailOverlay('+JSON.stringify(taskId)+','+m.idx+')';
+        const previewTxt=preview.substring(0,60);
+        html+='<div data-mi="'+mi+'" data-src="'+m.src+'" style="display:flex;gap:8px;align-items:flex-start;padding:6px '+indent+' 6px '+indent+';border-top:0.5px solid var(--border);cursor:pointer;background:var(--bg1);transition:background .1s;" '
+          +'onmouseenter="_pamUnifiedHover(this,\''+tooltipEsc+'\')" onmouseleave="_pamUnifiedHoverOut()" '
+          +'onclick="'+clickFn+'">';
         html+='<div style="width:26px;height:26px;border-radius:5px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;">';
         html+='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="'+envColor+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>';
         html+='</div>';
@@ -12393,7 +12397,7 @@ function _pamRenderUnifiedEmailList(task){
         html+='</div>';
         html+='<div style="display:flex;align-items:center;gap:4px;margin-top:2px;">';
         html+='<span style="font-size:calc(10px*var(--modal-scale,1));padding:1px 5px;border-radius:4px;background:'+dirBg+';color:'+dirTxt+';font-weight:600;white-space:nowrap;">'+dirLabel+'</span>';
-        if(preview)html+='<span style="font-size:calc(11px*var(--modal-scale,1));color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(preview)+'</span>';
+        if(previewTxt)html+='<span style="font-size:calc(11px*var(--modal-scale,1));color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(previewTxt)+'</span>';
         html+='</div>';
         html+='</div></div>';
       });
@@ -12403,7 +12407,6 @@ function _pamRenderUnifiedEmailList(task){
 
   el.innerHTML=html;
 
-  // Popup-Button + Auto-Expand
   const popRow=document.getElementById('pamEmailOpenPopupRow');
   if(popRow)popRow.style.display='block';
   const body=document.getElementById('pamEmailListBody');
@@ -12411,6 +12414,7 @@ function _pamRenderUnifiedEmailList(task){
   if(body&&body.style.display==='none'){body.style.display='block';if(chev)chev.style.transform='rotate(180deg)';}
   _pamUpdateEmailListBadge();
 }
+
 
 
 function _pamToggleThread(key){
@@ -12796,7 +12800,7 @@ function _pamEmailRefresh(task){
   const mc=document.getElementById('pamOutlookCount');
   if(mc){mc.textContent=msBadge;mc.style.display=msBadge?'inline':'none';}
   const oc=document.getElementById('pamOrigCount');
-  if(oc){oc.textContent=origCount?origCount:'';oc.style.display=origCount?'inline':'none';}
+  if(oc){oc.textContent='';oc.style.display='none';} // EML-Badge zeigt diese Zahl bereits
   // Aufklappfeld-Badge aktualisieren
   const listBadge=document.getElementById('pamEmailListBadge');
   if(listBadge){const tot2=gmBadge+msBadge+origCount;listBadge.textContent=tot2?tot2+' Nachrichten':'';}
@@ -19786,3 +19790,4 @@ function _pamRollbackSelected(evt){
 </script>
 </body>
 </html>
+                                                                                                                     
