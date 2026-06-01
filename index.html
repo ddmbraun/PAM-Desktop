@@ -3523,7 +3523,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-01 · #192'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b189)
+const PAM_BUILD = 'v2026-06-01 · #195'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b189)
 
 // ── STATE ──
 let boards = {};
@@ -18297,19 +18297,73 @@ function _renderEmailMailList(){
           (t.emailUrl?'<button onclick="window.open(\''+_escHtml(t.emailUrl)+'\',\'_blank\')" style="display:flex;align-items:center;gap:3px;padding:3px 8px;font-size:11px;font-weight:700;border:none;border-radius:6px;background:#2c2c3e;color:#fff;cursor:pointer;">Drive</button>':'')+
         '</div>'+
         '<div style="display:flex;gap:3px;align-items:center;">'+
-          (_emlCnt>0?'<span onclick="_emOpenAttachGallery()" style="background:#FFF3CD;color:#856404;border:1px solid #FFEAA7;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px;cursor:pointer;">EML '+_emlCnt+'</span>':'')+
+          (_emlCnt>0?'<span onclick="_emOpenEmlGallery()" style="background:#FFF3CD;color:#856404;border:1px solid #FFEAA7;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px;cursor:pointer;">EML '+_emlCnt+'</span>':'')+
           (_pdfCnt>0?'<span onclick="_openEmailThumbnailGrid()" style="background:#fdf0f0;color:#c0392b;border:1px solid #f5c6c6;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px;cursor:pointer;">PDF '+_pdfCnt+'</span>':'')+
-          '<span onclick="_emOpenAttachGallery()" style="background:#E6F4EA;color:#15803D;border:1px solid #B7DFBF;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px;cursor:pointer;">Fotos '+_fotoCnt+'</span>'+
+          (_fotoCnt>0?'<span onclick="_emOpenFotoGallery()" style="background:#E6F4EA;color:#15803D;border:1px solid #B7DFBF;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px;cursor:pointer;">Fotos '+_fotoCnt+'</span>':'')+
         '</div>'+
       '</div>'+
     '</div>';
   el.appendChild(_header);
-  // ── Mail-Liste via _pamRenderUnifiedEmailList (identisch mit Auftrag-Modal) ──
+  // ── Mail-Liste: exakt gleiche Render-Logik wie Auftrag-Modal (kopiert) ────
   let _unifiedDiv=document.createElement('div');
-  _unifiedDiv.id='pamUnifiedEmailList';
   _unifiedDiv.style.cssText='flex:1;overflow-y:auto;min-height:0;';
   el.appendChild(_unifiedDiv);
-  _pamRenderUnifiedEmailList(t);
+  (function(task,container){
+    const taskId=task.id;
+    function _ns(s){return(s||'').replace(/^(Re|AW|Fwd|WG|Antwort|FYI):\s*/gi,'').trim().toLowerCase().substring(0,60);}
+    const thrIds=new Set([...(task.gmailThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean),...(task.msThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean)]);
+    const thrSK=new Set();
+    (task.gmailThreadMessages||[]).forEach(function(m){const k=_ns(m.subject||m.betreff||'');if(k)thrSK.add(k);});
+    (task.msThreadMessages||[]).forEach(function(m){const k=_ns(m.subject||m.betreff||'');if(k)thrSK.add(k);});
+    const allM=[];
+    (task.gmailThreadMessages||[]).forEach(function(m,i){allM.push({src:'gmail',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:m.threadId||task.gmailThreadId||'_gm'});});
+    (task.msThreadMessages||[]).forEach(function(m,i){allM.push({src:'ms',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:m.conversationId||task.msConversationId||'_ms'});});
+    (task.emailOriginals||[]).forEach(function(m,i){if(m.messageId&&thrIds.has(m.messageId))return;const sk=_ns(m.subject||m.name||'');if(sk&&thrSK.has(sk))return;allM.push({src:'original',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:'_orig'});});
+    allM.sort(function(a,b){return(b._ts||0)-(a._ts||0);});
+    if(!allM.length){container.innerHTML='<div style="padding:20px;text-align:center;color:var(--text2);font-size:12px;line-height:1.6;">Noch keine E-Mails –<br>per Drag &amp; Drop hinzufügen</div>';return;}
+    const grps=new Map();
+    allM.forEach(function(m){const subj=m.data.subject||m.data.betreff||'(kein Betreff)';let key;if(m.src!=='original'){const rid=m.convId&&!m.convId.startsWith('_');key=rid?m.convId:(_ns(subj)||'__other__');}else{key=_ns(subj)||'__other__';}if(!grps.has(key))grps.set(key,{subject:subj,mails:[]});grps.get(key).mails.push(m);});
+    const showH=allM.length>=2;
+    if(!window._pamThreadOpen)window._pamThreadOpen={};
+    if(!Object.keys(window._pamThreadOpen).length){const fk=[...grps.keys()][0];if(fk)window._pamThreadOpen[fk]=true;}
+    function _fmt(ts){if(!ts)return'';const d=new Date(ts);const now=new Date();if(d.toDateString()===now.toDateString())return('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);return('0'+d.getDate()).slice(-2)+'.'+('0'+(d.getMonth()+1)).slice(-2)+'.'+String(d.getFullYear()).slice(2);}
+    let html='';
+    grps.forEach(function(grp,key){
+      const isOpen=!showH||!!window._pamThreadOpen[key];
+      const lastTs=Math.max.apply(null,grp.mails.map(function(m){return m._ts||0;}));
+      const lastDate=_fmt(lastTs);const mc=grp.mails.length;
+      if(showH){html+='<div style="border-bottom:0.5px solid var(--border);"><div onclick="_pamToggleThread(\''+key+'\')" style="padding:7px 10px;background:var(--bg3);display:flex;align-items:flex-start;gap:6px;cursor:pointer;user-select:none;"><span style="font-size:10px;color:var(--text2);margin-top:2px;flex-shrink:0;display:inline-block;transform:rotate('+(isOpen?'0':'-90')+'deg);transition:transform .15s;">▼</span><div style="flex:1;min-width:0;"><div style="font-size:calc(12px*var(--modal-scale,1));font-weight:600;color:var(--text1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(grp.subject)+'</div><div style="font-size:calc(11px*var(--modal-scale,1));color:var(--text2);margin-top:1px;">'+mc+' Mail'+(mc!==1?'s':'')+' · '+lastDate+'</div></div></div>';}
+      if(isOpen){
+        const ind=showH?'22px':'10px';
+        [...grp.mails].sort(function(a,b){return(b._ts||0)-(a._ts||0);}).forEach(function(m){
+          const d=m.data;const isOrig=m.src==='original';
+          const from=d.fromName||d.from||d.sender||d.senderName||'Unbekannt';
+          const isOut=d.direction==='gesendet'||d.isOut||false;
+          const dateStr=_fmt(m._ts);
+          const preview=(d.preview||d.snippet||d.bodyText||d.body||'').replace(/\n/g,' ').trim();
+          const subj=d.subject||d.betreff||'';
+          const tip=((from+(subj?' | '+subj:'')+(preview?' - '+preview:'')).substring(0,250)).replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          let dBg,dTxt,dLbl,eCol;
+          if(isOrig){dBg='rgba(124,58,237,.12)';dTxt='#5b21b6';dLbl='Original';eCol='#7c3aed';}
+          else if(isOut){dBg='rgba(22,163,74,.15)';dTxt='#15803D';dLbl='Gesendet';eCol='#16A34A';}
+          else{dBg='rgba(29,78,216,.10)';dTxt='#1E40AF';dLbl='Eingang';eCol='#0078d4';}
+          let cf;
+          if(m.src==='gmail'){cf='_gmOpenMailOverlay('+JSON.stringify(taskId)+','+m.idx+')';}
+          else if(m.src==='ms'){cf='_msOpenMailOverlay('+JSON.stringify(taskId)+','+m.idx+')';}
+          else{const ns2=(d.subject||d.name||'email.eml').replace(/"/g,'').substring(0,60);const fs=(d.fileId||'').replace(/"/g,'');const us=(d.url||'').replace(/"/g,'');cf='_openEmailOrigInlinePreview({fileId:"'+fs+'",name:"'+ns2+'",url:"'+us+'"})'; }
+          const pvw=preview.substring(0,60);
+          html+='<div style="display:flex;gap:8px;align-items:flex-start;padding:6px '+ind+' 6px '+ind+';border-top:0.5px solid var(--border);cursor:pointer;background:var(--bg1);transition:background .1s;" onmouseenter="_pamUnifiedHover(this,\''+tip+'\')" onmouseleave="_pamUnifiedHoverOut()" onclick="'+cf+'">';
+          html+='<div style="width:26px;height:26px;border-radius:5px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="'+eCol+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg></div>';
+          html+='<div style="flex:1;min-width:0;"><div style="display:flex;align-items:center;gap:4px;"><span style="font-size:calc(12px*var(--modal-scale,1));font-weight:600;color:var(--text1);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(from)+'</span><span style="font-size:calc(11px*var(--modal-scale,1));color:var(--text2);white-space:nowrap;">'+dateStr+'</span></div>';
+          html+='<div style="display:flex;align-items:center;gap:4px;margin-top:2px;"><span style="font-size:calc(10px*var(--modal-scale,1));padding:1px 5px;border-radius:4px;background:'+dBg+';color:'+dTxt+';font-weight:600;white-space:nowrap;">'+dLbl+'</span>';
+          if(pvw)html+='<span style="font-size:calc(11px*var(--modal-scale,1));color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(pvw)+'</span>';
+          html+='</div></div></div>';
+        });
+      }
+      if(showH)html+='</div>';
+    });
+    container.innerHTML=html;
+  })(t,_unifiedDiv);
   // ── Untere Leiste: .eml/.msg + Anhang ──
   let _emlBar=document.createElement('div');
   _emlBar.innerHTML='<div id="_emDropBarList" style="padding:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:6px;background:var(--bg2);transition:background .15s,outline .15s;">'+
@@ -18785,6 +18839,48 @@ function _emRenderAttachPanel(allFiles){
     body.appendChild(btn);
   });
 }
+function _emOpenEmlGallery(){
+  if(!_emCurrentTask)return;
+  let files=[];
+  (_emCurrentTask.emailOriginals||[]).filter(function(e){return e.fileId;}).forEach(function(e){
+    files.push({icon:'📨',name:e.subject||e.name||'E-Mail Original',url:e.url||'',isImg:false,data:e,mime:'message/rfc822'});
+  });
+  if(!files.length){showToast('Keine EML-Dateien vorhanden','info',2000);return;}
+  _emShowFileListOverlay('📨 EML-Dateien ('+files.length+')',files);
+}
+function _emOpenFotoGallery(){
+  if(!_emCurrentTask)return;
+  let files=[];
+  (_emCurrentTask.fotos||[]).forEach(function(f){
+    files.push({icon:'🖼',name:f.name||'Bild',url:f.url||f.webViewLink||f.thumbnailLink||'',isImg:true,data:f,mime:'image/jpeg'});
+  });
+  if(!files.length){showToast('Keine Fotos vorhanden','info',2000);return;}
+  _emShowFileListOverlay('🖼 Fotos ('+files.length+')',files);
+}
+function _emShowFileListOverlay(title,files){
+  let ov=document.createElement('div');ov.className='em-gal-overlay';
+  ov.onclick=function(e){if(e.target===ov)ov.remove();};
+  let box=document.createElement('div');box.className='em-gal-box';
+  let hdr=document.createElement('div');hdr.className='em-gal-header';
+  hdr.innerHTML='<span class="em-gal-title">'+title+'</span><button class="em-gal-close" onclick="this.closest(\'.em-gal-overlay\').remove()">✕</button>';
+  box.appendChild(hdr);
+  let grid=document.createElement('div');grid.className='em-gal-grid';
+  files.forEach(function(f,idx){
+    if(f.isImg&&f.url){
+      let img=document.createElement('img');img.className='em-gal-thumb';
+      img.src=f.url;img.title=f.name;img.alt=f.name;
+      img.onerror=function(){this.style.display='none';};
+      img.onclick=function(){ov.remove();_emOpenViewer(files,idx);};
+      grid.appendChild(img);
+    }else{
+      let btn=document.createElement('div');btn.className='em-gal-file';
+      btn.innerHTML='<span style="font-size:20px;">'+f.icon+'</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px;" title="'+_escHtml(f.name)+'">'+_escHtml(f.name)+'</span>';
+      btn.onclick=function(){_emShowAttachPreview(f.icon,f.name,f.url,f.mime,f.data);};
+      grid.appendChild(btn);
+    }
+  });
+  box.appendChild(grid);ov.appendChild(box);document.body.appendChild(ov);
+}
 function _emOpenAttachGallery(){
   if(!_emCurrentTask)return;
   let files=[];
@@ -19259,9 +19355,6 @@ function _initEmailResizers(){
         let nw=Math.min(window.innerWidth-rect.left,Math.max(520,sw+(ev.clientX-sx)));
         let nh=Math.min(window.innerHeight-rect.top,Math.max(300,sh+(ev.clientY-sy)));
         modal.style.width=nw+'px';modal.style.height=nh+'px';
-        // Schrift & Inhalt skalieren mit Modal-Breite
-        const scale=Math.max(0.75,Math.min(1.3,nw/1200));
-        modal.style.setProperty('--modal-scale',scale.toFixed(2));
         const rp=document.getElementById('emRightPanel');
         if(rp&&!rp.classList.contains('collapsed'))rp.style.minHeight='100%';
       }
