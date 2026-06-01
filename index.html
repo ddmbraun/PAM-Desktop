@@ -2392,6 +2392,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
     <div class="logo">PAM Workboard</div>
     <div class="board-selector" id="boardTabs"></div>
     <button class="board-add-btn" onclick="openProjManager()" title="Projekte verwalten">+</button>
+    <button id="pamBoardListBtn" onclick="_pamOpenBoardPopup()" title="Alle Tasks dieses Boards anzeigen" style="padding:3px 10px;border-radius:6px;font-size:12px;font-weight:600;background:var(--bg3);border:1px solid var(--border);color:var(--text);cursor:pointer;display:inline-flex;align-items:center;gap:5px;">≡ Alle Tasks</button>
   </div>
 
   <div class="topbar-right">
@@ -3023,6 +3024,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
       <button class="gcal-btn-modal" id="gcalModalBtn" onclick="openGoogleCalendarFromModal()" style="display:none;">📅 Kalender</button>
       <button class="outlook-btn-modal" id="outlookModalBtn" onclick="openOutlookCalendarFromModal()" style="display:none;">📆 Outlook</button>
       <!-- Rechte Seite: tägliche Aktionen -->
+      <button class="topbar-btn" id="pamAllTasksBtn" onclick="_pamOpenBoardPopup()" title="Alle Tasks dieses Boards anzeigen" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);">📋 Board</button>
       <button class="topbar-btn btn-secondary" onclick="saveTaskAndBack()">← Zurück</button>
       <button class="topbar-btn" onclick="duplicateTask()" title="Task duplizieren" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);">⧉ Duplizieren</button>
       <button class="topbar-btn" onclick="moveTaskToBoard()" title="Task verschieben" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);">↗ Verschieben</button>
@@ -3495,6 +3497,23 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
   </div>
 </div>
 
+<!-- BOARD TASK POPUP -->
+<div id="pamBoardPopupOverlay" onclick="if(event.target===this)_pamCloseBoardPopup()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10500;align-items:center;justify-content:center;">
+  <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;width:520px;max-width:95vw;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,.4);">
+    <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-shrink:0;flex-wrap:wrap;">
+      <span style="font-size:14px;font-weight:700;color:var(--text);flex:1;" id="pamBoardPopupTitle">Alle Tasks</span>
+      <div style="display:flex;gap:4px;flex-wrap:wrap;">
+        <button id="pamBPSort_due"    onclick="_pamBPSetSort('due')"    style="font-size:11px;padding:3px 9px;border-radius:5px;border:1px solid var(--border);background:var(--accent);color:#fff;cursor:pointer;">Fälligkeit</button>
+        <button id="pamBPSort_ausf"   onclick="_pamBPSetSort('ausf')"   style="font-size:11px;padding:3px 9px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;">Ausführung</button>
+        <button id="pamBPSort_ampel"  onclick="_pamBPSetSort('ampel')"  style="font-size:11px;padding:3px 9px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;">Ampel</button>
+        <button id="pamBPSort_status" onclick="_pamBPSetSort('status')" style="font-size:11px;padding:3px 9px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;">Status</button>
+      </div>
+      <button onclick="_pamCloseBoardPopup()" style="background:transparent;border:none;color:var(--text2);font-size:16px;cursor:pointer;padding:0 4px;">✕</button>
+    </div>
+    <div id="pamBoardPopupList" style="overflow-y:auto;flex:1;padding:6px 8px;"></div>
+  </div>
+</div>
+
 <!-- QUICK ADD -->
 <div class="quick-add-bar" id="quickAddBar">
   <span style="color:var(--accent);font-weight:700;">+</span>
@@ -3504,7 +3523,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-01 · #167'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b167)
+const PAM_BUILD = 'v2026-06-01 · #169'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b169)
 
 // ── STATE ──
 let boards = {};
@@ -17735,6 +17754,109 @@ function openEmailTaskModal(task,board){
 }
 
 // ══ BOARD TASK LIST – Aufklapp-Panel in allen Modals ══════════════════════════
+
+// ── BOARD POPUP (Footer-Button) ─────────────────────────────────────────────
+let _pamBPSortField = 'due';
+
+function _pamOpenBoardPopup(){
+  const ov = document.getElementById('pamBoardPopupOverlay');
+  if(!ov) return;
+  ov.style.display = 'flex';
+  const title = document.getElementById('pamBoardPopupTitle');
+  if(title) title.textContent = '📋 ' + (currentBoard || 'Board') + ' – alle Tasks';
+  _pamBPSetSort(_pamBPSortField);
+}
+
+function _pamCloseBoardPopup(){
+  const ov = document.getElementById('pamBoardPopupOverlay');
+  if(ov) ov.style.display = 'none';
+}
+
+function _pamBPSetSort(field){
+  _pamBPSortField = field;
+  ['due','ausf','ampel','status'].forEach(function(f){
+    const btn = document.getElementById('pamBPSort_'+f);
+    if(!btn) return;
+    btn.style.background = f === field ? 'var(--accent)' : 'var(--bg3)';
+    btn.style.color      = f === field ? '#fff' : 'var(--text2)';
+    btn.style.borderColor= f === field ? 'var(--accent)' : 'var(--border)';
+  });
+  _pamBPRender();
+}
+
+function _pamBPRender(){
+  const el = document.getElementById('pamBoardPopupList');
+  if(!el) return;
+  const boardName = currentBoard;
+  const currentId = (document.getElementById('taskId')||{}).value || _pamActiveTaskId || '';
+  const today = new Date().toISOString().split('T')[0];
+  const ampelOrder = {rot:0, gelb:1, grün:2};
+  let tasks = (boards[boardName]||[]).filter(function(t){ return !t.archiviert; });
+
+  tasks.sort(function(a,b){
+    if(_pamBPSortField==='ampel'){
+      const ao=ampelOrder[a.ampel]!=null?ampelOrder[a.ampel]:3;
+      const bo=ampelOrder[b.ampel]!=null?ampelOrder[b.ampel]:3;
+      if(ao!==bo)return ao-bo;
+      return(a.due||'')>(b.due||'')?1:-1;
+    }
+    if(_pamBPSortField==='ausf'){
+      const av=a.ausfuehrungstermin||''; const bv=b.ausfuehrungstermin||'';
+      if(av&&!bv)return -1; if(!av&&bv)return 1;
+      return av>bv?1:av<bv?-1:0;
+    }
+    if(_pamBPSortField==='status'){
+      const cols=getBoardStatuses(boardName)||[];
+      return cols.indexOf(a.status)-cols.indexOf(b.status);
+    }
+    const av=a.due||''; const bv=b.due||'';
+    if(av&&!bv)return -1; if(!av&&bv)return 1;
+    return av>bv?1:av<bv?-1:0;
+  });
+
+  if(!tasks.length){
+    el.innerHTML='<div style="padding:20px;text-align:center;color:var(--text2);font-size:13px;">Keine Tasks in diesem Board.</div>';
+    return;
+  }
+
+  const ampelDot={rot:'#E24B4A',gelb:'#EF9F27',grün:'#4CAF50'};
+  let html='';
+  tasks.forEach(function(t){
+    const isCur = t.id===currentId;
+    const isOverdue = t.due && t.due<today;
+    const isToday   = t.due && t.due===today;
+    const dueTxt = t.due?(function(){const p=t.due.split('-');return p[2]+'.'+p[1]+'.'+p[0].slice(2);})():'';
+    const ausfTxt= t.ausfuehrungstermin?(function(){const p=t.ausfuehrungstermin.split('-');return p[2]+'.'+p[1]+'.';})():'';
+    const dot = '<div style="width:9px;height:9px;border-radius:50%;background:'+(ampelDot[t.ampel]||'var(--border)')+';flex-shrink:0;margin-top:3px;"></div>';
+    const dueColor = isOverdue?'#E24B4A':isToday?'#EF9F27':'var(--text2)';
+    const rowBg = isCur?'background:rgba(var(--accent-rgb,108,99,255),.12);border-left:3px solid var(--accent);':'border-left:3px solid transparent;';
+    const isEmail = _isEmailBoard(boardName);
+    const clickFn = isEmail
+      ? '_pamBPClick('+JSON.stringify(t.id)+',true)'
+      : '_pamBPClick('+JSON.stringify(t.id)+',false)';
+    html += '<div onclick="'+clickFn+'" style="display:flex;align-items:flex-start;gap:9px;padding:8px 10px;border-radius:6px;cursor:pointer;margin-bottom:2px;'+rowBg+'">';
+    html += dot;
+    html += '<div style="flex:1;min-width:0;">';
+    html += '<div style="font-size:13px;font-weight:'+(isCur?'700':'500')+';color:var(--text1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(t.title||'(kein Titel)')+'</div>';
+    html += '<div style="display:flex;gap:8px;margin-top:3px;flex-wrap:wrap;">';
+    if(dueTxt) html+='<span style="font-size:11px;color:'+dueColor+';">📅 '+dueTxt+'</span>';
+    if(ausfTxt)html+='<span style="font-size:11px;color:var(--text2);">🔨 '+ausfTxt+'</span>';
+    if(t.status)html+='<span style="font-size:11px;color:var(--text2);background:var(--bg3);border:0.5px solid var(--border);border-radius:4px;padding:1px 6px;">'+esc(t.status)+'</span>';
+    if(isCur)html+='<span style="font-size:10px;color:var(--accent);font-weight:700;">▶ geöffnet</span>';
+    html+='</div></div></div>';
+  });
+  el.innerHTML = html;
+}
+
+function _pamBPClick(taskId, isEmail){
+  _pamCloseBoardPopup();
+  if(isEmail){
+    const task=(boards[currentBoard]||[]).find(function(t){return t.id===taskId;});
+    if(task) openEmailTaskModal(task, currentBoard);
+  } else {
+    openEditTaskModal(taskId);
+  }
+}
 
 let _pamBoardTaskSortField = 'due'; // 'due' | 'ausf' | 'ampel' | 'status'
 let _pamBoardTaskListOpen = false;
