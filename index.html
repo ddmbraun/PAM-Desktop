@@ -3523,7 +3523,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-01 · #183'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b181)
+const PAM_BUILD = 'v2026-06-01 · #184'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b181)
 
 // ── STATE ──
 let boards = {};
@@ -18235,6 +18235,7 @@ function _renderEmailMailList(){
   let el=document.getElementById('emMailList');
   if(!el)return;
   let t=_emCurrentTask;
+  window._emChipReg=[]; // Registry zurücksetzen für Chip-Klick-Handler
   let mails=[]; // Alle Mail-Einträge sammeln – dedupliziert wie _pamRenderUnifiedEmailList
   function _normSubjEM(s){return(s||'').replace(/^(Re|AW|Fwd|WG|Antwort|FYI):\s*/gi,'').trim().toLowerCase().substring(0,60);}
   const _emThrIds=new Set([...(t.gmailThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean),...(t.msThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean)]);
@@ -18306,10 +18307,15 @@ function _renderEmailMailList(){
     el.appendChild(_empty);
     // .eml/.msg + Anhang Buttons auch bei leerem Zustand
     let _bar=document.createElement('div');
-    _bar.innerHTML='<div style="padding:8px 10px;border-top:1px solid var(--border);display:flex;gap:6px;background:var(--bg2);">'+
-      '<label style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:7px 10px;font-size:12px;font-weight:600;border:1.5px dashed #1a7040;border-radius:8px;background:rgba(26,112,64,.05);color:#1a7040;cursor:pointer;">✉ .eml / .msg<input type="file" accept=".msg,.eml" style="display:none" onchange="_emHandleEmlSelect(event)"></label>'+
-      '<button onclick="_emToggleAttachSection()" style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:7px 10px;font-size:12px;font-weight:600;border:1px solid var(--border);border-radius:8px;background:var(--bg3);color:var(--text2);cursor:pointer;">📎 Anhang</button>'+
+    _bar.innerHTML='<div id="_emDropBarEmpty" style="padding:8px 10px;border-top:1px solid var(--border);display:flex;gap:6px;background:var(--bg2);transition:background .15s,outline .15s;">'+
+      '<label style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:7px 10px;font-size:12px;font-weight:600;border:1.5px dashed #1a7040;border-radius:8px;background:rgba(26,112,64,.05);color:#1a7040;cursor:pointer;" title=".eml oder .msg Datei wählen oder hierher ziehen">✉ .eml / .msg<input type="file" accept=".msg,.eml" style="display:none" onchange="_emHandleEmlSelect(event)"></label>'+
+      '<label style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:7px 10px;font-size:12px;font-weight:600;border:1px solid var(--border);border-radius:8px;background:var(--bg3);color:var(--text2);cursor:pointer;" title="Datei als Anhang hochladen">📎 Anhang<input type="file" multiple style="display:none" onchange="_emAddAttachmentFile(event)"></label>'+
     '</div>';
+    let _bd=_bar.querySelector('div');
+    _bd.addEventListener('dragenter',function(e){e.preventDefault();_bd.style.background='rgba(108,99,255,.07)';_bd.style.outline='2px dashed var(--accent)';});
+    _bd.addEventListener('dragover',function(e){e.preventDefault();});
+    _bd.addEventListener('dragleave',function(){_bd.style.background='var(--bg2)';_bd.style.outline='';});
+    _bd.addEventListener('drop',function(e){e.preventDefault();_bd.style.background='var(--bg2)';_bd.style.outline='';_emHandleEmlDrop(e.dataTransfer);});
     el.appendChild(_bar);
     return;
   }
@@ -18327,8 +18333,13 @@ function _renderEmailMailList(){
     (d.attachments||[]).forEach(function(a){
       let name=(a.filename||a.name||'').toLowerCase();
       let cls=name.endsWith('.pdf')?'pdf':(name.match(/\.(jpe?g|png|gif|webp|heic)$/)?'img':'eml');
-      chips.push('<span class="em-chip '+cls+'" title="'+(a.filename||a.name||'')+'" style="cursor:pointer;" onclick="event.stopPropagation();_emOpenAttachGallery()">'+
-        (cls==='pdf'?'📄':cls==='img'?'🖼':'📧')+' '+(a.filename||a.name||'').substring(0,12)+'</span>');
+      let _cicon=cls==='pdf'?'📄':cls==='img'?'🖼':'📧';
+      let _curl=a.url||a.webViewLink||'';
+      let _cmime=a.mimeType||a.contentType||(cls==='pdf'?'application/pdf':cls==='img'?'image/jpeg':'message/rfc822');
+      let _cid=(window._emChipReg=window._emChipReg||[]).length;
+      window._emChipReg.push({icon:_cicon,name:a.filename||a.name||'Anhang',url:_curl,mime:_cmime,data:a});
+      chips.push('<span class="em-chip '+cls+'" title="'+(a.filename||a.name||'')+'" style="cursor:pointer;" onclick="event.stopPropagation();_emOpenChipById('+_cid+')">'+
+        _cicon+' '+(a.filename||a.name||'').substring(0,12)+'</span>');
     });
     // emailPdfs
     (t.emailPdfs||[]).forEach(function(p){if(p.mailIdx===i||p.mailSource===m.type)chips.push('<span class="em-chip pdf">📄 PDF</span>');});
@@ -18359,10 +18370,15 @@ function _renderEmailMailList(){
   // .eml/.msg + Anhang Buttons am Ende der Liste
   let _emlBar=document.createElement('div');
   _emlBar.style.marginTop='auto';
-  _emlBar.innerHTML='<div style="padding:8px 10px;border-top:1px solid var(--border);display:flex;gap:6px;background:var(--bg2);">'+
-    '<label style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:7px 10px;font-size:12px;font-weight:600;border:1.5px dashed #1a7040;border-radius:8px;background:rgba(26,112,64,.05);color:#1a7040;cursor:pointer;">✉ .eml / .msg<input type="file" accept=".msg,.eml" style="display:none" onchange="_emHandleEmlSelect(event)"></label>'+
-    '<button onclick="_emToggleAttachSection()" style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:7px 10px;font-size:12px;font-weight:600;border:1px solid var(--border);border-radius:8px;background:var(--bg3);color:var(--text2);cursor:pointer;">📎 Anhang</button>'+
+  _emlBar.innerHTML='<div id="_emDropBarList" style="padding:8px 10px;border-top:1px solid var(--border);display:flex;gap:6px;background:var(--bg2);transition:background .15s,outline .15s;">'+
+    '<label style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:7px 10px;font-size:12px;font-weight:600;border:1.5px dashed #1a7040;border-radius:8px;background:rgba(26,112,64,.05);color:#1a7040;cursor:pointer;" title=".eml oder .msg Datei wählen oder hierher ziehen">✉ .eml / .msg<input type="file" accept=".msg,.eml" style="display:none" onchange="_emHandleEmlSelect(event)"></label>'+
+    '<label style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:7px 10px;font-size:12px;font-weight:600;border:1px solid var(--border);border-radius:8px;background:var(--bg3);color:var(--text2);cursor:pointer;" title="Datei als Anhang hochladen">📎 Anhang<input type="file" multiple style="display:none" onchange="_emAddAttachmentFile(event)"></label>'+
   '</div>';
+  let _ebd=_emlBar.querySelector('div');
+  _ebd.addEventListener('dragenter',function(e){e.preventDefault();_ebd.style.background='rgba(108,99,255,.07)';_ebd.style.outline='2px dashed var(--accent)';});
+  _ebd.addEventListener('dragover',function(e){e.preventDefault();});
+  _ebd.addEventListener('dragleave',function(){_ebd.style.background='var(--bg2)';_ebd.style.outline='';});
+  _ebd.addEventListener('drop',function(e){e.preventDefault();_ebd.style.background='var(--bg2)';_ebd.style.outline='';_emHandleEmlDrop(e.dataTransfer);});
   el.appendChild(_emlBar);
   // Event-Delegation: Timer unterscheidet Single (280ms) von Doppelklick
   let _elNew=el.cloneNode(false);
@@ -18883,6 +18899,39 @@ function _emOpenViewer(files,startIdx){
   document.addEventListener('keydown',onKey);
   ov.appendChild(prev);ov.appendChild(img);ov.appendChild(next);ov.appendChild(cls);ov.appendChild(cap);
   document.body.appendChild(ov);
+}
+function _emOpenChipById(id){
+  let f=window._emChipReg&&window._emChipReg[id];
+  if(!f){_emOpenAttachGallery();return;}
+  if(f.url)_emShowAttachPreview(f.icon,f.name,f.url,f.mime,f.data||{});
+  else _emOpenAttachGallery();
+}
+async function _emAddAttachmentFile(evt){
+  const files=[...(evt.target.files||[])];
+  evt.target.value='';
+  if(!files.length||!_emCurrentTask)return;
+  const t=_emCurrentTask;
+  const folderId=_ezFolderId((t.gdriveOrdner||'').trim());
+  for(const file of files){
+    const mime=file.type||'application/octet-stream';
+    if(gdriveToken&&folderId){
+      showToast('⏳ "'+file.name+'" wird hochgeladen…','info',4000);
+      try{
+        const buf=await new Promise(function(res,rej){const r=new FileReader();r.onload=function(ev){res(ev.target.result);};r.onerror=rej;r.readAsArrayBuffer(file);});
+        const result=await _driveUploadGeneric(buf,file.name,mime,folderId);
+        if(!t.attachments)t.attachments=[];
+        t.attachments.push({name:file.name,type:mime,fileId:result.id,url:'https://drive.google.com/file/d/'+result.id+'/view',uploadedAt:new Date().toLocaleDateString('de-DE')});
+        showToast('✅ "'+file.name+'" hochgeladen','success',3000);
+      }catch(e){showToast('⚠ Upload fehlgeschlagen: '+e.message,'error',5000);}
+    } else {
+      const MAX=20*1024*1024;
+      if(file.size>MAX){showToast('⚠ "'+file.name+'" zu groß (max. 20 MB ohne Drive-Ordner)','error',5000);continue;}
+      showToast('ℹ Kein Drive-Ordner – "'+file.name+'" lokal gespeichert','info',3000);
+      await new Promise(function(res){const r=new FileReader();r.onload=function(ev){if(!t.attachments)t.attachments=[];t.attachments.push({name:file.name,type:mime,size:file.size,data:ev.target.result,uploadedAt:new Date().toLocaleDateString('de-DE')});res();};r.readAsDataURL(file);});
+    }
+  }
+  _emScheduleSave();
+  _emReloadMailList();
 }
 function _emToggleAttachSection(){
   let body=document.getElementById('emAttachSectionBody');
