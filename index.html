@@ -3523,7 +3523,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-01 · #206'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b199)
+const PAM_BUILD = 'v2026-06-01 · #208'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b199)
 
 // ── STATE ──
 let boards = {};
@@ -13560,26 +13560,56 @@ async function _createDriveAuftragStruktur(folderName,parentFid){
 }
 // ── Auto-Ordner: vollständige Auftragsstruktur anlegen wenn neuer Task einen Titel bekommt ──
 let _autoFolderCreating=false; // Verhindert Doppelaufruf
+// Zeigt Mini-Modal zur Ordnernamens-Bestätigung vor Drive-Anlage
+function _promptFolderName(suggested){
+  return new Promise(function(resolve){
+    const ex=document.getElementById('_folderNamePrompt');if(ex)ex.remove();
+    const ov=document.createElement('div');
+    ov.id='_folderNamePrompt';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99999;display:flex;align-items:center;justify-content:center;';
+    const box=document.createElement('div');
+    box.style.cssText='background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px 24px;min-width:320px;max-width:500px;box-shadow:0 8px 32px rgba(0,0,0,.5);';
+    const safe=suggested.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+    box.innerHTML='<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:10px;">📁 Drive-Ordnername anpassen</div>'
+      +'<div style="font-size:12px;color:var(--text2);margin-bottom:6px;">Ordnername:</div>'
+      +'<input id="_fnpInput" type="text" value="'+safe+'" autocomplete="off" style="width:100%;box-sizing:border-box;padding:8px 10px;border-radius:7px;border:1.5px solid var(--accent);background:var(--bg3);color:var(--text);font-size:13px;outline:none;">'
+      +'<div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;">'
+      +'<button id="_fnpCancel" style="padding:7px 16px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:13px;cursor:pointer;">Abbrechen</button>'
+      +'<button id="_fnpOk" style="padding:7px 18px;border-radius:7px;border:none;background:var(--accent);color:#fff;font-size:13px;font-weight:700;cursor:pointer;">📁 Anlegen</button>'
+      +'</div>';
+    ov.appendChild(box);document.body.appendChild(ov);
+    const inp=document.getElementById('_fnpInput');
+    setTimeout(function(){inp.focus();inp.select();},60);
+    function _done(val){ov.remove();resolve(val);}
+    document.getElementById('_fnpOk').onclick=function(){const v=(inp.value||'').trim();if(v)_done(v);else inp.focus();};
+    document.getElementById('_fnpCancel').onclick=function(){_done(null);};
+    inp.addEventListener('keydown',function(e){if(e.key==='Enter'){const v=(inp.value||'').trim();if(v)_done(v);}else if(e.key==='Escape')_done(null);});
+    ov.addEventListener('click',function(e){if(e.target===ov)_done(null);});
+  });
+}
 async function _autoCreateTaskFolder(){
   const titleEl=document.getElementById('taskTitleInput');
   const title=(titleEl?titleEl.value:'').trim();
-  if(!title||title.length<3)return; // Kein Titel oder zu kurz
+  if(!title||title.length<3)return;
   const taskId=(document.getElementById('taskId')||{}).value||'';
-  if(taskId)return; // Bestehender Task – kein Auto-Ordner
-  if(!gdriveToken){return;} // Drive nicht verbunden
-  // Prüfen ob Felder noch auf Default stehen (noch kein Ordner angelegt)
+  if(taskId)return;
+  if(!gdriveToken)return;
   const gdOrdEl=document.getElementById('tGDOrdner');
   const currentVal=(gdOrdEl?gdOrdEl.value:'').trim();
-  const mainFid=_extractFolderIdFromUrl(DEFAULT_FOLDER_BAUSTELLE);
+  const isNotiz=(typeof boardTypes!=='undefined'&&typeof currentBoard!=='undefined')&&(boardTypes[currentBoard]||'baustelle')==='notiz';
+  const mainFid=_extractFolderIdFromUrl(isNotiz?DEFAULT_FOLDER_NOTIZ:DEFAULT_FOLDER_BAUSTELLE);
   const currentFid=_extractFolderIdFromUrl(currentVal);
-  if(currentFid&&currentFid!==mainFid)return; // Bereits angepasst
+  if(currentFid&&currentFid!==mainFid)return;
   if(_autoFolderCreating)return;
-  // Nicht anlegen wenn VBS-Drive-Erstellung noch läuft
   if(_vbsSearchAttempts>0||_vbsSearchTimer||_vbsSubfolderSearchActive)return;
-  _autoFolderCreating=true;
-  showToast('📁 Erstelle Drive-Ordnerstruktur: '+title.substring(0,40)+'…','info',5000);
+  _autoFolderCreating=true; // Doppelaufruf verhindern während Prompt
   try{
-    const urls=await _createDriveAuftragStruktur(title,mainFid);
+    const confirmedName=await _promptFolderName(title);
+    if(!confirmedName){return;} // User hat abgebrochen
+    // Task-Titel synchron zum Ordnernamen setzen
+    if(confirmedName!==title&&titleEl){titleEl.value=confirmedName;scheduleTaskFieldSave&&scheduleTaskFieldSave();}
+    showToast('📁 Erstelle Drive-Ordnerstruktur: '+confirmedName.substring(0,40)+'…','info',5000);
+    const urls=await _createDriveAuftragStruktur(confirmedName,mainFid);
     const gdEl =document.getElementById('tGD');          if(gdEl)  gdEl.value =urls.fotoUrl;
     const gdoEl=document.getElementById('tGDOrdner');    if(gdoEl) gdoEl.value=urls.mainUrl;
     const eoEl =document.getElementById('tEmailOrdner'); if(eoEl)  eoEl.value =urls.emailUrl;
