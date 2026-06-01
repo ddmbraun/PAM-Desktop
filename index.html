@@ -18235,8 +18235,18 @@ function _renderEmailMailList(){
   let el=document.getElementById('emMailList');
   if(!el)return;
   let t=_emCurrentTask;
-  let mails=[]; // Alle Mail-Einträge sammeln
-  (t.emailOriginals||[]).forEach(function(m,i){mails.push({type:'original',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0});});
+  let mails=[]; // Alle Mail-Einträge sammeln – dedupliziert wie _pamRenderUnifiedEmailList
+  function _normSubjEM(s){return(s||'').replace(/^(Re|AW|Fwd|WG|Antwort|FYI):\s*/gi,'').trim().toLowerCase().substring(0,60);}
+  const _emThrIds=new Set([...(t.gmailThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean),...(t.msThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean)]);
+  const _emThrSubj=new Set();
+  (t.gmailThreadMessages||[]).forEach(function(m){const k=_normSubjEM(m.subject||m.betreff||'');if(k)_emThrSubj.add(k);});
+  (t.msThreadMessages||[]).forEach(function(m){const k=_normSubjEM(m.subject||m.betreff||'');if(k)_emThrSubj.add(k);});
+  (t.emailOriginals||[]).forEach(function(m,i){
+    if(m.messageId&&_emThrIds.has(m.messageId))return;
+    const subjKey=_normSubjEM(m.subject||m.name||'');
+    if(subjKey&&_emThrSubj.has(subjKey))return;
+    mails.push({type:'original',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0});
+  });
   (t.gmailThreadMessages||[]).forEach(function(m,i){mails.push({type:'gmail',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0});});
   (t.msThreadMessages||[]).forEach(function(m,i){mails.push({type:'ms',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0});});
   // Chronologisch sortieren – neueste zuerst
@@ -18282,7 +18292,7 @@ function _renderEmailMailList(){
         '</div>'+
         '<div style="display:flex;gap:3px;align-items:center;">'+
           (_emlCnt>0?'<span onclick="_emOpenAttachGallery()" style="background:#FFF3CD;color:#856404;border:1px solid #FFEAA7;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px;cursor:pointer;">EML '+_emlCnt+'</span>':'')+
-          (_pdfCnt>0?'<span onclick="_emOpenAttachGallery()" style="background:#fdf0f0;color:#c0392b;border:1px solid #f5c6c6;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px;cursor:pointer;">PDF '+_pdfCnt+'</span>':'')+
+          (_pdfCnt>0?'<span onclick="_openEmailThumbnailGrid()" style="background:#fdf0f0;color:#c0392b;border:1px solid #f5c6c6;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px;cursor:pointer;">PDF '+_pdfCnt+'</span>':'')+
           '<span onclick="_emOpenAttachGallery()" style="background:#E6F4EA;color:#15803D;border:1px solid #B7DFBF;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px;cursor:pointer;">Fotos '+_fotoCnt+'</span>'+
         '</div>'+
       '</div>'+
@@ -19197,7 +19207,7 @@ function _initEmailResizers(){
       e.preventDefault();rz2.setPointerCapture(e.pointerId);rz2.classList.add('dragging');
       let ml=document.getElementById('emMailList');
       let startX=e.clientX,startW=ml?ml.offsetWidth:300;
-      function onMove(ev){if(!ml)return;let nw=Math.max(160,Math.min(600,startW+(ev.clientX-startX)));ml.style.width=nw+'px';ml.style.minWidth=nw+'px';}
+      function onMove(ev){if(!ml)return;let nw=Math.max(160,Math.min(600,startW+(ev.clientX-startX)));ml.style.width=nw+'px';ml.style.flex='none';}
       function onUp(){rz2.classList.remove('dragging');_emSaveColWidths();rz2.removeEventListener('pointermove',onMove);rz2.removeEventListener('pointerup',onUp);}
       rz2.addEventListener('pointermove',onMove);rz2.addEventListener('pointerup',onUp);
     });
@@ -20159,27 +20169,4 @@ function _pamVersionRollback(){
     +'<button onclick="document.getElementById(\'_rollbackFileInput\').click()" '
     'style="padding:10px 20px;border-radius:8px;background:var(--accent);color:#fff;border:none;cursor:pointer;font-size:14px;font-weight:600;">\uD83D\uDCC2 Backup-Datei ausw\u00e4hlen</button>'
     +'<button onclick="this.parentElement.parentElement.remove()" '
-    +'style="padding:8px;border-radius:8px;background:none;border:1px solid var(--border);color:var(--text2);cursor:pointer;font-size:13px;">Abbrechen</button>';
-  ov.appendChild(box);
-  ov.onclick=function(e){if(e.target===ov)ov.remove();};
-  document.body.appendChild(ov);
-}
-function _pamRollbackSelected(evt){
-  let file=evt.target.files[0];if(!file)return;
-  evt.target.value='';
-  let reader=new FileReader();
-  reader.onload=function(e){
-    let blob=new Blob([e.target.result],{type:'text/html'});
-    let a=document.createElement('a');
-    a.href=URL.createObjectURL(blob);
-    a.download='index.html';
-    a.click();
-    setTimeout(function(){URL.revokeObjectURL(a.href);},5000);
-    showToast('\u2705 index.html heruntergeladen \u2013 jetzt zu GitHub hochladen, dann \uD83D\uDD04 Update klicken','ok',8000);    document.querySelectorAll('[style*="z-index:9999"]').forEach(function(el){el.remove();});
-  };
-  reader.readAsText(file);
-}
-
-</script>
-</body>
-</html>
+    +'style="padding:8px;border-radius:8px;background:none;border:1px solid var(--border);color:var(--text2);cursor:pointer;font-size:13px;">Abbrechen</butt
