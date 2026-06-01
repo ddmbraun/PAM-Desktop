@@ -261,7 +261,7 @@ async function _ezBuildPdfFromHtml(info){
   let cleanHtml=info.bodyHtml.replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<link[^>]+rel=["']?stylesheet["']?[^>]*>/gi,'').replace(/@font-face\s*\{[^}]*\}/gi,'').replace(/@import\s+url\([^)]*\)[^;]*;/gi,'');
   // CID-Inline-Bilder direkt im HTML ersetzen bevor wrap gebaut wird
   let _cidMap=info.cidMap||{};
-  const _MIN_CID_BYTES=5*1024; // 5KB-Schwelle: Logos/Icons (<5KB) werden nicht als Bilder angezeigt
+  const _MIN_CID_BYTES=5*1024; // 5KB: Logos/Icons rausfiltern
   let resolvedHtml=cleanHtml.replace(/src=["']?(cid:[^"'\s>]+)["']?/gi,function(m,cid){
     let _d=_cidMap[cid]||_cidMap['cid:'+cid.replace(/^cid:/i,'')]||'';
     if(!_d)return 'src=""';
@@ -3523,7 +3523,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-01 · #208'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b199)
+const PAM_BUILD = 'v2026-06-01 · #211'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b199)
 
 // ── STATE ──
 let boards = {};
@@ -6277,7 +6277,6 @@ function renderHeute(){
       +(cnt>0?'<span style="font-size:10px;background:'+(active?color:'rgba(0,0,0,0.1)')+';color:'+(active?'#fff':'var(--text2)')+';padding:0 5px;border-radius:8px;font-weight:700;">'+cnt+'</span>':'')
       +'</button>';
   }
-  // Tabellen-Render
   function _renderTabelle(){
     var fd=_heuteDateFilter||today;
     var allItems=[];
@@ -12012,13 +12011,18 @@ async function _msLoadEmailThread(){
     }
     // Ersten convId für Rückwärtskompatibilität speichern
     task.msConversationId=[...convIds][0];
-    // Schritt 2: Alle Mails aus allen Conversations laden – globale Suche (alle Ordner inkl. Unterordner, Gelöschte, Archiv)
-    const allMsgsMap=new Map(); // id → message (Deduplizierung)
+    // Schritt 2: Alle Ordner + Unterordner + Gesendet, OHNE Papierkorb
+    let _deletedFolderId='';
+    try{
+      const _rDel=await fetch('https://graph.microsoft.com/v1.0/me/mailFolders/deleteditems?$select=id',{headers:{Authorization:'Bearer '+msToken}});
+      if(_rDel.ok){const _dDel=await _rDel.json();_deletedFolderId=_dDel.id||'';}
+    }catch(e){}
+    const allMsgsMap=new Map();
     for(const convId of convIds){
       try{
-        // me/messages ohne Ordner-Einschränkung → sucht in Posteingang, Gesendet, Unterordner, Gelöscht, Archiv
-        const _f2=encodeURIComponent(`conversationId eq '${convId}' and isDraft eq false`);
-        const r2=await fetch(`https://graph.microsoft.com/v1.0/me/messages?$filter=${_f2}&$select=id,subject,from,receivedDateTime,internetMessageId,bodyPreview,isDraft,hasAttachments&$top=50`,
+        const _f2Base=`conversationId eq '${convId}' and isDraft eq false`;
+        const _f2=encodeURIComponent(_deletedFolderId?_f2Base+` and parentFolderId ne '${_deletedFolderId}'`:_f2Base);
+        const r2=await fetch(`https://graph.microsoft.com/v1.0/me/messages?$filter=${_f2}&$select=id,subject,from,receivedDateTime,internetMessageId,bodyPreview,isDraft,hasAttachments&$top=100`,
           {headers:{Authorization:'Bearer '+msToken}});
         if(!r2.ok){const _e2=await r2.json().catch(()=>({}));console.warn('[MS] Thread',convId,':',_e2.error?.message);continue;}
         const d2=await r2.json();
@@ -13559,8 +13563,7 @@ async function _createDriveAuftragStruktur(folderName,parentFid){
   return{mainId,mainUrl:base+mainId,fotoId:foto2Id,fotoUrl:base+foto2Id,emailId,emailUrl:base+emailId,dokId:dok1Id,dokUrl:base+dok1Id};
 }
 // ── Auto-Ordner: vollständige Auftragsstruktur anlegen wenn neuer Task einen Titel bekommt ──
-let _autoFolderCreating=false; // Verhindert Doppelaufruf
-// Zeigt Mini-Modal zur Ordnernamens-Bestätigung vor Drive-Anlage
+let _autoFolderCreating=false;
 function _promptFolderName(suggested){
   return new Promise(function(resolve){
     const ex=document.getElementById('_folderNamePrompt');if(ex)ex.remove();
@@ -13569,7 +13572,7 @@ function _promptFolderName(suggested){
     ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99999;display:flex;align-items:center;justify-content:center;';
     const box=document.createElement('div');
     box.style.cssText='background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px 24px;min-width:320px;max-width:500px;box-shadow:0 8px 32px rgba(0,0,0,.5);';
-    const safe=suggested.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+    const safe=(suggested||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
     box.innerHTML='<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:10px;">📁 Drive-Ordnername anpassen</div>'
       +'<div style="font-size:12px;color:var(--text2);margin-bottom:6px;">Ordnername:</div>'
       +'<input id="_fnpInput" type="text" value="'+safe+'" autocomplete="off" style="width:100%;box-sizing:border-box;padding:8px 10px;border-radius:7px;border:1.5px solid var(--accent);background:var(--bg3);color:var(--text);font-size:13px;outline:none;">'
@@ -13602,11 +13605,10 @@ async function _autoCreateTaskFolder(){
   if(currentFid&&currentFid!==mainFid)return;
   if(_autoFolderCreating)return;
   if(_vbsSearchAttempts>0||_vbsSearchTimer||_vbsSubfolderSearchActive)return;
-  _autoFolderCreating=true; // Doppelaufruf verhindern während Prompt
+  _autoFolderCreating=true;
   try{
     const confirmedName=await _promptFolderName(title);
-    if(!confirmedName){return;} // User hat abgebrochen
-    // Task-Titel synchron zum Ordnernamen setzen
+    if(!confirmedName){return;}
     if(confirmedName!==title&&titleEl){titleEl.value=confirmedName;scheduleTaskFieldSave&&scheduleTaskFieldSave();}
     showToast('📁 Erstelle Drive-Ordnerstruktur: '+confirmedName.substring(0,40)+'…','info',5000);
     const urls=await _createDriveAuftragStruktur(confirmedName,mainFid);
@@ -16410,23 +16412,55 @@ async function _driveSetPublic(fileId){
 }
 
 async function _uploadEmailOriginal(file){
-  if(!gdriveToken){showToast('⚠ .eml ablegen: Bitte zuerst oben „☁️ Google Drive" verbinden.','error',5000);return;}
-  // Zielordner: E-Mail-Ablageordner, Fallback: emailOrdner/gdriveOrdner des aktiven Tasks (E-Mail-Modal)
-  const folderUrl=(document.getElementById('tEmailOrdner')?.value||'').trim()
+  if(!gdriveToken){showToast('⚠ .eml ablegen: Bitte zuerst "☁️ Google Drive" verbinden.','error',5000);return;}
+  // EML-Betreff vorab lesen fuer Ordnername-Prompt
+  const isEml=file.name.toLowerCase().endsWith('.eml');
+  let preMessageId='';
+  let preText='';
+  if(isEml){
+    try{
+      preText=await new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.onerror=rej;r.readAsText(file,'utf-8');});
+      const _preParsed=_parseEmlText(preText);
+      preMessageId=(_preParsed.messageId||'').replace(/^<|>$/g,'');
+      if(_preParsed.subject)window._emlDropSubject=_preParsed.subject.replace(/^(Re|Fwd|AW|WG):\s*/i,'').trim();
+    }catch(e){}
+  }
+  // Zielordner bestimmen
+  let _folderUrl=(document.getElementById('tEmailOrdner')?.value||'').trim()
     ||(_emCurrentTask&&(_emCurrentTask.emailOrdner||_emCurrentTask.gdriveOrdner)||'');
-  const fid=_ezFolderId(folderUrl);
-  if(!fid){showToast('⚠ .eml ablegen: Bitte den Projektordner im Task eintragen (Verknüpfungen → Projektordner).','error',7000);return;}
+  let fid=_ezFolderId(_folderUrl);
+  // Kein Ordner - Prompt mit EML-Betreff vorausgefuellt, dann Ordner anlegen
+  if(!fid){
+    const _titleEl=document.getElementById('taskTitleInput');
+    const _taskTitle=(_titleEl?_titleEl.value:'').trim();
+    const _suggestion=window._emlDropSubject||_taskTitle||file.name.replace(/\.eml$/i,'').replace(/\.msg$/i,'');
+    window._emlDropSubject=undefined;
+    const _confirmed=await _promptFolderName(_suggestion);
+    if(!_confirmed)return;
+    if(_titleEl&&_confirmed!==_taskTitle){_titleEl.value=_confirmed;scheduleTaskFieldSave&&scheduleTaskFieldSave();}
+    try{
+      const _isNotiz=(typeof boardTypes!=='undefined'&&typeof currentBoard!=='undefined')&&(boardTypes[currentBoard]||'baustelle')==='notiz';
+      const _mainFid=_extractFolderIdFromUrl(_isNotiz?DEFAULT_FOLDER_NOTIZ:DEFAULT_FOLDER_BAUSTELLE);
+      showToast('📁 Erstelle Drive-Ordnerstruktur: '+_confirmed.substring(0,40)+'…','info',5000);
+      const _urls=await _createDriveAuftragStruktur(_confirmed,_mainFid);
+      const _gdEl=document.getElementById('tGD');if(_gdEl)_gdEl.value=_urls.fotoUrl;
+      const _gdoEl=document.getElementById('tGDOrdner');if(_gdoEl)_gdoEl.value=_urls.mainUrl;
+      const _eoEl=document.getElementById('tEmailOrdner');if(_eoEl)_eoEl.value=_urls.emailUrl;
+      const _doEl=document.getElementById('tDokOrdner');if(_doEl)_doEl.value=_urls.dokUrl;
+      _folderUrl=_urls.emailUrl;
+      fid=_ezFolderId(_folderUrl);
+      scheduleTaskFieldSave&&scheduleTaskFieldSave();
+      showToast('✓ Drive-Ordnerstruktur angelegt','success',3000);
+    }catch(_fe){showToast('⚠ Ordner anlegen fehlgeschlagen: '+_fe.message,'error',5000);return;}
+  }
+  if(!fid){showToast('⚠ .eml ablegen: Bitte Projektordner im Task eintragen.','error',7000);return;}
   const msgEl=document.getElementById('emailOrigDropMsg');
-  if(msgEl)msgEl.textContent='⏳ Prüfe: '+file.name+'…';
+  if(msgEl)msgEl.textContent='⏳ Pruefe: '+file.name+'…';
   try{
-    // EML vorab lesen um Message-ID zu prüfen (Duplikat-Check VOR Upload)
-    const isEml=file.name.toLowerCase().endsWith('.eml');
-    let preMessageId='';
-    let preText='';
     if(isEml){
       try{
-        preText=await new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.onerror=rej;r.readAsText(file,'utf-8');});
-        preMessageId=(_parseEmlText(preText).messageId||'').replace(/^<|>$/g,'');
+        if(!preText)preText=await new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.onerror=rej;r.readAsText(file,'utf-8');});
+        if(!preMessageId)preMessageId=(_parseEmlText(preText).messageId||'').replace(/^<|>$/g,'');
       }catch(e){}
     }
     // Duplikat-Check: Message-ID bereits bekannt?
