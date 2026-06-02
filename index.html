@@ -3539,7 +3539,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-01 · #221'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b199)
+const PAM_BUILD = 'v2026-06-01 · #222'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b199)
 
 // ── STATE ──
 let boards = {};
@@ -15652,9 +15652,15 @@ function _closeEmailOrigPopup(){_closeEmailAllPopup();}
 
 // ── Thumbnail-Kachel-Galerie für E-Mail Dateien ──────────────────────────────
 function _openEmailThumbnailGrid(){
-  const _atgTask=(()=>{const _id=(document.getElementById('taskId')||{}).value||'';return _id?findTaskById(_id):(typeof _emCurrentTask!=='undefined'?_emCurrentTask:null);})();
-  const _atgPdfs=(typeof _emCurrentTask!=='undefined'&&_emCurrentTask&&_atgTask===_emCurrentTask)?(_emCurrentTask.emailPdfs||[]):taskEmailPdfs;
-  const _atgOrigs=(typeof _emCurrentTask!=='undefined'&&_emCurrentTask&&_atgTask===_emCurrentTask)?(_emCurrentTask.emailOriginals||[]):taskEmailOriginals;
+  // Fix #222: Email-Modal-Kontext hat Priorität – taskId-DOM-Wert kann von einem zuvor geöffneten Task stammen
+  var _emModalOpen=!!(document.getElementById('emailTaskModal')&&document.getElementById('emailTaskModal').classList.contains('open'));
+  const _atgTask=(()=>{
+    if(_emModalOpen&&typeof _emCurrentTask!=='undefined'&&_emCurrentTask)return _emCurrentTask;
+    const _id=(document.getElementById('taskId')||{}).value||'';
+    return _id?findTaskById(_id):(typeof _emCurrentTask!=='undefined'?_emCurrentTask:null);
+  })();
+  const _atgPdfs=(_emModalOpen&&typeof _emCurrentTask!=='undefined'&&_emCurrentTask)?(_emCurrentTask.emailPdfs||[]):((typeof _emCurrentTask!=='undefined'&&_emCurrentTask&&_atgTask===_emCurrentTask)?(_emCurrentTask.emailPdfs||[]):taskEmailPdfs);
+  const _atgOrigs=(_emModalOpen&&typeof _emCurrentTask!=='undefined'&&_emCurrentTask)?(_emCurrentTask.emailOriginals||[]):((typeof _emCurrentTask!=='undefined'&&_emCurrentTask&&_atgTask===_emCurrentTask)?(_emCurrentTask.emailOriginals||[]):taskEmailOriginals);
   const _atgTIds=new Set([...((_atgTask&&_atgTask.gmailThreadMessages)||[]).map(m=>m.messageId).filter(Boolean),...((_atgTask&&_atgTask.msThreadMessages)||[]).map(m=>m.messageId).filter(Boolean)]);
   const _atgPdfSeen=new Set();
   const allItems=[
@@ -19188,7 +19194,8 @@ function _emOpenFotoGallery(){
   if(!_emCurrentTask)return;
   let files=[];
   (_emCurrentTask.fotos||[]).forEach(function(f){
-    files.push({icon:'🖼',name:f.name||'Bild',url:f.url||f.webViewLink||f.thumbnailLink||'',isImg:true,data:f,mime:'image/jpeg'});
+    // Fix #222: driveId mitgeben damit _emShowFileListOverlay per Auth-API laden kann
+    files.push({icon:'🖼',name:f.name||'Bild',url:f.url||f.webViewLink||f.thumbnailLink||'',driveId:(f.editedDriveId||f.driveId)||'',isImg:true,data:f,mime:'image/jpeg'});
   });
   if(!files.length){showToast('Keine Fotos vorhanden','info',2000);return;}
   _emShowFileListOverlay('🖼 Fotos ('+files.length+')',files);
@@ -19202,11 +19209,16 @@ function _emShowFileListOverlay(title,files){
   box.appendChild(hdr);
   let grid=document.createElement('div');grid.className='em-gal-grid';
   files.forEach(function(f,idx){
-    if(f.isImg&&f.url){
+    if(f.isImg){
       let img=document.createElement('img');img.className='em-gal-thumb';
-      img.src=f.url;img.title=f.name;img.alt=f.name;
+      img.title=f.name;img.alt=f.name;
       img.onerror=function(){this.style.display='none';};
       img.onclick=function(){ov.remove();_emOpenViewer(files,idx);};
+      // Fix #222: Drive-Bilder per Auth-API laden (thumbnailLink erfordert Auth, funktioniert nicht direkt in img.src)
+      var _did=f.driveId||(f.data&&(f.data.editedDriveId||f.data.driveId))||'';
+      if(_did&&typeof _fetchDesktopFotoBlob==='function'){
+        _fetchDesktopFotoBlob(_did).then(function(url){if(url)img.src=url;else if(f.url)img.src=f.url;});
+      }else if(f.url){img.src=f.url;}
       grid.appendChild(img);
     }else{
       let btn=document.createElement('div');btn.className='em-gal-file';
