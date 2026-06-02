@@ -542,7 +542,19 @@ function _parseEmlText(rawText){
         let cid=pcidArr[1].trim();
         let b64=pb.replace(/\s+/g,'');
         // Bug-Fix: cidMap-Einträge auf max. 2MB begrenzen – riesige Bilder nicht in Memory laden
-        if(b64&&b64.length*0.75<2*1024*1024)res.cidMap['cid:'+cid]='data:'+pct+';base64,'+b64;
+        if(b64&&b64.length*0.75<2*1024*1024){
+          let _dataUrl='data:'+pct+';base64,'+b64;
+          res.cidMap['cid:'+cid]=_dataUrl;
+          // Fix #225: auch Kurzvariante ohne @domain eintragen (cid:image001.jpg@01DC... → cid:image001.jpg)
+          let _cidShort=cid.includes('@')?cid.substring(0,cid.indexOf('@')):null;
+          if(_cidShort)res.cidMap['cid:'+_cidShort]=_dataUrl;
+        } else {
+          // Fix #225: Zu großes Bild (>2MB) – Platzhalter-Eintrag damit cid:-Referenz nicht im HTML bleibt
+          var _ph='data:image/svg+xml;base64,'+btoa('<svg xmlns="http://www.w3.org/2000/svg" width="60" height="60"><rect width="60" height="60" fill="#eee"/><text x="30" y="35" text-anchor="middle" font-size="10" fill="#999">🖼</text></svg>');
+          res.cidMap['cid:'+cid]=_ph;
+          let _cidShort2=cid.includes('@')?cid.substring(0,cid.indexOf('@')):null;
+          if(_cidShort2)res.cidMap['cid:'+_cidShort2]=_ph;
+        }
       }
       // CID-Flag setzen (für interne Logik)
       let _isCidImage=pct.startsWith('image/')&&pcidArr;
@@ -567,7 +579,12 @@ function _parseEmlText(rawText){
       // Outlook-Mails nutzen oft src="cid:image001.jpg" ohne separaten Content-ID-Header
       if(!pcidArr&&attachName&&pct.startsWith('image/')&&pe==='base64'){
         let _nb64=pb.replace(/\s+/g,'');
-        if(_nb64&&_nb64.length*0.75<2*1024*1024)res.cidMap['cid:'+attachName]='data:'+pct+';base64,'+_nb64;
+        if(_nb64&&_nb64.length*0.75<2*1024*1024){
+          let _nUrl='data:'+pct+';base64,'+_nb64;
+          res.cidMap['cid:'+attachName]=_nUrl;
+          // Fix #225: auch @domain-Variante (cid:image001.jpg → auch cid:image001.jpg@xxx)
+          // wird beim Rendering per cleanup abgefangen
+        }
       }
       // Fix #223: CID-Inline-Bilder markieren – nicht automatisch hochladen, aber für "Als Foto speichern" verfügbar halten
       if(pe==='base64'&&attachName&&pct.startsWith('image/')){
@@ -3541,7 +3558,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-01 · #224'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b199)
+const PAM_BUILD = 'v2026-06-01 · #225'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b199)
 
 // ── STATE ──
 let boards = {};
@@ -18889,7 +18906,13 @@ async function _emOpenMail(idx,mails){
       const rawText=await r.text();
       const parsed=_parseEmlText(rawText);
       bodyHtml=parsed.bodyHtml||'';bodyText=parsed.bodyText||'';
-      if(bodyHtml&&parsed.cidMap){for(const [cid,durl] of Object.entries(parsed.cidMap)){bodyHtml=bodyHtml.split(cid).join(durl);}}
+      if(bodyHtml&&parsed.cidMap){
+        // Fix #225a: cidMap ersetzen (exakter Treffer)
+        for(const [cid,durl] of Object.entries(parsed.cidMap)){bodyHtml=bodyHtml.split(cid).join(durl);}
+        // Fix #225b: Verbleibende cid:-Referenzen (keine Übereinstimmung in cidMap) durch Platzhalter ersetzen
+        bodyHtml=bodyHtml.replace(/src="cid:[^"]*"/gi,'src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" title="Bild nicht ladbar (zu groß)"');
+        bodyHtml=bodyHtml.replace(/src='cid:[^']*'/gi,"src='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7' title='Bild nicht ladbar'");
+      }
       if(parsed.sender)from=parsed.sender;
       (parsed.attachments||[]).forEach(function(a){let nl=(a.name||'').toLowerCase();let icon=nl.endsWith('.pdf')?'📄':(nl.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':'📎');emlAttachFiles.push({icon:icon,name:a.name||'Anhang',url:'',mime:a.mimeType||'',data:a,_isEmlParsed:true});});
       const _t=_emCurrentTask;
