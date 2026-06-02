@@ -1636,6 +1636,9 @@ body.topbar-collapsed #topbarCollapseBtn{transform:rotate(180deg);}
 .card-col-5{border-left-color:#00b8d9;}
 .card-col-6{border-left-color:#9b59b6;}
 .card-col-7{border-left-color:#e67e22;}
+/* Email-Board Karten */
+.email-board-card{border:1px solid #BAE6FD!important;border-left:4px solid #075985!important;padding:11px 13px!important;background:rgba(224,242,254,0.13);}
+.email-board-card:hover{border-color:#075985!important;border-left-color:#075985!important;box-shadow:0 4px 12px rgba(7,89,133,0.15)!important;}
 /* Toolbar-Suchfeld */
 .toolbar-search-wrap{position:relative;display:flex;align-items:center;}
 .toolbar-search-input{padding:4px 28px 4px 24px;border-radius:5px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:11px;width:160px;outline:none;transition:width .2s,border-color .15s;}
@@ -3523,7 +3526,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-01 · #219'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b199)
+const PAM_BUILD = 'v2026-06-01 · #221'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b199)
 
 // ── STATE ──
 let boards = {};
@@ -5870,7 +5873,7 @@ function taskCardHTML(task){
   const _gesamtMins=_zeitMins+(_timerMins>0?_timerMins:0)+_terminMins;
   const _fmtBadge=m=>{const h=Math.floor(m/60),r=m%60;return h>0?(h+'h'+(r>0?' '+r+'m':'')):(r+'m');};
   const _isMergeSel=_mergeSelected.includes(task.id);
-  return`<div class="task-card ${colClass}${_isMergeSel?' merge-selected':''}" draggable="true" data-id="${esc(task.id)}"
+  return`<div class="task-card ${colClass}${isEmailBoard?' email-board-card':''}${_isMergeSel?' merge-selected':''}" draggable="true" data-id="${esc(task.id)}"
     ondragstart="onDragStart(event)" ondragend="onDragEnd(event)" onclick="openEditTaskModal('${esc(task.id)}')">
     <input type="checkbox" class="task-merge-cb" ${_isMergeSel?'checked':''} title="Für Zusammenführen markieren"
       onclick="event.stopPropagation();_toggleMergeSelect('${esc(task.id)}')"
@@ -14645,32 +14648,39 @@ async function _createGoogleKontakt(kontaktDiv){
   }
 }
 // ── Google Kontakt: "PAM"-Label sicherstellen ──
-let _pamGroupResourceName=null;
-async function _getOrCreatePamGroup(){
-  if(_pamGroupResourceName)return _pamGroupResourceName;
+let _gkGroupsCache=null;
+async function _loadContactGroups(){
+  if(_gkGroupsCache)return _gkGroupsCache;
+  const hdrs={'Authorization':'Bearer '+gdriveToken};
+  try{
+    const r=await fetch('https://people.googleapis.com/v1/contactGroups',{headers:hdrs});
+    if(!r.ok){console.warn('[GK] contactGroups status:',r.status);return [];}
+    const d=await r.json();
+    _gkGroupsCache=(d.contactGroups||[]).filter(g=>g.groupType==='USER_CONTACT_GROUP');
+  }catch(e){console.warn('[GK] loadGroups:',e);_gkGroupsCache=[];}
+  return _gkGroupsCache;
+}
+async function _getOrCreateGroup(name){
+  const groups=await _loadContactGroups();
+  const existing=groups.find(g=>g.name===name);
+  if(existing)return existing.resourceName;
   const hdrs={'Authorization':'Bearer '+gdriveToken,'Content-Type':'application/json'};
-  // Alle Gruppen laden
-  const r=await fetch('https://people.googleapis.com/v1/contactGroups?maxMembers=0',{headers:hdrs});
-  if(!r.ok)return null;
-  const d=await r.json();
-  const groups=d.contactGroups||[];
-  const existing=groups.find(g=>g.name==='PAM');
-  if(existing){_pamGroupResourceName=existing.resourceName;return _pamGroupResourceName;}
-  // Neu anlegen
-  const r2=await fetch('https://people.googleapis.com/v1/contactGroups',{
-    method:'POST',headers:hdrs,
-    body:JSON.stringify({contactGroup:{name:'PAM'}})
-  });
-  if(!r2.ok)return null;
-  const d2=await r2.json();
-  _pamGroupResourceName=d2.resourceName||null;
-  return _pamGroupResourceName;
+  try{
+    const r=await fetch('https://people.googleapis.com/v1/contactGroups',{
+      method:'POST',headers:hdrs,body:JSON.stringify({contactGroup:{name:name}})
+    });
+    if(!r.ok){console.warn('[GK] createGroup status:',r.status);return null;}
+    const d=await r.json();
+    _gkGroupsCache=null; // Cache invalidieren
+    return d.resourceName||null;
+  }catch(e){console.warn('[GK] createGroup:',e);return null;}
 }
 // ── Google Kontakt Vorschau-Dialog ──
 let _gkPreviewDiv=null;
 function _showGKPreview(kontaktDiv){
   if(!gdriveToken){showToast('⚠ Bitte zuerst Google Drive verbinden','warning',4000);return;}
   _gkPreviewDiv=kontaktDiv;
+  _gkGroupsCache=null; // immer frisch laden
   const fullName=(kontaktDiv.querySelector('.k-name')||{value:''}).value||'';
   const tel=(kontaktDiv.querySelector('.k-tel')||{value:''}).value||'';
   const email=(kontaktDiv.querySelector('.k-email')||{value:''}).value||'';
@@ -14684,13 +14694,8 @@ function _showGKPreview(kontaktDiv){
   const fs='width:100%;padding:5px 7px;font-size:12px;box-sizing:border-box;border:1px solid #d1d5db;border-radius:4px;margin-top:2px;';
   const row=(id,lbl,type,val)=>'<div><label style="font-size:10px;color:#6b7280;">'+lbl+'</label><input id="'+id+'" type="'+type+'" value="'+esc(val)+'" style="'+fs+'"></div>';
   const nm=_parseNameGK(fullName);
-  const rolle=(kontaktDiv.querySelector('.k-rolle')||{value:'sonstiges'}).value||'sonstiges';
-  const rolleOpts=['ag','mieter','eigentuemer','sonstiges'];
-  const rolleMap={ag:'AG Kontakt',mieter:'Mieter',eigentuemer:'Eigentümer',sonstiges:'Sonstiges'};
-  const rolleSelect='<div><label style="font-size:10px;color:#6b7280;">Label / Rolle</label>'
-    +'<select id="gkp-rolle" style="'+fs+'">'
-    +rolleOpts.map(r=>'<option value="'+r+'"'+(r===rolle?' selected':'')+'>'+rolleMap[r]+'</option>').join('')
-    +'</select></div>';
+  const rolleSelect='<div><label style="font-size:10px;color:#6b7280;">Google Label</label>'
+    +'<select id="gkp-label" style="'+fs+'"><option value="">⏳ Lädt…</option></select></div>';
   const overlay=document.createElement('div');
   overlay.id='gk-preview-modal';
   overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;display:flex;align-items:center;justify-content:center;';
@@ -14710,6 +14715,15 @@ function _showGKPreview(kontaktDiv){
     +'</div></div>';
   document.body.appendChild(overlay);
   overlay.addEventListener('click',e=>{if(e.target===overlay){overlay.remove();_gkPreviewDiv=null;}});
+  // Labels asynchron laden
+  _loadContactGroups().then(groups=>{
+    const sel=document.getElementById('gkp-label');if(!sel)return;
+    sel.innerHTML='';
+    if(!groups.length){sel.innerHTML='<option value="">(keine Labels vorhanden)</option>';return;}
+    // PAM vorauswählen falls vorhanden
+    const opts=[{value:'',label:'– kein Label –'},...groups.map(g=>({value:g.resourceName,label:g.name}))];
+    opts.forEach(o=>{const op=document.createElement('option');op.value=o.value;op.textContent=o.label;if(o.label==='PAM')op.selected=true;sel.appendChild(op);});
+  }).catch(()=>{const sel=document.getElementById('gkp-label');if(sel)sel.innerHTML='<option value="">(Fehler beim Laden)</option>';});
 }
 async function _createGoogleKontaktFromPreview(){
   const g=id=>(document.getElementById(id)||{value:''}).value||'';
@@ -14745,21 +14759,23 @@ async function _createGoogleKontaktFromPreview(){
     if(!resp.ok){const e=await resp.json();throw new Error(e.error&&e.error.message||resp.status);}
     const created=await resp.json();
     const personRN=created.resourceName||'';
+    const selectedLabel=document.getElementById('gkp-label');
+    const labelRN=selectedLabel?selectedLabel.value:'';
+    const labelName=selectedLabel&&selectedLabel.options[selectedLabel.selectedIndex]?selectedLabel.options[selectedLabel.selectedIndex].text:'';
     let labelOK=false;
-    try{
-      const pamRN=await _getOrCreatePamGroup();
-      if(pamRN&&personRN){
-        const gid=pamRN.replace('contactGroups/','');
+    if(labelRN&&personRN){
+      try{
+        const gid=labelRN.replace('contactGroups/','');
         const mr=await fetch('https://people.googleapis.com/v1/contactGroups/'+gid+'/members:modify',{
           method:'POST',
           headers:{'Authorization':'Bearer '+gdriveToken,'Content-Type':'application/json'},
           body:JSON.stringify({resourceNamesToAdd:[personRN]})
         });
         labelOK=mr.ok;
-        if(!mr.ok)mr.json().then(ed=>console.warn('[GK] modify:',mr.status,ed)).catch(()=>{});
-      }
-    }catch(eg){console.warn('[GK] PAM-Label:',eg);}
-    showToast('✅ Kontakt angelegt: '+name+(labelOK?' + Label PAM':''),'success',5000);
+        if(!mr.ok){const ed=await mr.json().catch(()=>({}));console.warn('[GK] modify:',mr.status,ed);}
+      }catch(eg){console.warn('[GK] Label:',eg);}
+    }
+    showToast('✅ Kontakt angelegt: '+name+(labelOK?' + Label: '+labelName:''),'success',5000);
     if(_gkPreviewDiv){const btn=_gkPreviewDiv.querySelector('.gk-create-btn');if(btn){btn.textContent='✅';btn.disabled=true;btn.style.background='#16a34a';}_gkPreviewDiv=null;}
   }catch(e){
     showToast('⚠ Kontakt anlegen fehlgeschlagen: '+e.message,'error',6000);
@@ -19565,6 +19581,8 @@ function _initEmailResizers(){
         let nw=Math.min(window.innerWidth-rect.left,Math.max(520,sw+(ev.clientX-sx)));
         let nh=Math.min(window.innerHeight-rect.top,Math.max(300,sh+(ev.clientY-sy)));
         modal.style.width=nw+'px';modal.style.height=nh+'px';
+        const scale=Math.max(0.7,Math.min(1.4,nh/sh));
+        modal.style.setProperty('--modal-scale',scale.toFixed(2));
         const rp=document.getElementById('emRightPanel');
         if(rp&&!rp.classList.contains('collapsed'))rp.style.minHeight='100%';
       }
@@ -20476,17 +20494,4 @@ function _pamRollbackSelected(evt){
   evt.target.value='';
   let reader=new FileReader();
   reader.onload=function(e){
-    let blob=new Blob([e.target.result],{type:'text/html'});
-    let a=document.createElement('a');
-    a.href=URL.createObjectURL(blob);
-    a.download='index.html';
-    a.click();
-    setTimeout(function(){URL.revokeObjectURL(a.href);},5000);
-    showToast('\u2705 index.html heruntergeladen \u2013 jetzt zu GitHub hochladen, dann \uD83D\uDD04 Update klicken','ok',8000);    document.querySelectorAll('[style*="z-index:9999"]').forEach(function(el){el.remove();});
-  };
-  reader.readAsText(file);
-}
-
-</script>
-</body>
-</html>
+    let blob=new Blob([e.target.result],{
