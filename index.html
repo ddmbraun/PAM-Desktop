@@ -569,10 +569,11 @@ function _parseEmlText(rawText){
         let _nb64=pb.replace(/\s+/g,'');
         if(_nb64&&_nb64.length*0.75<2*1024*1024)res.cidMap['cid:'+attachName]='data:'+pct+';base64,'+_nb64;
       }
-      // Bilder (CID-Inline ODER Anhang) mit Dateiname → immer in attachments (→ Foto-Bereich)
+      // Fix #223: CID-Inline-Bilder markieren – nicht automatisch hochladen, aber für "Als Foto speichern" verfügbar halten
       if(pe==='base64'&&attachName&&pct.startsWith('image/')){
+        var _isCidInlineFlag=!!(pcidArr||disp.startsWith('inline'));
         let b64=pb.replace(/\s+/g,'');
-        if(b64)res.attachments.push({name:attachName,mimeType:pct||'image/jpeg',b64:b64});
+        if(b64)res.attachments.push({name:attachName,mimeType:pct||'image/jpeg',b64:b64,_isCidInline:_isCidInlineFlag});
       }
       // Sonstige Anhänge (PDF, DOCX etc.)
       else if(pe==='base64'&&attachName&&!_isCidImage&&(disp.startsWith('attachment')||pct==='application/pdf'||pct==='application/octet-stream'||pct.startsWith('application/'))){
@@ -1073,6 +1074,7 @@ async function _auftragAddToTask(task,boardName,fileMode){
     if(_isRawEml2&&fid&&gdriveToken&&info.attachments&&info.attachments.length>0){
       let _att2Ok=0,_att2Fail=0;
       for(const att of info.attachments){
+        if(att._isCidInline)continue; // Fix #223: CID-Inline-Bilder nicht automatisch hochladen
         try{
           const binStr=atob(att.b64);
           const bytes=new Uint8Array(binStr.length);
@@ -1362,7 +1364,7 @@ async function _auftragConfirm(){
         }catch(e){_attFail++;console.warn('[PTP] EML-Anhang Upload:',e);}
       }
       if(_attFail===0){
-        const _imgCnt=(info.attachments||[]).filter(function(a){return /\.(jpg|jpeg|png|gif|webp|heic)/i.test(a.name)||(a.mimeType||'').startsWith('image/');}).length;
+        const _imgCnt=(info.attachments||[]).filter(function(a){return !a._isCidInline&&(/\.(jpg|jpeg|png|gif|webp|heic)/i.test(a.name)||(a.mimeType||'').startsWith('image/'));}).length;
         const _fileCnt=_attOk-_imgCnt;
         let _msg='📎 Extrahiert: ';
         if(_imgCnt)_msg+='🖼 '+_imgCnt+' Foto'+(_imgCnt!==1?'s':'')+' → 02_Fotos  ';
@@ -3539,7 +3541,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-01 · #222'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b199)
+const PAM_BUILD = 'v2026-06-01 · #223'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b199)
 
 // ── STATE ──
 let boards = {};
@@ -19327,6 +19329,27 @@ function _emToggleAttachSection(){
   body.style.display=open?'block':'none';
   if(arrow)arrow.textContent=open?'˅':'›';
 }
+async function _emSaveCidImageAsFoto(b64,mimeType,name){
+  // Fix #223: Eingebettetes Bild aus E-Mail-Body in Drive als Foto speichern
+  if(!_emCurrentTask||!b64){return;}
+  if(!gdriveToken){showToast('⚠ Google Drive nicht verbunden','error',3000);return;}
+  showToast('⏳ Wird in Drive gespeichert…','info',4000);
+  try{
+    const binStr=atob(b64);
+    const bytes=new Uint8Array(binStr.length);
+    for(let k=0;k<binStr.length;k++)bytes[k]=binStr.charCodeAt(k);
+    const _defaultFid=_ezFolderId(DEFAULT_FOLDER_EMAIL);
+    const fid=await _getOrCreateEmailFid(_emCurrentTask,_defaultFid);
+    const result=await _driveUploadGeneric(bytes.buffer,name,mimeType||'image/jpeg',fid);
+    if(!result||!result.id)throw new Error('Upload fehlgeschlagen');
+    const attUrl='https://drive.google.com/file/d/'+result.id+'/view';
+    if(!_emCurrentTask.fotos)_emCurrentTask.fotos=[];
+    _emCurrentTask.fotos.push({driveId:result.id,name:name,mimeType:mimeType||'image/jpeg',caption:'',thumbnailLink:result.thumbnailLink||attUrl,fromEmail:true});
+    await autoSave();
+    _renderEmailMailList();
+    showToast('✅ Foto gespeichert: '+name,'success',3000);
+  }catch(e){showToast('⚠ Speichern fehlgeschlagen: '+e.message,'error',4000);console.warn('[EM] CID-Foto-Upload:',e);}
+}
 function _emShowAttachPreview(icon,name,url,mime,data){
   // EML/MSG → direkt in den richtigen Viewer weiterleiten
   const _mimeL=(mime||'').toLowerCase();
@@ -19350,6 +19373,22 @@ function _emShowAttachPreview(icon,name,url,mime,data){
   previewArea.style.cssText='flex:1;overflow:auto;border:1px solid var(--border);border-radius:8px;min-height:200px;display:flex;align-items:center;justify-content:center;';
   let mimeL=(mime||'').toLowerCase();
   let namL=name.toLowerCase();
+  // Fix #223 (5): Drive-Bilder per Auth-API laden (driveId vorhanden)
+  var _prvDriveId=data&&(data.driveId||data.editedDriveId||'');
+  if(_prvDriveId&&(mimeL.startsWith('image/')||namL.match(/\.(jpe?g|png|gif|webp|heic)$/))){
+    previewArea.style.cssText='flex:1;overflow:auto;border:1px solid var(--border);border-radius:8px;min-height:200px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;';
+    previewArea.innerHTML='<div style="color:var(--text2);font-size:13px;">⏳ Lädt…</div>';
+    var _prvUrl=url;
+    if(typeof _fetchDesktopFotoBlob==='function'){
+      _fetchDesktopFotoBlob(_prvDriveId).then(function(blobUrl){
+        if(blobUrl){previewArea.innerHTML='<img src="'+blobUrl+'" style="max-width:100%;max-height:500px;object-fit:contain;">';}
+        else if(_prvUrl){previewArea.innerHTML='<a href="'+_escHtml(_prvUrl)+'" target="_blank" style="color:var(--accent);font-size:13px;">📂 In Drive öffnen</a>';}
+        else{previewArea.innerHTML='<div style="color:var(--text2);font-size:13px;">Keine Vorschau</div>';}
+      });
+    }else if(_prvUrl){previewArea.innerHTML='<img src="'+_escHtml(_prvUrl)+'" style="max-width:100%;max-height:500px;object-fit:contain;">';}
+    box.appendChild(previewArea);ov.appendChild(box);document.body.appendChild(ov);
+    return;
+  }
   // Fix: EML-geparste Bilder (b64, keine URL) -> data-URL bauen
   if(!url&&data&&data._isEmlParsed&&data.b64){
     let _m=data.mimeType||mime||'application/octet-stream';
@@ -19359,6 +19398,15 @@ function _emShowAttachPreview(icon,name,url,mime,data){
   }
   if(url&&(mimeL.startsWith('image/')||namL.match(/\.(jpe?g|png|gif|webp)$/))){
     previewArea.innerHTML='<img src="'+_escHtml(url)+'" style="max-width:100%;max-height:500px;object-fit:contain;">';
+    // Fix #223 (4): CID-Inline-Bilder: "Als Foto speichern"-Button anzeigen
+    if(data&&data._isCidInline&&data.b64){
+      var _cidB64=data.b64;var _cidMt=data.mimeType||mime;var _cidNm=name;
+      var _saveBtn=document.createElement('button');
+      _saveBtn.textContent='📷 Als Foto speichern';
+      _saveBtn.style.cssText='margin-top:8px;padding:6px 14px;border-radius:6px;border:1px solid #7ab648;background:rgba(122,182,72,.12);color:#1a4d05;font-size:12px;font-weight:600;cursor:pointer;width:100%;';
+      _saveBtn.onclick=function(){document.body.removeChild(ov);_emSaveCidImageAsFoto(_cidB64,_cidMt,_cidNm);};
+      previewArea.appendChild(_saveBtn);
+    }
   } else if(url&&(mimeL==='application/pdf'||namL.endsWith('.pdf'))){
     const _pdfSrc=url.replace(/\/view(\?.*)?$/,'/preview');
     previewArea.innerHTML='<iframe src="'+_escHtml(_pdfSrc)+'" style="width:100%;height:500px;border:none;"></iframe>';
