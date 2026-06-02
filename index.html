@@ -1366,7 +1366,8 @@ async function _auftragConfirm(){
           const bytes=new Uint8Array(binStr.length);
           for(let k=0;k<binStr.length;k++)bytes[k]=binStr.charCodeAt(k);
           const isImg=/\.(jpg|jpeg|png|gif|webp|heic|heif|avif|bmp|tiff?)$/i.test(att.name)||(att.mimeType||'').startsWith('image/');
-          const _attFid=isImg&&_driveUrls?_driveUrls.fotoId:(_driveUrls?_driveUrls.dokId:fid);
+          // Fix #226: Fallback auf fid (mainId) wenn Unterordner nicht vorhanden (z.B. Posteingang-Board)
+          const _attFid=isImg&&_driveUrls?(_driveUrls.fotoId||fid):(_driveUrls?(_driveUrls.dokId||fid):fid);
           const attResult=await _driveUploadGeneric(bytes.buffer,att.name,att.mimeType,_attFid);
           const attUrl='https://drive.google.com/file/d/'+attResult.id+'/view';
           const today=new Date().toLocaleDateString('de-DE');
@@ -3558,7 +3559,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-01 · #225'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b199)
+const PAM_BUILD = 'v2026-06-01 · #227'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b199)
 
 // ── STATE ──
 let boards = {};
@@ -12700,7 +12701,9 @@ function _pamRenderUnifiedEmailList(task){
         const dateStr=_fmt(m._ts);
         const preview=(d.preview||d.snippet||d.bodyText||d.body||'').replace(/\n/g,' ').trim();
         const subject=d.subject||d.betreff||'';
-        const tooltipRaw=(from+(subject?' | '+subject:'')+(preview?' - '+preview:'')).substring(0,250);
+        // Fix #227: Tooltip übersichtlicher – Absender, Betreff, Vorschautext je eigene Zeile
+        const _pvwFull2=(preview||'').substring(0,200);
+        const tooltipRaw=(from+(subject?'\n'+subject:'')+(_pvwFull2?'\n\n'+_pvwFull2:'')).substring(0,280);
         const tooltipEsc=tooltipRaw.replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
         let dirBg,dirTxt,dirLabel,envColor;
         if(isOriginal){dirBg='rgba(124,58,237,.12)';dirTxt='#5b21b6';dirLabel='Original';envColor='#7c3aed';}
@@ -12951,7 +12954,7 @@ function _pamUnifiedHover(el,text){
   _pamHoverTimer=setTimeout(()=>{
     if(!_pamHoverTooltip){
       _pamHoverTooltip=document.createElement('div');
-      _pamHoverTooltip.style.cssText='position:fixed;z-index:99990;pointer-events:none;background:var(--bg2);border:1px solid var(--border);border-radius:7px;padding:8px 12px;max-width:320px;font-size:12px;color:var(--text1);box-shadow:0 4px 16px rgba(0,0,0,.18);line-height:1.5;white-space:pre-wrap;word-break:break-word;';
+      _pamHoverTooltip.style.cssText='position:fixed;z-index:99990;pointer-events:none;background:var(--bg2);border:1px solid var(--border);border-radius:7px;padding:8px 12px;max-width:420px;font-size:12px;color:var(--text1);box-shadow:0 4px 16px rgba(0,0,0,.18);line-height:1.5;white-space:pre-wrap;word-break:break-word;'; // Fix #227: breiter für 250-Zeichen-Vorschau
       document.body.appendChild(_pamHoverTooltip);
     }
     _pamHoverTooltip.textContent=text;
@@ -13297,7 +13300,11 @@ async function _msOpenMailOverlay(taskId,idx){
   document.body.appendChild(ov);
   ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
   // Mail-Body laden
-  if(msToken&&m.id){
+  if(!msToken){
+    // Fix #227: klare Rückmeldung wenn Outlook-Token fehlt
+    const bodyEl2=document.getElementById('_msMailBody');
+    if(bodyEl2)bodyEl2.innerHTML='<div style="color:#c00;padding:20px;">⚠ Outlook nicht verbunden. Bitte oben auf 📨 Outlook klicken.</div>';
+  } else if(msToken&&m.id){
     try{
       const r=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${m.id}?$select=body`,{headers:{Authorization:'Bearer '+msToken}});
       if(r.ok){
@@ -16958,8 +16965,15 @@ async function _openEmailOrigInlinePreview(item){
     return;
   }
   // .eml: fetch from Drive, parse, render inline
-  if(!item.fileId||!gdriveToken){
-    loader.textContent='⚠ Keine Drive-Verbindung oder fileId fehlt.';
+  if(!item.fileId){
+    // Fix #227: klare Rückmeldung statt stilles Versagen
+    _closeEmlPreview();
+    showToast('⚠ Diese E-Mail wurde nicht in Drive gespeichert (kein fileId). Bitte erneut einziehen.','error',5000);
+    return;
+  }
+  if(!gdriveToken){
+    _closeEmlPreview();
+    showToast('⚠ Bitte zuerst mit Google Drive verbinden (oben rechts: ☁️ Google Drive)','error',4000);
     return;
   }
   try{
@@ -18761,7 +18775,9 @@ function _renderEmailMailList(){
           const dateStr=_fmt(m._ts);
           const preview=(d.preview||d.snippet||d.bodyText||d.body||'').replace(/\n/g,' ').trim();
           const subj=d.subject||d.betreff||'';
-          const tip=((from+(subj?' | '+subj:'')+(preview?' - '+preview:'')).substring(0,250)).replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          // Fix #227: Tooltip mit bis zu 250 Zeichen Vorschautext
+          const _pvwFull=(preview||'').substring(0,200);
+          const tip=(from+(subj?'\n'+subj:'')+((_pvwFull)?'\n\n'+_pvwFull:'')).substring(0,280).replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
           let dBg,dTxt,dLbl,eCol;
           if(m.src==='original'){dBg='rgba(124,58,237,.12)';dTxt='#5b21b6';dLbl='Original';eCol='#7c3aed';}
           else if(isOut){dBg='rgba(22,163,74,.15)';dTxt='#15803D';dLbl='Gesendet';eCol='#16A34A';}
