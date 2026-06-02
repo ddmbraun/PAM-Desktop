@@ -3541,7 +3541,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-01 · #223'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b199)
+const PAM_BUILD = 'v2026-06-01 · #224'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-01-b199)
 
 // ── STATE ──
 let boards = {};
@@ -19116,8 +19116,11 @@ async function _emLadeOutlookVerlauf(){
     _emUpdateTop2();
     const gbtn=document.getElementById('emGmailLadenBtn');
     if(gbtn)gbtn.style.display=(typeof gmailToken!=='undefined'&&gmailToken)?'':'none';
-  }catch(e){console.warn('[EM] Outlook laden:',e);}
-  finally{
+  }catch(e){
+    // Fix #224: Fehler sichtbar machen statt still ignorieren
+    console.warn('[EM] Outlook laden:',e);
+    showToast('⚠ Outlook-Verlauf: '+e.message,'error',7000);
+  }finally{
     _emLoadOverrideId=null; // Override wieder freigeben
     if(btn){btn.textContent='📨 Outlook laden';btn.disabled=false;}
   }
@@ -19271,14 +19274,29 @@ function _emOpenAttachGallery(){
   box.appendChild(grid);ov.appendChild(box);document.body.appendChild(ov);
 }
 function _emOpenViewer(files,startIdx){
-  let imgFiles=files.filter(function(f){return f.isImg&&f.url;});
+  // Fix #224: isImg-Filter ohne url-Pflicht – driveId reicht für Auth-Fetch
+  let imgFiles=files.filter(function(f){return f.isImg&&(f.url||f.driveId||(f.data&&(f.data.driveId||f.data.editedDriveId)));});
   if(!imgFiles.length)return;
   let iIdx=Math.max(0,imgFiles.findIndex(function(f){return files.indexOf(f)>=startIdx;}));
   let ov=document.createElement('div');ov.className='em-viewer-overlay';
   ov.onclick=function(e){if(e.target===ov){ov.remove();document.removeEventListener('keydown',onKey);}};
   let img=document.createElement('img');img.className='em-viewer-img';
   let cap=document.createElement('div');cap.className='em-viewer-caption';
-  function show(i){iIdx=(i+imgFiles.length)%imgFiles.length;img.src=imgFiles[iIdx].url;cap.textContent=imgFiles[iIdx].name+' ('+(iIdx+1)+'/'+imgFiles.length+')';}
+  function show(i){
+    iIdx=(i+imgFiles.length)%imgFiles.length;
+    var _f=imgFiles[iIdx];
+    cap.textContent=_f.name+' ('+(iIdx+1)+'/'+imgFiles.length+')';
+    // Fix #224: Drive-Bilder per Auth-API laden statt direkter URL
+    var _did=_f.driveId||(_f.data&&(_f.data.editedDriveId||_f.data.driveId))||'';
+    if(_did&&typeof _fetchDesktopFotoBlob==='function'){
+      img.style.opacity='0.3';img.src='';
+      _fetchDesktopFotoBlob(_did).then(function(blobUrl){
+        if(blobUrl){img.src=blobUrl;img.style.opacity='1';}
+        else if(_f.url){img.src=_f.url;img.style.opacity='1';}
+        else{img.style.opacity='1';}
+      });
+    }else{img.src=_f.url||'';img.style.opacity='1';}
+  }
   show(iIdx);
   let prev=document.createElement('button');prev.className='em-viewer-btn em-viewer-prev';prev.textContent='‹';prev.onclick=function(e){e.stopPropagation();show(iIdx-1);};
   let next=document.createElement('button');next.className='em-viewer-btn em-viewer-next';next.textContent='›';next.onclick=function(e){e.stopPropagation();show(iIdx+1);};
