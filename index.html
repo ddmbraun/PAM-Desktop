@@ -8185,7 +8185,7 @@ function _executeMerge(){
   });
 
   // Listen zusammenführen (inkl. Outlook- und Gmail-Thread-Daten)
-  const listFields=['links','attachments','fotos','emailOriginals','emailPdfs','gmailLinks','aufgaben','notizVerlauf','timeEntries','zeitEntries','ausserhausTermine','freieTermine','checkliste','msMessageIds','msThreadMessages','gmailMessageIds','gmailThreadMessages'];
+  const listFields=['links','attachments','fotos','emailOriginals','emailPdfs','gmailLinks','aufgaben','notizVerlauf','timeEntries','zeitEntries','ausserhausTermine','freieTermine','checkliste','msMessageIds','msThreadMessages','gmailMessageIds','gmailThreadMessages','kontakte'];
   listFields.forEach(key=>{
     const listA=Array.isArray(tA[key])?tA[key]:[];
     const listB=Array.isArray(tB[key])?tB[key]:[];
@@ -8196,6 +8196,15 @@ function _executeMerge(){
       merged[key]=[...listA,...listB];
     }
   });
+  // Kontakte deduplizieren (nach Name+Tel+Rolle)
+  if(Array.isArray(merged.kontakte)){
+    const _seen=new Set();
+    merged.kontakte=merged.kontakte.filter(k=>{
+      const key=(k.rolle||'')+'|'+(k.name||'').toLowerCase().trim()+'|'+(k.tel||'').replace(/\s/g,'')+'|'+(k.email||'').toLowerCase().trim();
+      if(_seen.has(key))return false;
+      _seen.add(key);return true;
+    });
+  }
   // Outlook/Gmail-Primär-IDs: Master behält eigene, ergänzt falls leer
   if(!merged.msMessageId&&otherTask.msMessageId)merged.msMessageId=otherTask.msMessageId;
   if(!merged.msConversationId&&otherTask.msConversationId)merged.msConversationId=otherTask.msConversationId;
@@ -8298,6 +8307,28 @@ async function _mergeMoveFilesToMasterFolders(){
     document.getElementById('mergeFileMoveDialog')?.remove();
     const ok=moved>0&&failed===0;
     showToast(`${ok?'✓':'⚠'} ${moved} Datei${moved!==1?'en':''} verschoben${failed>0?` · ${failed} fehlgeschlagen`:''}`,ok?'success':'warning',5000);
+    // Leere Ordner des anderen Tasks löschen
+    if(moved>0){
+      const _foldersToDelete=[
+        _ezFolderId(otherTask.gdriveOrdner),
+        _ezFolderId(otherTask.gdrive),
+        _ezFolderId(otherTask.emailOrdner),
+        _ezFolderId(otherTask.sbPdfOrdner),
+      ].filter(Boolean);
+      let _delOk=0,_delFail=0;
+      for(const fid of _foldersToDelete){
+        try{
+          // Prüfen ob Ordner leer ist
+          const _chk=await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("'"+fid+"' in parents and trashed=false")}&fields=files(id)&pageSize=1`,{headers:{Authorization:'Bearer '+gdriveToken}});
+          if(!_chk.ok)continue;
+          const _chkData=await _chk.json();
+          if((_chkData.files||[]).length>0)continue; // nicht leer – überspringen
+          const _del=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fid)}`,{method:'DELETE',headers:{Authorization:'Bearer '+gdriveToken}});
+          if(_del.ok||_del.status===204)_delOk++;else _delFail++;
+        }catch(e){_delFail++;}
+      }
+      if(_delOk>0)showToast(`🗑 ${_delOk} leerer Ordner gelöscht`,'success',3000);
+    }
   }catch(e){
     console.error('[PAM] _mergeMoveFilesToMasterFolders:',e);
     if(btn){btn.disabled=false;btn.textContent='Erneut versuchen';}
