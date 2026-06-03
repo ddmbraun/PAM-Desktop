@@ -2661,6 +2661,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
           </a>
         </span>
       </div>
+      <button type="button" onclick="_pamTaskDrucken()" title="🖨 Task-Übersicht drucken" style="margin-left:auto;flex-shrink:0;padding:3px 10px;border-radius:8px;background:transparent;border:1px solid var(--border);color:var(--text2);cursor:pointer;font-size:calc(11px * var(--modal-scale,1));font-weight:600;display:flex;align-items:center;gap:4px;">🖨 Drucken</button>
       <!-- Zeile 4: Datums-Boxen (wie geschlossene Karte) -->
       <div id="_hdrDates" class="task-card-datebox-row" style="margin-top:4px;display:none;"></div>
     </div>
@@ -3566,7 +3567,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-03 · #240'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-02-b247)
+const PAM_BUILD = 'v2026-06-03 · #241'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-02-b247)
 
 // ── STATE ──
 let boards = {};
@@ -13082,6 +13083,190 @@ async function _pamVerlaufDrucken(){
     verlaufHtml+'</body></html>');
   w.document.close();
   w.onload=function(){setTimeout(()=>w.print(),500);};
+}
+async function _pamTaskDrucken(){
+  const taskId=(document.getElementById('taskId')||{}).value||_pamActiveTaskId||'';
+  const task=findTaskById(taskId);
+  if(!task){showToast('Kein Task gefunden.','warning',3000);return;}
+  const board=findBoardByTaskId(taskId)||currentBoard||'';
+  showToast('⏳ Druckansicht wird aufgebaut…','info',3000);
+
+  function esc2(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+  function fmtD(s){if(!s)return'';const p=s.split('-');return p.length===3?p[2]+'.'+p[1]+'.'+p[0]:s;}
+  function fmtTs(s){if(!s)return'';try{return new Date(s).toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(e){return s;}}
+  function row(label,val){if(!val&&val!==0)return'';return'<tr><td class="lbl">'+esc2(label)+'</td><td>'+esc2(val)+'</td></tr>';}
+  function rowHtml(label,val){if(!val)return'';return'<tr><td class="lbl">'+esc2(label)+'</td><td>'+val+'</td></tr>';}
+  function sec(title,content){if(!content)return'';return'<div class="sec"><div class="sec-title">'+esc2(title)+'</div>'+content+'</div>';}
+
+  // ── Fotos als base64 laden ──
+  const fotos=taskFotos||task.fotos||[];
+  const fotoImgs=[];
+  for(const f of fotos){
+    let src='';
+    if(f.localUrl&&f.localUrl.startsWith('data:')){src=f.localUrl;}
+    else if(f.thumbnailLink&&gdriveToken){
+      try{
+        const r=await fetch(f.thumbnailLink,{headers:{Authorization:'Bearer '+gdriveToken}});
+        if(r.ok){const b=await r.blob();src=await new Promise(res=>{const rd=new FileReader();rd.onload=e=>res(e.target.result);rd.readAsDataURL(b);});}
+      }catch(e){console.warn('[Druck] Foto laden:',e);}
+    }
+    fotoImgs.push({src,name:f.name||'',caption:f.caption||''});
+  }
+
+  // ── Abschnitte aufbauen ──
+  // Stammdaten
+  let stamm='<table class="dt">';
+  stamm+=row('Rep.-Nr.',task.repNr);
+  stamm+=row('Kunden-Nr.',task.kundenNr);
+  stamm+=row('Adresse',task.adresse);
+  stamm+=row('Hausverwaltung',task.hausverwaltung);
+  stamm+=row('Schadensbild',task.schadensbild);
+  stamm+=row('Beschreibung',task.desc);
+  stamm+=row('Bearbeiter',task.owner);
+  stamm+=row('Status',task.status);
+  stamm+=row('Kostenstelle',(task.tags||[]).join(', '));
+  stamm+=row('Quelle',task.source);
+  stamm+=row('Aktivit\xe4t',task.aktivitaet);
+  stamm+='</table>';
+  const hasStamm=[task.repNr,task.kundenNr,task.adresse,task.hausverwaltung,task.schadensbild,task.desc,task.owner,task.source,task.aktivitaet].some(Boolean);
+
+  // Kontakte
+  const ktList=taskFotos!==undefined?(task.kontakte||[]):(task.kontakte||[]);
+  let ktHtml='';
+  if((task.kontakte||[]).length){
+    ktHtml='<table class="dt">';
+    for(const k of task.kontakte){
+      if(!k.name&&!k.tel&&!k.email)continue;
+      ktHtml+='<tr><td class="lbl">'+esc2(k.rolle||'Kontakt')+'</td><td>'+esc2(k.name||'')+
+        (k.tel?'&nbsp;&nbsp;<span style="color:#555;">☎ '+esc2(k.tel)+'</span>':'')+
+        (k.email?'&nbsp;&nbsp;<span style="color:#555;">✉ '+esc2(k.email)+'</span>':'')+'</td></tr>';
+    }
+    ktHtml+='</table>';
+  }
+
+  // Termine
+  let termHtml='<table class="dt">';
+  termHtml+=row('Anfrage eingegangen',fmtD(task.anfrageEingangDatum));
+  termHtml+=row('Ortstermin',fmtD(task.ortstermin));
+  termHtml+=row('Auftrag erteilt',fmtD(task.auftragVomDatum));
+  termHtml+=row('Ausf\xfchrungstermin',fmtD(task.ausfuehrungstermin));
+  termHtml+=row('F\xe4lligkeit',fmtD(task.due));
+  for(const a of task.aufgaben||[]){if(a.datum)termHtml+=row(a.typ,fmtD(a.datum));}
+  for(const t of task.freieTermine||[]){if(t.datum)termHtml+=row(t.label||'Termin',fmtD(t.datum)+(t.notiz?' – '+t.notiz:''));}
+  termHtml+='</table>';
+  const hasTermin=[task.anfrageEingangDatum,task.ortstermin,task.auftragVomDatum,task.ausfuehrungstermin,task.due].some(Boolean)||
+    (task.aufgaben||[]).some(a=>a.datum)||(task.freieTermine||[]).some(t=>t.datum);
+
+  // Notiz-Verlauf
+  const nvList=taskNotizVerlauf||task.notizVerlauf||[];
+  let nvHtml='';
+  if(nvList.length){
+    nvHtml='<table class="dt">';
+    for(const n of nvList){nvHtml+='<tr><td class="lbl" style="white-space:nowrap;">'+fmtTs(n.ts)+'</td><td>'+esc2(n.text)+'</td></tr>';}
+    nvHtml+='</table>';
+  }
+
+  // Checkliste
+  const ckList=taskCheckliste||task.checkliste||[];
+  let ckHtml='';
+  if(ckList.length){
+    ckHtml='';
+    for(const sek of ckList){
+      ckHtml+='<div style="font-weight:600;margin:8px 0 4px;">'+esc2(sek.title||'')+'</div><table class="dt">';
+      for(const it of sek.items||[]){
+        const done=it.status==='ok';
+        const mangel=it.status==='mangel';
+        const icon=done?'✅':mangel?'⚠️':'□';
+        ckHtml+='<tr><td style="width:24px;text-align:center;">'+icon+'</td><td>'+esc2(it.text||'')+
+          (it.notiz?'<div style="font-size:11px;color:#555;margin-top:2px;">'+esc2(it.notiz)+'</div>':'')+'</td></tr>';
+      }
+      ckHtml+='</table>';
+    }
+  }
+
+  // Anhänge & Links
+  const attList=taskAttachments||task.attachments||[];
+  const lnkList=taskLinks||task.links||[];
+  let attHtml='';
+  if(attList.length||lnkList.length){
+    attHtml='<table class="dt">';
+    for(const a of attList){attHtml+='<tr><td class="lbl">Anhang</td><td>'+esc2(a.name||'')+(a.url?'&nbsp;<a href="'+esc2(a.url)+'" style="font-size:11px;color:#185FA5;">↗ Drive</a>':'')+'</td></tr>';}
+    for(const l of lnkList){attHtml+='<tr><td class="lbl">Link</td><td><a href="'+esc2(l.url||l)+'" style="color:#185FA5;">'+esc2(l.label||l.url||l)+'</a></td></tr>';}
+    attHtml+='</table>';
+  }
+
+  // Fotos HTML
+  let fotoHtml='';
+  if(fotoImgs.length){
+    fotoHtml='<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:6px;">';
+    for(const fi of fotoImgs){
+      fotoHtml+='<div style="text-align:center;max-width:180px;">';
+      if(fi.src){fotoHtml+='<img src="'+fi.src+'" style="max-width:180px;max-height:180px;border-radius:6px;border:1px solid #ddd;object-fit:cover;" alt="'+esc2(fi.name)+'">';}
+      else{fotoHtml+='<div style="width:180px;height:120px;border:1px solid #ddd;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:12px;">Vorschau nicht verf\xfcgbar</div>';}
+      if(fi.caption||fi.name){fotoHtml+='<div style="font-size:10px;color:#666;margin-top:3px;">'+esc2(fi.caption||fi.name)+'</div>';}
+      fotoHtml+='</div>';
+    }
+    fotoHtml+='</div>';
+  }
+
+  // Drive-Ordner
+  let driveHtml='';
+  if(task.gdriveOrdner||task.emailOrdner||task.dokOrdner){
+    driveHtml='<table class="dt">';
+    if(task.gdriveOrdner)driveHtml+=rowHtml('Hauptordner','<a href="'+esc2(task.gdriveOrdner)+'" style="color:#185FA5;">Drive ↗</a>');
+    if(task.emailOrdner)driveHtml+=rowHtml('E-Mail-Ordner','<a href="'+esc2(task.emailOrdner)+'" style="color:#185FA5;">Drive ↗</a>');
+    if(task.dokOrdner)driveHtml+=rowHtml('Dok-Ordner','<a href="'+esc2(task.dokOrdner)+'" style="color:#185FA5;">Drive ↗</a>');
+    driveHtml+='</table>';
+  }
+
+  const ampelColor={'rot':'#E24B4A','gelb':'#EF9F27','gr\xfcn':'#4CAF50'}[task.ampel]||'#ccc';
+  const dateStr=new Date().toLocaleDateString('de-DE');
+  const titleStr=task.title||'(kein Titel)';
+
+  const html=`<!DOCTYPE html><html lang="de"><head><meta charset="utf-8">
+<title>${esc2(titleStr)}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;font-size:13px;color:#222;background:#fff;padding:20px;}
+.topbar{display:flex;align-items:center;gap:12px;background:#185FA5;color:#fff;padding:10px 16px;border-radius:6px;margin-bottom:20px;}
+.topbar h2{margin:0;font-size:15px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.sec{margin-bottom:18px;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden;}
+.sec-title{background:#f5f5f5;padding:6px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#555;border-bottom:1px solid #e0e0e0;}
+.dt{width:100%;border-collapse:collapse;padding:8px 12px;}
+.dt td{padding:5px 12px;vertical-align:top;line-height:1.5;border-bottom:1px solid #f0f0f0;}
+.dt tr:last-child td{border-bottom:none;}
+.lbl{color:#777;font-size:11px;width:140px;white-space:nowrap;padding-right:8px;}
+.footer{margin-top:24px;font-size:10px;color:#aaa;display:flex;justify-content:space-between;}
+@media print{
+  .topbar .no-print{display:none!important;}
+  body{padding:0;font-size:12px;}
+  @page{margin:12mm;size:A4;}
+  .sec{break-inside:avoid;page-break-inside:avoid;}
+  img{max-width:160px!important;max-height:160px!important;}
+}
+</style></head><body>
+<div class="topbar">
+  <span style="width:12px;height:12px;border-radius:50%;background:${ampelColor};flex-shrink:0;display:inline-block;"></span>
+  <h2>${esc2(titleStr)}</h2>
+  <span style="font-size:11px;opacity:.8;">${esc2(board)} &nbsp;|&nbsp; ${esc2(task.status||'')} &nbsp;|&nbsp; ${dateStr}</span>
+  <button class="no-print" onclick="window.print()" style="padding:5px 14px;border-radius:6px;background:#fff;color:#185FA5;border:none;cursor:pointer;font-weight:700;font-size:12px;flex-shrink:0;">🖨 Drucken</button>
+</div>
+${hasStamm?sec('Stammdaten',stamm):''}
+${ktHtml?sec('Kontakte',ktHtml):''}
+${hasTermin?sec('Termine',termHtml):''}
+${nvHtml?sec('Notiz-Verlauf',nvHtml):''}
+${ckHtml?sec('Checkliste',ckHtml):''}
+${attHtml?sec('Anh\xe4nge & Links',attHtml):''}
+${fotoHtml?sec('Fotos ('+fotoImgs.length+')',fotoHtml):''}
+${driveHtml?sec('Drive-Ordner',driveHtml):''}
+<div class="footer"><span>PAM Workboard · Bearbeiter: ${esc2(task.owner||'')} · Board: ${esc2(board)}</span><span>${dateStr}</span></div>
+</body></html>`;
+
+  const w=window.open('','_blank','width=860,height=800,scrollbars=yes');
+  if(!w){showToast('⚠ Popup blockiert – bitte Popup-Blocker deaktivieren.','warning',4000);return;}
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
 }
 async function _pamEmailAntworten(){
   const taskId=(document.getElementById('taskId')||{}).value||_pamActiveTaskId||'';
