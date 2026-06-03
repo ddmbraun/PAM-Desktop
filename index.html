@@ -3567,7 +3567,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-03 · #270'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-02-b247)
+const PAM_BUILD = 'v2026-06-03 · #271'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-02-b247)
 
 // ── STATE ──
 let boards = {};
@@ -6199,40 +6199,7 @@ function _pamKachelHovOut(){
   if(pop)pop.style.display='none';
 }
 function _pamKachelLightbox(tid,startFi){
-  var t=findTaskById(tid);if(!t)return;
-  var fotos=t.fotos||[];if(!fotos.length)return;
-  var fi=startFi||0;
-  var ov=document.createElement('div');
-  ov.style.cssText='position:fixed;inset:0;z-index:14000;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center;';
-  function render(){
-    var f=fotos[fi];
-    var src=f.localUrl||f.thumbnailLink||'';
-    var closeBtn='<button id="_lbClose" style="position:absolute;top:16px;right:20px;background:rgba(255,255,255,.15);border:none;color:#fff;font-size:22px;width:38px;height:38px;border-radius:50%;cursor:pointer;z-index:2;">&#x2715;</button>';
-    var prevBtn=fotos.length>1?'<button id="_lbPrev" style="position:absolute;left:16px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,.15);border:none;color:#fff;font-size:28px;width:44px;height:44px;border-radius:50%;cursor:pointer;z-index:2;">&#x2039;</button>':'';
-    var nextBtn=fotos.length>1?'<button id="_lbNext" style="position:absolute;right:16px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,.15);border:none;color:#fff;font-size:28px;width:44px;height:44px;border-radius:50%;cursor:pointer;z-index:2;">&#x203a;</button>':'';
-    var capHtml=f.caption?'<div style="color:#fff;font-size:13px;margin-top:10px;opacity:.85;">'+f.caption+'</div>':'';
-    var cntHtml='<div style="color:rgba(255,255,255,.5);font-size:11px;margin-top:6px;">'+(fi+1)+' / '+fotos.length+'</div>';
-    ov.innerHTML=closeBtn+prevBtn
-      +'<div style="display:flex;flex-direction:column;align-items:center;max-width:90vw;">'
-      +'<img src="'+src+'" style="max-width:88vw;max-height:80vh;border-radius:8px;object-fit:contain;box-shadow:0 8px 48px rgba(0,0,0,.6);" alt="">'
-      +capHtml+cntHtml+'</div>'+nextBtn;
-    document.getElementById('_lbClose').onclick=function(){ov.remove();};
-    var prev=document.getElementById('_lbPrev');
-    var next=document.getElementById('_lbNext');
-    if(prev)prev.onclick=function(){fi=(fi-1+fotos.length)%fotos.length;render();};
-    if(next)next.onclick=function(){fi=(fi+1)%fotos.length;render();};
-    if(!src&&f.driveId){_pamLoadThumb(f.driveId).then(function(u){var img=ov.querySelector('img');if(u&&img)img.src=u;});}
-  }
-  render();
-  ov.onclick=function(e){if(e.target===ov)ov.remove();};
-  document.body.appendChild(ov);
-  function onKey(e){
-    if(!document.body.contains(ov)){document.removeEventListener('keydown',onKey);return;}
-    if(e.key==='ArrowLeft'){fi=(fi-1+fotos.length)%fotos.length;render();}
-    else if(e.key==='ArrowRight'){fi=(fi+1)%fotos.length;render();}
-    else if(e.key==='Escape'){ov.remove();document.removeEventListener('keydown',onKey);}
-  }
-  document.addEventListener('keydown',onKey);
+  _pamFotoLightbox(tid,startFi);
 }
 
 function _pamHeuteRaster(listeAll, today){
@@ -13376,17 +13343,81 @@ function _pamFotoHovOut(){
   const pop=document.getElementById('_pamFotoHovPop');
   if(pop)pop.style.display='none';
 }
-function _pamFotoHovClick(fi){
-  const img=document.getElementById('_pamFotoImg_'+fi);
-  const src=img?img.src:'';
-  if(!src)return;
-  const ov=document.createElement('div');
-  ov.style.cssText='position:fixed;inset:0;z-index:14000;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;cursor:zoom-out;';
-  ov.onclick=function(){document.body.removeChild(ov);};
-  const big=document.createElement('img');
-  big.src=src;big.style.cssText='max-width:92vw;max-height:92vh;border-radius:10px;box-shadow:0 8px 48px rgba(0,0,0,.7);object-fit:contain;';
-  ov.appendChild(big);
+// Einheitliche Foto-Lightbox (Kacheln + Übersicht-Overlay)
+// taskId: Task-ID; startFi: Start-Foto-Index
+function _pamFotoLightbox(taskId, startFi){
+  var t=findTaskById(taskId);
+  if(!t){
+    // Fallback: Task-ID aus Overlay lesen
+    var el=document.getElementById('pamUebAktTaskId');
+    if(el)t=findTaskById(el.value);
+  }
+  if(!t)return;
+  var fotos=t.fotos||[];if(!fotos.length)return;
+  var fi=(startFi||0);
+  if(fi<0||fi>=fotos.length)fi=0;
+
+  // Prüfe ob bereits offen
+  var existing=document.getElementById('_pamFotoLbOv');
+  if(existing)existing.remove();
+
+  var ov=document.createElement('div');
+  ov.id='_pamFotoLbOv';
+  ov.style.cssText='position:fixed;inset:0;z-index:15000;background:rgba(0,0,0,.92);display:flex;align-items:center;justify-content:center;';
+
+  function render(){
+    var f=fotos[fi];
+    // Src: zuerst gecachtes Thumbnail aus DOM, dann localUrl, dann thumbnailLink
+    var domImg=document.getElementById('_pamFotoImg_'+fi);
+    var src=(domImg&&domImg.src&&!domImg.src.endsWith(window.location.href))?domImg.src:'';
+    if(!src)src=f.localUrl||f.thumbnailLink||'';
+
+    var closeBtn='<button id="_flbClose" style="position:absolute;top:16px;right:20px;background:rgba(255,255,255,.18);border:none;color:#fff;font-size:22px;width:40px;height:40px;border-radius:50%;cursor:pointer;z-index:2;display:flex;align-items:center;justify-content:center;">&#x2715;</button>';
+    var prevBtn=fotos.length>1?'<button id="_flbPrev" style="position:absolute;left:14px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,.18);border:none;color:#fff;font-size:32px;width:48px;height:48px;border-radius:50%;cursor:pointer;z-index:2;display:flex;align-items:center;justify-content:center;">&#x2039;</button>':'';
+    var nextBtn=fotos.length>1?'<button id="_flbNext" style="position:absolute;right:14px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,.18);border:none;color:#fff;font-size:32px;width:48px;height:48px;border-radius:50%;cursor:pointer;z-index:2;display:flex;align-items:center;justify-content:center;">&#x203a;</button>':'';
+    var capHtml=f.caption?'<div style="color:#fff;font-size:13px;margin-top:10px;opacity:.85;max-width:80vw;text-align:center;">'+f.caption+'</div>':'';
+    var nameHtml=(f.name&&!f.caption)?'<div style="color:rgba(255,255,255,.5);font-size:11px;margin-top:8px;">'+f.name+'</div>':'';
+    var cntHtml='<div style="color:rgba(255,255,255,.45);font-size:11px;margin-top:6px;">'+(fi+1)+' / '+fotos.length+'</div>';
+
+    ov.innerHTML=closeBtn+prevBtn
+      +'<div style="display:flex;flex-direction:column;align-items:center;max-width:90vw;">'
+      +'<img id="_flbImg" src="'+src+'" style="max-width:88vw;max-height:78vh;border-radius:8px;object-fit:contain;box-shadow:0 8px 48px rgba(0,0,0,.6);" alt="">'
+      +capHtml+nameHtml+cntHtml+'</div>'+nextBtn;
+
+    document.getElementById('_flbClose').onclick=function(){ov.remove();document.removeEventListener('keydown',onKey);};
+    var prev=document.getElementById('_flbPrev');
+    var next=document.getElementById('_flbNext');
+    if(prev)prev.onclick=function(){fi=(fi-1+fotos.length)%fotos.length;render();};
+    if(next)next.onclick=function(){fi=(fi+1)%fotos.length;render();};
+
+    // Thumbnail nachladen falls src leer oder Platzhalter
+    var img=document.getElementById('_flbImg');
+    if(img&&(!src||src===window.location.href)&&f.driveId){
+      _pamLoadThumb(f.driveId).then(function(u){
+        var i2=document.getElementById('_flbImg');
+        if(u&&i2)i2.src=u;
+      });
+    }
+  }
+
+  render();
+  ov.onclick=function(e){if(e.target===ov){ov.remove();document.removeEventListener('keydown',onKey);}};
   document.body.appendChild(ov);
+
+  function onKey(e){
+    if(!document.body.contains(ov)){document.removeEventListener('keydown',onKey);return;}
+    if(e.key==='ArrowLeft'){fi=(fi-1+fotos.length)%fotos.length;render();}
+    else if(e.key==='ArrowRight'){fi=(fi+1)%fotos.length;render();}
+    else if(e.key==='Escape'){ov.remove();document.removeEventListener('keydown',onKey);}
+  }
+  document.addEventListener('keydown',onKey);
+}
+
+function _pamFotoHovClick(fi){
+  // Task-ID aus Übersicht-Overlay lesen
+  var el=document.getElementById('pamUebAktTaskId');
+  var tid=el?el.value:'';
+  _pamFotoLightbox(tid,fi);
 }
 
 async function _pamTaskDrucken(extId){
