@@ -3567,7 +3567,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-03 · #241'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-02-b247)
+const PAM_BUILD = 'v2026-06-03 · #242'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-02-b247)
 
 // ── STATE ──
 let boards = {};
@@ -13088,186 +13088,161 @@ async function _pamTaskDrucken(){
   const taskId=(document.getElementById('taskId')||{}).value||_pamActiveTaskId||'';
   const task=findTaskById(taskId);
   if(!task){showToast('Kein Task gefunden.','warning',3000);return;}
-  let board=currentBoard||'';for(const bk of Object.keys(boards)){if((boards[bk]||[]).some(t=>t.id===taskId)){board=bk;break;}}
-  showToast('⏳ Druckansicht wird aufgebaut…','info',3000);
+  let board=currentBoard||'';
+  for(const bk of Object.keys(boards)){if((boards[bk]||[]).some(t=>t.id===taskId)){board=bk;break;}}
 
-  function esc2(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-  function fmtD(s){if(!s)return'';const p=s.split('-');return p.length===3?p[2]+'.'+p[1]+'.'+p[0]:s;}
-  function fmtTs(s){if(!s)return'';try{return new Date(s).toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(e){return s;}}
-  function row(label,val){if(!val&&val!==0)return'';return'<tr><td class="lbl">'+esc2(label)+'</td><td>'+esc2(val)+'</td></tr>';}
-  function rowHtml(label,val){if(!val)return'';return'<tr><td class="lbl">'+esc2(label)+'</td><td>'+val+'</td></tr>';}
-  function sec(title,content){if(!content)return'';return'<div class="sec"><div class="sec-title">'+esc2(title)+'</div>'+content+'</div>';}
+  function _e(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+  function _fD(s){if(!s)return'';const p=s.split('-');return p.length===3?p[2]+'.'+p[1]+'.'+p[0]:s;}
+  function _fTs(s){if(!s)return'';try{return new Date(s).toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(_e2){return s;}}
+  const today=new Date().toISOString().split('T')[0];
+  function _od(d){return d&&d<today;}
+  function _fH(min){if(!min||min<=0)return'–';return Math.floor(min/60)+'h'+(min%60>0?' '+Math.round(min%60)+'min':'');}
+  function _parseMin(z){
+    if(z.minuten!=null)return+z.minuten;
+    if(z.von&&z.bis){const[vh,vm]=(z.von||'00:00').split(':').map(Number);const[bh,bm]=(z.bis||'00:00').split(':').map(Number);return(bh*60+bm)-(vh*60+vm);}
+    return 0;
+  }
+  function _sec(title,content,count){
+    if(!content)return'';
+    const cnt=count>0?'<span style="font-size:10px;background:rgba(0,0,0,.12);padding:1px 7px;border-radius:10px;margin-left:6px;">'+count+'</span>':'';
+    return'<div style="border-top:1px solid var(--border);">'
+      +'<div style="background:var(--bg3);padding:7px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text2);">'+_e(title)+cnt+'</div>'
+      +content+'</div>';
+  }
 
-  // ── Fotos als base64 laden ──
+  const nvList=taskNotizVerlauf||task.notizVerlauf||[];
+  const zeitList=taskZeitEntries||task.zeitEntries||[];
+  const aussList=taskAusserhausTermine||task.ausserhausTermine||[];
   const fotos=taskFotos||task.fotos||[];
-  const fotoImgs=[];
-  for(const f of fotos){
-    let src='';
-    if(f.localUrl&&f.localUrl.startsWith('data:')){src=f.localUrl;}
-    else if(f.thumbnailLink&&gdriveToken){
-      try{
-        const r=await fetch(f.thumbnailLink,{headers:{Authorization:'Bearer '+gdriveToken}});
-        if(r.ok){const b=await r.blob();src=await new Promise(res=>{const rd=new FileReader();rd.onload=e=>res(e.target.result);rd.readAsDataURL(b);});}
-      }catch(e){console.warn('[Druck] Foto laden:',e);}
+  const atts=taskAttachments||task.attachments||[];
+  const epfs=taskEmailPdfs||task.emailPdfs||[];
+  const aufgaben=task.aufgaben||[];
+  const freie=task.freieTermine||[];
+
+  const totalMin=zeitList.reduce((s,z)=>s+_parseMin(z),0);
+  const allDates=[...aufgaben.map(a=>a.datum),...freie.map(f=>f.datum),...aussList.map(a=>a.date||a.datum)].filter(Boolean);
+  const nextDue=allDates.filter(d=>d>=today).sort()[0];
+  const odCount=allDates.filter(d=>_od(d)).length;
+
+  const ampelColor={'rot':'#E24B4A','gelb':'#EF9F27','grün':'#4CAF50'}[task.ampel]||'#999';
+  document.getElementById('pamUebAmpel').style.background=ampelColor;
+  document.getElementById('pamUebTitel').textContent=task.title||'(kein Titel)';
+  document.getElementById('pamUebMeta').textContent=board+' · '+(task.status||'');
+
+  let html='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:14px 16px;">'
+    +'<div style="background:var(--bg3);border-radius:8px;padding:10px 14px;text-align:center;border:1px solid var(--border);">'
+    +'<div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px;">Zeit gesamt</div>'
+    +'<div style="font-size:18px;font-weight:700;color:var(--text);">'+_fH(totalMin)+'</div></div>'
+    +'<div style="background:var(--bg3);border-radius:8px;padding:10px 14px;text-align:center;border:1px solid var(--border);">'
+    +'<div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px;">Nächster Termin</div>'
+    +'<div style="font-size:14px;font-weight:700;color:var(--text);">'+(nextDue?_fD(nextDue):'–')+'</div></div>'
+    +'<div style="background:var(--bg3);border-radius:8px;padding:10px 14px;text-align:center;border:1px solid var(--border);">'
+    +'<div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px;">Überfällig</div>'
+    +'<div style="font-size:18px;font-weight:700;color:'+(odCount>0?'#E24B4A':'#4CAF50')+';">'+(odCount>0?odCount:'✓')+'</div></div>'
+    +'</div>';
+
+  // Aufgaben & Termine
+  const alle=[...aufgaben.map(a=>({label:a.typ||'Aufgabe',datum:a.datum,done:!!(a.erledigt)})),
+    ...freie.map(f=>({label:f.label||'Termin',datum:f.datum,done:!!(f.erledigt),notiz:f.notiz}))
+  ].sort((a,b)=>(a.datum||'zzz')>(b.datum||'zzz')?1:-1);
+  if(alle.length){
+    let t2='<table style="width:100%;border-collapse:collapse;">';
+    for(const t of alle){
+      const od=_od(t.datum)&&!t.done;
+      const ic=t.done?'<span style="color:#4CAF50;">&#10003;</span>':'<span style="color:'+(od?'#E24B4A':'#999')+';">□</span>';
+      t2+='<tr style="border-bottom:1px solid var(--border);">'
+        +'<td style="padding:6px 12px;width:22px;font-size:15px;">'+ic+'</td>'
+        +'<td style="padding:6px 8px;font-size:13px;color:var(--text);">'+_e(t.label)+(t.notiz?' <span style="font-size:11px;color:var(--text2);">– '+_e(t.notiz)+'</span>':'')+'</td>'
+        +'<td style="padding:6px 16px;white-space:nowrap;font-size:11px;font-weight:'+(od?700:400)+';color:'+(od?'#E24B4A':t.done?'#4CAF50':'var(--text2)')+';">'+(t.datum?_fD(t.datum)+(od?' ⚠':''):'')+'</td></tr>';
     }
-    fotoImgs.push({src,name:f.name||'',caption:f.caption||''});
+    t2+='</table>';
+    html+=_sec('Aufgaben & Termine',t2,alle.length);
   }
 
-  // ── Abschnitte aufbauen ──
-  // Stammdaten
-  let stamm='<table class="dt">';
-  stamm+=row('Rep.-Nr.',task.repNr);
-  stamm+=row('Kunden-Nr.',task.kundenNr);
-  stamm+=row('Adresse',task.adresse);
-  stamm+=row('Hausverwaltung',task.hausverwaltung);
-  stamm+=row('Schadensbild',task.schadensbild);
-  stamm+=row('Beschreibung',task.desc);
-  stamm+=row('Bearbeiter',task.owner);
-  stamm+=row('Status',task.status);
-  stamm+=row('Kostenstelle',(task.tags||[]).join(', '));
-  stamm+=row('Quelle',task.source);
-  stamm+=row('Aktivit\xe4t',task.aktivitaet);
-  stamm+='</table>';
-  const hasStamm=[task.repNr,task.kundenNr,task.adresse,task.hausverwaltung,task.schadensbild,task.desc,task.owner,task.source,task.aktivitaet].some(Boolean);
-
-  // Kontakte
-  const ktList=taskFotos!==undefined?(task.kontakte||[]):(task.kontakte||[]);
-  let ktHtml='';
-  if((task.kontakte||[]).length){
-    ktHtml='<table class="dt">';
-    for(const k of task.kontakte){
-      if(!k.name&&!k.tel&&!k.email)continue;
-      ktHtml+='<tr><td class="lbl">'+esc2(k.rolle||'Kontakt')+'</td><td>'+esc2(k.name||'')+
-        (k.tel?'&nbsp;&nbsp;<span style="color:#555;">☎ '+esc2(k.tel)+'</span>':'')+
-        (k.email?'&nbsp;&nbsp;<span style="color:#555;">✉ '+esc2(k.email)+'</span>':'')+'</td></tr>';
+  // Außerhaus-Termine
+  if(aussList.length){
+    let a2='<table style="width:100%;border-collapse:collapse;">';
+    for(const a of aussList.slice().sort((x,y)=>(x.date||x.datum||'')>(y.date||y.datum||'')?1:-1)){
+      a2+='<tr style="border-bottom:1px solid var(--border);">'
+        +'<td style="padding:5px 16px;font-size:11px;color:var(--text2);white-space:nowrap;width:100px;">'+_fD(a.date||a.datum)+'</td>'
+        +'<td style="padding:5px 8px;font-size:11px;color:var(--text2);white-space:nowrap;">'+(a.von||'')+(a.bis?' – '+a.bis:'')+'</td>'
+        +'<td style="padding:5px 16px;font-size:13px;color:var(--text);">'+_e(a.beschreibung||a.label||'Außerhaus')+'</td></tr>';
     }
-    ktHtml+='</table>';
+    a2+='</table>';
+    html+=_sec('Außerhaus-Termine',a2,aussList.length);
   }
 
-  // Termine
-  let termHtml='<table class="dt">';
-  termHtml+=row('Anfrage eingegangen',fmtD(task.anfrageEingangDatum));
-  termHtml+=row('Ortstermin',fmtD(task.ortstermin));
-  termHtml+=row('Auftrag erteilt',fmtD(task.auftragVomDatum));
-  termHtml+=row('Ausf\xfchrungstermin',fmtD(task.ausfuehrungstermin));
-  termHtml+=row('F\xe4lligkeit',fmtD(task.due));
-  for(const a of task.aufgaben||[]){if(a.datum)termHtml+=row(a.typ,fmtD(a.datum));}
-  for(const t of task.freieTermine||[]){if(t.datum)termHtml+=row(t.label||'Termin',fmtD(t.datum)+(t.notiz?' – '+t.notiz:''));}
-  termHtml+='</table>';
-  const hasTermin=[task.anfrageEingangDatum,task.ortstermin,task.auftragVomDatum,task.ausfuehrungstermin,task.due].some(Boolean)||
-    (task.aufgaben||[]).some(a=>a.datum)||(task.freieTermine||[]).some(t=>t.datum);
+  // Zeiterfassung
+  if(zeitList.length){
+    let z2='<table style="width:100%;border-collapse:collapse;">';
+    let gMin=0;
+    for(const z of zeitList.slice().sort((a,b)=>(a.date||a.datum||'')>(b.date||b.datum||'')?1:-1)){
+      const m=_parseMin(z);gMin+=m;
+      z2+='<tr style="border-bottom:1px solid var(--border);">'
+        +'<td style="padding:5px 16px;font-size:11px;color:var(--text2);white-space:nowrap;width:90px;">'+_fD(z.date||z.datum)+'</td>'
+        +'<td style="padding:5px 8px;font-size:11px;color:var(--text2);white-space:nowrap;">'+(z.von||'')+(z.bis?' – '+z.bis:'')+'</td>'
+        +'<td style="padding:5px 8px;font-size:13px;color:var(--text);">'+_e(z.beschreibung||z.aktivitaet||'')+'</td>'
+        +'<td style="padding:5px 16px;font-size:13px;font-weight:600;text-align:right;white-space:nowrap;">'+_fH(m)+'</td></tr>';
+    }
+    z2+='<tr style="background:var(--bg3);"><td colspan="3" style="padding:6px 16px;font-size:11px;font-weight:700;color:var(--text2);">Gesamt</td>'
+      +'<td style="padding:6px 16px;font-size:14px;font-weight:700;text-align:right;color:var(--text);">'+_fH(gMin)+'</td></tr></table>';
+    html+=_sec('Manuelle Zeiterfassung',z2,zeitList.length);
+  }
 
   // Notiz-Verlauf
-  const nvList=taskNotizVerlauf||task.notizVerlauf||[];
-  let nvHtml='';
   if(nvList.length){
-    nvHtml='<table class="dt">';
-    for(const n of nvList){nvHtml+='<tr><td class="lbl" style="white-space:nowrap;">'+fmtTs(n.ts)+'</td><td>'+esc2(n.text)+'</td></tr>';}
-    nvHtml+='</table>';
-  }
-
-  // Checkliste
-  const ckList=taskCheckliste||task.checkliste||[];
-  let ckHtml='';
-  if(ckList.length){
-    ckHtml='';
-    for(const sek of ckList){
-      ckHtml+='<div style="font-weight:600;margin:8px 0 4px;">'+esc2(sek.title||'')+'</div><table class="dt">';
-      for(const it of sek.items||[]){
-        const done=it.status==='ok';
-        const mangel=it.status==='mangel';
-        const icon=done?'✅':mangel?'⚠️':'□';
-        ckHtml+='<tr><td style="width:24px;text-align:center;">'+icon+'</td><td>'+esc2(it.text||'')+
-          (it.notiz?'<div style="font-size:11px;color:#555;margin-top:2px;">'+esc2(it.notiz)+'</div>':'')+'</td></tr>';
-      }
-      ckHtml+='</table>';
+    let n2='<table style="width:100%;border-collapse:collapse;">';
+    for(const n of [...nvList].sort((a,b)=>a.ts>b.ts?1:-1)){
+      n2+='<tr style="border-bottom:1px solid var(--border);">'
+        +'<td style="padding:5px 16px;font-size:11px;color:var(--text2);white-space:nowrap;width:130px;">'+_fTs(n.ts)+'</td>'
+        +'<td style="padding:5px 16px;font-size:13px;color:var(--text);">'+_e(n.text)+'</td></tr>';
     }
+    n2+='</table>';
+    html+=_sec('Verlauf / Notizen',n2,nvList.length);
   }
 
-  // Anhänge & Links
-  const attList=taskAttachments||task.attachments||[];
-  const lnkList=taskLinks||task.links||[];
-  let attHtml='';
-  if(attList.length||lnkList.length){
-    attHtml='<table class="dt">';
-    for(const a of attList){attHtml+='<tr><td class="lbl">Anhang</td><td>'+esc2(a.name||'')+(a.url?'&nbsp;<a href="'+esc2(a.url)+'" style="font-size:11px;color:#185FA5;">↗ Drive</a>':'')+'</td></tr>';}
-    for(const l of lnkList){attHtml+='<tr><td class="lbl">Link</td><td><a href="'+esc2(l.url||l)+'" style="color:#185FA5;">'+esc2(l.label||l.url||l)+'</a></td></tr>';}
-    attHtml+='</table>';
-  }
-
-  // Fotos HTML
-  let fotoHtml='';
-  if(fotoImgs.length){
-    fotoHtml='<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:6px;">';
-    for(const fi of fotoImgs){
-      fotoHtml+='<div style="text-align:center;max-width:180px;">';
-      if(fi.src){fotoHtml+='<img src="'+fi.src+'" style="max-width:180px;max-height:180px;border-radius:6px;border:1px solid #ddd;object-fit:cover;" alt="'+esc2(fi.name)+'">';}
-      else{fotoHtml+='<div style="width:180px;height:120px;border:1px solid #ddd;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:12px;">Vorschau nicht verf\xfcgbar</div>';}
-      if(fi.caption||fi.name){fotoHtml+='<div style="font-size:10px;color:#666;margin-top:3px;">'+esc2(fi.caption||fi.name)+'</div>';}
-      fotoHtml+='</div>';
+  // Fotos
+  if(fotos.length){
+    let f2='<div style="display:flex;flex-wrap:wrap;gap:8px;padding:10px 16px;">';
+    for(const f of fotos){
+      const src=f.localUrl||f.thumbnailLink||'';
+      const href=f.driveId?'https://drive.google.com/file/d/'+encodeURIComponent(f.driveId)+'/view':'#';
+      f2+='<a href="'+_e(href)+'" target="_blank" style="display:block;border-radius:7px;overflow:hidden;border:1px solid var(--border);flex-shrink:0;text-decoration:none;" title="'+_e(f.caption||f.name||'')+'">';
+      if(src){f2+='<img src="'+_e(src)+'" style="width:110px;height:90px;object-fit:cover;display:block;" alt="'+_e(f.name||'')+'">';}
+      else{f2+='<div style="width:110px;height:90px;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:24px;">🖼</div>';}
+      if(f.caption){f2+='<div style="font-size:10px;color:var(--text2);padding:2px 6px;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_e(f.caption)+'</div>';}
+      f2+='</a>';
     }
-    fotoHtml+='</div>';
+    f2+='</div>';
+    html+=_sec('Fotos',f2,fotos.length);
   }
 
-  // Drive-Ordner
-  let driveHtml='';
-  if(task.gdriveOrdner||task.emailOrdner||task.dokOrdner){
-    driveHtml='<table class="dt">';
-    if(task.gdriveOrdner)driveHtml+=rowHtml('Hauptordner','<a href="'+esc2(task.gdriveOrdner)+'" style="color:#185FA5;">Drive ↗</a>');
-    if(task.emailOrdner)driveHtml+=rowHtml('E-Mail-Ordner','<a href="'+esc2(task.emailOrdner)+'" style="color:#185FA5;">Drive ↗</a>');
-    if(task.dokOrdner)driveHtml+=rowHtml('Dok-Ordner','<a href="'+esc2(task.dokOrdner)+'" style="color:#185FA5;">Drive ↗</a>');
-    driveHtml+='</table>';
+  // Dokumente
+  const allDocs=[...atts.map(a=>({name:a.name||'Anhang',url:a.url||'',icon:'📄'})),
+    ...epfs.map(p=>({name:p.name||'E-Mail PDF',url:p.url||'',icon:'📧'}))];
+  if(allDocs.length){
+    let d2='<div style="display:flex;flex-direction:column;gap:4px;padding:8px 16px;">';
+    for(const d of allDocs){
+      d2+='<a href="'+_e(d.url)+'" target="_blank" style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg3);border-radius:7px;border:1px solid var(--border);text-decoration:none;color:var(--text);">'
+        +'<span style="font-size:15px;flex-shrink:0;">'+d.icon+'</span>'
+        +'<span style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_e(d.name)+'</span>'
+        +'<span style="margin-left:auto;font-size:11px;color:var(--text2);flex-shrink:0;">↗</span></a>';
+    }
+    d2+='</div>';
+    html+=_sec('Dokumente',d2,allDocs.length);
   }
 
-  const ampelColor={'rot':'#E24B4A','gelb':'#EF9F27','gr\xfcn':'#4CAF50'}[task.ampel]||'#ccc';
-  const dateStr=new Date().toLocaleDateString('de-DE');
-  const titleStr=task.title||'(kein Titel)';
+  html+='<div style="padding:10px 16px;display:flex;justify-content:space-between;font-size:10px;color:var(--text2);">'
+    +'<span>PAM Workboard · '+_e(task.owner||'')+' · '+_e(board)+'</span>'
+    +'<span>'+new Date().toLocaleDateString('de-DE')+'</span></div>';
 
-  const html=`<!DOCTYPE html><html lang="de"><head><meta charset="utf-8">
-<title>${esc2(titleStr)}</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;font-size:13px;color:#222;background:#fff;padding:20px;}
-.topbar{display:flex;align-items:center;gap:12px;background:#185FA5;color:#fff;padding:10px 16px;border-radius:6px;margin-bottom:20px;}
-.topbar h2{margin:0;font-size:15px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.sec{margin-bottom:18px;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden;}
-.sec-title{background:#f5f5f5;padding:6px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#555;border-bottom:1px solid #e0e0e0;}
-.dt{width:100%;border-collapse:collapse;padding:8px 12px;}
-.dt td{padding:5px 12px;vertical-align:top;line-height:1.5;border-bottom:1px solid #f0f0f0;}
-.dt tr:last-child td{border-bottom:none;}
-.lbl{color:#777;font-size:11px;width:140px;white-space:nowrap;padding-right:8px;}
-.footer{margin-top:24px;font-size:10px;color:#aaa;display:flex;justify-content:space-between;}
-@media print{
-  .topbar .no-print{display:none!important;}
-  body{padding:0;font-size:12px;}
-  @page{margin:12mm;size:A4;}
-  .sec{break-inside:avoid;page-break-inside:avoid;}
-  img{max-width:160px!important;max-height:160px!important;}
+  document.getElementById('pamUebBody').innerHTML=html;
+  document.getElementById('pamUebersichtOverlay').style.display='block';
 }
-</style></head><body>
-<div class="topbar">
-  <span style="width:12px;height:12px;border-radius:50%;background:${ampelColor};flex-shrink:0;display:inline-block;"></span>
-  <h2>${esc2(titleStr)}</h2>
-  <span style="font-size:11px;opacity:.8;">${esc2(board)} &nbsp;|&nbsp; ${esc2(task.status||'')} &nbsp;|&nbsp; ${dateStr}</span>
-  <button class="no-print" onclick="window.print()" style="padding:5px 14px;border-radius:6px;background:#fff;color:#185FA5;border:none;cursor:pointer;font-weight:700;font-size:12px;flex-shrink:0;">🖨 Drucken</button>
-</div>
-${hasStamm?sec('Stammdaten',stamm):''}
-${ktHtml?sec('Kontakte',ktHtml):''}
-${hasTermin?sec('Termine',termHtml):''}
-${nvHtml?sec('Notiz-Verlauf',nvHtml):''}
-${ckHtml?sec('Checkliste',ckHtml):''}
-${attHtml?sec('Anh\xe4nge & Links',attHtml):''}
-${fotoHtml?sec('Fotos ('+fotoImgs.length+')',fotoHtml):''}
-${driveHtml?sec('Drive-Ordner',driveHtml):''}
-<div class="footer"><span>PAM Workboard · Bearbeiter: ${esc2(task.owner||'')} · Board: ${esc2(board)}</span><span>${dateStr}</span></div>
-</body></html>`;
+function _pamCloseUebersicht(){
+  document.getElementById('pamUebersichtOverlay').style.display='none';
+}
 
-  const w=window.open('','_blank','width=860,height=800,scrollbars=yes');
-  if(!w){showToast('⚠ Popup blockiert – bitte Popup-Blocker deaktivieren.','warning',4000);return;}
-  w.document.open();
-  w.document.write(html);
-  w.document.close();
-}
 async function _pamEmailAntworten(){
   const taskId=(document.getElementById('taskId')||{}).value||_pamActiveTaskId||'';
   const task=findTaskById(taskId);
@@ -19218,7 +19193,7 @@ async function _emOpenMail(idx,mails){
   if(bodyHtml){
     const cleanBody=bodyHtml.replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<link[^>]+rel=["']?stylesheet["']?[^>]*>/gi,'');
     const iframe=document.createElement('iframe');iframe.style.cssText='flex:1;width:100%;border:none;min-height:0;';
-    const fullHtml='<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,Helvetica,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}a{color:#1a73e8;}img{max-width:100%;}</style></head><body>'+cleanBody+'</body></html>';
+    const fullHtml='<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,Helvetica,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}a{color:#1a73e8;}img{max-width:100%;}@media print{body > *:not(#pamUebersichtOverlay){display:none!important;}#pamUebersichtOverlay{display:block!important;position:static!important;background:none!important;padding:0!important;overflow:visible!important;}#pamUebersichtBox{box-shadow:none!important;border:none!important;}#pamUebersichtTopbar button{display:none!important;}@page{margin:12mm;size:A4;}}</style></head><body>'+cleanBody+'</body></html>';
     const blobUrl=URL.createObjectURL(new Blob([fullHtml],{type:'text/html'}));
     iframe.src=blobUrl;
     let _blobRevoked=false;
@@ -21002,5 +20977,8 @@ function _pamRollbackSelected(evt){
 }
 
 </script>
+
+<!-- PAM Task-Uebersicht Overlay -->
+<div id="pamUebersichtOverlay" style="display:none;position:fixed;inset:0;z-index:12000;background:rgba(0,0,0,0.55);overflow-y:auto;padding:20px 12px;" onclick="if(event.target===this)_pamCloseUebersicht();"><div id="pamUebersichtBox" style="background:var(--bg2);border-radius:14px;border:1px solid var(--border);max-width:720px;margin:0 auto;box-shadow:0 12px 48px rgba(0,0,0,.5);overflow:hidden;"><div id="pamUebersichtTopbar" style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#185FA5;color:#fff;"><span id="pamUebAmpel" style="width:11px;height:11px;border-radius:50%;background:#ccc;flex-shrink:0;display:inline-block;"></span><span id="pamUebTitel" style="font-size:14px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span><span id="pamUebMeta" style="font-size:11px;opacity:.8;white-space:nowrap;margin-right:6px;"></span><button onclick="window.print()" style="flex-shrink:0;padding:4px 12px;border-radius:6px;background:#fff;color:#185FA5;border:none;cursor:pointer;font-weight:700;font-size:12px;">🖨 Drucken</button><button onclick="_pamCloseUebersicht()" style="flex-shrink:0;padding:4px 10px;border-radius:6px;background:rgba(255,255,255,.2);color:#fff;border:none;cursor:pointer;font-size:14px;line-height:1;margin-left:4px;">✕</button></div><div id="pamUebBody" style="padding:0 0 4px;"></div></div></div>
 </body>
 </html>
