@@ -3567,7 +3567,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-03 · #266'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-02-b247)
+const PAM_BUILD = 'v2026-06-03 · #268'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-02-b247)
 
 // ── STATE ──
 let boards = {};
@@ -20083,27 +20083,46 @@ function _emShowBoardTaskPicker(title, onPick){
   ov.onclick=function(e){if(e.target===ov)ov.remove();};
   ov.querySelector('#_btp_back').onclick=function(){ov.remove();};
   document.body.appendChild(ov);
+  var _curBoard='';
   function renderBoards(){
     document.getElementById('_btp_hdr').textContent=title+' – Projekt wählen';
-    document.getElementById('_btp_back').textContent='Abbrechen';
-    document.getElementById('_btp_back').onclick=function(){ov.remove();};
-    const list=document.getElementById('_btp_list');list.innerHTML='';
+    var back=document.getElementById('_btp_back');back.textContent='Abbrechen';back.onclick=function(){ov.remove();};
+    var list=document.getElementById('_btp_list');list.innerHTML='';
     boardList.forEach(function(bk){
       const cnt=(boards[bk]||[]).filter(function(t){return !t.archiviert;}).length;
       const icon=boardTypes[bk]==='notiz'?'✅':'🏗';
       const btn=document.createElement('button');btn.className='em-pick-item';
       btn.innerHTML=_escHtml(icon+' '+bk)+'<div class="em-pick-sub">'+cnt+' Task'+(cnt!==1?'s':'')+'</div>';
-      btn.onclick=function(){renderTasks(bk);};
+      btn.onclick=function(){_curBoard=bk;renderColumns(bk);};
       list.appendChild(btn);
     });
   }
-  function renderTasks(boardName){
-    document.getElementById('_btp_hdr').textContent=title+' – '+boardName;
-    document.getElementById('_btp_back').textContent='← Zurück';
-    document.getElementById('_btp_back').onclick=renderBoards;
-    const tasks=(boards[boardName]||[]).filter(function(t){return !t.archiviert;});
-    const list=document.getElementById('_btp_list');list.innerHTML='';
-    if(!tasks.length){list.innerHTML='<div style="padding:12px 16px;font-size:12px;color:var(--text2);">Keine Tasks vorhanden.</div>';return;}
+  function renderColumns(boardName){
+    document.getElementById('_btp_hdr').textContent=title+' › '+boardName+' – Spalte wählen';
+    var back=document.getElementById('_btp_back');back.textContent='← Zurück';back.onclick=renderBoards;
+    var cols=getBoardStatuses(boardName)||[];
+    var list=document.getElementById('_btp_list');list.innerHTML='';
+    // Option: Alle Spalten (kein Filter)
+    var allTasks=(boards[boardName]||[]).filter(function(t){return !t.archiviert;});
+    var allBtn=document.createElement('button');allBtn.className='em-pick-item';
+    allBtn.innerHTML='<div style="font-weight:600;">📋 Alle Spalten</div><div class="em-pick-sub">'+allTasks.length+' Task'+(allTasks.length!==1?'s':'')+'</div>';
+    allBtn.onclick=function(){renderTasks(boardName,null);};
+    list.appendChild(allBtn);
+    cols.forEach(function(col){
+      var cnt=(boards[boardName]||[]).filter(function(t){return t.status===col&&!t.archiviert;}).length;
+      var btn=document.createElement('button');btn.className='em-pick-item';
+      btn.innerHTML='<div>📂 '+_escHtml(col)+'</div><div class="em-pick-sub">'+cnt+' Task'+(cnt!==1?'s':'')+'</div>';
+      btn.onclick=function(){renderTasks(boardName,col);};
+      list.appendChild(btn);
+    });
+  }
+  function renderTasks(boardName,filterCol){
+    var hdr=filterCol?title+' › '+boardName+' › '+filterCol:title+' › '+boardName+' – Alle';
+    document.getElementById('_btp_hdr').textContent=hdr;
+    var back=document.getElementById('_btp_back');back.textContent='← Zurück';back.onclick=function(){renderColumns(boardName);};
+    var tasks=(boards[boardName]||[]).filter(function(t){return !t.archiviert&&(filterCol?t.status===filterCol:true);});
+    var list=document.getElementById('_btp_list');list.innerHTML='';
+    if(!tasks.length){list.innerHTML='<div style="padding:12px 16px;font-size:12px;color:var(--text2);">Keine Tasks in dieser Spalte.</div>';return;}
     tasks.forEach(function(t){
       const ac={'rot':'#E24B4A','gelb':'#EF9F27','grün':'#4CAF50'}[t.ampel]||'#999';
       const btn=document.createElement('button');btn.className='em-pick-item';
@@ -20116,20 +20135,44 @@ function _emShowBoardTaskPicker(title, onPick){
 }
 function _emShowBoardPicker(title, excludeBoard, onPick){
   const boardList=Object.keys(boards).filter(function(bk){return bk!==excludeBoard;});
+  if(!boardList.length){showToast('Keine Boards verfügbar.','error');return;}
   const ov=document.createElement('div');ov.className='em-pick-overlay';
-  ov.innerHTML='<div class="em-pick-box"><div class="em-pick-header">'+_escHtml(title)+'</div><div class="em-pick-list" id="_bp_list"></div><div class="em-pick-footer"><button class="em-pick-cancel">Abbrechen</button></div></div>';
+  ov.innerHTML='<div class="em-pick-box"><div class="em-pick-header" id="_bp_hdr">'+_escHtml(title)+'</div><div class="em-pick-list" id="_bp_list"></div><div class="em-pick-footer"><button class="em-pick-cancel" id="_bp_back">Abbrechen</button></div></div>';
   ov.onclick=function(e){if(e.target===ov)ov.remove();};
-  ov.querySelector('.em-pick-cancel').onclick=function(){ov.remove();};
-  const list=ov.querySelector('#_bp_list');
-  boardList.forEach(function(bk){
-    const icon=boardTypes[bk]==='email'?'📧':boardTypes[bk]==='notiz'?'✅':'🏗';
-    const cols=(getBoardStatuses(bk)||[]).join(' · ');
-    const btn=document.createElement('button');btn.className='em-pick-item';
-    btn.innerHTML=_escHtml(icon+' '+bk)+(cols?'<div class="em-pick-sub">'+_escHtml(cols)+'</div>':'');
-    btn.onclick=function(){ov.remove();onPick(bk);};
-    list.appendChild(btn);
-  });
   document.body.appendChild(ov);
+  function renderBoards(){
+    document.getElementById('_bp_hdr').textContent=title;
+    var back=document.getElementById('_bp_back');back.textContent='Abbrechen';back.onclick=function(){ov.remove();};
+    var list=document.getElementById('_bp_list');list.innerHTML='';
+    boardList.forEach(function(bk){
+      const icon=boardTypes[bk]==='email'?'📧':boardTypes[bk]==='notiz'?'✅':'🏗';
+      const cols=(getBoardStatuses(bk)||[]).join(' · ');
+      const btn=document.createElement('button');btn.className='em-pick-item';
+      btn.innerHTML=_escHtml(icon+' '+bk)+(cols?'<div class="em-pick-sub">'+_escHtml(cols)+'</div>':'');
+      btn.onclick=function(){renderColumns(bk);};
+      list.appendChild(btn);
+    });
+  }
+  function renderColumns(boardName){
+    document.getElementById('_bp_hdr').textContent=title+' › '+boardName;
+    var back=document.getElementById('_bp_back');back.textContent='← Zurück';back.onclick=renderBoards;
+    var cols=getBoardStatuses(boardName)||[];
+    var list=document.getElementById('_bp_list');list.innerHTML='';
+    if(!cols.length){
+      var btn=document.createElement('button');btn.className='em-pick-item';
+      btn.textContent='(Keine Spalten – direkt verschieben)';
+      btn.onclick=function(){ov.remove();onPick(boardName,'');};
+      list.appendChild(btn);return;
+    }
+    cols.forEach(function(col){
+      const cnt=(boards[boardName]||[]).filter(function(t){return t.status===col&&!t.archiviert;}).length;
+      const btn=document.createElement('button');btn.className='em-pick-item';
+      btn.innerHTML='<div style="display:flex;align-items:center;gap:6px;">📂 '+_escHtml(col)+'</div><div class="em-pick-sub">'+cnt+' Task'+(cnt!==1?'s':'')+'</div>';
+      btn.onclick=function(){ov.remove();onPick(boardName,col);};
+      list.appendChild(btn);
+    });
+  }
+  renderBoards();
 }
 function _emShowPickModal(title,items,onPick){
   // items: [{label, sub, value}]
@@ -20227,27 +20270,22 @@ function _emInAuftragEinglieder(){
 
 function _emInBoardVerschieben(){
   if(!_emCurrentTask)return;
-  _emShowBoardPicker('In welches Board verschieben?',_emCurrentBoard,async function(targetBoard){
+  _emShowBoardPicker('In welches Board verschieben?',_emCurrentBoard,async function(targetBoard,targetStatus){
       if(targetBoard===_emCurrentBoard){showToast('Task ist bereits in diesem Board.','info');return;}
       let t=_emCurrentTask;
-      // Fix #232: Formularfelder VOR dem Verschieben sichern (unabhängig vom Save-Timer)
       _emDoSave();
+      // Gewählte Spalte übernehmen; Fallback auf erste Spalte
       let targetStatuses=getBoardStatuses(targetBoard)||[];
-      // Fix8: Status beibehalten wenn er im Ziel-Board existiert
-      let newStatus=targetStatuses.includes(t.status)?t.status:(targetStatuses[0]||'Backlog');
-      if(!targetStatuses.includes(t.status)){
-        showToast('Status auf „'+newStatus+'" gesetzt (bisheriger Status nicht im Ziel-Board)','info',4000);
-      }
+      let newStatus=targetStatus||(targetStatuses.includes(t.status)?t.status:(targetStatuses[0]||'Backlog'));
       t.status=newStatus;
       boards[_emCurrentBoard]=(boards[_emCurrentBoard]||[]).filter(function(x){return x.id!==t.id;});
       (boards[targetBoard]=boards[targetBoard]||[]).push(t);
       closeEmailTaskModal();
       currentBoard=targetBoard;
-      // Fix #232: sofort speichern statt 1s-Delay
       await autoSave();
       pushToSync();
       renderBoard();
-      showToast('Task nach „'+targetBoard+'" verschoben.','success');
+      showToast('Task nach „'+targetBoard+'" / Spalte „'+newStatus+'" verschoben.','success');
   });
 }
 
