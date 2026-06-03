@@ -3567,7 +3567,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-03 · #261'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-02-b247)
+const PAM_BUILD = 'v2026-06-03 · #262'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-02-b247)
 
 // ── STATE ──
 let boards = {};
@@ -6217,8 +6217,8 @@ function renderHeute(){
     (boards[boardName]||[]).forEach(function(t){
       if(t.archiviert)return; // archivierte Tasks nicht in Heute-Ansicht
       if(bType==='email'){
+        if(!t.due)return; // Posteingang nur in Heute wenn Datum gesetzt
         posteingang.push({t:t,board:boardName});
-        if(!t.due)return;
       }
       if(t.ausfuehrungstermin===today)ausfuehrungHeute.push({t:t,board:boardName});
       var _allDates=[];
@@ -13180,16 +13180,22 @@ async function _pamLoadThumb(driveId){
   if(_pamThumbCache[driveId])return _pamThumbCache[driveId];
   if(!gdriveToken)return'';
   try{
-    // Schritt 1: thumbnailLink via Drive API holen (googleapis.com ist in connect-src)
+    // Schritt 1: thumbnailLink via Drive API holen
     const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(driveId)+'?fields=thumbnailLink',
       {headers:{Authorization:'Bearer '+gdriveToken}});
     if(!r.ok)return'';
     const d=await r.json();
     const tl=d.thumbnailLink;if(!tl)return'';
-    // Schritt 2: Thumbnail-URL direkt zurückgeben (img-src erlaubt googleusercontent.com)
-    // Kein weiterer fetch nötig — Browser lädt img direkt
-    _pamThumbCache[driveId]=tl;
-    return tl;
+    // Schritt 2: Thumbnail mit Auth-Header laden → Blob-URL (umgeht Cookie-Anforderung)
+    const r2=await fetch(tl,{headers:{Authorization:'Bearer '+gdriveToken}});
+    if(!r2.ok){
+      // Fallback: direkte URL (funktioniert wenn Google-Cookie vorhanden)
+      _pamThumbCache[driveId]=tl;return tl;
+    }
+    const blob=await r2.blob();
+    const url=URL.createObjectURL(blob);
+    _pamThumbCache[driveId]=url;
+    return url;
   }catch(e){return'';}
 }
 function _pamExtractFileId(url){
