@@ -3596,7 +3596,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-03 · #272'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-03-b272)
+const PAM_BUILD = 'v2026-06-03 · #274'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-03-b274)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -3630,9 +3630,14 @@ function _pamGuestApply(){
   if(bsel)bsel.style.display='none';
   const badd=document.querySelector('.board-add-btn');
   if(badd)badd.style.display='none';
+  // Inhalt einblenden (war durch CSS versteckt)
+  const mc=document.getElementById('mainContent');
+  if(mc)mc.style.visibility='';
+  const tb=document.querySelector('.topbar');
+  if(tb)tb.style.visibility='';
   if(boards[_pamGuest.board]){
-    switchBoard(_pamGuest.board);
-    renderBoard();
+    if(typeof switchBoard==='function')switchBoard(_pamGuest.board);
+    if(typeof render==='function')render();
   }
   const badge=document.getElementById('pamGuestBadge');
   if(badge){badge.textContent='🔗 '+_pamGuest.board;badge.style.display='inline-flex';}
@@ -5802,6 +5807,11 @@ document.addEventListener('DOMContentLoaded',()=>{
     const bn=document.getElementById('pamGuestBoardName');
     if(bn)bn.textContent='Projekt: '+_pamGuest.board;
     if(ov){ov.style.display='flex';}
+    // Inhalt verstecken bis Passwort eingegeben
+    const mc=document.getElementById('mainContent');
+    if(mc)mc.style.visibility='hidden';
+    const tb=document.querySelector('.topbar');
+    if(tb)tb.style.visibility='hidden';
     const _origLoad=loadFromObject;
     loadFromObject=function(data){_origLoad(data);if(_pamGuestUnlocked)_pamGuestApply();};
   }
@@ -12212,6 +12222,7 @@ function _msCleanPreview(raw){
 }
 async function _msLoadEmailThread(){
   const taskId=_getActiveTaskId();
+  let _msActiveToken=msToken; // lokales Token – wird ggf. auf Konto 2 gesetzt ohne msToken global zu überschreiben
   const task=findTaskById(taskId)||(_pamCurrentTask&&_pamCurrentTask.id===taskId?_pamCurrentTask:null);
   if(!task){showToast('⚠ Kein Task geöffnet (ID: '+(taskId||'leer')+')','error',3000);return;}
   // Fix 2026-05-27: Token ggf. still aus MSAL-Cache holen (z.B. nach Seiten-Reload)
@@ -12291,8 +12302,8 @@ async function _msLoadEmailThread(){
           }catch(e){console.warn('[MS2] ID-Suche für',_m2id,':',e);}
         }
         if(convIds.size>0){
-          // Konto 2 hat Treffer → Token für Thread-Fetch tauschen (nur für diesen Aufruf)
-          msToken=msToken2;
+          // Konto 2 hat Treffer → _msActiveToken für diesen Aufruf setzen (msToken NICHT überschreiben)
+          _msActiveToken=msToken2;
           console.log('[MS-DEBUG] Konto 2 erfolgreich – verwende Token2 für Thread-Fetch');
           showToast('📨 E-Mail in Konto 2 gefunden ('+msUserEmail2+')','info',3000);
         }
@@ -12423,6 +12434,39 @@ async function _msLoadEmailThread(){
         }
       }catch(e){console.warn('[MS] Betreff-Fallback:',e);}
     }
+    // ── Konto 2: Betreff-Suche falls Konto 1 nichts gefunden hat ──
+    if(convIds.size===0&&_msSubjFallback&&msToken2&&(await _msRefreshToken2())){
+      console.log('[MS-DEBUG] Starte Betreff-Suche mit Konto 2 ('+msUserEmail2+')');
+      try{
+        const _normDE2=s=>s.replace(/ß/g,'ss').replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').toLowerCase();
+        const _searchQraw2=_msSubjFallback.replace(/["']/g,'').replace(/_/g,' ').replace(/\s+/g,' ').trim();
+        const _sw2=[..._searchQraw2.split(/[\s\-]+/)].filter(w=>w.length>=3&&!/^(Re|Fwd|AW|WG|Antwort):?$/i.test(w));
+        const _minMatch2=Math.max(2,Math.ceil(_sw2.length*0.7));
+        const _processRes2=function(d){
+          (d.value||[]).forEach(m=>{
+            const sub=(m.subject||'').toLowerCase();
+            const subN=_normDE2(m.subject||'');
+            const hits=_sw2.filter(w=>sub.includes(w.toLowerCase())||subN.includes(_normDE2(w))).length;
+            if(hits>=_minMatch2&&m.conversationId)convIds.add(m.conversationId);
+          });
+        };
+        const _q2=_sw2.slice(0,4).join(' ').substring(0,50);
+        const r2full=await fetch('https://graph.microsoft.com/v1.0/me/messages?$search=%22'+encodeURIComponent(_q2)+'%22&$select=id,conversationId,subject',
+          {headers:{Authorization:'Bearer '+msToken2}});
+        if(r2full.ok)_processRes2(await r2full.json());
+        if(convIds.size===0){
+          const _fSub2=encodeURIComponent("subject eq '"+_msSubjFallback.replace(/'/g,"''")+"'");
+          const r2sub=await fetch('https://graph.microsoft.com/v1.0/me/messages?$filter='+_fSub2+'&$select=id,conversationId&$top=10',
+            {headers:{Authorization:'Bearer '+msToken2}});
+          if(r2sub.ok)_processRes2(await r2sub.json());
+        }
+        if(convIds.size>0){
+          _msActiveToken=msToken2;
+          console.log('[MS-DEBUG] Konto 2 Betreff-Suche erfolgreich');
+          showToast('📨 E-Mail in Konto 2 gefunden ('+msUserEmail2+')','info',3000);
+        }
+      }catch(e){console.warn('[MS2] Betreff-Suche Konto 2:',e);}
+    }
     if(convIds.size===0){
       if(_allMsgIds.length>0){
         throw new Error('E-Mail nicht im Exchange-Postfach gefunden. Hinweis: Der Outlook-Verlauf funktioniert nur für E-Mails die direkt in deinem Exchange-Konto (nicht T-Online IMAP) liegen.');
@@ -12434,7 +12478,7 @@ async function _msLoadEmailThread(){
     // Schritt 2: Alle Ordner + Unterordner + Gesendet, OHNE Papierkorb
     let _deletedFolderId='';
     try{
-      const _rDel=await fetch('https://graph.microsoft.com/v1.0/me/mailFolders/deleteditems?$select=id',{headers:{Authorization:'Bearer '+msToken}});
+      const _rDel=await fetch('https://graph.microsoft.com/v1.0/me/mailFolders/deleteditems?$select=id',{headers:{Authorization:'Bearer '+_msActiveToken}});
       if(_rDel.ok){const _dDel=await _rDel.json();_deletedFolderId=_dDel.id||'';}
     }catch(e){}
     const allMsgsMap=new Map();
@@ -12443,7 +12487,7 @@ async function _msLoadEmailThread(){
         const _f2Base=`conversationId eq '${convId}' and isDraft eq false`;
         const _f2=encodeURIComponent(_deletedFolderId?_f2Base+` and parentFolderId ne '${_deletedFolderId}'`:_f2Base);
         const r2=await fetch(`https://graph.microsoft.com/v1.0/me/messages?$filter=${_f2}&$select=id,subject,from,receivedDateTime,internetMessageId,bodyPreview,isDraft,hasAttachments&$top=100`,
-          {headers:{Authorization:'Bearer '+msToken}});
+          {headers:{Authorization:'Bearer '+_msActiveToken}});
         if(!r2.ok){const _e2=await r2.json().catch(()=>({}));console.warn('[MS] Thread',convId,':',_e2.error?.message);continue;}
         const d2=await r2.json();
         (d2.value||[]).forEach(m=>allMsgsMap.set(m.id,m));
