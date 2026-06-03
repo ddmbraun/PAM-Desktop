@@ -3779,7 +3779,7 @@ function removeAufgabe(id){
     const _aufgIcons={'Ortstermin':'📍','Ortstermin am':'📍','Anruf':'📞','Anruf bis':'📞','Ausführungstermin':'🔨','Besichtigung':'👁','Besichtigung am':'👁','Auftrag erteilt':'📋','Angebot':'📝','E-Mail':'📧','E-Mail bis':'📧','Rückfragen':'❓','Rückfragen bis':'❓','Abgeschlossen':'✅'};
     const ico=_aufgIcons[removed.typ]||'🗓';
     const datStr=removed.datum?(()=>{const[y,m,d]=(removed.datum).split('-');return d+'.'+m+'.'+y;})():'kein Datum';
-    const ts=new Date().toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+    const ts=new Date().toISOString();
     taskNotizVerlauf.push({ts,text:'Aufgabe entfernt: '+ico+' '+removed.typ+' – '+datStr});
     renderTaskNotizen();
   }
@@ -13186,16 +13186,10 @@ async function _pamLoadThumb(driveId){
     if(!r.ok)return'';
     const d=await r.json();
     const tl=d.thumbnailLink;if(!tl)return'';
-    // Schritt 2: Thumbnail mit Auth-Header laden → Blob-URL (umgeht Cookie-Anforderung)
-    const r2=await fetch(tl,{headers:{Authorization:'Bearer '+gdriveToken}});
-    if(!r2.ok){
-      // Fallback: direkte URL (funktioniert wenn Google-Cookie vorhanden)
-      _pamThumbCache[driveId]=tl;return tl;
-    }
-    const blob=await r2.blob();
-    const url=URL.createObjectURL(blob);
-    _pamThumbCache[driveId]=url;
-    return url;
+    // Schritt 2: thumbnailLink direkt als img.src setzen (kein CORS-Problem bei img-Requests)
+    // Auth-Fetch zu lh3.googleusercontent.com schlägt wegen CORS fehl
+    _pamThumbCache[driveId]=tl;
+    return tl;
   }catch(e){return'';}
 }
 function _pamExtractFileId(url){
@@ -13443,6 +13437,27 @@ async function _pamTaskDrucken(extId){
   document.getElementById('pamUebBody').innerHTML=html;
   var _tidEl=document.getElementById('pamUebAktTaskId');if(_tidEl)_tidEl.value=taskId;
   document.getElementById('pamUebersichtOverlay').style.display='block';
+  // Overlay verschiebbar machen
+  (function(){
+    const box=document.getElementById('pamUebersichtBox');
+    const hdr=document.getElementById('pamUebersichtTopbar');
+    if(!box||!hdr||hdr._dragInit)return;
+    hdr._dragInit=true;
+    hdr.style.cursor='grab';
+    let sx,sy,bx,by;
+    hdr.addEventListener('mousedown',function(e){
+      if(e.target.tagName==='BUTTON')return;
+      e.preventDefault();
+      const r=box.getBoundingClientRect();
+      box.style.position='fixed';box.style.margin='0';
+      box.style.left=r.left+'px';box.style.top=r.top+'px';
+      sx=e.clientX;sy=e.clientY;bx=r.left;by=r.top;
+      hdr.style.cursor='grabbing';
+      function mm(e){box.style.left=Math.max(0,bx+(e.clientX-sx))+'px';box.style.top=Math.max(0,by+(e.clientY-sy))+'px';}
+      function mu(){hdr.style.cursor='grab';document.removeEventListener('mousemove',mm);document.removeEventListener('mouseup',mu);}
+      document.addEventListener('mousemove',mm);document.addEventListener('mouseup',mu);
+    });
+  })();
 }
 
 function _pamUebOeffnen(){
@@ -20012,6 +20027,63 @@ function _emToggleFolder(){
 }
 
 // Fix7: Inline-Auswahl-Modal – ersetzt window.prompt() für Board/Task-Auswahl
+
+function _emShowBoardTaskPicker(title, onPick){
+  const boardList=Object.keys(boards).filter(function(bk){return !_isEmailBoard(bk);});
+  if(!boardList.length){showToast('Keine Boards verfügbar.','error');return;}
+  const ov=document.createElement('div');ov.className='em-pick-overlay';
+  ov.innerHTML='<div class="em-pick-box"><div class="em-pick-header" id="_btp_hdr">'+_escHtml(title)+' – Projekt wählen</div><div class="em-pick-list" id="_btp_list"></div><div class="em-pick-footer"><button class="em-pick-cancel" id="_btp_back">Abbrechen</button></div></div>';
+  ov.onclick=function(e){if(e.target===ov)ov.remove();};
+  ov.querySelector('#_btp_back').onclick=function(){ov.remove();};
+  document.body.appendChild(ov);
+  function renderBoards(){
+    document.getElementById('_btp_hdr').textContent=title+' – Projekt wählen';
+    document.getElementById('_btp_back').textContent='Abbrechen';
+    document.getElementById('_btp_back').onclick=function(){ov.remove();};
+    const list=document.getElementById('_btp_list');list.innerHTML='';
+    boardList.forEach(function(bk){
+      const cnt=(boards[bk]||[]).filter(function(t){return !t.archiviert;}).length;
+      const icon=boardTypes[bk]==='notiz'?'✅':'🏗';
+      const btn=document.createElement('button');btn.className='em-pick-item';
+      btn.innerHTML=_escHtml(icon+' '+bk)+'<div class="em-pick-sub">'+cnt+' Task'+(cnt!==1?'s':'')+'</div>';
+      btn.onclick=function(){renderTasks(bk);};
+      list.appendChild(btn);
+    });
+  }
+  function renderTasks(boardName){
+    document.getElementById('_btp_hdr').textContent=title+' – '+boardName;
+    document.getElementById('_btp_back').textContent='← Zurück';
+    document.getElementById('_btp_back').onclick=renderBoards;
+    const tasks=(boards[boardName]||[]).filter(function(t){return !t.archiviert;});
+    const list=document.getElementById('_btp_list');list.innerHTML='';
+    if(!tasks.length){list.innerHTML='<div style="padding:12px 16px;font-size:12px;color:var(--text2);">Keine Tasks vorhanden.</div>';return;}
+    tasks.forEach(function(t){
+      const ac={'rot':'#E24B4A','gelb':'#EF9F27','grün':'#4CAF50'}[t.ampel]||'#999';
+      const btn=document.createElement('button');btn.className='em-pick-item';
+      btn.innerHTML='<div style="display:flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:50%;background:'+ac+';flex-shrink:0;display:inline-block;"></span>'+_escHtml(t.title||'(ohne Titel)')+'</div><div class="em-pick-sub">'+_escHtml(t.status||'')+(t.due?' · '+_escHtml(t.due.split('-').reverse().join('.')):'')+'</div>';
+      btn.onclick=function(){ov.remove();onPick({task:t,board:boardName});};
+      list.appendChild(btn);
+    });
+  }
+  renderBoards();
+}
+function _emShowBoardPicker(title, excludeBoard, onPick){
+  const boardList=Object.keys(boards).filter(function(bk){return bk!==excludeBoard;});
+  const ov=document.createElement('div');ov.className='em-pick-overlay';
+  ov.innerHTML='<div class="em-pick-box"><div class="em-pick-header">'+_escHtml(title)+'</div><div class="em-pick-list" id="_bp_list"></div><div class="em-pick-footer"><button class="em-pick-cancel">Abbrechen</button></div></div>';
+  ov.onclick=function(e){if(e.target===ov)ov.remove();};
+  ov.querySelector('.em-pick-cancel').onclick=function(){ov.remove();};
+  const list=ov.querySelector('#_bp_list');
+  boardList.forEach(function(bk){
+    const icon=boardTypes[bk]==='email'?'📧':boardTypes[bk]==='notiz'?'✅':'🏗';
+    const cols=(getBoardStatuses(bk)||[]).join(' · ');
+    const btn=document.createElement('button');btn.className='em-pick-item';
+    btn.innerHTML=_escHtml(icon+' '+bk)+(cols?'<div class="em-pick-sub">'+_escHtml(cols)+'</div>':'');
+    btn.onclick=function(){ov.remove();onPick(bk);};
+    list.appendChild(btn);
+  });
+  document.body.appendChild(ov);
+}
 function _emShowPickModal(title,items,onPick){
   // items: [{label, sub, value}]
   const ov=document.createElement('div');ov.className='em-pick-overlay';
@@ -20051,18 +20123,7 @@ function _emShowConfirmModal(message,onConfirm){
 
 function _emInAuftragEinglieder(){
   if(!_emCurrentTask)return;
-  // Task-Auswahl: alle nicht-email-Board-Tasks
-  let opts=[];
-  Object.keys(boards).forEach(function(bk){
-    if(_isEmailBoard(bk))return;
-    (boards[bk]||[]).forEach(function(t){opts.push({id:t.id,title:t.title||'(ohne Titel)',board:bk,task:t});});
-  });
-  if(!opts.length){showToast('Keine passenden Tasks gefunden.','error');return;}
-  // Fix7: Inline-Auswahlmodal statt window.prompt()
-  _emShowPickModal(
-    'In welchen Task eingliedern?',
-    opts.map(function(o){return{label:o.title,sub:'📋 '+o.board,value:o};}),
-    function(target){
+  _emShowBoardTaskPicker('In Auftrag eingliedern',function(target){
       let tt=target.task;
       let src=_emCurrentTask;
       const _doMerge=function(){
@@ -20114,21 +20175,12 @@ function _emInAuftragEinglieder(){
           _doMerge
         );
       }else{_doMerge();}
-    }
-  );
+  });
 }
 
 function _emInBoardVerschieben(){
   if(!_emCurrentTask)return;
-  let boardNames=Object.keys(boards);
-  // Fix7: Inline-Auswahlmodal statt window.prompt()
-  _emShowPickModal(
-    'In welches Board verschieben?',
-    boardNames.map(function(b){
-      const icon=boardTypes[b]==='email'?'📧':boardTypes[b]==='notiz'?'✅':(boardTypes[b]||'baustelle')==='email'?'📧':'🏗';
-      return{label:icon+' '+b,sub:(getBoardStatuses(b)||[]).join(' · '),value:b};
-    }),
-    async function(targetBoard){
+  _emShowBoardPicker('In welches Board verschieben?',_emCurrentBoard,async function(targetBoard){
       if(targetBoard===_emCurrentBoard){showToast('Task ist bereits in diesem Board.','info');return;}
       let t=_emCurrentTask;
       // Fix #232: Formularfelder VOR dem Verschieben sichern (unabhängig vom Save-Timer)
