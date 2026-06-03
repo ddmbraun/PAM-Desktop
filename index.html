@@ -3596,7 +3596,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-03 · #288'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-03-b281)
+const PAM_BUILD = 'v2026-06-03 · #289'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-03-b281)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -18557,35 +18557,51 @@ async function _vbsCreateDriveStruktur(ordnerName,nasParent,nasGrand){
 
     if(gdriveToken&&nasParent){
       try{
-        // ── Strategie 1: Zwei-Ebenen-Suche (nasGrand → nasParent) ──────────────
-        // Wenn nasGrand vorhanden: erst nasGrand suchen (eindeutig, z.B. Straße),
-        // dann nasParent (z.B. "2026") als Unterordner darin finden
-        if(nasGrand){
-          const qG=encodeURIComponent("name='"+nasGrand.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
-          const rG=await fetch(_base+'?q='+qG+'&fields=files(id,name)&spaces=drive&pageSize=10',_hdr);
-          if(rG.status===401){_handleDrive401();return;}
-          const grandList=(await rG.json()).files||[];
-          const grandFound=grandList.find(f=>f.name===nasGrand);
-          if(grandFound){
-            // nasGrand gefunden – jetzt nasParent darin suchen
-            const qP=encodeURIComponent("'"+grandFound.id+"' in parents and name='"+nasParent.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
-            const rP=await fetch(_base+'?q='+qP+'&fields=files(id,name)&spaces=drive&pageSize=5',_hdr);
-            const parentList=(await rP.json()).files||[];
-            const pFound=parentList.find(f=>f.name===nasParent);
-            if(pFound){parentFid=pFound.id;parentFound=true;console.log('[VBS] Zwei-Ebenen-Suche erfolgreich:',nasGrand,'→',nasParent);}
-            else{parentFid=grandFound.id;parentFound=true;console.log('[VBS] nasParent nicht in nasGrand – verwende nasGrand direkt:',nasGrand);}
+        // ── Strategie 1: nasParent direkt suchen (z.B. "Kartäuserstraße 19" – spezifisch) ──
+        // nasParent ist der Straßen-/Objektordner → eindeutig; nasGrand (Stadt) kommt mehrfach vor
+        const qP=encodeURIComponent("name='"+nasParent.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+        const rP=await fetch(_base+'?q='+qP+'&fields=files(id,name)&spaces=drive&pageSize=10',_hdr);
+        if(rP.status===401){_handleDrive401();return;}
+        const parentList=(await rP.json()).files||[];
+        const exactList=parentList.filter(f=>f.name===nasParent);
+        if(exactList.length===1){
+          parentFid=exactList[0].id;parentFound=true;
+          console.log('[VBS] nasParent eindeutig gefunden:',nasParent);
+        } else if(exactList.length>1&&nasGrand){
+          // ── Mehrere Treffer: nasGrand zur Disambiguierung nutzen ──
+          for(const f of exactList){
+            const upR=await fetch(_base+'/'+f.id+'?fields=parents',_hdr);
+            if(!upR.ok)continue;
+            const upD=await upR.json();
+            if(!upD.parents)continue;
+            const gpR=await fetch(_base+'/'+upD.parents[0]+'?fields=name',_hdr);
+            if(!gpR.ok)continue;
+            const gpD=await gpR.json();
+            if(gpD.name&&gpD.name.toLowerCase()===nasGrand.toLowerCase()){
+              parentFid=f.id;parentFound=true;
+              console.log('[VBS] nasParent disambiguiert via nasGrand:',nasGrand,'→',nasParent);
+              break;
+            }
           }
-        }
-        // ── Strategie 2: Einzel-Suche nasParent (wenn nasGrand nicht half) ─────
-        if(!parentFound){
-          const qP=encodeURIComponent("name='"+nasParent.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
-          const rP=await fetch(_base+'?q='+qP+'&fields=files(id,name)&spaces=drive&pageSize=10',_hdr);
-          if(rP.status===401){_handleDrive401();return;}
-          const parentList=(await rP.json()).files||[];
-          const exactList=parentList.filter(f=>f.name===nasParent);
-          if(exactList.length===1){parentFid=exactList[0].id;parentFound=true;console.log('[VBS] Einzel-Suche nasParent eindeutig:',nasParent);}
-          else if(exactList.length>1){console.warn('[VBS] nasParent mehrdeutig ('+exactList.length+'×) – verwende Fallback:',nasParent);}
-          else{console.warn('[VBS] nasParent nicht auf Drive gefunden:',nasParent);}
+          if(!parentFound){parentFid=exactList[0].id;parentFound=true;console.warn('[VBS] nasGrand half nicht – erster Treffer:',nasParent);}
+        } else if(exactList.length===0){
+          // ── Strategie 2 Fallback: nasGrand suchen, nasParent darin finden ──
+          if(nasGrand){
+            const qG=encodeURIComponent("name='"+nasGrand.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+            const rG=await fetch(_base+'?q='+qG+'&fields=files(id,name)&spaces=drive&pageSize=10',_hdr);
+            if(rG.ok){
+              const grandList=(await rG.json()).files||[];
+              const grandFound=grandList.find(f=>f.name===nasGrand);
+              if(grandFound){
+                const qP2=encodeURIComponent("'"+grandFound.id+"' in parents and name='"+nasParent.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+                const rP2=await fetch(_base+'?q='+qP2+'&fields=files(id,name)&spaces=drive&pageSize=5',_hdr);
+                const pList=(await rP2.json()).files||[];
+                const pFound=pList.find(f=>f.name===nasParent);
+                if(pFound){parentFid=pFound.id;parentFound=true;console.log('[VBS] Fallback nasGrand→nasParent:',nasGrand,'→',nasParent);}
+              }
+            }
+          }
+          if(!parentFound)console.warn('[VBS] nasParent nicht gefunden:',nasParent);
         }
       }catch(eP){console.warn('[VBS] Oberordner-Suche fehlgeschlagen:',eP);}
     }
