@@ -3315,6 +3315,35 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
   </div>
 </div>
 
+<!-- GASTMODUS OVERLAY -->
+<div id="pamGuestOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:99999;align-items:center;justify-content:center;flex-direction:column;">
+  <div style="background:var(--bg2,#1e1e2e);border-radius:14px;padding:36px 40px;max-width:380px;width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.5);text-align:center;">
+    <div style="font-size:32px;margin-bottom:12px;">🔒</div>
+    <h2 style="margin:0 0 6px;font-size:18px;color:var(--text,#fff);">Geschützter Bereich</h2>
+    <p id="pamGuestBoardName" style="font-size:13px;color:var(--text2,#aaa);margin:0 0 20px;"></p>
+    <input id="pamGuestPwInput" type="password" placeholder="Passwort eingeben…"
+      style="width:100%;box-sizing:border-box;padding:10px 14px;border-radius:8px;border:1px solid var(--border,#444);background:var(--bg3,#2a2a3e);color:var(--text,#fff);font-size:15px;margin-bottom:8px;outline:none;"
+      onkeydown="if(event.key==='Enter')_pamGuestSubmit()" autocomplete="new-password">
+    <div id="pamGuestError" style="color:#ff6b6b;font-size:12px;margin-bottom:10px;min-height:16px;"></div>
+    <button onclick="_pamGuestSubmit()"
+      style="width:100%;padding:10px;border-radius:8px;background:var(--accent,#5b7cfa);color:#fff;border:none;font-size:15px;font-weight:600;cursor:pointer;">
+      Einloggen
+    </button>
+  </div>
+</div>
+<div id="pamGuestBadge" style="display:none;position:fixed;bottom:16px;right:16px;background:var(--accent,#5b7cfa);color:#fff;border-radius:20px;padding:6px 14px;font-size:12px;font-weight:600;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.3);align-items:center;"></div>
+<script>
+function _pamGuestSubmit(){
+  const pw=document.getElementById('pamGuestPwInput').value;
+  if(!pw)return;
+  const ok=_pamGuestUnlock(pw);
+  if(!ok){
+    document.getElementById('pamGuestError').textContent='Falsches Passwort – bitte erneut versuchen.';
+    document.getElementById('pamGuestPwInput').value='';
+    document.getElementById('pamGuestPwInput').focus();
+  }
+}
+</script>
 <!-- PREVIEW LIGHTBOX -->
 <div class="preview-lightbox" id="previewLightbox" onclick="closePreview()">
   <div class="preview-close" onclick="closePreview()">✕</div>
@@ -3567,16 +3596,78 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-03 · #271'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-02-b247)
+const PAM_BUILD = 'v2026-06-03 · #272'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-03-b272)
 
-// ── STATE ──
-let boards = {};
-let statuses = ['Backlog','Diese Woche','Heute','Waiting','Done']; // globaler Fallback
-let boardStatuses = {}; // pro Board eigene Spalten: { 'Projektname': ['Spalte1',...] }
-let currentBoard = '';
-let mobileBoards = []; // Whitelist für PTP Mobile — leer = alle Boards aufs Handy
-let mobileStatusFilter = {}; // {BoardName: ['Spalte1','Spalte2']} — leer = alle Spalten
-let boardTypes = {}; // Typ pro Board: 'baustelle' (Standard) | 'notiz' | 'email'
+// ── GASTMODUS ──
+const _pamGuest=(function(){
+  const p=new URLSearchParams(location.search);
+  const board=p.get('board');
+  const token=p.get('token');
+  if(!board||!token)return null;
+  return{board:decodeURIComponent(board),token};
+})();
+let _pamGuestUnlocked=false;
+function _pamGuestToken(board,pw){
+  return btoa(unescape(encodeURIComponent(board+':'+pw)));
+}
+function _pamGuestCheck(pw){
+  if(!_pamGuest)return false;
+  return _pamGuestToken(_pamGuest.board,pw)===_pamGuest.token;
+}
+function _pamGuestUnlock(pw){
+  if(_pamGuestCheck(pw)){
+    _pamGuestUnlocked=true;
+    const ov=document.getElementById('pamGuestOverlay');
+    if(ov)ov.style.display='none';
+    _pamGuestApply();
+    return true;
+  }
+  return false;
+}
+function _pamGuestApply(){
+  if(!_pamGuest||!_pamGuestUnlocked)return;
+  const bsel=document.getElementById('boardTabs');
+  if(bsel)bsel.style.display='none';
+  const badd=document.querySelector('.board-add-btn');
+  if(badd)badd.style.display='none';
+  if(boards[_pamGuest.board]){
+    switchBoard(_pamGuest.board);
+    renderBoard();
+  }
+  const badge=document.getElementById('pamGuestBadge');
+  if(badge){badge.textContent='🔗 '+_pamGuest.board;badge.style.display='inline-flex';}
+}
+function _pamOpenShareDialog(boardName){
+  const pw=prompt('Passwort für den Gastlink von "'+boardName+'" festlegen:');
+  if(!pw)return;
+  const token=_pamGuestToken(boardName,pw);
+  const base=location.origin+location.pathname;
+  const link=base+'?board='+encodeURIComponent(boardName)+'&token='+encodeURIComponent(token);
+  const box=document.createElement('div');
+  box.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:99999;display:flex;align-items:center;justify-content:center;';
+  const inner=document.createElement('div');
+  inner.style.cssText='background:var(--bg2);border-radius:14px;padding:30px 32px;max-width:500px;width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.5);';
+  inner.innerHTML='<h3 style="margin:0 0 8px;color:var(--text);">🔗 Gastlink: '+boardName+'</h3>'+
+    '<p style="font-size:12px;color:var(--text2);margin:0 0 12px;">Diesen Link an Mitarbeiter schicken. Passwort separat mitteilen.</p>';
+  const inp=document.createElement('input');
+  inp.id='_pamShareInput'; inp.value=link; inp.readOnly=true;
+  inp.style.cssText='width:100%;box-sizing:border-box;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:11px;margin-bottom:12px;';
+  inp.onclick=function(){this.select();};
+  inner.appendChild(inp);
+  const btnRow=document.createElement('div');
+  btnRow.style.cssText='display:flex;gap:8px;justify-content:flex-end;';
+  const btnCopy=document.createElement('button');
+  btnCopy.style.cssText='padding:8px 16px;border-radius:8px;background:var(--accent);color:#fff;border:none;cursor:pointer;font-weight:600;';
+  btnCopy.textContent='📋 Kopieren';
+  btnCopy.onclick=function(){navigator.clipboard.writeText(inp.value);btnCopy.textContent='✓ Kopiert!';};
+  const btnClose=document.createElement('button');
+  btnClose.style.cssText='padding:8px 16px;border-radius:8px;background:var(--bg3);border:1px solid var(--border);color:var(--text);cursor:pointer;';
+  btnClose.textContent='Schließen';
+  btnClose.onclick=function(){box.remove();};
+  btnRow.appendChild(btnCopy); btnRow.appendChild(btnClose);
+  inner.appendChild(btnRow); box.appendChild(inner);
+  document.body.appendChild(box);
+}
 function _isEmailBoard(board){return (boardTypes[board||currentBoard]||'baustelle')==='email';}
 function _isNotizBoard(board){return (boardTypes[board||currentBoard]||'baustelle')==='notiz';}
 let currentView = 'heute';
@@ -5705,6 +5796,15 @@ function restoreLocalBackup(){
 document.addEventListener('DOMContentLoaded',()=>{
   // Versions-Badge befüllen
   const _vb=document.getElementById('pamVersionBadge');if(_vb)_vb.textContent=PAM_BUILD;
+  // Gastmodus aktivieren
+  if(_pamGuest){
+    const ov=document.getElementById('pamGuestOverlay');
+    const bn=document.getElementById('pamGuestBoardName');
+    if(bn)bn.textContent='Projekt: '+_pamGuest.board;
+    if(ov){ov.style.display='flex';}
+    const _origLoad=loadFromObject;
+    loadFromObject=function(data){_origLoad(data);if(_pamGuestUnlocked)_pamGuestApply();};
+  }
   // Sicherheits-Fallback: falls GSI-Script nicht lädt → Modal nur bei echtem Erststart
   setTimeout(()=>{
     if(!gdriveTokenClient){
@@ -20905,6 +21005,7 @@ function renderProjList(){
             </label>`).join('')}
         </div>
       </div>
+      <button class="col-icon-btn" onclick="_pamOpenShareDialog(editProjects[${i}].name)" title="Gastlink erstellen" style="color:var(--accent)">🔗</button>
       <button class="col-icon-btn" onclick="removeProject(${i})" ${editProjects.length<=1?'disabled':''} style="color:var(--red)" title="Projekt löschen">✕</button>
     </div>`).join('');
 }
