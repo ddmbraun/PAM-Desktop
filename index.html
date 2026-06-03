@@ -3596,7 +3596,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-03 · #286'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-03-b281)
+const PAM_BUILD = 'v2026-06-03 · #287'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-03-b281)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -21554,111 +21554,18 @@ async function _createDriveFoldersForNewAuftrag(p){
     return;
   }
   const btn=document.getElementById('vbsDriveStartBtn');
-  if(btn){btn.textContent='⏳ Suche Drive-Ordner…';btn.disabled=true;}
+  if(btn){btn.textContent='⏳ Drive-Ordner werden vorbereitet…';btn.disabled=true;}
+
+  // Auto-Ordner-Dialog sperren – läuft gleich über _vbsCreateDriveStruktur
+  _autoFolderCreating=true;
+
   try{
-    // ── Schritt 1: Richtigen Drive-Elternordner per nasParent-Name finden ──
-    let parentFid=_ezFolderId(DEFAULT_FOLDER_BAUSTELLE);
-    if(p.nasParent){
-      try{
-        const qFull=encodeURIComponent("name='"+p.nasParent.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
-        const srR=await fetch('https://www.googleapis.com/drive/v3/files?q='+qFull+'&fields=files(id,name)&pageSize=5',
-          {headers:{Authorization:'Bearer '+gdriveToken}});
-        if(srR.ok){
-          const srD=await srR.json();
-          if(srD.files&&srD.files.length>0){
-            let found=srD.files[0];
-            if(p.nasGrand&&srD.files.length>1){
-              for(const f of srD.files){
-                const upR=await fetch('https://www.googleapis.com/drive/v3/files/'+f.id+'?fields=parents',{headers:{Authorization:'Bearer '+gdriveToken}});
-                if(!upR.ok)continue;
-                const upD=await upR.json();
-                if(!upD.parents)continue;
-                const gpR=await fetch('https://www.googleapis.com/drive/v3/files/'+upD.parents[0]+'?fields=name',{headers:{Authorization:'Bearer '+gdriveToken}});
-                if(!gpR.ok)continue;
-                const gpD=await gpR.json();
-                if(gpD.name&&gpD.name.toLowerCase()===p.nasGrand.toLowerCase()){found=f;break;}
-              }
-            }
-            parentFid=found.id;
-            showToast('📁 Drive-Elternordner gefunden: '+found.name,'ok',2000);
-          }
-        }
-      }catch(ep){console.warn('[PAM] nasParent Suche:',ep);}
-    }
-
-    // ── Schritt 2: Prüfen ob Hauptordner bereits durch NAS-Sync vorhanden ──
-    let urls=null;
-    const ordnerName=p.ordner||('Auftrag_'+p.ks);
-    try{
-      const qEx=encodeURIComponent("'"+parentFid+"' in parents and name='"+ordnerName.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
-      const exR=await fetch('https://www.googleapis.com/drive/v3/files?q='+qEx+'&fields=files(id,name)&pageSize=1',
-        {headers:{Authorization:'Bearer '+gdriveToken}});
-      if(exR.ok){
-        const exD=await exR.json();
-        if(exD.files&&exD.files.length>0){
-          // Ordner existiert bereits (NAS-Sync) → Unterordner-Links holen
-          const mainId=exD.files[0].id;
-          showToast('📁 Ordner bereits vorhanden (NAS-Sync) – Links werden eingelesen…','ok',3000);
-          if(btn)btn.textContent='⏳ Unterordner werden eingelesen…';
-          const base='https://drive.google.com/drive/folders/';
-          // Unterordner suchen
-          async function findSub(parentId,name){
-            const q2=encodeURIComponent("'"+parentId+"' in parents and name='"+name+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
-            const r2=await fetch('https://www.googleapis.com/drive/v3/files?q='+q2+'&fields=files(id)&pageSize=1',{headers:{Authorization:'Bearer '+gdriveToken}});
-            if(!r2.ok)return null;
-            const d2=await r2.json();
-            return(d2.files&&d2.files[0])?d2.files[0].id:null;
-          }
-          const post0Id =await findSub(mainId,'00_Posteingang');
-          const emailId =post0Id?await findSub(post0Id,'E-Mails'):null;
-          const dok1Id  =await findSub(mainId,'01_Dokumente');
-          const foto2Id =await findSub(mainId,'02_Fotos');
-          urls={
-            mainId, mainUrl:base+mainId,
-            fotoId:foto2Id, fotoUrl:foto2Id?base+foto2Id:'',
-            emailId, emailUrl:emailId?base+emailId:'',
-            dokId:dok1Id, dokUrl:dok1Id?base+dok1Id:''
-          };
-        }
-      }
-    }catch(eEx){console.warn('[PAM] Existenz-Check:',eEx);}
-
-    // ── Schritt 3: Wenn nicht gefunden → neu anlegen ──
-    if(!urls){
-      if(btn)btn.textContent='⏳ Ordner werden angelegt…';
-      urls=await _createDriveAuftragStruktur(ordnerName, parentFid);
-    }
-
-    // ── Schritt 4: _Stammdaten suchen (1–4 Ebenen hoch) ──
-    let stammdatenUrl='';
-    try{
-      let suchId=parentFid;
-      for(let ebene=1;ebene<=4;ebene++){
-        const q=encodeURIComponent("'"+suchId+"' in parents and name='_Stammdaten' and mimeType='application/vnd.google-apps.folder' and trashed=false");
-        const srR=await fetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name)&pageSize=1',
-          {headers:{Authorization:'Bearer '+gdriveToken}});
-        if(srR.ok){
-          const srD=await srR.json();
-          if(srD.files&&srD.files.length>0){
-            stammdatenUrl='https://drive.google.com/drive/folders/'+srD.files[0].id;
-            showToast('📁 _Stammdaten (Ebene '+ebene+') gefunden','ok',2000);
-            break;
-          }
-        }
-        const upR=await fetch('https://www.googleapis.com/drive/v3/files/'+suchId+'?fields=parents',
-          {headers:{Authorization:'Bearer '+gdriveToken}});
-        if(!upR.ok)break;
-        const upD=await upR.json();
-        if(!upD.parents||!upD.parents[0])break;
-        suchId=upD.parents[0];
-      }
-    }catch(eSb){console.warn('[PAM] _Stammdaten Suche:',eSb);}
-
+    // Banner entfernen + Modal öffnen
     const bann=document.getElementById('vbsNewAuftragBanner');
     if(bann)bann.remove();
-    showToast('✓ Drive-Ordner bereit! Task wird geöffnet…','ok',4000);
-
     openNewTaskModal();
+
+    // Nicht-Drive-Felder sofort befüllen
     setTimeout(()=>{
       const adresse=(p.str+(p.ort?', '+p.ort:'')).trim();
       const titelEl=document.getElementById('taskTitleInput');
@@ -21680,27 +21587,21 @@ async function _createDriveFoldersForNewAuftrag(p){
       const repEl=document.getElementById('taskRepNr');     if(repEl)  repEl.value=p.repnr||'';
       const kdEl =document.getElementById('taskKundenNr');  if(kdEl)   kdEl.value=p.kdnr||'';
       const nasEl=document.getElementById('tNAS');          if(nasEl)  nasEl.value=p.nas||'';
-      const gdEl =document.getElementById('tGD');           if(gdEl)   gdEl.value=urls.fotoUrl||'';
-      const gdoEl=document.getElementById('tGDOrdner');     if(gdoEl)  gdoEl.value=urls.mainUrl||'';
-      const dokEl=document.getElementById('tDokOrdner');    if(dokEl)  dokEl.value=urls.dokUrl||'';
-      const eoEl =document.getElementById('tEmailOrdner');  if(eoEl)   eoEl.value=urls.emailUrl||'';
-      if(stammdatenUrl){
-        const sbEl=document.getElementById('tSbPdfOrdner');
-        if(sbEl&&!sbEl.value.trim()) sbEl.value=stammdatenUrl;
-        const sbEl2=document.getElementById('tSbPdfOrdnerVerk');
-        if(sbEl2&&!sbEl2.value.trim()) sbEl2.value=stammdatenUrl;
-      }
-      if(typeof _updateFotoOrdnerHint==='function') _updateFotoOrdnerHint();
-      if(typeof _updateStammSummary==='function')   _updateStammSummary();
-      if(typeof _updateHdrMeta==='function')        _updateHdrMeta();
-      if(typeof _updateMapsBtn==='function')        _updateMapsBtn();
-      _showVbsDriveLinksBox(urls.mainUrl,urls.fotoUrl,urls.dokUrl,urls.emailUrl,stammdatenUrl);
+      if(typeof _updateHdrMeta==='function')  _updateHdrMeta();
+      if(typeof _updateMapsBtn==='function')  _updateMapsBtn();
     },350);
 
+    // Drive-Struktur anlegen – _vbsCreateDriveStruktur setzt alle Drive-Felder,
+    // Stammblatt-Suche, NAS-Sync-Erkennung und Duplikat-Schutz
+    await _vbsCreateDriveStruktur(p.ordner||('Auftrag_'+p.ks), p.nasParent||'', p.nasGrand||'');
+
+    showToast('✓ Task bereit – bitte speichern!','ok',4000);
   }catch(e){
     showToast('⚠ Fehler: '+e.message,'error',8000);
     console.error('[VBS-Drive]',e);
     if(btn){btn.textContent='☁️ Drive-Ordner anlegen & Task öffnen';btn.disabled=false;}
+  }finally{
+    _autoFolderCreating=false;
   }
 }
 
