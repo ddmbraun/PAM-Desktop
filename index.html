@@ -3567,7 +3567,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-03 · #264'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-02-b247)
+const PAM_BUILD = 'v2026-06-03 · #266'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-02-b247)
 
 // ── STATE ──
 let boards = {};
@@ -6327,8 +6327,20 @@ function renderHeute(){
     if(_hAkt)badges+=' '+lbl+'Status:</span> '+chip(_hAkt.lbl,_hAkt.sty);
     if(t.ortstermin)badges+=' '+chip('📍 Ortstermin: '+fmtDate(t.ortstermin),'background:#B5D4F4;border-color:#185FA5;color:#0C447C;font-weight:600;');
     if(dringlichkeit==='overdue'){
-      let d=diffDays(_dispDate);
-      badges+=' '+lbl+'Fällig:</span> '+chip(fmtDate(_dispDate)+' · '+d+(d===1?' Tag':' Tage')+' überfällig','background:#FCEBEB;border-color:#F7C1C1;color:#A32D2D;font-weight:600;');
+      var _odItems=[];
+      (t.aufgaben||[]).forEach(function(a){if(a.datum&&a.datum<today&&!a.erledigt)_odItems.push({label:a.typ||'Aufgabe',datum:a.datum});});
+      (t.freieTermine||[]).forEach(function(f){if(f.datum&&f.datum<today&&!f.erledigt)_odItems.push({label:f.text||f.label||'Termin',datum:f.datum});});
+      _odItems.sort(function(a,b){return a.datum<b.datum?-1:1;});
+      if(_odItems.length){
+        _odItems.slice(0,3).forEach(function(item){
+          let d2=diffDays(item.datum);
+          badges+=' '+chip('⚠ '+esc(item.label)+' · '+fmtDate(item.datum)+' · '+d2+(d2===1?' Tag':' Tage')+' überfällig','background:#FCEBEB;border-color:#F7C1C1;color:#A32D2D;font-weight:600;');
+        });
+        if(_odItems.length>3)badges+=' '+chip('+'+(_odItems.length-3)+' weitere überfällig','background:#FCEBEB;border-color:#F7C1C1;color:#A32D2D;');
+      }else{
+        let d=diffDays(_dispDate);
+        badges+=' '+lbl+'Fällig:</span> '+chip(fmtDate(_dispDate)+' · '+d+(d===1?' Tag':' Tage')+' überfällig','background:#FCEBEB;border-color:#F7C1C1;color:#A32D2D;font-weight:600;');
+      }
     }else if(dringlichkeit==='heute'){
       badges+=' '+lbl+'Fällig:</span> '+chip(fmtDate(_dispDate),'background:#FAEEDA;border-color:#FAC775;color:#854F0B;font-weight:600;');
     }else if(dringlichkeit==='ausf'){
@@ -13432,15 +13444,15 @@ async function _pamTaskDrucken(extId){
     }
     f2+='</div>';
     html+=_sec('Fotos',f2,fotos.length);
-    // Thumbnails async laden
-    setTimeout(async function(){
-      for(let _fi=0;_fi<fotos.length;_fi++){
-        const f=fotos[_fi];const el=document.getElementById('_pamFotoImg_'+_fi);
-        if(!el)continue;
-        if(f.localUrl&&(f.localUrl.startsWith('data:')||f.localUrl.startsWith('blob:'))){el.src=f.localUrl;continue;}
+    // Thumbnails parallel laden (Promise.all)
+    setTimeout(function(){
+      Promise.all(fotos.map(async function(f,_fi){
+        const el=document.getElementById('_pamFotoImg_'+_fi);
+        if(!el)return;
+        if(f.localUrl&&(f.localUrl.startsWith('data:')||f.localUrl.startsWith('blob:'))){el.src=f.localUrl;return;}
         if(f.driveId){const u=await _pamLoadThumb(f.driveId);if(u&&el)el.src=u;}
         else if(f.thumbnailLink&&el.src!==f.thumbnailLink){el.src=f.thumbnailLink;}
-      }
+      }));
     },100);
   }
 
