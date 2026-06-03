@@ -3596,7 +3596,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-03 · #281'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-03-b281)
+const PAM_BUILD = 'v2026-06-03 · #283'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-03-b281)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -21548,44 +21548,72 @@ function _showNewAuftragBanner(p){
 
 async function _createDriveFoldersForNewAuftrag(p){
   if(!gdriveToken){
-    showToast('\u26a0 Bitte zuerst mit Google Drive verbinden (\u2601\uFE0F oben rechts)','error',6000);
+    showToast('⚠ Bitte zuerst mit Google Drive verbinden (☁️ oben rechts)','error',6000);
     return;
   }
   const btn=document.getElementById('vbsDriveStartBtn');
-  if(btn){btn.textContent='\u23f3 Ordner werden angelegt\u2026';btn.disabled=true;}
+  if(btn){btn.textContent='⏳ Ordner werden angelegt…';btn.disabled=true;}
   try{
     const parentId=_extractFolderIdFromUrl(DEFAULT_FOLDER_BAUSTELLE);
-    if(!parentId)throw new Error('DEFAULT_FOLDER_BAUSTELLE nicht aufl\u00f6sbar');
+    if(!parentId)throw new Error('DEFAULT_FOLDER_BAUSTELLE nicht auflösbar');
 
+    // Hauptordner anlegen (Name identisch mit NAS-Ordner)
     const mainId  = await _driveCreateFolder(p.ordner||('Auftrag_'+p.ks), parentId);
     const mainUrl = 'https://drive.google.com/drive/folders/'+mainId;
 
-    const akteId  = await _driveCreateFolder('00_Akte', mainId);
-    const kommId  = await _driveCreateFolder('Kommunikation', akteId);
-    await _driveCreateFolder('Hausverwaltung', kommId);
-    await _driveCreateFolder('Eigentuemer', kommId);
-    const mi=p.mieter&&p.mieter!=='(noch offen)'?p.mieter.replace(/[\/\\:*?"<>|]/g,'_'):'';
-    if(mi) await _driveCreateFolder('Mieter_'+mi, kommId);
+    // 00_Posteingang
+    const postId   = await _driveCreateFolder('00_Posteingang', mainId);
+    const emailId  = await _driveCreateFolder('E-Mails', postId);
+    const emailUrl = 'https://drive.google.com/drive/folders/'+emailId;
 
-    const postId  = await _driveCreateFolder('01_Posteingang', mainId);
-    const emailId = await _driveCreateFolder('E-Mails', postId);
-    await _driveCreateFolder('Briefe_Fax', postId);
+    // 01_Dokumente
+    const dokId  = await _driveCreateFolder('01_Dokumente', mainId);
+    await _driveCreateFolder('ASCII_Import', dokId);
+    const dokUrl = 'https://drive.google.com/drive/folders/'+dokId;
+
+    // 02_Fotos
     const fotoId  = await _driveCreateFolder('02_Fotos', mainId);
-    const dokId   = await _driveCreateFolder('03_Dokumente', mainId);
-    await _driveCreateFolder('Hausverwaltung', dokId);
-    await _driveCreateFolder('Eigentuemer', dokId);
-    if(mi) await _driveCreateFolder('Mieter_'+mi, dokId);
-    const gutId   = await _driveCreateFolder('04_Gutachten', mainId);
+    await _driveCreateFolder('Ortstermin1', fotoId);
+    await _driveCreateFolder('Ortstermin2', fotoId);
+    const fotoUrl = 'https://drive.google.com/drive/folders/'+fotoId;
+
+    // 03_Gutachten
+    const gutId = await _driveCreateFolder('03_Gutachten', mainId);
     await _driveCreateFolder('Entwuerfe', gutId);
     await _driveCreateFolder('Final', gutId);
 
-    const fotoUrl  = 'https://drive.google.com/drive/folders/'+fotoId;
-    const dokUrl   = 'https://drive.google.com/drive/folders/'+dokId;
-    const emailUrl = 'https://drive.google.com/drive/folders/'+emailId;
+    // 04_Ausgang
+    await _driveCreateFolder('04_Ausgang', mainId);
+
+    // _Stammdaten suchen: parentId = Ebene 1, dann 2 und 3 Ebenen höher
+    let stammdatenUrl = '';
+    try{
+      let suchId = parentId;
+      for(let ebene=1; ebene<=4; ebene++){
+        const q=encodeURIComponent("'"+suchId+"' in parents and name='_Stammdaten' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+        const srR=await fetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name)&pageSize=1',
+          {headers:{Authorization:'Bearer '+gdriveToken}});
+        if(srR.ok){
+          const srD=await srR.json();
+          if(srD.files&&srD.files.length>0){
+            stammdatenUrl='https://drive.google.com/drive/folders/'+srD.files[0].id;
+            showToast('📁 _Stammdaten (Ebene '+ebene+') gefunden','ok',3000);
+            break;
+          }
+        }
+        // Eine Ebene höher gehen
+        const upR=await fetch('https://www.googleapis.com/drive/v3/files/'+suchId+'?fields=parents',
+          {headers:{Authorization:'Bearer '+gdriveToken}});
+        if(!upR.ok) break;
+        const upD=await upR.json();
+        if(!upD.parents||!upD.parents[0]) break;
+        suchId=upD.parents[0];
+      }
+    }catch(eSb){console.warn('[PAM] _Stammdaten Suche:',eSb);}
 
     const bann=document.getElementById('vbsNewAuftragBanner');
     if(bann)bann.remove();
-    showToast('\u2713 Drive-Ordner angelegt! Task wird ge\u00f6ffnet\u2026','ok',4000);
+    showToast('✓ Drive-Ordner angelegt! Task wird geöffnet…','ok',4000);
 
     openNewTaskModal();
     setTimeout(()=>{
@@ -21602,20 +21630,28 @@ async function _createDriveFoldersForNewAuftrag(p){
         else            _t=adresse||p.ordner||'';
         titelEl.value=_t;
       }
-      const hvEl =document.getElementById('tHV');       if(hvEl)  hvEl.value=p.hv||'';
-      const adrEl=document.getElementById('tAdr');      if(adrEl) adrEl.value=adresse;
-      const schEl=document.getElementById('tSch');      if(schEl) schEl.value=p.schaden||'';
-      const tagEl=document.getElementById('taskTagsInput'); if(tagEl) tagEl.value=p.ks||'';
-      const repEl=document.getElementById('taskRepNr');     if(repEl) repEl.value=p.repnr||'';
-      const kdEl =document.getElementById('taskKundenNr');  if(kdEl)  kdEl.value=p.kdnr||'';
-      const nasEl=document.getElementById('tNAS');          if(nasEl) nasEl.value=p.nas||'';
-      const gdEl =document.getElementById('tGD');           if(gdEl)  gdEl.value=fotoUrl;
-      const gdoEl=document.getElementById('tGDOrdner');     if(gdoEl) gdoEl.value=dokUrl;
-      const eoEl =document.getElementById('tEmailOrdner');  if(eoEl)  eoEl.value=emailUrl;
+      const hvEl =document.getElementById('tHV');           if(hvEl)   hvEl.value=p.hv||'';
+      const adrEl=document.getElementById('tAdr');          if(adrEl)  adrEl.value=adresse;
+      const schEl=document.getElementById('tSch');          if(schEl)  schEl.value=p.schaden||'';
+      const tagEl=document.getElementById('taskTagsInput'); if(tagEl)  tagEl.value=p.ks||'';
+      const repEl=document.getElementById('taskRepNr');     if(repEl)  repEl.value=p.repnr||'';
+      const kdEl =document.getElementById('taskKundenNr');  if(kdEl)   kdEl.value=p.kdnr||'';
+      const nasEl=document.getElementById('tNAS');          if(nasEl)  nasEl.value=p.nas||'';
+      const gdEl =document.getElementById('tGD');           if(gdEl)   gdEl.value=fotoUrl;
+      const gdoEl=document.getElementById('tGDOrdner');     if(gdoEl)  gdoEl.value=mainUrl;
+      const dokEl=document.getElementById('tDokOrdner');    if(dokEl)  dokEl.value=dokUrl;
+      const eoEl =document.getElementById('tEmailOrdner');  if(eoEl)   eoEl.value=emailUrl;
+      if(stammdatenUrl){
+        const sbEl=document.getElementById('tSbPdfOrdner');
+        if(sbEl&&!sbEl.value.trim()) sbEl.value=stammdatenUrl;
+        const sbEl2=document.getElementById('tSbPdfOrdnerVerk');
+        if(sbEl2&&!sbEl2.value.trim()) sbEl2.value=stammdatenUrl;
+      }
       if(typeof _updateFotoOrdnerHint==='function') _updateFotoOrdnerHint();
       if(typeof _updateStammSummary==='function')   _updateStammSummary();
-      if(typeof _updateHdrMeta==='function')        _updateHdrMeta();      if(typeof _updateMapsBtn==='function')        _updateMapsBtn();
-      _showVbsDriveLinksBox(mainUrl,fotoUrl,dokUrl,emailUrl);
+      if(typeof _updateHdrMeta==='function')        _updateHdrMeta();
+      if(typeof _updateMapsBtn==='function')        _updateMapsBtn();
+      _showVbsDriveLinksBox(mainUrl,fotoUrl,dokUrl,emailUrl,stammdatenUrl);
     },350);
 
   }catch(e){
@@ -21625,7 +21661,7 @@ async function _createDriveFoldersForNewAuftrag(p){
   }
 }
 
-function _showVbsDriveLinksBox(mainUrl,fotoUrl,dokUrl,emailUrl){
+function _showVbsDriveLinksBox(mainUrl,fotoUrl,dokUrl,emailUrl,stammdatenUrl){
   const old=document.getElementById('vbsDriveLinksBox');
   if(old)old.remove();
   const box=document.createElement('div');
@@ -21633,18 +21669,20 @@ function _showVbsDriveLinksBox(mainUrl,fotoUrl,dokUrl,emailUrl){
   box.style.cssText='position:fixed;bottom:20px;right:20px;z-index:9989;background:var(--bg);'
     +'border:1px solid var(--green,#27ae60);border-radius:10px;padding:14px 18px;'
     +'max-width:340px;font-size:12px;box-shadow:0 4px 20px rgba(0,0,0,.35);';
+  let sbRow='';
+  if(stammdatenUrl) sbRow='<div style="margin-bottom:4px;"><span style="opacity:.7;">_Stammdaten: </span>'
+    +'<a href="'+stammdatenUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>';
   box.innerHTML=
     '<div style="font-weight:700;color:var(--green,#27ae60);margin-bottom:9px;">☁️ Drive-Ordner angelegt</div>'
    +'<div style="margin-bottom:4px;"><span style="opacity:.7;">Hauptordner: </span>'
      +'<a href="'+mainUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
    +'<div style="margin-bottom:4px;"><span style="opacity:.7;">02_Fotos: </span>'
-     +'<a href="'+mainUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
-   +'<div style="margin-bottom:4px;"><span style="opacity:.7;">02_Fotos: </span>'
      +'<a href="'+fotoUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
-   +'<div style="margin-bottom:4px;"><span style="opacity:.7;">03_Dokumente: </span>'
+   +'<div style="margin-bottom:4px;"><span style="opacity:.7;">01_Dokumente: </span>'
      +'<a href="'+dokUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
-   +'<div style="margin-bottom:10px;"><span style="opacity:.7;">E-Mails: </span>'
+   +'<div style="margin-bottom:4px;"><span style="opacity:.7;">E-Mails: </span>'
      +'<a href="'+emailUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
+   +sbRow
    +'<div style="font-size:11px;opacity:.65;margin-bottom:8px;">Alle Felder im Task ausgefüllt.<br>Bitte Task speichern!</div>'
    +'<button onclick="document.getElementById(\'vbsDriveLinksBox\').remove()" '
      +'style="background:var(--bg2);border:1px solid var(--border);color:var(--text1);'
