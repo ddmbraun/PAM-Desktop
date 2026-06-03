@@ -3567,7 +3567,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-03 · #244'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-02-b247)
+const PAM_BUILD = 'v2026-06-03 · #246'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-02-b247)
 
 // ── STATE ──
 let boards = {};
@@ -13084,6 +13084,33 @@ async function _pamVerlaufDrucken(){
   w.document.close();
   w.onload=function(){setTimeout(()=>w.print(),500);};
 }
+
+var _pamDocList=[];
+function _pamExtractFileId(url){
+  if(!url)return'';
+  var m=url.match(/file\/d\/([^/?#]+)/);
+  return m?m[1]:'';
+}
+function _pamDocHover(el,idx){
+  var d=_pamDocList[idx];if(!d)return;
+  var url=d.url,name=d.name;
+  const fid=_pamExtractFileId(url);
+  const prev=document.getElementById('pamUebPreview');
+  const frame=document.getElementById('pamUebPreviewFrame');
+  const lbl=document.getElementById('pamUebPreviewLabel');
+  if(!prev||!fid)return;
+  const previewUrl='https://drive.google.com/file/d/'+fid+'/preview';
+  if(frame.getAttribute('data-src')!==previewUrl){frame.setAttribute('data-src',previewUrl);frame.src=previewUrl;}
+  lbl.textContent=name||'Vorschau';
+  const r=el.getBoundingClientRect(),pw=380,ph=500;
+  let left=r.left-pw-12;if(left<8)left=r.right+12;
+  let top=r.top;if(top+ph>window.innerHeight-8)top=window.innerHeight-ph-8;if(top<8)top=8;
+  prev.style.left=left+'px';prev.style.top=top+'px';prev.style.display='block';
+}
+function _pamDocHoverOut(){
+  const prev=document.getElementById('pamUebPreview');
+  if(prev)prev.style.display='none';
+}
 async function _pamTaskDrucken(){
   const taskId=(document.getElementById('taskId')||{}).value||_pamActiveTaskId||'';
   const task=findTaskById(taskId);
@@ -13093,7 +13120,7 @@ async function _pamTaskDrucken(){
 
   function _e(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
   function _fD(s){if(!s)return'';const p=s.split('-');return p.length===3?p[2]+'.'+p[1]+'.'+p[0]:s;}
-  function _fTs(s){if(!s)return'';try{return new Date(s).toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(_e2){return s;}}
+  function _fTs(s){if(!s)return'';try{return new Date(s).toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(_x){return s;}}
   const today=new Date().toISOString().split('T')[0];
   function _od(d){return d&&d<today;}
   function _fH(min){if(!min||min<=0)return'–';return Math.floor(min/60)+'h'+(min%60>0?' '+Math.round(min%60)+'min':'');}
@@ -13119,67 +13146,71 @@ async function _pamTaskDrucken(){
   const aufgaben=task.aufgaben||[];
   const freie=task.freieTermine||[];
 
-  // Zeiten
   const totalZeit=zeitList.reduce((s,z)=>s+_parseMin(z),0);
-  // Außerhaus-Zeit: Dauer aus von/bis der ausserhausTermine
   const totalAuss=aussList.reduce((s,a)=>{
-    if(a.von&&a.bis){const[vh,vm]=(a.von||'00:00').split(':').map(Number);const[bh,bm]=(a.bis||'00:00').split(':').map(Number);return s+(bh*60+bm)-(vh*60+vm);}
+    if(a.von&&a.bis){const[vh,vm]=a.von.split(':').map(Number);const[bh,bm]=a.bis.split(':').map(Number);return s+(bh*60+bm)-(vh*60+vm);}
     return s;
   },0);
 
-  // Überfällige Einträge sammeln (mit Namen)
-  const allTermine=[
-    ...aufgaben.filter(a=>_od(a.datum)&&!a.erledigt).map(a=>({label:a.typ||'Aufgabe',datum:a.datum})),
-    ...freie.filter(f=>_od(f.datum)&&!f.erledigt).map(f=>({label:f.label||'Termin',datum:f.datum})),
-    ...aussList.filter(a=>_od(a.date||a.datum)).map(a=>({label:a.beschreibung||a.label||'Au\xdferhaus',datum:a.date||a.datum}))
-  ].sort((a,b)=>a.datum>b.datum?1:-1);
+  // Alle Termine mit Label+Datum für Kacheln
+  const alleTermineFlat=[
+    ...aufgaben.map(a=>({label:a.typ||'Aufgabe',datum:a.datum,done:!!(a.erledigt)})),
+    ...freie.map(f=>({label:f.label||f.bezeichnung||'Freier Termin',datum:f.datum,done:!!(f.erledigt)})),
+    ...aussList.map(a=>({label:a.beschreibung||a.label||'Außerhaus',datum:a.date||a.datum,done:false}))
+  ];
+  const odList=alleTermineFlat.filter(t=>_od(t.datum)&&!t.done).sort((a,b)=>a.datum>b.datum?1:-1);
+  const nextList=alleTermineFlat.filter(t=>t.datum&&t.datum>=today&&!t.done).sort((a,b)=>a.datum>b.datum?1:-1);
+  const nextEntry=nextList[0];
 
-  const allDates=[...aufgaben.map(a=>a.datum),...freie.map(f=>f.datum),...aussList.map(a=>a.date||a.datum)].filter(Boolean);
-  const nextDue=allDates.filter(d=>d>=today).sort()[0];
-
-  // Meta
-  const ampelColor={'rot':'#E24B4A','gelb':'#EF9F27','gr\xfcn':'#4CAF50'}[task.ampel]||'#999';
+  // Ampel + Meta
+  const ampelColor={'rot':'#E24B4A','gelb':'#EF9F27','grün':'#4CAF50'}[task.ampel]||'#999';
   document.getElementById('pamUebAmpel').style.background=ampelColor;
-  document.getElementById('pamUebTitel').textContent=task.title||'(kein Titel)';
-  const anfrageStr=task.anfrageEingangDatum?'Anfrage: '+_fD(task.anfrageEingangDatum)+' \xb7 ':'';
-  document.getElementById('pamUebMeta').textContent=anfrageStr+board+' \xb7 '+(task.status||'');
+  document.getElementById('pamUebTitel').textContent='Task: '+(task.title||'(kein Titel)');
+  const anfrageStr=task.anfrageEingangDatum?'Anfrage: '+_fD(task.anfrageEingangDatum)+' · ':'';
+  document.getElementById('pamUebMeta').textContent=anfrageStr+board+' · '+(task.status||'');
 
-  // ── Kacheln ──
-  // Überfällig-Kachel: bei Hover/Click zeigt Tooltip
-  const odHtml=allTermine.length>0
-    ?'<div style="font-size:13px;font-weight:700;color:#E24B4A;margin-bottom:2px;">'+allTermine.length+'</div>'
-     +'<div style="font-size:10px;color:#E24B4A;line-height:1.4;">'
-     +allTermine.slice(0,3).map(t=>'⚠ '+_e(t.label)+' ('+_fD(t.datum)+')').join('<br>')
-     +(allTermine.length>3?'<br>…+'+( allTermine.length-3)+' weitere':'')+'</div>'
-    :'<div style="font-size:18px;font-weight:700;color:#4CAF50;">✓</div>';
-
-  // Zeit-Kacheln
+  // Zeit-Kachel
   const zeitKachel='<div style="background:var(--bg3);border-radius:8px;padding:10px 14px;text-align:center;border:1px solid var(--border);">'
     +'<div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px;">Zeit gesamt</div>'
     +(totalAuss>0
-      ?'<div style="font-size:11px;color:var(--text2);">Au\xdferhaus: '+_fH(totalAuss)+'</div>'
+      ?'<div style="font-size:11px;color:var(--text2);">Außerhaus: '+_fH(totalAuss)+'</div>'
        +'<div style="font-size:11px;color:var(--text2);">Manuell: '+_fH(totalZeit)+'</div>'
-       +'<div style="font-size:16px;font-weight:700;color:var(--text);margin-top:2px;">'+_fH(totalAuss+totalZeit)+'</div>'
+       +'<div style="font-size:15px;font-weight:700;color:var(--text);margin-top:2px;">'+_fH(totalAuss+totalZeit)+'</div>'
       :'<div style="font-size:18px;font-weight:700;color:var(--text);">'+_fH(totalZeit)+'</div>')
     +'</div>';
 
-  let html='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:14px 16px;">'
-    +zeitKachel
-    +'<div style="background:var(--bg3);border-radius:8px;padding:10px 14px;text-align:center;border:1px solid var(--border);">'
-    +'<div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px;">N\xe4chster Termin</div>'
-    +'<div style="font-size:14px;font-weight:700;color:var(--text);">'+(nextDue?_fD(nextDue):'–')+'</div></div>'
-    +'<div style="background:var(--bg3);border-radius:8px;padding:10px 14px;text-align:center;border:1px solid var(--border);">'
-    +'<div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px;">\xdcberf\xe4llig</div>'
-    +odHtml+'</div>'
+  // Nächster-Termin-Kachel
+  const nextKachel='<div style="background:var(--bg3);border-radius:8px;padding:10px 14px;text-align:center;border:1px solid var(--border);">'
+    +'<div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px;">Nächster Termin</div>'
+    +(nextEntry
+      ?'<div style="font-size:13px;font-weight:700;color:var(--text);">'+_fD(nextEntry.datum)+'</div>'
+       +'<div style="font-size:11px;color:var(--text2);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_e(nextEntry.label)+'</div>'
+      :'<div style="font-size:14px;color:var(--text2);">–</div>')
     +'</div>';
 
-  // ── Aufgaben & Termine ──
-  const alle=[...aufgaben.map(a=>({label:a.typ||'Aufgabe',datum:a.datum,done:!!(a.erledigt)})),
-    ...freie.map(f=>({label:f.label||'Termin',datum:f.datum,done:!!(f.erledigt),notiz:f.notiz}))
+  // Überfällig-Kachel
+  const odKachel='<div style="background:var(--bg3);border-radius:8px;padding:10px 14px;text-align:center;border:1px solid var(--border);">'
+    +'<div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px;">Überfällig</div>'
+    +(odList.length>0
+      ?'<div style="font-size:13px;font-weight:700;color:#E24B4A;margin-bottom:3px;">'+odList.length+'</div>'
+       +'<div style="font-size:10px;color:#E24B4A;line-height:1.5;text-align:left;">'
+       +odList.slice(0,3).map(t=>'<span style="display:block;">⚠ '+_e(t.label)+' ('+_fD(t.datum)+')</span>').join('')
+       +(odList.length>3?'<span style="display:block;">+'+( odList.length-3)+' weitere</span>':'')
+       +'</div>'
+      :'<div style="font-size:18px;font-weight:700;color:#4CAF50;">✓</div>')
+    +'</div>';
+
+  let html='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:14px 16px;">'
+    +zeitKachel+nextKachel+odKachel+'</div>';
+
+  // Aufgaben & Freie Termine
+  const alleAnzeige=[
+    ...aufgaben.map(a=>({label:a.typ||'Aufgabe',datum:a.datum,done:!!(a.erledigt)})),
+    ...freie.map(f=>({label:f.label||f.bezeichnung||'Freier Termin',datum:f.datum,done:!!(f.erledigt),notiz:f.notiz}))
   ].sort((a,b)=>(a.datum||'zzz')>(b.datum||'zzz')?1:-1);
-  if(alle.length){
+  if(alleAnzeige.length){
     let t2='<table style="width:100%;border-collapse:collapse;">';
-    for(const t of alle){
+    for(const t of alleAnzeige){
       const od=_od(t.datum)&&!t.done;
       const ic=t.done?'<span style="color:#4CAF50;">&#10003;</span>':'<span style="color:'+(od?'#E24B4A':'#999')+';">□</span>';
       t2+='<tr style="border-bottom:1px solid var(--border);">'
@@ -13188,28 +13219,27 @@ async function _pamTaskDrucken(){
         +'<td style="padding:6px 16px;white-space:nowrap;font-size:11px;font-weight:'+(od?700:400)+';color:'+(od?'#E24B4A':t.done?'#4CAF50':'var(--text2)')+';">'+(t.datum?_fD(t.datum)+(od?' ⚠':''):'')+'</td></tr>';
     }
     t2+='</table>';
-    html+=_sec('Aufgaben & Termine',t2,alle.length);
+    html+=_sec('Aufgaben & Termine',t2,alleAnzeige.length);
   }
 
-  // ── Außerhaus-Termine ──
+  // Außerhaus-Termine
   if(aussList.length){
     let a2='<table style="width:100%;border-collapse:collapse;">';
     for(const a of aussList.slice().sort((x,y)=>(x.date||x.datum||'')>(y.date||y.datum||'')?1:-1)){
-      const min=a.von&&a.bis?(()=>{const[vh,vm]=(a.von).split(':').map(Number);const[bh,bm]=(a.bis).split(':').map(Number);return(bh*60+bm)-(vh*60+vm);})():0;
+      const min=(()=>{if(a.von&&a.bis){const[vh,vm]=a.von.split(':').map(Number);const[bh,bm]=a.bis.split(':').map(Number);return(bh*60+bm)-(vh*60+vm);}return 0;})();
       const od=_od(a.date||a.datum);
       a2+='<tr style="border-bottom:1px solid var(--border);">'
         +'<td style="padding:5px 16px;font-size:11px;color:'+(od?'#E24B4A':'var(--text2)')+';white-space:nowrap;width:100px;">'+_fD(a.date||a.datum)+(od?' ⚠':'')+'</td>'
         +'<td style="padding:5px 8px;font-size:11px;color:var(--text2);white-space:nowrap;">'+(a.von||'')+(a.bis?' – '+a.bis:'')+(min>0?' <span style="color:var(--text);font-weight:600;">('+_fH(min)+')</span>':'')+'</td>'
-        +'<td style="padding:5px 16px;font-size:13px;color:var(--text);">'+_e(a.beschreibung||a.label||'Au\xdferhaus')+'</td></tr>';
+        +'<td style="padding:5px 16px;font-size:13px;color:var(--text);">'+_e(a.beschreibung||a.label||'Außerhaus')+'</td></tr>';
     }
     a2+='</table>';
-    html+=_sec('Au\xdferhaus-Termine',a2,aussList.length);
+    html+=_sec('Außerhaus-Termine',a2,aussList.length);
   }
 
-  // ── Manuelle Zeiterfassung ──
+  // Manuelle Zeiterfassung
   if(zeitList.length){
-    let z2='<table style="width:100%;border-collapse:collapse;">';
-    let gMin=0;
+    let z2='<table style="width:100%;border-collapse:collapse;">';let gMin=0;
     for(const z of zeitList.slice().sort((a,b)=>(a.date||a.datum||'')>(b.date||b.datum||'')?1:-1)){
       const m=_parseMin(z);gMin+=m;
       z2+='<tr style="border-bottom:1px solid var(--border);">'
@@ -13223,7 +13253,7 @@ async function _pamTaskDrucken(){
     html+=_sec('Manuelle Zeiterfassung',z2,zeitList.length);
   }
 
-  // ── Notiz-Verlauf ──
+  // Notiz-Verlauf
   if(nvList.length){
     let n2='<table style="width:100%;border-collapse:collapse;">';
     for(const n of [...nvList].sort((a,b)=>a.ts>b.ts?1:-1)){
@@ -13235,7 +13265,7 @@ async function _pamTaskDrucken(){
     html+=_sec('Verlauf / Notizen',n2,nvList.length);
   }
 
-  // ── Fotos ──
+  // Fotos
   if(fotos.length){
     let f2='<div style="display:flex;flex-wrap:wrap;gap:8px;padding:10px 16px;">';
     for(const f of fotos){
@@ -13243,7 +13273,7 @@ async function _pamTaskDrucken(){
       const href=f.driveId?'https://drive.google.com/file/d/'+encodeURIComponent(f.driveId)+'/view':'#';
       f2+='<a href="'+_e(href)+'" target="_blank" style="display:block;border-radius:7px;overflow:hidden;border:1px solid var(--border);flex-shrink:0;text-decoration:none;" title="'+_e(f.caption||f.name||'')+'">';
       if(src){f2+='<img src="'+_e(src)+'" style="width:110px;height:90px;object-fit:cover;display:block;" alt="'+_e(f.name||'')+'">';}
-      else{f2+='<div style="width:110px;height:90px;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:24px;">\U0001f5bc</div>';}
+      else{f2+='<div style="width:110px;height:90px;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:24px;">🖼</div>';}
       if(f.caption){f2+='<div style="font-size:10px;color:var(--text2);padding:2px 6px;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_e(f.caption)+'</div>';}
       f2+='</a>';
     }
@@ -13251,39 +13281,16 @@ async function _pamTaskDrucken(){
     html+=_sec('Fotos',f2,fotos.length);
   }
 
-  // ── Dokumente ──
-  // Dokumente mit Hover-Vorschau
-  function _pamExtractFileId(url){
-    if(!url)return'';
-    const m=url.match(/\/file\/d\/([^/?#]+)/);
-    return m?m[1]:'';
-  }
-  function _pamDocHover(el,url,name){
-    const fid=_pamExtractFileId(url);
-    const prev=document.getElementById('pamUebPreview');
-    const frame=document.getElementById('pamUebPreviewFrame');
-    const lbl=document.getElementById('pamUebPreviewLabel');
-    if(!prev||!fid)return;
-    const previewUrl='https://drive.google.com/file/d/'+fid+'/preview';
-    if(frame.src!==previewUrl)frame.src=previewUrl;
-    lbl.textContent=name||'Vorschau';
-    const r=el.getBoundingClientRect(),pw=380,ph=500;
-    let left=r.left-pw-12;if(left<8)left=r.right+12;
-    let top=r.top;if(top+ph>window.innerHeight-8)top=window.innerHeight-ph-8;if(top<8)top=8;
-    prev.style.left=left+'px';prev.style.top=top+'px';prev.style.display='block';
-  }
-  function _pamDocHoverOut(){
-    const prev=document.getElementById('pamUebPreview');
-    if(prev)prev.style.display='none';
-  }
-
+  // Dokumente mit Hover-Vorschau (Index-basiert)
   const allDocs=[...atts.map(a=>({name:a.name||'Anhang',url:a.url||'',icon:'📄'})),
     ...epfs.map(p=>({name:p.name||'E-Mail PDF',url:p.url||'',icon:'📧'}))]
+  _pamDocList=allDocs.slice();
   if(allDocs.length){
     let d2='<div style="display:flex;flex-direction:column;gap:4px;padding:8px 16px;">';
-    for(const d of allDocs){
+    for(let di=0;di<allDocs.length;di++){
+      const d=allDocs[di];
       const fid=_pamExtractFileId(d.url);
-      const hov=fid?(' onmouseenter="_pamDocHover(this,\'' + d.url.replace(/'/g,"\\\'")+'\',' + JSON.stringify(d.name) +');" onmouseleave="_pamDocHoverOut();"')  :'';
+      const hov=fid?(' onmouseenter="_pamDocHover(this,'+di+');" onmouseleave="_pamDocHoverOut();"')  :'';
       d2+='<a href="'+_e(d.url)+'" target="_blank"'+hov
         +' style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg3);border-radius:7px;border:1px solid var(--border);text-decoration:none;color:var(--text);">'
         +'<span style="font-size:15px;flex-shrink:0;">'+d.icon+'</span>'
@@ -13296,7 +13303,7 @@ async function _pamTaskDrucken(){
   }
 
   html+='<div style="padding:10px 16px;display:flex;justify-content:space-between;font-size:10px;color:var(--text2);">'
-    +'<span>PAM Workboard \xb7 '+_e(task.owner||'')+' \xb7 '+_e(board)+'</span>'
+    +'<span>PAM Workboard · '+_e(task.owner||'')+' · '+_e(board)+'</span>'
     +'<span>'+new Date().toLocaleDateString('de-DE')+'</span></div>';
 
   document.getElementById('pamUebBody').innerHTML=html;
