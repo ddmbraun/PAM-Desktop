@@ -3605,7 +3605,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-04 · #306'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-04-b302)
+const PAM_BUILD = 'v2026-06-04 · #309'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-04-b302)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -6388,7 +6388,7 @@ function _pamHeuteRaster(listeAll, today){
   html+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;">';
   liste.forEach(function(item){
     var t=item.t,board=item.board;
-    var foto=(t.fotos&&t.fotos.length)?t.fotos[0]:null;
+    var foto=(t.fotos&&t.fotos.length)?(t.titelbildId?t.fotos.find(function(f){return f.driveId===t.titelbildId;})||t.fotos[0]:t.fotos[0]):null;
     var thumb=foto?(foto.localUrl||foto.thumbnailLink||''):'';
     var ampelColor={'rot':'#E24B4A','gelb':'#EF9F27','gr\xfcn':'#4CAF50'}[t.ampel]||'#999';
     var isOd=t.due&&t.due<today;var isToday=t.due===today;
@@ -11108,11 +11108,14 @@ function _openPdfSendenModus(taskId){
   function _secHtml(title,content,count){if(!content)return'';const cnt=(count>0)?'<span style="font-size:10px;background:rgba(0,0,0,.12);padding:1px 7px;border-radius:10px;margin-left:6px;">'+count+'</span>':'';return'<div style="border-top:1px solid var(--border);">'+'<div style="background:var(--bg3);padding:7px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text2);">'+_e(title)+cnt+'</div>'+content+'</div>';}
 
   // ── Übersicht-Block ──
-  const _nvList=t.notizVerlauf||[];
-  const _zeitList=t.zeitEntries||[];
-  const _aussList=t.ausserhausTermine||[];
-  const _aufgaben=t.aufgaben||[];
-  const _freie=t.freieTermine||[];
+  // Live-Globals nutzen wenn Task gerade im Edit-Modal offen ist
+  const _curId=(document.getElementById('taskId')||{}).value||'';
+  const _isLive=_curId===tid;
+  const _aufgaben=(_isLive&&typeof taskAufgaben!=='undefined'&&taskAufgaben)?taskAufgaben:(t.aufgaben||[]);
+  const _freie=(_isLive&&typeof taskFreieTermine!=='undefined'&&taskFreieTermine)?taskFreieTermine:(t.freieTermine||[]);
+  const _nvList=(_isLive&&typeof taskNotizVerlauf!=='undefined')?taskNotizVerlauf:(t.notizVerlauf||[]);
+  const _zeitList=(_isLive&&typeof taskZeitEntries!=='undefined')?taskZeitEntries:(t.zeitEntries||[]);
+  const _aussList=(_isLive&&typeof taskAusserhausTermine!=='undefined')?taskAusserhausTermine:(t.ausserhausTermine||[]);
   const _totalZeit=_zeitList.reduce((s,z)=>s+_parseMin(z),0);
   const _totalAuss=_aussList.reduce((s,a)=>{if(a.von&&a.bis){const[vh,vm]=a.von.split(':').map(Number);const[bh,bm]=a.bis.split(':').map(Number);return s+(bh*60+bm)-(vh*60+vm);}return s;},0);
   const _alleTermineFlat=[..._aufgaben.map(a=>({label:a.typ||'Aufgabe',datum:a.datum,done:!!(a.erledigt)})),..._freie.map(f=>({label:f.text||f.label||f.bezeichnung||'Freier Termin',datum:f.datum,done:!!(f.erledigt)})),..._aussList.map(a=>({label:a.beschreibung||a.label||'Außerhaus',datum:a.date||a.datum,done:!!(a.erledigt)}))];
@@ -11208,9 +11211,24 @@ function _openPdfSendenModus(taskId){
       const cap=document.createElement('div');
       cap.style.cssText='position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.55);color:#fff;font-size:9px;padding:2px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
       cap.textContent=name.length>18?name.substring(0,17)+'…':name;
-      wrap.append(chk,img,cap);
+      const tbBtn=document.createElement('button');
+      tbBtn.type='button';
+      tbBtn.title='Als Titelbild für Heute-Kachel setzen';
+      tbBtn.style.cssText='position:absolute;top:4px;right:4px;z-index:3;background:rgba(0,0,0,.55);border:none;border-radius:4px;cursor:pointer;font-size:11px;padding:1px 4px;line-height:1.4;';
+      tbBtn.textContent=t.titelbildId===f.driveId?'📌':'📍';
+      tbBtn.onclick=function(e){e.stopPropagation();
+        const isCurrent=t.titelbildId===f.driveId;
+        t.titelbildId=isCurrent?'':f.driveId;
+        Array.from(grid.querySelectorAll('button[data-tb]')).forEach(function(b){b.textContent='📍';b.style.background='rgba(0,0,0,.55)';});
+        if(!isCurrent){tbBtn.textContent='📌';tbBtn.style.background='#185FA5';}
+        scheduleSave();
+        showToast(isCurrent?'Titelbild entfernt':'Titelbild gesetzt','success',2000);
+      };
+      tbBtn.setAttribute('data-tb','1');
+      if(t.titelbildId===f.driveId){tbBtn.style.background='#185FA5';}
+      wrap.append(chk,img,cap,tbBtn);
       const _setStyle=()=>{wrap.style.borderColor=chk.checked?'var(--accent)':'transparent';wrap.style.boxShadow=chk.checked?'0 0 0 1px var(--accent)':'none';};
-      wrap.addEventListener('click',e=>{if(e.target!==chk){chk.checked=!chk.checked;}_setStyle();});
+      wrap.addEventListener('click',e=>{if(e.target!==chk&&e.target!==tbBtn){chk.checked=!chk.checked;}_setStyle();});
       chk.addEventListener('change',_setStyle);
       grid.appendChild(wrap);
     });
@@ -11246,16 +11264,33 @@ function _openPdfSendenModus(taskId){
     box.appendChild(row2);
   }
 
-  // ── Anhänge ──
+  // ── Anhänge + E-Mail-PDFs mit Hover-Vorschau ──
   const anhaenge=(t.attachments||[]);
-  if(anhaenge.length){
-    box.appendChild(secLabel('📎','Anhänge'));
-    anhaenge.forEach((a,i)=>{
-      const name=a.name||a.filename||('Anhang '+(i+1));
-      const lbl=document.createElement('label');
-      lbl.style.cssText='display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;background:var(--bg3);margin-bottom:4px;cursor:pointer;font-size:12px;color:var(--text);';
-      lbl.innerHTML='<input type="checkbox" id="_pdfS_a_'+i+'" style="width:14px;height:14px;cursor:pointer;">'+_e(name);
-      box.appendChild(lbl);
+  const epfs=(t.emailPdfs||[]);
+  const allDocs=[...anhaenge.map(a=>({name:a.name||a.filename||'Anhang',url:a.url||'',icon:'📄',orig:a})),...epfs.map(p=>({name:p.name||'E-Mail PDF',url:p.url||'',icon:'📧',orig:p}))];
+  if(allDocs.length){
+    box.appendChild(secLabel('📎','Anhänge & Dokumente'));
+    _pamDocList=allDocs.map(d=>({name:d.name,url:d.url}));
+    allDocs.forEach((d,i)=>{
+      const fid=typeof _pamExtractFileId==='function'?_pamExtractFileId(d.url):'';
+      const row=document.createElement('div');
+      row.style.cssText='display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;background:var(--bg3);margin-bottom:4px;';
+      const chk=document.createElement('input');chk.type='checkbox';chk.id='_pdfS_a_'+i;
+      chk.style.cssText='width:14px;height:14px;cursor:pointer;flex-shrink:0;';
+      const nameSpan=document.createElement('span');
+      nameSpan.style.cssText='flex:1;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+      nameSpan.textContent=d.icon+' '+d.name;
+      row.append(chk,nameSpan);
+      if(fid){
+        row.style.cursor='default';
+        const prevSpan=document.createElement('span');
+        prevSpan.style.cssText='font-size:10px;color:var(--text2);flex-shrink:0;opacity:.7;';
+        prevSpan.textContent='Vorschau';
+        row.appendChild(prevSpan);
+        row.addEventListener('mouseenter',function(){_pamDocHover(row,i);});
+        row.addEventListener('mouseleave',function(){_pamDocHoverOut();});
+      }
+      box.appendChild(row);
     });
   }
 
