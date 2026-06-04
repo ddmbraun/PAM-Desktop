@@ -3661,7 +3661,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-04 · #319'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-04-b319)
+const PAM_BUILD = 'v2026-06-04 · #320'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-04-b320)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -20589,27 +20589,37 @@ async function _emUploadEmlForModal(file){
     }
     if(!t.emailOriginals)t.emailOriginals=[];
     t.emailOriginals.push({name:fname,subject:meta.subject,sender:meta.sender,date:meta.date,messageId:meta.messageId,fileId:fileId,url:url,uploadedAt:today,type:'original'});
-    // Fix #290: Outlook-MessageId für _msLoadEmailThread setzen (war bisher fehlend → Betreff-Fallback lieferte falsche E-Mail)
+    // Fix #320: Konto-Erkennung + T-Online-Ausnahme + ConvId beide Tokens
     if(meta.messageId){
       const _prov=preText?_detectEmlProvider(preText):'unknown';
+      // T-Online: kein Exchange-Konto → nur als emailOriginals speichern, nicht in msMessageIds eintragen
+      const _isTOnline=isEml&&preText&&(()=>{const _hEnd=preText.search(/\r?\n\r?\n/);const _hdr=_hEnd>=0?preText.substring(0,_hEnd):preText.substring(0,2000);return /t-online\.de|telekom\.de/i.test(_hdr.match(/^From:.*$/im)||'');})();
       if(_prov==='gmail'){
         if(!t.gmailMessageIds)t.gmailMessageIds=[];
         if(!t.gmailMessageIds.includes(meta.messageId))t.gmailMessageIds.push(meta.messageId);
         if(!t.gmailMessageId)t.gmailMessageId=meta.messageId;
-      }else{
-        // exchange oder unknown → als MS behandeln
+      }else if(!_isTOnline){
+        // exchange oder unknown (aber nicht T-Online) → als MS behandeln
         if(!t.msMessageIds)t.msMessageIds=[];
         if(!t.msMessageIds.includes(meta.messageId))t.msMessageIds.push(meta.messageId);
         if(!t.msMessageId)t.msMessageId=meta.messageId;
         if(!t.msEmailSubject&&meta.subject)t.msEmailSubject=meta.subject;
-        // Background-ConvId-Lookup (verhindert langsamen Graph-Filter beim Outlook-Verlauf-Laden)
-        if(typeof msToken!=='undefined'&&msToken&&!t.msConversationId){
+        // Konto 2 erkennen: To: enthält f.braun@ddmbraun
+        if(!t.msAccount&&isEml&&preText){const _toL=(preText.match(/^To:.*$/im)||[''])[0].toLowerCase();if(_toL.includes('f.braun@ddmbraun'))t.msAccount='2';}
+        // Background-ConvId-Lookup: beide Konten versuchen (#320)
+        if(!t.msConversationId&&(typeof msToken!=='undefined'&&msToken||typeof msToken2!=='undefined'&&msToken2)){
           const _bgId=meta.messageId;const _bgT=t;
           (async()=>{
             try{
-              const _tryF=async(v)=>{const r=await fetch('https://graph.microsoft.com/v1.0/me/messages?$filter='+encodeURIComponent("internetMessageId eq '"+v+"'")+'&$select=id,conversationId&$top=1',{headers:{Authorization:'Bearer '+msToken}});if(!r.ok)return null;const d=await r.json();return d.value&&d.value.length?d.value[0].conversationId:null;};
-              const cId=await _tryF('<'+_bgId+'>')||await _tryF(_bgId);
-              if(cId){_bgT.msConversationId=cId;console.log('[EM] ConvId beim Modal-Drop gespeichert:',cId);}
+              const _tok1=(typeof msToken!=='undefined')?msToken:null;
+              const _tok2=(typeof msToken2!=='undefined')?msToken2:null;
+              // Richtiges Konto zuerst (basierend auf msAccount-Erkennung)
+              const _firstTok=_bgT.msAccount==='2'?_tok2:_tok1;
+              const _fallTok=_bgT.msAccount==='2'?_tok1:_tok2;
+              const _tryF=async(tok,v)=>{if(!tok)return null;const r=await fetch('https://graph.microsoft.com/v1.0/me/messages?$filter='+encodeURIComponent("internetMessageId eq '"+v+"'")+'&$select=id,conversationId&$top=1',{headers:{Authorization:'Bearer '+tok}});if(!r.ok)return null;const d=await r.json();return d.value&&d.value.length?d.value[0].conversationId:null;};
+              let cId=await _tryF(_firstTok,'<'+_bgId+'>')||await _tryF(_firstTok,_bgId);
+              if(!cId&&_fallTok){cId=await _tryF(_fallTok,'<'+_bgId+'>')||await _tryF(_fallTok,_bgId);if(cId)_bgT.msAccount=(_bgT.msAccount==='2'?undefined:'2');}
+              if(cId){_bgT.msConversationId=cId;console.log('[EM] ConvId beim Modal-Drop:',cId,'Konto',_bgT.msAccount||'1');}
             }catch(e){console.warn('[EM] Modal-Drop ConvId:',e);}
           })();
         }
@@ -22337,10 +22347,10 @@ function _showNewAuftragBanner(p){
      +'onclick="_createDriveFoldersForNewAuftrag(window._vbsPendingData)" '
      +'style="background:#fff;color:#1565c0;border:none;padding:8px 18px;border-radius:8px;'
      +'font-weight:700;cursor:pointer;font-size:13px;margin-right:8px;">'
-     +'\u2601\uFE0F Drive-Ordner anlegen &amp; Task \u00f6ffnen</button>'
+     +'☁️ Drive-Ordner anlegen &amp; Task öffnen</button>'
    +'<button onclick="document.getElementById(\'vbsNewAuftragBanner\').remove()" '
      +'style="background:rgba(255,255,255,.2);color:#fff;border:none;padding:8px 14px;'
-     +'border-radius:8px;cursor:pointer;font-size:12px;">\u2715</button>';
+     +'border-radius:8px;cursor:pointer;font-size:12px;">✕</button>';
   document.body.appendChild(banner);
 }
 
@@ -22461,14 +22471,14 @@ function _pamVersionRollback(){
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:center;justify-content:center;';
   let box=document.createElement('div');
   box.style.cssText='background:var(--bg2);border-radius:14px;padding:28px;max-width:480px;width:92vw;box-shadow:0 20px 60px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:16px;';
-  box.innerHTML='<div style="font-size:16px;font-weight:700;color:var(--text);">\u23ee Version zur\u00fccksetzen</div>'
+  box.innerHTML='<div style="font-size:16px;font-weight:700;color:var(--text);">⏮ Version zurücksetzen</div>'
     +'<div style="font-size:13px;color:var(--text2);line-height:1.6;">'
-    +'1. W\u00e4hle eine Backup-Datei aus deinem Workboard-Ordner<br>'
+    +'1. Wähle eine Backup-Datei aus deinem Workboard-Ordner<br>'
     +'2. Sie wird als <b>index.html</b> heruntergeladen<br>'
     +'3. Lade diese Datei zu GitHub hoch (Datei ersetzen)<br>'
-    +'4. Klicke danach in der App auf \uD83D\uDD04 Update</div>'
+    +'4. Klicke danach in der App auf 🔄 Update</div>'
     +'<button onclick="document.getElementById(\'_rollbackFileInput\').click()" '
-    'style="padding:10px 20px;border-radius:8px;background:var(--accent);color:#fff;border:none;cursor:pointer;font-size:14px;font-weight:600;">\uD83D\uDCC2 Backup-Datei ausw\u00e4hlen</button>'
+    'style="padding:10px 20px;border-radius:8px;background:var(--accent);color:#fff;border:none;cursor:pointer;font-size:14px;font-weight:600;">📂 Backup-Datei auswählen</button>'
     +'<button onclick="this.parentElement.parentElement.remove()" '
     +'style="padding:8px;border-radius:8px;background:none;border:1px solid var(--border);color:var(--text2);cursor:pointer;font-size:13px;">Abbrechen</button>';
   ov.appendChild(box);
@@ -22486,7 +22496,7 @@ function _pamRollbackSelected(evt){
     a.download='index.html';
     a.click();
     setTimeout(function(){URL.revokeObjectURL(a.href);},5000);
-    showToast('\u2705 index.html heruntergeladen \u2013 jetzt zu GitHub hochladen, dann \uD83D\uDD04 Update klicken','ok',8000);    document.querySelectorAll('[style*="z-index:9999"]').forEach(function(el){el.remove();});
+    showToast('✅ index.html heruntergeladen – jetzt zu GitHub hochladen, dann 🔄 Update klicken','ok',8000);    document.querySelectorAll('[style*="z-index:9999"]').forEach(function(el){el.remove();});
   };
   reader.readAsText(file);
 }
@@ -22494,6 +22504,6 @@ function _pamRollbackSelected(evt){
 </script>
 
 <!-- PAM Task-Uebersicht Overlay -->
-<div id="pamUebersichtOverlay" style="display:none;position:fixed;inset:0;z-index:12000;background:rgba(0,0,0,0.55);overflow-y:auto;padding:20px 12px;" onclick="if(event.target===this)_pamCloseUebersicht();"><div id="pamUebersichtBox" style="background:var(--bg2);border-radius:14px;border:1px solid var(--border);max-width:720px;margin:0 auto;box-shadow:0 12px 48px rgba(0,0,0,.5);overflow:hidden;"><div id="pamUebersichtTopbar" style="background:#185FA5;color:#fff;padding:10px 16px 8px;"><div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;"><span id="pamUebAmpel" style="width:10px;height:10px;border-radius:50%;background:#ccc;flex-shrink:0;display:inline-block;"></span><span id="pamUebTitel" style="font-size:14px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span><button onclick="_pamUebOeffnen()" style="flex-shrink:0;padding:4px 12px;border-radius:6px;background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.4);cursor:pointer;font-size:12px;margin-right:4px;">✏️ Task öffnen</button><button onclick="_pamUebDrucken()" style="flex-shrink:0;padding:4px 12px;border-radius:6px;background:#fff;color:#185FA5;border:none;cursor:pointer;font-weight:700;font-size:12px;">🖨 Drucken</button><button onclick="_pamCloseUebersicht()" style="flex-shrink:0;padding:4px 10px;border-radius:6px;background:rgba(255,255,255,.2);color:#fff;border:none;cursor:pointer;font-size:14px;line-height:1;margin-left:4px;">✕</button></div><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span style="font-size:11px;opacity:.8;">Task:</span><span id="pamUebStatus" style="font-size:11px;font-weight:700;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.4);border-radius:12px;padding:2px 10px;white-space:nowrap;"></span><span id="pamUebAnfrage" style="font-size:11px;opacity:.85;white-space:nowrap;display:none;">📅 Anfrage vom: <span id="pamUebAnfrageDat" style="font-weight:600;"></span></span></div></div><input type="hidden" id="pamUebAktTaskId" value=""><div id="pamUebBody" style="padding:0 0 4px;"></div><div id="pamUebPreview" style="display:none;position:fixed;z-index:13000;background:var(--bg2);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.4);overflow:hidden;width:520px;height:680px;pointer-events:auto;"><div style="display:flex;align-items:center;padding:6px 10px;background:var(--bg3);border-bottom:1px solid var(--border);gap:8px;"><div id="pamUebPreviewLabel" style="font-size:11px;font-weight:600;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;"></div><button onclick="document.getElementById('pamUebPreview').style.display='none'" style="flex-shrink:0;padding:2px 8px;border-radius:5px;font-size:11px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;">&#10005;</button></div><iframe id="pamUebPreviewFrame" src="" style="width:100%;height:calc(100% - 34px);border:none;background:#fff;" allowfullscreen></iframe></div></div></div>
+<div id="pamUebersichtOverlay" style="display:none;position:fixed;inset:0;z-index:12000;background:rgba(0,0,0,0.55);overflow-y:auto;padding:20px 12px;" onclick="if(event.target===this)_pamCloseUebersicht();"><div id="pamUebersichtBox" style="background:var(--bg2);border-radius:14px;border:1px solid var(--border);max-width:720px;margin:0 auto;box-shadow:0 12px 48px rgba(0,0,0,.5);overflow:hidden;"><div id="pamUebersichtTopbar" style="background:#185FA5;color:#fff;padding:10px 16px 8px;"><div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;"><span id="pamUebAmpel" style="width:10px;height:10px;border-radius:50%;background:#ccc;flex-shrink:0;display:inline-block;"></span><span id="pamUebTitel" style="font-size:14px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span><button onclick="_pamUebOeffnen()" style="flex-shrink:0;padding:4px 12px;border-radius:6px;background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.4);cursor:pointer;font-size:12px;margin-right:4px;">✏️ Task öffnen</button><button onclick="window.print()" style="flex-shrink:0;padding:4px 12px;border-radius:6px;background:#fff;color:#185FA5;border:none;cursor:pointer;font-weight:700;font-size:12px;">🖨 Drucken</button><button onclick="_pamCloseUebersicht()" style="flex-shrink:0;padding:4px 10px;border-radius:6px;background:rgba(255,255,255,.2);color:#fff;border:none;cursor:pointer;font-size:14px;line-height:1;margin-left:4px;">✕</button></div><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span style="font-size:11px;opacity:.8;">Task:</span><span id="pamUebStatus" style="font-size:11px;font-weight:700;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.4);border-radius:12px;padding:2px 10px;white-space:nowrap;"></span><span id="pamUebAnfrage" style="font-size:11px;opacity:.85;white-space:nowrap;display:none;">📅 Anfrage vom: <span id="pamUebAnfrageDat" style="font-weight:600;"></span></span></div></div><input type="hidden" id="pamUebAktTaskId" value=""><div id="pamUebBody" style="padding:0 0 4px;"></div><div id="pamUebPreview" style="display:none;position:fixed;z-index:13000;background:var(--bg2);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.4);overflow:hidden;width:520px;height:680px;pointer-events:auto;"><div style="display:flex;align-items:center;padding:6px 10px;background:var(--bg3);border-bottom:1px solid var(--border);gap:8px;"><div id="pamUebPreviewLabel" style="font-size:11px;font-weight:600;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;"></div><button onclick="document.getElementById('pamUebPreview').style.display='none'" style="flex-shrink:0;padding:2px 8px;border-radius:5px;font-size:11px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;">&#10005;</button></div><iframe id="pamUebPreviewFrame" src="" style="width:100%;height:calc(100% - 34px);border:none;background:#fff;" allowfullscreen></iframe></div></div></div>
 </body>
 </html>
