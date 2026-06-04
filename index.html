@@ -1048,16 +1048,20 @@ async function _auftragAddToTask(task,boardName,fileMode){
           if(!task.msMessageId)task.msMessageId=info.messageId;
           if(!task.msConversationId)task.msConversationId='';
           if(!task.msThreadMessages)task.msThreadMessages=[];
-          // ConversationId sofort im Hintergrund nachschlagen (fertig vor 600ms Auto-Load)
-          if(msToken&&info.messageId&&!task.msConversationId){
+          // ConversationId sofort im Hintergrund nachschlagen (#316: beide Konten versuchen)
+          if((msToken||msToken2)&&info.messageId&&!task.msConversationId){
             const _bgMsgId=info.messageId;const _bgTask=task;
             (async()=>{
-              const _tryFilter=async(v)=>{
-                const r=await fetch(`https://graph.microsoft.com/v1.0/me/messages?$filter=${encodeURIComponent("internetMessageId eq '"+v+"'")}&$select=id,conversationId&$top=1`,{headers:{Authorization:'Bearer '+msToken}});
+              const _tryFilter=async(v,tok)=>{
+                const r=await fetch(`https://graph.microsoft.com/v1.0/me/messages?$filter=${encodeURIComponent("internetMessageId eq '"+v+"'")}&$select=id,conversationId&$top=1`,{headers:{Authorization:'Bearer '+tok}});
                 if(!r.ok)return null;const d=await r.json();return d.value&&d.value.length?d.value[0].conversationId:null;
               };
-              const convId=await _tryFilter('<'+_bgMsgId+'>')||await _tryFilter(_bgMsgId);
-              if(convId){_bgTask.msConversationId=convId;console.log('[MS] ConvId beim Drag-in gespeichert:',convId);}
+              // Konto 1 versuchen
+              let convId=null;
+              if(msToken){convId=await _tryFilter('<'+_bgMsgId+'>',msToken)||await _tryFilter(_bgMsgId,msToken);}
+              // Konto 2 als Fallback
+              if(!convId&&msToken2){convId=await _tryFilter('<'+_bgMsgId+'>',msToken2)||await _tryFilter(_bgMsgId,msToken2);if(convId)_bgTask.msAccount='2';}
+              if(convId){_bgTask.msConversationId=convId;console.log('[MS] ConvId beim Drag-in gespeichert:',convId,'(Konto',_bgTask.msAccount||'1',')');}
             })();
           }
         }
@@ -3630,7 +3634,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-04 · #315'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-04-b315)
+const PAM_BUILD = 'v2026-06-04 · #316'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-04-b316)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -12312,10 +12316,10 @@ async function _saveThreadMailsAsEml(task,threadMsgs,tokenType){
       const senderFull=m.fromName?'"'+m.fromName+'" <'+(m.from||'')+'>':(m.from||m.sender||'');
       let buf=null;
       // ── Outlook: echtes MIME-Original via Graph API /$value holen ──
-      if(tokenType==='outlook'&&msToken&&m.id){
+      if(tokenType==='outlook'&&(msToken||msToken2)&&m.id){
         try{
           const rMime=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(m.id)+'/$value',
-            {headers:{Authorization:'Bearer '+msToken}});
+            {headers:{Authorization:'Bearer '+_msPickToken(task)}});  // #316: richtiges Konto
           if(rMime.ok){buf=await rMime.arrayBuffer();}
           else{console.warn('[PAM] /$value HTTP '+rMime.status+' – Fallback auf synthetisches EML');}
         }catch(eMime){console.warn('[PAM] /$value Fehler – Fallback auf synthetisches EML:',eMime);}
@@ -12744,6 +12748,12 @@ async function _msRefreshToken2(){
   }
 }
 
+// ── Konto-Auswahl-Helfer (#316) ───────────────────────────────────
+// Gibt das richtige MS-Token zurück: Konto 2 wenn task.msAccount==='2' und msToken2 vorhanden, sonst Konto 1
+function _msPickToken(task){return(task&&task.msAccount==='2'&&msToken2)?msToken2:msToken;}
+// Erneuert das richtige Token für den Task
+async function _msPickRefresh(task){return(task&&task.msAccount==='2')?_msRefreshToken2():_msRefreshToken();}
+
 function _msCleanPreview(raw){
   // bodyPreview von MS Graph kann CSS-Text enthalten wenn E-Mail mit <style>-Block beginnt
   // (passiert bei Outlook/Exchange-Mails mit word-generiertem HTML)
@@ -12847,6 +12857,7 @@ async function _msLoadEmailThread(){
         if(convIds.size>0){
           // Konto 2 hat Treffer → _msActiveToken für diesen Aufruf setzen (msToken NICHT überschreiben)
           _msActiveToken=msToken2;
+          task.msAccount='2'; // für alle Folgeaufrufe merken (#316)
           console.log('[MS-DEBUG] Konto 2 erfolgreich – verwende Token2 für Thread-Fetch');
           showToast('📨 E-Mail in Konto 2 gefunden ('+msUserEmail2+')','info',3000);
         }
@@ -13005,6 +13016,7 @@ async function _msLoadEmailThread(){
         }
         if(convIds.size>0){
           _msActiveToken=msToken2;
+          task.msAccount='2'; // für alle Folgeaufrufe merken (#316)
           console.log('[MS-DEBUG] Konto 2 Betreff-Suche erfolgreich');
           showToast('📨 E-Mail in Konto 2 gefunden ('+msUserEmail2+')','info',3000);
         }
@@ -13131,9 +13143,9 @@ async function _msSaveThreadPdfs(task,threadMsgs){
   let saved=0;
   for(const m of toSave){
     try{
-      // Vollständigen E-Mail-Body von Graph laden
+      // Vollständigen E-Mail-Body von Graph laden (#316: richtiges Konto wählen)
       const rb=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${m.id}?$select=body,toRecipients`,
-        {headers:{Authorization:'Bearer '+msToken}});
+        {headers:{Authorization:'Bearer '+_msPickToken(task)}});
       if(!rb.ok){console.warn('[MS] Body laden fehlgeschlagen',rb.status);continue;}
       const mb=await rb.json();
       const date=new Date(m.date||Date.now());
@@ -13350,9 +13362,9 @@ async function _msTPSelectMail(taskId,idx){
     <div id="_msTPBody" style="flex:1;overflow-y:auto;">
       <div style="padding:20px;color:var(--text2,#9ca3af);font-size:13px;">⏳ Lade Mail-Inhalt…</div>
     </div>`;
-  if(msToken&&m.id){
+  if((msToken||msToken2)&&m.id){
     try{
-      const r=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${m.id}?$select=body`,{headers:{Authorization:'Bearer '+msToken,'Prefer':'outlook.body-content-type="html"'}});
+      const r=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${m.id}?$select=body`,{headers:{Authorization:'Bearer '+_msPickToken(task),'Prefer':'outlook.body-content-type="html"'}});  // #316
       if(r.ok){
         const data=await r.json();
         m._cachedBodyHtml=data.body?.content||'';
@@ -13420,23 +13432,24 @@ async function _pamEmailAntwortenMitVerlauf(){
   if(!verlaufHtml){showToast('Kein Verlauf vorhanden – bitte zuerst E-Mails einziehen oder Verlauf laden.','warning',3000);return;}
 
   // ── Schritt 2: Outlook-Entwurf mit Verlauf erstellen (Graph API) ──
-  if(typeof msToken!=='undefined'&&msToken&&task){
+  if((typeof msToken!=='undefined'||typeof msToken2!=='undefined')&&(msToken||msToken2)&&task){
     const msgs=(task.msThreadMessages||[]);
     const sorted=[...msgs].sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
     const target=sorted.find(m=>m.direction==='eingang')||sorted[0];
     if(target&&target.id){
       showToast('⏳ Antwort-Entwurf mit Verlauf wird erstellt…','info',6000);
       try{
-        if(!await _msRefreshToken()){showToast('⚠ Outlook-Token abgelaufen – bitte neu anmelden','error',4000);return;}
+        if(!await _msPickRefresh(task)){showToast('⚠ Outlook-Token abgelaufen – bitte neu anmelden','error',4000);return;}  // #316
+        const _replyTok=_msPickToken(task);  // #316: richtiges Konto für Antwort
         // Schritt 1: leeren Entwurf anlegen
         const r1=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(target.id)+'/createReply',{
-          method:'POST',headers:{Authorization:'Bearer '+msToken,'Content-Type':'application/json'},body:JSON.stringify({})
+          method:'POST',headers:{Authorization:'Bearer '+_replyTok,'Content-Type':'application/json'},body:JSON.stringify({})
         });
         if(!r1.ok)throw new Error('createReply HTTP '+r1.status);
         const draft=await r1.json();
         // Schritt 2: HTML-Body in den Entwurf schreiben (comment nimmt nur Plaintext)
         const r2=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(draft.id),{
-          method:'PATCH',headers:{Authorization:'Bearer '+msToken,'Content-Type':'application/json'},
+          method:'PATCH',headers:{Authorization:'Bearer '+_replyTok,'Content-Type':'application/json'},
           body:JSON.stringify({body:{contentType:'html',content:verlaufHtml}})
         });
         if(!r2.ok)throw new Error('PATCH body HTTP '+r2.status);
@@ -13834,8 +13847,8 @@ async function _pamUnifiedShowPreview(taskId,src,idx){
         return;
       }
     }
-    if(src==='ms'&&msToken&&msgId){
-      const r=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${msgId}?$select=body`,{headers:{Authorization:'Bearer '+msToken}});
+    if(src==='ms'&&(msToken||msToken2)&&msgId){
+      const r=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${msgId}?$select=body`,{headers:{Authorization:'Bearer '+_msPickToken(task)}});  // #316
       if(r.ok){const data=await r.json();m._cachedBodyHtml=data.body?.content||'';
         const fr=document.createElement('iframe');fr.style.cssText='width:100%;height:300px;border:none;';fr.sandbox='allow-same-origin';
         bodyEl.innerHTML='';bodyEl.appendChild(fr);
