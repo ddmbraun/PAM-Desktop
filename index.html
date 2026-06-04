@@ -3624,7 +3624,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-04 · #312'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-04-b312)
+const PAM_BUILD = 'v2026-06-04 · #313'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-04-b313)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -14071,6 +14071,24 @@ function _pamFotoHovOut(){
   const pop=document.getElementById('_pamFotoHovPop');
   if(pop)pop.style.display='none';
 }
+// #313: Hover-Großvorschau für Bild-Anhang-Kacheln in der Übersicht (liest das img im Wrapper)
+function _pamImgTileHov(e,wrapEl){
+  const img=wrapEl&&wrapEl.querySelector('img');
+  const src=img?img.src:'';
+  if(!src)return;
+  let pop=document.getElementById('_pamFotoHovPop');
+  if(!pop){
+    pop=document.createElement('div');
+    pop.id='_pamFotoHovPop';
+    pop.style.cssText='position:fixed;z-index:13500;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:6px;box-shadow:0 8px 32px rgba(0,0,0,.5);pointer-events:none;display:none;';
+    pop.innerHTML='<img id="_pamFotoHovImg" style="max-width:420px;max-height:420px;border-radius:6px;display:block;object-fit:contain;">';
+    document.body.appendChild(pop);
+  }
+  document.getElementById('_pamFotoHovImg').src=src;
+  const x=Math.min(e.clientX+18,window.innerWidth-440);
+  const y=Math.min(e.clientY+18,window.innerHeight-440);
+  pop.style.left=x+'px';pop.style.top=y+'px';pop.style.display='block';
+}
 // Einheitliche Foto-Lightbox (Kacheln + Übersicht-Overlay)
 // taskId: Task-ID; startFi: Start-Foto-Index
 function _pamFotoLightbox(taskId, startFi){
@@ -14329,8 +14347,34 @@ async function _pamTaskDrucken(extId){
     },100);
   }
 
+  // #313: Bild-Anhänge (auch aus E-Mails) als Bilder mit Thumbnail erkennen
+  const _imgAttRe=/\.(jpe?g|png|gif|webp|heic|heif|bmp|tiff?)$/i;
+  const _isImgAtt=a=>_imgAttRe.test(a.name||a.filename||'')||((a.type||a.mimeType||'').indexOf('image/')===0);
+  const imgAtts=atts.filter(_isImgAtt);
+  const docAtts=atts.filter(a=>!_isImgAtt(a));
+  if(imgAtts.length){
+    let b2='<div style="display:flex;flex-wrap:wrap;gap:8px;padding:10px 16px;">';
+    for(let _bi=0;_bi<imgAtts.length;_bi++){const a=imgAtts[_bi];
+      const _afid=a.fileId||_pamExtractFileId(a.url||'');
+      const href=_afid?'https://drive.google.com/file/d/'+encodeURIComponent(_afid)+'/view':(a.url||'#');
+      b2+='<a href="'+_e(href)+'" target="_blank" style="display:block;border-radius:7px;overflow:hidden;border:1px solid var(--border);flex-shrink:0;text-decoration:none;cursor:zoom-in;" title="'+_e(a.name||'')+'" onmouseenter="_pamImgTileHov(event,this)" onmouseleave="_pamFotoHovOut()">';
+      b2+='<img id="_pamAttImg_'+_bi+'" src="" style="width:110px;height:90px;object-fit:cover;display:block;background:var(--bg3);" alt="'+_e(a.name||'')+'">';
+      b2+='</a>';
+    }
+    b2+='</div>';
+    html+=_sec('Bilder (Anhang/E-Mail)',b2,imgAtts.length);
+    setTimeout(function(){
+      Promise.all(imgAtts.map(async function(a,_bi){
+        const el=document.getElementById('_pamAttImg_'+_bi);
+        if(!el)return;
+        const _afid=a.fileId||_pamExtractFileId(a.url||'');
+        if(_afid){const u=await _pamLoadThumb(_afid);if(u&&el)el.src=u;}
+      }));
+    },100);
+  }
+
   // Dokumente mit Hover-Vorschau (Index-basiert)
-  const allDocs=[...atts.map(a=>({name:a.name||'Anhang',url:a.url||'',icon:'📄'})),
+  const allDocs=[...docAtts.map(a=>({name:a.name||'Anhang',url:a.url||'',icon:'📄'})),
     ...epfs.map(p=>({name:p.name||'E-Mail PDF',url:p.url||'',icon:'📧'}))]
   _pamDocList=allDocs.slice();
   if(allDocs.length){
