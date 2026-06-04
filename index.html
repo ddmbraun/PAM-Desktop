@@ -262,6 +262,7 @@ async function _ezBuildPdfFromHtml(info){
   // CID-Inline-Bilder direkt im HTML ersetzen bevor wrap gebaut wird
   let _cidMap=info.cidMap||{};
   const _MIN_CID_BYTES=5*1024; // 5KB: Logos/Icons rausfiltern
+  const _MIN_EMAIL_IMG_BYTES=25*1024; // 25KB: Anhang-Bilder (Logos/Signaturen) beim Import rausfiltern (#314)
   let resolvedHtml=cleanHtml.replace(/src=["']?(cid:[^"'\s>]+)["']?/gi,function(m,cid){
     let _d=_cidMap[cid]||_cidMap['cid:'+cid.replace(/^cid:/i,'')]||'';
     if(!_d)return 'src=""';
@@ -1092,6 +1093,8 @@ async function _auftragAddToTask(task,boardName,fileMode){
       let _att2Ok=0,_att2Fail=0;
       for(const att of info.attachments){
         if(att._isCidInline)continue; // Fix #223: CID-Inline-Bilder nicht automatisch hochladen
+        const isImg=/\.(jpg|jpeg|png|gif|webp|heic|heif|avif|bmp|tiff?)$/i.test(att.name)||(att.mimeType||'').startsWith('image/');
+        if(isImg&&att.b64&&att.b64.length*0.75<_MIN_EMAIL_IMG_BYTES){console.log('[PTP] Bild übersprungen (zu klein, vermutl. Logo/Signatur):',att.name,Math.round(att.b64.length*0.75/1024)+'KB');continue;} // Fix #314
         try{
           const binStr=atob(att.b64);
           const bytes=new Uint8Array(binStr.length);
@@ -1367,6 +1370,9 @@ async function _auftragConfirm(){
       let _attOk=0,_attFail=0;
       showToast('📎 '+info.attachments.length+' Anhang/Anhänge gefunden – lade hoch…','info',3000);
       for(const att of info.attachments){
+        if(att._isCidInline)continue; // Fix #314: CID-Inline-Bilder auch hier ausschließen
+        const isImg=/\.(jpg|jpeg|png|gif|webp|heic|heif|avif|bmp|tiff?)$/i.test(att.name)||(att.mimeType||'').startsWith('image/');
+        if(isImg&&att.b64&&att.b64.length*0.75<_MIN_EMAIL_IMG_BYTES){console.log('[PTP] Bild übersprungen (zu klein, vermutl. Logo/Signatur):',att.name,Math.round(att.b64.length*0.75/1024)+'KB');continue;} // Fix #314
         try{
           const binStr=atob(att.b64);
           const bytes=new Uint8Array(binStr.length);
@@ -3624,7 +3630,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-04 · #313'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-04-b313)
+const PAM_BUILD = 'v2026-06-04 · #315'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-04-b315)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -14264,16 +14270,16 @@ async function _pamTaskDrucken(extId){
   const alleAnzeige=[
     ...aufgaben.map(a=>({label:a.typ||'Aufgabe',datum:a.datum,done:!!(a.erledigt)})),
     ...freie.map(f=>({label:f.text||f.label||f.bezeichnung||'Freier Termin',datum:f.datum,done:!!(f.erledigt),notiz:f.notiz}))
-  ].sort((a,b)=>(a.datum||'zzz')>(b.datum||'zzz')?1:-1);
+  ].filter(a=>a.datum).sort((a,b)=>a.datum>b.datum?1:-1); // #315: nur Einträge mit Datum anzeigen
   if(alleAnzeige.length){
     let t2='<table style="width:100%;border-collapse:collapse;">';
     for(const t of alleAnzeige){
       const od=_od(t.datum)&&!t.done;
       const ic=t.done?'<span style="color:#4CAF50;">&#10003;</span>':'<span style="color:'+(od?'#E24B4A':'#999')+';">□</span>';
       t2+='<tr style="border-bottom:1px solid var(--border);">'
-        +'<td style="padding:6px 12px;width:22px;font-size:15px;">'+ic+'</td>'
-        +'<td style="padding:6px 8px;font-size:13px;color:var(--text);">'+_e(t.label)+(t.notiz?' <span style="font-size:11px;color:var(--text2);">– '+_e(t.notiz)+'</span>':'')+'</td>'
-        +'<td style="padding:6px 16px;white-space:nowrap;font-size:11px;font-weight:'+(od?700:400)+';color:'+(od?'#E24B4A':t.done?'#4CAF50':'var(--text2)')+';">'+(t.datum?_fD(t.datum)+(od?' ⚠':''):'')+'</td></tr>';
+        +'<td style="padding:4px 12px;width:22px;font-size:15px;">'+ic+'</td>'
+        +'<td style="padding:4px 8px;font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px;">'+_e(t.label)+(t.notiz?' <span style="font-size:11px;color:var(--text2);">– '+_e(t.notiz)+'</span>':'')+'</td>'
+        +'<td style="padding:4px 16px;white-space:nowrap;font-size:11px;font-weight:'+(od?700:400)+';color:'+(od?'#E24B4A':t.done?'#4CAF50':'var(--text2)')+';">'+(t.datum?_fD(t.datum)+(od?' ⚠':''):'')+'</td></tr>';
     }
     t2+='</table>';
     html+=_sec('Aufgaben & Termine',t2,alleAnzeige.length);
