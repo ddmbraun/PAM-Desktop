@@ -2419,6 +2419,15 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 .task-type-badge.baustelle{background:rgba(108,99,255,0.12);color:var(--accent);}
 .task-type-badge.notiz{background:rgba(39,174,96,0.12);color:#1a8a4a;}
 .proj-type-sel{padding:3px 6px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:11px;cursor:pointer;flex-shrink:0;}
+/* ── Druck-Isolation Funktionenuebersicht (#310): nur das Uebersichts-Overlay drucken ── */
+@media print{
+  body > *:not(#pamUebersichtOverlay){display:none!important;}
+  #pamUebersichtOverlay{display:block!important;position:static!important;background:none!important;padding:0!important;overflow:visible!important;}
+  #pamUebersichtBox{box-shadow:none!important;border:none!important;max-width:none!important;margin:0!important;}
+  #pamUebersichtTopbar button{display:none!important;}
+  #pamUebPreview{display:none!important;}
+  @page{margin:12mm;size:A4;}
+}
 </style>
 </head>
 <body>
@@ -3605,7 +3614,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-04 · #309'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-04-b302)
+const PAM_BUILD = 'v2026-06-04 · #310'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-04-b310)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -10681,6 +10690,12 @@ function hydrateDesktopFotoThumbs(){
   if(!gdriveTokenValid())return; // Kein gültiger Token → keine 401-Requests
   document.querySelectorAll('#fotoListDesktop img[data-foto-id]').forEach(img=>{
     if(img.dataset.hydrated==='1')return;
+    // Performance-Fix (#310): Wenn bereits eine schnelle Drive-Vorschau (thumbnailLink) als src
+    // gesetzt ist, NICHT das Vollbild per alt=media nachladen. Das sparte bei 20 Fotos zig MB
+    // Download + je einen modifiedTime-Roundtrip. Abgelaufene Links fängt der onerror-Fallback
+    // (_desktopThumbFallback) pro Bild einzeln per Auth-Fetch ab.
+    const srcAttr=img.getAttribute('src')||'';
+    if(srcAttr && !srcAttr.endsWith(window.location.href)){img.dataset.hydrated='1';return;}
     const id=img.getAttribute('data-foto-id');
     if(id){img.dataset.hydrated='1';loadDesktopFotoThumb(img,id);}
   });
@@ -14319,6 +14334,19 @@ async function _pamTaskDrucken(extId){
   })();
 }
 
+// Druck der Funktionenuebersicht (#310): erst alle Fotos/Bilder fertig laden, dann drucken.
+async function _pamUebDrucken(){
+  try{
+    const imgs=[...document.querySelectorAll('#pamUebBody img')];
+    const waits=imgs.map(img=>(img.complete&&img.naturalWidth>0)?Promise.resolve():new Promise(res=>{
+      img.addEventListener('load',res,{once:true});
+      img.addEventListener('error',res,{once:true});
+    }));
+    // Auf alle Bilder warten, aber maximal 5s (verhindert Haengenbleiben bei abgelaufenem Link)
+    await Promise.race([Promise.all(waits),new Promise(res=>setTimeout(res,5000))]);
+  }catch(e){console.warn('[PAM] Druck-Vorbereitung:',e);}
+  window.print();
+}
 function _pamUebOeffnen(){
   var _idEl=document.getElementById('pamUebAktTaskId');
   var tid=_idEl?_idEl.value:'';
@@ -22321,6 +22349,6 @@ function _pamRollbackSelected(evt){
 </script>
 
 <!-- PAM Task-Uebersicht Overlay -->
-<div id="pamUebersichtOverlay" style="display:none;position:fixed;inset:0;z-index:12000;background:rgba(0,0,0,0.55);overflow-y:auto;padding:20px 12px;" onclick="if(event.target===this)_pamCloseUebersicht();"><div id="pamUebersichtBox" style="background:var(--bg2);border-radius:14px;border:1px solid var(--border);max-width:720px;margin:0 auto;box-shadow:0 12px 48px rgba(0,0,0,.5);overflow:hidden;"><div id="pamUebersichtTopbar" style="background:#185FA5;color:#fff;padding:10px 16px 8px;"><div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;"><span id="pamUebAmpel" style="width:10px;height:10px;border-radius:50%;background:#ccc;flex-shrink:0;display:inline-block;"></span><span id="pamUebTitel" style="font-size:14px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span><button onclick="_pamUebOeffnen()" style="flex-shrink:0;padding:4px 12px;border-radius:6px;background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.4);cursor:pointer;font-size:12px;margin-right:4px;">✏️ Task öffnen</button><button onclick="window.print()" style="flex-shrink:0;padding:4px 12px;border-radius:6px;background:#fff;color:#185FA5;border:none;cursor:pointer;font-weight:700;font-size:12px;">🖨 Drucken</button><button onclick="_pamCloseUebersicht()" style="flex-shrink:0;padding:4px 10px;border-radius:6px;background:rgba(255,255,255,.2);color:#fff;border:none;cursor:pointer;font-size:14px;line-height:1;margin-left:4px;">✕</button></div><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span style="font-size:11px;opacity:.8;">Task:</span><span id="pamUebStatus" style="font-size:11px;font-weight:700;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.4);border-radius:12px;padding:2px 10px;white-space:nowrap;"></span><span id="pamUebAnfrage" style="font-size:11px;opacity:.85;white-space:nowrap;display:none;">📅 Anfrage vom: <span id="pamUebAnfrageDat" style="font-weight:600;"></span></span></div></div><input type="hidden" id="pamUebAktTaskId" value=""><div id="pamUebBody" style="padding:0 0 4px;"></div><div id="pamUebPreview" style="display:none;position:fixed;z-index:13000;background:var(--bg2);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.4);overflow:hidden;width:520px;height:680px;pointer-events:auto;"><div style="display:flex;align-items:center;padding:6px 10px;background:var(--bg3);border-bottom:1px solid var(--border);gap:8px;"><div id="pamUebPreviewLabel" style="font-size:11px;font-weight:600;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;"></div><button onclick="document.getElementById('pamUebPreview').style.display='none'" style="flex-shrink:0;padding:2px 8px;border-radius:5px;font-size:11px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;">&#10005;</button></div><iframe id="pamUebPreviewFrame" src="" style="width:100%;height:calc(100% - 34px);border:none;background:#fff;" allowfullscreen></iframe></div></div></div>
+<div id="pamUebersichtOverlay" style="display:none;position:fixed;inset:0;z-index:12000;background:rgba(0,0,0,0.55);overflow-y:auto;padding:20px 12px;" onclick="if(event.target===this)_pamCloseUebersicht();"><div id="pamUebersichtBox" style="background:var(--bg2);border-radius:14px;border:1px solid var(--border);max-width:720px;margin:0 auto;box-shadow:0 12px 48px rgba(0,0,0,.5);overflow:hidden;"><div id="pamUebersichtTopbar" style="background:#185FA5;color:#fff;padding:10px 16px 8px;"><div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;"><span id="pamUebAmpel" style="width:10px;height:10px;border-radius:50%;background:#ccc;flex-shrink:0;display:inline-block;"></span><span id="pamUebTitel" style="font-size:14px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span><button onclick="_pamUebOeffnen()" style="flex-shrink:0;padding:4px 12px;border-radius:6px;background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.4);cursor:pointer;font-size:12px;margin-right:4px;">✏️ Task öffnen</button><button onclick="_pamUebDrucken()" style="flex-shrink:0;padding:4px 12px;border-radius:6px;background:#fff;color:#185FA5;border:none;cursor:pointer;font-weight:700;font-size:12px;">🖨 Drucken</button><button onclick="_pamCloseUebersicht()" style="flex-shrink:0;padding:4px 10px;border-radius:6px;background:rgba(255,255,255,.2);color:#fff;border:none;cursor:pointer;font-size:14px;line-height:1;margin-left:4px;">✕</button></div><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span style="font-size:11px;opacity:.8;">Task:</span><span id="pamUebStatus" style="font-size:11px;font-weight:700;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.4);border-radius:12px;padding:2px 10px;white-space:nowrap;"></span><span id="pamUebAnfrage" style="font-size:11px;opacity:.85;white-space:nowrap;display:none;">📅 Anfrage vom: <span id="pamUebAnfrageDat" style="font-weight:600;"></span></span></div></div><input type="hidden" id="pamUebAktTaskId" value=""><div id="pamUebBody" style="padding:0 0 4px;"></div><div id="pamUebPreview" style="display:none;position:fixed;z-index:13000;background:var(--bg2);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.4);overflow:hidden;width:520px;height:680px;pointer-events:auto;"><div style="display:flex;align-items:center;padding:6px 10px;background:var(--bg3);border-bottom:1px solid var(--border);gap:8px;"><div id="pamUebPreviewLabel" style="font-size:11px;font-weight:600;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;"></div><button onclick="document.getElementById('pamUebPreview').style.display='none'" style="flex-shrink:0;padding:2px 8px;border-radius:5px;font-size:11px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;">&#10005;</button></div><iframe id="pamUebPreviewFrame" src="" style="width:100%;height:calc(100% - 34px);border:none;background:#fff;" allowfullscreen></iframe></div></div></div>
 </body>
 </html>
