@@ -1048,7 +1048,14 @@ async function _auftragAddToTask(task,boardName,fileMode){
           if(!task.msMessageId)task.msMessageId=info.messageId;
           if(!task.msConversationId)task.msConversationId='';
           if(!task.msThreadMessages)task.msThreadMessages=[];
-          // ConversationId sofort im Hintergrund nachschlagen (#316: beide Konten versuchen)
+          // #317: Konto 2 sofort erkennen anhand To:-Adresse im EML
+          if(msUserEmail2&&info.recipient){
+            const _toL2=(info.recipient||'').toLowerCase();
+            if(_toL2.includes(msUserEmail2.toLowerCase())||_toL2.includes('f.braun@ddmbraun')){
+              task.msAccount='2';console.log('[MS] AddToTask: Konto 2 erkannt via To:',info.recipient);
+            }
+          }
+          // ConversationId sofort im Hintergrund nachschlagen (#317: Konto-Reihenfolge aus msAccount)
           if((msToken||msToken2)&&info.messageId&&!task.msConversationId){
             const _bgMsgId=info.messageId;const _bgTask=task;
             (async()=>{
@@ -1056,12 +1063,16 @@ async function _auftragAddToTask(task,boardName,fileMode){
                 const r=await fetch(`https://graph.microsoft.com/v1.0/me/messages?$filter=${encodeURIComponent("internetMessageId eq '"+v+"'")}&$select=id,conversationId&$top=1`,{headers:{Authorization:'Bearer '+tok}});
                 if(!r.ok)return null;const d=await r.json();return d.value&&d.value.length?d.value[0].conversationId:null;
               };
-              // Konto 1 versuchen
+              // Richtiges Konto zuerst (basierend auf msAccount aus To:-Erkennung)
+              const _firstTok=_bgTask.msAccount==='2'?msToken2:msToken;
+              const _fallTok=_bgTask.msAccount==='2'?msToken:msToken2;
               let convId=null;
-              if(msToken){convId=await _tryFilter('<'+_bgMsgId+'>',msToken)||await _tryFilter(_bgMsgId,msToken);}
-              // Konto 2 als Fallback
-              if(!convId&&msToken2){convId=await _tryFilter('<'+_bgMsgId+'>',msToken2)||await _tryFilter(_bgMsgId,msToken2);if(convId)_bgTask.msAccount='2';}
-              if(convId){_bgTask.msConversationId=convId;console.log('[MS] ConvId beim Drag-in gespeichert:',convId,'(Konto',_bgTask.msAccount||'1',')');}
+              if(_firstTok){convId=await _tryFilter('<'+_bgMsgId+'>',_firstTok)||await _tryFilter(_bgMsgId,_firstTok);}
+              if(!convId&&_fallTok){
+                convId=await _tryFilter('<'+_bgMsgId+'>',_fallTok)||await _tryFilter(_bgMsgId,_fallTok);
+                if(convId)_bgTask.msAccount=(_bgTask.msAccount==='2'?undefined:'2'); // Konto korrigieren falls Fallback trifft
+              }
+              if(convId){_bgTask.msConversationId=convId;console.log('[MS] ConvId beim Drag-in:',convId,'(Konto',_bgTask.msAccount||'1',')');}
             })();
           }
         }
@@ -1240,6 +1251,14 @@ async function _auftragConfirm(){
   // Betreff für Outlook-Fallback-Suche speichern (greift auch wenn keine Message-ID extrahiert werden konnte)
   if(_npNew!=='gmail'&&(info.subject||newTask.title)){
     newTask.msEmailSubject=info.subject||newTask.title;
+  }
+  // #317: Konto 2 sofort erkennen anhand To:-Adresse im EML
+  if(_npNew!=='gmail'&&msUserEmail2&&info.recipient){
+    const _toL=(info.recipient||'').toLowerCase();
+    if(_toL.includes(msUserEmail2.toLowerCase())||_toL.includes('f.braun@ddmbraun')){
+      newTask.msAccount='2';
+      console.log('[MS] Konto 2 erkannt via To:',info.recipient);
+    }
   }
 
   if(!boards[boardName])boards[boardName]=[];
@@ -3634,7 +3653,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-04 · #316'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-04-b316)
+const PAM_BUILD = 'v2026-06-04 · #318'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-04-b318)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -4336,6 +4355,7 @@ function saveTaskData(){
     msMessageIds:(()=>{const _t=findTaskById(document.getElementById('taskId')?.value);return _t?JSON.parse(JSON.stringify(_t.msMessageIds||[])):[];})(),
     msConversationId:(()=>{const _t=findTaskById(document.getElementById('taskId')?.value);return _t?(_t.msConversationId||''):'';})(),
     msEmailSubject:(()=>{const _t=findTaskById(document.getElementById('taskId')?.value);return _t?(_t.msEmailSubject||''):'';})(),
+    msAccount:(()=>{const _t=findTaskById(document.getElementById('taskId')?.value);return _t?(_t.msAccount||''):'';})(), // #317: Konto-Zuordnung erhalten
     msThreadMessages:(()=>{const _t=findTaskById(document.getElementById('taskId')?.value);return _t?JSON.parse(JSON.stringify(_t.msThreadMessages||[])):[];})(),
     gmailMessageId:(()=>{const _t=findTaskById(document.getElementById('taskId')?.value);return _t?(_t.gmailMessageId||''):'';})(),
     gmailMessageIds:(()=>{const _t=findTaskById(document.getElementById('taskId')?.value);return _t?JSON.parse(JSON.stringify(_t.gmailMessageIds||[])):[];})(),
@@ -8571,6 +8591,7 @@ function _executeMerge(){
   // Outlook/Gmail-Primär-IDs: Master behält eigene, ergänzt falls leer
   if(!merged.msMessageId&&otherTask.msMessageId)merged.msMessageId=otherTask.msMessageId;
   if(!merged.msConversationId&&otherTask.msConversationId)merged.msConversationId=otherTask.msConversationId;
+  if(!merged.msAccount&&otherTask.msAccount)merged.msAccount=otherTask.msAccount; // #317: Konto-Zuordnung erhalten
   if(!merged.gmailMessageId&&otherTask.gmailMessageId)merged.gmailMessageId=otherTask.gmailMessageId;
 
   merged.notizVerlauf=merged.notizVerlauf||[];
