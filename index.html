@@ -2663,6 +2663,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
         </span>
       </div>
       <button type="button" onclick="_pamTaskDrucken()" title="🖨 Task-Übersicht drucken" style="margin-left:auto;flex-shrink:0;padding:3px 10px;border-radius:8px;background:transparent;border:1px solid var(--border);color:var(--text2);cursor:pointer;font-size:calc(11px * var(--modal-scale,1));font-weight:600;display:flex;align-items:center;gap:4px;">📋 Übersicht</button>
+      <button type="button" onclick="_openPdfSendenModus()" title="PDF zusammenstellen & senden" style="flex-shrink:0;margin-left:6px;padding:3px 10px;border-radius:8px;background:#185FA5;border:1px solid #185FA5;color:#fff;cursor:pointer;font-size:calc(11px * var(--modal-scale,1));font-weight:600;display:flex;align-items:center;gap:4px;">📎 PDF & Senden</button>
       <!-- Zeile 4: Datums-Boxen (wie geschlossene Karte) -->
       <div id="_hdrDates" class="task-card-datebox-row" style="margin-top:4px;display:none;"></div>
     </div>
@@ -3603,7 +3604,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-04 · #299'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-04-b299)
+const PAM_BUILD = 'v2026-06-04 · #300'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-04-b300)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -6141,9 +6142,10 @@ function taskCardHTML(task){
   </div>`;
   // Zeile 3 HTML
   const _uebBtn=`<button onclick="event.stopPropagation();_pamTaskDrucken('${task.id}')" title="Übersicht" style="display:inline-flex;align-items:center;font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;background:#185FA5;color:#fff;border:none;cursor:pointer;white-space:nowrap;flex-shrink:0;">📋</button>`;
+  const _pdfSendenBtn=`<button onclick="event.stopPropagation();_openPdfSendenModus('${task.id}')" title="PDF & Senden" style="display:inline-flex;align-items:center;font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;background:#1a5c3a;color:#fff;border:none;cursor:pointer;white-space:nowrap;flex-shrink:0;margin-left:3px;">📎</button>`;
   const _zeile3=(_hasDate||task.owner||_adr||_tel)?`<div style="display:flex;align-items:center;gap:0;margin-top:4px;">
     <div style="flex:1;display:flex;align-items:center;gap:4px;flex-wrap:wrap;min-width:0;">${_allDateBoxes}${_notizDueBadge}</div>
-    ${_hasDate?_uebBtn:''}
+    ${_hasDate?_uebBtn:''}${_pdfSendenBtn}
     <div style="width:1px;background:var(--border);align-self:stretch;margin:0 8px;flex-shrink:0;"></div>
     ${_ownerCol}
   </div>`:'';
@@ -11071,6 +11073,329 @@ async function createPdfAllFotos(){
     }
   }catch(_e){showToast('✓ PDF geöffnet (Drive-Upload fehlgeschlagen)','warning',4000);console.warn('[PDF]',_e);}
 }
+
+// ── PDF & SENDEN ─────────────────────────────────────────────────────────────
+// Universeller Auswahlmodus: Adresse + Kontakte + Fotos + Anhänge → eine PDF → per Mail
+
+function _openPdfSendenModus(taskId){
+  const tid=taskId||(document.getElementById('taskId')||{}).value||'';
+  const t=findTaskById(tid);
+  if(!t){showToast('Task nicht gefunden','error');return;}
+
+  const ov=document.createElement('div');
+  ov.id='_pdfSendenOv';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;display:flex;align-items:center;justify-content:center;';
+
+  const box=document.createElement('div');
+  box.style.cssText='background:var(--bg2);border-radius:14px;padding:20px;width:min(540px,96vw);max-height:88vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:0;';
+
+  const _e=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+  // ── Header ──
+  const hdr=document.createElement('div');
+  hdr.style.cssText='display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;';
+  hdr.innerHTML='<span style="font-size:15px;font-weight:700;color:var(--text);">📎 PDF zusammenstellen</span>'
+    +'<button onclick="document.getElementById(\'_pdfSendenOv\').remove()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text2);line-height:1;">✕</button>';
+  box.appendChild(hdr);
+
+  // ── Sektions-Label ──
+  function secLabel(icon,title){
+    const d=document.createElement('div');
+    d.style.cssText='font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;margin:12px 0 6px;';
+    d.textContent=icon+' '+title;
+    return d;
+  }
+
+  // ── Adresse ──
+  const adr=(t.adresse||t.adresse2||'').trim();
+  if(adr){
+    box.appendChild(secLabel('📍','Adresse'));
+    const row=document.createElement('label');
+    row.style.cssText='display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border-radius:8px;background:var(--bg3);margin-bottom:4px;cursor:pointer;';
+    row.innerHTML='<input type="checkbox" id="_pdfS_adr_chk" checked style="width:15px;height:15px;margin-top:3px;flex-shrink:0;cursor:pointer;">';
+    const inp=document.createElement('input');
+    inp.type='text';inp.id='_pdfS_adr_val';inp.value=adr;
+    inp.style.cssText='flex:1;background:transparent;border:none;border-bottom:1px solid var(--border);color:var(--text);font-size:12px;padding:2px 0;outline:none;';
+    row.appendChild(inp);
+    box.appendChild(row);
+  }
+
+  // ── Ansprechpartner ──
+  const kontakte=(t.kontakte||[]).filter(k=>k.name||k.tel||k.email);
+  if(kontakte.length){
+    box.appendChild(secLabel('👤','Ansprechpartner'));
+    kontakte.forEach((k,i)=>{
+      const row=document.createElement('div');
+      row.style.cssText='display:grid;grid-template-columns:20px 1fr 1fr 1fr;gap:6px;align-items:center;padding:7px 10px;border-radius:8px;background:var(--bg3);margin-bottom:4px;';
+      const chk=document.createElement('input');
+      chk.type='checkbox';chk.id='_pdfS_k_chk_'+i;chk.checked=true;
+      chk.style.cssText='width:15px;height:15px;cursor:pointer;';
+      const mkI=function(id,val,ph){
+        const x=document.createElement('input');
+        x.type='text';x.id=id;x.value=val||'';x.placeholder=ph;
+        x.style.cssText='background:transparent;border:none;border-bottom:1px solid var(--border);color:var(--text);font-size:11px;padding:2px 0;outline:none;min-width:0;';
+        return x;
+      };
+      row.appendChild(chk);
+      row.appendChild(mkI('_pdfS_k_name_'+i,k.name,'Name'));
+      row.appendChild(mkI('_pdfS_k_tel_'+i,k.tel,'Telefon'));
+      row.appendChild(mkI('_pdfS_k_email_'+i,k.email,'E-Mail'));
+      box.appendChild(row);
+    });
+  }
+
+  // ── Fotos ──
+  const fotos=t.fotos||[];
+  if(fotos.length){
+    box.appendChild(secLabel('📷','Fotos'));
+    const grid=document.createElement('div');
+    grid.style.cssText='display:flex;flex-wrap:wrap;gap:6px;padding:2px 0 4px;';
+    fotos.forEach((f,i)=>{
+      const name=f.caption||f.name||('Foto '+(i+1));
+      const lbl=document.createElement('label');
+      lbl.style.cssText='display:flex;align-items:center;gap:5px;padding:5px 9px;border-radius:7px;background:var(--bg3);cursor:pointer;font-size:11px;color:var(--text);border:1px solid transparent;';
+      lbl.innerHTML='<input type="checkbox" id="_pdfS_f_'+i+'" style="width:13px;height:13px;cursor:pointer;">'+_e(name.length>28?name.substring(0,27)+'…':name);
+      const chk=lbl.querySelector('input');
+      chk.onchange=()=>{lbl.style.borderColor=chk.checked?'var(--accent)':'transparent';lbl.style.background=chk.checked?'rgba(108,99,255,.12)':'var(--bg3)';};
+      grid.appendChild(lbl);
+    });
+    box.appendChild(grid);
+    // Alle / Keine Buttons
+    const row2=document.createElement('div');
+    row2.style.cssText='display:flex;gap:6px;margin-top:4px;';
+    const btnAll=document.createElement('button');btnAll.type='button';btnAll.textContent='Alle';
+    btnAll.style.cssText='padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:11px;cursor:pointer;';
+    btnAll.onclick=()=>fotos.forEach((_,i)=>{const c=document.getElementById('_pdfS_f_'+i);if(c){c.checked=true;c.dispatchEvent(new Event('change'));}});
+    const btnNone=document.createElement('button');btnNone.type='button';btnNone.textContent='Keine';
+    btnNone.style.cssText=btnAll.style.cssText;
+    btnNone.onclick=()=>fotos.forEach((_,i)=>{const c=document.getElementById('_pdfS_f_'+i);if(c){c.checked=false;c.dispatchEvent(new Event('change'));}});
+    row2.append(btnAll,btnNone);
+    box.appendChild(row2);
+  }
+
+  // ── Anhänge ──
+  const anhaenge=(t.attachments||[]);
+  if(anhaenge.length){
+    box.appendChild(secLabel('📎','Anhänge'));
+    anhaenge.forEach((a,i)=>{
+      const name=a.name||a.filename||('Anhang '+(i+1));
+      const lbl=document.createElement('label');
+      lbl.style.cssText='display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;background:var(--bg3);margin-bottom:4px;cursor:pointer;font-size:12px;color:var(--text);';
+      lbl.innerHTML='<input type="checkbox" id="_pdfS_a_'+i+'" style="width:14px;height:14px;cursor:pointer;">'+_e(name);
+      box.appendChild(lbl);
+    });
+  }
+
+  if(!adr&&!kontakte.length&&!fotos.length&&!anhaenge.length){
+    const empty=document.createElement('div');
+    empty.style.cssText='color:var(--text2);font-size:13px;padding:20px 0;text-align:center;';
+    empty.textContent='Keine Inhalte im Task vorhanden.';
+    box.appendChild(empty);
+  }
+
+  // ── Footer ──
+  const footer=document.createElement('div');
+  footer.style.cssText='display:flex;gap:8px;margin-top:18px;flex-shrink:0;';
+  const btnPdf=document.createElement('button');btnPdf.type='button';
+  btnPdf.textContent='📄 PDF erstellen';
+  btnPdf.style.cssText='flex:1;padding:10px;border-radius:8px;background:var(--accent);color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer;';
+  btnPdf.onclick=()=>_pdfSendenCreate(t,false);
+  const btnSend=document.createElement('button');btnSend.type='button';
+  btnSend.textContent='📧 PDF & Senden';
+  btnSend.style.cssText='flex:1;padding:10px;border-radius:8px;background:#185FA5;color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer;';
+  btnSend.onclick=()=>_pdfSendenCreate(t,true);
+  const btnCancel=document.createElement('button');btnCancel.type='button';
+  btnCancel.textContent='Abbrechen';
+  btnCancel.style.cssText='padding:10px 14px;border-radius:8px;background:var(--bg3);color:var(--text2);border:1px solid var(--border);font-size:13px;cursor:pointer;';
+  btnCancel.onclick=()=>ov.remove();
+  footer.append(btnPdf,btnSend,btnCancel);
+  box.appendChild(footer);
+
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
+}
+
+async function _pdfSendenCreate(t,sendMail){
+  if(!window.jspdf){showToast('PDF-Bibliothek nicht geladen','error');return;}
+  const {jsPDF}=window.jspdf;
+  const M=14;
+  let doc=null;
+  let hasContent=false;
+
+  function _addPage(landscape){
+    const fmt=landscape?[297,210]:[210,297];
+    const ori=landscape?'landscape':'portrait';
+    if(!doc){doc=new jsPDF({orientation:ori,unit:'mm',format:fmt});}
+    else{doc.addPage(fmt,ori);}
+    hasContent=true;
+  }
+
+  // ── Deckblatt (Adresse + Kontakte) ───────────────────────────
+  const inclAdr=document.getElementById('_pdfS_adr_chk')&&document.getElementById('_pdfS_adr_chk').checked;
+  const adrVal=(document.getElementById('_pdfS_adr_val')||{value:''}).value.trim();
+  const kontakte=(t.kontakte||[]).filter(k=>k.name||k.tel||k.email);
+  const inclKontakte=kontakte.map((k,i)=>{
+    const chk=document.getElementById('_pdfS_k_chk_'+i);
+    if(!chk||!chk.checked)return null;
+    return{
+      rolle:k.rolle||'',
+      name:(document.getElementById('_pdfS_k_name_'+i)||{value:k.name||''}).value.trim(),
+      tel:(document.getElementById('_pdfS_k_tel_'+i)||{value:k.tel||''}).value.trim(),
+      email:(document.getElementById('_pdfS_k_email_'+i)||{value:k.email||''}).value.trim()
+    };
+  }).filter(Boolean);
+
+  if((inclAdr&&adrVal)||inclKontakte.length){
+    _addPage(false);
+    let y=M+4;
+    // Titel
+    doc.setFontSize(16);doc.setFont('helvetica','bold');doc.setTextColor(30,30,30);
+    const tit=(t.title||'Auftrag').substring(0,60);
+    doc.text(tit,M,y);y+=9;
+    // Trennlinie
+    doc.setDrawColor(200,200,200);doc.line(M,y,210-M,y);y+=8;
+    // Adresse
+    if(inclAdr&&adrVal){
+      doc.setFontSize(8);doc.setFont('helvetica','bold');doc.setTextColor(120,120,120);
+      doc.text('ADRESSE',M,y);y+=5;
+      doc.setFontSize(11);doc.setFont('helvetica','normal');doc.setTextColor(30,30,30);
+      const lines=doc.splitTextToSize(adrVal,210-2*M);
+      doc.text(lines,M,y);y+=lines.length*6+8;
+    }
+    // Kontakte
+    if(inclKontakte.length){
+      doc.setFontSize(8);doc.setFont('helvetica','bold');doc.setTextColor(120,120,120);
+      doc.text('ANSPRECHPARTNER',M,y);y+=5;
+      doc.setFont('helvetica','normal');doc.setFontSize(11);doc.setTextColor(30,30,30);
+      const rolleMap={ag:'AG',eigentuemer:'Eigentümer',mieter:'Mieter',sonstiges:'Sonstiges'};
+      for(const k of inclKontakte){
+        const r=rolleMap[k.rolle]||k.rolle||'';
+        let line=(r?r+': ':'')+[k.name,k.tel,k.email].filter(Boolean).join('   ');
+        doc.text(line,M,y);y+=7;
+        if(y>280){doc.addPage([210,297],'portrait');y=M;}
+      }
+    }
+  }
+
+  // ── Fotos ────────────────────────────────────────────────────
+  showToast('📄 PDF wird erstellt…','info',8000);
+  const fotos=t.fotos||[];
+  for(let i=0;i<fotos.length;i++){
+    const chk=document.getElementById('_pdfS_f_'+i);
+    if(!chk||!chk.checked)continue;
+    const f=fotos[i];
+    let url=f.driveId?_desktopFotoBlobCache.get(f.driveId):null;
+    if(!url&&f.driveId){try{url=await _fetchDesktopFotoBlob(f.driveId);}catch(e){continue;}}
+    if(!url)continue;
+    const corrUrl=await _correctFotoForPdf(url);
+    const imgInfo=await new Promise(res=>{
+      const img=new Image();
+      img.onload=()=>res({w:img.naturalWidth,h:img.naturalHeight,src:corrUrl});
+      img.onerror=()=>res(null);img.src=corrUrl;
+    });
+    if(!imgInfo)continue;
+    const landscape=imgInfo.w>imgInfo.h;
+    _addPage(landscape);
+    const fmt=landscape?[297,210]:[210,297];
+    const cap=f.caption||f.name||'';
+    doc.addImage(imgInfo.src,'JPEG',0,0,fmt[0],fmt[1]-(cap?8:0),'','FAST');
+    if(cap){doc.setFontSize(8);doc.setTextColor(80,80,80);doc.setFont('helvetica','normal');doc.text(cap,6,fmt[1]-3);}
+  }
+
+  // ── Anhänge ──────────────────────────────────────────────────
+  const anhaenge=(t.attachments||[]);
+  const textAnhNames=[];
+  for(let i=0;i<anhaenge.length;i++){
+    const chk=document.getElementById('_pdfS_a_'+i);
+    if(!chk||!chk.checked)continue;
+    const a=anhaenge[i];
+    const fname=(a.name||a.filename||'').toLowerCase();
+    const isImg=/\.(jpe?g|png|gif|webp)$/.test(fname);
+    if(isImg){
+      let src=a.data||null;
+      if(!src&&a.url&&gdriveToken){
+        try{
+          const m=String(a.url).match(/\/d\/([a-zA-Z0-9_-]+)/)||String(a.url).match(/id=([a-zA-Z0-9_-]+)/);
+          const fid=m?m[1]:null;
+          if(fid){
+            const r=await fetch('https://www.googleapis.com/drive/v3/files/'+fid+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
+            if(r.ok){const bl=await r.blob();src=await new Promise(res=>{const rd=new FileReader();rd.onload=e=>res(e.target.result);rd.readAsDataURL(bl);});}
+          }
+        }catch(e){console.warn('[PdfSenden]',e);}
+      }
+      if(!src){textAnhNames.push(a.name||a.filename||'Anhang');continue;}
+      const corrUrl=await _correctFotoForPdf(src);
+      const imgInfo=await new Promise(res=>{
+        const img=new Image();
+        img.onload=()=>res({w:img.naturalWidth,h:img.naturalHeight,src:corrUrl});
+        img.onerror=()=>res(null);img.src=corrUrl;
+      });
+      if(!imgInfo){textAnhNames.push(a.name||a.filename||'Anhang');continue;}
+      const landscape=imgInfo.w>imgInfo.h;
+      _addPage(landscape);
+      const fmt=landscape?[297,210]:[210,297];
+      doc.addImage(imgInfo.src,'JPEG',0,0,fmt[0],fmt[1]-8,'','FAST');
+      doc.setFontSize(8);doc.setTextColor(80,80,80);doc.setFont('helvetica','normal');
+      doc.text(a.name||a.filename||'Anhang',6,fmt[1]-3);
+    }else{
+      textAnhNames.push(a.name||a.filename||'Anhang');
+    }
+  }
+  // Nicht-Bild-Anhänge als Textliste auf einer Seite
+  if(textAnhNames.length){
+    _addPage(false);
+    let y=M+4;
+    doc.setFontSize(8);doc.setFont('helvetica','bold');doc.setTextColor(120,120,120);
+    doc.text('ANHÄNGE',M,y);y+=6;
+    doc.setFont('helvetica','normal');doc.setFontSize(11);doc.setTextColor(30,30,30);
+    for(const n of textAnhNames){doc.text('📎 '+n,M,y);y+=7;}
+  }
+
+  if(!doc||!hasContent){showToast('Bitte mindestens einen Inhalt auswählen','error');return;}
+
+  // Dateiname
+  const tit=(t.title||'PAM').replace(/[^a-zA-Z0-9äöüÄÖÜß \-_]/g,'_').trim();
+  const dateStr=new Date().toLocaleDateString('de-DE').replace(/\./g,'-');
+  const pdfName=tit+'_'+dateStr+'.pdf';
+
+  document.getElementById('_pdfSendenOv')?.remove();
+
+  if(sendMail){
+    await _pdfSendenMail(doc,pdfName,t);
+  }else{
+    window.open(doc.output('bloburl'),'_blank');
+    showToast('✓ PDF erstellt','success',3000);
+  }
+}
+
+async function _pdfSendenMail(doc,fname,t){
+  showToast('📧 PDF wird vorbereitet…','info',3000);
+  const buf=doc.output('arraybuffer');
+  const b64=btoa(Array.from(new Uint8Array(buf),b=>String.fromCharCode(b)).join(''));
+  const kontakte=(t.kontakte||[]);
+  const toAddr=(kontakte.find(k=>k.email)||{}).email||'';
+  const subj=(t.title||'Auftrag')+' – Unterlagen';
+  const token=msToken||msToken2||null;
+  if(token){
+    try{
+      const body={message:{subject:subj,body:{contentType:'Text',content:''},
+        toRecipients:toAddr?[{emailAddress:{address:toAddr}}]:[],
+        attachments:[{'@odata.type':'#microsoft.graph.fileAttachment',name:fname,contentType:'application/pdf',contentBytes:b64}]
+      },saveToSentItems:true};
+      const r=await fetch('https://graph.microsoft.com/v1.0/me/sendMail',
+        {method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body)});
+      if(r.ok||r.status===202){showToast('✓ Mail mit PDF versendet!','success',5000);return;}
+      console.warn('[PdfSenden] Graph HTTP',r.status);
+    }catch(e){console.warn('[PdfSenden] Graph-Fehler:',e);}
+  }
+  // Fallback: PDF speichern + mailto öffnen
+  doc.save(fname);
+  const mailto='mailto:'+encodeURIComponent(toAddr)+'?subject='+encodeURIComponent(subj);
+  window.open(mailto,'_blank');
+  showToast('PDF gespeichert – Anhang bitte manuell hinzufügen','warning',6000);
+}
+
 let _currentFotoLbIdx=-1;
 let _deskFotoKbHandler=null;
 let _deskPannellumViewer=null;
@@ -21825,4 +22150,6 @@ function _pamRollbackSelected(evt){
 </script>
 
 <!-- PAM Task-Uebersicht Overlay -->
-<div id="pamUebersichtOverlay" style="display:none;position:fixed;inset:0;z-index:12000;background:rgba(0,0,0,0.55);overflow-y:auto;padding:20px 12px;" onclick="if(event.target===this)_pamCloseUebersicht();"><div id="pamUebersichtBox" style="background:var(--bg2);border-radius:14px;border:1px solid var(--border);max-width:720px;margin:0 auto;box-shadow:0 12px 48px rgba(0,0,0,.5);overflow:hidden;"><div id="pamUebersichtTopbar" style="background:#185FA5;color:#fff;padding:10px 16px 8px;"><div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;"><span id="pamUebAmpel" style="width:10px;height:10px;border-radius:50%;background:#ccc;flex-shrink:0;display:inline-block;"></span><span id="pamUebTitel" style="font-size:14px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span><button onclick="_pamUebOeffnen()" style="flex-shrink:0;padding:4px 12px;border-radius:6px;background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.4);cursor:pointer;font-size:12px;margin-right:4px;">✏️ Task öffnen</button><button onclick="window.print()" style="flex-shrink:0;padding:4px 12px;border-radius:6px;background:#fff;color:#185FA5;border:none;cursor:pointer;font-weight:700;font-size:12px;">🖨 Drucken</button><button onclick="_pamCloseUebersicht()" style="flex-shrink:0;padding:4px 10px;border-radius:6px;background:rgba(255,255,255,.2);color:#fff;border:none;cursor:pointer;font-size:14px;line-height:1;margin-left:4px;">✕</button></div><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span style="font-size:11px;opacity:.8;">Task:</span><span id="pamUebStatus" style="font-size:11px;font-weight:700;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.4);border-radius:12px;padding:2px 10px;white-space:nowrap;"></span><span id="pamUebAnfrage" style="font-size:11px;opacity:.85;white-space:nowrap;display:none;">📅 Anfrage vom: <span id="pamUebAnfrageDat" style="font-weight:600;"></span></span></div></div><input type="hidden" id="pamUebAktTaskId" value=""><div id="pamUebBody" style="padding:0 0 4px;"></div><div id="pamUebPreview" style="display:none;position:fixed;z-index:13000;background:var(--bg2);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.4);overflow:h
+<div id="pamUebersichtOverlay" style="display:none;position:fixed;inset:0;z-index:12000;background:rgba(0,0,0,0.55);overflow-y:auto;padding:20px 12px;" onclick="if(event.target===this)_pamCloseUebersicht();"><div id="pamUebersichtBox" style="background:var(--bg2);border-radius:14px;border:1px solid var(--border);max-width:720px;margin:0 auto;box-shadow:0 12px 48px rgba(0,0,0,.5);overflow:hidden;"><div id="pamUebersichtTopbar" style="background:#185FA5;color:#fff;padding:10px 16px 8px;"><div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;"><span id="pamUebAmpel" style="width:10px;height:10px;border-radius:50%;background:#ccc;flex-shrink:0;display:inline-block;"></span><span id="pamUebTitel" style="font-size:14px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span><button onclick="_pamUebOeffnen()" style="flex-shrink:0;padding:4px 12px;border-radius:6px;background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.4);cursor:pointer;font-size:12px;margin-right:4px;">✏️ Task öffnen</button><button onclick="window.print()" style="flex-shrink:0;padding:4px 12px;border-radius:6px;background:#fff;color:#185FA5;border:none;cursor:pointer;font-weight:700;font-size:12px;">🖨 Drucken</button><button onclick="_pamCloseUebersicht()" style="flex-shrink:0;padding:4px 10px;border-radius:6px;background:rgba(255,255,255,.2);color:#fff;border:none;cursor:pointer;font-size:14px;line-height:1;margin-left:4px;">✕</button></div><div style="display:flex;align-items:center;gap:10px;flex-wrap:wraidden;width:520px;height:680px;pointer-events:auto;"><div style="display:flex;align-items:center;padding:6px 10px;background:var(--bg3);border-bottom:1px solid var(--border);gap:8px;"><div id="pamUebPreviewLabel" style="font-size:11px;font-weight:600;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;"></div><button onclick="document.getElementById('pamUebPreview').style.display='none'" style="flex-shrink:0;padding:2px 8px;border-radius:5px;font-size:11px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;">&#10005;</button></div><iframe id="pamUebPreviewFrame" src="" style="width:100%;height:calc(100% - 34px);border:none;background:#fff;" allowfullscreen></iframe></div></div></div>
+</body>
+</html>
