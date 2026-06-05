@@ -3661,7 +3661,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-05 · #325'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-05-b325)
+const PAM_BUILD = 'v2026-06-05 · #327'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-05-b327)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -11629,54 +11629,84 @@ async function _pdfSendenMail(doc,fname,t,extraAnhänge){
   const subj=(t.title||'Auftrag')+' – Unterlagen';
   const token=msToken||msToken2||null;
 
-  // Zusätzliche Anhänge von Drive laden und als base64 vorbereiten
+  // Zusätzliche Anhänge von Drive laden (kein gdriveToken-Gate – Token-Fehler wird per Catch abgefangen)
   const _extraAtts=[{'@odata.type':'#microsoft.graph.fileAttachment',name:fname,contentType:'application/pdf',contentBytes:b64}];
-  if(extraAnhänge&&extraAnhänge.length&&token&&gdriveToken){
-    showToast('📎 Lade '+extraAnhänge.length+' Anhang/Anhänge…','info',4000);
+  const _loadedNames=[];
+  if(extraAnhänge&&extraAnhänge.length){
+    showToast('📎 Lade '+extraAnhänge.length+' Anhang/Anhänge…','info',5000);
     for(const ea of extraAnhänge){
       try{
         let _b64ea=null;
         if(ea.data){
-          // Lokal gespeichert (data-URL)
-          _b64ea=ea.data.includes(',')? ea.data.split(',')[1]:ea.data;
-        }else if(ea.fileId&&gdriveToken){
-          const _r=await fetch('https://www.googleapis.com/drive/v3/files/'+ea.fileId+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
-          if(_r.ok){
-            const _bl=await _r.blob();
-            _b64ea=await new Promise(res=>{const rd=new FileReader();rd.onload=e=>res(e.target.result.split(',')[1]);rd.readAsDataURL(_bl);});
+          _b64ea=ea.data.includes(',')?ea.data.split(',')[1]:ea.data;
+        }else if(ea.fileId){
+          const _drTok=typeof gdriveToken!=='undefined'?gdriveToken:null;
+          if(_drTok){
+            const _r=await fetch('https://www.googleapis.com/drive/v3/files/'+ea.fileId+'?alt=media',{headers:{Authorization:'Bearer '+_drTok}});
+            if(_r.ok){
+              const _bl=await _r.blob();
+              _b64ea=await new Promise(res=>{const rd=new FileReader();rd.onload=e=>res(e.target.result.split(',')[1]);rd.readAsDataURL(_bl);});
+            }else{console.warn('[PdfSenden] Drive HTTP',_r.status,'für',ea.name);}
           }
         }
         if(_b64ea){
           const _ext=(ea.name||'').split('.').pop().toLowerCase();
           const _mimeMap={pdf:'application/pdf',doc:'application/msword',docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',xls:'application/vnd.ms-excel',xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',zip:'application/zip'};
-          const _mime=_mimeMap[_ext]||'application/octet-stream';
-          _extraAtts.push({'@odata.type':'#microsoft.graph.fileAttachment',name:ea.name,contentType:_mime,contentBytes:_b64ea});
+          _extraAtts.push({'@odata.type':'#microsoft.graph.fileAttachment',name:ea.name,contentType:_mimeMap[_ext]||'application/octet-stream',contentBytes:_b64ea});
+          _loadedNames.push(ea.name);
+        }else{
+          console.warn('[PdfSenden] Anhang konnte nicht geladen werden:',ea.name);
         }
       }catch(e){console.warn('[PdfSenden] Anhang-Fehler:',ea.name,e);}
     }
+    if(_loadedNames.length<extraAnhänge.length){
+      const _missing=extraAnhänge.length-_loadedNames.length;
+      showToast('⚠ '+_missing+' Anhang/Anhänge konnten nicht geladen werden (Drive-Verbindung prüfen)','warning',5000);
+    }
   }
 
+  // Größen-Check: Graph-API sendMail-Limit ~4 MB
+  const _totalB64Len=_extraAtts.reduce((s,a)=>s+(a.contentBytes?a.contentBytes.length:0),0);
+  const _totalMB=(_totalB64Len*0.75/1024/1024).toFixed(1); // base64→bytes = *0.75
+  if(_totalB64Len>0)console.log('[PdfSenden] Gesamtgröße ca.',_totalMB,'MB,',_extraAtts.length,'Anhänge');
+
   if(token){
+    // Zu groß für sendMail (>3.5 MB)? → Anhänge weglassen und separat speichern
+    const _tooBig=_totalB64Len>4700000;
+    const _attsToSend=_tooBig?[_extraAtts[0]]:_extraAtts;
+    if(_tooBig&&_loadedNames.length>0){
+      showToast('⚠ Anhänge zu groß für E-Mail ('+_totalMB+' MB) – werden separat gespeichert','warning',6000);
+      // Separate Downloads der Anhänge auslösen
+      for(const att of _extraAtts.slice(1)){
+        try{const _ab=Uint8Array.from(atob(att.contentBytes),c=>c.charCodeAt(0));const _bl=new Blob([_ab],{type:att.contentType});const _a=document.createElement('a');_a.href=URL.createObjectURL(_bl);_a.download=att.name;_a.click();}catch(_de){}
+      }
+    }
     try{
       const body={message:{subject:subj,body:{contentType:'Text',content:''},
         toRecipients:toAddr?[{emailAddress:{address:toAddr}}]:[],
-        attachments:_extraAtts
+        attachments:_attsToSend
       },saveToSentItems:true};
       const r=await fetch('https://graph.microsoft.com/v1.0/me/sendMail',
         {method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body)});
       if(r.ok||r.status===202){
-        const _cnt=_extraAtts.length;
-        showToast('✓ Mail versendet – '+_cnt+' Anhang'+(_cnt!==1?'änge':''),'success',5000);
+        const _cnt=_attsToSend.length;
+        showToast('✓ Mail versendet – '+_cnt+' Anhang'+(_cnt!==1?'änge':'')+(_tooBig?' (Dokumente separat gespeichert)':''),'success',6000);
         return;
       }
-      console.warn('[PdfSenden] Graph HTTP',r.status);
+      const _errTxt=await r.text().catch(()=>'');
+      console.warn('[PdfSenden] Graph HTTP',r.status,_errTxt);
+      showToast('⚠ Outlook-Fehler '+r.status+' – Fallback wird gestartet','warning',4000);
     }catch(e){console.warn('[PdfSenden] Graph-Fehler:',e);}
   }
-  // Fallback: PDF speichern + mailto öffnen
+  // Fallback: PDF + alle geladenen Anhänge speichern, mailto öffnen
   doc.save(fname);
+  for(const att of _extraAtts.slice(1)){
+    try{const _ab=Uint8Array.from(atob(att.contentBytes),c=>c.charCodeAt(0));const _bl=new Blob([_ab],{type:att.contentType});const _a=document.createElement('a');_a.href=URL.createObjectURL(_bl);_a.download=att.name;_a.click();}catch(_de){}
+  }
   const mailto='mailto:'+encodeURIComponent(toAddr)+'?subject='+encodeURIComponent(subj);
   window.open(mailto,'_blank');
-  showToast('PDF gespeichert – Anhang bitte manuell hinzufügen','warning',6000);
+  const _fallbackHint=_extraAtts.length>1?' + '+(_extraAtts.length-1)+' Dokument/e gespeichert – als Anhang hinzufügen':'';
+  showToast('PDF gespeichert'+_fallbackHint,'warning',7000);
 }
 
 let _currentFotoLbIdx=-1;
@@ -16783,33 +16813,46 @@ table.data-tbl{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:
 </body>
 </html>`;
 
-    // ── In Projektordner hochladen ──
+    // ── Overlay mit Auswahl ──
     const safeTitle=(title||'Abschlussakte').replace(/[^a-zA-Z0-9_\-äöüÄÖÜß ]/g,'_');
     const blob=new Blob([html],{type:'text/html;charset=utf-8'});
     const url=URL.createObjectURL(blob);
     const projUrl=(document.getElementById('tGDOrdner')?.value||'').trim();
     const projId=_extractFolderIdFromUrl(projUrl);
-    if(projId&&gdriveToken){
-      btn.textContent='⏳ Hochladen…';
-      const enc=new TextEncoder();
-      await _driveUploadGeneric(enc.encode(html).buffer,safeTitle+'.html','text/html;charset=utf-8',projId);
-      showToast('✓ Abschlussakte HTML in Projektordner gespeichert','success',4000);
-    }
-    // Overlay mit Download-Option
+    const hasDrive=!!(projId&&gdriveToken);
     const ov=document.createElement('div');
     ov.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;';
+    const driveBtnHtml=hasDrive
+      ?`<button id="_abschlDriveBtn" style="padding:11px 0;border-radius:8px;background:#1a73e8;color:#fff;font-weight:700;font-size:14px;border:none;cursor:pointer;display:block;width:100%;">☁ In Google Drive speichern</button>`
+      :`<button disabled style="padding:11px 0;border-radius:8px;background:#e0e0e0;color:#aaa;font-weight:600;font-size:13px;border:none;display:block;width:100%;cursor:not-allowed;" title="Kein Projektordner oder nicht eingeloggt">☁ In Google Drive speichern (kein Ordner)</button>`;
     ov.innerHTML=`<div style="background:#fff;border-radius:14px;padding:28px 32px;max-width:380px;width:90%;box-shadow:0 8px 40px rgba(0,0,0,.3);text-align:center;">
       <div style="font-size:28px;margin-bottom:10px;">🌐</div>
       <div style="font-size:17px;font-weight:700;margin-bottom:6px;">Abschlussakte HTML</div>
       <div style="font-size:13px;color:#666;margin-bottom:22px;">${_esc(title)}</div>
       <div style="display:flex;flex-direction:column;gap:10px;">
+        ${driveBtnHtml}
         <a href="${url}" target="_blank" style="padding:11px 0;border-radius:8px;background:#5a50b4;color:#fff;font-weight:700;font-size:14px;text-decoration:none;display:block;">🔍 Im Browser öffnen</a>
         <a href="${url}" download="${safeTitle}.html" style="padding:11px 0;border-radius:8px;background:#15803d;color:#fff;font-weight:700;font-size:14px;text-decoration:none;display:block;">⬇ Herunterladen (.html)</a>
-        <button onclick="this.closest('div[style]').parentElement.remove()" style="padding:9px 0;border-radius:8px;background:#f0f0f0;color:#555;font-weight:600;font-size:13px;border:none;cursor:pointer;display:block;width:100%;">Schließen</button>
+        <button onclick="this.closest('.pam-abs-ov').remove()" style="padding:9px 0;border-radius:8px;background:#f0f0f0;color:#555;font-weight:600;font-size:13px;border:none;cursor:pointer;display:block;width:100%;">Schließen</button>
       </div>
     </div>`;
+    ov.classList.add('pam-abs-ov');
     ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
     document.body.appendChild(ov);
+    if(hasDrive){
+      document.getElementById('_abschlDriveBtn').addEventListener('click',async()=>{
+        const db=document.getElementById('_abschlDriveBtn');
+        db.textContent='⏳ Hochladen…';db.disabled=true;
+        try{
+          const enc=new TextEncoder();
+          await _driveUploadGeneric(enc.encode(html).buffer,safeTitle+'.html','text/html;charset=utf-8',projId);
+          db.textContent='✓ Gespeichert in Drive';db.style.background='#15803d';
+          showToast('✓ Abschlussakte HTML in Projektordner gespeichert','success',4000);
+        }catch(err){
+          db.textContent='⚠ Fehler – nochmal versuchen';db.style.background='#c0392b';db.disabled=false;
+        }
+      });
+    }
 
     btn.textContent='✓ HTML bereit';
     setTimeout(()=>{btn.textContent='🌐 Abschlussakte (HTML)';btn.disabled=false;},3000);
@@ -22522,76 +22565,4 @@ function _showVbsDriveLinksBox(mainUrl,fotoUrl,dokUrl,emailUrl,stammdatenUrl){
      +'<a href="'+emailUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
    +sbRow
    +'<div style="font-size:11px;opacity:.65;margin-bottom:8px;">Alle Felder im Task ausgefüllt.<br>Bitte Task speichern!</div>'
-   +'<button onclick="document.getElementById(\'vbsDriveLinksBox\').remove()" '
-     +'style="background:var(--bg2);border:1px solid var(--border);color:var(--text1);'
-     +'padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;">✕ Schließen</button>';
-  document.body.appendChild(box);
-}
-
-document.addEventListener('DOMContentLoaded', _checkNewAuftragFromVbs);
-// ── Service Worker: bei jedem Seitenaufruf auf Updates prüfen ──────────────────────────────────
-if('serviceWorker' in navigator){
-  navigator.serviceWorker.getRegistration().then(reg=>{
-    if(reg) reg.update();
-  });
-  navigator.serviceWorker.addEventListener('controllerchange',()=>{
-    // Neuer SW hat übernommen → Seite automatisch neu laden
-    window.location.reload();
-  });
-}
-
-// ── App-Update-Button: unregistriert SW und lädt neu ───
-function pamForceSwUpdate(){
-  if('serviceWorker' in navigator){
-    navigator.serviceWorker.getRegistrations().then(function(regs){
-      Promise.all(regs.map(function(r){return r.unregister();})).then(function(){
-        window.location.reload(true);
-      });
-    });
-  } else {
-    window.location.reload(true);
-  }
-}
-// ── VERSION ROLLBACK ─────────────────────────────────────────────
-function _pamVersionRollback(){
-  let ov=document.createElement('div');
-  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:center;justify-content:center;';
-  let box=document.createElement('div');
-  box.style.cssText='background:var(--bg2);border-radius:14px;padding:28px;max-width:480px;width:92vw;box-shadow:0 20px 60px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:16px;';
-  box.innerHTML='<div style="font-size:16px;font-weight:700;color:var(--text);">⏮ Version zurücksetzen</div>'
-    +'<div style="font-size:13px;color:var(--text2);line-height:1.6;">'
-    +'1. Wähle eine Backup-Datei aus deinem Workboard-Ordner<br>'
-    +'2. Sie wird als <b>index.html</b> heruntergeladen<br>'
-    +'3. Lade diese Datei zu GitHub hoch (Datei ersetzen)<br>'
-    +'4. Klicke danach in der App auf 🔄 Update</div>'
-    +'<button onclick="document.getElementById(\'_rollbackFileInput\').click()" '
-    'style="padding:10px 20px;border-radius:8px;background:var(--accent);color:#fff;border:none;cursor:pointer;font-size:14px;font-weight:600;">📂 Backup-Datei auswählen</button>'
-    +'<button onclick="this.parentElement.parentElement.remove()" '
-    +'style="padding:8px;border-radius:8px;background:none;border:1px solid var(--border);color:var(--text2);cursor:pointer;font-size:13px;">Abbrechen</button>';
-  ov.appendChild(box);
-  ov.onclick=function(e){if(e.target===ov)ov.remove();};
-  document.body.appendChild(ov);
-}
-function _pamRollbackSelected(evt){
-  let file=evt.target.files[0];if(!file)return;
-  evt.target.value='';
-  let reader=new FileReader();
-  reader.onload=function(e){
-    let blob=new Blob([e.target.result],{type:'text/html'});
-    let a=document.createElement('a');
-    a.href=URL.createObjectURL(blob);
-    a.download='index.html';
-    a.click();
-    setTimeout(function(){URL.revokeObjectURL(a.href);},5000);
-    showToast('✅ index.html heruntergeladen – jetzt zu GitHub hochladen, dann 🔄 Update klicken','ok',8000);    document.querySelectorAll('[style*="z-index:9999"]').forEach(function(el){el.remove();});
-  };
-  reader.readAsText(file);
-}
-
-</script>
-
-<!-- PAM Task-Uebersicht Overlay -->
-<div id="pamUebersichtOverlay" style="display:none;position:fixed;inset:0;z-index:12000;background:rgba(0,0,0,0.55);overflow-y:auto;padding:20px 12px;" onclick="if(event.target===this)_pamCloseUebersicht();"><div id="pamUebersichtBox" style="background:var(--bg2);border-radius:14px;border:1px solid var(--border);max-width:720px;margin:0 auto;box-shadow:0 12px 48px rgba(0,0,0,.5);overflow:hidden;"><div id="pamUebersichtTopbar" style="background:#185FA5;color:#fff;padding:10px 16px 8px;"><div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;"><span id="pamUebAmpel" style="width:10px;height:10px;border-radius:50%;background:#ccc;flex-shrink:0;display:inline-block;"></span><span id="pamUebTitel" style="font-size:14px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span><button onclick="_pamUebOeffnen()" style="flex-shrink:0;padding:4px 12px;border-radius:6px;background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.4);cursor:pointer;font-size:12px;margin-right:4px;">✏️ Task öffnen</button><button onclick="_pamUebDrucken()" style="flex-shrink:0;padding:4px 12px;border-radius:6px;background:#fff;color:#185FA5;border:none;cursor:pointer;font-weight:700;font-size:12px;">🖨 Drucken</button><button onclick="_pamCloseUebersicht()" style="flex-shrink:0;padding:4px 10px;border-radius:6px;background:rgba(255,255,255,.2);color:#fff;border:none;cursor:pointer;font-size:14px;line-height:1;margin-left:4px;">✕</button></div><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span style="font-size:11px;opacity:.8;">Task:</span><span id="pamUebStatus" style="font-size:11px;font-weight:700;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.4);border-radius:12px;padding:2px 10px;white-space:nowrap;"></span><span id="pamUebAnfrage" style="font-size:11px;opacity:.85;white-space:nowrap;display:none;">📅 Anfrage vom: <span id="pamUebAnfrageDat" style="font-weight:600;"></span></span></div></div><input type="hidden" id="pamUebAktTaskId" value=""><div id="pamUebBody" style="padding:0 0 4px;"></div></div></div>
-<div id="pamUebPreview" style="display:none;position:fixed;z-index:100001;background:var(--bg2);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.4);overflow:hidden;width:520px;height:680px;pointer-events:auto;"><div style="display:flex;align-items:center;padding:6px 10px;background:var(--bg3);border-bottom:1px solid var(--border);gap:8px;"><div id="pamUebPreviewLabel" style="font-size:11px;font-weight:600;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;"></div><button onclick="document.getElementById('pamUebPreview').style.display='none'" style="flex-shrink:0;padding:2px 8px;border-radius:5px;font-size:11px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;">&#10005;</button></div><iframe id="pamUebPreviewFrame" src="" style="width:100%;height:calc(100% - 34px);border:none;background:#fff;" allowfullscreen></iframe></div>
-</body>
-</html>
+   +'<button onclick="document.getElementById(\'vbs
