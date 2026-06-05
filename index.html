@@ -3661,7 +3661,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-05 · #324'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-05-b324)
+const PAM_BUILD = 'v2026-06-05 · #325'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-05-b325)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -11315,7 +11315,18 @@ function _openPdfSendenModus(taskId){
       if(t.titelbildId===f.driveId){tbBtn.style.background='#185FA5';}
       wrap.append(chk,img,cap,tbBtn);
       const _setStyle=()=>{wrap.style.borderColor=chk.checked?'var(--accent)':'transparent';wrap.style.boxShadow=chk.checked?'0 0 0 1px var(--accent)':'none';};
-      wrap.addEventListener('click',e=>{if(e.target!==chk&&e.target!==tbBtn){chk.checked=!chk.checked;}_setStyle();});
+      // Klick auf Bild → Lightbox; Klick auf Checkbox → nur Auswahl togglen
+      img.addEventListener('click',function(e){
+        e.stopPropagation();
+        const src=img.src;
+        if(!src||src===location.href)return;
+        if(f.driveId&&typeof gdriveToken!=='undefined'&&gdriveToken){
+          _openAttachLightbox({type:'image/jpeg',fileId:f.driveId,name:f.caption||f.name||'Foto',url:src});
+        }else if(src.startsWith('blob:')||src.startsWith('data:')){
+          _openAttachLightbox({type:'image/jpeg',data:src,name:f.caption||f.name||'Foto'});
+        }
+      });
+      wrap.addEventListener('click',e=>{if(e.target!==chk&&e.target!==tbBtn&&e.target!==img){chk.checked=!chk.checked;}_setStyle();});
       chk.addEventListener('change',_setStyle);
       wrap.addEventListener('mouseenter',function(e){_pamImgTileHov(e,wrap);});
       wrap.addEventListener('mouseleave',function(){_pamFotoHovOut();});
@@ -11370,10 +11381,15 @@ function _openPdfSendenModus(taskId){
       nameSpan.style.cssText='flex:1;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
       nameSpan.textContent=d.icon+' '+d.name;
       row.append(chk,nameSpan);
+      // Klick auf Name → Drive-Link öffnen; Klick auf Checkbox → nur Auswahl
+      if(d.url&&d.url!=='#'){
+        nameSpan.style.cssText+='cursor:pointer;text-decoration:underline;text-underline-offset:2px;';
+        nameSpan.title='Klicken zum Öffnen';
+        nameSpan.addEventListener('click',function(e){e.stopPropagation();window.open(d.url,'_blank');});
+      }
       if(fid){
-        row.style.cursor='default';
         const prevSpan=document.createElement('span');
-        prevSpan.style.cssText='font-size:10px;color:var(--text2);flex-shrink:0;opacity:.7;';
+        prevSpan.style.cssText='font-size:10px;color:var(--text2);flex-shrink:0;opacity:.7;white-space:nowrap;';
         prevSpan.textContent='Vorschau';
         row.appendChild(prevSpan);
         row.addEventListener('mouseenter',function(){_pamDocHover(row,i);});
@@ -11579,17 +11595,32 @@ async function _pdfSendenCreate(t,sendMail){
   const dateStr=new Date().toLocaleDateString('de-DE').replace(/\./g,'-');
   const pdfName=tit+'_'+dateStr+'.pdf';
 
+  // Ausgewählte Nicht-Bild-Anhänge für E-Mail-Versand sammeln (inkl. E-Mail-PDFs)
+  const _selMailAnhänge=[];
+  if(sendMail){
+    const _allAnhForMail=[...(t.attachments||[]),...(t.emailPdfs||[])];
+    for(let i=0;i<_allAnhForMail.length;i++){
+      const chk=document.getElementById('_pdfS_a_'+i);
+      if(!chk||!chk.checked)continue;
+      const a=_allAnhForMail[i];
+      const _fn=(a.name||a.filename||'').toLowerCase();
+      const _isImgAnh=/\.(jpe?g|png|gif|webp)$/.test(_fn);
+      if(_isImgAnh)continue; // Bilder sind bereits ins PDF eingebettet
+      _selMailAnhänge.push({name:a.name||a.filename||'Anhang',url:a.url||'',data:a.data||null,fileId:a.fileId||_pamExtractFileId(a.url||'')||''});
+    }
+  }
+
   document.getElementById('_pdfSendenOv')?.remove();
 
   if(sendMail){
-    await _pdfSendenMail(doc,pdfName,t);
+    await _pdfSendenMail(doc,pdfName,t,_selMailAnhänge);
   }else{
     window.open(doc.output('bloburl'),'_blank');
     showToast('✓ PDF erstellt','success',3000);
   }
 }
 
-async function _pdfSendenMail(doc,fname,t){
+async function _pdfSendenMail(doc,fname,t,extraAnhänge){
   showToast('📧 PDF wird vorbereitet…','info',3000);
   const buf=doc.output('arraybuffer');
   const b64=btoa(Array.from(new Uint8Array(buf),b=>String.fromCharCode(b)).join(''));
@@ -11597,15 +11628,47 @@ async function _pdfSendenMail(doc,fname,t){
   const toAddr=(kontakte.find(k=>k.email)||{}).email||'';
   const subj=(t.title||'Auftrag')+' – Unterlagen';
   const token=msToken||msToken2||null;
+
+  // Zusätzliche Anhänge von Drive laden und als base64 vorbereiten
+  const _extraAtts=[{'@odata.type':'#microsoft.graph.fileAttachment',name:fname,contentType:'application/pdf',contentBytes:b64}];
+  if(extraAnhänge&&extraAnhänge.length&&token&&gdriveToken){
+    showToast('📎 Lade '+extraAnhänge.length+' Anhang/Anhänge…','info',4000);
+    for(const ea of extraAnhänge){
+      try{
+        let _b64ea=null;
+        if(ea.data){
+          // Lokal gespeichert (data-URL)
+          _b64ea=ea.data.includes(',')? ea.data.split(',')[1]:ea.data;
+        }else if(ea.fileId&&gdriveToken){
+          const _r=await fetch('https://www.googleapis.com/drive/v3/files/'+ea.fileId+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
+          if(_r.ok){
+            const _bl=await _r.blob();
+            _b64ea=await new Promise(res=>{const rd=new FileReader();rd.onload=e=>res(e.target.result.split(',')[1]);rd.readAsDataURL(_bl);});
+          }
+        }
+        if(_b64ea){
+          const _ext=(ea.name||'').split('.').pop().toLowerCase();
+          const _mimeMap={pdf:'application/pdf',doc:'application/msword',docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',xls:'application/vnd.ms-excel',xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',zip:'application/zip'};
+          const _mime=_mimeMap[_ext]||'application/octet-stream';
+          _extraAtts.push({'@odata.type':'#microsoft.graph.fileAttachment',name:ea.name,contentType:_mime,contentBytes:_b64ea});
+        }
+      }catch(e){console.warn('[PdfSenden] Anhang-Fehler:',ea.name,e);}
+    }
+  }
+
   if(token){
     try{
       const body={message:{subject:subj,body:{contentType:'Text',content:''},
         toRecipients:toAddr?[{emailAddress:{address:toAddr}}]:[],
-        attachments:[{'@odata.type':'#microsoft.graph.fileAttachment',name:fname,contentType:'application/pdf',contentBytes:b64}]
+        attachments:_extraAtts
       },saveToSentItems:true};
       const r=await fetch('https://graph.microsoft.com/v1.0/me/sendMail',
         {method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body)});
-      if(r.ok||r.status===202){showToast('✓ Mail mit PDF versendet!','success',5000);return;}
+      if(r.ok||r.status===202){
+        const _cnt=_extraAtts.length;
+        showToast('✓ Mail versendet – '+_cnt+' Anhang'+(_cnt!==1?'änge':''),'success',5000);
+        return;
+      }
       console.warn('[PdfSenden] Graph HTTP',r.status);
     }catch(e){console.warn('[PdfSenden] Graph-Fehler:',e);}
   }
