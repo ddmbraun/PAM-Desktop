@@ -3661,7 +3661,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-05 · #322'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-05-b322)
+const PAM_BUILD = 'v2026-06-05 · #323'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-05-b323)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -3778,6 +3778,7 @@ let _heuteFilter = 'alle';
 let _heuteViewMode = 'karten';
 let _heuteDateFilter = '';
 let _heuteTypFilter2 = 'alle';
+let _heuteTerminFilter = 'alle';
 let _colSort = {}; // { [status]: {field:'title'|'tags', dir:1|-1} }
 
 // ── MODAL DRAG & RESIZE ──
@@ -6408,11 +6409,29 @@ function _pamKachelLightbox(tid,startFi){
   _pamFotoLightbox(tid,startFi);
 }
 
-function _pamHeuteRaster(listeAll, today){
+function _pamHeuteRaster(listeAll, today, typFilter, terminFilter){
   if(!listeAll||!listeAll.length)return'';
-  var _pamRasterImgQueue=[];
+  var _fD=function(d){if(!d)return'–';var p=d.split('-');return p[2]+'.'+p[1]+'.';};
+  // Typ-Filter
+  var liste2=listeAll.filter(function(item){
+    var bt=boardTypes[item.board]||'baustelle';
+    if(typFilter==='auftraege')return bt==='baustelle';
+    if(typFilter==='aufgaben')return bt==='notiz';
+    if(typFilter==='posteingang')return bt==='email';
+    return true;
+  });
+  // Termin-Filter
+  if(terminFilter&&terminFilter!=='alle'){
+    liste2=liste2.filter(function(item){
+      var t=item.t;
+      if(terminFilter==='faelligkeit')return !!(t.due&&t.due<=today);
+      if(terminFilter==='aufgaben')return (t.aufgaben||[]).some(function(a){return a.datum&&a.datum<=today&&!a.erledigt;});
+      if(terminFilter==='termine')return (t.freieTermine||[]).some(function(f){return f.datum&&f.datum<=today&&!f.erledigt;});
+      return true;
+    });
+  }
   var grouped={overdue:[],heute:[],ausf:[]};
-  listeAll.forEach(function(item){
+  liste2.forEach(function(item){
     var t=item.t;
     var hasOd=(t.aufgaben||[]).some(function(a){return a.datum&&a.datum<today&&!a.erledigt;})
       ||(t.freieTermine||[]).some(function(f){return f.datum&&f.datum<today&&!f.erledigt;})
@@ -6430,66 +6449,77 @@ function _pamHeuteRaster(listeAll, today){
     var bStyle='padding:3px 10px;border-radius:14px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;border:1.5px solid '+(on?color:'var(--border)')+';background:'+(on?color+'22':'var(--bg3)')+';color:'+(on?color:'var(--text2)')+';';
     return'<button onclick="event.stopPropagation();_pamToggleRasterFilter(\''+key+'\')" style="'+bStyle+'">'+label+' <span style="opacity:.7;">'+cnt+'</span></button>';
   }
+  var _tf2=typFilter||'alle';
+  var _termF=terminFilter||'alle';
+  var typSel='<select onchange="_setHeuteTypFilter2(this.value)" style="font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);">'
+    +'<option value="alle"'+(_tf2==='alle'?' selected':'')+'>Alle Typen</option>'
+    +'<option value="auftraege"'+(_tf2==='auftraege'?' selected':'')+'>Auftrag</option>'
+    +'<option value="aufgaben"'+(_tf2==='aufgaben'?' selected':'')+'>Aufgabe</option>'
+    +'<option value="posteingang"'+(_tf2==='posteingang'?' selected':'')+'>Posteingang</option>'
+    +'</select>';
+  var termSel='<select onchange="_setHeuteTerminFilter(this.value)" style="font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);">'
+    +'<option value="alle"'+(_termF==='alle'?' selected':'')+'>Alle Eintr\xe4ge</option>'
+    +'<option value="faelligkeit"'+(_termF==='faelligkeit'?' selected':'')+'>F\xe4lligkeitsdatum</option>'
+    +'<option value="aufgaben"'+(_termF==='aufgaben'?' selected':'')+'>Aufgaben</option>'
+    +'<option value="termine"'+(_termF==='termine'?' selected':'')+'>Freie Termine</option>'
+    +'</select>';
   var filterBar='<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px;">'
     +fBtn('overdue','⚠️ \xdcberf\xe4llig','#E24B4A',grouped.overdue.length)
     +fBtn('heute','📅 Heute f\xe4llig','#EF9F27',grouped.heute.length)
     +fBtn('ausf','🔧 Ausf\xfchrung heute','#378ADD',grouped.ausf.length)
+    +'<span style="flex:1;min-width:6px;"></span>'
+    +typSel+' '+termSel
     +'</div>';
   var liste=[];
   if(rf.overdue)liste=liste.concat(grouped.overdue);
   if(rf.heute)liste=liste.concat(grouped.heute);
   if(rf.ausf)liste=liste.concat(grouped.ausf);
   liste=liste.filter(function(x,i,a){return a.findIndex(function(y){return y.t.id===x.t.id;})===i;});
-  var html='<div style="margin:10px 14px 4px;">';
+  var html='<div style="margin:0 0 12px;">';
   html+='<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text2);margin-bottom:6px;">Tages\xfcbersicht</div>';
   html+=filterBar;
   if(!liste.length){return html+'<div style="font-size:12px;color:var(--text2);padding:8px 0;">Keine Kacheln f\xfcr aktive Filter.</div></div>';}
-  html+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;">';
+  html+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;">';
   liste.forEach(function(item){
     var t=item.t,board=item.board;
-    var foto=(t.fotos&&t.fotos.length)?(t.titelbildId?t.fotos.find(function(f){return f.driveId===t.titelbildId;})||t.fotos[0]:t.fotos[0]):null;
-    var thumb=foto?(foto.localUrl||foto.thumbnailLink||''):'';
+    var bt=boardTypes[board]||'baustelle';
     var ampelColor={'rot':'#E24B4A','gelb':'#EF9F27','gr\xfcn':'#4CAF50'}[t.ampel]||'#999';
-    var isOd=t.due&&t.due<today;var isToday=t.due===today;
-    var badge=isOd?'<span style="position:absolute;top:5px;right:5px;font-size:9px;background:#E24B4A;color:#fff;padding:1px 5px;border-radius:4px;">⚠ \xdcberf.</span>'
-      :isToday?'<span style="position:absolute;top:5px;right:5px;font-size:9px;background:#185FA5;color:#fff;padding:1px 5px;border-radius:4px;">Heute</span>':'';
+    var isOd=t.due&&t.due<today;
+    var isToday=t.due===today;
+    var badge=isOd?'<span style="font-size:9px;background:#E24B4A;color:#fff;padding:1px 5px;border-radius:4px;white-space:nowrap;">⚠ \xdcberf.</span>'
+      :isToday?'<span style="font-size:9px;background:#185FA5;color:#fff;padding:1px 5px;border-radius:4px;white-space:nowrap;">Heute</span>':'';
     var fotoCnt=(t.fotos||[]).length;
-    var fotoBadge=fotoCnt?'<span style="position:absolute;bottom:5px;left:5px;font-size:9px;background:rgba(0,0,0,.5);color:#fff;padding:1px 5px;border-radius:4px;">📷 '+fotoCnt+'</span>':'';
-    var _rImgId='_hRImg_'+t.id;
-    var imgCursor=fotoCnt?'zoom-in':'default';
-    var imgClick=fotoCnt?'onclick="event.stopPropagation();_pamKachelLightbox(\''+t.id+'\',0)"':'';
-    var imgWrap='<div style="position:relative;cursor:'+imgCursor+';height:90px;" '+imgClick
-      +' onmouseenter="_pamKachelHov(event,\''+t.id+'\',\''+esc(board)+'\')" onmouseleave="_pamKachelHovOut()">'
-      +'<img id="'+_rImgId+'" src="" style="width:100%;height:90px;object-fit:cover;display:block;background:var(--bg3);" alt="">'
-      +badge+fotoBadge+'</div>';
-    if(thumb||(foto&&foto.driveId)){_pamRasterImgQueue.push({id:_rImgId,th:thumb,fobj:foto});}
-    var zeitMin=(t.zeitEntries||[]).reduce(function(s,z){
-      if(z.minuten!=null)return s+(+z.minuten);
-      if(z.von&&z.bis){var p=z.von.split(':').map(Number),q=z.bis.split(':').map(Number);return s+(q[0]*60+q[1])-(p[0]*60+p[1]);}
-      return s;},0);
-    var zeitStr=zeitMin>0?Math.floor(zeitMin/60)+'h'+(zeitMin%60>0?' '+Math.round(zeitMin%60)+'min':''):'';
-    html+='<div onclick="_pamTaskDrucken(\''+t.id+'\')" style="background:var(--bg2);border-radius:10px;border:1px solid var(--border);overflow:hidden;cursor:pointer;" onmouseenter="this.style.boxShadow=\'0 2px 12px rgba(0,0,0,.2)\'" onmouseleave="this.style.boxShadow=\'none\'">'
-      +imgWrap
-      +'<div style="padding:6px 8px;">'
-      +'<div style="display:flex;align-items:center;gap:4px;margin-bottom:2px;">'
-      +'<span style="width:7px;height:7px;border-radius:50%;background:'+ampelColor+';flex-shrink:0;"></span>'
-      +'<span style="font-size:11px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(t.title||'')+'</span>'
+    var anhCnt=((t.attachments||[]).length)||((t.dateianhaenge||[]).length);
+    var typIcon=bt==='email'?'📧':bt==='notiz'?'✅':'🏗';
+    var statusLine=esc(board||'')+(t.status?' › '+esc(t.status):'');
+    // Grund der Anzeige
+    var grundLine='';
+    var matchFT=(t.freieTermine||[]).find(function(f){return f.datum&&f.datum<=today&&!f.erledigt;});
+    var matchAufg=(t.aufgaben||[]).find(function(a){return a.datum&&a.datum<=today&&!a.erledigt;});
+    if(matchFT){grundLine='📅 '+esc(matchFT.beschreibung||matchFT.titel||'Termin')+(matchFT.von?' · '+esc(matchFT.von):'');}
+    else if(matchAufg){grundLine='✅ '+esc(matchAufg.text||matchAufg.titel||'Aufgabe');}
+    else if(t.due&&t.due<=today){grundLine='📋 F\xe4lligkeit: '+_fD(t.due);}
+    else if(t.ausfuehrungstermin===today){grundLine='🔧 Ausf\xfchrung heute';}
+    var bottomLeft='';
+    if(bt==='email'){bottomLeft=anhCnt>0?'📎 '+anhCnt+' Anh.':'📧 Mail';}
+    else{bottomLeft=fotoCnt>0?'📷 '+fotoCnt+' Foto'+(fotoCnt!==1?'s':''):'&nbsp;';}
+    var clickFn=bt==='email'?"openEmailTaskModal('"+t.id+"')"
+      :"openEditTaskModal('"+t.id+"')";
+    html+='<div onclick="'+clickFn+'" style="background:var(--bg2);border-radius:10px;border:1px solid var(--border);padding:9px 10px;cursor:pointer;" onmouseenter="this.style.boxShadow=\'0 2px 12px rgba(0,0,0,.2)\'" onmouseleave="this.style.boxShadow=\'none\'">'
+      +'<div style="display:flex;align-items:flex-start;gap:4px;margin-bottom:5px;">'
+      +'<span style="width:7px;height:7px;border-radius:50%;background:'+ampelColor+';flex-shrink:0;margin-top:3px;display:inline-block;"></span>'
+      +'<span style="font-size:11px;font-weight:600;color:var(--text);line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">'+esc(t.title||'')+'</span>'
       +'</div>'
-      +(zeitStr?'<span style="font-size:9px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:1px 5px;color:var(--text2);">⏱ '+zeitStr+'</span>':'')
-      +'</div></div>';
+      +(statusLine?'<div style="font-size:10px;color:var(--text2);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+typIcon+' '+statusLine+'</div>':'')
+      +(t.owner?'<div style="font-size:10px;color:var(--text2);margin-bottom:2px;">👤 '+esc(t.owner)+'</div>':'')
+      +(grundLine?'<div style="font-size:10px;color:var(--text2);margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+grundLine+'</div>':'')
+      +'<div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px;">'
+      +'<span style="font-size:10px;color:var(--text2);">'+bottomLeft+'</span>'
+      +badge
+      +'</div>'
+      +'</div>';
   });
   html+='</div></div>';
-  // Alle Thumbnails parallel laden
-  setTimeout(function(){
-    Promise.all(_pamRasterImgQueue.map(function(q){
-      return (async function(){
-        var el=document.getElementById(q.id);if(!el)return;
-        if(q.th&&(q.th.startsWith('data:')||q.th.startsWith('blob:'))){el.src=q.th;return;}
-        if(q.fobj&&q.fobj.driveId){var u=await _pamLoadThumb(q.fobj.driveId);if(u&&el){el.src=u;return;}}
-        if(q.th&&el)el.src=q.th;
-      })();
-    }));
-  },100);
   return html;
 }
 function renderHeute(){
@@ -6705,6 +6735,7 @@ function renderHeute(){
   try{_heuteViewMode=localStorage.getItem('pam_heute_view_mode')||'karten';}catch(e){_heuteViewMode='karten';}
   try{_heuteDateFilter=localStorage.getItem('pam_heute_date_filter')||today;}catch(e){_heuteDateFilter=today;}
   try{_heuteTypFilter2=localStorage.getItem('pam_heute_typ2_filter')||'alle';}catch(e){_heuteTypFilter2='alle';}
+  try{_heuteTerminFilter=localStorage.getItem('pam_heute_termin_filter')||'alle';}catch(e){_heuteTerminFilter='alle';}
   function _applyHF(arr_ueb,arr_heu,arr_ausf,arr_bald){
     if(_heuteFilter==='heute')return{u:[],h:arr_heu,a:[],b:[]};
     if(_heuteFilter==='overdue')return{u:arr_ueb,h:[],a:[],b:[]};
@@ -6773,23 +6804,12 @@ function renderHeute(){
       +'<th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text2);font-weight:600;">Status</th>'
       +'</tr></thead><tbody>'+rows+'</tbody></table></div>';
   }
-  var isTable=_heuteViewMode==='tabelle';
+  var isKachel=(_heuteViewMode==='kachel'||_heuteViewMode==='tabelle');
   var toggleBar='<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px;">'
-    +'<button onclick="_setHeuteViewMode(\'karten\')" style="padding:4px 11px;border-radius:20px;border:1.5px solid '+(isTable?'var(--border)':'var(--accent)')+';background:'+(isTable?'var(--bg3)':'rgba(108,99,255,0.1)')+';color:'+(isTable?'var(--text2)':'var(--accent)')+';font-size:11px;font-weight:'+(isTable?'500':'700')+';cursor:pointer;">🃏 Karten</button>'
-    +'<button onclick="_setHeuteViewMode(\'tabelle\')" style="padding:4px 11px;border-radius:20px;border:1.5px solid '+(isTable?'var(--accent)':'var(--border)')+';background:'+(isTable?'rgba(108,99,255,0.1)':'var(--bg3)')+';color:'+(isTable?'var(--accent)':'var(--text2)')+';font-size:11px;font-weight:'+(isTable?'700':'500')+';cursor:pointer;">🗂 Tabelle</button>'
-    +(isTable
-      ?'<span style="margin-left:6px;display:inline-flex;align-items:center;gap:6px;">'
-        +'<label style="font-size:11px;color:var(--text2);">Datum:</label>'
-        +'<input type="date" value="'+(_heuteDateFilter||today)+'" onchange="_setHeuteDateFilter(this.value)" style="font-size:11px;padding:3px 7px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);">'
-        +'<select onchange="_setHeuteTypFilter2(this.value)" style="font-size:11px;padding:3px 7px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);">'
-        +'<option value="alle"'+((_heuteTypFilter2==="alle"||!_heuteTypFilter2)?' selected':'')+'>Alle</option>'
-        +'<option value="auftraege"'+(_heuteTypFilter2==="auftraege"?' selected':'')+'>Aufträge</option>'
-        +'<option value="aufgaben"'+(_heuteTypFilter2==="aufgaben"?' selected':'')+'>Aufgaben</option>'
-        +'</select>'
-        +'</span>'
-      :'')
+    +'<button onclick="_setHeuteViewMode(\'karten\')" style="padding:4px 11px;border-radius:20px;border:1.5px solid '+(!isKachel?'var(--accent)':'var(--border)')+';background:'+(!isKachel?'rgba(108,99,255,0.1)':'var(--bg3)')+';color:'+(!isKachel?'var(--accent)':'var(--text2)')+';font-size:11px;font-weight:'+(!isKachel?'700':'500')+';cursor:pointer;">🃏 Karten</button>'
+    +'<button onclick="_setHeuteViewMode(\'kachel\')" style="padding:4px 11px;border-radius:20px;border:1.5px solid '+(isKachel?'var(--accent)':'var(--border)')+';background:'+(isKachel?'rgba(108,99,255,0.1)':'var(--bg3)')+';color:'+(isKachel?'var(--accent)':'var(--text2)')+';font-size:11px;font-weight:'+(isKachel?'700':'500')+';cursor:pointer;">⊞ Kachel</button>'
     +'</div>';
-  let filterBar=isTable?''
+  let filterBar=isKachel?''
     :'<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:1rem;">'
     +_fBtn('alle','Alle','var(--accent)',_cntH+_cntU+_cntA+_cntB)
     +_fBtn('heute','Heute fällig','#EF9F27',_cntH)
@@ -6800,9 +6820,8 @@ function renderHeute(){
   var _rasterListe=[...ueberfaellig,...heuteFaellig,...ausfuehrungHeute].filter(function(x,i,a){
     return a.findIndex(function(y){return y.t.id===x.t.id;})===i;
   });
-  var _rasterHtml=_pamHeuteRaster(_rasterListe,today);
+  var _rasterHtml=_pamHeuteRaster(_rasterListe,today,_heuteTypFilter2,_heuteTerminFilter);
   let html='<div style="padding:20px 24px;">'
-    +_rasterHtml
     +'<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:0.5rem;">'
     +'<span style="font-size:18px;font-weight:600;color:var(--text);">Was steht heute an?</span>'
     +'<span style="font-size:13px;color:var(--text2);">'+dateStr+'</span>'
@@ -6812,8 +6831,8 @@ function renderHeute(){
     +filterBar
     +'<div id="heuteZoomContent" style="zoom:'+zoom+'%;">';
 
-  if(isTable){
-    html+=_renderTabelle();
+  if(isKachel){
+    html+=_rasterHtml;
   }else if(!hasAufg&&!hasAuftr&&!hasPost){
     html+='<div style="color:var(--text2);font-size:14px;padding:20px 0;">Keine fälligen Aufgaben — alles erledigt!</div>';
   }else{
@@ -7165,6 +7184,7 @@ function _setHeuteFilter(key){_heuteFilter=key;try{localStorage.setItem('pam_heu
 function _setHeuteViewMode(mode){_heuteViewMode=mode;try{localStorage.setItem('pam_heute_view_mode',mode);}catch(e){}renderHeute();}
 function _setHeuteDateFilter(val){_heuteDateFilter=val;try{localStorage.setItem('pam_heute_date_filter',val);}catch(e){}renderHeute();}
 function _setHeuteTypFilter2(val){_heuteTypFilter2=val;try{localStorage.setItem('pam_heute_typ2_filter',val);}catch(e){}renderHeute();}
+function _setHeuteTerminFilter(val){_heuteTerminFilter=val;try{localStorage.setItem('pam_heute_termin_filter',val);}catch(e){}renderHeute();}
 function toggleColSort(status,field){
   const cur=_colSort[status];
   if(!cur||cur.field!==field){_colSort[status]={field,dir:1};}
