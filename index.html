@@ -3661,7 +3661,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-05 · #324'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-05-b324)
+const PAM_BUILD = 'v2026-06-05 · #326'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-05-b326)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -6372,6 +6372,7 @@ function _heuteSetFilter(key,val){
 }
 
 var _pamRasterFilter={overdue:true,heute:true,ausf:true};
+var _pamRasterGrouped={overdue:[],heute:[],ausf:[]};
 function _pamToggleRasterFilter(key){
   _pamRasterFilter[key]=!_pamRasterFilter[key];
   renderHeute();
@@ -6422,6 +6423,35 @@ function _pamKachelHovOut(){
   var pop=document.getElementById('_pamKachelHovPop');
   if(pop)pop.style.display='none';
 }
+function _pamFilterTip(e,key){
+  var pop=document.getElementById('_pamKachelHovPop');
+  if(!pop){pop=document.createElement('div');pop.id='_pamKachelHovPop';pop.style.cssText='position:fixed;z-index:13500;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 14px;box-shadow:0 8px 32px rgba(0,0,0,.45);pointer-events:none;display:none;min-width:220px;max-width:320px;';document.body.appendChild(pop);}
+  var items=(_pamRasterGrouped[key]||[]);
+  if(!items.length){pop.style.display='none';return;}
+  var today=new Date().toISOString().split('T')[0];
+  var _fD=function(d){if(!d)return'';var p=d.split('-');return p[2]+'.'+p[1]+'.';};
+  var html='<div style="display:flex;flex-direction:column;gap:3px;">';
+  items.slice(0,10).forEach(function(item){
+    var t=item.t;
+    var matchFT=(t.freieTermine||[]).find(function(f){return f.datum&&f.datum<=today&&!f.erledigt;});
+    var matchAufg=(t.aufgaben||[]).find(function(a){return a.datum&&a.datum<=today&&!a.erledigt;});
+    var grund='';
+    if(matchFT)grund='📅 '+esc(matchFT.beschreibung||matchFT.titel||'Termin')+(matchFT.von?' · '+matchFT.von:'')+(matchFT.datum?' · '+_fD(matchFT.datum):'');
+    else if(matchAufg)grund='✅ '+esc(matchAufg.text||matchAufg.titel||'Aufgabe')+(matchAufg.datum?' · '+_fD(matchAufg.datum):'');
+    else if(t.due)grund='📋 F\xe4lligkeit: '+_fD(t.due);
+    else if(t.ausfuehrungstermin===today)grund='🔧 Ausf\xfchrung heute';
+    html+='<div style="padding:3px 0 4px;border-bottom:0.5px solid var(--border);">'
+      +'<div style="font-size:11px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:270px;">'+esc(t.title||'(kein Titel)')+'</div>'
+      +(grund?'<div style="font-size:10px;color:var(--text2);margin-top:1px;">'+grund+'</div>':'')
+      +'</div>';
+  });
+  if(items.length>10)html+='<div style="font-size:10px;color:var(--text2);padding-top:3px;">… und '+(items.length-10)+' weitere</div>';
+  html+='</div>';
+  pop.innerHTML=html;
+  var x=Math.min(e.clientX,window.innerWidth-330);
+  var y=Math.min(e.clientY+22,window.innerHeight-220);
+  pop.style.left=x+'px';pop.style.top=y+'px';pop.style.display='block';
+}
 function _pamKachelLightbox(tid,startFi){
   _pamFotoLightbox(tid,startFi);
 }
@@ -6460,11 +6490,14 @@ function _pamHeuteRaster(listeAll, today, typFilter, terminFilter){
     else if(hasAusf)grouped.ausf.push(item);
     else grouped.heute.push(item);
   });
+  _pamRasterGrouped=grouped;
   var rf=_pamRasterFilter;
   function fBtn(key,label,color,cnt){
     var on=rf[key];
-    var bStyle='padding:3px 10px;border-radius:14px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;border:1.5px solid '+(on?color:'var(--border)')+';background:'+(on?color+'22':'var(--bg3)')+';color:'+(on?color:'var(--text2)')+';';
-    return'<button onclick="event.stopPropagation();_pamToggleRasterFilter(\''+key+'\')" style="'+bStyle+'">'+label+' <span style="opacity:.7;">'+cnt+'</span></button>';
+    var bStyle=on
+      ?'padding:3px 12px;border-radius:14px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;border:none;background:'+color+';color:#fff;'
+      :'padding:3px 10px;border-radius:14px;font-size:10px;font-weight:600;cursor:pointer;white-space:nowrap;border:1.5px solid var(--border);background:var(--bg3);color:var(--text2);';
+    return'<button onclick="event.stopPropagation();_pamToggleRasterFilter(\''+key+'\')" onmouseenter="_pamFilterTip(event,\''+key+'\')" onmouseleave="_pamKachelHovOut()" style="'+bStyle+'">'+label+' <span style="'+(on?'opacity:.85;':'opacity:.6;')+'">'+cnt+'</span></button>';
   }
   var _tf2=typFilter||'alle';
   var _termF=terminFilter||'alle';
@@ -6520,8 +6553,7 @@ function _pamHeuteRaster(listeAll, today, typFilter, terminFilter){
     var bottomLeft='';
     if(bt==='email'){bottomLeft=anhCnt>0?'📎 '+anhCnt+' Anh.':'📧 Mail';}
     else{bottomLeft=fotoCnt>0?'📷 '+fotoCnt+' Foto'+(fotoCnt!==1?'s':''):'&nbsp;';}
-    var clickFn=bt==='email'?"openEmailTaskModal('"+t.id+"')"
-      :"openEditTaskModal('"+t.id+"')";
+    var clickFn="_pamTaskDrucken('"+t.id+"')";
     var grpColor=item._grp==='overdue'?'#E24B4A':item._grp==='heute'?'#EF9F27':'#378ADD';
     html+='<div onclick="'+clickFn+'" style="background:var(--bg2);border-radius:10px;border:1px solid var(--border);border-left:4px solid '+grpColor+';padding:9px 10px;cursor:pointer;" onmouseenter="_pamKachelHov(event,\''+t.id+'\',\''+esc(item.board)+'\')" onmouseleave="_pamKachelHovOut()">'
       +'<div style="display:flex;align-items:flex-start;gap:4px;margin-bottom:5px;">'
