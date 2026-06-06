@@ -3686,7 +3686,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-06 · #336'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-06-b336)
+const PAM_BUILD = 'v2026-06-06 · #338'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-06-b338)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -4595,7 +4595,11 @@ function gdriveInit() {
   const _authCode = _query.get('code');
   if (_authCode) {
     window.history.replaceState({}, '', window.location.pathname);
-    _exchangeCodeForToken(_authCode);
+    if (_query.get('state') === 'gmail') {
+      _exchangeGmailCodeForToken(_authCode);
+    } else {
+      _exchangeCodeForToken(_authCode);
+    }
     return;
   }
 
@@ -5111,22 +5115,32 @@ setInterval(()=>{
     }
   });
 
-  // Gmail-Token-Ablauf prüfen (Gmail hat keinen eigenen Timer)
+  // Gmail-Token-Ablauf prüfen + Auto-Renewal via Cloud Function
   if(gmailToken){
     let _gmExp=0;try{const _gs=JSON.parse(localStorage.getItem('pam_gmail_token_v1')||'null');if(_gs)_gmExp=_gs.expires||0;}catch(e){}
-    if(_gmExp&&Date.now()>_gmExp-120000&&!_gmWarnToastShown){
-      // Weniger als 2 Min → Token läuft gleich ab
-      _gmWarnToastShown=true;
-      gmailToken=null;gmailUserEmail=null;
-      try{localStorage.removeItem('pam_gmail_token_v1');}catch(e){}
-      _gmUpdateBtn();
-      showToast('ℹ Gmail-Sitzung abgelaufen – bitte 📩 Gmail-Button drücken zum Neu-Verbinden','error',9000);
+    if(_gmExp&&Date.now()>_gmExp-600000&&!_gmRenewAttempted){
+      // Weniger als 10 Min → Cloud-Refresh versuchen
+      _gmRenewAttempted=true;
+      _renewGmailTokenViaCloud().then(ok=>{
+        if(ok){
+          _gmRenewAttempted=false; // Neuer Token → Flag für nächsten Zyklus zurücksetzen
+          console.info('[Gmail] Token automatisch erneuert ✓');
+        } else if(!_gmWarnToastShown){
+          _gmWarnToastShown=true;
+          gmailToken=null; gmailUserEmail=null;
+          try{localStorage.removeItem('pam_gmail_token_v1');}catch(e){}
+          _gmUpdateBtn();
+          showToast('ℹ Gmail-Sitzung abgelaufen – bitte 📩 Gmail-Button drücken zum Neu-Verbinden','error',9000);
+        }
+      });
     }
   } else {
-    _gmWarnToastShown=false; // Reset wenn abgemeldet
+    _gmWarnToastShown=false;
+    _gmRenewAttempted=false; // Reset wenn abgemeldet
   }
 },60*1000);
-let _gmWarnToastShown=false; // Gmail-Ablauf-Toast nur einmal pro Session
+let _gmWarnToastShown=false;   // Gmail-Ablauf-Toast nur einmal pro Session
+let _gmRenewAttempted=false;   // Verhindert mehrfachen Cloud-Refresh-Versuch pro Token-Lebensdauer
 
 // Fix #4: Konsolidierter visibilitychange-Handler (Token-Check + Sync in einem)
 // Der zweite Handler in startSyncPolling() wird durch _ptpVisHooked unterdrückt
@@ -5231,6 +5245,7 @@ function gdriveRequestToken(action) {
     prompt:                 'consent',     // Erzwingt Refresh Token bei jedem Login
     scope:                  GDRIVE_SCOPE,
     include_granted_scopes: 'true',
+    state:                  'drive',       // Unterscheidet Drive- von Gmail-Redirect
   });
   if (hint) { params.set('login_hint', hint); }
   // Fix 2026-05-24: Daten vor dem Seitenreload sichern – verhindert Datenverlust beim Reconnect
@@ -5292,6 +5307,64 @@ async function _renewTokenViaCloud() {
     return true;
   } catch (e) {
     console.warn('[Cloud-Refresh] Fehler:', e);
+    return false;
+  }
+}
+
+// ── Gmail: Authorization Code gegen Tokens tauschen (via Cloud Function) ──
+async function _exchangeGmailCodeForToken(authCode) {
+  try {
+    const response = await fetch(CLOUD_FUNCTION_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action:       'exchange',
+        code:         authCode,
+        redirect_uri: window.location.origin + window.location.pathname.replace(/index\.html$/i,''),
+      }),
+    });
+    if (!response.ok) throw new Error('Cloud-Server Fehler: ' + response.status);
+    const data = await response.json();
+    if (data.error) throw new Error(data.error);
+
+    gmailToken = data.access_token;
+    if (data.refresh_token) {
+      try { localStorage.setItem('pam_gmail_refresh_token', data.refresh_token); } catch(e) {}
+    }
+    const _exp = Date.now() + (Number(data.expires_in || 3600) - 60) * 1000;
+    fetch('https://www.googleapis.com/oauth2/v1/userinfo', {headers:{Authorization:'Bearer '+gmailToken}})
+      .then(r=>r.json()).then(d=>{
+        gmailUserEmail = d.email || ''; _gmUpdateBtn();
+        showToast('✅ Gmail verbunden: '+gmailUserEmail, 'success', 3000);
+        try{localStorage.setItem('pam_gmail_token_v1', JSON.stringify({token:gmailToken, email:gmailUserEmail, expires:_exp}));}catch(e){}
+      }).catch(()=>{ _gmUpdateBtn(); showToast('✅ Gmail verbunden', 'success', 2000); });
+  } catch(err) {
+    showToast('⚠ Gmail-Anmeldung fehlgeschlagen: ' + err.message, 'error', 8000);
+  }
+}
+
+// ── Gmail: Token im Hintergrund erneuern (via Cloud Function, kein Nutzereingriff nötig) ──
+async function _renewGmailTokenViaCloud() {
+  const refreshToken = localStorage.getItem('pam_gmail_refresh_token');
+  if (!refreshToken) return false;
+  try {
+    const response = await fetch(CLOUD_FUNCTION_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'refresh', refresh_token: refreshToken }),
+    });
+    if (!response.ok) return false;
+    const data = await response.json();
+    if (!data.access_token) return false;
+
+    gmailToken = data.access_token;
+    const _exp = Date.now() + (Number(data.expires_in || 3600) - 60) * 1000;
+    try { localStorage.setItem('pam_gmail_token_v1', JSON.stringify({token:gmailToken, email:gmailUserEmail, expires:_exp})); } catch(e) {}
+    _gmUpdateBtn();
+    console.log('[Gmail-Cloud-Refresh] Token automatisch erneuert.');
+    return true;
+  } catch(e) {
+    console.warn('[Gmail-Cloud-Refresh] Fehler:', e);
     return false;
   }
 }
@@ -11807,17 +11880,10 @@ async function _pdfSendenCreate(t,sendMail){
       doc.setFontSize(8);doc.setTextColor(80,80,80);doc.setFont('helvetica','normal');
       doc.text(a.name||a.filename||'Anhang',6,fmt[1]-3);
     }else{
-      textAnhNames.push(a.name||a.filename||'Anhang');
+      // Nicht-Bild: als separater E-Mail-Anhang sammeln (mit fileId für Download)
+      const fid2=a.fileId||(_pamExtractFileId(a.url||''));
+      textAnhNames.push({name:a.name||a.filename||'Anhang',fileId:fid2||''});
     }
-  }
-  // Nicht-Bild-Anhänge als Textliste auf einer Seite
-  if(textAnhNames.length){
-    _addPage(false);
-    let y=M+4;
-    doc.setFontSize(8);doc.setFont('helvetica','bold');doc.setTextColor(120,120,120);
-    doc.text('ANHÄNGE',M,y);y+=6;
-    doc.setFont('helvetica','normal');doc.setFontSize(11);doc.setTextColor(30,30,30);
-    for(const n of textAnhNames){doc.text('📎 '+n,M,y);y+=7;}
   }
 
   if(!doc||!hasContent){showToast('Bitte mindestens einen Inhalt auswählen','error');return;}
@@ -11830,14 +11896,14 @@ async function _pdfSendenCreate(t,sendMail){
   document.getElementById('_pdfSendenOv')?.remove();
 
   if(sendMail){
-    await _pdfSendenMail(doc,pdfName,t);
+    await _pdfSendenMail(doc,pdfName,t,textAnhNames);
   }else{
     window.open(doc.output('bloburl'),'_blank');
     showToast('✓ PDF erstellt','success',3000);
   }
 }
 
-async function _pdfSendenMail(doc,fname,t){
+async function _pdfSendenMail(doc,fname,t,extraAnhänge){
   showToast('📧 PDF wird vorbereitet…','info',3000);
   const buf=doc.output('arraybuffer');
   const b64=btoa(Array.from(new Uint8Array(buf),b=>String.fromCharCode(b)).join(''));
@@ -11847,13 +11913,35 @@ async function _pdfSendenMail(doc,fname,t){
   const token=msToken||msToken2||null;
   if(token){
     try{
+      // Hauptanhang: generiertes PDF
+      const attachments=[{'@odata.type':'#microsoft.graph.fileAttachment',name:fname,contentType:'application/pdf',contentBytes:b64}];
+      // Zusatz-Anhänge: ausgewählte Drive-Dokumente herunterladen
+      if(extraAnhänge&&extraAnhänge.length&&gdriveToken){
+        showToast('📎 Lade Dokumente…','info',6000);
+        for(const anh of extraAnhänge){
+          if(!anh.fileId)continue;
+          try{
+            const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(anh.fileId)+'?alt=media',
+              {headers:{Authorization:'Bearer '+gdriveToken}});
+            if(!r.ok){console.warn('[PdfSenden] Drive-Download fehlgeschlagen:',anh.name,r.status);continue;}
+            const blob=await r.blob();
+            const ab=await blob.arrayBuffer();
+            const ab64=btoa(Array.from(new Uint8Array(ab),b=>String.fromCharCode(b)).join(''));
+            const mime=blob.type||'application/octet-stream';
+            attachments.push({'@odata.type':'#microsoft.graph.fileAttachment',name:anh.name,contentType:mime,contentBytes:ab64});
+          }catch(e){console.warn('[PdfSenden] Anhang-Fehler:',anh.name,e);}
+        }
+      }
       const body={message:{subject:subj,body:{contentType:'Text',content:''},
         toRecipients:toAddr?[{emailAddress:{address:toAddr}}]:[],
-        attachments:[{'@odata.type':'#microsoft.graph.fileAttachment',name:fname,contentType:'application/pdf',contentBytes:b64}]
+        attachments:attachments
       },saveToSentItems:true};
       const r=await fetch('https://graph.microsoft.com/v1.0/me/sendMail',
         {method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body)});
-      if(r.ok||r.status===202){showToast('✓ Mail mit PDF versendet!','success',5000);return;}
+      if(r.ok||r.status===202){
+        const extra=attachments.length>1?' + '+( attachments.length-1)+' Dokument(e)':'';
+        showToast('✓ Mail mit PDF'+extra+' versendet!','success',5000);return;
+      }
       console.warn('[PdfSenden] Graph HTTP',r.status);
     }catch(e){console.warn('[PdfSenden] Graph-Fehler:',e);}
   }
@@ -11861,7 +11949,7 @@ async function _pdfSendenMail(doc,fname,t){
   doc.save(fname);
   const mailto='mailto:'+encodeURIComponent(toAddr)+'?subject='+encodeURIComponent(subj);
   window.open(mailto,'_blank');
-  showToast('PDF gespeichert – Anhang bitte manuell hinzufügen','warning',6000);
+  showToast('PDF gespeichert – weitere Anhänge bitte manuell hinzufügen','warning',6000);
 }
 
 let _currentFotoLbIdx=-1;
@@ -12377,17 +12465,19 @@ function gmailConnect(){
   gmailRequestToken();
 }
 function gmailRequestToken(){
-  try{localStorage.setItem('pam_gdrive_last_action','gmail_auth');}catch(e){}
+  _saveLocalBackup(); // Datensicherung vor Redirect
   const hint=localStorage.getItem('pam_user_email_v1')||'';
   const params=new URLSearchParams({
-    client_id:GDRIVE_CLIENT_ID,
-    redirect_uri:window.location.origin+window.location.pathname.replace(/index\.html$/i,''),
-    response_type:'token',
-    scope:GMAIL_SCOPE,
+    client_id:             GDRIVE_CLIENT_ID,
+    redirect_uri:          window.location.origin+window.location.pathname.replace(/index\.html$/i,''),
+    response_type:         'code',     // Code-Flow → Refresh Token möglich
+    access_type:           'offline',  // Refresh Token anfordern
+    prompt:                'consent',  // Erzwingt Refresh Token bei jedem Login
+    scope:                 GMAIL_SCOPE,
     include_granted_scopes:'true',
+    state:                 'gmail',    // Unterscheidet Gmail- von Drive-Redirect
   });
   if(hint){params.set('login_hint',hint);}
-  else{params.set('prompt','select_account');}
   window.location.href='https://accounts.google.com/o/oauth2/v2/auth?'+params;
 }
 function _gmHandleToken(resp){
