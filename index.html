@@ -3720,7 +3720,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-06 · #343'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-06-b343)
+const PAM_BUILD = 'v2026-06-06 · #345'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-06-b345)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -6201,7 +6201,7 @@ function getTasks(){
     // Normal-Modus: nur nicht-archivierte Tasks des aktuellen Boards
     t=(boards[currentBoard]||[]).filter(x=>!x.archiviert);
   }
-  if(searchQuery){const q=searchQuery.toLowerCase();t=t.filter(x=>x.title.toLowerCase().includes(q)||(x.desc||'').toLowerCase().includes(q)||x.owner.toLowerCase().includes(q)||(x.tags||[]).some(tg=>tg.toLowerCase().includes(q)));}
+  if(searchQuery){const q=searchQuery.toLowerCase();t=t.filter(x=>(x.title||'').toLowerCase().includes(q)||(x.desc||'').toLowerCase().includes(q)||(x.owner||'').toLowerCase().includes(q)||(x.tags||[]).some(tg=>tg.toLowerCase().includes(q)));}
   if(filters.owner)t=t.filter(x=>x.owner===filters.owner);
   if(filters.ampel)t=t.filter(x=>x.ampel===filters.ampel);
   if(filters.tag)t=t.filter(x=>(x.tags||[]).includes(filters.tag));
@@ -8658,6 +8658,8 @@ function clearFilters(){
   _pamFTaskId='';_pamFSpalte='';_pamFPlanung=false;
   _pamFAnfrVon='';_pamFAnfrBis='';_pamFFaellig='';_pamFTerminText='';_pamFSortField='';_pamFSortDir=1;
   ['pamFTaskSel','pamFAnfrVon','pamFAnfrBis','pamFFaelligSel','pamFSortSel','pamFTerminText'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  _pamFMehrOpen=false;
+  const _mp=document.getElementById('pamFMehrPanel');if(_mp)_mp.style.display='none';
   render();
 }
 // ── PAM FILTER v2 FUNKTIONEN (#331) ──
@@ -20344,16 +20346,13 @@ function _pamBPPopulateSpalten(){
   const sel = document.getElementById('pamBPSpaltenSel');
   if(!sel) return;
   const prev = sel.value;
-  // Reihenfolge aus boardStatuses, aber nur Spalten die wirklich Tasks haben
+  // Alle definierten Spalten des Boards anzeigen (nicht nur belegte)
   const defined = getBoardStatuses(currentBoard) || [];
+  // Zusätzlich: Tasks mit Status der nicht in boardStatuses ist (z.B. Altdaten)
   const tasks = (boards[currentBoard] || []).filter(function(t){ return !t.archiviert; });
-  // Alle tatsächlich vorhandenen Status aus Tasks sammeln
-  const seen = {};
-  tasks.forEach(function(t){ if(t.status) seen[t.status] = true; });
-  // Erst in der Reihenfolge von boardStatuses, dann restliche alphabetisch
-  const cols = [];
-  defined.forEach(function(c){ if(seen[c]){ cols.push(c); delete seen[c]; } });
-  Object.keys(seen).sort().forEach(function(c){ cols.push(c); });
+  const extra = {};
+  tasks.forEach(function(t){ if(t.status && defined.indexOf(t.status)<0) extra[t.status]=true; });
+  const cols = defined.concat(Object.keys(extra).sort());
   const _e = function(s){ return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
   let opts = '<option value="">Alle Spalten</option>';
   cols.forEach(function(c){ opts += '<option value="'+_e(c)+'">'+_e(c)+'</option>'; });
@@ -20390,7 +20389,7 @@ function _pamBPRender(){
       const ao=ampelOrder[a.ampel]!=null?ampelOrder[a.ampel]:3;
       const bo=ampelOrder[b.ampel]!=null?ampelOrder[b.ampel]:3;
       if(ao!==bo)return ao-bo;
-      return(a.due||'')>(b.due||'')?1:-1;
+      const _da=a.due||'',_db=b.due||'';return _da>_db?1:_da<_db?-1:0;
     }
     if(_pamBPSortField==='ausf'){
       const av=a.ausfuehrungstermin||''; const bv=b.ausfuehrungstermin||'';
@@ -20456,6 +20455,8 @@ function _pamBPClick(taskId, isEmail){
   if(isEmail){
     const task=(boards[currentBoard]||[]).find(function(t){return t.id===taskId;});
     if(task) setTimeout(function(){openEmailTaskModal(task, currentBoard);}, 50);
+  } else {
+    setTimeout(function(){openEditTaskModal(taskId);}, 50);
   }
 }
 
@@ -20559,7 +20560,8 @@ function _pamGSRender(){
   if(cnt) cnt.textContent = results.length ? results.length+' Treffer' : '';
 
   if(!results.length){
-    el.innerHTML='<div style="padding:20px;text-align:center;color:var(--text2);font-size:13px;">'+(q?'Keine Treffer für „'+esc(q)+'".':'Suchbegriff eingeben oder Board wählen.')+'</div>';
+    const _gsEmptyMsg=q?'Keine Treffer für „'+esc(q)+'".':(selBoard?'Keine Tasks in diesem Board.':'Suchbegriff eingeben oder Board wählen.');
+    el.innerHTML='<div style="padding:20px;text-align:center;color:var(--text2);font-size:13px;">'+_gsEmptyMsg+'</div>';
     return;
   }
 
@@ -20600,6 +20602,8 @@ function _pamGSClick(taskId, boardName, isEmail){
       if(isEmail){
         const task=(boards[boardName]||[]).find(function(t){return t.id===taskId;});
         if(task) setTimeout(function(){openEmailTaskModal(task,boardName);},80);
+      } else {
+        setTimeout(function(){openEditTaskModal(taskId);},80);
       }
     }, 250);
   } else {
@@ -20607,6 +20611,8 @@ function _pamGSClick(taskId, boardName, isEmail){
     if(isEmail){
       const task=(boards[currentBoard]||[]).find(function(t){return t.id===taskId;});
       if(task) setTimeout(function(){openEmailTaskModal(task,currentBoard);},50);
+    } else {
+      setTimeout(function(){openEditTaskModal(taskId);},50);
     }
   }
 }
@@ -20666,7 +20672,7 @@ function _pamGetSortedBoardTasks(boardName, currentId){
       const ao = ampelOrder[a.ampel] !== undefined ? ampelOrder[a.ampel] : 3;
       const bo = ampelOrder[b.ampel] !== undefined ? ampelOrder[b.ampel] : 3;
       if(ao !== bo) return ao - bo;
-      return (a.due||'') < (b.due||'') ? -1 : 1;
+      const _da=a.due||'',_db=b.due||'';return _da<_db?-1:_da>_db?1:0;
     }
     if(field === 'ausf'){
       const av = a.ausfuehrungstermin || '';
