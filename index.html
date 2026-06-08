@@ -3763,7 +3763,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-08 · #364'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-08-b364)
+const PAM_BUILD = 'v2026-06-08 · #365'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-08-b365)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -12435,7 +12435,7 @@ async function _dfbLoad(folderId,folderName){
       ?`mimeType='application/vnd.google-apps.folder' and 'root' in parents and trashed=false`
       :`'${folderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
     const resp=await fetch(
-      'https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(qStr)+'&fields=files(id,name)&orderBy=name&pageSize=100',
+      'https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(qStr)+'&fields=files(id,name)&orderBy=name&pageSize=1000',
       {headers:{Authorization:'Bearer '+gdriveToken}});
     if(resp.status===401){
       // Token abgelaufen → hilfreiche Meldung + Warn-Banner, kein looping
@@ -12478,6 +12478,8 @@ function _dfbPickItem(id,name){
   if(el){el.value=url;el.dispatchEvent(new Event('input'));}
   _dfbClose();
   showToast('✓ Ordner gesetzt: '+name,'success');
+  // Wenn Projektordner gesetzt: bekannte Unterordner automatisch suchen & befüllen
+  if(_dfbTargetField==='tGDOrdner'){_autoFillProjectSubfolders(id);}
 }
 function _dfbPickCurrent(){
   _dfbPickItem(_dfbCurrentId,_dfbCurrentName);
@@ -12485,6 +12487,54 @@ function _dfbPickCurrent(){
 function _dfbClose(){
   const ov=document.getElementById('driveFolderBrowserOverlay');
   if(ov)ov.classList.remove('open');
+}
+
+// ── Auto-Fill Unterordner nach Projektordner-Wahl ─────────────────────────────
+// Wenn tGDOrdner neu gesetzt wird: sucht 02_Fotos, 01_Dokumente, 00_Posteingang/E-Mails
+// im neuen Hauptordner und befüllt die entsprechenden Verknüpfungs-Felder.
+async function _autoFillProjectSubfolders(mainFolderId){
+  if(!gdriveToken||!mainFolderId)return;
+  try{
+    const base='https://drive.google.com/drive/folders/';
+    // Direkte Kinder des Projektordners laden
+    const qDirect=encodeURIComponent("'"+mainFolderId+"' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false");
+    const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+qDirect+'&fields=files(id,name)&orderBy=name&pageSize=50',
+      {headers:{Authorization:'Bearer '+gdriveToken}});
+    if(!r.ok)return;
+    const d=await r.json();
+    const children=d.files||[];
+    const updated=[];
+    // 02_Fotos → tGD (Foto-Ordner)
+    const fotos=children.find(function(f){return f.name==='02_Fotos';});
+    if(fotos){
+      const elF=document.getElementById('tGD');
+      if(elF){elF.value=base+fotos.id;elF.dispatchEvent(new Event('input'));updated.push('📷 Fotos');}
+    }
+    // 01_Dokumente → tDokOrdner
+    const dok=children.find(function(f){return f.name==='01_Dokumente';});
+    if(dok){
+      const elD=document.getElementById('tDokOrdner');
+      if(elD){elD.value=base+dok.id;elD.dispatchEvent(new Event('input'));updated.push('📄 Dokumente');}
+    }
+    // 00_Posteingang → E-Mails (eine Ebene tiefer) → tEmailOrdner
+    const post=children.find(function(f){return f.name==='00_Posteingang';});
+    if(post){
+      const qEmail=encodeURIComponent("'"+post.id+"' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false");
+      const r2=await fetch('https://www.googleapis.com/drive/v3/files?q='+qEmail+'&fields=files(id,name)&pageSize=20',
+        {headers:{Authorization:'Bearer '+gdriveToken}});
+      if(r2.ok){
+        const d2=await r2.json();
+        const emailF=(d2.files||[]).find(function(f){return f.name==='E-Mails';});
+        if(emailF){
+          const elE=document.getElementById('tEmailOrdner');
+          if(elE){elE.value=base+emailF.id;elE.dispatchEvent(new Event('input'));updated.push('📧 E-Mail');}
+        }
+      }
+    }
+    if(updated.length){
+      showToast('✓ Unterordner gesetzt: '+updated.join(' · '),'success',5000);
+    }
+  }catch(e){console.warn('[PAM] autoFillProjectSubfolders:',e);}
 }
 
 // ── Drive-Browser Suche ───────────────────────────────────────────────────────
@@ -12503,14 +12553,16 @@ async function _dfbSearch(term){
   const pathEl=document.getElementById('dfbPath');
   const backBtn=document.getElementById('dfbBackBtn');
   if(listEl)listEl.innerHTML='<div style="padding:16px;text-align:center;color:var(--text2);font-size:13px;">🔍 Suche läuft…</div>';
-  if(pathEl)pathEl.textContent='Suchergebnisse: "'+term+'"';
+  const _searchInFolder=(_dfbCurrentId&&_dfbCurrentId!=='root');
+  if(pathEl)pathEl.textContent=(_searchInFolder?'🔍 in „'+_dfbCurrentName+'": ':'🔍 Suche: ')+'"'+term+'"';
   if(backBtn)backBtn.style.display='none';
   const pickBtn=document.getElementById('dfbPickCurrentBtn');
   if(pickBtn)pickBtn.style.display='none';
   try{
-    const q=encodeURIComponent("name contains '"+term.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+    const _parentPart=_searchInFolder?" and '"+_dfbCurrentId+"' in parents":'';
+    const q=encodeURIComponent("name contains '"+term.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false"+_parentPart);
     // Hinweis: orderBy ist bei contains-Suchen nicht erlaubt → clientseitig sortieren
-    const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name,parents)&spaces=drive&pageSize=50',
+    const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name,parents)&spaces=drive&pageSize=200',
       {headers:{Authorization:'Bearer '+gdriveToken}});
     if(!r.ok)throw new Error('HTTP '+r.status+' – '+await r.text());
     const d=await r.json();
