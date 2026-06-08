@@ -3760,7 +3760,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-08 · #362'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-08-b362)
+const PAM_BUILD = 'v2026-06-08 · #363'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-08-b363)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -15646,7 +15646,7 @@ async function _autoCreateTaskFolder(){
   const currentFid=_extractFolderIdFromUrl(currentVal);
   if(currentFid&&currentFid!==mainFid)return;
   if(_autoFolderCreating)return;
-  if(_vbsSearchAttempts>0||_vbsSearchTimer||_vbsSubfolderSearchActive)return;
+  if(_vbsCreating||_vbsSearchAttempts>0||_vbsSearchTimer||_vbsSubfolderSearchActive)return;
   _autoFolderCreating=true;
   try{
     const confirmedName=await _promptFolderName(title);
@@ -19634,6 +19634,7 @@ function _vbsUpdateStatus(boardName){
 
 // 4) Task-Modal öffnen und alle VBS-Felder befüllen
 function _openVbsNewTask(data){
+  _vbsCreating=true; // onblur-Guard: _autoCreateTaskFolder sperren während VBS-Anlage
   localStorage.removeItem('pam_vbs_new_auftrag');
   openNewTaskModal();
   setTimeout(function(){
@@ -19677,11 +19678,15 @@ function _openVbsNewTask(data){
     // Drive-Ordnerstruktur direkt anlegen (ohne auf NAS-Sync zu warten)
     if(data.ordner){
       if(gdriveToken){
-        _vbsCreateDriveStruktur(data.ordner,data.nasParent||'',data.nasGrand||'');
+        _vbsCreateDriveStruktur(data.ordner,data.nasParent||'',data.nasGrand||'')
+          .finally(function(){_vbsCreating=false;});
       } else {
+        _vbsCreating=false;
         _vbsShowSearchBadge('⏳ Drive nicht verbunden – bitte ☁️ klicken, dann Ordner automatisch angelegt');
         try{localStorage.setItem('pam_vbs_pending_ordner',JSON.stringify({ordner:data.ordner,nasParent:data.nasParent||'',nasGrand:data.nasGrand||''}));}catch(e){}
       }
+    } else {
+      _vbsCreating=false;
     }
   },200);
 }
@@ -19690,6 +19695,7 @@ function _openVbsNewTask(data){
 let _vbsSearchTimer=null;
 let _vbsSearchAttempts=0;
 let _vbsSubfolderSearchActive=false; // Sperre während Unterordner-Retry läuft
+let _vbsCreating=false; // Sperre während VBS-Direktanlage (_vbsCreateDriveStruktur) läuft
 const _VBS_MAX_ATTEMPTS=20;
 
 function _vbsStartDriveSearch(ordnerName){
@@ -22518,11 +22524,13 @@ function deleteTask(){
     const _emBox=document.getElementById('emModalBox');
     if(_emBox&&_emBox.style.display!=='none'&&typeof _emReloadMailList==='function')_emReloadMailList();
   }catch(e){}
-  // Drive-Ordner anbieten zu löschen
+  // Drive-Ordner anbieten zu löschen (nur wenn eigener Unterordner vorhanden, nicht Eltern-Standardordner)
   if(_task){
     const _folderUrl=(_task.gdriveOrdner||_task.emailOrdner||'').trim();
     const _fid=_folderUrl?_ezFolderId(_folderUrl):null;
-    if(_fid&&gdriveToken){
+    const _defaultFids=[_ezFolderId(DEFAULT_FOLDER_NOTIZ),_ezFolderId(DEFAULT_FOLDER_BAUSTELLE)].filter(Boolean);
+    const _isOwnFolder=_fid&&!_defaultFids.includes(_fid);
+    if(_isOwnFolder&&gdriveToken){
       if(confirm('Drive-Ordner "'+(_task.title||'Task')+'" auch in den Papierkorb? (Kann in Drive wiederhergestellt werden)')){
         _pamTrashDriveFolder(_fid,_task.title||'Ordner');
       }
