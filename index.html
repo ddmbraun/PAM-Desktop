@@ -3763,7 +3763,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-10 · #367'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-10-b367)
+const PAM_BUILD = 'v2026-06-10 · #368'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-10-b368)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -5854,7 +5854,14 @@ async function gdriveSaveData() {
             // ID der Task, die gerade im Edit-Modal offen ist (falls überhaupt)
             const tidEl=document.getElementById('taskId');
             const modalOpen=document.querySelector('.modal-overlay.open')||document.querySelector('#taskModal.open');
-            const modalTaskId=(modalOpen&&tidEl)?tidEl.value:'';
+            let modalTaskId=(modalOpen&&tidEl)?tidEl.value:'';
+            // Fix #368: Posteingang-Modal erkennen – es hat kein #taskId-Feld.
+            // Ohne diese Erkennung lief der Modal-Merge für Posteingang-Tasks ins
+            // Leere (Remote gewann komplett) bzw. ein STALE #taskId-Wert eines längst
+            // geschlossenen Tasks wurde fälschlich als "offen" behandelt.
+            const _emBoxEl=document.getElementById('emModalBox');
+            const _emOpen=!!(_emBoxEl&&_emBoxEl.style.display!=='none'&&typeof _emCurrentTask!=='undefined'&&_emCurrentTask&&_emCurrentTask.id);
+            if(_emOpen)modalTaskId=_emCurrentTask.id;
             // Alle lokalen Task-IDs pro Board sammeln, damit wir "nur lokal vorhandene" erkennen
             const localState=buildSaveObject();
             const remoteIds=new Set();
@@ -5899,7 +5906,8 @@ async function gdriveSaveData() {
                   // Merge: Snapshot-basiert – nur tatsächlich geänderte Felder lokal gewinnen lassen.
                   // Unveränderte Felder → Remote (Mobile) gewinnt, damit Mobile-Änderungen erhalten bleiben.
                   const mergedTask={...(remoteTask||{})};
-                  const _snap=_taskModalSnapshot;
+                  // Fix #368: passenden Snapshot wählen – Posteingang-Modal hat seinen eigenen
+                  const _snap=_emOpen?_emModalSnapshot:_taskModalSnapshot;
                   for(const k of Object.keys(lt)){
                     if(k==='id')continue; // ID nie überschreiben
                     const snap=_snap?_snap[k]:undefined;
@@ -5958,9 +5966,18 @@ async function gdriveSaveData() {
             // Merged-State zurück ins Frontend laden, damit UI und folgende Saves konsistent sind
             loadFromObject(merged);
             render();
+            // Fix #368: Posteingang-Modal nach Merge neu binden – loadFromObject() baut
+            // boards[] mit NEUEN Objekten auf; _emCurrentTask zeigte sonst auf ein
+            // verwaistes Objekt → weitere Posteingang-Eingaben gingen ins Leere.
+            if(_emOpen){
+              const _emRebind=findTaskById(modalTaskId);
+              if(_emRebind)_emCurrentTask=_emRebind;
+            }
             // Wenn Modal offen ist: lokale Snapshots aktualisieren, sonst überschreibt der
             // nächste Auto-Save die gerade neu gemergten Einträge (z.B. Handy-Zeiterfassung) wieder.
-            if(modalTaskId){
+            // Fix #368: nur fürs Auftrag/Aufgabe-Modal – die task*-Globals und render*-Funktionen
+            // gehören zu diesem Modal, nicht zum Posteingang.
+            if(modalTaskId&&!_emOpen){
               const refreshed=findTaskById(modalTaskId);
               if(refreshed){
                 try{taskAusserhausTermine=JSON.parse(JSON.stringify(refreshed.ausserhausTermine||[]));}catch(e){console.warn('[PAM]',e);}
@@ -19530,6 +19547,11 @@ function closeModal(){
   }
   _taskModalDirty = false;
   _taskModalSnapshot = null;
+  // Fix #368: #taskId leeren – ein STALE-Wert ließ den Konflikt-Merge sonst einen
+  // längst geschlossenen Task als "offen" behandeln (alle lokalen Felder gewannen
+  // ohne Snapshot) → Handy-Änderungen an diesem Task wurden überschrieben.
+  // saveTaskData() ist zu diesem Zeitpunkt bereits gelaufen (siehe oben).
+  const _tidClear=document.getElementById('taskId');if(_tidClear)_tidClear.value='';
   collapseAllTaskSections();
   // E-Mail-Block einklappen + Chips zurücksetzen
   ['pamGmailBody','pamOutlookBody'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});
@@ -20248,6 +20270,7 @@ function _pfUpdateStatus(boardName){
 // E-MAIL-TASK-MODAL – Öffnen, Rendern, Speichern, Aktionen
 // ══════════════════════════════════════════════════════
 let _emCurrentTask=null, _emCurrentBoard='', _emPrevBoard='', _emActiveMailIdx=-1, _emSaveTimer=null, _emRightCollapsed=false;
+let _emModalSnapshot=null; // Fix #368: Task-Stand beim Öffnen des Posteingang-Modals (für Snapshot-Merge in gdriveSaveData)
 let _emLoadOverrideId=null; // Fix1: kein DOM-Side-Effect beim Outlook/Gmail-Laden
 let _emOpenMailToken=0;    // Fix3: Race-Condition-Schutz in _emOpenMail
 let _emMailBodyCache={};
@@ -20400,6 +20423,9 @@ async function _pepLoadPreview(m,task,previewEl){
 
 function openEmailTaskModal(task,board){
   _emCurrentTask=task;
+  // Fix #368: Snapshot für den Konflikt-Merge – nur tatsächlich geänderte Felder
+  // gewinnen gegen zwischenzeitliche Handy-Änderungen (analog _taskModalSnapshot)
+  try{_emModalSnapshot=JSON.parse(JSON.stringify(task));}catch(e){_emModalSnapshot=null;}
   _pamActiveTaskId=task.id;
   _emPrevBoard=currentBoard; // merken für Rücksetzen beim Schließen
   _emCurrentBoard=board||currentBoard;
@@ -21147,6 +21173,7 @@ function closeEmailTaskModal(){
   _emLastAttachFiles=[];
   _emActiveMailIdx=-1;
   _emCurrentTask=null;
+  _emModalSnapshot=null; // Fix #368: Snapshot zurücksetzen
   _emCurrentBoard='';
   // currentBoard auf vorherigen Wert zurücksetzen
   if(_emPrevBoard&&_emPrevBoard!==currentBoard){currentBoard=_emPrevBoard;render();}
