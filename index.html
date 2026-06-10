@@ -3763,7 +3763,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-08 · #365'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-08-b365)
+const PAM_BUILD = 'v2026-06-10 · #366'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-10-b366)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -4672,6 +4672,17 @@ function _getLocalBackup(){
   try{const s=localStorage.getItem(PC_BACKUP_KEY);return s?JSON.parse(s):null;}catch(e){return null;}
 }
 
+// ── Fix #366: Lösch-Tracking ──────────────────────────────────────────────
+// IDs lokal gelöschter Tasks. Verhindert, dass der Konflikt-Merge in
+// gdriveSaveData() (Remote als Basis) gerade gelöschte Tasks "wiederbelebt",
+// wenn das Handy zwischen Löschen und Speichern geschrieben hat.
+// Persistiert in localStorage (max. 500 IDs); IDs werden entfernt, sobald die
+// Löschung auf Drive propagiert ist (ID nicht mehr im Remote-Stand).
+let _pamDeletedIds=new Set();
+try{(JSON.parse(localStorage.getItem('pam_deleted_ids_v1')||'[]')||[]).forEach(id=>_pamDeletedIds.add(id));}catch(e){}
+function _pamPersistDeletedIds(){try{localStorage.setItem('pam_deleted_ids_v1',JSON.stringify([..._pamDeletedIds].slice(-500)));}catch(e){}}
+function _pamMarkTaskDeleted(id){if(!id)return;_pamDeletedIds.add(id);_pamPersistDeletedIds();}
+
 let gdriveToken = null;
 let gdriveTokenExpires = 0;
 let gdriveETag = null;  // ETag für Optimistic Locking
@@ -5275,6 +5286,20 @@ document.addEventListener('visibilitychange', () => {
 // Verhindert dass startSyncPolling() einen zweiten visibilitychange-Handler registriert
 window._ptpVisHooked = true;
 
+// Fix #366: Sicherung beim Schließen des Fensters/Tabs.
+// Vorher gab es KEINEN beforeunload-Handler – wer innerhalb des 1s-Auto-Save-Debounce
+// schloss, verlor die letzte Änderung. Jetzt: Modal-Felder → boards[] übernehmen,
+// synchrones localStorage-Backup, und bei ungespeicherten Änderungen Browser-Warnung
+// (gibt dem laufenden Drive-Save die Chance fertigzulaufen, wenn der User abbricht).
+window.addEventListener('beforeunload',(e)=>{
+  let _unsaved=false;
+  try{
+    if(_taskModalDirty){_unsaved=true;clearTimeout(autoSaveTimer);saveTaskData();}
+    _saveLocalBackup(); // synchron – einzige zuverlässige Sicherung beim Schließen
+  }catch(ex){console.warn('[PAM] beforeunload:',ex);}
+  if(_unsaved||gdriveSaving){e.preventDefault();e.returnValue='';}
+});
+
 // Fix 2026-05-24: Permanenter 60-Sekunden-Intervall-Save
 // Speichert den offenen Task auch wenn der User in einem anderen Programm arbeitet
 // und keine Feldänderungen stattfinden (kein oninput-Trigger)
@@ -5623,13 +5648,9 @@ async function migrateFileToWorkspaceFolder(fileId) {
 // ── WORKBOARD-POLLING (fremde Änderungen übernehmen, z.B. vom Handy) ──
 let workboardLastModified=null;
 let workboardPollTimer=null;
+let _pamRemotePollPending=false; // Fix #366: fremde Änderung erkannt, aber Modal offen/User tippt
 async function pollWorkboardFile(){
   if(!gdriveFileId||!gdriveTokenValid())return;
-  // Nicht neuladen, während der User gerade tippt
-  const ae=document.activeElement;
-  if(ae&&['INPUT','TEXTAREA','SELECT'].includes(ae.tagName))return;
-  // Nicht neuladen, während ein Modal offen ist (Task bearbeiten, Spalten-Editor, etc.)
-  if(document.querySelector('.modal-overlay.open'))return;
   try{
     const mr=await fetch('https://www.googleapis.com/drive/v3/files/'+gdriveFileId+'?fields=modifiedTime&_='+Date.now(),
       {headers:{Authorization:'Bearer '+gdriveToken},cache:'no-store'});
@@ -5643,6 +5664,23 @@ async function pollWorkboardFile(){
     const meta=await mr.json();
     if(!workboardLastModified){workboardLastModified=meta.modifiedTime;return;}
     if(meta.modifiedTime===workboardLastModified)return;
+    // Fix #366: Während User tippt oder ein Modal offen ist, nicht neu laden –
+    // aber Änderung MERKEN und Hinweis zeigen (vorher wurden Handy-Änderungen
+    // stillschweigend ignoriert, solange ein Modal offen war).
+    // closeModal() lädt ausstehende Änderungen dann sofort nach.
+    {
+      const ae=document.activeElement;
+      const _typing=ae&&['INPUT','TEXTAREA','SELECT'].includes(ae.tagName);
+      const _modalOpen=!!document.querySelector('.modal-overlay.open');
+      if(_typing||_modalOpen){
+        if(!_pamRemotePollPending){
+          _pamRemotePollPending=true;
+          try{const ind=document.getElementById('fileMsg');if(ind)ind.textContent='↻ Änderungen vom Handy liegen vor…';}catch(e){}
+        }
+        return;
+      }
+    }
+    _pamRemotePollPending=false;
     // Datei hat sich geändert — neu laden
     const r=await fetch('https://www.googleapis.com/drive/v3/files/'+gdriveFileId+'?alt=media&_='+Date.now(),
       {headers:{Authorization:'Bearer '+gdriveToken,'Cache-Control':'no-cache'},cache:'no-store'});
@@ -5894,6 +5932,17 @@ async function gdriveSaveData() {
                   if(!exists)merged[k].push(lt);
                 }
               }
+            }
+            // Fix #366: lokal gelöschte Tasks aus dem Merge entfernen –
+            // Remote ist Basis, daher kämen gerade gelöschte Tasks sonst zurück.
+            if(_pamDeletedIds.size){
+              for(const rk of Object.keys(merged)){
+                if(rk.startsWith('_')||!Array.isArray(merged[rk]))continue;
+                merged[rk]=merged[rk].filter(t=>!(t&&t.id&&_pamDeletedIds.has(t.id)));
+              }
+              // IDs aufräumen, deren Löschung bereits auf Drive propagiert ist
+              for(const did of [..._pamDeletedIds]){if(!remoteIds.has(did))_pamDeletedIds.delete(did);}
+              _pamPersistDeletedIds();
             }
             // Merged-State zurück ins Frontend laden, damit UI und folgende Saves konsistent sind
             loadFromObject(merged);
@@ -19452,7 +19501,8 @@ function closeModal(){
   // Nur speichern wenn User etwas geändert hat ODER es ein neuer Task ist.
   // Ohne Änderung würde saveTaskData() den T0-Stand zurückschreiben und
   // zwischenzeitliche Mobile-Änderungen überschreiben (Hauptursache Mobile→PC-Bug).
-  if(_isNewTask || _taskModalDirty){
+  const _didSave = _isNewTask || _taskModalDirty; // Fix #366: für Poll-Nachholen unten
+  if(_didSave){
     saveTaskData();
   }
   _taskModalDirty = false;
@@ -19468,6 +19518,13 @@ function closeModal(){
   const _vbsBadge=document.getElementById('_vbsDriveBadge');if(_vbsBadge)_vbsBadge.remove();
   // VBS-Sperren zurücksetzen damit _autoCreateTaskFolder für den nächsten Task wieder funktioniert
   _vbsSubfolderSearchActive=false;
+  // Fix #366: Während das Modal offen war eingegangene Handy-Änderungen jetzt nachladen.
+  // NUR wenn hier nichts gespeichert wurde – sonst übernimmt der Konflikt-Merge in
+  // gdriveSaveData() das Zusammenführen (sofortiges Neuladen würde die gerade
+  // gespeicherten Modal-Änderungen aus boards[] überschreiben, bevor der Save läuft).
+  if(_pamRemotePollPending&&!_didSave){
+    setTimeout(()=>{try{pollWorkboardFile();}catch(e){console.warn('[PAM]',e);}},300);
+  }
 }
 function saveTaskAndBack(){
   saveTask(); // speichert (wenn Titel vorhanden) und schließt
@@ -22576,6 +22633,7 @@ function deleteTask(){
   if(!boards[currentBoard])return;
   const _task=(boards[currentBoard]||[]).find(t=>t.id===id)||null;
   boards[currentBoard]=boards[currentBoard].filter(t=>t.id!==id);
+  _pamMarkTaskDeleted(id); // Fix #366: verhindert Wiederauferstehung beim Konflikt-Merge
   _taskModalDirty=false; // verhindert dass closeModal() den Task wieder zurückschreibt
   closeModal();render();autoSave();
   // Posteingang-Modal aktualisieren falls offen
