@@ -462,6 +462,38 @@ function _decodeQP(s,charset){
 function _decodeB64Body(s,cs){
   try{let bin=atob(s.replace(/\s/g,''));let b=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)b[i]=bin.charCodeAt(i);return new TextDecoder(cs||'utf-8').decode(b);}catch(e){return s;}
 }
+// ── Fix #371: Encoding-Reparatur für EML-Inhalte ────────────────────────────
+// .eml-Dateien mit 8bit-Latin-1-Body wurden bisher pauschal als UTF-8 gelesen →
+// ä/ö/ü wurden zu Ersetzungszeichen (�) oder Mojibake (Ã¤/Ã¼).
+// Datei binär laden und Zeichensatz heuristisch bestimmen:
+function _smartDecodeEmlBuffer(buf){
+  const utf8=new TextDecoder('utf-8',{fatal:false}).decode(buf);
+  // Ersetzungszeichen vorhanden → Datei war kein gültiges UTF-8 → als windows-1252 neu dekodieren
+  if(utf8.indexOf('�')>=0){
+    try{
+      const w=new TextDecoder('windows-1252').decode(buf);
+      if(w.indexOf('�')<0)return w;
+    }catch(e){}
+  }
+  return utf8;
+}
+// UTF-8-Bytes, die fälschlich als Latin-1 interpretiert wurden (Ã¤→ä, Ã¼→ü, ÃŸ→ß):
+// nur reparieren, wenn das typische Muster vorkommt UND die Rückumwandlung gültiges UTF-8 ergibt.
+const _W1252_REV={0x20AC:0x80,0x201A:0x82,0x0192:0x83,0x201E:0x84,0x2026:0x85,0x2020:0x86,0x2021:0x87,0x02C6:0x88,0x2030:0x89,0x0160:0x8A,0x2039:0x8B,0x0152:0x8C,0x017D:0x8E,0x2018:0x91,0x2019:0x92,0x201C:0x93,0x201D:0x94,0x2022:0x95,0x2013:0x96,0x2014:0x97,0x02DC:0x98,0x2122:0x99,0x0161:0x9A,0x203A:0x9B,0x0153:0x9C,0x017E:0x9E,0x0178:0x9F}; // Fix #371b
+function _fixMojibake(s){
+  if(!s||!/Ã[ -¿]/.test(s))return s;
+  try{
+    const bytes=new Uint8Array(s.length);
+    for(let i=0;i<s.length;i++){
+      let c=s.charCodeAt(i);
+      // Fix #371b: Windows-1252-Sonderzeichen (Ÿ € „ … aus 0x80–0x9F) zurückmappen –
+      // ohne sie würde z.B. ÃŸ (=ß) nicht repariert, weil Ÿ als U+0178 > 0xFF ist.
+      if(c>0xFF){c=_W1252_REV[c];if(c===undefined)return s;}
+      bytes[i]=c;
+    }
+    return new TextDecoder('utf-8',{fatal:true}).decode(bytes);
+  }catch(e){return s;}
+}
 // ── EML-Anbieter-Erkennung ──────────────────────────────────────────────────
 // Gibt 'gmail', 'exchange' oder 'unknown' zurück.
 // Bekannte Google-Workspace-Domains (Mails über Gmail-Server, aber eigene Domain)
@@ -3839,7 +3871,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-10 · #370'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-10-b370)
+const PAM_BUILD = 'v2026-06-10 · #371'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-10-b371)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -14121,14 +14153,20 @@ async function _pamEmailAntwortenMitVerlauf(){
   // ── Schritt 1: Verlauf aus Thread-Mails + EML-Originalen aufbauen ──
   // Thread-Nachrichten normalisieren (primäre Quelle wenn Verlauf geladen ist)
   // Fix #370 (V3): id mitnehmen (für Graph-Nachladen) + _cachedBodyHtml nutzen (vom Verlauf-Fenster geladener Inhalt)
-  const _tvMap=m=>({id:m.id||'',messageId:m.messageId||m.internetMessageId||'',subject:m.subject||'',date:m.date,sender:m.fromName?('"'+m.fromName+'" <'+(m.from||'')+'>'):(m.from||m.sender||''),bodyHtml:m.bodyHtml||m._cachedBodyHtml||'',bodyText:m.bodyText||m.preview||''});
+  // Fix #371: preview SEPARAT halten – Graph-bodyPreview sind nur die ersten ~250 Zeichen!
+  // Wanderte preview in bodyText, hielt der Builder die Vorschau für den vollen Inhalt
+  // und übersprang das Live-Nachladen → im Entwurf stand nur "der erste Teil" der Mail.
+  const _tvMap=m=>({id:m.id||'',messageId:m.messageId||m.internetMessageId||'',subject:m.subject||'',date:m.date,sender:m.fromName?('"'+m.fromName+'" <'+(m.from||'')+'>'):(m.from||m.sender||''),bodyHtml:m.bodyHtml||m._cachedBodyHtml||'',bodyText:m.bodyText||'',preview:m.preview||''});
   const threadMails=[...(task.gmailThreadMessages||[]).map(_tvMap),...(task.msThreadMessages||[]).map(_tvMap)];
-  // Manuell hochgeladene EML-Originale (vollständiger Body – bevorzugt falls vorhanden)
+  // Manuell hochgeladene EML-Originale
   const emlMails=[...(task.emailOriginals||[]),...(taskEmailOriginals||[])];
-  // Kombinieren: EML-Inhalt bevorzugen, Thread-Mails als Fallback / Ergänzung
+  // Fix #371: Thread-Mails (Outlook/Gmail) BEVORZUGEN – Graph liefert das echte
+  // Original-HTML mit garantiert korrektem UTF-8 (Original-Optik + saubere Umlaute).
+  // EML-Originale nur noch für Mails, die nicht im Thread sind (vorher umgekehrt →
+  // EML-Parser-Encoding-Probleme landeten im Antwort-Entwurf).
   const seenIds=new Set();
   const storedMails=[];
-  [...emlMails,...threadMails].forEach(m=>{const key=m.messageId||(m.subject+'|'+(m.date||''));if(seenIds.has(key))return;seenIds.add(key);storedMails.push(m);});
+  [...threadMails,...emlMails].forEach(m=>{const key=m.messageId||(m.subject+'|'+(m.date||''));if(seenIds.has(key))return;seenIds.add(key);storedMails.push(m);});
   const uniqueMails=[...storedMails].sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
 
   let verlaufHtml='';
@@ -14142,8 +14180,9 @@ async function _pamEmailAntwortenMitVerlauf(){
       let bodyContent=m.bodyHtml||m.bodyText||'';
       if(!bodyContent&&m.fileId&&gdriveToken){
         try{
+          // Fix #371: binär laden + Zeichensatz-Heuristik statt pauschal UTF-8 (r.text())
           const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(m.fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
-          if(r.ok){const txt=await r.text();const parsed=_parseEmlText(txt);bodyContent=parsed.bodyHtml||parsed.bodyText||'';}
+          if(r.ok){const txt=_smartDecodeEmlBuffer(await r.arrayBuffer());const parsed=_parseEmlText(txt);bodyContent=parsed.bodyHtml||parsed.bodyText||'';}
         }catch(e){console.warn('[PAM] EML laden für Verlauf:',e);}
       }
       // Fix #370 (V3): Outlook-Body live von Graph nachladen, wenn weder gespeichert noch EML vorhanden
@@ -14154,6 +14193,10 @@ async function _pamEmailAntwortenMitVerlauf(){
           if(rb.ok){const db=await rb.json();bodyContent=(db.body&&db.body.content)||'';}
         }catch(e){console.warn('[PAM] Graph-Body für Verlauf:',e);}
       }
+      // Fix #371: Vorschau nur als ALLERLETZTER Ausweg (wenn Drive + Graph nichts lieferten)
+      if(!bodyContent)bodyContent=m.preview||'';
+      // Fix #371: Mojibake-Reparatur (UTF-8 fälschlich als Latin-1 interpretiert: Ã¤→ä)
+      bodyContent=_fixMojibake(bodyContent);
       // Fix #370 (V2): aufgelösten Inhalt am Objekt merken – der mailto-Fallback unten
       // nutzte vorher nur m.bodyText und zeigte "(kein Inhalt)", obwohl der Body
       // hier gerade aus Drive/Graph geladen wurde.
@@ -14703,11 +14746,13 @@ async function _pamVerlaufDrucken(){
   if(!task){showToast('Kein Task gefunden.','warning',3000);return;}
   showToast('⏳ Verlauf wird aufgebaut…','info',4000);
   // Thread-Mails + EML-Originale kombinieren (wie in _pamEmailAntwortenMitVerlauf)
-  const _tvMap2=m=>({messageId:m.messageId||m.internetMessageId||'',subject:m.subject||'',date:m.date,sender:m.fromName?('"'+m.fromName+'" <'+(m.from||'')+'>'):(m.from||m.sender||''),bodyHtml:m.bodyHtml||'',bodyText:m.bodyText||m.preview||''});
+  // Fix #371: gleiche Korrekturen wie beim Antwort-Verlauf – id für Graph-Nachladen,
+  // _cachedBodyHtml nutzen, preview separat (nur ~250 Zeichen!), Thread-Mails bevorzugen
+  const _tvMap2=m=>({id:m.id||'',messageId:m.messageId||m.internetMessageId||'',subject:m.subject||'',date:m.date,sender:m.fromName?('"'+m.fromName+'" <'+(m.from||'')+'>'):(m.from||m.sender||''),bodyHtml:m.bodyHtml||m._cachedBodyHtml||'',bodyText:m.bodyText||'',preview:m.preview||''});
   const threadMails2=[...(task.gmailThreadMessages||[]).map(_tvMap2),...(task.msThreadMessages||[]).map(_tvMap2)];
   const emlMails2=[...(task.emailOriginals||[]),...(taskEmailOriginals||[])];
   const seenIds=new Set();const storedMails=[];
-  [...emlMails2,...threadMails2].forEach(m=>{const key=m.messageId||(m.subject+'|'+(m.date||''));if(seenIds.has(key))return;seenIds.add(key);storedMails.push(m);});
+  [...threadMails2,...emlMails2].forEach(m=>{const key=m.messageId||(m.subject+'|'+(m.date||''));if(seenIds.has(key))return;seenIds.add(key);storedMails.push(m);});
   const uniqueMails=[...storedMails].sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
   let verlaufHtml='';
   if(uniqueMails.length>0){
@@ -14718,10 +14763,21 @@ async function _pamVerlaufDrucken(){
       let bodyContent=m.bodyHtml||m.bodyText||'';
       if(!bodyContent&&m.fileId&&gdriveToken){
         try{
+          // Fix #371: binär laden + Zeichensatz-Heuristik statt pauschal UTF-8
           const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(m.fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
-          if(r.ok){const txt=await r.text();const parsed=_parseEmlText(txt);bodyContent=parsed.bodyHtml||parsed.bodyText||'';}
+          if(r.ok){const txt=_smartDecodeEmlBuffer(await r.arrayBuffer());const parsed=_parseEmlText(txt);bodyContent=parsed.bodyHtml||parsed.bodyText||'';}
         }catch(e){console.warn('[PAM] EML laden für Verlauf-Druck:',e);}
       }
+      // Fix #371: Outlook-Body live nachladen (preview wäre nur ~250 Zeichen)
+      if(!bodyContent&&m.id&&typeof msToken!=='undefined'&&(msToken||msToken2)){
+        try{
+          const rb=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(m.id)+'?$select=body',
+            {headers:{Authorization:'Bearer '+_msPickToken(task),'Prefer':'outlook.body-content-type="html"'}});
+          if(rb.ok){const db=await rb.json();bodyContent=(db.body&&db.body.content)||'';}
+        }catch(e){console.warn('[PAM] Graph-Body für Verlauf-Druck:',e);}
+      }
+      if(!bodyContent)bodyContent=m.preview||'';
+      bodyContent=_fixMojibake(bodyContent);
       // Outlook-Standard-Format (auch im Druck)
       verlaufHtml+='<div style="border:none;border-top:solid #E1E1E1 1.0pt;padding:3.0pt 0cm 0cm 0cm;margin:16px 0 8px 0;">';
       const _dd=m.date?new Date(m.date):null;
