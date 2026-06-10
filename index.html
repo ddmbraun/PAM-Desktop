@@ -3871,7 +3871,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-10 · #374'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-10-b374)
+const PAM_BUILD = 'v2026-06-10 · #377'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-10-b377)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -4344,6 +4344,7 @@ function initColResize(){
 
 // ── AUTO-SAVE DEBOUNCE ──
 let autoSaveTimer = null;
+let _pushToSyncFullSaveTimer = null; // #375: debounced Volldatei-Save nach pushToSync()
 function scheduleSave(){
   clearTimeout(autoSaveTimer);
   autoSaveTimer = setTimeout(async ()=>{await autoSave();pushToSync();}, 1000);
@@ -6079,7 +6080,7 @@ async function gdriveSaveData() {
             // verwaistes Objekt → weitere Posteingang-Eingaben gingen ins Leere.
             if(_emOpen){
               const _emRebind=findTaskById(modalTaskId);
-              if(_emRebind)_emCurrentTask=_emRebind;
+              if(_emRebind){_emCurrentTask=JSON.parse(JSON.stringify(_emRebind));_emDirty=false;} // #376: Arbeitskopie nach Merge erneuern
             }
             // Wenn Modal offen ist: lokale Snapshots aktualisieren, sonst überschreibt der
             // nächste Auto-Save die gerade neu gemergten Einträge (z.B. Handy-Zeiterfassung) wieder.
@@ -14647,7 +14648,7 @@ async function _pamUnifiedShowPreview(taskId,src,idx){
       if(r.ok){const data=await r.json();m._cachedBodyHtml=data.body?.content||'';
         const fr=document.createElement('iframe');fr.style.cssText='width:100%;height:300px;border:none;';fr.sandbox='allow-same-origin';
         bodyEl.innerHTML='';bodyEl.appendChild(fr);
-        fr.contentDocument.open();fr.contentDocument.write(data.body?.contentType==='html'?data.body.content:'<!DOCTYPE html><html><body><pre style="white-space:pre-wrap;font-size:13px;">'+esc(data.body?.content||m.preview||'')+'</pre></body></html>');fr.contentDocument.close();
+        fr.contentDocument.open();fr.contentDocument.write(data.body?.contentType==='html'?data.body.content.replace(/<script[\s\S]*?<\/script>/gi,''):'<!DOCTYPE html><html><body><pre style="white-space:pre-wrap;font-size:13px;">'+esc(data.body?.content||m.preview||'')+'</pre></body></html>');fr.contentDocument.close(); // Fix #377: Script-Strip wie in den anderen Zweigen
         setTimeout(()=>{try{fr.style.height=Math.min(fr.contentDocument.body.scrollHeight+20,360)+'px';}catch(e){}},300);
         return;
       }
@@ -15567,13 +15568,14 @@ async function _msOpenMailOverlay(taskId,idx){
   document.body.appendChild(ov);
   ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
   // Mail-Body laden
-  if(!msToken){
+  if(!msToken&&!msToken2){
     // Fix #227: klare Rückmeldung wenn Outlook-Token fehlt
     const bodyEl2=document.getElementById('_msMailBody');
     if(bodyEl2)bodyEl2.innerHTML='<div style="color:#c00;padding:20px;">⚠ Outlook nicht verbunden. Bitte oben auf 📨 Outlook klicken.</div>';
-  } else if(msToken&&m.id){
+  } else if(m.id){
     try{
-      const r=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${m.id}?$select=body`,{headers:{Authorization:'Bearer '+msToken}});
+      // Fix #377: kontobewusst (#316) – vorher msToken (Konto 1) fest → 404 bei Konto-2-Mails
+      const r=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${m.id}?$select=body`,{headers:{Authorization:'Bearer '+_msPickToken(task)}});
       if(r.ok){
         const data=await r.json();
         const bodyEl=document.getElementById('_msMailBody');
@@ -15663,9 +15665,10 @@ async function _msShowInlinePreview(taskId,idx){
       <div style="padding:16px;color:var(--text2);font-size:13px;">⏳ Lade Mail-Inhalt…</div>
     </div>
   </div>`;
-  if(msToken&&m.id){
+  if((msToken||msToken2)&&m.id){
     try{
-      const r=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${m.id}?$select=body`,{headers:{Authorization:'Bearer '+msToken}});
+      // Fix #377: kontobewusst (#316) – vorher msToken (Konto 1) fest → 404 bei Konto-2-Mails
+      const r=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${m.id}?$select=body`,{headers:{Authorization:'Bearer '+_msPickToken(task)}});
       if(r.ok){
         const data=await r.json();
         m._cachedBodyHtml=data.body?.content||'';
@@ -16004,6 +16007,7 @@ async function _emAutoCreateTaskFolder(){
   try{
     const urls=await _createDriveEmailStruktur(title,parentFid);
     _emCurrentTask.gdriveOrdner=urls.mainUrl;
+    _emDirty=true;_emFlushToLive(); // #376
     scheduleAutoSave();
     showToast('✓ E-Mail-Ordner angelegt','success',3500);
   }catch(e){
@@ -20506,6 +20510,7 @@ function _pfUpdateStatus(boardName){
 // E-MAIL-TASK-MODAL – Öffnen, Rendern, Speichern, Aktionen
 // ══════════════════════════════════════════════════════
 let _emCurrentTask=null, _emCurrentBoard='', _emPrevBoard='', _emActiveMailIdx=-1, _emSaveTimer=null, _emRightCollapsed=false;
+let _emDirty=false; // #376: Dirty-Flag – true wenn User etwas im Posteingang-Modal geändert hat
 let _emModalSnapshot=null; // Fix #368: Task-Stand beim Öffnen des Posteingang-Modals (für Snapshot-Merge in gdriveSaveData)
 let _emLoadOverrideId=null; // Fix1: kein DOM-Side-Effect beim Outlook/Gmail-Laden
 let _emOpenMailToken=0;    // Fix3: Race-Condition-Schutz in _emOpenMail
@@ -20658,7 +20663,8 @@ async function _pepLoadPreview(m,task,previewEl){
 }
 
 function openEmailTaskModal(task,board){
-  _emCurrentTask=task;
+  _emCurrentTask=JSON.parse(JSON.stringify(task)); // #376: Arbeitskopie – nicht direkt am Live-Objekt
+  _emDirty=false;
   // Fix #368: Snapshot für den Konflikt-Merge – nur tatsächlich geänderte Felder
   // gewinnen gegen zwischenzeitliche Handy-Änderungen (analog _taskModalSnapshot)
   try{_emModalSnapshot=JSON.parse(JSON.stringify(task));}catch(e){_emModalSnapshot=null;}
@@ -21576,7 +21582,9 @@ async function _emOpenMail(idx,mails){
     const d2=d.date?new Date(d.date):null;
     const dateLabel=d2?d2.toLocaleString('de-DE'):'';
     const allFiles=[];
-    (d.attachments||[]).forEach(function(a){let name=a.filename||a.name||'Anhang';let nl=name.toLowerCase();let icon=nl.endsWith('.pdf')?'📄':(nl.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':'📎');allFiles.push({icon:icon,name:name,url:a.url||a.webViewLink||'',mime:a.contentType||a.mimeType||'',data:a});});
+    // Fix #377: Graph-/Gmail-Anhänge haben keine URL – Mail-ID + Quelle mitgeben,
+    // damit _emShowAttachPreview den Inhalt per API nachladen kann
+    (d.attachments||[]).forEach(function(a){let name=a.filename||a.name||'Anhang';let nl=name.toLowerCase();let icon=nl.endsWith('.pdf')?'📄':(nl.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':'📎');allFiles.push({icon:icon,name:name,url:a.url||a.webViewLink||'',mime:a.contentType||a.mimeType||'',data:Object.assign({},a,{_graphMailId:d.id,_graphSrc:(isMs?'ms':'gmail')})});});
     _emRenderAttachPanel(allFiles);
     const pane=document.getElementById('emReadingPane');
     const taskId=_emCurrentTask.id;
@@ -21609,8 +21617,9 @@ async function _emOpenMail(idx,mails){
       return;
     }
     try{
-      if(isMs&&msToken&&d.id){
-        const r=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+d.id+'?$select=body',{headers:{Authorization:'Bearer '+msToken}});
+      if(isMs&&(msToken||msToken2)&&d.id){
+        // Fix #377: kontobewusst (#316) – vorher msToken (Konto 1) fest → 404 bei Konto-2-Mails
+        const r=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+d.id+'?$select=body',{headers:{Authorization:'Bearer '+_msPickToken(_emCurrentTask)}});
         if(r.ok){
           const data=await r.json();d._cachedBodyHtml=(data.body&&data.body.content)||'';
           if(_myToken!==_emOpenMailToken)return;
@@ -22251,12 +22260,84 @@ async function _emSaveCidImageAsFoto(b64,mimeType,name){
     const attUrl='https://drive.google.com/file/d/'+result.id+'/view';
     if(!_emCurrentTask.fotos)_emCurrentTask.fotos=[];
     _emCurrentTask.fotos.push({driveId:result.id,name:name,mimeType:mimeType||'image/jpeg',caption:'',thumbnailLink:result.thumbnailLink||attUrl,fromEmail:true});
+    _emDirty=true;_emFlushToLive(); // #376: Kopie → boards[] bevor autoSave schreibt
     await autoSave();
     _renderEmailMailList();
     showToast('✅ Foto gespeichert: '+name,'success',3000);
   }catch(e){showToast('⚠ Speichern fehlgeschlagen: '+e.message,'error',4000);console.warn('[EM] CID-Foto-Upload:',e);}
 }
+// ── Fix #377: Outlook/Gmail-Anhang per API laden und anzeigen ────────────────
+// Graph-/Gmail-Anhänge liefern nur Metadaten (Name, Typ, ID) – weder URL noch
+// Drive-Datei. Vorher: „Keine Vorschau verfügbar" und nichts zu öffnen.
+async function _emShowGraphAttachPreview(icon,name,mime,data){
+  const ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9900;display:flex;align-items:center;justify-content:center;';
+  let _burl=null;
+  const _close=function(){try{if(_burl)URL.revokeObjectURL(_burl);}catch(e){}ov.remove();};
+  ov.onclick=function(e){if(e.target===ov)_close();};
+  const box=document.createElement('div');
+  box.style.cssText='background:var(--bg2);border-radius:12px;padding:20px;max-width:760px;width:90vw;max-height:88vh;display:flex;flex-direction:column;gap:10px;box-shadow:0 16px 48px rgba(0,0,0,.5);';
+  const header=document.createElement('div');
+  header.style.cssText='display:flex;align-items:center;gap:8px;';
+  header.innerHTML='<span style="font-size:18px;">'+icon+'</span><span style="flex:1;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_escHtml(name)+'</span>';
+  const dlBtn=document.createElement('button');
+  dlBtn.textContent='⬇ Laden';dlBtn.title='Herunterladen';dlBtn.disabled=true;
+  dlBtn.style.cssText='background:var(--bg3);border:1px solid var(--border);border-radius:5px;font-size:12px;cursor:pointer;color:var(--text1);padding:3px 10px;flex-shrink:0;';
+  const closeBtn=document.createElement('button');
+  closeBtn.textContent='✕';
+  closeBtn.style.cssText='background:none;border:none;font-size:18px;cursor:pointer;color:var(--text2);padding:0 2px;flex-shrink:0;';
+  closeBtn.onclick=_close;
+  header.append(dlBtn,closeBtn);
+  const previewArea=document.createElement('div');
+  previewArea.style.cssText='flex:1;overflow:auto;border:1px solid var(--border);border-radius:8px;min-height:200px;display:flex;align-items:center;justify-content:center;';
+  previewArea.innerHTML='<div style="color:var(--text2);font-size:13px;">⏳ Anhang wird geladen…</div>';
+  box.append(header,previewArea);ov.appendChild(box);document.body.appendChild(ov);
+  try{
+    const attId=data.id||data.attachmentId||'';
+    if(!attId)throw new Error('Keine Anhang-ID vorhanden');
+    let blob=null;
+    if(data._graphSrc==='ms'){
+      if(typeof _msPickRefresh==='function'){try{await _msPickRefresh(_emCurrentTask);}catch(e){}}
+      const tok=(typeof _msPickToken==='function')?_msPickToken(_emCurrentTask):msToken;
+      const r=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(data._graphMailId)+'/attachments/'+encodeURIComponent(attId),
+        {headers:{Authorization:'Bearer '+tok}});
+      if(!r.ok)throw new Error('Outlook HTTP '+r.status);
+      const j=await r.json();
+      if(!j.contentBytes)throw new Error('Anhangstyp ohne Inhalt ('+(j['@odata.type']||'unbekannt')+') – z.B. eingebettete Mail');
+      const bin=atob(j.contentBytes);const u8=new Uint8Array(bin.length);
+      for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);
+      blob=new Blob([u8],{type:j.contentType||mime||'application/octet-stream'});
+    }else{
+      if(typeof gmailToken==='undefined'||!gmailToken)throw new Error('Gmail nicht verbunden');
+      const r=await fetch('https://www.googleapis.com/gmail/v1/users/me/messages/'+encodeURIComponent(data._graphMailId)+'/attachments/'+encodeURIComponent(attId),
+        {headers:{Authorization:'Bearer '+gmailToken}});
+      if(!r.ok)throw new Error('Gmail HTTP '+r.status);
+      const j=await r.json();
+      const b64=(j.data||'').replace(/-/g,'+').replace(/_/g,'/');
+      if(!b64)throw new Error('Kein Inhalt');
+      const bin=atob(b64);const u8=new Uint8Array(bin.length);
+      for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);
+      blob=new Blob([u8],{type:mime||'application/octet-stream'});
+    }
+    _burl=URL.createObjectURL(blob);
+    dlBtn.disabled=false;
+    dlBtn.onclick=function(){const a=document.createElement('a');a.href=_burl;a.download=name||'Anhang';a.click();};
+    const mimeL=(blob.type||'').toLowerCase();const namL=(name||'').toLowerCase();
+    if(mimeL.startsWith('image/')||namL.match(/\.(jpe?g|png|gif|webp|heic)$/)){
+      previewArea.innerHTML='<img src="'+_burl+'" style="max-width:100%;max-height:560px;object-fit:contain;">';
+    }else if(mimeL==='application/pdf'||namL.endsWith('.pdf')){
+      previewArea.innerHTML='<iframe src="'+_burl+'" style="width:100%;height:560px;border:none;"></iframe>';
+    }else{
+      previewArea.innerHTML='<div style="text-align:center;color:var(--text2);font-size:13px;padding:20px;">'+icon+' '+_escHtml(name)+'<br><br>Keine Inline-Vorschau für diesen Dateityp – bitte ⬇ Laden.</div>';
+    }
+  }catch(e){
+    console.warn('[PAM] Graph-Anhang:',e);
+    previewArea.innerHTML='<div style="text-align:center;color:#c0392b;font-size:13px;padding:20px;">⚠ Anhang konnte nicht geladen werden:<br>'+_escHtml(e.message||String(e))+'</div>';
+  }
+}
 function _emShowAttachPreview(icon,name,url,mime,data){
+  // Fix #377: Outlook/Gmail-Anhänge (nur Metadaten, keine URL) → Inhalt per API laden
+  if(!url&&data&&data._graphMailId){_emShowGraphAttachPreview(icon,name,mime,data);return;}
   // EML/MSG → direkt in den richtigen Viewer weiterleiten
   const _mimeL=(mime||'').toLowerCase();
   const _namL=(name||'').toLowerCase();
@@ -22273,8 +22354,12 @@ function _emShowAttachPreview(icon,name,url,mime,data){
   box.style.cssText='background:var(--bg2);border-radius:12px;padding:20px;max-width:700px;width:90vw;max-height:85vh;display:flex;flex-direction:column;gap:10px;box-shadow:0 16px 48px rgba(0,0,0,.5);';
   let header=document.createElement('div');
   header.style.cssText='display:flex;align-items:center;gap:8px;';
-  header.innerHTML='<span style="font-size:18px;">'+icon+'</span><span style="flex:1;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_escHtml(name)+'</span>'+(url?'<a href="'+_escHtml(url)+'" target="_blank" style="font-size:12px;color:var(--accent);text-decoration:none;white-space:nowrap;">🔗 Öffnen</a>':'')+'<button onclick="document.body.removeChild(this.parentElement.parentElement)" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text2);padding:0 2px;">✕</button>';
+  header.innerHTML='<span style="font-size:18px;">'+icon+'</span><span style="flex:1;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_escHtml(name)+'</span>'+(url?'<a href="'+_escHtml(url)+'" target="_blank" style="font-size:12px;color:var(--accent);text-decoration:none;white-space:nowrap;">🔗 Öffnen</a>':'')+'<button class="_emAttPrvClose" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text2);padding:0 2px;">✕</button>';
   box.appendChild(header);
+  // Fix #377: ✕ schloss vorher per parentElement-Kette eine Ebene zu kurz
+  // (removeChild(box) statt removeChild(ov)) → NotFoundError, Button tat nichts
+  const _attClose=header.querySelector('._emAttPrvClose');
+  if(_attClose)_attClose.onclick=function(){ov.remove();};
   let previewArea=document.createElement('div');
   previewArea.style.cssText='flex:1;overflow:auto;border:1px solid var(--border);border-radius:8px;min-height:200px;display:flex;align-items:center;justify-content:center;';
   let mimeL=(mime||'').toLowerCase();
@@ -22347,7 +22432,17 @@ function _emDownloadEmlAttachment(b64,mimeType,filename){
   }catch(e){showToast('⚠ Download fehlgeschlagen: '+e.message,'error',4000);}
 }
 
+// #376: Schreibt die Arbeitskopie (_emCurrentTask) zurück ins Live-Objekt in boards[]
+function _emFlushToLive(){
+  if(!_emCurrentTask)return;
+  const _id=_emCurrentTask.id;if(!_id)return;
+  for(const bk of Object.keys(boards)){
+    const _li=(boards[bk]||[]).find(function(x){return x.id===_id;});
+    if(_li){Object.assign(_li,_emCurrentTask);_emDirty=false;return;}
+  }
+}
 function _emScheduleSave(){
+  _emDirty=true; // #376
   if(_emSaveTimer)clearTimeout(_emSaveTimer);
   _emSaveTimer=setTimeout(_emDoSave,800);
 }
@@ -22385,6 +22480,7 @@ function _emDoSave(){
   });
   t.aufgaben=aufgaben;
   t.emNotiz=document.getElementById('emNotizInput').value||'';
+  if(_emDirty)_emFlushToLive(); // #376: Arbeitskopie → Live-Objekt in boards[]
   scheduleAutoSave();
   // Bug3-Fix: renderBoard nur wenn sichtbare Felder (Status, Fälligkeit) geändert
   if(t.status!==_prevStatus||t.due!==_prevDue)render();
@@ -23479,6 +23575,9 @@ function pushToSync(){
   syncData.lastUpdated=new Date().toISOString();syncData.updatedBy='pam';
   lastSyncTimestamp=syncData.lastUpdated;syncWrite();
   try{localStorage.setItem('pam_sync_ping',String(Date.now()));}catch(e){console.warn('[PAM]',e);}
+  // #375: Sicherheitsnetz – workboard.json (für Mobile) ebenfalls aktualisieren
+  clearTimeout(_pushToSyncFullSaveTimer);
+  _pushToSyncFullSaveTimer=setTimeout(()=>autoSave(),2000);
 }
 // _ptpLastSyncReadAt: früh deklariert in STATE-Sektion
 function updateSyncUI(){
