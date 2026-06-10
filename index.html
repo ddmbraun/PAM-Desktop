@@ -3839,7 +3839,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-10 · #369'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-10-b369)
+const PAM_BUILD = 'v2026-06-10 · #370'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-10-b370)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -13234,7 +13234,7 @@ async function _gmSendReply(taskId,msgIdx){
 const MS_CLIENT_ID='4296f960-6e3e-4ca8-b0ef-eae6429ffa15';
 const MS_TENANT_ID='e0de9521-b302-4fac-ad8b-88dc5c2c789b';
 const MS_REDIRECT = window.location.origin + window.location.pathname.replace(/index\.html$/i, '');
-const MS_SCOPES=['Mail.Read','User.Read'];
+const MS_SCOPES=['Mail.Read','Mail.ReadWrite','User.Read']; // Fix #370: Mail.ReadWrite für createReply (Antwort-Entwürfe) – vorher 403
 let msalInstance=null;
 let msToken=null;
 let msUserEmail=null;
@@ -14120,7 +14120,8 @@ async function _pamEmailAntwortenMitVerlauf(){
 
   // ── Schritt 1: Verlauf aus Thread-Mails + EML-Originalen aufbauen ──
   // Thread-Nachrichten normalisieren (primäre Quelle wenn Verlauf geladen ist)
-  const _tvMap=m=>({messageId:m.messageId||m.internetMessageId||'',subject:m.subject||'',date:m.date,sender:m.fromName?('"'+m.fromName+'" <'+(m.from||'')+'>'):(m.from||m.sender||''),bodyHtml:m.bodyHtml||'',bodyText:m.bodyText||m.preview||''});
+  // Fix #370 (V3): id mitnehmen (für Graph-Nachladen) + _cachedBodyHtml nutzen (vom Verlauf-Fenster geladener Inhalt)
+  const _tvMap=m=>({id:m.id||'',messageId:m.messageId||m.internetMessageId||'',subject:m.subject||'',date:m.date,sender:m.fromName?('"'+m.fromName+'" <'+(m.from||'')+'>'):(m.from||m.sender||''),bodyHtml:m.bodyHtml||m._cachedBodyHtml||'',bodyText:m.bodyText||m.preview||''});
   const threadMails=[...(task.gmailThreadMessages||[]).map(_tvMap),...(task.msThreadMessages||[]).map(_tvMap)];
   // Manuell hochgeladene EML-Originale (vollständiger Body – bevorzugt falls vorhanden)
   const emlMails=[...(task.emailOriginals||[]),...(taskEmailOriginals||[])];
@@ -14145,6 +14146,18 @@ async function _pamEmailAntwortenMitVerlauf(){
           if(r.ok){const txt=await r.text();const parsed=_parseEmlText(txt);bodyContent=parsed.bodyHtml||parsed.bodyText||'';}
         }catch(e){console.warn('[PAM] EML laden für Verlauf:',e);}
       }
+      // Fix #370 (V3): Outlook-Body live von Graph nachladen, wenn weder gespeichert noch EML vorhanden
+      if(!bodyContent&&m.id&&typeof msToken!=='undefined'&&(msToken||msToken2)){
+        try{
+          const rb=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(m.id)+'?$select=body',
+            {headers:{Authorization:'Bearer '+_msPickToken(task),'Prefer':'outlook.body-content-type="html"'}});
+          if(rb.ok){const db=await rb.json();bodyContent=(db.body&&db.body.content)||'';}
+        }catch(e){console.warn('[PAM] Graph-Body für Verlauf:',e);}
+      }
+      // Fix #370 (V2): aufgelösten Inhalt am Objekt merken – der mailto-Fallback unten
+      // nutzte vorher nur m.bodyText und zeigte "(kein Inhalt)", obwohl der Body
+      // hier gerade aus Drive/Graph geladen wurde.
+      m._resolvedBody=bodyContent;
       // Outlook-Standard: dünne Trennlinie + Von/Gesendet/Betreff-Header
       verlaufHtml+='<div style="border:none;border-top:solid #E1E1E1 1.0pt;padding:3.0pt 0cm 0cm 0cm;margin:16px 0 8px 0;">';
       verlaufHtml+='<p style="margin:0 0 8px 0;font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#000;">';
@@ -14199,7 +14212,8 @@ async function _pamEmailAntwortenMitVerlauf(){
       plainBody='\n\n-------- Verlauf --------\n';
       for(const m of uniqueMails){
         const ds=m.date?new Date(m.date).toLocaleString('de-DE'):'';
-        const txt=(m.bodyText||'').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim().substring(0,200);
+        // Fix #370 (V2): zuerst den oben aus Drive/Graph aufgelösten Inhalt nehmen
+        const txt=(m._resolvedBody||m.bodyText||'').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim().substring(0,400);
         plainBody+='Von: '+(m.sender||m.from||'')+'\nDatum: '+ds+'\nBetreff: '+(m.subject||'')+'\n'+(txt||'(kein Inhalt)')+'\n\n';
       }
       plainBody=plainBody.substring(0,1500);
@@ -15209,7 +15223,7 @@ async function _pamEmailAntworten(){
   const taskId=(document.getElementById('taskId')||{}).value||_pamActiveTaskId||'';
   const task=findTaskById(taskId);
   // ── Option 1: Graph API Reply-Draft (Outlook verbunden + Thread geladen) ──
-  if(typeof msToken!=='undefined'&&msToken&&task){
+  if(typeof msToken!=='undefined'&&(msToken||msToken2)&&task){
     // Letzte eingehende Nachricht bevorzugen, sonst neueste Nachricht
     const msgs=(task.msThreadMessages||[]);
     const sorted=[...msgs].sort((a,b)=>new Date(b.date)-new Date(a.date));
@@ -15217,10 +15231,11 @@ async function _pamEmailAntworten(){
     if(target&&target.id){
       showToast('⏳ Antwort-Entwurf wird erstellt…','info',6000);
       try{
-        if(!await _msRefreshToken()){showToast('⚠ Outlook-Token abgelaufen – bitte neu anmelden','error',4000);return;}
+        // Fix #370: kontobewusst (#316) – vorher nur msToken (Konto 1) → bei Konto-2-Mails Fehler
+        if(!await _msPickRefresh(task)){showToast('⚠ Outlook-Token abgelaufen – bitte neu anmelden','error',4000);return;}
         const r=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(target.id)}/createReply`,{
           method:'POST',
-          headers:{Authorization:'Bearer '+msToken,'Content-Type':'application/json'},
+          headers:{Authorization:'Bearer '+_msPickToken(task),'Content-Type':'application/json'},
           body:JSON.stringify({})
         });
         if(!r.ok)throw new Error('HTTP '+r.status);
@@ -15237,7 +15252,14 @@ async function _pamEmailAntworten(){
     }
   }
   // ── Fallback: mailto: nur mit Empfänger + Betreff ──
-  const v=(document.getElementById('taskEmailSenderInput')||{}).value||'';
+  // Fix #370 (V4): Bei offenem Posteingang-Modal Absender aus dem Task nehmen –
+  // taskEmailSenderInput gehört zum Auftrag/Aufgabe-Modal und könnte stale sein.
+  let v='';
+  const _emBox370=document.getElementById('emModalBox');
+  if(_emBox370&&_emBox370.style.display!=='none'&&typeof _emCurrentTask!=='undefined'&&_emCurrentTask&&_emCurrentTask.id===taskId){
+    v=_emCurrentTask.emailSender||_emCurrentTask.emailSenderName||(((_emCurrentTask.emailOriginals||[])[0]||{}).sender)||'';
+  }
+  if(!v)v=(document.getElementById('taskEmailSenderInput')||{}).value||'';
   const mv=v.match(/<([^>]+)>/);
   const addr=mv?mv[1]:v.includes('@')?v:'';
   if(addr){
@@ -21815,6 +21837,15 @@ async function _emLadeGmailVerlauf(){
 }
 function _emAntworten(){
   if(!_emCurrentTask)return;
+  // Fix #370 (V4): Wenn ein Outlook-Thread geladen ist → zentrale createReply-Logik
+  // (echter Antwort-Entwurf im Postfach statt leerem Compose-Fenster).
+  // Entscheidung Frank 10.06.: erstmal OHNE Verlauf. Gleicher Button, besseres Ergebnis.
+  if(typeof msToken!=='undefined'&&(msToken||msToken2)&&(_emCurrentTask.msThreadMessages||[]).some(function(m){return m&&m.id;})){
+    _pamActiveTaskId=_emCurrentTask.id; // zentrale Logik findet den Task hierüber
+    _pamEmailAntworten();
+    return;
+  }
+  // Sonst (kein Thread geladen): bisheriges Verhalten unverändert
   // Fix9: Aktive Mail aus der zusammengeführten Liste (Original/MS/Gmail) ermitteln
   let _allMails=[];
   (_emCurrentTask.emailOriginals||[]).forEach(function(m){_allMails.push({type:'original',data:m});});
