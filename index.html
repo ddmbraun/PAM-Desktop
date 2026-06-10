@@ -3871,7 +3871,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-10 · #373'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-10-b373)
+const PAM_BUILD = 'v2026-06-10 · #374'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-10-b374)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -20079,25 +20079,32 @@ function _vbsNasPathSegments(nasPath){
   return segs.reverse();
 }
 
-// #373: Drive-Ahnenkette eines Kandidaten gegen NAS-Segmente vergleichen → Anzahl übereinstimmender Ebenen (max 5)
-async function _vbsScoreAncestors(candId,segs){
-  let score=0;
+// #374: Ordner, deren Ahnenkette einen Archiv-Ordner enthält, werden bei der Eltern-Suche ignoriert (Spiegel-Kopien wie "Archiv_360")
+const _VBS_ARCHIV_RE=/^archiv/i;
+
+// #374: Ahnenkette (Ordnernamen aufwärts) eines Drive-Ordners holen, max. 6 Ebenen
+async function _vbsAncestorChain(candId,maxLvl){
+  const chain=[];
   try{
     const _b='https://www.googleapis.com/drive/v3/files/';
     const _h={headers:{Authorization:'Bearer '+gdriveToken}};
     const r=await fetch(_b+candId+'?fields=parents',_h);
-    if(!r.ok)return 0;
+    if(!r.ok)return chain;
     let pid=(((await r.json()).parents)||[])[0];
-    for(let i=1;i<segs.length&&i<=5&&pid;i++){
+    for(let i=0;i<(maxLvl||6)&&pid;i++){
       const pR=await fetch(_b+pid+'?fields=name,parents',_h);
       if(!pR.ok)break;
       const pD=await pR.json();
-      if((pD.name||'').trim().toLowerCase()!==segs[i].toLowerCase())break;
-      score++;
+      chain.push((pD.name||'').trim());
       pid=(pD.parents||[])[0];
     }
-  }catch(e){console.warn('[VBS] Ahnen-Score Fehler:',e);}
-  return score;
+  }catch(e){console.warn('[VBS] Ahnenkette Fehler:',e);}
+  return chain;
+}
+
+// #374: ist der Ordner (per Ahnenkette) Teil einer Archiv-Kopie?
+function _vbsChainIsArchiv(chain){
+  return chain.some(function(n){return _VBS_ARCHIV_RE.test(n);});
 }
 
 async function _vbsCreateDriveStruktur(ordnerName,nasParent,nasGrand,nasPath){
@@ -20118,36 +20125,45 @@ async function _vbsCreateDriveStruktur(ordnerName,nasParent,nasGrand,nasPath){
         const parentList=(await rP.json()).files||[];
         const exactList=parentList.filter(f=>f.name===nasParent);
         if(exactList.length===1){
-          parentFid=exactList[0].id;parentFound=true;
-          console.log('[VBS] nasParent eindeutig gefunden:',nasParent);
+          // #374: auch Einzel-Treffer nicht akzeptieren, wenn er in einer Archiv-Kopie liegt
+          if(_vbsChainIsArchiv(await _vbsAncestorChain(exactList[0].id,6))){
+            console.warn('[VBS] Einziger Treffer liegt im Archiv – wird ignoriert:',nasParent);
+          } else {
+            parentFid=exactList[0].id;parentFound=true;
+            console.log('[VBS] nasParent eindeutig gefunden:',nasParent);
+          }
         } else if(exactList.length>1){
-          // ── #373: Mehrere Treffer – NAS-Pfad-Abgleich (Ahnenkette) hat Vorrang ──
+          // ── #373/#374: Mehrere Treffer – Ahnenketten holen, Archiv-Kopien ausschließen, NAS-Pfad-Abgleich ──
           const _segs=_vbsNasPathSegments(nasPath||'');
-          if(_segs.length>1){
-            let _best=null,_bestScore=0,_tie=false;
-            for(const f of exactList){
-              const _sc=await _vbsScoreAncestors(f.id,_segs);
-              if(_sc>_bestScore){_best=f;_bestScore=_sc;_tie=false;}
-              else if(_sc===_bestScore&&_sc>0)_tie=true;
+          console.log('[VBS] Mehrfach-Treffer ('+exactList.length+') für',nasParent,'| NAS-Segmente:',_segs.join(' / ')||'(keine)','| nasPath:',nasPath||'(leer)');
+          const _cands=[];
+          for(const f of exactList){
+            const _chain=await _vbsAncestorChain(f.id,6);
+            const _isArch=_vbsChainIsArchiv(_chain);
+            let _sc=0;
+            for(let i=1;i<_segs.length&&i<=5;i++){
+              if((_chain[i-1]||'').toLowerCase()!==_segs[i].toLowerCase())break;
+              _sc++;
             }
-            if(_best&&_bestScore>0&&!_tie){
-              parentFid=_best.id;parentFound=true;
-              console.log('[VBS] nasParent per NAS-Pfad-Abgleich eindeutig ('+_bestScore+' Ebene(n) bestätigt):',nasParent);
+            console.log('[VBS] Kandidat '+f.id+' | Kette: '+(_chain.join(' / ')||'(leer)')+' | Archiv: '+_isArch+' | Score: '+_sc);
+            if(!_isArch)_cands.push({f:f,sc:_sc,chain:_chain});
+          }
+          if(_cands.length===1){
+            parentFid=_cands[0].f.id;parentFound=true;
+            console.log('[VBS] Eindeutig nach Archiv-Ausschluss:',nasParent);
+          } else if(_cands.length>1){
+            _cands.sort(function(a,b){return b.sc-a.sc;});
+            if(_cands[0].sc>0&&_cands[0].sc>_cands[1].sc){
+              parentFid=_cands[0].f.id;parentFound=true;
+              console.log('[VBS] nasParent per NAS-Pfad-Abgleich eindeutig ('+_cands[0].sc+' Ebene(n) bestätigt):',nasParent);
             }
           }
-          // ── Fallback: nasGrand zur Disambiguierung nutzen (wie bisher) ──
-          if(!parentFound&&nasGrand)for(const f of exactList){
-            const upR=await fetch(_base+'/'+f.id+'?fields=parents',_hdr);
-            if(!upR.ok)continue;
-            const upD=await upR.json();
-            if(!upD.parents)continue;
-            const gpR=await fetch(_base+'/'+upD.parents[0]+'?fields=name',_hdr);
-            if(!gpR.ok)continue;
-            const gpD=await gpR.json();
-            if(gpD.name&&gpD.name.toLowerCase()===nasGrand.toLowerCase()){
-              parentFid=f.id;parentFound=true;
+          // ── Fallback: nasGrand zur Disambiguierung (nur Nicht-Archiv-Kandidaten) ──
+          if(!parentFound&&nasGrand){
+            const _gHit=_cands.find(function(c){return (c.chain[0]||'').toLowerCase()===nasGrand.toLowerCase();});
+            if(_gHit){
+              parentFid=_gHit.f.id;parentFound=true;
               console.log('[VBS] nasParent disambiguiert via nasGrand:',nasGrand,'→',nasParent);
-              break;
             }
           }
           if(!parentFound&&nasGrand){
@@ -20157,7 +20173,12 @@ async function _vbsCreateDriveStruktur(ordnerName,nasParent,nasGrand,nasPath){
               const rG2=await fetch(_base+'?q='+qG2+'&fields=files(id,name)&spaces=drive&pageSize=10',_hdr);
               if(rG2.ok){
                 const gList2=(await rG2.json()).files||[];
-                const gF2=gList2.find(f=>f.name===nasGrand);
+                // #374: ersten Nicht-Archiv-Treffer für nasGrand wählen
+                let gF2=null;
+                for(const g of gList2.filter(function(x){return x.name===nasGrand;})){
+                  if(_vbsChainIsArchiv(await _vbsAncestorChain(g.id,6)))continue;
+                  gF2=g;break;
+                }
                 if(gF2){
                   const qP3=encodeURIComponent("'"+gF2.id+"' in parents and name='"+nasParent.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
                   const rP3=await fetch(_base+'?q='+qP3+'&fields=files(id,name)&spaces=drive&pageSize=5',_hdr);
@@ -20168,7 +20189,7 @@ async function _vbsCreateDriveStruktur(ordnerName,nasParent,nasGrand,nasPath){
               }
             }catch(eG2){console.warn('[VBS] nasGrand-Direktsuche fehlgeschlagen:',eG2);}
           }
-          if(!parentFound&&_segs.length<=1){parentFid=exactList[0].id;parentFound=true;console.warn('[VBS] nasGrand half nicht – erster Treffer:',nasParent);}
+          if(!parentFound&&_segs.length<=1&&_cands.length>0){parentFid=_cands[0].f.id;parentFound=true;console.warn('[VBS] nasGrand half nicht – erster Nicht-Archiv-Treffer:',nasParent);}
           else if(!parentFound)console.warn('[VBS] Mehrfach-Treffer, weder NAS-Pfad noch nasGrand eindeutig – kein Raten, Anlage im Startordner:',nasParent);
         } else if(exactList.length===0){
           // ── Strategie 2 Fallback: nasGrand suchen, nasParent darin finden ──
@@ -20177,7 +20198,12 @@ async function _vbsCreateDriveStruktur(ordnerName,nasParent,nasGrand,nasPath){
             const rG=await fetch(_base+'?q='+qG+'&fields=files(id,name)&spaces=drive&pageSize=10',_hdr);
             if(rG.ok){
               const grandList=(await rG.json()).files||[];
-              const grandFound=grandList.find(f=>f.name===nasGrand);
+              // #374: ersten Nicht-Archiv-Treffer für nasGrand wählen
+              let grandFound=null;
+              for(const g of grandList.filter(function(x){return x.name===nasGrand;})){
+                if(_vbsChainIsArchiv(await _vbsAncestorChain(g.id,6)))continue;
+                grandFound=g;break;
+              }
               if(grandFound){
                 const qP2=encodeURIComponent("'"+grandFound.id+"' in parents and name='"+nasParent.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
                 const rP2=await fetch(_base+'?q='+qP2+'&fields=files(id,name)&spaces=drive&pageSize=5',_hdr);
