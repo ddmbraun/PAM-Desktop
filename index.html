@@ -3763,7 +3763,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-10 · #366'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-10-b366)
+const PAM_BUILD = 'v2026-06-10 · #367'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-10-b367)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -4109,7 +4109,7 @@ function removeFreierTermin(id){
   const removed=taskFreieTermine.find(f=>f.id===id);
   if(removed){
     const datStr=removed.datum?(()=>{const[y,m,d]=(removed.datum).split('-');return d+'.'+m+'.'+y;})():'kein Datum';
-    const ts=new Date().toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+    const ts=new Date().toISOString(); // Fix #367: ISO, Anzeige via _fmtNotizTs
     taskNotizVerlauf.push({ts,text:'Freier Termin entfernt: 📅 '+(removed.text||'-')+' - '+datStr});
     renderTaskNotizen();
   }
@@ -5370,11 +5370,14 @@ function gdriveRequestToken(action) {
     redirect_uri:           window.location.origin + window.location.pathname.replace(/index\.html$/i,''),
     response_type:          'code',        // Authorization Code Flow statt Implicit Flow
     access_type:            'offline',     // Refresh Token anfordern
-    prompt:                 'consent',     // Erzwingt Refresh Token bei jedem Login
     scope:                  GDRIVE_SCOPE,
     include_granted_scopes: 'true',
     state:                  'drive',       // Unterscheidet Drive- von Gmail-Redirect
   });
+  // Fix #367: prompt=consent nur erzwingen, wenn noch KEIN Refresh-Token vorhanden ist
+  // (Google gibt den Refresh-Token nur mit consent aus). Wird der Token ungültig
+  // (invalid_grant), löscht _renewTokenViaCloud() ihn → nächster Login fordert neu an.
+  if (!localStorage.getItem('pam_gdrive_refresh_token')) params.set('prompt', 'consent');
   if (hint) { params.set('login_hint', hint); }
   // Fix 2026-05-24: Daten vor dem Seitenreload sichern – verhindert Datenverlust beim Reconnect
   _saveLocalBackup();
@@ -5421,9 +5424,17 @@ async function _renewTokenViaCloud() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'refresh', refresh_token: refreshToken }),
     });
-    if (!response.ok) return false;
-    const data = await response.json();
-    if (!data.access_token) return false;
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.access_token) {
+      // Fix #367: ungültigen/widerrufenen Refresh-Token entfernen → nächster Login
+      // fordert via prompt=consent automatisch einen neuen an
+      const errStr = JSON.stringify(data && (data.error_description || data.error) || '');
+      if (errStr.includes('invalid_grant')) {
+        try { localStorage.removeItem('pam_gdrive_refresh_token'); } catch(e) {}
+        console.warn('[Cloud-Refresh] Refresh-Token ungültig – entfernt.');
+      }
+      return false;
+    }
 
     gdriveToken = data.access_token;
     gdriveTokenExpires = Date.now() + (Number(data.expires_in || 3600) - 60) * 1000;
@@ -8042,6 +8053,16 @@ function _bdMaschSuggest(inp){_bdShowSuggest('bdMaschSuggest',inp,_bdAllMaschine
 function _bdMaschHideSuggest(){const d=document.getElementById('bdMaschSuggest');if(d)d.style.display='none';}
 
 // ── NOTIZ-CHRONIK (synchron mit PTP Mobile) ──
+// Fix #367: Notiz-Zeitstempel anzeigen – NUR echte ISO-Strings per Date formatieren,
+// alles andere (de-DE-Altbestand) unverändert durchreichen. new Date('10.06.2026')
+// würde als Monat.Tag.Jahr fehlinterpretiert!
+function _fmtNotizTs(ts){
+  if(!ts)return'';
+  if(/^\d{4}-\d{2}-\d{2}T/.test(ts)){
+    try{const d=new Date(ts);if(!isNaN(d))return d.toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(e){}
+  }
+  return ts;
+}
 function renderTaskNotizen(){
   const el=document.getElementById('taskNotizList');
   if(!el)return;
@@ -8052,7 +8073,7 @@ function renderTaskNotizen(){
   el.innerHTML=taskNotizVerlauf.map((n,i)=>
     '<div class="notiz-entry">'
     +'<div class="notiz-entry-body">'
-    +'<input type="text" class="notiz-ts" value="'+esc(n.ts||'')+'" title="Zeitstempel bearbeiten"'
+    +'<input type="text" class="notiz-ts" value="'+esc(_fmtNotizTs(n.ts||''))+'" title="Zeitstempel bearbeiten"'
     +' onblur="updateNotizTs('+i+',this.value)"'
     +' onkeydown="if(event.key===\'Enter\'){this.blur();}"'
     +' style="background:transparent;border:none;border-bottom:1px dashed var(--border);color:var(--text2);font-size:11px;font-weight:500;letter-spacing:.2px;padding:0;margin-bottom:3px;width:100%;outline:none;cursor:text;">'
@@ -8070,7 +8091,9 @@ function addTaskNotiz(){
   if(!inp)return;
   const text=(inp.value||'').trim();
   if(!text){inp.focus();return;}
-  const ts=new Date().toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  // Fix #367: ISO statt de-DE-String – einheitlich mit Mobile/Auto-Einträgen,
+  // Anzeige formatiert _fmtNotizTs(); Altbestand bleibt lesbar (Passthrough)
+  const ts=new Date().toISOString();
   taskNotizVerlauf.push({ts,text});
   inp.value='';
   renderTaskNotizen();
@@ -11690,7 +11713,7 @@ function _openPdfSendenModus(taskId){
 
   // ── Hilfs-Funktionen für Übersicht ──
   function _fD(s){if(!s)return'';const p=s.split('-');return p.length===3?p[2]+'.'+p[1]+'.'+p[0]:s;}
-  function _fTs(s){if(!s)return'';try{return new Date(s).toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(_x){return s;}}
+  function _fTs(s){if(!s)return'';if(!/^\d{4}-\d{2}-\d{2}T/.test(s))return s;const d=new Date(s);if(isNaN(d))return s;return d.toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});} // Fix #367: ISO-Guard – de-DE-Altbestand („10.06.2026, …") roh anzeigen statt als Monat.Tag fehlzuinterpretieren
   const _today=new Date().toISOString().split('T')[0];
   function _od(d){return d&&d<_today;}
   function _fH(min){if(!min||min<=0)return'–';return Math.floor(min/60)+'h'+(min%60>0?' '+Math.round(min%60)+'min':'');}
@@ -14805,7 +14828,7 @@ async function _pamTaskDrucken(extId){
 
   function _e(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
   function _fD(s){if(!s)return'';const p=s.split('-');return p.length===3?p[2]+'.'+p[1]+'.'+p[0]:s;}
-  function _fTs(s){if(!s)return'';try{return new Date(s).toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch(_x){return s;}}
+  function _fTs(s){if(!s)return'';if(!/^\d{4}-\d{2}-\d{2}T/.test(s))return s;const d=new Date(s);if(isNaN(d))return s;return d.toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});} // Fix #367: ISO-Guard – de-DE-Altbestand („10.06.2026, …") roh anzeigen statt als Monat.Tag fehlzuinterpretieren
   const today=new Date().toISOString().split('T')[0];
   function _od(d){return d&&d<today;}
   function _fH(min){if(!min||min<=0)return'–';return Math.floor(min/60)+'h'+(min%60>0?' '+Math.round(min%60)+'min':'');}
