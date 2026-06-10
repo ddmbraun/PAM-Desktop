@@ -3871,7 +3871,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-10 · #377'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-10-b377)
+const PAM_BUILD = 'v2026-06-10 · #378'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-10-b378)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -21691,7 +21691,9 @@ async function _emOpenMail(idx,mails){
         bodyHtml=bodyHtml.replace(/src='cid:[^']*'/gi,"src='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7' title='Bild nicht ladbar'");
       }
       if(parsed.sender)from=parsed.sender;
-      (parsed.attachments||[]).forEach(function(a){let nl=(a.name||'').toLowerCase();let icon=nl.endsWith('.pdf')?'📄':(nl.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':'📎');emlAttachFiles.push({icon:icon,name:a.name||'Anhang',url:'',mime:a.mimeType||'',data:a,_isEmlParsed:true});});
+      // Fix #378: _isEmlParsed gehört aufs data-Objekt – die Vorschau prüft data._isEmlParsed,
+      // das Flag lag aber auf dem Wrapper → EML-Anhänge zeigten nie eine Vorschau
+      (parsed.attachments||[]).forEach(function(a){let nl=(a.name||'').toLowerCase();let icon=nl.endsWith('.pdf')?'📄':(nl.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':'📎');emlAttachFiles.push({icon:icon,name:a.name||'Anhang',url:'',mime:a.mimeType||'',data:Object.assign({},a,{_isEmlParsed:true})});});
       const _t=_emCurrentTask;
       if(_t&&d.messageId){
         (_t.fotos||[]).forEach(function(f){if(f.fromMessageId&&f.fromMessageId!==d.messageId)return;let nl=(f.name||'').toLowerCase();let icon=nl.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':'📎';if(!emlAttachFiles.some(function(x){return x.name===f.name;}))emlAttachFiles.push({icon:icon,name:f.name||'Foto',url:f.thumbnailLink||'',mime:f.mimeType||'image/jpeg',data:f});});
@@ -22338,6 +22340,19 @@ async function _emShowGraphAttachPreview(icon,name,mime,data){
 function _emShowAttachPreview(icon,name,url,mime,data){
   // Fix #377: Outlook/Gmail-Anhänge (nur Metadaten, keine URL) → Inhalt per API laden
   if(!url&&data&&data._graphMailId){_emShowGraphAttachPreview(icon,name,mime,data);return;}
+  // Fix #378: EML-geparste Anhänge (Base64) → Blob-URL für ALLE Typen.
+  // Vorher bekamen nur Bilder eine data:-URL (und das auch nie, weil das
+  // _isEmlParsed-Flag auf dem Wrapper statt auf data lag) → PDFs & Co. zeigten
+  // „Keine Vorschau verfügbar" und der 🔗 Öffnen-Link im Kopf fehlte.
+  if(!url&&data&&data.b64){
+    try{
+      const _bm=(data.mimeType||mime||'application/octet-stream');
+      const _bin=atob(data.b64);const _u8=new Uint8Array(_bin.length);
+      for(let i=0;i<_bin.length;i++)_u8[i]=_bin.charCodeAt(i);
+      url=URL.createObjectURL(new Blob([_u8],{type:_bm}));
+      if(!mime)mime=_bm;
+    }catch(e){console.warn('[PAM] Anhang-Blob:',e);}
+  }
   // EML/MSG → direkt in den richtigen Viewer weiterleiten
   const _mimeL=(mime||'').toLowerCase();
   const _namL=(name||'').toLowerCase();
