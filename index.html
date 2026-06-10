@@ -3871,7 +3871,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-10 · #372'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-10-b372)
+const PAM_BUILD = 'v2026-06-10 · #373'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-10-b373)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -20003,12 +20003,12 @@ function _openVbsNewTask(data){
     // Drive-Ordnerstruktur direkt anlegen (ohne auf NAS-Sync zu warten)
     if(data.ordner){
       if(gdriveToken){
-        _vbsCreateDriveStruktur(data.ordner,data.nasParent||'',data.nasGrand||'')
+        _vbsCreateDriveStruktur(data.ordner,data.nasParent||'',data.nasGrand||'',data.nas||'')
           .finally(function(){_vbsCreating=false;});
       } else {
         _vbsCreating=false;
         _vbsShowSearchBadge('⏳ Drive nicht verbunden – bitte ☁️ klicken, dann Ordner automatisch angelegt');
-        try{localStorage.setItem('pam_vbs_pending_ordner',JSON.stringify({ordner:data.ordner,nasParent:data.nasParent||'',nasGrand:data.nasGrand||''}));}catch(e){}
+        try{localStorage.setItem('pam_vbs_pending_ordner',JSON.stringify({ordner:data.ordner,nasParent:data.nasParent||'',nasGrand:data.nasGrand||'',nas:data.nas||''}));}catch(e){}
       }
     } else {
       _vbsCreating=false;
@@ -20069,7 +20069,38 @@ async function _vbsSearchOnce(ordnerName){
 // 5b) Drive-Ordnerstruktur anlegen – adaptiver Zwei-Ebenen-Oberordner-Suche
 // nasParent = direkter Elternordner des Auftrags (z.B. "2026" oder "AHV_Hauptstr")
 // nasGrand  = Großelternordner (z.B. "Matthias-Schleiden-Weg 13") – für eindeutige Suche wenn nasParent nicht eindeutig
-async function _vbsCreateDriveStruktur(ordnerName,nasParent,nasGrand){
+// nasPath   = #373: voller NAS-Pfad des Auftragsordners (VBS-Param "nas") – für Ahnenketten-Abgleich bei Mehrfach-Treffern
+
+// #373: NAS-Pfad in Segmente zerlegen (ohne Auftragsordner selbst), umgekehrt: [0]=nasParent, [1]=nasGrand, ...
+function _vbsNasPathSegments(nasPath){
+  if(!nasPath)return[];
+  const segs=String(nasPath).replace(/\//g,'\\').split('\\').map(function(s){return s.trim();}).filter(function(s){return s!==''&&!/^[A-Za-z]:$/.test(s);});
+  segs.pop(); // letztes Segment = Auftragsordner selbst
+  return segs.reverse();
+}
+
+// #373: Drive-Ahnenkette eines Kandidaten gegen NAS-Segmente vergleichen → Anzahl übereinstimmender Ebenen (max 5)
+async function _vbsScoreAncestors(candId,segs){
+  let score=0;
+  try{
+    const _b='https://www.googleapis.com/drive/v3/files/';
+    const _h={headers:{Authorization:'Bearer '+gdriveToken}};
+    const r=await fetch(_b+candId+'?fields=parents',_h);
+    if(!r.ok)return 0;
+    let pid=(((await r.json()).parents)||[])[0];
+    for(let i=1;i<segs.length&&i<=5&&pid;i++){
+      const pR=await fetch(_b+pid+'?fields=name,parents',_h);
+      if(!pR.ok)break;
+      const pD=await pR.json();
+      if((pD.name||'').trim().toLowerCase()!==segs[i].toLowerCase())break;
+      score++;
+      pid=(pD.parents||[])[0];
+    }
+  }catch(e){console.warn('[VBS] Ahnen-Score Fehler:',e);}
+  return score;
+}
+
+async function _vbsCreateDriveStruktur(ordnerName,nasParent,nasGrand,nasPath){
   _vbsShowSearchBadge('📁 Suche richtigen Drive-Ordner…');
   try{
     const _base='https://www.googleapis.com/drive/v3/files';
@@ -20089,9 +20120,23 @@ async function _vbsCreateDriveStruktur(ordnerName,nasParent,nasGrand){
         if(exactList.length===1){
           parentFid=exactList[0].id;parentFound=true;
           console.log('[VBS] nasParent eindeutig gefunden:',nasParent);
-        } else if(exactList.length>1&&nasGrand){
-          // ── Mehrere Treffer: nasGrand zur Disambiguierung nutzen ──
-          for(const f of exactList){
+        } else if(exactList.length>1){
+          // ── #373: Mehrere Treffer – NAS-Pfad-Abgleich (Ahnenkette) hat Vorrang ──
+          const _segs=_vbsNasPathSegments(nasPath||'');
+          if(_segs.length>1){
+            let _best=null,_bestScore=0,_tie=false;
+            for(const f of exactList){
+              const _sc=await _vbsScoreAncestors(f.id,_segs);
+              if(_sc>_bestScore){_best=f;_bestScore=_sc;_tie=false;}
+              else if(_sc===_bestScore&&_sc>0)_tie=true;
+            }
+            if(_best&&_bestScore>0&&!_tie){
+              parentFid=_best.id;parentFound=true;
+              console.log('[VBS] nasParent per NAS-Pfad-Abgleich eindeutig ('+_bestScore+' Ebene(n) bestätigt):',nasParent);
+            }
+          }
+          // ── Fallback: nasGrand zur Disambiguierung nutzen (wie bisher) ──
+          if(!parentFound&&nasGrand)for(const f of exactList){
             const upR=await fetch(_base+'/'+f.id+'?fields=parents',_hdr);
             if(!upR.ok)continue;
             const upD=await upR.json();
@@ -20123,7 +20168,8 @@ async function _vbsCreateDriveStruktur(ordnerName,nasParent,nasGrand){
               }
             }catch(eG2){console.warn('[VBS] nasGrand-Direktsuche fehlgeschlagen:',eG2);}
           }
-          if(!parentFound){parentFid=exactList[0].id;parentFound=true;console.warn('[VBS] nasGrand half nicht – erster Treffer:',nasParent);}
+          if(!parentFound&&_segs.length<=1){parentFid=exactList[0].id;parentFound=true;console.warn('[VBS] nasGrand half nicht – erster Treffer:',nasParent);}
+          else if(!parentFound)console.warn('[VBS] Mehrfach-Treffer, weder NAS-Pfad noch nasGrand eindeutig – kein Raten, Anlage im Startordner:',nasParent);
         } else if(exactList.length===0){
           // ── Strategie 2 Fallback: nasGrand suchen, nasParent darin finden ──
           if(nasGrand){
@@ -20327,7 +20373,7 @@ function _vbsShowSearchBadge(text,success,warn){
       const pendingOrdner=localStorage.getItem('pam_vbs_pending_ordner');
       if(pendingOrdner){
         localStorage.removeItem('pam_vbs_pending_ordner');
-        try{const po=JSON.parse(pendingOrdner);console.log('[VBS] Pending-Ordner nach Drive-Login:',po);_vbsCreateDriveStruktur(po.ordner||'',po.nasParent||'',po.nasGrand||'');}catch(e){console.warn('[VBS] Pending-Ordner Parse-Fehler:',e);}
+        try{const po=JSON.parse(pendingOrdner);console.log('[VBS] Pending-Ordner nach Drive-Login:',po);_vbsCreateDriveStruktur(po.ordner||'',po.nasParent||'',po.nasGrand||'',po.nas||'');}catch(e){console.warn('[VBS] Pending-Ordner Parse-Fehler:',e);}
         return;
       }
       // Altes Format: pam_vbs_pending_search (rückwärtskompatibel)
@@ -23577,7 +23623,7 @@ async function _createDriveFoldersForNewAuftrag(p){
 
     // Drive-Struktur anlegen – _vbsCreateDriveStruktur setzt alle Drive-Felder,
     // Stammblatt-Suche, NAS-Sync-Erkennung und Duplikat-Schutz
-    await _vbsCreateDriveStruktur(p.ordner||('Auftrag_'+p.ks), p.nasParent||'', p.nasGrand||'');
+    await _vbsCreateDriveStruktur(p.ordner||('Auftrag_'+p.ks), p.nasParent||'', p.nasGrand||'', p.nas||'');
 
     showToast('✓ Task bereit – bitte speichern!','ok',4000);
   }catch(e){
