@@ -262,7 +262,7 @@ async function _ezBuildPdfFromHtml(info){
   // CID-Inline-Bilder direkt im HTML ersetzen bevor wrap gebaut wird
   let _cidMap=info.cidMap||{};
   const _MIN_CID_BYTES=5*1024; // 5KB: Logos/Icons rausfiltern
-  const _MIN_EMAIL_IMG_BYTES=25*1024; // 25KB: Anhang-Bilder (Logos/Signaturen) beim Import rausfiltern (#314)
+  const _MIN_EMAIL_IMG_BYTES=50*1024; // Fix #369: 25→50KB – Anhang-Bilder (Logos/Signaturen) beim Import rausfiltern (Wunsch Frank 10.06.)
   let resolvedHtml=cleanHtml.replace(/src=["']?(cid:[^"'\s>]+)["']?/gi,function(m,cid){
     let _d=_cidMap[cid]||_cidMap['cid:'+cid.replace(/^cid:/i,'')]||'';
     if(!_d)return 'src=""';
@@ -505,7 +505,7 @@ function _parseEmlText(rawText){
   let hdr=he>=0?rawText.substring(0,he):rawText.substring(0,2000);
   let bdy=he>=0?rawText.substring(he).replace(/^\r?\n/,''):'';
   let hl=hdr.replace(/\r?\n([ \t])/g,' ').split(/\r?\n/);
-  let subject='',sender='',recipient='',cc='',date=new Date(),ctype='',tenc='',charset='utf-8',messageId='';
+  let subject='',sender='',recipient='',cc='',date=new Date(),ctype='',tenc='',charset='utf-8',messageId='',inReplyTo='',references='';
   hl.forEach(function(l){
     if(/^Subject:/i.test(l))subject=_decodeEmlMimeWord(l.replace(/^Subject:\s*/i,'').trim());
     if(/^From:/i.test(l))sender=_decodeEmlMimeWord(l.replace(/^From:\s*/i,'').trim());
@@ -513,6 +513,10 @@ function _parseEmlText(rawText){
     if(/^Cc:/i.test(l))cc=_decodeEmlMimeWord(l.replace(/^Cc:\s*/i,'').trim());
     if(/^Date:/i.test(l)){try{let d=new Date(l.replace(/^Date:\s*/i,''));if(!isNaN(d))date=d;}catch(e){}}
     if(/^Message-ID:/i.test(l))messageId=l.replace(/^Message-ID:\s*/i,'').trim().replace(/^<|>$/g,'');
+    // Fix #369: Konversations-Header – Antwort-Mails haben NEUE Message-IDs,
+    // die Zugehörigkeit steht in In-Reply-To/References
+    if(/^In-Reply-To:/i.test(l))inReplyTo=l.replace(/^In-Reply-To:\s*/i,'').trim().replace(/^<|>$/g,'');
+    if(/^References:/i.test(l))references=l.replace(/^References:\s*/i,'').trim();
     if(/^Content-Type:/i.test(l)){ctype=l.replace(/^Content-Type:\s*/i,'');let cm=ctype.match(/charset=["']?([^"';\s]+)/i);if(cm)charset=cm[1];}
     if(/^Content-Transfer-Encoding:/i.test(l))tenc=l.replace(/^Content-Transfer-Encoding:\s*/i,'').trim().toLowerCase().replace(/['"]/g,'');
   });
@@ -629,7 +633,10 @@ function _parseEmlText(rawText){
   if(!htmlBody){let _hm=bdy.match(/<html[\s\S]*?<\/html>/i);if(_hm){htmlBody=_hm[0];if(/^(Received:|MIME-Version:|X-MS-Exchange)/m.test(plain.substring(0,300)))plain='';}}
   // Fallback: plain enthält E-Mail-Header-Block → eingebettete Nachricht (message/rfc822) rekursiv parsen
   if(!htmlBody&&plain&&/^(Received:|MIME-Version:|X-MS-Exchange)/m.test(plain.substring(0,300))){try{let _ip=_parseEmlText(plain);if(_ip.bodyHtml){htmlBody=_ip.bodyHtml;plain='';}else if(_ip.bodyText&&!/^(Received:|MIME-Version:)/m.test(_ip.bodyText.substring(0,100)))plain=_ip.bodyText;}catch(_e){}}
-  return{subject:subject,sender:sender,recipient:recipient||'',cc:cc||'',date:date,messageId:messageId||'',bodyText:plain.substring(0,8000),bodyHtml:htmlBody||'',cidMap:cidMap||{},attachments:emlAttachments};
+  return{subject:subject,sender:sender,recipient:recipient||'',cc:cc||'',date:date,messageId:messageId||'',
+    inReplyTo:inReplyTo||'', // Fix #369
+    references:references?references.split(/\s+/).map(function(x){return x.replace(/^<|>$/g,'');}).filter(Boolean):[], // Fix #369
+    bodyText:plain.substring(0,8000),bodyHtml:htmlBody||'',cidMap:cidMap||{},attachments:emlAttachments};
 }
 
 function tEmailOrdnerOeffnen(){let u=(document.getElementById('tEmailOrdner')||{}).value||'';if(u.trim())window.open(u,'_blank');else showToast('⚠ Bitte zuerst eine Google Drive Ordner-URL eintragen','error',4000);}
@@ -777,6 +784,47 @@ async function _pdfAuftragDrop(dt){
   _auftragShowPopup('📄 '+title);
 }
 
+// ── Fix #369: Konversations-Erkennung beim .eml-Import ──────────────────────
+// Betreff normalisieren: AW:/Re:/WG:/Fwd:-Präfixe (auch mehrfach) entfernen
+function _normEmlSubject(s){return String(s||'').replace(/^\s*((aw|re|wg|fw|fwd|antw|sv)\s*:\s*)+/i,'').replace(/\s+/g,' ').trim().toLowerCase();}
+// Sucht den Task, zu dem eine eingezogene E-Mail gehört.
+// Rückgabe: {task,board,match:'duplicate'|'id'|'subject'} oder null
+// - 'duplicate': exakt dieselbe Mail (Message-ID) ist schon im Task
+// - 'id':        Antwort/Weiterleitung derselben Konversation (In-Reply-To/References)
+// - 'subject':   nur Betreff-Übereinstimmung (unsicherer → Popup mit Vorauswahl)
+function _findTaskForEmlInfo(info){
+  if(!info)return null;
+  const dropId=(info.messageId||'').trim();
+  const replyIds=new Set();
+  if(info.inReplyTo)replyIds.add(info.inReplyTo);
+  (Array.isArray(info.references)?info.references:[]).forEach(function(r){if(r)replyIds.add(r);});
+  const nSubj=_normEmlSubject(info.subject);
+  let subjHit=null;
+  for(const bn of Object.keys(boards)){
+    const arr=boards[bn];
+    if(!Array.isArray(arr))continue;
+    for(const t of arr){
+      if(!t||!t.id)continue;
+      const tIds=new Set();
+      (t.emailOriginals||[]).forEach(function(e){if(e&&e.messageId)tIds.add(e.messageId);});
+      (t.emailPdfs||[]).forEach(function(p){if(!p)return;[p.messageId,p.msMessageId,p.gmailMessageId].forEach(function(x){if(x)tIds.add(x);});});
+      (t.msMessageIds||[]).forEach(function(x){if(x)tIds.add(x);});
+      (t.gmailMessageIds||[]).forEach(function(x){if(x)tIds.add(x);});
+      if(t.msMessageId)tIds.add(t.msMessageId);
+      if(t.gmailMessageId)tIds.add(t.gmailMessageId);
+      if(tIds.size){
+        if(dropId&&tIds.has(dropId))return{task:t,board:bn,match:'duplicate'};
+        for(const rid of replyIds){if(tIds.has(rid))return{task:t,board:bn,match:'id'};}
+      }
+      if(!subjHit&&nSubj){
+        const cands=[t.msEmailSubject].concat((t.emailOriginals||[]).map(function(e){return e&&e.subject;}));
+        if(cands.some(function(c){return c&&_normEmlSubject(c)===nSubj;}))subjHit={task:t,board:bn,match:'subject'};
+      }
+    }
+  }
+  return subjHit;
+}
+
 async function _auftragDrop(dt){
   if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden (oben rechts: ☁️ Google Drive)','error',5000);return;}
   let zone=document.getElementById('auftragDropBar');
@@ -812,7 +860,25 @@ async function _auftragDrop(dt){
     }
     if(!info){zone.classList.remove('adz-hover');alert('Keine E-Mail erkannt. Bitte .eml-Datei verwenden.');return;}
     _auftragPending={info:info,rawFile:rawFile};
-    _auftragShowPopup(info.subject);
+    // Fix #369: Konversations-Erkennung (Wunsch Frank 10.06.):
+    // - dieselbe Mail schon im Task → abbrechen (kein Duplikat)
+    // - Antwort derselben Konversation (ID-Treffer) → VOLLAUTOMATISCH anhängen
+    // - nur Betreff-Treffer → Popup mit Vorauswahl "Zu bestehendem Task"
+    let _convHit=null;
+    try{_convHit=_findTaskForEmlInfo(info);}catch(_ce){console.warn('[PAM] Konversations-Erkennung:',_ce);}
+    if(_convHit&&_convHit.match==='duplicate'){
+      zone.classList.remove('adz-hover');
+      _auftragPending=null;
+      showToast('ℹ Diese E-Mail ist bereits in „'+(_convHit.task.title||'Task')+'" vorhanden – nichts importiert','info',6000);
+      return;
+    }
+    if(_convHit&&_convHit.match==='id'){
+      zone.classList.remove('adz-hover');
+      showToast('📧 Konversation erkannt → wird automatisch an „'+(_convHit.task.title||'Task')+'" angehängt…','info',5000);
+      await _auftragAddToTask(_convHit.task,_convHit.board,'email');
+      return;
+    }
+    _auftragShowPopup(info.subject,_convHit); // _convHit = Betreff-Treffer oder null
   }catch(e){
     zone.classList.remove('adz-hover');alert('Fehler: '+e.message);
   }
@@ -889,7 +955,7 @@ async function _pdfAuftragCreate(boardName){
   setTimeout(function(){openEditTaskModal(newTask.id);},150);
 }
 
-function _auftragShowPopup(subject){
+function _auftragShowPopup(subject,_suggest){
   let sel=document.getElementById('auftragBoardSel');
   sel.innerHTML='';
   Object.keys(boards).forEach(function(k){
@@ -907,6 +973,16 @@ function _auftragShowPopup(subject){
   _auftragToggle('new');
   // Task-Dropdown und Status-Dropdown befüllen
   _auftragUpdateTaskSel();
+  // Fix #369: Betreff-Treffer → "Zu bestehendem Task" mit gefundenem Task vorauswählen
+  // (nur Vorbelegung – Frank prüft und bestätigt; "Neuer Task" bleibt jederzeit wählbar)
+  if(_suggest&&_suggest.task&&_suggest.task.id){
+    if(_suggest.board&&sel.querySelector('option[value="'+CSS.escape(_suggest.board)+'"]'))sel.value=_suggest.board;
+    _auftragToggle('exist');
+    _auftragUpdateTaskSel();
+    let _tSel=document.getElementById('auftragTaskSel');
+    if(_tSel&&_tSel.querySelector('option[value="'+CSS.escape(_suggest.task.id)+'"]'))_tSel.value=_suggest.task.id;
+    showToast('📧 Gleicher Betreff gefunden – gehört vermutlich zu: „'+(_suggest.task.title||'Task')+'". Bitte prüfen & bestätigen.','info',7000);
+  }
   let popup=document.getElementById('auftragBoardPopup');
   popup.style.display='flex';
 }
@@ -3763,7 +3839,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-10 · #368'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-10-b368)
+const PAM_BUILD = 'v2026-06-10 · #369'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-10-b369)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -4620,7 +4696,7 @@ const DEFAULT_FOLDER_EMAIL    = 'https://drive.google.com/drive/folders/1qPfE5wo
 // Fix #351: Globale Konstante – war fälschlicherweise nur lokal in _ezBuildPdfFromHtml definiert,
 // wurde aber in _auftragConfirm (Zeile ~1406) und _auftragAddToTask (Zeile ~1116) verwendet
 // → ReferenceError wenn isImg=true → gesamter Anhang-Upload-Loop abgebrochen, keine Dokumente hochgeladen
-const _MIN_EMAIL_IMG_BYTES = 25 * 1024; // 25 KB: Logos/Signaturen beim EML-Import überspringen
+const _MIN_EMAIL_IMG_BYTES = 50 * 1024; // Fix #369: 25→50 KB – Logos/Signaturen beim EML-Import überspringen
 // Fix #6: drive.file erlaubt nur app-eigene Dateien; drive.readonly für Lesezugriff auf fremde Dateien.
 // drive.metadata.readonly erlaubt Datei-Suche (name, parents) ohne vollen Lesezugriff.
 // drive.metadata (ohne readonly) erlaubt Verschieben (parents ändern) für ALLE Ordner des Nutzers – benötigt für _moveTaskFolderToParent().
