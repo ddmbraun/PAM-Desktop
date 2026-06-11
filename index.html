@@ -2378,12 +2378,13 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 .em-topbar-title{font-size:17px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);}
 input.em-topbar-title:focus{box-shadow:none;}
 .em-body{display:flex;flex:1;overflow:hidden;}
-.em-mail-list{width:320px;min-width:160px;flex-shrink:0;border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;background:var(--bg3);}
+.em-mail-list{width:320px;min-width:160px;flex-shrink:0;border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;background:var(--bg3);transition:width .2s,opacity .15s,min-width .2s;}
+.em-mail-list.collapsed{width:0;min-width:0;border-right:none;opacity:0;pointer-events:none;overflow:hidden;flex:0 0 0;}
 .em-resizer{width:5px;background:transparent;cursor:col-resize;flex-shrink:0;transition:background .15s;}
 .em-resizer:hover,.em-resizer.dragging{background:var(--accent);}
 .em-reading-pane{flex:1;min-width:120px;display:flex;flex-direction:column;overflow:hidden;background:var(--bg2);}
 .em-right-panel{width:300px;min-width:200px;flex:1;border-left:1px solid var(--border);padding:12px;display:flex;flex-direction:column;gap:10px;overflow-y:auto;overflow-x:hidden;background:var(--bg3);transition:width .2s,padding .2s,opacity .15s,min-width .2s;}
-.em-right-panel.collapsed{width:0;min-width:0;padding:0;opacity:0;pointer-events:none;overflow:hidden;}
+.em-right-panel.collapsed{width:0;min-width:0;padding:0;opacity:0;pointer-events:none;overflow:hidden;flex:0 0 0;}
 .em-footer{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:8px 14px;border-top:1px solid var(--border);background:var(--bg3);flex-shrink:0;}
 .em-mail-item{padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s;}
 .em-mail-item:hover{background:var(--bg3);}
@@ -3660,6 +3661,7 @@ function _pamGuestSubmit(){
           onkeydown="if(event.key==='Enter'){this.blur();event.preventDefault();}">
         <div id="emHeaderBadges" style="display:flex;align-items:center;gap:4px;flex-shrink:0;flex-wrap:wrap;margin-left:6px;"></div>
         <div class="em-topbar-right">
+          <button class="em-toggle-btn" id="emToggleLeftBtn" onclick="_emToggleLeft()" title="Linkes Panel (Mail-Liste) ein-/ausklappen">◧</button>
           <button class="em-toggle-btn" id="emToggleRightBtn" onclick="_emToggleRight()" title="Rechtes Panel ein-/ausklappen">◨</button>
           <button class="em-close-btn" onclick="closeEmailTaskModal()">✕</button>
         </div>
@@ -3871,7 +3873,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-10 · #379'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-10-b379)
+const PAM_BUILD = 'v2026-06-11 · #380'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-11-b380)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -20509,7 +20511,7 @@ function _pfUpdateStatus(boardName){
 // ══════════════════════════════════════════════════════
 // E-MAIL-TASK-MODAL – Öffnen, Rendern, Speichern, Aktionen
 // ══════════════════════════════════════════════════════
-let _emCurrentTask=null, _emCurrentBoard='', _emPrevBoard='', _emActiveMailIdx=-1, _emSaveTimer=null, _emRightCollapsed=false;
+let _emCurrentTask=null, _emCurrentBoard='', _emPrevBoard='', _emActiveMailIdx=-1, _emSaveTimer=null, _emRightCollapsed=false, _emLeftCollapsed=false;
 let _emDirty=false; // #376: Dirty-Flag – true wenn User etwas im Posteingang-Modal geändert hat
 let _emModalSnapshot=null; // Fix #368: Task-Stand beim Öffnen des Posteingang-Modals (für Snapshot-Merge in gdriveSaveData)
 let _emLoadOverrideId=null; // Fix1: kein DOM-Side-Effect beim Outlook/Gmail-Laden
@@ -20700,8 +20702,7 @@ function openEmailTaskModal(task,board){
   _emRenderAufgabenList();
   document.getElementById('emNotizInput').value=task.emNotiz||'';
   _emUpdateFolderLink();
-  let rp=document.getElementById('emRightPanel');
-  if(_emRightCollapsed)rp.classList.add('collapsed');else rp.classList.remove('collapsed');
+  _emApplyPanelLayout(); // #380: Panel-Zustand (links/rechts) + gespeicherte Breite anwenden
   // Gmail-Button nur zeigen wenn Gmail verbunden
   const _gbtn=document.getElementById('emGmailLadenBtn');
   if(_gbtn)_gbtn.style.display=(typeof gmailToken!=='undefined'&&gmailToken)?'':'none';
@@ -20749,9 +20750,17 @@ function openEmailTaskModal(task,board){
     _emBox.style.transform='translate(-50%,-50%)';
     _emBox.style.top='50%';
     _emBox.style.left='50%';
-    _emBox.style.width='';
-    _emBox.style.height='';
-    _emBox.style.maxWidth='';
+    // #380: gespeicherte Fenstergröße wiederherstellen statt bei jedem Öffnen zurückzusetzen
+    let _emSz=null;try{_emSz=JSON.parse(localStorage.getItem(_EM_MODAL_KEY)||'null');}catch(e){}
+    if(_emSz&&_emSz.w>400&&_emSz.h>250){
+      _emBox.style.width=_emSz.w+'px';
+      _emBox.style.height=_emSz.h+'px';
+      _emBox.style.maxWidth='none';
+    }else{
+      _emBox.style.width='';
+      _emBox.style.height='';
+      _emBox.style.maxWidth='';
+    }
     _emBox._emDragInit=false; // Drag-Listener neu initialisieren
   }
   document.getElementById('emailTaskModal').classList.add('open');
@@ -21748,10 +21757,43 @@ function _escHtml(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&l
 
 function _emToggleRight(){
   _emRightCollapsed=!_emRightCollapsed;
+  if(_emRightCollapsed)_emLeftCollapsed=false; // nie beide gleichzeitig zu
+  _emApplyPanelLayout();
+}
+function _emToggleLeft(){
+  _emLeftCollapsed=!_emLeftCollapsed;
+  if(_emLeftCollapsed)_emRightCollapsed=false; // nie beide gleichzeitig zu
+  _emApplyPanelLayout();
+}
+// #380: zentrale Layout-Logik für die beiden Panels (Mail-Liste links / Steuerung rechts)
+function _emApplyPanelLayout(){
+  let ml=document.getElementById('emMailList');
   let rp=document.getElementById('emRightPanel');
   let rz=document.getElementById('emResizer2');
-  if(_emRightCollapsed){rp.classList.add('collapsed');if(rz)rz.style.display='none';}
-  else{rp.classList.remove('collapsed');if(rz)rz.style.display='';}
+  if(!ml||!rp)return;
+  if(_emLeftCollapsed)ml.classList.add('collapsed');else ml.classList.remove('collapsed');
+  if(_emRightCollapsed)rp.classList.add('collapsed');else rp.classList.remove('collapsed');
+  let bothOpen=!_emLeftCollapsed&&!_emRightCollapsed;
+  // Trenn-Resizer nur sinnvoll, wenn beide Seiten offen sind
+  if(rz)rz.style.display=bothOpen?'':'none';
+  if(bothOpen){
+    // gespeicherte Trennbreite wiederherstellen (rechtes Panel füllt den Rest)
+    ml.style.flex='';ml.style.width='';
+    _emRestoreColWidths();
+    rp.style.flex='1';
+  }else if(_emRightCollapsed){
+    // nur Mail-Liste sichtbar -> füllt die volle Breite (kein weißes Feld)
+    ml.style.width='';ml.style.flex='1';
+  }else{
+    // nur rechtes Panel sichtbar -> füllt die volle Breite
+    ml.style.width='';ml.style.flex='';
+    rp.style.flex='1';
+  }
+  // Button-Status sichtbar machen
+  let lb=document.getElementById('emToggleLeftBtn');
+  let rb=document.getElementById('emToggleRightBtn');
+  if(lb)lb.style.opacity=_emLeftCollapsed?'.5':'';
+  if(rb)rb.style.opacity=_emRightCollapsed?'.5':'';
 }
 function _emRenderTerminList(){
   let el=document.getElementById('emTerminList');
@@ -22760,6 +22802,7 @@ function _emDeleteTask(){
 }
 
 const _EM_COL_KEY='pam_em_col_widths_v2';
+const _EM_MODAL_KEY='pam_em_modal_size_v1'; // #380: Fenstergröße des E-Mail-Modals merken
 function _emSaveColWidths(){
   try{
     let ml=document.getElementById('emMailList');
@@ -22814,8 +22857,8 @@ function _initEmailResizers(){
       rz2.addEventListener('pointermove',onMove);rz2.addEventListener('pointerup',onUp);
     });
   })();
-  // Fix: gespeicherte Breiten beim Oeffnen wiederherstellen
-  _emRestoreColWidths();
+  // Fix: gespeicherte Breiten + Panel-Zustand beim Oeffnen wiederherstellen (#380)
+  _emApplyPanelLayout();
 
   // ── Modal verschieben (Drag per Topbar) ──
   const modal=document.getElementById('emModalBox');
@@ -22876,7 +22919,10 @@ function _initEmailResizers(){
         const rp=document.getElementById('emRightPanel');
         if(rp&&!rp.classList.contains('collapsed')){rp.style.zoom=scale.toFixed(2);rp.style.minHeight='100%';}
       }
-      function onUp(){newHandle.removeEventListener('pointermove',onMove);newHandle.removeEventListener('pointerup',onUp);}
+      function onUp(){
+        try{localStorage.setItem(_EM_MODAL_KEY,JSON.stringify({w:modal.offsetWidth,h:modal.offsetHeight}));}catch(e){} // #380: Größe merken
+        newHandle.removeEventListener('pointermove',onMove);newHandle.removeEventListener('pointerup',onUp);
+      }
       newHandle.addEventListener('pointermove',onMove);newHandle.addEventListener('pointerup',onUp);
     });
   }
