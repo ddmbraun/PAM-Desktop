@@ -3905,7 +3905,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-11 · #382'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-11-b382)
+const PAM_BUILD = 'v2026-06-12 · #383'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-12-b383)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -13033,10 +13033,13 @@ async function _gmLoadEmailThread(){
     const allMsgIds=[...new Set([...(task.gmailMessageIds||[]),task.gmailMessageId||''].filter(Boolean))];
     const threadIds=new Set();if(task.gmailThreadId)threadIds.add(task.gmailThreadId);
     for(const msgId of allMsgIds){
-      try{const q=encodeURIComponent('rfc822msgid:<'+msgId+'>');
-        const r=await fetch('https://www.googleapis.com/gmail/v1/users/me/messages?q='+q+'&maxResults=1',{headers:{Authorization:'Bearer '+gmailToken}});
-        if(r.status===401){throw new Error('Gmail-Token abgelaufen – bitte Gmail neu verbinden (Toolbar: 📩 Gmail)');}
-        if(r.ok){const d=await r.json();if(d.messages?.length)threadIds.add(d.messages[0].threadId);}
+      try{
+        // #383: rfc822msgid mit UND ohne Spitzklammern probieren (wie _gmFindByMsgId)
+        for(const q of ['rfc822msgid:<'+msgId+'>','rfc822msgid:'+msgId]){
+          const r=await fetch('https://www.googleapis.com/gmail/v1/users/me/messages?q='+encodeURIComponent(q)+'&maxResults=1',{headers:{Authorization:'Bearer '+gmailToken}});
+          if(r.status===401){throw new Error('Gmail-Token abgelaufen – bitte Gmail neu verbinden (Toolbar: 📩 Gmail)');}
+          if(r.ok){const d=await r.json();if(d.messages?.length){threadIds.add(d.messages[0].threadId);break;}}
+        }
       }catch(e){console.warn('[GM] msgId lookup:',e);}
     }
     if(!threadIds.size&&!allMsgIds.length)throw new Error('Keine Gmail-Mail verknüpft – bitte erst eine Mail in den Task ziehen');
@@ -13582,9 +13585,9 @@ function _msCleanPreview(raw){
 }
 async function _msLoadEmailThread(){
   const taskId=_getActiveTaskId();
-  let _msActiveToken=msToken; // lokales Token – wird ggf. auf Konto 2 gesetzt ohne msToken global zu überschreiben
   const task=findTaskById(taskId)||(_pamCurrentTask&&_pamCurrentTask.id===taskId?_pamCurrentTask:null);
   if(!task){showToast('⚠ Kein Task geöffnet (ID: '+(taskId||'leer')+')','error',3000);return;}
+  let _msActiveToken=_msPickToken(task); // #383: Konto-2-Tasks starten direkt mit Token 2; wird nach Refresh neu gesetzt (war vorher stale kopiert)
   // Fix 2026-05-27: Token ggf. still aus MSAL-Cache holen (z.B. nach Seiten-Reload)
   if(!msToken){
     const _msAcc=typeof msalInstance!=='undefined'&&msalInstance&&msalInstance.getAllAccounts&&msalInstance.getAllAccounts();
@@ -13613,8 +13616,11 @@ async function _msLoadEmailThread(){
   try{
     // Token ggf. erneuern
     if(!await _msRefreshToken()){showToast('⚠ Outlook-Token abgelaufen – bitte neu anmelden','error',4000);return;}
+    if(task.msAccount==='2')await _msRefreshToken2(); // #383: Konto-2-Token ebenfalls erneuern
+    _msActiveToken=_msPickToken(task); // #383 FIX: vorher wurde das VOR dem Refresh kopierte (stale/null) Token für Schritt 2 benutzt → 401 → "0 Mails geladen"
     // Schritt 1: ConversationIds für alle Message-IDs ermitteln
     const convIds=new Set();
+    let _idHits=0; // #383: echte Treffer der ID-Suche zählen – gespeicherte ConvId darf den Konto-2-Fallback nicht blockieren
     if(task.msConversationId)convIds.add(task.msConversationId);
     for(const msgId of _allMsgIds){
       try{
@@ -13624,7 +13630,7 @@ async function _msLoadEmailThread(){
         if(r.ok){
           const d=await r.json();
           if(d.value&&d.value.length){
-            convIds.add(d.value[0].conversationId);
+            convIds.add(d.value[0].conversationId);_idHits++;
           }else{
             // Fallback 2: manche Exchange-Server speichern ohne Spitzklammern
             const _f1b=encodeURIComponent(`internetMessageId eq '${msgId}'`);
@@ -13633,7 +13639,7 @@ async function _msLoadEmailThread(){
             if(rb.ok){
               const db=await rb.json();
               if(db.value&&db.value.length){
-                convIds.add(db.value[0].conversationId);
+                convIds.add(db.value[0].conversationId);_idHits++;
               }
               // Hinweis: MessageId KQL ($search) ist kein gültiges Graph-API Suchfeld → immer 400, daher entfernt
             }
@@ -13643,25 +13649,25 @@ async function _msLoadEmailThread(){
     }
     console.log('[MS-DEBUG] Nach ID-Suche: convIds.size=',convIds.size,'| IDs durchsucht:',_allMsgIds.length);
     // Zweites Outlook-Konto: falls Konto 1 keine Treffer liefert, Konto 2 versuchen
-    if(convIds.size===0&&_allMsgIds.length>0&&msToken2){
+    if(_idHits===0&&_allMsgIds.length>0&&msToken2){ /* #383: _idHits statt convIds.size – gespeicherte ConvId blockierte Konto 2 */
       console.log('[MS-DEBUG] Kein Treffer mit Konto 1 – versuche Konto 2 ('+msUserEmail2+')');
       if(await _msRefreshToken2()){
         for(const _m2id of _allMsgIds){
-          if(convIds.size>0)break;
+          if(_idHits>0)break;
           try{
             // Filter mit <>
             const _r2a=await fetch(`https://graph.microsoft.com/v1.0/me/messages?$filter=${encodeURIComponent("internetMessageId eq '<"+_m2id+">'")}&$select=id,conversationId&$top=1`,
               {headers:{Authorization:'Bearer '+msToken2}});
-            if(_r2a.ok){const _d2a=await _r2a.json();if(_d2a.value&&_d2a.value.length)convIds.add(_d2a.value[0].conversationId);}
+            if(_r2a.ok){const _d2a=await _r2a.json();if(_d2a.value&&_d2a.value.length){convIds.add(_d2a.value[0].conversationId);_idHits++;}}
             // Filter ohne <>
-            if(convIds.size===0){
+            if(_idHits===0){
               const _r2b=await fetch(`https://graph.microsoft.com/v1.0/me/messages?$filter=${encodeURIComponent("internetMessageId eq '"+_m2id+"'")}&$select=id,conversationId&$top=1`,
                 {headers:{Authorization:'Bearer '+msToken2}});
-              if(_r2b.ok){const _d2b=await _r2b.json();if(_d2b.value&&_d2b.value.length)convIds.add(_d2b.value[0].conversationId);}
+              if(_r2b.ok){const _d2b=await _r2b.json();if(_d2b.value&&_d2b.value.length){convIds.add(_d2b.value[0].conversationId);_idHits++;}}
             }
           }catch(e){console.warn('[MS2] ID-Suche für',_m2id,':',e);}
         }
-        if(convIds.size>0){
+        if(_idHits>0){
           // Konto 2 hat Treffer → _msActiveToken für diesen Aufruf setzen (msToken NICHT überschreiben)
           _msActiveToken=msToken2;
           task.msAccount='2'; // für alle Folgeaufrufe merken (#316)
@@ -13872,6 +13878,13 @@ async function _msLoadEmailThread(){
       internetMessageId:(m.internetMessageId||'').replace(/^<|>$/g,''),
       hasAttachments:m.hasAttachments||false,
     }));
+    if(threadMsgs.length===0){
+      // #383: Konversation gefunden, aber 0 Mails geladen → kein falscher Erfolgs-Toast,
+      // bestehenden Verlauf NICHT mit leerer Liste überschreiben (deutet auf Token-/Konto-Problem)
+      if(stEl)stEl.textContent='⚠ 0 Mails';
+      showToast('⚠ Konversation gefunden, aber 0 Mails geladen (Token-/Konto-Problem?) – bitte erneut versuchen','warning',6000);
+      return;
+    }
     task.msThreadMessages=threadMsgs;
     _msRenderThread(task);
     // PDFs + Originale automatisch speichern
@@ -19213,11 +19226,14 @@ async function _uploadEmailOriginal(file){
         // Empfänger-Check: liegt die Email in einem Exchange-Postfach?
         // Nur dann msMessageIds befüllen und Outlook-Thread-Suche starten.
         const _rcpt=(emailMeta.recipient||'').toLowerCase();
-        const _exchangeAddrs=['info@ddmbraun.de','frank.braun@sv-fb.de'];
+        // #383: frank.braun@sv-fb.de ist GMAIL (Outlook ist dort nur IMAP-Client) → Gmail-Slot, nicht Exchange!
+        // Exchange-Postfächer (via Graph erreichbar): info@ + f.braun@ddmbraun.de (Konto 2, fehlte bisher)
+        const _exchangeAddrs=['info@ddmbraun.de','f.braun@ddmbraun.de'];
         const _isExchangeRecipient=_exchangeAddrs.some(a=>_rcpt.includes(a));
+        const _isGmailRecipient=_rcpt.includes('@sv-fb.de');
         // Wenn IMAP-Konto (T-Online etc.): kein Outlook-Verlauf möglich
-        const _isImap=(_ep!=='gmail')&&!_isExchangeRecipient&&_rcpt.length>0;
-        if(_ep==='gmail'){
+        const _isImap=(_ep!=='gmail')&&!_isGmailRecipient&&!_isExchangeRecipient&&_rcpt.length>0;
+        if(_ep==='gmail'||_isGmailRecipient){
           if(!t.gmailMessageIds)t.gmailMessageIds=[];
           if(!t.gmailMessageIds.includes(emailMeta.messageId))t.gmailMessageIds.push(emailMeta.messageId);
           if(!t.gmailMessageId)t.gmailMessageId=emailMeta.messageId;
@@ -19236,10 +19252,10 @@ async function _uploadEmailOriginal(file){
           showToast('✅ EML gespeichert · Outlook','success',3000);
         }
         // Chip auto-aufklappen + Thread laden (nur wenn Task noch geöffnet und Exchange-Mail)
-        if(_ep==='gmail'&&typeof gmailToken!=='undefined'&&gmailToken){
+        if((_ep==='gmail'||_isGmailRecipient)&&typeof gmailToken!=='undefined'&&gmailToken){ /* #383: auch bei Empfänger sv-fb.de */
           _pamEmailToggle('gmail');
           setTimeout(()=>{const _tid=(document.getElementById('taskId')||{}).value||_pamActiveTaskId||'';if(_tid&&typeof _gmLoadEmailThread==='function')_gmLoadEmailThread();},600);
-        }else if(!_isImap&&_ep!=='gmail'&&typeof msToken!=='undefined'&&msToken){
+        }else if(!_isImap&&_ep!=='gmail'&&!_isGmailRecipient&&typeof msToken!=='undefined'&&msToken){
           _pamEmailToggle('outlook');
           setTimeout(()=>{const _tid=(document.getElementById('taskId')||{}).value||_pamActiveTaskId||'';if(_tid&&typeof _msLoadEmailThread==='function')_msLoadEmailThread();},600);
         }
@@ -22069,9 +22085,11 @@ async function _emUploadEmlForModal(file){
     // Fix #320: Konto-Erkennung + T-Online-Ausnahme + ConvId beide Tokens
     if(meta.messageId){
       const _prov=preText?_detectEmlProvider(preText):'unknown';
+      // #383: An @sv-fb.de adressierte Mails liegen im GMAIL-Postfach (Outlook nur Client) → Gmail-Slot auch bei Provider 'unknown' (gleiche Logik wie Task-Modal-Pfad)
+      const _toGm=isEml&&preText&&/^To:.*@sv-fb\.de/im.test(preText);
       // T-Online: kein Exchange-Konto → nur als emailOriginals speichern, nicht in msMessageIds eintragen
       const _isTOnline=isEml&&preText&&(()=>{const _hEnd=preText.search(/\r?\n\r?\n/);const _hdr=_hEnd>=0?preText.substring(0,_hEnd):preText.substring(0,2000);return /t-online\.de|telekom\.de/i.test(_hdr.match(/^From:.*$/im)||'');})();
-      if(_prov==='gmail'){
+      if(_prov==='gmail'||_toGm){
         if(!t.gmailMessageIds)t.gmailMessageIds=[];
         if(!t.gmailMessageIds.includes(meta.messageId))t.gmailMessageIds.push(meta.messageId);
         if(!t.gmailMessageId)t.gmailMessageId=meta.messageId;
