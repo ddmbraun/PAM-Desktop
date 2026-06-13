@@ -3905,7 +3905,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-13 · #385'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-13-b385)
+const PAM_BUILD = 'v2026-06-13 · #386'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-13-b386)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -15303,7 +15303,9 @@ async function _pamTaskDrucken(extId){
   document.getElementById('pamUebBody').innerHTML=html;
   var _tidEl=document.getElementById('pamUebAktTaskId');if(_tidEl)_tidEl.value=taskId;
   document.getElementById('pamUebersichtOverlay').style.display='block';
-  // Fix #385: erstes Dokument mit Drive-ID sofort in Vorschau laden
+  // Fix #385/#386: erstes Dokument mit Drive-ID sofort in Vorschau laden
+  // z-index auf 15000 (über Overlay 12000), links neben Übersicht-Box positioniert
+  // Fallback: wenn Google CSP-iframe blockiert → Link-Button zum externen Öffnen
   (function(){
     const _fd=_pamDocList.find(function(d){return _pamExtractFileId(d.url);});
     if(!_fd)return;
@@ -15312,11 +15314,40 @@ async function _pamTaskDrucken(extId){
     const frame=document.getElementById('pamUebPreviewFrame');
     const lbl=document.getElementById('pamUebPreviewLabel');
     if(!prev||!frame||!lbl)return;
+    prev.style.zIndex='15000';
     const pUrl='https://drive.google.com/file/d/'+_fid+'/preview';
     if(frame.getAttribute('data-src')!==pUrl){frame.setAttribute('data-src',pUrl);frame.src=pUrl;}
     lbl.textContent=_fd.name||'Vorschau';
+    // CSP-Fallback: nach 3s prüfen ob iframe leer ist → Hinweis + Link zeigen
+    setTimeout(function(){
+      try{
+        const doc=frame.contentDocument||frame.contentWindow&&frame.contentWindow.document;
+        if(!doc||!doc.body||doc.body.innerHTML.trim()===''){
+          frame.style.display='none';
+          let fb=prev.querySelector('._uebFb');
+          if(!fb){fb=document.createElement('div');fb.className='_uebFb';
+            fb.style.cssText='padding:24px;text-align:center;color:var(--text2);display:flex;flex-direction:column;gap:12px;align-items:center;';
+            prev.appendChild(fb);}
+          fb.innerHTML='<div style="font-size:28px;">📄</div>'
+            +'<div style="font-size:12px;">Vorschau nicht möglich<br>(Google CSP blockiert Einbettung)</div>'
+            +'<a href="https://drive.google.com/file/d/'+_fid+'/view" target="_blank" style="padding:8px 16px;background:var(--accent);color:#fff;border-radius:6px;text-decoration:none;font-size:12px;font-weight:600;">↗ Dokument öffnen</a>';
+        }
+      }catch(e){/* cross-origin – iframe ist geblockt, Fehler ist erwartet */
+        frame.style.display='none';
+        let fb=prev.querySelector('._uebFb');
+        if(!fb){fb=document.createElement('div');fb.className='_uebFb';
+          fb.style.cssText='padding:24px;text-align:center;color:var(--text2);display:flex;flex-direction:column;gap:12px;align-items:center;';
+          prev.appendChild(fb);}
+        fb.innerHTML='<div style="font-size:28px;">📄</div>'
+          +'<div style="font-size:12px;">Vorschau nicht möglich<br>(Google CSP blockiert Einbettung)</div>'
+          +'<a href="https://drive.google.com/file/d/'+_fid+'/view" target="_blank" style="padding:8px 16px;background:var(--accent);color:#fff;border-radius:6px;text-decoration:none;font-size:12px;font-weight:600;">↗ Dokument öffnen</a>';
+      }
+    },3000);
+    // Position: links neben Übersicht-Box (max-width 720px zentriert)
     const pw=520,ph=680;
-    prev.style.left=Math.max(8,window.innerWidth-pw-16)+'px';
+    const uebLeft=Math.max(0,Math.round((window.innerWidth-720)/2));
+    const left=Math.max(8,uebLeft-pw-12);
+    prev.style.left=left+'px';
     prev.style.top=Math.max(8,Math.round((window.innerHeight-ph)/2))+'px';
     prev.style.display='block';
   })();
@@ -17237,12 +17268,17 @@ function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2){
   name=name||'';tel=tel||'';email=email||'';tel2=tel2||'';
   const div=document.createElement('div');div.className='kontakt-entry';
   const fs='font-size:11px;padding:3px 6px;';
-  const _dlId='_rdl'+Date.now();
+  const rolleOpts=['ag','mieter','eigentuemer','sonstiges'];
+  const isCustom=rolle&&!rolleOpts.includes(rolle);
+  const selVal=isCustom?'_custom_':rolle;
   div.innerHTML='<div class="kontakt-entry-header">'
-    +'<datalist id="'+_dlId+'">'
-    +'<option value="👔 AG Kontakt"><option value="🏠 Mieter"><option value="👤 Eigentümer"><option value="👥 Sonstiges">'
-    +'</datalist>'
-    +'<input list="'+_dlId+'" class="k-rolle" value="'+(rolleLabel[rolle]||rolle||'').replace(/"/g,'&quot;')+'" placeholder="Rolle …" oninput="scheduleTaskFieldSave()" style="font-size:11px;padding:2px 4px;">'
+    +'<div style="display:flex;flex-direction:column;gap:2px;flex:1;">'
+    +'<select class="k-rolle" style="font-size:11px;padding:2px 4px;width:100%;" onchange="var ci=this.parentNode.querySelector(\'.k-rolle-custom\');if(ci){ci.style.display=this.value===\'_custom_\'?\'\':\' none\';if(this.value===\'_custom_\')ci.focus();}scheduleTaskFieldSave();">'
+    +rolleOpts.map(r=>'<option value="'+r+'"'+(r===selVal?' selected':'')+'>'+rolleLabel[r]+'</option>').join('')
+    +'<option value="_custom_"'+(isCustom?' selected':'')+'>✏️ Andere…</option>'
+    +'</select>'
+    +'<input type="text" class="k-rolle-custom" value="'+(isCustom?rolle.replace(/"/g,'&quot;'):'')+'" placeholder="Eigene Rolle eingeben…" oninput="scheduleTaskFieldSave()" style="display:'+(isCustom?'':'none')+';font-size:11px;padding:2px 4px;width:100%;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);">'
+    +'</div>'
     +'<label style="display:flex;align-items:center;gap:4px;font-size:10px;color:#1a56c4;cursor:pointer;margin-left:6px;" title="Dieser Kontakt wird auf Mobil als Anruf-Button angezeigt">'
     +'<input type="checkbox" class="k-anruf"'+(anrufKontakt?' checked':'')+' style="width:13px;height:13px;accent-color:#1a56c4;cursor:pointer;" onchange="_updateMapsBtn();scheduleTaskFieldSave()">📞 Anruf</label>'
     +'<button type="button" class="gk-create-btn" style="padding:2px 6px;font-size:11px;background:#1a56c4;color:#fff;border:none;border-radius:4px;cursor:pointer;" onclick="_showGKPreview(this.closest(\'.kontakt-entry\'))" title="Kontakt in Google Kontakte anlegen">👤+</button>'
@@ -17284,14 +17320,17 @@ function renderKontaktePTP(kontakte){
 }
 function getKontaktePTP(){
   const c=document.getElementById('tKontakteContainer');if(!c)return[];
-  return[...c.querySelectorAll('.kontakt-entry')].map(e=>({
-    rolle:e.querySelector('.k-rolle').value,
+  return[...c.querySelectorAll('.kontakt-entry')].map(e=>{
+    const _rs=e.querySelector('.k-rolle');
+    const _rc=e.querySelector('.k-rolle-custom');
+    const rolle=(_rs&&_rs.value==='_custom_'&&_rc)?(_rc.value.trim()||'sonstiges'):(_rs?_rs.value:'sonstiges');
+    return({rolle,
     name:e.querySelector('.k-name').value.trim(),
     tel:e.querySelector('.k-tel').value.trim(),
     tel2:e.querySelector('.k-tel2')?e.querySelector('.k-tel2').value.trim():'',
     email:e.querySelector('.k-email').value.trim(),
     anrufKontakt:e.querySelector('.k-anruf')?e.querySelector('.k-anruf').checked:false
-  })).filter(k=>k.name||k.tel||k.tel2||k.email);
+  });}).filter(k=>k.name||k.tel||k.tel2||k.email);
 }
 function updateKontaktePTPTitle(){
   const c=document.getElementById('tKontakteContainer');
