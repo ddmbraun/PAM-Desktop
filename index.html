@@ -3905,7 +3905,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-13 · #384'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-13-b384)
+const PAM_BUILD = 'v2026-06-13 · #385'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-13-b385)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -8253,7 +8253,10 @@ function renderTaskNotizen(){
     +' onblur="updateNotizTs('+i+',this.value)"'
     +' onkeydown="if(event.key===\'Enter\'){this.blur();}"'
     +' style="background:transparent;border:none;border-bottom:1px dashed var(--border);color:var(--text2);font-size:11px;font-weight:500;letter-spacing:.2px;padding:0;margin-bottom:3px;width:100%;outline:none;cursor:text;">'
-    +'<div class="notiz-text">'+esc(n.text||'')+'</div>'
+    +'<textarea class="notiz-text" rows="2" title="Eintrag bearbeiten"'
+    +' onblur="updateNotizText('+i+',this.value)"'
+    +' onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){this.blur();event.preventDefault();}"'
+    +' style="background:transparent;border:none;border-bottom:1px dashed var(--border);color:var(--text);font-size:13px;padding:0;width:100%;outline:none;cursor:text;resize:vertical;line-height:1.4;font-family:inherit;">'+esc(n.text||'')+'</textarea>'
     +'</div>'
     +'<button type="button" class="notiz-del" onclick="removeTaskNotiz('+i+')" title="Eintrag löschen">✕</button>'
     +'</div>'
@@ -8261,6 +8264,9 @@ function renderTaskNotizen(){
 }
 function updateNotizTs(i,val){
   if(taskNotizVerlauf[i]){taskNotizVerlauf[i].ts=val.trim();scheduleTaskFieldSave();}
+}
+function updateNotizText(i,val){
+  if(taskNotizVerlauf[i]){taskNotizVerlauf[i].text=val.trim();scheduleTaskFieldSave();}
 }
 function addTaskNotiz(){
   const inp=document.getElementById('newTaskNotizInput');
@@ -12409,7 +12415,12 @@ function _lbNav(dir){
   openFotoDesktop(ni);
 }
 function _lbForce360(){
-  if(_deskCurrentFotoUrl){const _b=document.getElementById('lb360Btn');if(_b)_b.style.display='none';_deskInitPannellum(_deskCurrentFotoUrl);}
+  if(_deskCurrentFotoUrl){
+    const _b=document.getElementById('lb360Btn');if(_b)_b.style.display='none';
+    // Fix #385: previewContent ausblenden damit das reguläre Foto nicht den Pannellum-Container überdeckt
+    const _cnt=document.getElementById('previewContent');if(_cnt){_cnt.innerHTML='';_cnt.style.display='none';}
+    _deskInitPannellum(_deskCurrentFotoUrl);
+  }
 }
 // ── Zeichen-Tool Desktop ──
 function deskStartDraw(){
@@ -15292,6 +15303,23 @@ async function _pamTaskDrucken(extId){
   document.getElementById('pamUebBody').innerHTML=html;
   var _tidEl=document.getElementById('pamUebAktTaskId');if(_tidEl)_tidEl.value=taskId;
   document.getElementById('pamUebersichtOverlay').style.display='block';
+  // Fix #385: erstes Dokument mit Drive-ID sofort in Vorschau laden
+  (function(){
+    const _fd=_pamDocList.find(function(d){return _pamExtractFileId(d.url);});
+    if(!_fd)return;
+    const _fid=_pamExtractFileId(_fd.url);
+    const prev=document.getElementById('pamUebPreview');
+    const frame=document.getElementById('pamUebPreviewFrame');
+    const lbl=document.getElementById('pamUebPreviewLabel');
+    if(!prev||!frame||!lbl)return;
+    const pUrl='https://drive.google.com/file/d/'+_fid+'/preview';
+    if(frame.getAttribute('data-src')!==pUrl){frame.setAttribute('data-src',pUrl);frame.src=pUrl;}
+    lbl.textContent=_fd.name||'Vorschau';
+    const pw=520,ph=680;
+    prev.style.left=Math.max(8,window.innerWidth-pw-16)+'px';
+    prev.style.top=Math.max(8,Math.round((window.innerHeight-ph)/2))+'px';
+    prev.style.display='block';
+  })();
   // Overlay verschiebbar machen
   (function(){
     const box=document.getElementById('pamUebersichtBox');
@@ -17205,15 +17233,16 @@ async function _createGoogleKontaktFromPreview(){
 }
 function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2){
   const c=document.getElementById('tKontakteContainer');if(!c)return;
-  const rolleOpts=['ag','mieter','eigentuemer','sonstiges'];
   const rolleLabel={ag:'👔 AG Kontakt',mieter:'🏠 Mieter',eigentuemer:'👤 Eigentümer',sonstiges:'👥 Sonstiges'};
   name=name||'';tel=tel||'';email=email||'';tel2=tel2||'';
   const div=document.createElement('div');div.className='kontakt-entry';
   const fs='font-size:11px;padding:3px 6px;';
+  const _dlId='_rdl'+Date.now();
   div.innerHTML='<div class="kontakt-entry-header">'
-    +'<select class="k-rolle" style="font-size:11px;padding:2px 4px;" onchange="scheduleTaskFieldSave()">'
-    +rolleOpts.map(r=>'<option value="'+r+'"'+(r===rolle?' selected':'')+'>'+rolleLabel[r]+'</option>').join('')
-    +'</select>'
+    +'<datalist id="'+_dlId+'">'
+    +'<option value="👔 AG Kontakt"><option value="🏠 Mieter"><option value="👤 Eigentümer"><option value="👥 Sonstiges">'
+    +'</datalist>'
+    +'<input list="'+_dlId+'" class="k-rolle" value="'+(rolleLabel[rolle]||rolle||'').replace(/"/g,'&quot;')+'" placeholder="Rolle …" oninput="scheduleTaskFieldSave()" style="font-size:11px;padding:2px 4px;">'
     +'<label style="display:flex;align-items:center;gap:4px;font-size:10px;color:#1a56c4;cursor:pointer;margin-left:6px;" title="Dieser Kontakt wird auf Mobil als Anruf-Button angezeigt">'
     +'<input type="checkbox" class="k-anruf"'+(anrufKontakt?' checked':'')+' style="width:13px;height:13px;accent-color:#1a56c4;cursor:pointer;" onchange="_updateMapsBtn();scheduleTaskFieldSave()">📞 Anruf</label>'
     +'<button type="button" class="gk-create-btn" style="padding:2px 6px;font-size:11px;background:#1a56c4;color:#fff;border:none;border-radius:4px;cursor:pointer;" onclick="_showGKPreview(this.closest(\'.kontakt-entry\'))" title="Kontakt in Google Kontakte anlegen">👤+</button>'
