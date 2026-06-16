@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pam-desktop-2026-06-15-b390'; // b390: Standort-Zeile (lat/lon + Maps-Link) aus „Beschreibung" in die „Objekt"-Sektion unter die Adresse verschoben + Erfassungszeitpunkt (standortErfasst) angezeigt
+const CACHE_NAME = 'pam-desktop-2026-06-16-b391'; // b391: Kanban-Spaltenbreite – Resize-Greifzone an den sichtbaren Balken (rechte Spaltenkante) angeglichen, Ziehen funktioniert jetzt zuverlässig
 
 self.addEventListener('install', event => {
   // Kein pre-caching – verhindert addAll-Fehler bei Subdirectory-Deployments (z.B. GitHub Pages)
