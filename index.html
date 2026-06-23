@@ -174,7 +174,7 @@ async function _ezProcess(info,fid,zone){
   try{
     let pdf=await _ezBuildPdfFromHtml(info);
     let d=info.date instanceof Date&&!isNaN(info.date)?info.date:new Date();
-    let stamp=d.getFullYear()+'.'+_ez2(d.getMonth()+1)+'.'+_ez2(d.getDate());
+    let stamp=String(d.getFullYear()).slice(-2)+_ez2(d.getMonth()+1)+_ez2(d.getDate());
     let fname=stamp+'_'+_ezClean(info.subject)+'.pdf';
     let result=await _ezUpload(pdf,fname,fid);
     _ezMsg(zone,'success','✅ Gespeichert: '+fname);
@@ -414,7 +414,10 @@ async function _ezUpload(buf,fname,fid){
   return r.json();
 }
 function _ezFolderId(url){if(!url)return null;let m=url.match(/\/folders\/([a-zA-Z0-9_-]+)/)||url.match(/[?&]id=([a-zA-Z0-9_-]+)/);return m?m[1]:null;}
-function _ezClean(s){return(s||'E-Mail').replace(/[\/\\:*?"<>|]/g,'-').replace(/\s+/g,'_').substring(0,80);}
+// Fix 2026-06-23: Betreff-Limit 80→40 Zeichen. Reduziert die Dateinamenlänge deutlich, damit
+// der kombinierte NAS-Pfad (Freigabe + Projekt + E-Mail-Ordner + Dateiname) seltener Windows
+// MAX_PATH (260 Zeichen) reißt. Der Betreff ist der dominierende variable Längenanteil.
+function _ezClean(s){return(s||'E-Mail').replace(/[\/\\:*?"<>|]/g,'-').replace(/\s+/g,'_').substring(0,40);}
 function _ez2(n){return n<10?'0'+n:String(n);}
 
 // ── EML-PARSER: MIME-Dekodierung für lesbare PDFs ──
@@ -1130,7 +1133,7 @@ async function _auftragAddToTask(task,boardName,fileMode){
     let driveId2='',driveUrl2='';
     if(fid&&gdriveToken&&rawFile){
       try{
-        let stamp2=(function(){let d=info.date instanceof Date&&!isNaN(info.date)?info.date:new Date();return d.getFullYear()+'.'+_ez2(d.getMonth()+1)+'.'+_ez2(d.getDate());})();
+        let stamp2=(function(){let d=info.date instanceof Date&&!isNaN(info.date)?info.date:new Date();return String(d.getFullYear()).slice(-2)+_ez2(d.getMonth()+1)+_ez2(d.getDate());})();
         let pdfName2=stamp2+'_'+_ezClean(info.subject)+(rawFile.name.toLowerCase().endsWith('.eml')?'.eml':'.msg');
         let buf2=await new Promise(function(res,rej){let r=new FileReader();r.onload=function(e){res(e.target.result);};r.onerror=rej;r.readAsArrayBuffer(rawFile);});
         const _mime2=rawFile.name.toLowerCase().endsWith('.msg')?'application/vnd.ms-outlook':'message/rfc822';
@@ -1199,7 +1202,7 @@ async function _auftragAddToTask(task,boardName,fileMode){
     if(_isRawEml2&&fid&&gdriveToken&&(info.bodyHtml||info.bodyText)){
       try{
         let _d2=info.date instanceof Date&&!isNaN(info.date)?info.date:new Date();
-        let _stamp2=_d2.getFullYear()+'.'+_ez2(_d2.getMonth()+1)+'.'+_ez2(_d2.getDate());
+        let _stamp2=String(_d2.getFullYear()).slice(-2)+_ez2(_d2.getMonth()+1)+_ez2(_d2.getDate());
         let _pdfName2=_stamp2+'_'+_ezClean(info.subject||'email')+'.pdf';
         let _pdfInfo2={subject:info.subject,sender:info.sender,date:_d2,bodyHtml:info.bodyHtml,bodyText:info.bodyText,cidMap:info.cidMap||{}};
         let _pdfData2=await _ezBuildPdfFromHtml(_pdfInfo2);
@@ -1423,7 +1426,7 @@ async function _auftragConfirm(){
     ?(_isEmail?_driveUrls.mainId:(_driveUrls.emailId||_driveUrls.mainId))
     :await _getOrCreateEmailFid(newTask,_ezFolderId(_folderDefault));
   if(fid&&gdriveToken){
-    let stamp=(function(){let d=info.date instanceof Date&&!isNaN(info.date)?info.date:new Date();return d.getFullYear()+'.'+_ez2(d.getMonth()+1)+'.'+_ez2(d.getDate());})();
+    let stamp=(function(){let d=info.date instanceof Date&&!isNaN(info.date)?info.date:new Date();return String(d.getFullYear()).slice(-2)+_ez2(d.getMonth()+1)+_ez2(d.getDate());})();
     let pdfName=stamp+'_'+_ezClean(info.subject)+'.pdf';
 
     // PDF erstellen und hochladen – NUR wenn kein Original (rawFile) vorhanden
@@ -3911,7 +3914,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-16 · #391'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-16-b391)
+const PAM_BUILD = 'v2026-06-23 · #392'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-23-b392)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -5294,20 +5297,22 @@ function _scheduleTokenRefresh(){
   const delay=Math.max(15000,gdriveTokenExpires-Date.now()-600000);
   _gdriveRefreshTimer=setTimeout(()=>{
     if(!gdriveToken)return;
-    // GitHub Pages COOP-Header → requestAccessToken({prompt:'none'}) immer geblockt
-    // → nur Banner + Toast, kein GIS-Popup-Versuch
-    console.info('[PTP] Token läuft in ~10 Min ab – Banner einblenden');
-    if(Date.now()>=_bannerDismissedUntil) _showDriveWarnBanner(600);
-    if(!_warnToastShown){
-      _warnToastShown=true;
-      showToast('⚠ Drive-Verbindung läuft in 10 Min ab – Drive-Button ☁️ drücken','error',10000);
-    }
+    // Fix 2026-06-23: T-10min zuerst stillen Cloud-Refresh (Refresh-Token, kein Popup/COOP-Problem)
+    // versuchen. Nur wenn der fehlschlägt Banner + Toast. Vorher wurde hier NUR gewarnt, nie erneuert.
+    _renewTokenViaCloud().then(ok=>{
+      if(ok){ console.info('[PTP] Token proaktiv (T-10) erneuert ✓'); return; }
+      console.info('[PTP] Proaktiver Refresh fehlgeschlagen – Banner einblenden');
+      if(Date.now()>=_bannerDismissedUntil) _showDriveWarnBanner(600);
+      if(!_warnToastShown){
+        _warnToastShown=true;
+        showToast('⚠ Drive-Verbindung läuft in 10 Min ab – Drive-Button ☁️ drücken','error',10000);
+      }
+    });
   },delay);
   console.info('[PTP] Nächster Token-Refresh in',Math.round(delay/60000),'Min geplant');
 }
 
 function _silentTokenRefresh(onSuccess, onFail){
-  console.warn('[PAM-DEBUG] _silentTokenRefresh wurde aufgerufen!', new Error().stack);
   if(!gdriveTokenClient||!gdriveToken)return;
   // GaveUp-Guard: nach immediate_failed oder popup_closed (silent) keine weiteren Versuche
   // bis _setGaveUp() abläuft (15 Min). Gilt für ALLE Aufrufer – Timer, Intervall, Visibility.
@@ -5427,14 +5432,16 @@ document.addEventListener('visibilitychange', () => {
     return;
   }
   if (document.visibilityState !== 'visible') return;
-  // Token-Ablauf prüfen
+  // Token-Ablauf prüfen – Fix 2026-06-23: beim Zurückkehren in den Tab zuerst still per
+  // Cloud-Refresh erneuern. Hintergrund-Tabs drosseln den Minuten-Intervall, daher war das
+  // Token beim Zurückkommen oft abgelaufen, OHNE dass ein Erneuerungsversuch lief (nur Banner).
   if (gdriveTokenClient && gdriveToken) {
     const msLeft = gdriveTokenExpires - Date.now();
-    if(msLeft <= 0){
-      if(Date.now() >= _bannerDismissedUntil) _showDriveWarnBanner(0);
-    } else if(msLeft <= 600000){
-      _showDriveWarnBanner(msLeft/1000);
-      // Kein _silentTokenRefresh (COOP) – Drive-Button für Redirect
+    if(msLeft <= 600000){
+      _renewTokenViaCloud().then(ok=>{
+        if(ok){ _hideDriveWarnBanner(); return; }
+        if(Date.now() >= _bannerDismissedUntil) _showDriveWarnBanner(Math.max(0,msLeft/1000));
+      });
     }
   }
   // Sync sofort lesen (ersetzt den separaten Handler in startSyncPolling)

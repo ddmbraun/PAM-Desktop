@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pam-desktop-2026-06-16-b391'; // b391: Kanban-Spaltenbreite – Resize-Greifzone an den sichtbaren Balken (rechte Spaltenkante) angeglichen, Ziehen funktioniert jetzt zuverlässig
+const CACHE_NAME = 'pam-desktop-2026-06-23-b392'; // b392: Token-Refresh zuverlässiger (visibilitychange + T-10min lösen jetzt Cloud-Refresh aus, [PAM-DEBUG]-Log entfernt) · NAS-Pfadlängen: E-Mail-Betreff 80→40 Zeichen + Datums-Stamp YYMMDD
 
 self.addEventListener('install', event => {
   // Kein pre-caching – verhindert addAll-Fehler bei Subdirectory-Deployments (z.B. GitHub Pages)
