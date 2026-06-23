@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pam-desktop-2026-06-23-b393'; // b393: _warnToastShown nach Cloud-Refresh zurücksetzen (kein stummer 2. Ablauf) · b392: Token-Refresh zuverlässiger (visibilitychange + T-10min lösen jetzt Cloud-Refresh aus, [PAM-DEBUG]-Log entfernt) · NAS-Pfadlängen: E-Mail-Betreff 80→40 Zeichen + Datums-Stamp YYMMDD
+const CACHE_NAME = 'pam-desktop-2026-06-23-b394'; // b394: Outlook Auto-Connect: sequenziell + E-Mail-basierte Konto-Zuweisung + Fehlermeldung + kein Toast beim Start · b393: _warnToastShown nach Cloud-Refresh zurücksetzen (kein stummer 2. Ablauf) · b392: Token-Refresh zuverlässiger (visibilitychange + T-10min lösen jetzt Cloud-Refresh aus, [PAM-DEBUG]-Log entfernt) · NAS-Pfadlängen: E-Mail-Betreff 80→40 Zeichen + Datums-Stamp YYMMDD
 
 self.addEventListener('install', event => {
   // Kein pre-caching – verhindert addAll-Fehler bei Subdirectory-Deployments (z.B. GitHub Pages)

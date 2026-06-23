@@ -3914,7 +3914,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-23 · #393'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-23-b393)
+const PAM_BUILD = 'v2026-06-23 · #394'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-23-b394)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -13427,41 +13427,41 @@ function msInit(){
           _msHandleToken(r);
         }
       }else{
-        // Stiller Token-Refresh für alle gespeicherten Accounts beim Start
+        // Fix #394: Stiller Token-Refresh beim Start – sequenziell (verhindert Race Condition)
+        // Konto-Zuweisung per E-Mail-Adresse statt per Reihenfolge der Promise-Auflösung.
         const accs=msalInstance.getAllAccounts();
-        for(const acc of accs.slice(0,2)){
-          // Versuch 1: silent (Cache)
-          msalInstance.acquireTokenSilent({scopes:MS_SCOPES,account:acc})
-            .then(r2=>{
-              const em=(r2.account?.username||'').toLowerCase();
-              if(msToken&&msUserEmail&&msUserEmail.toLowerCase()!==em){
-                msToken2=r2.accessToken;msUserEmail2=r2.account?.username||'';_msUpdateBtn2();
-              }else{
-                _msHandleToken(r2);
-              }
-            }).catch(e=>{
+        (async()=>{
+          for(const acc of accs.slice(0,2)){
+            // Konto 2 erkennen anhand E-Mail (nicht per Reihenfolge)
+            const _isK2=(acc.username||'').toLowerCase().includes('f.braun@ddmbraun');
+            let _tok=null;
+            try{
+              const r2=await msalInstance.acquireTokenSilent({scopes:MS_SCOPES,account:acc});
+              _tok=r2.accessToken;
+            }catch(e){
               console.warn('[MS] Startup silent fehlgeschlagen, versuche forceRefresh:',e.errorCode||e.message);
-              // Versuch 2: forceRefresh (erzwingt Refresh-Token-Nutzung ohne Popup)
-              msalInstance.acquireTokenSilent({scopes:MS_SCOPES,account:acc,forceRefresh:true})
-                .then(r3=>{
-                  const em=(r3.account?.username||'').toLowerCase();
-                  if(msToken&&msUserEmail&&msUserEmail.toLowerCase()!==em){
-                    msToken2=r3.accessToken;msUserEmail2=r3.account?.username||'';_msUpdateBtn2();
-                  }else{
-                    _msHandleToken(r3);
-                  }
-                  console.info('[MS] forceRefresh erfolgreich für',acc.username);
-                }).catch(e2=>{
-                  // Beide stillen Versuche fehlgeschlagen → Token leeren, KEIN Toast beim Start
-                  // Der Nutzer merkt es wenn er Outlook benutzt (dann kommt Popup-Fallback)
-                  console.warn('[MS] Startup-Refresh komplett fehlgeschlagen:',e2.errorCode||e2.message);
-                  const em=(acc.username||'').toLowerCase();
-                  if(msUserEmail&&msUserEmail.toLowerCase()===em){msToken=null;}
-                  else if(msUserEmail2&&msUserEmail2.toLowerCase()===em){msToken2=null;_msUpdateBtn2();}
-                  _msUpdateBtn();
-                });
-            });
-        }
+              try{
+                const r3=await msalInstance.acquireTokenSilent({scopes:MS_SCOPES,account:acc,forceRefresh:true});
+                _tok=r3.accessToken;
+                console.info('[MS] forceRefresh erfolgreich für',acc.username);
+              }catch(e2){
+                // Fix #394: dezenter Hinweis statt nur console.warn – Nutzer weiß warum Outlook-Funktionen fehlen
+                console.warn('[MS] Startup-Refresh komplett fehlgeschlagen:',e2.errorCode||e2.message);
+                showToast('ℹ Outlook ('+( acc.username||'Konto').split('@')[0]+') muss neu verbunden werden – 📨 klicken','info',6000);
+                if(_isK2){msToken2=null;_msUpdateBtn2();}else{msToken=null;}
+              }
+            }
+            if(_tok){
+              if(_isK2){
+                msToken2=_tok;msUserEmail2=acc.username||'';_msUpdateBtn2();
+                // kein Toast beim Auto-Start für Konto 2
+              }else{
+                _msHandleToken({accessToken:_tok,account:acc},true); // silent=true → kein Toast
+              }
+            }
+          }
+          _msUpdateBtn();
+        })();
       }
       _msUpdateBtn();
     }).catch(e=>console.warn('[MS] handleRedirect:',e));
@@ -13491,11 +13491,11 @@ async function msConnect(){
   }
 }
 
-function _msHandleToken(resp){
+function _msHandleToken(resp,silent){
   msToken=resp.accessToken;
   msUserEmail=resp.account?.username||'';
   _msUpdateBtn();
-  showToast('✅ Outlook verbunden: '+msUserEmail,'success',3000);
+  if(!silent)showToast('✅ Outlook verbunden: '+msUserEmail,'success',3000);
 }
 
 function _msUpdateBtn(){
