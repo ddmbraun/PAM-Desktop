@@ -3922,7 +3922,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-06-30 · #397'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-30-b397)
+const PAM_BUILD = 'v2026-06-30 · #398'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-06-30-b397)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -5470,6 +5470,15 @@ window.addEventListener('beforeunload',(e)=>{
     if(_taskModalDirty){_unsaved=true;clearTimeout(autoSaveTimer);saveTaskData();}
     _saveLocalBackup(); // synchron – einzige zuverlässige Sicherung beim Schließen
   }catch(ex){console.warn('[PAM] beforeunload:',ex);}
+  // Popup-Modus: kein Browser-Dialog, geänderter Task über localStorage ans Hauptfenster senden
+  if(document.body.classList.contains('pam-popup-mode')){
+    try{
+      const _tid=document.getElementById('taskId')?.value;
+      const _pt=_tid?findTaskById(_tid):null;
+      if(_pt)localStorage.setItem('pam_popup_task_save',JSON.stringify({id:_pt.id,task:_pt,ts:Date.now()}));
+    }catch(_ex){}
+    return;
+  }
   if(_unsaved||gdriveSaving){e.preventDefault();e.returnValue='';}
 });
 
@@ -7849,6 +7858,24 @@ function _pamTaskPopout(){
   const url=location.origin+location.pathname+'?popup=1';
   window.open(url,'pam_popup_'+taskId,'width=960,height=780,resizable=yes,scrollbars=yes');
   closeModal();
+  _pamPopupSaveListen();
+}
+function _pamPopupSaveListen(){
+  window.addEventListener('storage',function _psl(e){
+    if(e.key!=='pam_popup_task_save')return;
+    window.removeEventListener('storage',_psl);
+    try{
+      const d=JSON.parse(e.newValue||'{}');
+      if(!d.id||!d.task)return;
+      for(const bk of Object.keys(boards)){
+        const idx=(boards[bk]||[]).findIndex(t=>t.id===d.id);
+        if(idx!==-1){boards[bk][idx]=d.task;break;}
+      }
+      saveAll();
+      showToast('💾 Popup-Task gespeichert','ok',2500);
+    }catch(ex){console.warn('[PAM] popup-save merge:',ex);}
+    try{localStorage.removeItem('pam_popup_task_save');}catch(ex){}
+  });
 }
 function _checkPopupMode(){
   if(new URLSearchParams(location.search).get('popup')!=='1')return;
