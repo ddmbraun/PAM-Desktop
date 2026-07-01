@@ -2114,6 +2114,9 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 .foto-desktop-thumb .foto-del{position:absolute;top:4px;right:4px;background:rgba(0,0,0,.65);color:#fff;border:none;width:22px;height:22px;border-radius:11px;font-size:12px;cursor:pointer;z-index:2;}
 .foto-desktop-thumb .foto-edit{position:absolute;top:4px;right:30px;background:rgba(0,0,0,.65);color:#fff;border:none;width:22px;height:22px;border-radius:11px;font-size:11px;cursor:pointer;z-index:2;display:flex;align-items:center;justify-content:center;}
 .foto-desktop-thumb .foto-edit:hover{background:rgba(106,138,255,.85);}
+.foto-desktop-thumb .foto-exif-btn{position:absolute;bottom:28px;right:4px;background:rgba(0,0,0,.55);color:#fff;border:none;width:22px;height:22px;border-radius:11px;font-size:11px;cursor:pointer;z-index:2;display:flex;align-items:center;justify-content:center;font-weight:700;}
+.foto-desktop-thumb .foto-exif-btn:hover{background:rgba(0,150,136,.85);}
+.foto-exif-popup{position:fixed;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 14px;font-size:12px;color:var(--text1);z-index:9999;max-width:280px;box-shadow:0 4px 24px rgba(0,0,0,.35);}
 .foto-desktop-thumb .foto-name{position:absolute;left:0;right:0;bottom:0;font-size:10px;color:#fff;background:rgba(0,0,0,.55);padding:3px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .foto-desktop-thumb .foto-caption{position:absolute;left:0;right:0;bottom:0;font-size:11px;color:#fff;background:rgba(106,138,255,.78);padding:3px 6px;white-space:normal;overflow:hidden;text-overflow:ellipsis;line-height:1.25;max-height:2.5em;}
 /* #312: 360°-Kennzeichen auf Foto-Kacheln + Lightbox-Klicknavigation/360-Schalter */
@@ -3943,7 +3946,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-01 · #407'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-01-b407)
+const PAM_BUILD = 'v2026-07-01 · #408'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-01-b408)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -9231,12 +9234,10 @@ function restoreSpaeterBearbeiten(taskId,evt){
       updateFilterDropdowns();
       // Direkt ins richtige Board wechseln, damit der Task in seiner echten Spalte sichtbar ist
       switchBoard(bk); // klappt beim Board-Wechsel alle Spalten ein
-      // Spalte des Tasks wieder aufklappen + Task kurz hervorheben, damit man ihn sofort findet
+      // Spalte des Tasks wieder aufklappen, damit man sie sofort sieht (Markierung übernimmt openEditTaskModal)
       const _stColl=boards[bk][idx].status;
       collapsedCols[_stColl]=false;
-      _pamHighlightTaskId=taskId;
       render();
-      setTimeout(()=>{ if(_pamHighlightTaskId===taskId){_pamHighlightTaskId='';render();} },4000);
       autoSave();
       showToast('✓ Zurück im Projekt „'+bk+'"','success',2500);
       // Task-Modal direkt öffnen – kein manuelles Suchen nötig
@@ -11789,6 +11790,7 @@ function renderFotoListDesktop(){
       +bottomLabel
       +'<button class="foto-edit" onclick="event.stopPropagation();editFotoCaptionDesktop('+i+')" title="Beschreibung bearbeiten">📝</button>'
       +'<button class="foto-del" onclick="event.stopPropagation();removeFotoDesktop('+i+')" title="Entfernen">✕</button>'
+      +'<button class="foto-exif-btn" onclick="event.stopPropagation();_showFotoExif('+i+',this)" title="EXIF-Daten anzeigen">ℹ</button>'
       +'</div>';
   }).join('');
   const selCount=_fotoSelected.size;
@@ -11818,6 +11820,61 @@ function _fotoThumbClick(i,e){
   }else{
     openFotoDesktop(i);
   }
+}
+async function _showFotoExif(i,btn){
+  const f=taskFotos&&taskFotos[i];
+  if(!f){showToast('Foto nicht gefunden','error');return;}
+  const id=f.editedDriveId||f.driveId||'';
+  if(!id){showToast('Keine Drive-ID','error');return;}
+  if(!gdriveToken){showToast('Drive nicht verbunden','error');return;}
+  const old=document.getElementById('_exifPopup');
+  if(old){old.remove();if(old._srcBtn===btn)return;}
+  btn.textContent='⏳';
+  try{
+    const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(id)+'?alt=media',
+      {headers:{Authorization:'Bearer '+gdriveToken,Range:'bytes=0-131071'}});
+    if(!r.ok)throw new Error('Drive '+r.status);
+    const buf=await r.arrayBuffer();
+    const bytes=new Uint8Array(buf);
+    let bin='';for(let j=0;j<bytes.length;j++)bin+=String.fromCharCode(bytes[j]);
+    const dataUrl='data:image/jpeg;base64,'+btoa(bin);
+    let exif={};
+    try{exif=piexif.load(dataUrl);}catch(e){}
+    const zeroth=exif['0th']||{};
+    const exifIfd=exif['Exif']||{};
+    const gpsIfd=exif['GPS']||{};
+    const date=exifIfd[piexif.ExifIFD.DateTimeOriginal]||zeroth[piexif.ImageIFD.DateTime]||'';
+    const make=zeroth[piexif.ImageIFD.Make]||'';
+    const model=zeroth[piexif.ImageIFD.Model]||'';
+    const pw=exifIfd[piexif.ExifIFD.PixelXDimension]||'';
+    const ph=exifIfd[piexif.ExifIFD.PixelYDimension]||'';
+    let mapsLink='';
+    const gLat=gpsIfd[piexif.GPSIFD.GPSLatitude];
+    const gLon=gpsIfd[piexif.GPSIFD.GPSLongitude];
+    if(gLat&&gLon){
+      const _dms=function(d){return d[0][0]/d[0][1]+(d[1][0]/d[1][1])/60+(d[2][0]/d[2][1])/3600;};
+      const lat=(_dms(gLat)*(gpsIfd[piexif.GPSIFD.GPSLatitudeRef]==='S'?-1:1)).toFixed(6);
+      const lon=(_dms(gLon)*(gpsIfd[piexif.GPSIFD.GPSLongitudeRef]==='W'?-1:1)).toFixed(6);
+      mapsLink='<a href="https://maps.google.com/?q='+lat+','+lon+'" target="_blank" style="color:var(--accent)">📍 '+lat+', '+lon+'</a>';
+    }
+    const rows=[
+      date?'<tr><td style="color:var(--text2);padding-right:10px;white-space:nowrap">📅 Datum</td><td>'+esc(date)+'</td></tr>':'',
+      (make||model)?'<tr><td style="color:var(--text2);padding-right:10px;white-space:nowrap">📷 Kamera</td><td>'+esc((make+' '+model).trim())+'</td></tr>':'',
+      (pw&&ph)?'<tr><td style="color:var(--text2);padding-right:10px;white-space:nowrap">🔲 Auflösung</td><td>'+pw+' × '+ph+'</td></tr>':'',
+      mapsLink?'<tr><td style="color:var(--text2);padding-right:10px;white-space:nowrap">📍 GPS</td><td>'+mapsLink+'</td></tr>':'',
+    ].filter(Boolean).join('');
+    const popup=document.createElement('div');
+    popup.id='_exifPopup';popup._srcBtn=btn;
+    popup.className='foto-exif-popup';
+    popup.innerHTML=(rows?'<table style="border-collapse:collapse;line-height:1.7">'+rows+'</table>'
+      :'<span style="color:var(--text2)">Keine EXIF-Daten gefunden</span>')
+      +'<div style="text-align:right;margin-top:8px"><button onclick="document.getElementById(\'_exifPopup\').remove()" style="font-size:11px;padding:2px 10px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer">✕</button></div>';
+    const rect=btn.getBoundingClientRect();
+    popup.style.left=Math.min(rect.right+6,window.innerWidth-290)+'px';
+    popup.style.top=Math.max(rect.top-80,8)+'px';
+    document.body.appendChild(popup);
+  }catch(e){showToast('EXIF: '+e.message,'error');}
+  btn.textContent='ℹ';
 }
 function openFotoPanel(){
   if(!taskFotos||!taskFotos.length){showToast('Keine Fotos vorhanden','info');return;}
@@ -23608,6 +23665,7 @@ function openEditTaskModal(id){
   updateStatusSelect();
   document.getElementById('taskId').value=task.id;
   _pamActiveTaskId=task.id; // globaler Fallback für _msLoadEmailThread etc.
+  _pamHighlightTaskId=task.id; // zuletzt geöffneter Task bleibt auf dem Board markiert, bis ein anderer geöffnet wird
   _pamCurrentTask=task;     // Fallback-Task-Objekt wenn findTaskById fehlschlägt
   document.getElementById('taskTitleInput').value=(task.title||'').replace(/[-_]+/g,' ').replace(/\s+/g,' ').trim();
   document.getElementById('taskDescInput').value=task.desc||'';
