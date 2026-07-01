@@ -3946,7 +3946,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-01 · #410'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-01-b410)
+const PAM_BUILD = 'v2026-07-01 · #411'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-01-b411)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -4043,6 +4043,9 @@ const SYNC_SOURCE='pam';
 // syncPollingId: früh deklariert
 // _ptpLastSyncReadAt: früh deklariert
 let filters = {owner:null,ampel:null,tag:null,archiv:false,spaeterBearbeiten:false,archivJahr:'',archivMonat:''};
+// Archivierte Tasks liegen NICHT mehr im jeweiligen Projekt-Array (boards[k]), sondern hier,
+// damit sie ein Löschen des Ursprungsprojekts überleben (siehe archiveTask()/restoreTask()).
+let archivedTasks = [];
 // Neue PAM Filter v2 (#331)
 let _pamFTaskId='';
 let _pamFSpalte='';
@@ -6462,6 +6465,25 @@ function loadFromObject(data){
     if(k.startsWith('_'))continue;
     if(Array.isArray(v))boards[k]=v;
   }
+  // ── AUTO-MIGRATION: archivierte Tasks in eigenen, projektunabhängigen Speicher überführen ──
+  // (früher blieben sie im jeweiligen boards[k] liegen – ein Löschen des Projekts hat sie mitgelöscht)
+  archivedTasks=Array.isArray(data._archivedTasks)?data._archivedTasks.slice():[];
+  {const _knownIds=new Set(archivedTasks.map(t=>t.id));let _migrated=0;
+  Object.keys(boards).forEach(k=>{
+    const still=[];
+    (boards[k]||[]).forEach(t=>{
+      if(t.archiviert){
+        if(!_knownIds.has(t.id)){
+          if(!t._archivProjekt)t._archivProjekt=k;
+          archivedTasks.push(t);_knownIds.add(t.id);_migrated++;
+        } // sonst: Dublette (schon im neuen Speicher bekannt) – wird verworfen
+      } else {
+        still.push(t);
+      }
+    });
+    boards[k]=still;
+  });
+  if(_migrated)console.info('[PTP] '+_migrated+' archivierte Tasks in eigenen Speicher migriert');}
   // ── AUTO-MIGRATION: boardTypes für alle Boards sicherstellen ──
   // Fehlende Einträge aus Boardname ableiten (auch wenn _boardTypes teilweise vorhanden)
   {const _np=/aufgab|notiz|todo|to[\s_-]do/i;
@@ -6481,6 +6503,7 @@ function loadFromObject(data){
 }
 function buildSaveObject(){
   const out={_statuses:statuses};
+  if(archivedTasks.length)out._archivedTasks=archivedTasks.slice();
   if(Object.keys(boardStatuses).length)out._boardStatuses={...boardStatuses};
   if(Array.isArray(mobileBoards)&&mobileBoards.length)out._mobileBoards=mobileBoards.slice();
   if(Object.keys(mobileStatusFilter).length)out._mobileStatusFilter={...mobileStatusFilter};
@@ -6550,12 +6573,8 @@ function seedData(){
 function getTasks(){
   let t;
   if(filters.archiv){
-    // Archiv-Modus: alle archivierten Tasks aus ALLEN Boards sammeln
-    t=[];
-    for(const bk of Object.keys(boards)){
-      if(bk.startsWith('_'))continue;
-      t=t.concat((boards[bk]||[]).filter(x=>x.archiviert));
-    }
+    // Archiv-Modus: archivierte Tasks liegen im eigenen, projektunabhängigen Speicher
+    t=archivedTasks.slice();
     if(filters.archivJahr)t=t.filter(x=>(x.archiviertAm||'').slice(0,4)===filters.archivJahr);
     if(filters.archivMonat)t=t.filter(x=>(x.archiviertAm||'').slice(5,7)===filters.archivMonat);
   } else if(filters.spaeterBearbeiten){
@@ -7593,9 +7612,7 @@ function renderKanban(){
   if(filters.archiv){
     const tasks=getTasks();
     const mc=document.getElementById('mainContent');
-    const _allArchived=[];
-    for(const bk of Object.keys(boards)){if(bk.startsWith('_'))continue;_allArchived.push(...(boards[bk]||[]).filter(x=>x.archiviert));}
-    const _jahre=[...new Set(_allArchived.map(x=>(x.archiviertAm||'').slice(0,4)).filter(Boolean))].sort().reverse();
+    const _jahre=[...new Set(archivedTasks.map(x=>(x.archiviertAm||'').slice(0,4)).filter(Boolean))].sort().reverse();
     if(filters.archivJahr&&!_jahre.includes(filters.archivJahr))_jahre.unshift(filters.archivJahr);
     const _monate=[['01','Januar'],['02','Februar'],['03','März'],['04','April'],['05','Mai'],['06','Juni'],['07','Juli'],['08','August'],['09','September'],['10','Oktober'],['11','November'],['12','Dezember']];
     const _filterRow='<div style="display:flex;gap:8px;margin-bottom:16px;">'
@@ -9204,10 +9221,13 @@ function archiveTask(taskId,evt){
   for(const bk of Object.keys(boards)){
     const idx=(boards[bk]||[]).findIndex(t=>t.id===taskId);
     if(idx>=0){
-      boards[bk][idx].archiviert=true;
-      boards[bk][idx].archiviertAm=new Date().toISOString().split('T')[0];
-      boards[bk][idx].spaeterBearbeiten=false;
-      boards[bk][idx].spaeterBearbeitenAm='';
+      const[task]=boards[bk].splice(idx,1);
+      task.archiviert=true;
+      task.archiviertAm=new Date().toISOString().split('T')[0];
+      task.spaeterBearbeiten=false;
+      task.spaeterBearbeitenAm='';
+      task._archivProjekt=bk;
+      archivedTasks.push(task);
       render();autoSave();
       showToast('📦 Task archiviert','success',2500);
       return;
@@ -9217,16 +9237,23 @@ function archiveTask(taskId,evt){
 
 function restoreTask(taskId,evt){
   if(evt)evt.stopPropagation();
-  for(const bk of Object.keys(boards)){
-    const idx=(boards[bk]||[]).findIndex(t=>t.id===taskId);
-    if(idx>=0){
-      boards[bk][idx].archiviert=false;
-      boards[bk][idx].archiviertAm='';
-      render();autoSave();
-      showToast('✓ Task wiederhergestellt','success',2500);
-      return;
-    }
+  const idx=archivedTasks.findIndex(t=>t.id===taskId);
+  if(idx<0)return;
+  const[task]=archivedTasks.splice(idx,1);
+  let target=task._archivProjekt;
+  let movedNotice='';
+  if(!target||!boards[target]){
+    const fallback=boards[currentBoard]?currentBoard:(Object.keys(boards)[0]||'');
+    if(!fallback){archivedTasks.push(task);showToast('⚠ Kein Projekt zum Wiederherstellen vorhanden','error',4000);return;}
+    movedNotice=target?' – Ursprungsprojekt „'+target+'" existiert nicht mehr, nach „'+fallback+'" verschoben':' – kein Ursprungsprojekt bekannt, nach „'+fallback+'" verschoben';
+    target=fallback;
   }
+  task.archiviert=false;
+  task.archiviertAm='';
+  delete task._archivProjekt;
+  boards[target].push(task);
+  render();autoSave();
+  showToast('✓ Task wiederhergestellt'+movedNotice,'success',movedNotice?6000:2500);
 }
 
 // ── SPÄTER-BEARBEITEN-SYSTEM ──
@@ -9535,14 +9562,16 @@ function _executeMerge(){
   otherSnapshot.spaeterBearbeiten=false;
   otherSnapshot.spaeterBearbeitenAm='';
   otherSnapshot.zusammengefuehrtMit=masterId;
+  otherSnapshot._archivProjekt=rOther.board;
 
   // Master aktualisieren
   const idxMaster=(boards[rMaster.board]||[]).findIndex(t=>t.id===masterId);
   if(idxMaster>=0) boards[rMaster.board][idxMaster]=merged;
 
-  // Other archivieren
+  // Other aus dem Projekt entfernen, Snapshot in den Archiv-Speicher legen
   const idxOther=(boards[rOther.board]||[]).findIndex(t=>t.id===otherId);
-  if(idxOther>=0) boards[rOther.board][idxOther]=otherSnapshot;
+  if(idxOther>=0) boards[rOther.board].splice(idxOther,1);
+  archivedTasks.push(otherSnapshot);
 
   ov.remove();
   _clearMergeSelection();
@@ -9655,7 +9684,7 @@ async function _mergeMoveFilesToMasterFolders(){
 
 function archiveCardHTML(task){
   const _adr=(task.archiviertAm||'').split('-').reverse().join('.');
-  const _proj=Object.keys(boards).find(bk=>(boards[bk]||[]).some(t=>t.id===task.id))||'';
+  const _proj=task._archivProjekt||'';
   return`<div style="background:var(--bg3);border:1px solid var(--border);border-left:5px solid #888;border-radius:8px;padding:10px 12px;margin-bottom:8px;">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
       <span style="font-size:12px;background:var(--bg4);color:var(--text2);padding:2px 7px;border-radius:4px;">📦 Archiviert${_adr?' am '+_adr:''}</span>
@@ -17790,11 +17819,7 @@ async function createAbschlussHtml(){
 // Archiv-Karte: HTML direkt aus dem gespeicherten Task-Objekt erzeugen, ohne das Modal zu öffnen
 function archiveTaskToHtml(taskId,evt){
   if(evt)evt.stopPropagation();
-  let task=null;
-  for(const bk of Object.keys(boards)){
-    const t=(boards[bk]||[]).find(x=>x.id===taskId);
-    if(t){task=t;break;}
-  }
+  const task=archivedTasks.find(x=>x.id===taskId);
   if(!task)return;
   const btn=(evt&&evt.currentTarget instanceof HTMLElement)?evt.currentTarget:null;
   _buildAbschlussHtml(task,btn,'🌐 HTML erstellen');
