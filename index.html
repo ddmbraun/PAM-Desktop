@@ -1781,6 +1781,10 @@ body.topbar-collapsed #topbarCollapseBtn{transform:rotate(180deg);}
 .col-collapse-btn{background:none;border:none;color:var(--text2);font-size:13px;cursor:pointer;padding:2px 5px;border-radius:4px;line-height:1;flex-shrink:0;}
 .col-collapse-btn:hover{color:var(--accent);background:var(--bg3);}
 
+/* ARCHIV / SPÄTER-BEARBEITEN: Meta-Zeile auf 2 Zeilen begrenzt, Klick klappt auf/zu */
+.pam-clamp2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer;}
+.pam-clamp2.pam-clamp-open{display:block;-webkit-line-clamp:unset;overflow:visible;}
+
 /* TASK CARD */
 .task-card{background:var(--bg3);border-radius:8px;padding:8px 11px;cursor:grab;transition:transform .18s,box-shadow .18s,border-color .15s;border:1px solid var(--border);border-left:5px solid #ccc;position:relative;zoom:var(--card-scale,1);}
 .task-card:hover{border-color:var(--accent);border-left-color:inherit;box-shadow:0 5px 14px var(--shadow);}
@@ -3946,7 +3950,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-01 · #411'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-01-b411)
+const PAM_BUILD = 'v2026-07-01 · #412'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-01-b412)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -4042,7 +4046,7 @@ const SYNC_FILE_NAME='pam_workboard_sync.json';
 const SYNC_SOURCE='pam';
 // syncPollingId: früh deklariert
 // _ptpLastSyncReadAt: früh deklariert
-let filters = {owner:null,ampel:null,tag:null,archiv:false,spaeterBearbeiten:false,archivJahr:'',archivMonat:''};
+let filters = {owner:null,ampel:null,tag:null,archiv:false,spaeterBearbeiten:false,archivJahr:'',archivMonat:'',spaeterJahr:'',spaeterMonat:''};
 // Archivierte Tasks liegen NICHT mehr im jeweiligen Projekt-Array (boards[k]), sondern hier,
 // damit sie ein Löschen des Ursprungsprojekts überleben (siehe archiveTask()/restoreTask()).
 let archivedTasks = [];
@@ -6584,6 +6588,8 @@ function getTasks(){
       if(bk.startsWith('_'))continue;
       t=t.concat((boards[bk]||[]).filter(x=>x.spaeterBearbeiten&&!x.archiviert));
     }
+    if(filters.spaeterJahr)t=t.filter(x=>(x.spaeterBearbeitenAm||'').slice(0,4)===filters.spaeterJahr);
+    if(filters.spaeterMonat)t=t.filter(x=>(x.spaeterBearbeitenAm||'').slice(5,7)===filters.spaeterMonat);
   } else {
     // Normal-Modus: nur nicht-archivierte, nicht auf Später-bearbeiten stehende Tasks des aktuellen Boards
     t=(boards[currentBoard]||[]).filter(x=>!x.archiviert&&!x.spaeterBearbeiten);
@@ -7637,8 +7643,27 @@ function renderKanban(){
   if(filters.spaeterBearbeiten){
     const tasks=getTasks();
     const mc=document.getElementById('mainContent');
-    if(!tasks.length){mc.innerHTML='<div style="text-align:center;padding:60px 20px;color:var(--text2);font-size:15px;">⏳ Keine Tasks auf Später bearbeiten</div>';return;}
-    mc.innerHTML='<div style="max-width:900px;margin:24px auto;padding:0 16px;"><div style="font-size:13px;color:var(--text2);margin-bottom:16px;">'+tasks.length+' Task'+(tasks.length!==1?'s':'')+' auf Später bearbeiten</div>'+tasks.map(spaeterBearbeitenCardHTML).join('')+'</div>';
+    const _alleSpaeter=[];
+    for(const bk of Object.keys(boards)){if(bk.startsWith('_'))continue;_alleSpaeter.push(...(boards[bk]||[]).filter(x=>x.spaeterBearbeiten&&!x.archiviert));}
+    const _jahreSp=[...new Set(_alleSpaeter.map(x=>(x.spaeterBearbeitenAm||'').slice(0,4)).filter(Boolean))].sort().reverse();
+    if(filters.spaeterJahr&&!_jahreSp.includes(filters.spaeterJahr))_jahreSp.unshift(filters.spaeterJahr);
+    const _monateSp=[['01','Januar'],['02','Februar'],['03','März'],['04','April'],['05','Mai'],['06','Juni'],['07','Juli'],['08','August'],['09','September'],['10','Oktober'],['11','November'],['12','Dezember']];
+    const _filterRowSp='<div style="display:flex;gap:8px;margin-bottom:16px;">'
+      +'<input type="text" id="spaeterSearchInput" value="'+esc(searchQuery)+'" oninput="searchQuery=this.value;render();" placeholder="Später bearbeiten durchsuchen…" style="flex:2;min-width:0;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:13px;">'
+      +'<select onchange="filters.spaeterJahr=this.value;render();" style="flex:1;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:13px;">'
+      +'<option value="">Jahr: alle</option>'+_jahreSp.map(j=>'<option value="'+j+'"'+(filters.spaeterJahr===j?' selected':'')+'>'+j+'</option>').join('')
+      +'</select>'
+      +'<select onchange="filters.spaeterMonat=this.value;render();" style="flex:1;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:13px;">'
+      +'<option value="">Monat: alle</option>'+_monateSp.map(m=>'<option value="'+m[0]+'"'+(filters.spaeterMonat===m[0]?' selected':'')+'>'+m[1]+'</option>').join('')
+      +'</select></div>';
+    const _wasSpSearchFocused=document.activeElement&&document.activeElement.id==='spaeterSearchInput';
+    const _spSearchCursor=_wasSpSearchFocused?document.activeElement.selectionStart:null;
+    if(!tasks.length){mc.innerHTML='<div style="max-width:900px;margin:24px auto;padding:0 16px;">'+_filterRowSp+'<div style="text-align:center;padding:60px 20px;color:var(--text2);font-size:15px;">⏳ Keine Tasks auf Später bearbeiten</div></div>';}
+    else{mc.innerHTML='<div style="max-width:900px;margin:24px auto;padding:0 16px;">'+_filterRowSp+'<div style="font-size:13px;color:var(--text2);margin-bottom:16px;">'+tasks.length+' Task'+(tasks.length!==1?'s':'')+' auf Später bearbeiten</div>'+tasks.map(spaeterBearbeitenCardHTML).join('')+'</div>';}
+    if(_wasSpSearchFocused){
+      const _si2=document.getElementById('spaeterSearchInput');
+      if(_si2){_si2.focus();if(_spSearchCursor!=null)_si2.setSelectionRange(_spSearchCursor,_spSearchCursor);}
+    }
     return;
   }
   const tasks=getTasks();
@@ -9157,7 +9182,7 @@ function toggleFilter(type){
 function closeAllDropdowns(){document.querySelectorAll('.filter-dropdown').forEach(d=>d.classList.remove('open'));}
 function setFilter(type,value){filters[type]=filters[type]===value?null:value;closeAllDropdowns();render();}
 function clearFilters(){
-  filters={owner:null,ampel:null,tag:null,archiv:false,spaeterBearbeiten:false,archivJahr:'',archivMonat:''};
+  filters={owner:null,ampel:null,tag:null,archiv:false,spaeterBearbeiten:false,archivJahr:'',archivMonat:'',spaeterJahr:'',spaeterMonat:''};
   _pamFTaskId='';_pamFSpalte='';_pamFPlanung=false;
   _pamFAnfrVon='';_pamFAnfrBis='';_pamFFaellig='';_pamFTerminText='';_pamFSortField='';_pamFSortDir=1;
   ['pamFTaskSel','pamFAnfrVon','pamFAnfrBis','pamFFaelligSel','pamFSortSel','pamFTerminText'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
@@ -9208,7 +9233,10 @@ function toggleArchivFilter(){
 
 function toggleSpaeterBearbeitenFilter(){
   filters.spaeterBearbeiten=!filters.spaeterBearbeiten;
-  if(filters.spaeterBearbeiten)filters.archiv=false;
+  if(filters.spaeterBearbeiten){
+    filters.archiv=false;
+    filters.spaeterJahr=String(new Date().getFullYear());
+  }
   const btn=document.getElementById('spaeterBearbeitenFilterBtn');
   if(btn){btn.classList.toggle('active',filters.spaeterBearbeiten);btn.textContent=filters.spaeterBearbeiten?'⏳ Später bearbeiten ✓':'⏳ Später bearbeiten';}
   updateFilterDropdowns();
@@ -9687,8 +9715,8 @@ function archiveCardHTML(task){
   const _proj=task._archivProjekt||'';
   return`<div style="background:var(--bg3);border:1px solid var(--border);border-left:5px solid #888;border-radius:8px;padding:10px 12px;margin-bottom:8px;">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-      <span style="font-size:12px;background:var(--bg4);color:var(--text2);padding:2px 7px;border-radius:4px;">📦 Archiviert${_adr?' am '+_adr:''}</span>
-      ${_proj?`<span style="font-size:12px;color:var(--text2);">Projekt: ${esc(_proj)}</span>`:''}
+      <span style="font-size:12px;font-weight:700;background:var(--bg4);color:var(--text2);padding:2px 7px;border-radius:4px;">📦 Archiviert${_adr?' am '+_adr:''}</span>
+      ${_proj?`<span style="font-size:12px;font-weight:700;background:var(--bg4);color:var(--text2);padding:2px 7px;border-radius:4px;">Projekt: ${esc(_proj)}</span>`:''}
       <span style="margin-left:auto;display:flex;gap:6px;">
         <button onclick="restoreTask('${esc(task.id)}',event)" style="font-size:11px;padding:3px 10px;border-radius:5px;border:1px solid #3B6D11;background:#EAF3DE;color:#3B6D11;cursor:pointer;font-weight:700;">↩ Wiederherstellen</button>
         <button onclick="archiveTaskToHtml('${esc(task.id)}',event)" style="font-size:11px;padding:3px 10px;border-radius:5px;border:1px solid #1a73e8;background:#E8F0FE;color:#1a73e8;cursor:pointer;font-weight:700;">🌐 HTML erstellen</button>
@@ -9696,25 +9724,37 @@ function archiveCardHTML(task){
       </span>
     </div>
     <div style="font-size:13px;font-weight:600;margin-bottom:3px;">${esc(task.title||'')}</div>
-    <div style="font-size:12px;color:var(--text2);">${[task.hausverwaltung,task.adresse,task.schadensbild].filter(Boolean).map(s=>esc(s)).join(' · ')}</div>
+    <div class="pam-clamp2" onclick="event.stopPropagation();this.classList.toggle('pam-clamp-open')" title="Klicken zum Ein-/Ausklappen" style="font-size:12px;color:var(--text2);">${[task.hausverwaltung,task.adresse,task.schadensbild].filter(Boolean).map(s=>esc(s)).join(' · ')}</div>
     ${task.repNr?`<div style="font-size:12px;color:var(--text2);margin-top:2px;">Rep. ${esc(task.repNr)}</div>`:''}
   </div>`;
+}
+function spaeterBearbeitenTaskToHtml(taskId,evt){
+  if(evt)evt.stopPropagation();
+  let task=null;
+  for(const bk of Object.keys(boards)){
+    const t=(boards[bk]||[]).find(x=>x.id===taskId);
+    if(t){task=t;break;}
+  }
+  if(!task)return;
+  const btn=(evt&&evt.currentTarget instanceof HTMLElement)?evt.currentTarget:null;
+  _buildAbschlussHtml(task,btn,'🌐 HTML erstellen');
 }
 function spaeterBearbeitenCardHTML(task){
   const _sbd=(task.spaeterBearbeitenAm||'').split('-').reverse().join('.');
   const _proj=Object.keys(boards).find(bk=>(boards[bk]||[]).some(t=>t.id===task.id))||'';
   return`<div style="background:var(--bg3);border:1px solid var(--border);border-left:5px solid #EF9F27;border-radius:8px;padding:10px 12px;margin-bottom:8px;">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-      <span style="font-size:11px;background:var(--bg4);color:var(--text2);padding:2px 7px;border-radius:4px;">⏳ Später bearbeiten${_sbd?' seit '+_sbd:''}</span>
-      ${_proj?`<span style="font-size:11px;color:var(--text2);">Projekt: ${esc(_proj)}</span>`:''}
+      <span style="font-size:12px;font-weight:700;background:var(--bg4);color:var(--text2);padding:2px 7px;border-radius:4px;">⏳ Später bearbeiten${_sbd?' seit '+_sbd:''}</span>
+      ${_proj?`<span style="font-size:12px;font-weight:700;background:var(--bg4);color:var(--text2);padding:2px 7px;border-radius:4px;">Projekt: ${esc(_proj)}</span>`:''}
       <span style="margin-left:auto;display:flex;gap:6px;">
         <button onclick="restoreSpaeterBearbeiten('${esc(task.id)}',event)" style="font-size:11px;padding:3px 10px;border-radius:5px;border:1px solid #3B6D11;background:#EAF3DE;color:#3B6D11;cursor:pointer;font-weight:700;">↩ Zurück ins Projekt</button>
+        <button onclick="spaeterBearbeitenTaskToHtml('${esc(task.id)}',event)" style="font-size:11px;padding:3px 10px;border-radius:5px;border:1px solid #1a73e8;background:#E8F0FE;color:#1a73e8;cursor:pointer;font-weight:700;">🌐 HTML erstellen</button>
         <button onclick="archiveTask('${esc(task.id)}',event)" style="font-size:11px;padding:3px 10px;border-radius:5px;border:1px solid var(--border);background:var(--bg4);color:var(--text2);cursor:pointer;font-weight:700;">📦 Archivieren</button>
       </span>
     </div>
     <div style="font-size:13px;font-weight:600;margin-bottom:3px;cursor:pointer;" onclick="openEditTaskModal('${esc(task.id)}')">${esc(task.title||'')}</div>
-    <div style="font-size:11px;color:var(--text2);">${[task.hausverwaltung,task.adresse,task.schadensbild].filter(Boolean).map(s=>esc(s)).join(' · ')}</div>
-    ${task.repNr?`<div style="font-size:11px;color:var(--text2);margin-top:2px;">Rep. ${esc(task.repNr)}</div>`:''}
+    <div class="pam-clamp2" onclick="event.stopPropagation();this.classList.toggle('pam-clamp-open')" title="Klicken zum Ein-/Ausklappen" style="font-size:12px;color:var(--text2);">${[task.hausverwaltung,task.adresse,task.schadensbild].filter(Boolean).map(s=>esc(s)).join(' · ')}</div>
+    ${task.repNr?`<div style="font-size:12px;color:var(--text2);margin-top:2px;">Rep. ${esc(task.repNr)}</div>`:''}
   </div>`;
 }
 document.getElementById('searchInput').addEventListener('input',function(){searchQuery=this.value;render();});
