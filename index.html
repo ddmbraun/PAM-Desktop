@@ -13680,8 +13680,7 @@ async function _saveThreadMailsAsEml(task,threadMsgs,tokenType){
       // ── Outlook: echtes MIME-Original via Graph API /$value holen ──
       if(tokenType==='outlook'&&(msToken||msToken2)&&m.id){
         try{
-          const rMime=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(m.id)+'/$value',
-            {headers:{Authorization:'Bearer '+_msPickToken(task)}});  // #316: richtiges Konto
+          const rMime=await _msGetMsgDual(task,'https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(m.id)+'/$value',false);  // #316/dual: Task-Konto, sonst anderes Konto
           if(rMime.ok){buf=await rMime.arrayBuffer();}
           else{console.warn('[PAM] /$value HTTP '+rMime.status+' – Fallback auf synthetisches EML');}
         }catch(eMime){console.warn('[PAM] /$value Fehler – Fallback auf synthetisches EML:',eMime);}
@@ -14126,6 +14125,26 @@ function _msPickToken(task){return(task&&task.msAccount==='2'&&msToken2)?msToken
 // Erneuert das richtige Token für den Task
 async function _msPickRefresh(task){return(task&&task.msAccount==='2')?_msRefreshToken2():_msRefreshToken();}
 
+// Kontoübergreifendes Body-Nachladen: nach dem Zusammenführen kann ein Task Mails aus
+// BEIDEN Outlook-Postfächern enthalten. Zuerst mit dem Task-Konto laden, bei 401/403/404
+// (falsche Mailbox) automatisch mit dem anderen Konto erneut versuchen (inkl. Token-Refresh).
+async function _msGetMsgDual(task,url,preferHtml){
+  const _mk=function(tok){const h={Authorization:'Bearer '+tok};if(preferHtml)h['Prefer']='outlook.body-content-type="html"';return{headers:h};};
+  const primAcc=(task&&task.msAccount==='2')?'2':'1';
+  const otherAcc=primAcc==='2'?'1':'2';
+  const tokOf=function(acc){return acc==='2'?(typeof msToken2!=='undefined'?msToken2:null):(typeof msToken!=='undefined'?msToken:null);};
+  const refreshOf=async function(acc){try{if(acc==='2'){if(typeof _msRefreshToken2==='function')return await _msRefreshToken2();}else{if(typeof _msRefreshToken==='function')return await _msRefreshToken();}}catch(e){}return false;};
+  let r=null;
+  const pt=tokOf(primAcc);
+  if(pt){try{r=await fetch(url,_mk(pt));if(r&&r.ok)return r;}catch(e){r=null;}}
+  if(!r||[401,403,404].includes(r.status)){
+    await refreshOf(otherAcc);
+    const ot=tokOf(otherAcc);
+    if(ot){try{const r2=await fetch(url,_mk(ot));if(r2&&r2.ok)return r2;return r2||r;}catch(e){return r;}}
+  }
+  return r;
+}
+
 function _msCleanPreview(raw){
   // bodyPreview von MS Graph kann CSS-Text enthalten wenn E-Mail mit <style>-Block beginnt
   // (passiert bei Outlook/Exchange-Mails mit word-generiertem HTML)
@@ -14529,8 +14548,7 @@ async function _msSaveThreadPdfs(task,threadMsgs){
   for(const m of toSave){
     try{
       // Vollständigen E-Mail-Body von Graph laden (#316: richtiges Konto wählen)
-      const rb=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${m.id}?$select=body,toRecipients`,
-        {headers:{Authorization:'Bearer '+_msPickToken(task)}});
+      const rb=await _msGetMsgDual(task,`https://graph.microsoft.com/v1.0/me/messages/${m.id}?$select=body,toRecipients`,false);
       if(!rb.ok){console.warn('[MS] Body laden fehlgeschlagen',rb.status);continue;}
       const mb=await rb.json();
       const date=new Date(m.date||Date.now());
@@ -14749,7 +14767,7 @@ async function _msTPSelectMail(taskId,idx){
     </div>`;
   if((msToken||msToken2)&&m.id){
     try{
-      const r=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${m.id}?$select=body`,{headers:{Authorization:'Bearer '+_msPickToken(task),'Prefer':'outlook.body-content-type="html"'}});  // #316
+      const r=await _msGetMsgDual(task,`https://graph.microsoft.com/v1.0/me/messages/${m.id}?$select=body`,true);  // #316/dual
       if(r.ok){
         const data=await r.json();
         m._cachedBodyHtml=data.body?.content||'';
@@ -14826,8 +14844,7 @@ async function _pamEmailAntwortenMitVerlauf(){
       // Fix #370 (V3): Outlook-Body live von Graph nachladen, wenn weder gespeichert noch EML vorhanden
       if(!bodyContent&&m.id&&typeof msToken!=='undefined'&&(msToken||msToken2)){
         try{
-          const rb=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(m.id)+'?$select=body',
-            {headers:{Authorization:'Bearer '+_msPickToken(task),'Prefer':'outlook.body-content-type="html"'}});
+          const rb=await _msGetMsgDual(task,'https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(m.id)+'?$select=body',true);
           if(rb.ok){const db=await rb.json();bodyContent=(db.body&&db.body.content)||'';}
         }catch(e){console.warn('[PAM] Graph-Body für Verlauf:',e);}
       }
@@ -15269,7 +15286,7 @@ async function _pamUnifiedShowPreview(taskId,src,idx){
       }
     }
     if(src==='ms'&&(msToken||msToken2)&&msgId){
-      const r=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${msgId}?$select=body`,{headers:{Authorization:'Bearer '+_msPickToken(task)}});  // #316
+      const r=await _msGetMsgDual(task,`https://graph.microsoft.com/v1.0/me/messages/${msgId}?$select=body`,false);  // #316/dual
       if(r.ok){const data=await r.json();m._cachedBodyHtml=data.body?.content||'';
         const fr=document.createElement('iframe');fr.style.cssText='width:100%;height:300px;border:none;';fr.sandbox='allow-same-origin';
         bodyEl.innerHTML='';bodyEl.appendChild(fr);
@@ -15408,8 +15425,7 @@ async function _pamVerlaufDrucken(){
       // Fix #371: Outlook-Body live nachladen (preview wäre nur ~250 Zeichen)
       if(!bodyContent&&m.id&&typeof msToken!=='undefined'&&(msToken||msToken2)){
         try{
-          const rb=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(m.id)+'?$select=body',
-            {headers:{Authorization:'Bearer '+_msPickToken(task),'Prefer':'outlook.body-content-type="html"'}});
+          const rb=await _msGetMsgDual(task,'https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(m.id)+'?$select=body',true);
           if(rb.ok){const db=await rb.json();bodyContent=(db.body&&db.body.content)||'';}
         }catch(e){console.warn('[PAM] Graph-Body für Verlauf-Druck:',e);}
       }
@@ -16249,7 +16265,7 @@ async function _msOpenMailOverlay(taskId,idx){
   } else if(m.id){
     try{
       // Fix #377: kontobewusst (#316) – vorher msToken (Konto 1) fest → 404 bei Konto-2-Mails
-      const r=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${m.id}?$select=body`,{headers:{Authorization:'Bearer '+_msPickToken(task)}});
+      const r=await _msGetMsgDual(task,`https://graph.microsoft.com/v1.0/me/messages/${m.id}?$select=body`,false);
       if(r.ok){
         const data=await r.json();
         const bodyEl=document.getElementById('_msMailBody');
@@ -16342,7 +16358,7 @@ async function _msShowInlinePreview(taskId,idx){
   if((msToken||msToken2)&&m.id){
     try{
       // Fix #377: kontobewusst (#316) – vorher msToken (Konto 1) fest → 404 bei Konto-2-Mails
-      const r=await fetch(`https://graph.microsoft.com/v1.0/me/messages/${m.id}?$select=body`,{headers:{Authorization:'Bearer '+_msPickToken(task)}});
+      const r=await _msGetMsgDual(task,`https://graph.microsoft.com/v1.0/me/messages/${m.id}?$select=body`,false);
       if(r.ok){
         const data=await r.json();
         m._cachedBodyHtml=data.body?.content||'';
