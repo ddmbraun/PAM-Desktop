@@ -24886,4 +24886,178 @@ function _showNewAuftragBanner(p){
   window._vbsPendingData = p;
   const banner=document.createElement('div');
   banner.id='vbsNewAuftragBanner';
-  banner.style.cssText='position:fixed;top:56px;left:50%;transform:transl
+  banner.style.cssText='position:fixed;top:56px;left:50%;transform:translateX(-50%);z-index:9990;'
+    +'background:linear-gradient(135deg,#1565c0,#0d47a1);color:#fff;padding:16px 22px;'
+    +'border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,.45);max-width:520px;width:92%;'
+    +'text-align:center;font-size:13px;';
+  banner.innerHTML=
+    '<div style="font-size:15px;font-weight:700;margin-bottom:6px;">\u{1F4C1} Neuer Auftrag aus VBS erkannt</div>'
+   +'<div style="margin-bottom:3px;opacity:.9;">'+_vbsEsc(p.str)+' &ndash; KS '+_vbsEsc(p.ks)+'</div>'
+   +'<div style="margin-bottom:12px;opacity:.7;font-size:11px;">NAS-Ordner wurde erstellt &ndash; jetzt Drive-Struktur anlegen?</div>'
+   +'<button id="vbsDriveStartBtn" '
+     +'onclick="_createDriveFoldersForNewAuftrag(window._vbsPendingData)" '
+     +'style="background:#fff;color:#1565c0;border:none;padding:8px 18px;border-radius:8px;'
+     +'font-weight:700;cursor:pointer;font-size:13px;margin-right:8px;">'
+     +'☁️ Drive-Ordner anlegen &amp; Task öffnen</button>'
+   +'<button onclick="document.getElementById(\'vbsNewAuftragBanner\').remove()" '
+     +'style="background:rgba(255,255,255,.2);color:#fff;border:none;padding:8px 14px;'
+     +'border-radius:8px;cursor:pointer;font-size:12px;">✕</button>';
+  document.body.appendChild(banner);
+}
+
+async function _createDriveFoldersForNewAuftrag(p){
+  if(!gdriveToken){
+    showToast('⚠ Bitte zuerst mit Google Drive verbinden (☁️ oben rechts)','error',6000);
+    return;
+  }
+  const btn=document.getElementById('vbsDriveStartBtn');
+  if(btn){btn.textContent='⏳ Drive-Ordner werden vorbereitet…';btn.disabled=true;}
+
+  // Auto-Ordner-Dialog sperren – läuft gleich über _vbsCreateDriveStruktur
+  _autoFolderCreating=true;
+  _vbsSubfolderSearchActive=true;
+
+  try{
+    // Banner entfernen + Modal öffnen
+    const bann=document.getElementById('vbsNewAuftragBanner');
+    if(bann)bann.remove();
+    openNewTaskModal();
+
+    // Nicht-Drive-Felder sofort befüllen
+    setTimeout(()=>{
+      const adresse=(p.str+(p.ort?', '+p.ort:'')).trim();
+      const titelEl=document.getElementById('taskTitleInput');
+      if(titelEl){
+        let _t='';
+        const _k=(p.kuerzel||'').trim();
+        const _b=(p.bauobj||'').trim();
+        const _o=(p.ort||'').trim();
+        if(_k&&_b)      _t=_k+' '+_b+(_o?', '+_o:'');
+        else if(_b)     _t=_b+(_o?', '+_o:'');
+        else if(_k)     _t=_k+' '+(p.str||'').trim()+(_o?', '+_o:'');
+        else            _t=adresse||p.ordner||'';
+        titelEl.value=_t;
+      }
+      const hvEl =document.getElementById('tHV');           if(hvEl)   hvEl.value=p.hv||'';
+      const adrEl=document.getElementById('tAdr');          if(adrEl)  adrEl.value=adresse;
+      const schEl=document.getElementById('tSch');          if(schEl)  schEl.value=p.schaden||'';
+      const tagEl=document.getElementById('taskTagsInput'); if(tagEl)  tagEl.value=p.ks||'';
+      const repEl=document.getElementById('taskRepNr');     if(repEl)  repEl.value=p.repnr||'';
+      const kdEl =document.getElementById('taskKundenNr');  if(kdEl)   kdEl.value=p.kdnr||'';
+      const nasEl=document.getElementById('tNAS');          if(nasEl)  nasEl.value=p.nas||'';
+      if(typeof _updateHdrMeta==='function')  _updateHdrMeta();
+      if(typeof _updateMapsBtn==='function')  _updateMapsBtn();
+    },350);
+
+    // Drive-Struktur anlegen – _vbsCreateDriveStruktur setzt alle Drive-Felder,
+    // Stammblatt-Suche, NAS-Sync-Erkennung und Duplikat-Schutz
+    await _vbsCreateDriveStruktur(p.ordner||('Auftrag_'+p.ks), p.nasParent||'', p.nasGrand||'', p.nas||'');
+
+    showToast('✓ Task bereit – bitte speichern!','ok',4000);
+  }catch(e){
+    showToast('⚠ Fehler: '+e.message,'error',8000);
+    console.error('[VBS-Drive]',e);
+    if(btn){btn.textContent='☁️ Drive-Ordner anlegen & Task öffnen';btn.disabled=false;}
+  }finally{
+    _autoFolderCreating=false;
+    setTimeout(()=>{ _vbsSubfolderSearchActive=false; }, 3000);
+  }
+}
+
+function _showVbsDriveLinksBox(mainUrl,fotoUrl,dokUrl,emailUrl,stammdatenUrl){
+  const old=document.getElementById('vbsDriveLinksBox');
+  if(old)old.remove();
+  const box=document.createElement('div');
+  box.id='vbsDriveLinksBox';
+  box.style.cssText='position:fixed;bottom:20px;right:20px;z-index:9989;background:var(--bg);'
+    +'border:1px solid var(--green,#27ae60);border-radius:10px;padding:14px 18px;'
+    +'max-width:340px;font-size:12px;box-shadow:0 4px 20px rgba(0,0,0,.35);';
+  let sbRow=stammdatenUrl?'<div style="margin-bottom:4px;"><span style="opacity:.7;">_Stammdaten: </span>'
+    +'<a href="'+stammdatenUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>':'';
+  box.innerHTML=
+    '<div style="font-weight:700;color:var(--green,#27ae60);margin-bottom:9px;">☁️ Drive-Ordner bereit</div>'
+   +'<div style="margin-bottom:4px;"><span style="opacity:.7;">Hauptordner: </span>'
+     +'<a href="'+mainUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
+   +'<div style="margin-bottom:4px;"><span style="opacity:.7;">02_Fotos: </span>'
+     +'<a href="'+fotoUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
+   +'<div style="margin-bottom:4px;"><span style="opacity:.7;">01_Dokumente: </span>'
+     +'<a href="'+dokUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
+   +'<div style="margin-bottom:4px;"><span style="opacity:.7;">E-Mails: </span>'
+     +'<a href="'+emailUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
+   +sbRow
+   +'<div style="font-size:11px;opacity:.65;margin-bottom:8px;">Alle Felder im Task ausgefüllt.<br>Bitte Task speichern!</div>'
+   +'<button onclick="document.getElementById(\'vbsDriveLinksBox\').remove()" '
+     +'style="background:var(--bg2);border:1px solid var(--border);color:var(--text1);'
+     +'padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;">✕ Schließen</button>';
+  document.body.appendChild(box);
+}
+
+document.addEventListener('DOMContentLoaded', _checkNewAuftragFromVbs);
+// ── Service Worker: bei jedem Seitenaufruf auf Updates prüfen ──────────────────────────────────
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.getRegistration().then(reg=>{
+    if(reg) reg.update();
+  });
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{
+    // Neuer SW hat übernommen → Seite automatisch neu laden
+    window.location.reload();
+  });
+}
+
+// ── App-Update-Button: unregistriert SW und lädt neu ───
+function pamForceSwUpdate(){
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.getRegistrations().then(function(regs){
+      Promise.all(regs.map(function(r){return r.unregister();})).then(function(){
+        window.location.reload(true);
+      });
+    });
+  } else {
+    window.location.reload(true);
+  }
+}
+// ── VERSION ROLLBACK ─────────────────────────────────────────────
+function _pamVersionRollback(){
+  let ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  let box=document.createElement('div');
+  box.style.cssText='background:var(--bg2);border-radius:14px;padding:28px;max-width:480px;width:92vw;box-shadow:0 20px 60px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:16px;';
+  box.innerHTML='<div style="font-size:16px;font-weight:700;color:var(--text);">⏮ Version zurücksetzen</div>'
+    +'<div style="font-size:13px;color:var(--text2);line-height:1.6;">'
+    +'1. W\u00e4hle eine Backup-Datei aus deinem Workboard-Ordner<br>'
+    +'2. Sie wird als <b>index.html</b> heruntergeladen<br>'
+    +'3. Lade diese Datei zu GitHub hoch (Datei ersetzen)<br>'
+    +'4. Klicke danach in der App auf \uD83D\uDD04 Update</div>'
+    +'<button onclick="document.getElementById(\'_rollbackFileInput\').click()" '
+    'style="padding:10px 20px;border-radius:8px;background:var(--accent);color:#fff;border:none;cursor:pointer;font-size:14px;font-weight:600;">\uD83D\uDCC2 Backup-Datei ausw\u00e4hlen</button>'
+    +'<button onclick="this.parentElement.parentElement.remove()" '
+    +'style="padding:8px;border-radius:8px;background:none;border:1px solid var(--border);color:var(--text2);cursor:pointer;font-size:13px;">Abbrechen</button>';
+  ov.appendChild(box);
+  ov.onclick=function(e){if(e.target===ov)ov.remove();};
+  document.body.appendChild(ov);
+}
+function _pamRollbackSelected(evt){
+  let file=evt.target.files[0];if(!file)return;
+  evt.target.value='';
+  let reader=new FileReader();
+  reader.onload=function(e){
+    let blob=new Blob([e.target.result],{type:'text/html'});
+    let a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='index.html';
+    a.click();
+    setTimeout(function(){URL.revokeObjectURL(a.href);},5000);
+    showToast('\u2705 index.html heruntergeladen \u2013 jetzt zu GitHub hochladen, dann \uD83D\uDD04 Update klicken','ok',8000);    document.querySelectorAll('[style*="z-index:9999"]').forEach(function(el){el.remove();});
+  };
+  reader.readAsText(file);
+}
+
+</script>
+
+<!-- PAM Task-Uebersicht Overlay -->
+<div id="pamUebersichtOverlay" style="display:none;position:fixed;inset:0;z-index:12000;background:rgba(0,0,0,0.55);overflow-y:auto;padding:20px 12px;" onclick="if(event.target===this)_pamCloseUebersicht();"><div id="pamUebersichtBox" style="background:var(--bg2);border-radius:14px;border:1px solid var(--border);max-width:720px;margin:0 auto;box-shadow:0 12px 48px rgba(0,0,0,.5);overflow:hidden;"><div id="pamUebersichtTopbar" style="background:#185FA5;color:#fff;padding:10px 16px 8px;"><div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;"><span id="pamUebAmpel" style="width:10px;height:10px;border-radius:50%;background:#ccc;flex-shrink:0;display:inline-block;"></span><span id="pamUebTitel" style="font-size:14px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span><button onclick="_pamUebOeffnen()" style="flex-shrink:0;padding:4px 12px;border-radius:6px;background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.4);cursor:pointer;font-size:12px;margin-right:4px;">✏️ Task öffnen</button><button onclick="window.print()" style="flex-shrink:0;padding:4px 12px;border-radius:6px;background:#fff;color:#185FA5;border:none;cursor:pointer;font-weight:700;font-size:12px;">🖨 Drucken</button><button onclick="_pamCloseUebersicht()" style="flex-shrink:0;padding:4px 10px;border-radius:6px;background:rgba(255,255,255,.2);color:#fff;border:none;cursor:pointer;font-size:14px;line-height:1;margin-left:4px;">✕</button></div><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span style="font-size:11px;opacity:.8;">Task:</span><span id="pamUebStatus" style="font-size:11px;font-weight:700;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.4);border-radius:12px;padding:2px 10px;white-space:nowrap;"></span><span id="pamUebAnfrage" style="font-size:11px;opacity:.85;white-space:nowrap;display:none;">📅 Anfrage vom: <span id="pamUebAnfrageDat" style="font-weight:600;"></span></span></div></div><input type="hidden" id="pamUebAktTaskId" value=""><div id="pamUebBody" style="padding:0 0 4px;"></div></div></div>
+
+<!-- PAM Dokument-Vorschau – außerhalb Overlay für korrekte position:fixed -->
+<div id="pamUebPreview" style="display:none;position:fixed;z-index:13000;background:var(--bg2);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.4);overflow:hidden;width:520px;height:680px;pointer-events:auto;"><div style="display:flex;align-items:center;padding:6px 10px;background:var(--bg3);border-bottom:1px solid var(--border);gap:8px;"><div id="pamUebPreviewLabel" style="font-size:11px;font-weight:600;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;"></div><button onclick="document.getElementById('pamUebPreview').style.display='none'" style="flex-shrink:0;padding:2px 8px;border-radius:5px;font-size:11px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;">&#10005;</button></div><iframe id="pamUebPreviewFrame" src="" style="width:100%;height:calc(100% - 34px);border:none;background:#fff;" allowfullscreen></iframe></div>
+</body>
+</html>
