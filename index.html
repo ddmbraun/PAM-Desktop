@@ -3952,7 +3952,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-01 · #416'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-01-b416)
+const PAM_BUILD = 'v2026-07-03 · #417'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-03-b417)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -20576,7 +20576,7 @@ function _applyStammblattPrefill(){
     // Nur verwenden wenn jünger als 60 Sekunden
     if(!p||!p._ts||(Date.now()-p._ts)>60000){localStorage.removeItem('pam_prefill_task');return;}
     localStorage.removeItem('pam_prefill_task');
-    if(p.adresse){const el=document.getElementById('taskTitleInput');if(el)el.value=p.adresse;}
+    {const _tt=(p._taskname||p.adresse||'');if(_tt){const el=document.getElementById('taskTitleInput');if(el)el.value=_tt;}}
     if(p.hv){const el=document.getElementById('tHV');if(el)el.value=p.hv;}
     if(p.adresse){const el=document.getElementById('tAdr');if(el)el.value=p.adresse;}
     if(p.kostenstelle){const el=document.getElementById('taskTagsInput');if(el)el.value=p.kostenstelle;}
@@ -20587,6 +20587,33 @@ function _applyStammblattPrefill(){
     if(p._status){const el=document.getElementById('taskStatusInput');if(el)el.value=p._status;}
     showToast('✓ Objektdaten aus Stammblatt übernommen','success',4000);
     _updateStammSummary();_updateHdrMeta();_updateMapsBtn();
+    // Weg A: Drive-Ordnerstruktur mit gewähltem Namen im gewählten Eltern-Ordner anlegen
+    (function(){
+      var _pName=(p._ordnername||p._taskname||p.adresse||'').trim();
+      if(!_pName)return;
+      if(typeof gdriveToken==='undefined'||!gdriveToken){
+        showToast('ℹ Nicht mit Google Drive verbunden – Ordner wurde nicht angelegt','info',5000);
+        return;
+      }
+      var _parentUrl=(p._speicherort||'').trim();
+      var _parentFid=_parentUrl?_extractFolderIdFromUrl(_parentUrl):null;
+      if(!_parentFid) _parentFid=_extractFolderIdFromUrl((typeof DEFAULT_FOLDER_BAUSTELLE!=='undefined')?DEFAULT_FOLDER_BAUSTELLE:'');
+      if(!_parentFid){showToast('⚠ Kein gültiger Drive-Eltern-Ordner gewählt','error',5000);return;}
+      _autoFolderCreating=true; // verhindert parallele Anlage über onblur/_autoCreateTaskFolder
+      showToast('📁 Erstelle Drive-Ordnerstruktur: '+_pName.substring(0,40)+'…','info',5000);
+      _createDriveAuftragStruktur(_pName,_parentFid).then(function(urls){
+        var gdEl =document.getElementById('tGD');          if(gdEl &&urls.fotoUrl) gdEl.value =urls.fotoUrl;
+        var gdoEl=document.getElementById('tGDOrdner');    if(gdoEl&&urls.mainUrl) gdoEl.value=urls.mainUrl;
+        var eoEl =document.getElementById('tEmailOrdner'); if(eoEl &&urls.emailUrl)eoEl.value =urls.emailUrl;
+        var doEl =document.getElementById('tDokOrdner');   if(doEl &&urls.dokUrl)  doEl.value  =urls.dokUrl;
+        if(typeof _updateFotoOrdnerHint==='function')_updateFotoOrdnerHint();
+        if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
+        showToast('✓ Drive-Ordnerstruktur angelegt','success',4000);
+      }).catch(function(e){
+        showToast('⚠ Ordner anlegen fehlgeschlagen: '+(e&&e.message?e.message:e),'error',6000);
+        console.warn('[SBTask] Drive-Ordner-Anlage:',e);
+      }).finally(function(){ _autoFolderCreating=false; });
+    })();
   }catch(e){console.warn('[PTP] Stammblatt-Prefill Fehler:',e);}
 }
 
@@ -21205,6 +21232,12 @@ function _showPrefillBoardDialog(p){
     return '<option value="'+s.replace(/"/g,'&quot;')+'">'+s+'</option>';
   }).join('');
 
+  // Vorbelegungen für die frei wählbaren Felder (Taskname / Ordnername / Drive-Eltern-Ordner)
+  var _esc=function(s){return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');};
+  var _defName=_esc(p.adresse||'');
+  var _defFolder=_esc(p.adresse||p.kostenstelle||'');
+  var _defSpeicher=_esc((typeof DEFAULT_FOLDER_BAUSTELLE!=='undefined')?DEFAULT_FOLDER_BAUSTELLE:'');
+
   box.innerHTML='<div style="font-size:16px;font-weight:800;color:#1a2744;margin-bottom:4px;">➕ Neuer Task aus Stammblatt</div>'
     +'<div style="font-size:12px;color:#666;margin-bottom:16px;line-height:1.5;">'
     +(p.adresse?'📍 '+p.adresse+'<br>':'')
@@ -21217,6 +21250,22 @@ function _showPrefillBoardDialog(p){
     +'<div><label style="font-size:11px;font-weight:700;color:#555;display:block;margin-bottom:4px;">Status (Spalte)</label>'
     +'<select id="_pfStatus" style="width:100%;padding:7px 8px;border:1px solid #d0d5dd;border-radius:7px;font-size:13px;">'+statusOpts+'</select></div>'
     +'</div>'
+    +'<div style="margin-bottom:14px;">'
+    +'<label style="font-size:11px;font-weight:700;color:#555;display:block;margin-bottom:4px;">Taskname</label>'
+    +'<input id="_pfTaskname" type="text" value="'+_defName+'" autocomplete="off" style="width:100%;box-sizing:border-box;padding:7px 8px;border:1px solid #d0d5dd;border-radius:7px;font-size:13px;">'
+    +'</div>'
+    +'<div style="margin-bottom:14px;">'
+    +'<label style="font-size:11px;font-weight:700;color:#555;display:block;margin-bottom:4px;">Ordnername (Drive)</label>'
+    +'<input id="_pfOrdnername" type="text" value="'+_defFolder+'" autocomplete="off" style="width:100%;box-sizing:border-box;padding:7px 8px;border:1px solid #d0d5dd;border-radius:7px;font-size:13px;">'
+    +'</div>'
+    +'<div style="margin-bottom:18px;">'
+    +'<label style="font-size:11px;font-weight:700;color:#555;display:block;margin-bottom:4px;">Speicherort (Drive-Eltern-Ordner)</label>'
+    +'<div style="display:flex;gap:6px;">'
+    +'<input id="_pfSpeicherort" type="text" value="'+_defSpeicher+'" autocomplete="off" style="flex:1;min-width:0;box-sizing:border-box;padding:7px 8px;border:1px solid #d0d5dd;border-radius:7px;font-size:12px;" placeholder="https://drive.google.com/drive/folders/…">'
+    +'<button type="button" id="_pfPick" style="padding:7px 12px;border:1px solid #d0d5dd;border-radius:7px;background:#f5f5f5;cursor:pointer;font-size:13px;white-space:nowrap;" title="Drive-Ordner wählen">📂</button>'
+    +'</div>'
+    +'<div style="font-size:10px;color:#888;margin-top:4px;">Neuer Task-Ordner wird in diesem Drive-Ordner angelegt.</div>'
+    +'</div>'
     +'<div style="display:flex;gap:8px;justify-content:flex-end;">'
     +'<button id="_pfCancel" style="padding:8px 18px;border-radius:7px;border:1px solid #ccc;background:#f5f5f5;cursor:pointer;font-size:13px;">Abbrechen</button>'
     +'<button id="_pfOk" style="padding:8px 24px;border-radius:7px;background:#6c63ff;color:#fff;border:none;cursor:pointer;font-size:13px;font-weight:700;">Task erstellen</button>'
@@ -21225,6 +21274,13 @@ function _showPrefillBoardDialog(p){
   ov.appendChild(box);
   document.body.appendChild(ov);
 
+  // Drive-Ordner-Picker: temporär z-index anheben, damit der Browser über diesem Dialog liegt
+  var _pfPickBtn=box.querySelector('#_pfPick');
+  if(_pfPickBtn) _pfPickBtn.addEventListener('click',function(){
+    var _dov=document.getElementById('driveFolderBrowserOverlay');
+    if(_dov)_dov.style.zIndex='99999';
+    _pickDriveFolder('_pfSpeicherort');
+  });
   box.querySelector('#_pfCancel').addEventListener('click',function(){
     localStorage.removeItem('pam_prefill_task');
     ov.remove();
@@ -21232,11 +21288,17 @@ function _showPrefillBoardDialog(p){
   box.querySelector('#_pfOk').addEventListener('click',function(){
     let selBoard=box.querySelector('#_pfBoard').value;
     let selStatus=box.querySelector('#_pfStatus').value;
+    let selTaskname=(box.querySelector('#_pfTaskname').value||'').trim();
+    let selOrdnername=(box.querySelector('#_pfOrdnername').value||'').trim();
+    let selSpeicherort=(box.querySelector('#_pfSpeicherort').value||'').trim();
     ov.remove();
     // Board wechseln falls nötig
     if(selBoard&&selBoard!==currentBoard) switchBoard(selBoard);
-    // Prefill mit gewähltem Status erweitern
+    // Prefill mit gewählten Werten erweitern
     p._status=selStatus;
+    p._taskname=selTaskname;
+    p._ordnername=selOrdnername;
+    p._speicherort=selSpeicherort;
     localStorage.setItem('pam_prefill_task',JSON.stringify(p));
     setTimeout(function(){openNewTaskModal();},150);
   });
