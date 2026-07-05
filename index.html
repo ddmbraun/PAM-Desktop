@@ -3957,7 +3957,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-05 · #434'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-05-b434)
+const PAM_BUILD = 'v2026-07-05 · #435'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-05-b435)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -8126,22 +8126,42 @@ async function _kalSyncStatus(){
     const today=new Date(); today.setHours(0,0,0,0);
     const from=new Date(today); from.setDate(from.getDate()-2);
     const to=new Date(today);   to.setDate(to.getDate()+31);
-    const url='https://graph.microsoft.com/v1.0/me/calendarView?startDateTime='+from.toISOString()+'&endDateTime='+to.toISOString()+'&$top=250&$select=id,subject,lastModifiedDateTime';
+    const url='https://graph.microsoft.com/v1.0/me/calendarView?startDateTime='+from.toISOString()+'&endDateTime='+to.toISOString()+'&$top=250&$select=id,subject,start,end,lastModifiedDateTime';
     const r=await fetch(url,{headers:{Authorization:'Bearer '+msToken,Prefer:'outlook.timezone="Europe/Berlin"'}});
     if(!r.ok){console.warn('[KAL] calendarView HTTP',r.status);return;}
     const data=await r.json();
-    const ids=new Set((data.value||[]).map(e=>e.id));
-    let changed=false;
+    const evMap=new Map(); (data.value||[]).forEach(e=>evMap.set(e.id,e));
+    const openId=(document.getElementById('taskId')||{}).value||'';
+    let changed=false, pulled=0;
     Object.values(boards||{}).forEach(tasks=>(tasks||[]).forEach(task=>{
-      (task.ausserhausTermine||[]).forEach(t=>{
-        if(t&&t.outlookEventId){
-          const exists=ids.has(t.outlookEventId);
-          if(!exists && !t.outlookDeleted){t.outlookDeleted=true;changed=true;}
-          else if(exists && t.outlookDeleted){t.outlookDeleted=false;changed=true;}
+      (task.ausserhausTermine||[]).forEach((t,idx)=>{
+        if(!t||!t.outlookEventId)return;
+        const ev=evMap.get(t.outlookEventId);
+        // Löschung erkennen (Phase 5)
+        if(!ev){ if(!t.outlookDeleted){t.outlookDeleted=true;changed=true;} return; }
+        if(t.outlookDeleted){t.outlookDeleted=false;changed=true;}
+        // Phase 4 – externe Zeitänderung aus Outlook übernehmen
+        const lm=ev.lastModifiedDateTime||'';
+        if(!lm)return;
+        if(!t.outlookLastModified){ t.outlookLastModified=lm; changed=true; return; } // Basiswert merken
+        if(lm>t.outlookLastModified && !t._pamDirty){
+          const s=(ev.start&&ev.start.dateTime)||'';
+          const e=(ev.end&&ev.end.dateTime)||'';
+          let did=false;
+          if(s.length>=16){ const nd=s.slice(0,10), nv=s.slice(11,16); if(t.date!==nd){t.date=nd;did=true;} if(t.von!==nv){t.von=nv;did=true;} }
+          if(e.length>=16){ const nb=e.slice(11,16); if(t.bis!==nb){t.bis=nb;did=true;} }
+          t.outlookLastModified=lm; changed=true;
+          if(did){ pulled++;
+            if(openId===task.id && Array.isArray(taskAusserhausTermine) && taskAusserhausTermine[idx]){
+              taskAusserhausTermine[idx].date=t.date; taskAusserhausTermine[idx].von=t.von; taskAusserhausTermine[idx].bis=t.bis;
+              if(document.getElementById('ausserhausTermineList'))renderAusserhausTermine();
+            }
+          }
         }
       });
     }));
     if(changed){try{autoSave();}catch(e){console.warn('[KAL]',e);}}
+    if(pulled>0)showToast('↩ '+pulled+' Termin'+(pulled>1?'e':'')+' aus Outlook aktualisiert (Zeit)','info',4000);
     if(currentView==='kalender')renderKalender(true);
   }catch(e){console.warn('[KAL] Sync-Fehler:',e);}
   finally{_kalSyncing=false;}
@@ -8188,6 +8208,7 @@ async function _msPushTermin(task,t){
   if(!r.ok){ let msg='HTTP '+r.status; try{const e=await r.json();msg=(e.error&&e.error.message)||msg;}catch(_){ } throw new Error(msg); }
   const data=await r.json().catch(()=>({}));
   if(!isUpdate&&data&&data.id)t.outlookEventId=data.id;
+  if(data&&data.lastModifiedDateTime)t.outlookLastModified=data.lastModifiedDateTime;
   t.outlookDeleted=false;
   return true;
 }
