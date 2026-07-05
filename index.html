@@ -2671,6 +2671,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
   <div class="toolbar-left">
     <div class="view-tabs">
       <button class="view-tab active" data-view="heute" onclick="switchView('heute')">&#128197; Heute</button>
+      <button class="view-tab" data-view="kalender" onclick="switchView('kalender')">&#128197; Kalender</button>
       <button class="view-tab" data-view="kanban" onclick="switchView('kanban')">&#9638; Kanban</button>
       <button class="view-tab" data-view="list" onclick="switchView('list')">&#9776; Liste</button>
       <button class="view-tab" data-view="table" onclick="switchView('table')">&#9638;&#9638; Tabelle</button>
@@ -6555,7 +6556,7 @@ function loadFromObject(data){
   try{const saved=localStorage.getItem('pam_lastBoard');if(saved&&boards[saved])currentBoard=saved;}catch(e){console.warn('[PAM]',e);}
   if(!currentBoard||!boards[currentBoard])currentBoard=keys.length?keys[0]:'';
   // Zuletzt gewählte Ansicht (Heute/Kanban/Liste/Tabelle) wiederherstellen
-  try{const sv=localStorage.getItem('pam_current_view');if(sv&&['heute','kanban','list','table'].includes(sv))currentView=sv;}catch(e){console.warn('[PAM]',e);}
+  try{const sv=localStorage.getItem('pam_current_view');if(sv&&['heute','kalender','kanban','list','table'].includes(sv))currentView=sv;}catch(e){console.warn('[PAM]',e);}
   // laufenden Timer aus Vorgänger-Session fortsetzen, sobald die Tasks geladen sind
   try{resumeRunningTimer();}catch(e){console.warn('[PAM]',e);}
   // Einmalige Bereinigung früherer Zusammenführungen (idempotent, meldet nur bei Änderung)
@@ -7938,6 +7939,7 @@ function render(){
   renderBoardTabs();updateFilterDropdowns();updateStatusSelect();_updateAlleColCount();
   document.querySelectorAll('.view-tab').forEach(t=>t.classList.toggle('active',t.dataset.view===currentView));
   if(currentView==='heute')renderHeute();
+  else if(currentView==='kalender')renderKalender();
   else if(currentView==='kanban'){renderKanban();setTimeout(initColResize,0);}
   else if(currentView==='list')renderList();
   else renderTable();
@@ -7952,6 +7954,139 @@ function render(){
   // Modal-Scroll-Positionen wiederherstellen (verhindert Sprung nach oben bei Auto-Save)
   if(_ml&&_scL>0)_ml.scrollTop=_scL;
   if(_mr&&_scR>0)_mr.scrollTop=_scR;
+}
+
+// ══════════════════════════════════════════════════════
+// KALENDER-ANSICHT (Outlook-Anbindung, Stufe 1: Agenda) – 2026-07-05
+// Zeigt NUR PAM-Termine (ausserhausTermine der Tasks), Zeitfenster -1..+30 Tage.
+// Outlook (info@, msToken) wird nur zum Abgleich des Sync-Status gelesen.
+// ══════════════════════════════════════════════════════
+let _kalShowHidden=false, _kalSyncing=false, _kalLastSync=0;
+function _kalKostenstelle(task){
+  return (((task&&task.tags&&task.tags[0])||(task&&task.title?task.title.split(/[–-]/)[0]:'')||'')+'').trim();
+}
+function _kalCollectTermine(){
+  const out=[];
+  const today=new Date(); today.setHours(0,0,0,0);
+  const from=new Date(today); from.setDate(from.getDate()-1);
+  const to=new Date(today);   to.setDate(to.getDate()+30);
+  Object.entries(boards||{}).forEach(([bn,tasks])=>{
+    (tasks||[]).forEach(task=>{
+      if(!task||task.archiviert||!Array.isArray(task.ausserhausTermine))return;
+      task.ausserhausTermine.forEach((t,i)=>{
+        if(!t||!t.date)return;
+        const d=new Date(t.date+'T00:00:00'); if(isNaN(d.getTime()))return;
+        if(d<from||d>to)return;
+        out.push({taskId:task.id,idx:i,d:d,date:t.date,von:t.von||'',bis:t.bis||'',
+          beschreibung:t.beschreibung||'',kostenstelle:_kalKostenstelle(task),title:task.title||'',
+          outlookEventId:t.outlookEventId||'',hidden:!!t.hiddenInPam,deletedInOutlook:!!t.outlookDeleted});
+      });
+    });
+  });
+  out.sort((a,b)=>a.d-b.d || (a.von||'').localeCompare(b.von||''));
+  return out;
+}
+function _kalFmtDate(d){
+  const wd=['So','Mo','Di','Mi','Do','Fr','Sa'][d.getDay()];
+  return wd+', '+String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0')+'.';
+}
+function _kalRow(x){
+  const status = x.deletedInOutlook
+    ? '<span title="In Outlook gelöscht" style="color:#E24B4A;font-weight:600;white-space:nowrap;">⚠ in Outlook gelöscht</span>'
+    : (x.outlookEventId
+        ? '<span title="In Outlook vorhanden" style="color:#22c55e;font-weight:600;white-space:nowrap;">✓ in Outlook</span>'
+        : '<span title="Noch nicht nach Outlook geschrieben" style="color:#9ca3af;font-weight:600;white-space:nowrap;">● nicht sync</span>');
+  const zeit=(x.von||'')+(x.bis?'–'+x.bis:'');
+  const ks=x.kostenstelle?'<span style="background:var(--bg4);border:0.5px solid var(--border);border-radius:4px;padding:0 5px;font-size:11px;font-weight:700;margin-right:5px;">'+esc(x.kostenstelle)+'</span>':'';
+  return '<div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border:1px solid var(--border);border-left:3px solid #22c55e;border-radius:7px;background:var(--bg2);margin:4px 0;'+(x.hidden?'opacity:.5;':'')+'">'
+    + '<div style="min-width:52px;font-variant-numeric:tabular-nums;font-size:12px;color:var(--text2);font-weight:600;">'+(zeit||'—')+'</div>'
+    + '<div style="flex:1;min-width:0;">'+ks+'<span style="font-size:13px;color:var(--text);font-weight:600;">'+esc(x.beschreibung||'(ohne Bezeichnung)')+'</span>'
+    +   '<span style="font-size:12px;color:var(--text2);"> – '+esc(x.title)+'</span></div>'
+    + '<div style="font-size:11px;">'+status+'</div>'
+    + '<button onclick="_kalOpenTask(\''+esc(x.taskId)+'\')" title="Task öffnen" style="border:1px solid var(--border);background:var(--bg3);color:var(--text);border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;white-space:nowrap;">↗ Task</button>'
+    + '<button onclick="_kalHide(\''+esc(x.taskId)+'\','+x.idx+')" title="'+(x.hidden?'Wieder einblenden':'Aus der Liste ausblenden (löscht nichts)')+'" style="border:1px solid var(--border);background:var(--bg3);color:var(--text2);border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;white-space:nowrap;">'+(x.hidden?'einblenden':'ausblenden')+'</button>'
+    + '</div>';
+}
+function _kalSection(title,color,items){
+  if(!items.length)return '';
+  return '<div style="margin:16px 0 4px;font-size:13px;font-weight:700;color:'+color+';">'+title+' <span style="color:var(--text2);font-weight:500;">('+items.length+')</span></div>'
+    + items.map(_kalRow).join('');
+}
+function renderKalender(skipSync){
+  const mc=document.getElementById('mainContent'); if(!mc)return;
+  let all=_kalCollectTermine();
+  const hiddenCount=all.filter(x=>x.hidden).length;
+  if(!_kalShowHidden) all=all.filter(x=>!x.hidden);
+  const today=new Date(); today.setHours(0,0,0,0);
+  const wocheEnd=new Date(today); wocheEnd.setDate(wocheEnd.getDate()+7);
+  const g={vergangen:[],heute:[],woche:[],spaeter:[]};
+  all.forEach(x=>{
+    if(x.d<today)g.vergangen.push(x);
+    else if(x.d.getTime()===today.getTime())g.heute.push(x);
+    else if(x.d<=wocheEnd)g.woche.push(x);
+    else g.spaeter.push(x);
+  });
+  const conn = msToken
+    ? '<span style="color:#22c55e;">● Outlook verbunden ('+esc((msUserEmail||'').split("@")[0]||'info')+')</span>'
+    : '<span style="color:#E24B4A;">● Outlook nicht verbunden – Sync-Status kann nicht geprüft werden (📨 Outlook klicken)</span>';
+  let html='<div style="max-width:920px;margin:0 auto;padding:6px 4px 40px;">';
+  html+='<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px;">'
+    + '<div style="font-size:16px;font-weight:700;color:var(--text);">📅 Kalender <span style="font-size:12px;font-weight:500;color:var(--text2);">– PAM-Termine (−1 bis +30 Tage)</span></div>'
+    + '<div style="flex:1;"></div>'
+    + '<button onclick="_kalForceSync()" title="Sync-Status jetzt aus Outlook aktualisieren" style="border:1px solid var(--border);background:var(--bg3);color:var(--text);border-radius:6px;padding:5px 11px;font-size:12px;cursor:pointer;">↻ Aktualisieren</button>'
+    + '<button onclick="window.open(\'https://outlook.office.com/calendar/\',\'_blank\')" style="border:none;background:#0078d4;color:#fff;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;">📆 Outlook öffnen</button>'
+    + '</div>';
+  html+='<div style="font-size:11px;margin-bottom:6px;">'+conn+'</div>';
+  if(!all.length && !hiddenCount){
+    html+='<div class="no-items-hint" style="padding:30px;text-align:center;color:var(--text2);">Keine PAM-Termine im Zeitfenster. Außentermine an den Tasks anlegen – sie erscheinen dann hier.</div>';
+  }else{
+    html+=_kalSection('▶ Vergangen','#9ca3af',g.vergangen);
+    html+=_kalSection('🔶 Heute','#EF9F27',g.heute);
+    html+=_kalSection('📆 Diese Woche','#378ADD',g.woche);
+    html+=_kalSection('🗓 Später','#639922',g.spaeter);
+  }
+  if(hiddenCount){
+    html+='<div style="margin-top:18px;font-size:12px;"><button onclick="_kalToggleHidden()" style="border:1px solid var(--border);background:var(--bg3);color:var(--text2);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;">'+(_kalShowHidden?'Ausgeblendete verbergen':'Ausgeblendete anzeigen')+' ('+hiddenCount+')</button></div>';
+  }
+  html+='</div>';
+  mc.innerHTML=html;
+  if(!skipSync && msToken && Date.now()-_kalLastSync>15000) _kalSyncStatus();
+}
+function _kalToggleHidden(){_kalShowHidden=!_kalShowHidden;renderKalender(true);}
+function _kalForceSync(){_kalLastSync=0;if(msToken){_kalSyncStatus();}else{showToast('⚠ Outlook nicht verbunden – bitte 📨 Outlook klicken','warning',4000);}}
+function _kalHide(taskId,idx){
+  const task=findTaskById(taskId); if(!task||!Array.isArray(task.ausserhausTermine)||!task.ausserhausTermine[idx])return;
+  task.ausserhausTermine[idx].hiddenInPam=!task.ausserhausTermine[idx].hiddenInPam;
+  try{autoSave();}catch(e){console.warn('[KAL]',e);}
+  renderKalender(true);
+}
+function _kalOpenTask(id){ if(typeof openEditTaskModal==='function')openEditTaskModal(id); }
+async function _kalSyncStatus(){
+  if(_kalSyncing||!msToken)return;
+  _kalSyncing=true; _kalLastSync=Date.now();
+  try{
+    const today=new Date(); today.setHours(0,0,0,0);
+    const from=new Date(today); from.setDate(from.getDate()-2);
+    const to=new Date(today);   to.setDate(to.getDate()+31);
+    const url='https://graph.microsoft.com/v1.0/me/calendarView?startDateTime='+from.toISOString()+'&endDateTime='+to.toISOString()+'&$top=250&$select=id,subject,lastModifiedDateTime';
+    const r=await fetch(url,{headers:{Authorization:'Bearer '+msToken,Prefer:'outlook.timezone="Europe/Berlin"'}});
+    if(!r.ok){console.warn('[KAL] calendarView HTTP',r.status);return;}
+    const data=await r.json();
+    const ids=new Set((data.value||[]).map(e=>e.id));
+    let changed=false;
+    Object.values(boards||{}).forEach(tasks=>(tasks||[]).forEach(task=>{
+      (task.ausserhausTermine||[]).forEach(t=>{
+        if(t&&t.outlookEventId){
+          const exists=ids.has(t.outlookEventId);
+          if(!exists && !t.outlookDeleted){t.outlookDeleted=true;changed=true;}
+          else if(exists && t.outlookDeleted){t.outlookDeleted=false;changed=true;}
+        }
+      });
+    }));
+    if(changed){try{autoSave();}catch(e){console.warn('[KAL]',e);}}
+    if(currentView==='kalender')renderKalender(true);
+  }catch(e){console.warn('[KAL] Sync-Fehler:',e);}
+  finally{_kalSyncing=false;}
 }
 function updateStatusSelect(){
   const sel=document.getElementById('taskStatusInput');const cur=sel.value;
