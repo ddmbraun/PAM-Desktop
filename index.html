@@ -3957,7 +3957,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-05 · #427'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-05-b427)
+const PAM_BUILD = 'v2026-07-05 · #428'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-05-b428)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -4795,6 +4795,7 @@ function saveTaskData(){
     boards[currentBoard].push(data);
   }
   render(); scheduleSave();
+  try{ _msAutoPushTermine(data); }catch(e){ console.warn('[KAL] Auto-Push-Aufruf:',e); }
   return true;
 }
 
@@ -4945,6 +4946,8 @@ function _driveSetStatus(msg, isErr) {
 }
 
 function gdriveInit() {
+  // ── Deep-Link: ?task=<ID> merken + nach Daten-Load öffnen (Rücksprung aus Outlook-Termin) ──
+  try{ const _tp=new URLSearchParams(window.location.search).get('task'); if(_tp){ window._pamPendingTaskId=_tp; _pamTryOpenPendingTask(); } }catch(e){ console.warn('[KAL] Deep-Link:',e); }
   // ── Redirect-Rückkehr: Authorization Code aus URL-Query lesen (Code-Flow) ──
   const _query = new URLSearchParams(window.location.search);
   const _authCode = _query.get('code');
@@ -8088,6 +8091,117 @@ async function _kalSyncStatus(){
   }catch(e){console.warn('[KAL] Sync-Fehler:',e);}
   finally{_kalSyncing=false;}
 }
+
+// ══════════════════════════════════════════════════════
+// PHASE 3 – PAM → OUTLOOK schreiben (2026-07-05)
+// Auto-Push neuer/geänderter Außentermine (Trigger: beim Speichern, nur _pamDirty).
+// Bestand nur per Knopf. Betreff: 🔷 Kostenstelle Task-Name – Beschreibung.
+// ══════════════════════════════════════════════════════
+function _normTime(s){ s=(s||'').trim(); const m=/^(\d{1,2}):(\d{2})/.exec(s); return m?m[1].padStart(2,'0')+':'+m[2]:s; }
+function _addMinToHHMM(hhmm,min){ const m=/^(\d{1,2}):(\d{2})$/.exec(hhmm||''); if(!m)return hhmm; let tot=(+m[1])*60+(+m[2])+min; tot=((tot%1440)+1440)%1440; return String(Math.floor(tot/60)).padStart(2,'0')+':'+String(tot%60).padStart(2,'0'); }
+function _msTerminSubject(task,t){
+  const ks=_kalKostenstelle(task);
+  const title=((task&&task.title)||'').trim();
+  const bez=((t&&t.beschreibung)||'').trim();
+  let core=title;
+  if(ks){
+    const _n=x=>x.replace(/\s+/g,'').toLowerCase();
+    if(!(title && _n(title).startsWith(_n(ks)))) core=ks+(title?' '+title:'');
+  }
+  let s='🔷 '+(core||'Außentermin');
+  if(bez)s+=' – '+bez;
+  return s.trim();
+}
+function _msTerminComplete(t){ return !!(t && t.date && t.von && t.beschreibung && t.beschreibung.trim()); }
+async function _msPushTermin(task,t){
+  if(!msToken)throw new Error('Outlook (info@) nicht verbunden');
+  if(!_msTerminComplete(t))throw new Error('Termin unvollständig (Datum, Uhrzeit, Beschreibung nötig)');
+  const start=t.date+'T'+_normTime(t.von)+':00';
+  const bisT=t.bis?_normTime(t.bis):_addMinToHHMM(_normTime(t.von),60);
+  const end=t.date+'T'+bisT+':00';
+  const ort=((task&&task.adresse)||'').trim();
+  const base=window.location.origin+window.location.pathname;
+  const link=base+'?task='+encodeURIComponent(task.id||'');
+  const ev={ subject:_msTerminSubject(task,t), categories:['PAM'],
+    start:{dateTime:start,timeZone:'Europe/Berlin'},
+    end:{dateTime:end,timeZone:'Europe/Berlin'},
+    body:{contentType:'HTML',content:'🔗 In PAM öffnen: <a href="'+link+'">'+link+'</a>'} };
+  if(ort)ev.location={displayName:ort};
+  const isUpdate=!!t.outlookEventId;
+  const url='https://graph.microsoft.com/v1.0/me/events'+(isUpdate?'/'+encodeURIComponent(t.outlookEventId):'');
+  const r=await fetch(url,{method:isUpdate?'PATCH':'POST',headers:{Authorization:'Bearer '+msToken,'Content-Type':'application/json'},body:JSON.stringify(ev)});
+  if(!r.ok){ let msg='HTTP '+r.status; try{const e=await r.json();msg=(e.error&&e.error.message)||msg;}catch(_){ } throw new Error(msg); }
+  const data=await r.json().catch(()=>({}));
+  if(!isUpdate&&data&&data.id)t.outlookEventId=data.id;
+  t.outlookDeleted=false;
+  return true;
+}
+// Auto-Push: nach dem Speichern eines Tasks – nur als _pamDirty markierte, vollständige Termine
+async function _msAutoPushTermine(task){
+  if(!msToken||!task||!Array.isArray(task.ausserhausTermine))return;
+  const openId=(document.getElementById('taskId')||{}).value||'';
+  let changed=false;
+  for(let i=0;i<task.ausserhausTermine.length;i++){
+    const t=task.ausserhausTermine[i];
+    if(!t||!t._pamDirty||t._pamPushing)continue;
+    if(!_msTerminComplete(t))continue;
+    t._pamPushing=true;
+    try{
+      await _msPushTermin(task,t);
+      t._pamDirty=false; changed=true;
+      // in offene Arbeitskopie spiegeln (per Index)
+      if(openId===task.id && Array.isArray(taskAusserhausTermine) && taskAusserhausTermine[i]){
+        taskAusserhausTermine[i].outlookEventId=t.outlookEventId;
+        taskAusserhausTermine[i].outlookDeleted=false;
+        taskAusserhausTermine[i]._pamDirty=false;
+      }
+    }catch(e){
+      console.warn('[KAL] Auto-Push fehlgeschlagen:',e);
+      showToast('⚠ Outlook: Termin nicht übernommen – '+(e.message||e),'warning',5000);
+    }finally{ t._pamPushing=false; }
+  }
+  if(changed){
+    try{scheduleSave();}catch(e){}
+    if(document.getElementById('ausserhausTermineList'))renderAusserhausTermine();
+    if(currentView==='kalender')renderKalender(true);
+  }
+}
+// Manueller Knopf (📆) – schreibt genau diesen Termin sofort nach Outlook (auch Bestand)
+function openOutlookTermin(i){
+  const t=taskAusserhausTermine[i]; if(!t)return;
+  if(!msToken){ showToast('⚠ Outlook (info@) nicht verbunden – bitte 📨 Outlook in der Leiste klicken','warning',5000); return; }
+  if(!_msTerminComplete(t)){ showToast('⚠ Termin braucht Datum, Uhrzeit und Beschreibung','warning',5000); return; }
+  const id=(document.getElementById('taskId')||{}).value||'';
+  const task={ id:id,
+    title:((document.getElementById('taskTitleInput')||{}).value||'').trim(),
+    tags:(((document.getElementById('taskTagsInput')||{}).value)||'').split(',').map(s=>s.trim()).filter(Boolean),
+    adresse:((document.getElementById('tAdr')||{}).value||'').trim() };
+  showToast('⏳ Schreibe Termin nach Outlook…','info',3000);
+  _msPushTermin(task,t).then(()=>{
+    t._pamDirty=false;
+    scheduleTaskFieldSave();
+    renderAusserhausTermine();
+    if(currentView==='kalender')renderKalender(true);
+    showToast('✅ In Outlook: '+_msTerminSubject(task,t),'success',4500);
+  }).catch(e=>showToast('⚠ Outlook: '+(e.message||e),'error',6000));
+}
+// Deep-Link: PAM per ?task=<ID> öffnen (Rücksprung aus Outlook-Termin)
+function _pamTryOpenPendingTask(){
+  if(!window._pamPendingTaskId)return;
+  let tries=0;
+  const iv=setInterval(()=>{
+    tries++;
+    let t=null; try{ t=(typeof findTaskById==='function')?findTaskById(window._pamPendingTaskId):null; }catch(e){}
+    if(t){
+      clearInterval(iv);
+      const id=window._pamPendingTaskId; window._pamPendingTaskId=null;
+      try{
+        for(const bk of Object.keys(boards||{})){ if((boards[bk]||[]).some(x=>x.id===id)){ if(currentBoard!==bk){currentBoard=bk;render();} break; } }
+        if(typeof openEditTaskModal==='function')openEditTaskModal(id);
+      }catch(e){console.warn('[KAL] Deep-Link öffnen:',e);}
+    }else if(tries>40){ clearInterval(iv); }
+  },800);
+}
 function updateStatusSelect(){
   const sel=document.getElementById('taskStatusInput');const cur=sel.value;
   const s=getBoardStatuses();
@@ -8257,7 +8371,7 @@ function toggleColSort(status,field){
 
 // ── AUSSERHAUS-TERMINE ──
 function addAusserhausTermin(date='',von='',bis='',beschreibung=''){
-  taskAusserhausTermine.push({date,von,bis,beschreibung});
+  taskAusserhausTermine.push({date,von,bis,beschreibung,_pamDirty:true});
   renderAusserhausTermine();
   scheduleTaskFieldSave();
 }
@@ -8277,7 +8391,7 @@ function erledigtAusserhausTermin(i){
   scheduleTaskFieldSave();
 }
 function removeAusserhausTermin(i){taskAusserhausTermine.splice(i,1);renderAusserhausTermine();scheduleTaskFieldSave();}
-function syncAusserhausTermin(i,field,val){if(taskAusserhausTermine[i]){taskAusserhausTermine[i][field]=val;if(field==='von'||field==='bis'){renderTermineGesamt();_updateHdrZeitBadge();}scheduleTaskFieldSave();}}
+function syncAusserhausTermin(i,field,val){if(taskAusserhausTermine[i]){taskAusserhausTermine[i][field]=val;if(['date','von','bis','beschreibung'].includes(field))taskAusserhausTermine[i]._pamDirty=true;if(field==='von'||field==='bis'){renderTermineGesamt();_updateHdrZeitBadge();}scheduleTaskFieldSave();}}
 function openGcalTermin(i){
   const t=taskAusserhausTermine[i];
   const title=encodeURIComponent(document.getElementById('taskTitleInput').value.trim()||'Außerhaus-Termin');
