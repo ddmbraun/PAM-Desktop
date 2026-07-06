@@ -8204,7 +8204,12 @@ async function _msPushTermin(task,t){
   if(ort)ev.location={displayName:ort};
   const isUpdate=!!t.outlookEventId;
   const url='https://graph.microsoft.com/v1.0/me/events'+(isUpdate?'/'+encodeURIComponent(t.outlookEventId):'');
-  const r=await fetch(url,{method:isUpdate?'PATCH':'POST',headers:{Authorization:'Bearer '+msToken,'Content-Type':'application/json'},body:JSON.stringify(ev)});
+  const _doPush=()=>fetch(url,{method:isUpdate?'PATCH':'POST',headers:{Authorization:'Bearer '+msToken,'Content-Type':'application/json'},body:JSON.stringify(ev)});
+  let r=await _doPush();
+  // Token abgelaufen (401 / "Lifetime validation failed, the token is expired") → einmal erneuern und erneut versuchen
+  if(r.status===401){
+    try{ if(typeof _msRefreshToken==='function' && await _msRefreshToken()){ r=await _doPush(); } }catch(_){}
+  }
   if(!r.ok){ let msg='HTTP '+r.status; try{const e=await r.json();msg=(e.error&&e.error.message)||msg;}catch(_){ } throw new Error(msg); }
   const data=await r.json().catch(()=>({}));
   if(!isUpdate&&data&&data.id)t.outlookEventId=data.id;
@@ -8264,18 +8269,24 @@ function openOutlookTermin(i){
 // Deep-Link: PAM per ?task=<ID> öffnen (Rücksprung aus Outlook-Termin)
 function _pamTryOpenPendingTask(){
   if(!window._pamPendingTaskId)return;
+  if(window._pamPendingPolling)return; // nicht doppelt starten
+  window._pamPendingPolling=true;
   let tries=0;
   const iv=setInterval(()=>{
+    if(!window._pamPendingTaskId){ clearInterval(iv); window._pamPendingPolling=false; return; }
     tries++;
     let t=null; try{ t=(typeof findTaskById==='function')?findTaskById(window._pamPendingTaskId):null; }catch(e){}
     if(t){
-      clearInterval(iv);
+      clearInterval(iv); window._pamPendingPolling=false;
       const id=window._pamPendingTaskId; window._pamPendingTaskId=null;
       try{
         for(const bk of Object.keys(boards||{})){ if((boards[bk]||[]).some(x=>x.id===id)){ if(currentBoard!==bk){currentBoard=bk;render();} break; } }
         if(typeof openEditTaskModal==='function')openEditTaskModal(id);
       }catch(e){console.warn('[KAL] Deep-Link öffnen:',e);}
-    }else if(tries>40){ clearInterval(iv); }
+    }else if(tries>375){ // ~5 min: deckt manuelles Laden von Drive/workboard.json ab
+      clearInterval(iv); window._pamPendingPolling=false; window._pamPendingTaskId=null;
+      try{ if(typeof showToast==='function')showToast('⚠ Verlinkter Task nicht gefunden – bitte Daten (Drive/Datei) laden und Link erneut öffnen','warning',7000); }catch(e){}
+    }
   },800);
 }
 function updateStatusSelect(){
