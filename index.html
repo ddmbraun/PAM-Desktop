@@ -7996,7 +7996,7 @@ function _kalCollectTermine(){
         if(d<from||d>to)return;
         out.push({taskId:task.id,idx:i,d:d,date:ds,von:t.von||'',bis:t.bis||'',
           beschreibung:t.beschreibung||'',kostenstelle:_kalKostenstelle(task),title:task.title||'',
-          outlookEventId:t.outlookEventId||'',hidden:!!t.hiddenInPam,deletedInOutlook:!!t.outlookDeleted});
+          outlookEventId:t.outlookEventId||'',outlookWebLink:t.outlookWebLink||'',outlookMetaChanged:!!t.outlookMetaChanged,outlookSubject:t.outlookSubject||'',outlookLocation:t.outlookLocation||'',hidden:!!t.hiddenInPam,deletedInOutlook:!!t.outlookDeleted});
       });
     });
   });
@@ -8022,7 +8022,8 @@ function _kalRow(x){
     + '</div>'
     + '<div style="flex:1;min-width:0;">'+ks+'<span style="font-size:13px;color:var(--text);font-weight:600;">'+esc(x.beschreibung||'(ohne Bezeichnung)')+'</span>'
     +   '<span style="font-size:12px;color:var(--text2);"> – '+esc(x.title)+'</span></div>'
-    + '<div style="font-size:11px;">'+status+'</div>'
+    + '<div style="font-size:11px;">'+status+(x.outlookMetaChanged?(' <span title="In Outlook geändert — '+esc((x.outlookSubject||''))+(x.outlookLocation?(' | Ort: '+esc(x.outlookLocation)):'')+'" style="color:#0078d4;font-weight:600;white-space:nowrap;">ℹ Outlook geändert</span>'):'')+'</div>'
+    + ((x.outlookEventId&&!x.deletedInOutlook)?('<button onclick="_kalOpenOutlook(\''+esc(x.taskId)+'\','+x.idx+')" title="Diesen Termin in Outlook öffnen" style="border:1px solid #0078d4;background:rgba(0,120,212,.12);color:#0078d4;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;white-space:nowrap;">📆 Outlook</button>'):'')
     + (x.deletedInOutlook?('<button onclick="_kalKeepDeleted(\''+esc(x.taskId)+'\','+x.idx+')" title="Termin in PAM behalten (Outlook-Verknüpfung lösen)" style="border:1px solid #22c55e;background:rgba(34,197,94,.12);color:#16a34a;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;white-space:nowrap;">behalten</button>'+'<button onclick="_kalRemoveTermin(\''+esc(x.taskId)+'\','+x.idx+')" title="Termin-Eintrag endgültig aus PAM entfernen" style="border:1px solid #E24B4A;background:rgba(226,75,74,.12);color:#E24B4A;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;white-space:nowrap;">entfernen</button>'):'')
     + '<button onclick="_kalOpenTask(\''+esc(x.taskId)+'\')" title="Task öffnen" style="border:1px solid var(--border);background:var(--bg3);color:var(--text);border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;white-space:nowrap;">↗ Task</button>'
     + '<button onclick="_kalHide(\''+esc(x.taskId)+'\','+x.idx+')" title="'+(x.hidden?'Wieder einblenden':'Aus der Liste ausblenden (löscht nichts)')+'" style="border:1px solid var(--border);background:var(--bg3);color:var(--text2);border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;white-space:nowrap;">'+(x.hidden?'einblenden':'ausblenden')+'</button>'
@@ -8089,7 +8090,14 @@ function renderKalender(skipSync){
 function _kalToggleHidden(){_kalShowHidden=!_kalShowHidden;renderKalender(true);}
 function _kalSetStatusFilter(v){_kalStatusFilter=v;renderKalender(true);}
 function _kalSetDateFilter(v){_kalDateFilter=v||'';renderKalender(true);}
-function _kalForceSync(){_kalLastSync=0;if(msToken){_kalSyncStatus();}else{showToast('⚠ Outlook nicht verbunden – bitte 📨 Outlook klicken','warning',4000);}}
+function _kalForceSync(){_kalLastSync=0;if(msToken){showToast('⏳ Aktualisiere aus Outlook…','info',1500);_kalSyncStatus(true);}else{showToast('⚠ Outlook nicht verbunden – bitte 📨 Outlook klicken','warning',4000);}}
+function _kalOpenOutlook(taskId,idx){
+  const task=(typeof findTaskById==='function')?findTaskById(taskId):null;
+  const t=(task&&Array.isArray(task.ausserhausTermine))?task.ausserhausTermine[idx]:null;
+  const url=t&&t.outlookWebLink;
+  window.open(url||'https://outlook.office.com/calendar/','_blank');
+  if(!url)showToast('ℹ Kein direkter Termin-Link vorhanden – Outlook-Kalender geöffnet. Nach „↻ Aktualisieren" ist der Direktlink da.','info',5000);
+}
 function _kalHide(taskId,idx){
   const task=findTaskById(taskId); if(!task||!Array.isArray(task.ausserhausTermine)||!task.ausserhausTermine[idx])return;
   task.ausserhausTermine[idx].hiddenInPam=!task.ausserhausTermine[idx].hiddenInPam;
@@ -8119,20 +8127,23 @@ function _kalRemoveTermin(taskId,idx){
   renderKalender(true);
   showToast('Termin-Eintrag entfernt','info',2500);
 }
-async function _kalSyncStatus(){
+async function _kalSyncStatus(manual){
   if(_kalSyncing||!msToken)return;
   _kalSyncing=true; _kalLastSync=Date.now();
   try{
     const today=new Date(); today.setHours(0,0,0,0);
     const from=new Date(today); from.setDate(from.getDate()-2);
     const to=new Date(today);   to.setDate(to.getDate()+31);
-    const url='https://graph.microsoft.com/v1.0/me/calendarView?startDateTime='+from.toISOString()+'&endDateTime='+to.toISOString()+'&$top=250&$select=id,subject,start,end,lastModifiedDateTime';
-    const r=await fetch(url,{headers:{Authorization:'Bearer '+msToken,Prefer:'outlook.timezone="Europe/Berlin"'}});
-    if(!r.ok){console.warn('[KAL] calendarView HTTP',r.status);return;}
+    const url='https://graph.microsoft.com/v1.0/me/calendarView?startDateTime='+from.toISOString()+'&endDateTime='+to.toISOString()+'&$top=250&$select=id,subject,location,start,end,lastModifiedDateTime,webLink';
+    const _kalFetch=()=>fetch(url,{headers:{Authorization:'Bearer '+msToken,Prefer:'outlook.timezone="Europe/Berlin"'}});
+    let r=await _kalFetch();
+    // Token abgelaufen → einmal erneuern und erneut versuchen
+    if(r.status===401){ try{ if(typeof _msRefreshToken==='function' && await _msRefreshToken()){ r=await _kalFetch(); } }catch(_){}}
+    if(!r.ok){console.warn('[KAL] calendarView HTTP',r.status); if(manual)showToast('⚠ Outlook-Abgleich fehlgeschlagen (HTTP '+r.status+')','error',5000); return;}
     const data=await r.json();
     const evMap=new Map(); (data.value||[]).forEach(e=>evMap.set(e.id,e));
     const openId=(document.getElementById('taskId')||{}).value||'';
-    let changed=false, pulled=0;
+    let changed=false, pulled=0, metaCount=0;
     Object.values(boards||{}).forEach(tasks=>(tasks||[]).forEach(task=>{
       (task.ausserhausTermine||[]).forEach((t,idx)=>{
         if(!t||!t.outlookEventId)return;
@@ -8140,6 +8151,16 @@ async function _kalSyncStatus(){
         // Löschung erkennen (Phase 5)
         if(!ev){ if(!t.outlookDeleted){t.outlookDeleted=true;changed=true;} return; }
         if(t.outlookDeleted){t.outlookDeleted=false;changed=true;}
+        // webLink für „📆 In Outlook öffnen" merken
+        if(ev.webLink && t.outlookWebLink!==ev.webLink){ t.outlookWebLink=ev.webLink; changed=true; }
+        // Betreff/Ort in Outlook geändert? → NICHT überschreiben, nur sichtbar machen
+        const _baseSubj=(t._pushedSubject!=null)?t._pushedSubject:_msTerminSubject(task,t);
+        const _baseLoc=(t._pushedLocation!=null)?t._pushedLocation:(((task&&task.adresse)||'').trim());
+        const _outSubj=(ev.subject||'').trim();
+        const _outLoc=(ev.location&&ev.location.displayName||'').trim();
+        const _metaChg=(!!_outSubj&&_outSubj!==(_baseSubj||'').trim())||(_outLoc!==(_baseLoc||'').trim());
+        if(_metaChg){ if(!t.outlookMetaChanged||t.outlookSubject!==_outSubj||t.outlookLocation!==_outLoc){ t.outlookMetaChanged=true; t.outlookSubject=_outSubj; t.outlookLocation=_outLoc; changed=true; metaCount++; } else { metaCount++; } }
+        else if(t.outlookMetaChanged){ t.outlookMetaChanged=false; delete t.outlookSubject; delete t.outlookLocation; changed=true; }
         // Phase 4 – externe Zeitänderung aus Outlook übernehmen
         const lm=ev.lastModifiedDateTime||'';
         if(!lm)return;
@@ -8162,6 +8183,8 @@ async function _kalSyncStatus(){
     }));
     if(changed){try{autoSave();}catch(e){console.warn('[KAL]',e);}}
     if(pulled>0)showToast('↩ '+pulled+' Termin'+(pulled>1?'e':'')+' aus Outlook aktualisiert (Zeit)','info',4000);
+    if(metaCount>0)showToast('ℹ '+metaCount+' Termin'+(metaCount>1?'e':'')+' in Outlook geändert (Betreff/Ort) – siehe „ℹ Outlook geändert"','info',5000);
+    if(manual && pulled===0)showToast('✓ Kalender aktualisiert'+(metaCount>0?'':' – keine Zeitänderungen'),'success',2500);
     if(currentView==='kalender')renderKalender(true);
   }catch(e){console.warn('[KAL] Sync-Fehler:',e);}
   finally{_kalSyncing=false;}
@@ -8213,6 +8236,10 @@ async function _msPushTermin(task,t){
   if(!r.ok){ let msg='HTTP '+r.status; try{const e=await r.json();msg=(e.error&&e.error.message)||msg;}catch(_){ } throw new Error(msg); }
   const data=await r.json().catch(()=>({}));
   if(!isUpdate&&data&&data.id)t.outlookEventId=data.id;
+  if(data&&data.webLink)t.outlookWebLink=data.webLink; // für „📆 In Outlook öffnen" pro Eintrag
+  // Gepushten Betreff/Ort merken → Sync kann später erkennen, ob in Outlook geändert wurde
+  t._pushedSubject=ev.subject; t._pushedLocation=(ort||'');
+  t.outlookMetaChanged=false; delete t.outlookSubject; delete t.outlookLocation;
   if(data&&data.lastModifiedDateTime)t.outlookLastModified=data.lastModifiedDateTime;
   t.outlookDeleted=false;
   return true;
