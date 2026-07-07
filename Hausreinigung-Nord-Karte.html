@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
+<title>Hausreinigung Nord – Übersichtskarte Bad Langensalza</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root { --bg:#f4f5f7; --card:#fff; --text:#1c2733; --muted:#607080; --border:#dfe4ea; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif; color:var(--text); background:var(--bg); }
+  #app { display:flex; flex-direction:column; height:100%; }
+  header { padding:10px 14px; background:var(--card); border-bottom:1px solid var(--border); }
+  header h1 { margin:0; font-size:16px; }
+  header p { margin:2px 0 0; font-size:12px; color:var(--muted); }
+  #bar { flex:1; display:flex; min-height:0; }
+  #map { flex:1; min-height:0; }
+  #legend { width:230px; background:var(--card); border-left:1px solid var(--border); overflow-y:auto; padding:10px 12px; }
+  #legend h2 { font-size:12px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); margin:0 0 8px; }
+  .lg { display:flex; align-items:center; gap:8px; padding:5px 4px; border-radius:6px; cursor:pointer; font-size:13px; }
+  .lg:hover { background:var(--bg); }
+  .dot { width:14px; height:14px; border-radius:50%; flex:0 0 auto; border:2px solid #fff; box-shadow:0 0 0 1px rgba(0,0,0,.15); }
+  .lg .cnt { margin-left:auto; color:var(--muted); font-size:12px; }
+  #status { position:absolute; z-index:1000; left:50%; top:12px; transform:translateX(-50%); background:var(--card); border:1px solid var(--border); border-radius:20px; padding:7px 14px; font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,.12); max-width:90%; text-align:center; }
+  #status.hidden { display:none; }
+  .prog { display:inline-block; width:120px; height:6px; background:var(--bg); border-radius:3px; overflow:hidden; vertical-align:middle; margin-left:8px; }
+  .prog > i { display:block; height:100%; width:0; background:#2d7ef7; transition:width .2s; }
+  .pin { width:18px; height:18px; border-radius:50% 50% 50% 0; transform:rotate(-45deg); border:2px solid #fff; box-shadow:0 1px 4px rgba(0,0,0,.4); }
+  .leaflet-popup-content { font-size:13px; line-height:1.5; }
+  @media (max-width:640px){
+    #bar { flex-direction:column; }
+    #legend { width:auto; max-height:34%; border-left:none; border-top:1px solid var(--border); }
+    header h1 { font-size:15px; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Hausreinigung Nord – Bad Langensalza</h1>
+    <p>Übersichtskarte · ein Marker je Straße, farbig · Marker antippen zeigt alle Hausnummern</p>
+  </header>
+  <div id="bar">
+    <div id="map">
+      <div id="status">Karte wird geladen…<span class="prog"><i id="progbar"></i></span></div>
+    </div>
+    <div id="legend"><h2>Straßen</h2><div id="legend-items"></div></div>
+  </div>
+</div>
+
+<script>
+// ---- Adressdaten (aus dem Bild "Hausreinigung Nord") ----
+const CITY = "Bad Langensalza";
+const STREETS = [
+  { name:"Böhmenstraße",            q:"Böhmenstraße",              color:"#e6194b", nums:["10","10a","11","11a","11b"] },
+  { name:"Friedrich-Ebert-Straße",  q:"Friedrich-Ebert-Straße",    color:"#3cb44b", nums:["1","1a","2","2a","3","3a","4","4a","4b","5","5a","5b","6","6a","6b"] },
+  { name:"Friedrich-Hahn-Straße",   q:"Friedrich-Hahn-Straße",     color:"#4363d8", nums:["1","2","3","4","18","19","20"] },
+  { name:"Hermann-von-Salza-Straße",q:"Hermann-von-Salza-Straße",  color:"#f58231", nums:["2","4","5a","5b","6","7","7a","7b","8","10","12"] },
+  { name:"Feldstraße",              q:"Feldstraße",                color:"#911eb4", nums:["34","34a","34b"] },
+  { name:"Langer Rasen",            q:"Langer Rasen",              color:"#008080", nums:["10","11","12","13","14"] },
+  { name:"Brentanostraße",          q:"Brentanostraße",            color:"#9a6324", nums:["8","9","10"] },
+  { name:"Kleinspehnstraße",        q:"Kleinspehnstraße",          color:"#e6008c", nums:["15","16","17"] },
+];
+
+const FALLBACK = [51.1082, 10.6461]; // Zentrum Bad Langensalza
+const CACHE_KEY = "hn_geocode_v3";
+const cache = JSON.parse(localStorage.getItem(CACHE_KEY) || "{}");
+
+const map = L.map("map", { zoomControl:true }).setView(FALLBACK, 15);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom:19, attribution:'© OpenStreetMap-Mitwirkende'
+}).addTo(map);
+
+const layers = {};   // Straßenname -> L.layerGroup
+const bounds = [];
+const statusEl = document.getElementById("status");
+const progEl = document.getElementById("progbar");
+
+function pinIcon(color){
+  return L.divIcon({ className:"", html:`<div class="pin" style="background:${color}"></div>`, iconSize:[18,18], iconAnchor:[9,17], popupAnchor:[0,-16] });
+}
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+async function fetchNominatim(url){
+  try {
+    const res = await fetch(url, { headers:{ "Accept":"application/json" } });
+    if (!res.ok) return null;                 // 429 / Rate-Limit etc.
+    const data = await res.json();
+    if (data && data.length) return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+  } catch(e){ /* offline / blockiert */ }
+  return null;
+}
+
+// Geocodiert EINE Straße (nicht jede Hausnummer) – strukturiert, mit Free-Text-Fallback.
+async function geocodeStreet(street){
+  const key = street + ", " + CITY;
+  if (cache[key]) return cache[key];
+  const base = "https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=de";
+  const urls = [
+    base + "&street=" + encodeURIComponent(street) + "&city=" + encodeURIComponent(CITY),
+    base + "&q=" + encodeURIComponent(street + ", " + CITY + ", Germany")
+  ];
+  for (let i=0; i<urls.length; i++){
+    if (i>0) await sleep(1100);              // Abstand zwischen zwei Versuchen
+    const p = await fetchNominatim(urls[i]);
+    if (p){
+      cache[key] = p;
+      localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+      return p;
+    }
+  }
+  return null;
+}
+
+// Legende aufbauen
+const legendItems = document.getElementById("legend-items");
+STREETS.forEach(s=>{
+  layers[s.name] = L.layerGroup().addTo(map);
+  const row = document.createElement("div");
+  row.className = "lg";
+  row.innerHTML = `<span class="dot" style="background:${s.color}"></span><span>${s.name}</span><span class="cnt">${s.nums.length}</span>`;
+  row.onclick = ()=>{
+    const b = [];
+    layers[s.name].eachLayer(l=>{ if(l.getLatLng) b.push(l.getLatLng()); });
+    if (b.length) map.setView(b[0], 17);
+  };
+  legendItems.appendChild(row);
+});
+
+async function run(){
+  const total = STREETS.length;
+  let done = 0, placed = 0;
+
+  for (const s of STREETS){
+    const cached = !!cache[s.q + ", " + CITY];
+    if (!cached) await sleep(1100);          // 1 Anfrage/Sekunde (nur bei Live-Abfrage)
+    const pt = await geocodeStreet(s.q);
+    done++;
+    progEl.style.width = Math.round(done/total*100) + "%";
+    statusEl.firstChild.textContent = `Straßen werden verortet… ${done}/${total}`;
+    if (pt){
+      placed++;
+      const popup =
+        `<b>${s.name}</b><br>${CITY}` +
+        `<br><span style="color:#607080">Hausnummern (${s.nums.length}):</span>` +
+        `<br>${s.nums.join(", ")}`;
+      L.marker(pt, { icon: pinIcon(s.color) }).bindPopup(popup).addTo(layers[s.name]);
+      bounds.push(pt);
+      map.fitBounds(L.latLngBounds(bounds).pad(0.25));
+    }
+  }
+
+  if (placed===0){
+    statusEl.classList.remove("hidden");
+    statusEl.firstChild.textContent = "Keine Verortung möglich (offline?). Bitte mit Internetverbindung öffnen.";
+    statusEl.querySelector(".prog").style.display = "none";
+  } else {
+    statusEl.classList.add("hidden");
+  }
+}
+run();
+</script>
+</body>
+</html>
