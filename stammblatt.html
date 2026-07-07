@@ -252,6 +252,7 @@ textarea{min-height:48px;resize:vertical;}
     <button class="tbtn grau" id="btnPdfDrive" onclick="pdfNachDrive()" disabled title="PDF in Drive-Ordner speichern">📤 PDF→Drive</button>
     <button class="tbtn grau" id="btnShortcut" onclick="shortcutNachDrive()" disabled title="Stammblatt-Verknüpfung (.url) in Drive-Stammdaten-Ordner speichern">🔗 Shortcut→Drive</button>
     <button class="tbtn" id="btnNeuerTask" onclick="neuerTaskInPTP()" disabled style="background:#6c63ff;color:#fff;" title="Neuen Task in PAM Workboard mit Objektdaten anlegen">➕ Neuer Task</button>
+    <button class="tbtn" id="btnAuftragAscii" onclick="auftragAlsAscii()" disabled style="background:#0f766e;color:#fff;" title="Objektdaten als ASCII-Datei (VBS-Format) speichern – Speicherort frei wählbar (z. B. NAS-Ordner)">📄 Auftrag-ASCII</button>
     <button class="tbtn grau" onclick="beenden()">✕</button>
   </div>
   <div id="wrap">
@@ -815,6 +816,7 @@ function waehleObj(id){
   document.getElementById('form').style.display='block';
   document.getElementById('btnDruck').disabled=false;
   var _bnt=document.getElementById('btnNeuerTask');if(_bnt)_bnt.disabled=false;
+  var _bac=document.getElementById('btnAuftragAscii');if(_bac)_bac.disabled=false;
   fuellForm(o);
   renListe();
 }
@@ -903,6 +905,94 @@ function neuerTaskInPTP(){
   setTimeout(function(){ if(_tn.parentNode) _tn.remove(); }, 12000);
 }
 function holeObj(){ return D.obj.find(function(o){ return o.id===cid; }); }
+
+// ── AUFTRAG ALS ASCII (VBS-Format) ──────────────────────────────────────────
+// Erzeugt eine .txt genau mit den Feld-Labels, die WBG_LSZ_Auftrag_anlegen.vbs liest.
+// Speicherort frei waehlbar (nativer Dialog), Fallback: Download. ANSI-kodiert.
+function _asciiToAnsiBytes(str){
+  // Haeufige Unicode-Zeichen auf ASCII/Latin-1 zurueckfuehren, damit die ANSI-VBS sie versteht
+  str=str.replace(/[‘’‚]/g,"'")
+         .replace(/[“”„]/g,'"')
+         .replace(/[–—]/g,'-')
+         .replace(/…/g,'...')
+         .replace(/ /g,' ');
+  var arr=new Array(str.length);
+  for(var i=0;i<str.length;i++){ var c=str.charCodeAt(i); arr[i]=(c<=255?c:63); } // 63 = '?'
+  return new Uint8Array(arr);
+}
+async function _asciiSpeichern(txt,fname){
+  var bytes=_asciiToAnsiBytes(txt);
+  if(window.showSaveFilePicker){
+    try{
+      var h=await window.showSaveFilePicker({
+        suggestedName:fname,
+        types:[{description:'ASCII-Textdatei',accept:{'text/plain':['.txt']}}]
+      });
+      var w=await h.createWritable();
+      await w.write(bytes);
+      await w.close();
+      if(typeof toast==='function')toast('ASCII gespeichert: '+fname,'ok');
+      return;
+    }catch(e){
+      if(e && e.name==='AbortError')return; // Nutzer hat abgebrochen
+      // sonst: auf Download zurueckfallen
+    }
+  }
+  var blob=new Blob([bytes],{type:'text/plain'});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=fname;
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ a.remove(); URL.revokeObjectURL(a.href); },0);
+  if(typeof toast==='function')toast('ASCII heruntergeladen: '+fname,'ok');
+}
+function auftragAlsAscii(){
+  if(!cid){ alert('Bitte zuerst ein Objekt auswählen.'); return; }
+  sammelDaten();
+  var o=holeObj(); if(!o) return;
+  // HV-Name aus Kontakten aufloesen (wie bei neuerTaskInPTP)
+  var hvName=o.hv||'';
+  if(!hvName&&o.hvref){
+    var k=(D.kontakte||[]).find(function(x){return x.id===o.hvref;});
+    if(k) hvName=k.name||'';
+  }
+  var strasse = (o.adr||'').trim();
+  var plzort  = ((o.plz||'')+' '+(o.ort||'')).trim();
+  var asp     = (o.aspn||'').trim();
+  var driveLink=(o.gdriveProjOrdner||o.driveOrdner||'').trim();
+  var nas     = (o.nasOrdner||'').trim();
+  // ASCII-Zeilen im VBS-Format. Leere Felder bleiben leer -> VBS fragt sie per InputBox ab.
+  var L=[];
+  L.push('AUFTRAG');
+  L.push('Hausverwaltung: '+hvName);
+  L.push('Kostenstelle: '+(o.id_txt||''));
+  L.push('Rep.- Nr: ');
+  L.push('Kunden - Nr.: ');
+  L.push('Datum: ');
+  L.push('Ansprechpartner HV: '+asp);
+  L.push('Telefon Ansprechpartner HV: ');
+  L.push('E-Mail Ansprechpartner HV: ');
+  L.push('');
+  L.push('OBJEKT');
+  L.push('Straße: '+strasse);
+  L.push('PLZ/Ort: '+plzort);
+  L.push('Mieter: ');
+  L.push('Mieter Telefon: ');
+  L.push('Mieter E-Mail: ');
+  L.push('Eigentümer / WEG: ');
+  L.push('Eigentümer / WEG Telefon: ');
+  L.push('Eigentümer / WEG E-Mail: ');
+  L.push('Schadensbeschreibung: ');
+  L.push('');
+  L.push('VERKNUEPFUNGEN');
+  L.push('Google_Drive_Link: '+driveLink);
+  L.push('NAS_Auftragsordner: '+nas);
+  var txt=L.join('\r\n')+'\r\n';
+  // Dateiname: Kostenstelle_Straße (bereinigt), Endung _ASCII.txt
+  var basis=((o.id_txt?o.id_txt+'_':'')+(strasse||'Auftrag'));
+  var fname=basis.replace(/[\\/:*?"<>|]/g,'-').replace(/\s+/g,' ').trim().substring(0,80)+'_ASCII.txt';
+  _asciiSpeichern(txt,fname);
+}
 
 // ── FORM
 function v(id){ var e=document.getElementById(id); return e?e.value:''; }
