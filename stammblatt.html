@@ -76,10 +76,18 @@ body{font-family:Arial,sans-serif;font-size:13px;background:#f0f2f5;color:#222;}
 /* BLOCKS */
 .blk{background:#fff;border-radius:7px;box-shadow:0 1px 3px rgba(0,0,0,.08);margin-bottom:12px;overflow:hidden;}
 .bh{background:#1a2744;color:#fff;padding:8px 14px;font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;cursor:pointer;display:flex;align-items:center;gap:6px;}
-.bh .arr{margin-left:auto;font-size:11px;transition:transform .2s;}
+.bh .arr{margin-left:6px;font-size:11px;transition:transform .2s;}
 .bh.col .arr{transform:rotate(-90deg);}
 .bb{padding:10px 14px;}
 .bb.hid{display:none;}
+/* Füllstand-Badge im Blockkopf */
+.bh .fst{margin-left:auto;font-size:10px;font-weight:700;padding:1px 8px;border-radius:9px;background:#475569;color:#cbd5e1;letter-spacing:.3px;line-height:1.7;}
+.bh .fst.vt{background:#f59e0b;color:#3a2500;}
+.bh .fst.vf{background:#16a34a;color:#fff;}
+/* Leseansicht: nur ausgefüllte Felder */
+#form.nurGefuellt .fr.leer{display:none;}
+#form.nurGefuellt .sub.leer{display:none;}
+.tbtn.an{background:#6c63ff;color:#fff;box-shadow:inset 0 0 0 2px rgba(255,255,255,.35);}
 
 /* FIELDS */
 .fr{display:grid;grid-template-columns:190px 1fr;gap:6px 14px;padding:6px 0;border-bottom:1px solid #f5f5f5;align-items:start;}
@@ -248,6 +256,7 @@ textarea{min-height:48px;resize:vertical;}
     <button class="tbtn grau" onclick="zeigeKontakte()">👥 Kontakte</button>
     <button class="tbtn gruen" id="driveBtnBar" onclick="gdriveConnectFromBar()">☁️ Drive</button><span id="driveStatusTxt" style="font-size:11px;color:rgba(255,255,255,.55);margin-left:-6px"></span>
     <button class="tbtn gruen" onclick="speichern()">💾 Speichern</button><span id="_autoSaveTxt" style="font-size:10px;color:rgba(255,255,255,.5);margin-left:-6px;" title="Letztes Auto-Speichern"></span>
+    <button class="tbtn grau" id="btnNurGef" onclick="toggleNurGefuellt()" title="Nur ausgefüllte Felder anzeigen (Leseansicht) – nochmal drücken zeigt wieder alle">👁 Nur ausgefüllte</button>
     <button class="tbtn gelb" id="btnDruck" onclick="drucken()" disabled>🖨 Drucken/PDF</button>
     <button class="tbtn grau" id="btnPdfDrive" onclick="pdfNachDrive()" disabled title="PDF in Drive-Ordner speichern">📤 PDF→Drive</button>
     <button class="tbtn grau" id="btnShortcut" onclick="shortcutNachDrive()" disabled title="Stammblatt-Verknüpfung (.url) in Drive-Stammdaten-Ordner speichern">🔗 Shortcut→Drive</button>
@@ -1037,6 +1046,7 @@ function fuellForm(o){
   var ztEl=document.querySelector('input[name="zt"][value="'+o.zt+'"]');
   if(ztEl) zeigHersteller(ztEl);
   ladeFotos(o.fotos||{});
+  _updateFuellstand();
 }
 
 function sammelDaten(){
@@ -1302,7 +1312,7 @@ function klappBlock(h){
 }
 
 function setzeDirty(v){ dirty=v; }
-function planeAutoSave(){ setzeDirty(true); clearTimeout(stimer); stimer=setTimeout(function(){ if(cid)sammelDaten(); },1500); }
+function planeAutoSave(){ setzeDirty(true); if(cid)_updateFuellstand(); clearTimeout(stimer); stimer=setTimeout(function(){ if(cid)sammelDaten(); },1500); }
 
 function bindFelder(){
   document.querySelectorAll('#form input,#form select,#form textarea').forEach(function(el){
@@ -1377,32 +1387,79 @@ function holeFotos(){
   return o;
 }
 
-// ── DRUCKEN
-function drucken(){
-  if(!cid){ toast('Kein Objekt gewählt','err'); return; }
-  sammelDaten();
-  // Leere Zeilen für Druck ausblenden
-  document.querySelectorAll('#form .fr').forEach(function(row){
-    var hat=false;
-    row.querySelectorAll('input,select,textarea').forEach(function(el){
-      if(el.type==='radio'||el.type==='checkbox'){ if(el.checked) hat=true; }
-      else if((el.value||'').trim()) hat=true;
-    });
-    row.classList.toggle('leer',!hat);
+// ── Füllstand + „Nur ausgefüllte Felder" (Leseansicht) ──
+// Ist eine Feldzeile ausgefüllt? Eingabefelder + Spezial-Schalter (Ampel/Reichweite/Schalter).
+function _frGefuellt(row){
+  var hat=false;
+  row.querySelectorAll('input,select,textarea').forEach(function(el){
+    if(el.type==='file') return;
+    if(el.type==='radio'||el.type==='checkbox'){ if(el.checked) hat=true; }
+    else if((el.value||'').trim()) hat=true;
   });
-  // Sub-Überschriften ausblenden wenn alle Folge-Zeilen leer
+  if(row.querySelector('.ab.act,.srb.act,.ssw.act,.suc.act')) hat=true;
+  return hat;
+}
+// Leere Zeilen (und Zwischenüberschriften ohne befüllte Folgezeile) mit .leer markieren.
+function _markiereLeer(){
+  document.querySelectorAll('#form .fr').forEach(function(row){
+    row.classList.toggle('leer',!_frGefuellt(row));
+  });
   document.querySelectorAll('#form .sub').forEach(function(sub){
-    var next=sub.nextElementSibling;
-    var alleL=true;
+    var next=sub.nextElementSibling,alleL=true;
     while(next&&next.classList.contains('fr')){
       if(!next.classList.contains('leer')){alleL=false;break;}
       next=next.nextElementSibling;
     }
     sub.classList.toggle('leer',alleL);
   });
+}
+var _nurGef=false;
+function toggleNurGefuellt(){
+  if(!cid){ toast('Kein Objekt gewählt','err'); return; }
+  _nurGef=!_nurGef;
+  var form=document.getElementById('form'), btn=document.getElementById('btnNurGef');
+  if(_nurGef){
+    _markiereLeer();
+    form.classList.add('nurGefuellt');
+    if(btn){ btn.classList.add('an'); btn.textContent='👁 Alle Felder'; }
+  }else{
+    form.classList.remove('nurGefuellt');
+    document.querySelectorAll('#form .fr.leer,#form .sub.leer').forEach(function(el){el.classList.remove('leer');});
+    if(btn){ btn.classList.remove('an'); btn.textContent='👁 Nur ausgefüllte'; }
+  }
+}
+// Füllstand je Block (A–I) im Blockkopf: befüllte / zählbare Felder.
+function _updateFuellstand(){
+  document.querySelectorAll('#form .blk').forEach(function(blk){
+    var bh=blk.querySelector('.bh'); if(!bh) return;
+    var badge=bh.querySelector('.fst');
+    if(!badge){ badge=document.createElement('span'); badge.className='fst'; bh.insertBefore(badge,bh.querySelector('.arr')); }
+    var tot=0,fill=0;
+    if(blk.querySelector('#fgrid')){ // Block H – Pflichtfotos
+      tot=FOTOS.length;
+      for(var i=0;i<FOTOS.length;i++){ var im=document.getElementById('fi'+i); if(im&&/\bhas\b/.test(im.className)) fill++; }
+    }else{
+      blk.querySelectorAll('.bb .fr').forEach(function(r){
+        if(r.querySelector('input:not([type=button]),select,textarea,.ab,.srb,.ssw')){
+          tot++; if(_frGefuellt(r)) fill++;
+        }
+      });
+    }
+    badge.textContent=fill+'/'+tot;
+    badge.classList.remove('vt','vf');
+    if(tot>0&&fill>=tot) badge.classList.add('vf');
+    else if(fill>0) badge.classList.add('vt');
+  });
+}
+
+// ── DRUCKEN
+function drucken(){
+  if(!cid){ toast('Kein Objekt gewählt','err'); return; }
+  sammelDaten();
+  _markiereLeer(); // Leere Zeilen für Druck ausblenden (gleiche Logik wie Leseansicht)
   window.print();
   setTimeout(function(){
-    document.querySelectorAll('#form .fr.leer,#form .sub.leer').forEach(function(el){el.classList.remove('leer');});
+    if(!_nurGef) document.querySelectorAll('#form .fr.leer,#form .sub.leer').forEach(function(el){el.classList.remove('leer');});
   },800);
 }
 
