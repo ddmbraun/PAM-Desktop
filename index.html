@@ -3092,7 +3092,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
               <button onclick="loadFotosFromDriveFolder()" style="padding:8px 12px;border-radius:6px;border:1.5px dashed #34a853;background:rgba(52,168,83,0.06);color:#34a853;font-size:calc(12px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;">🔄 Aus Ordner wählen</button>
             </div>
             <div id="fotoOrdnerHint" style="font-size:calc(11px * var(--modal-scale,1));margin-top:4px;padding:4px 6px;border-radius:4px;display:none"></div>
-            <input type="file" id="fotoDriveInput" style="display:none" accept="image/*" multiple onchange="handleFotoUploadToDrive(event)" autocomplete="off">
+            <input type="file" id="fotoDriveInput" style="display:none" accept="image/*,video/*" multiple onchange="handleFotoUploadToDrive(event)" autocomplete="off">
           </div>
         </div>
 
@@ -4017,7 +4017,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-07 · #447'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-07-b447)
+const PAM_BUILD = 'v2026-07-07 · #449'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-07-b449)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -10876,8 +10876,8 @@ async function _dfpLoadFolder(folderId,folderName){
       {headers:{Authorization:'Bearer '+gdriveToken}});
     const dFolder=rFolder.ok?await rFolder.json():{files:[]};
     const folders=dFolder.files||[];
-    // Bilder laden
-    const qImg=`'${folderId}' in parents and mimeType contains 'image/' and trashed=false`;
+    // Bilder + Videos laden
+    const qImg=`'${folderId}' in parents and (mimeType contains 'image/' or mimeType contains 'video/') and trashed=false`;
     const rImg=await fetch(
       'https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(qImg)+'&fields=files(id,name,mimeType,thumbnailLink)&orderBy=name&pageSize=200',
       {headers:{Authorization:'Bearer '+gdriveToken}});
@@ -10903,18 +10903,24 @@ async function _dfpLoadFolder(folderId,folderName){
       });
       html+='</div>';
     }
-    // Bilder anzeigen
+    // Bilder + Videos anzeigen
     if(images.length){
-      html+='<div style="font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:6px;font-weight:600;">🖼 Fotos ('+images.length+')</div>';
+      const vidCount=images.filter(f=>_isVideo(f.mimeType,f.name)).length;
+      const galLabel=vidCount?'🖼 Medien ('+images.length+', davon '+vidCount+' Video)':'🖼 Fotos ('+images.length+')';
+      html+='<div style="font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:6px;font-weight:600;">'+galLabel+'</div>';
       html+='<div style="display:flex;flex-wrap:wrap;gap:8px;">';
       images.forEach(f=>{
+        const isVid=_isVideo(f.mimeType,f.name);
         const thumb=f.thumbnailLink?f.thumbnailLink.replace(/=s\d+$/,'=s160'):'';
         const sel=_dfpSelected.has(f.id);
         const border=sel?'border:2.5px solid var(--accent);':'border:2.5px solid transparent;';
         const chk=sel?'display:flex;':'display:none;';
-        html+=`<div class="dfp-item" data-id="${esc(f.id)}" data-name="${esc(f.name)}" data-mime="${esc(f.mimeType||'image/jpeg')}" data-thumb="${esc(thumb)}" data-selected="${sel?'1':'0'}" onclick="_dfpToggle(this)" style="position:relative;width:110px;height:110px;border-radius:8px;overflow:hidden;cursor:pointer;${border}background:var(--bg3);flex-shrink:0;">`
+        const fallbackIcon=isVid?'🎬':'🖼️';
+        const playBadge=isVid?`<div style="position:absolute;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;pointer-events:none;"><div style="width:34px;height:34px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;">▶</div></div>`:'';
+        html+=`<div class="dfp-item" data-id="${esc(f.id)}" data-name="${esc(f.name)}" data-mime="${esc(f.mimeType||(isVid?'video/mp4':'image/jpeg'))}" data-thumb="${esc(thumb)}" data-selected="${sel?'1':'0'}" onclick="_dfpToggle(this)" style="position:relative;width:110px;height:110px;border-radius:8px;overflow:hidden;cursor:pointer;${border}background:var(--bg3);flex-shrink:0;">`
           +(thumb?`<img src="${esc(thumb)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">`
-                 :`<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:28px;">🖼️</div>`)
+                 :`<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:28px;">${fallbackIcon}</div>`)
+          +playBadge
           +`<div style="position:absolute;bottom:0;left:0;right:0;font-size:9px;padding:2px 4px;background:rgba(0,0,0,.6);color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(f.name)}</div>`
           +`<div class="dfp-check" style="${chk}position:absolute;top:4px;right:4px;background:var(--accent);color:#fff;border-radius:50%;width:20px;height:20px;align-items:center;justify-content:center;font-size:12px;font-weight:700;">✓</div>`
           +`</div>`;
@@ -11002,7 +11008,9 @@ async function handleFotoUploadToDrive(e){
   if(!folderId){showToast('Kein Drive-Ordner verknüpft','error');return;}
   if(!taskFotos)taskFotos=[];
   for(const file of files){
-    if(!file.type.startsWith('image/')){showToast(file.name+' ist kein Bild – übersprungen','error');continue;}
+    const _isImg=file.type.startsWith('image/');
+    const _isVid=_fileIsVideo(file);
+    if(!_isImg&&!_isVid){showToast(file.name+' ist kein Bild/Video – übersprungen','error');continue;}
     showToast('⬆ '+file.name+' wird hochgeladen…','info');
     try{
       const body=new FormData();
@@ -11037,6 +11045,30 @@ function _fileImageMime(file){
   if(/\.(dng|raw|arw|cr2|nef)$/i.test(file.name))return 'image/jpeg';
   if(/\.(heic|heif)$/i.test(file.name))return 'image/heic';
   return 'image/jpeg';
+}
+// ── Video-Unterstützung (Galerie + Anhang-Vorschau) ──
+const VIDEO_EXTS=/\.(mp4|m4v|mov|webm|ogv|avi|mkv|3gp|3g2|mpg|mpeg|wmv|flv|ts|mts|m2ts|insv)$/i;
+// Formate, die der Browser nativ per <video> abspielen kann
+const VIDEO_PLAYABLE_EXTS=/\.(mp4|m4v|mov|webm|ogv|3gp)$/i;
+const VIDEO_PLAYABLE_MIME=/^video\/(mp4|webm|ogg|quicktime|3gpp)$/i;
+function _isVideo(mime,name){
+  if(mime&&/^video\//i.test(mime))return true;
+  if(name&&VIDEO_EXTS.test(name))return true;
+  return false;
+}
+function _fileIsVideo(file){return _isVideo(file.type,file.name);}
+// Kann der Browser diese Datei direkt im <video>-Player abspielen?
+function _videoIsPlayable(mime,name){
+  if(mime&&VIDEO_PLAYABLE_MIME.test(mime))return true;
+  if(name&&VIDEO_PLAYABLE_EXTS.test(name))return true;
+  return false;
+}
+function _videoPlayMime(mime,name){
+  if(mime&&/^video\//i.test(mime))return mime;
+  if(name&&/\.webm$/i.test(name))return 'video/webm';
+  if(name&&/\.ogv$/i.test(name))return 'video/ogg';
+  if(name&&/\.(mov|m4v|3gp)$/i.test(name))return 'video/mp4';
+  return 'video/mp4';
 }
 async function handleFileAttach(e){
   const files=[...e.target.files];
@@ -11115,6 +11147,8 @@ function _aicEicSvg(type,name){
   const n=(name||'').toLowerCase();
   if((type&&type.startsWith('image/'))||/\.(jpg|jpeg|png|gif|webp|heic|heif|avif|bmp|tiff?)$/i.test(n))
     return `<svg viewBox="0 0 68 68" xmlns="http://www.w3.org/2000/svg"><rect width="68" height="68" rx="8" fill="#e8f0fe"/><rect x="9" y="14" width="50" height="36" rx="3" fill="#1a73e8"/><circle cx="20" cy="25" r="5" fill="rgba(255,255,255,0.5)"/><path d="M9 50 L25 34 L36 45 L46 33 L59 50Z" fill="rgba(255,255,255,0.35)"/><rect x="14" y="52" width="40" height="5" rx="2" fill="#1a73e8" opacity="0.3"/></svg>`;
+  if(_isVideo(type,name))
+    return `<svg viewBox="0 0 68 68" xmlns="http://www.w3.org/2000/svg"><rect width="68" height="68" rx="8" fill="#fdeef0"/><rect x="9" y="16" width="50" height="34" rx="4" fill="#e0344b"/><path d="M29 25 L44 33 L29 41 Z" fill="#fff"/><rect x="14" y="53" width="40" height="5" rx="2" fill="#e0344b" opacity="0.3"/></svg>`;
   if(type==='application/pdf'||n.endsWith('.pdf'))
     return `<svg viewBox="0 0 68 68" xmlns="http://www.w3.org/2000/svg"><rect width="68" height="68" rx="8" fill="#fce8e6"/><rect x="13" y="6" width="29" height="42" rx="3" fill="#ea4335"/><path d="M42 6 L42 18 L53 18 Z" fill="#f28b82"/><rect x="42" y="6" width="11" height="12" rx="0" fill="#c5221f" opacity="0.6"/><line x1="18" y1="18" x2="36" y2="18" stroke="rgba(255,255,255,0.5)" stroke-width="1.5"/><line x1="18" y1="24" x2="36" y2="24" stroke="rgba(255,255,255,0.5)" stroke-width="1.5"/><line x1="18" y1="30" x2="36" y2="30" stroke="rgba(255,255,255,0.5)" stroke-width="1.5"/><rect x="13" y="48" width="42" height="14" rx="3" fill="#c5221f"/><text x="34" y="58" font-family="Arial,sans-serif" font-size="9" font-weight="bold" fill="white" text-anchor="middle">PDF</text></svg>`;
   if(n.endsWith('.doc')||n.endsWith('.docx'))
@@ -12515,10 +12549,17 @@ function renderFotoListDesktop(){
       :'<div class="foto-name">'+esc(name)+'</div>';
     const selClass=_fotoSelected.has(i)?' selected':'';
     const checkMark=_fotoSelected.has(i)?'✓':'';
+    const isVid=_isVideo(f.mimeType,name);
+    // Videos: dunkle Kachel mit ▶ statt Full-Download-Vorschau (spart Datenvolumen)
+    const mediaEl=isVid
+      ?'<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1a1a2e,#2b2b45);">'
+        +'<div style="width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.16);display:flex;align-items:center;justify-content:center;font-size:19px;color:#fff;">▶</div>'
+        +'<div style="position:absolute;top:5px;left:5px;background:rgba(0,0,0,.6);color:#fff;font-size:9px;padding:2px 6px;border-radius:4px;pointer-events:none">🎬 Video</div></div>'
+      :'<img '+srcAttr+'alt="" loading="lazy" onload="_fotoMark360(this)" onerror="_desktopThumbFallback(this)">';
     return '<div class="foto-desktop-thumb'+selClass+'" onclick="_fotoThumbClick('+i+',event)" title="'+esc(tip)+'">'
       +'<div class="foto-check">'+checkMark+'</div>'
-      +badge360
-      +'<img '+srcAttr+'alt="" loading="lazy" onload="_fotoMark360(this)" onerror="_desktopThumbFallback(this)">'
+      +(isVid?'':badge360)
+      +mediaEl
       +editedBadge
       +bottomLabel
       +'<button class="foto-edit" onclick="event.stopPropagation();editFotoCaptionDesktop('+i+')" title="Beschreibung bearbeiten">📝</button>'
@@ -13350,6 +13391,25 @@ async function openFotoDesktop(i){
   if(_deskFotoKbHandler){document.removeEventListener('keydown',_deskFotoKbHandler);}
   _deskFotoKbHandler=function(e){if(e.key==='ArrowLeft'&&_currentFotoLbIdx>0)openFotoDesktop(_currentFotoLbIdx-1);else if(e.key==='ArrowRight'&&taskFotos&&_currentFotoLbIdx<taskFotos.length-1)openFotoDesktop(_currentFotoLbIdx+1);};
   document.addEventListener('keydown',_deskFotoKbHandler);
+  // ── Video: eigener Player ──
+  if(_isVideo(f.mimeType,f.name)){
+    cnt.style.display='';
+    if(_videoIsPlayable(f.mimeType,f.name)&&f.driveId){
+      const vurl=await _fetchDesktopFotoBlob(f.driveId);
+      if(vurl){
+        _deskCurrentFotoUrl=vurl;
+        cnt.innerHTML='<video src="'+esc(vurl)+'" controls autoplay playsinline id="deskLbVideo" '
+          +'style="max-width:90vw;max-height:78vh;border-radius:10px;box-shadow:0 24px 80px rgba(0,0,0,.6);background:#000;" '
+          +'onclick="event.stopPropagation()"></video>';
+        return;
+      }
+    }
+    // Nicht direkt abspielbar (z.B. .avi/.mkv/.wmv) oder Blob-Fehler → Drive-Player einbetten
+    const vfallback=(f.driveId?'https://drive.google.com/file/d/'+f.driveId+'/preview':f.url||'');
+    if(vfallback){cnt.innerHTML='<iframe src="'+esc(vfallback)+'" allow="autoplay; fullscreen" style="width:85vw;height:82vh;border:none;border-radius:10px;background:#000;" onclick="event.stopPropagation()"></iframe>';}
+    else{cnt.innerHTML='<div style="color:#fff;padding:20px">Video-Vorschau nicht verfügbar</div>';}
+    return;
+  }
   const _viewId=f.editedDriveId||f.driveId;
   if(_viewId){
     const url=await _fetchDesktopFotoBlob(_viewId);
@@ -16099,9 +16159,22 @@ function _pamFotoLightbox(taskId, startFi){
     var nameHtml=(f.name&&!f.caption)?'<div style="color:rgba(255,255,255,.5);font-size:11px;margin-top:8px;">'+f.name+'</div>':'';
     var cntHtml='<div style="color:rgba(255,255,255,.45);font-size:11px;margin-top:6px;">'+(fi+1)+' / '+fotos.length+'</div>';
 
+    var _isVid=_isVideo(f.mimeType,f.name);
+    var mediaHtml;
+    if(_isVid){
+      if(_videoIsPlayable(f.mimeType,f.name)&&f.driveId){
+        mediaHtml='<video id="_flbVid" src="" controls autoplay playsinline style="max-width:88vw;max-height:78vh;border-radius:8px;background:#000;box-shadow:0 8px 48px rgba(0,0,0,.6);"></video>';
+      }else if(f.driveId){
+        mediaHtml='<iframe id="_flbVid" src="https://drive.google.com/file/d/'+encodeURIComponent(f.driveId)+'/preview" allow="autoplay; fullscreen" style="width:88vw;height:78vh;border:none;border-radius:8px;background:#000;box-shadow:0 8px 48px rgba(0,0,0,.6);"></iframe>';
+      }else{
+        mediaHtml='<div style="color:#fff;padding:40px;">Video nicht verfügbar</div>';
+      }
+    }else{
+      mediaHtml='<img id="_flbImg" src="'+src+'" style="max-width:88vw;max-height:78vh;border-radius:8px;object-fit:contain;box-shadow:0 8px 48px rgba(0,0,0,.6);" alt="">';
+    }
     ov.innerHTML=closeBtn+prevBtn
       +'<div style="display:flex;flex-direction:column;align-items:center;max-width:90vw;">'
-      +'<img id="_flbImg" src="'+src+'" style="max-width:88vw;max-height:78vh;border-radius:8px;object-fit:contain;box-shadow:0 8px 48px rgba(0,0,0,.6);" alt="">'
+      +mediaHtml
       +capHtml+nameHtml+cntHtml+'</div>'+nextBtn;
 
     document.getElementById('_flbClose').onclick=function(){ov.remove();document.removeEventListener('keydown',onKey);};
@@ -16110,19 +16183,28 @@ function _pamFotoLightbox(taskId, startFi){
     if(prev)prev.onclick=function(){fi=(fi-1+fotos.length)%fotos.length;render();};
     if(next)next.onclick=function(){fi=(fi+1)%fotos.length;render();};
 
-    // Thumbnail nachladen falls src leer oder Platzhalter
-    var img=document.getElementById('_flbImg');
-    if(img&&(!src||src===window.location.href)&&f.driveId){
-      _pamLoadThumb(f.driveId).then(function(u){
-        var i2=document.getElementById('_flbImg');
-        if(u&&i2)i2.src=u;
-      });
+    // Video: abspielbaren Blob laden; sonst Thumbnail nachladen falls src leer/Platzhalter
+    if(_isVid){
+      var vEl=document.getElementById('_flbVid');
+      if(vEl&&vEl.tagName==='VIDEO'&&f.driveId){
+        _fetchDesktopFotoBlob(f.driveId).then(function(u){var v2=document.getElementById('_flbVid');if(u&&v2&&v2.tagName==='VIDEO')v2.src=u;});
+      }
+    }else{
+      var img=document.getElementById('_flbImg');
+      if(img&&(!src||src===window.location.href)&&f.driveId){
+        _pamLoadThumb(f.driveId).then(function(u){
+          var i2=document.getElementById('_flbImg');
+          if(u&&i2)i2.src=u;
+        });
+      }
     }
   }
 
+  // Fix: Overlay VOR render() ins DOM hängen – render() nutzt document.getElementById('_flbClose'/…),
+  // was bei noch nicht angehängtem ov null liefert (warf bisher bei jedem Öffnen einen TypeError).
+  document.body.appendChild(ov);
   render();
   ov.onclick=function(e){if(e.target===ov){ov.remove();document.removeEventListener('keydown',onKey);}};
-  document.body.appendChild(ov);
 
   function onKey(e){
     if(!document.body.contains(ov)){document.removeEventListener('keydown',onKey);return;}
@@ -16300,10 +16382,12 @@ async function _pamTaskDrucken(extId){
   if(fotos.length){
     let f2='<div style="display:flex;flex-wrap:wrap;gap:8px;padding:10px 16px;">';
     for(let _fi=0;_fi<fotos.length;_fi++){const f=fotos[_fi];
+      const _isVid=_isVideo(f.mimeType,f.name);
       const src=f.localUrl||f.thumbnailLink||'';
       const href=f.driveId?'https://drive.google.com/file/d/'+encodeURIComponent(f.driveId)+'/view':'#';
-      f2+='<a href="'+_e(href)+'" target="_blank" style="display:block;border-radius:7px;overflow:hidden;border:1px solid var(--border);flex-shrink:0;text-decoration:none;cursor:zoom-in;" title="'+_e(f.caption||f.name||'')+'" onmouseenter="_pamFotoHov(event,'+_fi+')" onmouseleave="_pamFotoHovOut()" onclick="event.preventDefault();_pamFotoHovClick('+_fi+')" ondblclick="event.preventDefault();_pamFotoHovClick('+_fi+')">';
+      f2+='<a href="'+_e(href)+'" target="_blank" style="position:relative;display:block;border-radius:7px;overflow:hidden;border:1px solid var(--border);flex-shrink:0;text-decoration:none;cursor:zoom-in;" title="'+_e(f.caption||f.name||'')+'" onmouseenter="_pamFotoHov(event,'+_fi+')" onmouseleave="_pamFotoHovOut()" onclick="event.preventDefault();_pamFotoHovClick('+_fi+')" ondblclick="event.preventDefault();_pamFotoHovClick('+_fi+')">';
       f2+='<img id="_pamFotoImg_'+_fi+'" src="'+_e(src)+'" style="width:110px;height:90px;object-fit:cover;display:block;background:var(--bg3);" alt="'+_e(f.name||'')+'">';
+      if(_isVid){f2+='<div style="position:absolute;top:0;left:0;right:0;height:90px;display:flex;align-items:center;justify-content:center;pointer-events:none;"><div style="width:30px;height:30px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;">▶</div></div><div style="position:absolute;top:3px;left:3px;background:rgba(0,0,0,.6);color:#fff;font-size:8px;padding:1px 4px;border-radius:3px;pointer-events:none;">🎬</div>';}
       if(f.caption){f2+='<div style="font-size:10px;color:var(--text2);padding:2px 6px;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_e(f.caption)+'</div>';}
       f2+='</a>';
     }
@@ -16348,7 +16432,7 @@ async function _pamTaskDrucken(extId){
   }
 
   // Dokumente mit Hover-Vorschau (Index-basiert)
-  const allDocs=[...docAtts.map(a=>({name:a.name||'Anhang',url:a.url||'',icon:'📄'})),
+  const allDocs=[...docAtts.map(a=>({name:a.name||'Anhang',url:a.url||'',icon:_isVideo(a.type||a.mimeType,a.name||a.filename)?'🎬':'📄'})),
     ...epfs.map(p=>({name:p.name||'E-Mail PDF',url:p.url||'',icon:'📧'}))]
   _pamDocList=allDocs.slice();
   if(allDocs.length){
@@ -17801,7 +17885,34 @@ function _openAttachLightbox(a){
   document.addEventListener('keydown',function _lbEsc(e){if(e.key==='Escape'){e.stopImmediatePropagation();ov.remove();document.removeEventListener('keydown',_lbEsc);}});
   // Inhalt
   let inner='';
-  if(a.type&&a.type.startsWith('image/')){
+  if(_isVideo(a.type,a.name)){
+    // ── Video-Player ──
+    if(_videoIsPlayable(a.type,a.name)&&a.fileId&&gdriveToken){
+      inner='<div id="_attachLbVidWrap" style="color:#fff;padding:40px;text-align:center">⏳ Video wird geladen…<br><span style="opacity:.6;font-size:12px;">'+esc(a.name||'')+'</span></div>';
+      setTimeout(async()=>{
+        try{
+          const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(a.fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
+          if(!r.ok)throw new Error('HTTP '+r.status);
+          const blob=await r.blob();const url=URL.createObjectURL(blob);
+          const v=document.createElement('video');
+          v.src=url;v.controls=true;v.autoplay=true;v.setAttribute('playsinline','');
+          v.style.cssText='max-width:90vw;max-height:82vh;border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.7);background:#000;';
+          v.onclick=e=>e.stopPropagation();
+          const ph=document.getElementById('_attachLbVidWrap');
+          if(ph)ph.replaceWith(v);
+        }catch(e){const ph=document.getElementById('_attachLbVidWrap');if(ph)ph.textContent='⚠ '+e.message;if(String(e.message).includes('401'))_handleDrive401();}
+      },100);
+    } else if(_videoIsPlayable(a.type,a.name)&&a.data){
+      inner='<video src="'+a.data+'" controls autoplay playsinline style="max-width:90vw;max-height:82vh;border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.7);background:#000;" onclick="event.stopPropagation()"></video>';
+    } else if(a.fileId){
+      // Format evtl. nicht direkt abspielbar (z.B. .avi/.mkv/.wmv) → Drive-Player einbetten
+      inner='<iframe src="https://drive.google.com/file/d/'+encodeURIComponent(a.fileId)+'/preview" allow="autoplay; fullscreen" style="width:85vw;height:82vh;border:none;border-radius:8px;background:#000;" onclick="event.stopPropagation()"></iframe>';
+    } else if(a.url){
+      inner='<iframe src="'+a.url.replace(/\/view.*$/,'/preview')+'" allow="autoplay; fullscreen" style="width:85vw;height:82vh;border:none;border-radius:8px;background:#000;" onclick="event.stopPropagation()"></iframe>';
+    } else {
+      inner='<div style="color:#fff;padding:40px;text-align:center">Video nicht verfügbar</div>';
+    }
+  } else if(a.type&&a.type.startsWith('image/')){
     const imgSrc=a.data||(a.url||'');
     inner='<img src="'+imgSrc+'" style="max-width:90vw;max-height:82vh;border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.7);cursor:default;object-fit:contain;" onclick="event.stopPropagation()">';
     // Drive-Bild ohne data: via API laden
@@ -17969,8 +18080,33 @@ function _openAttachGallery(startNonImgIdx){
 
     const isPdf=a.type==='application/pdf'||(a.name||'').toLowerCase().endsWith('.pdf');
     const isDriveFile=!!(a.fileId&&gdriveToken);
+    const isVid=_isVideo(a.type,a.name);
 
-    if(isPdf&&isDriveFile){
+    if(isVid){
+      const playable=_videoIsPlayable(a.type,a.name);
+      if(playable&&isDriveFile){
+        const loader=document.createElement('div');loader.style.cssText='color:#fff;font-size:14px;text-align:center;';loader.textContent='⏳ Video wird geladen…';content.appendChild(loader);
+        try{
+          const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(a.fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
+          if(!r.ok)throw new Error('HTTP '+r.status);
+          const blob=await r.blob();curBlobUrl=URL.createObjectURL(blob);
+          const v=document.createElement('video');v.src=curBlobUrl;v.controls=true;v.autoplay=true;v.setAttribute('playsinline','');
+          v.style.cssText='max-width:90vw;max-height:86vh;border-radius:10px;background:#000;';
+          loader.replaceWith(v);
+        }catch(e){loader.innerHTML='<span style="color:#f88">⚠ '+esc(e.message)+'</span>';if(String(e.message).includes('401'))_handleDrive401();}
+      } else if(playable&&a.data){
+        const v=document.createElement('video');v.src=a.data;v.controls=true;v.autoplay=true;v.setAttribute('playsinline','');
+        v.style.cssText='max-width:90vw;max-height:86vh;border-radius:10px;background:#000;';content.appendChild(v);
+      } else if(a.fileId){
+        const fr=document.createElement('iframe');fr.src='https://drive.google.com/file/d/'+encodeURIComponent(a.fileId)+'/preview';
+        fr.setAttribute('allow','autoplay; fullscreen');fr.style.cssText='width:90vw;height:86vh;border:none;border-radius:8px;background:#000;';content.appendChild(fr);
+      } else {
+        const info=document.createElement('div');info.style.cssText='color:#fff;font-size:14px;text-align:center;';
+        info.innerHTML='<div style="font-size:40px;margin-bottom:12px;">🎬</div><div>'+esc(a.name||'Video')+'</div>'
+          +'<button onclick="downloadAttach('+i+')" style="margin-top:18px;padding:8px 20px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:6px;cursor:pointer;font-size:13px;">⬇ Herunterladen</button>';
+        content.appendChild(info);
+      }
+    } else if(isPdf&&isDriveFile){
       const loader=document.createElement('div');
       loader.style.cssText='color:#fff;font-size:14px;text-align:center;';
       loader.textContent='⏳ PDF wird geladen…';
@@ -18022,6 +18158,7 @@ function _openAttachGallery(startNonImgIdx){
 
 function closePreview(){
   _deskClosePannellum();deskDiscardDraw();
+  try{const _v=document.getElementById('deskLbVideo');if(_v){_v.pause();_v.removeAttribute('src');_v.load();}}catch(e){}
   _lbZoomReset(); // Zoom zurücksetzen
   if(_deskFotoKbHandler){document.removeEventListener('keydown',_deskFotoKbHandler);_deskFotoKbHandler=null;}
   const lb=document.getElementById('previewLightbox');
@@ -19878,13 +20015,29 @@ function _openAttachThumbnailGrid(){
     tileEl.style.borderColor='var(--accent)';
     tileEl.style.boxShadow='0 0 0 2px var(--accent)';
     const isImg=a.type&&a.type.startsWith('image/');
+    const isVid=_isVideo(a.type,a.name);
     const isPdf=a.type==='application/pdf'||(a.name||'').toLowerCase().endsWith('.pdf');
     const isTxt=a.type==='text/plain'||(a.name||'').toLowerCase().endsWith('.txt');
     const hasDrive=!!(a.fileId&&gdriveToken);
     const hasData=!!a.data;
     previewContent.style.cssText='flex:1;overflow:hidden;display:flex;align-items:center;justify-content:center;';
     previewContent.innerHTML='<span style="color:var(--text2);font-size:13px;">⏳ Lädt…</span>';
-    if(isImg&&hasData){
+    if(isVid){
+      if(_videoIsPlayable(a.type,a.name)&&hasData){
+        const v=document.createElement('video');v.src=a.data;v.controls=true;v.style.cssText='max-width:100%;max-height:100%;background:#000;';
+        previewContent.innerHTML='';previewContent.appendChild(v);
+      } else if(a.fileId){
+        // Drive-Player /preview (nutzt Browser-Google-Session, spielt auch .avi/.mkv/.wmv)
+        const fr=document.createElement('iframe');
+        fr.src='https://drive.google.com/file/d/'+encodeURIComponent(a.fileId)+'/preview';
+        fr.allow='autoplay; fullscreen';
+        fr.style.cssText='flex:1;width:100%;border:none;display:block;background:#000;';
+        previewContent.style.cssText='flex:1;overflow:hidden;display:flex;flex-direction:column;';
+        previewContent.innerHTML='';previewContent.appendChild(fr);
+      } else {
+        previewContent.innerHTML='<span style="color:var(--text2);font-size:13px;">Video nicht verfügbar</span>';
+      }
+    } else if(isImg&&hasData){
       const img=document.createElement('img');
       img.src=a.data;img.style.cssText='max-width:100%;max-height:100%;object-fit:contain;';
       previewContent.innerHTML='';previewContent.appendChild(img);
@@ -19943,6 +20096,7 @@ function _openAttachThumbnailGrid(){
 
   taskAttachments.forEach((a,i)=>{
     const isImg=a.type&&a.type.startsWith('image/');
+    const isVid=_isVideo(a.type,a.name);
     const isPdf=a.type==='application/pdf'||(a.name||'').toLowerCase().endsWith('.pdf');
     const tileWrap=document.createElement('div');
     tileWrap.style.cssText='border:1.5px solid var(--border);border-radius:8px;background:var(--bg2);overflow:hidden;transition:border-color .15s,box-shadow .15s;flex-shrink:0;';
@@ -19967,7 +20121,8 @@ function _openAttachThumbnailGrid(){
       })();
     } else {
       const ic=document.createElement('div');ic.style.cssText='font-size:36px;opacity:.7;';
-      ic.textContent=isImg?'🖼️':isPdf?'📄':'📎';thumb.appendChild(ic);
+      ic.textContent=isVid?'🎬':isImg?'🖼️':isPdf?'📄':'📎';thumb.appendChild(ic);
+      if(isVid){const pb=document.createElement('div');pb.style.cssText='position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;';pb.innerHTML='<div style="width:38px;height:38px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;">▶</div>';thumb.appendChild(pb);}
     }
     thumb.onclick=()=>_loadPrev(a,i,tileWrap);
     const lbl=document.createElement('div');
