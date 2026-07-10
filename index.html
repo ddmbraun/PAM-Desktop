@@ -424,6 +424,7 @@ function _ezFolderId(url){if(!url)return null;let m=url.match(/\/folders\/([a-zA
 // GM-Akten liegen unter Dokumente / <Jahr> / <Aktennummer> in Google Drive.
 const GM_DOKUMENTE_PARENT = '1H1L6WjBn2xyPmsnMs2YTLVlJvPVF8uFH'; // Ordner "Dokumente"
 let _gmPickList = [];
+let _gmPickCallback = null; // Anlege-Flow: Callback statt direkter Feld-Setzung
 // Lädt alle GM-Akten aus Drive (alle Jahresordner unter „Dokumente"). Gibt [{id,name,year}] zurück.
 async function _gmLoadAkten(){
   const yearsQ=`'${GM_DOKUMENTE_PARENT}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
@@ -476,17 +477,18 @@ async function _gmOpenAkte(){
     _gmShowPickDialog(hits);
   }catch(e){showToast('Fehler beim Suchen des GM-Ordners: '+e.message,'error',5000);}
 }
-function _gmShowPickDialog(akten){
+function _gmShowPickDialog(akten,onPick){
   _gmPickList=akten;
+  _gmPickCallback=onPick||null;
   const old=document.getElementById('_gmPickOverlay');if(old)old.remove();
   const ov=document.createElement('div');
   ov.id='_gmPickOverlay';
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9850;display:flex;align-items:center;justify-content:center;';
-  ov.onclick=(e)=>{if(e.target===ov)ov.remove();};
+  ov.onclick=(e)=>{if(e.target===ov)_gmPickCancel();};
   ov.innerHTML='<div style="background:var(--bg2);border-radius:14px;width:min(560px,94vw);max-height:80vh;display:flex;flex-direction:column;overflow:hidden;">'
     +'<div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);flex-shrink:0;">'
     +'<span style="font-weight:700;font-size:14px;flex:1;">📂 GM-Akte auswählen ('+akten.length+')</span>'
-    +'<button onclick="document.getElementById(\'_gmPickOverlay\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text2);">✕</button>'
+    +'<button onclick="_gmPickCancel()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text2);">✕</button>'
     +'</div>'
     +'<div style="padding:8px 14px;flex-shrink:0;border-bottom:1px solid var(--border);">'
     +'<input type="text" id="_gmPickSearch" placeholder="🔍 Nummer oder Name suchen…" oninput="_gmPickFilter(this.value)" autocomplete="off" style="width:100%;padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:13px;box-sizing:border-box;">'
@@ -516,11 +518,78 @@ function _gmPickFilter(term){
 }
 function _gmSelectAkteByIdx(idx){
   const a=_gmPickList[idx];if(!a)return;
+  const ov=document.getElementById('_gmPickOverlay');if(ov)ov.remove();
+  if(_gmPickCallback){const cb=_gmPickCallback;_gmPickCallback=null;cb(a);return;}
   const f=document.getElementById('tGmAkte');if(f)f.value=a.name;
   const h=document.getElementById('tGmAkteFolderId');if(h)h.value=a.id;
-  const ov=document.getElementById('_gmPickOverlay');if(ov)ov.remove();
   if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
   showToast('✓ GM-Akte '+a.name+' verknüpft','success',3000);
+}
+// Bricht die GM-Auswahl-Liste ab (ruft ggf. den Anlege-Flow-Callback mit null).
+function _gmPickCancel(){
+  const ov=document.getElementById('_gmPickOverlay');if(ov)ov.remove();
+  if(_gmPickCallback){const cb=_gmPickCallback;_gmPickCallback=null;cb(null);}
+}
+// Auswahl-Liste als Promise (für den Anlege-Flow): löst mit {id,name,year} oder null (Abbruch).
+function _gmPickAktePromise(akten){
+  return new Promise(function(resolve){_gmShowPickDialog(akten,function(a){resolve(a||null);});});
+}
+// Ja/Nein-Dialog beim Anlegen: „Gehört dieser Auftrag zu einer GM-Akte?" – true=GM wählen, false=eigener Ordner.
+function _gmConfirmLinkDialog(){
+  return new Promise(function(resolve){
+    const ex=document.getElementById('_gmConfirmOverlay');if(ex)ex.remove();
+    const ov=document.createElement('div');
+    ov.id='_gmConfirmOverlay';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99999;display:flex;align-items:center;justify-content:center;';
+    const box=document.createElement('div');
+    box.style.cssText='background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:22px 26px;max-width:460px;box-shadow:0 8px 32px rgba(0,0,0,.5);';
+    box.innerHTML='<div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:8px;">📂 Gehört dieser Auftrag zu einer GM-Akte?</div>'
+      +'<div style="font-size:12px;color:var(--text2);margin-bottom:18px;line-height:1.5;">Bei „GM-Akte wählen" nutzt PAM die Ordner der GM-Akte (Bilder / Dokumente / Posteingang) als Speicherort – es wird KEINE eigene Ordnerstruktur angelegt.</div>'
+      +'<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">'
+      +'<button id="_gmcNo" style="padding:8px 16px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:13px;cursor:pointer;">Nein – eigener PAM-Ordner</button>'
+      +'<button id="_gmcYes" style="padding:8px 18px;border-radius:7px;border:none;background:var(--accent);color:#fff;font-size:13px;font-weight:700;cursor:pointer;">📋 GM-Akte wählen</button>'
+      +'</div>';
+    ov.appendChild(box);document.body.appendChild(ov);
+    function _done(v){ov.remove();resolve(v);}
+    document.getElementById('_gmcYes').onclick=function(){_done(true);};
+    document.getElementById('_gmcNo').onclick=function(){_done(false);};
+    ov.addEventListener('click',function(e){if(e.target===ov)_done(false);});
+  });
+}
+// Liest die Unterordner der GM-Akte und trägt sie als PAM-Ablageziele ein (Bilder/Dokumente/Posteingang).
+async function _gmApplyAkteToFields(akte){
+  const q=`'${akte.id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+  const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q)+'&fields=files(id,name)&pageSize=100',{headers:{Authorization:'Bearer '+gdriveToken}});
+  const subs=r.ok?(((await r.json()).files)||[]):[];
+  const find=function(n){const f=subs.find(function(s){return s.name.toLowerCase()===n.toLowerCase();});return f?f.id:akte.id;};
+  const base='https://drive.google.com/drive/folders/';
+  const set=function(id,val){const el=document.getElementById(id);if(el)el.value=val;};
+  set('tGDOrdner',base+akte.id);
+  set('tGD',base+find('Bilder'));
+  set('tDokOrdner',base+find('Dokumente'));
+  set('tEmailOrdner',base+find('Posteingang'));
+  set('tGmAkte',akte.name);
+  const h=document.getElementById('tGmAkteFolderId');if(h)h.value=akte.id;
+  if(typeof _updateFotoOrdnerHint==='function')_updateFotoOrdnerHint();
+  if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
+  showToast('✓ Mit GM-Akte '+akte.name+' verknüpft – Ordner gesetzt','success',4500);
+}
+// Anlege-Flow: fragt beim neuen Auftrag nach GM-Akte. true = GM verknüpft (eigene Struktur überspringen).
+async function _gmMaybeLinkOnCreate(){
+  let wantGm=false;
+  try{wantGm=await _gmConfirmLinkDialog();}catch(e){return false;}
+  if(!wantGm)return false;
+  if(!gdriveToken){showToast('⚠ Drive nicht verbunden – eigener Ordner wird verwendet','error',4000);return false;}
+  let akten;
+  try{
+    showToast('⏳ Lade GM-Akten…','info',4000);
+    akten=await _gmLoadAkten();
+  }catch(e){showToast('Fehler beim Laden der GM-Akten: '+e.message,'error',5000);return false;}
+  if(!akten.length){showToast('Keine GM-Akten gefunden – eigener Ordner wird verwendet','info',4000);return false;}
+  const akte=await _gmPickAktePromise(akten);
+  if(!akte)return false;
+  try{await _gmApplyAkteToFields(akte);}catch(e){showToast('Fehler beim Setzen der GM-Ordner: '+e.message,'error',5000);return false;}
+  return true;
 }
 // Fix 2026-06-23: Betreff-Limit 80→40 Zeichen. Reduziert die Dateinamenlänge deutlich, damit
 // der kombinierte NAS-Pfad (Freigabe + Projekt + E-Mail-Ordner + Dateiname) seltener Windows
@@ -4128,7 +4197,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-07 · #453'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-07-b453)
+const PAM_BUILD = 'v2026-07-07 · #454'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-07-b454)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -17386,6 +17455,10 @@ async function _autoCreateTaskFolder(){
   if(_vbsCreating||_vbsSearchAttempts>0||_vbsSearchTimer||_vbsSubfolderSearchActive)return;
   _autoFolderCreating=true;
   try{
+    // GM-Anbindung: erst fragen, ob dieser neue Auftrag zu einer GM-Akte gehört.
+    // Bei „ja" + Auswahl werden die GM-Ordner als Ziele gesetzt und KEINE eigene Struktur angelegt.
+    const _gmLinked=await _gmMaybeLinkOnCreate();
+    if(_gmLinked){return;}
     const confirmedName=await _promptFolderName(title);
     if(!confirmedName){return;}
     if(confirmedName!==title&&titleEl){titleEl.value=confirmedName;scheduleTaskFieldSave&&scheduleTaskFieldSave();}
