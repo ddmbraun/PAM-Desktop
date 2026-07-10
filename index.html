@@ -420,6 +420,108 @@ async function _ezUpload(buf,fname,fid){
   return r.json();
 }
 function _ezFolderId(url){if(!url)return null;let m=url.match(/\/folders\/([a-zA-Z0-9_-]+)/)||url.match(/[?&]id=([a-zA-Z0-9_-]+)/);return m?m[1]:null;}
+// ── GM-Akten-Anbindung (Google Drive) ──────────────────────────────
+// GM-Akten liegen unter Dokumente / <Jahr> / <Aktennummer> in Google Drive.
+const GM_DOKUMENTE_PARENT = '1H1L6WjBn2xyPmsnMs2YTLVlJvPVF8uFH'; // Ordner "Dokumente"
+let _gmPickList = [];
+// Lädt alle GM-Akten aus Drive (alle Jahresordner unter „Dokumente"). Gibt [{id,name,year}] zurück.
+async function _gmLoadAkten(){
+  const yearsQ=`'${GM_DOKUMENTE_PARENT}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+  const yr=await fetch('https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(yearsQ)+'&fields=files(id,name)&orderBy=name desc&pageSize=100',{headers:{Authorization:'Bearer '+gdriveToken}});
+  if(!yr.ok){if(yr.status===401)_handleDrive401();throw new Error('Jahresordner ('+yr.status+')');}
+  const years=((await yr.json()).files)||[];
+  let akten=[];
+  for(const y of years){
+    const aQ=`'${y.id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+    const ar=await fetch('https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(aQ)+'&fields=files(id,name)&orderBy=name desc&pageSize=1000',{headers:{Authorization:'Bearer '+gdriveToken}});
+    if(!ar.ok)continue;
+    const fs=((await ar.json()).files)||[];
+    fs.forEach(f=>{if(/^\d{2}-\d+/.test(f.name))akten.push({id:f.id,name:f.name,year:y.name});});
+  }
+  return akten;
+}
+// Öffnet die Auswahl-Liste aller GM-Akten aus Drive.
+async function _gmPickAkte(){
+  if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden (☁️-Button)','error',5000);return;}
+  showToast('⏳ Lade GM-Akten…','info',4000);
+  try{
+    const akten=await _gmLoadAkten();
+    if(!akten.length){showToast('Keine GM-Akten in Drive gefunden','info',4000);return;}
+    _gmShowPickDialog(akten);
+  }catch(e){showToast('Fehler beim Laden der GM-Akten: '+e.message,'error',5000);}
+}
+// Öffnet den GM-Ordner der aktuell verknüpften/eingetragenen Akte in Drive (neuer Tab).
+async function _gmOpenAkte(){
+  const id=(document.getElementById('tGmAkteFolderId')?.value||'').trim();
+  if(id){window.open('https://drive.google.com/drive/folders/'+id,'_blank');return;}
+  const nr=(document.getElementById('tGmAkte')?.value||'').trim();
+  if(!nr){showToast('⚠ Erst eine GM-Akte wählen (📋) oder Nummer eintragen','error',4500);return;}
+  if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden (☁️-Button)','error',5000);return;}
+  showToast('⏳ Suche GM-Ordner…','info',4000);
+  try{
+    const akten=await _gmLoadAkten();
+    const q=nr.toLowerCase();
+    let hits=akten.filter(a=>a.name.toLowerCase()===q);
+    if(!hits.length)hits=akten.filter(a=>a.name.toLowerCase().indexOf(q)===0);
+    if(!hits.length)hits=akten.filter(a=>a.name.toLowerCase().indexOf(q)!==-1);
+    if(!hits.length){showToast('⚠ Kein GM-Ordner zu „'+nr+'" gefunden','error',5000);return;}
+    if(hits.length===1){
+      const a=hits[0];
+      const h=document.getElementById('tGmAkteFolderId');if(h)h.value=a.id;
+      if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
+      window.open('https://drive.google.com/drive/folders/'+a.id,'_blank');
+      return;
+    }
+    showToast('Mehrere Treffer zu „'+nr+'" – bitte auswählen','info',3500);
+    _gmShowPickDialog(hits);
+  }catch(e){showToast('Fehler beim Suchen des GM-Ordners: '+e.message,'error',5000);}
+}
+function _gmShowPickDialog(akten){
+  _gmPickList=akten;
+  const old=document.getElementById('_gmPickOverlay');if(old)old.remove();
+  const ov=document.createElement('div');
+  ov.id='_gmPickOverlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9850;display:flex;align-items:center;justify-content:center;';
+  ov.onclick=(e)=>{if(e.target===ov)ov.remove();};
+  ov.innerHTML='<div style="background:var(--bg2);border-radius:14px;width:min(560px,94vw);max-height:80vh;display:flex;flex-direction:column;overflow:hidden;">'
+    +'<div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);flex-shrink:0;">'
+    +'<span style="font-weight:700;font-size:14px;flex:1;">📂 GM-Akte auswählen ('+akten.length+')</span>'
+    +'<button onclick="document.getElementById(\'_gmPickOverlay\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text2);">✕</button>'
+    +'</div>'
+    +'<div style="padding:8px 14px;flex-shrink:0;border-bottom:1px solid var(--border);">'
+    +'<input type="text" id="_gmPickSearch" placeholder="🔍 Nummer oder Name suchen…" oninput="_gmPickFilter(this.value)" autocomplete="off" style="width:100%;padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:13px;box-sizing:border-box;">'
+    +'</div>'
+    +'<div id="_gmPickListBox" style="padding:6px 8px;flex:1;overflow-y:auto;"></div>'
+    +'</div>';
+  document.body.appendChild(ov);
+  _gmPickRender(_gmPickList);
+  const s=document.getElementById('_gmPickSearch');if(s)s.focus();
+}
+function _gmPickRender(list){
+  const c=document.getElementById('_gmPickListBox');if(!c)return;
+  if(!list.length){c.innerHTML='<div style="padding:20px;text-align:center;color:var(--text2);font-size:13px;">Keine Treffer</div>';return;}
+  c.innerHTML=list.map(a=>{
+    const idx=_gmPickList.indexOf(a);
+    return '<button onclick="_gmSelectAkteByIdx('+idx+')" style="display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:9px 10px;border:none;border-bottom:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;font-size:13px;">'
+      +'<span style="font-size:16px;flex-shrink:0;">📂</span>'
+      +'<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(a.name)+'</span>'
+      +'<span style="font-size:11px;color:var(--text2);flex-shrink:0;">'+esc(a.year)+'</span>'
+      +'</button>';
+  }).join('');
+}
+function _gmPickFilter(term){
+  term=(term||'').toLowerCase().trim();
+  const f=term?_gmPickList.filter(a=>(a.name+' '+a.year).toLowerCase().indexOf(term)!==-1):_gmPickList;
+  _gmPickRender(f);
+}
+function _gmSelectAkteByIdx(idx){
+  const a=_gmPickList[idx];if(!a)return;
+  const f=document.getElementById('tGmAkte');if(f)f.value=a.name;
+  const h=document.getElementById('tGmAkteFolderId');if(h)h.value=a.id;
+  const ov=document.getElementById('_gmPickOverlay');if(ov)ov.remove();
+  if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
+  showToast('✓ GM-Akte '+a.name+' verknüpft','success',3000);
+}
 // Fix 2026-06-23: Betreff-Limit 80→40 Zeichen. Reduziert die Dateinamenlänge deutlich, damit
 // der kombinierte NAS-Pfad (Freigabe + Projekt + E-Mail-Ordner + Dateiname) seltener Windows
 // MAX_PATH (260 Zeichen) reißt. Der Betreff ist der dominierende variable Längenanteil.
@@ -3546,7 +3648,10 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
       <div class="modal-field full">
         <label>📂 GM-Aktennummer <span style="font-size:10px;color:var(--accent);font-weight:600;">← Verknüpfung mit GutachtenManager</span></label>
         <div class="link-row-2">
-          <input type="text" id="tGmAkte" placeholder="z.B. 2026-0123" oninput="scheduleTaskFieldSave()" autocomplete="off">
+          <input type="text" id="tGmAkte" placeholder="z.B. 26-008" oninput="document.getElementById('tGmAkteFolderId').value='';scheduleTaskFieldSave()" autocomplete="off">
+          <input type="hidden" id="tGmAkteFolderId">
+          <button class="link-btn-2" onclick="_gmPickAkte()" title="GM-Akte aus Google Drive auswählen">📋</button>
+          <button class="link-btn-2" onclick="_gmOpenAkte()" title="GM-Ordner in Google Drive öffnen">📁</button>
         </div>
       </div>
       <div class="modal-field full baustelle-only">
@@ -4023,7 +4128,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-07 · #451'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-07-b451)
+const PAM_BUILD = 'v2026-07-07 · #453'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-07-b453)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -4792,6 +4897,7 @@ function saveTaskData(){
     kontakte:getKontaktePTP(),
     gdriveOrdner:document.getElementById('tGDOrdner').value.trim(),
     gmAkte:(document.getElementById('tGmAkte')?.value||'').trim(),
+    gmAkteFolderId:(document.getElementById('tGmAkteFolderId')?.value||'').trim(),
     gdrive:document.getElementById('tGD').value.trim(),
     nas:document.getElementById('tNAS').value.trim(),
     emailOrdner:document.getElementById('tEmailOrdner')?document.getElementById('tEmailOrdner').value.trim():'',
@@ -24853,6 +24959,7 @@ function openEditTaskModal(id){
   const _isAufgabenEdit=(boardTypes[_taskBoard]||'baustelle')==='notiz';
   document.getElementById('tGDOrdner').value=task.gdriveOrdner||(_isAufgabenEdit?_aufgabenDef:_dDef);
   {const _gmEl=document.getElementById('tGmAkte');if(_gmEl)_gmEl.value=task.gmAkte||'';}
+  {const _gmF=document.getElementById('tGmAkteFolderId');if(_gmF)_gmF.value=task.gmAkteFolderId||'';}
   document.getElementById('tGD').value=task.gdrive||(_isAufgabenEdit?_aufgabenDef:_dDef);
   document.getElementById('tNAS').value=task.nas||_nDef;
   _updateFotoOrdnerHint();
