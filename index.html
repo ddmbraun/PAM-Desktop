@@ -3224,6 +3224,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
           <div class="mv2-section-label" onclick="_toggleMv2Sect('tAnsprchSect',event)"><span class="mvl-dot"><i style="background:#888780"></i></span><span class="mvl-icon">👥</span><span class="mvl-text">Ansprechpartner</span><span class="mvl-badge" id="tAnsprchTitle"></span><span class="mv2-coll-arrow">›</span></div>
           <div id="tKontakteContainer"></div>
           <button class="add-row-btn" onclick="addKontaktPTP('sonstiges','','','')">+ Kontakt hinzufügen</button>
+          <button class="add-row-btn" onclick="_adrBookOpenPicker()" title="Gespeicherte Adresse aus dem Adressbuch übernehmen">📇 Adresse wählen</button>
         </div>
 
         <!-- Außerhaus-Termine (aus rechter Spalte) -->
@@ -4202,7 +4203,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-07 · #459'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-07-b459)
+const PAM_BUILD = 'v2026-07-11 · #460'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-11-b460)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -18755,6 +18756,167 @@ async function _createGoogleKontaktFromPreview(){
     console.warn('[GK]',e);_gkPreviewDiv=null;
   }
 }
+// ── PAM-Adressbuch (pam-adressen.json in „PAM-Workboard Daten") ──────────────
+// Eigenständiges Web-Adressbuch: Ansprechpartner aus Tasks speichern (✅) und
+// wieder auswählen (📇). Läuft OHNE GM/Python; nutzt denselben Drive-Ordner
+// (workspaceFolderId) + Token (gdriveToken) wie workboard.json.
+let _adrBook=null;        // Array {id,rolle,name,tel,tel2,email,quelle,angelegt}
+let _adrBookFileId=null;  // Drive-Datei-ID von pam-adressen.json
+let _adrBookLoaded=false;
+
+function _adrNorm(s){return (s||'').toString().toLowerCase().replace(/[\s\/().+-]/g,'').trim();}
+function _adrKey(name,tel,email){const t=(tel&&tel.trim())?tel:(email||'');return _adrNorm(name)+'|'+_adrNorm(t);}
+function _adrRoleLabel(r){const m={ag:'👔 AG',mieter:'🏠 Mieter',eigentuemer:'👤 Eigentümer',sonstiges:'👥 Sonstiges'};return m[r]||('🏷 '+(r||'Sonstiges'));}
+
+async function _adrBookLoad(){
+  if(_adrBookLoaded)return _adrBook;
+  if(!gdriveToken)throw new Error('NO_TOKEN');
+  let q="name='pam-adressen.json' and mimeType='application/json' and trashed=false";
+  if(workspaceFolderId)q+=" and '"+workspaceFolderId+"' in parents";
+  const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q)+'&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc',
+    {headers:{Authorization:'Bearer '+gdriveToken}});
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  const data=await r.json();
+  const files=data.files||[];
+  if(files.length){
+    _adrBookFileId=files[0].id;
+    const fr=await fetch('https://www.googleapis.com/drive/v3/files/'+_adrBookFileId+'?alt=media',
+      {headers:{Authorization:'Bearer '+gdriveToken}});
+    if(!fr.ok)throw new Error('HTTP '+fr.status);
+    let js={};try{js=await fr.json();}catch(e){js={};}
+    _adrBook=Array.isArray(js.kontakte)?js.kontakte:[];
+  }else{
+    _adrBook=[];_adrBookFileId=null;
+  }
+  _adrBookLoaded=true;
+  return _adrBook;
+}
+
+async function _adrBookSave(){
+  if(!gdriveToken)throw new Error('NO_TOKEN');
+  const content=JSON.stringify({version:1,stand:new Date().toISOString(),kontakte:_adrBook||[]},null,2);
+  if(_adrBookFileId){
+    const r=await fetch('https://www.googleapis.com/upload/drive/v3/files/'+_adrBookFileId+'?uploadType=media',
+      {method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},body:content});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+  }else{
+    const boundary='adr_boundary_'+Date.now();
+    const metaObj={name:'pam-adressen.json',mimeType:'application/json'};
+    if(workspaceFolderId)metaObj.parents=[workspaceFolderId];
+    const body='--'+boundary+'\r\n'+
+      'Content-Type: application/json; charset=UTF-8\r\n\r\n'+
+      JSON.stringify(metaObj)+'\r\n'+
+      '--'+boundary+'\r\n'+
+      'Content-Type: application/json\r\n\r\n'+
+      content+'\r\n'+
+      '--'+boundary+'--';
+    const r=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',
+      {method:'POST',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'multipart/related; boundary='+boundary},body:body});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const f=await r.json();_adrBookFileId=f.id||null;
+  }
+}
+
+async function _adrBookAddFromKontakt(entryEl){
+  if(!entryEl)return;
+  if(!gdriveToken){showToast('⚠ Bitte zuerst Google Drive verbinden (☁️)','warning',4000);return;}
+  const gv=sel=>{const el=entryEl.querySelector(sel);return el?(el.value||'').trim():'';};
+  let rolle=gv('.k-rolle');
+  if(rolle==='_custom_')rolle=gv('.k-rolle-custom')||'sonstiges';
+  const name=gv('.k-name'),tel=gv('.k-tel'),tel2=gv('.k-tel2'),email=gv('.k-email');
+  if(!name&&!tel&&!email){showToast('Nichts zu speichern – bitte Name/Tel eintragen','info',3000);return;}
+  try{
+    await _adrBookLoad();
+    const key=_adrKey(name,tel,email);
+    if((_adrBook||[]).some(k=>_adrKey(k.name,k.tel,k.email)===key)){showToast('ℹ Kontakt ist schon im Adressbuch','info',3000);return;}
+    _adrBook.push({id:'adr_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),rolle:rolle||'sonstiges',name:name,tel:tel,tel2:tel2,email:email,quelle:'task',angelegt:new Date().toISOString()});
+    await _adrBookSave();
+    showToast('✅ Im Adressbuch gespeichert: '+(name||tel),'success',3000);
+  }catch(e){
+    if(e.message==='NO_TOKEN'){showToast('⚠ Bitte zuerst Google Drive verbinden (☁️)','warning',4000);return;}
+    showToast('⚠ Adressbuch-Fehler: '+e.message,'error',6000);
+  }
+}
+
+function _adrBookOpenPicker(){
+  if(!gdriveToken){showToast('⚠ Bitte zuerst Google Drive verbinden (☁️)','warning',4000);return;}
+  const ex=document.getElementById('adr-picker-modal');if(ex)ex.remove();
+  const overlay=document.createElement('div');
+  overlay.id='adr-picker-modal';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  overlay.innerHTML='<div style="background:var(--bg,#fff);color:var(--text,#111);border:1px solid var(--border,#d1d5db);border-radius:10px;padding:16px 18px;width:440px;max-width:96vw;max-height:86vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.25);">'
+    +'<div style="font-size:14px;font-weight:600;color:var(--accent,#1a56c4);margin-bottom:10px;">📇 Adresse wählen</div>'
+    +'<input id="adr-search" type="text" placeholder="🔍 suchen…" autocomplete="off" style="width:100%;padding:6px 8px;font-size:12px;box-sizing:border-box;border:1px solid var(--border,#d1d5db);border-radius:6px;background:var(--bg,#fff);color:var(--text,#111);margin-bottom:8px;">'
+    +'<div id="adr-list" style="flex:1;overflow-y:auto;min-height:90px;border:1px solid var(--border,#e5e7eb);border-radius:6px;padding:4px;"></div>'
+    +'<div style="display:flex;gap:8px;margin-top:12px;justify-content:space-between;align-items:center;">'
+    +'<button type="button" onclick="_adrPickToggleAll()" style="padding:6px 12px;font-size:12px;border:1px solid var(--border,#d1d5db);background:var(--bg3,#f3f4f6);color:var(--text,#111);border-radius:6px;cursor:pointer;">Alle</button>'
+    +'<span style="display:flex;gap:8px;">'
+    +'<button type="button" onclick="document.getElementById(\'adr-picker-modal\').remove()" style="padding:6px 14px;font-size:12px;border:1px solid var(--border,#d1d5db);background:var(--bg3,#f9fafb);color:var(--text,#111);border-radius:6px;cursor:pointer;">Abbrechen</button>'
+    +'<button type="button" onclick="_adrBookPickApply()" style="padding:6px 14px;font-size:12px;background:var(--accent,#1a56c4);color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">Auswahl übernehmen</button>'
+    +'</span></div></div>';
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click',function(e){if(e.target===overlay)overlay.remove();});
+  const s=document.getElementById('adr-search');
+  if(s)s.addEventListener('input',function(){_adrRenderPickerList(s.value);});
+  _adrBookLoad().then(function(){_adrRenderPickerList('');}).catch(function(e){
+    const L=document.getElementById('adr-list');
+    if(L)L.innerHTML='<div style="padding:12px;color:var(--text2,#6b7280);font-size:12px;">'+(e.message==='NO_TOKEN'?'Bitte Google Drive verbinden.':'Fehler: '+e.message)+'</div>';
+  });
+}
+
+function _adrRenderPickerList(filter){
+  const L=document.getElementById('adr-list');if(!L)return;
+  const esc=s=>(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  const f=_adrNorm(filter);
+  const all=_adrBook||[];
+  if(!all.length){L.innerHTML='<div style="padding:12px;color:var(--text2,#6b7280);font-size:12px;">Noch keine Adressen gespeichert. Nutze ✅ an einem Kontakt.</div>';return;}
+  const list=all.filter(function(k){return !f||_adrNorm((k.name||'')+(k.tel||'')+(k.email||'')+(k.rolle||'')).includes(f);});
+  if(!list.length){L.innerHTML='<div style="padding:12px;color:var(--text2,#6b7280);font-size:12px;">Kein Treffer.</div>';return;}
+  L.innerHTML=list.map(function(k){return '<label style="display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:5px;cursor:pointer;font-size:12px;">'
+    +'<input type="checkbox" class="adr-cb" data-id="'+esc(k.id)+'" style="width:14px;height:14px;flex-shrink:0;">'
+    +'<span style="flex:1;min-width:0;"><span style="font-size:10px;color:var(--text2,#6b7280);">'+_adrRoleLabel(k.rolle)+'</span><br><b>'+esc(k.name||'(ohne Name)')+'</b>'+(k.tel?' · '+esc(k.tel):'')+(k.email?' · '+esc(k.email):'')+'</span>'
+    +'<button type="button" title="Aus Adressbuch löschen" onclick="event.preventDefault();event.stopPropagation();_adrBookDelete(\''+esc(k.id)+'\')" style="flex-shrink:0;padding:2px 6px;font-size:13px;border:none;background:transparent;cursor:pointer;">🗑</button>'
+    +'</label>';}).join('');
+}
+
+function _adrPickToggleAll(){
+  const cbs=Array.prototype.slice.call(document.querySelectorAll('#adr-list .adr-cb'));
+  if(!cbs.length)return;
+  const anyOff=cbs.some(function(c){return !c.checked;});
+  cbs.forEach(function(c){c.checked=anyOff;});
+}
+
+function _adrBookPickApply(){
+  const ids=Array.prototype.slice.call(document.querySelectorAll('#adr-list .adr-cb:checked')).map(function(c){return c.getAttribute('data-id');});
+  if(!ids.length){showToast('Nichts ausgewählt','info',2000);return;}
+  const existing=(typeof getKontaktePTP==='function'?getKontaktePTP():[]).map(function(k){return _adrKey(k.name,k.tel,k.email);});
+  let added=0,skipped=0;
+  for(const id of ids){
+    const k=(_adrBook||[]).find(function(x){return x.id===id;});
+    if(!k)continue;
+    const kk=_adrKey(k.name,k.tel,k.email);
+    if(existing.indexOf(kk)>=0){skipped++;continue;}
+    addKontaktPTP(k.rolle||'sonstiges',k.name||'',k.tel||'',k.email||'',false,k.tel2||'');
+    existing.push(kk);added++;
+  }
+  const m=document.getElementById('adr-picker-modal');if(m)m.remove();
+  if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
+  showToast('✅ '+added+' Kontakt(e) übernommen'+(skipped?' · '+skipped+' schon vorhanden':''),'success',3500);
+}
+
+async function _adrBookDelete(id){
+  const k=(_adrBook||[]).find(function(x){return x.id===id;});
+  if(!k)return;
+  if(!confirm('„'+(k.name||k.tel||'Eintrag')+'" aus dem Adressbuch löschen?'))return;
+  _adrBook=(_adrBook||[]).filter(function(x){return x.id!==id;});
+  try{
+    await _adrBookSave();
+    const se=document.getElementById('adr-search');
+    _adrRenderPickerList(se?se.value:'');
+    showToast('🗑 Aus Adressbuch gelöscht','info',2500);
+  }catch(e){showToast('⚠ Löschen fehlgeschlagen: '+e.message,'error',5000);}
+}
+
 function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2){
   const c=document.getElementById('tKontakteContainer');if(!c)return;
   const rolleLabel={ag:'👔 AG Kontakt',mieter:'🏠 Mieter',eigentuemer:'👤 Eigentümer',sonstiges:'👥 Sonstiges'};
@@ -18775,6 +18937,7 @@ function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2){
     +'<label style="display:flex;align-items:center;gap:4px;font-size:10px;color:#1a56c4;cursor:pointer;margin-left:6px;" title="Dieser Kontakt wird auf Mobil als Anruf-Button angezeigt">'
     +'<input type="checkbox" class="k-anruf"'+(anrufKontakt?' checked':'')+' style="width:13px;height:13px;accent-color:#1a56c4;cursor:pointer;" onchange="_updateMapsBtn();scheduleTaskFieldSave()">📞 Anruf</label>'
     +'<button type="button" class="gk-create-btn" style="padding:2px 6px;font-size:11px;background:#1a56c4;color:#fff;border:none;border-radius:4px;cursor:pointer;" onclick="_showGKPreview(this.closest(\'.kontakt-entry\'))" title="Kontakt in Google Kontakte anlegen">👤+</button>'
+    +'<button type="button" class="adr-save-btn" style="padding:2px 6px;font-size:11px;background:#15803d;color:#fff;border:none;border-radius:4px;cursor:pointer;" onclick="_adrBookAddFromKontakt(this.closest(\'.kontakt-entry\'))" title="Diesen Kontakt ins Adressbuch speichern">✅</button>'
     +'<button type="button" class="rm-btn" style="padding:2px 6px;font-size:11px;" onclick="this.closest(\'.kontakt-entry\').remove();updateKontaktePTPTitle();scheduleTaskFieldSave()" title="Entfernen">✕</button>'
     +'</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">'
