@@ -450,7 +450,8 @@ async function _gmPickAkte(){
   try{
     const akten=await _gmLoadAkten();
     if(!akten.length){showToast('Keine GM-Akten in Drive gefunden','info',4000);return;}
-    _gmShowPickDialog(akten);
+    // Bei Auswahl: alle GM-Ordner (Hauptordner, Bilder, Dokumente, Posteingang) automatisch eintragen
+    _gmShowPickDialog(akten,function(a){if(a)_gmApplyAkteToFields(a);});
   }catch(e){showToast('Fehler beim Laden der GM-Akten: '+e.message,'error',5000);}
 }
 // Öffnet den GM-Ordner der aktuell verknüpften/eingetragenen Akte in Drive (neuer Tab).
@@ -3226,6 +3227,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
           <div id="tKontakteContainer"></div>
           <button class="add-row-btn" onclick="addKontaktPTP('sonstiges','','','')">+ Kontakt hinzufügen</button>
           <button class="add-row-btn" onclick="_adrBookOpenPicker()" title="Gespeicherte Adresse aus dem Adressbuch übernehmen">📇 Adresse wählen</button>
+          <button class="add-row-btn" onclick="_gmAktePick()" title="Ansprechpartner aus der verknüpften GM-Akte übernehmen">📂 Aus GM-Akte</button>
         </div>
 
         <!-- Außerhaus-Termine (aus rechter Spalte) -->
@@ -4204,7 +4206,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-11 · #464'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-11-b464)
+const PAM_BUILD = 'v2026-07-11 · #465'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-11-b465)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -19046,6 +19048,109 @@ async function _adrBookDelete(id){
     _adrRenderPickerList(se?se.value:'');
     showToast('🗑 Aus Adressbuch gelöscht','info',2500);
   }catch(e){showToast('⚠ Löschen fehlgeschlagen: '+e.message,'error',5000);}
+}
+
+// ── GM-Akte-Adressen (pam-akte-adressen.json) ─ Ansprechpartner einer GM-Akte übernehmen ──
+let _gmAkteBook=null;          // { "26-008": [ {rolle,status,name,tel,tel2,email,strasse,plz,ort}, ... ] }
+let _gmAkteBookLoaded=false;
+let _gmAkteBookFileId=null;
+
+async function _gmAkteBookLoad(){
+  if(_gmAkteBookLoaded)return _gmAkteBook;
+  if(!gdriveToken)throw new Error('NO_TOKEN');
+  let q="name='pam-akte-adressen.json' and mimeType='application/json' and trashed=false";
+  if(workspaceFolderId)q+=" and '"+workspaceFolderId+"' in parents";
+  const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q)+'&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc',{headers:{Authorization:'Bearer '+gdriveToken}});
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  const data=await r.json();
+  const files=data.files||[];
+  if(files.length){
+    _gmAkteBookFileId=files[0].id;
+    const fr=await fetch('https://www.googleapis.com/drive/v3/files/'+_gmAkteBookFileId+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
+    if(!fr.ok)throw new Error('HTTP '+fr.status);
+    let js={};try{js=await fr.json();}catch(e){js={};}
+    _gmAkteBook=(js&&js.akten)?js.akten:{};
+  }else{ _gmAkteBook={}; _gmAkteBookFileId=null; }
+  _gmAkteBookLoaded=true;
+  return _gmAkteBook;
+}
+
+function _gmAkteFindContacts(book,akte){
+  if(!book)return[];
+  if(book[akte])return book[akte];
+  var target=(akte||'').toString().trim().toLowerCase();
+  for(var k in book){ if(k.toString().trim().toLowerCase()===target) return book[k]; }
+  return [];
+}
+
+function _gmAktePick(){
+  if(!gdriveToken){showToast('⚠ Bitte zuerst Google Drive verbinden (☁️)','warning',4000);return;}
+  const akteEl=document.getElementById('tGmAkte');
+  const akte=akteEl?(akteEl.value||'').trim():'';
+  if(!akte){showToast('Bitte zuerst eine GM-Aktennummer eintragen/wählen','info',3500);return;}
+  const ex=document.getElementById('gmakte-picker-modal');if(ex)ex.remove();
+  const esc=s=>(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  const overlay=document.createElement('div');
+  overlay.id='gmakte-picker-modal';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  overlay.innerHTML='<div style="background:var(--bg,#fff);color:var(--text,#111);border:1px solid var(--border,#d1d5db);border-radius:10px;padding:16px 18px;width:460px;max-width:96vw;max-height:86vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.25);">'
+    +'<div style="font-size:14px;font-weight:600;color:var(--accent,#1a56c4);margin-bottom:10px;">📂 Ansprechpartner aus GM-Akte '+esc(akte)+'</div>'
+    +'<div id="gmakte-list" style="flex:1;overflow-y:auto;min-height:80px;border:1px solid var(--border,#e5e7eb);border-radius:6px;padding:4px;">Lädt…</div>'
+    +'<div style="display:flex;gap:8px;margin-top:12px;justify-content:space-between;align-items:center;">'
+    +'<button type="button" onclick="_gmAktePickToggleAll()" style="padding:6px 12px;font-size:12px;border:1px solid var(--border,#d1d5db);background:var(--bg3,#f3f4f6);color:var(--text,#111);border-radius:6px;cursor:pointer;">Alle</button>'
+    +'<span style="display:flex;gap:8px;">'
+    +'<button type="button" onclick="document.getElementById(\'gmakte-picker-modal\').remove()" style="padding:6px 14px;font-size:12px;border:1px solid var(--border,#d1d5db);background:var(--bg3,#f9fafb);color:var(--text,#111);border-radius:6px;cursor:pointer;">Abbrechen</button>'
+    +'<button type="button" onclick="_gmAktePickApply()" style="padding:6px 14px;font-size:12px;background:var(--accent,#1a56c4);color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">Auswahl übernehmen</button>'
+    +'</span></div></div>';
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click',function(e){if(e.target===overlay)overlay.remove();});
+  _gmAkteBookLoad().then(function(book){ _gmAkteRenderList(book,akte); }).catch(function(e){
+    const L=document.getElementById('gmakte-list');
+    if(L)L.innerHTML='<div style="padding:12px;color:var(--text2,#6b7280);font-size:12px;">'+(e.message==='NO_TOKEN'?'Bitte Google Drive verbinden.':'Fehler: '+e.message)+'</div>';
+  });
+}
+
+function _gmAkteRenderList(book,akte){
+  const L=document.getElementById('gmakte-list');if(!L)return;
+  const esc=s=>(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  const list=_gmAkteFindContacts(book,akte);
+  window._gmAkteCurrentList=list;
+  if(!list.length){L.innerHTML='<div style="padding:12px;color:var(--text2,#6b7280);font-size:12px;">Keine Ansprechpartner zu Akte '+esc(akte)+' gefunden.<br><span style="font-size:11px;">Ist der Export aktuell (export_gm_akte_adressen)?</span></div>';return;}
+  L.innerHTML=list.map(function(k,i){
+    var adr=[k.strasse,[k.plz,k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+    var sub=[adr,k.tel,k.email].filter(Boolean).map(esc).join(' · ');
+    return '<label style="display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:5px;cursor:pointer;font-size:12px;">'
+    +'<input type="checkbox" class="gmakte-cb" data-i="'+i+'" checked style="width:14px;height:14px;flex-shrink:0;">'
+    +'<span style="flex:1;min-width:0;"><span style="font-size:10px;color:var(--text2,#6b7280);">'+_adrRoleLabel(k.rolle||'sonstiges')+'</span><br><b>'+esc(k.name||'(ohne Name)')+'</b>'+(sub?'<br><span style="font-size:11px;color:var(--text2,#6b7280);">'+sub+'</span>':'')+'</span>'
+    +'</label>';
+  }).join('');
+}
+
+function _gmAktePickToggleAll(){
+  const cbs=Array.prototype.slice.call(document.querySelectorAll('#gmakte-list .gmakte-cb'));
+  if(!cbs.length)return;
+  const anyOff=cbs.some(function(c){return !c.checked;});
+  cbs.forEach(function(c){c.checked=anyOff;});
+}
+
+function _gmAktePickApply(){
+  const list=window._gmAkteCurrentList||[];
+  const cbs=Array.prototype.slice.call(document.querySelectorAll('#gmakte-list .gmakte-cb:checked'));
+  if(!cbs.length){showToast('Nichts ausgewählt','info',2000);return;}
+  const existing=(typeof getKontaktePTP==='function'?getKontaktePTP():[]).map(function(k){return _adrKey(k.name,k.tel,k.email);});
+  let added=0,skipped=0;
+  cbs.forEach(function(cb){
+    const k=list[parseInt(cb.getAttribute('data-i'),10)];
+    if(!k)return;
+    const kk=_adrKey(k.name,k.tel,k.email);
+    if(existing.indexOf(kk)>=0){skipped++;return;}
+    addKontaktPTP(k.rolle||'sonstiges',k.name||'',k.tel||'',k.email||'',false,k.tel2||'');
+    existing.push(kk);added++;
+  });
+  const m=document.getElementById('gmakte-picker-modal');if(m)m.remove();
+  if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
+  if(typeof _adrRefreshMarks==='function')_adrRefreshMarks();
+  showToast('✅ '+added+' Ansprechpartner übernommen'+(skipped?' · '+skipped+' schon vorhanden':''),'success',3500);
 }
 
 function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2){
