@@ -4203,7 +4203,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-11 · #460'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-11-b460)
+const PAM_BUILD = 'v2026-07-11 · #461'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-11-b461)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -18825,17 +18825,100 @@ async function _adrBookAddFromKontakt(entryEl){
   if(rolle==='_custom_')rolle=gv('.k-rolle-custom')||'sonstiges';
   const name=gv('.k-name'),tel=gv('.k-tel'),tel2=gv('.k-tel2'),email=gv('.k-email');
   if(!name&&!tel&&!email){showToast('Nichts zu speichern – bitte Name/Tel eintragen','info',3000);return;}
+  let firma='';
+  if(rolle==='ag'||rolle==='hausverwaltung'){const hv=document.getElementById('tHV');firma=hv?(hv.value||'').trim():'';}
+  let strasse='',plz='',ort='';
+  try{
+    const adrEl=document.getElementById('tAdr');
+    if(adrEl&&adrEl.value&&typeof _parseAdresseGK==='function'){
+      const a=_parseAdresseGK(adrEl.value)||{};
+      strasse=a.street||''; plz=a.plz||''; ort=a.city||'';
+    }
+  }catch(e){}
+  try{ await _adrBookLoad(); }
+  catch(e){ if(e.message==='NO_TOKEN'){showToast('⚠ Bitte zuerst Google Drive verbinden (☁️)','warning',4000);return;} showToast('⚠ Adressbuch-Fehler: '+e.message,'error',6000); return; }
+  const key=_adrKey(name,tel,email);
+  const vorhanden=(_adrBook||[]).find(function(k){return _adrKey(k.name,k.tel,k.email)===key;});
+  if(vorhanden){ firma=vorhanden.firma||firma; strasse=vorhanden.strasse||strasse; plz=vorhanden.plz||plz; ort=vorhanden.ort||ort; }
+  _adrOpenSaveDialog({rolle:rolle||'sonstiges',name:name,firma:firma,strasse:strasse,plz:plz,ort:ort,tel:tel,tel2:tel2,email:email,update:!!vorhanden,id:vorhanden?vorhanden.id:null});
+}
+
+function _adrOpenSaveDialog(d){
+  const ex=document.getElementById('adr-save-modal');if(ex)ex.remove();
+  const esc=s=>(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+  const fs='width:100%;padding:5px 7px;font-size:12px;box-sizing:border-box;border:1px solid var(--border,#d1d5db);border-radius:4px;margin-top:2px;background:var(--bg,#fff);color:var(--text,#111);';
+  const row=function(id,lbl,val){return '<div><label style="font-size:10px;color:var(--text2,#6b7280);">'+lbl+'</label><input id="'+id+'" type="text" value="'+esc(val)+'" style="'+fs+'"></div>';};
+  const overlay=document.createElement('div');
+  overlay.id='adr-save-modal';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10000;display:flex;align-items:center;justify-content:center;';
+  overlay.innerHTML='<div style="background:var(--bg,#fff);color:var(--text,#111);border:1px solid var(--border,#d1d5db);border-radius:10px;padding:18px 20px;width:400px;max-width:96vw;box-shadow:0 8px 32px rgba(0,0,0,0.25);">'
+    +'<div style="font-size:14px;font-weight:600;color:#15803d;margin-bottom:12px;">'+(d.update?'✏️ Adressbuch-Eintrag aktualisieren':'✅ In Adressbuch speichern')+' <span style="font-weight:400;color:var(--text2,#6b7280);font-size:11px;">('+_adrRoleLabel(d.rolle)+')</span></div>'
+    +'<div style="display:flex;flex-direction:column;gap:7px;">'
+    +row('adrs-name','Name',d.name)
+    +row('adrs-firma','Firma',d.firma)
+    +row('adrs-str','Straße',d.strasse)
+    +'<div style="display:grid;grid-template-columns:90px 1fr;gap:7px;">'+row('adrs-plz','PLZ',d.plz)+row('adrs-ort','Ort',d.ort)+'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;">'+row('adrs-tel','Telefon',d.tel)+row('adrs-tel2','Tel 2',d.tel2)+'</div>'
+    +row('adrs-email','E-Mail',d.email)
+    +'</div>'
+    +'<div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;">'
+    +'<button type="button" onclick="document.getElementById(\'adr-save-modal\').remove()" style="padding:7px 16px;font-size:12px;border:1px solid var(--border,#d1d5db);background:var(--bg3,#f9fafb);color:var(--text,#111);border-radius:6px;cursor:pointer;">Abbrechen</button>'
+    +'<button type="button" id="adrs-ok" style="padding:7px 16px;font-size:12px;background:#15803d;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">'+(d.update?'Aktualisieren':'Speichern')+'</button>'
+    +'</div></div>';
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click',function(e){if(e.target===overlay)overlay.remove();});
+  const okBtn=document.getElementById('adrs-ok');
+  if(okBtn)okBtn.addEventListener('click',function(){_adrDoSaveEntry(d);});
+  const nEl=document.getElementById('adrs-name'); if(nEl)nEl.focus();
+}
+
+async function _adrDoSaveEntry(d){
+  const g=function(id){const el=document.getElementById(id);return el?(el.value||'').trim():'';};
+  const rec={rolle:d.rolle||'sonstiges',name:g('adrs-name'),firma:g('adrs-firma'),strasse:g('adrs-str'),plz:g('adrs-plz'),ort:g('adrs-ort'),tel:g('adrs-tel'),tel2:g('adrs-tel2'),email:g('adrs-email')};
+  if(!rec.name&&!rec.tel&&!rec.email){showToast('Nichts zu speichern','info',2500);return;}
   try{
     await _adrBookLoad();
-    const key=_adrKey(name,tel,email);
-    if((_adrBook||[]).some(k=>_adrKey(k.name,k.tel,k.email)===key)){showToast('ℹ Kontakt ist schon im Adressbuch','info',3000);return;}
-    _adrBook.push({id:'adr_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),rolle:rolle||'sonstiges',name:name,tel:tel,tel2:tel2,email:email,quelle:'task',angelegt:new Date().toISOString()});
+    const key=_adrKey(rec.name,rec.tel,rec.email);
+    const ex=(_adrBook||[]).find(function(k){return (d.id&&k.id===d.id)||_adrKey(k.name,k.tel,k.email)===key;});
+    if(ex){ Object.assign(ex,rec); }
+    else{ _adrBook.push(Object.assign({id:'adr_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),quelle:'task',angelegt:new Date().toISOString()},rec)); }
     await _adrBookSave();
-    showToast('✅ Im Adressbuch gespeichert: '+(name||tel),'success',3000);
+    const m=document.getElementById('adr-save-modal');if(m)m.remove();
+    if(typeof _adrRefreshMarks==='function')_adrRefreshMarks();
+    showToast((ex?'✏️ Adressbuch aktualisiert: ':'✅ Im Adressbuch gespeichert: ')+(rec.name||rec.tel),'success',3000);
   }catch(e){
     if(e.message==='NO_TOKEN'){showToast('⚠ Bitte zuerst Google Drive verbinden (☁️)','warning',4000);return;}
     showToast('⚠ Adressbuch-Fehler: '+e.message,'error',6000);
   }
+}
+
+function _adrSetSaveBtnState(btn,saved){
+  if(!btn)return;
+  if(saved){
+    btn.textContent='✔';
+    btn.style.background='#dcfce7'; btn.style.color='#15803d'; btn.style.border='1px solid #15803d';
+    btn.title='Schon im Adressbuch – klicken zum Aktualisieren';
+    btn.setAttribute('data-adr-saved','1');
+  }else{
+    btn.textContent='✅';
+    btn.style.background='#15803d'; btn.style.color='#fff'; btn.style.border='none';
+    btn.title='Diesen Kontakt ins Adressbuch speichern';
+    btn.removeAttribute('data-adr-saved');
+  }
+}
+
+async function _adrRefreshMarks(){
+  if(!gdriveToken)return;
+  let book;
+  try{ book=await _adrBookLoad(); }catch(e){ return; }
+  const keys={};
+  (book||[]).forEach(function(k){keys[_adrKey(k.name,k.tel,k.email)]=1;});
+  const rows=document.querySelectorAll('#tKontakteContainer .kontakt-entry');
+  Array.prototype.forEach.call(rows,function(row){
+    const q=function(sel){const el=row.querySelector(sel);return el?(el.value||'').trim():'';};
+    const has=(q('.k-name')||q('.k-tel')||q('.k-email'))?!!keys[_adrKey(q('.k-name'),q('.k-tel'),q('.k-email'))]:false;
+    _adrSetSaveBtnState(row.querySelector('.adr-save-btn'),has);
+  });
 }
 
 function _adrBookOpenPicker(){
@@ -18872,9 +18955,12 @@ function _adrRenderPickerList(filter){
   if(!all.length){L.innerHTML='<div style="padding:12px;color:var(--text2,#6b7280);font-size:12px;">Noch keine Adressen gespeichert. Nutze ✅ an einem Kontakt.</div>';return;}
   const list=all.filter(function(k){return !f||_adrNorm((k.name||'')+(k.tel||'')+(k.email||'')+(k.rolle||'')).includes(f);});
   if(!list.length){L.innerHTML='<div style="padding:12px;color:var(--text2,#6b7280);font-size:12px;">Kein Treffer.</div>';return;}
-  L.innerHTML=list.map(function(k){return '<label style="display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:5px;cursor:pointer;font-size:12px;">'
+  L.innerHTML=list.map(function(k){
+    var adr=[k.strasse,[k.plz,k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+    var sub=[k.firma,adr,k.tel,k.email].filter(Boolean).map(esc).join(' · ');
+    return '<label style="display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:5px;cursor:pointer;font-size:12px;">'
     +'<input type="checkbox" class="adr-cb" data-id="'+esc(k.id)+'" style="width:14px;height:14px;flex-shrink:0;">'
-    +'<span style="flex:1;min-width:0;"><span style="font-size:10px;color:var(--text2,#6b7280);">'+_adrRoleLabel(k.rolle)+'</span><br><b>'+esc(k.name||'(ohne Name)')+'</b>'+(k.tel?' · '+esc(k.tel):'')+(k.email?' · '+esc(k.email):'')+'</span>'
+    +'<span style="flex:1;min-width:0;"><span style="font-size:10px;color:var(--text2,#6b7280);">'+_adrRoleLabel(k.rolle)+'</span><br><b>'+esc(k.name||'(ohne Name)')+'</b>'+(sub?'<br><span style="font-size:11px;color:var(--text2,#6b7280);">'+sub+'</span>':'')+'</span>'
     +'<button type="button" title="Aus Adressbuch löschen" onclick="event.preventDefault();event.stopPropagation();_adrBookDelete(\''+esc(k.id)+'\')" style="flex-shrink:0;padding:2px 6px;font-size:13px;border:none;background:transparent;cursor:pointer;">🗑</button>'
     +'</label>';}).join('');
 }
@@ -18901,6 +18987,7 @@ function _adrBookPickApply(){
   }
   const m=document.getElementById('adr-picker-modal');if(m)m.remove();
   if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
+  if(typeof _adrRefreshMarks==='function')_adrRefreshMarks();
   showToast('✅ '+added+' Kontakt(e) übernommen'+(skipped?' · '+skipped+' schon vorhanden':''),'success',3500);
 }
 
@@ -18973,6 +19060,7 @@ function renderKontaktePTP(kontakte){
   const c=document.getElementById('tKontakteContainer');if(!c)return;
   c.innerHTML='';
   for(const k of(kontakte||[]))addKontaktPTP(k.rolle||'sonstiges',k.name||'',k.tel||'',k.email||'',k.anrufKontakt||false,k.tel2||'');
+  if(typeof _adrRefreshMarks==='function')_adrRefreshMarks();
 }
 function getKontaktePTP(){
   const c=document.getElementById('tKontakteContainer');if(!c)return[];
