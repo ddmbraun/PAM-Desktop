@@ -2866,7 +2866,8 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
 .kalw-card.conf{background:#FCEBEB;color:#A32D2D;border-left-color:#E24B4A;}
 .kalw-card.sel{outline:2px solid var(--accent);}
 .kalw-card b{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.kalw-anf{position:absolute;left:2px;right:2px;border-radius:4px 4px 0 0;z-index:1;border:1px dashed #94a3b8;background:repeating-linear-gradient(45deg,rgba(148,163,184,.30) 0 4px,transparent 4px 8px);}
+.kalw-anf{position:absolute;left:2px;right:2px;border-radius:4px 4px 0 0;z-index:1;border:1px dashed #94a3b8;background:repeating-linear-gradient(45deg,rgba(148,163,184,.30) 0 4px,transparent 4px 8px);box-sizing:border-box;padding:1px 4px;font-size:9px;line-height:1.1;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.kalw-anf.nach{border-radius:0 0 4px 4px;}
 .kalw-chip{display:flex;flex-direction:column;gap:1px;width:152px;padding:4px 7px;border-radius:5px;background:var(--bg4);border:1px solid var(--border);border-left:3px solid #BA7517;font-size:10px;color:var(--text);cursor:grab;}
 .kalw-chip.sel{outline:2px solid var(--accent);}
 .kalw-chip b{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -4235,7 +4236,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-14 · #475'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-14-b475)
+const PAM_BUILD = 'v2026-07-14 · #477'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-14-b477)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -8379,7 +8380,10 @@ function _kalKW(d){
 }
 function _kalMin(hhmm){const m=/^(\d{1,2}):(\d{2})$/.exec(_normTime(hhmm||''));return m?(+m[1])*60+(+m[2]):null;}
 function _kalDauer(t){const a=_kalMin(t&&t.von),b=_kalMin(t&&t.bis);return (a!=null&&b!=null&&b>a)?(b-a):60;}
-function _kalAnf(t){const n=parseInt((t&&t.anfahrt)||0,10);return (isNaN(n)||n<0)?0:n;}
+/* Fahrzeit je Richtung (Minuten) – wird vor UND nach dem Termin geblockt.
+   Altes Feld `anfahrt` wird weiter gelesen, bis es beim nächsten Setzen ersetzt wird. */
+function _kalFahrt(t){const v=(t&&(t.fahrt!=null?t.fahrt:t.anfahrt));const n=parseInt(v||0,10);return (isNaN(n)||n<0)?0:n;}
+function _kalFahrtText(t){return ((t&&t.fahrtText)||'').trim();}
 
 /* Datenbasis des Rasters: eigene Sammlung (Wochenfenster), damit die
    Listenansicht und ihr Zeitraum-Filter völlig unberührt bleiben. */
@@ -8400,11 +8404,12 @@ function _kalwCollect(){
 
       arr.forEach((t,i)=>{
         if(!t || t.hiddenInPam) return;
-        const hay=((t.beschreibung||'')+' '+(task.title||'')+' '+(ks||'')).toLowerCase();
+        const hay=((t.betreff||'')+' '+(t.beschreibung||'')+' '+(task.title||'')+' '+(ks||'')).toLowerCase();
         if(q && !hay.includes(q)) return;
         const ds=((t.date||t.datum)||'').trim();
         const rec={taskId:task.id,idx:i,t:t,ks:ks,title:task.title||'',
-                   bez:t.beschreibung||'',sync:!!t.outlookEventId,del:!!t.outlookDeleted};
+                   bez:(((t.betreff||'').trim())||t.beschreibung||''),   // eigener Name schlägt die Beschreibung
+                   sync:!!t.outlookEventId,del:!!t.outlookDeleted};
 
         if(!ds){ rec.sub=(ks?ks+' · ':'')+'ohne Datum'; backlog.push(rec); hatOffen=true; return; }
         hatDatum=true;
@@ -8437,12 +8442,12 @@ function _kalwCollect(){
 
   const G=grid.filter(sf), O=ohneZeit.filter(sf);
 
-  // Überschneidungen je Tag (Anfahrt zählt mit)
+  // Überschneidungen je Tag (Fahrt hin UND zurück zählt mit)
   const byDay={};
   G.forEach(r=>{ (byDay[r.date]=byDay[r.date]||[]).push(r); });
   Object.keys(byDay).forEach(k=>{
     const l=byDay[k];
-    l.forEach(r=>{ r._s=_kalMin(r.von)-_kalAnf(r.t); r._e=_kalMin(r.von)+_kalDauer(r.t); });
+    l.forEach(r=>{ const f=_kalFahrt(r.t); r._s=_kalMin(r.von)-f; r._e=_kalMin(r.von)+_kalDauer(r.t)+f; });
     l.sort((a,b)=>a._s-b._s);
     for(let i=1;i<l.length;i++) if(l[i]._s < l[i-1]._e){ l[i].conf=true; l[i-1].conf=true; }
   });
@@ -8464,15 +8469,21 @@ function _kalwChip(r){
 function _kalwCard(r,hr){
   const key=r.taskId+'|'+r.idx;
   const st=_kalMin(r.von), top=(st-hr*60)/60*KALW_ROW;
-  const dur=_kalDauer(r.t), anf=_kalAnf(r.t);
+  const dur=_kalDauer(r.t), f=_kalFahrt(r.t), fx=_kalFahrtText(r.t);
   const hgt=Math.max(20, dur/60*KALW_ROW-2);
   const lbl=r.bez||r.title||'(ohne Bezeichnung)';
   let s='';
-  if(anf>0) s+='<div class="kalw-anf" style="top:'+(top-anf/60*KALW_ROW).toFixed(1)+'px;height:'
-    +(anf/60*KALW_ROW).toFixed(1)+'px" title="Anfahrt '+anf+' min"></div>';
+  if(f>0){
+    const fh=(f/60*KALW_ROW).toFixed(1);
+    s+='<div class="kalw-anf" style="top:'+(top-f/60*KALW_ROW).toFixed(1)+'px;height:'+fh
+      +'px" title="'+_escHtml('Hinfahrt '+f+' min'+(fx?' · '+fx:''))+'">'+esc(fx)+'</div>';
+    s+='<div class="kalw-anf nach" style="top:'+(top+dur/60*KALW_ROW).toFixed(1)+'px;height:'+fh
+      +'px" title="'+_escHtml('Rückfahrt '+f+' min'+(fx?' · '+fx:''))+'">'+esc(fx)+'</div>';
+  }
   const cls='kalw-card'+(r.conf?' conf':'')+(r.sync?'':' nosync')+((_kalPick===key)?' sel':'');
   const tip=(r.ks?r.ks+' · ':'')+lbl+' – '+r.title+' | '+_normTime(r.von)+(r.bis?'–'+_normTime(r.bis):'')
-    +(anf?' | Anfahrt '+anf+' min':'')+(r.conf?' | ⚠ Überschneidung':'')+(r.sync?'':' | ● nicht in Outlook');
+    +(f?' | Fahrt '+f+' min je Richtung'+(fx?' ('+fx+')':''):'')
+    +(r.conf?' | ⚠ Überschneidung':'')+(r.sync?'':' | ● nicht in Outlook');
   s+='<div class="'+cls+'" draggable="true" style="top:'+top.toFixed(1)+'px;height:'+hgt.toFixed(1)+'px"'
     + ' ondragstart="_kalwDragStart(event,\''+_escHtml(key)+'\')"'
     + ' onclick="event.stopPropagation();_kalwPick(\''+_escHtml(key)+'\')"'
@@ -8495,7 +8506,8 @@ function _kalRenderWeek(){
     + '<button class="kal-btn" onclick="_kalWeekNav(1)" title="Nächste Woche">›</button>'
     + '<span class="kalw-kw">KW '+_kalKW(mon)+' · '+fmt(mon)+'–'+fmt(last)+last.getFullYear()+'</span>'
     + '<span class="kal-spacer"></span>'
-    + '<button class="kal-btn" onclick="_kalwSetAnfahrt()" title="Anfahrt (Minuten) für den markierten Termin setzen">⏱ Anfahrt</button>'
+    + '<button class="kal-btn" onclick="_kalwSetName()" title="Name des markierten Termins – steht so in Outlook (leer = automatisch aus Kostenstelle, Auftrag und Beschreibung)">✏ Name</button>'
+    + '<button class="kal-btn" onclick="_kalwSetFahrt()" title="Fahrzeit je Richtung (Minuten) für den markierten Termin setzen – wird vor und nach dem Termin geblockt">🚗 Fahrt</button>'
     + '</div>';
 
   h+='<div class="kalw-lbl">Ungeplant ('+D.backlog.length+')'
@@ -8593,7 +8605,9 @@ async function _kalwDropBl(ev){
   const t=(task&&Array.isArray(task.ausserhausTermine))?task.ausserhausTermine[i]:null;
   if(!t||!t.date)return;
 
-  if(!confirm('Termin aus der Planung nehmen?'+(t.outlookEventId?'\n\nDer Termin wird dabei auch in Outlook gelöscht.':'')))return;
+  const _hatFahrt=!!(t.outlookFahrtHinId||t.outlookFahrtRueckId);
+  if(!confirm('Termin aus der Planung nehmen?'
+      +(t.outlookEventId?('\n\nDer Termin'+(_hatFahrt?' und die Fahrt-Einträge werden':' wird')+' dabei auch in Outlook gelöscht.'):'')))return;
 
   if(t.outlookEventId && msToken){
     try{
@@ -8605,7 +8619,9 @@ async function _kalwDropBl(ev){
       return;
     }
   }
+  if(msToken) await _msDeleteFahrtEvents(t);
   t.date=''; t.von=''; t.bis='';
+  delete t.outlookFahrtHinId; delete t.outlookFahrtRueckId;
   delete t.outlookEventId; delete t.outlookWebLink; delete t.outlookLastModified;
   t.outlookDeleted=false; t.outlookMetaChanged=false; t._pamDirty=false;
   try{ autoSave(); }catch(e){}
@@ -8613,19 +8629,49 @@ async function _kalwDropBl(ev){
   showToast('↩ Termin zurück in „Ungeplant"','info',3000);
 }
 
-function _kalwSetAnfahrt(){
-  if(!_kalPick){ showToast('ℹ Erst einen Termin antippen, dann ⏱ Anfahrt','info',4000); return; }
+function _kalwSetFahrt(){
+  if(!_kalPick){ showToast('ℹ Erst einen Termin antippen, dann 🚗 Fahrt','info',4000); return; }
   const p=String(_kalPick).split('|'), i=parseInt(p[1],10);
-  if(i<0){ showToast('ℹ Anfahrt geht erst, wenn der Termin im Raster liegt','info',4000); return; }
+  if(i<0){ showToast('ℹ Fahrzeit geht erst, wenn der Termin im Raster liegt','info',4000); return; }
   const task=(typeof findTaskById==='function')?findTaskById(p[0]):null;
   const t=(task&&Array.isArray(task.ausserhausTermine))?task.ausserhausTermine[i]:null;
   if(!t){ showToast('⚠ Termin nicht gefunden','warning',4000); return; }
-  const v=prompt('Anfahrt in Minuten (0 = keine):', String(_kalAnf(t)));
+  const v=prompt('Fahrzeit je Richtung in Minuten (0 = keine)\nWird vor UND nach dem Termin geblockt:', String(_kalFahrt(t)));
   if(v===null)return;
   const n=parseInt(v,10);
-  t.anfahrt=(isNaN(n)||n<0)?0:n;
+  t.fahrt=(isNaN(n)||n<0)?0:n;
+  delete t.anfahrt;                       // altes Feld ablösen
+  if(t.fahrt>0){
+    // Vorschlag aus dem Auftrag: dorthin fährst du – Objektadresse, sonst der Task-Name
+    const vor=_kalFahrtText(t) || ((task.adresse||'').trim()) || (task.title||'').trim();
+    const b=prompt('Bezeichnung der Fahrt (Vorschlag aus dem Auftrag – frei änderbar, leer = ohne):', vor);
+    if(b!==null) t.fahrtText=(b||'').trim();
+  } else delete t.fahrtText;              // ohne Fahrt keine Bezeichnung
+  t._pamDirty=true;                       // Fahrt-Einträge in Outlook anlegen / ändern / entfernen
   try{ autoSave(); }catch(e){}
   renderKalender(true);
+  if(msToken) _msAutoPushTermine(task).catch(e=>console.warn('[KALW] Fahrt-Push',e));
+}
+
+/* Freier Name des Termins – steht so in Outlook. Leer = automatisches Muster
+   (🔷 Kostenstelle Auftrag – Beschreibung) aus _msTerminSubject(). */
+function _kalwSetName(){
+  if(!_kalPick){ showToast('ℹ Erst einen Termin antippen, dann ✏ Name','info',4000); return; }
+  const p=String(_kalPick).split('|'), i=parseInt(p[1],10);
+  if(i<0){ showToast('ℹ Name geht erst, wenn der Termin im Raster liegt','info',4000); return; }
+  const task=(typeof findTaskById==='function')?findTaskById(p[0]):null;
+  const t=(task&&Array.isArray(task.ausserhausTermine))?task.ausserhausTermine[i]:null;
+  if(!t){ showToast('⚠ Termin nicht gefunden','warning',4000); return; }
+  const jetzt=((t.betreff||'').trim())||_msTerminSubject(task,t);   // zeigt, was aktuell in Outlook steht
+  const v=prompt('Name des Termins – steht so in Outlook.\nLeer lassen = automatisch aus Kostenstelle, Auftrag und Beschreibung:', jetzt);
+  if(v===null)return;
+  const neu=(v||'').trim();
+  if(neu) t.betreff=neu; else delete t.betreff;
+  t._pamDirty=true;
+  try{ autoSave(); }catch(e){}
+  renderKalender(true);
+  if(msToken) _msAutoPushTermine(task).then(()=>showToast('✓ Name nach Outlook übernommen','info',2500))
+                                      .catch(e=>console.warn('[KALW] Name-Push',e));
 }
 /* ═══════════ ENDE WOCHENRASTER ═══════════ */
 function renderKalender(skipSync){
@@ -8758,6 +8804,7 @@ async function _kalDeleteTermin(taskId,idx){
       if(!r.ok && r.status!==404) showToast('⚠ Outlook: Termin nicht gelöscht (HTTP '+r.status+') – aus PAM trotzdem entfernt','warning',6000);
     }catch(e){ showToast('⚠ Outlook-Löschen fehlgeschlagen – aus PAM trotzdem entfernt','warning',5000); }
   }
+  if(msToken) await _msDeleteFahrtEvents(t);      // Fahrt-Einträge nicht verwaisen lassen
   task.ausserhausTermine.splice(idx,1);
   try{ const openId=(document.getElementById('taskId')||{}).value||''; if(openId===task.id && Array.isArray(taskAusserhausTermine)){ taskAusserhausTermine.splice(idx,1); if(document.getElementById('ausserhausTermineList'))renderAusserhausTermine(); } }catch(e){}
   try{autoSave();}catch(e){console.warn('[KAL]',e);}
@@ -8858,6 +8905,9 @@ async function _kalSyncStatus(manual){
 function _normTime(s){ s=(s||'').trim(); const m=/^(\d{1,2}):(\d{2})/.exec(s); return m?m[1].padStart(2,'0')+':'+m[2]:s; }
 function _addMinToHHMM(hhmm,min){ const m=/^(\d{1,2}):(\d{2})$/.exec(hhmm||''); if(!m)return hhmm; let tot=(+m[1])*60+(+m[2])+min; tot=((tot%1440)+1440)%1440; return String(Math.floor(tot/60)).padStart(2,'0')+':'+String(tot%60).padStart(2,'0'); }
 function _msTerminSubject(task,t){
+  // Frei vergebener Name (✏ Name im Wochenraster) schlägt das automatische Muster
+  const eigen=((t&&t.betreff)||'').trim();
+  if(eigen)return eigen;
   const ks=_kalKostenstelle(task);
   const title=((task&&task.title)||'').trim();
   const bez=((t&&t.beschreibung)||'').trim();
@@ -8870,7 +8920,59 @@ function _msTerminSubject(task,t){
   if(bez)s+=' – '+bez;
   return s.trim();
 }
-function _msTerminComplete(t){ return !!(t && t.date && t.von && t.beschreibung && t.beschreibung.trim()); }
+function _msTerminComplete(t){ return !!(t && t.date && t.von && (((t.beschreibung||'').trim())||((t.betreff||'').trim()))); }
+// ── Fahrt als eigene Outlook-Termine (vor + nach dem Ortstermin) ──────────────
+// Der Ortstermin selbst bleibt reine Arbeitszeit; die Fahrt bekommt eigene
+// Einträge mit der in PAM vergebenen Bezeichnung.
+function _msFahrtSubject(task,t,rueck){
+  const txt=_kalFahrtText(t) || ((task&&task.adresse)||'').trim() || ((task&&task.title)||'').trim();
+  return '🚗 '+(rueck?'Rückfahrt':'Hinfahrt')+(txt?' · '+txt:'');
+}
+async function _msDeleteEvent(id){
+  if(!id||!msToken)return;
+  const _del=()=>fetch('https://graph.microsoft.com/v1.0/me/events/'+encodeURIComponent(id),{method:'DELETE',headers:{Authorization:'Bearer '+msToken}});
+  let r=await _del();
+  if(r.status===401){ try{ if(typeof _msRefreshToken==='function' && await _msRefreshToken()){ r=await _del(); } }catch(_){ } }
+  if(!r.ok && r.status!==404) throw new Error('HTTP '+r.status);
+}
+async function _msDeleteFahrtEvents(t){
+  if(!t)return;
+  for(const k of ['outlookFahrtHinId','outlookFahrtRueckId']){
+    if(!t[k])continue;
+    try{ await _msDeleteEvent(t[k]); }catch(e){ console.warn('[KAL] Fahrt-Termin nicht gelöscht:',e); }
+    delete t[k];
+  }
+}
+async function _msPushFahrt(task,t){
+  if(!msToken||!t||!t.date||!t.von)return;
+  const f=_kalFahrt(t);
+  if(f<=0){ await _msDeleteFahrtEvents(t); return; }      // keine Fahrt mehr → Einträge raus
+  const von=_normTime(t.von);
+  const bisT=t.bis?_normTime(t.bis):_addMinToHHMM(von,60);
+  const hinStart=_addMinToHHMM(von,-f), rueckEnd=_addMinToHHMM(bisT,f);
+  const ort=((task&&task.adresse)||'').trim();
+  const base=window.location.origin+window.location.pathname;
+  const link=base+'?task='+encodeURIComponent(task.id||'');
+  const legs=[];
+  if(hinStart<von)   legs.push({key:'outlookFahrtHinId',  rueck:false,start:hinStart,end:von});      // sonst Überlauf über Mitternacht
+  if(rueckEnd>bisT)  legs.push({key:'outlookFahrtRueckId',rueck:true, start:bisT,    end:rueckEnd});
+  for(const leg of legs){
+    const ev={ subject:_msFahrtSubject(task,t,leg.rueck), categories:['PAM'],
+      start:{dateTime:t.date+'T'+leg.start+':00',timeZone:'Europe/Berlin'},
+      end:{dateTime:t.date+'T'+leg.end+':00',timeZone:'Europe/Berlin'},
+      body:{contentType:'HTML',content:'🚗 Fahrt zum PAM-Termin: <a href="'+link+'">'+link+'</a>'} };
+    if(ort)ev.location={displayName:ort};
+    let isUpdate=!!t[leg.key];
+    const _doPush=()=>fetch('https://graph.microsoft.com/v1.0/me/events'+(isUpdate?'/'+encodeURIComponent(t[leg.key]):''),
+      {method:isUpdate?'PATCH':'POST',headers:{Authorization:'Bearer '+msToken,'Content-Type':'application/json'},body:JSON.stringify(ev)});
+    let r=await _doPush();
+    if(r.status===401){ try{ if(typeof _msRefreshToken==='function' && await _msRefreshToken()){ r=await _doPush(); } }catch(_){ } }
+    if(r.status===404 && isUpdate){ delete t[leg.key]; isUpdate=false; r=await _doPush(); }  // in Outlook gelöscht → neu anlegen
+    if(!r.ok){ console.warn('[KAL] Fahrt-Push fehlgeschlagen: HTTP '+r.status); continue; }
+    const data=await r.json().catch(()=>({}));
+    if(data&&data.id)t[leg.key]=data.id;
+  }
+}
 async function _msPushTermin(task,t){
   if(!msToken)throw new Error('Outlook (info@) nicht verbunden');
   if(!t||!t.date||!t.von)throw new Error('Termin unvollständig (Datum + Uhrzeit nötig)');
@@ -8902,6 +9004,8 @@ async function _msPushTermin(task,t){
   t.outlookMetaChanged=false; delete t.outlookSubject; delete t.outlookLocation;
   if(data&&data.lastModifiedDateTime)t.outlookLastModified=data.lastModifiedDateTime;
   t.outlookDeleted=false;
+  // Fahrt-Blöcke ziehen mit (anlegen / verschieben / bei Fahrt 0 wieder entfernen)
+  try{ await _msPushFahrt(task,t); }catch(e){ console.warn('[KAL] Fahrt-Termine:',e); }
   return true;
 }
 // Auto-Push: nach dem Speichern eines Tasks – nur als _pamDirty markierte, vollständige Termine
