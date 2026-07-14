@@ -2846,6 +2846,32 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
 .kal-menu button:hover{background:var(--bg3);}
 .kal-menu button.kal-menu-danger{color:#E24B4A;}
 .kal-menu button.kal-menu-ok{color:#16a34a;}
+/* ═══ WOCHENRASTER (Stundenplan) – additiv, 2026-07-14 ═══ */
+.kalw-nav{display:flex;align-items:center;gap:8px;margin:8px 0;flex-wrap:wrap;}
+.kalw-kw{font-size:13px;font-weight:600;color:var(--text);}
+.kalw-lbl{font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;margin:8px 0 4px;}
+.kalw-bl{display:flex;gap:6px;flex-wrap:wrap;min-height:44px;padding:6px;background:var(--bg3);border:1px dashed var(--border);border-radius:8px;margin-bottom:10px;}
+.kalw-bl.over{border-color:var(--accent);}
+.kalw-oz{display:flex;gap:6px;flex-wrap:wrap;padding:6px;margin-bottom:10px;background:var(--bg3);border-radius:8px;}
+.kalw-scroll{overflow-x:auto;padding-bottom:6px;}
+.kalw-grid{display:grid;grid-template-columns:46px repeat(6,minmax(112px,1fr));gap:2px;min-width:730px;}
+.kalw-hd{font-size:11px;font-weight:600;text-align:center;padding:5px 0;color:var(--text2);border-radius:4px;}
+.kalw-hd.today{background:var(--accent);color:#fff;}
+.kalw-tl{font-size:10px;color:var(--text2);text-align:right;padding-right:5px;height:44px;line-height:44px;}
+.kalw-cell{height:44px;background:var(--bg3);border-radius:4px;position:relative;}
+.kalw-cell.over{outline:1px dashed var(--accent);}
+.kalw-cell.pick{cursor:copy;}
+.kalw-card{position:absolute;left:2px;right:2px;border-radius:4px;padding:2px 5px;font-size:10px;line-height:1.25;overflow:hidden;cursor:grab;z-index:2;background:#E6F1FB;color:#0C447C;border-left:3px solid #378ADD;}
+.kalw-card.nosync{border-left-color:#9ca3af;}
+.kalw-card.conf{background:#FCEBEB;color:#A32D2D;border-left-color:#E24B4A;}
+.kalw-card.sel{outline:2px solid var(--accent);}
+.kalw-card b{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.kalw-anf{position:absolute;left:2px;right:2px;border-radius:4px 4px 0 0;z-index:1;border:1px dashed #94a3b8;background:repeating-linear-gradient(45deg,rgba(148,163,184,.30) 0 4px,transparent 4px 8px);}
+.kalw-chip{display:flex;flex-direction:column;gap:1px;width:152px;padding:4px 7px;border-radius:5px;background:var(--bg4);border:1px solid var(--border);border-left:3px solid #BA7517;font-size:10px;color:var(--text);cursor:grab;}
+.kalw-chip.sel{outline:2px solid var(--accent);}
+.kalw-chip b{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.kalw-chip small{color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.kalw-empty{font-size:11px;color:var(--text2);padding:10px;}
 </style>
 </head>
 <body>
@@ -4209,7 +4235,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-14 · #473'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-14-b473)
+const PAM_BUILD = 'v2026-07-14 · #475'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-14-b475)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -8328,6 +8354,280 @@ function _kalToggleMenu(ev){
   if(menu)menu.classList.toggle('open');
 }
 document.addEventListener('click',()=>{document.querySelectorAll('.kal-menu.open').forEach(m=>m.classList.remove('open'));});
+/* ═══════════ WOCHENRASTER (Stundenplan-Prinzip) – additiv, 2026-07-14 ═══════════
+   Nutzt dieselben Daten (task.ausserhausTermine) und denselben Outlook-Push
+   (_msAutoPushTermine). Ändert KEINE bestehende Funktion.                       */
+const KALW_H0=7, KALW_H1=16, KALW_ROW=44, KALW_DAYS=6;
+let _kalView=(function(){try{return localStorage.getItem('pam_kal_view')||'liste';}catch(e){return 'liste';}})();
+let _kalWeekOff=0, _kalPick=null, _kalDragKey=null;
+
+function _kalSetView(v){_kalView=(v==='woche')?'woche':'liste';try{localStorage.setItem('pam_kal_view',_kalView);}catch(e){}_kalPick=null;renderKalender(true);}
+function _kalWeekNav(d){ if(d===0)_kalWeekOff=0; else _kalWeekOff+=d; _kalPick=null; renderKalender(true); }
+
+function _kalIso(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function _kalDe(iso){return iso?iso.split('-').reverse().join('.'):'';}
+function _kalMonday(){
+  const d=new Date(); d.setHours(0,0,0,0);
+  d.setDate(d.getDate()-((d.getDay()+6)%7)+_kalWeekOff*7);
+  return d;
+}
+function _kalKW(d){
+  const t=new Date(d.getTime()); t.setHours(0,0,0,0);
+  t.setDate(t.getDate()+3-((t.getDay()+6)%7));
+  const w1=new Date(t.getFullYear(),0,4);
+  return 1+Math.round(((t-w1)/86400000-3+((w1.getDay()+6)%7))/7);
+}
+function _kalMin(hhmm){const m=/^(\d{1,2}):(\d{2})$/.exec(_normTime(hhmm||''));return m?(+m[1])*60+(+m[2]):null;}
+function _kalDauer(t){const a=_kalMin(t&&t.von),b=_kalMin(t&&t.bis);return (a!=null&&b!=null&&b>a)?(b-a):60;}
+function _kalAnf(t){const n=parseInt((t&&t.anfahrt)||0,10);return (isNaN(n)||n<0)?0:n;}
+
+/* Datenbasis des Rasters: eigene Sammlung (Wochenfenster), damit die
+   Listenansicht und ihr Zeitraum-Filter völlig unberührt bleiben. */
+function _kalwCollect(){
+  const mon=_kalMonday();
+  const endD=new Date(mon); endD.setDate(endD.getDate()+KALW_DAYS-1);
+  const from=_kalIso(mon), to=_kalIso(endD);
+  const q=(_kalSearch||'').toLowerCase();
+  const grid=[], backlog=[], ohneZeit=[];
+
+  Object.entries(boards||{}).forEach(([bn,tasks])=>{
+    if(_kalBoardFilter && bn!==_kalBoardFilter) return;
+    (tasks||[]).forEach(task=>{
+      if(!task || task.archiviert) return;
+      const ks=_kalKostenstelle(task);
+      const arr=Array.isArray(task.ausserhausTermine)?task.ausserhausTermine:[];
+      let hatDatum=false, hatOffen=false;
+
+      arr.forEach((t,i)=>{
+        if(!t || t.hiddenInPam) return;
+        const hay=((t.beschreibung||'')+' '+(task.title||'')+' '+(ks||'')).toLowerCase();
+        if(q && !hay.includes(q)) return;
+        const ds=((t.date||t.datum)||'').trim();
+        const rec={taskId:task.id,idx:i,t:t,ks:ks,title:task.title||'',
+                   bez:t.beschreibung||'',sync:!!t.outlookEventId,del:!!t.outlookDeleted};
+
+        if(!ds){ rec.sub=(ks?ks+' · ':'')+'ohne Datum'; backlog.push(rec); hatOffen=true; return; }
+        hatDatum=true;
+        if(ds<from || ds>to) return;
+        rec.date=ds; rec.von=t.von||''; rec.bis=t.bis||'';
+        const st=_kalMin(t.von);
+        if(st==null || st<KALW_H0*60 || st>KALW_H1*60+59){
+          rec.sub=_kalDe(ds)+' · '+(t.von?_normTime(t.von):'ohne Uhrzeit');
+          ohneZeit.push(rec);
+        } else grid.push(rec);
+      });
+
+      // Möglichkeit B: Status Außerhaus, aber gar kein Termin angelegt
+      if(!hatDatum && !hatOffen && typeof isAusserhaus==='function' && isAusserhaus(task)){
+        const hay=((task.title||'')+' '+(ks||'')).toLowerCase();
+        if(!q || hay.includes(q))
+          backlog.push({taskId:task.id,idx:-1,t:null,ks:ks,title:task.title||'',bez:'',
+                        sync:false,del:false,virt:true,sub:(ks?ks+' · ':'')+'kein Termin'});
+      }
+    });
+  });
+
+  // Status-Chips der Filterleiste auch im Raster respektieren
+  const sf=x=>{
+    if(_kalStatusFilter==='sync')   return x.sync && !x.del;
+    if(_kalStatusFilter==='nosync') return !x.sync;
+    if(_kalStatusFilter==='del')    return x.del;
+    return true;
+  };
+
+  const G=grid.filter(sf), O=ohneZeit.filter(sf);
+
+  // Überschneidungen je Tag (Anfahrt zählt mit)
+  const byDay={};
+  G.forEach(r=>{ (byDay[r.date]=byDay[r.date]||[]).push(r); });
+  Object.keys(byDay).forEach(k=>{
+    const l=byDay[k];
+    l.forEach(r=>{ r._s=_kalMin(r.von)-_kalAnf(r.t); r._e=_kalMin(r.von)+_kalDauer(r.t); });
+    l.sort((a,b)=>a._s-b._s);
+    for(let i=1;i<l.length;i++) if(l[i]._s < l[i-1]._e){ l[i].conf=true; l[i-1].conf=true; }
+  });
+
+  return {mon:mon, grid:G, backlog:backlog, ohneZeit:O};
+}
+
+function _kalwChip(r){
+  const key=r.taskId+'|'+r.idx;
+  const lbl=r.bez||r.title||'(ohne Bezeichnung)';
+  return '<div class="kalw-chip'+((_kalPick===key)?' sel':'')+'" draggable="true"'
+    + ' ondragstart="_kalwDragStart(event,\''+_escHtml(key)+'\')"'
+    + ' onclick="_kalwPick(\''+_escHtml(key)+'\')"'
+    + ' ondblclick="_kalOpenTask(\''+_escHtml(r.taskId)+'\')"'
+    + ' title="'+_escHtml(lbl+' – '+r.title+' · Antippen, dann Zielfeld antippen · Doppelklick: Task öffnen')+'">'
+    + '<b>'+esc(lbl)+'</b><small>'+esc(r.sub||'')+'</small></div>';
+}
+
+function _kalwCard(r,hr){
+  const key=r.taskId+'|'+r.idx;
+  const st=_kalMin(r.von), top=(st-hr*60)/60*KALW_ROW;
+  const dur=_kalDauer(r.t), anf=_kalAnf(r.t);
+  const hgt=Math.max(20, dur/60*KALW_ROW-2);
+  const lbl=r.bez||r.title||'(ohne Bezeichnung)';
+  let s='';
+  if(anf>0) s+='<div class="kalw-anf" style="top:'+(top-anf/60*KALW_ROW).toFixed(1)+'px;height:'
+    +(anf/60*KALW_ROW).toFixed(1)+'px" title="Anfahrt '+anf+' min"></div>';
+  const cls='kalw-card'+(r.conf?' conf':'')+(r.sync?'':' nosync')+((_kalPick===key)?' sel':'');
+  const tip=(r.ks?r.ks+' · ':'')+lbl+' – '+r.title+' | '+_normTime(r.von)+(r.bis?'–'+_normTime(r.bis):'')
+    +(anf?' | Anfahrt '+anf+' min':'')+(r.conf?' | ⚠ Überschneidung':'')+(r.sync?'':' | ● nicht in Outlook');
+  s+='<div class="'+cls+'" draggable="true" style="top:'+top.toFixed(1)+'px;height:'+hgt.toFixed(1)+'px"'
+    + ' ondragstart="_kalwDragStart(event,\''+_escHtml(key)+'\')"'
+    + ' onclick="event.stopPropagation();_kalwPick(\''+_escHtml(key)+'\')"'
+    + ' ondblclick="event.stopPropagation();_kalOpenTask(\''+_escHtml(r.taskId)+'\')"'
+    + ' title="'+_escHtml(tip)+'">'
+    + '<b>'+esc(_normTime(r.von))+' '+esc(lbl)+'</b>'+esc(r.ks||r.title)+'</div>';
+  return s;
+}
+
+function _kalRenderWeek(){
+  const D=_kalwCollect(), mon=D.mon;
+  const WD=['Mo','Di','Mi','Do','Fr','Sa'];
+  const days=[]; for(let i=0;i<KALW_DAYS;i++){const x=new Date(mon);x.setDate(x.getDate()+i);days.push(x);}
+  const last=days[days.length-1], todayIso=_kalIso(new Date());
+  const fmt=x=>String(x.getDate()).padStart(2,'0')+'.'+String(x.getMonth()+1).padStart(2,'0')+'.';
+
+  let h='<div class="kalw-nav">'
+    + '<button class="kal-btn" onclick="_kalWeekNav(-1)" title="Vorige Woche">‹</button>'
+    + '<button class="kal-btn" onclick="_kalWeekNav(0)" title="Aktuelle Woche">Heute</button>'
+    + '<button class="kal-btn" onclick="_kalWeekNav(1)" title="Nächste Woche">›</button>'
+    + '<span class="kalw-kw">KW '+_kalKW(mon)+' · '+fmt(mon)+'–'+fmt(last)+last.getFullYear()+'</span>'
+    + '<span class="kal-spacer"></span>'
+    + '<button class="kal-btn" onclick="_kalwSetAnfahrt()" title="Anfahrt (Minuten) für den markierten Termin setzen">⏱ Anfahrt</button>'
+    + '</div>';
+
+  h+='<div class="kalw-lbl">Ungeplant ('+D.backlog.length+')'
+    + (_kalPick?' — jetzt Zielfeld antippen':' — ins Raster ziehen, oder antippen und Zielfeld antippen')+'</div>';
+  h+='<div class="kalw-bl" ondragover="event.preventDefault();this.classList.add(\'over\')"'
+    + ' ondragleave="this.classList.remove(\'over\')" ondrop="_kalwDropBl(event)">';
+  h+= D.backlog.length ? D.backlog.map(_kalwChip).join('')
+                       : '<span class="kalw-empty">Nichts offen — alle Außentermine sind verplant.</span>';
+  h+='</div>';
+
+  h+='<div class="kalw-scroll"><div class="kalw-grid"><div></div>';
+  days.forEach((x,i)=>{
+    const iso=_kalIso(x);
+    h+='<div class="kalw-hd'+(iso===todayIso?' today':'')+'">'+WD[i]+' '+fmt(x)+'</div>';
+  });
+  for(let hr=KALW_H0; hr<=KALW_H1; hr++){
+    h+='<div class="kalw-tl">'+String(hr).padStart(2,'0')+':00</div>';
+    days.forEach(x=>{
+      const iso=_kalIso(x);
+      h+='<div class="kalw-cell'+(_kalPick?' pick':'')+'"'
+        + ' ondragover="event.preventDefault();this.classList.add(\'over\')"'
+        + ' ondragleave="this.classList.remove(\'over\')"'
+        + ' ondrop="_kalwDrop(event,\''+iso+'\','+hr+')"'
+        + ' onclick="_kalwPlace(\''+iso+'\','+hr+')">';
+      D.grid.forEach(r=>{
+        if(r.date!==iso) return;
+        const st=_kalMin(r.von);
+        if(st>=hr*60 && st<(hr+1)*60) h+=_kalwCard(r,hr);
+      });
+      h+='</div>';
+    });
+  }
+  h+='</div></div>';
+
+  if(D.ohneZeit.length){
+    h+='<div class="kalw-lbl">Ohne Uhrzeit / außerhalb '+KALW_H0+'–'+(KALW_H1+1)+' Uhr ('+D.ohneZeit.length+')</div>';
+    h+='<div class="kalw-oz">'+D.ohneZeit.map(_kalwChip).join('')+'</div>';
+  }
+  return h;
+}
+
+/* ── Interaktion ───────────────────────────────────────────────── */
+function _kalwDragStart(ev,key){
+  _kalDragKey=key;
+  try{ ev.dataTransfer.setData('text/plain',key); ev.dataTransfer.effectAllowed='move'; }catch(e){}
+}
+function _kalwPick(key){ _kalPick=(_kalPick===key)?null:key; renderKalender(true); }
+function _kalwPlace(iso,hr){ if(!_kalPick)return; const k=_kalPick; _kalPick=null; _kalwApply(k,iso,hr); }
+function _kalwDrop(ev,iso,hr){
+  ev.preventDefault();
+  if(ev.currentTarget&&ev.currentTarget.classList)ev.currentTarget.classList.remove('over');
+  let key=_kalDragKey; try{ key=ev.dataTransfer.getData('text/plain')||key; }catch(e){}
+  _kalDragKey=null; _kalPick=null;
+  _kalwApply(key,iso,hr);
+}
+
+async function _kalwApply(key,iso,hr){
+  if(!key)return;
+  const p=String(key).split('|'), tid=p[0];
+  let i=parseInt(p[1],10);
+  const task=(typeof findTaskById==='function')?findTaskById(tid):null;
+  if(!task){ showToast('⚠ Task nicht gefunden','warning',4000); return; }
+  if(!Array.isArray(task.ausserhausTermine)) task.ausserhausTermine=[];
+
+  let t;
+  if(i<0){                                   // virtueller Backlog-Eintrag → Termin anlegen
+    t={date:'',von:'',bis:'',beschreibung:(task.title||'Außentermin').trim()};
+    task.ausserhausTermine.push(t); i=task.ausserhausTermine.length-1;
+  } else t=task.ausserhausTermine[i];
+  if(!t){ showToast('⚠ Termin nicht gefunden','warning',4000); return; }
+
+  const dauer=_kalDauer(t);
+  t.date=iso;
+  t.von=String(hr).padStart(2,'0')+':00';
+  t.bis=_addMinToHHMM(t.von,dauer);
+  if(!t.beschreibung||!t.beschreibung.trim()) t.beschreibung=(task.title||'Außentermin').trim();
+  t._pamDirty=true; t.outlookDeleted=false;
+
+  try{ autoSave(); }catch(e){ console.warn('[KALW]',e); }
+  renderKalender(true);
+
+  if(!msToken){ showToast('✓ '+_kalDe(iso)+' '+t.von+'–'+t.bis+' — Outlook nicht verbunden, kein Push','warning',5000); return; }
+  try{ await _msAutoPushTermine(task); showToast('✓ '+_kalDe(iso)+' '+t.von+'–'+t.bis+' · nach Outlook','info',3000); }
+  catch(e){ console.warn('[KALW] push',e); }
+}
+
+async function _kalwDropBl(ev){
+  ev.preventDefault();
+  if(ev.currentTarget&&ev.currentTarget.classList)ev.currentTarget.classList.remove('over');
+  let key=_kalDragKey; try{ key=ev.dataTransfer.getData('text/plain')||key; }catch(e){}
+  _kalDragKey=null; if(!key)return;
+  const p=String(key).split('|'), tid=p[0], i=parseInt(p[1],10);
+  if(i<0)return;                                    // war schon ungeplant
+  const task=(typeof findTaskById==='function')?findTaskById(tid):null;
+  const t=(task&&Array.isArray(task.ausserhausTermine))?task.ausserhausTermine[i]:null;
+  if(!t||!t.date)return;
+
+  if(!confirm('Termin aus der Planung nehmen?'+(t.outlookEventId?'\n\nDer Termin wird dabei auch in Outlook gelöscht.':'')))return;
+
+  if(t.outlookEventId && msToken){
+    try{
+      const r=await fetch('https://graph.microsoft.com/v1.0/me/events/'+encodeURIComponent(t.outlookEventId),
+                          {method:'DELETE',headers:{Authorization:'Bearer '+msToken}});
+      if(!r.ok && r.status!==404) throw new Error('HTTP '+r.status);
+    }catch(e){
+      showToast('⚠ Outlook-Termin konnte nicht gelöscht werden – '+(e.message||e),'warning',6000);
+      return;
+    }
+  }
+  t.date=''; t.von=''; t.bis='';
+  delete t.outlookEventId; delete t.outlookWebLink; delete t.outlookLastModified;
+  t.outlookDeleted=false; t.outlookMetaChanged=false; t._pamDirty=false;
+  try{ autoSave(); }catch(e){}
+  renderKalender(true);
+  showToast('↩ Termin zurück in „Ungeplant"','info',3000);
+}
+
+function _kalwSetAnfahrt(){
+  if(!_kalPick){ showToast('ℹ Erst einen Termin antippen, dann ⏱ Anfahrt','info',4000); return; }
+  const p=String(_kalPick).split('|'), i=parseInt(p[1],10);
+  if(i<0){ showToast('ℹ Anfahrt geht erst, wenn der Termin im Raster liegt','info',4000); return; }
+  const task=(typeof findTaskById==='function')?findTaskById(p[0]):null;
+  const t=(task&&Array.isArray(task.ausserhausTermine))?task.ausserhausTermine[i]:null;
+  if(!t){ showToast('⚠ Termin nicht gefunden','warning',4000); return; }
+  const v=prompt('Anfahrt in Minuten (0 = keine):', String(_kalAnf(t)));
+  if(v===null)return;
+  const n=parseInt(v,10);
+  t.anfahrt=(isNaN(n)||n<0)?0:n;
+  try{ autoSave(); }catch(e){}
+  renderKalender(true);
+}
+/* ═══════════ ENDE WOCHENRASTER ═══════════ */
 function renderKalender(skipSync){
   const mc=document.getElementById('mainContent'); if(!mc)return;
   let all=_kalCollectTermine();
@@ -8366,6 +8666,9 @@ function renderKalender(skipSync){
     + '<select class="kal-select" onchange="_kalSetBoard(this.value)" title="Nur Termine dieses Projekts anzeigen">'+_boardOpts+'</select>'
     + '<span class="kal-search-wrap"><input type="text" id="kalSearchInp" class="kal-search" placeholder="🔍 Beschreibung, Task, Kostenstelle…" value="'+_escHtml(_kalSearch)+'" oninput="_kalSetSearch(this.value)" autocomplete="off"></span>'
     + '<button class="kal-btn" onclick="_kalResetFilters()" title="Alle Kalender-Filter zurücksetzen">✕ Zurücksetzen</button>'
+    + '<span class="kal-spacer"></span>'
+    + '<button class="kal-chip'+(_kalView==='liste'?' active':'')+'" onclick="_kalSetView(\'liste\')" title="Agenda-Liste">☰ Liste</button>'
+    + '<button class="kal-chip'+(_kalView==='woche'?' active':'')+'" onclick="_kalSetView(\'woche\')" title="Wochenraster (Stundenplan)">▦ Woche</button>'
     + '</div>';
   // ── Filterleiste Zeile 2: Status-Toggles + Zeitraum + Datum + Ausgeblendete ──
   const _chip=(key,label,active)=>'<button class="kal-chip'+(active?' active':'')+'" onclick="_kalSetStatusFilter(\''+key+'\')">'+label+'</button>';
@@ -8386,6 +8689,14 @@ function renderKalender(skipSync){
     + '<span class="kal-spacer"></span>'
     + '<button class="kal-chip'+(_kalShowHidden?' active':'')+'" onclick="_kalToggleHidden()" title="Ausgeblendete Termine als eigene Liste unten anzeigen">👁 Ausgeblendete'+(hiddenCount?' ('+hiddenCount+')':'')+'</button>'
     + '</div>';
+  // ── Wochenraster: eigene Datenbasis + eigene Navigation, Liste bleibt unberührt ──
+  if(_kalView==='woche'){
+    html+=_kalRenderWeek();
+    html+='</div>';
+    mc.innerHTML=html;
+    if(!skipSync && msToken && Date.now()-_kalLastSync>15000) _kalSyncStatus();
+    return;
+  }
   // ── Treffer-Zähler (wie der Zähler der globalen Suche) ──
   html+='<div class="kal-count">'+all.length+' Termin'+(all.length!==1?'e':'')+' · '+g.heute.length+' heute'+((_kalShowHidden&&hiddenCount)?' · '+hiddenCount+' ausgeblendet':'')+'</div>';
   if(!all.length && !(_kalShowHidden&&hidden.length)){
@@ -26568,13 +26879,13 @@ window.Dachplan=(function(){
   function css(){const s=document.createElement('style');s.textContent=
    '#dpScreen{position:fixed;inset:0;z-index:99990;background:#0f1115;color:#e7eaf0;display:flex;flex-direction:column;font-family:system-ui,-apple-system,sans-serif}'
   +'#dpScreen.dp-hidden,.dp-hidden{display:none!important}'
-  +'#dpBar{display:flex;align-items:center;gap:6px;padding:8px;background:#171a21;border-bottom:1px solid #2a2f3a;flex-wrap:wrap}'
+  +'#dpBar{display:flex;align-items:center;gap:6px;padding:8px;background:#171a21;border-bottom:1px solid #2a2f3a;flex-wrap:wrap;position:relative;z-index:1400}'
   +'.dpb{min-height:40px;padding:0 12px;border-radius:9px;border:1px solid #2a2f3a;background:#1e222b;color:#e7eaf0;font-size:14px;font-weight:600;cursor:pointer}'
   +'.dpb.on{background:#153a6b;border-color:#3b82f6}.dpb.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}'
   +'#dpMap,#dpImap{flex:1;min-height:0;background:#0d0f14}'
   +'.dpMk{width:28px;height:28px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center}'
   +'.dpMk span{transform:rotate(45deg);color:#fff;font-weight:800;font-size:13px}'
-  +'#dpSheet{position:absolute;right:0;top:0;bottom:0;width:340px;max-width:92%;background:#171a21;border-left:1px solid #2a2f3a;padding:14px 16px 20px;overflow:auto;transform:translateX(105%);transition:transform .2s;z-index:1200}'
+  +'#dpSheet{position:absolute;right:0;top:56px;bottom:0;width:340px;max-width:92%;background:#171a21;border-left:1px solid #2a2f3a;padding:14px 16px 20px;overflow:auto;transform:translateX(105%);transition:transform .2s;z-index:1200}'
   +'#dpSheet.show{transform:none}'
   +'.dpf{font-size:12px;color:#9aa3b2;margin:10px 0 4px;font-weight:600}'
   +'#dpSheet input,#dpSheet textarea{width:100%;background:#1e222b;border:1px solid #2a2f3a;color:#e7eaf0;border-radius:9px;padding:9px;font-size:14px;font-family:inherit;box-sizing:border-box}'
@@ -26583,7 +26894,7 @@ window.Dachplan=(function(){
   +'.dpThumb{position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;background:#000}.dpThumb img{width:100%;height:100%;object-fit:cover;cursor:pointer}'
   +'.dpThumb b{position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);color:#fff;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;cursor:pointer}'
   +'.dprow{display:flex;gap:8px}.dprow>*{flex:1}'
-  +'#dpListPanel{position:absolute;left:0;top:0;bottom:0;width:320px;background:#0f1115;z-index:1300;overflow:auto;padding:12px;border-right:1px solid #2a2f3a}'
+  +'#dpListPanel{position:absolute;left:0;top:56px;bottom:0;width:320px;background:#0f1115;z-index:1300;overflow:auto;padding:12px;border-right:1px solid #2a2f3a}'
   +'.dpLi{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #2a2f3a;border-radius:12px;margin-bottom:8px;background:#1e222b;cursor:pointer}'
   +'.dpLi .b{width:28px;height:28px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:13px}'
   +'.dpLi .tx{flex:1;min-width:0}.dpLi .tx b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dpLi .tx span{color:#9aa3b2;font-size:12px}'
@@ -26658,7 +26969,7 @@ window.Dachplan=(function(){
   /* ---- Karte (geo) ---- */
   function ensureMap(){
     if(map)return true;if(typeof L==='undefined'){say('Leaflet nicht geladen (Internet?)');return false;}
-    map=L.map(E.mapEl,{zoomControl:true});
+    map=L.map(E.mapEl,{zoomControl:true,zoomSnap:0.25,zoomDelta:0.5,wheelPxPerZoomLevel:120});
     const esri=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:21,maxNativeZoom:19,attribution:'Luftbild © Esri, Maxar'});
     const osm=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'});
     esri.addTo(map);L.control.layers({'Luftbild':esri,'Karte':osm},null,{position:'topright'}).addTo(map);
@@ -26754,7 +27065,7 @@ window.Dachplan=(function(){
   function latLngToFr(ll){const W=dp.imgW||1000,H=dp.imgH||750;return {nx:ll.lng/W,ny:1-(ll.lat/H)};}
   function ensureImap(){
     if(imap)return true;if(typeof L==='undefined'){say('Leaflet nicht geladen');return false;}
-    imap=L.map(E.imapEl,{crs:L.CRS.Simple,zoomControl:true,minZoom:-5,maxZoom:6,attributionControl:false});
+    imap=L.map(E.imapEl,{crs:L.CRS.Simple,zoomControl:true,minZoom:-5,maxZoom:6,attributionControl:false,zoomSnap:0.25,zoomDelta:0.5,wheelPxPerZoomLevel:120});
     imap.on('click',e=>{if(calStep>0){onCalibTap(e.latlng);return;}if(!dp.imgDriveId){say('Erst „📷 Bild" laden');return;}if(addMode)addImgPin(e.latlng);else say('Zum Setzen erst „➕ Pin" antippen');});
     imap.on('moveend',()=>{if(dp&&dp.base==='bild'){try{dp.imgC=[imap.getCenter().lat,imap.getCenter().lng];dp.imgZ=imap.getZoom();saveViewSoon();}catch(_){}}});
     return true;
