@@ -4236,7 +4236,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-14 · #477'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-14-b477)
+const PAM_BUILD = 'v2026-07-16 · #478'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-16-b478)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -12933,10 +12933,22 @@ function _wpDelete(idx){
 /* ══════════════════════════════════════════════════════════════════════════ */
 
 
+// b478: eindeutige 360°-Erkennung. Equirectangular-Panoramen (z.B. Insta360-Studio-Export) sind exakt 2:1.
+// Die alte Regel („360" irgendwo im Namen oder Ratio ≥ 1.8) traf normale Fotos: Zeitstempel wie
+// „…_093601…", „insta360" im Namen, 16:9-Crops. Jetzt: nur .insp / „pano(rama)" als eigenes Wort / Ratio ≈ 2:1.
+function _deskIs360Name(n){
+  n=String(n||'');
+  return /\.insp$/i.test(n)||/(^|[^a-z0-9])(pano|panorama)([^a-z0-9]|$)/i.test(n);
+}
+function _deskIs360Ratio(w,h){
+  if(!w||!h)return false;
+  const r=w/h;
+  return r>=1.95&&r<=2.05;
+}
 function _markIf360(imgEl,i){
-  // Ratio ≥ 1.8 → 360°-Badge nachträglich setzen + merken
+  // b478: nur exakt 2:1 (Equirectangular) → 360°-Badge nachträglich setzen + merken
   if(!imgEl||!imgEl.naturalWidth)return;
-  if((imgEl.naturalWidth/imgEl.naturalHeight)>=1.8){
+  if(_deskIs360Ratio(imgEl.naturalWidth,imgEl.naturalHeight)){
     if(taskAttachments[i])taskAttachments[i].is360=true;
     const cell=imgEl.closest('.attach-img-cell');
     if(cell&&!cell.querySelector('.badge-360')){
@@ -12948,11 +12960,11 @@ function _markIf360(imgEl,i){
     }
   }
 }
-// #312: 360°-Badge auf Drive-Foto-Kacheln (Ratio >= 1.8 nach Thumbnail-Load)
+// #312/b478: 360°-Badge auf Drive-Foto-Kacheln (nur noch Ratio ≈ 2:1 nach Thumbnail-Load)
 function _fotoMark360(img){
   try{
     if(!img||!img.naturalWidth||!img.naturalHeight)return;
-    if((img.naturalWidth/img.naturalHeight)>=1.8){
+    if(_deskIs360Ratio(img.naturalWidth,img.naturalHeight)){
       const cell=img.closest('.foto-desktop-thumb');
       if(cell&&!cell.querySelector('.foto-360-badge')){
         const b=document.createElement('div');
@@ -13208,9 +13220,9 @@ function renderFotoListDesktop(){
     // data-foto-id immer setzen (auch wenn thumbSrc vorhanden) → Fallback-Fetch wenn URL abläuft
     const dId=safeId?'data-foto-id="'+safeId+'" ':'';
     const srcAttr=cached?('src="'+esc(cached)+'" '+dId):(thumbSrc?('src="'+esc(thumbSrc)+'" '+dId):(dId));
-    // #312: 360°-Erkennung per Name (.insp / 360 / panorama / pano) oder gemerktem Flag
+    // #312/b478: 360°-Erkennung per Name (nur .insp / „pano(rama)" als Wort) oder gemerktem Flag
     const _nm360=(f.editedName||f.name||'');
-    const is360=/\.insp$/i.test(_nm360)||/360|panorama|pano/i.test(_nm360)||f.is360===true;
+    const is360=_deskIs360Name(_nm360)||f.is360===true;
     const badge360=is360?'<div class="foto-360-badge">360°</div>':'';
     const _ebLeft=is360?'44px':'4px';
     const editedBadge=f.editedDriveId?'<div style="position:absolute;top:4px;left:'+_ebLeft+';background:rgba(108,99,255,.75);color:#fff;font-size:9px;padding:2px 5px;border-radius:4px;pointer-events:none">✏ bearb.</div>':'';
@@ -13293,20 +13305,32 @@ async function _showFotoExif(i,btn){
     const model=zeroth[piexif.ImageIFD.Model]||'';
     const pw=exifIfd[piexif.ExifIFD.PixelXDimension]||'';
     const ph=exifIfd[piexif.ExifIFD.PixelYDimension]||'';
-    let mapsLink='';
+    // b478: Aufnahmeort als Adresse statt nackter Koordinaten. GPS 0,0 = leerer
+    // GPS-Block (z.B. Insta360 ohne Standortquelle) → wie „kein GPS" behandeln.
+    // Ohne GPS im Foto: Rückfall auf den am Task erfassten Handy-Standort.
+    let gpsPos=null;
     const gLat=gpsIfd[piexif.GPSIFD.GPSLatitude];
     const gLon=gpsIfd[piexif.GPSIFD.GPSLongitude];
     if(gLat&&gLon){
       const _dms=function(d){return d[0][0]/d[0][1]+(d[1][0]/d[1][1])/60+(d[2][0]/d[2][1])/3600;};
-      const lat=(_dms(gLat)*(gpsIfd[piexif.GPSIFD.GPSLatitudeRef]==='S'?-1:1)).toFixed(6);
-      const lon=(_dms(gLon)*(gpsIfd[piexif.GPSIFD.GPSLongitudeRef]==='W'?-1:1)).toFixed(6);
-      mapsLink='<a href="https://maps.google.com/?q='+lat+','+lon+'" target="_blank" style="color:var(--accent)">📍 '+lat+', '+lon+'</a>';
+      const lat=_dms(gLat)*(gpsIfd[piexif.GPSIFD.GPSLatitudeRef]==='S'?-1:1);
+      const lon=_dms(gLon)*(gpsIfd[piexif.GPSIFD.GPSLongitudeRef]==='W'?-1:1);
+      if(isFinite(lat)&&isFinite(lon)&&(Math.abs(lat)>0.0001||Math.abs(lon)>0.0001))gpsPos={lat:lat,lon:lon,quelle:'foto'};
     }
+    if(!gpsPos){
+      try{
+        const _t=findTaskById((document.getElementById('taskId')||{}).value||'');
+        if(_t&&_t.lat&&_t.lon)gpsPos={lat:Number(_t.lat),lon:Number(_t.lon),quelle:'task'};
+      }catch(_e){}
+    }
+    const ortCell=gpsPos
+      ?'<span style="color:var(--text2)">wird ermittelt…</span>'
+      :'<span style="color:var(--text2)">nicht im Foto gespeichert</span>';
     const rows=[
       date?'<tr><td style="color:var(--text2);padding-right:10px;white-space:nowrap">📅 Datum</td><td>'+esc(date)+'</td></tr>':'',
       (make||model)?'<tr><td style="color:var(--text2);padding-right:10px;white-space:nowrap">📷 Kamera</td><td>'+esc((make+' '+model).trim())+'</td></tr>':'',
       (pw&&ph)?'<tr><td style="color:var(--text2);padding-right:10px;white-space:nowrap">🔲 Auflösung</td><td>'+pw+' × '+ph+'</td></tr>':'',
-      mapsLink?'<tr><td style="color:var(--text2);padding-right:10px;white-space:nowrap">📍 GPS</td><td>'+mapsLink+'</td></tr>':'',
+      '<tr><td style="color:var(--text2);padding-right:10px;white-space:nowrap;vertical-align:top">📍 Aufnahmeort</td><td id="_exifOrt">'+ortCell+'</td></tr>',
     ].filter(Boolean).join('');
     const popup=document.createElement('div');
     popup.id='_exifPopup';popup._srcBtn=btn;
@@ -13318,8 +13342,50 @@ async function _showFotoExif(i,btn){
     popup.style.left=Math.min(rect.right+6,window.innerWidth-290)+'px';
     popup.style.top=Math.max(rect.top-80,8)+'px';
     document.body.appendChild(popup);
+    // b478: Adresse asynchron nachladen (Popup steht sofort, Ort folgt)
+    if(gpsPos){
+      const mapsU='https://maps.google.com/?q='+gpsPos.lat.toFixed(6)+','+gpsPos.lon.toFixed(6);
+      _deskReverseGeocode(gpsPos.lat,gpsPos.lon).then(function(addr){
+        const el=document.getElementById('_exifOrt');if(!el)return;
+        const txt=addr||(gpsPos.lat.toFixed(6)+', '+gpsPos.lon.toFixed(6));
+        el.innerHTML='<a href="'+mapsU+'" target="_blank" style="color:var(--accent)">'+esc(txt)+' 🗺</a>'
+          +(gpsPos.quelle==='task'?'<div style="font-size:10px;color:var(--text2)">vom Handy erfasster Task-Standort (Foto ohne GPS)</div>':'');
+      });
+    }
   }catch(e){showToast('EXIF: '+e.message,'error');}
   btn.textContent='ℹ';
+}
+// b478: Koordinaten → Adresse (wie PAM Mobil: erst Photon, dann Nominatim wenn ohne Hausnummer), mit Mini-Cache
+const _deskRevGeoCache={};
+async function _deskReverseGeocode(lat,lon){
+  const key=lat.toFixed(5)+','+lon.toFixed(5);
+  if(_deskRevGeoCache[key])return _deskRevGeoCache[key];
+  let strasse='',addr='';
+  try{
+    const r=await fetch('https://photon.komoot.io/reverse?lat='+lat+'&lon='+lon+'&lang=de');
+    const j=await r.json();
+    const p=j&&j.features&&j.features[0]&&j.features[0].properties;
+    if(p){
+      strasse=((p.street||p.name||'')+' '+(p.housenumber||'')).trim();
+      const ort=((p.postcode||'')+' '+(p.city||p.town||p.village||'')).trim();
+      addr=[strasse,ort].filter(Boolean).join(', ');
+    }
+  }catch(e){console.warn('[RevGeo Photon]',e);}
+  if(!/\d/.test(strasse)){
+    try{
+      const r=await fetch('https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat='+lat+'&lon='+lon+'&zoom=18&addressdetails=1&accept-language=de',{headers:{'Accept':'application/json'}});
+      const j=await r.json();
+      const a=j&&j.address;
+      if(a){
+        const s2=((a.road||'')+' '+(a.house_number||'')).trim();
+        const o2=((a.postcode||'')+' '+(a.city||a.town||a.village||'')).trim();
+        const addr2=[s2,o2].filter(Boolean).join(', ');
+        if(addr2&&(/\d/.test(s2)||!addr))addr=addr2;
+      }
+    }catch(e){console.warn('[RevGeo Nominatim]',e);}
+  }
+  if(addr)_deskRevGeoCache[key]=addr;
+  return addr;
 }
 function openFotoPanel(){
   if(!taskFotos||!taskFotos.length){showToast('Keine Fotos vorhanden','info');return;}
@@ -14130,17 +14196,18 @@ async function openFotoDesktop(i){
     const url=await _fetchDesktopFotoBlob(_viewId);
     if(url){
       _deskCurrentFotoUrl=url;
-      // .insp und bekannte 360°-Namen sofort als Panorama öffnen
-      const force360=/\.insp$/i.test(f.editedName||f.name)||/360|panorama|pano/i.test(f.editedName||f.name);
+      // b478: nur eindeutige 360°-Namen sofort als Panorama öffnen (.insp / „pano(rama)" als Wort).
+      // „360" als Ziffernfolge zählt NICHT mehr (traf Zeitstempel wie _093601 und „insta360").
+      const force360=_deskIs360Name(f.editedName||f.name);
       if(force360){
         cnt.innerHTML='';cnt.style.display='none';
         _deskInitPannellum(url);
         return;
       }
-      // Sonstige Bilder: 360°-Erkennung per Aspect-Ratio
+      // Sonstige Bilder: 360°-Erkennung nur bei exakt 2:1 (Equirectangular, b478)
       const testImg=new Image();
       testImg.onload=()=>{
-        if(testImg.naturalWidth&&testImg.naturalHeight&&(testImg.naturalWidth/testImg.naturalHeight)>=1.8){
+        if(_deskIs360Ratio(testImg.naturalWidth,testImg.naturalHeight)){
           cnt.innerHTML='';cnt.style.display='none';
           _deskInitPannellum(url);
         }else{
