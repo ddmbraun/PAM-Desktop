@@ -4236,7 +4236,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-17 · #481'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-17-b481)
+const PAM_BUILD = 'v2026-07-17 · #482'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-17-b482)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -27110,7 +27110,9 @@ window.Dachplan=(function(){
       +'<button class="dpb" id="dpNav" style="width:100%;margin-top:8px">🧭 Navigation zu diesem Pin</button>'
       +'<button class="dpb" id="dpDel" style="width:100%;margin-top:10px;color:#e5484d;border-color:#e5484d">🗑 Pin löschen</button>'
      +'</div>'
-     +'<div id="dpPhoto" class="dp-hidden"><span class="x" id="dpPhotoX">✕</span><img id="dpPhotoImg"></div>';
+     +'<div id="dpPhoto" class="dp-hidden"><span class="x" id="dpPhotoX">✕</span><img id="dpPhotoImg">'
+      +'<div id="dpPhotoCap" style="position:absolute;left:12px;right:12px;bottom:84px;color:#fff;background:rgba(0,0,0,.55);border-radius:8px;padding:8px 10px;font-size:15px;display:none"></div>'
+      +'<button class="dpb" id="dpPhotoText" style="position:absolute;bottom:20px;left:50%;transform:translateX(-50%);z-index:2;border-color:#2d7ef7;color:#7db4ff">📝 Text</button></div>'; /* b482 */
     document.body.appendChild(d);
     E.screen=d;E.mapEl=d.querySelector('#dpMap');E.imapEl=d.querySelector('#dpImap');E.sheet=d.querySelector('#dpSheet');
     E.thumbs=d.querySelector('#dpThumbs');E.photo=d.querySelector('#dpPhoto');E.photoImg=d.querySelector('#dpPhotoImg');E.msg=d.querySelector('#dpMsg');
@@ -27134,6 +27136,7 @@ window.Dachplan=(function(){
     q('#dpNav').onclick=()=>{const p=cur();if(!p)return;let lat=p.lat,lng=p.lng;if((lat==null||lng==null)&&p.nx!=null){const w=calFrToLatLng(p.nx,p.ny);if(w){lat=w.lat;lng=w.lng;}}if(lat!=null&&lng!=null)window.open('https://www.google.com/maps/dir/?api=1&destination='+lat+','+lng,'_blank');else say('Navigation im Bild-Modus braucht die Kalibrierung');};
     q('#dpDel').onclick=()=>{const p=cur();if(!p)return;if(!confirm('Pin '+p.nr+' löschen?'))return;dp.pins=dp.pins.filter(x=>x.id!==p.id);sel=null;closeSheet();renderPins();save();};
     q('#dpPhotoX').onclick=()=>E.photo.classList.add('dp-hidden');
+    q('#dpPhotoText').onclick=()=>{if(window._dpPhotoFo)dpFotoText(window._dpPhotoFo);}; // b482
     E.photo.onclick=ev=>{if(ev.target===E.photo)E.photo.classList.add('dp-hidden');};
     built=true;
   }
@@ -27185,15 +27188,47 @@ window.Dachplan=(function(){
       try{const meta=await dpUpload(up,folderId);const fo={driveId:meta.id};p.fotos.push(fo);drawThumbs(p);save();say('Foto gespeichert');}catch(e){say('Upload fehlgeschlagen','error');}}
   }
   function fotoThumb(fo){return fo.driveId?('https://drive.google.com/thumbnail?id='+fo.driveId+'&sz=w600'):(fo.dataUrl||'');}
-  function drawThumbs(p){const box=E.thumbs;box.innerHTML='';(p.fotos||[]).forEach((fo,i)=>{const d=document.createElement('div');d.className='dpThumb';const img=document.createElement('img');img.src=fotoThumb(fo);img.onclick=()=>showPhoto(fo);const del=document.createElement('b');del.textContent='×';del.onclick=ev=>{ev.stopPropagation();p.fotos.splice(i,1);drawThumbs(p);save();};d.appendChild(img);d.appendChild(del);box.appendChild(d);});}
-  function showPhoto(fo){E.photoImg.src=fo.driveId?('https://drive.google.com/thumbnail?id='+fo.driveId+'&sz=w1600'):(fo.dataUrl||'');E.photo.classList.remove('dp-hidden');}
+  function drawThumbs(p){const box=E.thumbs;box.innerHTML='';(p.fotos||[]).forEach((fo,i)=>{const d=document.createElement('div');d.className='dpThumb';const img=document.createElement('img');img.src=fotoThumb(fo);img.onclick=()=>showPhoto(fo);const del=document.createElement('b');del.textContent='×';del.onclick=ev=>{ev.stopPropagation();p.fotos.splice(i,1);drawThumbs(p);save();};d.appendChild(img);d.appendChild(del);
+    if(fo.caption){const c=document.createElement('span');c.textContent=fo.caption;c.style.cssText='position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.62);color:#fff;font-size:10px;line-height:1.3;padding:2px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;';d.appendChild(c);} // b482: Foto-Text als Balken (kommt u.a. vom Tablet)
+    box.appendChild(d);});}
+  function showPhoto(fo){window._dpPhotoFo=fo; /* b482: für 📝-Text-Knopf merken */
+    try{const cap=E.screen.querySelector('#dpPhotoCap');if(cap){cap.textContent=fo.caption||'';cap.style.display=fo.caption?'':'none';}}catch(_){}
+    E.photoImg.src=fo.driveId?('https://drive.google.com/thumbnail?id='+fo.driveId+'&sz=w1600'):(fo.dataUrl||'');E.photo.classList.remove('dp-hidden');}
+  // b482: Text pro Pin-Foto (wie Mobil v116) – Anzeige + Bearbeitung am Desktop
+  function dpFotoText(fo){
+    const old=document.getElementById('dpFotoTextPopup');if(old)old.remove();
+    const ov=document.createElement('div');
+    ov.id='dpFotoTextPopup';
+    ov.style.cssText='position:fixed;inset:0;z-index:100060;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;padding:20px;';
+    ov.innerHTML='<div style="background:#171a21;border:1px solid #2a2f3a;border-radius:14px;padding:16px;width:100%;max-width:560px;display:flex;flex-direction:column;gap:10px;">'
+      +'<b style="color:#e7eaf0;font-size:15px;">📝 Text zum Foto</b>'
+      +'<textarea id="dpFotoTA" placeholder="Was zeigt dieses Foto?" style="width:100%;box-sizing:border-box;min-height:120px;background:#1e222b;color:#e7eaf0;border:1px solid #2a2f3a;border-radius:10px;padding:10px 12px;font-size:15px;line-height:1.5;font-family:inherit;resize:vertical;"></textarea>'
+      +'<div style="display:flex;gap:8px;justify-content:flex-end;">'
+        +'<button class="dpb" id="dpFotoTAbbr">Abbrechen</button>'
+        +'<button class="dpb" id="dpFotoTSave" style="background:#2d7ef7;border-color:#2d7ef7;color:#fff">✓ Speichern</button>'
+      +'</div></div>';
+    document.body.appendChild(ov);
+    const ta=ov.querySelector('#dpFotoTA');ta.value=fo.caption||'';setTimeout(()=>ta.focus(),50);
+    ov.querySelector('#dpFotoTAbbr').onclick=()=>ov.remove();
+    ov.querySelector('#dpFotoTSave').onclick=()=>{
+      fo.caption=ta.value.trim();save();
+      try{const cap=E.screen.querySelector('#dpPhotoCap');if(cap){cap.textContent=fo.caption;cap.style.display=fo.caption?'':'none';}}catch(_){}
+      const p=cur();if(p)drawThumbs(p);
+      ov.remove();say('Foto-Text gespeichert');
+    };
+  }
 
   /* ---- Liste / Suche / Standort ---- */
   function openList(){
     const panel=E.screen.querySelector('#dpListPanel');const arr=(dp.pins||[]).slice().sort((a,b)=>a.nr-b.nr);
     let h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><b>Pins ('+arr.length+')</b><button class="dpb" id="dpListClose">Schließen</button></div>';
     if(!arr.length)h+='<div style="color:#9aa3b2;line-height:1.5">Noch keine Pins. „➕ Pin" aktivieren und auf die Karte klicken.</div>';
-    arr.forEach(p=>{const ti=(p.title?String(p.title).replace(/</g,'&lt;'):'Pin '+p.nr);h+='<div class="dpLi" data-id="'+p.id+'"><div class="b" style="background:'+COL[p.status||'rot']+'">'+p.nr+'</div><div class="tx"><b>'+ti+'</b><span>'+(LBL[p.status]||'')+' · '+((p.fotos||[]).length)+' Foto(s)</span></div></div>';});
+    // b482: Titel → sonst Notiz als Hauptzeile; Notiz zusätzlich als zweite Zeile (wie Mobil v116 – Notizen waren in der Liste unsichtbar)
+    arr.forEach(p=>{const _e=s=>String(s||'').replace(/</g,'&lt;');
+      const note=String(p.note||'').replace(/\s+/g,' ').trim();
+      const ti=p.title?_e(p.title):(note?_e(note.length>48?note.slice(0,48)+'…':note):'Pin '+p.nr);
+      const sub=(p.title&&note)?('<span style="display:block;white-space:normal;color:#c6ccd8;font-size:12px;margin:2px 0 3px">'+_e(note.length>120?note.slice(0,120)+'…':note)+'</span>'):'';
+      h+='<div class="dpLi" data-id="'+p.id+'"><div class="b" style="background:'+COL[p.status||'rot']+'">'+p.nr+'</div><div class="tx"><b>'+ti+'</b>'+sub+'<span>'+(LBL[p.status]||'')+' · '+((p.fotos||[]).length)+' Foto(s)</span></div></div>';});
     panel.innerHTML=h;panel.classList.remove('dp-hidden');
     panel.querySelector('#dpListClose').onclick=()=>panel.classList.add('dp-hidden');
     panel.querySelectorAll('.dpLi').forEach(row=>{row.onclick=()=>{const p=dp.pins.find(x=>x.id===row.dataset.id);if(!p)return;panel.classList.add('dp-hidden');sel=p.id;try{if(dp.base==='bild'&&imap&&p.nx!=null)imap.setView(frToLatLng(p.nx,p.ny),Math.max(imap.getZoom()||0,1));else if(map&&p.lat!=null)map.setView([p.lat,p.lng],Math.max(map.getZoom()||19,19));}catch(_){}openSheet(p);};});
