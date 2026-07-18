@@ -2868,6 +2868,10 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
 .kalw-card b{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .kalw-anf{position:absolute;left:2px;right:2px;border-radius:4px 4px 0 0;z-index:1;border:1px dashed #94a3b8;background:repeating-linear-gradient(45deg,rgba(148,163,184,.30) 0 4px,transparent 4px 8px);box-sizing:border-box;padding:1px 4px;font-size:9px;line-height:1.1;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .kalw-anf.nach{border-radius:0 0 4px 4px;}
+/* Paket 2 (b485): Halbe-Stunden-Linie + „Jetzt"-Linie */
+.kalw-cell::after{content:'';position:absolute;left:0;right:0;top:50%;border-top:1px dashed rgba(148,163,184,.28);pointer-events:none;}
+.kalw-now{position:absolute;left:0;right:0;border-top:2px solid #E24B4A;z-index:3;pointer-events:none;}
+.kalw-now::before{content:'';position:absolute;left:2px;top:-4px;width:7px;height:7px;border-radius:50%;background:#E24B4A;}
 /* Fahrt&Name-Dialog + Rückgängig-Toast (Fahrzeit-Paket 1, b483) */
 #kalfOverlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99990;display:flex;align-items:center;justify-content:center;}
 .kalf-box{background:var(--bg2,#fff);color:var(--text,#111);border-radius:10px;padding:16px 18px;width:min(440px,92vw);box-shadow:0 8px 30px rgba(0,0,0,.35);display:flex;flex-direction:column;gap:4px;}
@@ -4246,7 +4250,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-18 · #484'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-18-b484)
+const PAM_BUILD = 'v2026-07-18 · #485'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-18-b485)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -8369,7 +8373,15 @@ document.addEventListener('click',()=>{document.querySelectorAll('.kal-menu.open
 /* ═══════════ WOCHENRASTER (Stundenplan-Prinzip) – additiv, 2026-07-14 ═══════════
    Nutzt dieselben Daten (task.ausserhausTermine) und denselben Outlook-Push
    (_msAutoPushTermine). Ändert KEINE bestehende Funktion.                       */
-const KALW_H0=7, KALW_H1=16, KALW_ROW=44, KALW_DAYS=6;
+/* Rasterzeiten einstellbar (Paket 2 b485): Standard Mo–Sa, 7–16 Uhr.
+   Einstellung pro Rechner in localStorage 'pam_kalw_cfg' ({h0,h1,days}), ⚙-Knopf im Raster. */
+const KALW_ROW=44;
+let KALW_H0=7, KALW_H1=16, KALW_DAYS=6;
+(function(){try{const c=JSON.parse(localStorage.getItem('pam_kalw_cfg')||'{}');
+  if(Number.isInteger(c.h0)&&c.h0>=0&&c.h0<=22)KALW_H0=c.h0;
+  if(Number.isInteger(c.h1)&&c.h1>KALW_H0&&c.h1<=23)KALW_H1=c.h1;
+  if(c.days===7||c.days===6)KALW_DAYS=c.days;
+}catch(e){}})();
 let _kalView=(function(){try{return localStorage.getItem('pam_kal_view')||'liste';}catch(e){return 'liste';}})();
 let _kalWeekOff=0, _kalPick=null, _kalDragKey=null;
 
@@ -8511,9 +8523,10 @@ function _kalwCard(r,hr){
 
 function _kalRenderWeek(){
   const D=_kalwCollect(), mon=D.mon;
-  const WD=['Mo','Di','Mi','Do','Fr','Sa'];
+  const WD=['Mo','Di','Mi','Do','Fr','Sa','So'];
   const days=[]; for(let i=0;i<KALW_DAYS;i++){const x=new Date(mon);x.setDate(x.getDate()+i);days.push(x);}
-  const last=days[days.length-1], todayIso=_kalIso(new Date());
+  const now=new Date(), nowMin=now.getHours()*60+now.getMinutes();
+  const last=days[days.length-1], todayIso=_kalIso(now);
   const fmt=x=>String(x.getDate()).padStart(2,'0')+'.'+String(x.getMonth()+1).padStart(2,'0')+'.';
 
   let h='<div class="kalw-nav">'
@@ -8523,7 +8536,10 @@ function _kalRenderWeek(){
     + '<span class="kalw-kw">KW '+_kalKW(mon)+' · '+fmt(mon)+'–'+fmt(last)+last.getFullYear()+'</span>'
     + '<span class="kal-spacer"></span>'
     + '<button class="kal-btn" onclick="_kalwSetName()" title="Name des markierten Termins – steht so in Outlook (leer = automatisch aus Kostenstelle, Auftrag und Beschreibung)">✏ Name</button>'
-    + '<button class="kal-btn" onclick="_kalwSetFahrt()" title="Fahrzeit je Richtung (Minuten) für den markierten Termin setzen – wird vor und nach dem Termin geblockt">🚗 Fahrt</button>'
+    + '<button class="kal-btn" onclick="_kalwSetFahrt()" title="Hin-/Rückfahrtzeit für den markierten Termin setzen – wird vor bzw. nach dem Termin geblockt">🚗 Fahrt</button>'
+    + '<button class="kal-btn" onclick="_kalwSetDauer()" title="Dauer des markierten Termins ändern (Ende = Beginn + Dauer)">⏱ Dauer</button>'
+    + '<button class="kal-btn" onclick="_kalwUnplanPick()" title="Markierten Termin zurück in die Ungeplant-Leiste nehmen (löscht nach Rückfrage auch den Outlook-Eintrag)">↩ Ungeplant</button>'
+    + '<button class="kal-btn" onclick="_kalwCfgDialog()" title="Rasterzeiten einstellen: erste/letzte Stunde, Sonntag anzeigen">⚙</button>'
     + '</div>';
 
   h+='<div class="kalw-lbl">Ungeplant ('+D.backlog.length+')'
@@ -8547,7 +8563,9 @@ function _kalRenderWeek(){
         + ' ondragover="event.preventDefault();this.classList.add(\'over\')"'
         + ' ondragleave="this.classList.remove(\'over\')"'
         + ' ondrop="_kalwDrop(event,\''+iso+'\','+hr+')"'
-        + ' onclick="_kalwPlace(\''+iso+'\','+hr+')">';
+        + ' onclick="_kalwPlace(event,\''+iso+'\','+hr+')">';
+      if(iso===todayIso&&now.getHours()===hr)  // „Jetzt"-Linie (Paket 2 b485)
+        h+='<div class="kalw-now" style="top:'+((nowMin-hr*60)/60*KALW_ROW).toFixed(1)+'px"></div>';
       D.grid.forEach(r=>{
         if(r.date!==iso) return;
         const st=_kalMin(r.von);
@@ -8571,35 +8589,64 @@ function _kalwDragStart(ev,key){
   try{ ev.dataTransfer.setData('text/plain',key); ev.dataTransfer.effectAllowed='move'; }catch(e){}
 }
 function _kalwPick(key){ _kalPick=(_kalPick===key)?null:key; renderKalender(true); }
-function _kalwPlace(iso,hr){ if(!_kalPick)return; const k=_kalPick; _kalPick=null; _kalwApply(k,iso,hr); }
+/* Obere Zellhälfte = volle Stunde, untere = :30 (Paket 2 b485) */
+function _kalwHalf(ev){
+  try{ const r=ev.currentTarget.getBoundingClientRect(); return ((ev.clientY-r.top)>r.height/2)?30:0; }catch(e){ return 0; }
+}
+function _kalwPlace(ev,iso,hr){ if(!_kalPick)return; const k=_kalPick; _kalPick=null; _kalwApply(k,iso,hr,_kalwHalf(ev)); }
 function _kalwDrop(ev,iso,hr){
   ev.preventDefault();
   if(ev.currentTarget&&ev.currentTarget.classList)ev.currentTarget.classList.remove('over');
   let key=_kalDragKey; try{ key=ev.dataTransfer.getData('text/plain')||key; }catch(e){}
   _kalDragKey=null; _kalPick=null;
-  _kalwApply(key,iso,hr);
+  _kalwApply(key,iso,hr,_kalwHalf(ev));
 }
 
-async function _kalwApply(key,iso,hr){
+/* Überschneidungsprüfung VOR dem Einplanen (Paket 2 b485) – Fahrtzeiten beider
+   Richtungen zählen mit. Liefert die Bezeichnung des kollidierenden Termins. */
+function _kalwConflictAt(iso,startMin,endMin,skipTaskId,skipIdx){
+  let hit=null;
+  Object.values(boards||{}).forEach(tasks=>{ (tasks||[]).forEach(task=>{
+    if(hit||!task||task.archiviert||!Array.isArray(task.ausserhausTermine))return;
+    task.ausserhausTermine.forEach((t,i)=>{
+      if(hit||!t||t.hiddenInPam)return;
+      if(task.id===skipTaskId&&i===skipIdx)return;
+      if(((t.date||t.datum)||'').trim()!==iso)return;
+      const st=_kalMin(t.von); if(st==null)return;
+      const s=st-_kalFahrt(t), e=st+_kalDauer(t)+_kalFahrtR(t);
+      if(startMin<e&&endMin>s) hit=((t.betreff||'').trim())||t.beschreibung||task.title||'Termin';
+    });
+  });});
+  return hit;
+}
+
+async function _kalwApply(key,iso,hr,mins){
   if(!key)return;
+  mins=(mins===30)?30:0;
   const p=String(key).split('|'), tid=p[0];
   let i=parseInt(p[1],10);
   const task=(typeof findTaskById==='function')?findTaskById(tid):null;
   if(!task){ showToast('⚠ Task nicht gefunden','warning',4000); return; }
   if(!Array.isArray(task.ausserhausTermine)) task.ausserhausTermine=[];
 
-  let t, isNew=false;
-  if(i<0){                                   // virtueller Backlog-Eintrag → Termin anlegen
+  let t=null, isNew=(i<0);
+  if(!isNew){ t=task.ausserhausTermine[i]; if(!t){ showToast('⚠ Termin nicht gefunden','warning',4000); return; } }
+
+  // Warnung VOR dem Einplanen – erst nach „OK" wird etwas verändert
+  const dauer=isNew?60:_kalDauer(t);
+  const startMin=hr*60+mins;
+  const hit=_kalwConflictAt(iso,startMin-(isNew?0:_kalFahrt(t)),startMin+dauer+(isNew?0:_kalFahrtR(t)),tid,isNew?-1:i);
+  if(hit&&!confirm('⚠ Überschneidet sich (inkl. Fahrzeit) mit:\n„'+hit+'"\n\nTrotzdem einplanen?'))return;
+
+  if(isNew){                                 // virtueller Backlog-Eintrag → Termin anlegen
     t={date:'',von:'',bis:'',beschreibung:(task.title||'Außentermin').trim()};
-    task.ausserhausTermine.push(t); i=task.ausserhausTermine.length-1; isNew=true;
-  } else t=task.ausserhausTermine[i];
-  if(!t){ showToast('⚠ Termin nicht gefunden','warning',4000); return; }
+    task.ausserhausTermine.push(t); i=task.ausserhausTermine.length-1;
+  }
 
   // Vorherigen Stand für „↩ Rückgängig" merken (Fehlklick-Schutz, Paket 1 b483)
   const prev=isNew?null:{date:t.date||'',von:t.von||'',bis:t.bis||''};
-  const dauer=_kalDauer(t);
   t.date=iso;
-  t.von=String(hr).padStart(2,'0')+':00';
+  t.von=String(hr).padStart(2,'0')+':'+(mins?'30':'00');
   t.bis=_addMinToHHMM(t.von,dauer);
   if(!t.beschreibung||!t.beschreibung.trim()) t.beschreibung=(task.title||'Außentermin').trim();
   t._pamDirty=true; t.outlookDeleted=false;
@@ -8671,7 +8718,23 @@ async function _kalwDropBl(ev){
   const task=(typeof findTaskById==='function')?findTaskById(tid):null;
   const t=(task&&Array.isArray(task.ausserhausTermine))?task.ausserhausTermine[i]:null;
   if(!t||!t.date)return;
+  await _kalwUnplan(task,t);
+}
 
+/* ↩ Ungeplant per Antippen (Paket 2 b485) – der Drag-Weg geht am Tablet nicht */
+function _kalwUnplanPick(){
+  if(!_kalPick){ showToast('ℹ Erst einen Termin antippen, dann ↩ Ungeplant','info',4000); return; }
+  const p=String(_kalPick).split('|'), i=parseInt(p[1],10);
+  if(i<0){ showToast('ℹ Der Termin ist schon ungeplant','info',4000); return; }
+  const task=(typeof findTaskById==='function')?findTaskById(p[0]):null;
+  const t=(task&&Array.isArray(task.ausserhausTermine))?task.ausserhausTermine[i]:null;
+  if(!t||!t.date){ showToast('ℹ Der Termin ist schon ungeplant','info',4000); return; }
+  _kalPick=null;
+  _kalwUnplan(task,t);
+}
+
+/* Gemeinsamer Kern: Termin aus der Planung nehmen (Nachfrage + Outlook-Aufräumen) */
+async function _kalwUnplan(task,t){
   const _hatFahrt=!!(t.outlookFahrtHinId||t.outlookFahrtRueckId);
   if(!confirm('Termin aus der Planung nehmen?'
       +(t.outlookEventId?('\n\nDer Termin'+(_hatFahrt?' und die Fahrt-Einträge werden':' wird')+' dabei auch in Outlook gelöscht.'):'')))return;
@@ -8694,6 +8757,89 @@ async function _kalwDropBl(ev){
   try{ autoSave(); }catch(e){}
   renderKalender(true);
   showToast('↩ Termin zurück in „Ungeplant"','info',3000);
+}
+
+/* ── ⏱ Dauer des markierten Termins (Paket 2 b485) ───────────────────────────── */
+function _kalwSetDauer(){
+  if(!_kalPick){ showToast('ℹ Erst einen Termin antippen, dann ⏱ Dauer','info',4000); return; }
+  const p=String(_kalPick).split('|'), i=parseInt(p[1],10);
+  if(i<0){ showToast('ℹ Dauer geht erst, wenn der Termin im Raster liegt','info',4000); return; }
+  const task=(typeof findTaskById==='function')?findTaskById(p[0]):null;
+  const t=(task&&Array.isArray(task.ausserhausTermine))?task.ausserhausTermine[i]:null;
+  if(!t||!t.von){ showToast('⚠ Termin nicht gefunden oder ohne Uhrzeit','warning',4000); return; }
+  const old=document.getElementById('kalfOverlay'); if(old)old.remove();
+  const ov=document.createElement('div'); ov.id='kalfOverlay';
+  ov.addEventListener('click',function(e){ if(e.target===ov)_kalfClose(); });
+  ov.innerHTML='<div class="kalf-box" role="dialog" aria-label="Dauer des Termins">'
+    +'<div class="kalf-title">⏱ Dauer des Termins</div>'
+    +'<div class="kalf-sub">'+esc(_kalDe(t.date)+' '+_normTime(t.von)+(task.title?' · '+task.title:''))+'</div>'
+    +'<label class="kalf-lbl">Dauer in Minuten – das Ende wird aus Beginn + Dauer gesetzt</label>'
+    +'<input type="number" id="kalwDauerMin" min="15" step="15" inputmode="numeric" value="'+_kalDauer(t)+'">'
+    +'<div class="kalf-btns">'
+    +  '<button class="kal-btn" onclick="_kalfClose()">Abbrechen</button>'
+    +  '<button class="kal-btn kal-btn-primary" onclick="_kalwDauerSave(\''+_escHtml(p[0])+'\','+i+')">✓ Speichern</button>'
+    +'</div></div>';
+  ov.addEventListener('keydown',function(e){
+    if(e.key==='Escape'){ e.stopPropagation(); _kalfClose(); }
+    if(e.key==='Enter'&&e.target&&e.target.tagName==='INPUT'){ e.preventDefault(); _kalwDauerSave(p[0],i); }
+  });
+  document.body.appendChild(ov);
+  const f=document.getElementById('kalwDauerMin'); if(f){ f.focus(); try{f.select();}catch(e){} }
+}
+function _kalwDauerSave(taskId,idx){
+  const task=(typeof findTaskById==='function')?findTaskById(taskId):null;
+  const t=(task&&Array.isArray(task.ausserhausTermine))?task.ausserhausTermine[idx]:null;
+  if(!t||!t.von){ _kalfClose(); showToast('⚠ Termin nicht gefunden','warning',4000); return; }
+  let n=parseInt((document.getElementById('kalwDauerMin')||{}).value,10);
+  if(isNaN(n)||n<15)n=15;
+  const s=_kalMin(t.von); if(s!=null&&s+n>1439)n=1439-s;   // nicht über Mitternacht hinaus
+  t.bis=_addMinToHHMM(_normTime(t.von),n);
+  t._pamDirty=true;
+  // Offenes Task-Formular: Arbeitskopie mitziehen, sonst überschreibt deren Speichern die Dauer
+  try{
+    const openId=(document.getElementById('taskId')||{}).value||'';
+    if(openId===taskId&&typeof taskAusserhausTermine!=='undefined'&&Array.isArray(taskAusserhausTermine)&&taskAusserhausTermine[idx]){
+      taskAusserhausTermine[idx].bis=t.bis; taskAusserhausTermine[idx]._pamDirty=true;
+      if(document.getElementById('ausserhausTermineList'))renderAusserhausTermine();
+    }
+  }catch(e){}
+  _kalfClose();
+  try{ autoSave(); }catch(e){}
+  renderKalender(true);
+  showToast('✓ Dauer '+n+' min – bis '+t.bis,'info',3000);
+  if(msToken) _msAutoPushTermine(task).catch(e=>console.warn('[KALW] Dauer-Push',e));
+}
+
+/* ── ⚙ Rasterzeiten einstellen (Paket 2 b485), gilt pro Rechner ──────────────── */
+function _kalwCfgDialog(){
+  const old=document.getElementById('kalfOverlay'); if(old)old.remove();
+  const ov=document.createElement('div'); ov.id='kalfOverlay';
+  ov.addEventListener('click',function(e){ if(e.target===ov)_kalfClose(); });
+  ov.innerHTML='<div class="kalf-box" role="dialog" aria-label="Rasterzeiten">'
+    +'<div class="kalf-title">⚙ Rasterzeiten</div>'
+    +'<div class="kalf-sub">Gilt nur für diesen Rechner. Termine außerhalb landen in der Leiste „Ohne Uhrzeit / außerhalb".</div>'
+    +'<label class="kalf-lbl">Erste Stunde im Raster (0–22)</label>'
+    +'<input type="number" id="kalwCfgH0" min="0" max="22" inputmode="numeric" value="'+KALW_H0+'">'
+    +'<label class="kalf-lbl">Letzte Stunde im Raster (1–23) – sichtbar bis zum Ende dieser Stunde</label>'
+    +'<input type="number" id="kalwCfgH1" min="1" max="23" inputmode="numeric" value="'+KALW_H1+'">'
+    +'<label class="kalf-lbl" style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="kalwCfgSo" style="width:auto;"'+(KALW_DAYS===7?' checked':'')+'>Sonntag anzeigen (Mo–So statt Mo–Sa)</label>'
+    +'<div class="kalf-btns">'
+    +  '<button class="kal-btn" onclick="_kalfClose()">Abbrechen</button>'
+    +  '<button class="kal-btn kal-btn-primary" onclick="_kalwCfgSave()">✓ Speichern</button>'
+    +'</div></div>';
+  document.body.appendChild(ov);
+}
+function _kalwCfgSave(){
+  let h0=parseInt((document.getElementById('kalwCfgH0')||{}).value,10);
+  let h1=parseInt((document.getElementById('kalwCfgH1')||{}).value,10);
+  const so=!!((document.getElementById('kalwCfgSo')||{}).checked);
+  if(isNaN(h0)||h0<0)h0=7; if(h0>22)h0=22;
+  if(isNaN(h1)||h1>23)h1=16; if(h1<=h0)h1=h0+1;
+  KALW_H0=h0; KALW_H1=h1; KALW_DAYS=so?7:6;
+  try{ localStorage.setItem('pam_kalw_cfg',JSON.stringify({h0:h0,h1:h1,days:KALW_DAYS})); }catch(e){}
+  _kalfClose();
+  renderKalender(true);
+  showToast('✓ Raster '+(KALW_DAYS===7?'Mo–So':'Mo–Sa')+', '+h0+'–'+(h1+1)+' Uhr','info',3000);
 }
 
 /* ── Fahrt & Name: gemeinsamer Dialog (Fahrzeit-Paket 1, b483) ─────────────────
