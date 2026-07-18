@@ -4246,7 +4246,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-18 · #483'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-18-b483)
+const PAM_BUILD = 'v2026-07-18 · #484'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-18-b484)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -8294,7 +8294,7 @@ function _kalCollectTermine(){
         const ds=(t&&(t.date||t.datum))||''; if(!ds)return;
         const d=new Date(ds+'T00:00:00'); if(isNaN(d.getTime()))return;
         if(d<from||d>to)return;
-        out.push({taskId:task.id,idx:i,d:d,date:ds,von:t.von||'',bis:t.bis||'',fahrt:_kalFahrt(t),
+        out.push({taskId:task.id,idx:i,d:d,date:ds,von:t.von||'',bis:t.bis||'',fahrt:_kalFahrt(t),fahrtR:_kalFahrtR(t),
           beschreibung:t.beschreibung||'',kostenstelle:_kalKostenstelle(task),title:task.title||'',
           outlookEventId:t.outlookEventId||'',outlookWebLink:t.outlookWebLink||'',outlookMetaChanged:!!t.outlookMetaChanged,outlookSubject:t.outlookSubject||'',outlookLocation:t.outlookLocation||'',hidden:!!t.hiddenInPam,deletedInOutlook:!!t.outlookDeleted});
       });
@@ -8332,7 +8332,7 @@ function _kalRow(x){
     + (x.deletedInOutlook
         ?'<span class="kal-badge-del" title="Der verknüpfte Outlook-Termin existiert nicht mehr – Aktionen im ⋯-Menü">⚠ in Outlook gelöscht</span>'
         :'<span class="kal-status-dot" title="'+statusTitle+'"></span>')
-    + '<button class="kal-btn" onclick="_kalFahrtDialog(\''+id+'\','+x.idx+',\'fahrt\')" title="Fahrzeit je Richtung setzen – wird vor und nach dem Termin geblockt. Öffnet auch Fahrt-Bezeichnung und Outlook-Name.">🚗'+(x.fahrt?' '+x.fahrt+'′':'')+'</button>'
+    + '<button class="kal-btn" onclick="_kalFahrtDialog(\''+id+'\','+x.idx+',\'fahrt\')" title="Hin-/Rückfahrtzeit setzen – wird vor bzw. nach dem Termin geblockt. Öffnet auch Fahrt-Bezeichnung und Outlook-Name.">🚗'+((x.fahrt||x.fahrtR)?(x.fahrt===x.fahrtR?(' '+x.fahrt+'′'):(' '+x.fahrt+'/'+x.fahrtR+'′')):'')+'</button>'
     + '<button class="kal-btn" onclick="_kalOpenTask(\''+id+'\')" title="Task öffnen">↗ Task</button>'
     + '<div class="kal-menu-wrap">'
     +   '<button class="kal-btn kal-menu-btn" onclick="_kalToggleMenu(event)" title="Weitere Aktionen">⋯</button>'
@@ -8391,9 +8391,13 @@ function _kalKW(d){
 }
 function _kalMin(hhmm){const m=/^(\d{1,2}):(\d{2})$/.exec(_normTime(hhmm||''));return m?(+m[1])*60+(+m[2]):null;}
 function _kalDauer(t){const a=_kalMin(t&&t.von),b=_kalMin(t&&t.bis);return (a!=null&&b!=null&&b>a)?(b-a):60;}
-/* Fahrzeit je Richtung (Minuten) – wird vor UND nach dem Termin geblockt.
+/* Fahrzeit (Minuten): `fahrt` = Hinfahrt (vor dem Termin), `fahrtRueck` = Rückfahrt
+   (nach dem Termin). Fehlt `fahrtRueck`, gilt Rückfahrt = Hinfahrt (Normalfall,
+   b483 und älter). Rückfahrt 0 = direkt weiter zum nächsten Termin – die Fahrt
+   dazwischen ist dann die Hinfahrt des Folgetermins (b484).
    Altes Feld `anfahrt` wird weiter gelesen, bis es beim nächsten Setzen ersetzt wird. */
 function _kalFahrt(t){const v=(t&&(t.fahrt!=null?t.fahrt:t.anfahrt));const n=parseInt(v||0,10);return (isNaN(n)||n<0)?0:n;}
+function _kalFahrtR(t){const v=(t&&t.fahrtRueck);if(v==null||v==='')return _kalFahrt(t);const n=parseInt(v,10);return (isNaN(n)||n<0)?0:n;}
 function _kalFahrtText(t){return ((t&&t.fahrtText)||'').trim();}
 
 /* Datenbasis des Rasters: eigene Sammlung (Wochenfenster), damit die
@@ -8458,7 +8462,7 @@ function _kalwCollect(){
   G.forEach(r=>{ (byDay[r.date]=byDay[r.date]||[]).push(r); });
   Object.keys(byDay).forEach(k=>{
     const l=byDay[k];
-    l.forEach(r=>{ const f=_kalFahrt(r.t); r._s=_kalMin(r.von)-f; r._e=_kalMin(r.von)+_kalDauer(r.t)+f; });
+    l.forEach(r=>{ r._s=_kalMin(r.von)-_kalFahrt(r.t); r._e=_kalMin(r.von)+_kalDauer(r.t)+_kalFahrtR(r.t); });
     l.sort((a,b)=>a._s-b._s);
     for(let i=1;i<l.length;i++) if(l[i]._s < l[i-1]._e){ l[i].conf=true; l[i-1].conf=true; }
   });
@@ -8480,20 +8484,21 @@ function _kalwChip(r){
 function _kalwCard(r,hr){
   const key=r.taskId+'|'+r.idx;
   const st=_kalMin(r.von), top=(st-hr*60)/60*KALW_ROW;
-  const dur=_kalDauer(r.t), f=_kalFahrt(r.t), fx=_kalFahrtText(r.t);
+  const dur=_kalDauer(r.t), fH=_kalFahrt(r.t), fR=_kalFahrtR(r.t), fx=_kalFahrtText(r.t);
   const hgt=Math.max(20, dur/60*KALW_ROW-2);
   const lbl=r.bez||r.title||'(ohne Bezeichnung)';
   let s='';
-  if(f>0){
-    const fh=(f/60*KALW_ROW).toFixed(1);
-    s+='<div class="kalw-anf" style="top:'+(top-f/60*KALW_ROW).toFixed(1)+'px;height:'+fh
-      +'px" title="'+_escHtml('Hinfahrt '+f+' min'+(fx?' · '+fx:''))+'">'+esc(fx)+'</div>';
-    s+='<div class="kalw-anf nach" style="top:'+(top+dur/60*KALW_ROW).toFixed(1)+'px;height:'+fh
-      +'px" title="'+_escHtml('Rückfahrt '+f+' min'+(fx?' · '+fx:''))+'">'+esc(fx)+'</div>';
+  if(fH>0){
+    s+='<div class="kalw-anf" style="top:'+(top-fH/60*KALW_ROW).toFixed(1)+'px;height:'+(fH/60*KALW_ROW).toFixed(1)
+      +'px" title="'+_escHtml('Hinfahrt '+fH+' min'+(fx?' · '+fx:''))+'">'+esc(fx)+'</div>';
+  }
+  if(fR>0){
+    s+='<div class="kalw-anf nach" style="top:'+(top+dur/60*KALW_ROW).toFixed(1)+'px;height:'+(fR/60*KALW_ROW).toFixed(1)
+      +'px" title="'+_escHtml('Rückfahrt '+fR+' min'+(fx?' · '+fx:''))+'">'+esc(fx)+'</div>';
   }
   const cls='kalw-card'+(r.conf?' conf':'')+(r.sync?'':' nosync')+((_kalPick===key)?' sel':'');
   const tip=(r.ks?r.ks+' · ':'')+lbl+' – '+r.title+' | '+_normTime(r.von)+(r.bis?'–'+_normTime(r.bis):'')
-    +(f?' | Fahrt '+f+' min je Richtung'+(fx?' ('+fx+')':''):'')
+    +((fH||fR)?(' | Fahrt '+(fH===fR?fH+' min je Richtung':fH+' min hin / '+fR+' min zurück')+(fx?' ('+fx+')':'')):'')
     +(r.conf?' | ⚠ Überschneidung':'')+(r.sync?'':' | ● nicht in Outlook');
   s+='<div class="'+cls+'" draggable="true" style="top:'+top.toFixed(1)+'px;height:'+hgt.toFixed(1)+'px"'
     + ' ondragstart="_kalwDragStart(event,\''+_escHtml(key)+'\')"'
@@ -8716,8 +8721,10 @@ function _kalFahrtDialog(taskId,idx,focus){
   ov.innerHTML='<div class="kalf-box" role="dialog" aria-label="Fahrt und Name des Termins">'
     +'<div class="kalf-title">🚗 Fahrt &amp; Name des Termins</div>'
     +'<div class="kalf-sub">'+esc((t.date?_kalDe(t.date)+' ':'')+(t.von?_normTime(t.von):'')+(t.bis?'–'+_normTime(t.bis):'')+(task.title?' · '+task.title:''))+'</div>'
-    +'<label class="kalf-lbl">Fahrzeit je Richtung in Minuten (0 = keine) – wird vor UND nach dem Termin geblockt</label>'
+    +'<label class="kalf-lbl">Hinfahrt in Minuten (0 = keine) – wird vor dem Termin geblockt</label>'
     +'<input type="number" id="kalfMin" min="0" step="5" inputmode="numeric" value="'+_kalFahrt(t)+'">'
+    +'<label class="kalf-lbl">Rückfahrt in Minuten – leer = wie Hinfahrt. Fährst du direkt zum nächsten Termin weiter: hier 0 eintragen, die Fahrt dazwischen ist die Hinfahrt des nächsten Termins</label>'
+    +'<input type="number" id="kalfMinR" min="0" step="5" inputmode="numeric" value="'+((t.fahrtRueck!=null&&t.fahrtRueck!=='')?_kalFahrtR(t):'')+'" placeholder="wie Hinfahrt">'
     +'<label class="kalf-lbl">Bezeichnung der Fahrt – steht im Fahrt-Block und in Outlook („🚗 Hinfahrt · …")</label>'
     +'<input type="text" id="kalfTxt" value="'+_escHtml(_kalFahrtText(t))+'" placeholder="'+_escHtml(vorschlag||'z.B. Objektadresse')+'" autocomplete="off">'
     +'<label class="kalf-lbl">Name des Termins in Outlook – leer = automatisch aus Kostenstelle, Auftrag und Beschreibung</label>'
@@ -8732,8 +8739,10 @@ function _kalFahrtDialog(taskId,idx,focus){
   });
   document.body.appendChild(ov);
   // Leeres Bezeichnungsfeld mit dem Vorschlag vorbelegen, sobald eine Fahrzeit drinsteht
-  const mi=document.getElementById('kalfMin'), tx=document.getElementById('kalfTxt');
-  if(mi&&tx) mi.addEventListener('input',function(){ if(parseInt(mi.value,10)>0&&!tx.value&&vorschlag)tx.value=vorschlag; });
+  const mi=document.getElementById('kalfMin'), mr=document.getElementById('kalfMinR'), tx=document.getElementById('kalfTxt');
+  const _vor=function(el){ if(el&&parseInt(el.value,10)>0&&tx&&!tx.value&&vorschlag)tx.value=vorschlag; };
+  if(mi) mi.addEventListener('input',function(){_vor(mi);});
+  if(mr) mr.addEventListener('input',function(){_vor(mr);});
   const f=document.getElementById(focus==='name'?'kalfName':'kalfMin');
   if(f){ f.focus(); try{f.select();}catch(e){} }
 }
@@ -8743,11 +8752,16 @@ function _kalfSave(taskId,idx){
   if(!r.t){ _kalfClose(); showToast('⚠ Termin nicht gefunden','warning',4000); return; }
   const n=parseInt((document.getElementById('kalfMin')||{}).value,10);
   const fahrt=(isNaN(n)||n<0)?0:n;
+  const rRaw=(((document.getElementById('kalfMinR')||{}).value)||'').trim();
+  let fahrtR=null;                                 // null = wie Hinfahrt (Feld leer)
+  if(rRaw!==''){ const rn=parseInt(rRaw,10); fahrtR=(isNaN(rn)||rn<0)?0:rn; }
+  const effR=(fahrtR==null)?fahrt:fahrtR;
   const txt=((document.getElementById('kalfTxt')||{}).value||'').trim();
   const name=((document.getElementById('kalfName')||{}).value||'').trim();
   const apply=function(t){
     t.fahrt=fahrt; delete t.anfahrt;               // altes Feld ablösen
-    if(fahrt>0&&txt) t.fahrtText=txt; else delete t.fahrtText;   // ohne Fahrt keine Bezeichnung
+    if(fahrtR==null||fahrtR===fahrt) delete t.fahrtRueck; else t.fahrtRueck=fahrtR;
+    if((fahrt>0||effR>0)&&txt) t.fahrtText=txt; else delete t.fahrtText;   // ohne Fahrt keine Bezeichnung
     if(name) t.betreff=name; else delete t.betreff;
     t._pamDirty=true;                              // Fahrt-Einträge in Outlook anlegen / ändern / entfernen
   };
@@ -8763,7 +8777,9 @@ function _kalfSave(taskId,idx){
   }
   _kalfClose();
   if(currentView==='kalender')renderKalender(true);
-  showToast(fahrt>0?('✓ Fahrt '+fahrt+' min je Richtung gespeichert'):'✓ Gespeichert – keine Fahrzeit','info',3000);
+  showToast((fahrt>0||effR>0)
+    ?('✓ Fahrt '+(fahrt===effR?(fahrt+' min je Richtung'):(fahrt+' min hin / '+effR+' min zurück'))+' gespeichert')
+    :'✓ Gespeichert – keine Fahrzeit','info',3000);
 }
 /* 🚗 aus dem Termin-Formular des Auftrags: wirkt auf die offene Arbeitskopie */
 function _kalFahrtDialogForm(i){
@@ -9059,17 +9075,21 @@ async function _msDeleteFahrtEvents(t){
 }
 async function _msPushFahrt(task,t){
   if(!msToken||!t||!t.date||!t.von)return;
-  const f=_kalFahrt(t);
-  if(f<=0){ await _msDeleteFahrtEvents(t); return; }      // keine Fahrt mehr → Einträge raus
+  const fHin=_kalFahrt(t), fRueck=_kalFahrtR(t);          // b484: je Richtung eigener Wert
+  if(fHin<=0&&fRueck<=0){ await _msDeleteFahrtEvents(t); return; }   // keine Fahrt mehr → Einträge raus
+  // Eine Richtung auf 0 gesetzt → deren vorhandenen Outlook-Eintrag entfernen
+  for(const d of [['outlookFahrtHinId',fHin],['outlookFahrtRueckId',fRueck]]){
+    if(d[1]<=0&&t[d[0]]){ try{ await _msDeleteEvent(t[d[0]]); }catch(e){ console.warn('[KAL] Fahrt-Eintrag nicht gelöscht:',e); } delete t[d[0]]; }
+  }
   const von=_normTime(t.von);
   const bisT=t.bis?_normTime(t.bis):_addMinToHHMM(von,60);
-  const hinStart=_addMinToHHMM(von,-f), rueckEnd=_addMinToHHMM(bisT,f);
+  const hinStart=_addMinToHHMM(von,-fHin), rueckEnd=_addMinToHHMM(bisT,fRueck);
   const ort=((task&&task.adresse)||'').trim();
   const base=window.location.origin+window.location.pathname;
   const link=base+'?task='+encodeURIComponent(task.id||'');
   const legs=[];
-  if(hinStart<von)   legs.push({key:'outlookFahrtHinId',  rueck:false,start:hinStart,end:von});      // sonst Überlauf über Mitternacht
-  if(rueckEnd>bisT)  legs.push({key:'outlookFahrtRueckId',rueck:true, start:bisT,    end:rueckEnd});
+  if(fHin>0&&hinStart<von)   legs.push({key:'outlookFahrtHinId',  rueck:false,start:hinStart,end:von});      // sonst Überlauf über Mitternacht
+  if(fRueck>0&&rueckEnd>bisT)legs.push({key:'outlookFahrtRueckId',rueck:true, start:bisT,    end:rueckEnd});
   for(const leg of legs){
     const ev={ subject:_msFahrtSubject(task,t,leg.rueck), categories:['PAM'],
       start:{dateTime:t.date+'T'+leg.start+':00',timeZone:'Europe/Berlin'},
@@ -9888,7 +9908,7 @@ function renderAusserhausTermine(){
       <input type="text" value="${esc(t.beschreibung||'')}" placeholder="Beschreibung" oninput="syncAusserhausTermin(${i},'beschreibung',this.value)" autocomplete="off">
       <button class="termin-row-btn cal" onclick="openGcalTermin(${i})" title="In Google Kalender eintragen">📅</button>
       <button class="termin-row-btn" onclick="openOutlookTermin(${i})" title="In Outlook Kalender eintragen" style="background:#0078d4;color:#fff;border:none;border-radius:5px;padding:0 8px;cursor:pointer;font-size:14px;">📆</button>
-      <button class="termin-row-btn" onclick="_kalFahrtDialogForm(${i})" title="Fahrzeit je Richtung + Fahrt-Bezeichnung + Outlook-Name${_kalFahrt(t)>0?' (aktuell '+_kalFahrt(t)+' min)':''}" style="${_kalFahrt(t)>0?'background:#E6F1FB;border:1px solid #378ADD;border-radius:5px;':''}">🚗</button>
+      <button class="termin-row-btn" onclick="_kalFahrtDialogForm(${i})" title="Hin-/Rückfahrtzeit + Fahrt-Bezeichnung + Outlook-Name${(_kalFahrt(t)>0||_kalFahrtR(t)>0)?' (aktuell hin '+_kalFahrt(t)+' / zurück '+_kalFahrtR(t)+' min)':''}" style="${(_kalFahrt(t)>0||_kalFahrtR(t)>0)?'background:#E6F1FB;border:1px solid #378ADD;border-radius:5px;':''}">🚗</button>
       <button class="termin-row-btn del" onclick="removeAusserhausTermin(${i})">✕</button>
       <button class="termin-row-btn" onclick="erledigtAusserhausTermin(${i})" title="Als erledigt markieren + Verlaufseintrag" style="${t.erledigt?'background:#4CAF50;color:#fff;':''}">${t.erledigt?'✓':'○'}</button>
     </div>`).join('');
