@@ -741,7 +741,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
     <div class="ctl-row">
       <button id="locBtn" class="ctl-btn">📍 Mein Standort</button>
       <button id="liveBtn" class="ctl-btn" title="Live-Standort: Punkt wandert mit, ±m-Anzeige, Blickrichtung">📡 Live</button>
-      <button id="offBtn" class="ctl-btn" title="Aktuell sichtbares Gebiet als Luftbild-Kacheln offline speichern (für die Nutzung ohne Netz)">📥 Offline speichern</button>
+      <button id="offBtn" class="ctl-btn" title="Luftbild rund um die angezeigten Objekte offline speichern (für die Nutzung ohne Netz)">📥 Offline speichern</button>
       <button id="legBtn" class="ctl-btn">Legende ausblenden</button>
     </div>
   </header>
@@ -1135,25 +1135,34 @@ async function updateOffBtn(){
 }
 async function saveOfflineArea(){
   if(_saving) return;
-  if(!navigator.onLine){ alert("Zum Speichern brauchst du einmal Internet. Danach ist das Gebiet offline verfügbar."); return; }
+  if(!navigator.onLine){ alert("Zum Speichern brauchst du einmal Internet. Danach sind die Objekte offline verfügbar."); return; }
   const activeBase = [dopTH, baseSat, baseOSM].find(l=>map.hasLayer(l)) || dopTH;
-  const bnds = map.getBounds();
-  const zMin = 16, zMax = 19;
-  const urls = [];
+  // Nur Kacheln RUND UM die angezeigten Objekte (nicht das leere Feld dazwischen) – spart enorm.
+  const visMarkers = allMarkers.filter(o => map.hasLayer(o.mk));
+  if(!visMarkers.length){ alert("Es sind gerade keine Objekte sichtbar."); return; }
+  const zMin = 16, zMax = 18, ring = 1;   // z16–18 + 1 Kachel Rand je Objekt (Kontext)
+  const tileMap = new Map();
   for(let z=zMin; z<=zMax; z++){
-    const nw = map.project(bnds.getNorthWest(), z).divideBy(256).floor();
-    const se = map.project(bnds.getSouthEast(), z).divideBy(256).floor();
-    for(let x=nw.x; x<=se.x; x++) for(let y=nw.y; y<=se.y; y++){ const c=L.point(x,y); c.z=z; urls.push(activeBase.getTileUrl(c)); }
+    for(const o of visMarkers){
+      const p = map.project(L.latLng(o.ll[0], o.ll[1]), z).divideBy(256).floor();
+      for(let dx=-ring; dx<=ring; dx++) for(let dy=-ring; dy<=ring; dy++){
+        const x=p.x+dx, y=p.y+dy, k=z+"|"+x+"|"+y;
+        if(!tileMap.has(k)) tileMap.set(k, { z:z, x:x, y:y });
+      }
+    }
   }
-  const total = urls.length;
-  if(!total){ alert("Kein Gebiet sichtbar."); return; }
-  if(total > 500){ alert(`Dieses Gebiet ist zu groß zum Speichern (${total} Kacheln, ~${Math.round(total*130/1024)} MB).\n\nBitte näher heranzoomen – am besten auf einen Straßenzug bzw. deine Objekte – und dann erneut „📥 Offline speichern".`); return; }
-  if(!confirm(`${total} Luftbild-Kacheln (~${Math.max(1,Math.round(total*130/1024))} MB) für dieses Gebiet offline speichern?\n\nTipp: erst auf dein Objekt-Gebiet zoomen (nicht die ganze Stadt), dann speichern.`)) return;
+  const list = [...tileMap.values()];
+  const total = list.length;
+  if(!total){ alert("Nichts zu speichern."); return; }
+  if(total > 1200){ alert(`Zu viele Kacheln (${total}, ~${Math.round(total*130/1024)} MB).\n\nTipp: oben im Filter „Dachtyp" nur Ziegel bzw. nur Flada wählen und beide getrennt speichern.`); return; }
+  if(!confirm(`${total} Luftbild-Kacheln (~${Math.max(1,Math.round(total*130/1024))} MB) rund um die ${visMarkers.length} angezeigten Objekte speichern?`)) return;
   _saving = true;
   statusEl.classList.remove("hidden");
   statusEl.querySelector(".prog").style.display = "";
   let done=0, ok=0;
-  for(const url of urls){
+  for(const t of list){
+    const c = L.point(t.x, t.y); c.z = t.z;
+    const url = activeBase.getTileUrl(c);
     try{
       if(await idbGet(url)){ ok++; }
       else { const r = await fetch(url); if(r.ok){ await idbPut(url, await r.blob()); ok++; } }
@@ -1166,7 +1175,7 @@ async function saveOfflineArea(){
   }
   _saving = false;
   const cnt = await idbCount();
-  statusEl.firstChild.textContent = `✓ Gebiet offline gespeichert (${ok} Kacheln, gesamt ${cnt})`;
+  statusEl.firstChild.textContent = `✓ Objekte offline gespeichert (${ok} Kacheln, gesamt ${cnt})`;
   setTimeout(()=>statusEl.classList.add("hidden"), 3500);
   updateOffBtn();
 }
