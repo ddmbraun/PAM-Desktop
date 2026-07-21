@@ -4249,7 +4249,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-20 · #486'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-20-b486)
+const PAM_BUILD = 'v2026-07-21 · #487'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-21-b487)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -5226,6 +5226,7 @@ let _pamDeletedIds=new Set();
 try{(JSON.parse(localStorage.getItem('pam_deleted_ids_v1')||'[]')||[]).forEach(id=>_pamDeletedIds.add(id));}catch(e){}
 function _pamPersistDeletedIds(){try{localStorage.setItem('pam_deleted_ids_v1',JSON.stringify([..._pamDeletedIds].slice(-500)));}catch(e){}}
 function _pamMarkTaskDeleted(id){if(!id)return;_pamDeletedIds.add(id);_pamPersistDeletedIds();}
+function _pamUnmarkTaskDeleted(id){if(!id)return;if(_pamDeletedIds.delete(id))_pamPersistDeletedIds();} // #487: Lösch-Marker aufheben (z.B. beim Wiederherstellen aus dem Archiv), sonst würde der Task beim nächsten Cloud-Sync erneut entfernt
 
 let gdriveToken = null;
 let gdriveTokenExpires = 0;
@@ -6883,10 +6884,13 @@ function loadFromObject(data){
   try{_pamMigrateOldMerges();}catch(e){console.warn('[PAM] _pamMigrateOldMerges:',e);}
 }
 
-// ── Auto-Migration: repariert vor dem Merge-Fix (b417) zusammengeführte Tasks ──
-// 1) weggemergte Tasks bekommen nachträglich ihren Lösch-Marker (verhindert Wiederkehr beim Sync)
-// 2) evtl. wieder aufgetauchte Duplikate werden aus den Boards entfernt
-// 3) beim Master werden fehlende Mail-Verknüpfungen (gmailThreadId/emailSenderName/emailUrl) aus dem Archiv-Snapshot nachgetragen
+// ── Auto-Migration: bereinigt Archiv-Dubletten (idempotent, läuft beim Laden) ──
+// Deckt ZWEI Ursachen ab:
+//  a) vor dem Merge-Fix (b424) zusammengeführte Tasks
+//  b) #487: normal archivierte Tasks, die ohne Lösch-Marker beim Cloud-Sync aus der Remote-Basis zurück ins Board kamen
+// 2) noch/wieder lebende Board-Kopie eines archivierten Tasks wird entfernt (die eigentliche Dublette)
+// 1) betroffene Tasks bekommen ihren Lösch-Marker nachgetragen (verhindert erneute Wiederkehr beim Sync)
+// 3) beim Master werden fehlende Mail-Verknüpfungen (gmailThreadId/emailSenderName/emailUrl) aus dem Archiv-Snapshot nachgetragen – nur bei zusammengeführten Tasks
 let _pamMigrateBusy=false;
 function _pamMigrateOldMerges(){
   if(_pamMigrateBusy)return;
@@ -6895,16 +6899,19 @@ function _pamMigrateOldMerges(){
   try{
     let markiert=0, dupsEntfernt=0, masterRepariert=0;
     archivedTasks.forEach(function(snap){
-      if(!snap||!snap.id||!snap.zusammengefuehrtMit)return;
-      // 1) Lösch-Marker nachtragen
-      if(!_pamDeletedIds.has(snap.id)){_pamDeletedIds.add(snap.id);markiert++;}
-      // 2) noch/wieder lebende Kopie im Board entfernen
+      if(!snap||!snap.id)return; // #487: gilt jetzt für ALLE archivierten Tasks, nicht nur zusammengeführte
+      const _merged=!!snap.zusammengefuehrtMit;
+      // 2) noch/wieder lebende Kopie im Board entfernen (die eigentliche Archiv+Board-Dublette)
+      let _hatDublette=false;
       Object.keys(boards).forEach(function(bk){
         if(!Array.isArray(boards[bk]))return;
         const idx=boards[bk].findIndex(function(t){return t&&t.id===snap.id;});
-        if(idx>=0){boards[bk].splice(idx,1);dupsEntfernt++;}
+        if(idx>=0){boards[bk].splice(idx,1);dupsEntfernt++;_hatDublette=true;}
       });
-      // 3) Master-Link-Felder nachtragen
+      // 1) Lösch-Marker nachtragen – bei Merges immer (Alt-Fälle vor b424), sonst nur wenn eine Board-Dublette existierte
+      if((_merged||_hatDublette)&&!_pamDeletedIds.has(snap.id)){_pamDeletedIds.add(snap.id);markiert++;}
+      // 3) Master-Link-Felder nachtragen – nur bei zusammengeführten Tasks
+      if(!_merged)return;
       const masterId=snap.zusammengefuehrtMit;
       let master=null;
       for(const bk of Object.keys(boards)){
@@ -6929,11 +6936,11 @@ function _pamMigrateOldMerges(){
           const parts=[];
           if(dupsEntfernt)parts.push(dupsEntfernt+' doppelte'+(dupsEntfernt!==1?' Tasks':'r Task')+' entfernt');
           if(masterRepariert)parts.push(masterRepariert+' Master mit Mail-Verknüpfung repariert');
-          showToast('✓ Alt-Merges bereinigt: '+parts.join(' · '),'success',7000);
+          showToast('✓ Archiv-Dubletten bereinigt: '+parts.join(' · '),'success',7000);
         }
       },900);
     } else if(markiert){
-      console.info('[PAM] Alt-Merges gesichert:',markiert,'Lösch-Marker nachgetragen');
+      console.info('[PAM] Archiv-Dubletten gesichert:',markiert,'Lösch-Marker nachgetragen');
     }
   }finally{_pamMigrateBusy=false;}
 }
@@ -10773,6 +10780,7 @@ function archiveTask(taskId,evt){
       task.spaeterBearbeitenAm='';
       task._archivProjekt=bk;
       archivedTasks.push(task);
+      _pamMarkTaskDeleted(taskId); // #487: verhindert, dass der Task beim 30-Sek-Cloud-Sync aus der Remote-Basis zurück ins Board kommt (sonst Dublette Archiv+Board)
       render();autoSave();
       showToast('📦 Task archiviert','success',2500);
       return;
@@ -10797,6 +10805,7 @@ function restoreTask(taskId,evt){
   task.archiviertAm='';
   delete task._archivProjekt;
   boards[target].push(task);
+  _pamUnmarkTaskDeleted(taskId); // #487: Lösch-Marker aufheben, sonst würde der wiederhergestellte Task beim nächsten Cloud-Sync erneut entfernt
   render();autoSave();
   showToast('✓ Task wiederhergestellt'+movedNotice,'success',movedNotice?6000:2500);
 }
