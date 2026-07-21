@@ -66,7 +66,6 @@ async function _clearCacheAndReload(){
 try{var _cs=+(localStorage.getItem('pam_card_scale')||100);document.documentElement.style.setProperty('--card-scale',(_cs/100).toFixed(2));}catch(e){}
 </script>
 <script src="https://accounts.google.com/gsi/client" defer onload="typeof gdriveInit==='function'?gdriveInit():(window._gsiPending=true)" onerror="window._gsiLoadError=true;window._gsiPending=false;typeof _driveSetStatus==='function'&&_driveSetStatus('⚠ Google-Dienst nicht erreichbar – Netzwerk oder Adblocker prüfen',false)"></script>
-<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js" defer onload="typeof msInit==='function'?msInit():(window._msalPending=true)" onerror="console.warn('[MS] MSAL nicht geladen')"></script>
 <script>
 // ── EMAIL DROP-ZONE – Inline-Handler am Element, kein addEventListener nötig ──
 
@@ -4250,7 +4249,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-18 · #485'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-18-b485)
+const PAM_BUILD = 'v2026-07-20 · #486'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-20-b486)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -5264,13 +5263,19 @@ function gdriveInit() {
   const _query = new URLSearchParams(window.location.search);
   const _authCode = _query.get('code');
   if (_authCode) {
+    const _oauthState = _query.get('state') || '';
     window.history.replaceState({}, '', window.location.pathname);
-    if (_query.get('state') === 'gmail') {
+    if (_oauthState === 'ms1' || _oauthState === 'ms2') {
+      // b486: Outlook-Rückkehr (Code-Flow) – Tausch läuft im Hintergrund über die
+      // Cloud Function, Drive-Init danach ganz normal fortsetzen (kein return!)
+      _exchangeMsCodeForToken(_authCode, _oauthState === 'ms2' ? '2' : '1');
+    } else if (_oauthState === 'gmail') {
       _exchangeGmailCodeForToken(_authCode);
+      return;
     } else {
       _exchangeCodeForToken(_authCode);
+      return;
     }
-    return;
   }
 
   // ── Redirect-Rückkehr: Token aus URL-Hash nach Google-Login lesen (Legacy Implicit Flow) ──
@@ -15491,11 +15496,28 @@ const MS_CLIENT_ID='4296f960-6e3e-4ca8-b0ef-eae6429ffa15';
 const MS_TENANT_ID='e0de9521-b302-4fac-ad8b-88dc5c2c789b';
 const MS_REDIRECT = window.location.origin + window.location.pathname.replace(/index\.html$/i, '');
 const MS_SCOPES=['Mail.Read','Mail.ReadWrite','User.Read','Calendars.ReadWrite']; // Fix #370: Mail.ReadWrite für createReply (Antwort-Entwürfe) – vorher 403 | 2026-07-05: Calendars.ReadWrite für Outlook-Kalender-Anbindung (Konto 1 = info@ddmbraun.de)
-let msalInstance=null;
+// b486: MSAL komplett ersetzt – Outlook-Login läuft jetzt wie Google über die
+// oauthBridge-Cloud-Function (Code-Flow + PKCE, Public Client ohne Secret).
+// Grund: Microsoft begrenzt Refresh-Tokens für Browser-SPAs hart auf 24 h →
+// tägliches Neu-Verbinden. Über die Cloud Function halten sie ~90 Tage rollierend.
 let msToken=null;
 let msUserEmail=null;
 let msToken2=null;      // Zweites Outlook-Konto (f.braun@ddmbraun.de)
 let msUserEmail2=null;
+const MS_RT_KEY=function(slot){return 'pam_ms_refresh_'+slot;};   // Dauer-Ticket (Refresh-Token)
+const MS_AT_KEY=function(slot){return 'pam_ms_token_'+slot;};     // Zugriffstoken-Cache {token,email,exp}
+// Gibt es für den Slot (oder irgendeinen) ein gespeichertes Dauer-Ticket?
+function _msHasStoredAccount(slot){
+  try{
+    if(slot)return !!localStorage.getItem(MS_RT_KEY(slot));
+    return !!(localStorage.getItem(MS_RT_KEY('1'))||localStorage.getItem(MS_RT_KEY('2')));
+  }catch(e){return false;}
+}
+// Token + E-Mail in den richtigen Slot schreiben und Button aktualisieren
+function _msSetSlot(slot,tok,email){
+  if(slot==='2'){msToken2=tok;if(email!==undefined)msUserEmail2=email||null;_msUpdateBtn2();}
+  else{msToken=tok;if(email!==undefined)msUserEmail=email||null;_msUpdateBtn();}
+}
 let _pamActiveTaskId=''; // Fallback-ID wenn taskId-DOM-Feld leer ist
 let _pamCurrentTask=null;  // Fallback-Task-Objekt wenn findTaskById fehlschlägt
 
@@ -15523,99 +15545,141 @@ function _getActiveTaskId(){
 }
 
 function msInit(){
-  if(typeof msal==='undefined'){console.warn('[MS] MSAL nicht verfügbar');return;}
-  try{
-    msalInstance=new msal.PublicClientApplication({
-      auth:{clientId:MS_CLIENT_ID,authority:'https://login.microsoftonline.com/'+MS_TENANT_ID,redirectUri:MS_REDIRECT},
-      cache:{cacheLocation:'localStorage',storeAuthStateInCookie:true}
-    });
-    // initialize() abwarten bevor handleRedirectPromise – nötig ab MSAL v2.x
-    const _initPromise=typeof msalInstance.initialize==='function'
-      ?msalInstance.initialize()
-      :Promise.resolve();
-    _initPromise.then(()=>{
-      return msalInstance.handleRedirectPromise();
-    }).then(r=>{
-      if(r){
-        // Redirect-Ergebnis: Slot aus localStorage lesen
-        const _slot=localStorage.getItem('_msPamLoginSlot')||'1';
-        localStorage.removeItem('_msPamLoginSlot');
-        if(_slot==='2'){
-          msToken2=r.accessToken;msUserEmail2=r.account?.username||'';
-          _msUpdateBtn2();showToast('✅ Outlook 2 verbunden: '+msUserEmail2,'success',3000);
-        }else{
-          _msHandleToken(r);
-        }
-      }else{
-        // Fix #394: Stiller Token-Refresh beim Start – sequenziell (verhindert Race Condition)
-        // Konto-Zuweisung per E-Mail-Adresse statt per Reihenfolge der Promise-Auflösung.
-        const accs=msalInstance.getAllAccounts();
-        (async()=>{
-          for(const acc of accs.slice(0,2)){
-            // Konto 2 erkennen anhand E-Mail (nicht per Reihenfolge)
-            const _isK2=(acc.username||'').toLowerCase().includes('f.braun@ddmbraun');
-            let _tok=null;
-            try{
-              const r2=await msalInstance.acquireTokenSilent({scopes:MS_SCOPES,account:acc});
-              _tok=r2.accessToken;
-            }catch(e){
-              console.warn('[MS] Startup silent fehlgeschlagen, versuche forceRefresh:',e.errorCode||e.message);
-              try{
-                const r3=await msalInstance.acquireTokenSilent({scopes:MS_SCOPES,account:acc,forceRefresh:true});
-                _tok=r3.accessToken;
-                console.info('[MS] forceRefresh erfolgreich für',acc.username);
-              }catch(e2){
-                // Fix #394: dezenter Hinweis statt nur console.warn – Nutzer weiß warum Outlook-Funktionen fehlen
-                console.warn('[MS] Startup-Refresh komplett fehlgeschlagen:',e2.errorCode||e2.message);
-                showToast('ℹ Outlook ('+( acc.username||'Konto').split('@')[0]+') muss neu verbunden werden – 📨 klicken','info',6000);
-                if(_isK2){msToken2=null;_msUpdateBtn2();}else{msToken=null;}
-              }
-            }
-            if(_tok){
-              if(_isK2){
-                msToken2=_tok;msUserEmail2=acc.username||'';_msUpdateBtn2();
-                // kein Toast beim Auto-Start für Konto 2
-              }else{
-                _msHandleToken({accessToken:_tok,account:acc},true); // silent=true → kein Toast
-              }
-            }
-          }
-          _msUpdateBtn();
-        })();
+  // b486: Start-Erneuerung ohne MSAL – gültigen Token-Cache direkt nutzen,
+  // sonst still über die Cloud Function erneuern (sequenziell wie Fix #394).
+  (async()=>{
+    for(const slot of ['1','2']){
+      let cached=null;
+      try{cached=JSON.parse(localStorage.getItem(MS_AT_KEY(slot))||'null');}catch(e){}
+      if(cached&&cached.token&&cached.exp&&Date.now()<cached.exp){
+        _msSetSlot(slot,cached.token,cached.email||'');
+        continue;
       }
-      _msUpdateBtn();
-    }).catch(e=>console.warn('[MS] handleRedirect:',e));
-  }catch(e){console.warn('[MS] Init:',e);}
+      if(_msHasStoredAccount(slot)){
+        const ok=await _msRenewViaCloud(slot,true);
+        if(!ok&&!_msHasStoredAccount(slot)){
+          // Dauer-Ticket war ungültig und wurde entfernt → Nutzer informieren
+          showToast('ℹ Outlook ('+(slot==='2'?'f.braun':'info')+') muss neu verbunden werden – 📨 klicken','info',6000);
+        }
+      }
+    }
+  })();
+}
+
+// ── b486: PKCE-Challenge erzeugen (Verifier überlebt den Redirect in localStorage) ──
+async function _msPkceStart(){
+  const _b64url=function(buf){return btoa(String.fromCharCode.apply(null,new Uint8Array(buf))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');};
+  const verifier=_b64url(crypto.getRandomValues(new Uint8Array(32)));
+  const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier));
+  localStorage.setItem('_msPamPkce',verifier);
+  return _b64url(digest);
+}
+
+// ── b486: Login starten – voller Seiten-Redirect zu Microsoft (wie Google-Login) ──
+async function _msStartLogin(slot){
+  try{
+    const challenge=await _msPkceStart();
+    localStorage.setItem('_msPamLoginSlot',slot);
+    _saveLocalBackup(); // Daten sichern – die Seite verlässt PAM gleich
+    const params=new URLSearchParams({
+      client_id:MS_CLIENT_ID,
+      response_type:'code',
+      redirect_uri:MS_REDIRECT,
+      response_mode:'query',
+      scope:MS_SCOPES.join(' ')+' offline_access openid profile',
+      state:slot==='2'?'ms2':'ms1',
+      code_challenge:challenge,
+      code_challenge_method:'S256',
+      login_hint:slot==='2'?'f.braun@ddmbraun.de':'info@ddmbraun.de'
+    });
+    window.location.href='https://login.microsoftonline.com/'+MS_TENANT_ID+'/oauth2/v2.0/authorize?'+params;
+  }catch(e){
+    console.warn('[MS] Login-Start:',e);
+    showToast('⚠ Outlook-Login: '+(e.message||e),'error',5000);
+  }
+}
+
+// ── b486: Authorization Code gegen Tokens tauschen (via Cloud Function) ──
+async function _exchangeMsCodeForToken(authCode,slot){
+  slot=slot==='2'?'2':'1';
+  const verifier=localStorage.getItem('_msPamPkce')||'';
+  try{localStorage.removeItem('_msPamPkce');localStorage.removeItem('_msPamLoginSlot');}catch(e){}
+  try{
+    const response=await fetch(CLOUD_FUNCTION_URL,{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'ms_exchange',code:authCode,code_verifier:verifier,redirect_uri:MS_REDIRECT})
+    });
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok||data.error||!data.access_token)throw new Error(data.error_description||data.error||('Cloud-Server Fehler: '+response.status));
+    if(data.refresh_token){try{localStorage.setItem(MS_RT_KEY(slot),data.refresh_token);}catch(e){}}
+    else console.warn('[MS'+slot+'] Kein Refresh-Token erhalten – offline_access fehlt?');
+    const exp=Date.now()+(Number(data.expires_in||3600)-60)*1000;
+    let email='';
+    try{const u=await fetch('https://graph.microsoft.com/v1.0/me',{headers:{Authorization:'Bearer '+data.access_token}}).then(r=>r.json());email=u.mail||u.userPrincipalName||'';}catch(e){}
+    try{localStorage.setItem(MS_AT_KEY(slot),JSON.stringify({token:data.access_token,email:email,exp:exp}));}catch(e){}
+    _msSetSlot(slot,data.access_token,email);
+    showToast('✅ Outlook'+(slot==='2'?' 2':'')+' verbunden: '+(email||'')+(data.refresh_token?'':' (⚠ ohne Dauer-Ticket)'),'success',4000);
+  }catch(err){
+    console.warn('[MS'+slot+'] Code-Tausch:',err);
+    showToast('⚠ Outlook-Anmeldung fehlgeschlagen: '+(err.message||err),'error',8000);
+  }
+}
+
+// ── b486: Zugriffstoken still über die Cloud Function erneuern ──
+// Microsoft ROTIERT Refresh-Tokens: das neue Ticket aus der Antwort immer speichern!
+let _msRenewBusy={};
+async function _msRenewViaCloud(slot,silent){
+  slot=slot==='2'?'2':'1';
+  if(_msRenewBusy[slot])return _msRenewBusy[slot]; // laufende Erneuerung mitbenutzen (kein Doppel-Refresh → Rotation würde sonst Tickets entwerten)
+  _msRenewBusy[slot]=(async()=>{
+    let rt=null;
+    try{rt=localStorage.getItem(MS_RT_KEY(slot));}catch(e){}
+    if(!rt)return false;
+    try{
+      const response=await fetch(CLOUD_FUNCTION_URL,{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:'ms_refresh',refresh_token:rt})
+      });
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok||!data.access_token){
+        const errStr=JSON.stringify(data&&(data.error_description||data.error)||'');
+        if(errStr.includes('invalid_grant')){
+          // Ticket widerrufen/abgelaufen → entfernen, nächster Klick meldet neu an
+          try{localStorage.removeItem(MS_RT_KEY(slot));localStorage.removeItem(MS_AT_KEY(slot));}catch(e){}
+          _msSetSlot(slot,null,'');
+          console.warn('[MS'+slot+'] Refresh-Token ungültig – entfernt.');
+          if(!silent)showToast('⚠ Outlook-Anmeldung abgelaufen – bitte 📨 klicken und neu verbinden','warning',6000);
+        }else{
+          console.warn('[MS'+slot+'] Cloud-Refresh fehlgeschlagen:',errStr||response.status);
+        }
+        return false;
+      }
+      if(data.refresh_token){try{localStorage.setItem(MS_RT_KEY(slot),data.refresh_token);}catch(e){}}
+      const exp=Date.now()+(Number(data.expires_in||3600)-60)*1000;
+      let email=slot==='2'?msUserEmail2:msUserEmail;
+      if(!email){try{email=(JSON.parse(localStorage.getItem(MS_AT_KEY(slot))||'{}')||{}).email||'';}catch(e){}}
+      if(!email){try{const u=await fetch('https://graph.microsoft.com/v1.0/me',{headers:{Authorization:'Bearer '+data.access_token}}).then(r=>r.json());email=u.mail||u.userPrincipalName||'';}catch(e){}}
+      try{localStorage.setItem(MS_AT_KEY(slot),JSON.stringify({token:data.access_token,email:email,exp:exp}));}catch(e){}
+      _msSetSlot(slot,data.access_token,email);
+      return true;
+    }catch(e){
+      console.warn('[MS'+slot+'] Cloud-Refresh Fehler:',e);
+      return false;
+    }
+  })();
+  const r=await _msRenewBusy[slot];
+  _msRenewBusy[slot]=null;
+  return r;
 }
 
 async function msConnect(){
-  if(!msalInstance){showToast('⚠ Outlook-Verbindung nicht verfügbar','error',3000);return;}
-  if(msToken){
-    // Abmelden
+  if(msToken||_msHasStoredAccount('1')){
+    // Abmelden – nur PAM-seitig (Tokens verwerfen, Microsoft-Browser-Session bleibt)
     msToken=null;msUserEmail=null;
-    try{const accs=msalInstance.getAllAccounts();if(accs.length>0)msalInstance.logoutRedirect({account:accs[0],postLogoutRedirectUri:MS_REDIRECT});}catch(e){}
+    try{localStorage.removeItem(MS_RT_KEY('1'));localStorage.removeItem(MS_AT_KEY('1'));}catch(e){}
     _msUpdateBtn();showToast('Outlook abgemeldet','info',2000);return;
   }
-  try{
-    // Sicherstellen dass MSAL vollständig initialisiert ist
-    // Fix: msalInstance.initialized ist keine offizielle MSAL-Property → Guard entfernt,
-    // initialize() ist in MSAL v3 idempotent und kann sicher wiederholt aufgerufen werden
-    if(typeof msalInstance.initialize==='function'){
-      await msalInstance.initialize();
-    }
-    await msalInstance.loginRedirect({scopes:MS_SCOPES});
-    // Seite wird weitergeleitet → handleRedirectPromise() bei Rückkehr zuständig
-  }catch(e){
-    console.warn('[MS] loginRedirect Fehler:',e);
-    if(e.errorCode!=='user_cancelled')showToast('⚠ Outlook-Login: '+( e.errorCode||e.message),'error',5000);
-  }
-}
-
-function _msHandleToken(resp,silent){
-  msToken=resp.accessToken;
-  msUserEmail=resp.account?.username||'';
-  _msUpdateBtn();
-  if(!silent)showToast('✅ Outlook verbunden: '+msUserEmail,'success',3000);
+  _msStartLogin('1');
 }
 
 function _msUpdateBtn(){
@@ -15636,64 +15700,20 @@ function _msUpdateBtn(){
 }
 
 async function _msRefreshToken(){
-  if(!msalInstance)return false;
-  const accs=msalInstance.getAllAccounts();
-  if(!accs.length)return false;
-  const _acc1=msUserEmail?accs.find(a=>(a.username||'').toLowerCase()===msUserEmail.toLowerCase()):accs[0];
-  const _account=_acc1||accs[0];
-  // Versuch 1: silent aus Cache
-  try{
-    const r=await msalInstance.acquireTokenSilent({scopes:MS_SCOPES,account:_account});
-    msToken=r.accessToken;_msUpdateBtn();return true;
-  }catch(e1){
-    console.warn('[MS] acquireTokenSilent fehlgeschlagen:',e1.errorCode||e1.message);
-  }
-  // Versuch 2: silent mit forceRefresh (nutzt Refresh-Token ohne Popup)
-  try{
-    const r=await msalInstance.acquireTokenSilent({scopes:MS_SCOPES,account:_account,forceRefresh:true});
-    msToken=r.accessToken;_msUpdateBtn();return true;
-  }catch(e2){
-    console.warn('[MS] forceRefresh fehlgeschlagen:',e2.errorCode||e2.message);
-  }
-  // Versuch 3: Popup (Microsoft-Konto im Browser bereits eingeloggt → kein Passwort nötig)
-  try{
-    const popupParams={scopes:MS_SCOPES,account:_account};
-    if(_account?.username)popupParams.loginHint=_account.username;
-    const r=await msalInstance.acquireTokenPopup(popupParams);
-    msToken=r.accessToken;_msUpdateBtn();
-    showToast('✅ Outlook neu verbunden','success',2500);
-    return true;
-  }catch(e3){
-    // Popup geblockt oder User hat abgebrochen oder Session komplett abgelaufen
-    const _code=e3.errorCode||e3.name||'';
-    const _blocked=_code.includes('popup_window_error')||_code.includes('empty_window');
-    msToken=null;_msUpdateBtn();
-    if(_blocked){
-      showToast('⚠ Outlook: Popup wurde blockiert – bitte Popup-Blocker für diese Seite deaktivieren, dann 📨 Outlook klicken','warning',8000);
-    }else{
-      showToast('⚠ Outlook-Session abgelaufen – bitte 📨 Outlook in der Toolbar klicken','warning',6000);
-    }
-    return false;
-  }
+  // b486: Erneuerung läuft komplett über das Dauer-Ticket in der Cloud Function –
+  // kein MSAL-Cache, kein Popup mehr nötig. Gleiche Rückgabe (true = msToken frisch).
+  return _msRenewViaCloud('1');
 }
 
 // ── Zweites Outlook-Konto (f.braun@ddmbraun.de) ──────────────────
 async function msConnect2(){
-  if(!msalInstance){showToast('⚠ Outlook-Verbindung nicht verfügbar','error',3000);return;}
-  if(msToken2){
+  if(msToken2||_msHasStoredAccount('2')){
     // Abmelden (nur Slot 2 leeren, Slot 1 bleibt)
-    msToken2=null;msUserEmail2=null;_msUpdateBtn2();
-    showToast('Outlook 2 abgemeldet','info',2000);return;
+    msToken2=null;msUserEmail2=null;
+    try{localStorage.removeItem(MS_RT_KEY('2'));localStorage.removeItem(MS_AT_KEY('2'));}catch(e){}
+    _msUpdateBtn2();showToast('Outlook 2 abgemeldet','info',2000);return;
   }
-  try{
-    if(typeof msalInstance.initialize==='function')await msalInstance.initialize();
-    localStorage.setItem('_msPamLoginSlot','2'); // Slot merken → überlebe Redirect
-    await msalInstance.loginRedirect({scopes:MS_SCOPES,loginHint:'f.braun@ddmbraun.de'});
-  }catch(e){
-    localStorage.removeItem('_msPamLoginSlot');
-    console.warn('[MS2] loginRedirect Fehler:',e);
-    if(e.errorCode!=='user_cancelled')showToast('⚠ Outlook 2 Login: '+(e.errorCode||e.message),'error',5000);
-  }
+  _msStartLogin('2');
 }
 function _msUpdateBtn2(){
   const btn=document.getElementById('msBtnBar2');if(!btn)return;
@@ -15712,30 +15732,8 @@ function _msUpdateBtn2(){
   }
 }
 async function _msRefreshToken2(){
-  if(!msalInstance)return false;
-  const accs=msalInstance.getAllAccounts();
-  if(!accs.length)return false;
-  const _acc2=msUserEmail2?accs.find(a=>(a.username||'').toLowerCase()===msUserEmail2.toLowerCase()):accs[1];
-  if(!_acc2)return false;
-  // Versuch 1: silent
-  try{
-    const r=await msalInstance.acquireTokenSilent({scopes:MS_SCOPES,account:_acc2});
-    msToken2=r.accessToken;_msUpdateBtn2();return true;
-  }catch(e1){console.warn('[MS2] silent fehlgeschlagen:',e1.errorCode||e1.message);}
-  // Versuch 2: forceRefresh
-  try{
-    const r=await msalInstance.acquireTokenSilent({scopes:MS_SCOPES,account:_acc2,forceRefresh:true});
-    msToken2=r.accessToken;_msUpdateBtn2();return true;
-  }catch(e2){console.warn('[MS2] forceRefresh fehlgeschlagen:',e2.errorCode||e2.message);}
-  // Versuch 3: Popup
-  try{
-    const r=await msalInstance.acquireTokenPopup({scopes:MS_SCOPES,account:_acc2,loginHint:_acc2.username});
-    msToken2=r.accessToken;_msUpdateBtn2();return true;
-  }catch(e3){
-    msToken2=null;_msUpdateBtn2();
-    console.warn('[MS2] Popup fehlgeschlagen:',e3.errorCode||e3.message);
-    return false;
-  }
+  // b486: siehe _msRefreshToken – Erneuerung über Dauer-Ticket (Slot 2)
+  return _msRenewViaCloud('2');
 }
 
 // ── Konto-Auswahl-Helfer (#316) ───────────────────────────────────
@@ -15788,11 +15786,10 @@ async function _msLoadEmailThread(){
   const task=findTaskById(taskId)||(_pamCurrentTask&&_pamCurrentTask.id===taskId?_pamCurrentTask:null);
   if(!task){showToast('⚠ Kein Task geöffnet (ID: '+(taskId||'leer')+')','error',3000);return;}
   let _msActiveToken=_msPickToken(task); // #383: Konto-2-Tasks starten direkt mit Token 2; wird nach Refresh neu gesetzt (war vorher stale kopiert)
-  // Fix 2026-05-27: Token ggf. still aus MSAL-Cache holen (z.B. nach Seiten-Reload)
+  // Fix 2026-05-27 / b486: Token ggf. still über das Dauer-Ticket holen (z.B. nach Seiten-Reload)
   if(!msToken){
-    const _msAcc=typeof msalInstance!=='undefined'&&msalInstance&&msalInstance.getAllAccounts&&msalInstance.getAllAccounts();
-    if(_msAcc&&_msAcc.length>0){
-      // MSAL hat gespeicherten Account → silent refresh versuchen
+    if(_msHasStoredAccount('1')||_msHasStoredAccount('2')){
+      // Gespeichertes Dauer-Ticket vorhanden → silent refresh versuchen
       const _refreshed=await _msRefreshToken();
       if(!_refreshed){showToast('⚠ Outlook-Session abgelaufen – bitte erneut anmelden (Toolbar: 📨 Outlook)','warning',5000);return;}
     }else{
@@ -16301,9 +16298,9 @@ function _msOpenThreadPopup(){
   _msTPActiveIdx=-1;
   _msRefreshThreadPopup(task);
   // Beim ersten Öffnen (noch kein Verlauf) automatisch laden wenn Token vorhanden
-  // Fix 2026-05-27: auch versuchen wenn Token noch fehlt aber MSAL-Account gespeichert (nach Reload)
+  // Fix 2026-05-27 / b486: auch versuchen wenn Token noch fehlt aber Dauer-Ticket gespeichert (nach Reload)
   const _msAutoMsgs=(task&&task.msThreadMessages)||[];
-  const _msPopupHasAccount=typeof msalInstance!=='undefined'&&msalInstance&&msalInstance.getAllAccounts&&msalInstance.getAllAccounts().length>0;
+  const _msPopupHasAccount=typeof _msHasStoredAccount==='function'&&_msHasStoredAccount();
   if(_msAutoMsgs.length===0&&(msToken||_msPopupHasAccount)){
     setTimeout(()=>{ if(typeof _msLoadEmailThread==='function')_msLoadEmailThread(); },300);
   }
@@ -25407,7 +25404,7 @@ function _emAntworten(){
   let _toClean=(to.match(/<([^>]+)>/)||[])[1]||to;
   let subject=d?('Re: '+(d.subject||d.betreff||'')):'';
   // Fix9: Outlook Web Compose wenn MS-Token vorhanden, sonst mailto als Fallback
-  if((typeof msToken!=='undefined'&&msToken||typeof msalInstance!=='undefined'&&msalInstance)&&_toClean){
+  if((typeof msToken!=='undefined'&&msToken||typeof _msHasStoredAccount==='function'&&_msHasStoredAccount())&&_toClean){
     let _owUrl='https://outlook.office.com/mail/deeplink/compose?to='+encodeURIComponent(_toClean)+'&subject='+encodeURIComponent(subject);
     window.open(_owUrl,'_blank');
   } else {
@@ -26870,9 +26867,10 @@ document.addEventListener('click',function(e){if(!e.target.closest('.filter-wrap
 
 // ── INIT ──
 boards={};render();
-// Fallback: GSI/MSAL haben vor Funktionsdefinition geladen (Race-Condition)
+// Fallback: GSI hat vor Funktionsdefinition geladen (Race-Condition)
 if(window._gsiPending && typeof gdriveInit==='function'){gdriveInit();window._gsiPending=false;}
-if(window._msalPending && typeof msInit==='function'){msInit();window._msalPending=false;}
+// b486: Outlook-Init direkt aufrufen (MSAL-Script entfernt, kein onload-Hook mehr)
+if(typeof msInit==='function')msInit();
 
 // ══════════════════════════════════════════════
 // ── SYNC-MODUL (pam_workboard_sync.json) – PAM ──
