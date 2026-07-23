@@ -4278,7 +4278,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-23 · #496'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-23-b496)
+const PAM_BUILD = 'v2026-07-23 · #497'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-23-b497)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -22792,15 +22792,38 @@ function _pamDokFooter(title,btns){
 }
 function _pamDokIsImg(ext){return /^(png|jpe?g|gif|webp|bmp|heic|heif)$/.test(ext);}
 function _pamDokIsVid(ext){return /^(mp4|mov|m4v|webm|avi|mkv|wmv|3gp)$/.test(ext);}
+// #497: dauerhafter Speicher (IndexedDB) – derselbe, den die Fotos schon benutzen.
+// Prüft nur die Änderungszeit auf Drive und lädt die Datei nur neu, wenn sie sich
+// geändert hat. Überlebt Task-Wechsel, Neuladen der Seite und Programm-Neustart.
+async function _pamDokCachedUrl(fileId){
+  try{
+    const u=await _fetchFotoBlobCached(fileId,gdriveToken);
+    if(u)return u;
+  }catch(e){console.warn('[PAM] Dokument-Cache nicht verfügbar:',e);}
+  // Rückfall: direkter Abruf ohne dauerhaften Speicher
+  const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  return URL.createObjectURL(await r.blob());
+}
+async function _pamDokCachedText(fileId){
+  const u=await _pamDokCachedUrl(fileId);
+  _pamDokBlobs.push(u);
+  const r=await fetch(u); // rein lokal aus dem Blob, kein Netzabruf
+  return await r.text();
+}
 async function _pamDokPrevDriveBlob(fileId,mime,busyMsg){
   const ck=(mime||'raw')+'|'+fileId;
   if(_pamDokCache.has(ck))return _pamDokCache.get(ck);
   if(busyMsg)_pamDokPrevBusy(busyMsg);
-  const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
-  if(!r.ok)throw new Error('HTTP '+r.status);
-  const b=await r.blob();
-  const u=URL.createObjectURL(mime?new Blob([b],{type:mime}):b);
-  _pamDokBlobs.push(u);_pamDokCache.set(ck,u);
+  let u=await _pamDokCachedUrl(fileId);
+  _pamDokBlobs.push(u);
+  if(mime){
+    // Typ erzwingen, damit das Iframe die Datei anzeigt statt sie zum Download anzubieten
+    const b=await (await fetch(u)).blob();
+    u=URL.createObjectURL(new Blob([b],{type:mime}));
+    _pamDokBlobs.push(u);
+  }
+  _pamDokCache.set(ck,u);
   return u;
 }
 async function _pamDokPrevPdf(fileId){
@@ -22820,9 +22843,7 @@ async function _pamDokPrevHtml(fileId){
   if(_pamDokCache.has(ck)){_pamDokPrevFrame(_pamDokCache.get(ck));return;}
   try{
     _pamDokPrevBusy('⏳ Lädt…');
-    const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
-    if(!r.ok)throw new Error('HTTP '+r.status);
-    const html=await r.text();
+    const html=await _pamDokCachedText(fileId);
     if(!document.getElementById('_pamDokOverlay'))return;
     const u=URL.createObjectURL(new Blob([html],{type:'text/html'}));
     _pamDokBlobs.push(u);_pamDokCache.set(ck,u);
@@ -22844,9 +22865,7 @@ async function _pamDokPrevEml(fileId){
   if(_pamDokCache.has(ck)){_pamDokPrevEmlShow(_pamDokEmlHdr.get(ck)||'',_pamDokCache.get(ck));return;}
   try{
     _pamDokPrevBusy('⏳ E-Mail lädt…');
-    const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
-    if(!r.ok)throw new Error('HTTP '+r.status);
-    const txt=await r.text();
+    const txt=await _pamDokCachedText(fileId);
     if(!document.getElementById('_pamDokOverlay'))return;
     const info=_parseEmlText(txt);
     const e2=function(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):'';};
