@@ -4278,7 +4278,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-23 · #493'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-23-b493)
+const PAM_BUILD = 'v2026-07-23 · #495'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-23-b495)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -15283,9 +15283,13 @@ async function _gmLoadEmailThread(){
     task.gmailThreadMessages=threadMsgs;
     _gmRenderThread(task);
     const saved=await _gmSaveThreadPdfs(task,threadMsgs);
-    if(stEl)stEl.textContent=threadMsgs.length+' Mails'+(saved>0?', '+saved+' PDF'+(saved>1?'s':'')+' gespeichert':'');
+    // #495: wie bei Outlook auch das echte Original als .eml sichern – sonst bliebe
+    // nach dem Löschen im Postfach nur der PDF-Ausdruck übrig
+    const _emlNeu=(await _saveThreadMailsAsEml(task,threadMsgs,'gmail'))||0;
+    const _zusatz=(saved>0?', '+saved+' PDF'+(saved>1?'s':''):'')+(_emlNeu>0?', '+_emlNeu+' Original'+(_emlNeu>1?'e':''):'');
+    if(stEl)stEl.textContent=threadMsgs.length+' Mails'+(_zusatz?_zusatz+' gespeichert':'');
     await autoSave();
-    showToast('✅ '+threadMsgs.length+' Gmail-Mails geladen'+(saved>0?', '+saved+' PDFs':''),'success',4000);
+    showToast('✅ '+threadMsgs.length+' Gmail-Mails geladen'+_zusatz,'success',4000);
   }catch(e){if(stEl)stEl.textContent='⚠ Fehler';showToast('⚠ '+e.message,'error',6000);}
 }
 async function _gmSaveThreadPdfs(task,threadMsgs){
@@ -15322,11 +15326,11 @@ async function _gmSaveThreadPdfs(task,threadMsgs){
 // ── Alle Thread-Mails als .eml in Google Drive speichern (Gmail + Outlook) ──
 // tokenType='outlook' → echtes MIME-Original via Graph /$value; sonst synthetisches EML als Fallback
 async function _saveThreadMailsAsEml(task,threadMsgs,tokenType){
-  if(!gdriveToken)return;
+  if(!gdriveToken)return 0;
   // #491: einheitlicher Mail-Ordner über _getOrCreateEmailFid (task.emailOrdner → sonst Posteingang im Projektordner); DOM-Feld nur noch als Rückfall
   const folderUrl=(document.getElementById('tEmailOrdner')?.value||document.getElementById('tGDOrdner')?.value||'').trim();
   const _fbFid=_ezFolderId(folderUrl);
-  const fid=(await _getOrCreateEmailFid(task,_fbFid))||_fbFid;if(!fid)return;
+  const fid=(await _getOrCreateEmailFid(task,_fbFid))||_fbFid;if(!fid)return 0;
   // Bereits gespeicherte Message-IDs sammeln (keine Duplikate)
   const knownMsgIds=new Set([
     ...(task.emailOriginals||[]).map(e=>e.messageId||'').filter(Boolean),
@@ -15334,7 +15338,8 @@ async function _saveThreadMailsAsEml(task,threadMsgs,tokenType){
   ]);
   // Outlook-Thread nutzt 'internetMessageId', Gmail nutzt 'messageId' → beide abdecken
   const toSave=threadMsgs.filter(m=>{const mid=m.messageId||m.internetMessageId||'';return mid&&!knownMsgIds.has(mid);});
-  if(!toSave.length)return;
+  if(!toSave.length)return 0;
+  let _emlSaved=0;
   for(const m of toSave){
     try{
       const mid=m.messageId||m.internetMessageId||''; // einheitliche ID für diese Mail
@@ -15353,6 +15358,25 @@ async function _saveThreadMailsAsEml(task,threadMsgs,tokenType){
           if(rMime.ok){buf=await rMime.arrayBuffer();}
           else{console.warn('[PAM] /$value HTTP '+rMime.status+' – Fallback auf synthetisches EML');}
         }catch(eMime){console.warn('[PAM] /$value Fehler – Fallback auf synthetisches EML:',eMime);}
+      }
+      // ── #495: Gmail – echtes RFC822-Original via format=raw holen ──
+      // Wichtig: die Thread-Einträge tragen bei Gmail nur den 120-Zeichen-Schnipsel,
+      // ein synthetisches EML wäre also praktisch leer. Nur das Rohformat ist ein Original.
+      if(tokenType==='gmail'&&typeof gmailToken!=='undefined'&&gmailToken&&m.id){
+        try{
+          const rRaw=await fetch('https://www.googleapis.com/gmail/v1/users/me/messages/'+encodeURIComponent(m.id)+'?format=raw',{headers:{Authorization:'Bearer '+gmailToken}});
+          if(rRaw.ok){
+            const jRaw=await rRaw.json();
+            if(jRaw&&jRaw.raw){
+              let b64=String(jRaw.raw).replace(/-/g,'+').replace(/_/g,'/');
+              while(b64.length%4)b64+='=';
+              const bin=atob(b64);
+              const arr=new Uint8Array(bin.length);
+              for(let x=0;x<bin.length;x++)arr[x]=bin.charCodeAt(x);
+              buf=arr.buffer;
+            }else{console.warn('[GM] format=raw ohne raw-Feld – Fallback auf synthetisches EML');}
+          }else{console.warn('[GM] format=raw HTTP '+rRaw.status+' – Fallback auf synthetisches EML');}
+        }catch(eRaw){console.warn('[GM] format=raw Fehler – Fallback auf synthetisches EML:',eRaw);}
       }
       // ── Fallback: synthetisches EML aus Metadaten + Body ──
       if(!buf){
@@ -15386,6 +15410,7 @@ async function _saveThreadMailsAsEml(task,threadMsgs,tokenType){
         if(!task.emailOriginals.some(e=>e.messageId===mid))task.emailOriginals.push(entry);
         // Globales Array synchron halten wenn regular-Modal offen
         if(typeof taskEmailOriginals!=='undefined'&&taskEmailOriginals!==task.emailOriginals){if(!taskEmailOriginals)taskEmailOriginals=[];if(!taskEmailOriginals.some(e=>e.messageId===mid))taskEmailOriginals.push(entry);}
+        _emlSaved++;
       }
     }catch(e){console.warn('[PAM] Thread-EML speichern fehlgeschlagen:',e);}
   }
@@ -15395,6 +15420,7 @@ async function _saveThreadMailsAsEml(task,threadMsgs,tokenType){
   if(taskEmailOriginals)taskEmailOriginals.sort(_dsort);
   renderEmailSection();
   scheduleTaskFieldSave();
+  return _emlSaved;
 }
 
 // ── Doppelte EML-Einträge aus dem aktuellen Task bereinigen ──────────────────
@@ -22959,10 +22985,12 @@ function _pamDokOpen(kind,i){
   const task=_pamDokTask();const ix=_pamDokIndex(task);
   if(kind==='mail'){
     const e=ix.mails[i];if(!e)return;
-    // Lesen: geladener Verlauf → Original → Schnappschuss → PDF-Ausdruck
+    // Reihenfolge: Original auf Drive ZUERST. Das Vollbild des Verlaufs holt den
+    // Mailtext live aus Gmail/Graph nach – ist die Mail im Postfach gelöscht, bliebe
+    // es leer. Die archivierte .eml funktioniert dagegen dauerhaft.
+    if(e.orig&&e.orig.fileId){_openEmailOrigInlinePreview({fileId:e.orig.fileId,name:e.orig.name,url:e.orig.url});return;}
     if(e.thread&&e.thread.src==='gmail'){_gmOpenMailOverlay(taskId,e.thread.idx);return;}
     if(e.thread&&e.thread.src==='ms'){_msOpenMailOverlay(taskId,e.thread.idx);return;}
-    if(e.orig&&e.orig.fileId){_openEmailOrigInlinePreview({fileId:e.orig.fileId,name:e.orig.name,url:e.orig.url});return;}
     if(e.snap&&e.snap.fileId){_previewSnapshot(e.snap.fileId,e.snap.name);return;}
     if(e.pdf&&e.pdf.fileId){openEmailPdfPreview(e.pdf.fileId,e.pdf.name);return;}
     showToast('Für diese Mail ist keine lesbare Fassung hinterlegt','info',3500);return;
