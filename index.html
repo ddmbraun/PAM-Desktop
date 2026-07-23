@@ -20051,9 +20051,20 @@ function _objForEntry(k){
   });
   return out;
 }
-function _objEntryMatches(k,objKey){
-  if(!objKey)return false;
-  return !!_objForEntry(k)[objKey];
+// Sucheingabe -> Vergleichstext. Teiltreffer (b512): „Pestlozzi" findet Nr. 15,
+// 17 und 19 derselben Straße. Unter 3 Zeichen kein Objektbezug – sonst trifft
+// beim Tippen erst mal alles.
+function _objQueryKey(s){
+  s=(s||'').toString().trim();
+  if(!s)return '';
+  var p=(typeof _adrParseObjAddr==='function')?_adrParseObjAddr(s):{strasse:s};
+  var k=_objNorm(p.strasse||'');
+  return k.length>=3?k:'';
+}
+function _objEntryMatches(k,q){
+  if(!q)return false;
+  var o=_objForEntry(k);
+  return Object.keys(o).some(function(ok){return ok.indexOf(q)>=0;});
 }
 
 function _adrBookOpenPicker(mode){
@@ -20081,7 +20092,7 @@ function _adrBookOpenPicker(mode){
   const objBox=(mode==='manage')?''
     :'<div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">'
       +'<span style="font-size:11px;color:var(--text2,#6b7280);white-space:nowrap;">📍 Objekt</span>'
-      +'<input id="adr-obj" type="text" value="'+escA(objVor)+'" placeholder="Objektadresse – z.B. Pestalozzistraße 17" autocomplete="off" style="flex:1;min-width:0;padding:5px 8px;font-size:12px;box-sizing:border-box;border:1px solid var(--border,#d1d5db);border-radius:6px;background:var(--bg,#fff);color:var(--text,#111);">'
+      +'<input id="adr-obj" type="text" value="'+escA(objVor)+'" placeholder="Straße – auch nur ein Teil, z.B. Pestlozzi" autocomplete="off" style="flex:1;min-width:0;padding:5px 8px;font-size:12px;box-sizing:border-box;border:1px solid var(--border,#d1d5db);border-radius:6px;background:var(--bg,#fff);color:var(--text,#111);">'
       +'<button type="button" onclick="_adrPickClearObj()" title="Objektbezug aufheben – alle Kontakte zeigen" style="flex-shrink:0;padding:4px 9px;font-size:12px;border:1px solid var(--border,#d1d5db);background:var(--bg3,#f3f4f6);color:var(--text2,#6b7280);border-radius:6px;cursor:pointer;">✕</button>'
       +'</div>';
   overlay.innerHTML='<div style="background:var(--bg,#fff);color:var(--text,#111);border:1px solid var(--border,#d1d5db);border-radius:10px;padding:16px 18px;width:460px;max-width:96vw;max-height:86vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.25);">'
@@ -20140,7 +20151,7 @@ function _adrRenderPickerList(filter){
   const list=all.filter(function(k){return !f||_adrNorm((k.name||'')+(k.firma||'')+(k.strasse||'')+(k.tel||'')+(k.email||'')+(k.ort||'')+(k.rolle||'')+(((k&&k.objekte)||[]).join(' '))).includes(f);});
   if(!list.length){L.innerHTML='<div style="padding:12px;color:var(--text2,#6b7280);font-size:12px;">Kein Treffer.</div>';return;}
   // Objekte je Eintrag einmal auflösen (abgeleitet aus den Tasks + fest angeheftet)
-  const objKey=manage?'':_objKeyFromAdr(window._adrPickObj||'');
+  const objQ=manage?'':_objQueryKey(window._adrPickObj||'');
   const objs={};
   list.forEach(function(k){ objs[k.id]=_objForEntry(k); });
   const row=function(k){
@@ -20164,11 +20175,12 @@ function _adrRenderPickerList(filter){
       +'<input type="checkbox" class="adr-cb" data-id="'+esc(k.id)+'" style="width:14px;height:14px;flex-shrink:0;margin-top:2px;">'+inner+'</label>';
   };
   // Ohne Objektbezug: einfache Liste wie bisher.
-  if(!objKey){ L.innerHTML=list.map(row).join(''); return; }
+  if(!objQ){ L.innerHTML=list.map(row).join(''); return; }
   // Mit Objektbezug: NICHT ausblenden, sondern einsortieren – sonst findet man
   // den Handwerker nicht mehr, der neu an dieses Objekt soll.
-  const hier=list.filter(function(k){return !!objs[k.id][objKey];});
-  const rest=list.filter(function(k){return !objs[k.id][objKey];});
+  const trifft=function(k){return Object.keys(objs[k.id]||{}).some(function(ok){return ok.indexOf(objQ)>=0;});};
+  const hier=list.filter(trifft);
+  const rest=list.filter(function(k){return !trifft(k);});
   var html='<div style="font-size:10px;font-weight:700;color:#15803d;text-transform:uppercase;letter-spacing:.04em;padding:3px 6px 4px;">An diesem Objekt ('+hier.length+')</div>';
   html+=hier.length?hier.map(row).join('')
     :'<div style="padding:4px 8px 8px;font-size:11px;color:var(--text2,#6b7280);">Noch kein Kontakt zu dieser Adresse erfasst.</div>';
