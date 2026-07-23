@@ -923,8 +923,10 @@ async function _doMoveTaskFolder(mainFolderId,targetFid){
 }
 async function _moveEmailFilesToCurrentFolder(){
   if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden','warn',3000);return;}
-  const folderUrl=(document.getElementById('tEmailOrdner')?.value||document.getElementById('tGDOrdner')?.value||'').trim();
-  const newFolderId=_extractFolderIdFromUrl(folderUrl)||_ezFolderId(folderUrl);
+  // #491: Ziel ist der einheitliche Mail-Ordner (Posteingang im Projektordner); das Feld hat weiter Vorrang
+  const folderUrl=(document.getElementById('tEmailOrdner')?.value||'').trim();
+  const _mvTask=(()=>{const _id=(document.getElementById('taskId')||{}).value||'';return _id&&typeof findTaskById==='function'?findTaskById(_id):null;})();
+  const newFolderId=_extractFolderIdFromUrl(folderUrl)||_ezFolderId(folderUrl)||(_mvTask?await _getOrCreateEmailFid(_mvTask,null):null);
   if(!newFolderId){showToast('⚠ Kein Ablageordner eingetragen – bitte URL einfügen','warn',3500);return;}
   const allFiles=[...taskEmailOriginals,...taskEmailPdfs].filter(f=>f.fileId);
   if(!allFiles.length){showToast('Keine E-Mail-Dateien im Task vorhanden','info',2500);return;}
@@ -4264,7 +4266,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-23 · #490'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-23-b490)
+const PAM_BUILD = 'v2026-07-23 · #491'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-23-b491)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -15276,8 +15278,9 @@ async function _gmLoadEmailThread(){
 }
 async function _gmSaveThreadPdfs(task,threadMsgs){
   if(!gdriveToken)return 0;
+  // #491: einheitlicher Mail-Ordner – Posteingang im Projektordner (wie die Snapshots); DOM-Feld nur noch als Rückfall
   const folderUrl=(document.getElementById('tEmailOrdner')?.value||document.getElementById('tGDOrdner')?.value||'').trim();
-  const fid=_ezFolderId(folderUrl);if(!fid)return 0;
+  const fid=await _getOrCreateEmailFid(task,_ezFolderId(folderUrl));if(!fid)return 0;
   // Dedup: alle vorhandenen messageId-Felder berücksichtigen (inkl. msMessageId von Outlook-PDFs)
   const knownIds=new Set([...(taskEmailPdfs||[]).flatMap(p=>[p.gmailMessageId,p.messageId,p.msMessageId]).filter(Boolean)]);
   const knownFileIds=new Set((taskEmailPdfs||[]).map(p=>p.fileId).filter(Boolean));
@@ -15307,9 +15310,9 @@ async function _gmSaveThreadPdfs(task,threadMsgs){
 // tokenType='outlook' → echtes MIME-Original via Graph /$value; sonst synthetisches EML als Fallback
 async function _saveThreadMailsAsEml(task,threadMsgs,tokenType){
   if(!gdriveToken)return;
-  // Zielordner: zuerst task-Objekt, dann DOM-Felder als Fallback
-  const folderUrl=(task.emailOrdner||task.gdriveOrdner||(document.getElementById('tEmailOrdner')?.value||document.getElementById('tGDOrdner')?.value||'')).trim();
-  const fid=_ezFolderId(folderUrl);if(!fid)return;
+  // #491: einheitlicher Mail-Ordner über _getOrCreateEmailFid (task.emailOrdner → sonst Posteingang im Projektordner); DOM-Feld nur noch als Rückfall
+  const folderUrl=(document.getElementById('tEmailOrdner')?.value||document.getElementById('tGDOrdner')?.value||'').trim();
+  const fid=await _getOrCreateEmailFid(task,_ezFolderId(folderUrl));if(!fid)return;
   // Bereits gespeicherte Message-IDs sammeln (keine Duplikate)
   const knownMsgIds=new Set([
     ...(task.emailOriginals||[]).map(e=>e.messageId||'').filter(Boolean),
@@ -16178,9 +16181,9 @@ function _msUnlinkThread(){
 }
 async function _msSaveThreadPdfs(task,threadMsgs){
   if(!gdriveToken){showToast('⚠ Google Drive nicht verbunden – PDFs nicht gespeichert','warning',3000);return 0;}
-  // Zielordner: zuerst task-Objekt, dann DOM-Felder als Fallback
-  const folderUrl=(task.emailOrdner||task.gdriveOrdner||(document.getElementById('tEmailOrdner')?.value||document.getElementById('tGDOrdner')?.value||'')).trim();
-  const fid=_ezFolderId(folderUrl);
+  // #491: einheitlicher Mail-Ordner über _getOrCreateEmailFid (task.emailOrdner → sonst Posteingang im Projektordner); DOM-Feld nur noch als Rückfall
+  const folderUrl=(document.getElementById('tEmailOrdner')?.value||document.getElementById('tGDOrdner')?.value||'').trim();
+  const fid=await _getOrCreateEmailFid(task,_ezFolderId(folderUrl));
   if(!fid){showToast('⚠ Kein E-Mail-Ordner verknüpft – PDFs nicht gespeichert','warning',3000);return 0;}
   // Bereits gespeicherte MessageIds → keine Duplikate; task.emailPdfs ist die maßgebliche Quelle
   const _taskPdfs=task.emailPdfs||(taskEmailPdfs||[]);
@@ -22082,9 +22085,10 @@ async function _uploadEmailOriginal(file){
     }catch(e){}
   }
   // Zielordner bestimmen
-  let _folderUrl=(document.getElementById('tEmailOrdner')?.value||'').trim()
-    ||(_emCurrentTask&&(_emCurrentTask.emailOrdner||_emCurrentTask.gdriveOrdner)||'');
-  let fid=_ezFolderId(_folderUrl);
+  let _folderUrl=(document.getElementById('tEmailOrdner')?.value||'').trim();
+  // #491: einheitlicher Mail-Ordner – Posteingang im Projektordner statt Projektordner-Wurzel; Feld hat weiter Vorrang
+  const _uoTask=(()=>{const _id=(document.getElementById('taskId')||{}).value||'';return(_id&&typeof findTaskById==='function'?findTaskById(_id):null)||(typeof _emCurrentTask!=='undefined'?_emCurrentTask:null);})();
+  let fid=_ezFolderId(_folderUrl)||(_uoTask?await _getOrCreateEmailFid(_uoTask,null):null);
   // Kein Ordner - Prompt mit EML-Betreff vorausgefuellt, dann Ordner anlegen
   if(!fid){
     const _titleEl=document.getElementById('taskTitleInput');
