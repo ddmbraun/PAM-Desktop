@@ -4278,7 +4278,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-23 · #492'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-23-b492)
+const PAM_BUILD = 'v2026-07-23 · #493'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-23-b493)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -22659,6 +22659,8 @@ function _pamDokIndex(task){
   return out;
 }
 let _pamDokFilter='alle';
+let _pamDokSel={kind:'',i:-1};
+let _pamDokBlobs=[];
 function _pamDokTask(){const id=(document.getElementById('taskId')||{}).value||'';return(id&&typeof findTaskById==='function')?findTaskById(id):null;}
 function _openPamDokUebersicht(startFilter){
   const GID='_pamDokOverlay';
@@ -22671,8 +22673,16 @@ function _openPamDokUebersicht(startFilter){
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:99998;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;';
   ov.addEventListener('click',function(ev){if(ev.target===ov)_closePamDokUebersicht();});
   const card=document.createElement('div');
-  card.style.cssText='background:var(--bg2);border-radius:14px;width:min(980px,96vw);height:min(720px,92vh);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 16px 48px rgba(0,0,0,.5);';
-  card.innerHTML='<div id="_pamDokHead" style="flex-shrink:0;"></div><div id="_pamDokBody" style="flex:1;overflow-y:auto;min-height:0;background:var(--bg);"></div>';
+  card.style.cssText='background:var(--bg2);border-radius:14px;width:min(1180px,97vw);height:min(760px,93vh);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 16px 48px rgba(0,0,0,.5);';
+  // Zwei Spalten: links die Liste, rechts die Vorschau (erste Sache wird automatisch angezeigt)
+  card.innerHTML='<div id="_pamDokHead" style="flex-shrink:0;"></div>'
+    +'<div style="display:flex;flex:1;min-height:0;">'
+      +'<div id="_pamDokBody" style="width:370px;flex-shrink:0;overflow-y:auto;min-height:0;border-right:1px solid var(--border);background:var(--bg);"></div>'
+      +'<div style="flex:1;min-width:0;display:flex;flex-direction:column;background:var(--bg2);">'
+        +'<div id="_pamDokPrev" style="flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;"></div>'
+        +'<div id="_pamDokFoot" style="display:none;flex-shrink:0;align-items:center;gap:8px;padding:9px 14px;border-top:1px solid var(--border);background:var(--bg3);"></div>'
+      +'</div>'
+    +'</div>';
   ov.appendChild(card);
   document.body.appendChild(ov);
   document.addEventListener('keydown',_pamDokEsc);
@@ -22685,8 +22695,197 @@ function _pamDokEsc(ev){
   ev.stopImmediatePropagation();_closePamDokUebersicht();
 }
 function _closePamDokUebersicht(){
+  _pamDokBlobs.forEach(function(u){try{URL.revokeObjectURL(u);}catch(e){}});_pamDokBlobs=[];
   const o=document.getElementById('_pamDokOverlay');if(o)o.remove();
   document.removeEventListener('keydown',_pamDokEsc);
+}
+// ── Auswahl & Vorschau (rechte Spalte) ──
+function _pamDokVisible(ix,f){
+  const out=[];
+  if(f==='alle'||f==='mails')ix.mails.forEach(function(_x,i){out.push({kind:'mail',i:i});});
+  if(f==='alle'||f==='docs')ix.docs.forEach(function(_x,i){out.push({kind:'doc',i:i});});
+  if(f==='alle'||f==='fotos')ix.fotos.forEach(function(_x,i){out.push({kind:'foto',i:i});});
+  return out;
+}
+function _pamDokMarkActive(){
+  const body=document.getElementById('_pamDokBody');if(!body)return;
+  const cur=_pamDokSel.kind+':'+_pamDokSel.i;
+  body.querySelectorAll('[data-sel]').forEach(function(el){
+    const on=(el.getAttribute('data-sel')===cur);
+    el.style.background=on?'rgba(108,99,255,.10)':'';
+    el.style.borderLeftColor=on?'var(--accent)':'transparent';
+  });
+}
+function _pamDokSelect(kind,i){
+  _pamDokSel={kind:kind,i:i};
+  _pamDokMarkActive();
+  _pamDokShowPreview(kind,i);
+}
+function _pamDokClearPrev(hint){
+  _pamDokBlobs.forEach(function(u){try{URL.revokeObjectURL(u);}catch(e){}});_pamDokBlobs=[];
+  const f=document.getElementById('_pamDokFoot');if(f){f.style.display='none';f.innerHTML='';}
+  const p=document.getElementById('_pamDokPrev');if(!p)return;
+  p.style.cssText='flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;';
+  p.innerHTML=hint?'<span style="color:var(--text2);font-size:13px;">Nichts ausgewählt</span>':'';
+}
+function _pamDokPrevBusy(msg){
+  const p=document.getElementById('_pamDokPrev');if(!p)return;
+  p.style.cssText='flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;';
+  p.innerHTML='<span style="color:var(--text2);font-size:13px;">'+msg+'</span>';
+}
+function _pamDokPrevInfo(html){
+  const p=document.getElementById('_pamDokPrev');if(!p)return;
+  p.style.cssText='flex:1;min-height:0;overflow-y:auto;';
+  p.innerHTML=html;
+}
+function _pamDokPrevImg(src){
+  const p=document.getElementById('_pamDokPrev');if(!p)return;
+  p.style.cssText='flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:auto;padding:12px;';
+  p.innerHTML='<img src="'+src+'" alt="" style="max-width:100%;max-height:100%;object-fit:contain;border-radius:6px;">';
+}
+function _pamDokPrevFrame(src){
+  const p=document.getElementById('_pamDokPrev');if(!p)return;
+  p.style.cssText='flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;';
+  p.innerHTML='';
+  const fr=document.createElement('iframe');
+  fr.style.cssText='flex:1;width:100%;border:none;background:#fff;';
+  fr.src=src;
+  p.appendChild(fr);
+}
+function _pamDokBtn(label,fn,tip){
+  return '<button type="button" title="'+tip+'" onclick="'+fn+'" style="flex-shrink:0;padding:5px 12px;border-radius:6px;border:0.5px solid var(--border);background:var(--bg2);color:var(--text1);font-size:12px;font-weight:600;cursor:pointer;">'+label+'</button>';
+}
+function _pamDokFooter(title,btns){
+  const f=document.getElementById('_pamDokFoot');if(!f)return;
+  f.style.display='flex';
+  f.innerHTML='<span style="flex:1;min-width:0;font-size:12px;font-weight:600;color:var(--text1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+title+'</span>'+btns;
+}
+function _pamDokIsImg(ext){return /^(png|jpe?g|gif|webp|bmp|heic|heif)$/.test(ext);}
+function _pamDokIsVid(ext){return /^(mp4|mov|m4v|webm|avi|mkv|wmv|3gp)$/.test(ext);}
+async function _pamDokPrevDriveBlob(fileId,mime){
+  const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  const b=await r.blob();
+  const u=URL.createObjectURL(mime?new Blob([b],{type:mime}):b);
+  _pamDokBlobs.push(u);
+  return u;
+}
+async function _pamDokPrevPdf(fileId){
+  try{const u=await _pamDokPrevDriveBlob(fileId,'application/pdf');
+    if(!document.getElementById('_pamDokOverlay'))return;
+    _pamDokPrevFrame(u+'#toolbar=0&navpanes=0&view=FitH');
+  }catch(ex){_pamDokPrevInfo('<div style="padding:20px;color:var(--red);font-size:12px;">⚠ '+esc(ex.message)+'</div>');}
+}
+async function _pamDokPrevDriveImg(fileId){
+  try{const u=await _pamDokPrevDriveBlob(fileId,'');
+    if(!document.getElementById('_pamDokOverlay'))return;
+    _pamDokPrevImg(u);
+  }catch(ex){_pamDokPrevInfo('<div style="padding:20px;color:var(--red);font-size:12px;">⚠ '+esc(ex.message)+'</div>');}
+}
+async function _pamDokPrevHtml(fileId){
+  try{
+    const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const html=await r.text();
+    if(!document.getElementById('_pamDokOverlay'))return;
+    const u=URL.createObjectURL(new Blob([html],{type:'text/html'}));_pamDokBlobs.push(u);
+    _pamDokPrevFrame(u);
+  }catch(ex){_pamDokPrevInfo('<div style="padding:20px;color:var(--red);font-size:12px;">⚠ '+esc(ex.message)+'</div>');}
+}
+// .eml lesbar darstellen – gleiche Aufbereitung wie in der Datei-Galerie (CID-Bilder als Blobs)
+async function _pamDokPrevEml(fileId){
+  try{
+    const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const txt=await r.text();
+    if(!document.getElementById('_pamDokOverlay'))return;
+    const info=_parseEmlText(txt);
+    const e2=function(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):'';};
+    const rawBody=info.bodyHtml||('<pre style="white-space:pre-wrap;font-family:Arial,sans-serif;font-size:13px;margin:0;">'+e2(info.bodyText||'(kein Inhalt)')+'</pre>');
+    const cm=info.cidMap||{};const cmB={};
+    Object.keys(cm).forEach(function(k){
+      try{
+        const m2=String(cm[k]).match(/^data:([^;]+);base64,(.+)$/);
+        if(m2){
+          const bs=atob(m2[2]);const arr=new Uint8Array(bs.length);
+          for(let x=0;x<bs.length;x++)arr[x]=bs.charCodeAt(x);
+          const bu=URL.createObjectURL(new Blob([arr],{type:m2[1]}));
+          cmB[k]=bu;_pamDokBlobs.push(bu);
+        }else{cmB[k]=cm[k];}
+      }catch(_e){cmB[k]=cm[k];}
+    });
+    const clean=String(rawBody).replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<link[^>]+rel=["']?stylesheet["']?[^>]*>/gi,'').replace(/src=["']?(cid:[^"'\s>]+)["']?/gi,function(_m,cid){return cmB[cid]?'src="'+cmB[cid]+'"':'src=""';});
+    const full='<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,Helvetica,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}a{color:#1a73e8;}img{max-width:100%;}</style></head><body>'+clean+'</body></html>';
+    const u=URL.createObjectURL(new Blob([full],{type:'text/html'}));_pamDokBlobs.push(u);
+    const p=document.getElementById('_pamDokPrev');if(!p)return;
+    p.style.cssText='flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;';
+    p.innerHTML='<div style="padding:12px 16px 9px;border-bottom:1px solid var(--border);background:var(--bg3);flex-shrink:0;">'
+      +'<div style="font-weight:700;font-size:14px;color:var(--text1);margin-bottom:5px;">'+e2(info.subject||'(kein Betreff)')+'</div>'
+      +'<div style="font-size:11px;color:var(--text2);">Von '+e2(info.sender||'')+(info.date?' · '+e2(info.date.toLocaleString('de-DE')):'')+'</div></div>';
+    const fr=document.createElement('iframe');
+    fr.style.cssText='flex:1;width:100%;border:none;background:#fff;';
+    fr.src=u;
+    p.appendChild(fr);
+  }catch(ex){_pamDokPrevInfo('<div style="padding:20px;color:var(--red);font-size:12px;">⚠ '+esc(ex.message)+'</div>');}
+}
+async function _pamDokShowPreview(kind,i){
+  _pamDokBlobs.forEach(function(u){try{URL.revokeObjectURL(u);}catch(e){}});_pamDokBlobs=[];
+  const task=_pamDokTask();const ix=_pamDokIndex(task);
+  const tok=(typeof gdriveToken!=='undefined')?gdriveToken:'';
+  const note=function(t,b){return '<div style="padding:22px;font-size:13px;color:var(--text2);line-height:1.65;"><div style="font-weight:700;color:var(--text1);margin-bottom:7px;">'+t+'</div>'+b+'</div>';};
+  if(kind==='mail'){
+    const e=ix.mails[i];if(!e)return;
+    const hasFile=!!((e.orig&&e.orig.fileId)||(e.pdf&&e.pdf.fileId)||(e.snap&&e.snap.fileId));
+    _pamDokFooter(esc(e.subject||'(kein Betreff)'),
+      (hasFile?_pamDokBtn('⬇ Original',"_pamDokDownload('mail',"+i+")",'Herunterladen'):'')
+      +_pamDokBtn('⛶ Groß',"_pamDokOpen('mail',"+i+")",'Groß öffnen'));
+    if(e.orig&&e.orig.fileId&&tok){_pamDokPrevBusy('⏳ E-Mail lädt…');return _pamDokPrevEml(e.orig.fileId);}
+    if(e.snap&&e.snap.fileId&&tok){_pamDokPrevBusy('⏳ Schnappschuss lädt…');return _pamDokPrevHtml(e.snap.fileId);}
+    if(e.pdf&&e.pdf.fileId&&tok){_pamDokPrevBusy('⏳ PDF lädt…');return _pamDokPrevPdf(e.pdf.fileId);}
+    _pamDokPrevInfo(note(esc(e.subject||'(kein Betreff)'),
+      'Von '+esc(e.from||'Unbekannt')+(e.ts?' · '+_pamDokFmtDate(e.ts):'')+'<br><br>'
+      +(tok?'Für diese Mail liegt noch keine Datei auf Drive. Über „⛶ Groß" öffnet sich der geladene Verlauf.':'Nicht mit Google Drive verbunden – Vorschau nicht möglich.')));
+    return;
+  }
+  if(kind==='doc'){
+    const d=ix.docs[i];if(!d)return;
+    _pamDokFooter(esc(d.name),
+      ((d.fileId||d.data)?_pamDokBtn('⬇ Laden',"_pamDokDownload('doc',"+i+")",'Herunterladen'):'')
+      +_pamDokBtn('⛶ Groß',"_pamDokOpen('doc',"+i+")",'Groß öffnen'));
+    if(d.kind==='prf'){_pamDokPrevInfo(note(esc(d.name),'Formular'+(d.ts?' vom '+_pamDokFmtDate(d.ts):'')+'.<br><br>Über „⛶ Groß" zum Ausfüllen öffnen.'));return;}
+    const ext=String(d.name||'').split('.').pop().toLowerCase();
+    if(d.data){
+      if(_pamDokIsImg(ext))return _pamDokPrevImg(d.data);
+      if(ext==='pdf')return _pamDokPrevFrame(d.data);
+      _pamDokPrevInfo(note(esc(d.name),'Diese Datei liegt im Auftrag selbst (nicht auf Drive) und hat keine Vorschau.'));return;
+    }
+    if(d.fileId&&tok){
+      if(_pamDokIsImg(ext)){_pamDokPrevBusy('⏳ Bild lädt…');return _pamDokPrevDriveImg(d.fileId);}
+      if(ext==='pdf'){_pamDokPrevBusy('⏳ PDF lädt…');return _pamDokPrevPdf(d.fileId);}
+      if(ext==='eml'||ext==='msg'){_pamDokPrevBusy('⏳ E-Mail lädt…');return _pamDokPrevEml(d.fileId);}
+      if(ext==='html'||ext==='htm'){_pamDokPrevBusy('⏳ Lädt…');return _pamDokPrevHtml(d.fileId);}
+      if(_pamDokIsVid(ext)){_pamDokPrevInfo(note(esc(d.name),'Video – über „⛶ Groß" abspielen.'));return;}
+    }
+    _pamDokPrevInfo(note(esc(d.name),'Für diesen Dateityp gibt es keine Vorschau.'
+      +(d.url?'<br><br><a href="'+esc(d.url)+'" target="_blank" style="color:var(--accent);">In Drive öffnen ↗</a>':'')));
+    return;
+  }
+  if(kind==='foto'){
+    const ft=ix.fotos[i];if(!ft)return;
+    _pamDokFooter(esc(ft.name),
+      (ft.fileId?_pamDokBtn('⬇ Laden',"_pamDokDownload('foto',"+i+")",'Herunterladen'):'')
+      +_pamDokBtn('⛶ Groß',"_pamDokOpen('foto',"+i+")",'Groß öffnen'));
+    const fext=String(ft.name||'').split('.').pop().toLowerCase();
+    if(_pamDokIsVid(fext)){_pamDokPrevInfo(note(esc(ft.name),'Video – über „⛶ Groß" abspielen.'));return;}
+    if(!ft.fileId||!tok){_pamDokPrevInfo(note(esc(ft.name),'Keine Drive-Datei hinterlegt – Vorschau nicht möglich.'));return;}
+    _pamDokPrevBusy('⏳ Foto lädt…');
+    try{
+      const u=await _fetchDesktopFotoBlob(ft.fileId);
+      if(!document.getElementById('_pamDokOverlay'))return;
+      if(u)_pamDokPrevImg(u);else _pamDokPrevInfo(note(esc(ft.name),'Foto konnte nicht geladen werden.'));
+    }catch(ex){_pamDokPrevInfo('<div style="padding:20px;color:var(--red);font-size:12px;">⚠ '+esc(ex.message)+'</div>');}
+    return;
+  }
 }
 function _pamDokSetFilter(f){_pamDokFilter=f;_pamDokRender();}
 function _pamDokRender(){
@@ -22708,11 +22907,11 @@ function _pamDokRender(){
   const f=_pamDokFilter;let html='';
   function grp(t,n){return '<div style="display:flex;align-items:center;gap:7px;padding:7px 18px;background:var(--bg3);border-bottom:0.5px solid var(--border);"><span style="font-size:12px;font-weight:700;color:var(--text1);flex:1;">'+t+'</span><span style="font-size:11px;color:var(--text2);">'+n+'</span></div>';}
   function row(main,sub,kind,i,dl){
-    return '<div style="display:flex;align-items:center;gap:10px;padding:9px 18px;border-bottom:0.5px solid var(--border);">'
-      +'<div style="flex:1;min-width:0;cursor:pointer;" onclick="_pamDokOpen(\''+kind+'\','+i+')">'
+    return '<div data-sel="'+kind+':'+i+'" onclick="_pamDokSelect(\''+kind+'\','+i+')" style="display:flex;align-items:center;gap:10px;padding:9px 14px 9px 15px;border-bottom:0.5px solid var(--border);border-left:3px solid transparent;cursor:pointer;">'
+      +'<div style="flex:1;min-width:0;">'
       +'<div style="font-size:13px;color:var(--text1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+main+'</div>'
       +'<div style="display:flex;align-items:center;gap:6px;margin-top:3px;min-width:0;">'+sub+'</div></div>'
-      +(dl?'<button type="button" title="Herunterladen" onclick="_pamDokDownload(\''+kind+'\','+i+')" style="flex-shrink:0;width:30px;height:30px;border-radius:6px;border:0.5px solid var(--border);background:var(--bg2);color:var(--text2);font-size:14px;cursor:pointer;">⬇</button>':'')
+      +(dl?'<button type="button" title="Herunterladen" onclick="event.stopPropagation();_pamDokDownload(\''+kind+'\','+i+')" style="flex-shrink:0;width:28px;height:28px;border-radius:6px;border:0.5px solid var(--border);background:var(--bg2);color:var(--text2);font-size:13px;cursor:pointer;">⬇</button>':'')
       +'</div>';
   }
   if((f==='alle'||f==='mails')&&cM){
@@ -22748,6 +22947,12 @@ function _pamDokRender(){
   }
   if(!html)html='<div style="padding:44px 20px;text-align:center;color:var(--text2);font-size:13px;line-height:1.6;">In diesem Auftrag liegen noch keine Dokumente.</div>';
   body.innerHTML=html;
+  // Sofort etwas anzeigen: bestehende Auswahl halten, sonst die erste sichtbare Sache
+  const vis=_pamDokVisible(ix,f);
+  const keep=vis.some(function(x){return x.kind===_pamDokSel.kind&&x.i===_pamDokSel.i;});
+  if(keep)_pamDokMarkActive();
+  else if(vis.length)_pamDokSelect(vis[0].kind,vis[0].i);
+  else{_pamDokSel={kind:'',i:-1};_pamDokClearPrev(true);}
 }
 function _pamDokOpen(kind,i){
   const taskId=(document.getElementById('taskId')||{}).value||'';
