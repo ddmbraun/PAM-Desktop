@@ -4278,7 +4278,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-23 · #495'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-23-b495)
+const PAM_BUILD = 'v2026-07-23 · #496'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-23-b496)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -22687,6 +22687,10 @@ function _pamDokIndex(task){
 let _pamDokFilter='alle';
 let _pamDokSel={kind:'',i:-1};
 let _pamDokBlobs=[];
+// #496: Zwischenspeicher pro geöffnetem Fenster – eine einmal geladene Datei wird beim
+// Hin- und Herklicken nicht erneut von Drive geholt. Freigabe gebündelt beim Schließen.
+let _pamDokCache=new Map();
+let _pamDokEmlHdr=new Map();
 function _pamDokTask(){const id=(document.getElementById('taskId')||{}).value||'';return(id&&typeof findTaskById==='function')?findTaskById(id):null;}
 function _openPamDokUebersicht(startFilter){
   const GID='_pamDokOverlay';
@@ -22722,6 +22726,7 @@ function _pamDokEsc(ev){
 }
 function _closePamDokUebersicht(){
   _pamDokBlobs.forEach(function(u){try{URL.revokeObjectURL(u);}catch(e){}});_pamDokBlobs=[];
+  _pamDokCache.clear();_pamDokEmlHdr.clear();
   const o=document.getElementById('_pamDokOverlay');if(o)o.remove();
   document.removeEventListener('keydown',_pamDokEsc);
 }
@@ -22748,7 +22753,6 @@ function _pamDokSelect(kind,i){
   _pamDokShowPreview(kind,i);
 }
 function _pamDokClearPrev(hint){
-  _pamDokBlobs.forEach(function(u){try{URL.revokeObjectURL(u);}catch(e){}});_pamDokBlobs=[];
   const f=document.getElementById('_pamDokFoot');if(f){f.style.display='none';f.innerHTML='';}
   const p=document.getElementById('_pamDokPrev');if(!p)return;
   p.style.cssText='flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;';
@@ -22788,39 +22792,58 @@ function _pamDokFooter(title,btns){
 }
 function _pamDokIsImg(ext){return /^(png|jpe?g|gif|webp|bmp|heic|heif)$/.test(ext);}
 function _pamDokIsVid(ext){return /^(mp4|mov|m4v|webm|avi|mkv|wmv|3gp)$/.test(ext);}
-async function _pamDokPrevDriveBlob(fileId,mime){
+async function _pamDokPrevDriveBlob(fileId,mime,busyMsg){
+  const ck=(mime||'raw')+'|'+fileId;
+  if(_pamDokCache.has(ck))return _pamDokCache.get(ck);
+  if(busyMsg)_pamDokPrevBusy(busyMsg);
   const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
   if(!r.ok)throw new Error('HTTP '+r.status);
   const b=await r.blob();
   const u=URL.createObjectURL(mime?new Blob([b],{type:mime}):b);
-  _pamDokBlobs.push(u);
+  _pamDokBlobs.push(u);_pamDokCache.set(ck,u);
   return u;
 }
 async function _pamDokPrevPdf(fileId){
-  try{const u=await _pamDokPrevDriveBlob(fileId,'application/pdf');
+  try{const u=await _pamDokPrevDriveBlob(fileId,'application/pdf','⏳ PDF lädt…');
     if(!document.getElementById('_pamDokOverlay'))return;
     _pamDokPrevFrame(u+'#toolbar=0&navpanes=0&view=FitH');
   }catch(ex){_pamDokPrevInfo('<div style="padding:20px;color:var(--red);font-size:12px;">⚠ '+esc(ex.message)+'</div>');}
 }
 async function _pamDokPrevDriveImg(fileId){
-  try{const u=await _pamDokPrevDriveBlob(fileId,'');
+  try{const u=await _pamDokPrevDriveBlob(fileId,'','⏳ Bild lädt…');
     if(!document.getElementById('_pamDokOverlay'))return;
     _pamDokPrevImg(u);
   }catch(ex){_pamDokPrevInfo('<div style="padding:20px;color:var(--red);font-size:12px;">⚠ '+esc(ex.message)+'</div>');}
 }
 async function _pamDokPrevHtml(fileId){
+  const ck='html|'+fileId;
+  if(_pamDokCache.has(ck)){_pamDokPrevFrame(_pamDokCache.get(ck));return;}
   try{
+    _pamDokPrevBusy('⏳ Lädt…');
     const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
     if(!r.ok)throw new Error('HTTP '+r.status);
     const html=await r.text();
     if(!document.getElementById('_pamDokOverlay'))return;
-    const u=URL.createObjectURL(new Blob([html],{type:'text/html'}));_pamDokBlobs.push(u);
+    const u=URL.createObjectURL(new Blob([html],{type:'text/html'}));
+    _pamDokBlobs.push(u);_pamDokCache.set(ck,u);
     _pamDokPrevFrame(u);
   }catch(ex){_pamDokPrevInfo('<div style="padding:20px;color:var(--red);font-size:12px;">⚠ '+esc(ex.message)+'</div>');}
 }
 // .eml lesbar darstellen – gleiche Aufbereitung wie in der Datei-Galerie (CID-Bilder als Blobs)
+function _pamDokPrevEmlShow(hdrHtml,blobUrl){
+  const p=document.getElementById('_pamDokPrev');if(!p)return;
+  p.style.cssText='flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;';
+  p.innerHTML=hdrHtml;
+  const fr=document.createElement('iframe');
+  fr.style.cssText='flex:1;width:100%;border:none;background:#fff;';
+  fr.src=blobUrl;
+  p.appendChild(fr);
+}
 async function _pamDokPrevEml(fileId){
+  const ck='eml|'+fileId;
+  if(_pamDokCache.has(ck)){_pamDokPrevEmlShow(_pamDokEmlHdr.get(ck)||'',_pamDokCache.get(ck));return;}
   try{
+    _pamDokPrevBusy('⏳ E-Mail lädt…');
     const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
     if(!r.ok)throw new Error('HTTP '+r.status);
     const txt=await r.text();
@@ -22843,19 +22866,15 @@ async function _pamDokPrevEml(fileId){
     const clean=String(rawBody).replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<link[^>]+rel=["']?stylesheet["']?[^>]*>/gi,'').replace(/src=["']?(cid:[^"'\s>]+)["']?/gi,function(_m,cid){return cmB[cid]?'src="'+cmB[cid]+'"':'src=""';});
     const full='<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,Helvetica,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}a{color:#1a73e8;}img{max-width:100%;}</style></head><body>'+clean+'</body></html>';
     const u=URL.createObjectURL(new Blob([full],{type:'text/html'}));_pamDokBlobs.push(u);
-    const p=document.getElementById('_pamDokPrev');if(!p)return;
-    p.style.cssText='flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;';
-    p.innerHTML='<div style="padding:12px 16px 9px;border-bottom:1px solid var(--border);background:var(--bg3);flex-shrink:0;">'
+    const hdrHtml='<div style="padding:12px 16px 9px;border-bottom:1px solid var(--border);background:var(--bg3);flex-shrink:0;">'
       +'<div style="font-weight:700;font-size:14px;color:var(--text1);margin-bottom:5px;">'+e2(info.subject||'(kein Betreff)')+'</div>'
       +'<div style="font-size:11px;color:var(--text2);">Von '+e2(info.sender||'')+(info.date?' · '+e2(info.date.toLocaleString('de-DE')):'')+'</div></div>';
-    const fr=document.createElement('iframe');
-    fr.style.cssText='flex:1;width:100%;border:none;background:#fff;';
-    fr.src=u;
-    p.appendChild(fr);
+    _pamDokCache.set(ck,u);_pamDokEmlHdr.set(ck,hdrHtml);
+    _pamDokPrevEmlShow(hdrHtml,u);
   }catch(ex){_pamDokPrevInfo('<div style="padding:20px;color:var(--red);font-size:12px;">⚠ '+esc(ex.message)+'</div>');}
 }
 async function _pamDokShowPreview(kind,i){
-  _pamDokBlobs.forEach(function(u){try{URL.revokeObjectURL(u);}catch(e){}});_pamDokBlobs=[];
+  // #496: hier NICHT mehr freigeben – sonst müsste jede Datei bei jedem Klick neu geladen werden
   const task=_pamDokTask();const ix=_pamDokIndex(task);
   const tok=(typeof gdriveToken!=='undefined')?gdriveToken:'';
   const note=function(t,b){return '<div style="padding:22px;font-size:13px;color:var(--text2);line-height:1.65;"><div style="font-weight:700;color:var(--text1);margin-bottom:7px;">'+t+'</div>'+b+'</div>';};
@@ -22865,9 +22884,9 @@ async function _pamDokShowPreview(kind,i){
     _pamDokFooter(esc(e.subject||'(kein Betreff)'),
       (hasFile?_pamDokBtn('⬇ Original',"_pamDokDownload('mail',"+i+")",'Herunterladen'):'')
       +_pamDokBtn('⛶ Groß',"_pamDokOpen('mail',"+i+")",'Groß öffnen'));
-    if(e.orig&&e.orig.fileId&&tok){_pamDokPrevBusy('⏳ E-Mail lädt…');return _pamDokPrevEml(e.orig.fileId);}
-    if(e.snap&&e.snap.fileId&&tok){_pamDokPrevBusy('⏳ Schnappschuss lädt…');return _pamDokPrevHtml(e.snap.fileId);}
-    if(e.pdf&&e.pdf.fileId&&tok){_pamDokPrevBusy('⏳ PDF lädt…');return _pamDokPrevPdf(e.pdf.fileId);}
+    if(e.orig&&e.orig.fileId&&tok)return _pamDokPrevEml(e.orig.fileId);
+    if(e.snap&&e.snap.fileId&&tok)return _pamDokPrevHtml(e.snap.fileId);
+    if(e.pdf&&e.pdf.fileId&&tok)return _pamDokPrevPdf(e.pdf.fileId);
     _pamDokPrevInfo(note(esc(e.subject||'(kein Betreff)'),
       'Von '+esc(e.from||'Unbekannt')+(e.ts?' · '+_pamDokFmtDate(e.ts):'')+'<br><br>'
       +(tok?'Für diese Mail liegt noch keine Datei auf Drive. Über „⛶ Groß" öffnet sich der geladene Verlauf.':'Nicht mit Google Drive verbunden – Vorschau nicht möglich.')));
@@ -22886,10 +22905,10 @@ async function _pamDokShowPreview(kind,i){
       _pamDokPrevInfo(note(esc(d.name),'Diese Datei liegt im Auftrag selbst (nicht auf Drive) und hat keine Vorschau.'));return;
     }
     if(d.fileId&&tok){
-      if(_pamDokIsImg(ext)){_pamDokPrevBusy('⏳ Bild lädt…');return _pamDokPrevDriveImg(d.fileId);}
-      if(ext==='pdf'){_pamDokPrevBusy('⏳ PDF lädt…');return _pamDokPrevPdf(d.fileId);}
-      if(ext==='eml'||ext==='msg'){_pamDokPrevBusy('⏳ E-Mail lädt…');return _pamDokPrevEml(d.fileId);}
-      if(ext==='html'||ext==='htm'){_pamDokPrevBusy('⏳ Lädt…');return _pamDokPrevHtml(d.fileId);}
+      if(_pamDokIsImg(ext))return _pamDokPrevDriveImg(d.fileId);
+      if(ext==='pdf')return _pamDokPrevPdf(d.fileId);
+      if(ext==='eml'||ext==='msg')return _pamDokPrevEml(d.fileId);
+      if(ext==='html'||ext==='htm')return _pamDokPrevHtml(d.fileId);
       if(_pamDokIsVid(ext)){_pamDokPrevInfo(note(esc(d.name),'Video – über „⛶ Groß" abspielen.'));return;}
     }
     _pamDokPrevInfo(note(esc(d.name),'Für diesen Dateityp gibt es keine Vorschau.'
