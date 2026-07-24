@@ -4311,7 +4311,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-23 · #512'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-23-b512)
+const PAM_BUILD = 'v2026-07-24 · #513'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-24-b513)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -13653,7 +13653,10 @@ function _fotoThumbClick(i,e){
 async function _showFotoExif(i,btn){
   const f=taskFotos&&taskFotos[i];
   if(!f){showToast('Foto nicht gefunden','error');return;}
-  const id=f.editedDriveId||f.driveId||'';
+  // b513: Aufnahmedaten IMMER bevorzugt aus dem ORIGINAL lesen – die bemalte Kopie
+  // (editedDriveId) ist ein Canvas-Bild und hatte bis Mobil v121 nie EXIF/GPS.
+  // Damit zeigen auch alle FRÜHER beschrifteten Fotos wieder ihren Aufnahmeort.
+  const id=f.driveId||f.editedDriveId||'';
   if(!id){showToast('Keine Drive-ID','error');return;}
   if(!gdriveToken){showToast('Drive nicht verbunden','error');return;}
   const old=document.getElementById('_exifPopup');
@@ -13709,7 +13712,9 @@ async function _showFotoExif(i,btn){
     popup.className='foto-exif-popup';
     popup.innerHTML=(rows?'<table style="border-collapse:collapse;line-height:1.7">'+rows+'</table>'
       :'<span style="color:var(--text2)">Keine EXIF-Daten gefunden</span>')
-      +'<div style="text-align:right;margin-top:8px"><button onclick="document.getElementById(\'_exifPopup\').remove()" style="font-size:11px;padding:2px 10px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer">✕</button></div>';
+      +'<div style="display:flex;justify-content:space-between;gap:8px;margin-top:8px">'
+      +'<button onclick="_deskGpsDialog('+i+')" style="font-size:11px;padding:2px 10px;border-radius:5px;border:1px solid var(--accent);background:var(--bg3);color:var(--accent);cursor:pointer;font-weight:600">📍 korrigieren</button>' // b513: Aufnahmeort setzen/ändern
+      +'<button onclick="document.getElementById(\'_exifPopup\').remove()" style="font-size:11px;padding:2px 10px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer">✕</button></div>';
     const rect=btn.getBoundingClientRect();
     popup.style.left=Math.min(rect.right+6,window.innerWidth-290)+'px';
     popup.style.top=Math.max(rect.top-80,8)+'px';
@@ -13758,6 +13763,160 @@ async function _deskReverseGeocode(lat,lon){
   }
   if(addr)_deskRevGeoCache[key]=addr;
   return addr;
+}
+// ══════════ b513 FOTO-GPS-PAKET (Desktop-Teil) ══════════
+// 📍-Dialog im ℹ-Popup: Aufnahmeort eines Fotos nachträglich setzen/korrigieren.
+// Schreibt die Koordinaten fest in die Drive-JPEG (Original + ggf. bearbeitete Kopie).
+function _gpsDecToRational(dec){
+  const a=Math.abs(dec);
+  const d=Math.floor(a),mFull=(a-d)*60,m=Math.floor(mFull),s=Math.round((mFull-m)*60*10000);
+  return [[d,1],[m,1],[s,10000]];
+}
+function _writeGpsIntoDataUrl(dataUrl,lat,lon){
+  let exifObj;
+  try{exifObj=piexif.load(dataUrl);}
+  catch(e){exifObj={'0th':{},'Exif':{},'GPS':{},'1st':{},'thumbnail':null};}
+  const gpsIfd={};
+  gpsIfd[piexif.GPSIFD.GPSVersionID]=[2,3,0,0];
+  gpsIfd[piexif.GPSIFD.GPSLatitudeRef]=lat>=0?'N':'S';
+  gpsIfd[piexif.GPSIFD.GPSLatitude]=_gpsDecToRational(lat);
+  gpsIfd[piexif.GPSIFD.GPSLongitudeRef]=lon>=0?'E':'W';
+  gpsIfd[piexif.GPSIFD.GPSLongitude]=_gpsDecToRational(lon);
+  exifObj['GPS']=gpsIfd;
+  exifObj['1st']={};exifObj['thumbnail']=null; // Thumbnail weg – kann dump-Fehler auslösen
+  let bytes;
+  try{bytes=piexif.dump(exifObj);}
+  catch(eDump){ // Alt-EXIF nicht schreibbar → Minimalsatz (Datum/Kamera) + neues GPS
+    const z=exifObj['0th']||{},ex=exifObj['Exif']||{};
+    const mini={'0th':{},'Exif':{},'GPS':gpsIfd,'1st':{},'thumbnail':null};
+    [piexif.ImageIFD.Make,piexif.ImageIFD.Model,piexif.ImageIFD.DateTime].forEach(t=>{if(z[t]!==undefined)mini['0th'][t]=z[t];});
+    [piexif.ExifIFD.DateTimeOriginal,piexif.ExifIFD.DateTimeDigitized].forEach(t=>{if(ex[t]!==undefined)mini['Exif'][t]=ex[t];});
+    bytes=piexif.dump(mini);
+  }
+  return piexif.insert(bytes,dataUrl);
+}
+async function _deskWriteGpsToDriveFoto(driveId,lat,lon){
+  if(!driveId)throw new Error('keine Drive-ID');
+  if(!gdriveToken)throw new Error('Drive nicht verbunden');
+  const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(driveId)+'?alt=media',
+    {headers:{Authorization:'Bearer '+gdriveToken}});
+  if(!r.ok)throw new Error('Drive '+r.status);
+  const blob=await r.blob();
+  const dataUrl=await new Promise((res,rej)=>{const fr=new FileReader();fr.onload=e=>res(e.target.result);fr.onerror=rej;fr.readAsDataURL(blob);});
+  if(!dataUrl.startsWith('data:image/jpeg')&&!dataUrl.startsWith('data:image/jpg'))throw new Error('kein JPEG');
+  const out=_writeGpsIntoDataUrl(dataUrl,lat,lon);
+  const b64=out.split(',')[1];
+  const bin=atob(b64);const bytes=new Uint8Array(bin.length);
+  for(let j=0;j<bin.length;j++)bytes[j]=bin.charCodeAt(j);
+  const r2=await fetch('https://www.googleapis.com/upload/drive/v3/files/'+encodeURIComponent(driveId)+'?uploadType=media',
+    {method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'image/jpeg'},body:new Blob([bytes],{type:'image/jpeg'})});
+  if(!r2.ok)throw new Error('Drive-Upload '+r2.status);
+  try{_desktopFotoBlobCache.delete(driveId);}catch(e){}
+  return true;
+}
+async function _deskForwardGeocode(q){
+  q=String(q||'').trim();
+  if(!q)return null;
+  try{
+    const r=await fetch('https://photon.komoot.io/api/?limit=1&lang=de&q='+encodeURIComponent(q));
+    if(r.ok){
+      const d=await r.json();
+      const ft=d.features&&d.features[0];
+      if(ft&&ft.geometry&&ft.geometry.coordinates){
+        const p=ft.properties||{};
+        const label=[[p.street||p.name||'',p.housenumber||''].filter(Boolean).join(' '),[p.postcode||'',p.city||p.town||p.village||''].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+        return {lat:ft.geometry.coordinates[1],lon:ft.geometry.coordinates[0],label:label||q};
+      }
+    }
+  }catch(e){console.warn('[Geocode vorwärts Photon]',e);}
+  try{
+    const r=await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=de&q='+encodeURIComponent(q),{headers:{'Accept':'application/json'}});
+    if(r.ok){const d=await r.json();if(d&&d[0])return {lat:parseFloat(d[0].lat),lon:parseFloat(d[0].lon),label:d[0].display_name||q};}
+  }catch(e){console.warn('[Geocode vorwärts Nominatim]',e);}
+  return null;
+}
+let _deskGpsPending=null;
+function _deskGpsDialog(i){
+  const f=taskFotos&&taskFotos[i];
+  if(!f){showToast('Foto nicht gefunden','error');return;}
+  if(!f.driveId&&!f.editedDriveId){showToast('Foto hat keine Drive-Datei','error');return;}
+  _deskGpsPending=null;
+  const old=document.getElementById('_deskGpsOv');if(old)old.remove();
+  const ov=document.createElement('div');
+  ov.id='_deskGpsOv';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100000;display:flex;align-items:center;justify-content:center;padding:16px;';
+  ov.innerHTML='<div style="background:var(--bg,#fff);color:var(--text,#222);border:1px solid var(--border,#ccc);border-radius:12px;padding:20px 22px;width:100%;max-width:460px;box-shadow:0 8px 40px rgba(0,0,0,.35);" onclick="event.stopPropagation()">'
+    +'<div style="font-size:16px;font-weight:700;margin-bottom:10px;">📍 Aufnahmeort im Foto korrigieren</div>'
+    +'<div style="display:flex;gap:8px;margin-bottom:10px;">'
+      +'<button onclick="_deskGpsUseTaskAdr('+i+')" style="flex:1;padding:9px 8px;border-radius:8px;border:1px solid var(--accent);background:var(--bg3,#f4f5f8);color:var(--accent);font-size:12px;font-weight:700;cursor:pointer;">🏠 Aus Objektadresse übernehmen</button>'
+    +'</div>'
+    +'<input id="_deskGpsInput" type="text" placeholder="Adresse oder Koordinaten (51.108, 10.653)…" style="width:100%;padding:9px;border-radius:8px;border:1px solid var(--border,#ccc);background:var(--bg,#fff);color:var(--text,#222);font-size:13px;box-sizing:border-box;">'
+    +'<div id="_deskGpsResult" style="font-size:12px;color:var(--text2,#666);margin:10px 0;min-height:16px;"></div>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end;">'
+      +'<button onclick="document.getElementById(\'_deskGpsOv\').remove()" style="padding:8px 14px;border-radius:8px;border:1px solid var(--border,#ccc);background:var(--bg3,#f4f5f8);color:var(--text,#222);font-size:12px;cursor:pointer;">Abbrechen</button>'
+      +'<button onclick="_deskGpsResolveInput()" style="padding:8px 14px;border-radius:8px;border:none;background:var(--accent,#2e4fc4);color:#fff;font-size:12px;font-weight:700;cursor:pointer;">🔍 Prüfen</button>'
+      +'<button id="_deskGpsSaveBtn" onclick="_deskGpsSave('+i+')" disabled style="padding:8px 14px;border-radius:8px;border:none;background:#27ae60;color:#fff;font-size:12px;font-weight:700;opacity:.45;cursor:pointer;">💾 In Foto speichern</button>'
+    +'</div></div>';
+  ov.addEventListener('click',()=>ov.remove());
+  document.body.appendChild(ov);
+  const inp=document.getElementById('_deskGpsInput');
+  if(inp){inp.addEventListener('keydown',e=>{if(e.key==='Enter')_deskGpsResolveInput();});setTimeout(()=>inp.focus(),60);}
+}
+function _deskGpsSetPending(lat,lon,label){
+  _deskGpsPending={lat:lat,lon:lon};
+  const res=document.getElementById('_deskGpsResult');
+  if(res)res.innerHTML='✅ Gefunden: <b>'+esc(label||(lat.toFixed(5)+', '+lon.toFixed(5)))+'</b><br>('+lat.toFixed(6)+', '+lon.toFixed(6)+') – jetzt „💾 In Foto speichern" klicken.';
+  const btn=document.getElementById('_deskGpsSaveBtn');
+  if(btn){btn.disabled=false;btn.style.opacity='1';}
+}
+function _deskGpsUseTaskAdr(i){
+  let a='';
+  try{const t=findTaskById((document.getElementById('taskId')||{}).value||'');a=t&&t.adresse?String(t.adresse).trim():'';}catch(e){}
+  if(!a){const res=document.getElementById('_deskGpsResult');if(res)res.textContent='⚠ Im Auftrag ist keine Objektadresse hinterlegt.';return;}
+  const inp=document.getElementById('_deskGpsInput');if(inp)inp.value=a;
+  _deskGpsResolveInput();
+}
+async function _deskGpsResolveInput(){
+  const inp=document.getElementById('_deskGpsInput');
+  const res=document.getElementById('_deskGpsResult');
+  const q=(inp&&inp.value||'').trim();
+  if(!q){if(res)res.textContent='Bitte Adresse eingeben oder Koordinaten einfügen.';return;}
+  const m=q.match(/^\s*(-?\d{1,3}\.\d+)[,;\s]+(-?\d{1,3}\.\d+)\s*$/);
+  if(m){
+    const lat=parseFloat(m[1]),lon=parseFloat(m[2]);
+    if(lat>=-90&&lat<=90&&lon>=-180&&lon<=180){
+      let label=lat.toFixed(5)+', '+lon.toFixed(5);
+      try{const a=await _deskReverseGeocode(lat,lon);if(a)label=a;}catch(e){}
+      _deskGpsSetPending(lat,lon,label);
+      return;
+    }
+  }
+  if(res)res.textContent='🔍 Suche Adresse…';
+  const hit=await _deskForwardGeocode(q);
+  if(hit)_deskGpsSetPending(hit.lat,hit.lon,hit.label);
+  else if(res)res.textContent='⚠ Adresse nicht gefunden – bitte genauer eingeben (Straße Nr, PLZ Ort).';
+}
+async function _deskGpsSave(i){
+  if(!_deskGpsPending)return;
+  const f=taskFotos&&taskFotos[i];if(!f)return;
+  const btn=document.getElementById('_deskGpsSaveBtn');
+  if(btn){btn.disabled=true;btn.textContent='⏳ Speichere…';}
+  const lat=_deskGpsPending.lat,lon=_deskGpsPending.lon;
+  let okCount=0,fail='';
+  for(const id of [f.driveId,f.editedDriveId]){ // Original + ggf. bearbeitete Kopie
+    if(!id)continue;
+    try{await _deskWriteGpsToDriveFoto(id,lat,lon);okCount++;}
+    catch(e){fail=e.message||String(e);console.warn('[GPS-Korrektur]',id,e);}
+  }
+  if(okCount>0){
+    const ov=document.getElementById('_deskGpsOv');if(ov)ov.remove();
+    const ex=document.getElementById('_exifPopup');if(ex)ex.remove(); // ℹ neu öffnen zeigt den neuen Stand
+    showToast('📍 Aufnahmeort im Foto gespeichert'+(fail?' (eine Datei fehlgeschlagen)':''),'success',4000);
+  }else{
+    if(btn){btn.disabled=false;btn.textContent='💾 In Foto speichern';}
+    const res=document.getElementById('_deskGpsResult');
+    if(res)res.textContent='⚠ Speichern fehlgeschlagen: '+fail;
+  }
 }
 function openFotoPanel(){
   if(!taskFotos||!taskFotos.length){showToast('Keine Fotos vorhanden','info');return;}
@@ -14811,10 +14970,16 @@ function embedExifCaption(dataUrl,caption){
   try{
     if(!window.piexif)return dataUrl;
     let exifObj;
+    // b513: Bei unlesbarem EXIF NICHT mit leerem Satz überschreiben (löschte sonst
+    // GPS/Datum/Kamera aus der Drive-Datei) – dann lieber gar nicht einbetten,
+    // der Text steht ja ohnehin in der Aufgabe (f.caption).
     try{exifObj=piexif.load(dataUrl);}
-    catch(e){exifObj={'0th':{},'Exif':{},'GPS':{},'1st':{},'thumbnail':null};}
+    catch(e){return dataUrl;}
     if(!exifObj['0th'])exifObj['0th']={};
-    exifObj['0th'][piexif.ImageIFD.ImageDescription]=caption;
+    // b513: Text als UTF-8-Bytes einbetten – Emojis/Sonderzeichen (Zeichencode >255)
+    // zerstörten sonst die EXIF-Struktur der JPEG (bewiesen 24.07.: „Wrong JPEG data",
+    // Datei danach je nach Programm nicht mehr anzeigbar).
+    exifObj['0th'][piexif.ImageIFD.ImageDescription]=unescape(encodeURIComponent(String(caption||'')));
     const exifBytes=piexif.dump(exifObj);
     return piexif.insert(exifBytes,dataUrl);
   }catch(e){console.warn('EXIF:',e);return dataUrl;}
