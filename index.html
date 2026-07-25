@@ -4321,7 +4321,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-25 · #517'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-25-b517)
+const PAM_BUILD = 'v2026-07-25 · #518'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-25-b518)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -10094,6 +10094,24 @@ function _btbSetFilter(f,ev){if(ev)ev.stopPropagation();_btbFilter=f;
   renderTaskNotizen();}
 const _btbMoreOpen=new Set();
 function _btbToggleMore(key){if(_btbMoreOpen.has(key))_btbMoreOpen.delete(key);else _btbMoreOpen.add(key);renderTaskNotizen();}
+// b518: Aufnahmezeit eines Fotos ändern (nur f.ts = Einordnung im Tagebuch,
+// die Foto-Datei/EXIF auf Drive bleibt unangetastet). Aufruf aus dem ℹ-Popup.
+function _btbZeitKorrigieren(i){
+  const f=taskFotos&&taskFotos[i];if(!f)return;
+  const d=_btbParseTs(f.ts);
+  const cur=d?(String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0')+'.'+d.getFullYear()+' '+_btbZeit(d)):'';
+  const val=prompt('Aufnahmezeit für "'+(f.name||'Foto')+'" ändern (Format TT.MM.JJJJ HH:MM):\n\nÄndert nur die Einordnung im Bautagebuch – die Foto-Datei auf Drive bleibt unverändert.',cur);
+  if(val===null)return;
+  const m=/^(\d{1,2})\.(\d{1,2})\.(\d{4})[ ,]+(\d{1,2})[:.](\d{2})$/.exec(String(val).trim());
+  if(!m){showToast('Format nicht erkannt – bitte TT.MM.JJJJ HH:MM (z. B. 22.07.2026 07:25)','error',4500);return;}
+  const nd=new Date(+m[3],+m[2]-1,+m[1],+m[4],+m[5]);
+  if(isNaN(nd)){showToast('Ungültiges Datum','error');return;}
+  f.ts=nd.toISOString();
+  const p=document.getElementById('_exifPopup');if(p)p.remove();
+  renderFotoListDesktop(); // rendert das Tagebuch mit → Foto rutscht zur passenden Notiz
+  scheduleTaskFieldSave();
+  showToast('🕒 Aufnahmezeit geändert – Foto neu einsortiert','success');
+}
 function _btbOpenFotoAuswahl(){
   const sect=document.getElementById('tFotoSect');
   if(sect)sect.classList.add('open');
@@ -10190,21 +10208,44 @@ function renderTaskNotizen(){
       +'</div>';
     // Notizen des Tages, zeitlich aufsteigend (Original-Index bleibt für Edit/Löschen erhalten)
     g.notiz.sort((a,b)=>((a.d?a.d.getTime():0)-(b.d?b.d.getTime():0))||(a.i-b.i));
-    g.notiz.forEach(x=>{html+=_btbIsSystemNotiz(x.n.text)?_btbSystemZeile(x.n,x.i,x.d):_btbNotizCard(x.n,x.i);});
-    // Fotos des Tages: erste 4 + „+X mehr"
-    if(fc){
-      g.foto.sort((a,b)=>((a.d?a.d.getTime():0)-(b.d?b.d.getTime():0))||(a.i-b.i));
-      const open=_btbMoreOpen.has(key);
-      const show=open?g.foto:g.foto.slice(0,4);
-      html+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 2px;">';
-      show.forEach(x=>{html+=_btbFotoTile(x);});
-      if(!open&&fc>4){
-        html+='<div onclick="_btbToggleMore(\''+key+'\')" style="width:84px;height:64px;border-radius:6px;border:1.5px dashed var(--accent);background:rgba(108,99,255,0.05);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--accent);font-size:calc(11px*var(--modal-scale,1));font-weight:700;flex-shrink:0;">+'+(fc-4)+' mehr</div>';
-      }else if(open&&fc>4){
-        html+='<div onclick="_btbToggleMore(\''+key+'\')" style="width:84px;height:64px;border-radius:6px;border:1.5px dashed var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text2);font-size:calc(11px*var(--modal-scale,1));font-weight:600;flex-shrink:0;">− weniger</div>';
+    g.foto.sort((a,b)=>((a.d?a.d.getTime():0)-(b.d?b.d.getTime():0))||(a.i-b.i));
+    // b518: Fotos der zeitlich passenden Notiz zuordnen (Wunsch Frank: zwei Ortstermine
+    // am selben Tag, z. B. 07:23 und 19:30 – jede Notiz bekommt „ihre" Bilder).
+    // Regel: Ein Foto hängt unter der LETZTEN echten Notiz, deren Uhrzeit vor der
+    // Aufnahmezeit liegt; Fotos vor der ersten Notiz stehen oben im Tagesblock.
+    // System-Zeilen sind keine Anker. Falsche Zeiten korrigierbar: Notiz übers
+    // Zeitstempel-Feld, Foto über ℹ → „🕒 Zeit".
+    const anker=g.notiz.filter(x=>!_btbIsSystemNotiz(x.n.text)&&x.d);
+    const fGrp=new Map();
+    g.foto.forEach(x=>{
+      let gi=-1;const ft=x.d?x.d.getTime():0;
+      for(let a=0;a<anker.length;a++){if(anker[a].d.getTime()<=ft)gi=a;else break;}
+      if(!fGrp.has(gi))fGrp.set(gi,[]);
+      fGrp.get(gi).push(x);
+    });
+    const strip=(list,gKey)=>{
+      if(!list||!list.length)return'';
+      const open=_btbMoreOpen.has(gKey);
+      const show=open?list:list.slice(0,4);
+      let s='<div style="display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 2px;">';
+      show.forEach(x=>{s+=_btbFotoTile(x);});
+      if(!open&&list.length>4){
+        s+='<div onclick="_btbToggleMore(\''+gKey+'\')" style="width:84px;height:64px;border-radius:6px;border:1.5px dashed var(--accent);background:rgba(108,99,255,0.05);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--accent);font-size:calc(11px*var(--modal-scale,1));font-weight:700;flex-shrink:0;">+'+(list.length-4)+' mehr</div>';
+      }else if(open&&list.length>4){
+        s+='<div onclick="_btbToggleMore(\''+gKey+'\')" style="width:84px;height:64px;border-radius:6px;border:1.5px dashed var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text2);font-size:calc(11px*var(--modal-scale,1));font-weight:600;flex-shrink:0;">− weniger</div>';
       }
-      html+='</div>';
-    }
+      return s+'</div>';
+    };
+    html+=strip(fGrp.get(-1),key+'#vor');
+    let ai=0;
+    g.notiz.forEach(x=>{
+      if(_btbIsSystemNotiz(x.n.text)){html+=_btbSystemZeile(x.n,x.i,x.d);return;}
+      html+=_btbNotizCard(x.n,x.i);
+      if(x.d){
+        html+=strip(fGrp.get(ai),key+'#'+ai);
+        ai++;
+      }
+    });
   });
   el.innerHTML=html;
   try{hydrateDesktopFotoThumbs();}catch(e){console.warn('[BTB] hydrate:',e);}
@@ -13907,6 +13948,7 @@ async function _showFotoExif(i,btn){
       :'<span style="color:var(--text2)">nicht im Foto gespeichert</span>';
     const rows=[
       date?'<tr><td style="color:var(--text2);padding-right:10px;white-space:nowrap">📅 Datum</td><td>'+esc(date)+'</td></tr>':'',
+      '<tr><td style="color:var(--text2);padding-right:10px;white-space:nowrap">🕒 Tagebuch</td><td>'+(f.ts?esc(_fmtNotizTs(f.ts)):'<span style="color:var(--text2)">kein Datum – über 🕒 Zeit setzen</span>')+'</td></tr>', // b518: Einordnungs-Zeit im Bautagebuch
       (make||model)?'<tr><td style="color:var(--text2);padding-right:10px;white-space:nowrap">📷 Kamera</td><td>'+esc((make+' '+model).trim())+'</td></tr>':'',
       (pw&&ph)?'<tr><td style="color:var(--text2);padding-right:10px;white-space:nowrap">🔲 Auflösung</td><td>'+pw+' × '+ph+'</td></tr>':'',
       '<tr><td style="color:var(--text2);padding-right:10px;white-space:nowrap;vertical-align:top">📍 Aufnahmeort</td><td id="_exifOrt">'+ortCell+'</td></tr>',
@@ -13918,6 +13960,7 @@ async function _showFotoExif(i,btn){
       :'<span style="color:var(--text2)">Keine EXIF-Daten gefunden</span>')
       +'<div style="display:flex;justify-content:space-between;gap:8px;margin-top:8px">'
       +'<button onclick="_deskGpsDialog('+i+')" style="font-size:11px;padding:2px 10px;border-radius:5px;border:1px solid var(--accent);background:var(--bg3);color:var(--accent);cursor:pointer;font-weight:600">📍 korrigieren</button>' // b513: Aufnahmeort setzen/ändern
+      +'<button onclick="_btbZeitKorrigieren('+i+')" style="font-size:11px;padding:2px 10px;border-radius:5px;border:1px solid var(--accent);background:var(--bg3);color:var(--accent);cursor:pointer;font-weight:600">🕒 Zeit</button>' // b518: Tagebuch-Zeit ändern
       +'<button onclick="document.getElementById(\'_exifPopup\').remove()" style="font-size:11px;padding:2px 10px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer">✕</button></div>';
     const rect=btn.getBoundingClientRect();
     popup.style.left=Math.min(rect.right+6,window.innerWidth-290)+'px';
