@@ -4311,7 +4311,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-24 · #513'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-24-b513)
+const PAM_BUILD = 'v2026-07-25 · #514'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-25-b514)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -11866,7 +11866,7 @@ async function _dfpLoadFolder(folderId,folderName){
     // Bilder + Videos laden
     const qImg=`'${folderId}' in parents and (mimeType contains 'image/' or mimeType contains 'video/') and trashed=false`;
     const rImg=await fetch(
-      'https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(qImg)+'&fields=files(id,name,mimeType,thumbnailLink)&orderBy=name&pageSize=200',
+      'https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(qImg)+'&fields=files(id,name,mimeType,thumbnailLink,createdTime,imageMediaMetadata(time))&orderBy=name&pageSize=200',
       {headers:{Authorization:'Bearer '+gdriveToken}});
     if(!rImg.ok){
       if(rImg.status===401||rImg.status===403)showToast('⚠ Keine Berechtigung – Drive neu verbinden','error',6000);
@@ -11904,7 +11904,7 @@ async function _dfpLoadFolder(folderId,folderName){
         const chk=sel?'display:flex;':'display:none;';
         const fallbackIcon=isVid?'🎬':'🖼️';
         const playBadge=isVid?`<div style="position:absolute;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;pointer-events:none;"><div style="width:34px;height:34px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;">▶</div></div>`:'';
-        html+=`<div class="dfp-item" data-id="${esc(f.id)}" data-name="${esc(f.name)}" data-mime="${esc(f.mimeType||(isVid?'video/mp4':'image/jpeg'))}" data-thumb="${esc(thumb)}" data-selected="${sel?'1':'0'}" onclick="_dfpToggle(this)" style="position:relative;width:110px;height:110px;border-radius:8px;overflow:hidden;cursor:pointer;${border}background:var(--bg3);flex-shrink:0;">`
+        html+=`<div class="dfp-item" data-id="${esc(f.id)}" data-name="${esc(f.name)}" data-mime="${esc(f.mimeType||(isVid?'video/mp4':'image/jpeg'))}" data-thumb="${esc(thumb)}" data-ts="${esc(_fotoTsFromDriveMeta(f))}" data-selected="${sel?'1':'0'}" onclick="_dfpToggle(this)" style="position:relative;width:110px;height:110px;border-radius:8px;overflow:hidden;cursor:pointer;${border}background:var(--bg3);flex-shrink:0;">`
           +(thumb?`<img src="${esc(thumb)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">`
                  :`<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:28px;">${fallbackIcon}</div>`)
           +playBadge
@@ -11938,7 +11938,7 @@ function _dfpToggle(el){
   if(chk)chk.style.display=sel?'none':'flex';
   const id=el.dataset.id;
   if(sel){_dfpSelected.delete(id);}
-  else{_dfpSelected.set(id,{id,name:el.dataset.name,mime:el.dataset.mime||'image/jpeg',thumbnailLink:el.dataset.thumb||''});}
+  else{_dfpSelected.set(id,{id,name:el.dataset.name,mime:el.dataset.mime||'image/jpeg',thumbnailLink:el.dataset.thumb||'',ts:el.dataset.ts||''});}
   _dfpUpdateCount();
 }
 function _dfpUpdateCount(){
@@ -11950,9 +11950,9 @@ function _dfpConfirm(){
   if(!overlay)return;
   if(!taskFotos)taskFotos=[];
   let added=0;
-  _dfpSelected.forEach(({id,name,mime,thumbnailLink})=>{
+  _dfpSelected.forEach(({id,name,mime,thumbnailLink,ts})=>{
     if(!taskFotos.find(f=>f.driveId===id)){
-      taskFotos.push({driveId:id,name,mimeType:mime,caption:'',thumbnailLink:thumbnailLink||''});
+      taskFotos.push({driveId:id,name,mimeType:mime,caption:'',thumbnailLink:thumbnailLink||'',ts:ts||''});
       added++;
     }
   });
@@ -12011,7 +12011,7 @@ async function handleFotoUploadToDrive(e){
         const blobUrl=URL.createObjectURL(file);
         _desktopFotoBlobCache.set(meta.id,blobUrl);
         const thumbUrl=await _genLocalThumb(file);
-        taskFotos.push({driveId:meta.id,name:meta.name||file.name,mimeType:meta.mimeType||file.type,caption:'',thumbnailLink:thumbUrl});
+        taskFotos.push({driveId:meta.id,name:meta.name||file.name,mimeType:meta.mimeType||file.type,caption:'',thumbnailLink:thumbUrl,ts:_fotoTsFromFile(file)});
         showToast('✓ '+file.name+' hochgeladen','success');
       }
     }catch(err){showToast('Fehler: '+err.message,'error');}
@@ -12113,7 +12113,7 @@ async function handleFileAttach(e){
           if(_meta&&_meta.id){
             if(!taskFotos)taskFotos=[];
             try{_desktopFotoBlobCache.set(_meta.id,URL.createObjectURL(file));}catch(e2){}
-            taskFotos.push({driveId:_meta.id,name:_meta.name||file.name,mimeType:_meta.mimeType||mime,caption:''});
+            taskFotos.push({driveId:_meta.id,name:_meta.name||file.name,mimeType:_meta.mimeType||mime,caption:'',ts:_fotoTsFromFile(file)});
             renderFotoListDesktop();scheduleTaskFieldSave();
             showToast('✅ Video „'+file.name+'" in Fotos/Videos','success',3000);
           }
@@ -13571,6 +13571,74 @@ function _preloadHvBildCache(){
       setTimeout(fn, 1000);
     }
   }catch(e){}
+}
+
+// ── b514 Paket 1 (Bautagebuch-Vorbereitung): Aufnahme-Zeitstempel für Fotos ──
+// Jedes Foto bekommt f.ts (ISO-Aufnahmedatum): beim Upload aus der Datei
+// (lastModified = bei Kamera-Dateien die Aufnahmezeit), beim Drive-Picker aus den
+// Drive-Metadaten (imageMediaMetadata.time = echtes EXIF-Datum, sonst createdTime).
+// Alt-Bestand wird einmalig im Hintergrund nachgetragen (_fotoTsBackfill) und
+// wandert über workboard.json auch zu Mobil. Grundlage für Tagesblöcke (Paket 2).
+function _fotoExifToIso(t){
+  if(!t)return'';
+  const m=/^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(String(t));
+  if(!m)return'';
+  const d=new Date(+m[1],+m[2]-1,+m[3],+m[4],+m[5],+m[6]); // Kamerazeit = lokale Zeit
+  return isNaN(d)?'':d.toISOString();
+}
+function _fotoTsFromDriveMeta(meta){
+  if(!meta)return'';
+  return _fotoExifToIso(meta.imageMediaMetadata&&meta.imageMediaMetadata.time)||meta.createdTime||'';
+}
+function _fotoTsFromFile(file){
+  try{if(file&&file.lastModified){const d=new Date(file.lastModified);if(!isNaN(d)&&d.getFullYear()>2000)return d.toISOString();}}catch(e){}
+  return new Date().toISOString();
+}
+// Einmaliger Nachtrag für Alt-Fotos ohne ts. Dauerhafte Fehlversuche (gelöschte
+// Drive-Dateien) werden pro Gerät gemerkt, damit nicht jeder Start dieselben
+// toten IDs abfragt. 401 bricht ab (Token-Problem, nächster Start probiert neu).
+const _FOTOTS_FAIL_KEY='pam_fotots_fail';
+async function _fotoTsBackfill(){
+  if(!gdriveToken)return;
+  let failed;
+  try{failed=new Set(JSON.parse(localStorage.getItem(_FOTOTS_FAIL_KEY)||'[]'));}catch(e){failed=new Set();}
+  const jobs=[];
+  const collect=t=>{((t&&t.fotos)||[]).forEach(f=>{if(f&&!f.ts&&f.driveId&&!failed.has(f.driveId))jobs.push(f);});};
+  Object.values(boards||{}).forEach(list=>(list||[]).forEach(collect));
+  (typeof archivedTasks!=='undefined'?(archivedTasks||[]):[]).forEach(collect);
+  if(!jobs.length)return;
+  console.log('[PAM] Foto-Zeitstempel: trage '+jobs.length+' Alt-Foto(s) nach…');
+  let ok=0,fail=0,abort=false;
+  const worker=async()=>{
+    while(jobs.length&&!abort){
+      const f=jobs.shift();
+      if(!f)return;
+      try{
+        const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(f.driveId)+'?fields=createdTime,imageMediaMetadata(time)',{headers:{Authorization:'Bearer '+gdriveToken}});
+        if(r.status===401){abort=true;return;}
+        if(!r.ok){fail++;failed.add(f.driveId);continue;}
+        const meta=await r.json().catch(()=>null);
+        const ts=_fotoTsFromDriveMeta(meta);
+        if(ts){
+          f.ts=ts;ok++;
+          // Modal gerade offen? Live-Kopie (taskFotos) mitziehen, sonst überschreibt der nächste Modal-Save den Nachtrag
+          try{(taskFotos||[]).forEach(lf=>{if(lf.driveId===f.driveId&&!lf.ts)lf.ts=ts;});}catch(e){}
+        }else{fail++;failed.add(f.driveId);}
+      }catch(e){fail++;}
+    }
+  };
+  await Promise.all([worker(),worker(),worker()]);
+  try{localStorage.setItem(_FOTOTS_FAIL_KEY,JSON.stringify([...failed].slice(-800)));}catch(e){}
+  if(ok>0){
+    scheduleSave();
+    showToast('📅 Aufnahmedatum für '+ok+' Alt-Foto(s) nachgetragen'+(fail?' ('+fail+' ohne Datum)':''),'success',4500);
+  }
+  console.log('[PAM] Foto-Zeitstempel: '+ok+' nachgetragen, '+fail+' ohne Datum'+(abort?', Abbruch wegen Token':''));
+}
+function _fotoTsBackfillKick(){
+  if(window._fotoTsKicked)return;
+  window._fotoTsKicked=true;
+  setTimeout(()=>{_fotoTsBackfill().catch(e=>console.warn('[PAM] FotoTs:',e));},8000);
 }
 
 function renderFotoListDesktop(){
@@ -22231,7 +22299,7 @@ async function _handleFotoDrop(dt){
         const blobUrl=URL.createObjectURL(file);
         _desktopFotoBlobCache.set(meta.id,blobUrl);
         const thumbUrl=await _genLocalThumb(file);
-        taskFotos.push({driveId:meta.id,name:meta.name||file.name,mimeType:meta.mimeType||file.type,caption:'',thumbnailLink:thumbUrl});
+        taskFotos.push({driveId:meta.id,name:meta.name||file.name,mimeType:meta.mimeType||file.type,caption:'',thumbnailLink:thumbUrl,ts:_fotoTsFromFile(file)});
         showToast('✓ '+file.name+' hochgeladen','success');
       }
     }catch(err){showToast('Fehler: '+err.message,'error');}
@@ -27914,6 +27982,7 @@ async function syncWrite(){
 function startSyncPolling(){
   if(syncPollingId)clearInterval(syncPollingId);
   syncPollingId=setInterval(()=>syncRead(),30000);
+  _fotoTsBackfillKick(); // b514: Alt-Fotos einmalig mit Aufnahmedatum versorgen (läuft 8s später im Hintergrund, one-shot)
   if(!window._ptpStorageHooked){
     window.addEventListener('storage',e=>{if(e.key==='ptp_sync_ping'||e.key==='pam_sync_ping')syncRead();});
     window._ptpStorageHooked=true;
