@@ -3277,6 +3277,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
             <button type="button" onclick="tDriveOeffnen()" style="padding:7px 11px;border-radius:6px;border:1.5px solid var(--border);background:var(--bg3);color:var(--text2);font-size:calc(12px*var(--modal-scale,1));cursor:pointer;white-space:nowrap;">📂 Ordner</button>
             <button type="button" onclick="loadFotosFromDriveFolder()" style="padding:7px 11px;border-radius:6px;border:1.5px dashed #34a853;background:rgba(52,168,83,0.06);color:#34a853;font-size:calc(12px*var(--modal-scale,1));cursor:pointer;white-space:nowrap;">🔄 Aus Ordner wählen</button>
             <button type="button" onclick="_btbOpenFotoAuswahl()" title="Öffnet die Foto-Sektion im Auswahl-Modus (PDF erstellen)" style="padding:7px 11px;border-radius:6px;border:1.5px solid var(--border);background:var(--bg3);color:var(--text2);font-size:calc(12px*var(--modal-scale,1));cursor:pointer;white-space:nowrap;">☑ Auswahl / PDF</button>
+            <button type="button" onclick="_btbBericht()" title="Komplettes Bautagebuch mit Bildern als Druckansicht – drucken oder als PDF speichern (für Kunden/Akte)" style="padding:7px 13px;border-radius:6px;border:none;background:var(--accent);color:#fff;font-size:calc(12px*var(--modal-scale,1));font-weight:700;cursor:pointer;white-space:nowrap;box-shadow:0 2px 6px rgba(108,99,255,.3);">🖨 Bericht</button>
           </div>
           <div style="display:flex;gap:6px;">
             <input type="text" id="newTaskNotizInput" placeholder="Kurze Notiz mit Zeitstempel…" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();addTaskNotiz();}" autocomplete="off">
@@ -4321,7 +4322,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-25 · #518'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-25-b518)
+const PAM_BUILD = 'v2026-07-25 · #519'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-25-b519)
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -10111,6 +10112,127 @@ function _btbZeitKorrigieren(i){
   renderFotoListDesktop(); // rendert das Tagebuch mit → Foto rutscht zur passenden Notiz
   scheduleTaskFieldSave();
   showToast('🕒 Aufnahmezeit geändert – Foto neu einsortiert','success');
+}
+// ── b519 Paket 4: 🖨 BERICHT – Bautagebuch als Druckansicht (Papier oder PDF) ──
+// Öffnet ein eigenes Fenster mit A4-tauglichem Layout: Kopf (Titel/Adresse/HV),
+// Tagesblöcke ÄLTESTER Tag zuerst (liest sich als Tagebuch), Notizen mit Uhrzeit,
+// Fotos GROSS unter der zeitlich passenden Notiz (gleiche Anker-Logik wie b518),
+// System-Einträge per Häkchen zuschaltbar. Bilder werden nach dem Öffnen über den
+// vorhandenen Blob-Weg nachgeladen (bearbeitete/beschriftete Version bevorzugt) –
+// damit sind sie im Druck/PDF FEST eingebettet, anders als die Drive-Links der
+// Abschlussakte-HTML. „Als PDF speichern" im Druckdialog = Datei für den Kunden.
+function _btbBerichtHtml(){
+  const gT=id=>{const e=document.getElementById(id);return e?(e.value||'').trim():'';};
+  const titel=gT('taskTitleInput')||'Auftrag';
+  const adresse=gT('tAdr');
+  const hv=gT('tHV');
+  const repNr=gT('taskRepNr');
+  const asc=(a,b)=>((a.d?a.d.getTime():0)-(b.d?b.d.getTime():0))||(a.i-b.i);
+  const notizen=(taskNotizVerlauf||[]).map((n,i)=>({n,i,d:_btbParseTs(n.ts)}));
+  const fotos=(taskFotos||[]).map((f,i)=>({f,i,d:_btbParseTs(f.ts)}));
+  const days={};
+  const add=(key,kind,item)=>{if(!days[key])days[key]={notiz:[],foto:[]};days[key][kind].push(item);};
+  notizen.forEach(x=>add(x.d?_btbDayKey(x.d):'','notiz',x));
+  fotos.forEach(x=>add(x.d?_btbDayKey(x.d):'','foto',x));
+  const keys=Object.keys(days).sort((a,b)=>a===''?1:(b===''?-1:(a<b?-1:1)));
+  let body='';
+  keys.forEach(key=>{
+    const g=days[key];
+    g.notiz.sort(asc);g.foto.sort(asc);
+    const anker=g.notiz.filter(x=>!_btbIsSystemNotiz(x.n.text)&&x.d);
+    const fGrp=new Map();
+    let vidCount=0;
+    g.foto.forEach(x=>{
+      if(_isVideo(x.f.mimeType,x.f.name)){vidCount++;return;}
+      let gi=-1;const ft=x.d?x.d.getTime():0;
+      for(let a=0;a<anker.length;a++){if(anker[a].d.getTime()<=ft)gi=a;else break;}
+      if(!fGrp.has(gi))fGrp.set(gi,[]);
+      fGrp.get(gi).push(x);
+    });
+    const grid=list=>{
+      if(!list||!list.length)return'';
+      let s='<div class="bg-grid">';
+      list.forEach(x=>{
+        const cap=[_btbZeit(x.d),(x.f.caption||'')].filter(Boolean).join(' – ');
+        s+='<figure><img id="_bf'+x.i+'" alt="">'+(cap?'<figcaption>'+esc(cap)+'</figcaption>':'')+'</figure>';
+      });
+      return s+'</div>';
+    };
+    body+='<h2>'+(key?_btbDayLabel(key):'Einträge ohne Datum')+'</h2>';
+    body+=grid(fGrp.get(-1));
+    let ai=0;
+    g.notiz.forEach(x=>{
+      if(_btbIsSystemNotiz(x.n.text)){body+='<div class="sysrow">⚙ '+(_btbZeit(x.d)?_btbZeit(x.d)+' – ':'')+esc(x.n.text||'')+'</div>';return;}
+      body+='<div class="eintrag"><span class="zeit">'+(_btbZeit(x.d)||'')+'</span>'+esc(x.n.text||'')+'</div>';
+      if(x.d){body+=grid(fGrp.get(ai));ai++;}
+    });
+    if(vidCount)body+='<div class="sysrow" style="display:block;">🎬 '+vidCount+' Video(s) an diesem Tag – im Druck/PDF nicht darstellbar, siehe PAM</div>';
+  });
+  const heute=new Date().toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'});
+  return '<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>Bautagebuch – '+esc(titel)+'</title><style>'
+    +'body{font-family:Arial,Helvetica,sans-serif;color:#1a1a2e;margin:24px;max-width:820px;}'
+    +'h1{font-size:20px;margin:0 0 2px;}'
+    +'h2{font-size:14px;margin:20px 0 6px;padding:4px 8px;background:#eeedfe;border-left:4px solid #6c63ff;page-break-after:avoid;}'
+    +'.kopf{color:#555;font-size:12px;margin-bottom:3px;}'
+    +'.eintrag{font-size:13px;line-height:1.5;margin:7px 0;page-break-inside:avoid;white-space:pre-wrap;}'
+    +'.eintrag .zeit{font-weight:bold;margin-right:8px;}'
+    +'.sysrow{font-size:11px;color:#888;margin:3px 0;}'
+    +'.bg-grid{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 10px;}'
+    +'figure{margin:0;width:244px;page-break-inside:avoid;}'
+    +'figure img{width:244px;height:auto;border:1px solid #ccc;border-radius:4px;background:#f0f0f4;min-height:50px;display:block;}'
+    +'figcaption{font-size:10px;color:#555;margin-top:2px;}'
+    +'.bar{position:sticky;top:0;background:#fff;padding:8px 0;border-bottom:1px solid #ddd;margin-bottom:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;}'
+    +'.bar button{padding:8px 16px;font-size:13px;cursor:pointer;border-radius:6px;border:1px solid #6c63ff;background:#6c63ff;color:#fff;font-weight:bold;}'
+    +'.bar .zu{background:#fff;color:#555;border-color:#aaa;font-weight:normal;}'
+    +'.bar label{font-size:12px;color:#555;cursor:pointer;}'
+    +'#ladehinweis{font-size:12px;color:#b45309;}'
+    +'body:not(.mitSys) .sysrow{display:none;}'
+    +'@media print{.bar{display:none;}body{margin:0;max-width:none;}}'
+    +'</style></head><body>'
+    +'<div class="bar">'
+    +'<button onclick="window.print()">🖨 Drucken / Als PDF speichern</button>'
+    +'<label><input type="checkbox" onchange="document.body.classList.toggle(\'mitSys\',this.checked)"> System-Einträge mitdrucken</label>'
+    +'<span id="ladehinweis">⏳ Bilder werden geladen…</span>'
+    +'<button class="zu" onclick="window.close()">✕ Schließen</button>'
+    +'</div>'
+    +'<h1>📔 Bautagebuch</h1>'
+    +'<div class="kopf" style="font-size:14px;color:#1a1a2e;font-weight:bold;">'+esc(titel)+(repNr?' · Rep. '+esc(repNr):'')+'</div>'
+    +(adresse?'<div class="kopf">📍 '+esc(adresse)+'</div>':'')
+    +(hv?'<div class="kopf">Auftraggeber / HV: '+esc(hv)+'</div>':'')
+    +'<div class="kopf">Erstellt am '+heute+'</div>'
+    +body
+    +'</body></html>';
+}
+async function _btbBericht(){
+  if(!(taskNotizVerlauf||[]).length&&!(taskFotos||[]).length){showToast('Bautagebuch ist leer – nichts zu drucken','info');return;}
+  const win=window.open('','_blank');
+  if(!win){showToast('⚠ Popup blockiert – bitte Popups für PAM erlauben','error',5000);return;}
+  win.document.write(_btbBerichtHtml());
+  win.document.close();
+  // Bilder nachladen: bearbeitete (beschriftete) Version bevorzugt, mit Blob-Cache
+  const jobs=(taskFotos||[]).map((f,i)=>({f,i})).filter(x=>!_isVideo(x.f.mimeType,x.f.name));
+  let done=0,fehl=0;
+  for(const x of jobs){
+    let img=null;
+    try{img=win.document.getElementById('_bf'+x.i);}catch(e){return;} // Fenster zu → abbrechen
+    if(!img){done++;continue;}
+    const id=x.f.editedDriveId||x.f.driveId||'';
+    try{
+      let u=id?(_desktopFotoBlobCache.get(id)||await _fetchDesktopFotoBlob(id)):'';
+      if(!u)u=x.f.localUrl||x.f.thumbnailLink||x.f.thumbnail||'';
+      if(u)img.src=u;else fehl++;
+    }catch(e){fehl++;console.warn('[Bericht]',e);}
+    done++;
+    try{
+      const lh=win.document.getElementById('ladehinweis');
+      if(lh)lh.textContent='⏳ Bild '+done+'/'+jobs.length+' geladen…';
+    }catch(e){return;}
+  }
+  try{
+    const lh=win.document.getElementById('ladehinweis');
+    if(lh)lh.textContent=jobs.length?('✓ '+(jobs.length-fehl)+' von '+jobs.length+' Bildern geladen – bereit zum Drucken'+(fehl?' ('+fehl+' nicht ladbar)':'')):'';
+    if(lh&&!fehl&&jobs.length)lh.style.color='#15803d';
+  }catch(e){}
 }
 function _btbOpenFotoAuswahl(){
   const sect=document.getElementById('tFotoSect');
