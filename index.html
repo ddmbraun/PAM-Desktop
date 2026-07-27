@@ -7742,20 +7742,31 @@ function renderHeute(){
   let in3=new Date(Date.now()+3*864e5).toISOString().split('T')[0];
   let ueberfaellig=[],heuteFaellig=[],bald=[],posteingang=[];
   let ausfuehrungHeute=[];
+  let unterwegs=[]; // b528: heutige Außer-Haus-Termine (Uhrzeit + Fahrzeit) für die Kopfzeile
   Object.keys(boards).forEach(function(boardName){
     if(boardName.startsWith('_'))return;
     let bType=boardTypes[boardName]||'baustelle';
     (boards[boardName]||[]).forEach(function(t){
       if(t.archiviert||t.spaeterBearbeiten)return; // archivierte / Später-bearbeiten Tasks nicht in Heute-Ansicht
+      // b528: heutige Außer-Haus-Termine einsammeln → Abschnitt „Heute unterwegs"
+      (t.ausserhausTermine||[]).forEach(function(tm){
+        if(tm&&tm.date===today)unterwegs.push({t:t,board:boardName,tm:tm});
+      });
       if(bType==='email'){
         if(!t.due)return; // Posteingang nur in Heute wenn Datum gesetzt
         posteingang.push({t:t,board:boardName});
       }
-      if(t.ausfuehrungstermin===today)ausfuehrungHeute.push({t:t,board:boardName});
+      // b528 (Frage Frank): „Ausführung heute" prüfte NUR das Altfeld ausfuehrungstermin –
+      // der neue Weg (Aufgabe vom Typ „Ausführungstermin") fehlte. Jetzt zählen beide.
+      if(t.ausfuehrungstermin===today
+        ||(t.aufgaben||[]).some(function(a){return a.typ==='Ausführungstermin'&&a.datum===today&&!a.erledigt;}))
+        ausfuehrungHeute.push({t:t,board:boardName});
       var _getFT=function(x){var a=x.freieTermine&&x.freieTermine.length?x.freieTermine:(x.freierTermin&&x.freierTermin.datum?[x.freierTermin]:[]);return a;};
       var _allDates=[];
       if(t.due)_allDates.push(t.due);
-      (t.aufgaben||[]).forEach(function(a){if(a.datum)_allDates.push(a.datum);});
+      // b528: Ausführungstermin-Aufgabe mit Datum HEUTE nicht doppelt in „Heute fällig" –
+      // sie steht jetzt in der eigenen Sektion „Ausführung heute" (wie das Altfeld schon immer)
+      (t.aufgaben||[]).forEach(function(a){if(a.datum){if(a.typ==='Ausführungstermin'&&a.datum===today)return;_allDates.push(a.datum);}});
       _getFT(t).forEach(function(f){if(f.datum)_allDates.push(f.datum);});
       if(!_allDates.length)return;
       var _inUeb=false,_inHeu=false,_inBald=false;
@@ -7877,7 +7888,7 @@ function renderHeute(){
     }else if(dringlichkeit==='heute'){
       badges+=' '+lbl+'Fällig:</span> '+chip(fmtDate(_dispDate),'background:#FAEEDA;border-color:#FAC775;color:#854F0B;font-weight:600;');
     }else if(dringlichkeit==='ausf'){
-      badges+=' '+lbl+'Ausf.:</span> '+chip(fmtDate(t.ausfuehrungstermin),'background:#E6F1FB;border-color:#B5D4F4;color:#185FA5;font-weight:600;');
+      badges+=' '+lbl+'Ausf.:</span> '+chip(fmtDate(t.ausfuehrungstermin||today),'background:#E6F1FB;border-color:#B5D4F4;color:#185FA5;font-weight:600;'); // b528: auch ohne Altfeld (Aufgaben-Weg)
     }else{
       badges+=' '+lbl+'Fällig:</span> '+chip(fmtDate(_dispDate),'background:#EAF3DE;border-color:#C0DD97;color:#3B6D11;font-weight:600;');
     }
@@ -8068,6 +8079,39 @@ function renderHeute(){
     return a.findIndex(function(y){return y.t.id===x.t.id;})===i;
   });
   var _rasterHtml=_pamHeuteRaster(_rasterListe,today,_heuteTypFilter2,_heuteTerminFilter);
+  // ── b528: „Heute unterwegs" – heutige Außer-Haus-Termine mit Uhrzeit + Fahrzeit ──
+  // (wie PAM Mobil v131; vorher musste man dafür in den Kalender wechseln)
+  unterwegs.sort(function(a,b){return (a.tm.von?_normTime(a.tm.von):'99')<(b.tm.von?_normTime(b.tm.von):'99')?-1:1;});
+  var unterwegsHtml='';
+  if(unterwegs.length){
+    unterwegsHtml='<div style="margin-bottom:1.1rem;">'
+      +'<div style="display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#378ADD;margin-bottom:6px;">'
+      +'<span style="width:6px;height:6px;border-radius:50%;background:#378ADD;display:inline-block;"></span>'
+      +'🚗 Heute unterwegs'
+      +'<span style="width:18px;height:18px;border-radius:50%;font-size:11px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;background:#378ADD22;color:#378ADD;">'+unterwegs.length+'</span>'
+      +'</div>'
+      +'<div style="display:flex;flex-wrap:wrap;gap:6px;">'
+      +unterwegs.map(function(u){
+        var t=u.t,tm=u.tm;
+        var von=tm.von?_normTime(tm.von):'';
+        var bis=tm.bis?_normTime(tm.bis):'';
+        var zeit=von+(bis?'–'+bis:'');
+        var bez=((tm.betreff||tm.beschreibung)||'').trim();
+        var fH=_kalFahrt(tm),fR=_kalFahrtR(tm);
+        var fahrt=(fH>0||fR>0)
+          ?'<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:#FAEEDA;border:0.5px solid #FAC775;color:#854F0B;font-weight:600;white-space:nowrap;">🚗 '+(fH===fR?fH+'′ je Richtung':fH+'′ hin / '+fR+'′ zurück')+'</span>'
+          :'';
+        var adr=((t.adresse)||'').trim();
+        return '<div onclick="openEditTaskModal(\''+esc(t.id)+'\')" style="display:flex;align-items:center;gap:8px;padding:7px 12px;border:0.5px solid var(--border);border-left:3px solid #378ADD;border-radius:0 8px 8px 0;background:var(--bg2);cursor:pointer;max-width:100%;">'
+          +(zeit?'<span style="font-size:14px;font-weight:700;color:#378ADD;white-space:nowrap;">'+esc(zeit)+'</span>':'')
+          +'<span style="font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px;">'+esc(t.title||'')+'</span>'
+          +(bez?'<span style="font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;">'+esc(bez)+'</span>':'')
+          +fahrt
+          +(adr?'<span style="font-size:11px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;">📍 '+esc(adr)+'</span>':'')
+          +'</div>';
+      }).join('')
+      +'</div></div>';
+  }
   let html='<div style="padding:20px 24px;">'
     +'<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:0.5rem;">'
     +'<span style="font-size:18px;font-weight:600;color:var(--text);">Was steht heute an?</span>'
@@ -8076,7 +8120,8 @@ function renderHeute(){
     +zoomBar
     +toggleBar
     +filterBar
-    +'<div id="heuteZoomContent" style="zoom:'+zoom+'%;">';
+    +'<div id="heuteZoomContent" style="zoom:'+zoom+'%;">'
+    +unterwegsHtml; // b528: „Heute unterwegs" in allen Ansichts-Modi (Karten/Kachel/Tabelle)
 
   if(isKachel){
     html+=_rasterHtml;
@@ -9322,7 +9367,11 @@ async function _msDeleteFahrtEvents(t){
   if(!t)return;
   for(const k of ['outlookFahrtHinId','outlookFahrtRueckId']){
     if(!t[k])continue;
-    try{ await _msDeleteEvent(t[k]); }catch(e){ console.warn('[KAL] Fahrt-Termin nicht gelöscht:',e); }
+    try{ await _msDeleteEvent(t[k]); }
+    catch(e){
+      console.warn('[KAL] Fahrt-Termin nicht gelöscht:',e);
+      try{ showToast('⚠ Outlook: alter Fahrt-Eintrag ließ sich nicht löschen – bitte im Outlook-Kalender prüfen','warning',8000); }catch(_){ } // b528
+    }
     delete t[k];
   }
 }
@@ -9332,7 +9381,7 @@ async function _msPushFahrt(task,t){
   if(fHin<=0&&fRueck<=0){ await _msDeleteFahrtEvents(t); return; }   // keine Fahrt mehr → Einträge raus
   // Eine Richtung auf 0 gesetzt → deren vorhandenen Outlook-Eintrag entfernen
   for(const d of [['outlookFahrtHinId',fHin],['outlookFahrtRueckId',fRueck]]){
-    if(d[1]<=0&&t[d[0]]){ try{ await _msDeleteEvent(t[d[0]]); }catch(e){ console.warn('[KAL] Fahrt-Eintrag nicht gelöscht:',e); } delete t[d[0]]; }
+    if(d[1]<=0&&t[d[0]]){ try{ await _msDeleteEvent(t[d[0]]); }catch(e){ console.warn('[KAL] Fahrt-Eintrag nicht gelöscht:',e); try{ showToast('⚠ Outlook: alter Fahrt-Eintrag ließ sich nicht löschen – bitte im Outlook-Kalender prüfen','warning',8000); }catch(_){ } } delete t[d[0]]; } // b528: sichtbar
   }
   const von=_normTime(t.von);
   const bisT=t.bis?_normTime(t.bis):_addMinToHHMM(von,60);
@@ -9355,7 +9404,13 @@ async function _msPushFahrt(task,t){
     let r=await _doPush();
     if(r.status===401){ try{ if(typeof _msRefreshToken==='function' && await _msRefreshToken()){ r=await _doPush(); } }catch(_){ } }
     if(r.status===404 && isUpdate){ delete t[leg.key]; isUpdate=false; r=await _doPush(); }  // in Outlook gelöscht → neu anlegen
-    if(!r.ok){ console.warn('[KAL] Fahrt-Push fehlgeschlagen: HTTP '+r.status); continue; }
+    if(!r.ok){
+      console.warn('[KAL] Fahrt-Push fehlgeschlagen: HTTP '+r.status);
+      // b528 (Paket 3): Fehler SICHTBAR machen – vorher sah der Kalender synchron aus,
+      // obwohl der Fahrt-Eintrag in Outlook fehlte (nur console.warn).
+      try{ showToast('⚠ Outlook: '+(leg.rueck?'Rückfahrt':'Hinfahrt')+' zu „'+((task&&task.title)||'Termin')+'" NICHT eingetragen (HTTP '+r.status+'). Termin erneut speichern = neuer Versuch.','warning',9000); }catch(_){ }
+      continue;
+    }
     const data=await r.json().catch(()=>({}));
     if(!isUpdate && data && data.id) t[leg.key]=data.id;   // ID nur beim Anlegen übernehmen (wie beim Haupttermin)
   }
@@ -9392,7 +9447,12 @@ async function _msPushTermin(task,t){
   if(data&&data.lastModifiedDateTime)t.outlookLastModified=data.lastModifiedDateTime;
   t.outlookDeleted=false;
   // Fahrt-Blöcke ziehen mit (anlegen / verschieben / bei Fahrt 0 wieder entfernen)
-  try{ await _msPushFahrt(task,t); }catch(e){ console.warn('[KAL] Fahrt-Termine:',e); }
+  try{ await _msPushFahrt(task,t); }
+  catch(e){
+    console.warn('[KAL] Fahrt-Termine:',e);
+    // b528: auch harte Fehler (Netz weg, Exception) sichtbar melden statt still zu schlucken
+    try{ showToast('⚠ Outlook: Fahrt-Einträge zu „'+((task&&task.title)||'Termin')+'" nicht geschrieben ('+((e&&e.message)||e)+'). Termin erneut speichern = neuer Versuch.','warning',9000); }catch(_){ }
+  }
   return true;
 }
 // Auto-Push: nach dem Speichern eines Tasks – nur als _pamDirty markierte, vollständige Termine
