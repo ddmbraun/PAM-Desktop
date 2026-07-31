@@ -3380,6 +3380,8 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
               <button onclick="triggerFotoUploadToDrive()" style="padding:8px 12px;border-radius:6px;border:1.5px dashed var(--accent);background:rgba(108,99,255,0.06);color:var(--accent);font-size:calc(12px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;">📷 Drive-Foto</button>
               <button onclick="tDriveOeffnen()" style="padding:8px 12px;border-radius:6px;border:1.5px solid var(--border);background:var(--bg3);color:var(--text2);font-size:calc(12px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;">📂 Ordner</button>
               <button onclick="loadFotosFromDriveFolder()" style="padding:8px 12px;border-radius:6px;border:1.5px dashed #34a853;background:rgba(52,168,83,0.06);color:#34a853;font-size:calc(12px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;">🔄 Aus Ordner wählen</button>
+              <!-- b530: lose Blitz-Fotos (Mobil-Tages-Sammler „📷 Foto-Eingang") in diesen Task verschieben -->
+              <button id="feEingangBtn" onclick="_feDeskOeffnen()" style="display:none;padding:8px 12px;border-radius:6px;border:1.5px dashed #c77700;background:rgba(199,119,0,0.08);color:#c77700;font-size:calc(12px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;">📥 Foto-Eingang</button>
             </div>
             <div id="fotoOrdnerHint" style="font-size:calc(11px * var(--modal-scale,1));margin-top:4px;padding:4px 6px;border-radius:4px;display:none"></div>
             <input type="file" id="fotoDriveInput" style="display:none" accept="image/*,video/*" multiple onchange="handleFotoUploadToDrive(event)" autocomplete="off">
@@ -4329,7 +4331,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-27 · #529'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-27-b529) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-07-30 · #530'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-30-b530) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -12474,6 +12476,114 @@ async function handleFotoUploadToDrive(e){
   renderFotoListDesktop();
   scheduleTaskFieldSave();
 }
+// ══════════════════════════════════════════════
+//  b530: FOTO-EINGANG (Gegenstück zu Mobil v145)
+//  Die Mobil-App legt Blitz-Fotos ohne Task in Tages-Sammlern „📷 Foto-Eingang TT.MM."
+//  ab (Task-ID beginnt mit fe_). Hier: alle losen Fotos ansehen und ausgewählte in den
+//  offenen Task verschieben – die Drive-Datei wird dabei nur UMGEHÄNGT
+//  (addParents/removeParents, kein Neu-Upload, EXIF/GPS/Datum bleiben unverändert).
+// ══════════════════════════════════════════════
+function _feDeskAlleFotos(){
+  // Nur hochgeladene Fotos (driveId) – rein lokale Mobil-Fotos liegen als Bytes nur auf
+  // dem Aufnahme-Gerät und können vom Desktop weder angezeigt noch verschoben werden.
+  const out=[];
+  for(const[,tasks]of Object.entries(boards||{})){
+    if(!Array.isArray(tasks))continue;
+    for(const task of tasks){
+      if(!task||!String(task.id||'').startsWith('fe_'))continue;
+      for(const fo of task.fotos||[])if(fo&&fo.driveId)out.push({feTask:task,fo});
+    }
+  }
+  return out;
+}
+function _feDeskBtnRefresh(){
+  try{
+    const btn=document.getElementById('feEingangBtn');
+    if(!btn)return;
+    const tid=document.getElementById('taskId')?.value||'';
+    const n=String(tid).startsWith('fe_')?0:_feDeskAlleFotos().length;
+    btn.style.display=n?'':'none';
+    btn.textContent='📥 Foto-Eingang ('+n+')';
+  }catch(e){}
+}
+let _feDeskAuswahl=null;
+function _feDeskOeffnen(){
+  const alle=_feDeskAlleFotos();
+  if(!alle.length){showToast('Foto-Eingang ist leer','info');return;}
+  _feDeskAuswahl=new Set();
+  let ov=document.getElementById('feDeskOverlay');if(ov)ov.remove();
+  ov=document.createElement('div');
+  ov.id='feDeskOverlay';
+  ov.style.cssText='position:fixed;inset:0;z-index:100050;background:rgba(0,0,0,.82);display:flex;flex-direction:column;padding:24px;';
+  ov.innerHTML='<div style="font-size:17px;font-weight:700;color:#fff;margin-bottom:4px;">📥 Foto-Eingang – Fotos in diesen Task verschieben</div>'
+    +'<div style="font-size:12px;color:#bbb;margin-bottom:12px;">Antippen zum Auswählen. Die Dateien werden in den Foto-Ordner des Tasks umgehängt (kein Neu-Upload, Aufnahmedaten bleiben erhalten).</div>'
+    +'<div id="feDeskGrid" style="flex:1;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;align-content:start;"></div>'
+    +'<div style="display:flex;gap:10px;margin-top:14px;justify-content:flex-end;">'
+    +'<button onclick="document.getElementById(\'feDeskOverlay\').remove()" style="min-height:44px;padding:0 20px;border-radius:8px;border:1.5px solid #777;background:transparent;color:#fff;font-size:14px;cursor:pointer;">Abbrechen</button>'
+    +'<button id="feDeskOk" onclick="_feDeskUebernehmen()" style="min-height:44px;padding:0 22px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;">✓ In diesen Task verschieben (0)</button>'
+    +'</div>';
+  document.body.appendChild(ov);
+  const grid=ov.querySelector('#feDeskGrid');
+  alle.forEach(x=>{
+    const key=x.fo.driveId;
+    const cell=document.createElement('div');
+    cell.style.cssText='position:relative;aspect-ratio:4/3;border-radius:10px;overflow:hidden;background:#222;border:3px solid transparent;cursor:pointer;';
+    const img=document.createElement('img');
+    img.style.cssText='width:100%;height:100%;object-fit:cover;';
+    img.src=x.fo.thumbnailLink||x.fo.thumbnail||('https://drive.google.com/thumbnail?id='+x.fo.driveId+'&sz=w400');
+    img.onerror=()=>{try{_fetchDesktopFotoBlob(x.fo.driveId).then(u=>{if(u)img.src=u;}).catch(()=>{});}catch(e){}};
+    const tag=document.createElement('div');
+    tag.style.cssText='position:absolute;left:5px;bottom:5px;right:5px;font-size:11px;color:#fff;background:rgba(0,0,0,.55);border-radius:6px;padding:2px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+    const zeit=x.fo.ts?new Date(x.fo.ts).toLocaleString('de-DE',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
+    tag.textContent=(zeit?zeit+' · ':'')+(x.feTask.title||'');
+    cell.appendChild(img);cell.appendChild(tag);
+    cell.onclick=()=>{
+      if(_feDeskAuswahl.has(key)){_feDeskAuswahl.delete(key);cell.style.borderColor='transparent';}
+      else{_feDeskAuswahl.add(key);cell.style.borderColor='var(--accent)';}
+      const ok=document.getElementById('feDeskOk');
+      if(ok)ok.textContent='✓ In diesen Task verschieben ('+_feDeskAuswahl.size+')';
+    };
+    grid.appendChild(cell);
+  });
+}
+async function _feDeskUebernehmen(){
+  const ov=document.getElementById('feDeskOverlay');
+  if(!_feDeskAuswahl||!_feDeskAuswahl.size){if(ov)ov.remove();return;}
+  const alle=_feDeskAlleFotos().filter(x=>_feDeskAuswahl.has(x.fo.driveId));
+  if(ov)ov.remove();
+  if(!alle.length)return;
+  if(!gdriveToken){showToast('Bitte zuerst mit Google Drive verbinden','error');return;}
+  const taskId=document.getElementById('taskId')?.value||'';
+  const ziel=taskId?findTaskById(taskId):null;
+  if(!ziel){showToast('Kein Task geöffnet','error');return;}
+  // Ziel-Ordner wie beim 📷-Upload: Foto-Ordner (t.gdrive), Ersatz Projektordner
+  const zielFid=_getDriveFotoFolderId()||_extractFolderIdFromUrl(ziel.gdriveOrdner||'');
+  if(!zielFid){showToast('Kein Drive-Ordner am Task verknüpft – bitte unter Verknüpfungen eintragen','error');return;}
+  if(!taskFotos)taskFotos=[];
+  let ok=0,fail=0;
+  for(const x of alle){
+    try{
+      showToast('📥 '+(x.fo.name||'Foto')+' wird verschoben…','info',1500);
+      const r0=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(x.fo.driveId)+'?fields=parents',
+        {headers:{Authorization:'Bearer '+gdriveToken}});
+      if(!r0.ok)throw new Error('HTTP '+r0.status);
+      const old=((await r0.json()).parents||[]).join(',');
+      const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(x.fo.driveId)
+        +'?addParents='+encodeURIComponent(zielFid)+(old?'&removeParents='+encodeURIComponent(old):''),
+        {method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},body:'{}'});
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      // Eintrag umhängen: aus dem Sammler raus, in den offenen Task (Modal-Kopie) rein
+      x.feTask.fotos=x.feTask.fotos.filter(f=>f!==x.fo);
+      taskFotos.push(x.fo);
+      ok++;
+    }catch(e){console.warn('[FE-Desk] Verschieben:',e);fail++;}
+  }
+  renderFotoListDesktop();
+  scheduleTaskFieldSave();
+  _feDeskBtnRefresh();
+  if(ok)showToast('✓ '+ok+' Foto'+(ok!==1?'s':'')+' übernommen – Datei liegt jetzt im Foto-Ordner des Tasks','success',4000);
+  if(fail)showToast('⚠ '+fail+' Foto'+(fail!==1?'s':'')+' konnten nicht verschoben werden','error',5000);
+}
 // Kamera-Formate die als Bild behandelt werden (intern oft JPEG)
 const IMAGE_EXTS=/\.(jpg|jpeg|png|gif|webp|heic|heif|avif|bmp|tiff?|insp|insv|dng|raw|arw|cr2|nef)$/i;
 function _fileIsImage(file){
@@ -14119,6 +14229,7 @@ function _fotoTsBackfillKick(){
 function renderFotoListDesktop(){
   const el=document.getElementById('fotoListDesktop');
   if(!el)return;
+  _feDeskBtnRefresh(); // b530: „📥 Foto-Eingang (N)"-Knopf ein-/ausblenden + Zähler
   const badge=document.getElementById('tFotoCountBadge');
   if(badge){if(taskFotos&&taskFotos.length){badge.textContent=taskFotos.length;badge.style.display='inline';}else{badge.style.display='none';}}
   if(!taskFotos||!taskFotos.length){el.innerHTML='';_fotoSelectMode=false;_fotoSelected.clear();return;}
