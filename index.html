@@ -4387,7 +4387,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-31 · #541'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-31-b541) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-07-31 · #542'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-31-b542) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -12605,6 +12605,84 @@ function _feDeskBtnRefresh(){
     btn.textContent='📥 Foto-Eingang ('+n+')';
   }catch(e){}
 }
+// ══════════════════════════════════════════════════════════════════════════════
+// ── b542: Hover-Vorschau für Foto-Kacheln ────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// Maus auf eine Kachel und kurz warten → das Bild erscheint groß daneben, ohne Klick.
+// Wichtig im Foto-Eingang: dort ist der Klick mit „auswählen" belegt, ans große Bild
+// kam man bisher gar nicht heran. Läuft über einen einzigen Listener am document
+// (Event-Delegation), weil die Kacheln bei jedem Rendern neu entstehen.
+let _hvBox=null,_hvTimer=null,_hvAktiv='';
+const _HV_VERZOEGERUNG=450; // ms – verhindert Aufblitzen beim bloßen Überfahren
+
+function _hvBild(id){
+  // Größere Fassung desselben Vorschaubildes (Google liefert die Größe über sz)
+  return 'https://drive.google.com/thumbnail?id='+encodeURIComponent(id)+'&sz=w1000';
+}
+function _hvVerstecken(){
+  clearTimeout(_hvTimer);_hvTimer=null;_hvAktiv='';
+  if(_hvBox){_hvBox.style.display='none';const i=_hvBox.querySelector('img');if(i)i.removeAttribute('src');}
+}
+function _hvZeigen(id,quelle,ev){
+  if(!_hvBox){
+    _hvBox=document.createElement('div');
+    _hvBox.id='pamHoverVorschau';
+    _hvBox.style.cssText='position:fixed;z-index:100090;display:none;padding:4px;border-radius:10px;'
+      +'background:rgba(20,20,20,.96);box-shadow:0 8px 32px rgba(0,0,0,.55);pointer-events:none;';
+    _hvBox.innerHTML='<img alt="" style="display:block;max-width:520px;max-height:520px;border-radius:7px;">'
+      +'<div style="font-size:11px;color:#ccc;padding:3px 4px 1px;max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>';
+    document.body.appendChild(_hvBox);
+  }
+  const img=_hvBox.querySelector('img');
+  const txt=_hvBox.querySelector('div');
+  txt.textContent=quelle||'';
+  txt.style.display=quelle?'':'none';
+  img.onload=function(){
+    if(_hvAktiv!==id)return;
+    _hvBox.style.display='block';
+    _hvPosition(ev);
+  };
+  img.onerror=function(){_hvVerstecken();};
+  img.src=_hvBild(id);
+}
+function _hvPosition(ev){
+  if(!_hvBox||_hvBox.style.display==='none')return;
+  const b=_hvBox.getBoundingClientRect();
+  const rand=16;
+  let x=(ev.clientX||0)+22, y=(ev.clientY||0)+18;
+  if(x+b.width+rand>window.innerWidth) x=(ev.clientX||0)-b.width-22;
+  if(y+b.height+rand>window.innerHeight)y=window.innerHeight-b.height-rand;
+  if(x<rand)x=rand;
+  if(y<rand)y=rand;
+  _hvBox.style.left=Math.round(x)+'px';
+  _hvBox.style.top =Math.round(y)+'px';
+}
+document.addEventListener('mouseover',function(e){
+  const t=e.target&&e.target.closest?e.target.closest('[data-hvid]'):null;
+  if(!t){return;}
+  const id=t.dataset.hvid;
+  if(!id||id===_hvAktiv)return;
+  _hvVerstecken();
+  _hvAktiv=id;
+  const ev={clientX:e.clientX,clientY:e.clientY};
+  _hvTimer=setTimeout(function(){
+    if(_hvAktiv===id)_hvZeigen(id,t.dataset.hvtitel||'',ev);
+  },_HV_VERZOEGERUNG);
+});
+document.addEventListener('mouseout',function(e){
+  const t=e.target&&e.target.closest?e.target.closest('[data-hvid]'):null;
+  if(!t)return;
+  const nach=e.relatedTarget&&e.relatedTarget.closest?e.relatedTarget.closest('[data-hvid]'):null;
+  if(nach===t)return;
+  _hvVerstecken();
+});
+document.addEventListener('mousemove',function(e){
+  if(_hvBox&&_hvBox.style.display==='block')_hvPosition(e);
+});
+// Beim Scrollen und bei Klicks weg – sonst klebt die Vorschau im Bild
+document.addEventListener('scroll',function(){if(_hvAktiv)_hvVerstecken();},true);
+document.addEventListener('click',function(){if(_hvAktiv)_hvVerstecken();},true);
+
 // b541: Zähler für den Topbar-Einstieg (Foto-Eingang ansehen, ohne einen Task zu öffnen)
 function _feTopBtnRefresh(){
   try{
@@ -12645,6 +12723,9 @@ function _feDeskOeffnen(ohneTask){
     const key=x.fo.driveId;
     const cell=document.createElement('div');
     cell.style.cssText='position:relative;aspect-ratio:4/3;border-radius:10px;overflow:hidden;background:#222;border:3px solid transparent;cursor:pointer;';
+    // b542: Hover-Vorschau – hier besonders wichtig, weil der Klick mit „auswählen" belegt ist
+    cell.dataset.hvid=x.fo.driveId;
+    cell.dataset.hvtitel=(x.fo.name||'')+(x.feTask&&x.feTask.title?'  ·  '+x.feTask.title:'');
     const img=document.createElement('img');
     img.style.cssText='width:100%;height:100%;object-fit:cover;';
     img.src=x.fo.thumbnailLink||x.fo.thumbnail||('https://drive.google.com/thumbnail?id='+x.fo.driveId+'&sz=w400');
@@ -14536,7 +14617,9 @@ function renderFotoListDesktop(){
         +'<div style="width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.16);display:flex;align-items:center;justify-content:center;font-size:19px;color:#fff;">▶</div>'
         +'<div style="position:absolute;top:5px;left:5px;background:rgba(0,0,0,.6);color:#fff;font-size:9px;padding:2px 6px;border-radius:4px;pointer-events:none">🎬 Video</div></div>'
       :'<img '+srcAttr+'alt="" loading="lazy" onload="_fotoMark360(this)" onerror="_desktopThumbFallback(this)">';
-    return '<div class="foto-desktop-thumb'+selClass+'" onclick="_fotoThumbClick('+i+',event)" title="'+esc(tip)+'">'
+    // b542: data-hvid = Hover-Vorschau (nur bei Drive-Fotos, lokale haben kein Vorschaubild)
+    const hvAttr=safeId?(' data-hvid="'+safeId+'" data-hvtitel="'+esc(caption||name)+'"'):'';
+    return '<div class="foto-desktop-thumb'+selClass+'"'+hvAttr+' onclick="_fotoThumbClick('+i+',event)" title="'+esc(tip)+'">'
       +'<div class="foto-check">'+checkMark+'</div>'
       +(isVid?'':badge360)
       +mediaEl
