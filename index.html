@@ -3680,6 +3680,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
       <div class="mv2-mehr-wrap" style="margin-right:auto;">
         <button type="button" class="topbar-btn" id="mv2MehrBtn" onclick="_toggleMehrMenu(event)" title="Weitere Optionen" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);letter-spacing:2px;padding:5px 10px;">⋯</button>
         <div class="mv2-mehr-menu" id="mv2MehrMenu">
+          <button onclick="_pamZuAuftragAusTask();_closeMehrMenu()" title="Auftragsordner anlegen, Dateien mitnehmen und Task ins Auftrags-Board verschieben">🏗 → Auftrag erstellen</button>
           <button onclick="exportTaskZipRestore();_closeMehrMenu()">📋 Sichern (ZIP – PAM Restore)</button>
           <button onclick="exportTaskZipNotfall();_closeMehrMenu()">🆘 Notfallarchiv (ZIP + alle Dateien)</button>
           <label class="mv2-mehr-item">↩ Wiederherstellen<input type="file" accept=".zip" style="display:none" onchange="importTaskFromZip(this.files[0]);this.value='';_closeMehrMenu();" autocomplete="off"></label>
@@ -4264,6 +4265,7 @@ function _pamGuestSubmit(){
           <button class="em-action-btn primary" onclick="_emAntworten()">↩ Antworten</button>
           <button class="em-action-btn" onclick="_emLadeOutlookVerlauf()" id="emOutlookLadenBtn" title="Outlook-Verlauf laden (info@ + frank.braun@)">📨 Outlook laden</button>
           <button class="em-action-btn" onclick="_emLadeGmailVerlauf()" id="emGmailLadenBtn" title="Gmail-Verlauf laden" style="display:none;">📩 Gmail laden</button>
+          <button class="em-action-btn" onclick="_pamZuAuftragAusEmail()" title="Auftragsordner anlegen, Dateien mitnehmen und Task verschieben">🏗 Auftrag erstellen</button>
           <button class="em-action-btn" onclick="_emInAuftragEinglieder()">📋 In Auftrag eingliedern</button>
           <button class="em-action-btn" onclick="_emInBoardVerschieben()">↪ In Board verschieben</button>
           <button class="em-action-btn danger" onclick="_emDeleteTask()">🗑 Löschen</button>
@@ -4379,7 +4381,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-31 · #535'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-31-b535) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-07-31 · #538'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-31-b538) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -12117,7 +12119,8 @@ async function _scanDriveImport(type){
       added++;
     } else {
       if(!taskAttachments)taskAttachments=[];
-      taskAttachments.push({name,fileId:id,url,type:mime,uploadedAt:new Date().toLocaleDateString('de-DE')});
+      // b538: ordner = Drive-Ordner, aus dem eingelesen wurde → Filter in der Anhang-Sektion
+      taskAttachments.push({name,fileId:id,url,type:mime,uploadedAt:new Date().toLocaleDateString('de-DE'),ordner:(typeof _sbCurrentName!=='undefined'?_sbCurrentName:'')||''});
       added++;
     }
   }
@@ -12341,6 +12344,7 @@ function _dfpOpenOverlay(){
       </div>
       <div id="dfpContent" style="overflow-y:auto;flex:1;padding:12px;"></div>
       <div style="display:flex;justify-content:flex-end;gap:8px;padding:10px 16px;border-top:1px solid var(--border);flex-shrink:0;">
+        <button id="dfpAlleBtn" onclick="_dfpAlleMitUnterordnern()" title="Alle Fotos aus diesem Ordner und seinen Unterordnern auswählen" style="margin-right:auto;padding:8px 14px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;font-size:13px;">📁+ Alle mit Unterordnern</button>
         <button onclick="document.getElementById('driveFolderPickerOverlay').remove()" style="padding:8px 16px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);cursor:pointer;font-size:13px;">Abbrechen</button>
         <button onclick="_dfpConfirm()" style="padding:8px 18px;border-radius:6px;background:var(--accent);color:#fff;border:none;cursor:pointer;font-size:13px;font-weight:600;">✓ Auswahl übernehmen</button>
       </div>
@@ -12437,6 +12441,43 @@ function _dfpBack(){
   const prev=_dfpHistory.pop();
   _dfpLoadFolder(prev.id,prev.name);
 }
+// b538: Alle Bilder/Videos aus dem aktuellen Ordner UND seinen Unterordnern auswählen.
+// Ohne das müsste man jeden Ortstermin-Ordner einzeln durchklicken. Der Ordnername wird
+// je Datei mitgeführt und wird später zum Filter in der Foto-Sektion.
+async function _dfpAlleMitUnterordnern(){
+  if(!gdriveToken){showToast('Bitte zuerst mit Google Drive verbinden','error');return;}
+  const btn=document.getElementById('dfpAlleBtn');
+  if(btn){btn.disabled=true;btn.textContent='⏳ Wird gelesen…';}
+  const basis='https://www.googleapis.com/drive/v3/files?q=';
+  const hdr={headers:{Authorization:'Bearer '+gdriveToken}};
+  let gefunden=0;
+  try{
+    // Aktueller Ordner + eine Ebene Unterordner (mehr braucht die Ortstermin-Ablage nicht)
+    const ordner=[{id:_dfpCurrentId,name:_dfpCurrentName}];
+    try{
+      const qF=encodeURIComponent("'"+_dfpCurrentId+"' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false");
+      const rF=await fetch(basis+qF+'&fields=files(id,name)&orderBy=name&pageSize=100',hdr);
+      if(rF.ok)((await rF.json()).files||[]).forEach(function(f){ordner.push({id:f.id,name:f.name});});
+    }catch(e){console.warn('[Fotos] Unterordner:',e);}
+    for(const o of ordner){
+      const qI=encodeURIComponent("'"+o.id+"' in parents and (mimeType contains 'image/' or mimeType contains 'video/') and trashed=false");
+      const rI=await fetch(basis+qI+'&fields=files(id,name,mimeType,thumbnailLink,imageMediaMetadata(time))&orderBy=name&pageSize=200',hdr);
+      if(!rI.ok)continue;
+      ((await rI.json()).files||[]).forEach(function(f){
+        if(_dfpSelected.has(f.id))return;
+        _dfpSelected.set(f.id,{id:f.id,name:f.name,mime:f.mimeType||'image/jpeg',
+          thumbnailLink:f.thumbnailLink||'',ts:(f.imageMediaMetadata&&f.imageMediaMetadata.time)||'',ordner:o.name||''});
+        gefunden++;
+      });
+    }
+    _dfpUpdateCount();
+    showToast(gefunden?('✓ '+gefunden+' Foto(s) aus '+ordner.length+' Ordner(n) ausgewählt – jetzt „Auswahl übernehmen"'):'Keine weiteren Fotos gefunden','success',5000);
+  }catch(e){
+    showToast('⚠ Einlesen fehlgeschlagen: '+e.message,'error',6000);
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='📁+ Alle mit Unterordnern';}
+  }
+}
 function _dfpToggle(el){
   const sel=el.dataset.selected==='1';
   el.dataset.selected=sel?'0':'1';
@@ -12445,7 +12486,8 @@ function _dfpToggle(el){
   if(chk)chk.style.display=sel?'none':'flex';
   const id=el.dataset.id;
   if(sel){_dfpSelected.delete(id);}
-  else{_dfpSelected.set(id,{id,name:el.dataset.name,mime:el.dataset.mime||'image/jpeg',thumbnailLink:el.dataset.thumb||'',ts:el.dataset.ts||''});}
+  // b538: ordner = Name des Drive-Ordners, aus dem eingelesen wird → Filter in der Foto-Sektion
+  else{_dfpSelected.set(id,{id,name:el.dataset.name,mime:el.dataset.mime||'image/jpeg',thumbnailLink:el.dataset.thumb||'',ts:el.dataset.ts||'',ordner:_dfpCurrentName||''});}
   _dfpUpdateCount();
 }
 function _dfpUpdateCount(){
@@ -12457,9 +12499,9 @@ function _dfpConfirm(){
   if(!overlay)return;
   if(!taskFotos)taskFotos=[];
   let added=0;
-  _dfpSelected.forEach(({id,name,mime,thumbnailLink,ts})=>{
+  _dfpSelected.forEach(({id,name,mime,thumbnailLink,ts,ordner})=>{
     if(!taskFotos.find(f=>f.driveId===id)){
-      taskFotos.push({driveId:id,name,mimeType:mime,caption:'',thumbnailLink:thumbnailLink||'',ts:ts||''});
+      taskFotos.push({driveId:id,name,mimeType:mime,caption:'',thumbnailLink:thumbnailLink||'',ts:ts||'',ordner:ordner||''});
       added++;
     }
   });
@@ -12672,6 +12714,69 @@ function _videoPlayMime(mime,name){
   if(name&&/\.(mov|m4v|3gp)$/i.test(name))return 'video/mp4';
   return 'video/mp4';
 }
+// ══════════════════════════════════════════════════════════════════════════════
+// ── b538: Filter nach Herkunftsordner (Fotos + Dateianhänge) ─────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// Beim Einlesen wird am Eintrag `ordner` gemerkt (Name des Drive-Ordners). Daraus
+// entsteht automatisch ein Auswahlmenü in der Kopfzeile – ohne Pflegeaufwand:
+// welche Unterordner in Drive existieren, bestimmt Frank, PAM übernimmt die Namen.
+let _fotoOrdnerFilter='';
+let _attOrdnerFilter='';
+
+function _pamOrdnerZaehlen(arr){
+  const m=new Map();
+  (arr||[]).forEach(function(x){
+    const o=((x&&x.ordner)||'').trim();
+    if(o)m.set(o,(m.get(o)||0)+1);
+  });
+  return Array.from(m.entries()).sort(function(a,b){return a[0].localeCompare(b[0],'de');});
+}
+
+function _pamPasstFilter(x,filter){
+  if(!filter)return true;
+  const o=((x&&x.ordner)||'').trim();
+  if(filter==='__foto') return !_isVideo(x.mimeType||x.type,x.name);
+  if(filter==='__video')return  _isVideo(x.mimeType||x.type,x.name);
+  if(filter==='__ohne') return !o;
+  return o===filter;
+}
+
+// Baut das Auswahlmenü über der Liste. mitMedien=true ergänzt „nur Fotos"/„nur Videos".
+function _pamFilterMenu(listenId,barId,arr,filterWert,changeFn,mitMedien){
+  const cont=document.getElementById(listenId);
+  if(!cont)return;
+  let bar=document.getElementById(barId);
+  if(!bar){
+    bar=document.createElement('div');
+    bar.id=barId;
+    bar.style.cssText='display:flex;justify-content:flex-end;align-items:center;margin:0 0 6px;';
+    cont.parentNode.insertBefore(bar,cont);
+  }
+  const ordner=_pamOrdnerZaehlen(arr);
+  const ohne=(arr||[]).filter(function(x){return !((x&&x.ordner)||'').trim();}).length;
+  const vid=(arr||[]).filter(function(x){return _isVideo(x.mimeType||x.type,x.name);}).length;
+  // Menü nur zeigen, wenn es etwas zu unterscheiden gibt
+  if(!ordner.length&&!(mitMedien&&vid)){bar.style.display='none';bar.innerHTML='';return;}
+  bar.style.display='flex';
+  let opt='<option value="">📁 Alle ('+(arr||[]).length+')</option>';
+  if(mitMedien&&vid){
+    opt+='<option value="__foto">📷 Nur Fotos ('+((arr||[]).length-vid)+')</option>';
+    opt+='<option value="__video">🎬 Nur Videos ('+vid+')</option>';
+  }
+  ordner.forEach(function(e){
+    opt+='<option value="'+esc(e[0])+'">'+esc(e[0])+' ('+e[1]+')</option>';
+  });
+  if(ohne&&ordner.length)opt+='<option value="__ohne">Ohne Ordner ('+ohne+')</option>';
+  bar.innerHTML='<select onchange="'+changeFn+'(this.value)" title="Nach Herkunftsordner filtern" '
+    +'style="font-size:11px;padding:3px 7px;border-radius:6px;border:1px solid var(--border);'
+    +'background:var(--bg3);color:var(--text2);max-width:230px;">'+opt+'</select>';
+  const sel=bar.querySelector('select');
+  if(sel)sel.value=filterWert||'';
+}
+
+function _setFotoOrdnerFilter(v){_fotoOrdnerFilter=v||'';renderFotoListDesktop();}
+function _setAttOrdnerFilter(v){_attOrdnerFilter=v||'';renderAttachList();}
+
 // Zähl-Badge Fotos/Videos für Karten & Zähler (#449) – trennt 📷 Bilder und 🎬 Videos
 function _fvCounts(fotos){var f=0,v=0;(fotos||[]).forEach(function(x){if(_isVideo(x.mimeType,x.name))v++;else f++;});return{f:f,v:v};}
 function _fvBadge(fotos){var c=_fvCounts(fotos);return (c.f?('📷 '+c.f):'')+(c.f&&c.v?' ':'')+(c.v?('🎬 '+c.v):'');}
@@ -12827,9 +12932,12 @@ function renderAttachList(){
   if(galBtn)galBtn.style.display=total?'':'none';
   const el=document.getElementById('attachList');
   if(!el)return;
-  if(!total){el.innerHTML='';el.style.display='none';return;}
+  if(!total){el.innerHTML='';el.style.display='none';_pamFilterMenu('attachList','attOrdnerFilterBar',[],'','_setAttOrdnerFilter',false);return;}
+  // b538: Auswahlmenü nach Herkunftsordner über der Liste
+  _pamFilterMenu('attachList','attOrdnerFilterBar',taskAttachments,_attOrdnerFilter,'_setAttOrdnerFilter',false);
   el.style.cssText='display:flex;flex-wrap:wrap;gap:8px;padding:4px 0 6px;';
   el.innerHTML=taskAttachments.map((a,i)=>{
+    if(!_pamPasstFilter(a,_attOrdnerFilter))return '';
     const svg=_aicEicSvg(a.type,a.name);
     const nameEsc=esc(a.name||'Anhang');
     const short=(a.name||'').length>9?(a.name||'').substring(0,9)+'…':(a.name||'Anhang');
@@ -14282,8 +14390,11 @@ function renderFotoListDesktop(){
   _feDeskBtnRefresh(); // b530: „📥 Foto-Eingang (N)"-Knopf ein-/ausblenden + Zähler
   const badge=document.getElementById('tFotoCountBadge');
   if(badge){if(taskFotos&&taskFotos.length){badge.textContent=taskFotos.length;badge.style.display='inline';}else{badge.style.display='none';}}
-  if(!taskFotos||!taskFotos.length){el.innerHTML='';_fotoSelectMode=false;_fotoSelected.clear();return;}
+  if(!taskFotos||!taskFotos.length){el.innerHTML='';_fotoSelectMode=false;_fotoSelected.clear();_pamFilterMenu('fotoListDesktop','fotoOrdnerFilterBar',[],'','_setFotoOrdnerFilter',true);return;}
+  // b538: Auswahlmenü nach Herkunftsordner (plus nur Fotos / nur Videos)
+  _pamFilterMenu('fotoListDesktop','fotoOrdnerFilterBar',taskFotos,_fotoOrdnerFilter,'_setFotoOrdnerFilter',true);
   const items=taskFotos.map((f,i)=>{
+    if(!_pamPasstFilter(f,_fotoOrdnerFilter))return '';
     const name=f.name||'';
     const caption=f.caption||'';
     // Bearbeitete Version bevorzugen wenn vorhanden
@@ -19336,20 +19447,146 @@ async function _createDriveAuftragStruktur(folderName,parentFid){
   const base='https://drive.google.com/drive/folders/';
   return{mainId,mainUrl:base+mainId,fotoId:foto2Id,fotoUrl:base+foto2Id,emailId,emailUrl:base+emailId,dokId:dok1Id,dokUrl:base+dok1Id};
 }
+// ══════════════════════════════════════════════════════════════════════════════
+// ── b537: Aus einem Task einen vollwertigen Auftrag machen ────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// Für Aufgaben- und E-Mail-Tasks, die nur einen einzelnen Ordner haben. Legt die
+// Auftragsstruktur im gewählten Objektordner an, nimmt die vorhandenen Dateien mit
+// und verschiebt den Task ins gewünschte Board.
+
+// Hängt alle DATEIEN eines Drive-Ordners um: Bilder/Videos → Foto-Ordner, Rest → Posteingang.
+// Unterordner bleiben unangetastet (sie würden sonst verwaisen). Kein Neu-Upload –
+// die Dateien behalten ID, EXIF und Datum.
+async function _pamMoveDriveFiles(vonFid,fotoFid,restFid){
+  let bewegt=0;
+  if(!vonFid||!gdriveToken)return 0;
+  try{
+    const q=encodeURIComponent("'"+vonFid+"' in parents and trashed=false");
+    const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name,mimeType)&pageSize=200',
+      {headers:{Authorization:'Bearer '+gdriveToken}});
+    if(!r.ok)return 0;
+    const dateien=((await r.json()).files||[]).filter(function(f){return f.mimeType!=='application/vnd.google-apps.folder';});
+    for(const f of dateien){
+      const istBild=/^image\/|^video\//.test(f.mimeType||'');
+      const ziel=istBild?(fotoFid||restFid):(restFid||fotoFid);
+      if(!ziel)continue;
+      try{
+        const mR=await fetch('https://www.googleapis.com/drive/v3/files/'+f.id+'?fields=parents',
+          {headers:{Authorization:'Bearer '+gdriveToken}});
+        if(!mR.ok)continue;
+        const alte=((await mR.json()).parents||[]).join(',');
+        const mv=await fetch('https://www.googleapis.com/drive/v3/files/'+f.id
+          +'?addParents='+encodeURIComponent(ziel)+'&removeParents='+encodeURIComponent(alte),
+          {method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},body:'{}'});
+        if(mv.ok)bewegt++;
+      }catch(e){console.warn('[ZuAuftrag] Datei',f.name,e);}
+    }
+  }catch(e){console.warn('[ZuAuftrag] Dateien lesen:',e);}
+  return bewegt;
+}
+
+// Verschiebt einen Task in ein anderes Board/Spalte – boardübergreifend, ohne currentBoard.
+function _pamTaskInBoard(task,vonBoard,zielBoard,zielStatus){
+  if(!task||!boards[zielBoard])return false;
+  const quelle=vonBoard&&boards[vonBoard]?vonBoard:Object.keys(boards).find(function(bk){
+    return (boards[bk]||[]).some(function(t){return t.id===task.id;});
+  });
+  if(quelle&&boards[quelle])boards[quelle]=boards[quelle].filter(function(t){return t.id!==task.id;});
+  const spalten=getBoardStatuses(zielBoard)||[];
+  task.status=zielStatus||(spalten.includes(task.status)?task.status:(spalten[0]||'Backlog'));
+  (boards[zielBoard]=boards[zielBoard]||[]).push(task);
+  return true;
+}
+
+async function _pamTaskZuAuftrag(task,vonBoard){
+  if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden (☁️ oben rechts)','error',6000);return;}
+  if(!task){showToast('Kein Task gefunden','error');return;}
+  const titel=(task.title||'').trim()||'Auftrag';
+  const name=await _promptFolderName(titel,DEFAULT_FOLDER_BAUSTELLE);
+  if(!name)return;
+  const zielFid=_extractFolderIdFromUrl(_fnpLastParentUrl||'')||_extractFolderIdFromUrl(DEFAULT_FOLDER_BAUSTELLE);
+  if(!zielFid){showToast('⚠ Kein gültiger Ablageordner gewählt','error',5000);return;}
+
+  showToast('📁 Auftragsordner wird angelegt…','info',6000);
+  let urls;
+  try{urls=await _createDriveAuftragStruktur(name,zielFid);}
+  catch(e){showToast('⚠ Ordner anlegen fehlgeschlagen: '+e.message,'error',8000);return;}
+
+  // Bisherigen Ordner leeren und in den Papierkorb (nicht endgültig löschen)
+  const altFid=_extractFolderIdFromUrl((task.gdriveOrdner||'').trim());
+  let bewegt=0;
+  if(altFid&&altFid!==urls.mainId){
+    bewegt=await _pamMoveDriveFiles(altFid,urls.fotoId,urls.emailId);
+    try{
+      await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(altFid),
+        {method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},
+         body:JSON.stringify({trashed:true})});
+    }catch(e){console.warn('[ZuAuftrag] Alter Ordner:',e);}
+  }
+
+  task.gdriveOrdner=urls.mainUrl;
+  task.gdrive      =urls.fotoUrl;
+  task.emailOrdner =urls.emailUrl;
+  task.dokOrdner   =urls.dokUrl;
+
+  showToast('✓ Auftragsordner angelegt'+(bewegt?' · '+bewegt+' Datei(en) mitgenommen':''),'success',5000);
+
+  // Zielboard und Spalte wählen – der Task soll bei den Aufträgen landen
+  _emShowBoardPicker('Auftrag in welches Board?',null,async function(zielBoard,zielStatus){
+    _pamTaskInBoard(task,vonBoard,zielBoard,zielStatus);
+    try{if(typeof closeEmailTaskModal==='function')closeEmailTaskModal();}catch(e){}
+    try{if(typeof closeModal==='function'&&document.getElementById('taskModal')&&document.getElementById('taskModal').classList.contains('open'))closeModal();}catch(e){}
+    await autoSave();
+    try{pushToSync();}catch(e){}
+    render();
+    showToast('✓ Auftrag angelegt und nach „'+zielBoard+'" verschoben','success',5000);
+  });
+}
+
+// Einstiege: E-Mail-Modal und normales Task-Modal
+function _pamZuAuftragAusEmail(){
+  if(typeof _emCurrentTask==='undefined'||!_emCurrentTask){showToast('Kein Task offen','error');return;}
+  if(typeof _emDoSave==='function')_emDoSave();
+  _pamTaskZuAuftrag(_emCurrentTask,typeof _emCurrentBoard!=='undefined'?_emCurrentBoard:'');
+}
+function _pamZuAuftragAusTask(){
+  const id=(document.getElementById('taskId')||{}).value||'';
+  if(!id){showToast('Task bitte zuerst speichern','error',4000);return;}
+  if(typeof saveTaskData==='function')saveTaskData();
+  const t=typeof findTaskById==='function'?findTaskById(id):null;
+  if(!t){showToast('Task nicht gefunden','error');return;}
+  _pamTaskZuAuftrag(t,currentBoard);
+}
+
 // ── Auto-Ordner: vollständige Auftragsstruktur anlegen wenn neuer Task einen Titel bekommt ──
 let _autoFolderCreating=false;
-function _promptFolderName(suggested){
+// b536: Zweiter Parameter parentUrl blendet die Zeile „Ablegen in" ein. Der gewählte
+// Ablageort landet in _fnpLastParentUrl – der Rückgabewert bleibt der Ordnername (String),
+// damit die vier anderen Aufrufer (PDF-, E-Mail-, EML-Ordner) unverändert weiterlaufen.
+let _fnpLastParentUrl='';
+function _promptFolderName(suggested,parentUrl){
+  _fnpLastParentUrl=parentUrl||'';
   return new Promise(function(resolve){
     const ex=document.getElementById('_folderNamePrompt');if(ex)ex.remove();
     const ov=document.createElement('div');
     ov.id='_folderNamePrompt';
     ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99999;display:flex;align-items:center;justify-content:center;';
     const box=document.createElement('div');
-    box.style.cssText='background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px 24px;min-width:320px;max-width:500px;box-shadow:0 8px 32px rgba(0,0,0,.5);';
+    box.style.cssText='background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px 24px;min-width:380px;max-width:520px;box-shadow:0 8px 32px rgba(0,0,0,.5);';
     const safe=(suggested||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+    const safeP=(parentUrl||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+    const parentBlock=parentUrl
+      ?'<div style="font-size:12px;color:var(--text2);margin:14px 0 6px;">Ablegen in:</div>'
+       +'<div style="display:flex;gap:6px;align-items:center;">'
+       +'<input id="_fnpParent" type="text" readonly value="'+safeP+'" autocomplete="off" oninput="_setResolveName(\'_fnpParent\',\'_fnpParentName\')" style="flex:1;box-sizing:border-box;padding:6px 9px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:11px;">'
+       +'<button id="_fnpPick" style="padding:6px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;font-size:13px;" title="Anderen Ordner wählen">📂</button>'
+       +'</div>'
+       +'<div id="_fnpParentName" style="font-size:12px;color:var(--accent);margin-top:3px;font-weight:600;">&nbsp;</div>'
+      :'';
     box.innerHTML='<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:10px;">📁 Drive-Ordnername anpassen</div>'
       +'<div style="font-size:12px;color:var(--text2);margin-bottom:6px;">Ordnername:</div>'
       +'<input id="_fnpInput" type="text" value="'+safe+'" autocomplete="off" style="width:100%;box-sizing:border-box;padding:8px 10px;border-radius:7px;border:1.5px solid var(--accent);background:var(--bg3);color:var(--text);font-size:13px;outline:none;">'
+      +parentBlock
       +'<div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;">'
       +'<button id="_fnpCancel" style="padding:7px 16px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:13px;cursor:pointer;">Abbrechen</button>'
       +'<button id="_fnpOk" style="padding:7px 18px;border-radius:7px;border:none;background:var(--accent);color:#fff;font-size:13px;font-weight:700;cursor:pointer;">📁 Anlegen</button>'
@@ -19357,7 +19594,16 @@ function _promptFolderName(suggested){
     ov.appendChild(box);document.body.appendChild(ov);
     const inp=document.getElementById('_fnpInput');
     setTimeout(function(){inp.focus();inp.select();},60);
-    function _done(val){ov.remove();resolve(val);}
+    if(parentUrl){
+      const pickBtn=document.getElementById('_fnpPick');
+      if(pickBtn)pickBtn.onclick=function(){_pickDriveFolder('_fnpParent');};
+      if(typeof _setResolveName==='function')_setResolveName('_fnpParent','_fnpParentName');
+    }
+    function _done(val){
+      const pEl=document.getElementById('_fnpParent');
+      if(pEl)_fnpLastParentUrl=(pEl.value||'').trim();
+      ov.remove();resolve(val);
+    }
     document.getElementById('_fnpOk').onclick=function(){const v=(inp.value||'').trim();if(v)_done(v);else inp.focus();};
     document.getElementById('_fnpCancel').onclick=function(){_done(null);};
     inp.addEventListener('keydown',function(e){if(e.key==='Enter'){const v=(inp.value||'').trim();if(v)_done(v);}else if(e.key==='Escape')_done(null);});
@@ -19398,11 +19644,16 @@ async function _autoCreateTaskFolder(){
     // Bei „ja" + Auswahl werden die GM-Ordner als Ziele gesetzt und KEINE eigene Struktur angelegt.
     const _gmLinked=await _gmMaybeLinkOnCreate();
     if(_gmLinked){return;}
-    const confirmedName=await _promptFolderName(title);
+    // b536: Dialog zeigt zusätzlich „Ablegen in" – Vorgabe ist der Standardordner aus den
+    // ⚙ Einstellungen, über 📂 lässt sich der Objektordner der Hausverwaltung wählen.
+    // Liegt der gewählte Ordner im gespiegelten Bereich, entsteht der Auftrag automatisch
+    // auch auf dem NAS – das nachträgliche Verschieben über 📁↗ entfällt.
+    const confirmedName=await _promptFolderName(title,DEFAULT_FOLDER_BAUSTELLE);
     if(!confirmedName){return;}
     if(confirmedName!==title&&titleEl){titleEl.value=confirmedName;scheduleTaskFieldSave&&scheduleTaskFieldSave();}
+    const zielFid=_extractFolderIdFromUrl(_fnpLastParentUrl||'')||mainFid;
     showToast('📁 Erstelle Drive-Ordnerstruktur: '+confirmedName.substring(0,40)+'…','info',5000);
-    const urls=await _createDriveAuftragStruktur(confirmedName,mainFid);
+    const urls=await _createDriveAuftragStruktur(confirmedName,zielFid);
     const gdEl =document.getElementById('tGD');          if(gdEl)  gdEl.value =urls.fotoUrl;
     const gdoEl=document.getElementById('tGDOrdner');    if(gdoEl) gdoEl.value=urls.mainUrl;
     const eoEl =document.getElementById('tEmailOrdner'); if(eoEl)  eoEl.value =urls.emailUrl;
@@ -27742,7 +27993,24 @@ function _emInAuftragEinglieder(){
   _emShowBoardTaskPicker('In Auftrag eingliedern',function(target){
       let tt=target.task;
       let src=_emCurrentTask;
-      const _doMerge=function(){
+      const _doMerge=async function(){
+        // b537: Erst die DATEIEN in Drive mitnehmen, dann die Daten zusammenführen.
+        // Vorher wurden nur die Verweise kopiert – die Mails blieben physisch im
+        // E-Mail-Ordner liegen, während der Auftrag beim Kunden lag.
+        try{
+          const _srcFid=_extractFolderIdFromUrl((src.gdriveOrdner||'').trim());
+          const _dstFoto=_extractFolderIdFromUrl((tt.gdrive||'').trim());
+          const _dstMail=_extractFolderIdFromUrl((tt.emailOrdner||tt.gdriveOrdner||'').trim());
+          if(gdriveToken&&_srcFid&&(_dstFoto||_dstMail)&&_srcFid!==_dstMail&&_srcFid!==_dstFoto){
+            const _n=await _pamMoveDriveFiles(_srcFid,_dstFoto,_dstMail);
+            if(_n)showToast('📦 '+_n+' Datei(en) in den Auftragsordner verschoben','info',4000);
+            try{
+              await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(_srcFid),
+                {method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},
+                 body:JSON.stringify({trashed:true})});
+            }catch(e){console.warn('[Eingliedern] Alter Ordner:',e);}
+          }
+        }catch(e){console.warn('[Eingliedern] Dateien verschieben:',e);}
         // Daten zusammenfuehren – Duplikat-Check über fileId / messageId
         if(!tt.emailOriginals)tt.emailOriginals=[];
         (src.emailOriginals||[]).forEach(function(e){
