@@ -4387,7 +4387,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-07-31 · #542'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-07-31-b542) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-01 · #543'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-01-b543) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -5171,6 +5171,12 @@ function saveTaskData(){
     aufgaben:JSON.parse(JSON.stringify(taskAufgaben||[])),
     ausserhausTermine:JSON.parse(JSON.stringify(taskAusserhausTermine||[])),
     emailSender:(document.getElementById('taskEmailSenderInput')?document.getElementById('taskEmailSenderInput').value.trim():''),
+    // b543 (F2): Felder des E-Mail-Fensters erhalten – standen nicht in dieser Liste und
+    // wurden dadurch bei JEDEM Speichern im großen Fenster gelöscht
+    emNotiz:existingTask?.emNotiz||'',
+    emailSenderName:existingTask?.emailSenderName||'',
+    freierTermin:existingTask?.freierTermin?JSON.parse(JSON.stringify(existingTask.freierTermin)):null,
+    emailUrl:existingTask?.emailUrl||'',
     msMessageId:(()=>{const _t=findTaskById(document.getElementById('taskId')?.value);return _t?(_t.msMessageId||''):'';})(),
     msMessageIds:(()=>{const _t=findTaskById(document.getElementById('taskId')?.value);return _t?JSON.parse(JSON.stringify(_t.msMessageIds||[])):[];})(),
     msConversationId:(()=>{const _t=findTaskById(document.getElementById('taskId')?.value);return _t?(_t.msConversationId||''):'';})(),
@@ -5301,6 +5307,13 @@ const CLOUD_FUNCTION_URL = 'https://europe-west1-ptp-workboard.cloudfunctions.ne
 let DEFAULT_FOLDER_NOTIZ    = 'https://drive.google.com/drive/folders/1iSEa-ibrBmv-WrkiLrIBVzAozbr97yJ7';
 let DEFAULT_FOLDER_BAUSTELLE= 'https://drive.google.com/drive/folders/1iSEa-ibrBmv-WrkiLrIBVzAozbr97yJ7';
 let DEFAULT_FOLDER_EMAIL    = 'https://drive.google.com/drive/folders/1qPfE5woo2LiKE6obu184IZYc_uFQKfz2';
+// b543 (K0): Gemeinsame Standard-Ordner erkennen. Diese Ordner teilen sich ALLE Tasks –
+// sie dürfen nie geleert, verschoben oder in den Papierkorb gelegt werden.
+function _istSammelOrdner(fid){
+  if(!fid)return false;
+  return [DEFAULT_FOLDER_NOTIZ,DEFAULT_FOLDER_BAUSTELLE,DEFAULT_FOLDER_EMAIL]
+    .map(function(u){return _ezFolderId(u||'');}).filter(Boolean).indexOf(fid)!==-1;
+}
 // Fix #351: Globale Konstante – war fälschlicherweise nur lokal in _ezBuildPdfFromHtml definiert,
 // wurde aber in _auftragConfirm (Zeile ~1406) und _auftragAddToTask (Zeile ~1116) verwendet
 // → ReferenceError wenn isImg=true → gesamter Anhang-Upload-Loop abgebrochen, keine Dokumente hochgeladen
@@ -16536,6 +16549,17 @@ async function _gmLoadEmailThread(){
         direction:myAddrs.includes(fromAddr.toLowerCase())?'gesendet':'eingang',
         messageId:(hdrs['message-id']||'').replace(/^<|>$/g,''),};
     }).sort((a,b)=>new Date(b.date)-new Date(a.date)); // neueste zuerst
+    // b543 (K2): Nullschutz wie bei Outlook (#383) – 0 geladene Mails dürfen einen
+    // vorhandenen Verlauf NIE überschreiben (typisch: Token abgelaufen → 401 wird oben
+    // beim Thread-Abruf still übersprungen und threadMsgs bleibt leer)
+    if(!threadMsgs.length){
+      const _vorh=(task.gmailThreadMessages||[]).length;
+      if(stEl)stEl.textContent='⚠ 0 Mails geladen';
+      showToast(_vorh
+        ?'⚠ Gmail: 0 Mails geladen – bestehender Verlauf ('+_vorh+' Mails) bleibt erhalten. Vermutlich Gmail-Verbindung abgelaufen → 📩 Gmail neu verbinden.'
+        :'⚠ Gmail: Konversation gefunden, aber 0 Mails geladen – nichts gespeichert.','error',8000);
+      return;
+    }
     task.gmailThreadMessages=threadMsgs;
     _gmRenderThread(task);
     const saved=await _gmSaveThreadPdfs(task,threadMsgs);
@@ -19465,10 +19489,16 @@ async function _msSaveMailSnapshot(taskId,idx,_silent=false){
     }
         m._cachedBodyHtml=bodyHtml;
       }
-    }catch(e){}
+    }catch(e){console.warn('[Snapshot] Frisch-Abruf fehlgeschlagen:',e);}
   }
-  if(!bodyHtml)bodyHtml=m._cachedBodyHtml||'';
-  if(!bodyHtml){if(!_silent)showToast('⚠ Kein Mail-Inhalt verfügbar','warn',3000);throw new Error('kein Inhalt');}
+  // b543 (K3): KEIN stiller Rückfall mehr auf den Zwischenspeicher (_cachedBodyHtml).
+  // Ein Snapshot, der nicht dem frischen Postfach-Inhalt entspricht, wäre ein falsches
+  // Beweisdokument. Schlägt der Abruf fehl (Token abgelaufen, Netz, Konto 2), wird
+  // ehrlich abgebrochen statt still veralteten Inhalt zu speichern.
+  if(!bodyHtml){
+    if(!_silent)showToast('⚠ Mail konnte nicht frisch aus dem Postfach geladen werden – Snapshot NICHT gespeichert. Outlook-Verbindung prüfen und erneut versuchen.','error',8000);
+    throw new Error('Snapshot abgebrochen: Mail nicht frisch ladbar');
+  }
   let processed=bodyHtml;
   // 1. CID-Inline-Bilder durch base64 data-URIs ersetzen
   for(const att of inlineAtts){
@@ -19657,7 +19687,7 @@ async function _pamMoveDriveFiles(vonFid,fotoFid,restFid){
     const q=encodeURIComponent("'"+vonFid+"' in parents and trashed=false");
     const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name,mimeType)&pageSize=200',
       {headers:{Authorization:'Bearer '+gdriveToken}});
-    if(!r.ok)return 0;
+    if(!r.ok)return null; // b543 (K0): Fehler von „Ordner ist leer" unterscheiden – Aufrufer darf bei null NICHT löschen
     const dateien=((await r.json()).files||[]).filter(function(f){return f.mimeType!=='application/vnd.google-apps.folder';});
     for(const f of dateien){
       const istBild=/^image\/|^video\//.test(f.mimeType||'');
@@ -19674,7 +19704,7 @@ async function _pamMoveDriveFiles(vonFid,fotoFid,restFid){
         if(mv.ok)bewegt++;
       }catch(e){console.warn('[ZuAuftrag] Datei',f.name,e);}
     }
-  }catch(e){console.warn('[ZuAuftrag] Dateien lesen:',e);}
+  }catch(e){console.warn('[ZuAuftrag] Dateien lesen:',e);return null;} // b543 (K0): s. o.
   return bewegt;
 }
 
@@ -19706,15 +19736,24 @@ async function _pamTaskZuAuftrag(task,vonBoard){
   catch(e){showToast('⚠ Ordner anlegen fehlgeschlagen: '+e.message,'error',8000);return;}
 
   // Bisherigen Ordner leeren und in den Papierkorb (nicht endgültig löschen)
+  // b543 (K0): NIE den gemeinsamen Sammelordner anfassen – dort liegen die Dateien ALLER
+  // E-Mail-Tasks. Und Papierkorb nur, wenn das Verschieben nicht fehlgeschlagen ist.
   const altFid=_extractFolderIdFromUrl((task.gdriveOrdner||'').trim());
   let bewegt=0;
-  if(altFid&&altFid!==urls.mainId){
+  if(altFid&&altFid!==urls.mainId&&!_istSammelOrdner(altFid)){
     bewegt=await _pamMoveDriveFiles(altFid,urls.fotoId,urls.emailId);
-    try{
-      await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(altFid),
-        {method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},
-         body:JSON.stringify({trashed:true})});
-    }catch(e){console.warn('[ZuAuftrag] Alter Ordner:',e);}
+    if(bewegt===null){
+      bewegt=0;
+      showToast('⚠ Dateien konnten nicht verschoben werden – alter Ordner bleibt erhalten','error',7000);
+    }else{
+      try{
+        await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(altFid),
+          {method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},
+           body:JSON.stringify({trashed:true})});
+      }catch(e){console.warn('[ZuAuftrag] Alter Ordner:',e);}
+    }
+  }else if(altFid&&_istSammelOrdner(altFid)){
+    console.log('[ZuAuftrag] Gemeinsamer Sammelordner erkannt – wird weder geleert noch in den Papierkorb verschoben');
   }
 
   task.gdriveOrdner=urls.mainUrl;
@@ -23697,8 +23736,10 @@ async function _driveUploadGeneric(buf,fname,mimeType,fid){
   if(r.status===401){_handleDrive401();throw new Error('Drive-Verbindung abgelaufen – bitte ☁️-Button drücken');}
   if(!r.ok)throw new Error('Drive Upload Fehler: HTTP '+r.status);
   const result=await r.json();
-  // Automatisch öffentlich freigeben (Jeder mit Link kann öffnen)
-  _driveSetPublic(result.id);
+  // b543 (K1): KEINE automatische öffentliche Freigabe mehr. Vorher wurde hier jede
+  // Datei auf „Jeder mit Link kann lesen" gestellt (19 Aufrufstellen – Mails, Anhänge,
+  // Fotos, Gutachten). Die App-Vorschau nutzt den authentifizierten Abruf (?alt=media).
+  // Bestand bereinigen: _pamFreigabenBereinigen() in der Browser-Konsole.
   return result;
 }
 
@@ -23712,6 +23753,37 @@ async function _driveSetPublic(fileId){
       body:JSON.stringify({role:'reader',type:'anyone'})
     });
   }catch(e){console.warn('[PAM] Drive-Freigabe konnte nicht gesetzt werden:',e);}
+}
+
+// b543 (K1): Bestands-Bereinigung – entfernt die öffentliche „Jeder mit Link"-Freigabe
+// von allen Dateien, die an Tasks hängen (Mails, PDFs, Fotos, Anhänge, Prüfberichte).
+// Aufruf aus der Browser-Konsole: _pamFreigabenBereinigen()
+async function _pamFreigabenBereinigen(){
+  if(!gdriveToken){showToast('⚠ Bitte zuerst Google Drive verbinden (☁️)','error',5000);return;}
+  const ids=new Set();
+  Object.keys(boards||{}).forEach(function(bk){(boards[bk]||[]).forEach(function(t){
+    ['emailOriginals','emailPdfs','fotos','attachments','pruefberichte'].forEach(function(k){
+      (t[k]||[]).forEach(function(e){if(e&&e.fileId)ids.add(e.fileId);});
+    });
+  });});
+  if(!ids.size){showToast('ℹ Keine Task-Dateien gefunden','info',4000);return;}
+  showToast('🔒 Prüfe '+ids.size+' Dateien auf öffentliche Freigabe…','info',6000);
+  let entfernt=0,warPrivat=0,fehler=0,i=0;
+  for(const fid of ids){
+    i++;
+    try{
+      const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fid)+'/permissions/anyoneWithLink',
+        {method:'DELETE',headers:{Authorization:'Bearer '+gdriveToken}});
+      if(r.ok||r.status===204)entfernt++;
+      else if(r.status===404)warPrivat++;   // keine öffentliche Freigabe vorhanden
+      else fehler++;
+    }catch(e){fehler++;}
+    if(i%50===0)showToast('🔒 '+i+'/'+ids.size+' geprüft…','info',2000);
+  }
+  const msg='🔒 Freigabe-Bereinigung: '+entfernt+' öffentliche Freigabe(n) entfernt, '+warPrivat+' waren schon privat'+(fehler?', '+fehler+' Fehler':'');
+  console.log('[K1]',msg);
+  showToast(msg,fehler?'error':'success',10000);
+  return {entfernt:entfernt,warPrivat:warPrivat,fehler:fehler,gesamt:ids.size};
 }
 
 async function _uploadEmailOriginal(file){
@@ -27473,6 +27545,21 @@ function _emTerminVereinbaren(){
 
 // ── Exchange-Verlauf aus Posteingang-Modal laden ──────────────────────────────
 // Setzt _pamActiveTaskId damit _msLoadEmailThread/_gmLoadEmailThread den richtigen Task finden
+
+// b543 (F1): Die Lade-Funktionen schreiben ans LIVE-Objekt in boards[] – die Arbeitskopie
+// _emCurrentTask muss danach nachgezogen werden. Sonst zeigt die Liste im E-Mail-Fenster
+// den frischen Verlauf nicht, und der nächste _emFlushToLive (Object.assign) macht ihn
+// im Live-Objekt wieder platt. Nur Mail-Felder syncen – Formulareingaben bleiben unberührt.
+function _emSyncMailFelderVonLive(){
+  if(!_emCurrentTask)return;
+  const live=findTaskById(_emCurrentTask.id);
+  if(!live)return;
+  ['msThreadMessages','gmailThreadMessages','emailOriginals','emailPdfs',
+   'msMessageIds','gmailMessageIds','msConversationId','gmailThreadId',
+   'msMessageId','gmailMessageId','msAccount','msEmailSubject','msEmailDate'].forEach(function(k){
+    if(live[k]!==undefined)_emCurrentTask[k]=JSON.parse(JSON.stringify(live[k]));
+  });
+}
 async function _emLadeOutlookVerlauf(){
   if(!_emCurrentTask){showToast('⚠ Kein Task aktiv','error',3000);return;}
   const btn=document.getElementById('emOutlookLadenBtn');
@@ -27482,6 +27569,7 @@ async function _emLadeOutlookVerlauf(){
   _pamActiveTaskId=_emCurrentTask.id;
   try{
     await _msLoadEmailThread();
+    _emSyncMailFelderVonLive(); // b543 (F1)
     _emReloadMailList();
     _emUpdateTop2();
     const gbtn=document.getElementById('emGmailLadenBtn');
@@ -27505,6 +27593,7 @@ async function _emLadeGmailVerlauf(){
   _pamActiveTaskId=_emCurrentTask.id;
   try{
     await _gmLoadEmailThread();
+    _emSyncMailFelderVonLive(); // b543 (F1)
     _emReloadMailList();
     _emUpdateTop2();
     // Fix2: Gmail-Button-Sichtbarkeit auch nach Gmail-Laden aktualisieren
@@ -28202,14 +28291,19 @@ function _emInAuftragEinglieder(){
           const _srcFid=_extractFolderIdFromUrl((src.gdriveOrdner||'').trim());
           const _dstFoto=_extractFolderIdFromUrl((tt.gdrive||'').trim());
           const _dstMail=_extractFolderIdFromUrl((tt.emailOrdner||tt.gdriveOrdner||'').trim());
-          if(gdriveToken&&_srcFid&&(_dstFoto||_dstMail)&&_srcFid!==_dstMail&&_srcFid!==_dstFoto){
+          // b543 (K0): Sammelordner-Schutz + Papierkorb nur nach gelungenem Verschieben
+          if(gdriveToken&&_srcFid&&(_dstFoto||_dstMail)&&_srcFid!==_dstMail&&_srcFid!==_dstFoto&&!_istSammelOrdner(_srcFid)){
             const _n=await _pamMoveDriveFiles(_srcFid,_dstFoto,_dstMail);
-            if(_n)showToast('📦 '+_n+' Datei(en) in den Auftragsordner verschoben','info',4000);
-            try{
-              await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(_srcFid),
-                {method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},
-                 body:JSON.stringify({trashed:true})});
-            }catch(e){console.warn('[Eingliedern] Alter Ordner:',e);}
+            if(_n===null){
+              showToast('⚠ Dateien konnten nicht verschoben werden – alter Ordner bleibt erhalten','error',7000);
+            }else{
+              if(_n)showToast('📦 '+_n+' Datei(en) in den Auftragsordner verschoben','info',4000);
+              try{
+                await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(_srcFid),
+                  {method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},
+                   body:JSON.stringify({trashed:true})});
+              }catch(e){console.warn('[Eingliedern] Alter Ordner:',e);}
+            }
           }
         }catch(e){console.warn('[Eingliedern] Dateien verschieben:',e);}
         // Daten zusammenfuehren – Duplikat-Check über fileId / messageId
@@ -28300,7 +28394,8 @@ function _emDeleteTask(){
   // Fix #293: Drive-Ordner anbieten zu löschen (wie deleteTask())
   const _folderUrl=(_delTask.gdriveOrdner||_delTask.emailOrdner||'').trim();
   const _fid=_folderUrl?_ezFolderId(_folderUrl):null;
-  if(_fid&&gdriveToken){
+  // b543 (K0): nie den gemeinsamen Sammelordner anbieten – dort liegen fremde Task-Dateien
+  if(_fid&&gdriveToken&&!_istSammelOrdner(_fid)){
     if(confirm('Drive-Ordner „'+(_delTask.title||'Task')+'" auch in den Papierkorb verschieben?\n(Kann in Drive wiederhergestellt werden)')){
       _pamTrashDriveFolder(_fid,_delTask.title||'Ordner');
     }
@@ -28622,8 +28717,7 @@ function deleteTask(){
   if(_task){
     const _folderUrl=(_task.gdriveOrdner||_task.emailOrdner||'').trim();
     const _fid=_folderUrl?_ezFolderId(_folderUrl):null;
-    const _defaultFids=[_ezFolderId(DEFAULT_FOLDER_NOTIZ),_ezFolderId(DEFAULT_FOLDER_BAUSTELLE)].filter(Boolean);
-    const _isOwnFolder=_fid&&!_defaultFids.includes(_fid);
+    const _isOwnFolder=_fid&&!_istSammelOrdner(_fid); // b543 (K0): prüft jetzt alle drei Standard-Ordner (auch E-Mail)
     if(_isOwnFolder&&gdriveToken){
       if(confirm('Drive-Ordner "'+(_task.title||'Task')+'" auch in den Papierkorb? (Kann in Drive wiederhergestellt werden)')){
         _pamTrashDriveFolder(_fid,_task.title||'Ordner');
