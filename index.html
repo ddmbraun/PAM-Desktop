@@ -805,15 +805,27 @@ function _parseEmlText(rawText){
           // wird beim Rendering per cleanup abgefangen
         }
       }
+      // b548: Anhänge nicht mehr nur bei Base64 erkennen – quoted-printable/7bit/8bit
+      // (typisch .txt/.csv und weitergeleitete Mails) fielen bisher stumm durch.
+      var _attB64FromPart=function(body,enc){
+        try{
+          let bin=enc==='quoted-printable'
+            ?body.replace(/=\r?\n/g,'').replace(/=([0-9A-Fa-f]{2})/g,function(_,h){return String.fromCharCode(parseInt(h,16));})
+            :body;
+          let out='';for(let _i2=0;_i2<bin.length;_i2++){out+=String.fromCharCode(bin.charCodeAt(_i2)&0xFF);}
+          return btoa(out);
+        }catch(e){return'';}
+      };
+      const _attEncOk=(pe==='base64'||pe==='quoted-printable'||pe==='7bit'||pe==='8bit'||pe==='');
       // Fix #223: CID-Inline-Bilder markieren – nicht automatisch hochladen, aber für "Als Foto speichern" verfügbar halten
-      if(pe==='base64'&&attachName&&pct.startsWith('image/')){
+      if(_attEncOk&&attachName&&pct.startsWith('image/')){
         var _isCidInlineFlag=!!(pcidArr||disp.startsWith('inline'));
-        let b64=pb.replace(/\s+/g,'');
+        let b64=pe==='base64'?pb.replace(/\s+/g,''):_attB64FromPart(pb,pe);
         if(b64)res.attachments.push({name:attachName,mimeType:pct||'image/jpeg',b64:b64,_isCidInline:_isCidInlineFlag});
       }
-      // Sonstige Anhänge (PDF, DOCX etc.)
-      else if(pe==='base64'&&attachName&&!_isCidImage&&(disp.startsWith('attachment')||pct==='application/pdf'||pct==='application/octet-stream'||pct.startsWith('application/'))){
-        let b64=pb.replace(/\s+/g,'');
+      // Sonstige Anhänge (PDF, DOCX, TXT, CSV etc.)
+      else if(_attEncOk&&attachName&&!_isCidImage&&(disp.startsWith('attachment')||pct==='application/pdf'||pct==='application/octet-stream'||pct.startsWith('application/')||(pct.startsWith('text/')&&disp.startsWith('attachment')))){
+        let b64=pe==='base64'?pb.replace(/\s+/g,''):_attB64FromPart(pb,pe);
         if(b64)res.attachments.push({name:attachName,mimeType:pct||'application/octet-stream',b64:b64});
       }
       if(pct.startsWith('multipart/')&&pfullct){
@@ -1302,32 +1314,71 @@ async function _auftragAddToTask(task,boardName,fileMode){
         if(result&&result.id){driveId=result.id;driveUrl='https://drive.google.com/file/d/'+result.id+'/view';}
       }catch(e){console.warn('[PTP] PDF-Upload:',e);}
     }
-    if(!task.attachments)task.attachments=[];
-    task.attachments.push({name:p.file.name,fileId:driveId,url:driveUrl,uploadedAt:new Date().toLocaleDateString('de-DE')});
-    showToast('✅ PDF in "'+task.title+'" gespeichert','success',3000);
+    // b548: keine Phantom-Einträge und keine Erfolgsmeldung ohne Ergebnis mehr
+    if(driveId){
+      if(!task.attachments)task.attachments=[];
+      task.attachments.push({name:p.file.name,fileId:driveId,url:driveUrl,uploadedAt:new Date().toLocaleDateString('de-DE')});
+      showToast('✅ PDF in "'+task.title+'" gespeichert','success',3000);
+    }else{
+      showToast('⚠ PDF wurde NICHT gespeichert'+(!fid?' – Task hat keinen Drive-Ordner':(!gdriveToken?' – Drive nicht verbunden (☁️)':' – Upload fehlgeschlagen'))+'. Bitte erneut versuchen.','error',8000);
+    }
   }else{
     // E-Mail zu bestehendem Task
     let p2=_auftragPending;_auftragPending=null;
     if(!p2)return;
     let info=p2.info;let rawFile=p2.rawFile;
     showToast('⏳ E-Mail wird gespeichert…','info',3000);
-    let driveId2='',driveUrl2='';
+    // b548: Duplikatprüfung VOR dem Upload über die Message-ID – der alte Vergleich gegen
+    // die frisch erzeugte Drive-ID konnte prinzipiell nie greifen (jede Datei war „neu")
+    if(info.messageId&&(task.emailOriginals||[]).some(function(e){return e.messageId&&e.messageId===info.messageId;})){
+      showToast('ℹ Diese Mail ist bereits im Task vorhanden','info',3500);
+      return;
+    }
+    let driveId2='',driveUrl2='',emlName2='';
     if(fid&&gdriveToken&&rawFile){
       try{
         let stamp2=(function(){let d=info.date instanceof Date&&!isNaN(info.date)?info.date:new Date();return String(d.getFullYear()).slice(-2)+_ez2(d.getMonth()+1)+_ez2(d.getDate());})();
-        let pdfName2=stamp2+'_'+_ezClean(info.subject)+(rawFile.name.toLowerCase().endsWith('.eml')?'.eml':'.msg');
+        emlName2=stamp2+'_'+_ezClean(info.subject)+(rawFile.name.toLowerCase().endsWith('.eml')?'.eml':'.msg');
         let buf2=await new Promise(function(res,rej){let r=new FileReader();r.onload=function(e){res(e.target.result);};r.onerror=rej;r.readAsArrayBuffer(rawFile);});
         const _mime2=rawFile.name.toLowerCase().endsWith('.msg')?'application/vnd.ms-outlook':'message/rfc822';
-        let result2=await _driveUploadGeneric(buf2,pdfName2,_mime2,fid); // Fix: korrekter MIME-Type auch für MSG
+        let result2=await _driveUploadGeneric(buf2,emlName2,_mime2,fid); // Fix: korrekter MIME-Type auch für MSG
         if(result2&&result2.id){driveId2=result2.id;driveUrl2='https://drive.google.com/file/d/'+result2.id+'/view';}
       }catch(e){console.warn('[PTP] E-Mail-Upload:',e);}
+    }else if(fid&&gdriveToken&&!rawFile&&(info.bodyText||info.bodyHtml)){
+      // b548: Drag direkt aus Outlook liefert KEINE Datei – bisher wurde hier still nichts
+      // gespeichert und trotzdem Erfolg gemeldet. Jetzt: Ersatz-.eml bauen wie im Neu-Task-Zweig.
+      try{
+        let d2b=info.date instanceof Date&&!isNaN(info.date)?info.date:new Date();
+        let emlLines2=[
+          'MIME-Version: 1.0',
+          'Date: '+d2b.toUTCString(),
+          'Subject: '+_emlEncodeHeader(info.subject||'(kein Betreff)'),
+          'From: '+(info.sender||'unbekannt'),
+          'Content-Type: multipart/alternative; boundary="ptp_eml_boundary"',
+          '',
+          '--ptp_eml_boundary',
+          'Content-Type: text/plain; charset=UTF-8',
+          'Content-Transfer-Encoding: quoted-printable',
+          '',
+          _textToQP(info.bodyText||''),
+        ];
+        if(info.bodyHtml){
+          emlLines2=emlLines2.concat(['--ptp_eml_boundary','Content-Type: text/html; charset=UTF-8','Content-Transfer-Encoding: quoted-printable','',_textToQP(info.bodyHtml)]);
+        }
+        emlLines2.push('--ptp_eml_boundary--');
+        let stamp2b=String(d2b.getFullYear()).slice(-2)+_ez2(d2b.getMonth()+1)+_ez2(d2b.getDate());
+        emlName2=stamp2b+'_'+_ezClean(info.subject||'email')+'.eml';
+        let result2b=await _driveUploadGeneric(new TextEncoder().encode(emlLines2.join('\r\n')).buffer,emlName2,'message/rfc822',fid);
+        if(result2b&&result2b.id){driveId2=result2b.id;driveUrl2='https://drive.google.com/file/d/'+result2b.id+'/view';}
+      }catch(e){console.warn('[PTP] Ersatz-EML (AddToTask):',e);}
     }
     if(!task.emailOriginals)task.emailOriginals=[];
     // Fix: nur speichern wenn Drive-Upload erfolgreich war (driveId2 gesetzt)
     // Sonst entstehen Phantom-Einträge mit leerem fileId/url bei Verbindungsfehlern
     const _apAdd=info._rawEmlText?_detectEmlProvider(info._rawEmlText):'unknown';
-    if(driveId2&&!task.emailOriginals.some(e=>e.fileId&&e.fileId===driveId2)){
-      task.emailOriginals.push({subject:info.subject||'',sender:info.sender||'',date:info.date instanceof Date?info.date.toISOString():new Date().toISOString(),fileId:driveId2,url:driveUrl2});
+    if(driveId2){
+      // b548: name, messageId und uploadedAt mitspeichern – fehlten hier bisher komplett
+      task.emailOriginals.push({name:emlName2,subject:info.subject||'',sender:info.sender||'',date:info.date instanceof Date?info.date.toISOString():new Date().toISOString(),messageId:info.messageId||'',fileId:driveId2,url:driveUrl2,uploadedAt:new Date().toLocaleDateString('de-DE')});
       if(info.messageId){
         if(_apAdd==='gmail'){
           if(!task.gmailMessageIds)task.gmailMessageIds=[];
@@ -1434,7 +1485,12 @@ async function _auftragAddToTask(task,boardName,fileMode){
       }
       if(_att2Fail>0)showToast('⚠ '+_att2Fail+' Anhang/Anhänge fehlgeschlagen','warning',5000);
     }
-    showToast('✅ E-Mail in "'+task.title+'" gespeichert','success',3000);
+    // b548: Erfolgsmeldung nur, wenn wirklich etwas gespeichert wurde
+    if(driveId2){
+      showToast('✅ E-Mail in "'+task.title+'" gespeichert','success',3000);
+    }else{
+      showToast('⚠ E-Mail wurde NICHT gespeichert'+(!fid?' – Task hat keinen Drive-Ordner':(!gdriveToken?' – Drive nicht verbunden (☁️)':' – Upload fehlgeschlagen'))+'. Bitte erneut versuchen.','error',8000);
+    }
   }
 
   // Wenn der Task gerade offen ist: Email-Sektion neu rendern
@@ -4387,7 +4443,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-01 · #547'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-01-b547) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-01 · #548'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-01-b548) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -18039,16 +18095,19 @@ function _pamRenderUnifiedEmailList(task){
   if(!task){el.innerHTML='';return;}
   function _normSubj(s){return(s||'').replace(/^(Re|AW|Fwd|WG|Antwort|FYI):\s*/gi,'').trim().toLowerCase().substring(0,60);}
   const thrIds=new Set([...(task.gmailThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean),...(task.msThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean)]);
-  const thrSubjKeys=new Set();
-  (task.gmailThreadMessages||[]).forEach(function(m){const k=_normSubj(m.subject||m.betreff||'');if(k)thrSubjKeys.add(k);});
-  (task.msThreadMessages||[]).forEach(function(m){const k=_normSubj(m.subject||m.betreff||'');if(k)thrSubjKeys.add(k);});
+  // b548 (K6): Entdopplung NUR noch über die Message-ID. Die reine Betreffs-Entdopplung
+  // hat genau die hineingezogenen Antworten ausgeblendet – bei einem Vorgang tragen ALLE
+  // Mails denselben Betreff. Ersatzschlüssel für Originale ohne Message-ID: Betreff+Minute.
+  const thrSubjZeit=new Set();
+  function _szKey(subj,dateVal){const ts=dateVal?new Date(dateVal).getTime():0;if(!ts)return'';return _normSubj(subj)+'|'+Math.floor(ts/60000);}
+  (task.gmailThreadMessages||[]).forEach(function(m){const k=_szKey(m.subject||m.betreff||'',m.date);if(k)thrSubjZeit.add(k);});
+  (task.msThreadMessages||[]).forEach(function(m){const k=_szKey(m.subject||m.betreff||'',m.date);if(k)thrSubjZeit.add(k);});
   const allMails=[];
   (task.gmailThreadMessages||[]).forEach(function(m,i){allMails.push({src:'gmail',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:m.threadId||task.gmailThreadId||'_gm'});});
   (task.msThreadMessages||[]).forEach(function(m,i){allMails.push({src:'ms',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:m.conversationId||task.msConversationId||'_ms'});});
   (task.emailOriginals||[]).forEach(function(m,i){
     if(m.messageId&&thrIds.has(m.messageId))return;
-    const subjKey=_normSubj(m.subject||m.name||'');
-    if(subjKey&&thrSubjKeys.has(subjKey))return;
+    if(!m.messageId){const k=_szKey(m.subject||m.name||'',m.date);if(k&&thrSubjZeit.has(k))return;} // b548 (K6)
     allMails.push({src:'original',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:'_orig'});
   });
   allMails.sort(function(a,b){return(b._ts||0)-(a._ts||0);});
@@ -18100,9 +18159,14 @@ function _pamRenderUnifiedEmailList(task){
         else if(isOut){dirBg='rgba(22,163,74,.15)';dirTxt='#15803D';dirLabel='Gesendet';envColor='#16A34A';}
         else{dirBg='rgba(29,78,216,.10)';dirTxt='#1E40AF';dirLabel='Eingang';envColor='#0078d4';}
         let clickFn;
-        if(m.src==='gmail'){clickFn='_gmOpenMailOverlay('+JSON.stringify(taskId)+','+m.idx+')';}
-        else if(m.src==='ms'){clickFn='_msOpenMailOverlay('+JSON.stringify(taskId)+','+m.idx+')';}
-        else{const nameSafe=(d.subject||d.name||'email.eml').replace(/"/g,'').substring(0,60);const fileSafe=(d.fileId||'').replace(/"/g,'');const urlSafe=(d.url||'').replace(/"/g,'');clickFn='_openEmailOrigInlinePreview({fileId:"'+fileSafe+'",name:"'+nameSafe+'",url:"'+urlSafe+'"})'; }
+        // b548 (K5): Klick-Fix aus _renderEmailMailList übernommen – JSON.stringify lieferte
+        // doppelte Anführungszeichen, die das doppelt gequotete onclick-Attribut zerrissen.
+        // EML-Zweig ebenfalls auf einfache Anführungszeichen umgestellt (war in BEIDEN kaputt).
+        const _sqId=String(taskId).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+        const _sqV=function(s){return String(s||'').replace(/"/g,'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");};
+        if(m.src==='gmail'){clickFn='_gmOpenMailOverlay(\''+_sqId+'\','+m.idx+')';}
+        else if(m.src==='ms'){clickFn='_msOpenMailOverlay(\''+_sqId+'\','+m.idx+')';}
+        else{clickFn="_openEmailOrigInlinePreview({fileId:'"+_sqV(d.fileId)+"',name:'"+_sqV((d.subject||d.name||'email.eml').substring(0,60))+"',url:'"+_sqV(d.url)+"'})"; }
         const previewTxt=preview.substring(0,60);
         html+='<div data-mi="'+mi+'" data-src="'+m.src+'" style="display:flex;gap:8px;align-items:flex-start;padding:6px '+indent+' 6px '+indent+';border-top:0.5px solid var(--border);cursor:pointer;background:var(--bg);transition:background .1s;" onmouseenter="_pamUnifiedHover(this,\''+tooltipEsc+'\')" onmouseleave="_pamUnifiedHoverOut()" onclick="'+clickFn+'">';
         html+='<div style="width:26px;height:26px;border-radius:5px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="'+envColor+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg></div>';
@@ -23719,13 +23783,29 @@ function openEmailPdfPreview(fileId,name){
 
 // Generischer Drive-Upload (beliebiger MIME-Typ)
 async function _driveUploadGeneric(buf,fname,mimeType,fid){
+  const fb=new Uint8Array(buf);
+  // b548: Dateien über ~4,5 MB per resumable-Upload – der multipart-Weg scheiterte ab
+  // ca. 5 MB mit nacktem „HTTP …" ohne Retry und ohne Hinweis auf die Ursache
+  if(fb.length>4500000){
+    const ir=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,thumbnailLink',{
+      method:'POST',
+      headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json; charset=UTF-8','X-Upload-Content-Type':mimeType,'X-Upload-Content-Length':String(fb.length)},
+      body:JSON.stringify({name:fname,parents:[fid]})
+    });
+    if(ir.status===401){_handleDrive401();throw new Error('Drive-Verbindung abgelaufen – bitte ☁️-Button drücken');}
+    if(!ir.ok)throw new Error('Drive Upload (Start) Fehler: HTTP '+ir.status);
+    const loc=ir.headers.get('Location');
+    if(!loc)throw new Error('Drive Upload: keine Upload-Adresse erhalten');
+    const ur=await fetch(loc,{method:'PUT',headers:{'Content-Type':mimeType},body:fb});
+    if(!ur.ok)throw new Error('Drive Upload (Daten) Fehler: HTTP '+ur.status);
+    return await ur.json();
+  }
   const b='ptp_orig_'+Date.now();
   const enc=new TextEncoder();
   const m=JSON.stringify({name:fname,parents:[fid]});
   const p1=enc.encode('--'+b+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+m+'\r\n');
   const p2=enc.encode('--'+b+'\r\nContent-Type: '+mimeType+'\r\n\r\n');
   const p3=enc.encode('\r\n--'+b+'--');
-  const fb=new Uint8Array(buf);
   const out=new Uint8Array(p1.length+p2.length+fb.length+p3.length);
   let o=0;out.set(p1,o);o+=p1.length;out.set(p2,o);o+=p2.length;out.set(fb,o);o+=fb.length;out.set(p3,o);
   const r=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,thumbnailLink',{
@@ -24038,19 +24118,24 @@ async function _uploadEmailOriginal(file){
       let _attOk=0,_attFail=0;
       for(const att of emlParsedAttachments){
         try{
+          const isImg=/\.(jpg|jpeg|png|gif|webp|heic|heif|avif|bmp|tiff?)$/i.test(att.name)||(att.mimeType||'').startsWith('image/');
+          // b548 (K4): Filter aus den Board-Drop-Pfaden nachgezogen (#223/#314) – Signatur-
+          // Logos (CID-Inline) und Mini-Bilder unter der Schwelle gehören nicht in die Akte
+          if(att._isCidInline)continue;
+          if(isImg&&att.b64&&att.b64.length*0.75<_MIN_EMAIL_IMG_BYTES){console.log('[PTP] Mini-Bild übersprungen:',att.name);continue;}
           // Base64 → ArrayBuffer
           const binStr=atob(att.b64);
           const bytes=new Uint8Array(binStr.length);
           for(let k=0;k<binStr.length;k++)bytes[k]=binStr.charCodeAt(k);
           // Bilder → Foto-Ordner (tGD), alles andere → Projektordner (tGDOrdner)
-          const isImg=/\.(jpg|jpeg|png|gif|webp|heic|heif|avif|bmp|tiff?)$/i.test(att.name)||(att.mimeType||'').startsWith('image/');
           const _attTargetFid=isImg?_attFotoFid:_attDokFid;
           const attResult=await _driveUploadGeneric(bytes.buffer,att.name,att.mimeType,_attTargetFid);
           const attUrl='https://drive.google.com/file/d/'+attResult.id+'/view';
           const today=new Date().toLocaleDateString('de-DE');
           if(isImg){
             if(!taskFotos)taskFotos=[];
-            const fotoEntry={driveId:attResult.id,name:att.name,mimeType:att.mimeType||'image/jpeg',caption:'',thumbnailLink:attResult.thumbnailLink||''};
+            // b548 (V3): messageId mitspeichern – Grundlage für „Anhänge dieser Mail" (Build 3)
+            const fotoEntry={driveId:attResult.id,name:att.name,mimeType:att.mimeType||'image/jpeg',caption:'',thumbnailLink:attResult.thumbnailLink||'',messageId:emailMeta.messageId||''};
             taskFotos.push(fotoEntry);
             if(t3){if(!t3.fotos)t3.fotos=[];t3.fotos.push(fotoEntry);}
             // Foto-Sektion aufklappen damit Fotos sichtbar sind
@@ -24059,7 +24144,7 @@ async function _uploadEmailOriginal(file){
             if(typeof renderFotoListDesktop==='function')renderFotoListDesktop();
             _attOk++;
           }else{
-            const attEntry={name:att.name,fileId:attResult.id,url:attUrl,uploadedAt:today};
+            const attEntry={name:att.name,fileId:attResult.id,url:attUrl,uploadedAt:today,messageId:emailMeta.messageId||''}; // b548 (V3)
             if(!taskAttachments)taskAttachments=[];
             taskAttachments.push(attEntry);
             if(t3){if(!t3.attachments)t3.attachments=[];t3.attachments.push(attEntry);}
@@ -27001,14 +27086,17 @@ function _renderEmailMailList(){
   // ── Hilfsfunktionen ──
   function _ns(s){return(s||'').replace(/^(Re|AW|Fwd|WG|Antwort|FYI):\s*/gi,'').trim().toLowerCase().substring(0,60);}
   const thrIds=new Set([...(t.gmailThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean),...(t.msThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean)]);
-  const thrSK=new Set();
-  (t.gmailThreadMessages||[]).forEach(function(m){const k=_ns(m.subject||m.betreff||'');if(k)thrSK.add(k);});
-  (t.msThreadMessages||[]).forEach(function(m){const k=_ns(m.subject||m.betreff||'');if(k)thrSK.add(k);});
+  // b548 (K6): Entdopplung NUR über Message-ID; Ersatzschlüssel Betreff+Minute für
+  // Originale ohne Message-ID (Begründung siehe _pamRenderUnifiedEmailList)
+  const thrSZ=new Set();
+  function _szk(subj,dateVal){const ts=dateVal?new Date(dateVal).getTime():0;if(!ts)return'';return _ns(subj)+'|'+Math.floor(ts/60000);}
+  (t.gmailThreadMessages||[]).forEach(function(m){const k=_szk(m.subject||m.betreff||'',m.date);if(k)thrSZ.add(k);});
+  (t.msThreadMessages||[]).forEach(function(m){const k=_szk(m.subject||m.betreff||'',m.date);if(k)thrSZ.add(k);});
   // ── Mail-Liste aufbauen + deduplizieren ──
   const allM=[];
   (t.gmailThreadMessages||[]).forEach(function(m,i){allM.push({src:'gmail',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:m.threadId||t.gmailThreadId||'_gm'});});
   (t.msThreadMessages||[]).forEach(function(m,i){allM.push({src:'ms',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:m.conversationId||t.msConversationId||'_ms'});});
-  (t.emailOriginals||[]).forEach(function(m,i){if(m.messageId&&thrIds.has(m.messageId))return;const sk=_ns(m.subject||m.name||'');if(sk&&thrSK.has(sk))return;allM.push({src:'original',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:'_orig'});});
+  (t.emailOriginals||[]).forEach(function(m,i){if(m.messageId&&thrIds.has(m.messageId))return;if(!m.messageId){const k=_szk(m.subject||m.name||'',m.date);if(k&&thrSZ.has(k))return;}allM.push({src:'original',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:'_orig'});});
   allM.sort(function(a,b){return(b._ts||0)-(a._ts||0);});
   const _totalCnt=allM.length;
   // ── Metadaten ──
@@ -27110,7 +27198,7 @@ function _renderEmailMailList(){
           const _sqId=String(taskId).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
           if(m.src==='gmail'){cf='_gmOpenMailOverlay(\''+_sqId+'\','+m.idx+')';}
           else if(m.src==='ms'){cf='_msOpenMailOverlay(\''+_sqId+'\','+m.idx+')';}
-          else{const ns2=(d.subject||d.name||'email.eml').replace(/"/g,'').substring(0,60);const fs=(d.fileId||'').replace(/"/g,'');const us=(d.url||'').replace(/"/g,'');cf='_openEmailOrigInlinePreview({fileId:"'+fs+'",name:"'+ns2+'",url:"'+us+'"})'; }
+          else{const _sqV2=function(s){return String(s||'').replace(/"/g,'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");};cf="_openEmailOrigInlinePreview({fileId:'"+_sqV2(d.fileId)+"',name:'"+_sqV2((d.subject||d.name||'email.eml').substring(0,60))+"',url:'"+_sqV2(d.url)+"'})"; } // b548 (K5): EML-Zweig war durch doppelte Anführungszeichen im onclick tot
           const pvw=preview.substring(0,60);
           html+='<div style="display:flex;gap:8px;align-items:flex-start;padding:6px '+ind+' 6px '+ind+';border-top:0.5px solid var(--border);cursor:pointer;background:var(--bg);transition:background .1s;" onmouseenter="_pamUnifiedHover(this,\''+tip+'\')" onmouseleave="_pamUnifiedHoverOut()" onclick="'+cf+'">';
           html+='<div style="width:26px;height:26px;border-radius:5px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="'+eCol+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg></div>';
@@ -27557,23 +27645,34 @@ async function _emUploadEmlForModal(file){
       const already=(t.emailOriginals||[]).some(function(e){return e.messageId&&e.messageId===preMessageId;});
       if(already){showToast('ℹ Diese Mail ist bereits im Task vorhanden','info',3000);return;}
     }
+    // b548 (V2): EML-Metadaten VOR dem Upload lesen – für Dateiname (Mail-Datum statt
+    // Upload-Tag, wie im Auftrags-Pfad), Anhang-Auspacken und PDF-Lesekopie
+    let meta={subject:file.name,sender:'',date:new Date().toISOString(),messageId:preMessageId,bodyHtml:'',bodyText:'',cidMap:{}};
+    let emlAtts=[];
+    if(isEml){
+      try{const txt=preText||await new Promise(function(res,rej){const r=new FileReader();r.onload=function(e){res(e.target.result);};r.onerror=rej;r.readAsText(file,'utf-8');});const p=_parseEmlText(txt);meta={subject:p.subject||file.name,sender:p.sender||'',date:(p.date instanceof Date?p.date:new Date()).toISOString(),messageId:p.messageId||preMessageId,bodyHtml:p.bodyHtml||'',bodyText:p.bodyText||'',cidMap:p.cidMap||{}};emlAtts=p.attachments||[];}catch(e){}
+    }else{
+      // b548: .msg wird nicht geparst – ehrlicher Hinweis statt stillem Unterschied
+      showToast('📨 .msg wird nur abgelegt – Betreff, Datum und Anhänge können nicht ausgelesen werden. Für volle Unterstützung als .eml speichern.','warning',7000);
+    }
     // Upload
     const buf=await new Promise(function(res,rej){const r=new FileReader();r.onload=function(e){res(e.target.result);};r.onerror=rej;r.readAsArrayBuffer(file);});
     const mime=isEml?'message/rfc822':'application/vnd.ms-outlook';
     const today=new Date().toLocaleDateString('de-DE');
-    const stamp=new Date().toISOString().substring(0,10).replace(/-/g,'');
-    const fname=stamp+'_'+file.name;
+    let fname=file.name;
+    try{
+      const _md=new Date(meta.date);
+      if(!isNaN(_md))fname=_md.getFullYear()+'.'+_ez2(_md.getMonth()+1)+'.'+_ez2(_md.getDate())+'_'+_ezClean((meta.subject||file.name).replace(/\.(eml|msg)$/i,''))+(isEml?'.eml':'.msg');
+    }catch(_ne){fname=file.name;}
     const result=await _driveUploadGeneric(buf,fname,mime,fid);
     const fileId=result.id;
     const url='https://drive.google.com/file/d/'+fileId+'/view';
-    // EML-Metadaten
-    let meta={subject:file.name,sender:'',date:new Date().toISOString(),messageId:preMessageId,bodyHtml:'',bodyText:'',cidMap:{}};
-    if(isEml){
-      try{const txt=preText||await new Promise(function(res,rej){const r=new FileReader();r.onload=function(e){res(e.target.result);};r.onerror=rej;r.readAsText(file,'utf-8');});const p=_parseEmlText(txt);meta={subject:p.subject||file.name,sender:p.sender||'',date:(p.date instanceof Date?p.date:new Date()).toISOString(),messageId:p.messageId||preMessageId,bodyHtml:p.bodyHtml||'',bodyText:p.bodyText||'',cidMap:p.cidMap||{}};}catch(e){}
-    }
-    if(!t.emailOriginals)t.emailOriginals=[];
-    t.emailOriginals.push({name:fname,subject:meta.subject,sender:meta.sender,date:meta.date,messageId:meta.messageId,fileId:fileId,url:url,uploadedAt:today,type:'original'});
-    // Fix #320: Konto-Erkennung + T-Online-Ausnahme + ConvId beide Tokens
+    // b548: Nach den awaits kann das Fenster geschlossen sein (_emCurrentTask=null) –
+    // dann direkt ans LIVE-Objekt schreiben statt den Eintrag zu verlieren (Race-Befund 31.07.)
+    const zt=(_emCurrentTask&&_emCurrentTask.id===t.id)?_emCurrentTask:(findTaskById(t.id)||t);
+    if(!zt.emailOriginals)zt.emailOriginals=[];
+    zt.emailOriginals.push({name:fname,subject:meta.subject,sender:meta.sender,date:meta.date,messageId:meta.messageId,fileId:fileId,url:url,uploadedAt:today,type:'original'});
+    // Fix #320: Konto-Erkennung + T-Online-Ausnahme + ConvId beide Tokens (b548: auf zt)
     if(meta.messageId){
       const _prov=preText?_detectEmlProvider(preText):'unknown';
       // #383: An @sv-fb.de adressierte Mails liegen im GMAIL-Postfach (Outlook nur Client) → Gmail-Slot auch bei Provider 'unknown' (gleiche Logik wie Task-Modal-Pfad)
@@ -27581,20 +27680,20 @@ async function _emUploadEmlForModal(file){
       // T-Online: kein Exchange-Konto → nur als emailOriginals speichern, nicht in msMessageIds eintragen
       const _isTOnline=isEml&&preText&&(()=>{const _hEnd=preText.search(/\r?\n\r?\n/);const _hdr=_hEnd>=0?preText.substring(0,_hEnd):preText.substring(0,2000);return /t-online\.de|telekom\.de/i.test(_hdr.match(/^From:.*$/im)||'');})();
       if(_prov==='gmail'||_toGm){
-        if(!t.gmailMessageIds)t.gmailMessageIds=[];
-        if(!t.gmailMessageIds.includes(meta.messageId))t.gmailMessageIds.push(meta.messageId);
-        if(!t.gmailMessageId)t.gmailMessageId=meta.messageId;
+        if(!zt.gmailMessageIds)zt.gmailMessageIds=[];
+        if(!zt.gmailMessageIds.includes(meta.messageId))zt.gmailMessageIds.push(meta.messageId);
+        if(!zt.gmailMessageId)zt.gmailMessageId=meta.messageId;
       }else if(!_isTOnline){
         // exchange oder unknown (aber nicht T-Online) → als MS behandeln
-        if(!t.msMessageIds)t.msMessageIds=[];
-        if(!t.msMessageIds.includes(meta.messageId))t.msMessageIds.push(meta.messageId);
-        if(!t.msMessageId)t.msMessageId=meta.messageId;
-        if(!t.msEmailSubject&&meta.subject)t.msEmailSubject=meta.subject;
+        if(!zt.msMessageIds)zt.msMessageIds=[];
+        if(!zt.msMessageIds.includes(meta.messageId))zt.msMessageIds.push(meta.messageId);
+        if(!zt.msMessageId)zt.msMessageId=meta.messageId;
+        if(!zt.msEmailSubject&&meta.subject)zt.msEmailSubject=meta.subject;
         // Konto 2 erkennen: To: enthält f.braun@ddmbraun
-        if(!t.msAccount&&isEml&&preText){const _toL=(preText.match(/^To:.*$/im)||[''])[0].toLowerCase();if(_toL.includes('f.braun@ddmbraun'))t.msAccount='2';}
+        if(!zt.msAccount&&isEml&&preText){const _toL=(preText.match(/^To:.*$/im)||[''])[0].toLowerCase();if(_toL.includes('f.braun@ddmbraun'))zt.msAccount='2';}
         // Background-ConvId-Lookup: beide Konten versuchen (#320)
-        if(!t.msConversationId&&(typeof msToken!=='undefined'&&msToken||typeof msToken2!=='undefined'&&msToken2)){
-          const _bgId=meta.messageId;const _bgT=t;
+        if(!zt.msConversationId&&(typeof msToken!=='undefined'&&msToken||typeof msToken2!=='undefined'&&msToken2)){
+          const _bgId=meta.messageId;const _bgT=zt;
           (async()=>{
             try{
               const _tok1=(typeof msToken!=='undefined')?msToken:null;
@@ -27611,10 +27710,62 @@ async function _emUploadEmlForModal(file){
         }
       }
     }
-    _emScheduleSave();
-    _emReloadMailList();
-    _emUpdateTop2();
-    showToast('✅ "'+file.name+'" gespeichert','success',3000);
+    // ── b548 (V2): Anhänge auspacken – wie im Auftrags-Pfad, mit den Filtern #223/#314 ──
+    let _attOk=0,_attFail=0;
+    if(emlAtts.length){
+      showToast('📎 '+emlAtts.length+' Anhang/Anhänge gefunden – lade hoch…','info',3000);
+      for(const att of emlAtts){
+        try{
+          const isImg=/\.(jpg|jpeg|png|gif|webp|heic|heif|avif|bmp|tiff?)$/i.test(att.name)||(att.mimeType||'').startsWith('image/');
+          if(att._isCidInline)continue;                                            // Signatur-Logos (K4/#223)
+          if(isImg&&att.b64&&att.b64.length*0.75<_MIN_EMAIL_IMG_BYTES)continue;    // Mini-Bilder (K4/#314)
+          const binStr=atob(att.b64);
+          const bytes=new Uint8Array(binStr.length);
+          for(let k=0;k<binStr.length;k++)bytes[k]=binStr.charCodeAt(k);
+          const attResult=await _driveUploadGeneric(bytes.buffer,att.name,att.mimeType,fid);
+          const attUrl='https://drive.google.com/file/d/'+attResult.id+'/view';
+          if(isImg){
+            if(!zt.fotos)zt.fotos=[];
+            zt.fotos.push({driveId:attResult.id,name:att.name,mimeType:att.mimeType||'image/jpeg',caption:'',thumbnailLink:attResult.thumbnailLink||'',messageId:meta.messageId||''}); // V3
+          }else{
+            if(!zt.attachments)zt.attachments=[];
+            zt.attachments.push({name:att.name,fileId:attResult.id,url:attUrl,uploadedAt:today,messageId:meta.messageId||''}); // V3
+          }
+          _attOk++;
+        }catch(e){_attFail++;console.warn('[EM] Anhang-Upload:',e);}
+      }
+    }
+    // ── b548 (V2): PDF-Lesekopie lokal aus dem Mailtext erzeugen – kein Server-Abruf ──
+    let _pdfOk=false;
+    if(isEml&&(meta.bodyHtml||meta.bodyText)){
+      try{
+        const _pd=new Date(meta.date);
+        const _pdfData=await _ezBuildPdfFromHtml({subject:meta.subject,sender:meta.sender,date:_pd,bodyHtml:meta.bodyHtml,bodyText:meta.bodyText,cidMap:meta.cidMap});
+        const _pdfName=_pd.getFullYear()+'.'+_ez2(_pd.getMonth()+1)+'.'+_ez2(_pd.getDate())+'_'+_ezClean(meta.subject||file.name)+'.pdf';
+        const _dupPdf=(zt.emailPdfs||[]).some(function(p){return p.name===_pdfName||(meta.messageId&&p.messageId===meta.messageId);});
+        if(!_dupPdf){
+          const _pdfResult=await _ezUpload(_pdfData,_pdfName,fid);
+          if(_pdfResult&&_pdfResult.id){
+            if(!zt.emailPdfs)zt.emailPdfs=[];
+            zt.emailPdfs.push({name:_pdfName,fileId:_pdfResult.id,url:'https://drive.google.com/file/d/'+_pdfResult.id+'/view',uploadedAt:today,date:meta.date,messageId:meta.messageId||''});
+            _pdfOk=true;
+          }
+        }
+      }catch(_pe){console.warn('[EM] PDF-Lesekopie:',_pe);}
+    }
+    // Speichern + Anzeige – je nachdem, ob das Fenster noch offen ist
+    if(zt===_emCurrentTask){
+      _emScheduleSave();
+      _emReloadMailList();
+      _emUpdateTop2();
+    }else{
+      autoSave(); // Fenster wurde während des Uploads geschlossen – direkt am Live-Task gespeichert
+    }
+    let _fazit='✅ "'+fname+'" gespeichert';
+    if(_attOk)_fazit+=' · '+_attOk+' Anhang'+(_attOk!==1?'e':'');
+    if(_pdfOk)_fazit+=' · PDF-Lesekopie';
+    if(_attFail)showToast('⚠ '+_attFail+' Anhang/Anhänge konnten nicht hochgeladen werden','error',6000);
+    showToast(_fazit,'success',4000);
   }catch(e){showToast('⚠ Upload fehlgeschlagen: '+e.message,'error',5000);}
 }
 async function _emHandleEmlDrop(dt){
