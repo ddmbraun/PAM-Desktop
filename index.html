@@ -4387,7 +4387,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-01 · #543'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-01-b543) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-01 · #544'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-01-b544) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -23768,22 +23768,42 @@ async function _pamFreigabenBereinigen(){
   });});
   if(!ids.size){showToast('ℹ Keine Task-Dateien gefunden','info',4000);return;}
   showToast('🔒 Prüfe '+ids.size+' Dateien auf öffentliche Freigabe…','info',6000);
-  let entfernt=0,warPrivat=0,fehler=0,i=0;
+  // b544: erst Freigaben ANSEHEN, dann gezielt löschen – und Problemfälle mit Name und
+  // Grund sammeln (der blinde DELETE auf 'anyoneWithLink' lieferte nur nackte 403er)
+  let entfernt=0,warPrivat=0,fehler=0,i=0;const probleme=[];
   for(const fid of ids){
     i++;
     try{
-      const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fid)+'/permissions/anyoneWithLink',
-        {method:'DELETE',headers:{Authorization:'Bearer '+gdriveToken}});
-      if(r.ok||r.status===204)entfernt++;
-      else if(r.status===404)warPrivat++;   // keine öffentliche Freigabe vorhanden
-      else fehler++;
-    }catch(e){fehler++;}
+      const pr=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fid)+'?fields=name,capabilities/canShare,permissions(id,type,role)',
+        {headers:{Authorization:'Bearer '+gdriveToken}});
+      if(pr.status===404){warPrivat++;continue;} // Datei existiert nicht mehr
+      if(!pr.ok){const e=await pr.json().catch(function(){return{};});probleme.push({datei:'(ID '+fid.substring(0,12)+'…)',grund:'Lesen: HTTP '+pr.status+' '+(((e.error||{}).message)||'')});fehler++;continue;}
+      const info=await pr.json();
+      if(!info.permissions){
+        probleme.push({datei:info.name||'(ID '+fid.substring(0,12)+'…)',grund:'Freigaben nicht einsehbar – Datei gehört vermutlich einem anderen Konto'});
+        fehler++;continue;
+      }
+      const anyPerms=info.permissions.filter(function(p){return p.type==='anyone';});
+      if(!anyPerms.length){warPrivat++;continue;}
+      if(info.capabilities&&info.capabilities.canShare===false){
+        probleme.push({datei:info.name||'?',grund:'öffentlich, aber keine Berechtigung zum Ändern (canShare=false – anderes Eigentümer-Konto?)'});
+        fehler++;continue;
+      }
+      let ok=true;
+      for(const p of anyPerms){
+        const dr=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fid)+'/permissions/'+encodeURIComponent(p.id),
+          {method:'DELETE',headers:{Authorization:'Bearer '+gdriveToken}});
+        if(!(dr.ok||dr.status===204)){ok=false;const e=await dr.json().catch(function(){return{};});probleme.push({datei:info.name||'?',grund:'Löschen: HTTP '+dr.status+' '+(((e.error||{}).message)||'')});}
+      }
+      if(ok)entfernt++;else fehler++;
+    }catch(e){probleme.push({datei:'(ID '+fid.substring(0,12)+'…)',grund:String((e&&e.message)||e)});fehler++;}
     if(i%50===0)showToast('🔒 '+i+'/'+ids.size+' geprüft…','info',2000);
   }
-  const msg='🔒 Freigabe-Bereinigung: '+entfernt+' öffentliche Freigabe(n) entfernt, '+warPrivat+' waren schon privat'+(fehler?', '+fehler+' Fehler':'');
+  const msg='🔒 Freigabe-Bereinigung: '+entfernt+' öffentliche Freigabe(n) entfernt, '+warPrivat+' waren schon privat/gelöscht'+(fehler?', '+fehler+' Problemfälle (Tabelle in der Konsole)':'');
   console.log('[K1]',msg);
+  if(probleme.length){console.log('[K1] Problemfälle:');console.table(probleme);}
   showToast(msg,fehler?'error':'success',10000);
-  return {entfernt:entfernt,warPrivat:warPrivat,fehler:fehler,gesamt:ids.size};
+  return {entfernt:entfernt,warPrivat:warPrivat,fehler:fehler,probleme:probleme,gesamt:ids.size};
 }
 
 async function _uploadEmailOriginal(file){
