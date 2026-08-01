@@ -4425,7 +4425,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-01 · #553'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-01-b553) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-01 · #554'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-01-b554) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -17711,16 +17711,11 @@ function _pamEmailToggle(which){
 }
 // ── Outlook-Thread-Popup (Split-Layout) ──────────────────────────
 function _pamOpenBestVerlauf(){
-  const taskId=(document.getElementById('taskId')||{}).value||_pamActiveTaskId||'';
-  const task=findTaskById(taskId)||(_pamCurrentTask&&_pamCurrentTask.id===taskId?_pamCurrentTask:null);
-  if(!task)return;
-  const hasMsMails=(task.msThreadMessages||[]).length>0;
-  const hasGmMails=(task.gmailThreadMessages||[]).length>0;
-  const hasEmls=(task.emailOriginals||[]).length>0;
-  if(hasMsMails){_msOpenThreadPopup();return;}
-  if(hasGmMails){_msOpenThreadPopup();return;}
-  if(hasEmls){_openPamEmailPreview(0);return;}
-  _msOpenThreadPopup();
+  // b554: IMMER die Gesamt-Ansicht öffnen. Die alte Weiche öffnete das reine
+  // Outlook-Fenster, sobald auch nur EINE Outlook-Mail geladen war – die abgelegten
+  // .eml-Originale fehlten dort komplett (Befund Frank: „1 statt 7"); Gmail-Fälle
+  // landeten sogar im falschen (Outlook-)Fenster.
+  _openPamEmailPreview(0);
 }
 function _msOpenThreadPopup(){
   const taskId=(document.getElementById('taskId')||{}).value||_pamActiveTaskId||'';
@@ -19171,7 +19166,10 @@ function _pamEmailRefresh(task){
   const gmBadge=gmMsgs||gmLinked;
   const msBadge=msMsgs||msLinked;
   const origCount=(typeof taskEmailOriginals!=='undefined'?taskEmailOriginals.length:0);
-  const total=gmBadge+msBadge;
+  // b554: gleiche Rechnung wie die kompakte Karte – Verlauf + abgelegte Originale, ENTDOPPELT
+  // (vorher zählte der Kasten-Badge nur Gmail+Outlook: „1 Nachrichten" neben „7" auf der Karte)
+  let total=gmBadge+msBadge;
+  try{if(t&&typeof _pamVerlaufListeHtml==='function'){const _vc=_pamVerlaufListeHtml(t,t.id).count;if(_vc)total=_vc;}}catch(e){}
   // Nachrichten-Badge
   const badge=document.getElementById('pamEmailMsgBadge');
   if(badge){badge.textContent=total+' Nachrichten';badge.style.display=total?'':'none';}
@@ -19184,7 +19182,7 @@ function _pamEmailRefresh(task){
   if(oc){oc.textContent='';oc.style.display='none';}
   // Aufklappfeld-Badge aktualisieren
   const listBadge=document.getElementById('pamEmailListBadge');
-  if(listBadge){const tot2=gmBadge+msBadge+origCount;listBadge.textContent=tot2?tot2+' Nachrichten':'';}
+  if(listBadge){const tot2=total||origCount;listBadge.textContent=tot2?tot2+' Nachrichten':'';} // b554: gleiche entdoppelte Zahl wie Karte + Kasten-Badge
   // Absender: gespeicherter Wert, sonst ersten Absender aus Gmail/Outlook/EML-Originale übernehmen
   let senderVal=(document.getElementById('taskEmailSenderInput')||{}).value||(t&&t.emailSender)||'';
   if(!senderVal){
@@ -26033,7 +26031,17 @@ function _openPamEmailPreview(startIdx){
   const mails=[];
   (task.msThreadMessages||[]).forEach(function(m,i){mails.push({type:'ms',idx:i,data:m,ts:m.date?new Date(m.date).getTime():0});});
   (task.gmailThreadMessages||[]).forEach(function(m,i){mails.push({type:'gmail',idx:i,data:m,ts:m.date?new Date(m.date).getTime():0});});
-  (task.emailOriginals||[]).forEach(function(m,i){mails.push({type:'eml',idx:i,data:m,ts:m.date?new Date(m.date).getTime():0});});
+  // b554 (K6 wie in der Liste): abgelegte Originale nur zeigen, wenn sie nicht schon im
+  // nachgeladenen Verlauf stecken – Message-ID zuerst, Ersatzschlüssel Betreff+Minute
+  const _thrIds4=new Set([...(task.gmailThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean),...(task.msThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean)]);
+  const _nsj4=function(s){return(s||'').replace(/^(Re|AW|Fwd|WG|Antwort|FYI):\s*/gi,'').trim().toLowerCase().substring(0,60);};
+  const _thrSZ4=new Set();
+  [].concat(task.gmailThreadMessages||[],task.msThreadMessages||[]).forEach(function(m){const ts=m&&m.date?new Date(m.date).getTime():0;if(ts)_thrSZ4.add(_nsj4(m.subject||'')+'|'+Math.floor(ts/60000));});
+  (task.emailOriginals||[]).forEach(function(m,i){
+    if(m&&m.messageId&&_thrIds4.has(m.messageId))return;
+    if(m&&!m.messageId){const ts=m.date?new Date(m.date).getTime():0;if(ts&&_thrSZ4.has(_nsj4(m.subject||m.name||'')+'|'+Math.floor(ts/60000)))return;}
+    mails.push({type:'eml',idx:i,data:m,ts:m&&m.date?new Date(m.date).getTime():0});
+  });
   mails.sort(function(a,b){return(b.ts||0)-(a.ts||0);});
   const ov=document.createElement('div');ov.className='pep-overlay';ov.id=GID;
   ov.addEventListener('click',function(e){if(e.target===ov)ov.remove();});
@@ -26118,6 +26126,7 @@ async function _pepLoadPreview(m,task,previewEl){
         +'<div><strong>Von:</strong> '+_escHtml(from)+'</div>'
         +(dateLabel?'<div><strong>Datum:</strong> '+_escHtml(dateLabel)+'</div>':'')
       +'</div>'
+      +_pamMailAnhangChipsHtml(task,d.messageId||'')
       +'<div class="pep-preview-actions">'
         +'<button class="pep-open-btn" onclick="'+fullBtn+'">⛶ Vollbild öffnen</button>'
         +(m.type==='eml'&&d.fileId?'<button class="pep-open-btn" onclick="_downloadEmailOrig(\''+d.fileId+'\',\''+_escHtml(d.name||'email.eml')+'\')">⬇ Herunterladen</button>':'')
