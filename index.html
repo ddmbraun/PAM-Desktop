@@ -4443,7 +4443,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-01 · #548'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-01-b548) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-01 · #549'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-01-b549) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -18087,98 +18087,197 @@ function _pamAbsenderAusKontakten(){
   document.body.appendChild(ov);
 }
 // ── Unified E-Mail-Liste (Outlook-Style) – Build #101 ──────────────
+// ═══ b549 (Build 3): GEMEINSAME VERLAUFSANSICHT + DATEIEN-BEREICH ═══════════════
+// EIN Renderer für beide Fenster (Task-Modal + E-Mail-Fenster) – die zwei alten, zu
+// 90 % identischen Listen drifteten auseinander (der Klick-Fix war nur in einem).
+// Konzept PAM_EMAIL_ANZEIGE_KONZEPT_2026-08-01.md, Abschnitt 2: Zeile = nur
+// Richtungs-Marke (Eingang blau/Gesendet grün), Absender, Datum, Büroklammer;
+// Ursprungsmail OBEN, Antworten chronologisch darunter; keine Aktionsknöpfe je Zeile.
+function _pamMailAnhangZahl(tk,messageId){
+  if(!messageId)return 0;
+  let n=0;
+  (tk.attachments||[]).forEach(function(a){if(a&&a.messageId===messageId)n++;});
+  (tk.fotos||[]).forEach(function(f){if(f&&f.messageId===messageId)n++;});
+  return n;
+}
+function _pamVerlaufListeHtml(tk,tkId){
+  function _nsj(s){return(s||'').replace(/^(Re|AW|Fwd|WG|Antwort|FYI):\s*/gi,'').trim().toLowerCase().substring(0,60);}
+  function _szk(subj,dateVal){const ts=dateVal?new Date(dateVal).getTime():0;if(!ts)return'';return _nsj(subj)+'|'+Math.floor(ts/60000);}
+  const thrIds=new Set([...(tk.gmailThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean),...(tk.msThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean)]);
+  const thrSZ=new Set();
+  (tk.gmailThreadMessages||[]).forEach(function(m){const k=_szk(m.subject||m.betreff||'',m.date);if(k)thrSZ.add(k);});
+  (tk.msThreadMessages||[]).forEach(function(m){const k=_szk(m.subject||m.betreff||'',m.date);if(k)thrSZ.add(k);});
+  const alle=[];
+  (tk.gmailThreadMessages||[]).forEach(function(m,i){alle.push({src:'gmail',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:m.threadId||tk.gmailThreadId||'_gm'});});
+  (tk.msThreadMessages||[]).forEach(function(m,i){alle.push({src:'ms',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:m.conversationId||tk.msConversationId||'_ms'});});
+  (tk.emailOriginals||[]).forEach(function(m,i){
+    if(m.messageId&&thrIds.has(m.messageId))return;                                    // K6: eindeutig per Message-ID
+    if(!m.messageId){const k=_szk(m.subject||m.name||'',m.date);if(k&&thrSZ.has(k))return;} // Ersatz: Betreff+Minute
+    alle.push({src:'original',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:'_orig'});
+  });
+  if(!alle.length)return{html:'',count:0};
+  const groups=new Map();
+  alle.forEach(function(m){
+    const subj=m.data.subject||m.data.betreff||'(kein Betreff)';
+    let key;
+    if(m.src!=='original'){const rid=m.convId&&!m.convId.startsWith('_');key=rid?m.convId:(_nsj(subj)||'__other__');}
+    else{key=_nsj(subj)||'__other__';}
+    if(!groups.has(key))groups.set(key,{subject:subj,mails:[]});
+    groups.get(key).mails.push(m);
+  });
+  // Gruppen-Kopf nur bei MEHREREN Vorgängen – bei einem steht der Betreff schon im Fenster-Kopf
+  const showHeader=groups.size>1;
+  if(!window._pamThreadOpen)window._pamThreadOpen={};
+  function _fmt(ts){if(!ts)return'';const d=new Date(ts);const now=new Date();if(d.toDateString()===now.toDateString())return('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);return('0'+d.getDate()).slice(-2)+'.'+('0'+(d.getMonth()+1)).slice(-2)+'.'+String(d.getFullYear()).slice(2);}
+  const sorted=[...groups.entries()].sort(function(a,b){
+    const la=Math.max.apply(null,a[1].mails.map(function(m){return m._ts||0;}));
+    const lb=Math.max.apply(null,b[1].mails.map(function(m){return m._ts||0;}));
+    return lb-la;
+  });
+  if(showHeader&&!Object.keys(window._pamThreadOpen).length&&sorted.length)window._pamThreadOpen[sorted[0][0]]=true;
+  const _sqId=String(tkId).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+  const _sqV=function(s){return String(s||'').replace(/"/g,'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");};
+  let html='';
+  sorted.forEach(function(ent){
+    const key=ent[0],grp=ent[1];
+    const isOpen=!showHeader||!!window._pamThreadOpen[key];
+    const lastTs=Math.max.apply(null,grp.mails.map(function(m){return m._ts||0;}));
+    if(showHeader){
+      html+='<div style="border:2px solid #0284c7;border-radius:6px;margin:5px 8px;overflow:hidden;"><div onclick="_pamToggleThread(\''+_sqV(key)+'\')" style="padding:7px 10px;background:rgba(224,242,254,0.15);display:flex;align-items:flex-start;gap:6px;cursor:pointer;user-select:none;">';
+      html+='<span style="font-size:10px;color:var(--text2);margin-top:2px;flex-shrink:0;display:inline-block;transform:rotate('+(isOpen?'0':'-90')+'deg);transition:transform .15s;">▼</span>';
+      html+='<div style="flex:1;min-width:0;"><div style="font-size:12px;font-weight:600;color:var(--text1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(grp.subject)+'</div>';
+      html+='<div style="font-size:11px;color:var(--text2);margin-top:1px;">'+grp.mails.length+' Mail'+(grp.mails.length!==1?'s':'')+' · '+_fmt(lastTs)+'</div></div></div>';
+    }
+    if(isOpen){
+      const ind=showHeader?'16px':'10px';
+      // Konzept: Ursprungsmail OBEN, Antworten chronologisch darunter
+      [...grp.mails].sort(function(a,b){return(a._ts||0)-(b._ts||0);}).forEach(function(m){
+        const d=m.data;
+        const from=d.fromName||d.from||d.sender||d.senderName||'Unbekannt';
+        const isOriginal=m.src==='original';
+        let isOut=d.direction==='gesendet'||d.isOut||false;
+        // Original-.eml kennt keine Richtung → am Absender erkennen
+        if(isOriginal&&!d.direction){const s=(d.sender||'').toLowerCase();isOut=/frank\.braun@sv-fb\.de|info@ddmbraun\.de|f\.braun@ddmbraun/.test(s);}
+        const preview=(d.preview||d.snippet||d.bodyText||d.body||'').replace(/\n/g,' ').trim();
+        const subject=d.subject||d.betreff||'';
+        const tipRaw=((from+(subject?' ||| '+subject:'')+(preview?' ||| '+preview.substring(0,200):'')).substring(0,280));
+        const tip=tipRaw.replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        const dBg=isOut?'rgba(22,163,74,.15)':'rgba(29,78,216,.10)';
+        const dTxt=isOut?'#15803D':'#1E40AF';
+        const dLbl=isOut?'Gesendet':'Eingang';
+        const attN=_pamMailAnhangZahl(tk,d.messageId||'');
+        let clickFn;
+        if(m.src==='gmail'){clickFn='_gmOpenMailOverlay(\''+_sqId+'\','+m.idx+')';}
+        else if(m.src==='ms'){clickFn='_msOpenMailOverlay(\''+_sqId+'\','+m.idx+')';}
+        else{clickFn="_openEmailOrigInlinePreview({fileId:'"+_sqV(d.fileId)+"',name:'"+_sqV((d.subject||d.name||'email.eml').substring(0,60))+"',url:'"+_sqV(d.url)+"'})";}
+        html+='<div style="display:flex;align-items:center;gap:6px;padding:7px '+ind+';border-top:0.5px solid var(--border);cursor:pointer;background:var(--bg);transition:background .1s;" onmouseenter="_pamUnifiedHover(this,\''+tip+'\')" onmouseleave="_pamUnifiedHoverOut()" onclick="'+clickFn+'">';
+        html+='<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:'+dBg+';color:'+dTxt+';font-weight:700;flex-shrink:0;white-space:nowrap;">'+dLbl+'</span>';
+        html+='<span style="flex:1;min-width:0;font-size:12px;font-weight:600;color:var(--text1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(from)+'</span>';
+        if(attN)html+='<span style="font-size:11px;color:var(--text2);flex-shrink:0;" title="'+attN+' Anhang/Anhänge aus dieser Mail">📎'+attN+'</span>';
+        html+='<span style="font-size:11px;color:var(--text2);flex-shrink:0;">'+_fmt(m._ts)+'</span>';
+        html+='</div>';
+      });
+    }
+    if(showHeader)html+='</div>';
+  });
+  return{html:html,count:alle.length};
+}
+
+// „📁 Dateien dieses Vorgangs": EINE Zeile pro Mail (Original + PDF-Lesekopie als Knöpfe
+// dahinter), extrahierte Anhänge mit Herkunft „aus Mail vom …" (über die messageId, V3),
+// Altbestand ohne Zuordnung eingeklappt unter „Weitere Dateien". Zeilen tragen
+// data-hvid/data-hvtitel → die große Hover-Vorschau kommt vom b542-Foto-Hover gratis.
+function _pamDateienBereichHtml(tk){
+  const origs=tk.emailOriginals||[];
+  const pdfs=tk.emailPdfs||[];
+  const atts=tk.attachments||[];
+  const fots=tk.fotos||[];
+  const _sqV=function(s){return String(s||'').replace(/"/g,'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");};
+  function _dstr(v){if(!v)return'';const d=new Date(v);if(isNaN(d))return'';return('0'+d.getDate()).slice(-2)+'.'+('0'+(d.getMonth()+1)).slice(-2)+'.'+String(d.getFullYear()).slice(2);}
+  const mailDatum={};
+  origs.forEach(function(o){if(o&&o.messageId&&!mailDatum[o.messageId])mailDatum[o.messageId]=_dstr(o.date);});
+  (tk.gmailThreadMessages||[]).forEach(function(m){if(m&&m.messageId&&!mailDatum[m.messageId])mailDatum[m.messageId]=_dstr(m.date);});
+  (tk.msThreadMessages||[]).forEach(function(m){if(m&&m.messageId&&!mailDatum[m.messageId])mailDatum[m.messageId]=_dstr(m.date);});
+  const zeile='display:flex;align-items:center;gap:6px;padding:5px 10px;border-top:0.5px solid var(--border);font-size:11px;';
+  const knopf='flex-shrink:0;font-size:10px;padding:1px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text1);cursor:pointer;';
+  let rows='';let cnt=0;
+  // 1) je Mail EINE Zeile – Original und PDF-Lesekopie sind dieselbe Mail in zwei Formaten
+  const usedPdf=new Set();
+  origs.forEach(function(o){
+    if(!o)return;
+    const pdf=o.messageId?pdfs.find(function(p){return p&&p.messageId&&p.messageId===o.messageId;}):null;
+    if(pdf)usedPdf.add(pdf.fileId||pdf.name);
+    cnt++;
+    rows+='<div data-hvid="'+esc(o.fileId||'')+'" data-hvtitel="'+esc(o.subject||o.name||'')+'" style="'+zeile+'">';
+    rows+='<span style="flex-shrink:0;">✉</span>';
+    rows+='<span style="flex:1;min-width:0;color:var(--text1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="'+esc(o.name||'')+'">'+(_dstr(o.date)?_dstr(o.date)+' · ':'')+esc(o.subject||o.name||'E-Mail')+'</span>';
+    if(pdf)rows+='<button onclick="event.stopPropagation();window.open(\''+_sqV(pdf.url)+'\',\'_blank\')" style="'+knopf+'" title="PDF-Lesekopie ansehen">👁 PDF</button>';
+    if(o.fileId)rows+='<button onclick="event.stopPropagation();_downloadEmailOrig(\''+_sqV(o.fileId)+'\',\''+_sqV(o.name||'email.eml')+'\')" style="'+knopf+'" title="Original herunterladen (in Outlook zu öffnen)">⬇ .eml</button>';
+    rows+='</div>';
+  });
+  // 2) PDF-Lesekopien ohne zugehöriges Original (z. B. reine Thread-PDFs)
+  pdfs.forEach(function(p){
+    if(!p||usedPdf.has(p.fileId||p.name))return;
+    cnt++;
+    rows+='<div data-hvid="'+esc(p.fileId||'')+'" data-hvtitel="'+esc(p.name||'')+'" onclick="window.open(\''+_sqV(p.url)+'\',\'_blank\')" style="'+zeile+'cursor:pointer;">';
+    rows+='<span style="flex-shrink:0;">📄</span>';
+    rows+='<span style="flex:1;min-width:0;color:var(--text1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+(_dstr(p.date||'')?_dstr(p.date)+' · ':'')+esc(p.name||'PDF')+'</span>';
+    rows+='<span style="flex-shrink:0;">👁</span></div>';
+  });
+  // 3) Anhänge und Bilder AUS Mails – mit Herkunft
+  const anhMain=[];const anhRest=[];
+  atts.forEach(function(a){
+    if(!a)return;
+    const it={typ:'📎',name:a.name||'Datei',id:a.fileId||'',url:a.url||'',msg:a.messageId||'',vonMail:!!(a.messageId||a.fromEmail),up:a.uploadedAt||''};
+    (it.vonMail?anhMain:anhRest).push(it);
+  });
+  fots.forEach(function(f){
+    if(!f||!f.messageId)return; // Fotos ohne Mail-Bezug bleiben in der Foto-Sektion
+    anhMain.push({typ:'🖼',name:f.name||'Bild',id:f.driveId||'',url:f.driveId?('https://drive.google.com/file/d/'+f.driveId+'/view'):'',msg:f.messageId,vonMail:true,up:''});
+  });
+  anhMain.forEach(function(it){
+    cnt++;
+    const herk=it.msg&&mailDatum[it.msg]?('aus Mail vom '+mailDatum[it.msg]):'aus Mail';
+    rows+='<div data-hvid="'+esc(it.id)+'" data-hvtitel="'+esc(it.name)+'" onclick="window.open(\''+_sqV(it.url)+'\',\'_blank\')" style="'+zeile+'cursor:pointer;">';
+    rows+='<span style="flex-shrink:0;">'+it.typ+'</span>';
+    rows+='<span style="flex:1;min-width:0;color:var(--text1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(it.name)+'</span>';
+    rows+='<span style="flex-shrink:0;color:var(--text2);">'+esc(herk)+'</span>';
+    rows+='<span style="flex-shrink:0;">👁</span></div>';
+  });
+  // 4) Altbestand ohne Mail-Zuordnung – eingeklappt (Konzept 3.2: „Weitere Dateien")
+  if(anhRest.length){
+    let rest='';
+    anhRest.forEach(function(it){
+      rest+='<div data-hvid="'+esc(it.id)+'" data-hvtitel="'+esc(it.name)+'" onclick="window.open(\''+_sqV(it.url)+'\',\'_blank\')" style="'+zeile+'cursor:pointer;">';
+      rest+='<span style="flex-shrink:0;">'+it.typ+'</span>';
+      rest+='<span style="flex:1;min-width:0;color:var(--text1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(it.name)+'</span>';
+      rest+=(it.up?'<span style="flex-shrink:0;color:var(--text2);">'+esc(it.up)+'</span>':'');
+      rest+='<span style="flex-shrink:0;">👁</span></div>';
+    });
+    rows+='<details style="border-top:0.5px solid var(--border);"><summary style="padding:5px 10px;font-size:11px;color:var(--text2);cursor:pointer;user-select:none;">Weitere Dateien ('+anhRest.length+')</summary>'+rest+'</details>';
+  }
+  if(!rows)return'';
+  return '<div style="margin-top:8px;border-top:1px solid var(--border);">'
+    +'<div style="padding:6px 10px;background:var(--bg3);font-size:11px;font-weight:700;color:var(--text1);">📁 Dateien dieses Vorgangs ('+cnt+(anhRest.length?' + '+anhRest.length:'')+')</div>'
+    +rows+'</div>';
+}
+
 function _pamRenderUnifiedEmailList(task){
   const el=document.getElementById('pamUnifiedEmailList');
   if(!el)return;
   const taskId=task?task.id:((document.getElementById('taskId')||{}).value||'');
   if(!task)task=findTaskById(taskId);
   if(!task){el.innerHTML='';return;}
-  function _normSubj(s){return(s||'').replace(/^(Re|AW|Fwd|WG|Antwort|FYI):\s*/gi,'').trim().toLowerCase().substring(0,60);}
-  const thrIds=new Set([...(task.gmailThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean),...(task.msThreadMessages||[]).map(function(m){return m.messageId||'';}).filter(Boolean)]);
-  // b548 (K6): Entdopplung NUR noch über die Message-ID. Die reine Betreffs-Entdopplung
-  // hat genau die hineingezogenen Antworten ausgeblendet – bei einem Vorgang tragen ALLE
-  // Mails denselben Betreff. Ersatzschlüssel für Originale ohne Message-ID: Betreff+Minute.
-  const thrSubjZeit=new Set();
-  function _szKey(subj,dateVal){const ts=dateVal?new Date(dateVal).getTime():0;if(!ts)return'';return _normSubj(subj)+'|'+Math.floor(ts/60000);}
-  (task.gmailThreadMessages||[]).forEach(function(m){const k=_szKey(m.subject||m.betreff||'',m.date);if(k)thrSubjZeit.add(k);});
-  (task.msThreadMessages||[]).forEach(function(m){const k=_szKey(m.subject||m.betreff||'',m.date);if(k)thrSubjZeit.add(k);});
-  const allMails=[];
-  (task.gmailThreadMessages||[]).forEach(function(m,i){allMails.push({src:'gmail',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:m.threadId||task.gmailThreadId||'_gm'});});
-  (task.msThreadMessages||[]).forEach(function(m,i){allMails.push({src:'ms',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:m.conversationId||task.msConversationId||'_ms'});});
-  (task.emailOriginals||[]).forEach(function(m,i){
-    if(m.messageId&&thrIds.has(m.messageId))return;
-    if(!m.messageId){const k=_szKey(m.subject||m.name||'',m.date);if(k&&thrSubjZeit.has(k))return;} // b548 (K6)
-    allMails.push({src:'original',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:'_orig'});
-  });
-  allMails.sort(function(a,b){return(b._ts||0)-(a._ts||0);});
-  if(!allMails.length){
+  // b549 (Build 3): gemeinsamer Verlaufs-Renderer + Dateien-Bereich für BEIDE Fenster –
+  // die zwei alten, zu 90 % identischen Listen sind in _pamVerlaufListeHtml vereint
+  const _verlauf=_pamVerlaufListeHtml(task,taskId);
+  const _dateien=_pamDateienBereichHtml(task);
+  if(!_verlauf.count&&!_dateien){
     el.innerHTML='<div style="padding:20px;text-align:center;color:var(--text2);font-size:12px;line-height:1.6;">Noch keine E-Mails \u2013<br>per Drag &amp; Drop hinzuf\u00fcgen</div>';
     const popRow=document.getElementById('pamEmailOpenPopupRow');if(popRow)popRow.style.display='none';
     _pamUpdateEmailListBadge();return;
   }
-  const groups=new Map();
-  allMails.forEach(function(m){
-    const subj=m.data.subject||m.data.betreff||'(kein Betreff)';
-    let key;
-    if(m.src!=='original'){const hasRealId=m.convId&&!m.convId.startsWith('_');key=hasRealId?m.convId:(_normSubj(subj)||'__other__');}
-    else{key=_normSubj(subj)||'__other__';}
-    if(!groups.has(key))groups.set(key,{subject:subj,mails:[]});
-    groups.get(key).mails.push(m);
-  });
-  // Header anzeigen sobald ≥ 2 Mails vorhanden (wie Posteingang-Modal)
-  const showHeader=allMails.length>=2;
-  if(!window._pamThreadOpen)window._pamThreadOpen={};
-  if(!Object.keys(window._pamThreadOpen).length){const _fk=[...groups.keys()][0];if(_fk)window._pamThreadOpen[_fk]=true;}
-  function _fmt(ts){if(!ts)return'';const d=new Date(ts);const now=new Date();if(d.toDateString()===now.toDateString())return('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);return('0'+d.getDate()).slice(-2)+'.'+('0'+(d.getMonth()+1)).slice(-2)+'.'+String(d.getFullYear()).slice(2);}
-  let html='';
-  groups.forEach(function(grp,key){
-    const isOpen=!showHeader||!!window._pamThreadOpen[key];
-    const lastTs=Math.max.apply(null,grp.mails.map(function(m){return m._ts||0;}));
-    const lastDate=_fmt(lastTs);const mailCount=grp.mails.length;
-    if(showHeader){
-      html+='<div style="border:2px solid #0284c7;border-radius:6px;margin:5px 8px;overflow:hidden;"><div onclick="_pamToggleThread(\''+key+'\')" style="padding:7px 10px;background:rgba(224,242,254,0.15);display:flex;align-items:flex-start;gap:6px;cursor:pointer;user-select:none;">';
-      html+='<span style="font-size:10px;color:var(--text2);margin-top:2px;flex-shrink:0;display:inline-block;transform:rotate('+(isOpen?'0':'-90')+'deg);transition:transform .15s;">▼</span>';
-      html+='<div style="flex:1;min-width:0;"><div style="font-size:calc(12px*var(--modal-scale,1));font-weight:600;color:var(--text1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(grp.subject)+'</div>';
-      html+='<div style="font-size:calc(11px*var(--modal-scale,1));color:var(--text2);margin-top:1px;">'+mailCount+' Mail'+(mailCount!==1?'s':'')+' · '+lastDate+'</div></div></div>';
-    }
-    if(isOpen){
-      const indent=showHeader?'22px':'10px';
-      [...grp.mails].sort(function(a,b){return(b._ts||0)-(a._ts||0);}).forEach(function(m,mi){
-        const d=m.data;const isOriginal=m.src==='original';
-        const from=d.fromName||d.from||d.sender||d.senderName||'Unbekannt';
-        const isOut=d.direction==='gesendet'||d.isOut||false;
-        const dateStr=_fmt(m._ts);
-        const preview=(d.preview||d.snippet||d.bodyText||d.body||'').replace(/\n/g,' ').trim();
-        const subject=d.subject||d.betreff||'';
-        // Fix #227: Tooltip bis 250 Zeichen – \n verboten in HTML-Attributen, daher |||-Trenner
-        const _pvwFull2=(preview||'').substring(0,200);
-        const tooltipRaw=((from+(subject?' ||| '+subject:'')+(_pvwFull2?' ||| '+_pvwFull2:'')).substring(0,280));
-        const tooltipEsc=tooltipRaw.replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        let dirBg,dirTxt,dirLabel,envColor;
-        if(isOriginal){dirBg='rgba(124,58,237,.12)';dirTxt='#5b21b6';dirLabel='Original';envColor='#7c3aed';}
-        else if(isOut){dirBg='rgba(22,163,74,.15)';dirTxt='#15803D';dirLabel='Gesendet';envColor='#16A34A';}
-        else{dirBg='rgba(29,78,216,.10)';dirTxt='#1E40AF';dirLabel='Eingang';envColor='#0078d4';}
-        let clickFn;
-        // b548 (K5): Klick-Fix aus _renderEmailMailList übernommen – JSON.stringify lieferte
-        // doppelte Anführungszeichen, die das doppelt gequotete onclick-Attribut zerrissen.
-        // EML-Zweig ebenfalls auf einfache Anführungszeichen umgestellt (war in BEIDEN kaputt).
-        const _sqId=String(taskId).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-        const _sqV=function(s){return String(s||'').replace(/"/g,'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");};
-        if(m.src==='gmail'){clickFn='_gmOpenMailOverlay(\''+_sqId+'\','+m.idx+')';}
-        else if(m.src==='ms'){clickFn='_msOpenMailOverlay(\''+_sqId+'\','+m.idx+')';}
-        else{clickFn="_openEmailOrigInlinePreview({fileId:'"+_sqV(d.fileId)+"',name:'"+_sqV((d.subject||d.name||'email.eml').substring(0,60))+"',url:'"+_sqV(d.url)+"'})"; }
-        const previewTxt=preview.substring(0,60);
-        html+='<div data-mi="'+mi+'" data-src="'+m.src+'" style="display:flex;gap:8px;align-items:flex-start;padding:6px '+indent+' 6px '+indent+';border-top:0.5px solid var(--border);cursor:pointer;background:var(--bg);transition:background .1s;" onmouseenter="_pamUnifiedHover(this,\''+tooltipEsc+'\')" onmouseleave="_pamUnifiedHoverOut()" onclick="'+clickFn+'">';
-        html+='<div style="width:26px;height:26px;border-radius:5px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="'+envColor+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg></div>';
-        html+='<div style="flex:1;min-width:0;"><div style="display:flex;align-items:center;gap:4px;"><span style="font-size:calc(12px*var(--modal-scale,1));font-weight:600;color:var(--text1);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(from)+'</span><span style="font-size:calc(11px*var(--modal-scale,1));color:var(--text2);white-space:nowrap;">'+dateStr+'</span></div>';
-        html+='<div style="display:flex;align-items:center;gap:4px;margin-top:2px;"><span style="font-size:calc(10px*var(--modal-scale,1));padding:1px 5px;border-radius:4px;background:'+dirBg+';color:'+dirTxt+';font-weight:600;white-space:nowrap;">'+dirLabel+'</span>';
-        if(previewTxt)html+='<span style="font-size:calc(11px*var(--modal-scale,1));color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(previewTxt)+'</span>';
-        html+='</div></div></div>';
-      });
-    }
-    if(showHeader)html+='</div>';
-  });
-  el.innerHTML=html;
+  el.innerHTML=_verlauf.html+_dateien;
   const popRow=document.getElementById('pamEmailOpenPopupRow');if(popRow)popRow.style.display='block';
   const body=document.getElementById('pamEmailListBody');const chev=document.getElementById('pamEmailListChevron');
   if(body&&body.style.display==='none'){body.style.display='block';if(chev)chev.style.transform='rotate(180deg)';}
@@ -27150,67 +27249,12 @@ function _renderEmailMailList(){
   // 4. Thread-Liste (scrollbar)
   const _listDiv=document.createElement('div');
   _listDiv.style.cssText='flex:1;overflow-y:auto;min-height:0;';
-  if(!allM.length){
+  const _dat=_pamDateienBereichHtml(t); // b549 (Build 3)
+  if(!allM.length&&!_dat){
     _listDiv.innerHTML='<div style="padding:20px;text-align:center;color:var(--text2);font-size:12px;line-height:1.6;">Noch keine E-Mails –<br>per Drag &amp; Drop hinzufügen</div>';
   } else {
-    const taskId=t.id;
-    const grps=new Map();
-    allM.forEach(function(m){
-      const subj=m.data.subject||m.data.betreff||'(kein Betreff)';
-      let key;
-      if(m.src!=='original'){const rid=m.convId&&!m.convId.startsWith('_');key=rid?m.convId:(_ns(subj)||'__other__');}
-      else{key=_ns(subj)||'__other__';}
-      if(!grps.has(key))grps.set(key,{subject:subj,mails:[]});
-      grps.get(key).mails.push(m);
-    });
-    const showH=allM.length>=2;
-    if(!window._pamThreadOpen)window._pamThreadOpen={};
-    function _fmt(ts){if(!ts)return'';const d=new Date(ts);const now=new Date();if(d.toDateString()===now.toDateString())return('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);return('0'+d.getDate()).slice(-2)+'.'+('0'+(d.getMonth()+1)).slice(-2)+'.'+String(d.getFullYear()).slice(2);}
-    let html='';
-    grps.forEach(function(grp,key){
-      const isOpen=!showH||!!window._pamThreadOpen[key];
-      const lastTs=Math.max.apply(null,grp.mails.map(function(m){return m._ts||0;}));
-      const lastDate=_fmt(lastTs);const mc=grp.mails.length;
-      if(showH){
-        html+='<div style="border:2px solid #0284c7;border-radius:6px;margin:5px 8px;overflow:hidden;">';
-        html+='<div onclick="_pamToggleThread(\''+key+'\')" style="padding:7px 10px;background:rgba(224,242,254,0.15);display:flex;align-items:flex-start;gap:6px;cursor:pointer;user-select:none;">';
-        html+='<span style="font-size:10px;color:var(--text2);margin-top:2px;flex-shrink:0;display:inline-block;transform:rotate('+(isOpen?'0':'-90')+'deg);transition:transform .15s;">▼</span>';
-        html+='<div style="flex:1;min-width:0;"><div style="font-size:12px;font-weight:600;color:var(--text1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_escHtml(grp.subject)+'</div>';
-        html+='<div style="font-size:11px;color:var(--text2);margin-top:1px;">'+mc+' Mail'+(mc!==1?'s':'')+' · '+lastDate+'</div></div></div>';
-      }
-      if(isOpen){
-        const ind=showH?'22px':'10px';
-        [...grp.mails].sort(function(a,b){return(b._ts||0)-(a._ts||0);}).forEach(function(m){
-          const d=m.data;
-          const from=d.fromName||d.from||d.sender||d.senderName||'Unbekannt';
-          const isOut=d.direction==='gesendet'||d.isOut||false;
-          const dateStr=_fmt(m._ts);
-          const preview=(d.preview||d.snippet||d.bodyText||d.body||'').replace(/\n/g,' ').trim();
-          const subj=d.subject||d.betreff||'';
-          // Fix #227: Tooltip bis 250 Zeichen – \n verboten in HTML-Attributen, daher |||-Trenner
-          const _pvwFull=(preview||'').substring(0,200);
-          const tip=((from+(subj?' ||| '+subj:'')+(_pvwFull?' ||| '+_pvwFull:'')).substring(0,280)).replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-          let dBg,dTxt,dLbl,eCol;
-          if(m.src==='original'){dBg='rgba(124,58,237,.12)';dTxt='#5b21b6';dLbl='Original';eCol='#7c3aed';}
-          else if(isOut){dBg='rgba(22,163,74,.15)';dTxt='#15803D';dLbl='Gesendet';eCol='#16A34A';}
-          else{dBg='rgba(29,78,216,.10)';dTxt='#1E40AF';dLbl='Eingang';eCol='#0078d4';}
-          let cf;
-          const _sqId=String(taskId).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-          if(m.src==='gmail'){cf='_gmOpenMailOverlay(\''+_sqId+'\','+m.idx+')';}
-          else if(m.src==='ms'){cf='_msOpenMailOverlay(\''+_sqId+'\','+m.idx+')';}
-          else{const _sqV2=function(s){return String(s||'').replace(/"/g,'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");};cf="_openEmailOrigInlinePreview({fileId:'"+_sqV2(d.fileId)+"',name:'"+_sqV2((d.subject||d.name||'email.eml').substring(0,60))+"',url:'"+_sqV2(d.url)+"'})"; } // b548 (K5): EML-Zweig war durch doppelte Anführungszeichen im onclick tot
-          const pvw=preview.substring(0,60);
-          html+='<div style="display:flex;gap:8px;align-items:flex-start;padding:6px '+ind+' 6px '+ind+';border-top:0.5px solid var(--border);cursor:pointer;background:var(--bg);transition:background .1s;" onmouseenter="_pamUnifiedHover(this,\''+tip+'\')" onmouseleave="_pamUnifiedHoverOut()" onclick="'+cf+'">';
-          html+='<div style="width:26px;height:26px;border-radius:5px;background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="'+eCol+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg></div>';
-          html+='<div style="flex:1;min-width:0;"><div style="display:flex;align-items:center;gap:4px;"><span style="font-size:12px;font-weight:600;color:var(--text1);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+_escHtml(from)+'</span><span style="font-size:11px;color:var(--text2);white-space:nowrap;">'+dateStr+'</span></div>';
-          html+='<div style="display:flex;align-items:center;gap:4px;margin-top:2px;"><span style="font-size:10px;padding:1px 5px;border-radius:4px;background:'+dBg+';color:'+dTxt+';font-weight:600;white-space:nowrap;">'+dLbl+'</span>';
-          if(pvw)html+='<span style="font-size:11px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+_escHtml(pvw)+'</span>';
-          html+='</div></div></div>';
-        });
-      }
-      if(showH)html+='</div>';
-    });
-    _listDiv.innerHTML=html;
+    // b549 (Build 3): gemeinsame Verlaufsansicht + Dateien-Bereich – identisch zum großen Fenster
+    _listDiv.innerHTML=_pamVerlaufListeHtml(t,t.id).html+_dat;
   }
   el.appendChild(_listDiv);
   // 5. Footer: "Vollständigen Verlauf öffnen"
