@@ -4387,7 +4387,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-01 · #546'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-01-b546) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-01 · #547'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-01-b547) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -23753,6 +23753,71 @@ async function _driveSetPublic(fileId){
       body:JSON.stringify({role:'reader',type:'anyone'})
     });
   }catch(e){console.warn('[PAM] Drive-Freigabe konnte nicht gesetzt werden:',e);}
+}
+
+// b547 (K1): Findet die QUELLE der öffentlichen Freigabe. Läuft für jede betroffene Datei
+// die Ordner-Kette nach oben; der oberste Ordner mit „anyone"-Freigabe ist der Ursprung
+// (geerbte Freigaben sind nur DORT löschbar). Versucht die Freigabe dort direkt zu
+// entfernen; wenn verboten, gibt sie den Drive-Link zum Ordner für den Hand-Klick aus.
+// Aufruf aus der Browser-Konsole: _pamFreigabeQuelleFix()
+async function _pamFreigabeQuelleFix(){
+  if(!gdriveToken){showToast('⚠ Bitte zuerst Google Drive verbinden (☁️)','error',5000);return;}
+  const ids=new Set();
+  Object.keys(boards||{}).forEach(function(bk){(boards[bk]||[]).forEach(function(t){
+    ['emailOriginals','emailPdfs','fotos','attachments','pruefberichte'].forEach(function(k){
+      (t[k]||[]).forEach(function(e){if(e&&e.fileId)ids.add(e.fileId);});
+    });
+  });});
+  const cache={};
+  async function _info(fid){
+    if(cache[fid]!==undefined)return cache[fid];
+    try{
+      const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fid)+'?fields=name,parents,permissions(id,type)',
+        {headers:{Authorization:'Bearer '+gdriveToken}});
+      if(!r.ok){cache[fid]=null;return null;}
+      const d=await r.json();
+      cache[fid]={name:d.name||'?',parents:d.parents||[],any:(d.permissions||[]).filter(function(p){return p.type==='anyone';}).map(function(p){return p.id;})};
+      return cache[fid];
+    }catch(e){cache[fid]=null;return null;}
+  }
+  showToast('🔎 Suche die Quelle der öffentlichen Freigabe…','info',6000);
+  const quellen=new Map();
+  let geprueft=0;
+  for(const fid of ids){
+    geprueft++;
+    const fi=await _info(fid);
+    if(!fi||!fi.any.length)continue;      // Datei gar nicht öffentlich → uninteressant
+    let top=null,cur=fi.parents&&fi.parents[0],guard=0;
+    while(cur&&guard++<15){
+      const pi=await _info(cur);
+      if(!pi)break;
+      if(pi.any.length)top={fid:cur,name:pi.name};
+      cur=pi.parents&&pi.parents[0];
+    }
+    if(top)quellen.set(top.fid,top.name);
+    if(geprueft%40===0)showToast('🔎 '+geprueft+'/'+ids.size+' Dateien geprüft…','info',2000);
+  }
+  if(!quellen.size){
+    console.log('[K1] Keine Quell-Ordner mit öffentlicher Freigabe gefunden – Bestand scheint privat.');
+    showToast('ℹ Keine öffentlich freigegebenen Quell-Ordner gefunden','info',6000);
+    return;
+  }
+  console.log('════════ [K1] QUELLE(N) DER ÖFFENTLICHEN FREIGABE ════════');
+  for(const q of quellen){
+    const qfid=q[0],qname=q[1];
+    let status='';
+    const qi=cache[qfid];
+    for(const pid of ((qi&&qi.any.length)?qi.any:['anyoneWithLink'])){
+      const dr=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(qfid)+'/permissions/'+encodeURIComponent(pid),
+        {method:'DELETE',headers:{Authorization:'Bearer '+gdriveToken}});
+      status=(dr.ok||dr.status===204)
+        ?'✅ Freigabe hier automatisch ENTFERNT – nichts weiter zu tun.'
+        :'⚠ Konnte nicht automatisch entfernt werden → Link unten öffnen, dann: Freigeben → „Jeder mit dem Link" auf „Eingeschränkt".';
+    }
+    console.log('Ordner „'+qname+'"\n   '+status+'\n   https://drive.google.com/drive/folders/'+qfid);
+  }
+  console.log('Danach zur Kontrolle: _pamFreigabenBereinigen()  → sollte 0 Problemfälle melden.');
+  showToast('🔎 '+quellen.size+' Quell-Ordner gefunden – Ergebnis in der Konsole','success',9000);
 }
 
 // b543 (K1): Bestands-Bereinigung – entfernt die öffentliche „Jeder mit Link"-Freigabe
