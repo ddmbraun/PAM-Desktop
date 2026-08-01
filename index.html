@@ -4387,7 +4387,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-01 · #544'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-01-b544) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-01 · #546'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-01-b546) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -23767,6 +23767,11 @@ async function _pamFreigabenBereinigen(){
     });
   });});
   if(!ids.size){showToast('ℹ Keine Task-Dateien gefunden','info',4000);return;}
+  // b546: Konto und Token-Rechte vorab feststellen – für die Diagnose am Ende
+  let kontoMail='',tokenScope='';
+  try{const ar=await fetch('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)',{headers:{Authorization:'Bearer '+gdriveToken}});if(ar.ok){kontoMail=(((await ar.json()).user)||{}).emailAddress||'';}}catch(_e){}
+  try{const tr=await fetch('https://www.googleapis.com/oauth2/v3/tokeninfo?access_token='+encodeURIComponent(gdriveToken));if(tr.ok){tokenScope=((await tr.json()).scope)||'';}}catch(_e){}
+  console.log('[K1] Angemeldetes Drive-Konto:',kontoMail||'?','· Token-Rechte:',tokenScope||'?');
   showToast('🔒 Prüfe '+ids.size+' Dateien auf öffentliche Freigabe…','info',6000);
   // b544: erst Freigaben ANSEHEN, dann gezielt löschen – und Problemfälle mit Name und
   // Grund sammeln (der blinde DELETE auf 'anyoneWithLink' lieferte nur nackte 403er)
@@ -23793,15 +23798,65 @@ async function _pamFreigabenBereinigen(){
       for(const p of anyPerms){
         const dr=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fid)+'/permissions/'+encodeURIComponent(p.id),
           {method:'DELETE',headers:{Authorization:'Bearer '+gdriveToken}});
-        if(!(dr.ok||dr.status===204)){ok=false;const e=await dr.json().catch(function(){return{};});probleme.push({datei:info.name||'?',grund:'Löschen: HTTP '+dr.status+' '+(((e.error||{}).message)||'')});}
+        if(!(dr.ok||dr.status===204)){
+          ok=false;const e=await dr.json().catch(function(){return{};});
+          // b545: Ursache benennen – Eigentümer nachschlagen und prüfen, ob die Freigabe
+          // vom übergeordneten Ordner GEERBT ist (dann ist sie nur DORT löschbar)
+          let zusatz='';
+          try{
+            const fr=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fid)+'?fields=owners(emailAddress),parents',
+              {headers:{Authorization:'Bearer '+gdriveToken}});
+            if(fr.ok){
+              const fd=await fr.json();
+              const own=(fd.owners||[]).map(function(o){return o.emailAddress;}).filter(Boolean).join(', ');
+              if(own)zusatz+=' · Eigentümer: '+own;
+              for(const par of (fd.parents||[])){
+                const prr=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(par)+'?fields=name,permissions(id,type)',
+                  {headers:{Authorization:'Bearer '+gdriveToken}});
+                if(prr.ok){
+                  const pd=await prr.json();
+                  if((pd.permissions||[]).some(function(pp){return pp.type==='anyone';}))
+                    zusatz+=' · Freigabe GEERBT vom Ordner „'+(pd.name||par)+'" – dort entfernen (Drive: Ordner → Freigeben → „Jeder mit dem Link" auf „Eingeschränkt")';
+                }
+              }
+            }
+          }catch(_e){}
+          probleme.push({datei:info.name||'?',grund:'Löschen: HTTP '+dr.status+' '+(((e.error||{}).message)||'')+zusatz});
+        }
       }
       if(ok)entfernt++;else fehler++;
     }catch(e){probleme.push({datei:'(ID '+fid.substring(0,12)+'…)',grund:String((e&&e.message)||e)});fehler++;}
     if(i%50===0)showToast('🔒 '+i+'/'+ids.size+' geprüft…','info',2000);
   }
-  const msg='🔒 Freigabe-Bereinigung: '+entfernt+' öffentliche Freigabe(n) entfernt, '+warPrivat+' waren schon privat/gelöscht'+(fehler?', '+fehler+' Problemfälle (Tabelle in der Konsole)':'');
+  const msg='🔒 Freigabe-Bereinigung: '+entfernt+' öffentliche Freigabe(n) entfernt, '+warPrivat+' waren schon privat/gelöscht'+(fehler?', '+fehler+' Problemfälle (Diagnose in der Konsole)':'');
   console.log('[K1]',msg);
-  if(probleme.length){console.log('[K1] Problemfälle:');console.table(probleme);}
+  // b546: lesbare Diagnose statt abgeschnittener Tabelle – Ursachen bündeln
+  if(probleme.length){
+    const geerbtOrdner=new Set(),eigentuemer=new Set();
+    probleme.forEach(function(p){
+      const g=p.grund||'';
+      const mo=g.match(/GEERBT vom Ordner „([^"]+)"/);if(mo)geerbtOrdner.add(mo[1]);
+      const me=g.match(/Eigentümer: (\S+)/);if(me)eigentuemer.add(me[1].replace(/[·,]+$/,''));
+    });
+    console.log('════════ [K1] DIAGNOSE ════════');
+    console.log('Angemeldet als: '+(kontoMail||'?'));
+    if(tokenScope)console.log('Token-Rechte: '+tokenScope);
+    console.log('Problemfälle: '+probleme.length+' von '+ids.size+' Dateien');
+    if(eigentuemer.size){
+      const fremde=[...eigentuemer].filter(function(e){return kontoMail&&e.toLowerCase()!==kontoMail.toLowerCase();});
+      console.log('Eigentümer der Problem-Dateien: '+[...eigentuemer].join(', '));
+      if(fremde.length)console.log('→ Diese Dateien gehören einem ANDEREN Konto – die Freigabe kann nur dort entfernt werden. Lösung: PAM einmal mit '+fremde.join(' / ')+' bei Drive anmelden und die Bereinigung dort laufen lassen.');
+    }
+    if(geerbtOrdner.size){
+      console.log('Öffentliche Freigabe GEERBT von Ordner(n): '+[...geerbtOrdner].join(' · '));
+      console.log('→ Im Drive am ORDNER entfernen: Rechtsklick → Freigeben → „Jeder mit dem Link" auf „Eingeschränkt" stellen. Danach sind alle Dateien darin auf einen Schlag privat.');
+    }
+    if(!eigentuemer.size&&!geerbtOrdner.size)console.log('→ Keine Zusatz-Ursache ermittelbar – bitte Screenshot der ersten Zeilen unten an Claude.');
+    console.log('════════ Einzelfälle ════════');
+    probleme.slice(0,20).forEach(function(p,ix){console.log((ix+1)+'. '+p.datei+'\n   → '+p.grund);});
+    if(probleme.length>20)console.log('… und '+(probleme.length-20)+' weitere (window._k1Probleme enthält alle).');
+    window._k1Probleme=probleme;
+  }
   showToast(msg,fehler?'error':'success',10000);
   return {entfernt:entfernt,warPrivat:warPrivat,fehler:fehler,probleme:probleme,gesamt:ids.size};
 }
