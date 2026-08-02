@@ -4503,7 +4503,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-02 · #560'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-02-b560) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-02 · #561'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-02-b561) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -19972,32 +19972,56 @@ async function _createDriveAuftragStruktur(folderName,parentFid){
 // Hängt alle DATEIEN eines Drive-Ordners um: Bilder/Videos → Foto-Ordner, Rest → Posteingang.
 // Unterordner bleiben unangetastet (sie würden sonst verwaisen). Kein Neu-Upload –
 // die Dateien behalten ID, EXIF und Datum.
+// b561: Seitenwechsel + Fehlerzählung. Vorher pageSize=200 OHNE pageToken – ab 200 Dateien
+// fielen still welche weg und landeten mit dem alten Ordner im Papierkorb; einzeln
+// fehlgeschlagene Verschiebungen wurden gar nicht bemerkt.
+// Rückgabe: {bewegt,fehler} – oder null, wenn schon die Dateiliste nicht lesbar war
+// (b543/K0: Aufrufer darf bei null NICHT löschen).
 async function _pamMoveDriveFiles(vonFid,fotoFid,restFid){
-  let bewegt=0;
-  if(!vonFid||!gdriveToken)return 0;
+  let bewegt=0,fehler=0;
+  if(!vonFid||!gdriveToken)return {bewegt:0,fehler:0};
+  const dateien=[];
   try{
     const q=encodeURIComponent("'"+vonFid+"' in parents and trashed=false");
-    const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name,mimeType)&pageSize=200',
+    let pageToken='';
+    do{
+      const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=nextPageToken,files(id,name,mimeType)&pageSize=200'
+        +(pageToken?'&pageToken='+encodeURIComponent(pageToken):''),
+        {headers:{Authorization:'Bearer '+gdriveToken}});
+      if(!r.ok)return null;
+      const j=await r.json();
+      (j.files||[]).forEach(function(f){if(f.mimeType!=='application/vnd.google-apps.folder')dateien.push(f);});
+      pageToken=j.nextPageToken||'';
+    }while(pageToken);
+  }catch(e){console.warn('[ZuAuftrag] Dateien lesen:',e);return null;}
+  for(const f of dateien){
+    const istBild=/^image\/|^video\//.test(f.mimeType||'');
+    const ziel=istBild?(fotoFid||restFid):(restFid||fotoFid);
+    if(!ziel){fehler++;continue;}
+    try{
+      const mR=await fetch('https://www.googleapis.com/drive/v3/files/'+f.id+'?fields=parents',
+        {headers:{Authorization:'Bearer '+gdriveToken}});
+      if(!mR.ok){fehler++;continue;}
+      const alte=((await mR.json()).parents||[]).join(',');
+      const mv=await fetch('https://www.googleapis.com/drive/v3/files/'+f.id
+        +'?addParents='+encodeURIComponent(ziel)+'&removeParents='+encodeURIComponent(alte),
+        {method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},body:'{}'});
+      if(mv.ok)bewegt++;else fehler++;
+    }catch(e){fehler++;console.warn('[ZuAuftrag] Datei',f.name,e);}
+  }
+  return {bewegt:bewegt,fehler:fehler};
+}
+
+// b561: Papierkorb nur, wenn der Ordner nachweislich leer ist (keine Dateien UND keine
+// Unterordner). Bei jedem Zweifel (Lesefehler) false – dann bleibt der Ordner stehen.
+async function _pamDriveFolderLeer(fid){
+  try{
+    const q=encodeURIComponent("'"+fid+"' in parents and trashed=false");
+    const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id)&pageSize=1',
       {headers:{Authorization:'Bearer '+gdriveToken}});
-    if(!r.ok)return null; // b543 (K0): Fehler von „Ordner ist leer" unterscheiden – Aufrufer darf bei null NICHT löschen
-    const dateien=((await r.json()).files||[]).filter(function(f){return f.mimeType!=='application/vnd.google-apps.folder';});
-    for(const f of dateien){
-      const istBild=/^image\/|^video\//.test(f.mimeType||'');
-      const ziel=istBild?(fotoFid||restFid):(restFid||fotoFid);
-      if(!ziel)continue;
-      try{
-        const mR=await fetch('https://www.googleapis.com/drive/v3/files/'+f.id+'?fields=parents',
-          {headers:{Authorization:'Bearer '+gdriveToken}});
-        if(!mR.ok)continue;
-        const alte=((await mR.json()).parents||[]).join(',');
-        const mv=await fetch('https://www.googleapis.com/drive/v3/files/'+f.id
-          +'?addParents='+encodeURIComponent(ziel)+'&removeParents='+encodeURIComponent(alte),
-          {method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},body:'{}'});
-        if(mv.ok)bewegt++;
-      }catch(e){console.warn('[ZuAuftrag] Datei',f.name,e);}
-    }
-  }catch(e){console.warn('[ZuAuftrag] Dateien lesen:',e);return null;} // b543 (K0): s. o.
-  return bewegt;
+    if(!r.ok)return false;
+    return (((await r.json()).files)||[]).length===0;
+  }catch(e){return false;}
 }
 
 // Verschiebt einen Task in ein anderes Board/Spalte – boardübergreifend, ohne currentBoard.
@@ -20033,16 +20057,22 @@ async function _pamTaskZuAuftrag(task,vonBoard){
   const altFid=_extractFolderIdFromUrl((task.gdriveOrdner||'').trim());
   let bewegt=0;
   if(altFid&&altFid!==urls.mainId&&!_istSammelOrdner(altFid)){
-    bewegt=await _pamMoveDriveFiles(altFid,urls.fotoId,urls.emailId);
-    if(bewegt===null){
-      bewegt=0;
-      showToast('⚠ Dateien konnten nicht verschoben werden – alter Ordner bleibt erhalten','error',7000);
+    // b561: Papierkorb erst nach dreifacher Absicherung – alle Dateien verschoben (mit
+    // Seitenwechsel), kein einziger Fehlschlag, und der Ordner ist nachweislich leer.
+    // Vorher reichte ein lesbarer erster Seitenabruf, und Datei 201+ oder einzeln
+    // gescheiterte Verschiebungen wanderten mit dem Ordner in den Papierkorb.
+    const erg=await _pamMoveDriveFiles(altFid,urls.fotoId,urls.emailId);
+    if(erg===null){
+      showToast('⚠ Dateien konnten nicht gelesen werden – alter Ordner bleibt erhalten','error',7000);
     }else{
-      try{
-        await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(altFid),
-          {method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},
-           body:JSON.stringify({trashed:true})});
-      }catch(e){console.warn('[ZuAuftrag] Alter Ordner:',e);}
+      bewegt=erg.bewegt;
+      if(erg.fehler>0){
+        showToast('⚠ '+erg.fehler+' Datei(en) konnten nicht verschoben werden – alter Ordner bleibt erhalten','error',8000);
+      }else if(await _pamDriveFolderLeer(altFid)){
+        await _pamTrashDriveFolder(altFid,(task.title||'alter Ordner'));
+      }else{
+        showToast('ℹ Alter Ordner enthält noch Unterordner – bleibt erhalten','info',6000);
+      }
     }
   }else if(altFid&&_istSammelOrdner(altFid)){
     console.log('[ZuAuftrag] Gemeinsamer Sammelordner erkannt – wird weder geleert noch in den Papierkorb verschoben');
@@ -28769,16 +28799,20 @@ function _emInAuftragEinglieder(){
           const _dstMail=_extractFolderIdFromUrl((tt.emailOrdner||tt.gdriveOrdner||'').trim());
           // b543 (K0): Sammelordner-Schutz + Papierkorb nur nach gelungenem Verschieben
           if(gdriveToken&&_srcFid&&(_dstFoto||_dstMail)&&_srcFid!==_dstMail&&_srcFid!==_dstFoto&&!_istSammelOrdner(_srcFid)){
-            const _n=await _pamMoveDriveFiles(_srcFid,_dstFoto,_dstMail);
-            if(_n===null){
-              showToast('⚠ Dateien konnten nicht verschoben werden – alter Ordner bleibt erhalten','error',7000);
+            // b561: gleiche Absicherung wie bei „Auftrag erstellen" – Papierkorb nur bei
+            // 0 Fehlschlägen UND nachweislich leerem Ordner (s. _pamTaskZuAuftrag)
+            const _erg=await _pamMoveDriveFiles(_srcFid,_dstFoto,_dstMail);
+            if(_erg===null){
+              showToast('⚠ Dateien konnten nicht gelesen werden – alter Ordner bleibt erhalten','error',7000);
             }else{
-              if(_n)showToast('📦 '+_n+' Datei(en) in den Auftragsordner verschoben','info',4000);
-              try{
-                await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(_srcFid),
-                  {method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},
-                   body:JSON.stringify({trashed:true})});
-              }catch(e){console.warn('[Eingliedern] Alter Ordner:',e);}
+              if(_erg.bewegt)showToast('📦 '+_erg.bewegt+' Datei(en) in den Auftragsordner verschoben','info',4000);
+              if(_erg.fehler>0){
+                showToast('⚠ '+_erg.fehler+' Datei(en) konnten nicht verschoben werden – alter Ordner bleibt erhalten','error',8000);
+              }else if(await _pamDriveFolderLeer(_srcFid)){
+                await _pamTrashDriveFolder(_srcFid,(src.title||'alter Ordner'));
+              }else{
+                showToast('ℹ Alter Ordner enthält noch Unterordner – bleibt erhalten','info',6000);
+              }
             }
           }
         }catch(e){console.warn('[Eingliedern] Dateien verschieben:',e);}
@@ -29235,7 +29269,18 @@ async function _pamTrashDriveFolder(folderId,label){
       body:JSON.stringify({trashed:true})
     });
     if(r.ok){showToast('🗑 Drive-Ordner "'+label+'" in Papierkorb verschoben','success',3500);}
-    else{const e=await r.json().catch(()=>({}));showToast('⚠ Drive-Fehler: '+(e.error?.message||r.status),'error',5000);}
+    else{
+      const e=await r.json().catch(()=>({}));
+      const msg=(e.error&&e.error.message)||(''+r.status);
+      // b561: PAM läuft bewusst mit drive.file-Scope und darf nur eigene Ordner in den
+      // Papierkorb legen. Ordner von der NAS-Spiegelung/GM ergaben den rohen Google-Text
+      // „user has not granted the app … write access" (Praxisbefund 02.08.).
+      if(r.status===403&&/not granted|insufficient/i.test(msg)){
+        showToast('ℹ Ordner "'+label+'" wurde nicht von PAM angelegt (NAS-Spiegelung/GM) – PAM darf ihn nicht in den Papierkorb legen. Bitte im Explorer auf dem NAS löschen, die Spiegelung räumt Drive mit ab.','info',10000);
+      }else{
+        showToast('⚠ Drive-Fehler: '+msg,'error',5000);
+      }
+    }
   }catch(e){showToast('⚠ Drive-Ordner konnte nicht gelöscht werden: '+e.message,'error',5000);}
 }
 
