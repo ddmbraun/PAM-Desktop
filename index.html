@@ -3500,7 +3500,9 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
           <div style="padding:8px 10px 10px;">
             <div id="tDokuGruppenList" style="display:flex;flex-direction:column;"></div>
             <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
-              <button onclick="_scanDriveIntoTask('tDokOrdner','anhang')" style="padding:8px 12px;border-radius:6px;border:1.5px dashed #34a853;background:rgba(52,168,83,0.06);color:#34a853;font-size:calc(12px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;">🔄 Aus Ordner einlesen</button>
+              <!-- b556: 🔄 gleicht selbstständig ab (Ordner + Unterordner), 📂 ist die freie Auswahl -->
+              <button onclick="_dokSyncOrdner()" title="Dokumente-Ordner samt Unterordnern abgleichen – trägt automatisch alles Neue nach" style="padding:8px 12px;border-radius:6px;border:1.5px dashed #34a853;background:rgba(52,168,83,0.06);color:#34a853;font-size:calc(12px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;">🔄 Aktualisieren</button>
+              <button onclick="_scanDriveIntoTask('tDokOrdner','anhang')" title="Dateien selbst aussuchen – auch aus anderen Drive-Ordnern" style="padding:8px 12px;border-radius:6px;border:1.5px solid var(--border);background:var(--bg3);color:var(--text2);font-size:calc(12px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;">📂 Durchsuchen</button>
               <button onclick="_openSectPopup('tAnhangSect')" style="padding:8px 12px;border-radius:6px;border:1.5px solid var(--border);background:var(--bg3);color:var(--text2);font-size:calc(12px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;">📎 Anhänge-Fenster</button>
               <button onclick="_openPamDokUebersicht()" style="padding:8px 12px;border-radius:6px;border:1.5px solid var(--accent);background:rgba(108,99,255,.06);color:var(--accent);font-size:calc(12px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;">⛶ Alle Dokumente</button>
               <button class="baustelle-only" onclick="_openSectPopup('tPruefSect')" style="padding:8px 12px;border-radius:6px;border:1.5px solid var(--border);background:var(--bg3);color:var(--text2);font-size:calc(12px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;">📋 Formulare</button>
@@ -4011,7 +4013,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
           <input type="url" id="tDokOrdner" placeholder="https://drive.google.com/drive/folders/…" autocomplete="off">
           <button class="link-btn-2" onclick="_pickDriveFolder('tDokOrdner')" title="Ordner aus Drive wählen">📂</button>
           <button class="link-btn-2" onclick="tDokOrdnerOeffnen()" title="Ordner öffnen">📁</button>
-          <button class="link-btn-2" onclick="_scanDriveIntoTask('tDokOrdner','anhang')" title="Dateien einlesen" style="color:var(--accent);font-weight:700;">🔄</button>
+          <button class="link-btn-2" onclick="_dokSyncOrdner()" title="Abgleichen – liest Ordner + Unterordner und trägt Neues automatisch nach" style="color:var(--accent);font-weight:700;">🔄</button>
         </div>
       </div>
     </div>
@@ -12233,6 +12235,7 @@ let _sbCurrentId='';
 let _sbCurrentName='';
 let _sbType='';
 let _sbSelected=new Map(); // fileId → {id,name,mime}
+let _sbVorhanden=new Set(); // b556: fileIds, die schon im Task liegen – vorgehakt & gesperrt angezeigt
 
 async function _openScanDriveBrowser(inputId,type){
   if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden','error');return;}
@@ -12241,6 +12244,12 @@ async function _openScanDriveBrowser(inputId,type){
   _sbHistory=[];
   _sbType=type;
   _sbSelected=new Map();
+  // b556: Was schon im Task liegt, vorher merken. Die Zeilen werden vorgehakt und gesperrt
+  // dargestellt – vorher fing die Liste bei null an, dadurch sah Vorhandenes genauso aus wie
+  // Neues. (Bei den Fotos wird seit jeher vorgehakt – daher der gefühlte Unterschied.)
+  _sbVorhanden=new Set();
+  if(type==='email'){(taskEmailOriginals||[]).forEach(function(e){if(e&&e.fileId)_sbVorhanden.add(e.fileId);});}
+  else{(taskAttachments||[]).forEach(function(a){if(a&&a.fileId)_sbVorhanden.add(a.fileId);});}
   const old=document.getElementById('_scanBrowserOverlay');if(old)old.remove();
   const ov=document.createElement('div');
   ov.id='_scanBrowserOverlay';
@@ -12281,6 +12290,14 @@ async function _openScanDriveBrowser(inputId,type){
   countEl.id='_sbCount';
   countEl.style.cssText='font-size:12px;color:var(--text2);';
   countEl.textContent='0 ausgewählt';
+  // b556: „Alle" wirkt auf den gerade geöffneten Ordner. Was schon im Task liegt, ist gesperrt
+  // und bleibt unberührt – man kann also nicht versehentlich alles doppelt anhaken.
+  const allBtn=document.createElement('button');
+  allBtn.id='_sbAllBtn';
+  allBtn.textContent='☑ Alle';
+  allBtn.title='Alle Dateien in diesem Ordner an-/abwählen';
+  allBtn.style.cssText='padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;cursor:pointer;margin-left:10px;white-space:nowrap;';
+  allBtn.onclick=_sbAlleWaehlen;
   const btns=document.createElement('div');
   btns.style.cssText='display:flex;gap:8px;';
   const cancelBtn=document.createElement('button');
@@ -12293,7 +12310,10 @@ async function _openScanDriveBrowser(inputId,type){
   importBtn.style.cssText='padding:7px 18px;border-radius:6px;background:var(--accent);color:#fff;border:none;cursor:pointer;font-size:13px;font-weight:600;';
   importBtn.onclick=_sbImport;
   btns.append(cancelBtn,importBtn);
-  ftr.append(countEl,btns);
+  const ftrLinks=document.createElement('div'); // b556
+  ftrLinks.style.cssText='display:flex;align-items:center;min-width:0;';
+  ftrLinks.append(countEl,allBtn);
+  ftr.append(ftrLinks,btns);
   box.append(hdr,listEl,ftr);
   ov.appendChild(box);
   document.body.appendChild(ov);
@@ -12374,15 +12394,25 @@ async function _sbLoad(folderId,folderName){
         label.style.cssText='display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:7px;cursor:pointer;';
         label.onmouseenter=()=>label.style.background='var(--bg3)';
         label.onmouseleave=()=>label.style.background='';
+        const schonDa=_sbVorhanden.has(f.id); // b556
         const cb=document.createElement('input');
         cb.type='checkbox';
-        cb.checked=_sbSelected.has(f.id);
+        cb.checked=schonDa||_sbSelected.has(f.id);
+        cb.disabled=schonDa; // b556: liegt schon im Task – nur zur Anzeige, kein zweites Einlesen
         cb.style.cssText='width:15px;height:15px;flex-shrink:0;accent-color:var(--accent);';
         cb.onchange=()=>{if(cb.checked)_sbSelected.set(f.id,{id:f.id,name:f.name,mime:f.mimeType||''});else _sbSelected.delete(f.id);_sbUpdateCount();};
         const ico=document.createElement('span');ico.style.cssText='font-size:16px;flex-shrink:0;';ico.textContent=icon;
         const nm=document.createElement('span');nm.style.cssText='font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';nm.textContent=f.name;nm.title=f.name;
         const szEl=document.createElement('span');szEl.style.cssText='font-size:10px;color:var(--text2);flex-shrink:0;';szEl.textContent=sz;
         label.append(cb,ico,nm,szEl);
+        if(schonDa){ // b556: klar sichtbar machen, statt es nur beim Einlesen still zu überspringen
+          label.style.opacity='.5';
+          label.style.cursor='default';
+          const mk=document.createElement('span');
+          mk.style.cssText='font-size:10px;color:var(--green,#27ae60);flex-shrink:0;font-weight:700;white-space:nowrap;';
+          mk.textContent='✓ im Task';
+          label.appendChild(mk);
+        }
         listEl.appendChild(label);
       });
     }
@@ -12396,6 +12426,111 @@ async function _sbLoad(folderId,folderName){
 function _sbEnter(id,name){_sbHistory.push({id:_sbCurrentId,name:_sbCurrentName});_sbLoad(id,name);}
 function _sbBack(){if(!_sbHistory.length)return;const p=_sbHistory.pop();_sbLoad(p.id,p.name);}
 function _sbToggle(id,name,mime,checked){if(checked)_sbSelected.set(id,{id,name,mime});else _sbSelected.delete(id);_sbUpdateCount();}
+// b556: hakt im offenen Ordner alles an bzw. wieder ab. Gesperrte Zeilen (schon im Task)
+// bleiben außen vor – :not(:disabled) sorgt dafür.
+function _sbAlleWaehlen(){
+  const cbs=[...document.querySelectorAll('#_sbList input[type=checkbox]:not(:disabled)')];
+  if(!cbs.length){showToast('In diesem Ordner gibt es nichts zum Auswählen','info',3000);return;}
+  const alleAn=cbs.every(function(c){return c.checked;});
+  cbs.forEach(function(c){
+    if(c.checked===!alleAn)return;
+    c.checked=!alleAn;
+    if(typeof c.onchange==='function')c.onchange();
+  });
+}
+
+// ═══ b556: Dokumente-Ordner automatisch abgleichen (zwei Ebenen) ═══════════════════════
+// Der 🔄-Knopf liest den verknüpften Dokumente-Ordner UND seine direkten Unterordner und
+// trägt alles nach, was noch nicht im Task ist – ohne Dialog, ohne Anhaken.
+// Vorher führte 🔄 in den Auswahl-Browser: dort begann die Liste bei null, Vorhandenes war
+// von Neuem nicht zu unterscheiden, und Unterordner wurden gar nicht mitgelesen (nur zum
+// Reinklicken angezeigt). Genau das machte das Nachtragen eines neuen Unterordners mühsam.
+// Zwei Ebenen sind Absprache mit Frank (02.08.2026) – tiefer wird jeder Klick spürbar langsam.
+// Der Auswahl-Browser bleibt als „📂 Durchsuchen" für Dateien aus fremden Ordnern erhalten.
+// Bilder sind wie bisher ausgenommen (die gehören in die Foto-Sektion).
+const _DOK_DATEI_FILTER=" in parents and trashed=false and not mimeType contains 'image/' and not mimeType='application/vnd.google-apps.folder'";
+
+// Holt ALLE Treffer – mit Seitenwechsel, damit bei über 200 Dateien nichts still wegfällt.
+async function _dokDriveListe(q){
+  let out=[],token='';
+  do{
+    const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q)
+      +'&fields=nextPageToken,files(id,name,mimeType,size)&orderBy=name&pageSize=200'
+      +(token?'&pageToken='+encodeURIComponent(token):''),
+      {headers:{Authorization:'Bearer '+gdriveToken}});
+    if(!r.ok){if(r.status===401)_handleDrive401();throw new Error('Drive '+r.status);}
+    const j=await r.json();
+    out=out.concat(j.files||[]);
+    token=j.nextPageToken||'';
+  }while(token);
+  return out;
+}
+
+async function _dokSyncOrdner(){
+  if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden (oben rechts)','error',5000);return;}
+  const url=(document.getElementById('tDokOrdner')||{}).value||'';
+  const rootId=_ezFolderId(url);
+  if(!rootId){
+    const sect=document.getElementById('tVerkSect');
+    if(sect&&!sect.classList.contains('open'))toggleFormSection('tVerkSect');
+    showToast('⚠ Kein Dokumente-Ordner verknüpft – bitte unter „Verknüpfungen" eintragen','error',6000);
+    return;
+  }
+  showToast('⏳ Dokumente-Ordner wird abgeglichen…','info',4000);
+  try{
+    if(!taskAttachments)taskAttachments=[];
+    const vorhanden=new Set();
+    taskAttachments.forEach(function(a){if(a&&a.fileId)vorhanden.add(a.fileId);});
+
+    // Ebene 1: Dateien direkt im Dokumente-Ordner + Liste seiner Unterordner
+    const [wurzelDateien,unterOrdner]=await Promise.all([
+      _dokDriveListe("'"+rootId+"'"+_DOK_DATEI_FILTER),
+      _dokDriveListe("'"+rootId+"' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false")
+    ]);
+
+    // Ebene 2: Dateien in den direkten Unterordnern. Ein Unterordner, der klemmt, darf den
+    // ganzen Abgleich nicht kippen – deshalb pro Ordner abgefangen und am Ende gemeldet.
+    const fehler=[];
+    const unterListen=await Promise.all(unterOrdner.map(function(o){
+      return _dokDriveListe("'"+o.id+"'"+_DOK_DATEI_FILTER).catch(function(e){fehler.push(o.name);return [];});
+    }));
+
+    const fund=[];
+    wurzelDateien.forEach(function(f){fund.push({f:f,ordner:''});});
+    unterListen.forEach(function(liste,i){
+      liste.forEach(function(f){fund.push({f:f,ordner:unterOrdner[i].name});});
+    });
+
+    let neu=0;const neueOrdner=new Set();
+    fund.forEach(function(x){
+      if(vorhanden.has(x.f.id))return;
+      vorhanden.add(x.f.id);
+      taskAttachments.push({
+        name:x.f.name,
+        fileId:x.f.id,
+        url:'https://drive.google.com/file/d/'+x.f.id+'/view',
+        type:x.f.mimeType||'',
+        uploadedAt:new Date().toLocaleDateString('de-DE'),
+        ordner:x.ordner // leer = Wurzel, sonst Name des Unterordners → Gruppen in der Sektion
+      });
+      neu++;
+      if(x.ordner)neueOrdner.add(x.ordner);
+    });
+
+    const fehlerTxt=fehler.length?' ⚠ nicht lesbar: '+fehler.join(', '):'';
+    if(!neu){
+      showToast('✓ Alles aktuell – '+fund.length+' Dokument(e) im Ordner'+fehlerTxt,'success',5000);
+      return;
+    }
+    renderAttachList(); // frischt auch die Dokumente-Sektion mit den Gruppen auf
+    scheduleTaskFieldSave();
+    const zusatz=neueOrdner.size?(' aus '+neueOrdner.size+' Unterordner'+(neueOrdner.size===1?'':'n')):'';
+    showToast('✅ '+neu+' neue(s) Dokument(e)'+zusatz+' eingelesen'+fehlerTxt,'success',6000);
+  }catch(e){
+    console.error('[PAM] _dokSyncOrdner:',e);
+    showToast('⚠ Abgleich fehlgeschlagen: '+e.message,'error',6000);
+  }
+}
 function _sbUpdateCount(){const el=document.getElementById('_sbCount');if(el)el.textContent=_sbSelected.size+' Datei'+(_sbSelected.size===1?'':'en')+' ausgewählt';}
 function _sbClose(){const o=document.getElementById('_scanBrowserOverlay');if(o)o.remove();}
 async function _sbImport(){
