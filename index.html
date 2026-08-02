@@ -158,10 +158,17 @@ async function handleEmailDrop(dt,zone){
 
   // 1. File drop (.msg or .eml) → Original direkt speichern
   if(dt.files&&dt.files.length){
-    let f=[].slice.call(dt.files).find(function(x){return/\.(msg|eml)$/i.test(x.name);});
-    if(f){
+    // b555: ALLE Mails verarbeiten, nacheinander. Vorher nahm `.find` nur die ERSTE –
+    // zog man drei .eml auf die Zone, verschwanden zwei kommentarlos.
+    let fs=[].slice.call(dt.files).filter(function(x){return/\.(msg|eml)$/i.test(x.name);});
+    if(fs.length){
       _ezMsg(zone,'','');
-      _uploadEmailOriginal(f);
+      (async function(){
+        for(const f of fs){
+          try{await _uploadEmailOriginal(f);}
+          catch(e){console.warn('[PTP] EML-Zone:',f&&f.name,e);showToast('⚠ „'+(f&&f.name||'Datei')+'" konnte nicht abgelegt werden: '+(e&&e.message||e),'error',6000);}
+        }
+      })();
       return;
     }
   }
@@ -660,6 +667,21 @@ function _smartDecodeEmlBuffer(buf){
   }
   return utf8;
 }
+// b555: Eine .eml-Datei als Text lesen – MIT Umlaut-Erkennung. Der Import las bisher an
+// fünf Stellen hart `readAsText(file,'utf-8')`; bei ISO-8859-1-Mails (Outlook-Klassiker)
+// wurden Umlaute damit zu `?` und waren danach nicht mehr reparierbar. _smartDecodeEmlBuffer
+// existierte genau dafür, wurde im Import aber nie benutzt.
+function _emlDateiAlsText(file){
+  return new Promise(function(res,rej){
+    const r=new FileReader();
+    r.onload=function(e){
+      try{res(_smartDecodeEmlBuffer(e.target.result));}
+      catch(err){rej(err);}
+    };
+    r.onerror=rej;
+    r.readAsArrayBuffer(file);
+  });
+}
 // UTF-8-Bytes, die fälschlich als Latin-1 interpretiert wurden (Ã¤→ä, Ã¼→ü, ÃŸ→ß):
 // nur reparieren, wenn das typische Muster vorkommt UND die Rückumwandlung gültiges UTF-8 ergibt.
 const _W1252_REV={0x20AC:0x80,0x201A:0x82,0x0192:0x83,0x201E:0x84,0x2026:0x85,0x2020:0x86,0x2021:0x87,0x02C6:0x88,0x2030:0x89,0x0160:0x8A,0x2039:0x8B,0x0152:0x8C,0x017D:0x8E,0x2018:0x91,0x2019:0x92,0x201C:0x93,0x201D:0x94,0x2022:0x95,0x2013:0x96,0x2014:0x97,0x02DC:0x98,0x2122:0x99,0x0161:0x9A,0x203A:0x9B,0x0153:0x9C,0x017E:0x9E,0x0178:0x9F}; // Fix #371b
@@ -1126,10 +1148,13 @@ function _auftragFileSelect(evt){
 async function _pdfAuftragCreate(boardName){
   let p=_pdfAuftragPending;_pdfAuftragPending=null;
   if(!p)return;
-  let _isNotiz=(boardTypes[boardName]||'baustelle')==='notiz';
-  let _folderDefault=_isNotiz
-    ?DEFAULT_FOLDER_NOTIZ
-    :DEFAULT_FOLDER_BAUSTELLE;
+  // b555: der 'email'-Zweig fehlte – ein PDF-Drop auf ein E-Mail-Board legte die volle
+  // 9-Ordner-Auftragsstruktur unter dem BAUSTELLEN-Ordner an, obwohl E-Mail-Tasks nur
+  // einen einzigen Ordner bekommen sollen.
+  let _bTyp=boardTypes[boardName]||'baustelle';
+  let _isNotiz=_bTyp==='notiz';
+  let _isEmailB=_bTyp==='email';
+  let _folderDefault=_isNotiz?DEFAULT_FOLDER_NOTIZ:(_isEmailB?DEFAULT_FOLDER_EMAIL:DEFAULT_FOLDER_BAUSTELLE);
   let newTask={
     id:generateId(),
     title:p.title||'Neuer Auftrag',
@@ -1155,12 +1180,20 @@ async function _pdfAuftragCreate(boardName){
       const _confirmedPdfName=await _promptFolderName(_safeName);
       if(!_confirmedPdfName){showToast('ℹ Drive-Ordner übersprungen – kann später im Task angelegt werden','info',4000);}
       else{
-        showToast('📁 Drive-Ordner werden angelegt…','info',5000);
-        _pdfDriveUrls=await _createDriveAuftragStruktur(_confirmedPdfName,_ezFolderId(_folderDefault));
-        newTask.gdriveOrdner=_pdfDriveUrls.mainUrl;
-        newTask.gdrive      =_pdfDriveUrls.fotoUrl;
-        newTask.emailOrdner =_pdfDriveUrls.emailUrl;
-        newTask.dokOrdner   =_pdfDriveUrls.dokUrl;
+        showToast('📁 Drive-Ordner '+(_isEmailB?'wird':'werden')+' angelegt…','info',5000);
+        if(_isEmailB){
+          // b555: E-Mail-Board → EIN Ordner (wie beim normalen E-Mail-Task)
+          const _emStr=await _createDriveEmailStruktur(_confirmedPdfName,_ezFolderId(DEFAULT_FOLDER_EMAIL));
+          _pdfDriveUrls={mainId:_emStr.mainId,mainUrl:_emStr.mainUrl,dokId:_emStr.mainId};
+          newTask.gdriveOrdner=_emStr.mainUrl;
+          newTask.emailOrdner =_emStr.mainUrl;
+        }else{
+          _pdfDriveUrls=await _createDriveAuftragStruktur(_confirmedPdfName,_ezFolderId(_folderDefault));
+          newTask.gdriveOrdner=_pdfDriveUrls.mainUrl;
+          newTask.gdrive      =_pdfDriveUrls.fotoUrl;
+          newTask.emailOrdner =_pdfDriveUrls.emailUrl;
+          newTask.dokOrdner   =_pdfDriveUrls.dokUrl;
+        }
         await autoSave();
         render();
       }
@@ -4425,7 +4458,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-01 · #554'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-01-b554) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-02 · #555'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-02-b555) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -5316,7 +5349,11 @@ function colColor(i){return COL_COLORS[i%COL_COLORS.length];}
 function generateId(){return 't_'+Date.now()+'_'+Math.random().toString(36).substr(2,6);}
 // F1-Fix: auch " escapen – esc() landet in value="…"/title="…"-Attributen (sonst Attribut-Breakout/XSS,
 // Angriffsdaten kommen aus fremden E-Mails wie Absendername/Betreff)
-function esc(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML.replace(/"/g,'&quot;');}
+// b555: `'` wird jetzt mit-escaped. esc() wird an vielen Stellen INNERHALB einfach
+// gequoteter JS-Strings benutzt (onclick="…('…')"); ein Anhang „Gutachten O'Brien.eml"
+// zerriss dort den String und machte den Knopf funktionslos. Da Betreff, Absendername
+// und Anhangnamen aus fremden E-Mails stammen, war das ein echter Angriffspfad.
+function esc(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML.replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function formatBytes(b){if(!b&&b!==0)return '–';b=Number(b);if(isNaN(b))return '–';if(b<1024)return b+'B';if(b<1048576)return (b/1024).toFixed(1)+' KB';return (b/1048576).toFixed(1)+' MB';}
 
 // ── TOAST-NACHRICHTEN ──
@@ -7869,6 +7906,7 @@ function renderHeute(){
       if(bType==='email'){
         if(!t.due)return; // Posteingang nur in Heute wenn Datum gesetzt
         posteingang.push({t:t,board:boardName});
+        return; // b555: fehlendes return – E-Mail-Tasks mit Datum landeten ZUSÄTZLICH in „Heute fällig"
       }
       // b528 (Frage Frank): „Ausführung heute" prüfte NUR das Altfeld ausfuehrungstermin –
       // der neue Weg (Aufgabe vom Typ „Ausführungstermin") fehlte. Jetzt zählen beide.
@@ -13202,7 +13240,7 @@ function renderAttachList(){
     const svg=_aicEicSvg(a.type,a.name);
     const nameEsc=esc(a.name||'Anhang');
     const short=(a.name||'').length>9?(a.name||'').substring(0,9)+'…':(a.name||'Anhang');
-    const driveBtn=a.url?`<button type="button" onclick="window.open('${a.url}','_blank')" class="eic-btn" title="In Drive öffnen">📂</button>`:'';
+    const driveBtn=a.url?`<button type="button" onclick="window.open('${esc(a.url)}','_blank')" class="eic-btn" title="In Drive öffnen">📂</button>`:''; // b555: url war ungeprüft im Attribut
     return `<div class="eic">
       <div class="eic-thumb" onclick="openPreview(${i})" style="cursor:pointer;" title="Ansehen / abspielen">${svg}</div>
       <div class="eic-overlay">
@@ -17710,6 +17748,16 @@ function _pamEmailToggle(which){
   }
 }
 // ── Outlook-Thread-Popup (Split-Layout) ──────────────────────────
+// b555 (Mini-Fix): Im E-Mail-Board-Fenster öffneten „📋 Öffnen" und „Vollständigen Verlauf
+// öffnen" noch das reine Outlook-Fenster – dort fehlen die abgelegten .eml-Originale
+// („1 statt 7", derselbe Befund wie b554 im Auftrags-Fenster). Jetzt auch hier die
+// Gesamt-Ansicht; Live-Objekt bevorzugt, damit frisch geladene Mails sicher drin sind.
+function _emOeffneGesamtVerlauf(){
+  if(!_emCurrentTask){showToast('⚠ Kein Task geöffnet','error',3000);return;}
+  const live=findTaskById(_emCurrentTask.id)||_emCurrentTask;
+  _pamActiveTaskId=_emCurrentTask.id;
+  _openPamEmailPreview(0,live);
+}
 function _pamOpenBestVerlauf(){
   // b554: IMMER die Gesamt-Ansicht öffnen. Die alte Weiche öffnete das reine
   // Outlook-Fenster, sobald auch nur EINE Outlook-Mail geladen war – die abgelegten
@@ -22631,6 +22679,11 @@ function _eicPdfSvg(){
 function _emailSortTs(item){
   const s=item.date||item.uploadedAt||'';
   if(s){
+    // b555: DEUTSCHES FORMAT ZUERST. Vorher lief `new Date(s)` davor – Chrome liest
+    // „07.11.2026" als Monat-vor-Tag (11. Juli statt 7. November), der Regex-Zweig
+    // darunter wurde nie erreicht. Betraf jede Datei mit Tag ≤ 12.
+    const g0=String(s).match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+    if(g0)return+new Date(+g0[3],+g0[2]-1,+g0[1]);
     // ISO-String (z.B. "2025-11-07T10:30:00Z")
     const iso=new Date(s);if(!isNaN(iso))return iso.getTime();
     // Deutsches Format "dd.mm.yyyy"
@@ -23917,7 +23970,7 @@ async function _uploadEmailOriginal(file){
   let preText='';
   if(isEml){
     try{
-      preText=await new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.onerror=rej;r.readAsText(file,'utf-8');});
+      preText=await _emlDateiAlsText(file); // b555: Umlaut-sicher statt hart UTF-8
       const _preParsed=_parseEmlText(preText);
       preMessageId=(_preParsed.messageId||'').replace(/^<|>$/g,'');
       if(_preParsed.subject)window._emlDropSubject=_preParsed.subject.replace(/^(Re|Fwd|AW|WG):\s*/i,'').trim();
@@ -23958,7 +24011,7 @@ async function _uploadEmailOriginal(file){
   try{
     if(isEml){
       try{
-        if(!preText)preText=await new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.onerror=rej;r.readAsText(file,'utf-8');});
+        if(!preText)preText=await _emlDateiAlsText(file); // b555
         if(!preMessageId)preMessageId=(_parseEmlText(preText).messageId||'').replace(/^<|>$/g,'');
       }catch(e){}
     }
@@ -23995,7 +24048,7 @@ async function _uploadEmailOriginal(file){
     let emlParsedAttachments=[];
     if(isEml){
       try{
-        const txt=preText||await new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.onerror=rej;r.readAsText(file,'utf-8');});
+        const txt=preText||await _emlDateiAlsText(file); // b555
         const parsed=_parseEmlText(txt);
         emailMeta={
           subject:parsed.subject||'',
@@ -24403,12 +24456,21 @@ function _handleEmailOrigDrop(dt){
     showToast('Kein .msg/.eml erkannt. Bei Outlook Neu: Datei → Speichern unter → .eml, dann hier hochladen.','error');
     return;
   }
-  files.forEach(f=>_uploadEmailOriginal(f));
+  // b555: NACHEINANDER statt parallel. Vorher startete jede Datei sofort – fehlte der
+  // Ordner, öffneten sich mehrere Ordnernamen-Dialoge gleichzeitig (der letzte entfernte
+  // das Overlay des vorherigen → Import hing) und es entstanden mehrere Ordnerbäume.
+  (async function(){
+    for(const f of files){
+      try{await _uploadEmailOriginal(f);}
+      catch(e){console.warn('[PTP] EML-Import:',f&&f.name,e);showToast('⚠ „'+(f&&f.name||'Datei')+'" konnte nicht abgelegt werden: '+(e&&e.message||e),'error',6000);}
+    }
+  })();
 }
 function _handleEmailOrigSelect(evt){
   const file=evt.target.files&&evt.target.files[0];
   evt.target.value='';
-  if(file)_uploadEmailOriginal(file);
+  // b555: .catch ergänzt – Fehler VOR dem internen try blieben bisher unsichtbar
+  if(file)Promise.resolve(_uploadEmailOriginal(file)).catch(function(e){console.warn('[PTP] EML-Auswahl:',e);showToast('⚠ Ablegen fehlgeschlagen: '+(e&&e.message||e),'error',6000);});
 }
 
 // ══════ DOKUMENTE-ÜBERSICHT (#491, Punkt 3) ══════
@@ -26022,9 +26084,11 @@ let _emLastAttachFiles=[]; // Anhänge der aktuell geöffneten Mail
 
 // ── E-Mail-Vorschau-Popup ────────────────────────────────────────────────────
 let _pepToken=0;
-function _openPamEmailPreview(startIdx){
+// b555: taskOverride – das E-Mail-Fenster hat kein gefülltes #taskId-Feld und muss den
+// Task direkt übergeben können (sonst öffnete sich dort gar nichts)
+function _openPamEmailPreview(startIdx,taskOverride){
   const taskId=(document.getElementById('taskId')||{}).value||'';
-  const task=taskId?findTaskById(taskId):null;
+  const task=taskOverride||(taskId?findTaskById(taskId):null);
   if(!task)return;
   const GID='_pamEmailPreviewPopup';
   const old=document.getElementById(GID);if(old)old.remove();
@@ -27046,7 +27110,7 @@ function _renderEmailMailList(){
     '<div style="display:flex;align-items:center;gap:5px;margin-bottom:5px;">'+
       '<span style="font-size:11px;font-weight:700;color:var(--text);">● E-Mails</span>'+
       '<span style="font-size:11px;color:var(--text2);flex:1;">'+_totalCnt+' Nachrichten</span>'+
-      '<button onclick="event.stopPropagation();if(_emCurrentTask){_pamActiveTaskId=_emCurrentTask.id;_msOpenThreadPopup();}" style="display:flex;align-items:center;gap:4px;padding:2px 8px;font-size:11px;font-weight:600;border:none;border-radius:6px;background:#1e7e34;color:#fff;cursor:pointer;">📋 Öffnen</button>'+
+      '<button onclick="event.stopPropagation();_emOeffneGesamtVerlauf()" style="display:flex;align-items:center;gap:4px;padding:2px 8px;font-size:11px;font-weight:600;border:none;border-radius:6px;background:#1e7e34;color:#fff;cursor:pointer;">📋 Öffnen</button>'+
     '</div>'+
     '<div style="display:flex;align-items:center;justify-content:space-between;gap:4px;">'+
       '<div style="display:flex;gap:4px;">'+
@@ -27074,7 +27138,7 @@ function _renderEmailMailList(){
   // 5. Footer: "Vollständigen Verlauf öffnen"
   const _footer=document.createElement('div');
   _footer.style.cssText='padding:8px 10px;border-top:1px solid var(--border);background:var(--bg2);flex-shrink:0;';
-  _footer.innerHTML='<button onclick="if(_emCurrentTask){_pamActiveTaskId=_emCurrentTask.id;_msOpenThreadPopup();}" style="width:100%;padding:7px;font-size:12px;font-weight:600;border:1px solid var(--border);border-radius:6px;background:var(--bg3);color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;">📋 Vollständigen Verlauf öffnen</button>';
+  _footer.innerHTML='<button onclick="_emOeffneGesamtVerlauf()" style="width:100%;padding:7px;font-size:12px;font-weight:600;border:1px solid var(--border);border-radius:6px;background:var(--bg3);color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;">📋 Vollständigen Verlauf öffnen</button>';
   el.appendChild(_footer);
 }
 
@@ -27497,7 +27561,7 @@ async function _emUploadEmlForModal(file){
     // Duplikat-Check
     let preMessageId='',preText='';
     if(isEml){
-      try{preText=await new Promise(function(res,rej){const r=new FileReader();r.onload=function(e){res(e.target.result);};r.onerror=rej;r.readAsText(file,'utf-8');});preMessageId=(_parseEmlText(preText).messageId||'').replace(/^<|>$/g,'');}catch(e){}
+      try{preText=await _emlDateiAlsText(file);preMessageId=(_parseEmlText(preText).messageId||'').replace(/^<|>$/g,'');}catch(e){} // b555
     }
     if(preMessageId){
       const already=(t.emailOriginals||[]).some(function(e){return e.messageId&&e.messageId===preMessageId;});
@@ -27508,7 +27572,7 @@ async function _emUploadEmlForModal(file){
     let meta={subject:file.name,sender:'',date:new Date().toISOString(),messageId:preMessageId,bodyHtml:'',bodyText:'',cidMap:{}};
     let emlAtts=[];
     if(isEml){
-      try{const txt=preText||await new Promise(function(res,rej){const r=new FileReader();r.onload=function(e){res(e.target.result);};r.onerror=rej;r.readAsText(file,'utf-8');});const p=_parseEmlText(txt);meta={subject:p.subject||file.name,sender:p.sender||'',date:(p.date instanceof Date?p.date:new Date()).toISOString(),messageId:p.messageId||preMessageId,bodyHtml:p.bodyHtml||'',bodyText:p.bodyText||'',cidMap:p.cidMap||{}};emlAtts=p.attachments||[];}catch(e){}
+      try{const txt=preText||await _emlDateiAlsText(file);const p=_parseEmlText(txt);meta={subject:p.subject||file.name,sender:p.sender||'',date:(p.date instanceof Date?p.date:new Date()).toISOString(),messageId:p.messageId||preMessageId,bodyHtml:p.bodyHtml||'',bodyText:p.bodyText||'',cidMap:p.cidMap||{}};emlAtts=p.attachments||[];}catch(e){}
     }else{
       // b548: .msg wird nicht geparst – ehrlicher Hinweis statt stillem Unterschied
       showToast('📨 .msg wird nur abgelegt – Betreff, Datum und Anhänge können nicht ausgelesen werden. Für volle Unterstützung als .eml speichern.','warning',7000);
@@ -28487,17 +28551,43 @@ function _emInAuftragEinglieder(){
             tt.emailPdfs.push(p);
         });
         if(src.desc&&src.desc.trim()){tt.desc=(tt.desc||'')+'\n\n[E-Mail-Import '+new Date().toLocaleDateString('de-DE')+']:\n'+src.desc;}
+        // ── b555: DIE VERKNÜPFUNGSFELDER MITNEHMEN ──────────────────────────────
+        // Bisher wurden nur die Listen kopiert – msConversationId, msMessageIds,
+        // gmailThreadId, gmailMessageIds und msAccount blieben zurück. Folge: Der
+        // eingegliederte Verlauf war eine tote Momentaufnahme, und hatte der Ziel-Task
+        // eine EIGENE Verknüpfung, überschrieb der nächste „⟳ Laden" die Liste komplett.
+        if(!tt.msConversationId&&src.msConversationId)tt.msConversationId=src.msConversationId;
+        if(!tt.gmailThreadId&&src.gmailThreadId)tt.gmailThreadId=src.gmailThreadId;
+        if(!tt.msMessageId&&src.msMessageId)tt.msMessageId=src.msMessageId;
+        if(!tt.gmailMessageId&&src.gmailMessageId)tt.gmailMessageId=src.gmailMessageId;
+        if(!tt.msAccount&&src.msAccount)tt.msAccount=src.msAccount;
+        if(!tt.msEmailSubject&&src.msEmailSubject)tt.msEmailSubject=src.msEmailSubject;
+        if(!tt.msEmailDate&&src.msEmailDate)tt.msEmailDate=src.msEmailDate;
+        if(!tt.emailSender&&src.emailSender)tt.emailSender=src.emailSender;
+        if(!tt.emailSenderName&&src.emailSenderName)tt.emailSenderName=src.emailSenderName;
+        // Message-ID-Listen vereinigen (nicht überschreiben – der Ziel-Auftrag kann eigene haben)
+        ['msMessageIds','gmailMessageIds'].forEach(function(k){
+          if(!(src[k]||[]).length)return;
+          if(!tt[k])tt[k]=[];
+          (src[k]||[]).forEach(function(id){if(id&&tt[k].indexOf(id)===-1)tt[k].push(id);});
+        });
         // Quell-Task löschen
         // Fix #232: Formularfelder sichern und sofort speichern
         _emDoSave();
         boards[_emCurrentBoard]=(boards[_emCurrentBoard]||[]).filter(function(t){return t.id!==src.id;});
+        // b555: verhindert die Wiederauferstehung des Quell-Tasks beim nächsten Sync
+        // (deleteTask macht das seit #366 – hier fehlte es)
+        if(typeof _pamMarkTaskDeleted==='function')_pamMarkTaskDeleted(src.id);
         closeEmailTaskModal();
         autoSave().then(function(){pushToSync();});
         render();
-        showToast('E-Mail in Task „'+tt.title+'" eingegliedert.','success');
+        showToast('E-Mail in Task „'+tt.title+'" eingegliedert – Verlauf bleibt nachladbar.','success');
       };
       // Fix7: Warnung wenn Ziel-Task keinen Ordner hat → Inline-Confirm statt window.confirm()
-      if(!tt.ordner&&!tt.folder){
+      // b555: prüfte bisher `tt.ordner`/`tt.folder` – Felder, die es am Task GAR NICHT gibt
+      // (sie heißen gdriveOrdner/emailOrdner/gdrive). Die Bedingung war immer wahr, die
+      // Warnung erschien bei JEDEM Eingliedern und wurde dadurch antrainiert weggeklickt.
+      if(!tt.gdriveOrdner&&!tt.emailOrdner&&!tt.gdrive){
         _emShowConfirmModal(
           'Der Ziel-Task hat keinen Ordner zugewiesen.\nDateianhänge können nicht automatisch verschoben werden.\nTrotzdem eingliedern (nur E-Mail-Daten kopieren)?',
           _doMerge
