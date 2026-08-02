@@ -220,7 +220,13 @@ async function _ezProcess(info,fid,zone){
 let _ezErrorTimer=null;
 function _ezReset(){let z=document.getElementById('emailDropZone');let msgEl=document.getElementById('emailDropZoneMsg');if(z)z.className='email-drop-zone';if(msgEl)msgEl.textContent='📧 E-Mail / PDF hier hineinziehen  →  direkt in Google Drive';}
 function _ezMsg(z,cls,msg){
-  if(!z)return;
+  // b559: Die alte Board-Drop-Zone gibt es nicht mehr – ohne sie verschwanden ALLE
+  // Meldungen dieses Pfades spurlos (u. a. „Bitte zuerst den E-Mail-Ablageordner
+  // eintragen"). Jetzt weichen sie auf die normale Hinweis-Blase aus.
+  if(!z){
+    if(msg&&typeof showToast==='function')showToast(msg,cls==='error'?'error':(cls==='success'?'success':'info'),cls==='error'?7000:3500);
+    return;
+  }
   let msgEl=document.getElementById('emailDropZoneMsg');
   if(msgEl)msgEl.textContent=msg;
   else{z.className='email-drop-zone'+(cls?' '+cls:'');z.textContent=msg;}
@@ -3545,7 +3551,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
               <button onclick="_scanDriveIntoTask('tDokOrdner','anhang')" title="Dateien selbst aussuchen – auch aus anderen Drive-Ordnern" style="padding:8px 12px;border-radius:6px;border:1.5px solid var(--border);background:var(--bg3);color:var(--text2);font-size:calc(12px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;">📂 Durchsuchen</button>
               <button onclick="_openSectPopup('tAnhangSect')" style="padding:8px 12px;border-radius:6px;border:1.5px solid var(--border);background:var(--bg3);color:var(--text2);font-size:calc(12px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;">📎 Anhänge-Fenster</button>
               <button onclick="_openPamDokUebersicht()" style="padding:8px 12px;border-radius:6px;border:1.5px solid var(--accent);background:rgba(108,99,255,.06);color:var(--accent);font-size:calc(12px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;">⛶ Alle Dokumente</button>
-              <button class="baustelle-only" onclick="_openSectPopup('tPruefSect')" style="padding:8px 12px;border-radius:6px;border:1.5px solid var(--border);background:var(--bg3);color:var(--text2);font-size:calc(12px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;">📋 Formulare</button>
+              <button class="baustelle-only" onclick="_openSectPopup('tPruefSect')" style="padding:8px 12px;border-radius:6px;border:1.5px solid var(--border);background:var(--bg3);color:var(--text2);font-size:calc(12px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;"><span id="tPruefTitle">📋 Formulare</span></button><!-- b559: Zähler-Element war beim Auflösen der rechten Karte (b553) verlorengegangen -->
             </div>
           </div>
         </div>
@@ -4286,84 +4292,81 @@ function _pamGuestSubmit(){
       <div class="em-resizer" id="emResizer1" style="display:none;"></div>
       <!-- RECHTS: Steuerung -->
       <div class="em-right-panel" id="emRightPanel">
-        <!-- b553 (Punkt 9): „Von" + „Absender-Name" zu EINEM Block – Name editierbar, Adresse darunter -->
+        <!-- ══ b559: rechte Spalte nach Arbeitsablauf geordnet (Absprache FB 02.08.) ══
+             Reihenfolge: Absender+Eingang · Status/Frist+Hauptaktionen · Termine · Notiz ·
+             alles Seltene eingeklappt. Sämtliche IDs unverändert – die JS-Logik läuft weiter. -->
         <div class="em-right-section">
-          <div class="em-right-lbl">Absender</div>
+          <div style="display:flex;align-items:baseline;gap:8px;">
+            <div class="em-right-lbl" style="flex:1;margin-bottom:0;border-bottom:none;">Absender</div>
+            <div id="emDateDisplay" style="font-size:11px;color:var(--text2);white-space:nowrap;">–</div>
+          </div>
           <input type="text" id="emSenderName" class="em-field-input" placeholder="Name eintragen …" oninput="_emScheduleSave()" autocomplete="off">
           <div id="emSenderDisplay" style="font-size:11px;color:var(--text2);word-break:break-word;overflow-wrap:break-word;overflow:hidden;padding:2px 0;max-width:100%;">–</div>
         </div>
-        <!-- #381: Kontakte (wie Auftrag/Aufgabe) -->
-        <div class="em-right-section">
+        <!-- Status + Frist nebeneinander, darunter die Hauptaktionen -->
+        <div class="em-right-section" style="border-top:1px solid var(--border);padding-top:8px;">
+          <div class="em-right-lbl" onclick="_emToggleTaskBlock()" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;user-select:none;">
+            <span>Bearbeitung</span><span id="emTaskCollapseArrow" style="font-size:11px;color:var(--text2);display:inline-block;transition:transform .2s;">▾</span>
+          </div>
+          <div id="emTaskCollapseBody">
+            <div style="display:flex;gap:6px;align-items:center;margin-bottom:7px;">
+              <select id="emStatusSel" class="em-field-input" style="flex:1;min-width:0;margin:0;" onchange="_emScheduleSave();_emUpdateTop2()"></select>
+              <input type="date" id="emDueDate" class="em-field-input" style="width:auto;flex-shrink:0;margin:0;" title="Bearbeiten bis" oninput="_emScheduleSave();_emUpdateTop2()" autocomplete="off">
+            </div>
+            <!-- b559: Hauptaktion prominent, Seltenes + Gefährliches hinter ⋯ -->
+            <div style="display:flex;gap:5px;align-items:stretch;">
+              <button class="em-action-btn primary" style="flex:1;margin:0;" onclick="_pamZuAuftragAusEmail()" title="Auftragsordner anlegen, Dateien mitnehmen und Task verschieben">🏗 Auftrag erstellen</button>
+              <button class="em-action-btn" style="width:auto;flex-shrink:0;margin:0;padding:0 12px;" onclick="_emAntworten()" title="Antworten">↩</button>
+              <button class="em-action-btn" style="width:auto;flex-shrink:0;margin:0;padding:0 12px;" onclick="_emToggleMehrMenu(event)" title="Weitere Aktionen">⋯</button>
+            </div>
+            <!-- ⋯-Menü -->
+            <div id="emMehrMenu" style="display:none;margin-top:5px;border:1px solid var(--border);border-radius:7px;padding:5px;background:var(--bg2);">
+              <button class="em-action-btn" onclick="_emLadeOutlookVerlauf();_emCloseMehrMenu()" id="emOutlookLadenBtn" title="Outlook-Verlauf laden (info@ + frank.braun@)">📨 Outlook laden</button>
+              <button class="em-action-btn" onclick="_emLadeGmailVerlauf();_emCloseMehrMenu()" id="emGmailLadenBtn" title="Gmail-Verlauf laden" style="display:none;">📩 Gmail laden</button>
+              <label class="em-action-btn" style="display:block;text-align:center;cursor:pointer;">📁 E-Mail-Datei wählen (.eml/.msg)
+                <input type="file" accept=".msg,.eml" style="display:none" onchange="_emHandleEmlSelect(event);_emCloseMehrMenu()" autocomplete="off">
+              </label>
+              <hr style="border:none;border-top:1px solid var(--border);margin:5px 0;">
+              <button class="em-action-btn" onclick="_emInAuftragEinglieder();_emCloseMehrMenu()">📋 In Auftrag eingliedern</button>
+              <button class="em-action-btn" onclick="_emInBoardVerschieben();_emCloseMehrMenu()">↪ In Board verschieben</button>
+              <button class="em-action-btn danger" onclick="_emDeleteTask();_emCloseMehrMenu()">🗑 Löschen</button>
+            </div>
+          </div>
+        </div>
+        <!-- b559: Aufgaben mit Termin + Freie Termine in EINER Sektion -->
+        <div class="em-right-section" style="border-top:1px solid var(--border);padding-top:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+            <div class="em-right-lbl" style="margin-bottom:0;border-bottom:none;">📅 Termine</div>
+            <div style="display:flex;gap:4px;">
+              <button class="em-add-termin-btn" onclick="_emAddAufgabe()" style="width:auto;margin-top:0;padding:2px 8px;" title="Aufgabe mit Termin">＋ Aufgabe</button>
+              <button class="em-add-termin-btn" onclick="_emAddTermin()" style="width:auto;margin-top:0;padding:2px 8px;" title="Freier Termin">＋ Frei</button>
+            </div>
+          </div>
+          <div id="emAufgabenList"></div>
+          <div class="em-termin-list" id="emTerminList"></div>
+        </div>
+        <!-- Notiz -->
+        <div class="em-right-section" style="border-top:1px solid var(--border);padding-top:8px;">
+          <div class="em-right-lbl">Notiz / Verlauf <span style="font-weight:400;font-size:10px;color:var(--text2);">(Doppelklick = großes Fenster)</span></div>
+          <textarea id="emNotizInput" class="em-field-input" rows="5" placeholder="Notizen …" oninput="_emScheduleSave()" ondblclick="_emOpenNotizPopup()"></textarea>
+        </div>
+        <!-- ── ab hier: alles Seltene, eingeklappt ── -->
+        <div class="em-right-section" style="border-top:1px solid var(--border);padding-top:8px;">
           <div class="em-right-lbl" onclick="_emToggleKontakte()" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;user-select:none;">
             <span>👥 Kontakte <span id="emKontakteBadge" style="font-weight:400;font-size:11px;color:var(--text2);"></span></span>
             <span id="emKontakteArrow" style="font-size:11px;color:var(--text2);display:inline-block;transition:transform .2s;transform:rotate(-90deg);">▾</span>
           </div>
-          <!-- b553 (Punkt 9): Kontakte standardmäßig EINGEKLAPPT – größter Platzfresser der Spalte -->
           <div id="emKontakteBody" style="margin-top:6px;display:none;">
             <div id="emKontakteContainer"></div>
             <button class="em-action-btn" onclick="_emAddKontakt()" style="margin-top:4px;">+ Kontakt hinzufügen</button>
           </div>
         </div>
-        <div class="em-right-section">
-          <div class="em-right-lbl">Posteingang</div>
-          <div id="emDateDisplay" style="font-size:11px;color:var(--text2);">–</div>
-        </div>
-        <div class="em-right-section" style="border-top:1px solid var(--border);padding-top:8px;">
-          <div class="em-right-lbl" onclick="_emToggleTaskBlock()" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;user-select:none;margin-bottom:0;">
-            <span>Task</span><span id="emTaskCollapseArrow" style="font-size:11px;color:var(--text2);display:inline-block;transition:transform .2s;">▾</span>
-          </div>
-        </div>
-        <!-- #381: alles ab hier per TASK-Pfeil einklappbar -->
-        <div id="emTaskCollapseBody">
-        <div class="em-right-section" style="padding-top:0;">
-          <select id="emStatusSel" class="em-field-input" onchange="_emScheduleSave();_emUpdateTop2()"></select>
-        </div>
-        <div class="em-right-section">
-          <div class="em-right-lbl">Bearbeiten bis</div>
-          <input type="date" id="emDueDate" class="em-field-input" oninput="_emScheduleSave();_emUpdateTop2()" autocomplete="off">
-        </div>
-        <!-- b553 (Punkt 9): eigene Dropzone raus – das GANZE Fenster nimmt .eml/.msg an
-             (Drag-Handler am emModalBox); hier bleibt nur die Datei-Auswahl -->
-        <div class="em-right-section">
-          <label class="em-action-btn" style="display:block;text-align:center;cursor:pointer;">📁 E-Mail-Datei wählen (.eml/.msg)
-            <input type="file" accept=".msg,.eml" style="display:none" onchange="_emHandleEmlSelect(event)" autocomplete="off">
-          </label>
-        </div>
-        <!-- Aufgaben mit Termin -->
-        <div class="em-right-section">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-            <div class="em-right-lbl" style="margin-bottom:0;border-bottom:none;">Aufgaben mit Termin</div>
-            <button class="em-add-termin-btn" onclick="_emAddAufgabe()" style="width:auto;margin-top:0;padding:2px 7px;">＋</button>
-          </div>
-          <div id="emAufgabenList"></div>
-        </div>
-        <div class="em-right-section">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-            <div class="em-right-lbl" style="margin-bottom:0;border-bottom:none;">Freie Termine</div>
-            <button class="em-add-termin-btn" onclick="_emAddTermin()" style="width:auto;margin-top:0;padding:2px 7px;">＋</button>
-          </div>
-          <div class="em-termin-list" id="emTerminList"></div>
-        </div>
-        <!-- Anhänge -->
-        <div class="em-right-section" id="emAttachSection" style="display:none;border-top:1px solid var(--border);padding-top:8px;">
+        <div class="em-right-section" id="emAttachSection" style="display:none;">
           <div class="em-right-lbl" onclick="_emToggleAttachSection()" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
             <span>📎 Anhänge <span id="emAttachBadge" style="font-weight:400;font-size:11px;"></span></span>
             <span id="emAttachArrow" style="font-size:10px;">›</span>
           </div>
           <div id="emAttachSectionBody" style="display:none;margin-top:6px;"></div>
-        </div>
-        <div class="em-right-section" style="border-top:1px solid var(--border);padding-top:8px;">
-          <div class="em-right-lbl" onclick="_emToggleFolder()" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
-            <span>📁 Drive-Ordner</span><span id="emFolderArrow" style="font-size:10px;">›</span>
-          </div>
-          <div id="emFolderBody" style="display:none;margin-top:4px;">
-            <a id="emFolderLink" href="#" target="_blank" style="font-size:11px;color:var(--accent);text-decoration:none;">Ordner öffnen →</a>
-          </div>
-        </div>
-        </div><!-- /emTaskCollapseBody (#382: Einklappen nur bis Drive-Ordner) -->
-        <div class="em-right-section" style="border-top:1px solid var(--border);padding-top:8px;">
-          <div class="em-right-lbl">Notiz / Verlauf <span style="font-weight:400;font-size:10px;color:var(--text2);">(Doppelklick = großes Fenster)</span></div>
-          <textarea id="emNotizInput" class="em-field-input" rows="5" placeholder="Notizen …" oninput="_emScheduleSave()" ondblclick="_emOpenNotizPopup()"></textarea>
         </div>
         <!-- #381: Checkliste (wie Auftrag/Aufgabe) -->
         <div class="em-right-section" style="border-top:1px solid var(--border);padding-top:8px;">
@@ -4379,15 +4382,15 @@ function _pamGuestSubmit(){
             </div>
           </div>
         </div>
+        <!-- b559: „Aktionen"-Block aufgelöst – Hauptaktionen stehen oben, Seltenes im ⋯-Menü.
+             Hier steht jetzt der Drive-Ordner (war vorher im Task-Klappbereich). -->
         <div class="em-right-section" style="border-top:1px solid var(--border);padding-top:8px;">
-          <div class="em-right-lbl">Aktionen</div>
-          <button class="em-action-btn primary" onclick="_emAntworten()">↩ Antworten</button>
-          <button class="em-action-btn" onclick="_emLadeOutlookVerlauf()" id="emOutlookLadenBtn" title="Outlook-Verlauf laden (info@ + frank.braun@)">📨 Outlook laden</button>
-          <button class="em-action-btn" onclick="_emLadeGmailVerlauf()" id="emGmailLadenBtn" title="Gmail-Verlauf laden" style="display:none;">📩 Gmail laden</button>
-          <button class="em-action-btn" onclick="_pamZuAuftragAusEmail()" title="Auftragsordner anlegen, Dateien mitnehmen und Task verschieben">🏗 Auftrag erstellen</button>
-          <button class="em-action-btn" onclick="_emInAuftragEinglieder()">📋 In Auftrag eingliedern</button>
-          <button class="em-action-btn" onclick="_emInBoardVerschieben()">↪ In Board verschieben</button>
-          <button class="em-action-btn danger" onclick="_emDeleteTask()">🗑 Löschen</button>
+          <div class="em-right-lbl" onclick="_emToggleFolder()" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
+            <span>📁 Drive-Ordner</span><span id="emFolderArrow" style="font-size:10px;">›</span>
+          </div>
+          <div id="emFolderBody" style="display:none;margin-top:4px;">
+            <a id="emFolderLink" href="#" target="_blank" style="font-size:11px;color:var(--accent);text-decoration:none;">Ordner öffnen →</a>
+          </div>
         </div>
         <!-- ── ALLE TASKS DIESES BOARDS (Aufklapp) ── -->
         <div class="em-right-section" style="border-top:1px solid var(--border);padding-top:8px;">
@@ -4500,7 +4503,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-02 · #558'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-02-b558) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-02 · #559'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-02-b559) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -15456,8 +15459,10 @@ async function createPdfAllFotos(){
   if(!window.jspdf){showToast('PDF-Bibliothek nicht geladen','error');return;}
   const {jsPDF}=window.jspdf;
   const taskTitle=(document.getElementById('taskTitleInput')?.value||'Task').trim();
-  const taskAddr=(document.getElementById('tAdresse')?.value||'').trim();
-  const taskKS=(document.getElementById('tKostenstelle')?.value||'').trim();
+  // b559: Feldnamen waren falsch (tAdresse/tKostenstelle existieren nicht) – Adresse und
+  // Kostenstelle blieben im erzeugten Foto-PDF deshalb immer leer
+  const taskAddr=(document.getElementById('tAdr')?.value||'').trim();
+  const taskKS=(document.getElementById('taskTagsInput')?.value||'').trim();
   const totalFotos=taskFotos.length;
   showToast('📄 PDF wird erstellt ('+totalFotos+' Fotos)…','info',8000);
   let doc=null;
@@ -20064,7 +20069,11 @@ async function _pamTaskZuAuftrag(task,vonBoard){
 function _pamZuAuftragAusEmail(){
   if(typeof _emCurrentTask==='undefined'||!_emCurrentTask){showToast('Kein Task offen','error');return;}
   if(typeof _emDoSave==='function')_emDoSave();
-  _pamTaskZuAuftrag(_emCurrentTask,typeof _emCurrentBoard!=='undefined'?_emCurrentBoard:'');
+  // b559: das LIVE-Objekt übergeben, nicht die Arbeitskopie. Sonst wandert die Kopie ins
+  // Zielboard und alles, was nur am Live-Objekt hing (frisch geladener Verlauf, automatisch
+  // gesicherte .eml), geht verloren (Befund F3 der Prüfung vom 31.07.).
+  const _live=(typeof findTaskById==='function'&&findTaskById(_emCurrentTask.id))||_emCurrentTask;
+  _pamTaskZuAuftrag(_live,typeof _emCurrentBoard!=='undefined'?_emCurrentBoard:'');
 }
 function _pamZuAuftragAusTask(){
   const id=(document.getElementById('taskId')||{}).value||'';
@@ -21213,7 +21222,7 @@ async function _createGoogleKontakt(kontaktDiv){
   // Task-Felder lesen
   const adresse=(document.getElementById('tAdr')||{value:''}).value||'';
   const hausverwaltung=(document.getElementById('tHV')||{value:''}).value||'';
-  const repNr=(document.getElementById('tRepNr')||{value:''}).value||'';
+  const repNr=(document.getElementById('taskRepNr')||{value:''}).value||''; // b559: hieß fälschlich tRepNr → Rep.-Nr. kam nie an
   const taskTitle=(document.getElementById('taskTitleInput')||{value:''}).value||'';
   const adr=_parseAdresseGK(adresse);
   const nm=_parseNameGK(name);
@@ -21311,7 +21320,7 @@ function _showGKPreview(kontaktDiv){
   const email=(kontaktDiv.querySelector('.k-email')||{value:''}).value||'';
   const adresse=(document.getElementById('tAdr')||{value:''}).value||'';
   const hausverwaltung=(document.getElementById('tHV')||{value:''}).value||'';
-  const repNr=(document.getElementById('tRepNr')||{value:''}).value||'';
+  const repNr=(document.getElementById('taskRepNr')||{value:''}).value||''; // b559: hieß fälschlich tRepNr → Rep.-Nr. kam nie an
   const taskTitle=(document.getElementById('taskTitleInput')||{value:''}).value||'';
   const note=[taskTitle,repNr?'Rep.'+repNr:''].filter(Boolean).join(' · ');
   const ex=document.getElementById('gk-preview-modal');if(ex)ex.remove();
@@ -22918,7 +22927,8 @@ function renderEmailSection(){
       else{disp.style.display='none';}
     }
   }
-  const ti=document.getElementById('tEmailOrigTitle');
+  // b559: „E-Mail Dateien (N)"-Titel entfällt – die Zahlen stehen in den Chips (EML/PDF/Fotos)
+  // und in der E-Mail-Karte; das Element gibt es seit Build 4 nicht mehr.
   // Fix 6: Thread-EMLs aus Icon-Grid herausfiltern — sie sind bereits im Thread-Verlauf sichtbar
   const _eidTask=(()=>{const _id=(document.getElementById('taskId')||{}).value||'';return _id?findTaskById(_id):null;})();
   const _eidTIds=new Set([...((_eidTask&&_eidTask.gmailThreadMessages)||[]).map(m=>m.messageId).filter(Boolean),...((_eidTask&&_eidTask.msThreadMessages)||[]).map(m=>m.messageId).filter(Boolean)]);
@@ -22926,7 +22936,6 @@ function renderEmailSection(){
   const _pdfSeenIds=new Set();
   const pdfItems=taskEmailPdfs.map((p,i)=>({...p,_type:'pdf',_idx:i})).filter(p=>{if(p.fileId&&_pdfSeenIds.has(p.fileId))return false;if(p.fileId)_pdfSeenIds.add(p.fileId);return true;}).sort((a,b)=>_emailSortTs(b)-_emailSortTs(a));
   const total=origItems.length+pdfItems.length;
-  if(ti)ti.innerHTML='&#128231; E-Mail Dateien'+(total?` <span style="color:var(--accent2);font-size:10px;font-weight:400;text-transform:none;letter-spacing:0">(${total})</span>`:'');
   const galBtn=document.getElementById('emailGalBtn');
   if(galBtn)galBtn.style.display=total?'':'none';
   // Duplikat-Button: einblenden wenn der Task emailOriginals hat die im Thread stecken
@@ -27277,23 +27286,15 @@ function _renderEmailMailList(){
   _hdr.innerHTML='<span style="font-size:12px;font-weight:700;color:var(--text);">● E-Mail</span>'+
     '<span style="font-size:11px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:1px 9px;color:var(--text2);">'+_totalCnt+' Nachricht'+(_totalCnt!==1?'en':'')+'</span>';
   el.appendChild(_hdr);
-  // 2. Sender-Karte
-  const _scard=document.createElement('div');
-  _scard.style.cssText='margin:6px 8px;padding:8px 10px;border:2px solid #0284c7;border-radius:8px;background:var(--bg2);display:flex;align-items:center;gap:8px;flex-shrink:0;';
-  _scard.innerHTML=
-    '<div style="width:32px;height:32px;border-radius:50%;background:#1e7e34;display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:700;flex-shrink:0;">'+_escHtml(_initials)+'</div>'+
-    '<div style="flex:1;min-width:0;">'+
-      '<div style="font-size:13px;font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_escHtml(_senderName||_senderEmail)+'</div>'+
-      '<div style="font-size:11px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_escHtml(_senderEmail)+'</div>'+
-    '</div>';
-  el.appendChild(_scard);
+  // b559: Absender-Karte entfällt – der Absender steht rechts im Kopf (stand vorher
+  // dreifach im Fenster: Karte, rechte Spalte, Mail-Zeile)
   // 3. E-Mails-Sektion: Label + Chips
   const _sec=document.createElement('div');
   _sec.style.cssText='margin:5px 8px 0;padding:8px 10px;border:2px solid #0284c7;border-radius:8px;background:var(--bg2);flex-shrink:0;';
   _sec.innerHTML=
     '<div style="display:flex;align-items:center;gap:5px;margin-bottom:5px;">'+
       '<span style="font-size:11px;font-weight:700;color:var(--text);">● E-Mails</span>'+
-      '<span style="font-size:11px;color:var(--text2);flex:1;">'+_totalCnt+' Nachrichten</span>'+
+      '<span style="font-size:11px;color:var(--text2);flex:1;">'+_totalCnt+' Nachricht'+(_totalCnt!==1?'en':'')+'</span>'+ // b559: Grammatik ("1 Nachrichten")
       '<button onclick="event.stopPropagation();_emOeffneGesamtVerlauf()" style="display:flex;align-items:center;gap:4px;padding:2px 8px;font-size:11px;font-weight:600;border:none;border-radius:6px;background:#1e7e34;color:#fff;cursor:pointer;">📋 Öffnen</button>'+
     '</div>'+
     '<div style="display:flex;align-items:center;justify-content:space-between;gap:4px;">'+
@@ -27319,6 +27320,16 @@ function _renderEmailMailList(){
     _listDiv.innerHTML=_pamVerlaufListeHtml(t,t.id).html;
   }
   el.appendChild(_listDiv);
+  // b559: Bei genau EINER Mail den Text gleich mit anzeigen – vorher blieb die halbe
+  // Fensterhöhe leer und man musste erst klicken, obwohl es nichts zu wählen gab.
+  if(allM.length===1){
+    const _vor=document.createElement('div');
+    _vor.id='emEineMailVorschau';
+    _vor.style.cssText='flex:2;min-height:0;overflow:hidden;border-top:1px solid var(--border);background:var(--bg2);display:flex;flex-direction:column;';
+    _vor.innerHTML='<div style="padding:10px 12px;color:var(--text2);font-size:12px;">⏳ Mail wird geladen…</div>';
+    el.appendChild(_vor);
+    _emZeigeEineMail(t,allM[0],_vor);
+  }
   // 5. Footer: "Vollständigen Verlauf öffnen"
   const _footer=document.createElement('div');
   _footer.style.cssText='padding:8px 10px;border-top:1px solid var(--border);background:var(--bg2);flex-shrink:0;';
@@ -27598,6 +27609,66 @@ function _emCollapseToggle(bodyId,arrowId){
   b.style.display=open?'none':'';
   if(a)a.style.transform=open?'rotate(-90deg)':'';
 }
+// b559: Mailtext direkt anzeigen, wenn der Vorgang nur EINE Mail enthält.
+// .eml → aus Drive lesen (funktioniert ohne Postfach); Postfach-Mail → Graph/Gmail.
+async function _emZeigeEineMail(tk,m,ziel){
+  if(!ziel)return;
+  const d=m&&m.data||{};
+  const _setz=function(inhalt,istHtml){
+    if(!document.body.contains(ziel))return;
+    ziel.innerHTML='';
+    const kopf=document.createElement('div');
+    kopf.style.cssText='padding:7px 12px;border-bottom:1px solid var(--border);background:var(--bg3);flex-shrink:0;';
+    const dt=d.date?new Date(d.date):null;
+    const ds=dt&&!isNaN(dt)?(('0'+dt.getDate()).slice(-2)+'.'+('0'+(dt.getMonth()+1)).slice(-2)+'.'+dt.getFullYear()+' '+('0'+dt.getHours()).slice(-2)+':'+('0'+dt.getMinutes()).slice(-2)):'';
+    kopf.innerHTML='<div style="font-size:12px;font-weight:700;color:var(--text1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_escHtml(d.subject||d.name||'(kein Betreff)')+'</div>'
+      +'<div style="font-size:11px;color:var(--text2);margin-top:1px;">'+_escHtml(d.fromName||d.from||d.sender||'')+(ds?' · '+ds:'')+'</div>'
+      +(typeof _pamMailAnhangChipsHtml==='function'?_pamMailAnhangChipsHtml(tk,d.messageId||''):'');
+    ziel.appendChild(kopf);
+    const koerper=document.createElement('div');
+    koerper.style.cssText='flex:1;min-height:0;overflow:hidden;display:flex;';
+    if(istHtml){
+      const fr=document.createElement('iframe');
+      fr.style.cssText='flex:1;width:100%;border:none;';
+      const blob=new Blob(['<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,Helvetica,sans-serif;font-size:13px;margin:12px 16px;line-height:1.6;color:#222;}a{color:#1a73e8;}img{max-width:100%;}</style></head><body>'+String(inhalt).replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'')+'</body></html>'],{type:'text/html'});
+      const bu=URL.createObjectURL(blob);
+      fr.src=bu;fr.onload=function(){setTimeout(function(){URL.revokeObjectURL(bu);},3000);};
+      koerper.appendChild(fr);
+    }else{
+      koerper.innerHTML='<div style="flex:1;overflow-y:auto;padding:12px 16px;font-size:13px;line-height:1.6;color:var(--text1);white-space:pre-wrap;">'+_escHtml(inhalt||'(kein Inhalt)')+'</div>';
+    }
+    ziel.appendChild(koerper);
+  };
+  try{
+    if(m.src==='original'&&d.fileId&&typeof gdriveToken!=='undefined'&&gdriveToken){
+      const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(d.fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
+      if(r.ok){
+        const p=_parseEmlText(_smartDecodeEmlBuffer(await r.arrayBuffer()));
+        let h=p.bodyHtml||'';
+        if(h&&p.cidMap){for(const[cid,durl]of Object.entries(p.cidMap)){h=h.split(cid).join(durl);}}
+        _setz(h||p.bodyText||'',!!h);return;
+      }
+    }
+    if(m.src==='ms'&&d.id&&typeof _msGetMsgDual==='function'){
+      const r=await _msGetMsgDual(tk,'https://graph.microsoft.com/v1.0/me/messages/'+d.id+'?$select=body',true);
+      if(r&&r.ok){const dat=await r.json();_setz(dat.body&&dat.body.content||'',(dat.body&&dat.body.contentType)==='html');return;}
+    }
+    if(m.src==='gmail'&&d.id&&typeof gmailToken!=='undefined'&&gmailToken){
+      const r=await fetch('https://www.googleapis.com/gmail/v1/users/me/messages/'+d.id+'?format=full',{headers:{Authorization:'Bearer '+gmailToken}});
+      if(r.ok){const mb=await r.json();const res={html:'',plain:''};_gmExtractBody(mb.payload,res);_setz(res.html||res.plain||'',!!res.html);return;}
+    }
+  }catch(e){console.warn('[EM] Einzelmail-Vorschau:',e);}
+  _setz(d.preview||d.bodyText||d.snippet||'Kein Inhalt verfügbar – Mail anklicken zum Öffnen.',false);
+}
+// b559: ⋯-Menü der rechten Spalte – Seltenes und Gefährliches (Eingliedern, Verschieben,
+// Löschen) liegt nicht mehr direkt neben den harmlosen Knöpfen
+function _emToggleMehrMenu(ev){
+  if(ev&&ev.stopPropagation)ev.stopPropagation();
+  const m=document.getElementById('emMehrMenu');
+  if(!m)return;
+  m.style.display=(m.style.display==='none'||!m.style.display)?'block':'none';
+}
+function _emCloseMehrMenu(){const m=document.getElementById('emMehrMenu');if(m)m.style.display='none';}
 function _emToggleTaskBlock(){_emCollapseToggle('emTaskCollapseBody','emTaskCollapseArrow');}
 function _emToggleKontakte(){_emCollapseToggle('emKontakteBody','emKontakteArrow');}
 function _emToggleCheckliste(){_emCollapseToggle('emChecklisteBody','emChecklisteArrow');}
