@@ -4503,7 +4503,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-02 · #564'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-02-b564) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-02 · #565'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-02-b565) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -25793,55 +25793,14 @@ function _openVbsNewTask(data){
   },200);
 }
 
-// 5) Drive-Ordner automatisch suchen – Retry alle 30 Sekunden (max 10 Min.)
+// 5) ENTFERNT in b565: alte Drive-Such-Kette (_vbsStartDriveSearch/_vbsSearchOnce, Retry
+//    alle 30 s). Seit der Umstellung „PAM legt selbst an" (11.07.) von keiner Stelle mehr
+//    aufgerufen; sie suchte zudem noch die alte 00_-Struktur. Die vier Sperren-Variablen
+//    bleiben – sie schützen _autoCreateTaskFolder weiterhin vor Parallel-Anlage.
 let _vbsSearchTimer=null;
 let _vbsSearchAttempts=0;
 let _vbsSubfolderSearchActive=false; // Sperre während Unterordner-Retry läuft
 let _vbsCreating=false; // Sperre während VBS-Direktanlage (_vbsCreateDriveStruktur) läuft
-const _VBS_MAX_ATTEMPTS=20;
-
-function _vbsStartDriveSearch(ordnerName){
-  _vbsSearchAttempts=0;
-  clearTimeout(_vbsSearchTimer);
-  _vbsShowSearchBadge('🔄 Suche Drive-Ordner… (NAS-Sync läuft)');
-  _vbsSearchOnce(ordnerName);
-}
-
-async function _vbsSearchOnce(ordnerName){
-  if(!gdriveToken){_vbsShowSearchBadge('⚠ Drive nicht verbunden');return;}
-  _vbsSearchAttempts++;
-  try{
-    // Suche in 01_Hausverwaltungen und 02_Privatkunden (Platzhalter-IDs – werden durch echte IDs ersetzt)
-    const VBS_SEARCH_PARENTS=['VBS_HV_FOLDER_ID','VBS_PK_FOLDER_ID'].filter(id=>!id.startsWith('VBS_'));
-    let found=null;
-    for(const pid of VBS_SEARCH_PARENTS){
-      const qP=encodeURIComponent("'"+pid+"' in parents and name='"+ordnerName.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
-      const rP=await fetch('https://www.googleapis.com/drive/v3/files?q='+qP+'&fields=files(id,name)&spaces=drive&pageSize=5',{headers:{Authorization:'Bearer '+gdriveToken}});
-      if(rP.status===401){_handleDrive401();return;}
-      const jP=await rP.json();
-      found=(jP.files||[]).find(f=>f.name===ordnerName);
-      if(found)break;
-    }
-    // Fallback: gesamtes Drive durchsuchen
-    if(!found){
-      const qAll=encodeURIComponent("name='"+ordnerName.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
-      const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+qAll+'&fields=files(id,name)&spaces=drive&pageSize=5',{headers:{Authorization:'Bearer '+gdriveToken}});
-      if(r.status===401){_handleDrive401();return;}
-      const j=await r.json();
-      found=(j.files||[]).find(f=>f.name===ordnerName);
-    }
-    if(found){await _vbsApplyDriveLinks(found.id,ordnerName);return;}
-  }catch(e){console.warn('[VBS] Drive-Suche Fehler:',e);}
-  // Noch nicht gefunden – retry
-  if(_vbsSearchAttempts<_VBS_MAX_ATTEMPTS){
-    _vbsShowSearchBadge('🔄 Suche… Versuch '+_vbsSearchAttempts+'/'+_VBS_MAX_ATTEMPTS+' (Sync läuft, bitte warten)');
-    _vbsSearchTimer=setTimeout(()=>_vbsSearchOnce(ordnerName),30000);
-  } else {
-    _vbsSearchAttempts=0; // Sperre aufheben: _autoCreateTaskFolder darf wieder laufen
-    _vbsSearchTimer=null;
-    _vbsShowSearchBadge('⚠ Ordner nicht in Drive gefunden – bitte Link manuell eintragen',false,true);
-  }
-}
 
 // 5b) Drive-Ordnerstruktur anlegen – adaptiver Zwei-Ebenen-Oberordner-Suche
 // nasParent = direkter Elternordner des Auftrags (z.B. "2026" oder "AHV_Hauptstr")
@@ -26083,60 +26042,9 @@ async function _vbsFindStammdaten(startFolderId){
   return null;
 }
 
-async function _vbsSearchSubfolders(folderId){
-  // Sucht 00_Posteingang → E-Mails; gibt {emailUrl, stammdatenUrl} zurück
-  // Retry bis zu 4× mit je 40s Pause falls Unterordner noch nicht indexiert
-  const baseUrl='https://drive.google.com/drive/folders/'+folderId;
-  for(let attempt=0;attempt<4;attempt++){
-    if(attempt>0){
-      await new Promise(res=>setTimeout(res,40000));
-      if(!gdriveToken)return{emailUrl:baseUrl,stammdatenUrl:''};
-    }
-    try{
-      const q2=encodeURIComponent("'"+folderId+"' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false");
-      const r2=await fetch('https://www.googleapis.com/drive/v3/files?q='+q2+'&fields=files(id,name)&spaces=drive&pageSize=20',{headers:{Authorization:'Bearer '+gdriveToken}});
-      if(r2.status===401){_handleDrive401();return{emailUrl:baseUrl,stammdatenUrl:''};}
-      const sub=(await r2.json()).files||[];
-      if(sub.length===0)continue; // Noch nicht indexiert – retry
-      const posteingang=sub.find(f=>f.name==='00_Posteingang')||sub.find(f=>/posteingang/i.test(f.name));
-      let emailUrl=baseUrl;
-      if(posteingang){
-        const q3=encodeURIComponent("'"+posteingang.id+"' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false");
-        const r3=await fetch('https://www.googleapis.com/drive/v3/files?q='+q3+'&fields=files(id,name)&spaces=drive&pageSize=10',{headers:{Authorization:'Bearer '+gdriveToken}});
-        const emlFolder=((await r3.json()).files||[]).find(f=>/e.?mail/i.test(f.name));
-        emailUrl='https://drive.google.com/drive/folders/'+(emlFolder?emlFolder.id:posteingang.id);
-      }
-      const stammdatenId=await _vbsFindStammdaten(folderId);
-      const stammdatenUrl=stammdatenId?'https://drive.google.com/drive/folders/'+stammdatenId:'';
-      return{emailUrl,stammdatenUrl};
-    }catch(e){console.warn('[VBS] Unterordner-Suche Versuch '+(attempt+1)+':',e);}
-  }
-  return{emailUrl:baseUrl,stammdatenUrl:''};
-}
-
-async function _vbsApplyDriveLinks(folderId,ordnerName){
-  const baseUrl='https://drive.google.com/drive/folders/'+folderId;
-  // Hauptordner sofort in alle Drive-Felder eintragen
-  const tGD=document.getElementById('tGD');if(tGD)tGD.value=baseUrl;
-  const tGDO=document.getElementById('tGDOrdner');if(tGDO)tGDO.value=baseUrl;
-  const tEO=document.getElementById('tEmailOrdner');if(tEO)tEO.value=baseUrl;
-  clearTimeout(_vbsSearchTimer);_vbsSearchTimer=null;_vbsSearchAttempts=0;
-  _vbsShowSearchBadge('✅ Drive-Ordner eingetragen – Unterordner per Explorer wählen',true,false);
-  showToast('✅ Drive-Ordner gefunden & eingetragen','success',5000);
-  if(typeof _updateFotoOrdnerHint==='function')_updateFotoOrdnerHint();
-  if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
-  // Stammdaten-Ordner: einmalig im Hintergrund suchen (kein Retry)
-  try{
-    const stammdatenId=await _vbsFindStammdaten(folderId);
-    if(stammdatenId){
-      const stammdatenUrl='https://drive.google.com/drive/folders/'+stammdatenId;
-      const tSb=document.getElementById('tSbPdfOrdner');if(tSb)tSb.value=stammdatenUrl;
-      const tSbV=document.getElementById('tSbPdfOrdnerVerk');if(tSbV)tSbV.value=stammdatenUrl;
-      if(typeof _saveSbOrdnerForAdr==='function')_saveSbOrdnerForAdr();
-      _vbsShowSearchBadge('✅ Drive-Ordner & Stammblatt-Ordner eingetragen',true,false);
-    }
-  }catch(e){console.warn('[VBS] Stammdaten-Suche:',e);}
-}
+// ENTFERNT in b565: _vbsSearchSubfolders (suchte die alte 00_Posteingang-Struktur, Retry
+// 4×40 s) und _vbsApplyDriveLinks – beide hingen nur an der ebenfalls entfernten alten
+// Such-Kette. _vbsFindStammdaten bleibt: wird von _vbsCreateDriveStruktur genutzt.
 
 function _vbsShowSearchBadge(text,success,warn){
   let badge=document.getElementById('_vbsDriveBadge');
@@ -30019,151 +29927,23 @@ function openBaudokuApp(){
 }
 
 // ══════════════════════════════════════════════
-// ── VBS-AUTOSTART: Drive-Ordner anlegen ──
+// ── VBS-AUTOSTART: ENTFERNT in b565 ──
 // ══════════════════════════════════════════════
+// Hier saß der alte Empfänger für ?newAuftrag=1 (blauer Balken „Drive-Ordner anlegen &
+// Task öffnen"): _vbsDec/_vbsEsc/_checkNewAuftragFromVbs/_showNewAuftragBanner/
+// _createDriveFoldersForNewAuftrag/_showVbsDriveLinksBox + DOMContentLoaded-Aufruf.
+// Er konnte seit Einführung von _readVbsUrlParams NIE mehr feuern: die IIFE sichert die
+// URL-Parameter und entfernt sie per replaceState, bevor DOMContentLoaded kommt. Aktiv
+// ist allein der Dialog-Weg über _checkVbsNewAuftrag → _openVbsNewTask. Der alte Zweig
+// hatte zudem eine Doppel-Dekodierung (zerstörte „+" in Telefonnummern) und beschriftete
+// noch mit der alten 02_Fotos/01_Dokumente-Struktur.
 
-function _vbsDec(s){try{return decodeURIComponent((s||'').replace(/\+/g,' '));}catch(e){return s||'';}}
-function _vbsEsc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+// (b565: _showNewAuftragBanner entfernt – siehe Grabstein oben)
 
-function _checkNewAuftragFromVbs(){
-  try{
-    const sp=new URLSearchParams(window.location.search);
-    if(!sp.get('newAuftrag'))return;
-    const p={
-      ordner : _vbsDec(sp.get('ordner')||''),
-      hv     : _vbsDec(sp.get('hv')||''),
-      ks     : _vbsDec(sp.get('ks')||''),
-      str    : _vbsDec(sp.get('str')||''),
-      ort    : _vbsDec(sp.get('ort')||''),
-      nas    : _vbsDec(sp.get('nas')||''),
-      mieter    : _vbsDec(sp.get('mieter')||''),
-      miet_tel  : _vbsDec(sp.get('miet_tel')||''),
-      miet_email: _vbsDec(sp.get('miet_email')||''),
-      datum  : _vbsDec(sp.get('datum')||''),
-      repnr  : _vbsDec(sp.get('repnr')||''),
-      kdnr   : _vbsDec(sp.get('kdnr')||''),
-      schaden: _vbsDec(sp.get('schaden')||''),
-      bauobj : _vbsDec(sp.get('bauobj')||''),
-      kuerzel: _vbsDec(sp.get('kuerzel')||''),
-      nasParent: _vbsDec(sp.get('nasParent')||''),
-      nasGrand:  _vbsDec(sp.get('nasGrand')||''),
-    };
-    setTimeout(()=>_showNewAuftragBanner(p), 1200);
-  }catch(e){console.warn('[VBS-Check]',e);}
-}
+// (b565: _createDriveFoldersForNewAuftrag entfernt – siehe Grabstein oben)
 
-function _showNewAuftragBanner(p){
-  if(document.getElementById('vbsNewAuftragBanner'))return;
-  window._vbsPendingData = p;
-  const banner=document.createElement('div');
-  banner.id='vbsNewAuftragBanner';
-  banner.style.cssText='position:fixed;top:56px;left:50%;transform:translateX(-50%);z-index:9990;'
-    +'background:linear-gradient(135deg,#1565c0,#0d47a1);color:#fff;padding:16px 22px;'
-    +'border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,.45);max-width:520px;width:92%;'
-    +'text-align:center;font-size:13px;';
-  banner.innerHTML=
-    '<div style="font-size:15px;font-weight:700;margin-bottom:6px;">\u{1F4C1} Neuer Auftrag aus VBS erkannt</div>'
-   +'<div style="margin-bottom:3px;opacity:.9;">'+_vbsEsc(p.str)+' &ndash; KS '+_vbsEsc(p.ks)+'</div>'
-   +'<div style="margin-bottom:12px;opacity:.7;font-size:11px;">NAS-Ordner wurde erstellt &ndash; jetzt Drive-Struktur anlegen?</div>'
-   +'<button id="vbsDriveStartBtn" '
-     +'onclick="_createDriveFoldersForNewAuftrag(window._vbsPendingData)" '
-     +'style="background:#fff;color:#1565c0;border:none;padding:8px 18px;border-radius:8px;'
-     +'font-weight:700;cursor:pointer;font-size:13px;margin-right:8px;">'
-     +'☁️ Drive-Ordner anlegen &amp; Task öffnen</button>'
-   +'<button onclick="document.getElementById(\'vbsNewAuftragBanner\').remove()" '
-     +'style="background:rgba(255,255,255,.2);color:#fff;border:none;padding:8px 14px;'
-     +'border-radius:8px;cursor:pointer;font-size:12px;">✕</button>';
-  document.body.appendChild(banner);
-}
+// (b565: _showVbsDriveLinksBox und der DOMContentLoaded-Aufruf entfernt – siehe Grabstein oben)
 
-async function _createDriveFoldersForNewAuftrag(p){
-  if(!gdriveToken){
-    showToast('⚠ Bitte zuerst mit Google Drive verbinden (☁️ oben rechts)','error',6000);
-    return;
-  }
-  const btn=document.getElementById('vbsDriveStartBtn');
-  if(btn){btn.textContent='⏳ Drive-Ordner werden vorbereitet…';btn.disabled=true;}
-
-  // Auto-Ordner-Dialog sperren – läuft gleich über _vbsCreateDriveStruktur
-  _autoFolderCreating=true;
-  _vbsSubfolderSearchActive=true;
-
-  try{
-    // Banner entfernen + Modal öffnen
-    const bann=document.getElementById('vbsNewAuftragBanner');
-    if(bann)bann.remove();
-    openNewTaskModal();
-
-    // Nicht-Drive-Felder sofort befüllen
-    setTimeout(()=>{
-      const adresse=(p.str+(p.ort?', '+p.ort:'')).trim();
-      const titelEl=document.getElementById('taskTitleInput');
-      if(titelEl){
-        let _t='';
-        const _k=(p.kuerzel||'').trim();
-        const _b=(p.bauobj||'').trim();
-        const _o=(p.ort||'').trim();
-        if(_k&&_b)      _t=_k+' '+_b+(_o?', '+_o:'');
-        else if(_b)     _t=_b+(_o?', '+_o:'');
-        else if(_k)     _t=_k+' '+(p.str||'').trim()+(_o?', '+_o:'');
-        else            _t=adresse||p.ordner||'';
-        titelEl.value=_t;
-      }
-      const hvEl =document.getElementById('tHV');           if(hvEl)   hvEl.value=p.hv||'';
-      const adrEl=document.getElementById('tAdr');          if(adrEl)  adrEl.value=adresse;
-      const schEl=document.getElementById('tSch');          if(schEl)  schEl.value=p.schaden||'';
-      const tagEl=document.getElementById('taskTagsInput'); if(tagEl)  tagEl.value=p.ks||'';
-      const repEl=document.getElementById('taskRepNr');     if(repEl)  repEl.value=p.repnr||'';
-      const kdEl =document.getElementById('taskKundenNr');  if(kdEl)   kdEl.value=p.kdnr||'';
-      const nasEl=document.getElementById('tNAS');          if(nasEl)  nasEl.value=p.nas||'';
-      if(typeof _updateHdrMeta==='function')  _updateHdrMeta();
-      if(typeof _updateMapsBtn==='function')  _updateMapsBtn();
-    },350);
-
-    // Drive-Struktur anlegen – _vbsCreateDriveStruktur setzt alle Drive-Felder,
-    // Stammblatt-Suche, NAS-Sync-Erkennung und Duplikat-Schutz
-    await _vbsCreateDriveStruktur(p.ordner||('Auftrag_'+p.ks), p.nasParent||'', p.nasGrand||'', p.nas||'');
-
-    showToast('✓ Task bereit – bitte speichern!','ok',4000);
-  }catch(e){
-    showToast('⚠ Fehler: '+e.message,'error',8000);
-    console.error('[VBS-Drive]',e);
-    if(btn){btn.textContent='☁️ Drive-Ordner anlegen & Task öffnen';btn.disabled=false;}
-  }finally{
-    _autoFolderCreating=false;
-    setTimeout(()=>{ _vbsSubfolderSearchActive=false; }, 3000);
-  }
-}
-
-function _showVbsDriveLinksBox(mainUrl,fotoUrl,dokUrl,emailUrl,stammdatenUrl){
-  const old=document.getElementById('vbsDriveLinksBox');
-  if(old)old.remove();
-  const box=document.createElement('div');
-  box.id='vbsDriveLinksBox';
-  box.style.cssText='position:fixed;bottom:20px;right:20px;z-index:9989;background:var(--bg);'
-    +'border:1px solid var(--green,#27ae60);border-radius:10px;padding:14px 18px;'
-    +'max-width:340px;font-size:12px;box-shadow:0 4px 20px rgba(0,0,0,.35);';
-  let sbRow=stammdatenUrl?'<div style="margin-bottom:4px;"><span style="opacity:.7;">_Stammdaten: </span>'
-    +'<a href="'+stammdatenUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>':'';
-  box.innerHTML=
-    '<div style="font-weight:700;color:var(--green,#27ae60);margin-bottom:9px;">☁️ Drive-Ordner bereit</div>'
-   +'<div style="margin-bottom:4px;"><span style="opacity:.7;">Hauptordner: </span>'
-     +'<a href="'+mainUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
-   +'<div style="margin-bottom:4px;"><span style="opacity:.7;">02_Fotos: </span>'
-     +'<a href="'+fotoUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
-   +'<div style="margin-bottom:4px;"><span style="opacity:.7;">01_Dokumente: </span>'
-     +'<a href="'+dokUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
-   +'<div style="margin-bottom:4px;"><span style="opacity:.7;">E-Mails: </span>'
-     +'<a href="'+emailUrl+'" target="_blank" style="color:var(--accent,#3a9eff);">Drive öffnen ↗</a></div>'
-   +sbRow
-   +'<div style="font-size:11px;opacity:.65;margin-bottom:8px;">Alle Felder im Task ausgefüllt.<br>Bitte Task speichern!</div>'
-   +'<button onclick="document.getElementById(\'vbsDriveLinksBox\').remove()" '
-     +'style="background:var(--bg2);border:1px solid var(--border);color:var(--text1);'
-     +'padding:4px 12px;border-radius:6px;cursor:pointer;font-size:11px;">✕ Schließen</button>';
-  document.body.appendChild(box);
-}
-
-document.addEventListener('DOMContentLoaded', _checkNewAuftragFromVbs);
 // ── Service Worker: bei jedem Seitenaufruf auf Updates prüfen ──────────────────────────────────
 if('serviceWorker' in navigator){
   navigator.serviceWorker.getRegistration().then(reg=>{
