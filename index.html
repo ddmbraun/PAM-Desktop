@@ -187,7 +187,7 @@ async function _ezProcess(info,fid,zone){
     let pdf=await _ezBuildPdfFromHtml(info);
     let d=info.date instanceof Date&&!isNaN(info.date)?info.date:new Date();
     let stamp=String(d.getFullYear()).slice(-2)+_ez2(d.getMonth()+1)+_ez2(d.getDate());
-    let fname=stamp+'_'+_ezClean(info.subject)+'.pdf';
+    let fname=_pamDateiname(info.date,info.subject,'.pdf'); // b558
     let result=await _ezUpload(pdf,fname,fid);
     _ezMsg(zone,'success','✅ Gespeichert: '+fname);
     setTimeout(function(){document.getElementById('emailDropZoneMsg')&&_ezMsg(zone,'','');},4000);
@@ -604,8 +604,48 @@ async function _gmMaybeLinkOnCreate(){
 // Fix 2026-06-23: Betreff-Limit 80→40 Zeichen. Reduziert die Dateinamenlänge deutlich, damit
 // der kombinierte NAS-Pfad (Freigabe + Projekt + E-Mail-Ordner + Dateiname) seltener Windows
 // MAX_PATH (260 Zeichen) reißt. Der Betreff ist der dominierende variable Längenanteil.
-function _ezClean(s){return(s||'E-Mail').replace(/[\/\\:*?"<>|]/g,'-').replace(/\s+/g,'_').substring(0,40);}
+// b557: Kappung 40 -> 25. Der Dateiname ist der LETZTE Teil eines NAS-Pfades, der vorher
+// schon 180-250 Zeichen verbraucht hat; ab 260 ist die Datei fuer den Explorer nicht mehr
+// erreichbar. Messung 02.08.2026 ueber alle 248 Ablage-Ordner: mit hoechstens 40 Zeichen
+// Dateiname sind 94,8 % der Ordner bedienbar (ueber Laufwerk S:), mit den bisherigen 69 nur
+// 66,9 %. Frueher stand die Grenze bei 80 und wurde schon einmal auf 40 gesenkt - gleicher
+// Grund. Zweites Argument: schaerfere Grenze dort, wo noch Uhrzeit + Richtung im Namen stehen.
+function _ezClean(s,max){return(s||'E-Mail').replace(/[\/\\:*?"<>|]/g,'-').replace(/\s+/g,'_').substring(0,max||25);}
 function _ez2(n){return n<10?'0'+n:String(n);}
+
+// ═══ b558: DIE EINZIGE Stelle, an der Ablage-Dateinamen entstehen ══════════════════════
+// Vorher bauten 13 Stellen ihren Namen selbst – mit DREI Datumsformen (260609 /
+// 2026.06.09 / 2026.06.09_1430) und jeweils eigener Laengengrenze. Zwei Folgen:
+//   1) Windows sortiert die Formen getrennt: bei "260609_" steht an zweiter Stelle eine
+//      '6', bei "2026.06.09_" eine '0' – dadurch landeten ALLE Punkt-Namen vor ALLEN
+//      Kurz-Namen, unabhaengig vom Datum. Die Sortierung nach Datum war kaputt.
+//   2) Niemand kannte die GESAMTlaenge. So wuchs ein Name unbemerkt auf 69 Zeichen; da
+//      NAS-Pfade schon 180-250 Zeichen verbrauchen, war die Datei ueber der 260er-Grenze
+//      und im Explorer nicht mehr erreichbar.
+// Jetzt: ein Format JJJJ.MM.TT (wie die Auftragsordner), Uhrzeit nur wo sie zur
+// Unterscheidung gebraucht wird, Richtung nur wo sie etwas aussagt – und die Gesamtlaenge
+// wird HIER durchgesetzt. Kein Aufrufer nennt mehr eine Zahl.
+// Gekuerzt wird ausschliesslich der freie Teil; Datum, Richtung und Endung bleiben ganz.
+//   opt.zeit     = true       -> _HHMM hinter das Datum
+//   opt.richtung = 'Aus'/'Ein'-> Richtung in den Dateinamen (Anzeige im Fenster bleibt lang)
+const PAM_NAME_MAX=40; // Messung 02.08.2026 ueber alle 248 Ablage-Ordner: damit sind 94,8 %
+                       // bedienbar (ueber Laufwerk S:), mit den frueheren 69 nur 66,9 %.
+
+function _pamDateiname(datum,text,endung,opt){
+  opt=opt||{};
+  let d=(datum instanceof Date)?datum:(datum?new Date(datum):new Date());
+  if(isNaN(d))d=new Date();
+  let fest=d.getFullYear()+'.'+_ez2(d.getMonth()+1)+'.'+_ez2(d.getDate());
+  if(opt.zeit)fest+='_'+_ez2(d.getHours())+_ez2(d.getMinutes());
+  if(opt.richtung)fest+='_'+opt.richtung;
+  const end=endung||'';
+  const platz=PAM_NAME_MAX-fest.length-1-end.length;
+  if(platz<1)return fest+end; // Notbremse: lieber ohne freien Teil als ueber der Grenze
+  let frei=_ezClean(text,999).replace(/_+/g,'_').replace(/^_+|_+$/g,'');
+  if(frei.length>platz)frei=frei.substring(0,platz).replace(/_+$/,'');
+  if(!frei)return fest+end;
+  return fest+'_'+frei+end;
+}
 
 // ── EML-PARSER: MIME-Dekodierung für lesbare PDFs ──
 function _decodeEmlMimeWord(str){
@@ -1372,7 +1412,7 @@ async function _auftragAddToTask(task,boardName,fileMode){
     if(fid&&gdriveToken&&rawFile){
       try{
         let stamp2=(function(){let d=info.date instanceof Date&&!isNaN(info.date)?info.date:new Date();return String(d.getFullYear()).slice(-2)+_ez2(d.getMonth()+1)+_ez2(d.getDate());})();
-        emlName2=stamp2+'_'+_ezClean(info.subject)+(rawFile.name.toLowerCase().endsWith('.eml')?'.eml':'.msg');
+        emlName2=_pamDateiname(info.date,info.subject,rawFile.name.toLowerCase().endsWith('.eml')?'.eml':'.msg'); // b558
         let buf2=await new Promise(function(res,rej){let r=new FileReader();r.onload=function(e){res(e.target.result);};r.onerror=rej;r.readAsArrayBuffer(rawFile);});
         const _mime2=rawFile.name.toLowerCase().endsWith('.msg')?'application/vnd.ms-outlook':'message/rfc822';
         let result2=await _driveUploadGeneric(buf2,emlName2,_mime2,fid); // Fix: korrekter MIME-Type auch für MSG
@@ -1401,7 +1441,7 @@ async function _auftragAddToTask(task,boardName,fileMode){
         }
         emlLines2.push('--ptp_eml_boundary--');
         let stamp2b=String(d2b.getFullYear()).slice(-2)+_ez2(d2b.getMonth()+1)+_ez2(d2b.getDate());
-        emlName2=stamp2b+'_'+_ezClean(info.subject||'email')+'.eml';
+        emlName2=_pamDateiname(d2b,info.subject||'email','.eml'); // b558
         let result2b=await _driveUploadGeneric(new TextEncoder().encode(emlLines2.join('\r\n')).buffer,emlName2,'message/rfc822',fid);
         if(result2b&&result2b.id){driveId2=result2b.id;driveUrl2='https://drive.google.com/file/d/'+result2b.id+'/view';}
       }catch(e){console.warn('[PTP] Ersatz-EML (AddToTask):',e);}
@@ -1469,7 +1509,7 @@ async function _auftragAddToTask(task,boardName,fileMode){
       try{
         let _d2=info.date instanceof Date&&!isNaN(info.date)?info.date:new Date();
         let _stamp2=String(_d2.getFullYear()).slice(-2)+_ez2(_d2.getMonth()+1)+_ez2(_d2.getDate());
-        let _pdfName2=_stamp2+'_'+_ezClean(info.subject||'email')+'.pdf';
+        let _pdfName2=_pamDateiname(_d2,info.subject||'email','.pdf'); // b558
         let _pdfInfo2={subject:info.subject,sender:info.sender,date:_d2,bodyHtml:info.bodyHtml,bodyText:info.bodyText,cidMap:info.cidMap||{}};
         let _pdfData2=await _ezBuildPdfFromHtml(_pdfInfo2);
         let _pdfResult2=await _ezUpload(_pdfData2,_pdfName2,fid);
@@ -1698,7 +1738,7 @@ async function _auftragConfirm(){
     :await _getOrCreateEmailFid(newTask,_ezFolderId(_folderDefault));
   if(fid&&gdriveToken){
     let stamp=(function(){let d=info.date instanceof Date&&!isNaN(info.date)?info.date:new Date();return String(d.getFullYear()).slice(-2)+_ez2(d.getMonth()+1)+_ez2(d.getDate());})();
-    let pdfName=stamp+'_'+_ezClean(info.subject)+'.pdf';
+    let pdfName=_pamDateiname(info.date,info.subject,'.pdf'); // b558
 
     // PDF erstellen und hochladen – NUR wenn kein Original (rawFile) vorhanden
     // Wenn rawFile da ist, wird unten das Original gespeichert → kein doppelter Eintrag
@@ -1731,7 +1771,7 @@ async function _auftragConfirm(){
 
     // Original-Datei hochladen (oder synthetisches .eml aus Drag-Daten erzeugen)
     try{
-      let origName=stamp+'_'+_ezClean(info.subject)+'.eml';
+      let origName=_pamDateiname(info.date,info.subject,'.eml'); // b558
       let origMime='message/rfc822';
       let buf=null;
 
@@ -4460,7 +4500,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-02 · #556'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-02-b556) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-02 · #558'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-02-b558) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -16872,8 +16912,11 @@ async function _gmSaveThreadPdfs(task,threadMsgs){
       const info={subject:m.subject||'(kein Betreff)',sender:m.fromName?'"'+m.fromName+'" <'+m.from+'>':m.from||'',date,bodyHtml:res.html,bodyText:res.plain,cidMap:{}};
       const pdfBuf=await _ezBuildPdfFromHtml(info);
       const stamp=date.getFullYear()+'.'+_ez2(date.getMonth()+1)+'.'+_ez2(date.getDate())+'_'+_ez2(date.getHours())+_ez2(date.getMinutes());
-      const dirLabel=m.direction==='gesendet'?'Gesendet':'Eingang';
-      const fname=stamp+'_'+dirLabel+'_'+_ezClean(m.fromName||m.from)+'.pdf';
+      // b557: nur im DATEINAMEN gekuerzt (Aus/Ein statt Gesendet/Eingang) – hier stehen schon
+      // Datum UND Uhrzeit davor, das war die laengste Namensform (69 Zeichen). Die farbigen
+      // Etiketten im Fenster heissen unveraendert „Gesendet"/„Eingang" (eigene Stellen, isOut).
+      const dirLabel=m.direction==='gesendet'?'Aus':'Ein';
+      const fname=_pamDateiname(date,m.fromName||m.from,'.pdf',{zeit:true,richtung:dirLabel}); // b558
       const result=await _ezUpload(pdfBuf,fname,fid);
       if(result?.id&&!knownFileIds.has(result.id)&&!knownIds.has(m.messageId)){knownFileIds.add(result.id);knownIds.add(m.messageId);taskEmailPdfs.push({name:fname,fileId:result.id,url:'https://drive.google.com/file/d/'+result.id+'/view',uploadedAt:new Date().toLocaleDateString('de-DE'),gmailMessageId:m.messageId});saved++;}
     }catch(e){console.warn('[GM] PDF-Fehler:',e);}
@@ -16904,9 +16947,12 @@ async function _saveThreadMailsAsEml(task,threadMsgs,tokenType){
       const mid=m.messageId||m.internetMessageId||''; // einheitliche ID für diese Mail
       const date=new Date(m.date||Date.now());
       const stamp=date.getFullYear()+'.'+_ez2(date.getMonth()+1)+'.'+_ez2(date.getDate())+'_'+_ez2(date.getHours())+_ez2(date.getMinutes());
-      const dirLabel=m.direction==='gesendet'?'Gesendet':'Eingang';
+      // b557: nur im DATEINAMEN gekuerzt (Aus/Ein statt Gesendet/Eingang) – hier stehen schon
+      // Datum UND Uhrzeit davor, das war die laengste Namensform (69 Zeichen). Die farbigen
+      // Etiketten im Fenster heissen unveraendert „Gesendet"/„Eingang" (eigene Stellen, isOut).
+      const dirLabel=m.direction==='gesendet'?'Aus':'Ein';
       const senderName=m.fromName||m.from||m.sender||'';
-      const fname=stamp+'_'+dirLabel+'_'+_ezClean(senderName)+'.eml';
+      const fname=_pamDateiname(date,senderName,'.eml',{zeit:true,richtung:dirLabel}); // b558
       const subject=m.subject||task.title||'(kein Betreff)';
       const senderFull=m.fromName?'"'+m.fromName+'" <'+(m.from||'')+'>':(m.from||m.sender||'');
       let buf=null;
@@ -17809,8 +17855,11 @@ async function _msSaveThreadPdfs(task,threadMsgs){
       };
       const pdfBuf=await _ezBuildPdfFromHtml(info);
       const stamp=date.getFullYear()+'.'+_ez2(date.getMonth()+1)+'.'+_ez2(date.getDate())+'_'+_ez2(date.getHours())+_ez2(date.getMinutes());
-      const dirLabel=m.direction==='gesendet'?'Gesendet':'Eingang';
-      const fname=stamp+'_'+dirLabel+'_'+_ezClean(m.fromName||m.from)+'.pdf';
+      // b557: nur im DATEINAMEN gekuerzt (Aus/Ein statt Gesendet/Eingang) – hier stehen schon
+      // Datum UND Uhrzeit davor, das war die laengste Namensform (69 Zeichen). Die farbigen
+      // Etiketten im Fenster heissen unveraendert „Gesendet"/„Eingang" (eigene Stellen, isOut).
+      const dirLabel=m.direction==='gesendet'?'Aus':'Ein';
+      const fname=_pamDateiname(date,m.fromName||m.from,'.pdf',{zeit:true,richtung:dirLabel}); // b558
       const result=await _ezUpload(pdfBuf,fname,fid);
       if(result&&result.id&&!_msKnownFileIds.has(result.id)&&!_msKnownIds.has(m.internetMessageId)){
         _msKnownFileIds.add(result.id);_msKnownIds.add(m.internetMessageId);
@@ -24170,7 +24219,7 @@ async function _uploadEmailOriginal(file){
       const _dStamp=_mailD.getFullYear()+'.'+_ez2(_mailD.getMonth()+1)+'.'+_ez2(_mailD.getDate());
       const _subj=(_ppD&&_ppD.subject)||file.name.replace(/\.(eml|msg)$/i,'');
       const _ext=isEml?'.eml':'.msg';
-      _uploadName=_dStamp+'_'+_ezClean(_subj)+_ext;
+      _uploadName=_pamDateiname(_mailD,_subj,_ext); // b558
     }catch(_ne){_uploadName=file.name;}
     if(msgEl)msgEl.textContent='⏳ Lade hoch: '+_uploadName+'…';
     const buf=await new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.onerror=rej;r.readAsArrayBuffer(file);});
@@ -24293,7 +24342,7 @@ async function _uploadEmailOriginal(file){
         const _pdfData=await _ezBuildPdfFromHtml(_pdfInfo);
         const _d=new Date(emailMeta.date);
         const _stamp=_d.getFullYear()+'.'+_ez2(_d.getMonth()+1)+'.'+_ez2(_d.getDate());
-        const _pdfName=_stamp+'_'+_ezClean(emailMeta.subject||file.name)+'.pdf';
+        const _pdfName=_pamDateiname(_d,emailMeta.subject||file.name,'.pdf'); // b558
         const _pdfResult=await _ezUpload(_pdfData,_pdfName,fid);
         if(_pdfResult&&_pdfResult.id){
           if(!taskEmailPdfs)taskEmailPdfs=[];
@@ -27719,7 +27768,7 @@ async function _emUploadEmlForModal(file){
     let fname=file.name;
     try{
       const _md=new Date(meta.date);
-      if(!isNaN(_md))fname=_md.getFullYear()+'.'+_ez2(_md.getMonth()+1)+'.'+_ez2(_md.getDate())+'_'+_ezClean((meta.subject||file.name).replace(/\.(eml|msg)$/i,''))+(isEml?'.eml':'.msg');
+      if(!isNaN(_md))fname=_pamDateiname(_md,(meta.subject||file.name).replace(/\.(eml|msg)$/i,''),isEml?'.eml':'.msg'); // b558
     }catch(_ne){fname=file.name;}
     const result=await _driveUploadGeneric(buf,fname,mime,fid);
     const fileId=result.id;
@@ -27798,7 +27847,7 @@ async function _emUploadEmlForModal(file){
       try{
         const _pd=new Date(meta.date);
         const _pdfData=await _ezBuildPdfFromHtml({subject:meta.subject,sender:meta.sender,date:_pd,bodyHtml:meta.bodyHtml,bodyText:meta.bodyText,cidMap:meta.cidMap});
-        const _pdfName=_pd.getFullYear()+'.'+_ez2(_pd.getMonth()+1)+'.'+_ez2(_pd.getDate())+'_'+_ezClean(meta.subject||file.name)+'.pdf';
+        const _pdfName=_pamDateiname(_pd,meta.subject||file.name,'.pdf'); // b558
         const _dupPdf=(zt.emailPdfs||[]).some(function(p){return p.name===_pdfName||(meta.messageId&&p.messageId===meta.messageId);});
         if(!_dupPdf){
           const _pdfResult=await _ezUpload(_pdfData,_pdfName,fid);
