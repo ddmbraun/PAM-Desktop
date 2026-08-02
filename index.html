@@ -4503,7 +4503,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-02 · #559'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-02-b559) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-02 · #560'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-02-b560) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -19942,7 +19942,9 @@ async function _driveGetOrCreateFolder(name,parentId){
 //   fotoUrl  → tGD       (Bilder)
 //   emailUrl → tEmailOrdner (Posteingang)
 async function _createDriveAuftragStruktur(folderName,parentFid){
-  const safeName=(folderName||'Auftrag').replace(/[\\/:*?"<>|]/g,'-').substring(0,100);
+  // b560: Endpunkte/Endleerzeichen abschneiden (auch nach der 100er-Kappung) – Drive
+  // erlaubt sie, Windows nicht; die NAS-Spiegelung scheitert sonst an dem Ordner.
+  const safeName=((folderName||'Auftrag').replace(/[\\/:*?"<>|]/g,'-').substring(0,100).replace(/[. ]+$/,''))||'Auftrag';
   const mainId  =await _driveCreateFolder(safeName,parentFid);
   // b534: Master-Struktur, 9 Ordner, alle ohne Nummern-Präfix.
   // Bilder / Dokumente / Posteingang sind Pflichtnamen: GM legt Bilder+Dokumente zwingend an
@@ -20157,7 +20159,7 @@ async function _autoCreateTaskFolder(){
   try{
     // b534: Aufgaben-Board → nur EIN Ordner, ohne GM-Frage und ohne Namens-Dialog
     if(isNotiz){
-      const safeName=(title||'Aufgabe').replace(/[\\/:*?"<>|]/g,'-').substring(0,100);
+      const safeName=((title||'Aufgabe').replace(/[\\/:*?"<>|]/g,'-').substring(0,100).replace(/[. ]+$/,''))||'Aufgabe'; // b560: Endpunkt/Endleerzeichen-Falle
       const notizId=await _driveCreateFolder(safeName,mainFid);
       const notizUrl='https://drive.google.com/drive/folders/'+notizId;
       // b540: ALLE Ordner-Felder auf denselben Ordner. Bei einer Aufgabe gibt es nur einen –
@@ -20203,7 +20205,7 @@ async function _autoCreateTaskFolder(){
 
 // ── E-Mail-Task: nur einen Unterordner (TaskTitle) im Oberordner anlegen ──
 async function _createDriveEmailStruktur(folderName,parentFid){
-  const safeName=(folderName||'E-Mail').replace(/[\\/:*?"<>|]/g,'-').substring(0,100);
+  const safeName=((folderName||'E-Mail').replace(/[\\/:*?"<>|]/g,'-').substring(0,100).replace(/[. ]+$/,''))||'E-Mail'; // b560: Endpunkt/Endleerzeichen-Falle
   const mainId=await _driveCreateFolder(safeName,parentFid);
   const base='https://drive.google.com/drive/folders/';
   return{mainId,mainUrl:base+mainId};
@@ -25668,11 +25670,10 @@ function _showVbsBoardDialog(data,bauBoards){
   ov.querySelector('#_vbsOk').addEventListener('click',function(){
     const selBoard=ov.querySelector('#_vbsBoard').value;
     const selStatus=ov.querySelector('#_vbsStatus').value;
-    const kurzform=(ov.querySelector('#_vbsKurzform')||{}).value||'';
+    // b560: toter Zugriff auf #_vbsKurzform entfernt – das Feld gab es im Dialog nie
     ov.remove();
     if(selBoard&&selBoard!==currentBoard)switchBoard(selBoard);
     data._targetStatus=selStatus;
-    data._kurzform=kurzform.trim();
     localStorage.setItem('pam_vbs_new_auftrag',JSON.stringify(data));
     setTimeout(()=>_openVbsNewTask(data),200);
   });
@@ -25688,17 +25689,23 @@ function _vbsUpdateStatus(boardName){
 function _openVbsNewTask(data){
   _vbsCreating=true; // onblur-Guard: _autoCreateTaskFolder sperren während VBS-Anlage
   localStorage.removeItem('pam_vbs_new_auftrag');
+  // b560: "(noch offen)"-Platzhalter aus dem VBS filtern. Das VBS schickt leere Felder
+  // wörtlich als "(noch offen)" mit – daraus entstanden Kontakte namens "(noch offen)"
+  // (Mieter/HV-Ansprechpartner) und vorbefüllte Felder mit Platzhaltertext.
+  const _nv=function(v){v=(v||'').trim();return v.toLowerCase()==='(noch offen)'?'':v;};
+  ['hv','ks','str','ort','mieter','miet_tel','miet_email','datum','repnr','kdnr','schaden','bauobj','kuerzel','agname','agtel','agemail','titel','kurzform'].forEach(function(k){data[k]=_nv(data[k]);});
   openNewTaskModal();
   setTimeout(function(){
-    // Titel: fertig aus VBS übernehmen
+    // Titel: fertig aus VBS übernehmen – ist er leer (alles "(noch offen)"), trägt der
+    // Ordnername (enthält immer das Datum) den Task
     const hvClean2=(data.hv||'').replace(/^c\/o\s*/i,'').trim();
-    const titelFertig=data.titel||'';
+    const titelFertig=data.titel||data.ordner||'';
     const tEl=document.getElementById('taskTitleInput');if(tEl)tEl.value=titelFertig;
     // Status
     if(data._targetStatus){const stEl=document.getElementById('taskStatusInput');if(stEl)stEl.value=data._targetStatus;}
     // Stammdaten
     const tHV=document.getElementById('tHV');if(tHV)tHV.value=hvClean2;
-    const tAdr=document.getElementById('tAdr');if(tAdr)tAdr.value=data.str+(data.ort?', '+data.ort:'');
+    const tAdr=document.getElementById('tAdr');if(tAdr)tAdr.value=[data.str,data.ort].filter(Boolean).join(', '); // b560: kein ", Erfurt" mehr bei leerer Straße
     const tSch=document.getElementById('tSch');if(tSch)tSch.value=data.schaden;
     // Beschreibung & Anweisungen – voller Schadentext
     const tDesc=document.getElementById('taskDescInput');if(tDesc&&data.schaden)tDesc.value=data.schaden;
@@ -25963,7 +25970,8 @@ async function _vbsCreateDriveStruktur(ordnerName,nasParent,nasGrand,nasPath){
     // ── Ordner anlegen (oder vorhandenen verwenden) + Unterstruktur ─────────────
     // Wenn NAS-Sync-Ordner gefunden: Unterordner per GetOrCreate (kein Duplikat)
     // Wenn neu angelegt: direkt per CreateFolder (schneller, kein Extra-Check nötig)
-    const safeName=(ordnerName||'Auftrag').replace(/[\\/:*?"<>|]/g,'-').substring(0,100);
+    // b560: Endpunkte/Endleerzeichen abschneiden – Windows-/Spiegelungs-Falle (s. _createDriveAuftragStruktur)
+    const safeName=((ordnerName||'Auftrag').replace(/[\\/:*?"<>|]/g,'-').substring(0,100).replace(/[. ]+$/,''))||'Auftrag';
     const _nasSynced=(mainId!==null);
     if(!mainId)mainId=await _driveCreateFolder(safeName,parentFid);
     const _mkSub=_nasSynced?_driveGetOrCreateFolder:_driveCreateFolder;
