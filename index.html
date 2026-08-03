@@ -4564,7 +4564,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-03 · #579'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-03-b579) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-03 · #580'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-03-b580) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -13083,7 +13083,22 @@ function _hvZeigen(id,quelle,ev,sofortSrc){
   // b579 (Fehler aus b574): Schlägt die SCHARFE Fassung fehl – und bei Frank schlug gerade
   // reihenweise etwas fehl (ERR_INSUFFICIENT_RESOURCES) –, dann verschwand die ganze
   // Vorschau, obwohl das Kachelbild längst zu sehen war. Jetzt bleibt stehen, was da ist.
-  img.onerror=function(){if(_hvAktiv===id&&!_stehtSchon)_hvVerstecken();};
+  // b579 Zusatz (Befund Frank: „nach Überfahren des 📝-Knopfs geht es"): Solange die Maus auf
+  // dem Bild RUHT, feuert der Browser kein neues Ereignis – ein gescheiterter erster Versuch
+  // wurde nie wiederholt. Erst der Wechsel auf den Knopf war ein neues Ereignis und damit der
+  // zweite Versuch. Deshalb: bei Fehlschlag automatisch EIN frischer Versuch an Drive vorbei
+  // am Cache; erst wenn auch der scheitert, wird zugemacht.
+  let _zweiterVersuch=false;
+  img.onerror=function(){
+    if(_hvAktiv!==id||_stehtSchon)return;
+    if(!_zweiterVersuch){
+      _zweiterVersuch=true;
+      delete _hvThumbCache[id];
+      _hvThumb(id).then(function(u){if(_hvAktiv===id&&u&&u!==img.src)img.src=u;});
+      return;
+    }
+    _hvVerstecken();
+  };
   // b550: Miniatur über die Drive-API auflösen (liefert eine signierte lh3-URL, die OHNE
   // Cookies funktioniert). Der direkte <img>-Weg auf drive.google.com/thumbnail scheitert
   // bei privaten Dateien, seit Chrome Drittanbieter-Cookies blockt – deshalb blieb die
@@ -13122,9 +13137,12 @@ async function _hvThumb(id){
       if(r.ok){u=(((await r.json()).thumbnailLink)||'').replace(/=s\d+(-c)?$/,'=s1000');}
     }
   }catch(e){}
-  if(!u)u=_hvBild(id); // Fallback: alter Weg (öffentliche Dateien, z. B. HV-Bilder)
-  _hvThumbCache[id]=u;
-  return u;
+  // b579: NUR Erfolge merken. Vorher wurde auch der Fehlschlag dauerhaft gemerkt: scheiterte
+  // der Drive-Abruf einmal (z. B. während des Lade-Sturms), stand für dieses Bild für immer
+  // die Cookie-abhängige Notlösung im Speicher – die bei privaten Dateien nicht lädt. Genau
+  // die Bilder, die man in dem Moment überfahren hatte, blieben dann dauerhaft ohne Vorschau.
+  if(u){_hvThumbCache[id]=u;return u;}
+  return _hvBild(id); // Notlösung nur für DIESEN Versuch – beim nächsten Überfahren wird neu gefragt
 }
 function _hvPosition(ev){
   if(!_hvBox||_hvBox.style.display==='none')return;
@@ -13227,6 +13245,30 @@ function _feDeskOeffnen(ohneTask){
     const zeit=x.fo.ts?new Date(x.fo.ts).toLocaleString('de-DE',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
     tag.textContent=(zeit?zeit+' · ':'')+(x.feTask.title||'');
     cell.appendChild(img);cell.appendChild(tag);
+    // b580 (Wunsch Frank): ℹ = volle Aufnahmedaten samt Adresse (ohne Task-Bezug, i=-1)
+    const info=document.createElement('button');
+    info.textContent='ℹ';info.title='Aufnahmedaten / GPS anzeigen';
+    info.style.cssText='position:absolute;top:4px;right:4px;background:rgba(0,0,0,.55);border:none;color:#fff;font-size:11px;line-height:1;padding:4px 6px;border-radius:5px;cursor:pointer;z-index:2;';
+    info.onclick=ev=>{ev.stopPropagation();_showFotoExifKern(x.fo,-1,info);};
+    cell.appendChild(info);
+    // b580: 📍 zeigt ohne Klick, ob das Foto Ortsdaten trägt. Drive hat die Koordinaten als
+    // Metadatum (imageMediaMetadata.location) – winziger Abruf, KEIN EXIF-Parsen, und durch
+    // die b579-Warteschlange gebremst, damit kein neuer Lade-Sturm entsteht.
+    const gpsTag=document.createElement('div');
+    gpsTag.style.cssText='position:absolute;top:4px;left:4px;display:none;background:rgba(0,0,0,.55);color:#7be3a1;font-size:11px;line-height:1;padding:4px 5px;border-radius:5px;z-index:2;';
+    gpsTag.textContent='📍';
+    cell.appendChild(gpsTag);
+    if(typeof gdriveToken!=='undefined'&&gdriveToken){
+      _pamLadeSchlange(()=>fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(key)+'?fields=imageMediaMetadata(location)',{headers:{Authorization:'Bearer '+gdriveToken}})
+        .then(r=>r.ok?r.json():null)
+        .then(j=>{
+          const loc=j&&j.imageMediaMetadata&&j.imageMediaMetadata.location;
+          if(loc&&(Math.abs(loc.latitude||0)>0.0001||Math.abs(loc.longitude||0)>0.0001)){
+            gpsTag.style.display='block';
+            gpsTag.title='Aufnahmeort: '+(+loc.latitude).toFixed(5)+', '+(+loc.longitude).toFixed(5)+' – Einzelheiten über ℹ';
+          }
+        }).catch(()=>{}));
+    }
     cell.onclick=()=>{
       if(_feDeskAuswahl.has(key)){_feDeskAuswahl.delete(key);cell.style.borderColor='transparent';}
       else{_feDeskAuswahl.add(key);cell.style.borderColor='var(--accent)';}
@@ -15306,6 +15348,12 @@ function _fotoThumbClick(i,e){
 async function _showFotoExif(i,btn){
   const f=taskFotos&&taskFotos[i];
   if(!f){showToast('Foto nicht gefunden','error');return;}
+  return _showFotoExifKern(f,i,btn);
+}
+// b580: Kern nimmt das Foto-OBJEKT entgegen – der Foto-Eingang zeigt Fotos aus fremden
+// fe_-Sammeltasks, die stehen nicht in taskFotos. i=-1 heißt „ohne Task-Bezug": dann
+// entfallen Tagebuch-Zeile, 📍-korrigieren und 🕒-Zeit (die arbeiten alle auf taskFotos[i]).
+async function _showFotoExifKern(f,i,btn){
   // b513: Aufnahmedaten IMMER bevorzugt aus dem ORIGINAL lesen – die bemalte Kopie
   // (editedDriveId) ist ein Canvas-Bild und hatte bis Mobil v121 nie EXIF/GPS.
   // Damit zeigen auch alle FRÜHER beschrifteten Fotos wieder ihren Aufnahmeort.
@@ -15345,7 +15393,7 @@ async function _showFotoExif(i,btn){
       const lon=_dms(gLon)*(gpsIfd[piexif.GPSIFD.GPSLongitudeRef]==='W'?-1:1);
       if(isFinite(lat)&&isFinite(lon)&&(Math.abs(lat)>0.0001||Math.abs(lon)>0.0001))gpsPos={lat:lat,lon:lon,quelle:'foto'};
     }
-    if(!gpsPos){
+    if(!gpsPos&&i>=0){ // b580: Task-Standort nur mit Task-Bezug – im Foto-Eingang wäre es der falsche Auftrag
       try{
         const _t=findTaskById((document.getElementById('taskId')||{}).value||'');
         if(_t&&_t.lat&&_t.lon)gpsPos={lat:Number(_t.lat),lon:Number(_t.lon),quelle:'task'};
@@ -15356,7 +15404,7 @@ async function _showFotoExif(i,btn){
       :'<span style="color:var(--text2)">nicht im Foto gespeichert</span>';
     const rows=[
       date?'<tr><td style="color:var(--text2);padding-right:10px;white-space:nowrap">📅 Datum</td><td>'+esc(date)+'</td></tr>':'',
-      '<tr><td style="color:var(--text2);padding-right:10px;white-space:nowrap">🕒 Tagebuch</td><td>'+(f.ts?esc(_fmtNotizTs(f.ts)):'<span style="color:var(--text2)">kein Datum – über 🕒 Zeit setzen</span>')+'</td></tr>', // b518: Einordnungs-Zeit im Bautagebuch
+      i>=0?'<tr><td style="color:var(--text2);padding-right:10px;white-space:nowrap">🕒 Tagebuch</td><td>'+(f.ts?esc(_fmtNotizTs(f.ts)):'<span style="color:var(--text2)">kein Datum – über 🕒 Zeit setzen</span>')+'</td></tr>':'', // b518: Einordnungs-Zeit im Bautagebuch; b580: nur mit Task-Bezug
       (make||model)?'<tr><td style="color:var(--text2);padding-right:10px;white-space:nowrap">📷 Kamera</td><td>'+esc((make+' '+model).trim())+'</td></tr>':'',
       (pw&&ph)?'<tr><td style="color:var(--text2);padding-right:10px;white-space:nowrap">🔲 Auflösung</td><td>'+pw+' × '+ph+'</td></tr>':'',
       '<tr><td style="color:var(--text2);padding-right:10px;white-space:nowrap;vertical-align:top">📍 Aufnahmeort</td><td id="_exifOrt">'+ortCell+'</td></tr>',
@@ -15367,8 +15415,8 @@ async function _showFotoExif(i,btn){
     popup.innerHTML=(rows?'<table style="border-collapse:collapse;line-height:1.7">'+rows+'</table>'
       :'<span style="color:var(--text2)">Keine EXIF-Daten gefunden</span>')
       +'<div style="display:flex;justify-content:space-between;gap:8px;margin-top:8px">'
-      +'<button onclick="_deskGpsDialog('+i+')" style="font-size:11px;padding:2px 10px;border-radius:5px;border:1px solid var(--accent);background:var(--bg3);color:var(--accent);cursor:pointer;font-weight:600">📍 korrigieren</button>' // b513: Aufnahmeort setzen/ändern
-      +'<button onclick="_btbZeitKorrigieren('+i+')" style="font-size:11px;padding:2px 10px;border-radius:5px;border:1px solid var(--accent);background:var(--bg3);color:var(--accent);cursor:pointer;font-weight:600">🕒 Zeit</button>' // b518: Tagebuch-Zeit ändern
+      +(i>=0?'<button onclick="_deskGpsDialog('+i+')" style="font-size:11px;padding:2px 10px;border-radius:5px;border:1px solid var(--accent);background:var(--bg3);color:var(--accent);cursor:pointer;font-weight:600">📍 korrigieren</button>':'') // b513: Aufnahmeort setzen/ändern; b580: nur mit Task-Bezug
+      +(i>=0?'<button onclick="_btbZeitKorrigieren('+i+')" style="font-size:11px;padding:2px 10px;border-radius:5px;border:1px solid var(--accent);background:var(--bg3);color:var(--accent);cursor:pointer;font-weight:600">🕒 Zeit</button>':'') // b518: Tagebuch-Zeit ändern
       +'<button onclick="document.getElementById(\'_exifPopup\').remove()" style="font-size:11px;padding:2px 10px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer">✕</button></div>';
     const rect=btn.getBoundingClientRect();
     popup.style.left=Math.min(rect.right+6,window.innerWidth-290)+'px';
