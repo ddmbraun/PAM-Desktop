@@ -4564,7 +4564,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-03 · #588'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-03-b588) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-03 · #589'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-03-b589) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -16037,6 +16037,15 @@ function _openPdfSendenModus(taskId){
 
   const box=document.createElement('div');
   box.style.cssText='background:var(--bg2);border-radius:14px;padding:20px;width:min(680px,96vw);max-height:90vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:0;';
+  // b589: Fenster übernimmt den Zoom-Regler des Auftragsfensters (linke Seite, wie die
+  // Sektionen). Befund Frank: bei 115 % wuchs das Modal mit, die Übersicht blieb klein.
+  // vw/vh-Maße durch den Zoom teilen, sonst wächst das Fenster über den Bildschirm hinaus.
+  const _z=Math.min(2,Math.max(0.7,(+(localStorage.getItem('pam_modal_scale_l')||100))/100));
+  if(_z!==1){
+    box.style.zoom=String(_z);
+    box.style.width='min(680px,'+(96/_z).toFixed(1)+'vw)';
+    box.style.maxHeight=(90/_z).toFixed(1)+'vh';
+  }
 
   const _e=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
@@ -16047,15 +16056,38 @@ function _openPdfSendenModus(taskId){
   hdr.innerHTML='<span style="font-size:15px;font-weight:700;color:var(--text);">📋 '+(_taskTitel?_e(_taskTitel):'Übersicht')+'</span>'
     +'<button onclick="document.getElementById(\'_pdfSendenOv\').remove()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text2);line-height:1;">✕</button>';
   box.appendChild(hdr);
+  // b589: Fenster an der Titelzeile frei verschiebbar (Wunsch Frank). Beim ersten Griff
+  // wird die Box aus der Flex-Mitte auf position:fixed umgestellt; Koordinaten durch den
+  // CSS-Zoom teilen, weil left/top im gezoomten Maßstab interpretiert werden.
+  hdr.style.cursor='move';
+  hdr.title='Zum Verschieben ziehen';
+  hdr.addEventListener('mousedown',function(ev){
+    if(ev.target&&ev.target.closest&&ev.target.closest('button'))return;
+    ev.preventDefault();
+    const r=box.getBoundingClientRect();
+    const dx=ev.clientX-r.left,dy=ev.clientY-r.top;
+    if(box.style.position!=='fixed'){
+      box.style.position='fixed';box.style.margin='0';
+      box.style.left=(r.left/_z)+'px';box.style.top=(r.top/_z)+'px';
+      ov.style.alignItems='flex-start';ov.style.justifyContent='flex-start';
+    }
+    const mv=function(e){box.style.left=((e.clientX-dx)/_z)+'px';box.style.top=((e.clientY-dy)/_z)+'px';};
+    const up=function(){document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);};
+    document.addEventListener('mousemove',mv);
+    document.addEventListener('mouseup',up);
+  });
 
   // ── Hilfs-Funktionen für Übersicht ──
   function _fD(s){if(!s)return'';const p=s.split('-');return p.length===3?p[2]+'.'+p[1]+'.'+p[0]:s;}
+  function _fDk(s){if(!s)return'';const p=s.split('-');return p.length===3?p[2]+'.'+p[1]+'.'+p[0].slice(2):s;} // b589: kurzes Datum tt.mm.jj für die linke Raster-Spalte
+  function _kurzName(n){n=String(n||'');return n.length>48?(n.slice(0,26)+'…'+n.slice(-18)):n;} // b589: NUR Anzeige gekürzt – Datei/Tooltip behalten den vollen Namen
   function _fTs(s){if(!s)return'';if(!/^\d{4}-\d{2}-\d{2}T/.test(s))return s;const d=new Date(s);if(isNaN(d))return s;return d.toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});} // Fix #367: ISO-Guard – de-DE-Altbestand („10.06.2026, …") roh anzeigen statt als Monat.Tag fehlzuinterpretieren
   const _today=new Date().toISOString().split('T')[0];
   function _od(d){return d&&d<_today;}
   function _fH(min){if(!min||min<=0)return'–';return Math.floor(min/60)+'h'+(min%60>0?' '+Math.round(min%60)+'min':'');}
   function _parseMin(z){if(z.minuten!=null)return+z.minuten;if(z.von&&z.bis){const[vh,vm]=(z.von||'00:00').split(':').map(Number);const[bh,bm]=(z.bis||'00:00').split(':').map(Number);return(bh*60+bm)-(vh*60+vm);}return 0;}
-  function _secHtml(title,content,count){if(!content)return'';const cnt=(count>0)?'<span style="font-size:10px;background:rgba(0,0,0,.12);padding:1px 7px;border-radius:10px;margin-left:6px;">'+count+'</span>':'';return'<div style="border-top:1px solid var(--border);">'+'<div style="background:var(--bg3);padding:7px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text2);">'+_e(title)+cnt+'</div>'+content+'</div>';}
+  // b589: ruhige Sektionsköpfe – normale Schrift statt GROSSBUCHSTABEN-Grau-Balken
+  function _secHtml(title,content,count){if(!content)return'';const cnt=(count>0)?'<span style="font-size:12px;color:var(--text2);margin-left:8px;font-weight:400;">'+count+'</span>':'';return'<div style="border-top:1px solid var(--border);">'+'<div style="background:var(--bg3);padding:7px 12px;font-size:13px;font-weight:700;color:var(--text);">'+_e(title)+cnt+'</div>'+content+'</div>';}
 
   // ── Übersicht-Block ──
   // Live-Globals nutzen wenn Task gerade im Edit-Modal offen ist
@@ -16077,23 +16109,15 @@ function _openPdfSendenModus(taskId){
   // Pille mit Anzahl – die Titel-Liste klappt per Klick auf (Delegation data-uebod).
   const _pills=[];
   if(_totalAuss+_totalZeit>0){
-    _pills.push('<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:3px 11px;border-radius:14px;background:var(--bg3);border:1px solid var(--border);color:var(--text);">⏱ <b>'+_fH(_totalAuss+_totalZeit)+'</b>'+(_totalAuss>0?'<span style="color:var(--text2);font-size:11px;">(Außerhaus '+_fH(_totalAuss)+' + manuell '+_fH(_totalZeit)+')</span>':'')+'</span>');
+    _pills.push('<span style="display:inline-flex;align-items:center;gap:5px;font-size:13px;padding:3px 11px;border-radius:14px;background:var(--bg3);border:1px solid var(--border);color:var(--text);">⏱ <b>'+_fH(_totalAuss+_totalZeit)+'</b>'+(_totalAuss>0?'<span style="color:var(--text2);font-size:11px;">(Außerhaus '+_fH(_totalAuss)+' + manuell '+_fH(_totalZeit)+')</span>':'')+'</span>');
   }
   if(_nextEntry){
-    _pills.push('<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:3px 11px;border-radius:14px;background:var(--bg3);border:1px solid var(--border);color:var(--text);">📅 <b>'+_fD(_nextEntry.datum)+'</b><span style="color:var(--text2);font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_e(_nextEntry.label)+'</span></span>');
+    _pills.push('<span style="display:inline-flex;align-items:center;gap:5px;font-size:13px;padding:3px 11px;border-radius:14px;background:var(--bg3);border:1px solid var(--border);color:var(--text);">📅 <b>'+_fD(_nextEntry.datum)+'</b><span style="color:var(--text2);font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_e(_nextEntry.label)+'</span></span>');
   }
   if(_odList.length){
-    _pills.push('<span data-uebod="1" title="Klicken für die Liste" style="display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:3px 11px;border-radius:14px;background:rgba(226,75,74,.12);border:1px solid rgba(226,75,74,.45);color:#E24B4A;cursor:pointer;font-weight:700;">⚠ '+_odList.length+' überfällig <span class="uebod-pfeil" style="display:inline-block;font-size:11px;transition:transform .18s;">▾</span></span>');
+    _pills.push('<span data-uebod="1" title="Klicken für die Liste" style="display:inline-flex;align-items:center;gap:5px;font-size:13px;padding:3px 11px;border-radius:14px;background:rgba(226,75,74,.12);border:1px solid rgba(226,75,74,.45);color:#E24B4A;cursor:pointer;font-weight:700;">⚠ '+_odList.length+' überfällig <span class="uebod-pfeil" style="display:inline-block;font-size:11px;transition:transform .18s;">▾</span></span>');
   }
-  let _uebHtml='';
-  if(_pills.length){
-    _uebHtml+='<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:2px 0 8px;">'+_pills.join('')+'</div>';
-    if(_odList.length){
-      _uebHtml+='<div data-uebodliste="1" style="display:none;margin:0 0 8px;padding:5px 10px;border-left:3px solid #E24B4A;font-size:12px;color:#E24B4A;line-height:1.6;">'
-        +_odList.map(function(x){return '<span style="display:block;">'+_e(x.label)+' ('+_fD(x.datum)+')</span>';}).join('')+'</div>';
-    }
-  }
-  // b587 (Übersicht Schritt 1): Ordner-Zeile wie im Auftragskopf (b576/b577). Werte bewusst
+  // b587 (Übersicht Schritt 1): Ordner-Chips wie im Auftragskopf (b576/b577). Werte bewusst
   // NUR aus dem Task-Objekt, NICHT über _hdrOrdnerWert aus den Modal-Feldern – die Übersicht
   // kann von der Karte aus aufgehen, während im Modal ein ANDERER Auftrag steckt.
   const _oc=[];
@@ -16103,17 +16127,24 @@ function _openPdfSendenModus(taskId){
   _ocAdd(t.dokOrdner,_HDR_SVG.blatt,'Dokumente-Ordner','#EEEDFE','#534AB7','#AFA9EC');
   _ocAdd(t.emailOrdner,_HDR_SVG.brief,'E-Mail-Ordner','#E6F1FB','#185FA5','#B5D4F4');
   _ocAdd(t.gmAkteFolderId?('https://drive.google.com/drive/folders/'+String(t.gmAkteFolderId).trim()):'',_HDR_SVG.koffer,'GM-Akte'+(t.gmAkte?' '+t.gmAkte:''),'#E1F5EE','#0F6E56','#9FE1CB');
-  if(_oc.length){
-    _uebHtml+='<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:0 0 10px;">'
-      +'<span style="font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;">Ordner:</span>'
-      +_oc.map(function(c){
-        return '<button type="button" data-ueburl="'+_e(c.v)+'" title="'+_e(c.tip)+'" style="display:inline-flex;align-items:center;justify-content:center;padding:3px 9px;border-radius:6px;border:1px solid '+c.bor+';background:'+c.bg+';color:'+c.col+';cursor:pointer;">'+_hdrSvg(c.svg)+'</button>';
-      }).join('')+'</div>';
+  // b589: Pillen und Ordner-Chips in EINER Zeile (Chips rechts) statt eigener „ORDNER:"-Zeile
+  const _chips=_oc.map(function(c){
+    return '<button type="button" data-ueburl="'+_e(c.v)+'" title="'+_e(c.tip)+'" style="display:inline-flex;align-items:center;justify-content:center;padding:3px 9px;border-radius:6px;border:1px solid '+c.bor+';background:'+c.bg+';color:'+c.col+';cursor:pointer;">'+_hdrSvg(c.svg)+'</button>';
+  }).join('');
+  let _uebHtml='';
+  if(_pills.length||_chips){
+    _uebHtml+='<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:2px 0 10px;">'+_pills.join('')
+      +(_chips?'<span style="flex:1;"></span><span style="display:inline-flex;gap:5px;">'+_chips+'</span>':'')+'</div>';
+    if(_odList.length){
+      _uebHtml+='<div data-uebodliste="1" style="display:none;margin:0 0 8px;padding:5px 10px;border-left:3px solid #E24B4A;font-size:13px;color:#E24B4A;line-height:1.6;">'
+        +_odList.map(function(x){return '<span style="display:block;">'+_e(x.label)+' ('+_fD(x.datum)+')</span>';}).join('')+'</div>';
+    }
   }
   const _alleAnzeige=[..._aufgaben.map(a=>({label:a.typ||'Aufgabe',datum:a.datum,done:!!(a.erledigt)})),..._freie.map(f=>({label:f.text||f.label||f.bezeichnung||'Freier Termin',datum:f.datum,done:!!(f.erledigt),notiz:f.notiz}))].sort((a,b)=>(a.datum||'zzz')>(b.datum||'zzz')?1:-1);
-  if(_alleAnzeige.length){let t2='<table style="width:100%;border-collapse:collapse;">';for(const x of _alleAnzeige){const od=_od(x.datum)&&!x.done;const ic=x.done?'<span style="color:#4CAF50;">✓</span>':'<span style="color:'+(od?'#E24B4A':'#999')+';">□</span>';t2+='<tr style="border-bottom:1px solid var(--border);"><td style="padding:5px 4px;width:22px;font-size:14px;">'+ic+'</td><td style="padding:5px 4px;font-size:12px;color:var(--text);">'+_e(x.label)+(x.notiz?' <span style="font-size:10px;color:var(--text2);">– '+_e(x.notiz)+'</span>':'')+'</td><td style="padding:5px 8px;white-space:nowrap;font-size:11px;font-weight:'+(od?700:400)+';color:'+(od?'#E24B4A':x.done?'#4CAF50':'var(--text2)')+';">'+(x.datum?_fD(x.datum)+(od?' ⚠':''):'')+'</td></tr>';}t2+='</table>';_uebHtml+=_secHtml('Aufgaben & Termine',t2,_alleAnzeige.length);}
-  if(_aussList.length){let a2='<table style="width:100%;border-collapse:collapse;">';for(const a of _aussList.slice().sort((x,y)=>(x.date||x.datum||'')>(y.date||y.datum||'')?1:-1)){const min=(()=>{if(a.von&&a.bis){const[vh,vm]=a.von.split(':').map(Number);const[bh,bm]=a.bis.split(':').map(Number);return(bh*60+bm)-(vh*60+vm);}return 0;})();const od=_od(a.date||a.datum);a2+='<tr style="border-bottom:1px solid var(--border);"><td style="padding:5px 4px;font-size:11px;color:'+(od?'#E24B4A':'var(--text2)')+';white-space:nowrap;width:80px;">'+_fD(a.date||a.datum)+(od?' ⚠':'')+'</td><td style="padding:5px 4px;font-size:11px;color:var(--text2);white-space:nowrap;">'+(a.von||'')+(a.bis?' – '+a.bis:'')+(min>0?' <span style="color:var(--text);font-weight:600;">('+_fH(min)+')</span>':'')+'</td><td style="padding:5px 4px;font-size:12px;color:var(--text);">'+_e(a.beschreibung||a.label||'Außerhaus')+'</td></tr>';}a2+='</table>';_uebHtml+=_secHtml('Außerhaus-Termine',a2,_aussList.length);}
-  if(_zeitList.length){let z2='<table style="width:100%;border-collapse:collapse;">';let gMin=0;for(const z of _zeitList.slice().sort((a,b)=>(a.date||a.datum||'')>(b.date||b.datum||'')?1:-1)){const m=_parseMin(z);gMin+=m;z2+='<tr style="border-bottom:1px solid var(--border);"><td style="padding:5px 4px;font-size:11px;color:var(--text2);white-space:nowrap;width:80px;">'+_fD(z.date||z.datum)+'</td><td style="padding:5px 4px;font-size:11px;color:var(--text2);white-space:nowrap;">'+(z.von||'')+(z.bis?' – '+z.bis:'')+'</td><td style="padding:5px 4px;font-size:12px;color:var(--text);">'+_e(z.beschreibung||z.aktivitaet||'')+'</td><td style="padding:5px 4px;font-size:12px;font-weight:600;text-align:right;white-space:nowrap;">'+_fH(m)+'</td></tr>';}z2+='<tr style="background:var(--bg3);"><td colspan="3" style="padding:6px 4px;font-size:11px;font-weight:700;color:var(--text2);">Gesamt</td><td style="padding:6px 4px;font-size:14px;font-weight:700;text-align:right;color:var(--text);">'+_fH(gMin)+'</td></tr></table>';_uebHtml+=_secHtml('Zeiterfassung',z2,_zeitList.length);}
+  // b589: EIN Raster für alle Sektionen – Datum immer links in fester Spalte (vorher rechts)
+  if(_alleAnzeige.length){let t2='<table style="width:100%;border-collapse:collapse;">';for(const x of _alleAnzeige){const od=_od(x.datum)&&!x.done;const ic=x.done?'<span style="color:#4CAF50;">✓</span>':'<span style="color:'+(od?'#E24B4A':'#999')+';">□</span>';t2+='<tr style="border-bottom:1px solid var(--border);"><td style="padding:5px 4px;width:76px;white-space:nowrap;font-size:12px;font-weight:'+(od?700:400)+';color:'+(od?'#E24B4A':x.done?'#4CAF50':'var(--text2)')+';vertical-align:top;">'+(x.datum?_fDk(x.datum)+(od?' ⚠':''):'')+'</td><td style="padding:5px 4px;width:20px;font-size:14px;">'+ic+'</td><td style="padding:5px 4px;font-size:13px;color:var(--text);">'+_e(x.label)+(x.notiz?' <span style="font-size:12px;color:var(--text2);">– '+_e(x.notiz)+'</span>':'')+'</td></tr>';}t2+='</table>';_uebHtml+=_secHtml('Aufgaben & Termine',t2,_alleAnzeige.length);}
+  if(_aussList.length){let a2='<table style="width:100%;border-collapse:collapse;">';for(const a of _aussList.slice().sort((x,y)=>(x.date||x.datum||'')>(y.date||y.datum||'')?1:-1)){const min=(()=>{if(a.von&&a.bis){const[vh,vm]=a.von.split(':').map(Number);const[bh,bm]=a.bis.split(':').map(Number);return(bh*60+bm)-(vh*60+vm);}return 0;})();const od=_od(a.date||a.datum);a2+='<tr style="border-bottom:1px solid var(--border);"><td style="padding:5px 4px;font-size:12px;font-weight:'+(od?700:400)+';color:'+(od?'#E24B4A':'var(--text2)')+';white-space:nowrap;width:76px;vertical-align:top;">'+_fDk(a.date||a.datum)+(od?' ⚠':'')+'</td><td style="padding:5px 4px;font-size:13px;color:var(--text);">'+_e(a.beschreibung||a.label||'Außerhaus')+'</td><td style="padding:5px 4px;font-size:12px;color:var(--text2);white-space:nowrap;text-align:right;">'+(a.von||'')+(a.bis?'–'+a.bis:'')+(min>0?' · <span style="color:var(--text);font-weight:600;">'+_fH(min)+'</span>':'')+'</td></tr>';}a2+='</table>';_uebHtml+=_secHtml('Außerhaus-Termine',a2,_aussList.length);}
+  if(_zeitList.length){let z2='<table style="width:100%;border-collapse:collapse;">';let gMin=0;for(const z of _zeitList.slice().sort((a,b)=>(a.date||a.datum||'')>(b.date||b.datum||'')?1:-1)){const m=_parseMin(z);gMin+=m;z2+='<tr style="border-bottom:1px solid var(--border);"><td style="padding:5px 4px;font-size:12px;color:var(--text2);white-space:nowrap;width:76px;vertical-align:top;">'+_fDk(z.date||z.datum)+'</td><td style="padding:5px 4px;font-size:13px;color:var(--text);">'+_e(z.beschreibung||z.aktivitaet||'')+'</td><td style="padding:5px 4px;font-size:12px;color:var(--text2);white-space:nowrap;text-align:right;">'+(z.von||'')+(z.bis?'–'+z.bis:'')+'</td><td style="padding:5px 4px;font-size:13px;font-weight:600;text-align:right;white-space:nowrap;">'+_fH(m)+'</td></tr>';}z2+='<tr style="background:var(--bg3);"><td colspan="3" style="padding:6px 4px;font-size:11px;font-weight:700;color:var(--text2);">Gesamt</td><td style="padding:6px 4px;font-size:14px;font-weight:700;text-align:right;color:var(--text);">'+_fH(gMin)+'</td></tr></table>';_uebHtml+=_secHtml('Zeiterfassung',z2,_zeitList.length);}
   // b587 (Übersicht Schritt 1): E-Mails und Dokumente (nach Ordner) fehlten oben komplett.
   // Datenbasis = _pamDokIndex wie im Fenster „Alle Dokumente" – funktioniert auch ohne
   // offenes Auftrags-Modal (Rückfall auf die Task-Arrays). Hover über data-hvid (Delegation),
@@ -16127,10 +16158,10 @@ function _openPdfSendenModus(taskId){
       const isOut=(e.dir==='gesendet');
       const ref=(e.pdf&&e.pdf.fileId)?e.pdf:((e.snap&&e.snap.fileId)?e.snap:null);
       const attrs=ref?(' data-hvid="'+_hvId(ref.fileId)+'" data-hvtitel="'+_e(e.subject||'')+'" data-uebfid="'+_hvId(ref.fileId)+'" data-uebname="'+_e(ref.name||e.subject||'E-Mail')+'" title="Klicken für Vorschau"'):'';
+      // b589: Richtungs-Pfeil vor dem Datum statt eigener „Eingang/Gesendet"-Spalte
       m2+='<tr'+attrs+' style="border-bottom:1px solid var(--border);'+(ref?'cursor:pointer;':'')+'">'
-        +'<td style="padding:5px 4px;font-size:11px;color:var(--text2);white-space:nowrap;width:60px;vertical-align:top;">'+_fKurz(e.ts)+'</td>'
-        +'<td style="padding:5px 4px;width:72px;vertical-align:top;"><span style="font-size:10px;padding:1px 7px;border-radius:4px;background:'+(isOut?'rgba(22,163,74,.15);color:#15803D':'rgba(29,78,216,.10);color:#1E40AF')+';font-weight:600;white-space:nowrap;">'+(isOut?'Gesendet':'Eingang')+'</span></td>'
-        +'<td style="padding:5px 4px;font-size:12px;color:var(--text);">'+_e(e.from||'Unbekannt')+(e.subject?' <span style="color:var(--text2);">– '+_e(e.subject)+'</span>':'')+'</td></tr>';
+        +'<td style="padding:5px 4px;font-size:12px;color:var(--text2);white-space:nowrap;width:76px;vertical-align:top;"><span title="'+(isOut?'Gesendet':'Eingang')+'" style="color:'+(isOut?'#1E40AF':'#15803D')+';font-weight:700;">'+(isOut?'↗':'↘')+'</span> '+_fKurz(e.ts)+'</td>'
+        +'<td style="padding:5px 4px;font-size:13px;color:var(--text);">'+_e(e.from||'Unbekannt')+(e.subject?' <span style="color:var(--text2);">– '+_e(e.subject)+'</span>':'')+'</td></tr>';
     });
     m2+='</table>';
     _uebHtml+=_secHtml('E-Mails',m2,_ix.mails.length);
@@ -16142,10 +16173,13 @@ function _openPdfSendenModus(taskId){
       d2+='<table style="width:100%;border-collapse:collapse;">';
       g.items.forEach(function(x){
         const d=x.o;const fid=_hvId(d.fileId);
-        const attrs=fid?(' data-hvid="'+fid+'" data-hvtitel="'+_e(d.name)+'" data-uebfid="'+fid+'" data-uebname="'+_e(d.name)+'" title="Klicken für Vorschau"'):'';
-        d2+='<tr'+attrs+' style="border-bottom:1px solid var(--border);'+(fid?'cursor:pointer;':'')+'">'
-          +'<td style="padding:5px 4px;font-size:11px;color:var(--text2);white-space:nowrap;width:60px;vertical-align:top;">'+_fKurz(d.ts)+'</td>'
-          +'<td style="padding:5px 4px;font-size:12px;color:var(--text);">'+_e(d.name)+(d.herkunft?' <span style="font-size:10px;color:var(--text2);">– '+_e(d.herkunft)+'</span>':'')+'</td></tr>';
+        const attrs=fid?(' data-hvid="'+fid+'" data-hvtitel="'+_e(d.name)+'" data-uebfid="'+fid+'" data-uebname="'+_e(d.name)+'"'):'';
+        // b589: Name nur in der ANZEIGE gekürzt (Tooltip = voller Name); „selbst abgelegt"
+        // ist der Normalfall und fliegt raus – nur „aus Mail …" bleibt als nützliche Ausnahme.
+        const hk=(d.herkunft&&d.herkunft.indexOf('aus Mail')===0)?d.herkunft:'';
+        d2+='<tr'+attrs+' title="'+_e(d.name)+(fid?' – klicken für Vorschau':'')+'" style="border-bottom:1px solid var(--border);'+(fid?'cursor:pointer;':'')+'">'
+          +'<td style="padding:5px 4px;font-size:12px;color:var(--text2);white-space:nowrap;width:76px;vertical-align:top;">'+_fKurz(d.ts)+'</td>'
+          +'<td style="padding:5px 4px;font-size:13px;color:var(--text);">'+_e(_kurzName(d.name))+(hk?' <span style="font-size:12px;color:var(--text2);">– '+_e(hk)+'</span>':'')+'</td></tr>';
       });
       d2+='</table>';
     });
@@ -16158,10 +16192,14 @@ function _openPdfSendenModus(taskId){
   // SCHREIBGESCHÜTZT (kein 📝/✕/Titelbild – bearbeitet wird im Auftrag); Klick = Lightbox,
   // Hover = Großvorschau (data-hvid), Nachladen gedrosselt über die b579-Warteschlange.
   const _fotosB=(_isLive&&typeof taskFotos!=='undefined'&&taskFotos)?taskFotos:(t.fotos||[]);
-  if(_nvList.length||_fotosB.length){
+  // b589: die grauen ⚙-System-Zeilen (automatische Protokolle wie „Termin gemacht…",
+  // „Aufgabe entfernt…") fliegen aus der Übersicht raus – Franks Notizen und Fotos bleiben
+  // vollständig; im Auftrag sind die ⚙-Zeilen weiter über den ⚙-Chip erreichbar.
+  const _nvSicht=_nvList.filter(function(n){return n&&!_btbIsSystemNotiz(n.text);});
+  if(_nvSicht.length||_fotosB.length){
     const _gr={};
     const _put=function(k,art,x){if(!_gr[k])_gr[k]={n:[],f:[]};_gr[k][art].push(x);};
-    _nvList.forEach(function(n){const d=_btbParseTs(n.ts);_put(d?_btbDayKey(d):'','n',{n:n,d:d});});
+    _nvSicht.forEach(function(n){const d=_btbParseTs(n.ts);_put(d?_btbDayKey(d):'','n',{n:n,d:d});});
     _fotosB.forEach(function(f,i){if(!f)return;const d=_btbParseTs(f.ts);_put(d?_btbDayKey(d):'','f',{f:f,i:i,d:d});});
     const _tile=function(x){
       const f=x.f;
@@ -16194,11 +16232,11 @@ function _openPdfSendenModus(taskId){
       g.n.sort(function(a,b){return (a.d?a.d.getTime():0)-(b.d?b.d.getTime():0);});
       g.f.sort(function(a,b){return ((a.d?a.d.getTime():0)-(b.d?b.d.getTime():0))||(a.i-b.i);});
       _fCnt+=g.f.length;
-      const echteN=g.n.filter(function(x){return !_btbIsSystemNotiz(x.n.text);}).length;
+      const echteN=g.n.length; // b589: System-Zeilen sind schon oben ausgefiltert
       const teile=[];
       if(echteN)teile.push(echteN+(echteN===1?' Notiz':' Notizen'));
       if(g.f.length)teile.push(g.f.length+(g.f.length===1?' Foto':' Fotos'));
-      n2+='<div style="padding:5px 10px 3px;font-size:11px;font-weight:700;color:var(--accent);border-bottom:1px solid var(--border);">'+(k?_btbDayLabel(k):'Ohne Datum')+(teile.length?' <span style="font-weight:400;color:var(--text2);">· '+teile.join(' · ')+'</span>':'')+'</div>';
+      n2+='<div style="padding:6px 10px 3px;font-size:13px;font-weight:700;color:var(--accent);border-bottom:1px solid var(--border);">'+(k?_btbDayLabel(k):'Ohne Datum')+(teile.length?' <span style="font-weight:400;font-size:12px;color:var(--text2);">· '+teile.join(' · ')+'</span>':'')+'</div>';
       // b518-Regel: ein Foto hängt unter der LETZTEN echten Notiz vor der Aufnahmezeit;
       // Fotos vor der ersten Notiz stehen oben im Tagesblock. System-Zeilen sind keine Anker.
       const anker=g.n.filter(function(x){return !_btbIsSystemNotiz(x.n.text)&&x.d;});
@@ -16214,10 +16252,9 @@ function _openPdfSendenModus(taskId){
       let ai=0;
       n2+='<table style="width:100%;border-collapse:collapse;">';
       g.n.forEach(function(x){
-        const sys=_btbIsSystemNotiz(x.n.text);
         const zeit=x.d?_btbZeit(x.d):_fTs(x.n.ts);
-        n2+='<tr style="border-bottom:1px solid var(--border);'+(sys?'opacity:.6;':'')+'"><td style="padding:4px;font-size:11px;color:var(--text2);white-space:nowrap;width:52px;vertical-align:top;">'+_e(zeit)+'</td><td style="padding:4px;font-size:'+(sys?'11px':'12px')+';color:'+(sys?'var(--text2)':'var(--text)')+';">'+(sys?'⚙ ':'')+_e(x.n.text)+'</td></tr>';
-        if(!sys&&x.d){
+        n2+='<tr style="border-bottom:1px solid var(--border);"><td style="padding:4px;font-size:12px;color:var(--text2);white-space:nowrap;width:76px;vertical-align:top;">'+_e(zeit)+'</td><td style="padding:4px;font-size:13px;color:var(--text);">'+_e(x.n.text)+'</td></tr>';
+        if(x.d){
           const fl=_strip(fGrp.get(ai));
           if(fl)n2+='<tr><td></td><td style="padding:0 4px 4px;">'+fl+'</td></tr>';
           ai++;
@@ -16225,7 +16262,7 @@ function _openPdfSendenModus(taskId){
       });
       n2+='</table>';
     });
-    _uebHtml+=_secHtml('Bautagebuch',n2,_nvList.length+_fCnt);
+    _uebHtml+=_secHtml('Bautagebuch',n2,_nvSicht.length+_fCnt);
   }
   const _uebDiv=document.createElement('div');
   _uebDiv.innerHTML=_uebHtml;
@@ -16450,9 +16487,9 @@ function _openPdfSendenModus(taskId){
         row.appendChild(chk);
       }else{ const sp=document.createElement('span'); sp.style.cssText='width:14px;flex-shrink:0;'; row.appendChild(sp); }
       const nameSpan=document.createElement('span');
-      nameSpan.style.cssText='flex:1;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;';
-      nameSpan.title='Klicken für Vorschau (bleibt offen, verschiebbar)';
-      nameSpan.textContent=d.icon+' '+d.name;
+      nameSpan.style.cssText='flex:1;font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;';
+      nameSpan.title=d.name+' – Klicken für Vorschau (bleibt offen, verschiebbar)'; // b589: voller Name im Tooltip
+      nameSpan.textContent=d.icon+' '+_kurzName(d.name);
       const _docObj={name:d.name,url:d.url,fileId:(d.orig&&d.orig.fileId)||fid};
       nameSpan.onclick=function(){_pamDocPinPreview(_docObj);};
       row.appendChild(nameSpan);
