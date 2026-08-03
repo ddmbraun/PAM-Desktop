@@ -1944,6 +1944,9 @@ async function _auftragConfirm(){
 <script src="https://cdn.jsdelivr.net/npm/photo-sphere-viewer@4/dist/photo-sphere-viewer.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@5.0.7/dist/jspdf.plugin.autotable.min.js"></script>
+<!-- b593: pdf-lib heftet fremde PDFs seitenweise in das erzeugte Dokument ein. jsPDF kann
+     das nicht – bis b592 fielen angekreuzte PDF-Anlagen beim Knopf „PDF" still unter den Tisch. -->
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <script>/* html2canvas willReadFrequently-Patch: verhindert Canvas2D-Performance-Warnung */
 (function(){const _orig=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(t,a){if(t==='2d')a=Object.assign({willReadFrequently:true},a||{});return _orig.call(this,t,a);};})();
 </script>
@@ -4566,7 +4569,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-03 · #592'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-03-b592) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-03 · #593'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-03-b593) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -16055,12 +16058,12 @@ function _uebAttIdx(arr,d){
   if(nm){for(let i=0;i<arr.length;i++){if(arr[i]&&String(arr[i].name||arr[i].filename||'')===nm)return i;}}
   return -1;
 }
-function _uebSelLesen(tid){try{const o=(JSON.parse(localStorage.getItem(_UEB_SEL_KEY)||'{}')[tid])||{};return{f:o.f||[],a:o.a||[]};}catch(e){return{f:[],a:[]};}}
-function _uebSelSchreiben(tid,f,a){
+function _uebSelLesen(tid){try{const o=(JSON.parse(localStorage.getItem(_UEB_SEL_KEY)||'{}')[tid])||{};return{f:o.f||[],a:o.a||[],e:o.e||[]};}catch(e){return{f:[],a:[],e:[]};}}
+function _uebSelSchreiben(tid,f,a,e){
   try{const o=JSON.parse(localStorage.getItem(_UEB_SEL_KEY)||'{}');
-    if(!f.length&&!a.length)delete o[tid];else o[tid]={f:f,a:a};
+    if(!f.length&&!a.length&&!(e||[]).length)delete o[tid];else o[tid]={f:f,a:a,e:e||[]};
     localStorage.setItem(_UEB_SEL_KEY,JSON.stringify(o));
-  }catch(e){}
+  }catch(e2){}
 }
 function _uebMehrZeigen(btn){
   const wrap=btn.parentElement;if(!wrap)return;
@@ -16124,7 +16127,7 @@ function _openPdfSendenModus(taskId){
   function _kurzName(n){n=String(n||'');return n.length>48?(n.slice(0,26)+'…'+n.slice(-18)):n;} // b589: NUR Anzeige gekürzt – Datei/Tooltip behalten den vollen Namen
   // b592: zuletzt getroffene Auswahl dieses Auftrags (stabile Schlüssel → Häkchen)
   const _selAlt=_uebSelLesen(tid);
-  const _selF=new Set(_selAlt.f),_selA=new Set(_selAlt.a);
+  const _selF=new Set(_selAlt.f),_selA=new Set(_selAlt.a),_selE=new Set(_selAlt.e); // b593: e = E-Mail-PDFs
   const _CHK='width:15px;height:15px;cursor:pointer;accent-color:#185FA5;flex-shrink:0;';
   function _fTs(s){if(!s)return'';if(!/^\d{4}-\d{2}-\d{2}T/.test(s))return s;const d=new Date(s);if(isNaN(d))return s;return d.toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});} // Fix #367: ISO-Guard – de-DE-Altbestand („10.06.2026, …") roh anzeigen statt als Monat.Tag fehlzuinterpretieren
   const _today=new Date().toISOString().split('T')[0];
@@ -16214,19 +16217,33 @@ function _openPdfSendenModus(taskId){
   const kontakte=(t.kontakte||[]).filter(k=>k.name||k.tel||k.email);
   if(adr||kontakte.length){
     const _inp='width:100%;box-sizing:border-box;background:transparent;border:none;border-bottom:1px solid var(--border);color:var(--text);font-size:13px;padding:2px 0;outline:none;';
-    let dh='<table style="width:100%;border-collapse:collapse;">';
+    let dh='';
     if(adr){
-      dh+='<tr style="border-bottom:1px solid var(--border);"><td style="padding:6px 4px;width:26px;vertical-align:middle;"><input type="checkbox" id="_pdfS_adr_chk" checked title="Adresse aufs Deckblatt" style="'+_CHK+'"></td>'
-        +'<td colspan="3" style="padding:6px 4px;"><input type="text" id="_pdfS_adr_val" value="'+_e(adr)+'" style="'+_inp+'"></td></tr>';
+      dh+='<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);">'
+        +'<input type="checkbox" id="_pdfS_adr_chk" checked title="Adresse aufs Deckblatt" style="'+_CHK+'">'
+        +'<input type="text" id="_pdfS_adr_val" value="'+_e(adr)+'" style="'+_inp+'"></div>';
     }
-    kontakte.forEach(function(k,i){
-      dh+='<tr style="border-bottom:1px solid var(--border);"><td style="padding:6px 4px;width:26px;vertical-align:middle;"><input type="checkbox" id="_pdfS_k_chk_'+i+'" checked title="Ansprechpartner aufs Deckblatt" style="'+_CHK+'"></td>'
-        +'<td style="padding:6px 4px;"><input type="text" id="_pdfS_k_name_'+i+'" value="'+_e(k.name||'')+'" placeholder="Name" style="'+_inp+'"></td>'
-        +'<td style="padding:6px 4px;"><input type="text" id="_pdfS_k_tel_'+i+'" value="'+_e(k.tel||'')+'" placeholder="Telefon" style="'+_inp+'"></td>'
-        +'<td style="padding:6px 4px;"><input type="text" id="_pdfS_k_email_'+i+'" value="'+_e(k.email||'')+'" placeholder="E-Mail" style="'+_inp+'"></td></tr>';
-    });
-    dh+='</table>';
-    _uebHtml+=_secHtml('Deckblatt – Adresse & Ansprechpartner',dh,0,_SEKT.deck);
+    if(kontakte.length){
+      // b593 (Wunsch Frank): Ansprechpartner eingeklappt und nur EINER wählbar → Punkte
+      // statt Häkchen. Die Ids `_pdfS_k_chk_<i>` bleiben, `_pdfSendenCreate` liest
+      // unverändert `.checked` – bei einem Radio ist genau einer davon an.
+      dh+='<div data-uebkopf="1" title="Ansprechpartner auf-/zuklappen" style="display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;user-select:none;">'
+        +'<span style="font-size:13px;color:var(--text2);">Ansprechpartner:</span>'
+        +'<span data-uebkname="1" style="font-size:13px;font-weight:600;color:var(--text);">'+_e(kontakte[0].name||kontakte[0].email||'—')+'</span>'
+        +(kontakte.length>1?'<span style="font-size:12px;color:var(--text2);">('+kontakte.length+' zur Auswahl)</span>':'')
+        +'<span style="flex:1;"></span>'
+        +'<span class="uebk-pfeil" style="font-size:14px;color:var(--text2);display:inline-block;transition:transform .18s;transform:rotate(-90deg);">▾</span></div>'
+        +'<div data-uebkliste="1" style="display:none;border-top:1px solid var(--border);"><table style="width:100%;border-collapse:collapse;">';
+      kontakte.forEach(function(k,i){
+        dh+='<tr style="border-bottom:1px solid var(--border);">'
+          +'<td style="padding:6px 4px 6px 10px;width:26px;vertical-align:middle;"><input type="radio" name="_pdfS_kwahl" id="_pdfS_k_chk_'+i+'" data-uebkidx="'+i+'"'+(i===0?' checked':'')+' title="Diesen Ansprechpartner aufs Deckblatt" style="'+_CHK+'"></td>'
+          +'<td style="padding:6px 4px;"><input type="text" id="_pdfS_k_name_'+i+'" value="'+_e(k.name||'')+'" placeholder="Name" style="'+_inp+'"></td>'
+          +'<td style="padding:6px 4px;"><input type="text" id="_pdfS_k_tel_'+i+'" value="'+_e(k.tel||'')+'" placeholder="Telefon" style="'+_inp+'"></td>'
+          +'<td style="padding:6px 10px 6px 4px;"><input type="text" id="_pdfS_k_email_'+i+'" value="'+_e(k.email||'')+'" placeholder="E-Mail" style="'+_inp+'"></td></tr>';
+      });
+      dh+='</table></div>';
+    }
+    _uebHtml+=_secHtml('Deckblatt',dh,0,_SEKT.deck);
   }
   const _alleAnzeige=[..._aufgaben.map(a=>({label:a.typ||'Aufgabe',datum:a.datum,done:!!(a.erledigt)})),..._freie.map(f=>({label:f.text||f.label||f.bezeichnung||'Freier Termin',datum:f.datum,done:!!(f.erledigt),notiz:f.notiz}))].sort((a,b)=>(a.datum||'zzz')>(b.datum||'zzz')?1:-1);
   // b589: EIN Raster für alle Sektionen – Datum immer links in fester Spalte (vorher rechts)
@@ -16239,6 +16256,7 @@ function _openPdfSendenModus(taskId){
   // Klick = bleibendes Vorschaufenster (_pamDocPinPreview) über die Delegation unten.
   const _ix=(typeof _pamDokIndex==='function')?_pamDokIndex(t):{mails:[],docs:[],fotos:[]};
   const _attArr=t.attachments||[]; // b592: maßgeblich fürs PDF – _pdfSendenCreate liest genau dieses Array
+  const _epfArr=t.emailPdfs||[];   // b593: dito für die E-Mail-PDFs
   const _hvId=function(s){return String(s||'').replace(/[^A-Za-z0-9_\-]/g,'');};
   const _fKurz=function(ts){return ts?new Date(ts).toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'2-digit'}):'';};
   if(_ix.mails.length){
@@ -16247,8 +16265,17 @@ function _openPdfSendenModus(taskId){
       const isOut=(e.dir==='gesendet');
       const ref=(e.pdf&&e.pdf.fileId)?e.pdf:((e.snap&&e.snap.fileId)?e.snap:null);
       const attrs=ref?(' data-hvid="'+_hvId(ref.fileId)+'" data-hvtitel="'+_e(e.subject||'')+'" data-uebfid="'+_hvId(ref.fileId)+'" data-uebname="'+_e(ref.name||e.subject||'E-Mail')+'" title="Klicken für Vorschau"'):'';
+      // b593: E-Mails sind jetzt auch fürs Dokument wählbar – sofern PAM ein PDF der Mail
+      // hat (das legt der E-Mail-Umbau seit b543 an). Ohne PDF gibt es kein Häkchen,
+      // denn eine .eml-Datei lässt sich nicht in Seiten verwandeln.
+      const ei=(e.pdf&&e.pdf.fileId)?_uebAttIdx(_epfArr,{fileId:e.pdf.fileId,name:e.pdf.name}):-1;
+      const eky=ei>=0?String(_epfArr[ei].fileId||''):'';
+      const echk=ei>=0
+        ?'<input type="checkbox" id="_pdfS_e_'+ei+'" data-uebchk="e" data-uebkey="'+_e(eky)+'"'+(_selE.has(eky)?' checked':'')+' title="E-Mail (als PDF) ins Dokument aufnehmen" style="'+_CHK+'">'
+        :'';
       // b589: Richtungs-Pfeil vor dem Datum statt eigener „Eingang/Gesendet"-Spalte
       m2+='<tr'+attrs+' style="border-bottom:1px solid var(--border);'+(ref?'cursor:pointer;':'')+'">'
+        +'<td style="padding:5px 2px 5px 6px;width:24px;vertical-align:middle;">'+echk+'</td>'
         +'<td style="padding:5px 4px;font-size:12px;color:var(--text2);white-space:nowrap;width:76px;vertical-align:top;"><span title="'+(isOut?'Gesendet':'Eingang')+'" style="color:'+(isOut?'#1E40AF':'#15803D')+';font-weight:700;">'+(isOut?'↗':'↘')+'</span> '+_fKurz(e.ts)+'</td>'
         +'<td style="padding:5px 4px;font-size:13px;color:var(--text);"><span style="font-weight:600;">'+_e(e.from||'Unbekannt')+'</span>'+(e.subject?' <span style="font-weight:400;color:var(--text2);">– '+_e(e.subject)+'</span>':'')+'</td></tr>';
     });
@@ -16394,6 +16421,14 @@ function _openPdfSendenModus(taskId){
       }
       return;
     }
+    // b593: Ansprechpartner-Liste auf-/zuklappen
+    const kk=cl('[data-uebkopf]');
+    if(kk){
+      const li=_uebDiv.querySelector('[data-uebkliste]');
+      if(li){const zu=li.style.display==='none';li.style.display=zu?'':'none';
+        const pf=kk.querySelector('.uebk-pfeil');if(pf)pf.style.transform=zu?'':'rotate(-90deg)';}
+      return;
+    }
     // b588: rote Überfällig-Pille klappt die Titel-Liste auf/zu
     const od=cl('[data-uebod]');
     if(od){
@@ -16425,12 +16460,14 @@ function _openPdfSendenModus(taskId){
   }
   // b592: Auswahl zählen, dauerhaft merken und die Kachel-Umrandung nachziehen.
   function _uebSammeln(){
-    const f=[],a=[];
+    const f=[],a=[],e=[];
     box.querySelectorAll('input[data-uebchk]:checked').forEach(function(c){
       const k=c.dataset.uebkey||'';
-      if(k)(c.dataset.uebchk==='f'?f:a).push(k);
+      if(!k)return;
+      const art=c.dataset.uebchk;
+      (art==='f'?f:(art==='e'?e:a)).push(k);
     });
-    return {f:f,a:a};
+    return {f:f,a:a,e:e};
   }
   function _uebZaehler(){
     const n=box.querySelectorAll('input[data-uebchk]:checked').length;
@@ -16445,16 +16482,24 @@ function _openPdfSendenModus(taskId){
       c.checked=!!an;
       if(c.dataset.uebchk==='f'){const w=c.closest('[data-uebfoto]');if(w)w.style.border=an?'2px solid #185FA5':'1px solid var(--border)';}
     });
-    const s=_uebSammeln();_uebSelSchreiben(tid,s.f,s.a);_uebZaehler();
+    const s=_uebSammeln();_uebSelSchreiben(tid,s.f,s.a,s.e);_uebZaehler();
   }
   box.addEventListener('change',function(ev){
     const c=ev.target;
+    // b593: gewählten Ansprechpartner in der zugeklappten Kopfzeile mitführen
+    if(c&&c.type==='radio'&&c.name==='_pdfS_kwahl'){
+      const nm=(document.getElementById('_pdfS_k_name_'+c.dataset.uebkidx)||{}).value||'';
+      const em=(document.getElementById('_pdfS_k_email_'+c.dataset.uebkidx)||{}).value||'';
+      const lbl=box.querySelector('[data-uebkname]');
+      if(lbl)lbl.textContent=(nm||em||'—');
+      return;
+    }
     if(!c||c.type!=='checkbox'||!c.dataset.uebchk)return;
     if(c.dataset.uebchk==='f'){
       const w=c.closest('[data-uebfoto]');
       if(w)w.style.border=c.checked?'2px solid #185FA5':'1px solid var(--border)';
     }
-    const s=_uebSammeln();_uebSelSchreiben(tid,s.f,s.a);
+    const s=_uebSammeln();_uebSelSchreiben(tid,s.f,s.a,s.e);
     _uebZaehler();
   });
   // ── Leiste unten (b592: läuft beim Scrollen mit – position:sticky im scrollenden Kasten,
@@ -16473,23 +16518,22 @@ function _openPdfSendenModus(taskId){
   const btnAlle=mkMini('Alle','Alle Fotos und Dokumente ankreuzen',function(){_uebAlle(true);});
   const btnKeine=mkMini('Keine','Alle Häkchen entfernen',function(){_uebAlle(false);});
   const spacer=document.createElement('span');spacer.style.cssText='flex:1;min-width:8px;';
-  const btnPrint=document.createElement('button');btnPrint.type='button';
-  btnPrint.textContent='🖨 Drucken';
-  btnPrint.style.cssText='padding:9px 13px;border-radius:8px;background:var(--bg3);color:var(--text);border:1px solid var(--border);font-size:13px;font-weight:700;cursor:pointer;';
-  btnPrint.onclick=()=>{ov.remove();_pamTaskDrucken(t.id);};
+  // b593: Der eigene „🖨 Drucken"-Knopf ist WEG. Er ignorierte die Auswahl komplett und
+  // öffnete nur das alte zweite Übersichtsfenster. Gedruckt wird künftig aus dem fertigen
+  // Dokument heraus (der PDF-Betrachter hat seinen eigenen Druckknopf) – ein Weg statt drei.
   const btnPdf=document.createElement('button');btnPdf.type='button';
-  btnPdf.textContent='📄 PDF';
+  btnPdf.textContent='📄 Dokument erstellen';
   btnPdf.style.cssText='padding:9px 15px;border-radius:8px;background:var(--accent);color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer;';
   btnPdf.onclick=()=>_pdfSendenCreate(t,false);
   const btnSend=document.createElement('button');btnSend.type='button';
-  btnSend.textContent='📧 Senden';
+  btnSend.textContent='📧 Erstellen & senden';
   btnSend.style.cssText='padding:9px 15px;border-radius:8px;background:#185FA5;color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer;';
   btnSend.onclick=()=>_pdfSendenCreate(t,true);
   const btnCancel=document.createElement('button');btnCancel.type='button';
   btnCancel.textContent='Schließen';
   btnCancel.style.cssText='padding:9px 13px;border-radius:8px;background:var(--bg3);color:var(--text2);border:1px solid var(--border);font-size:13px;cursor:pointer;';
   btnCancel.onclick=()=>ov.remove();
-  footer.append(cnt,btnAlle,btnKeine,spacer,btnPrint,btnPdf,btnSend,btnCancel);
+  footer.append(cnt,btnAlle,btnKeine,spacer,btnPdf,btnSend,btnCancel);
   box.appendChild(footer);
   _uebZaehler(); // b592: gemerkte Auswahl sofort in der Leiste zeigen
 
@@ -16587,7 +16631,8 @@ async function _pdfSendenCreate(t,sendMail){
 
   // ── Anhänge ──────────────────────────────────────────────────
   const anhaenge=(t.attachments||[]);
-  const textAnhNames=[];
+  const textAnhNames=[];    // kann nicht eingeheftet werden → Schlussseite + separater Mail-Anhang
+  const pdfEinheften=[];    // b593: {name,fileId} – wird unten mit pdf-lib ins Dokument eingeheftet
   for(let i=0;i<anhaenge.length;i++){
     const chk=document.getElementById('_pdfS_a_'+i);
     if(!chk||!chk.checked)continue;
@@ -16606,74 +16651,205 @@ async function _pdfSendenCreate(t,sendMail){
           }
         }catch(e){console.warn('[PdfSenden]',e);}
       }
-      if(!src){textAnhNames.push(a.name||a.filename||'Anhang');continue;}
+      if(!src){textAnhNames.push({name:a.name||a.filename||'Anhang',fileId:a.fileId||_pamExtractFileId(a.url||'')||''});continue;} // b593: als Objekt, damit Schlussseite + Mail-Anhang den Namen kennen
       const corrUrl=await _correctFotoForPdf(src);
       const imgInfo=await new Promise(res=>{
         const img=new Image();
         img.onload=()=>res({w:img.naturalWidth,h:img.naturalHeight,src:corrUrl});
         img.onerror=()=>res(null);img.src=corrUrl;
       });
-      if(!imgInfo){textAnhNames.push(a.name||a.filename||'Anhang');continue;}
+      if(!imgInfo){textAnhNames.push({name:a.name||a.filename||'Anhang',fileId:a.fileId||_pamExtractFileId(a.url||'')||''});continue;} // b593: siehe oben
       const landscape=imgInfo.w>imgInfo.h;
       _addPage(landscape);
       const fmt=landscape?[297,210]:[210,297];
       doc.addImage(imgInfo.src,'JPEG',0,0,fmt[0],fmt[1]-8,'','FAST');
       doc.setFontSize(8);doc.setTextColor(80,80,80);doc.setFont('helvetica','normal');
       doc.text(a.name||a.filename||'Anhang',6,fmt[1]-3);
+    }else if(/\.pdf$/.test(fname)){
+      // b593: echte PDF-Anlage → wird weiter unten seitenweise eingeheftet
+      const fidP=a.fileId||(_pamExtractFileId(a.url||''));
+      if(fidP)pdfEinheften.push({name:a.name||a.filename||'Anhang',fileId:fidP});
+      else textAnhNames.push({name:a.name||a.filename||'Anhang',fileId:''});
     }else{
-      // Nicht-Bild: als separater E-Mail-Anhang sammeln (mit fileId für Download)
+      // Word, Excel & Co.: kann kein Browser in PDF-Seiten verwandeln – kommt auf die
+      // Schlussseite und geht beim Senden als separate Datei mit.
       const fid2=a.fileId||(_pamExtractFileId(a.url||''));
       textAnhNames.push({name:a.name||a.filename||'Anhang',fileId:fid2||''});
     }
   }
+  // b593: angekreuzte E-Mails (deren von PAM erzeugtes PDF) ebenfalls einheften
+  (t.emailPdfs||[]).forEach(function(p,i){
+    const c=document.getElementById('_pdfS_e_'+i);
+    if(!c||!c.checked)return;
+    const fid=p.fileId||(_pamExtractFileId(p.url||''));
+    if(fid)pdfEinheften.push({name:p.name||'E-Mail.pdf',fileId:fid});
+  });
 
-  if(!doc||!hasContent){showToast('Bitte mindestens einen Inhalt auswählen','error');return;}
+  const _hatEigenes=!!(doc&&hasContent);
+  if(!_hatEigenes&&!pdfEinheften.length){showToast('Bitte mindestens einen Inhalt auswählen','error');return;}
 
   // Dateiname
   const tit=(t.title||'PAM').replace(/[^a-zA-Z0-9äöüÄÖÜß \-_]/g,'_').trim();
   const dateStr=new Date().toLocaleDateString('de-DE').replace(/\./g,'-');
   const pdfName=tit+'_'+dateStr+'.pdf';
 
+  // ── b593: EIN Dokument – fremde PDFs seitenweise einheften ───────────────────
+  // jsPDF kann nur Bilder und Text setzen; pdf-lib übernimmt fremde Seiten. Läuft die
+  // Bibliothek nicht (offline, Blocker), bleibt es beim jsPDF-Teil und die Anlagen gehen
+  // als separate Dateien mit – dann sagen wir das auch deutlich, statt still zu schlucken.
+  let pdfBytes=null;
+  const nichtEingeheftet=[];
+  if(window.PDFLib&&window.PDFLib.PDFDocument){
+    try{
+      if(pdfEinheften.length)showToast('📎 Anlagen werden eingeheftet…','info',9000);
+      const {PDFDocument,StandardFonts,rgb}=window.PDFLib;
+      const ziel=await PDFDocument.create();
+      if(_hatEigenes){
+        const eigen=await PDFDocument.load(doc.output('arraybuffer'));
+        (await ziel.copyPages(eigen,eigen.getPageIndices())).forEach(function(p){ziel.addPage(p);});
+      }
+      for(const an of pdfEinheften){
+        try{
+          if(!gdriveToken)throw new Error('Drive nicht verbunden');
+          const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(an.fileId)+'?alt=media',
+            {headers:{Authorization:'Bearer '+gdriveToken}});
+          if(!r.ok)throw new Error('HTTP '+r.status);
+          const fremd=await PDFDocument.load(await r.arrayBuffer(),{ignoreEncryption:true});
+          (await ziel.copyPages(fremd,fremd.getPageIndices())).forEach(function(p){ziel.addPage(p);});
+        }catch(e){
+          console.warn('[PdfSenden] nicht einheftbar:',an.name,e);
+          nichtEingeheftet.push(an);
+        }
+      }
+      // Schlussseite: was NICHT im Dokument steckt, wird benannt – sonst fehlt es lautlos.
+      const offen=textAnhNames.concat(nichtEingeheftet);
+      if(offen.length){
+        const s=ziel.addPage([595,842]);
+        const font=await ziel.embedFont(StandardFonts.Helvetica);
+        const fontB=await ziel.embedFont(StandardFonts.HelveticaBold);
+        s.drawText('Weitere Anlagen',{x:56,y:770,size:16,font:fontB,color:rgb(.12,.12,.12)});
+        s.drawText('Diese Dateien lassen sich nicht als Seiten einfuegen und liegen der',{x:56,y:742,size:10,font:font,color:rgb(.42,.42,.42)});
+        s.drawText('E-Mail als eigene Anhaenge bei:',{x:56,y:728,size:10,font:font,color:rgb(.42,.42,.42)});
+        let y=700;
+        offen.forEach(function(an){
+          if(y<60)return;
+          s.drawText('- '+String(an.name||'Anlage').replace(/[^\x20-\x7EÀ-ſ]/g,''),{x:56,y:y,size:11,font:font,color:rgb(.12,.12,.12)});
+          y-=18;
+        });
+      }
+      pdfBytes=await ziel.save();
+    }catch(e){
+      console.warn('[PdfSenden] Zusammenheften fehlgeschlagen:',e);
+      pdfBytes=null;
+      pdfEinheften.forEach(function(an){if(nichtEingeheftet.indexOf(an)<0)nichtEingeheftet.push(an);});
+    }
+  }else if(pdfEinheften.length){
+    pdfEinheften.forEach(function(an){nichtEingeheftet.push(an);});
+  }
+  // Was nicht eingeheftet werden konnte, geht wenigstens als Datei mit
+  nichtEingeheftet.forEach(function(an){if(textAnhNames.indexOf(an)<0)textAnhNames.push(an);});
+
+  if(!pdfBytes&&!_hatEigenes){
+    showToast('⚠ Es konnte kein Dokument erzeugt werden – bitte Drive-Verbindung prüfen','error',6000);
+    return;
+  }
+  const fertigeBytes=pdfBytes||new Uint8Array(doc.output('arraybuffer'));
+
   document.getElementById('_pdfSendenOv')?.remove();
 
   if(sendMail){
-    await _pdfSendenMail(doc,pdfName,t,textAnhNames);
+    await _pdfSendenMail(fertigeBytes,pdfName,t,textAnhNames,(inclKontakte[0]||{}).email||'');
   }else{
-    window.open(doc.output('bloburl'),'_blank');
-    showToast('✓ PDF erstellt','success',3000);
+    const url=URL.createObjectURL(new Blob([fertigeBytes],{type:'application/pdf'}));
+    window.open(url,'_blank');
+    const n=pdfEinheften.length-nichtEingeheftet.length;
+    showToast('✓ Dokument erstellt'+(n>0?' – '+n+' Anlage(n) eingeheftet':''),'success',4000);
+    if(nichtEingeheftet.length)showToast('⚠ Nicht einheftbar: '+nichtEingeheftet.map(function(a){return a.name;}).join(', '),'warning',8000);
   }
 }
 
-async function _pdfSendenMail(doc,fname,t,extraAnhänge){
-  showToast('📧 PDF wird vorbereitet…','info',3000);
-  const buf=doc.output('arraybuffer');
-  const b64=btoa(Array.from(new Uint8Array(buf),b=>String.fromCharCode(b)).join(''));
+// b593: Vor dem Absenden ein kleines Fenster – Empfänger, Betreff, Text und die Liste der
+// Anhänge zum Kontrollieren. Bis b592 ging die Mail mit LEEREM Text sofort an den ersten
+// Ansprechpartner raus, ohne Rückfrage. Gibt {to,subj,body} zurück oder null bei Abbruch.
+function _pdfSendenDialog(vorgabe){
+  return new Promise(function(fertig){
+    const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    const ov=document.createElement('div');
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000001;display:flex;align-items:center;justify-content:center;';
+    const bx=document.createElement('div');
+    bx.style.cssText='background:var(--bg2);border-radius:14px;padding:18px 20px;width:min(560px,94vw);max-height:90vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,.5);';
+    const inp='width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;padding:8px 10px;outline:none;';
+    const lbl='display:block;font-size:11px;font-weight:700;color:var(--text2);margin:10px 0 4px;';
+    bx.innerHTML='<div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:4px;">📧 Unterlagen senden</div>'
+      +'<div style="font-size:12px;color:var(--text2);">Vor dem Absenden prüfen – die Mail geht direkt raus.</div>'
+      +'<label style="'+lbl+'">Empfänger</label><input type="text" id="_psdTo" value="'+esc(vorgabe.to)+'" placeholder="name@firma.de" style="'+inp+'">'
+      +(vorgabe.vorschlaege&&vorgabe.vorschlaege.length>1
+        ?'<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:5px;">'+vorgabe.vorschlaege.map(function(v){
+            return '<button type="button" data-psdmail="'+esc(v.email)+'" style="padding:2px 8px;border-radius:12px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:11px;cursor:pointer;">'+esc(v.name||v.email)+'</button>';
+          }).join('')+'</div>':'')
+      +'<label style="'+lbl+'">Betreff</label><input type="text" id="_psdSubj" value="'+esc(vorgabe.subj)+'" style="'+inp+'">'
+      +'<label style="'+lbl+'">Nachricht</label><textarea id="_psdBody" rows="7" style="'+inp+'resize:vertical;line-height:1.5;">'+esc(vorgabe.body)+'</textarea>'
+      +'<label style="'+lbl+'">Anhänge</label><div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:12px;color:var(--text);line-height:1.7;">'
+        +vorgabe.anhaenge.map(function(n){return '📎 '+esc(n);}).join('<br>')+'</div>'
+      +'<div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;">'
+      +'<button type="button" id="_psdAb" style="padding:9px 14px;border-radius:8px;background:var(--bg3);color:var(--text2);border:1px solid var(--border);font-size:13px;cursor:pointer;">Abbrechen</button>'
+      +'<button type="button" id="_psdOk" style="padding:9px 18px;border-radius:8px;background:#185FA5;color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer;">Senden</button></div>';
+    ov.appendChild(bx);document.body.appendChild(ov);
+    const schliessen=function(erg){ov.remove();fertig(erg);};
+    bx.querySelectorAll('[data-psdmail]').forEach(function(b){
+      b.onclick=function(){document.getElementById('_psdTo').value=b.dataset.psdmail;};
+    });
+    bx.querySelector('#_psdAb').onclick=function(){schliessen(null);};
+    bx.querySelector('#_psdOk').onclick=function(){
+      const to=(document.getElementById('_psdTo').value||'').trim();
+      if(!to||to.indexOf('@')<0){showToast('⚠ Bitte einen Empfänger eintragen','warning',3000);return;}
+      schliessen({to:to,subj:(document.getElementById('_psdSubj').value||'').trim(),body:document.getElementById('_psdBody').value||''});
+    };
+    ov.addEventListener('click',function(e){if(e.target===ov)schliessen(null);});
+    setTimeout(function(){const el=document.getElementById('_psdTo');if(el&&!el.value)el.focus();},50);
+  });
+}
+async function _pdfSendenMail(bytes,fname,t,extraAnhänge,vorgabeMail){
+  const b64=btoa(Array.from(new Uint8Array(bytes),b=>String.fromCharCode(b)).join(''));
   const kontakte=(t.kontakte||[]);
-  const toAddr=(kontakte.find(k=>k.email)||{}).email||'';
-  const subj=(t.title||'Auftrag')+' – Unterlagen';
+  // b593: Empfänger, Betreff und Text erst bestätigen lassen
+  const wahl=await _pdfSendenDialog({
+    to:vorgabeMail||((kontakte.find(k=>k.email)||{}).email||''),
+    vorschlaege:kontakte.filter(k=>k.email).map(function(k){return {name:k.name||'',email:k.email};}),
+    subj:(t.title||'Auftrag')+' – Unterlagen',
+    body:'Sehr geehrte Damen und Herren,\n\nanbei erhalten Sie die Unterlagen zum Vorgang "'+(t.title||'')+'".\n\nMit freundlichen Grüßen\n',
+    anhaenge:[fname].concat((extraAnhänge||[]).map(function(a){return a&&a.name?a.name:String(a);}))
+  });
+  if(!wahl){showToast('Senden abgebrochen – das Dokument wurde nicht verschickt','info',3000);return;}
+  showToast('📧 Mail wird vorbereitet…','info',3000);
+  const toAddr=wahl.to;
+  const subj=wahl.subj;
   const token=msToken||msToken2||null;
   if(token){
     try{
       // Hauptanhang: generiertes PDF
       const attachments=[{'@odata.type':'#microsoft.graph.fileAttachment',name:fname,contentType:'application/pdf',contentBytes:b64}];
       // Zusatz-Anhänge: ausgewählte Drive-Dokumente herunterladen
+      const _fehlen=[]; // b593: was der Dialog verspricht, aber nicht mitgeht, wird gemeldet
       if(extraAnhänge&&extraAnhänge.length&&gdriveToken){
         showToast('📎 Lade Dokumente…','info',6000);
         for(const anh of extraAnhänge){
-          if(!anh.fileId)continue;
+          if(!anh.fileId){_fehlen.push(anh.name||String(anh));continue;}
           try{
             const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(anh.fileId)+'?alt=media',
               {headers:{Authorization:'Bearer '+gdriveToken}});
-            if(!r.ok){console.warn('[PdfSenden] Drive-Download fehlgeschlagen:',anh.name,r.status);continue;}
+            if(!r.ok){console.warn('[PdfSenden] Drive-Download fehlgeschlagen:',anh.name,r.status);_fehlen.push(anh.name||'Anhang');continue;}
             const blob=await r.blob();
             const ab=await blob.arrayBuffer();
             const ab64=btoa(Array.from(new Uint8Array(ab),b=>String.fromCharCode(b)).join(''));
             const mime=blob.type||'application/octet-stream';
             attachments.push({'@odata.type':'#microsoft.graph.fileAttachment',name:anh.name,contentType:mime,contentBytes:ab64});
-          }catch(e){console.warn('[PdfSenden] Anhang-Fehler:',anh.name,e);}
+          }catch(e){console.warn('[PdfSenden] Anhang-Fehler:',anh.name,e);_fehlen.push(anh.name||'Anhang');}
         }
+      }else if(extraAnhänge&&extraAnhänge.length){
+        (extraAnhänge||[]).forEach(function(a){_fehlen.push(a&&a.name?a.name:String(a));}); // Drive nicht verbunden
       }
-      const body={message:{subject:subj,body:{contentType:'Text',content:''},
+      const body={message:{subject:subj,body:{contentType:'Text',content:wahl.body||''},
         toRecipients:toAddr?[{emailAddress:{address:toAddr}}]:[],
         attachments:attachments
       },saveToSentItems:true};
@@ -16681,16 +16857,23 @@ async function _pdfSendenMail(doc,fname,t,extraAnhänge){
         {method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body)});
       if(r.ok||r.status===202){
         const extra=attachments.length>1?' + '+( attachments.length-1)+' Dokument(e)':'';
-        showToast('✓ Mail mit PDF'+extra+' versendet!','success',5000);return;
+        showToast('✓ Mail mit PDF'+extra+' versendet!','success',5000);
+        // b593: nie still schlucken – was der Dialog versprochen hat, aber nicht mitging
+        if(_fehlen.length)showToast('⚠ NICHT mitgeschickt: '+_fehlen.join(', ')+' – bitte von Hand nachreichen','warning',10000);
+        return;
       }
       console.warn('[PdfSenden] Graph HTTP',r.status);
     }catch(e){console.warn('[PdfSenden] Graph-Fehler:',e);}
   }
-  // Fallback: PDF speichern + mailto öffnen
-  doc.save(fname);
-  const mailto='mailto:'+encodeURIComponent(toAddr)+'?subject='+encodeURIComponent(subj);
+  // Fallback ohne Outlook-Verbindung: Datei herunterladen + Mailfenster mit Text öffnen
+  try{
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));
+    a.download=fname;document.body.appendChild(a);a.click();a.remove();
+  }catch(e){console.warn('[PdfSenden] Download:',e);}
+  const mailto='mailto:'+encodeURIComponent(toAddr)+'?subject='+encodeURIComponent(subj)+'&body='+encodeURIComponent(wahl.body||'');
   window.open(mailto,'_blank');
-  showToast('PDF gespeichert – weitere Anhänge bitte manuell hinzufügen','warning',6000);
+  showToast('Dokument heruntergeladen – bitte im Mailfenster als Anhang hinzufügen','warning',7000);
 }
 
 let _currentFotoLbIdx=-1;
@@ -19612,14 +19795,21 @@ function _pamFotoLightbox(taskId, startFi){
       }
     }else{
       var img=document.getElementById('_flbImg');
-      if(img&&(!src||src===window.location.href)&&f.driveId){
+      // b593 (Befund Frank: „beim Großmachen kommt nur ein kleines Bild"): Das Vollbild
+      // wurde bis b592 NUR geholt, wenn gar keine Quelle da war. War eine Miniatur da
+      // (Kachel oder thumbnailLink), blieb die stehen – und weil kleine Bilder nicht
+      // hochskaliert werden, klebte eine Briefmarke im schwarzen Fenster. Jetzt wird das
+      // Vollbild immer nachgeladen, außer die Anzeige IST schon das Vollbild.
+      var _vollSchonDa=!!(f.driveId&&typeof _desktopFotoBlobCache!=='undefined'
+        &&_desktopFotoBlobCache.has(f.driveId)&&src===_desktopFotoBlobCache.get(f.driveId));
+      if(img&&f.driveId&&!_vollSchonDa){
         // #467: Vollbild zuverlässig via Token-Blob laden (thumbnailLink läuft ab / wird geblockt); Thumbnail nur als Fallback
         var _wantFi=fi;
         _fetchDesktopFotoBlob(f.driveId).then(function(u){
           if(_wantFi!==fi)return;
           var i2=document.getElementById('_flbImg');
           if(u&&i2){i2.src=u;return;}
-          _pamLoadThumb(f.driveId).then(function(u2){var i3=document.getElementById('_flbImg');if(u2&&i3&&_wantFi===fi)i3.src=u2;});
+          if(!src)_pamLoadThumb(f.driveId).then(function(u2){var i3=document.getElementById('_flbImg');if(u2&&i3&&_wantFi===fi)i3.src=u2;});
         });
       }
     }
