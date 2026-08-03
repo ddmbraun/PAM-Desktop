@@ -4564,7 +4564,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-03 · #580'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-03-b580) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-03 · #581'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-03-b581) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -13054,7 +13054,11 @@ function _hvLokalesBild(el){
   if(!el)return '';
   if(el.dataset&&el.dataset.hvsrc)return el.dataset.hvsrc;
   const i=el.querySelector?el.querySelector('img'):null;
-  return (i&&i.src)?i.src:'';
+  // b581: nur ein Bild nehmen, das WIRKLICH fertig geladen ist. Vorher kam hier auch die
+  // Adresse einer gescheiterten Kachel zurück (abgelaufener thumbnailLink – bei älteren
+  // Tasks der Normalfall). Deren Fehlschlag fraß dann in _hvZeigen den einen automatischen
+  // Zweitversuch auf, und beim nächsten Ruckler machte die Vorschau kommentarlos zu.
+  return (i&&i.src&&i.complete&&i.naturalWidth>0)?i.src:'';
 }
 function _hvZeigen(id,quelle,ev,sofortSrc){
   if(!_hvBox){
@@ -13091,10 +13095,24 @@ function _hvZeigen(id,quelle,ev,sofortSrc){
   let _zweiterVersuch=false;
   img.onerror=function(){
     if(_hvAktiv!==id||_stehtSchon)return;
+    // b581: Scheitert nur das SOFORT-Bild (die Kachel-Adresse aus b574), zählt das nicht
+    // als Versuch – die scharfe Fassung ist ohnehin schon unterwegs (Zeile darunter) und
+    // ersetzt die Adresse gleich. Vorher verbrannte die tote Kachel-Adresse den einen
+    // Rettungsversuch, und ein einziger Ruckler danach ließ die Vorschau leer.
+    if(sofortSrc&&img.src===sofortSrc)return;
     if(!_zweiterVersuch){
       _zweiterVersuch=true;
       delete _hvThumbCache[id];
-      _hvThumb(id).then(function(u){if(_hvAktiv===id&&u&&u!==img.src)img.src=u;});
+      _hvThumb(id).then(function(u){
+        if(_hvAktiv!==id||!u)return;
+        // b581: Liefert der Zweitversuch DIESELBE Notlösungs-Adresse wie eben, wurde
+        // vorher gar nichts mehr geladen (u===img.src → kein neuer Versuch, kein
+        // Schließen – die Vorschau blieb stumm unsichtbar, typisch bei Dokument-Zeilen
+        // ohne Kachelbild). Jetzt: einmal mit Frische-Anhängsel neu laden; scheitert
+        // auch das, macht der nächste onerror über _hvVerstecken sauber zu.
+        if(u===img.src){img.src=u+(u.indexOf('?')>=0?'&':'?')+'hvfrisch='+Date.now();return;}
+        img.src=u;
+      });
       return;
     }
     _hvVerstecken();
@@ -13114,24 +13132,32 @@ function _hvZeigen(id,quelle,ev,sofortSrc){
 // Höchstens vier Abrufe gleichzeitig. Ohne Bremse startet eine Ansicht mit vielen Fotos
 // alle Abrufe auf einmal; Chrome bricht dann mit ERR_INSUFFICIENT_RESOURCES ab – und zwar
 // nicht nur die Bilder, sondern alles, was gleichzeitig läuft (auch die Hover-Vorschau).
-const _pamLadeMax=4;let _pamLadeAktiv=0;const _pamLadeWarte=[];
-function _pamLadeSchlange(fn){
-  _pamLadeWarte.push(fn);_pamLadeNaechster();
+const _pamLadeMax=4;let _pamLadeAktiv=0;const _pamLadeWarte=[];const _pamLadeWarteHinten=[];
+// b581: zwei Prioritäten. Die b580-GPS-Abrufe stellten sich beim Öffnen des Foto-Eingangs
+// zu Hunderten VOR die Kachel-Rettungen (FIFO) – die Kacheln blieben minutenlang grau und
+// die Hover-Vorschau hatte kein Sofort-Bild. Jetzt: Bild-Nachladungen vorn (Standard),
+// Kleinkram wie GPS-Metadaten mit hinten=true ans Ende.
+function _pamLadeSchlange(fn,hinten){
+  (hinten?_pamLadeWarteHinten:_pamLadeWarte).push(fn);_pamLadeNaechster();
 }
 function _pamLadeNaechster(){
   if(_pamLadeAktiv>=_pamLadeMax)return;
-  const fn=_pamLadeWarte.shift();
+  const fn=_pamLadeWarte.shift()||_pamLadeWarteHinten.shift();
   if(!fn)return;
   _pamLadeAktiv++;
   let p;try{p=fn();}catch(e){p=null;}
   Promise.resolve(p).catch(function(){}).then(function(){_pamLadeAktiv--;_pamLadeNaechster();});
 }
-const _hvThumbCache={};
+const _hvThumbCache={}; // b581: id → {u,ts} – die signierten Drive-Miniatur-Adressen LAUFEN AB
+const _HV_CACHE_MS=30*60*1000; // b581: nach 30 Minuten neu fragen, sonst steht eine abgelaufene Adresse im Speicher
 async function _hvThumb(id){
-  if(_hvThumbCache[id]!==undefined)return _hvThumbCache[id];
+  const _c=_hvThumbCache[id];
+  if(_c&&(Date.now()-_c.ts)<_HV_CACHE_MS)return _c.u;
   let u='';
   try{
-    if(typeof gdriveToken!=='undefined'&&gdriveToken){
+    // b581: gdriveTokenValid statt nur „Token vorhanden" – ein abgelaufenes Token brachte
+    // hier still ein 401 und damit die Cookie-Notlösung, die bei privaten Dateien nicht lädt.
+    if(typeof gdriveToken!=='undefined'&&gdriveToken&&(typeof gdriveTokenValid!=='function'||gdriveTokenValid())){
       const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(id)+'?fields=thumbnailLink',
         {headers:{Authorization:'Bearer '+gdriveToken}});
       if(r.ok){u=(((await r.json()).thumbnailLink)||'').replace(/=s\d+(-c)?$/,'=s1000');}
@@ -13141,7 +13167,7 @@ async function _hvThumb(id){
   // der Drive-Abruf einmal (z. B. während des Lade-Sturms), stand für dieses Bild für immer
   // die Cookie-abhängige Notlösung im Speicher – die bei privaten Dateien nicht lädt. Genau
   // die Bilder, die man in dem Moment überfahren hatte, blieben dann dauerhaft ohne Vorschau.
-  if(u){_hvThumbCache[id]=u;return u;}
+  if(u){_hvThumbCache[id]={u:u,ts:Date.now()};return u;}
   return _hvBild(id); // Notlösung nur für DIESEN Versuch – beim nächsten Überfahren wird neu gefragt
 }
 function _hvPosition(ev){
@@ -13259,6 +13285,7 @@ function _feDeskOeffnen(ohneTask){
     gpsTag.textContent='📍';
     cell.appendChild(gpsTag);
     if(typeof gdriveToken!=='undefined'&&gdriveToken){
+      // b581: hinten=true – GPS ist Kleinkram und darf die Kachel-Rettungen nicht aufhalten
       _pamLadeSchlange(()=>fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(key)+'?fields=imageMediaMetadata(location)',{headers:{Authorization:'Bearer '+gdriveToken}})
         .then(r=>r.ok?r.json():null)
         .then(j=>{
@@ -13267,7 +13294,7 @@ function _feDeskOeffnen(ohneTask){
             gpsTag.style.display='block';
             gpsTag.title='Aufnahmeort: '+(+loc.latitude).toFixed(5)+', '+(+loc.longitude).toFixed(5)+' – Einzelheiten über ℹ';
           }
-        }).catch(()=>{}));
+        }).catch(()=>{}),true);
     }
     cell.onclick=()=>{
       if(_feDeskAuswahl.has(key)){_feDeskAuswahl.delete(key);cell.style.borderColor='transparent';}
@@ -15080,10 +15107,14 @@ function _desktopThumbFallback(img){
   const id=img.getAttribute('data-foto-id');
   if(id&&gdriveToken){
     img.removeAttribute('onerror');
-    _fetchDesktopFotoBlob(id).then(u=>{
+    // b581: durch die b579-Warteschlange. Vorher feuerten hier (Bautagebuch + Foto-Sektion)
+    // bei vielen abgelaufenen Vorschau-Adressen ALLE Vollbild-Nachladungen gleichzeitig –
+    // derselbe ERR_INSUFFICIENT_RESOURCES-Sturm wie im Foto-Eingang vor b579, und der riss
+    // auch die Hover-Abrufe mit. b579-Merkregel: die Schlange gehört vor jede Massen-Nachladung.
+    _pamLadeSchlange(()=>_fetchDesktopFotoBlob(id).then(u=>{
       if(u){img.src=u;img.style.display='';}
       else{img.style.display='none';if(img.parentElement)img.parentElement.classList.add('fallback');}
-    });
+    }));
   } else {
     img.style.display='none';
     if(img.parentElement)img.parentElement.classList.add('fallback');
@@ -15100,7 +15131,7 @@ function hydrateDesktopFotoThumbs(){
     const srcAttr=img.getAttribute('src')||'';
     if(srcAttr && !srcAttr.endsWith(window.location.href)){img.dataset.hydrated='1';return;}
     const id=img.getAttribute('data-foto-id');
-    if(id){img.dataset.hydrated='1';loadDesktopFotoThumb(img,id);}
+    if(id){img.dataset.hydrated='1';_pamLadeSchlange(()=>loadDesktopFotoThumb(img,id));} // b581: gebremst, s. _desktopThumbFallback
   });
 }
 let _fotoSelectMode=false;
