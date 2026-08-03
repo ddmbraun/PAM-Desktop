@@ -4548,7 +4548,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-03 · #573'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-03-b573) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-03 · #574'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-03-b574) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -12933,7 +12933,7 @@ function _feDeskBtnRefresh(){
 // kam man bisher gar nicht heran. Läuft über einen einzigen Listener am document
 // (Event-Delegation), weil die Kacheln bei jedem Rendern neu entstehen.
 let _hvBox=null,_hvTimer=null,_hvAktiv='';
-const _HV_VERZOEGERUNG=450; // ms – verhindert Aufblitzen beim bloßen Überfahren
+const _HV_VERZOEGERUNG=280; // ms – verhindert Aufblitzen beim bloßen Überfahren (b574: von 450 herunter, das Bild kommt jetzt sofort)
 
 function _hvBild(id){
   // Größere Fassung desselben Vorschaubildes (Google liefert die Größe über sz)
@@ -12943,7 +12943,17 @@ function _hvVerstecken(){
   clearTimeout(_hvTimer);_hvTimer=null;_hvAktiv='';
   if(_hvBox){_hvBox.style.display='none';const i=_hvBox.querySelector('img');if(i)i.removeAttribute('src');}
 }
-function _hvZeigen(id,quelle,ev){
+// b574: Befund Frank – „kommt erst später, wird das immer erst geladen?". Genau so war es:
+// erst 450 ms warten, dann die Drive-Miniatur erfragen, dann das Bild laden – zwei Netzwege,
+// bevor überhaupt etwas zu sehen war. Jetzt wird sofort das Bild gezeigt, das die Kachel
+// ohnehin schon anzeigt (sofortSrc), und die scharfe Fassung schiebt sich nach.
+function _hvLokalesBild(el){
+  if(!el)return '';
+  if(el.dataset&&el.dataset.hvsrc)return el.dataset.hvsrc;
+  const i=el.querySelector?el.querySelector('img'):null;
+  return (i&&i.src)?i.src:'';
+}
+function _hvZeigen(id,quelle,ev,sofortSrc){
   if(!_hvBox){
     _hvBox=document.createElement('div');
     _hvBox.id='pamHoverVorschau';
@@ -12973,7 +12983,9 @@ function _hvZeigen(id,quelle,ev){
   // b573: fertige Bildadresse (blob:/https:) direkt anzeigen – sie kommt von Fotos, die
   // noch keine Drive-Id haben; für alles andere bleibt der Weg über die Drive-Miniatur.
   if(/^(blob:|data:|https?:)/.test(id)&&id.indexOf('drive.google.com/thumbnail')<0&&!/^[A-Za-z0-9_-]{20,}$/.test(id)){img.src=id;return;}
-  _hvThumb(id).then(function(u){if(_hvAktiv===id&&u)img.src=u;});
+  // b574: sofort das schon geladene Kachelbild zeigen, damit nicht ins Leere gewartet wird
+  if(sofortSrc&&sofortSrc!==img.src)img.src=sofortSrc;
+  _hvThumb(id).then(function(u){if(_hvAktiv===id&&u&&u!==img.src)img.src=u;});
 }
 const _hvThumbCache={};
 async function _hvThumb(id){
@@ -13015,8 +13027,9 @@ document.addEventListener('mouseover',function(e){
   _hvVerstecken();
   _hvAktiv=id;
   const ev={clientX:e.clientX,clientY:e.clientY};
+  const sofort=_hvLokalesBild(t); // b574: schon sichtbares Bild, kommt ohne Wartezeit
   _hvTimer=setTimeout(function(){
-    if(_hvAktiv===id)_hvZeigen(id,t.dataset.hvtitel||'',ev);
+    if(_hvAktiv===id)_hvZeigen(id,t.dataset.hvtitel||'',ev,sofort);
   },_HV_VERZOEGERUNG);
 });
 document.addEventListener('mouseout',function(e){
@@ -13552,9 +13565,10 @@ function _renderDokuGruppen(){
     // b573: jeder Ordner ist für sich einklappbar (Befund Frank: „zu unübersichtlich").
     // Voreinstellung bei mehreren Ordnern: nur der erste offen, der Rest zu.
     const zu=_pamDokGrpZu(gn,gix,namen.length);
+    // b574: Klapp-Pfeil rechts – wie bei den großen Sektionen (Wunsch Frank)
     html+='<div data-dokgrp="'+esc(gn)+'" onclick="_pamDokGrpToggle(this,\''+esc(gn).replace(/'/g,'')+'\')" title="Ordner auf-/zuklappen" style="display:flex;align-items:center;gap:5px;font-size:calc(11px*var(--modal-scale,1));font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;padding:7px 2px 3px;border-bottom:1px solid var(--border);transition:background .3s;cursor:pointer;user-select:none;">'
-      +'<span class="dokgrp-pfeil" style="display:inline-block;transition:transform .18s;transform:rotate('+(zu?-90:0)+'deg);font-size:10px;">▾</span>'
-      +'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;">📁 '+esc(gn)+' <span style="font-weight:400;">('+items.length+')</span></span></div>';
+      +'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;">📁 '+esc(gn)+' <span style="font-weight:400;">('+items.length+')</span></span>'
+      +'<span class="dokgrp-pfeil" style="display:inline-block;flex-shrink:0;transition:transform .18s;transform:rotate('+(zu?-90:0)+'deg);font-size:10px;color:var(--text2);">▾</span></div>';
     html+='<div data-dokgrpbody="'+esc(gn)+'"'+(zu?' style="display:none;"':'')+'>';
     items.forEach(function(it){
       const a=it.a;
@@ -13583,6 +13597,22 @@ function _pamDokGrpZu(name,index,anzahl){
   const m=_pamDokGrpMerk();
   if(Object.prototype.hasOwnProperty.call(m,name))return !!m[name];
   return anzahl>1&&index>0;
+}
+// b574: dieselbe Merkliste im Fenster „Alle Dokumente" – ein dort zugeklappter Ordner
+// bleibt auch im Auftrag zu und umgekehrt. Voreinstellung dort aber „offen".
+function _pamDokGrpZuFenster(name){
+  const m=_pamDokGrpMerk();
+  return Object.prototype.hasOwnProperty.call(m,name)?!!m[name]:false;
+}
+function _pamDokUgrpToggle(kopf,key,name){
+  if(!kopf||!kopf.parentNode)return;
+  const body=kopf.parentNode.querySelector('[data-pdgrp="'+key.replace(/"/g,'')+'"]');
+  if(!body)return;
+  const zu=body.style.display==='none';
+  body.style.display=zu?'':'none';
+  const pf=kopf.querySelector('.dokgrp-pfeil');
+  if(pf)pf.style.transform='rotate('+(zu?0:-90)+'deg)';
+  try{const m=_pamDokGrpMerk();m[name]=!zu;localStorage.setItem('pam_dok_grp_zu',JSON.stringify(m));}catch(e){}
 }
 function _pamDokGrpToggle(kopf,name){
   if(!kopf)return;
@@ -25270,7 +25300,9 @@ function _pamDokRender(){
   const f=_pamDokFilter;let html='';
   function grp(t,n){return '<div style="display:flex;align-items:center;gap:7px;padding:7px 18px;background:var(--bg3);border-bottom:1px solid var(--border);"><span style="font-size:12px;font-weight:700;color:var(--text1);flex:1;">'+t+'</span><span style="font-size:11px;color:var(--text2);">'+n+'</span></div>';}
   // b572 (Punkt 3): zweite Ebene – Unterordner, eingerückt und kleiner als die Hauptgruppe
-  function untergrp(t,n){return '<div style="display:flex;align-items:center;gap:6px;padding:5px 18px 4px 28px;background:var(--bg);border-bottom:0.5px solid var(--border);"><span style="font-size:11px;font-weight:600;color:var(--text2);flex:1;">📁 '+esc(t)+'</span><span style="font-size:10px;color:var(--text2);">'+n+'</span></div>';}
+  // b574: einklappbar wie in der Dokumente-Sektion, Pfeil rechts. Hier ist die Voreinstellung
+  // „offen" – dieses Fenster soll ja alles zeigen; nur was Frank selbst zuklappt, bleibt zu.
+  function untergrp(t,n,zu,key){return '<div data-pdgrpkopf="'+esc(key)+'" onclick="_pamDokUgrpToggle(this,\''+esc(key).replace(/'/g,'')+'\',\''+esc(t).replace(/'/g,'')+'\')" title="Ordner auf-/zuklappen" style="display:flex;align-items:center;gap:6px;padding:5px 18px 4px 28px;background:var(--bg);border-bottom:0.5px solid var(--border);cursor:pointer;user-select:none;"><span style="font-size:11px;font-weight:600;color:var(--text2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;">📁 '+esc(t)+'</span><span style="font-size:10px;color:var(--text2);">'+n+'</span><span class="dokgrp-pfeil" style="display:inline-block;flex-shrink:0;font-size:10px;color:var(--text2);transition:transform .18s;transform:rotate('+(zu?-90:0)+'deg);">▾</span></div>';}
   function row(main,sub,kind,i,dl){
     return '<div data-sel="'+kind+':'+i+'" onclick="_pamDokSelect(\''+kind+'\','+i+')" style="display:flex;align-items:center;gap:10px;padding:9px 14px 9px 15px;border-bottom:1px solid var(--border);border-left:3px solid transparent;cursor:pointer;">'
       +'<div style="flex:1;min-width:0;">'
@@ -25295,25 +25327,29 @@ function _pamDokRender(){
   if((f==='alle'||f==='docs')&&cD){
     html+=grp('📄 Dokumente',cD);
     _pamDokNachOrdner(ix.docs,'Dokumente').forEach(function(g){
-      if(g.mehrere)html+=untergrp(g.name,g.items.length);
+      const zu=g.mehrere&&_pamDokGrpZuFenster(g.name);
+      if(g.mehrere){html+=untergrp(g.name,g.items.length,zu,'d:'+g.name);html+='<div data-pdgrp="d:'+esc(g.name)+'"'+(zu?' style="display:none;"':'')+'>';}
       g.items.forEach(function(x){
         const d=x.o,ds=_pamDokFmtDate(d.ts);
         const sub='<span style="font-size:11px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(d.herkunft||'')+'</span>'
           +(ds?'<span style="flex-shrink:0;font-size:11px;color:var(--text2);">'+ds+'</span>':'');
         html+=row(esc(d.name),sub,'doc',x.i,!!(d.fileId||d.data));
       });
+      if(g.mehrere)html+='</div>';
     });
   }
   if((f==='alle'||f==='fotos')&&cF){
     html+=grp('📷 Fotos',cF);
     _pamDokNachOrdner(ix.fotos,'Fotos/Videos').forEach(function(g){
-      if(g.mehrere)html+=untergrp(g.name,g.items.length);
+      const zu=g.mehrere&&_pamDokGrpZuFenster(g.name);
+      if(g.mehrere){html+=untergrp(g.name,g.items.length,zu,'f:'+g.name);html+='<div data-pdgrp="f:'+esc(g.name)+'"'+(zu?' style="display:none;"':'')+'>';}
       g.items.forEach(function(x){
         const p=x.o,ds=_pamDokFmtDate(p.ts);
         const sub='<span style="font-size:11px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(p.herkunft||'')+'</span>'
           +(ds?'<span style="flex-shrink:0;font-size:11px;color:var(--text2);">'+ds+'</span>':'');
         html+=row(esc(p.name),sub,'foto',x.i,!!p.fileId);
       });
+      if(g.mehrere)html+='</div>';
     });
   }
   if(!html)html='<div style="padding:44px 20px;text-align:center;color:var(--text2);font-size:13px;line-height:1.6;">In diesem Auftrag liegen noch keine Dokumente.</div>';
