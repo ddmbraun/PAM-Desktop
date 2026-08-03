@@ -4564,7 +4564,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-03 · #583'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-03-b583) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-03 · #584'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-03-b584) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -13133,13 +13133,30 @@ function _hvZeigen(id,quelle,ev,sofortSrc){
   // vorgeladen (Probe) und nur bei ERFOLG eingetauscht – das sichtbare Bild wird nie
   // mehr durch eine ungeprüfte Adresse ersetzt. Ohne Sofort-Bild lädt die Box wie
   // bisher direkt (die onerror-Kette oben fängt Fehlschläge ab).
+  // b584: Die Probe versucht es bei Fehlschlag bis zu 5-mal im 3-Sekunden-Takt erneut
+  // (mit frisch erfragter Adresse), solange die Vorschau noch zu diesem Bild offen ist.
+  // Vorher gab es genau EINEN Versuch – wer im Start-Gedränge oder in einer Token-Lücke
+  // hoverte, blieb bis zum nächsten Überfahren auf dem unscharfen Kachelbild sitzen.
+  let _probeVersuch=0;
+  const _probeLaden=function(u){
+    if(_hvAktiv!==id||!u||u===img.src)return;
+    const probe=new Image();
+    probe.onload=function(){if(_hvAktiv===id&&u!==img.src)img.src=u;};
+    probe.onerror=function(){
+      if(_hvAktiv!==id||_probeVersuch>=5)return; // Sofort-Bild bleibt einfach stehen
+      _probeVersuch++;
+      setTimeout(function(){
+        if(_hvAktiv!==id)return;
+        delete _hvThumbCache[id];
+        _hvThumb(id).then(_probeLaden);
+      },3000);
+    };
+    probe.src=u;
+  };
   _hvThumb(id).then(function(u){
     if(_hvAktiv!==id||!u||u===img.src)return;
     if(!sofortSrc){img.src=u;return;}
-    const probe=new Image();
-    probe.onload=function(){if(_hvAktiv===id&&u!==img.src)img.src=u;};
-    probe.onerror=function(){}; // Sofort-Bild bleibt einfach stehen
-    probe.src=u;
+    _probeLaden(u);
   });
 }
 // ── b579: Warteschlange für Bild-Nachladungen ────────────────────────────────
@@ -13263,6 +13280,20 @@ function _feTopBtnRefresh(){
 }
 let _feDeskAuswahl=null;
 const _feGpsCache={}; // b582: driveId → location|null – GPS-Antworten der Sitzung merken
+// b584: GPS-Abruf mit Wiederholung. Brach der Abruf im Start-Gedränge ab (Verbindungs-
+// Engpass, ERR_INSUFFICIENT_RESOURCES), wurde er vorher STILL verschluckt und nie
+// wiederholt – die 📍 fehlten dann für die ganze Sitzung. Jetzt: bis zu 2 neue Anläufe
+// im Abstand von 15 s. Echte Absagen (403/404 = keine Berechtigung) werden NICHT wiederholt.
+function _feGpsAbruf(key,zeig,versuch){
+  _pamLadeSchlange(()=>fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(key)+'?fields=imageMediaMetadata(location)',{headers:{Authorization:'Bearer '+gdriveToken}})
+    .then(r=>r.ok?r.json():null)
+    .then(j=>{
+      const loc=(j&&j.imageMediaMetadata&&j.imageMediaMetadata.location)||null;
+      if(j)_feGpsCache[key]=loc; // nur echte Antworten merken, Fehlschläge nicht
+      zeig(loc);
+    })
+    .catch(()=>{if(versuch<2)setTimeout(()=>_feGpsAbruf(key,zeig,versuch+1),15000);}),true);
+}
 // ohneTask=true → Einstieg aus der Topbar: Ziel-Task wird beim Übernehmen abgefragt
 function _feDeskOeffnen(ohneTask){
   const alle=_feDeskAlleFotos();
@@ -13333,13 +13364,7 @@ function _feDeskOeffnen(ohneTask){
         }
       };
       if(_feGpsCache[key]!==undefined){_gpsZeig(_feGpsCache[key]);}
-      else _pamLadeSchlange(()=>fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(key)+'?fields=imageMediaMetadata(location)',{headers:{Authorization:'Bearer '+gdriveToken}})
-        .then(r=>r.ok?r.json():null)
-        .then(j=>{
-          const loc=(j&&j.imageMediaMetadata&&j.imageMediaMetadata.location)||null;
-          if(j)_feGpsCache[key]=loc; // nur echte Antworten merken, Fehlschläge nicht
-          _gpsZeig(loc);
-        }).catch(()=>{}),true);
+      else _feGpsAbruf(key,_gpsZeig,0);
     }
     cell.onclick=()=>{
       if(_feDeskAuswahl.has(key)){_feDeskAuswahl.delete(key);cell.style.borderColor='transparent';}
@@ -15231,23 +15256,14 @@ window.addEventListener('storage', function(e){
   }catch(e2){}
 });
 
-// Alle HV-Bilder-Thumbnails beim Start still im Hintergrund vorladen
-function _preloadHvBildCache(){
-  try{
-    const raw = localStorage.getItem('hv_bild_cache_v1');
-    if(!raw) return;
-    const parsed = JSON.parse(raw);
-    const urls = parsed.map ? Object.values(parsed.map).filter(u=>u&&u.startsWith('http'))
-                            : (parsed.zeilen||[]).map(r=>r[7]||'').filter(u=>u.startsWith('http'));
-    if(!urls.length) return;
-    const fn = ()=>{ urls.forEach(url=>{ const img=new Image(); img.src=url; }); };
-    if(typeof requestIdleCallback === 'function'){
-      requestIdleCallback(fn, {timeout:10000});
-    }else{
-      setTimeout(fn, 1000);
-    }
-  }catch(e){}
-}
+// b584 (Beschluss Frank): Das frühere Start-Vorladen ALLER HV-Bilder-Miniaturen ist
+// ersatzlos GESTRICHEN. Es lud bei jedem PAM-Start Hunderte Bilder herunter, die in den
+// meisten Sitzungen nie angesehen werden, und verstopfte damit ~40 s lang die Leitung
+// (zähe scharfe Hover-Fassungen, abgebrochene GPS-Abrufe im Foto-Eingang). Das
+// NACHSCHLAGEN im hv_bild_cache_v1 (_hvBildCacheLookup als dritte Notlösung für
+// Kachel-Miniaturen) bleibt unverändert – die Bilder laden dann eben in dem Moment,
+// in dem eine Kachel sie wirklich braucht.
+function _preloadHvBildCache(){}
 
 // ── b514 Paket 1 (Bautagebuch-Vorbereitung): Aufnahme-Zeitstempel für Fotos ──
 // Jedes Foto bekommt f.ts (ISO-Aufnahmedatum): beim Upload aus der Datei
