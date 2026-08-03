@@ -4548,7 +4548,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-03 · #572'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-03-b572) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-03 · #573'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-03-b573) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -10662,8 +10662,11 @@ function _btbFotoTile(x){
     ?'<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1a1a2e,#2b2b45);"><div style="width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff;">▶</div></div>'
     :'<img '+srcAttr+'alt="" loading="lazy" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;" onerror="_desktopThumbFallback(this)">';
   const unterzeile=(zeit||cap)?'<div style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.55);color:#fff;font-size:9px;padding:1px 4px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+zeit+(cap?(zeit?' · ':'')+esc(cap):'')+'</div>':'';
-  // b572 (Punkt 5): große Hover-Vorschau wie in der Foto-Sektion (b542) – hier fehlte sie
-  const hvAttr=safeId?(' data-hvid="'+safeId+'" data-hvtitel="'+esc(cap||name)+'"'):'';
+  // b572 (Punkt 5): große Hover-Vorschau wie in der Foto-Sektion (b542) – hier fehlte sie.
+  // b573: Fotos ohne Drive-Id (frisch vom Handy, noch nicht hochgeladen) zeigen wenigstens
+  // das Bild, das die Kachel schon hat – vorher kam bei ihnen gar nichts.
+  const hvAttr=safeId?(' data-hvid="'+safeId+'" data-hvtitel="'+esc(cap||name)+'"')
+    :((cached||thumb)?(' data-hvsrc="'+esc(cached||thumb)+'" data-hvtitel="'+esc(cap||name)+'"'):'');
   return '<div'+hvAttr+' onclick="openFotoDesktop('+x.i+')" draggable="true" ondragstart="_btbFotoDragStart(event,'+x.i+')" ondragend="_btbFotoDragEnd()" title="'+esc(cap?cap+' — '+name:name)+' — zum Umsortieren auf eine Notiz ziehen" style="position:relative;width:84px;height:64px;border-radius:6px;overflow:hidden;background:var(--bg4);border:1px solid var(--border);cursor:pointer;flex-shrink:0;">'
     +inner
     +'<button type="button" onclick="event.stopPropagation();editFotoCaptionDesktop('+x.i+')" title="Beschriftung bearbeiten" style="position:absolute;top:2px;right:24px;background:rgba(0,0,0,.55);border:none;color:#fff;font-size:10px;line-height:1;padding:3px 4px;border-radius:4px;cursor:pointer;">📝</button>' // b516: Beschriftung direkt im Tagebuch (Wunsch Frank)
@@ -12946,7 +12949,10 @@ function _hvZeigen(id,quelle,ev){
     _hvBox.id='pamHoverVorschau';
     _hvBox.style.cssText='position:fixed;z-index:100090;display:none;padding:4px;border-radius:10px;'
       +'background:rgba(20,20,20,.96);box-shadow:0 8px 32px rgba(0,0,0,.55);pointer-events:none;';
-    _hvBox.innerHTML='<img alt="" style="display:block;max-width:520px;max-height:520px;border-radius:7px;">'
+    // b573: einheitliche Größe (Befund Frank: „die Hover-Bilder sind unterschiedlich groß").
+    // Ausschlaggebend ist die HÖHE – dadurch sind alle Vorschauen gleich hoch, egal wie groß
+    // die Miniatur ist, die Drive gerade liefert. Breite folgt dem Seitenverhältnis.
+    _hvBox.innerHTML='<img alt="" style="display:block;height:min(520px,68vh);width:auto;max-width:min(760px,72vw);object-fit:contain;border-radius:7px;background:#000;">'
       +'<div style="font-size:11px;color:#ccc;padding:3px 4px 1px;max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>';
     document.body.appendChild(_hvBox);
   }
@@ -12964,6 +12970,9 @@ function _hvZeigen(id,quelle,ev){
   // Cookies funktioniert). Der direkte <img>-Weg auf drive.google.com/thumbnail scheitert
   // bei privaten Dateien, seit Chrome Drittanbieter-Cookies blockt – deshalb blieb die
   // Hover-Vorschau u. a. im neuen Dateien-Bereich (b549) leer.
+  // b573: fertige Bildadresse (blob:/https:) direkt anzeigen – sie kommt von Fotos, die
+  // noch keine Drive-Id haben; für alles andere bleibt der Weg über die Drive-Miniatur.
+  if(/^(blob:|data:|https?:)/.test(id)&&id.indexOf('drive.google.com/thumbnail')<0&&!/^[A-Za-z0-9_-]{20,}$/.test(id)){img.src=id;return;}
   _hvThumb(id).then(function(u){if(_hvAktiv===id&&u)img.src=u;});
 }
 const _hvThumbCache={};
@@ -12996,8 +13005,13 @@ function _hvPosition(ev){
 document.addEventListener('mouseover',function(e){
   const t=e.target&&e.target.closest?e.target.closest('[data-hvid]'):null;
   if(!t){return;}
-  const id=t.dataset.hvid;
-  if(!id||id===_hvAktiv)return;
+  const id=t.dataset.hvid||t.dataset.hvsrc; // b573: hvsrc = Notnagel für Fotos, die noch keine Drive-Id haben
+  if(!id)return;
+  // b573: „schon aktiv" nur überspringen, wenn wirklich noch etwas läuft. Im Bautagebuch
+  // wird die Liste beim Nachladen der Miniaturen neu aufgebaut; dabei ging der Zähler
+  // verloren, _hvAktiv blieb aber stehen – jedes weitere Überfahren wurde dann verschluckt
+  // und es kam nie eine Vorschau.
+  if(id===_hvAktiv&&(_hvTimer||(_hvBox&&_hvBox.style.display==='block')))return;
   _hvVerstecken();
   _hvAktiv=id;
   const ev={clientX:e.clientX,clientY:e.clientY};
@@ -13533,9 +13547,15 @@ function _renderDokuGruppen(){
     }
   }
   let html='';
-  namen.forEach(function(gn){
+  namen.forEach(function(gn,gix){
     const items=gruppen.get(gn);
-    html+='<div data-dokgrp="'+esc(gn)+'" style="font-size:calc(11px*var(--modal-scale,1));font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;padding:7px 2px 3px;border-bottom:1px solid var(--border);transition:background .3s;">📁 '+esc(gn)+' <span style="font-weight:400;">('+items.length+')</span></div>';
+    // b573: jeder Ordner ist für sich einklappbar (Befund Frank: „zu unübersichtlich").
+    // Voreinstellung bei mehreren Ordnern: nur der erste offen, der Rest zu.
+    const zu=_pamDokGrpZu(gn,gix,namen.length);
+    html+='<div data-dokgrp="'+esc(gn)+'" onclick="_pamDokGrpToggle(this,\''+esc(gn).replace(/'/g,'')+'\')" title="Ordner auf-/zuklappen" style="display:flex;align-items:center;gap:5px;font-size:calc(11px*var(--modal-scale,1));font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;padding:7px 2px 3px;border-bottom:1px solid var(--border);transition:background .3s;cursor:pointer;user-select:none;">'
+      +'<span class="dokgrp-pfeil" style="display:inline-block;transition:transform .18s;transform:rotate('+(zu?-90:0)+'deg);font-size:10px;">▾</span>'
+      +'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;">📁 '+esc(gn)+' <span style="font-weight:400;">('+items.length+')</span></span></div>';
+    html+='<div data-dokgrpbody="'+esc(gn)+'"'+(zu?' style="display:none;"':'')+'>';
     items.forEach(function(it){
       const a=it.a;
       const herk=a.messageId?('📧 aus Mail'+(mailDatum[a.messageId]?' vom '+mailDatum[a.messageId]:'')):(a.fromEmail?'📧 aus Mail':(a.uploadedAt?'📥 '+esc(a.uploadedAt):''));
@@ -13548,8 +13568,31 @@ function _renderDokuGruppen(){
       html+='<button type="button" onclick="event.stopPropagation();downloadAttach('+it.i+')" style="flex-shrink:0;font-size:10px;padding:1px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text1);cursor:pointer;" title="Herunterladen">⬇</button>';
       html+='</div>';
     });
+    html+='</div>';
   });
   el.innerHTML=html;
+}
+// ── b573: Klappzustand der einzelnen Ordner ───────────────────────────────────
+// Gemerkt wird nur, was Frank selbst angeklickt hat (localStorage, pro Ordnername –
+// die Namen wiederholen sich über die Aufträge hinweg). Alles ohne Eintrag folgt der
+// Voreinstellung: bei mehreren Ordnern ist nur der erste offen.
+function _pamDokGrpMerk(){
+  try{return JSON.parse(localStorage.getItem('pam_dok_grp_zu')||'{}')||{};}catch(e){return {};}
+}
+function _pamDokGrpZu(name,index,anzahl){
+  const m=_pamDokGrpMerk();
+  if(Object.prototype.hasOwnProperty.call(m,name))return !!m[name];
+  return anzahl>1&&index>0;
+}
+function _pamDokGrpToggle(kopf,name){
+  if(!kopf)return;
+  const body=kopf.parentNode?kopf.parentNode.querySelector('[data-dokgrpbody="'+name.replace(/"/g,'')+'"]'):null;
+  if(!body)return;
+  const zu=body.style.display==='none';
+  body.style.display=zu?'':'none';
+  const pf=kopf.querySelector('.dokgrp-pfeil');
+  if(pf)pf.style.transform='rotate('+(zu?0:-90)+'deg)';
+  try{const m=_pamDokGrpMerk();m[name]=!zu;localStorage.setItem('pam_dok_grp_zu',JSON.stringify(m));}catch(e){}
 }
 // b572: Auswahlfeld-Fassung derselben Sprungfunktion (ab 4 Ordnern)
 function _pamDokuChipWahl(sel){
@@ -13569,6 +13612,9 @@ function _pamDokuChipClick(btn){
     const hdrs=list.querySelectorAll('[data-dokgrp]');
     for(let i=0;i<hdrs.length;i++){
       if(hdrs[i].getAttribute('data-dokgrp')===grp){
+        // b573: zugeklappten Ordner erst aufklappen, sonst springt der Chip ins Leere
+        const _b=list.querySelector('[data-dokgrpbody="'+grp.replace(/"/g,'')+'"]');
+        if(_b&&_b.style.display==='none')_pamDokGrpToggle(hdrs[i],grp);
         hdrs[i].scrollIntoView({behavior:'smooth',block:'center'});
         hdrs[i].style.background='rgba(108,99,255,.14)';
         (function(h){setTimeout(function(){h.style.background='';},1400);})(hdrs[i]);
