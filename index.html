@@ -4566,7 +4566,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-03 · #591'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-03-b591) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-03 · #592'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-03-b592) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -16028,6 +16028,40 @@ function _uebThumbNeu(img){
     else loadDesktopFotoThumb(img,id);
   }catch(e){}
 }
+// b592 (Übersicht Schritt 2): Die Auswahl fürs PDF sitzt jetzt an den Übersichtszeilen –
+// die zweite Liste unten ist weg. Zwei Fallen dabei:
+// 1) Die Live-Globals (taskFotos/taskAttachments) sind TIEFE KOPIEN des Tasks. Die Häkchen
+//    heißen aber `_pdfS_f_<i>`/`_pdfS_a_<i>` und `_pdfSendenCreate` liest damit `t.fotos`
+//    bzw. `t.attachments`. Deshalb wird jede Zeile über einen stabilen Schlüssel auf das
+//    GESPEICHERTE Array zurückgerechnet; ohne Treffer gibt es kein Häkchen (statt still
+//    die falsche Datei ins PDF zu nehmen). Gleiches gilt für die Foto-Lightbox.
+// 2) Gemerkt wird die Auswahl über denselben stabilen Schlüssel, nicht über Listen-Nummern –
+//    die verschieben sich, sobald ein Foto dazukommt oder wegfällt. Ablage im localStorage
+//    und BEWUSST nicht am Task: sonst wanderte diese reine Arbeitsauswahl über den Sync
+//    auf Handy und alle anderen Rechner.
+const _UEB_SEL_KEY='pam_ueb_auswahl_v1';
+function _uebKey(o){return o?String(o.editedDriveId||o.driveId||o.fileId||o.url||o.name||o.filename||''):'';}
+function _uebIdxVon(arr,o){
+  const k=_uebKey(o);if(!k||!Array.isArray(arr))return -1;
+  for(let i=0;i<arr.length;i++){if(_uebKey(arr[i])===k)return i;}
+  return -1;
+}
+// Dokument-Zeilen kommen aus _pamDokIndex und haben ein anderes Format als die Anhänge
+// selbst – darum erst über die Datei-Id, dann über den Namen zuordnen.
+function _uebAttIdx(arr,d){
+  if(!Array.isArray(arr)||!d)return -1;
+  const fid=String(d.fileId||''),nm=String(d.name||'');
+  if(fid){for(let i=0;i<arr.length;i++){if(arr[i]&&String(arr[i].fileId||'')===fid)return i;}}
+  if(nm){for(let i=0;i<arr.length;i++){if(arr[i]&&String(arr[i].name||arr[i].filename||'')===nm)return i;}}
+  return -1;
+}
+function _uebSelLesen(tid){try{const o=(JSON.parse(localStorage.getItem(_UEB_SEL_KEY)||'{}')[tid])||{};return{f:o.f||[],a:o.a||[]};}catch(e){return{f:[],a:[]};}}
+function _uebSelSchreiben(tid,f,a){
+  try{const o=JSON.parse(localStorage.getItem(_UEB_SEL_KEY)||'{}');
+    if(!f.length&&!a.length)delete o[tid];else o[tid]={f:f,a:a};
+    localStorage.setItem(_UEB_SEL_KEY,JSON.stringify(o));
+  }catch(e){}
+}
 function _uebMehrZeigen(btn){
   const wrap=btn.parentElement;if(!wrap)return;
   wrap.querySelectorAll('[data-uebmehr]').forEach(function(el){el.style.display='contents';});
@@ -16088,6 +16122,10 @@ function _openPdfSendenModus(taskId){
   function _fD(s){if(!s)return'';const p=s.split('-');return p.length===3?p[2]+'.'+p[1]+'.'+p[0]:s;}
   function _fDk(s){if(!s)return'';const p=s.split('-');return p.length===3?p[2]+'.'+p[1]+'.'+p[0].slice(2):s;} // b589: kurzes Datum tt.mm.jj für die linke Raster-Spalte
   function _kurzName(n){n=String(n||'');return n.length>48?(n.slice(0,26)+'…'+n.slice(-18)):n;} // b589: NUR Anzeige gekürzt – Datei/Tooltip behalten den vollen Namen
+  // b592: zuletzt getroffene Auswahl dieses Auftrags (stabile Schlüssel → Häkchen)
+  const _selAlt=_uebSelLesen(tid);
+  const _selF=new Set(_selAlt.f),_selA=new Set(_selAlt.a);
+  const _CHK='width:15px;height:15px;cursor:pointer;accent-color:#185FA5;flex-shrink:0;';
   function _fTs(s){if(!s)return'';if(!/^\d{4}-\d{2}-\d{2}T/.test(s))return s;const d=new Date(s);if(isNaN(d))return s;return d.toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});} // Fix #367: ISO-Guard – de-DE-Altbestand („10.06.2026, …") roh anzeigen statt als Monat.Tag fehlzuinterpretieren
   const _today=new Date().toISOString().split('T')[0];
   function _od(d){return d&&d<_today;}
@@ -16098,6 +16136,7 @@ function _openPdfSendenModus(taskId){
   // dieselben Töne wie die b577-Ordnersymbole – als getönter Kopfbalken mit Symbol und
   // kräftigem linkem Rand; optional steht rechts eine Summe (extra).
   const _SEKT={
+    deck:   {bg:'#F1EFE8',bo:'#888780',ti:'#2C2C2A',ct:'#5F5E5A',ic:'📇'}, // b592: Deckblatt des PDFs
     termine:{bg:'#FAEEDA',bo:'#BA7517',ti:'#633806',ct:'#854F0B',ic:'📅'},
     auss:   {bg:'#FAECE7',bo:'#993C1D',ti:'#4A1B0C',ct:'#993C1D',ic:'🚗'},
     zeit:   {bg:'#E1F5EE',bo:'#0F6E56',ti:'#04342C',ct:'#0F6E56',ic:'⏱'},
@@ -16168,6 +16207,27 @@ function _openPdfSendenModus(taskId){
         +_odList.map(function(x){return '<span style="display:block;">'+_e(x.label)+' ('+_fD(x.datum)+')</span>';}).join('')+'</div>';
     }
   }
+  // b592: Deckblatt (Adresse + Ansprechpartner) steht jetzt als ERSTE Sektion in der einen
+  // Liste – vorher lag es unten im zweiten Block. Feld-Ids unverändert, `_pdfSendenCreate`
+  // liest sie weiter genauso.
+  const adr=(t.adresse||t.adresse2||'').trim();
+  const kontakte=(t.kontakte||[]).filter(k=>k.name||k.tel||k.email);
+  if(adr||kontakte.length){
+    const _inp='width:100%;box-sizing:border-box;background:transparent;border:none;border-bottom:1px solid var(--border);color:var(--text);font-size:13px;padding:2px 0;outline:none;';
+    let dh='<table style="width:100%;border-collapse:collapse;">';
+    if(adr){
+      dh+='<tr style="border-bottom:1px solid var(--border);"><td style="padding:6px 4px;width:26px;vertical-align:middle;"><input type="checkbox" id="_pdfS_adr_chk" checked title="Adresse aufs Deckblatt" style="'+_CHK+'"></td>'
+        +'<td colspan="3" style="padding:6px 4px;"><input type="text" id="_pdfS_adr_val" value="'+_e(adr)+'" style="'+_inp+'"></td></tr>';
+    }
+    kontakte.forEach(function(k,i){
+      dh+='<tr style="border-bottom:1px solid var(--border);"><td style="padding:6px 4px;width:26px;vertical-align:middle;"><input type="checkbox" id="_pdfS_k_chk_'+i+'" checked title="Ansprechpartner aufs Deckblatt" style="'+_CHK+'"></td>'
+        +'<td style="padding:6px 4px;"><input type="text" id="_pdfS_k_name_'+i+'" value="'+_e(k.name||'')+'" placeholder="Name" style="'+_inp+'"></td>'
+        +'<td style="padding:6px 4px;"><input type="text" id="_pdfS_k_tel_'+i+'" value="'+_e(k.tel||'')+'" placeholder="Telefon" style="'+_inp+'"></td>'
+        +'<td style="padding:6px 4px;"><input type="text" id="_pdfS_k_email_'+i+'" value="'+_e(k.email||'')+'" placeholder="E-Mail" style="'+_inp+'"></td></tr>';
+    });
+    dh+='</table>';
+    _uebHtml+=_secHtml('Deckblatt – Adresse & Ansprechpartner',dh,0,_SEKT.deck);
+  }
   const _alleAnzeige=[..._aufgaben.map(a=>({label:a.typ||'Aufgabe',datum:a.datum,done:!!(a.erledigt)})),..._freie.map(f=>({label:f.text||f.label||f.bezeichnung||'Freier Termin',datum:f.datum,done:!!(f.erledigt),notiz:f.notiz}))].sort((a,b)=>(a.datum||'zzz')>(b.datum||'zzz')?1:-1);
   // b589: EIN Raster für alle Sektionen – Datum immer links in fester Spalte (vorher rechts)
   if(_alleAnzeige.length){let t2='<table style="width:100%;border-collapse:collapse;">';for(const x of _alleAnzeige){const od=_od(x.datum)&&!x.done;const ic=x.done?'<span style="color:#4CAF50;">✓</span>':'<span style="color:'+(od?'#E24B4A':'#999')+';">□</span>';t2+='<tr style="border-bottom:1px solid var(--border);"><td style="padding:5px 4px;width:76px;white-space:nowrap;font-size:12px;font-weight:'+(od?700:400)+';color:'+(od?'#E24B4A':x.done?'#4CAF50':'var(--text2)')+';vertical-align:top;">'+(x.datum?_fDk(x.datum)+(od?' ⚠':''):'')+'</td><td style="padding:5px 4px;width:20px;font-size:14px;">'+ic+'</td><td style="padding:5px 4px;font-size:13px;color:var(--text);"><span style="font-weight:600;">'+_e(x.label)+'</span>'+(x.notiz?' <span style="font-size:12px;font-weight:400;color:var(--text2);">– '+_e(x.notiz)+'</span>':'')+'</td></tr>';}t2+='</table>';_uebHtml+=_secHtml('Aufgaben & Termine',t2,_alleAnzeige.length,_SEKT.termine);}
@@ -16178,6 +16238,7 @@ function _openPdfSendenModus(taskId){
   // offenes Auftrags-Modal (Rückfall auf die Task-Arrays). Hover über data-hvid (Delegation),
   // Klick = bleibendes Vorschaufenster (_pamDocPinPreview) über die Delegation unten.
   const _ix=(typeof _pamDokIndex==='function')?_pamDokIndex(t):{mails:[],docs:[],fotos:[]};
+  const _attArr=t.attachments||[]; // b592: maßgeblich fürs PDF – _pdfSendenCreate liest genau dieses Array
   const _hvId=function(s){return String(s||'').replace(/[^A-Za-z0-9_\-]/g,'');};
   const _fKurz=function(ts){return ts?new Date(ts).toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'2-digit'}):'';};
   if(_ix.mails.length){
@@ -16205,7 +16266,15 @@ function _openPdfSendenModus(taskId){
         // b589: Name nur in der ANZEIGE gekürzt (Tooltip = voller Name); „selbst abgelegt"
         // ist der Normalfall und fliegt raus – nur „aus Mail …" bleibt als nützliche Ausnahme.
         const hk=(d.herkunft&&d.herkunft.indexOf('aus Mail')===0)?d.herkunft:'';
+        // b592: Häkchen direkt an der Zeile. Nur echte Anhänge sind fürs PDF wählbar –
+        // Formulare/Prüfberichte stecken nicht in t.attachments und bekommen keins.
+        const ai=(d.kind==='attach')?_uebAttIdx(_attArr,d):-1;
+        const ky=ai>=0?_uebKey(_attArr[ai]):'';
+        const chk=(ai>=0)
+          ?'<input type="checkbox" id="_pdfS_a_'+ai+'" data-uebchk="a" data-uebkey="'+_e(ky)+'"'+(_selA.has(ky)?' checked':'')+' title="Für PDF/Drucken auswählen" style="'+_CHK+'">'
+          :'';
         d2+='<tr'+attrs+' title="'+_e(d.name)+(fid?' – klicken für Vorschau':'')+'" style="border-bottom:1px solid var(--border);'+(fid?'cursor:pointer;':'')+'">'
+          +'<td style="padding:5px 2px 5px 6px;width:24px;vertical-align:middle;">'+chk+'</td>'
           +'<td style="padding:5px 4px;font-size:12px;color:var(--text2);white-space:nowrap;width:76px;vertical-align:top;">'+_fKurz(d.ts)+'</td>'
           +'<td style="padding:5px 4px;font-size:13px;color:var(--text);"><span style="font-weight:600;">'+_e(_kurzName(d.name))+'</span>'+(hk?' <span style="font-size:12px;font-weight:400;color:var(--text2);">– '+_e(hk)+'</span>':'')+'</td></tr>';
       });
@@ -16241,7 +16310,15 @@ function _openPdfSendenModus(taskId){
         :'<img '+(thumb?'src="'+_e(thumb)+'" ':'')+(id?'data-uebthumb="'+id+'" ':'')+'alt="" loading="lazy" onerror="_uebThumbNeu(this)" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;">';
       const zeit=x.d?_btbZeit(x.d):'';
       const unten=(zeit||f.caption)?'<div style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.55);color:#fff;font-size:9px;padding:1px 4px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+zeit+(f.caption?(zeit?' · ':'')+_e(f.caption):'')+'</div>':'';
-      return '<div'+hv+' data-uebfoto="'+x.i+'" title="'+_e(nm)+' – klicken zum Großansehen" style="position:relative;width:76px;height:57px;border-radius:6px;overflow:hidden;background:var(--bg4);border:1px solid var(--border);cursor:pointer;flex-shrink:0;">'+inner+unten+'</div>';
+      // b592: Nummer im GESPEICHERTEN Task – Lightbox und Häkchen lesen beide `t.fotos`.
+      // (Bis b591 stand hier die Nummer aus der Live-Kopie; sobald die beiden Listen
+      // auseinanderliefen, öffnete die Lightbox das falsche Bild.)
+      const ti=_uebIdxVon(t.fotos||[],f);
+      const ky=ti>=0?_uebKey((t.fotos||[])[ti]):'';
+      const an=ti>=0&&_selF.has(ky);
+      const chk=ti>=0?('<input type="checkbox" id="_pdfS_f_'+ti+'" data-uebchk="f" data-uebkey="'+_e(ky)+'"'+(an?' checked':'')+' title="Für PDF/Drucken auswählen" style="position:absolute;top:3px;left:3px;z-index:3;'+_CHK+'">'):'';
+      const tb=ti>=0?('<button type="button" data-uebtb="'+ti+'" title="Als Titelbild setzen" style="position:absolute;top:3px;right:3px;z-index:3;background:'+((t.titelbildId&&t.titelbildId===f.driveId)?'#185FA5':'rgba(0,0,0,.55)')+';border:none;border-radius:4px;cursor:pointer;font-size:10px;padding:1px 4px;line-height:1.4;">'+((t.titelbildId&&t.titelbildId===f.driveId)?'📌':'📍')+'</button>'):'';
+      return '<div'+hv+(ti>=0?' data-uebfoto="'+ti+'"':'')+' title="'+_e(nm)+' – klicken zum Großansehen" style="position:relative;width:76px;height:57px;border-radius:6px;overflow:hidden;background:var(--bg4);border:'+(an?'2px solid #185FA5':'1px solid var(--border)')+';cursor:pointer;flex-shrink:0;">'+inner+chk+tb+unten+'</div>';
     };
     const _strip=function(list){
       if(!list||!list.length)return'';
@@ -16299,6 +16376,24 @@ function _openPdfSendenModus(taskId){
   // Foto-Kacheln (Lightbox), Dokument-/Mail-Zeilen (bleibendes Vorschaufenster).
   _uebDiv.addEventListener('click',function(ev){
     const cl=ev.target&&ev.target.closest?function(s){return ev.target.closest(s);}:function(){return null;};
+    // b592: Häkchen und Eingabefelder sind KEIN Zeilenklick – sonst ginge beim Ankreuzen
+    // gleich die Lightbox bzw. die Vorschau mit auf.
+    const tg=ev.target;
+    if(tg&&(tg.tagName==='INPUT'||tg.tagName==='TEXTAREA'))return;
+    // b592: 📌 Titelbild setzen/entfernen (muss VOR der Kachel-Prüfung stehen)
+    const tb=cl('[data-uebtb]');
+    if(tb){
+      const f=(t.fotos||[])[+tb.dataset.uebtb];
+      if(f){
+        const jetzt=(t.titelbildId===f.driveId);
+        t.titelbildId=jetzt?'':f.driveId;
+        _uebDiv.querySelectorAll('[data-uebtb]').forEach(function(b){b.textContent='📍';b.style.background='rgba(0,0,0,.55)';});
+        if(!jetzt){tb.textContent='📌';tb.style.background='#185FA5';}
+        if(typeof scheduleSave==='function')scheduleSave();
+        showToast(jetzt?'Titelbild entfernt':'Titelbild gesetzt','success',2000);
+      }
+      return;
+    }
     // b588: rote Überfällig-Pille klappt die Titel-Liste auf/zu
     const od=cl('[data-uebod]');
     if(od){
@@ -16318,254 +16413,85 @@ function _openPdfSendenModus(taskId){
   _uebDiv.querySelectorAll('img[data-uebthumb]').forEach(function(img){
     if(!img.getAttribute('src'))_uebThumbNeu(img);
   });
-  // ── Trennlinie PDF-Bereich ──
-  const _sep=document.createElement('div');
-  _sep.style.cssText='border-top:2px solid var(--accent);margin:16px 0 4px;';
-  box.appendChild(_sep);
-  const _sepLbl=document.createElement('div');
-  _sepLbl.style.cssText='font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;';
-  _sepLbl.textContent='📎 PDF zusammenstellen';
-  box.appendChild(_sepLbl);
-
-  // ── Sektions-Label ──
-  function secLabel(icon,title){
-    const d=document.createElement('div');
-    d.style.cssText='font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;margin:12px 0 6px;';
-    d.textContent=icon+' '+title;
-    return d;
+  // b592 (Schritt 2): Der zweite Block „📎 PDF zusammenstellen" ist ERSATZLOS entfallen –
+  // er zeigte Fotos und Dokumente ein zweites Mal, nur mit Häkchen. Adresse und
+  // Ansprechpartner stehen jetzt oben als Deckblatt-Sektion, angekreuzt wird direkt an den
+  // Übersichtszeilen. Damit gibt es nur noch EINE Liste.
+  if(!_uebHtml){
+    const _leer=document.createElement('div');
+    _leer.style.cssText='color:var(--text2);font-size:13px;padding:20px 0;text-align:center;';
+    _leer.textContent='Keine Inhalte im Auftrag vorhanden.';
+    box.appendChild(_leer);
   }
-
-  // ── Adresse ──
-  const adr=(t.adresse||t.adresse2||'').trim();
-  if(adr){
-    box.appendChild(secLabel('📍','Adresse'));
-    const row=document.createElement('label');
-    row.style.cssText='display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border-radius:8px;background:var(--bg3);margin-bottom:4px;cursor:pointer;';
-    row.innerHTML='<input type="checkbox" id="_pdfS_adr_chk" checked style="width:15px;height:15px;margin-top:3px;flex-shrink:0;cursor:pointer;">';
-    const inp=document.createElement('input');
-    inp.type='text';inp.id='_pdfS_adr_val';inp.value=adr;
-    inp.style.cssText='flex:1;background:transparent;border:none;border-bottom:1px solid var(--border);color:var(--text);font-size:12px;padding:2px 0;outline:none;';
-    row.appendChild(inp);
-    box.appendChild(row);
-  }
-
-  // ── Ansprechpartner ──
-  const kontakte=(t.kontakte||[]).filter(k=>k.name||k.tel||k.email);
-  if(kontakte.length){
-    box.appendChild(secLabel('👤','Ansprechpartner'));
-    kontakte.forEach((k,i)=>{
-      const row=document.createElement('div');
-      row.style.cssText='display:grid;grid-template-columns:20px 1fr 1fr 1fr;gap:6px;align-items:center;padding:7px 10px;border-radius:8px;background:var(--bg3);margin-bottom:4px;';
-      const chk=document.createElement('input');
-      chk.type='checkbox';chk.id='_pdfS_k_chk_'+i;chk.checked=true;
-      chk.style.cssText='width:15px;height:15px;cursor:pointer;';
-      const mkI=function(id,val,ph){
-        const x=document.createElement('input');
-        x.type='text';x.id=id;x.value=val||'';x.placeholder=ph;
-        x.style.cssText='background:transparent;border:none;border-bottom:1px solid var(--border);color:var(--text);font-size:11px;padding:2px 0;outline:none;min-width:0;';
-        return x;
-      };
-      row.appendChild(chk);
-      row.appendChild(mkI('_pdfS_k_name_'+i,k.name,'Name'));
-      row.appendChild(mkI('_pdfS_k_tel_'+i,k.tel,'Telefon'));
-      row.appendChild(mkI('_pdfS_k_email_'+i,k.email,'E-Mail'));
-      box.appendChild(row);
+  // b592: Auswahl zählen, dauerhaft merken und die Kachel-Umrandung nachziehen.
+  function _uebSammeln(){
+    const f=[],a=[];
+    box.querySelectorAll('input[data-uebchk]:checked').forEach(function(c){
+      const k=c.dataset.uebkey||'';
+      if(k)(c.dataset.uebchk==='f'?f:a).push(k);
     });
+    return {f:f,a:a};
   }
-
-  // ── Fotos ──
-  const fotos=t.fotos||[];
-  if(fotos.length){
-    box.appendChild(secLabel('📷','Fotos (anklicken zum Auswählen)'));
-    const grid=document.createElement('div');
-    grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(82px,1fr));gap:6px;padding:2px 0 4px;';
-    fotos.forEach((f,i)=>{
-      const name=f.caption||f.name||('Foto '+(i+1));
-      const wrap=document.createElement('div');
-      wrap.style.cssText='position:relative;border-radius:7px;overflow:hidden;border:2px solid transparent;cursor:pointer;aspect-ratio:1/1;background:var(--bg3);';
-      wrap.title=name;
-      const chk=document.createElement('input');
-      chk.type='checkbox';chk.id='_pdfS_f_'+i;chk.checked=false;
-      chk.style.cssText='position:absolute;top:4px;left:4px;width:15px;height:15px;cursor:pointer;z-index:2;accent-color:var(--accent);';
-      const img=document.createElement('img');
-      img.style.cssText='width:100%;height:100%;object-fit:cover;display:block;';
-      img.alt=name;
-      img.dataset.driveId=f.driveId||'';
-      img.dataset.thumbPending='1';
-      img.style.display='none';
-      const cap=document.createElement('div');
-      cap.style.cssText='position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.55);color:#fff;font-size:9px;padding:2px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-      cap.textContent=name.length>18?name.substring(0,17)+'…':name;
-      const tbBtn=document.createElement('button');
-      tbBtn.type='button';
-      tbBtn.title='Als Titelbild für Heute-Kachel setzen';
-      tbBtn.style.cssText='position:absolute;top:4px;right:4px;z-index:3;background:rgba(0,0,0,.55);border:none;border-radius:4px;cursor:pointer;font-size:11px;padding:1px 4px;line-height:1.4;';
-      tbBtn.textContent=t.titelbildId===f.driveId?'📌':'📍';
-      tbBtn.onclick=function(e){e.stopPropagation();
-        const isCurrent=t.titelbildId===f.driveId;
-        t.titelbildId=isCurrent?'':f.driveId;
-        Array.from(grid.querySelectorAll('button[data-tb]')).forEach(function(b){b.textContent='📍';b.style.background='rgba(0,0,0,.55)';});
-        if(!isCurrent){tbBtn.textContent='📌';tbBtn.style.background='#185FA5';}
-        scheduleSave();
-        showToast(isCurrent?'Titelbild entfernt':'Titelbild gesetzt','success',2000);
-      };
-      tbBtn.setAttribute('data-tb','1');
-      if(t.titelbildId===f.driveId){tbBtn.style.background='#185FA5';}
-      // #466: Foto groß öffnen/durchblättern (🔍) bzw. Video abspielen (▶) über die vorhandene Lightbox
-      const _isVidF=_isVideo(f.mimeType,f.name);
-      const openBtn=document.createElement('button');
-      openBtn.type='button';openBtn.setAttribute('data-open','1');
-      openBtn.title=_isVidF?'Video abspielen':'Groß öffnen / durchblättern';
-      if(_isVidF){
-        openBtn.textContent='▶';
-        openBtn.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:3;width:34px;height:34px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;border:none;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;padding:0;';
-      }else{
-        openBtn.textContent='🔍';
-        openBtn.style.cssText='position:absolute;bottom:3px;right:3px;z-index:3;width:22px;height:22px;border-radius:6px;background:rgba(0,0,0,.55);color:#fff;border:none;cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center;padding:0;';
-      }
-      openBtn.onclick=function(e){e.stopPropagation();_pamFotoLightbox(t.id,i);};
-      wrap.append(chk,img,cap,tbBtn,openBtn);
-      const _setStyle=()=>{wrap.style.borderColor=chk.checked?'var(--accent)':'transparent';wrap.style.boxShadow=chk.checked?'0 0 0 1px var(--accent)':'none';};
-      wrap.addEventListener('click',e=>{if(e.target!==chk&&e.target!==tbBtn){chk.checked=!chk.checked;}_setStyle();});
-      chk.addEventListener('change',_setStyle);
-      wrap.addEventListener('mouseenter',function(e){_pamImgTileHov(e,wrap);});
-      wrap.addEventListener('mouseleave',function(){_pamFotoHovOut();});
-      grid.appendChild(wrap);
+  function _uebZaehler(){
+    const n=box.querySelectorAll('input[data-uebchk]:checked').length;
+    const el=box.querySelector('[data-uebcount]');
+    if(!el)return;
+    el.textContent=n?(n+(n===1?' Anlage ausgewählt':' Anlagen ausgewählt')):'nichts ausgewählt';
+    el.style.color=n?'var(--text)':'var(--text2)';
+    el.style.fontWeight=n?'700':'400';
+  }
+  function _uebAlle(an){
+    box.querySelectorAll('input[data-uebchk]').forEach(function(c){
+      c.checked=!!an;
+      if(c.dataset.uebchk==='f'){const w=c.closest('[data-uebfoto]');if(w)w.style.border=an?'2px solid #185FA5':'1px solid var(--border)';}
     });
-    box.appendChild(grid);
-    // Gedrosselt laden: max 4 gleichzeitig
-    (function _loadThumbsBatch(){
-      const pending=Array.from(grid.querySelectorAll('img[data-thumb-pending="1"]'));
-      let active=0;const MAX=4;
-      function next(){
-        if(!pending.length)return;
-        if(active>=MAX)return;
-        const img=pending.shift();
-        const id=img.dataset.driveId;
-        if(!id){img.style.display='none';delete img.dataset.thumbPending;next();return;}
-        active++;
-        img.dataset.thumbPending='';
-        if(typeof loadDesktopFotoThumb==='function'){
-          loadDesktopFotoThumb(img,id).finally?loadDesktopFotoThumb(img,id).finally(()=>{active--;next();}):loadDesktopFotoThumb(img,id).then(()=>{active--;next();},()=>{active--;next();});
-        } else {active--;next();}
-      }
-      for(let j=0;j<MAX;j++)next();
-    })();
-    // Alle / Keine Buttons
-    const row2=document.createElement('div');
-    row2.style.cssText='display:flex;gap:6px;margin-top:6px;';
-    const btnAll=document.createElement('button');btnAll.type='button';btnAll.textContent='Alle';
-    btnAll.style.cssText='padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:11px;cursor:pointer;';
-    btnAll.onclick=()=>Array.from(grid.children).forEach((w,i)=>{const c=document.getElementById('_pdfS_f_'+i);if(c){c.checked=true;w.style.borderColor='var(--accent)';w.style.boxShadow='0 0 0 1px var(--accent)';}});
-    const btnNone=document.createElement('button');btnNone.type='button';btnNone.textContent='Keine';
-    btnNone.style.cssText=btnAll.style.cssText;
-    btnNone.onclick=()=>Array.from(grid.children).forEach((w,i)=>{const c=document.getElementById('_pdfS_f_'+i);if(c){c.checked=false;w.style.borderColor='transparent';w.style.boxShadow='none';}});
-    row2.append(btnAll,btnNone);
-    box.appendChild(row2);
+    const s=_uebSammeln();_uebSelSchreiben(tid,s.f,s.a);_uebZaehler();
   }
-
-  // ── #468: Anhänge getrennt in zwei einklappbare Abschnitte (<details>): 📧 E-Mail vs. 📎 Dateianhänge ──
-  const anhaenge=(t.attachments||[]);
-  const epfs=(t.emailPdfs||[]);
-  // b587: nach ORDNER gruppiert statt nach Herkunft („E-Mails/Dateianhänge") – gleiche
-  // Sortierung wie _pamDokNachOrdner (Wurzel „Dokumente" zuerst, „Formulare" zuletzt).
-  // Checkbox-Ids bleiben _pdfS_a_<Original-Index> → _pdfSendenCreate liest sie unverändert.
-  const _byOrd=new Map();
-  anhaenge.forEach(function(a,ai){
-    const it={name:a.name||a.filename||'Anhang',url:a.url||'',orig:a,attIdx:ai,icon:a.fromEmail?'📧':'📄'};
-    const k=String(a.ordner||'').trim()||'Dokumente';
-    if(!_byOrd.has(k))_byOrd.set(k,[]);
-    _byOrd.get(k).push(it);
+  box.addEventListener('change',function(ev){
+    const c=ev.target;
+    if(!c||c.type!=='checkbox'||!c.dataset.uebchk)return;
+    if(c.dataset.uebchk==='f'){
+      const w=c.closest('[data-uebfoto]');
+      if(w)w.style.border=c.checked?'2px solid #185FA5':'1px solid var(--border)';
+    }
+    const s=_uebSammeln();_uebSelSchreiben(tid,s.f,s.a);
+    _uebZaehler();
   });
-  const _epfItems=epfs.map(function(p){return {name:p.name||'E-Mail PDF',url:p.url||'',orig:p,attIdx:-1,icon:'📧'};});
-  const _ordKeys=[..._byOrd.keys()].sort(function(x,y){
-    if(x==='Dokumente')return -1; if(y==='Dokumente')return 1;
-    if(x==='Formulare')return 1; if(y==='Formulare')return -1;
-    return x.localeCompare(y,'de');
-  });
-  _pamDocList=_ordKeys.reduce(function(acc,k){return acc.concat(_byOrd.get(k));},[]).concat(_epfItems).map(function(d){return {name:d.name,url:d.url};});
-  function _pdfSendenDocSection(title,items){
-    if(!items.length)return;
-    const det=document.createElement('details'); det.open=true; det.style.cssText='margin:12px 0 4px;';
-    const sum=document.createElement('summary');
-    sum.style.cssText='font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;cursor:pointer;user-select:none;margin-bottom:6px;';
-    sum.textContent=title+' ('+items.length+')';
-    det.appendChild(sum);
-    items.forEach(function(d){
-      const fid=typeof _pamExtractFileId==='function'?_pamExtractFileId(d.url):'';
-      const _openDocBig=function(){
-        const o=d.orig||{};
-        const nm=o.name||o.filename||d.name||'Dokument';
-        let ty=o.type||o.mimeType||'';
-        if(!ty){const ln=nm.toLowerCase();
-          if(ln.slice(-4)==='.pdf')ty='application/pdf';
-          else{const mm=ln.match(/\.(jpe?g|png|gif|webp|heic|heif|bmp|tiff?)$/);if(mm)ty='image/'+mm[1].replace('jpg','jpeg');}
-        }
-        _openAttachLightbox({name:nm,type:ty,fileId:o.fileId||fid,url:o.url||d.url||'',data:o.data});
-      };
-      const row=document.createElement('div');
-      row.style.cssText='display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;background:var(--bg3);margin-bottom:4px;';
-      // b587: Hover-Großvorschau auch an den Auswahl-Zeilen (wie oben in der Übersicht)
-      const _hvFid=(d.orig&&d.orig.fileId)||fid;
-      if(_hvFid){row.dataset.hvid=String(_hvFid).replace(/[^A-Za-z0-9_\-]/g,'');row.dataset.hvtitel=d.name||'';}
-      // Auswahl-Häkchen nur für echte Dateianhänge (Original-Index bleibt erhalten → _pdfSendenCreate unverändert); E-Mail-PDFs sind nur Referenz
-      if(d.attIdx>=0){
-        const chk=document.createElement('input'); chk.type='checkbox'; chk.id='_pdfS_a_'+d.attIdx;
-        chk.style.cssText='width:14px;height:14px;cursor:pointer;flex-shrink:0;';
-        row.appendChild(chk);
-      }else{ const sp=document.createElement('span'); sp.style.cssText='width:14px;flex-shrink:0;'; row.appendChild(sp); }
-      const nameSpan=document.createElement('span');
-      nameSpan.style.cssText='flex:1;font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;';
-      nameSpan.title=d.name+' – Klicken für Vorschau (bleibt offen, verschiebbar)'; // b589: voller Name im Tooltip
-      nameSpan.textContent=d.icon+' '+_kurzName(d.name);
-      const _docObj={name:d.name,url:d.url,fileId:(d.orig&&d.orig.fileId)||fid};
-      nameSpan.onclick=function(){_pamDocPinPreview(_docObj);};
-      row.appendChild(nameSpan);
-      const prevLnk=document.createElement('span');
-      prevLnk.style.cssText='font-size:11px;color:var(--accent);flex-shrink:0;cursor:pointer;font-weight:700;white-space:nowrap;';
-      prevLnk.textContent='👁 Vorschau'; prevLnk.title='Bleibendes, verschiebbares Vorschaufenster';
-      prevLnk.onclick=function(){_pamDocPinPreview(_docObj);};
-      row.appendChild(prevLnk);
-      const openLnk=document.createElement('span');
-      openLnk.style.cssText='font-size:11px;color:var(--text2);flex-shrink:0;cursor:pointer;white-space:nowrap;';
-      openLnk.textContent='🔍 Groß'; openLnk.title='Vollbild';
-      openLnk.onclick=_openDocBig;
-      row.appendChild(openLnk);
-      det.appendChild(row);
-    });
-    box.appendChild(det);
-  }
-  _ordKeys.forEach(function(k){_pdfSendenDocSection('📁 '+k,_byOrd.get(k));});
-  if(_epfItems.length)_pdfSendenDocSection('📧 E-Mail-PDFs',_epfItems);
-
-  if(!adr&&!kontakte.length&&!fotos.length&&!anhaenge.length){
-    const empty=document.createElement('div');
-    empty.style.cssText='color:var(--text2);font-size:13px;padding:20px 0;text-align:center;';
-    empty.textContent='Keine Inhalte im Task vorhanden.';
-    box.appendChild(empty);
-  }
-
-  // ── Footer ──
+  // ── Leiste unten (b592: läuft beim Scrollen mit – position:sticky im scrollenden Kasten,
+  // negative Ränder, damit sie bündig über die 20-px-Polsterung der Box läuft) ──
   const footer=document.createElement('div');
-  footer.style.cssText='display:flex;gap:8px;margin-top:18px;flex-shrink:0;flex-wrap:wrap;';
+  footer.style.cssText='position:sticky;bottom:-20px;z-index:5;display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:14px -20px -20px;padding:10px 20px 20px;background:var(--bg2);border-top:1px solid var(--border);';
+  const cnt=document.createElement('span');
+  cnt.setAttribute('data-uebcount','1');
+  cnt.style.cssText='font-size:13px;color:var(--text2);white-space:nowrap;';
+  cnt.textContent='nichts ausgewählt';
+  const mkMini=function(txt,tip,fn){
+    const b=document.createElement('button');b.type='button';b.textContent=txt;b.title=tip;
+    b.style.cssText='padding:3px 9px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:12px;cursor:pointer;';
+    b.onclick=fn;return b;
+  };
+  const btnAlle=mkMini('Alle','Alle Fotos und Dokumente ankreuzen',function(){_uebAlle(true);});
+  const btnKeine=mkMini('Keine','Alle Häkchen entfernen',function(){_uebAlle(false);});
+  const spacer=document.createElement('span');spacer.style.cssText='flex:1;min-width:8px;';
   const btnPrint=document.createElement('button');btnPrint.type='button';
   btnPrint.textContent='🖨 Drucken';
-  btnPrint.style.cssText='padding:10px 14px;border-radius:8px;background:var(--bg3);color:var(--text);border:1px solid var(--border);font-size:13px;font-weight:700;cursor:pointer;';
+  btnPrint.style.cssText='padding:9px 13px;border-radius:8px;background:var(--bg3);color:var(--text);border:1px solid var(--border);font-size:13px;font-weight:700;cursor:pointer;';
   btnPrint.onclick=()=>{ov.remove();_pamTaskDrucken(t.id);};
   const btnPdf=document.createElement('button');btnPdf.type='button';
-  btnPdf.textContent='📄 PDF erstellen';
-  btnPdf.style.cssText='flex:1;padding:10px;border-radius:8px;background:var(--accent);color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer;';
+  btnPdf.textContent='📄 PDF';
+  btnPdf.style.cssText='padding:9px 15px;border-radius:8px;background:var(--accent);color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer;';
   btnPdf.onclick=()=>_pdfSendenCreate(t,false);
   const btnSend=document.createElement('button');btnSend.type='button';
-  btnSend.textContent='📧 PDF & Senden';
-  btnSend.style.cssText='flex:1;padding:10px;border-radius:8px;background:#185FA5;color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer;';
+  btnSend.textContent='📧 Senden';
+  btnSend.style.cssText='padding:9px 15px;border-radius:8px;background:#185FA5;color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer;';
   btnSend.onclick=()=>_pdfSendenCreate(t,true);
   const btnCancel=document.createElement('button');btnCancel.type='button';
-  btnCancel.textContent='Abbrechen';
-  btnCancel.style.cssText='padding:10px 14px;border-radius:8px;background:var(--bg3);color:var(--text2);border:1px solid var(--border);font-size:13px;cursor:pointer;';
+  btnCancel.textContent='Schließen';
+  btnCancel.style.cssText='padding:9px 13px;border-radius:8px;background:var(--bg3);color:var(--text2);border:1px solid var(--border);font-size:13px;cursor:pointer;';
   btnCancel.onclick=()=>ov.remove();
-  footer.append(btnPrint,btnPdf,btnSend,btnCancel);
+  footer.append(cnt,btnAlle,btnKeine,spacer,btnPrint,btnPdf,btnSend,btnCancel);
   box.appendChild(footer);
+  _uebZaehler(); // b592: gemerkte Auswahl sofort in der Leiste zeigen
 
   ov.appendChild(box);
   document.body.appendChild(ov);
