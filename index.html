@@ -4564,7 +4564,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-03 · #581'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-03-b581) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-03 · #582'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-03-b582) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -13132,27 +13132,45 @@ function _hvZeigen(id,quelle,ev,sofortSrc){
 // Höchstens vier Abrufe gleichzeitig. Ohne Bremse startet eine Ansicht mit vielen Fotos
 // alle Abrufe auf einmal; Chrome bricht dann mit ERR_INSUFFICIENT_RESOURCES ab – und zwar
 // nicht nur die Bilder, sondern alles, was gleichzeitig läuft (auch die Hover-Vorschau).
-const _pamLadeMax=4;let _pamLadeAktiv=0;const _pamLadeWarte=[];const _pamLadeWarteHinten=[];
-// b581: zwei Prioritäten. Die b580-GPS-Abrufe stellten sich beim Öffnen des Foto-Eingangs
-// zu Hunderten VOR die Kachel-Rettungen (FIFO) – die Kacheln blieben minutenlang grau und
-// die Hover-Vorschau hatte kein Sofort-Bild. Jetzt: Bild-Nachladungen vorn (Standard),
-// Kleinkram wie GPS-Metadaten mit hinten=true ans Ende.
-function _pamLadeSchlange(fn,hinten){
-  (hinten?_pamLadeWarteHinten:_pamLadeWarte).push(fn);_pamLadeNaechster();
+const _pamLadeMax=4;let _pamLadeAktiv=0;const _pamLadeWarte=[];
+// b582: Kleinkram (GPS-Metadaten u. Ä.) hat eine EIGENE kleine Spur mit max. 2 gleichzeitig.
+// In b581 stand er hinten in DERSELBEN Schlange wie die Vollbild-Rettungen – und weil die
+// bei vielen Fotos minutenlang lief, kam er schlicht nie dran (Befund Frank: „GPS-Anzeige
+// funktioniert nicht"). Die Abrufe sind winzig (ein Metadaten-Feld); zwei nebenher sind
+// unbedenklich, der b579-Lade-Sturm bleibt gebannt.
+const _pamLadeKleinMax=2;let _pamLadeKleinAktiv=0;const _pamLadeKleinWarte=[];
+function _pamLadeSchlange(fn,klein){
+  if(klein){_pamLadeKleinWarte.push(fn);_pamLadeKleinNaechster();return;}
+  _pamLadeWarte.push(fn);_pamLadeNaechster();
 }
 function _pamLadeNaechster(){
   if(_pamLadeAktiv>=_pamLadeMax)return;
-  const fn=_pamLadeWarte.shift()||_pamLadeWarteHinten.shift();
+  const fn=_pamLadeWarte.shift();
   if(!fn)return;
   _pamLadeAktiv++;
   let p;try{p=fn();}catch(e){p=null;}
   Promise.resolve(p).catch(function(){}).then(function(){_pamLadeAktiv--;_pamLadeNaechster();});
 }
+function _pamLadeKleinNaechster(){
+  if(_pamLadeKleinAktiv>=_pamLadeKleinMax)return;
+  const fn=_pamLadeKleinWarte.shift();
+  if(!fn)return;
+  _pamLadeKleinAktiv++;
+  let p;try{p=fn();}catch(e){p=null;}
+  Promise.resolve(p).catch(function(){}).then(function(){_pamLadeKleinAktiv--;_pamLadeKleinNaechster();});
+}
 const _hvThumbCache={}; // b581: id → {u,ts} – die signierten Drive-Miniatur-Adressen LAUFEN AB
 const _HV_CACHE_MS=30*60*1000; // b581: nach 30 Minuten neu fragen, sonst steht eine abgelaufene Adresse im Speicher
+const _hvThumbLaeuft={}; // b582: id → Promise – Vorlauf (mouseover) und Anzeige fragen sonst doppelt
 async function _hvThumb(id){
   const _c=_hvThumbCache[id];
   if(_c&&(Date.now()-_c.ts)<_HV_CACHE_MS)return _c.u;
+  if(_hvThumbLaeuft[id])return _hvThumbLaeuft[id];
+  const _p=_hvThumbHolen(id);
+  _hvThumbLaeuft[id]=_p;
+  try{return await _p;}finally{delete _hvThumbLaeuft[id];}
+}
+async function _hvThumbHolen(id){
   let u='';
   try{
     // b581: gdriveTokenValid statt nur „Token vorhanden" – ein abgelaufenes Token brachte
@@ -13194,6 +13212,11 @@ document.addEventListener('mouseover',function(e){
   if(id===_hvAktiv&&(_hvTimer||(_hvBox&&_hvBox.style.display==='block')))return;
   _hvVerstecken();
   _hvAktiv=id;
+  // b582 (Befund Frank: „scharfes Bild kommt erst später"): die Drive-Anfrage nach der
+  // scharfen Miniatur startete bisher erst NACH der 280-ms-Wartezeit. Jetzt läuft sie ab
+  // dem ersten Überfahren parallel – wenn die Vorschau aufgeht, liegt die Adresse meist
+  // schon im _hvThumbCache und die scharfe Fassung kommt praktisch sofort.
+  if(/^[A-Za-z0-9_-]{20,}$/.test(id))_hvThumb(id).catch(function(){});
   const ev={clientX:e.clientX,clientY:e.clientY};
   const sofort=_hvLokalesBild(t); // b574: schon sichtbares Bild, kommt ohne Wartezeit
   _hvTimer=setTimeout(function(){
@@ -13225,6 +13248,7 @@ function _feTopBtnRefresh(){
   }catch(e){}
 }
 let _feDeskAuswahl=null;
+const _feGpsCache={}; // b582: driveId → location|null – GPS-Antworten der Sitzung merken
 // ohneTask=true → Einstieg aus der Topbar: Ziel-Task wird beim Übernehmen abgefragt
 function _feDeskOeffnen(ohneTask){
   const alle=_feDeskAlleFotos();
@@ -13285,15 +13309,22 @@ function _feDeskOeffnen(ohneTask){
     gpsTag.textContent='📍';
     cell.appendChild(gpsTag);
     if(typeof gdriveToken!=='undefined'&&gdriveToken){
-      // b581: hinten=true – GPS ist Kleinkram und darf die Kachel-Rettungen nicht aufhalten
-      _pamLadeSchlange(()=>fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(key)+'?fields=imageMediaMetadata(location)',{headers:{Authorization:'Bearer '+gdriveToken}})
+      // b582: eigene Klein-Spur (klein=true) statt hinten in der großen Schlange – dort kam
+      // GPS bei vielen Foto-Rettungen nie dran. Ergebnis wird gemerkt (_feGpsCache): beim
+      // erneuten Öffnen des Foto-Eingangs erscheinen die 📍 sofort, ganz ohne Abrufe.
+      const _gpsZeig=loc=>{
+        if(loc&&(Math.abs(loc.latitude||0)>0.0001||Math.abs(loc.longitude||0)>0.0001)){
+          gpsTag.style.display='block';
+          gpsTag.title='Aufnahmeort: '+(+loc.latitude).toFixed(5)+', '+(+loc.longitude).toFixed(5)+' – Einzelheiten über ℹ';
+        }
+      };
+      if(_feGpsCache[key]!==undefined){_gpsZeig(_feGpsCache[key]);}
+      else _pamLadeSchlange(()=>fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(key)+'?fields=imageMediaMetadata(location)',{headers:{Authorization:'Bearer '+gdriveToken}})
         .then(r=>r.ok?r.json():null)
         .then(j=>{
-          const loc=j&&j.imageMediaMetadata&&j.imageMediaMetadata.location;
-          if(loc&&(Math.abs(loc.latitude||0)>0.0001||Math.abs(loc.longitude||0)>0.0001)){
-            gpsTag.style.display='block';
-            gpsTag.title='Aufnahmeort: '+(+loc.latitude).toFixed(5)+', '+(+loc.longitude).toFixed(5)+' – Einzelheiten über ℹ';
-          }
+          const loc=(j&&j.imageMediaMetadata&&j.imageMediaMetadata.location)||null;
+          if(j)_feGpsCache[key]=loc; // nur echte Antworten merken, Fehlschläge nicht
+          _gpsZeig(loc);
         }).catch(()=>{}),true);
     }
     cell.onclick=()=>{
