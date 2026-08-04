@@ -5348,7 +5348,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-04 · #614'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-04-b614) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-04 · #615'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-04-b615) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -7722,7 +7722,9 @@ async function gdriveLoadFile(fileId, fileName) {
   render();
   startWorkboardPolling();
   // VBS-Auftrag prüfen (nach Daten-Load, damit Boards verfügbar sind)
-  setTimeout(_checkVbsNewAuftrag, 800);
+  // b615: erst der Objekt-Weg. Liegt dort etwas an, kommt der Auftrags-Dialog nicht
+  // dazu – zwei Dialoge übereinander wären der sichere Weg in einen Fehlklick.
+  setTimeout(function(){ try{ if(_checkVbsNewImmo())return; }catch(e){console.warn('[IMMO]',e);} _checkVbsNewAuftrag(); }, 800);
   // Popup-Modus: Task nach Daten-Load automatisch öffnen
   setTimeout(_checkPopupMode, 900);
   // Migration: Datei in Arbeitsordner verschieben, falls noch im Drive-Root
@@ -18951,6 +18953,16 @@ function _dfbPickItem(id,name){
   showToast('✓ Ordner gesetzt: '+name,'success');
   // Wenn Projektordner gesetzt: bekannte Unterordner automatisch suchen & befüllen
   if(_dfbTargetField==='tGDOrdner'){_autoFillProjectSubfolders(id);}
+  // b615: Am Objekt gehen Fotos UND Dokumente in denselben Ordner (Beschluss Frank:
+  // ein Ordner, weil die meisten Leistungen gar keine Datei erzeugen). Wer hier den
+  // Foto-Ordner wählt, hätte sonst ein leeres Dokumente-Feld und wüsste nicht, warum
+  // seine Wartungsprotokolle nirgends auftauchen.
+  try{
+    if(_dfbTargetField==='tGD'&&(boardTypes[currentBoard]||'baustelle')==='immobilie'){
+      const dok=document.getElementById('tDokOrdner');
+      if(dok&&!dok.value.trim()){dok.value=url;dok.dispatchEvent(new Event('input'));}
+    }
+  }catch(e){console.warn('[IMMO] Dokumente-Feld spiegeln:',e);}
 }
 function _dfbPickCurrent(){
   _dfbPickItem(_dfbCurrentId,_dfbCurrentName);
@@ -28344,6 +28356,179 @@ function _applyStammblattPrefill(){
     console.log('[VBS] Parameter gesichert:',data.ordner);
   }catch(e){console.warn('[VBS] URL-Param Fehler:',e);}
 })();
+
+// ══════════════════════════════════════════════════════════════════════════
+// b615 – OBJEKT AUS „Wartung anlegen.vbs"
+//
+// Ablauf: Rechtsklick auf den Objektordner → Senden an → Wartung anlegen.
+// Das Skript legt NICHTS an, es reicht nur den Pfad weiter. PAM sucht den
+// gespiegelten Ordner in Drive, legt DORT den einen Unterordner an und trägt
+// ihn als Foto- und Dokumente-Ordner ein.
+//
+// Bewusst eigene, einfachere Ordnersuche statt der Auftrags-Suche
+// (`_vbsCreateDriveStruktur`, ~100 Zeilen mit Ahnenketten-Abgleich): die ist
+// erprobt und soll für diesen Nebenweg nicht umgebaut werden. Ist der Ordner
+// hier nicht eindeutig, wird NICHT geraten – dann geht der Ordner-Browser auf
+// und Frank wählt. Das ist ehrlicher als eine stille Fehlentscheidung.
+// ══════════════════════════════════════════════════════════════════════════
+(function _readImmoUrlParams(){
+  try{
+    const sp=new URLSearchParams(window.location.search);
+    if(sp.get('newImmobilie')!=='1')return;
+    const data={
+      _ts:Date.now(),
+      nas:        sp.get('nas')        ||'',
+      nasParent:  sp.get('nasParent')  ||'',
+      nasGrand:   sp.get('nasGrand')   ||'',
+      unterordner:sp.get('unterordner')||'',
+      titel:      sp.get('titel')      ||''
+    };
+    localStorage.setItem('pam_vbs_new_immo',JSON.stringify(data));
+    window.history.replaceState({},'',window.location.pathname);
+    console.log('[IMMO] Parameter gesichert:',data.nasParent,'/',data.unterordner);
+  }catch(e){console.warn('[IMMO] URL-Param Fehler:',e);}
+})();
+
+function _checkVbsNewImmo(){
+  try{
+    const raw=localStorage.getItem('pam_vbs_new_immo');
+    if(!raw)return false;
+    const data=JSON.parse(raw);
+    if(!data||!data._ts||(Date.now()-data._ts)>600000){
+      localStorage.removeItem('pam_vbs_new_immo');return false;
+    }
+    const immoBoards=Object.keys(boards).filter(b=>(boardTypes[b]||'baustelle')==='immobilie');
+    if(!immoBoards.length){
+      localStorage.removeItem('pam_vbs_new_immo');
+      showToast('⚠ Kein Board vom Typ „🏠 Immobilie" vorhanden – bitte erst eines anlegen','warning',7000);
+      return true;
+    }
+    _showImmoBoardDialog(data,immoBoards);
+    return true;
+  }catch(e){console.warn('[IMMO] Check-Fehler:',e);return false;}
+}
+
+function _showImmoBoardDialog(data,immoBoards){
+  if(document.getElementById('_immoDlg'))return;
+  const ov=document.createElement('div');
+  ov.id='_immoDlg';
+  ov.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;';
+  const boardOpts=immoBoards.map(b=>'<option value="'+_escHtml(b)+'"'+(b===currentBoard?' selected':'')+'>🏠 '+esc(b)+'</option>').join('');
+  const firstBoard=immoBoards.includes(currentBoard)?currentBoard:immoBoards[0];
+  const statusOpts=getBoardStatuses(firstBoard).map(s=>'<option value="'+_escHtml(s)+'">'+esc(s)+'</option>').join('');
+  ov.innerHTML='<div style="background:var(--bg,#fff);border-radius:14px;padding:26px 28px;max-width:470px;width:94%;box-shadow:0 8px 40px rgba(0,0,0,.35);">'
+    +'<div style="font-size:16px;font-weight:800;color:#7F77DD;margin-bottom:6px;">🏠 Neues Objekt aus VBS</div>'
+    +'<div style="font-size:12px;color:var(--text2,#666);margin-bottom:14px;line-height:1.7;">'
+    +'📍 <b>'+esc(data.nasParent||'(unbekannt)')+'</b><br>'
+    +(data.nasGrand?'🏢 '+esc(data.nasGrand)+'<br>':'')
+    +'📁 Ordner für die Dateien: <b>'+esc(data.unterordner||'Wartungen')+'</b>'
+    +'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px;">'
+    +'<div><label style="font-size:11px;font-weight:700;color:var(--text2,#555);display:block;margin-bottom:4px;">Board (Liste)</label>'
+    +'<select id="_immoBoard" style="width:100%;padding:7px 8px;border:1px solid var(--border,#d0d5dd);border-radius:7px;font-size:13px;background:var(--bg,#fff);color:var(--text,#111);" onchange="_immoUpdateStatus(this.value)">'+boardOpts+'</select></div>'
+    +'<div><label style="font-size:11px;font-weight:700;color:var(--text2,#555);display:block;margin-bottom:4px;">Status (Spalte)</label>'
+    +'<select id="_immoStatus" style="width:100%;padding:7px 8px;border:1px solid var(--border,#d0d5dd);border-radius:7px;font-size:13px;background:var(--bg,#fff);color:var(--text,#111);">'+statusOpts+'</select></div>'
+    +'</div>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end;">'
+    +'<button id="_immoCancel" style="padding:8px 18px;border-radius:7px;border:1px solid var(--border,#ccc);background:var(--bg3,#f5f5f5);cursor:pointer;font-size:13px;color:var(--text,#111);">Abbrechen</button>'
+    +'<button id="_immoOk" style="padding:8px 24px;border-radius:7px;background:#7F77DD;color:#fff;border:none;cursor:pointer;font-size:13px;font-weight:700;">✅ Objekt anlegen</button>'
+    +'</div></div>';
+  document.body.appendChild(ov);
+  ov.querySelector('#_immoCancel').addEventListener('click',function(){
+    localStorage.removeItem('pam_vbs_new_immo');ov.remove();
+  });
+  ov.querySelector('#_immoOk').addEventListener('click',function(){
+    const selBoard=ov.querySelector('#_immoBoard').value;
+    const selStatus=ov.querySelector('#_immoStatus').value;
+    ov.remove();
+    if(selBoard&&selBoard!==currentBoard)switchBoard(selBoard);
+    data._targetStatus=selStatus;
+    setTimeout(()=>_openImmoNewTask(data),200);
+  });
+}
+function _immoUpdateStatus(boardName){
+  const sel=document.getElementById('_immoStatus'); if(!sel)return;
+  sel.innerHTML=getBoardStatuses(boardName).map(s=>'<option value="'+_escHtml(s)+'">'+esc(s)+'</option>').join('');
+}
+
+// Objektordner in Drive suchen. Eindeutig → Kennung. Nicht eindeutig → null,
+// der Aufrufer lässt dann wählen. Archiv-Kopien fliegen raus (wie beim Auftrag).
+async function _immoFindeOrdner(nasParent,nasGrand){
+  if(!gdriveToken||!nasParent)return null;
+  const _base='https://www.googleapis.com/drive/v3/files';
+  const _hdr={headers:{Authorization:'Bearer '+gdriveToken}};
+  try{
+    const q=encodeURIComponent("name='"+nasParent.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+    const r=await fetch(_base+'?q='+q+'&fields=files(id,name)&spaces=drive&pageSize=10',_hdr);
+    if(r.status===401){_handleDrive401();return null;}
+    if(!r.ok)return null;
+    let treffer=((await r.json()).files||[]).filter(f=>f.name===nasParent);
+    if(!treffer.length)return null;
+    // Archiv-Kopien ausschließen – dieselbe Falle wie beim Auftrag (#374)
+    const echte=[];
+    for(const f of treffer){
+      try{ if(_vbsChainIsArchiv(await _vbsAncestorChain(f.id,6)))continue; }catch(e){}
+      echte.push(f);
+    }
+    if(echte.length===1)return echte[0].id;
+    if(echte.length>1&&nasGrand){
+      for(const f of echte){
+        try{
+          const kette=await _vbsAncestorChain(f.id,6);
+          if((kette[0]||'').toLowerCase()===nasGrand.toLowerCase())return f.id;
+        }catch(e){}
+      }
+    }
+    console.warn('[IMMO] Objektordner nicht eindeutig ('+echte.length+' Treffer) – Frank wählt:',nasParent);
+    return null;
+  }catch(e){console.warn('[IMMO] Ordnersuche:',e);return null;}
+}
+
+async function _openImmoNewTask(data){
+  _vbsCreating=true; // sperrt _autoCreateTaskFolder während der Anlage
+  localStorage.removeItem('pam_vbs_new_immo');
+  openNewTaskModal();
+  await new Promise(r=>setTimeout(r,200));
+  const setV=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v;};
+  setV('taskTitleInput',data.titel||data.nasParent||'Objekt');
+  if(data._targetStatus)setV('taskStatusInput',data._targetStatus);
+  if(data.nasGrand)setV('tHV',data.nasGrand);   // Ordner der Hausverwaltung
+  setV('tAdr',data.nasParent||'');
+  setV('tNAS',data.nas||'');
+  ['tGD','tGDOrdner','tEmailOrdner','tDokOrdner'].forEach(id=>setV(id,''));
+  if(typeof _updateHdrMeta==='function')_updateHdrMeta();
+  if(typeof _updateMapsBtn==='function')_updateMapsBtn();
+
+  try{
+    if(!gdriveToken){
+      showToast('⚠ Drive nicht verbunden – Ordner bitte später unter „Ordner & Links" setzen','warning',7000);
+      return;
+    }
+    const unter=((data.unterordner||'Wartungen').replace(/[\\/:*?"<>|]/g,'-').substring(0,100).replace(/[. ]+$/,''))||'Wartungen';
+    const objFid=await _immoFindeOrdner(data.nasParent||'',data.nasGrand||'');
+    if(!objFid){
+      // Nicht raten. Der Ordner-Browser geht direkt auf das Foto-Feld auf; was Frank
+      // dort wählt, wird durch die Spiegelung in _dfbPickItem auch das Dokumente-Feld.
+      showToast('📂 Objektordner in Drive nicht eindeutig gefunden – bitte „'+unter+'" selbst wählen','warning',8000);
+      if(typeof _pickDriveFolder==='function')setTimeout(()=>_pickDriveFolder('tGD'),400);
+      return;
+    }
+    // Vorhandenen Unterordner verwenden statt einen zweiten danebenzustellen
+    const zielId=await _driveGetOrCreateFolder(unter,objFid);
+    const b='https://drive.google.com/drive/folders/';
+    setV('tGDOrdner',b+objFid);
+    setV('tGD',b+zielId);        // Fotos
+    setV('tDokOrdner',b+zielId); // Dokumente – derselbe Ordner (Beschluss Frank)
+    if(typeof _updateFotoOrdnerHint==='function')_updateFotoOrdnerHint();
+    if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
+    showToast('✅ Objekt verknüpft – Dateien gehen nach „'+unter+'"','success',5000);
+  }catch(e){
+    console.warn('[IMMO] Anlage:',e);
+    showToast('⚠ Ordner konnte nicht verknüpft werden: '+e.message,'warning',7000);
+  }finally{
+    _vbsCreating=false;
+  }
+}
 
 // 2) Nach Daten-Load aufgerufen: VBS-Daten prüfen und Dialog zeigen
 function _checkVbsNewAuftrag(){
