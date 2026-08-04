@@ -3691,6 +3691,15 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 .ptp-immo-mode #tBaudokuSect,
 .ptp-immo-mode #tChecklisteSect,
 .ptp-immo-mode #tTermZeitSect{display:none!important;}
+/* b616: Ein Objekt hat keinen Posteingang – das Feld hat im schlanken Fenster
+   nichts verloren. Es wurde außerdem beim Anlegen mit dem Standardordner
+   vorbelegt (Befund Frank: zeigte auf „Projektordner_Aufträge"). */
+.ptp-immo-mode #tEmailOrdnerFeld{display:none!important;}
+/* b616: Der E-Mail-Block bleibt sichtbar, wenn am Task WIRKLICH eine Mail hängt.
+   Sonst hätte ein versehentlich aufs Objektboard geratener Mail-Task seinen
+   Inhalt hinter dem schlanken Fenster verloren – die Mail wäre nicht weg, aber
+   unerreichbar, und das sieht man dem Fenster nicht an. */
+.ptp-immo-mode.ptp-immo-hatmail #pamEmailBlock{display:block!important;}
 .task-type-badge.immo{background:rgba(127,119,221,0.14);color:#7F77DD;}
 
 /* ── TASK-TYP: Notiz-Modus (blendet Baustelle-spezifische Felder aus) ── */
@@ -3894,7 +3903,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
       <button class="view-tab" data-view="kalender" onclick="switchView('kalender')">&#128197; Kalender</button>
       <button class="view-tab" data-view="kanban" onclick="switchView('kanban')">&#9638; Kanban</button>
       <button class="view-tab" data-view="list" onclick="switchView('list')">&#9776; Liste</button>
-      <button class="view-tab" data-view="table" onclick="switchView('table')">&#9638;&#9638; Tabelle</button>
+      <button class="view-tab" data-view="objekte" onclick="switchView('objekte')" title="Alle Objekte mit ihren wiederkehrenden Leistungen">&#127968; Objekte</button>
     </div>
     <button class="col-manage-btn" onclick="openColManager()">&#9998; Spalten</button>
     <button class="col-manage-btn" id="alleColBtn" onclick="_pamOpenBoardPopup()" title="Alle Tasks dieses Boards anzeigen">⊞ Übersicht (<span id="alleColCount">0</span>)</button>
@@ -4840,7 +4849,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
           <button class="link-btn-2" onclick="_dokSyncOrdner()" title="Abgleichen – liest Ordner + Unterordner und trägt Neues automatisch nach" style="color:var(--accent);font-weight:700;">🔄</button>
         </div>
       </div>
-      <div class="modal-field full">
+      <div class="modal-field full" id="tEmailOrdnerFeld">
         <label>📧 E-Mail-Ablageordner (Google Drive)</label>
         <div class="link-row-2">
           <input type="url" id="tEmailOrdner" placeholder="https://drive.google.com/drive/folders/…" autocomplete="off">
@@ -4930,7 +4939,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
         <option value="baustelle">🏗 Baustelle</option>
         <option value="notiz">✅ Aufgaben</option>
         <option value="email">📧 E-Mail-Eingang</option>
-        <option value="immobilie">🏠 Immobilie</option>
+        <option value="immobilie">🏠 Objekt</option>
       </select>
       <button class="proj-add-btn" onclick="addProject()">+ Anlegen</button>
     </div>
@@ -5348,7 +5357,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-04 · #615'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-04-b615) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-04 · #618'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-04-b618) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -6382,11 +6391,26 @@ function _tuEintragWeg(id,datum){
 let _tuJahr=null, _tuJahrNurOffen=false;
 const TU_MON=['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
 
-function _tuJahrDialog(){
-  if(!(taskTurnus||[]).length){showToast('An diesem Auftrag sind noch keine Leistungen angelegt','info',3000);return;}
+// b618: Ohne Argument wie bisher – die Arbeitskopie des offenen Fensters.
+// MIT Task-Kennung aus dem Reiter „Objekte", wo kein Fenster offen ist.
+let _tuJahrListe=null;
+function _tuJahrDialog(taskId){
+  let titel='', quelle;
+  if(taskId){
+    const t=(typeof findTaskById==='function')?findTaskById(taskId):null;
+    if(!t){showToast('⚠ Objekt nicht gefunden','warning',3000);return;}
+    quelle=(t.turnusListe||[]).map(function(l){return l;});
+    titel=(t.title||'').trim();
+  }else{
+    quelle=taskTurnus||[];
+    titel=((document.getElementById('taskTitleInput')||{}).value||'').trim();
+  }
+  // Erst prüfen, DANN übernehmen: ein leerer Rest darf sonst beim nächsten
+  // Zeichnen die Daten des offenen Fensters überdecken.
+  if(!quelle.length){showToast('Hier sind noch keine Leistungen angelegt','info',3000);return;}
+  _tuJahrListe=quelle;
   if(_tuJahr==null)_tuJahr=new Date().getFullYear();
   const old=document.getElementById('tuJahrOverlay'); if(old)old.remove();
-  const titel=((document.getElementById('taskTitleInput')||{}).value||'').trim();
   const ov=document.createElement('div'); ov.id='tuJahrOverlay';
   ov.addEventListener('click',e=>{if(e.target===ov)_tuJahrClose();});
   ov.innerHTML='<div class="tuj-box" role="dialog" aria-label="Jahresübersicht der wiederkehrenden Leistungen">'
@@ -6420,6 +6444,7 @@ function _tuJahrEsc(e){
 function _tuJahrClose(){
   const o=document.getElementById('tuJahrOverlay'); if(o)o.remove();
   document.removeEventListener('keydown',_tuJahrEsc);
+  _tuJahrListe=null; // b618: keine Reste stehen lassen
 }
 function _tuJahrNav(d){_tuJahr+=d;_tuJahrRender();}
 function _tuJahrToggleOffen(){_tuJahrNurOffen=!_tuJahrNurOffen;_tuJahrRender();}
@@ -6452,7 +6477,7 @@ function _tuJahrRender(){
   if(kopf)kopf.innerHTML='<tr><th class="nam">Leistung</th><th style="text-align:left;">Turnus</th>'
     +TU_MON.map(m=>'<th>'+m+'</th>').join('')+'<th title="Erledigt-Einträge in diesem Jahr">Σ</th></tr>';
 
-  const alle=(taskTurnus||[]);
+  const alle=(_tuJahrListe||taskTurnus||[]); // b618: Quelle je nach Aufrufweg
   // Zahlen immer über ALLE Leistungen – der Filter ändert die Anzeige, nicht die Bilanz
   const mitEintrag=alle.filter(l=>(l.eintraege||[]).some(e=>!e.skip&&String(e.datum||'').startsWith(_tuJahr+'-'))).length;
   const faellig=alle.filter(_tuFaellig).length;
@@ -8403,7 +8428,7 @@ function loadFromObject(data){
   try{const saved=localStorage.getItem('pam_lastBoard');if(saved&&boards[saved])currentBoard=saved;}catch(e){console.warn('[PAM]',e);}
   if(!currentBoard||!boards[currentBoard])currentBoard=keys.length?keys[0]:'';
   // Zuletzt gewählte Ansicht (Heute/Kanban/Liste/Tabelle) wiederherstellen
-  try{const sv=localStorage.getItem('pam_current_view');if(sv&&['heute','kalender','kanban','list','table'].includes(sv))currentView=sv;}catch(e){console.warn('[PAM]',e);}
+  try{const sv=localStorage.getItem('pam_current_view');if(sv&&['heute','kalender','kanban','list','table','objekte'].includes(sv))currentView=sv;}catch(e){console.warn('[PAM]',e);}
   // laufenden Timer aus Vorgänger-Session fortsetzen, sobald die Tasks geladen sind
   try{resumeRunningTimer();}catch(e){console.warn('[PAM]',e);}
   // Einmalige Bereinigung früherer Zusammenführungen (idempotent, meldet nur bei Änderung)
@@ -9026,29 +9051,67 @@ function _tuKachelErledigt(taskId,lId){
     }
   }catch(e){console.warn('[TU] offenes Fenster:',e);}
   try{autoSave();}catch(e){console.warn('[TU] autoSave:',e);}
-  renderHeute();
+  // b618: aus Heute UND aus dem Reiter „Objekte" aufrufbar – die richtige
+  // Ansicht neu zeichnen, sonst bleibt die abgehakte Zeile stehen.
+  if(typeof currentView!=='undefined'&&currentView==='objekte'&&typeof renderObjekte==='function')renderObjekte();
+  else renderHeute();
   showToast('✓ '+(l.name||'')+' – heute eingetragen','success',2200);
 }
 
-// Kachel einer fälligen Leistung. Klick öffnet den Task, der Knopf hakt ab.
-function _tuKachel(x){
-  var t=x.t, l=x.l;
-  var farbe=TU_FARBE[_tuAmpel(l)]||TU_FARBE.gelb;
-  var idT=_escHtml(t.id), idL=_escHtml(l.id);
-  return '<div style="background:var(--bg2);border-radius:10px;border:1px solid var(--border);border-left:4px solid #7F77DD;padding:9px 10px;">'
+// ── b617: EINE KACHEL PRO OBJEKT ────────────────────────────────────────────
+// Befund Frank: „Eine Kachel pro Objekt ist quasi ein Task." Genau – und damit
+// verhalten sich die Immobilien-Kacheln wie alles andere in Heute, wo eine
+// Kachel immer ein Task ist. Vorher gab es eine Kachel je LEISTUNG; bei 20
+// Leistungen an einem Objekt hätte das die Tagesübersicht zugeschüttet.
+// Zugeklappt = eine Kachel, egal ob zwei oder zwanzig fällig sind.
+var _tuKachelOffen={};
+function _tuKachelToggle(taskId){
+  _tuKachelOffen[taskId]=!_tuKachelOffen[taskId];
+  renderHeute();
+}
+// Flache Fälligkeitsliste nach Objekt bündeln – Reihenfolge bleibt erhalten,
+// das Objekt mit dem am längsten Liegengebliebenen steht also weiter vorn.
+function _tuGruppiere(liste){
+  var out=[],idx={};
+  (liste||[]).forEach(function(x){
+    var k=x.t.id;
+    if(idx[k]===undefined){idx[k]=out.length;out.push({t:x.t,board:x.board,leistungen:[]});}
+    out[idx[k]].leistungen.push(x.l);
+  });
+  return out;
+}
+function _tuKachel(g){
+  var t=g.t, ls=g.leistungen||[];
+  // Kachelfarbe = dringendste Leistung des Objekts
+  var farbe=ls.some(function(l){return _tuAmpel(l)==='rot';})?TU_FARBE.rot:TU_FARBE.gelb;
+  var idT=_escHtml(t.id);
+  var auf=!!_tuKachelOffen[t.id];
+  var namen=ls.slice(0,3).map(function(l){return l.name||'';}).filter(Boolean).join(' · ')
+           +(ls.length>3?' · +'+(ls.length-3):'');
+  var h='<div style="background:var(--bg2);border-radius:10px;border:1px solid var(--border);border-left:4px solid #7F77DD;padding:9px 10px;">'
     + '<div style="display:flex;align-items:flex-start;gap:4px;margin-bottom:5px;cursor:pointer;" onclick="_pamOpenTaskFromHeute(\''+idT+'\')" title="Objekt öffnen">'
     +   '<span style="width:7px;height:7px;border-radius:50%;background:'+farbe+';flex-shrink:0;margin-top:3px;display:inline-block;"></span>'
     +   '<span style="font-size:11px;font-weight:600;color:var(--text);line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">'+esc(t.title||'')+'</span>'
     + '</div>'
-    + '<div style="font-size:10px;color:var(--text2);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">🏠 '+esc(x.board||'')+'</div>'
-    // b612 (Befund Frank am Bild): Name und Status standen in EINER Zeile mit
-    // Abschneiden – bei schmaler Kachel fiel genau der Status weg („noch nie …"),
-    // also das, wofür die Kachel da ist. Jetzt zwei Zeilen: der Name darf
-    // abschneiden, der Status bricht um und steht in der Ampelfarbe.
-    + '<div style="font-size:10px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+_escHtml((l.name||'')+' · '+_tuIntervall(l.intervall).label)+'">🔁 '+esc(l.name||'')+'</div>'
-    + '<div style="font-size:10px;font-weight:600;color:'+farbe+';margin-bottom:6px;line-height:1.35;">'+esc(_tuStatusText(l))+'</div>'
-    + '<button onclick="event.stopPropagation();_tuKachelErledigt(\''+idT+'\',\''+idL+'\')" style="width:100%;padding:4px 8px;border-radius:5px;border:none;background:#7F77DD;color:#fff;font-size:10px;font-weight:700;cursor:pointer;" title="Heutiges Datum als erledigt eintragen">✓ Heute erledigt</button>'
-    + '</div>';
+    + '<div style="font-size:10px;color:var(--text2);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">🏠 '+esc(g.board||'')+'</div>'
+    + '<div style="font-size:10px;font-weight:600;color:'+farbe+';line-height:1.35;">🔁 '+ls.length+' Leistung'+(ls.length!==1?'en':'')+' fällig</div>';
+  if(!auf){
+    h+='<div style="font-size:10px;color:var(--text2);margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+_escHtml(ls.map(function(l){return (l.name||'')+' · '+_tuStatusText(l);}).join('\n'))+'">'+esc(namen)+'</div>'
+      + '<button onclick="event.stopPropagation();_tuKachelToggle(\''+idT+'\')" style="width:100%;padding:4px 8px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:10px;font-weight:600;cursor:pointer;">▾ Aufklappen</button>';
+  }else{
+    h+='<div style="margin:5px 0 6px;">';
+    ls.forEach(function(l){
+      var lf=TU_FARBE[_tuAmpel(l)]||TU_FARBE.gelb;
+      h+='<div style="display:flex;align-items:center;gap:5px;padding:3px 0;border-top:1px solid var(--border);">'
+        + '<span style="width:6px;height:6px;border-radius:50%;background:'+lf+';flex-shrink:0;"></span>'
+        + '<span style="flex:1;min-width:0;font-size:10px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+_escHtml((l.name||'')+' · '+_tuStatusText(l))+'">'+esc(l.name||'')+'</span>'
+        + '<button onclick="event.stopPropagation();_tuKachelErledigt(\''+idT+'\',\''+_escHtml(l.id)+'\')" style="padding:2px 7px;border-radius:4px;border:none;background:#7F77DD;color:#fff;font-size:10px;font-weight:700;cursor:pointer;flex-shrink:0;" title="'+_escHtml(_tuStatusText(l)+' – heutiges Datum eintragen')+'">✓</button>'
+        + '</div>';
+    });
+    h+='</div>'
+      + '<button onclick="event.stopPropagation();_tuKachelToggle(\''+idT+'\')" style="width:100%;padding:4px 8px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:10px;font-weight:600;cursor:pointer;">▴ Zuklappen</button>';
+  }
+  return h+'</div>';
 }
 function _pamOpenTaskFromHeute(id){ if(typeof openEditTaskModal==='function')openEditTaskModal(id); }
 function _pamToggleRasterFilter(key){
@@ -9144,6 +9207,107 @@ function _pamKachelLightbox(tid,startFi){
   _pamFotoLightbox(tid,startFi);
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// b618 – REITER „🏠 OBJEKTE" (ersetzt „Tabelle", die Frank nie benutzt hat)
+//
+// Beantwortet: „wie steht es insgesamt" – alle Objekte untereinander, je Objekt
+// seine wiederkehrenden Leistungen. Heute beantwortet dagegen „was ist jetzt
+// dran". Es kommt bewusst KEIN sechster Reiter dazu.
+//
+// Wortwahl: Frank – „Immobilien ist das falsche Wort". Stimmt, seine Objekte
+// gehören Hausverwaltungen. PAM nennt das Gebäude am Auftrag ohnehin schon
+// „📍 Objekt" – dasselbe Wort für dieselbe Sache. Der GESPEICHERTE Board-Typ
+// heißt weiterhin `immobilie`; ein Umbenennen würde bestehenden Boards die
+// Einstellung nehmen.
+// ══════════════════════════════════════════════════════════════════════════
+var _objNurOffen=false, _objBoardFilter='';
+function _objSetNurOffen(){_objNurOffen=!_objNurOffen;renderObjekte();}
+function _objSetBoard(v){_objBoardFilter=v||'';renderObjekte();}
+
+// Alle Objekt-Tasks mit ihren Leistungen – unabhängig von der Fälligkeit,
+// denn dieser Reiter ist die Gesamtschau, nicht die Tagesliste.
+function _objSammle(){
+  var out=[];
+  Object.keys(boards||{}).forEach(function(bn){
+    if(bn.startsWith('_'))return;
+    if(_objBoardFilter&&bn!==_objBoardFilter)return;
+    (boards[bn]||[]).forEach(function(t){
+      if(!t||t.archiviert||t.spaeterBearbeiten)return;
+      var ls=(t.turnusListe||[]).filter(function(l){return l&&(!_objNurOffen||_tuFaellig(l));});
+      if(!ls.length)return;
+      // Innerhalb eines Objekts: am längsten Liegengebliebenes zuerst
+      ls=ls.slice().sort(function(a,b){
+        var ta=_tuTageSeit(_tuBezug(a)),tb=_tuTageSeit(_tuBezug(b));
+        if(ta===null&&tb===null)return 0;
+        if(ta===null)return -1;
+        if(tb===null)return 1;
+        return tb-ta;
+      });
+      out.push({t:t,board:bn,leistungen:ls,faellig:ls.filter(_tuFaellig).length});
+    });
+  });
+  // Objekte mit den meisten offenen Punkten nach oben
+  out.sort(function(a,b){return b.faellig-a.faellig;});
+  return out;
+}
+
+function renderObjekte(){
+  var mc=document.getElementById('mainContent'); if(!mc)return;
+  var liste=_objSammle();
+  var objBoards=Object.keys(boards||{}).filter(function(b){return !b.startsWith('_');});
+  var boardOpts='<option value="">Alle Projekte</option>'+objBoards.map(function(b){
+    return '<option value="'+_escHtml(b)+'"'+(b===_objBoardFilter?' selected':'')+'>'+esc(b)+'</option>';}).join('');
+  var summeL=liste.reduce(function(s,g){return s+g.leistungen.length;},0);
+  var summeF=liste.reduce(function(s,g){return s+g.faellig;},0);
+
+  var h='<div style="max-width:1000px;margin:0 auto;padding:6px 4px 40px;">';
+  h+='<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px;">'
+    +'<div style="font-size:16px;font-weight:700;color:var(--text);">🏠 Objekte <small style="font-size:12px;font-weight:500;color:var(--text2);">– wiederkehrende Leistungen</small></div>'
+    +'<span style="flex:1;min-width:8px;"></span>'
+    +'<select class="kal-select" onchange="_objSetBoard(this.value)" title="Nur Objekte dieses Projekts">'+boardOpts+'</select>'
+    +'<button class="kal-chip'+(_objNurOffen?' active':'')+'" onclick="_objSetNurOffen()" title="Nur zeigen, was zurzeit fällig ist">'+(_objNurOffen?'☑':'☐')+' nur offene</button>'
+    +'</div>';
+  h+='<div style="font-size:11px;color:var(--text2);margin:0 2px 10px;">'
+    + liste.length+' Objekt'+(liste.length!==1?'e':'')+' · '+summeL+' Leistung'+(summeL!==1?'en':'')
+    + (summeF?' · <b style="color:'+TU_FARBE.gelb+'">'+summeF+' fällig</b>':' · nichts fällig')+'</div>';
+
+  if(!liste.length){
+    h+='<div style="padding:30px;text-align:center;color:var(--text2);font-size:13px;">'
+      +(_objNurOffen?'Nichts fällig – alles im Turnus.'
+        :'Noch keine wiederkehrenden Leistungen angelegt. Einen Objekt-Task öffnen und unter „🔁 Wiederkehrende Leistungen" eintragen, was regelmäßig zu tun ist.')
+      +'</div></div>';
+    mc.innerHTML=h; return;
+  }
+
+  liste.forEach(function(g){
+    var idT=_escHtml(g.t.id);
+    var adr=((g.t.adresse||'')+'').trim();
+    h+='<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;margin-bottom:10px;overflow:hidden;">'
+      + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 12px;border-bottom:1px solid var(--border);">'
+      +   '<span style="font-size:13px;font-weight:700;color:var(--text);cursor:pointer;" onclick="_pamOpenTaskFromHeute(\''+idT+'\')" title="Objekt öffnen">'+esc(g.t.title||'(ohne Titel)')+'</span>'
+      +   (adr?'<span style="font-size:11px;color:var(--text2);">📍 '+esc(adr)+'</span>':'')
+      +   '<span style="font-size:11px;color:var(--text2);">🏠 '+esc(g.board)+'</span>'
+      +   '<span style="flex:1;min-width:6px;"></span>'
+      +   (g.faellig?'<span style="font-size:11px;font-weight:700;color:'+TU_FARBE.gelb+';">'+g.faellig+' fällig</span>':'')
+      +   '<button class="kal-btn" onclick="_tuJahrDialog(\''+idT+'\')" title="Jahresübersicht dieses Objekts">📅 Jahr</button>'
+      +   '<button class="kal-btn" onclick="_pamOpenTaskFromHeute(\''+idT+'\')" title="Objekt öffnen">↗ Öffnen</button>'
+      + '</div>';
+    g.leistungen.forEach(function(l){
+      var farbe=TU_FARBE[_tuAmpel(l)]||TU_FARBE.gelb;
+      h+='<div style="display:flex;align-items:center;gap:9px;padding:6px 12px;border-bottom:1px solid var(--border);">'
+        + '<span style="width:8px;height:8px;border-radius:50%;background:'+farbe+';flex-shrink:0;"></span>'
+        + '<span style="flex:1;min-width:0;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(l.name||'(ohne Namen)')+'</span>'
+        + '<span style="font-size:11px;color:var(--text2);white-space:nowrap;width:110px;">'+esc(_tuIntervall(l.intervall).label)+'</span>'
+        + '<span style="font-size:11px;color:'+farbe+';font-weight:600;white-space:nowrap;width:210px;text-align:right;">'+esc(_tuStatusText(l))+'</span>'
+        + '<button class="kal-btn" onclick="_tuKachelErledigt(\''+idT+'\',\''+_escHtml(l.id)+'\')" title="Heutiges Datum als erledigt eintragen">✓ Heute</button>'
+        + '</div>';
+    });
+    h+='</div>';
+  });
+  h+='</div>';
+  mc.innerHTML=h;
+}
+
 function _pamHeuteRaster(listeAll, today, typFilter, terminFilter){
   if(!listeAll||!listeAll.length)return'';
   var _fD=function(d){if(!d)return'–';var p=d.split('-');return p[2]+'.'+p[1]+'.';};
@@ -9207,7 +9371,7 @@ function _pamHeuteRaster(listeAll, today, typFilter, terminFilter){
     +'<option value="auftraege"'+(_tf2==='auftraege'?' selected':'')+'>Auftrag</option>'
     +'<option value="aufgaben"'+(_tf2==='aufgaben'?' selected':'')+'>Aufgabe</option>'
     +'<option value="posteingang"'+(_tf2==='posteingang'?' selected':'')+'>Posteingang</option>'
-    +'<option value="immobilien"'+(_tf2==='immobilien'?' selected':'')+'>Immobilie</option>'
+    +'<option value="immobilien"'+(_tf2==='immobilien'?' selected':'')+'>Objekt</option>'
     +'</select>';
   var termSel='<select onchange="_setHeuteTerminFilter(this.value)" style="font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);">'
     +'<option value="alle"'+(_termF==='alle'?' selected':'')+'>Alle Eintr\xe4ge</option>'
@@ -9219,7 +9383,7 @@ function _pamHeuteRaster(listeAll, today, typFilter, terminFilter){
     +fBtn('overdue','⚠️ \xdcberf\xe4llig','#E24B4A',grouped.overdue.length)
     +fBtn('heute','📅 Heute f\xe4llig','#EF9F27',grouped.heute.length)
     +fBtn('ausf','🔧 Ausf\xfchrung heute','#378ADD',grouped.ausf.length)
-    +(grouped.turnus.length?fBtn('turnus','🏠 Immobilien','#7F77DD',grouped.turnus.length):'')
+    +(grouped.turnus.length?fBtn('turnus','🏠 Objekte','#7F77DD',grouped.turnus.length):'')
     +'<span style="flex:1;min-width:6px;"></span>'
     +typSel+' '+termSel
     +'<span style="font-size:11px;color:var(--text2);white-space:nowrap;margin-left:2px;">Offen:</span>'
@@ -9283,8 +9447,8 @@ function _pamHeuteRaster(listeAll, today, typFilter, terminFilter){
       +'</div>';
   });
   // b611: Wartungs-Kacheln ans Ende – erst die echten Fristen, dann das,
-  // was „mal wieder dran wäre"
-  tuListe.forEach(function(x){ html+=_tuKachel(x); });
+  // was „mal wieder dran wäre". b617: gebündelt, eine Kachel je Objekt.
+  _tuGruppiere(tuListe).forEach(function(g){ html+=_tuKachel(g); });
   html+='</div></div>';
   return html;
 }
@@ -9609,7 +9773,7 @@ function renderHeute(){
     +'<option value="auftraege"'+(_heuteTypFilter2==='auftraege'?' selected':'')+'>Auftrag</option>'
     +'<option value="aufgaben"'+(_heuteTypFilter2==='aufgaben'?' selected':'')+'>Aufgabe</option>'
     +'<option value="posteingang"'+(_heuteTypFilter2==='posteingang'?' selected':'')+'>Posteingang</option>'
-    +'<option value="immobilien"'+(_heuteTypFilter2==='immobilien'?' selected':'')+'>Immobilie</option>'
+    +'<option value="immobilien"'+(_heuteTypFilter2==='immobilien'?' selected':'')+'>Objekt</option>'
     +'</select>';
   var _kartenTermSel='<select onchange="_setHeuteTerminFilter(this.value)" style="font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);">'
     +'<option value="alle"'+(_heuteTerminFilter==='alle'?' selected':'')+'>Alle Eintr\xe4ge</option>'
@@ -9955,6 +10119,7 @@ function render(){
   else if(currentView==='kalender')renderKalender();
   else if(currentView==='kanban'){renderKanban();setTimeout(initColResize,0);}
   else if(currentView==='list')renderList();
+  else if(currentView==='objekte')renderObjekte(); // b618
   else renderTable();
   if(_mc&&_sc>0)_mc.scrollTop=_sc;
   // Kanban-Spalten Scroll wiederherstellen (nach Paint)
@@ -27908,6 +28073,23 @@ function _updateChecklisteTitle(){
 }
 
 // ── BOARD-TYP: blendet Baustelle-spezifische Felder ein/aus ──
+// b616: Hängt am gerade offenen Task eine echte Mail? Prüft alle Wege, auf denen
+// eine Mail an einem Task landen kann – Outlook, Gmail, eingelesene .eml-Dateien.
+function _taskHatMail(){
+  try{
+    const id=(document.getElementById('taskId')||{}).value||'';
+    const t=id?findTaskById(id):null;
+    if(!t)return false;
+    return !!(t.msMessageId||t.gmailMessageId||t.msConversationId||t.gmailThreadId
+      ||(t.msMessageIds&&t.msMessageIds.length)
+      ||(t.gmailMessageIds&&t.gmailMessageIds.length)
+      ||(t.msThreadMessages&&t.msThreadMessages.length)
+      ||(t.gmailThreadMessages&&t.gmailThreadMessages.length)
+      ||(t.emailOriginals&&t.emailOriginals.length)
+      ||(t.emailPdfs&&t.emailPdfs.length));
+  }catch(e){console.warn('[IMMO] Mail-Prüfung:',e);return false;}
+}
+
 function _applyBoardType(boardName){
   const type=(boardTypes[boardName||currentBoard]||'baustelle');
   const box=document.getElementById('taskModalBox');
@@ -27919,11 +28101,13 @@ function _applyBoardType(boardName){
   }
   // b614: Objektfenster – schlanke Auswahl an Sektionen (siehe CSS ptp-immo-mode)
   box.classList.toggle('ptp-immo-mode', type==='immobilie');
+  // b616: hängt am Task wirklich eine Mail, bleibt der E-Mail-Block sichtbar
+  box.classList.toggle('ptp-immo-hatmail', type==='immobilie' && _taskHatMail());
   const ti=document.getElementById('_taskTypeIndicator');
   if(ti){
     const _craneSvgTI='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><line x1="9" y1="22" x2="9" y2="7"/><line x1="1" y1="7" x2="21" y2="7"/><line x1="9" y1="4" x2="21" y2="7"/><line x1="1" y1="7" x2="9" y2="4"/><line x1="17" y1="7" x2="17" y2="16"/><path d="M15 16 q2 2 4 0"/><line x1="6" y1="22" x2="12" y2="22"/></svg>';
     if(type==='notiz'){ti.innerHTML='✅ Aufgaben';ti.className='task-type-badge notiz';}
-    else if(type==='immobilie'){ti.innerHTML='🏠 Immobilie';ti.className='task-type-badge immo';} // b614
+    else if(type==='immobilie'){ti.innerHTML='🏠 Objekt';ti.className='task-type-badge immo';} // b614
     else{ti.innerHTML=_craneSvgTI+' Auftrag';ti.className='task-type-badge baustelle';}
   }
   // Abschlussakte-Button: nur sichtbar für Baustelle-Tasks (und wenn ID vorhanden)
@@ -28400,7 +28584,7 @@ function _checkVbsNewImmo(){
     const immoBoards=Object.keys(boards).filter(b=>(boardTypes[b]||'baustelle')==='immobilie');
     if(!immoBoards.length){
       localStorage.removeItem('pam_vbs_new_immo');
-      showToast('⚠ Kein Board vom Typ „🏠 Immobilie" vorhanden – bitte erst eines anlegen','warning',7000);
+      showToast('⚠ Kein Board vom Typ „🏠 Objekt" vorhanden – bitte erst eines anlegen','warning',7000);
       return true;
     }
     _showImmoBoardDialog(data,immoBoards);
@@ -28519,6 +28703,11 @@ async function _openImmoNewTask(data){
     setV('tGDOrdner',b+objFid);
     setV('tGD',b+zielId);        // Fotos
     setV('tDokOrdner',b+zielId); // Dokumente – derselbe Ordner (Beschluss Frank)
+    // b616: E-Mail-Feld ein zweites Mal leeren, GANZ am Ende. Beim Anlegen belegt
+    // openNewTaskModal es mit dem Standardordner vor; das erste Leeren weiter oben
+    // hat das bei Frank nicht überlebt (Befund: zeigte auf „Projektordner_Aufträge").
+    // Ursache ungeklärt – diese Zeile wirkt unabhängig davon.
+    setV('tEmailOrdner','');
     if(typeof _updateFotoOrdnerHint==='function')_updateFotoOrdnerHint();
     if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
     showToast('✅ Objekt verknüpft – Dateien gehen nach „'+unter+'"','success',5000);
@@ -32598,7 +32787,7 @@ function renderProjList(){
         <option value="baustelle" ${(p.type||'baustelle')==='baustelle'?'selected':''}>🏗 Baustelle</option>
         <option value="notiz" ${(p.type||'baustelle')==='notiz'?'selected':''}>✅ Aufgaben</option>
         <option value="email" ${(p.type||'baustelle')==='email'?'selected':''}>📧 E-Mail-Eingang</option>
-        <option value="immobilie" ${(p.type||'baustelle')==='immobilie'?'selected':''}>🏠 Immobilie</option>
+        <option value="immobilie" ${(p.type||'baustelle')==='immobilie'?'selected':''}>🏠 Objekt</option>
       </select>
       <label class="proj-mobile" title="Auf PTP Mobile anzeigen" style="display:flex;align-items:center;gap:4px;margin:0 6px;font-size:12px;color:var(--text2);cursor:pointer;user-select:none;">
         <input type="checkbox" id="projmob-${i}" ${p.mobile?'checked':''} onchange="toggleProjMobile(${i})" style="margin:0;cursor:pointer;" autocomplete="off">
