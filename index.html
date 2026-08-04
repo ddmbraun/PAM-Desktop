@@ -653,6 +653,24 @@ function _pamDateiname(datum,text,endung,opt){
   return fest+'_'+frei+end;
 }
 
+// b600: EIN Zielordner-Entscheider für Mail-Anhänge und angehängte Dateien.
+// Bis b599 kannte nur der Auftrags-Pfad (_uploadEmailOriginal) die Weiche „Bild → Bilder,
+// Rest → Dokumente". Beim Ziehen auf eine Karte (_auftragAddToTask) und im E-Mail-Fenster
+// (_emUploadEmlForModal) ging ALLES in den Posteingang, die 📎-Zone lud in die Akten-Wurzel.
+// Die Anzeige in PAM stimmte trotzdem (die Einordnung fotos/attachments ist davon getrennt) –
+// deshalb fiel es nie auf, nur die Drive-/NAS-Ablage lief auseinander.
+// Liest bewusst aus dem TASK-OBJEKT, nicht aus dem DOM: beim Ziehen auf eine Karte ist das
+// Task-Fenster gar nicht offen. `rueckfall` ist der bereits ermittelte Ordner (z. B. Posteingang) –
+// so bleibt bei Tasks ohne Unterordner alles dort, wo es bisher lag.
+function _pamAnhangZiele(task,rueckfall){
+  const f=function(u){return (typeof _ezFolderId==='function'?_ezFolderId(String(u||'').trim()):'')||'';};
+  const wurzel=f(task&&task.gdriveOrdner);
+  return {
+    bild: f(task&&task.gdrive)||wurzel||rueckfall||'',
+    dok:  f(task&&task.dokOrdner)||wurzel||rueckfall||''
+  };
+}
+
 // ── EML-PARSER: MIME-Dekodierung für lesbare PDFs ──
 function _decodeEmlMimeWord(str){
   // Dekodiert RFC-2047 encoded words: =?charset?B?base64?= und =?charset?Q?quoted-printable?=
@@ -1391,7 +1409,9 @@ async function _auftragAddToTask(task,boardName,fileMode){
     if(fid&&gdriveToken&&p.file){
       try{
         let buf=await new Promise(function(res,rej){let r=new FileReader();r.onload=function(e){res(e.target.result);};r.onerror=rej;r.readAsArrayBuffer(p.file);});
-        let result=await _driveUploadGeneric(buf,p.file.name,'application/pdf',fid);
+        // b600: PDF gehört in den Dokumente-Ordner. Vorher lief es in `fid` = Posteingang.
+        const _zielPdf=_pamAnhangZiele(task,fid).dok;
+        let result=await _driveUploadGeneric(buf,p.file.name,'application/pdf',_zielPdf);
         if(result&&result.id){driveId=result.id;driveUrl='https://drive.google.com/file/d/'+result.id+'/view';}
       }catch(e){console.warn('[PTP] PDF-Upload:',e);}
     }
@@ -1534,6 +1554,9 @@ async function _auftragAddToTask(task,boardName,fileMode){
     // Fix 2026-05-24: EML-Anhänge extrahieren und in Drive hochladen (analog _uploadEmailOriginal)
     if(_isRawEml2&&fid&&gdriveToken&&info.attachments&&info.attachments.length>0){
       let _att2Ok=0,_att2Fail=0;
+      // b600: Bilder → Bilder-Ordner, alles andere → Dokumente-Ordner. Vorher ging beides
+      // nach `fid` (Posteingang) – dieselbe Weiche kennt _uploadEmailOriginal schon länger.
+      const _ziele2=_pamAnhangZiele(task,fid);
       for(const att of info.attachments){
         if(att._isCidInline)continue; // Fix #223: CID-Inline-Bilder nicht automatisch hochladen
         const isImg=/\.(jpg|jpeg|png|gif|webp|heic|heif|avif|bmp|tiff?)$/i.test(att.name)||(att.mimeType||'').startsWith('image/');
@@ -1542,10 +1565,9 @@ async function _auftragAddToTask(task,boardName,fileMode){
           const binStr=atob(att.b64);
           const bytes=new Uint8Array(binStr.length);
           for(let k=0;k<binStr.length;k++)bytes[k]=binStr.charCodeAt(k);
-          const attResult=await _driveUploadGeneric(bytes.buffer,att.name,att.mimeType,fid);
+          const attResult=await _driveUploadGeneric(bytes.buffer,att.name,att.mimeType,isImg?_ziele2.bild:_ziele2.dok); // b600
           const attUrl='https://drive.google.com/file/d/'+attResult.id+'/view';
           const today=new Date().toLocaleDateString('de-DE');
-          const isImg=/\.(jpg|jpeg|png|gif|webp|heic|heif|avif|bmp|tiff?)$/i.test(att.name)||(att.mimeType||'').startsWith('image/');
           if(isImg){
             if(!task.fotos)task.fotos=[];
             task.fotos.push({driveId:attResult.id,name:att.name,mimeType:att.mimeType||'image/jpeg',caption:'',thumbnailLink:attResult.thumbnailLink||'',fromEmail:true});
@@ -4697,7 +4719,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-03 · #599'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-03-b599) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-04 · #601'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-04-b601) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -13982,16 +14004,19 @@ async function handleFileAttach(e){
   if(!files.length)return;
   e.target.value='';
 
-  // Drive-Upload bevorzugt (kein Größenlimit, JSON bleibt klein)
-  const folderUrl=(document.getElementById('tGDOrdner')?.value||document.getElementById('tGD')?.value||'').trim();
-  const folderId=_ezFolderId(folderUrl);
+  // b600: Dokumente gehören in den Dokumente-Ordner. Bis b599 lud diese Zone in die
+  // Akten-WURZEL (tGDOrdner) – und „🔄 Aus Ordner einlesen" (_dokSyncOrdner) durchsucht nur
+  // den Dokumente-Ordner, fand die Dateien also nie wieder. Der alte Rückfall auf tGD
+  // (Bilder) ist raus: ein Dokument im Bilder-Ordner ergibt keinen Sinn.
+  const _wurzelId=_ezFolderId((document.getElementById('tGDOrdner')?.value||'').trim());
+  const folderId=_ezFolderId((document.getElementById('tDokOrdner')?.value||'').trim())||_wurzelId;
 
   for(const file of files){
     const mime=file.type||'application/octet-stream';
 
     // #457: Videos gehören in Fotos/Videos (Foto-Ordner), NICHT zu Dateianhängen
     if(_fileIsVideo(file)){
-      const _vFolder=_getDriveFotoFolderId()||folderId;
+      const _vFolder=_getDriveFotoFolderId()||_wurzelId; // b600: Wurzel statt folderId – sonst landen Videos im Dokumente-Ordner
       if(gdriveToken && _vFolder){
         showToast('⏳ Video „'+file.name+'" → Fotos/Videos…','info',4000);
         try{
@@ -14044,7 +14069,7 @@ async function handleFileAttach(e){
     if(!gdriveToken){
       showToast('ℹ Kein Drive verbunden – Datei wird lokal gespeichert (max. 20 MB)','info',4000);
     } else if(!folderId){
-      showToast('ℹ Kein Projektordner eingetragen – Datei wird lokal gespeichert','info',4000);
+      showToast('ℹ Kein Dokumente- oder Projektordner eingetragen – Datei wird lokal gespeichert','info',4000); // b600
     }
     await new Promise(res=>{
       const reader=new FileReader();
@@ -15554,7 +15579,26 @@ function hydrateDesktopFotoThumbs(){
   });
 }
 let _fotoSelectMode=false;
+// b601: _fotoSelected hält seit diesem Build STABILE SCHLÜSSEL statt Positionsnummern.
+// Vorher standen hier die Listen-Nummern – löschte man im Auswahlmodus ein Foto mit ✕
+// (der Knopf bleibt dort klickbar), rutschten durch das splice() alle Nummern darüber um
+// eins, und „📄 PDF erstellen" legte die FALSCHEN Bilder ins Kunden-PDF. Dieselbe Falle wie
+// in b592 bei der Übersicht; der Foto-Eingang (_feDeskAuswahl) macht es über die driveId
+// schon länger richtig.
 let _fotoSelected=new Set();
+// driveId zuerst: die ändert sich beim Bearbeiten eines Fotos NICHT (editedDriveId schon).
+// Rein lokale Fotos ohne Drive-Kennung bekommen Name + Aufnahmezeit als Ersatzschlüssel.
+function _fotoKey(f){
+  if(!f)return '';
+  return f.driveId||f.editedDriveId||('n:'+(f.name||'')+'|'+(f.ts||''));
+}
+function _fotoKeyAt(i){return _fotoKey((taskFotos||[])[i]);}
+// Auswahl auf die noch vorhandenen Fotos eindampfen (z. B. nach dem Löschen eines Fotos)
+function _fotoSelPurge(){
+  if(!_fotoSelected.size)return;
+  const da=new Set((taskFotos||[]).map(_fotoKey));
+  [..._fotoSelected].forEach(function(k){if(!da.has(k))_fotoSelected.delete(k);});
+}
 let _fotoExpanded=false;
 
 // ── HV-Bild Cache Lookup ─────────────────────────────────────
@@ -15735,8 +15779,9 @@ function renderFotoListDesktop(){
     const bottomLabel=caption
       ?'<div class="foto-caption" title="'+esc(caption)+'">'+esc(caption)+'</div>'
       :'<div class="foto-name">'+esc(name)+'</div>';
-    const selClass=_fotoSelected.has(i)?' selected':'';
-    const checkMark=_fotoSelected.has(i)?'✓':'';
+    const _selKey=_fotoKey(f); // b601: stabiler Schlüssel statt Listen-Nummer
+    const selClass=_fotoSelected.has(_selKey)?' selected':'';
+    const checkMark=_fotoSelected.has(_selKey)?'✓':'';
     const isVid=_isVideo(f.mimeType,name);
     // Videos: dunkle Kachel mit ▶ statt Full-Download-Vorschau (spart Datenvolumen)
     const mediaEl=isVid
@@ -15757,7 +15802,9 @@ function renderFotoListDesktop(){
       +'<button class="foto-exif-btn" onclick="event.stopPropagation();_showFotoExif('+i+',this)" title="EXIF-Daten anzeigen">ℹ</button>'
       +'</div>';
   }).join('');
-  const selCount=_fotoSelected.size;
+  // b601: aus der echten Liste zählen statt aus der Merkmenge – so kann kein verwaister
+  // Schlüssel eine Zahl anzeigen, zu der es kein Foto mehr gibt.
+  const selCount=(taskFotos||[]).filter(function(f){return _fotoSelected.has(_fotoKey(f));}).length;
   const pdfBar=_fotoSelectMode
     ?'<div class="foto-pdf-bar visible" id="fotoPdfBar">'
       +'<span style="flex:1;font-size:13px;color:var(--text2)">'+selCount+' Foto(s) gewählt</span>'
@@ -15779,8 +15826,9 @@ function renderFotoListDesktop(){
 function _fotoThumbClick(i,e){
   if(_fotoSelectMode){
     e.stopPropagation();
-    if(_fotoSelected.has(i))_fotoSelected.delete(i);
-    else _fotoSelected.add(i);
+    const k=_fotoKeyAt(i); // b601
+    if(_fotoSelected.has(k))_fotoSelected.delete(k);
+    else _fotoSelected.add(k);
     renderFotoListDesktop();
   }else{
     openFotoDesktop(i);
@@ -16099,7 +16147,7 @@ function _renderPanelGrid(){
     const cached=id?_desktopFotoBlobCache.get(id):null;
     const safeId=String(id).replace(/[^A-Za-z0-9_\-]/g,'');
     const srcAttr=cached?'src="'+esc(cached)+'" ':(safeId?'data-foto-id-pan="'+safeId+'" ':'');
-    const sel=_fotoSelected.has(i);
+    const sel=_fotoSelected.has(_fotoKey(f)); // b601
     return '<div class="foto-panel-thumb'+(sel?' selected':'')+'" onclick="_panThumbClick('+i+',this)">'
       +'<div class="pan-check">'+(sel?'✓':'')+'</div>'
       +'<img '+srcAttr+'alt="" loading="lazy" onerror="this.style.display=\'none\'">'
@@ -16119,8 +16167,9 @@ function _panThumbClick(i,el){
   }
   el._panTimer=setTimeout(()=>{
     el._panTimer=null;
-    if(_fotoSelected.has(i))_fotoSelected.delete(i);
-    else _fotoSelected.add(i);
+    const k=_fotoKeyAt(i); // b601
+    if(_fotoSelected.has(k))_fotoSelected.delete(k);
+    else _fotoSelected.add(k);
     _renderPanelGrid();
     const btn=document.getElementById('panPdfBtn');
     if(btn)btn.style.display=_fotoSelected.size?'':'none';
@@ -16149,7 +16198,7 @@ function _renderGalleryGrid(grid){
     const cached=id?_desktopFotoBlobCache.get(id):null;
     const safeId=String(id).replace(/[^A-Za-z0-9_\-]/g,'');
     const srcAttr=cached?'src="'+esc(cached)+'" ':(safeId?'data-foto-id-gal="'+safeId+'" ':'');
-    const sel=_fotoSelected.has(i);
+    const sel=_fotoSelected.has(_fotoKey(f)); // b601
     const editedBadge=f.editedDriveId?'<span style="position:absolute;top:7px;right:7px;background:var(--accent);color:#fff;font-size:9px;padding:2px 5px;border-radius:4px;font-weight:700;">✏ bearb.</span>':'';
     return '<div class="foto-gallery-thumb'+(sel?' selected':'')+'" onclick="_galThumbClick('+i+',this)">'
       +'<div class="gal-check">'+(sel?'✓':'')+'</div>'
@@ -16173,8 +16222,9 @@ function _galThumbClick(i,el){
   }
   el._galClickTimer=setTimeout(()=>{
     el._galClickTimer=null;
-    if(_fotoSelected.has(i))_fotoSelected.delete(i);
-    else _fotoSelected.add(i);
+    const k=_fotoKeyAt(i); // b601
+    if(_fotoSelected.has(k))_fotoSelected.delete(k);
+    else _fotoSelected.add(k);
     const grid=document.getElementById('fotoGalleryGrid');
     if(grid)_renderGalleryGrid(grid);
     const btn=document.getElementById('galPdfBtn');
@@ -16206,9 +16256,12 @@ async function createPdfFromSelected(){
   showToast('📄 PDF wird erstellt…','info');
   const {jsPDF}=window.jspdf;
   let doc=null;
-  const indices=[..._fotoSelected].sort((a,b)=>a-b);
-  for(const i of indices){
-    const f=taskFotos[i];if(!f)continue;
+  // b601: über die Fotoliste laufen und die ausgewählten mitnehmen – dadurch stimmt die
+  // Reihenfolge automatisch mit der Anzeige überein, und eine zwischenzeitlich gelöschte
+  // Auswahl kann kein fremdes Foto mehr treffen (vorher: gemerkte Listen-Nummern).
+  const gewaehlt=(taskFotos||[]).filter(function(f){return _fotoSelected.has(_fotoKey(f));});
+  if(!gewaehlt.length){showToast('Die gewählten Fotos sind nicht mehr vorhanden','error');return;}
+  for(const f of gewaehlt){
     let url=f.driveId?_desktopFotoBlobCache.get(f.driveId):null;
     if(!url&&f.driveId){url=await _fetchDesktopFotoBlob(f.driveId);}
     if(!url)continue;
@@ -21840,6 +21893,7 @@ function removeFotoDesktop(i){
     : 'Foto-Eintrag entfernen?';
   if(!confirm(msg))return;
   taskFotos.splice(i,1);
+  _fotoSelPurge(); // b601: verwaiste Auswahl-Schlüssel entfernen, sonst zählt die Leiste zu viel
   renderFotoListDesktop();
   scheduleTaskFieldSave(); // b520: sofort sichern statt erst beim Modal-Schließen (wie Caption-Fix b516)
 }
@@ -29334,6 +29388,10 @@ async function _emUploadEmlForModal(file){
     let _attOk=0,_attFail=0;
     if(emlAtts.length){
       showToast('📎 '+emlAtts.length+' Anhang/Anhänge gefunden – lade hoch…','info',3000);
+      // b600: gleiche Weiche wie im Auftrags-Fenster. Vorher landete hier ALLES in `fid`
+      // (Posteingang). Hat der Task keine Unterordner, bleibt es dabei – dann trägt der
+      // Rückfall, und es ändert sich nichts.
+      const _zieleEm=_pamAnhangZiele(zt,fid);
       for(const att of emlAtts){
         try{
           const isImg=/\.(jpg|jpeg|png|gif|webp|heic|heif|avif|bmp|tiff?)$/i.test(att.name)||(att.mimeType||'').startsWith('image/');
@@ -29342,7 +29400,7 @@ async function _emUploadEmlForModal(file){
           const binStr=atob(att.b64);
           const bytes=new Uint8Array(binStr.length);
           for(let k=0;k<binStr.length;k++)bytes[k]=binStr.charCodeAt(k);
-          const attResult=await _driveUploadGeneric(bytes.buffer,att.name,att.mimeType,fid);
+          const attResult=await _driveUploadGeneric(bytes.buffer,att.name,att.mimeType,isImg?_zieleEm.bild:_zieleEm.dok); // b600
           const attUrl='https://drive.google.com/file/d/'+attResult.id+'/view';
           if(isImg){
             if(!zt.fotos)zt.fotos=[];
