@@ -1095,6 +1095,83 @@ async function _mailPaketAnalysieren(file,bekannteIds){
   return plan;
 }
 
+// ── b606: Ladeanzeige ─────────────────────────────────────────────────────────
+// Bei 26 Dateien aus einer 25-MB-Mail passiert minutenlang scheinbar nichts. Ohne
+// Anzeige weiss niemand, ob die App arbeitet oder haengt (Befund Frank 04.08.).
+let _mpFortschritt=null;
+function _mpFortschrittZeigen(gesamt,titel){
+  _mpFortschrittSchliessen();
+  const ov=document.createElement('div');
+  ov.id='_mpFortschritt';
+  ov.style.cssText='position:fixed;inset:0;z-index:1000003;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;';
+  ov.innerHTML='<div style="background:var(--bg,#fff);color:var(--text,#1e2337);border-radius:12px;padding:22px 26px;width:min(460px,92vw);box-shadow:0 10px 40px rgba(0,0,0,.4);">'
+    +'<div style="font-size:15px;font-weight:700;margin-bottom:10px;">'+(titel||'📥 Mail-Paket wird abgelegt…')+'</div>'
+    +'<div id="_mpFsText" style="font-size:12px;color:var(--text2,#5a6180);margin-bottom:10px;min-height:34px;line-height:1.5;word-break:break-word;">Wird vorbereitet…</div>'
+    +'<div style="height:8px;background:var(--bg3,#eceef5);border-radius:5px;overflow:hidden;">'
+    +'<div id="_mpFsBalken" style="height:100%;width:0%;background:var(--accent,#3a4bc8);transition:width .25s;"></div></div>'
+    +'<div id="_mpFsZahl" style="font-size:11px;color:var(--text2,#8b90a8);margin-top:7px;text-align:right;">0 / '+(gesamt||1)+'</div>'
+    +'<div style="font-size:11px;color:var(--text2,#8b90a8);margin-top:10px;">Schließt sich von selbst · Seite bitte nicht neu laden</div>'
+    +'</div>';
+  document.body.appendChild(ov);
+  _mpFortschritt={gesamt:gesamt||1,fertig:0};
+}
+function _mpFortschrittText(text){const t=document.getElementById('_mpFsText');if(t&&text)t.textContent=text;}
+function _mpFortschrittSchritt(text){
+  if(!_mpFortschritt)return;
+  _mpFortschritt.fertig++;
+  _mpFortschrittText(text);
+  const b=document.getElementById('_mpFsBalken'),z=document.getElementById('_mpFsZahl');
+  if(b)b.style.width=Math.min(100,Math.round(_mpFortschritt.fertig/_mpFortschritt.gesamt*100))+'%';
+  if(z)z.textContent=_mpFortschritt.fertig+' / '+_mpFortschritt.gesamt;
+}
+function _mpFortschrittSchliessen(){
+  const alt=document.getElementById('_mpFortschritt');if(alt)alt.remove();
+  _mpFortschritt=null;
+}
+
+// ── b606: Abschlussbericht – Soll gegen Ist ──────────────────────────────────
+// Beantwortet die Frage „ist wirklich alles drin?" aus dem Plan selbst, ohne dass
+// jemand die Mail von Hand nachzählen muss.
+function _mpBerichtZeigen(plan,bilanz){
+  let sollMails=0,sollDateien=0;
+  const fehlt=[];
+  (plan.mails||[]).forEach(function(m){
+    if(m.gewaehlt){sollMails++;}else if(m.hinweis){fehlt.push({n:(m.subject||'Mail'),g:m.hinweis});}
+    (m.dateien||[]).forEach(function(d){
+      if(d.gewaehlt)sollDateien++;
+      else if(!m.gewaehlt&&!d.hinweis)fehlt.push({n:d.name,g:'gehört zu einer nicht übernommenen Mail'});
+      else if(d.hinweis)fehlt.push({n:d.name,g:d.hinweis});
+      else fehlt.push({n:d.name,g:'abgewählt'});
+    });
+  });
+  const istDateien=(bilanz.bilder||0)+(bilanz.dok||0);
+  (bilanz.fehlerListe||[]).forEach(function(n){fehlt.push({n:n,g:'⚠ Upload fehlgeschlagen'});});
+  const vollstaendig=(bilanz.mails===sollMails)&&(istDateien===sollDateien)&&!(bilanz.fehler>0);
+  const ov=document.createElement('div');
+  ov.id='_mpBericht';
+  ov.style.cssText='position:fixed;inset:0;z-index:1000004;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:20px;';
+  const esc3=function(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;');};
+  ov.innerHTML='<div style="background:var(--bg,#fff);color:var(--text,#1e2337);border-radius:12px;width:min(560px,94vw);max-height:86vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.4);overflow:hidden;">'
+    +'<div style="padding:16px 20px;border-bottom:1px solid var(--border,#e3e6ef);">'
+    +'<div style="font-size:15px;font-weight:700;">'+(vollstaendig?'✅ Vollständig übernommen':'⚠ Übernommen – mit Abweichungen')+'</div>'
+    +'<div style="font-size:12px;color:var(--text2,#5a6180);margin-top:5px;">'
+    +bilanz.mails+' von '+sollMails+' Mail(s) · '+istDateien+' von '+sollDateien+' Datei(en)'
+    +(bilanz.pdf?' · '+bilanz.pdf+' PDF-Lesekopie'+(bilanz.pdf!==1?'n':''):'')+'</div></div>'
+    +(fehlt.length
+      ?'<div style="flex:1;overflow:auto;padding:12px 20px;"><div style="font-size:12px;font-weight:700;margin-bottom:7px;">Nicht abgelegt ('+fehlt.length+'):</div>'
+        +fehlt.map(function(f){return '<div style="font-size:12px;padding:3px 0;border-bottom:1px solid var(--border,#eee);">'
+          +esc3(f.n)+' <span style="color:var(--text2,#8b90a8);">· '+esc3(f.g)+'</span></div>';}).join('')
+        +'</div>'
+      :'<div style="padding:14px 20px;font-size:12px;color:var(--text2,#5a6180);">Alles, was in der Mail steckte, ist im Task angekommen.</div>')
+    +'<div style="padding:12px 20px;border-top:1px solid var(--border,#e3e6ef);text-align:right;">'
+    +'<button id="_mpBerOk" style="padding:8px 22px;border:none;border-radius:7px;background:var(--accent,#3a4bc8);color:#fff;font-size:13px;font-weight:600;cursor:pointer;">Schließen</button>'
+    +'</div></div>';
+  document.body.appendChild(ov);
+  const zu=function(){ov.remove();};
+  ov.querySelector('#_mpBerOk').onclick=zu;
+  ov.addEventListener('click',function(e){if(e.target===ov)zu();});
+}
+
 // Freien Dateinamen finden – vier Teilmails heissen bei Outlook alle "ForwardedMessage.eml"
 // und koennen nach _pamDateiname auf denselben Namen fallen (gleicher Tag, gleicher Betreff).
 // Drive erlaubt Namensdubletten, die NAS-Spiegelung nicht – dort ueberschreiben sie sich.
@@ -1131,10 +1208,21 @@ async function _mpOrdnerName(fid){
 // ── Ablegen: Upload nach Drive + Eintraege im Task ────────────────────────────
 async function _mailPaketAblegen(plan,ctx,dateiOriginal){
   const heute=new Date().toLocaleDateString('de-DE');
-  const bilanz={mails:0,bilder:0,dok:0,pdf:0,fehler:0,uebersprungen:0,msgIds:[]};
+  const bilanz={mails:0,bilder:0,dok:0,pdf:0,fehler:0,uebersprungen:0,msgIds:[],fehlerListe:[]};
   const vergeben=new Set();
+  // b606: Schritte für die Ladeanzeige zählen (je Mail: .eml + Lesekopie + ihre Dateien)
+  let _schritte=0;
+  (plan.mails||[]).forEach(function(m){
+    if(!m.gewaehlt)return;
+    _schritte++;
+    if(m.bodyHtml||m.bodyText)_schritte++;
+    (m.dateien||[]).forEach(function(d){if(d.gewaehlt)_schritte++;});
+  });
+  _mpFortschrittZeigen(_schritte||1);
+  _mpFortschrittText('Zielordner werden geprüft…');
   const nameBild=await _mpOrdnerName(ctx.fidBild);
   const nameDok=await _mpOrdnerName(ctx.fidDok);
+  try{
   for(const mail of plan.mails){
     if(!mail.gewaehlt){
       bilanz.uebersprungen++;
@@ -1147,6 +1235,7 @@ async function _mailPaketAblegen(plan,ctx,dateiOriginal){
     // 1) Die Mail selbst als .eml sichern – Traegermail aus der Originaldatei,
     //    eingebettete Mails aus ihrem Rohtext
     let mailFileId='',mailUrl='';
+    _mpFortschrittText('📧 '+(titel||'E-Mail').substring(0,70));
     try{
       const emlName=_mpFreierName(vergeben,_pamDateiname(mDatum,titel,'.eml'));
       let buf;
@@ -1163,11 +1252,13 @@ async function _mailPaketAblegen(plan,ctx,dateiOriginal){
           fwd:mail.ebene>0,fwdVon:mail.ebene>0?(plan.mails[0]?plan.mails[0].sender:''):''});
         bilanz.mails++;
         if(mail.messageId)bilanz.msgIds.push({id:mail.messageId,traeger:mail.istTraeger,sender:mail.sender||''});
-      }else{bilanz.fehler++;console.warn('[b603] Mail-Upload ohne Ergebnis:',emlName);}
-    }catch(e){bilanz.fehler++;console.warn('[b603] Mail-Upload:',e);}
+      }else{bilanz.fehler++;bilanz.fehlerListe.push(emlName);console.warn('[b603] Mail-Upload ohne Ergebnis:',emlName);}
+    }catch(e){bilanz.fehler++;bilanz.fehlerListe.push((titel||'E-Mail')+'.eml');console.warn('[b603] Mail-Upload:',e);}
+    _mpFortschrittSchritt();
 
     // 2) PDF-Lesekopie je Mail – damit Frank nichts entpacken muss
     if(mail.bodyHtml||mail.bodyText){
+      _mpFortschrittText('📄 Lesekopie: '+(titel||'E-Mail').substring(0,60));
       try{
         const pdfBuf=await _ezBuildPdfFromHtml({subject:mail.subject,sender:mail.sender,date:mDatum,
           bodyHtml:mail.bodyHtml,bodyText:mail.bodyText,cidMap:mail.cidMap});
@@ -1179,6 +1270,7 @@ async function _mailPaketAblegen(plan,ctx,dateiOriginal){
           bilanz.pdf++;
         }
       }catch(e){console.warn('[b603] PDF-Lesekopie:',e);}
+      _mpFortschrittSchritt();
     }
 
     // 3) Die Dateien dieser Mail – Bilder/Videos in den Bilder-Ordner, Rest zu den Dokumenten
@@ -1186,6 +1278,7 @@ async function _mailPaketAblegen(plan,ctx,dateiOriginal){
       if(!d.gewaehlt){bilanz.uebersprungen++;continue;}
       try{
         const istMedium=(d.art==='bild'||d.art==='video');
+        _mpFortschrittText((istMedium?'🖼 ':'📄 ')+String(d.name||'').substring(0,70)+'  ('+_mpGroesse(d.bytes)+')');
         const ziel=istMedium?ctx.fidBild:ctx.fidDok;
         const bytes=_mpB64ZuBytes(d.b64);
         // Dateien aus einem ZIP bringen keinen MIME-Typ mit – aus der Endung ableiten
@@ -1207,12 +1300,16 @@ async function _mailPaketAblegen(plan,ctx,dateiOriginal){
             type:mime,size:d.bytes||0,ordner:nameDok||'',fromEmail:true});
           bilanz.dok++;
         }
-      }catch(e){bilanz.fehler++;console.warn('[b603] Datei-Upload:',d.name,e);}
+      }catch(e){bilanz.fehler++;bilanz.fehlerListe.push(d.name);console.warn('[b603] Datei-Upload:',d.name,e);}
       d.b64=null; // Speicher freigeben – eine Sammelmail kann 25 MB gross sein
+      _mpFortschrittSchritt();
     }
     mail.raw='';
   }
+  }finally{_mpFortschrittSchliessen();}
   try{ctx.speichern&&ctx.speichern();}catch(e){console.warn('[b603] Speichern:',e);}
+  // b606: Abschlussbericht erst nach den Renderern des Aufrufers
+  setTimeout(function(){try{_mpBerichtZeigen(plan,bilanz);}catch(e){console.warn('[b606] Bericht:',e);}},400);
   return bilanz;
 }
 
@@ -1230,7 +1327,10 @@ function _mailPaketNachverknuepfen(t,plan,bilanz,fensterOffen){
   const istExchange=['info@ddmbraun.de','f.braun@ddmbraun.de'].some(function(a){return rcpt.includes(a);});
   const istGmail=(provider==='gmail')||rcpt.includes('@sv-fb.de'); // #383: sv-fb.de ist Gmail
   const istImap=!istGmail&&!istExchange&&rcpt.length>0;
-  (bilanz.msgIds||[]).forEach(function(m){
+  // b606: NUR die Trägermail in die Provider-Slots. Die eingebetteten Mails lagen nie in
+  // Franks Postfach – sie kamen als Anhang. Ihre IDs dort einzutragen ließe den Verlauf-
+  // Lader bei jedem Aufruf vergeblich in Outlook/Gmail nach ihnen suchen.
+  (bilanz.msgIds||[]).filter(function(m){return m.traeger;}).forEach(function(m){
     if(!m.id)return;
     if(istGmail){
       if(!t.gmailMessageIds)t.gmailMessageIds=[];
@@ -5163,7 +5263,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-04 · #605'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-04-b605) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-04 · #606'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-04-b606) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -26086,7 +26186,9 @@ async function _uploadEmailOriginal(file){
             (taskEmailOriginals||[]).map(function(e){return e.messageId;}),
             (_tMp&&_tMp.msMessageIds)||[],(_tMp&&_tMp.gmailMessageIds)||[]);
           if(msgEl)msgEl.textContent='⏳ Packe Mail-Paket aus…';
-          _mpPlan=await _mailPaketAnalysieren(file,_bekannt);
+          _mpFortschrittZeigen(1,'📬 Mail wird ausgepackt…');
+          _mpFortschrittText('„'+String(file.name||'').substring(0,60)+'" wird gelesen…');
+          try{_mpPlan=await _mailPaketAnalysieren(file,_bekannt);}finally{_mpFortschrittSchliessen();}
         }
       }catch(_mpe){
         console.warn('[b603] Analyse fehlgeschlagen:',_mpe);
@@ -29981,7 +30083,9 @@ async function _emUploadEmlForModal(file){
           const _bekannt=[].concat(
             (t.emailOriginals||[]).map(function(e){return e.messageId;}),
             t.msMessageIds||[],t.gmailMessageIds||[]);
-          _mpPlan=await _mailPaketAnalysieren(file,_bekannt);
+          _mpFortschrittZeigen(1,'📬 Mail wird ausgepackt…');
+          _mpFortschrittText('„'+String(file.name||'').substring(0,60)+'" wird gelesen…');
+          try{_mpPlan=await _mailPaketAnalysieren(file,_bekannt);}finally{_mpFortschrittSchliessen();}
         }
       }catch(_mpe){
         console.warn('[b603] Analyse fehlgeschlagen:',_mpe);
