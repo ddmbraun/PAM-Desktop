@@ -997,9 +997,24 @@ function _mpGroesse(b){if(!b)return '0 KB';if(b<1024*1024)return Math.round(b/10
 function _mpB64Bytes(b64){return b64?Math.round(b64.length*0.75):0;}
 function _mpArt(name,mimeType){
   const m=(mimeType||'').toLowerCase();
+  if(typeof _isVideo==='function'&&_isVideo(mimeType,name))return 'video';
   if(_MP_VIDEO_RE.test(name||'')||m.startsWith('video/'))return 'video';
   if(_MP_BILD_RE.test(name||'')||m.startsWith('image/'))return 'bild';
   return 'dok';
+}
+// MIME aus der Endung – ZIP-Inhalte bringen keinen Typ mit, und Drive braucht einen
+function _mpMimeAusName(name){
+  const e=(String(name||'').match(/\.([a-z0-9]+)$/i)||[])[1];
+  if(!e)return '';
+  const t={pdf:'application/pdf',jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',gif:'image/gif',
+    webp:'image/webp',heic:'image/heic',bmp:'image/bmp',tif:'image/tiff',tiff:'image/tiff',
+    mp4:'video/mp4',mov:'video/quicktime',avi:'video/x-msvideo',mkv:'video/x-matroska',webm:'video/webm',
+    doc:'application/msword',docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xls:'application/vnd.ms-excel',xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ppt:'application/vnd.ms-powerpoint',pptx:'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    txt:'text/plain',csv:'text/csv',rtf:'application/rtf',zip:'application/zip',eml:'message/rfc822',
+    dwg:'application/acad',dxf:'image/vnd.dxf'};
+  return t[e.toLowerCase()]||'';
 }
 // Uint8Array aus Base64 – bei grossen Anhaengen blockweise, sonst friert der Tab ein
 function _mpB64ZuBytes(b64){
@@ -1061,7 +1076,7 @@ async function _mailPaketAnalysieren(file,bekannteIds){
     const schonDa=!!(msgId&&bekannt.includes(msgId));
     const eintrag={
       id:id,ebene:ebene,elternId:elternId,
-      subject:parsed.subject||'',sender:parsed.sender||'',
+      subject:parsed.subject||'',sender:parsed.sender||'',recipient:parsed.recipient||'',
       date:(parsed.date instanceof Date&&!isNaN(parsed.date))?parsed.date.toISOString():new Date().toISOString(),
       messageId:msgId,bodyHtml:parsed.bodyHtml||'',bodyText:parsed.bodyText||'',cidMap:parsed.cidMap||{},
       raw:rawText||'',istTraeger:ebene===0,
@@ -1080,10 +1095,46 @@ async function _mailPaketAnalysieren(file,bekannteIds){
   return plan;
 }
 
+// Freien Dateinamen finden – vier Teilmails heissen bei Outlook alle "ForwardedMessage.eml"
+// und koennen nach _pamDateiname auf denselben Namen fallen (gleicher Tag, gleicher Betreff).
+// Drive erlaubt Namensdubletten, die NAS-Spiegelung nicht – dort ueberschreiben sie sich.
+function _mpFreierName(register,name,maxLaenge){
+  const max=maxLaenge||(typeof PAM_NAME_MAX!=='undefined'?PAM_NAME_MAX:40);
+  if(!register.has(name)){register.add(name);return name;}
+  const p=name.lastIndexOf('.');
+  let stamm=p>0?name.substring(0,p):name;
+  const ext=p>0?name.substring(p):'';
+  let i=2,kandidat;
+  do{
+    const anhang='_'+i;
+    let s=stamm;
+    if(s.length+anhang.length+ext.length>max)s=s.substring(0,Math.max(1,max-anhang.length-ext.length));
+    kandidat=s+anhang+ext;
+    i++;
+  }while(register.has(kandidat)&&i<999);
+  register.add(kandidat);
+  return kandidat;
+}
+// Ordnernamen fuer das Feld `ordner` holen – der Herkunftsordner-Filter und die
+// Dokumente-Gruppen lesen es; ohne das Feld liefe alles unter „Herkunftsordner unbekannt"
+async function _mpOrdnerName(fid){
+  if(!fid||typeof gdriveToken==='undefined'||!gdriveToken)return '';
+  try{
+    const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fid)+'?fields=name',
+      {headers:{Authorization:'Bearer '+gdriveToken}});
+    if(!r.ok)return '';
+    const d=await r.json();
+    return d.name||'';
+  }catch(e){return '';}
+}
+
 // ── Ablegen: Upload nach Drive + Eintraege im Task ────────────────────────────
 async function _mailPaketAblegen(plan,ctx,dateiOriginal){
   const heute=new Date().toLocaleDateString('de-DE');
-  const bilanz={mails:0,bilder:0,dok:0,pdf:0,fehler:0,uebersprungen:0};
+  const bilanz={mails:0,bilder:0,dok:0,pdf:0,fehler:0,uebersprungen:0,msgIds:[]};
+  const vergeben=new Set();
+  const nameBild=await _mpOrdnerName(ctx.fidBild);
+  const nameDok=await _mpOrdnerName(ctx.fidDok);
   for(const mail of plan.mails){
     if(!mail.gewaehlt){
       bilanz.uebersprungen++;
@@ -1097,7 +1148,7 @@ async function _mailPaketAblegen(plan,ctx,dateiOriginal){
     //    eingebettete Mails aus ihrem Rohtext
     let mailFileId='',mailUrl='';
     try{
-      const emlName=_pamDateiname(mDatum,titel,'.eml');
+      const emlName=_mpFreierName(vergeben,_pamDateiname(mDatum,titel,'.eml'));
       let buf;
       if(mail.istTraeger&&dateiOriginal){
         buf=await new Promise(function(res,rej){const r=new FileReader();r.onload=function(e){res(e.target.result);};r.onerror=rej;r.readAsArrayBuffer(dateiOriginal);});
@@ -1111,6 +1162,7 @@ async function _mailPaketAblegen(plan,ctx,dateiOriginal){
           messageId:mail.messageId,fileId:r.id,url:mailUrl,uploadedAt:heute,
           fwd:mail.ebene>0,fwdVon:mail.ebene>0?(plan.mails[0]?plan.mails[0].sender:''):''});
         bilanz.mails++;
+        if(mail.messageId)bilanz.msgIds.push({id:mail.messageId,traeger:mail.istTraeger,sender:mail.sender||''});
       }else{bilanz.fehler++;console.warn('[b603] Mail-Upload ohne Ergebnis:',emlName);}
     }catch(e){bilanz.fehler++;console.warn('[b603] Mail-Upload:',e);}
 
@@ -1119,7 +1171,7 @@ async function _mailPaketAblegen(plan,ctx,dateiOriginal){
       try{
         const pdfBuf=await _ezBuildPdfFromHtml({subject:mail.subject,sender:mail.sender,date:mDatum,
           bodyHtml:mail.bodyHtml,bodyText:mail.bodyText,cidMap:mail.cidMap});
-        const pdfName=_pamDateiname(mDatum,titel,'.pdf');
+        const pdfName=_mpFreierName(vergeben,_pamDateiname(mDatum,titel,'.pdf'));
         const rp=await _ezUpload(pdfBuf,pdfName,ctx.fidMail);
         if(rp&&rp.id){
           ctx.aufPdf({name:pdfName,fileId:rp.id,url:'https://drive.google.com/file/d/'+rp.id+'/view',
@@ -1136,15 +1188,23 @@ async function _mailPaketAblegen(plan,ctx,dateiOriginal){
         const istMedium=(d.art==='bild'||d.art==='video');
         const ziel=istMedium?ctx.fidBild:ctx.fidDok;
         const bytes=_mpB64ZuBytes(d.b64);
-        const r=await _driveUploadGeneric(bytes.buffer,d.name,d.mimeType||'application/octet-stream',ziel);
-        if(!r||!r.id){bilanz.fehler++;console.warn('[b603] Upload ohne Ergebnis:',d.name);continue;}
+        // Dateien aus einem ZIP bringen keinen MIME-Typ mit – aus der Endung ableiten
+        const mime=d.mimeType||_mpMimeAusName(d.name)||'application/octet-stream';
+        const dName=_mpFreierName(vergeben,d.name,120);
+        const r=await _driveUploadGeneric(bytes.buffer,dName,mime,ziel);
+        if(!r||!r.id){bilanz.fehler++;console.warn('[b603] Upload ohne Ergebnis:',dName);continue;}
         if(istMedium){
-          ctx.aufFoto({driveId:r.id,name:d.name,mimeType:d.mimeType||(d.art==='video'?'video/mp4':'image/jpeg'),
-            caption:'',thumbnailLink:r.thumbnailLink||'',messageId:mail.messageId||'',ts:mail.date});
+          // KEIN `ts` setzen: f.ts ist die AUFNAHMEzeit (Bautagebuch). Das Mail-Datum
+          // dort einzutragen würde die Tagesblöcke verfälschen und `_fotoTsBackfill`
+          // daran hindern, das echte EXIF-Datum aus Drive nachzutragen.
+          ctx.aufFoto({driveId:r.id,name:dName,mimeType:mime,
+            caption:'',thumbnailLink:r.thumbnailLink||'',messageId:mail.messageId||'',
+            ordner:nameBild||'',size:d.bytes||0,fromEmail:true});
           bilanz.bilder++;
         }else{
-          ctx.aufDok({name:d.name,fileId:r.id,url:'https://drive.google.com/file/d/'+r.id+'/view',
-            uploadedAt:heute,messageId:mail.messageId||''});
+          ctx.aufDok({name:dName,fileId:r.id,url:'https://drive.google.com/file/d/'+r.id+'/view',
+            uploadedAt:heute,messageId:mail.messageId||'',
+            type:mime,size:d.bytes||0,ordner:nameDok||'',fromEmail:true});
           bilanz.dok++;
         }
       }catch(e){bilanz.fehler++;console.warn('[b603] Datei-Upload:',d.name,e);}
@@ -1154,6 +1214,73 @@ async function _mailPaketAblegen(plan,ctx,dateiOriginal){
   }
   try{ctx.speichern&&ctx.speichern();}catch(e){console.warn('[b603] Speichern:',e);}
   return bilanz;
+}
+
+// ── Nachverknüpfung: Provider-Slot, Absender, Auto-Kontakt, Verlauf nachladen ──
+// Ohne diesen Schritt hinge eine ausgepackte Sammelmail OHNE Outlook-/Gmail-Bezug am
+// Task – „Verlauf laden" fände sie nie, und kein Ansprechpartner würde eingetragen.
+// Entspricht dem Abschluss von `_uploadEmailOriginal` (Provider-Weiche #383 + Auto-
+// Kontakt), hier auf alle Mails des Pakets angewandt.
+function _mailPaketNachverknuepfen(t,plan,bilanz,fensterOffen){
+  if(!t)return;
+  const traeger=plan.mails[0]||{};
+  let provider='unknown';
+  try{if(typeof _detectEmlProvider==='function'&&plan.rohTraeger)provider=_detectEmlProvider(plan.rohTraeger);}catch(e){}
+  const rcpt=(traeger.recipient||'').toLowerCase();
+  const istExchange=['info@ddmbraun.de','f.braun@ddmbraun.de'].some(function(a){return rcpt.includes(a);});
+  const istGmail=(provider==='gmail')||rcpt.includes('@sv-fb.de'); // #383: sv-fb.de ist Gmail
+  const istImap=!istGmail&&!istExchange&&rcpt.length>0;
+  (bilanz.msgIds||[]).forEach(function(m){
+    if(!m.id)return;
+    if(istGmail){
+      if(!t.gmailMessageIds)t.gmailMessageIds=[];
+      if(!t.gmailMessageIds.includes(m.id))t.gmailMessageIds.push(m.id);
+      if(!t.gmailMessageId)t.gmailMessageId=m.id;
+      if(!t.gmailThreadMessages)t.gmailThreadMessages=[];
+    }else if(!istImap){
+      if(!t.msMessageIds)t.msMessageIds=[];
+      if(!t.msMessageIds.includes(m.id))t.msMessageIds.push(m.id);
+      if(!t.msMessageId)t.msMessageId=m.id;
+      if(!t.msConversationId)t.msConversationId='';
+      if(!t.msThreadMessages)t.msThreadMessages=[];
+    }
+  });
+  if(traeger.sender&&!t.emailSender){
+    t.emailSender=traeger.sender;
+    const el=document.getElementById('taskEmailSenderInput');
+    if(el&&!el.value.trim())el.value=traeger.sender;
+  }
+  try{
+    if(traeger.sender&&typeof addKontaktPTP==='function'&&typeof getKontaktePTP==='function'){
+      let kn='',ke='';
+      const km=traeger.sender.match(/^(.+?)\s*<([^>]+)>/);
+      if(km){kn=km[1].trim().replace(/^["']|["']$/g,'');ke=km[2].trim();}
+      else if(traeger.sender.includes('@'))ke=traeger.sender.trim();
+      else kn=traeger.sender.trim();
+      if(kn||ke){
+        const schonDrin=getKontaktePTP().some(function(k){
+          return (ke&&k.email&&k.email.toLowerCase()===ke.toLowerCase())||
+                 (kn&&k.name&&k.name.toLowerCase()===kn.toLowerCase());
+        });
+        if(!schonDrin){
+          addKontaktPTP('ag',kn,'',ke,false);
+          if(typeof updateKontaktePTPTitle==='function')updateKontaktePTPTitle();
+          showToast('👤 Ansprechpartner eingetragen: '+(kn||ke),'success',3500);
+        }
+      }
+    }
+  }catch(e){console.warn('[b603] Auto-Kontakt:',e);}
+  if(istImap)showToast('📧 Kein Exchange-Verlauf möglich (T-Online/IMAP)','info',5000);
+  if(!fensterOffen)return;
+  try{
+    if(istGmail&&typeof gmailToken!=='undefined'&&gmailToken){
+      if(typeof _pamEmailToggle==='function')_pamEmailToggle('gmail');
+      setTimeout(function(){if(typeof _gmLoadEmailThread==='function')_gmLoadEmailThread();},600);
+    }else if(!istImap&&!istGmail&&typeof msToken!=='undefined'&&msToken){
+      if(typeof _pamEmailToggle==='function')_pamEmailToggle('outlook');
+      setTimeout(function(){if(typeof _msLoadEmailThread==='function')_msLoadEmailThread();},600);
+    }
+  }catch(e){console.warn('[b603] Verlauf nachladen:',e);}
 }
 
 // ── b604: Vorschau mit Haekchen – nichts wandert ungefragt in die Akte ────────
@@ -18603,6 +18730,10 @@ async function _pamCleanupDuplicateEmls(){
   const seenIds=new Set();
   const before=(task.emailOriginals||[]).length;
   const cleaned=(task.emailOriginals||[]).filter(e=>{
+    // b603: aus einer Sammelmail ausgepackte Teilmails NICHT wegräumen – sie stecken
+    // oft in derselben Konversation wie der geladene Verlauf, sind aber der einzige
+    // Nachweis mit eigener .eml-Datei und tragen die Zuordnung ihrer Anhänge
+    if(e.fwd)return true;
     const key=e.messageId||(e.subject+'|'+(e.date||''));
     if(threadMsgIds.has(e.messageId)){return false;}  // Thread-Duplikat
     if(seenIds.has(key)){return false;}               // internes Duplikat
@@ -25906,6 +26037,9 @@ async function _uploadEmailOriginal(file){
             if(_tMp2){if(!_tMp2.attachments)_tMp2.attachments=[];_tMp2.attachments.push(e);}},
           speichern:function(){scheduleTaskFieldSave&&scheduleTaskFieldSave();scheduleSave&&scheduleSave();}
         },file);
+        // Provider-Slots, Absender, Auto-Kontakt, Verlauf – sonst hinge das Paket
+        // ohne Outlook-/Gmail-Bezug am Task (der `return` unten überspringt den Rest)
+        try{_mailPaketNachverknuepfen(_tMp2,_mpPlan,_bilanz,true);}catch(_nv){console.warn('[b603] Nachverknüpfung:',_nv);}
         try{
           const _fs=document.getElementById('tFotoSect');
           if(_fs&&!_fs.classList.contains('open'))_fs.classList.add('open');
@@ -29778,19 +29912,27 @@ async function _emUploadEmlForModal(file){
         if(!_weiter){showToast('Abgebrochen – nichts abgelegt','info',2500);return;}
         showToast('📥 Lege Mail-Paket ab – das kann bei grossen Mails etwas dauern…','info',6000);
         const _ziele=(typeof _pamAnhangZiele==='function')?_pamAnhangZiele(t,fid):{bild:fid,dok:fid};
+        // b548-Absicherung: Der Upload dauert bei 25-MB-Mails lange. Wird das Fenster
+        // zwischendurch geschlossen oder gewechselt, darf nicht in ein abgehängtes
+        // Objekt geschrieben werden – deshalb bei JEDEM Eintrag frisch auflösen.
+        const _zt=function(){
+          return (_emCurrentTask&&_emCurrentTask.id===t.id)?_emCurrentTask:(findTaskById(t.id)||t);
+        };
         const _bilanz=await _mailPaketAblegen(_mpPlan,{
           fidMail:fid,
           fidBild:_ziele.bild||fid,
           fidDok:_ziele.dok||fid,
-          aufMail:function(e){if(!t.emailOriginals)t.emailOriginals=[];t.emailOriginals.push(e);},
-          aufPdf:function(e){if(!t.emailPdfs)t.emailPdfs=[];t.emailPdfs.push(e);},
-          aufFoto:function(e){if(!t.fotos)t.fotos=[];t.fotos.push(e);},
-          aufDok:function(e){if(!t.attachments)t.attachments=[];t.attachments.push(e);},
+          aufMail:function(e){const z=_zt();if(!z.emailOriginals)z.emailOriginals=[];z.emailOriginals.push(e);},
+          aufPdf:function(e){const z=_zt();if(!z.emailPdfs)z.emailPdfs=[];z.emailPdfs.push(e);},
+          aufFoto:function(e){const z=_zt();if(!z.fotos)z.fotos=[];z.fotos.push(e);},
+          aufDok:function(e){const z=_zt();if(!z.attachments)z.attachments=[];z.attachments.push(e);},
           speichern:function(){
-            if(t===_emCurrentTask&&typeof _emScheduleSave==='function')_emScheduleSave();
+            const z=_zt();
+            if(z===_emCurrentTask&&typeof _emScheduleSave==='function')_emScheduleSave();
             else if(typeof autoSave==='function')autoSave();
           }
         },file);
+        try{_mailPaketNachverknuepfen(_zt(),_mpPlan,_bilanz,false);}catch(_nv){console.warn('[b603] Nachverknüpfung:',_nv);}
         try{
           if(t===_emCurrentTask){
             if(typeof _emReloadMailList==='function')_emReloadMailList();
