@@ -4719,7 +4719,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-04 · #601'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-04-b601) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-04 · #602'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-04-b602) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -13349,6 +13349,10 @@ async function handleFotoUploadToDrive(e){
         const thumbUrl=await _genLocalThumb(file);
         taskFotos.push({driveId:meta.id,name:meta.name||file.name,mimeType:meta.mimeType||file.type,caption:'',thumbnailLink:thumbUrl,ts:_fotoTsFromFile(file)});
         showToast('✓ '+file.name+' hochgeladen','success');
+      }else{
+        // b602: Vorher passierte hier gar nichts – die Datei lag in Drive, stand aber in
+        // keinem Task, und es gab keinerlei Meldung. Aus Sicht des Nutzers stiller Verlust.
+        showToast('⚠ „'+file.name+'" wurde hochgeladen, aber Drive hat keine Kennung zurückgegeben – es ist NICHT im Auftrag. Bitte erneut versuchen.','error',8000);
       }
     }catch(err){showToast('Fehler: '+err.message,'error');}
   }
@@ -14032,6 +14036,8 @@ async function handleFileAttach(e){
             taskFotos.push({driveId:_meta.id,name:_meta.name||file.name,mimeType:_meta.mimeType||mime,caption:'',ts:_fotoTsFromFile(file)});
             renderFotoListDesktop();scheduleTaskFieldSave();
             showToast('✅ Video „'+file.name+'" in Fotos/Videos','success',3000);
+          }else{
+            showToast('⚠ „'+file.name+'" wurde hochgeladen, aber Drive hat keine Kennung zurückgegeben – das Video ist NICHT im Auftrag. Bitte erneut versuchen.','error',8000); // b602
           }
         }catch(err){showToast('⚠ Video-Upload fehlgeschlagen: '+err.message,'error',5000);}
       } else {
@@ -15804,10 +15810,16 @@ function renderFotoListDesktop(){
   }).join('');
   // b601: aus der echten Liste zählen statt aus der Merkmenge – so kann kein verwaister
   // Schlüssel eine Zahl anzeigen, zu der es kein Foto mehr gibt.
-  const selCount=(taskFotos||[]).filter(function(f){return _fotoSelected.has(_fotoKey(f));}).length;
+  const _selAlle=(taskFotos||[]).filter(function(f){return _fotoSelected.has(_fotoKey(f));});
+  const selCount=_selAlle.length;
+  // b602: Der Ordner-Filter blendet Fotos aus, die Auswahl bleibt aber bestehen – man kann
+  // also Bilder im PDF haben, die gerade gar nicht zu sehen sind. Die Auswahl wegzuwerfen
+  // wäre schlechter (sie war ja gewollt), deshalb wird es nur benannt.
+  const _selVersteckt=_selAlle.filter(function(f){return !_pamPasstFilter(f,_fotoOrdnerFilter);}).length;
   const pdfBar=_fotoSelectMode
     ?'<div class="foto-pdf-bar visible" id="fotoPdfBar">'
-      +'<span style="flex:1;font-size:13px;color:var(--text2)">'+selCount+' Foto(s) gewählt</span>'
+      +'<span style="flex:1;font-size:13px;color:var(--text2)">'+selCount+' Foto(s) gewählt'
+        +(_selVersteckt?'<span style="color:var(--accent);font-weight:600;"> · '+_selVersteckt+' davon durch den Filter ausgeblendet</span>':'')+'</span>' // b602
       +'<button class="btn-pdf-create" onclick="createPdfFromSelected()" '+(selCount===0?'disabled style="opacity:.4"':'')+'>📄 PDF erstellen</button>'
       +'<button class="btn-pdf-cancel" onclick="cancelFotoSelectMode()">Abbrechen</button>'
       +'</div>'
@@ -17115,18 +17127,30 @@ async function _pdfSendenCreate(t,sendMail){
       // Schlussseite: was NICHT im Dokument steckt, wird benannt – sonst fehlt es lautlos.
       const offen=textAnhNames.concat(nichtEingeheftet);
       if(offen.length){
-        const s=ziel.addPage([595,842]);
-        const font=await ziel.embedFont(StandardFonts.Helvetica);
-        const fontB=await ziel.embedFont(StandardFonts.HelveticaBold);
-        s.drawText('Weitere Anlagen',{x:56,y:770,size:16,font:fontB,color:rgb(.12,.12,.12)});
-        s.drawText('Diese Dateien lassen sich nicht als Seiten einfuegen und liegen der',{x:56,y:742,size:10,font:font,color:rgb(.42,.42,.42)});
-        s.drawText('E-Mail als eigene Anhaenge bei:',{x:56,y:728,size:10,font:font,color:rgb(.42,.42,.42)});
-        let y=700;
-        offen.forEach(function(an){
-          if(y<60)return;
-          s.drawText('- '+String(an.name||'Anlage').replace(/[^\x20-\x7EÀ-ſ]/g,''),{x:56,y:y,size:11,font:font,color:rgb(.12,.12,.12)});
-          y-=18;
-        });
+        // b602: Die Schlussseite darf das fertige Dokument NIE mehr kippen. Vorher lag sie im
+        // großen try – warf `drawText` hier, wurde unten `pdfBytes=null` gesetzt und ALLE
+        // bereits erfolgreich eingehefteten Anlagen galten als gescheitert.
+        // Auslöser war der Zeichenfilter: `À-ſ` ließ U+0100–U+017F durch (č, ő, ł …), die
+        // StandardFonts.Helvetica per WinAnsi nicht kodieren kann. Jetzt nur noch ASCII +
+        // Latin-1 (Umlaute und ß bleiben), der Rest wird zu „?“.
+        try{
+          const font=await ziel.embedFont(StandardFonts.Helvetica);
+          const fontB=await ziel.embedFont(StandardFonts.HelveticaBold);
+          const _sicher=function(s){return String(s||'').replace(/[^\x20-\x7E\xA0-\xFF]/g,'?')||'Anlage';};
+          let s=ziel.addPage([595,842]);
+          s.drawText('Weitere Anlagen',{x:56,y:770,size:16,font:fontB,color:rgb(.12,.12,.12)});
+          s.drawText('Diese Dateien lassen sich nicht als Seiten einfuegen und liegen der',{x:56,y:742,size:10,font:font,color:rgb(.42,.42,.42)});
+          s.drawText('E-Mail als eigene Anhaenge bei:',{x:56,y:728,size:10,font:font,color:rgb(.42,.42,.42)});
+          let y=700;
+          offen.forEach(function(an){
+            // b602: umbrechen statt stumm abschneiden – ab ca. 36 Anlagen fehlte der Rest
+            // kommentarlos, obwohl die Seite gerade das Verzeichnis der fehlenden ist.
+            if(y<60){s=ziel.addPage([595,842]);y=790;}
+            try{s.drawText('- '+_sicher(an.name),{x:56,y:y,size:11,font:font,color:rgb(.12,.12,.12)});}
+            catch(eZ){console.warn('[PdfSenden] Name nicht druckbar:',an.name,eZ);}
+            y-=18;
+          });
+        }catch(eS){console.warn('[PdfSenden] Schlussseite konnte nicht erzeugt werden:',eS);}
       }
       pdfBytes=await ziel.save();
     }catch(e){
@@ -24967,6 +24991,10 @@ async function _handleFotoDrop(dt){
         const thumbUrl=await _genLocalThumb(file);
         taskFotos.push({driveId:meta.id,name:meta.name||file.name,mimeType:meta.mimeType||file.type,caption:'',thumbnailLink:thumbUrl,ts:_fotoTsFromFile(file)});
         showToast('✓ '+file.name+' hochgeladen','success');
+      }else{
+        // b602: Vorher passierte hier gar nichts – die Datei lag in Drive, stand aber in
+        // keinem Task, und es gab keinerlei Meldung. Aus Sicht des Nutzers stiller Verlust.
+        showToast('⚠ „'+file.name+'" wurde hochgeladen, aber Drive hat keine Kennung zurückgegeben – es ist NICHT im Auftrag. Bitte erneut versuchen.','error',8000);
       }
     }catch(err){showToast('Fehler: '+err.message,'error');}
   }
@@ -28671,9 +28699,17 @@ function _emVorschauDokIdx(i){
 // Lädt eine Datei in die Vorschau-Spalte. Holt sie per Drive-Token als Blob – dieselbe
 // Technik wie das schwebende Fenster (#467/b528b), weil Google die /preview-Einbettung
 // oft blockt und man dann nur eine leere Fläche sieht.
+// b602: Adresse der zuletzt gezeigten Vorschau. Ohne Freigabe hält der Browser jede
+// angesehene Datei bis zum Neuladen der Seite im Speicher – bei großen PDFs über einen
+// Arbeitstag deutlich spürbar.
+let _emVorschauBlobUrl='';
+function _emVorschauBlobFrei(){
+  if(_emVorschauBlobUrl){try{URL.revokeObjectURL(_emVorschauBlobUrl);}catch(e){}_emVorschauBlobUrl='';}
+}
 async function _emVorschauDokument(d){
   const pane=document.getElementById('emReadingPane');
   if(!pane||!d)return;
+  _emVorschauBlobFrei(); // b602: vorherige Vorschau freigeben
   _emVorschauGefuellt=true;
   if(_emVorschauCollapsed){_emVorschauCollapsed=false;_emSavePanelState();_emApplyPanelLayout();}
   const nm=d.name||'Dokument';
@@ -28692,22 +28728,39 @@ async function _emVorschauDokument(d){
     '</div>';
   const koerper=document.getElementById('emVorschauKoerper');
   if(!koerper)return;
-  let src='';
+  // b602: Der frühere Rückfall auf die Drive-„/preview"-Adresse war wirkungslos – Google
+  // blockt die Einbettung auf ddmbraun.github.io per `frame-ancestors` (deshalb wurde seit
+  // #467/b528 überall auf Blob umgestellt), und bei einem Bild landete diese Adresse sogar
+  // in einem <img>, wo sie prinzipiell nicht funktionieren kann. Ergebnis war eine leere
+  // Fläche ohne jeden Hinweis. Jetzt: klare Meldung, und der häufigste Grund – abgelaufener
+  // Drive-Token – wird als solcher gemeldet und löst die Erneuerung aus.
+  let src='',fehler='';
   if(d.fileId&&typeof gdriveToken!=='undefined'&&gdriveToken){
     try{
       const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(d.fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
-      if(!r.ok)throw new Error('HTTP '+r.status);
+      if(r.status===401){
+        if(typeof _handleDrive401==='function')_handleDrive401();
+        throw new Error('Drive-Verbindung abgelaufen – bitte oben rechts auf ☁️ Google Drive klicken');
+      }
+      if(!r.ok)throw new Error('Konnte nicht geladen werden (HTTP '+r.status+')');
       src=URL.createObjectURL(await r.blob());
     }catch(e){
-      src='https://drive.google.com/file/d/'+encodeURIComponent(d.fileId)+'/preview';
+      fehler=(e&&e.message)||'Unbekannter Fehler';
     }
   }else if(d.fileId){
-    src='https://drive.google.com/file/d/'+encodeURIComponent(d.fileId)+'/preview';
+    fehler='Nicht mit Google Drive verbunden – bitte oben rechts auf ☁️ Google Drive klicken';
   }else if(d.url){
     src=d.url;
   }
-  if(!document.body.contains(koerper))return;
-  if(!src){koerper.innerHTML='<div style="margin:auto;color:var(--text2);font-size:12px;text-align:center;padding:16px;">Keine Vorschau möglich –<br>die Datei hat keine Drive-Kennung.</div>';return;}
+  if(!document.body.contains(koerper)){if(src&&src.startsWith('blob:'))URL.revokeObjectURL(src);return;}
+  if(!src){
+    koerper.innerHTML='<div style="margin:auto;color:var(--text2);font-size:12px;text-align:center;padding:16px;line-height:1.6;">'
+      +(fehler?('⚠ '+_escHtml(fehler)):'Keine Vorschau möglich –<br>die Datei hat keine Drive-Kennung.')
+      +(d.url?'<br><br><button onclick="window.open(\''+_sq(d.url)+'\',\'_blank\')" style="font-size:11px;padding:4px 10px;border:1px solid var(--border);border-radius:5px;background:var(--bg3);color:var(--text1);cursor:pointer;">↗ In Drive öffnen</button>':'')
+      +'</div>';
+    return;
+  }
+  if(src.startsWith('blob:'))_emVorschauBlobUrl=src; // b602: zum späteren Freigeben merken
   koerper.innerHTML='';
   if(istBild){
     const im=document.createElement('img');
@@ -30301,8 +30354,12 @@ function _emInAuftragEinglieder(){
             tt.attachments.push(a);
         });
         if(!tt.fotos)tt.fotos=[];
+        // b602: Fotos haben KEIN `fileId` – sie tragen `driveId`. Die alte Prüfung auf
+        // `x.fileId` war damit immer undefined und die Entdopplung wirkungslos (jedes Foto
+        // wurde blind angehängt). Läuft jetzt über denselben Schlüssel wie die Foto-Auswahl.
         (src.fotos||[]).forEach(function(f){
-          if(!tt.fotos.some(function(x){return x.fileId&&x.fileId===f.fileId;}))
+          const k=_fotoKey(f);
+          if(!k||!tt.fotos.some(function(x){return _fotoKey(x)===k;}))
             tt.fotos.push(f);
         });
         if(!tt.emailPdfs)tt.emailPdfs=[];
