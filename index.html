@@ -4075,6 +4075,9 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
           <span class="mv2-meta-item"><span class="mv2-meta-lbl">Kostenstelle:</span>&nbsp;<span id="_hdrKst" class="mv2-meta-val">–</span></span>
           <span class="mv2-meta-sep">·</span>
           <span class="mv2-meta-item"><span class="mv2-meta-lbl">Bearbeiter:</span>&nbsp;<span id="_hdrOwner" class="mv2-meta-val">–</span></span>
+          <span class="mv2-meta-sep">·</span>
+          <!-- b620: Anlegedatum – unveränderlich, gehört zu den Stammangaben (befüllt in _updateHdrMeta) -->
+          <span class="mv2-meta-item"><span class="mv2-meta-lbl">Angelegt:</span>&nbsp;<span id="_hdrAngelegt" class="mv2-meta-val">–</span></span>
           <span class="mv2-meta-sep" id="_hdrIconsSep" style="display:none;">·</span>
           <span id="_hdrIcons" style="display:none;align-items:center;gap:5px;font-size:calc(11px * var(--modal-scale,1));"></span>
           <!-- b576: Anruf + Besichtigung als EIN Block in einer eigenen Zeile (flex-basis:100%).
@@ -5357,7 +5360,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-04 · #619'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-04-b619) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-04 · #620'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-04-b620) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -6064,6 +6067,15 @@ function _updateHdrMeta(){
     const tid=document.getElementById('taskId')?.value;
     const t=tid?findTaskById(tid):null;
     _updateHdrArchivIcons(t);
+    // b620: „Angelegt" – createdAt, sonst aus der ID abgeleitet (_pamAngelegtDate).
+    // Beim NEUEN, noch nicht gespeicherten Task steht hier '–': es gibt noch kein
+    // Anlegedatum, und geraten wird nicht.
+    const _angEl=document.getElementById('_hdrAngelegt');
+    if(_angEl){
+      const _angTxt=t?_pamAngelegtText(t,true):'';
+      _angEl.textContent=_angTxt||'–';
+      _angEl.title=_angTxt?('Angelegt am '+_pamAngelegtLang(t)):'';
+    }
   }catch(e){}
 }
 function _updateHdrArchivIcons(t){
@@ -6659,6 +6671,39 @@ function resumeRunningTimer(){
 const COL_COLORS = ['#4a4a6a','#3a5a8a','#5a3a8a','#8a6a3a','#3a6a4a','#6a3a5a','#3a5a6a','#6a4a3a'];
 function colColor(i){return COL_COLORS[i%COL_COLORS.length];}
 function generateId(){return 't_'+Date.now()+'_'+Math.random().toString(36).substr(2,6);}
+// ── b620: „Angelegt" = Anlegedatum eines Tasks ─────────────────────────────────
+// Führend ist `createdAt` (seit b591 an allen Anlege-Stellen gestempelt).
+// Fehlt es (Task von vor b591), wird der Zeitstempel aus der ID gelesen:
+// generateId() baut sie als 't_<Millisekunden>_<zufall>' – das ist der ECHTE
+// Anlegezeitpunkt, also kein Raten, sondern eine Ableitung. Das Handy benutzt
+// dieselbe Formel (03_PAM-Mobil/index.html), IDs von dort passen ebenfalls.
+// Fremde ID-Formen (Importe) liefern bewusst null → Anzeige bleibt leer.
+// Bewusst Ortszeit (getDate/getMonth), nicht toISOString – sonst wäre ein
+// nachts um 0:30 angelegter Task auf den Vortag datiert.
+function _pamAngelegtDate(task){
+  if(!task)return null;
+  const iso=String(task.createdAt||'').trim();
+  if(iso){const d=new Date(iso);if(!isNaN(d.getTime()))return d;}
+  const m=/^t_(\d{10,16})_/.exec(String(task.id||''));
+  if(m){
+    const d=new Date(Number(m[1]));
+    if(!isNaN(d.getTime())&&d.getFullYear()>=2020&&d.getTime()<=Date.now()+86400000)return d;
+  }
+  return null;
+}
+// Kurztext: '04.08.2026' (langesJahr) bzw. '04.08.26' – '' wenn unbekannt
+function _pamAngelegtText(task,langesJahr){
+  const d=_pamAngelegtDate(task);
+  if(!d)return '';
+  const p=n=>String(n).padStart(2,'0');
+  return p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+(langesJahr?d.getFullYear():String(d.getFullYear()).slice(2));
+}
+// Datum + Uhrzeit für Tooltips
+function _pamAngelegtLang(task){
+  const d=_pamAngelegtDate(task);
+  if(!d)return '';
+  return d.toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+}
 // F1-Fix: auch " escapen – esc() landet in value="…"/title="…"-Attributen (sonst Attribut-Breakout/XSS,
 // Angriffsdaten kommen aus fremden E-Mails wie Absendername/Betreff)
 // b555: `'` wird jetzt mit-escaped. esc() wird an vielen Stellen INNERHALB einfach
@@ -8726,6 +8771,9 @@ function taskCardHTML(task){
   const _erteiltBadge=task.auftragVomDatum?(()=>{const[y,m,d]=(task.auftragVomDatum||'').split('-');return`<span style="font-size:9px;padding:1px 5px;border-radius:4px;background:#EEEDFE;color:#534AB7;border:1px solid #C4C2F7;white-space:nowrap;">📋 Erteilt ${d||'?'}.${m||'?'}.${(y||'').slice(2)}</span>`;})():'';
   const _repBadge=task.repNr?`<span style="font-size:9px;color:var(--text2);white-space:nowrap;">Rep. ${esc(task.repNr)}</span>`:'';
   const _kstBadge=(task.tags&&task.tags[0])?`<span style="font-size:9px;color:var(--text2);white-space:nowrap;">Kst. ${esc(task.tags[0])}</span>`:'';
+  // b620: Anlegedatum – dezent wie Rep./Kst. (die Reihe ist bei den neuen Karten einklappbar)
+  const _angelegtTxt=_pamAngelegtText(task);
+  const _angelegtBadge=_angelegtTxt?`<span style="font-size:9px;color:var(--text2);white-space:nowrap;" title="Angelegt am ${esc(_pamAngelegtLang(task))}">Angel. ${esc(_angelegtTxt)}</span>`:'';
   const _emlBadge=(()=>{const n=(task.emailOriginals||[]).length;return n?`<span style="display:inline-flex;align-items:center;gap:2px;font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:#E0F2FE;color:#075985;border:1px solid #BAE6FD;white-space:nowrap;cursor:pointer;" onclick="event.stopPropagation();openEditTaskModal('${esc(task.id)}')"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#075985" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>${n}</span>`:'';})();
   const _pdfBadge=(()=>{const n=(task.emailPdfs||[]).length;return n?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:#FCEBEB;color:#c0392b;border:1px solid #F7C1C1;white-space:nowrap;">📄 ${n}</span>`:'';})();
   const _anhBadge=hasAttach?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:#FAEEDA;color:#854F0B;border:1px solid #FAC775;white-space:nowrap;">Anh. ${(task.attachments||[]).length}</span>`:'';
@@ -8835,7 +8883,7 @@ function taskCardHTML(task){
     ${_pamNeu?`<div class="pam-neu-head"><button class="pam-neu-toggle" onclick="event.stopPropagation();this.closest('.task-card').classList.toggle('pam-neu-open')"><span class="pnt-a">▾ Details anzeigen</span><span class="pnt-b">▴ Details ausblenden</span></button>${isEmailBoard?'':`<div class="pam-neu-acts">${_uebBtn}${_mapsLink}${_telLink}${task.owner?`<span class="pam-neu-owner">${esc(task.owner)}</span>`:''}</div>`}</div>`:''}
     <div class="task-card-toprow">
       ${_boardBadge}${_emailSenderBadge}
-      ${isEmailBoard?[_taskStatusBadge,_eMailDateBadge,_emTerminBadges,_emAnhBadge,_emFotosBadge,_vidBadge,(_pamNeu?'':_anrufOffenBadge),(_pamNeu?'':_besichtigungOffenBadge)].filter(Boolean).join(''):[_taskStatusBadge,(task.gmAkte?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:#EEEDFE;color:#3C3489;border:1px solid #AFA9EC;white-space:nowrap;">📂 GM ${esc(_gmNr(task.gmAkte))}</span>`:''),(_pamNeu?'':_planenBadge),_anfrBadge,_erteiltBadge,_repBadge,_kstBadge,_emlBadge,_pdfBadge,_anhBadge,_fotosBadge,_vidBadge,(_pamNeu?'':_anrufOffenBadge),(_pamNeu?'':_besichtigungOffenBadge),_linksBadge,_zeitBadge,_bauBadge].filter(Boolean).join('')}
+      ${isEmailBoard?[_taskStatusBadge,_eMailDateBadge,_angelegtBadge,_emTerminBadges,_emAnhBadge,_emFotosBadge,_vidBadge,(_pamNeu?'':_anrufOffenBadge),(_pamNeu?'':_besichtigungOffenBadge)].filter(Boolean).join(''):[_taskStatusBadge,(task.gmAkte?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:#EEEDFE;color:#3C3489;border:1px solid #AFA9EC;white-space:nowrap;">📂 GM ${esc(_gmNr(task.gmAkte))}</span>`:''),(_pamNeu?'':_planenBadge),_anfrBadge,_erteiltBadge,_repBadge,_kstBadge,_angelegtBadge,_emlBadge,_pdfBadge,_anhBadge,_fotosBadge,_vidBadge,(_pamNeu?'':_anrufOffenBadge),(_pamNeu?'':_besichtigungOffenBadge),_linksBadge,_zeitBadge,_bauBadge].filter(Boolean).join('')}
     </div>
     <div class="pam-namerow" style="display:flex;align-items:center;gap:6px;">
       <div class="task-card-title" style="flex:1;min-width:0;margin:0;background:#fff;color:#111;border:1px solid #111;border-radius:5px;padding:3px 8px;">${esc(displayTitle)}</div>
@@ -23213,6 +23261,8 @@ async function createAbschlussakte(){
     const nas=document.getElementById('tNAS').value.trim();
     const desc=document.getElementById('taskDescInput').value.trim();
     const now=new Date().toLocaleString('de-DE');
+    // b620: Anlegedatum kommt aus dem echten Task (die Werte oben sind Formularfelder)
+    const _angelegt=_pamAngelegtText(findTaskById(document.getElementById('taskId')?.value||''),true);
     const zeitMin=taskZeitEntries.reduce((s,z)=>{try{const[vh,vm]=z.von.split(':').map(Number);const[bh,bm]=z.bis.split(':').map(Number);const d=(bh*60+bm)-(vh*60+vm);return s+(d>0?d:0);}catch(e){return s;}},0);
     const zeitH=Math.floor(zeitMin/60),zeitM=zeitMin%60;
     const kontakte=getKontaktePTP();
@@ -23252,13 +23302,14 @@ async function createAbschlussakte(){
     doc.setFontSize(15);doc.setFont('helvetica','bold');doc.setTextColor(255,255,255);
     doc.text('ABSCHLUSSAKTE',marginL,12);
     doc.setFontSize(9);doc.setFont('helvetica','normal');
-    doc.text('Erstellt: '+now,pageW-marginR,12,{align:'right'});
+    doc.text('Exportiert: '+now,pageW-marginR,12,{align:'right'}); // b620: hieß „Erstellt" – war mit dem Anlegedatum des Auftrags zu verwechseln
     doc.setTextColor(30,30,30);
     y=28;
     addLine(title,16,true,[30,30,100]);
     y+=3;
     // ── Auftragsdaten ──
     addSection('Auftrag');
+    addField('Angelegt',_angelegt); // b620 – addField überspringt leere Werte von selbst
     addField('Status',status);
     addField('Adresse',adresse);
     addField('Hausverwaltung',hv);
@@ -24958,6 +25009,10 @@ async function _openSbPdfDokument(){
 async function createAbschlussHtml(){
   const btn=document.getElementById('abschlussHtmlBtn');
   const task={
+    // b620: id + createdAt mitgeben – sonst kann die Akte das Anlegedatum nicht zeigen
+    // (dieses Objekt wird aus den Formularfeldern gebaut, nicht aus dem echten Task)
+    id:document.getElementById('taskId')?.value||'',
+    createdAt:(findTaskById(document.getElementById('taskId')?.value||'')||{}).createdAt||'',
     title:document.getElementById('taskTitleInput').value.trim(),
     desc:document.getElementById('taskDescInput').value.trim(),
     owner:document.getElementById('taskOwnerInput')?.value?.trim()||'',
@@ -25279,13 +25334,14 @@ table.data-tbl{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:
   <div class="hdr">
     <h1>${_esc(title)}</h1>
     <div class="meta">${adresse?'📍 '+_esc(adresse)+'&nbsp;&nbsp;':''}${hv?'🏢 '+_esc(hv):''}${status?'&nbsp;&nbsp;● '+_esc(status):''}</div>
-    <div class="sub">Erstellt: ${now}</div>
+    <div class="sub">Exportiert: ${now}</div>
     ${gesBadge}
     <button class="restore-btn" onclick="pamRestore()">↩ In PAM wiederherstellen</button>
   </div>
   <div class="card">
     ${_sec('📋 Auftragsdaten')}
     <table class="data-tbl">
+      ${_row('Angelegt',_esc(_pamAngelegtText(task,true)))}
       ${_row('Status',status)}
       ${_row('Adresse',adresse)}
       ${_row('Hausverwaltung',hv)}
@@ -32642,6 +32698,7 @@ function duplicateTask(){
   // Tiefe Kopie erstellen, neue ID vergeben
   const copy=JSON.parse(JSON.stringify(orig));
   copy.id=generateId();
+  copy.createdAt=new Date().toISOString(); // b620: die Kopie entsteht JETZT – sonst erbt sie das Datum des Originals
   copy.title=(orig.title||'')+'  (Kopie)';
   if(!boards[currentBoard])boards[currentBoard]=[];
   // Kopie direkt nach Original einfügen
@@ -32977,7 +33034,9 @@ function closeQuickAdd(){document.getElementById('quickAddBar').classList.remove
 document.getElementById('quickAddInput').addEventListener('keydown',function(e){
   if(e.key==='Enter'){
     const t=this.value.trim();
-    if(t){boards[currentBoard].push({id:generateId(),title:t,desc:'',owner:'',due:'',status:statuses[0]||'',ampel:'grün',tags:[],source:'',links:[],attachments:[],timeEntries:[]});render();autoSave();}
+    // b620: createdAt fehlte hier als einziger Anlege-Stelle – und heilte nie nach, weil
+    // saveTaskData bei bestehenden Tasks bewusst nichts nachträgt (existingTask.createdAt||'').
+    if(t){boards[currentBoard].push({id:generateId(),createdAt:new Date().toISOString(),title:t,desc:'',owner:'',due:'',status:statuses[0]||'',ampel:'grün',tags:[],source:'',links:[],attachments:[],timeEntries:[]});render();autoSave();}
     closeQuickAdd();
   }
   if(e.key==='Escape')closeQuickAdd();
