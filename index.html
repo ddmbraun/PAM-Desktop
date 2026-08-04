@@ -5374,7 +5374,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-04 · #621'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-04-b621) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-04 · #622'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-04-b622) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -6549,7 +6549,7 @@ function saveTaskData(){
     desc:document.getElementById('taskDescInput').value.trim(),
     owner:document.getElementById('taskOwnerInput').value.trim(),
     due:document.getElementById('taskDueInput').value,
-    status:document.getElementById('taskStatusInput').value,
+    status:_statusZumSpeichern(existingTask), // b622: nie eine leere Spalte zurückschreiben
     ampel:document.getElementById('taskAmpelInput').value||'grün',
     ausführungsdatum:document.getElementById('taskAusfInput').value,
     ausfuehrungstermin:(document.getElementById('taskAusfTerminInput')?document.getElementById('taskAusfTerminInput').value:''),
@@ -9292,9 +9292,14 @@ function _pamKachelLightbox(tid,startFi){
 // heißt weiterhin `immobilie`; ein Umbenennen würde bestehenden Boards die
 // Einstellung nehmen.
 // ══════════════════════════════════════════════════════════════════════════
-var _objNurOffen=false, _objBoardFilter='';
+var _objNurOffen=false, _objBoardFilter='', _objMitLeeren=false;
 function _objSetNurOffen(){_objNurOffen=!_objNurOffen;renderObjekte();}
 function _objSetBoard(v){_objBoardFilter=v||'';renderObjekte();}
+// b622 (Frage Frank): Der Reiter beantwortete nur „welche Objekte HABEN Leistungen".
+// Ein Objekt, bei dem noch nichts eingetragen ist, tauchte gar nicht auf – man sah
+// also nie, wo noch etwas fehlt. Bewusst als Schalter und nicht immer an, sonst
+// wäre die Tagesansicht mit lauter leeren Karten zugestellt.
+function _objSetMitLeeren(){_objMitLeeren=!_objMitLeeren;renderObjekte();}
 
 // Alle Objekt-Tasks mit ihren Leistungen – unabhängig von der Fälligkeit,
 // denn dieser Reiter ist die Gesamtschau, nicht die Tagesliste.
@@ -9306,7 +9311,15 @@ function _objSammle(){
     (boards[bn]||[]).forEach(function(t){
       if(!t||t.archiviert||t.spaeterBearbeiten)return;
       var ls=(t.turnusListe||[]).filter(function(l){return l&&(!_objNurOffen||_tuFaellig(l));});
-      if(!ls.length)return;
+      if(!ls.length){
+        // b622: leere Objekte nur auf ausdrücklichen Wunsch – und NUR von Objekt-Boards.
+        // Ohne diese Einschränkung stünde hier jeder Auftrag und jede Aufgabe drin, denn
+        // ohne Leistungen gibt es kein anderes Merkmal, an dem ein Objekt zu erkennen wäre.
+        // Bei „nur offene" ergibt es keinen Sinn: leer heißt nichts fällig.
+        if(!_objMitLeeren||_objNurOffen)return;
+        if((boardTypes[bn]||'baustelle')!=='immobilie')return;
+        if((t.turnusListe||[]).length)return; // hat welche, nur gerade weggefiltert
+      }
       // Innerhalb eines Objekts: am längsten Liegengebliebenes zuerst
       ls=ls.slice().sort(function(a,b){
         var ta=_tuTageSeit(_tuBezug(a)),tb=_tuTageSeit(_tuBezug(b));
@@ -9338,6 +9351,10 @@ function renderObjekte(){
     +'<span style="flex:1;min-width:8px;"></span>'
     +'<select class="kal-select" onchange="_objSetBoard(this.value)" title="Nur Objekte dieses Projekts">'+boardOpts+'</select>'
     +'<button class="kal-chip'+(_objNurOffen?' active':'')+'" onclick="_objSetNurOffen()" title="Nur zeigen, was zurzeit fällig ist">'+(_objNurOffen?'☑':'☐')+' nur offene</button>'
+    // b622: zeigt zusätzlich Objekt-Tasks, bei denen noch gar nichts eingetragen ist
+    +'<button class="kal-chip'+(_objMitLeeren?' active':'')+'" onclick="_objSetMitLeeren()" title="Auch Objekte zeigen, bei denen noch keine Leistung angelegt ist – damit man sieht, wo noch etwas fehlt"'
+    + (_objNurOffen?' disabled style="opacity:.45;cursor:not-allowed;"':'')
+    + '>'+(_objMitLeeren?'☑':'☐')+' auch ohne Leistungen</button>'
     +'</div>';
   h+='<div style="font-size:11px;color:var(--text2);margin:0 2px 10px;">'
     + liste.length+' Objekt'+(liste.length!==1?'e':'')+' · '+summeL+' Leistung'+(summeL!==1?'en':'')
@@ -9364,6 +9381,11 @@ function renderObjekte(){
       +   '<button class="kal-btn" onclick="_tuJahrDialog(\''+idT+'\')" title="Jahresübersicht dieses Objekts">📅 Jahr</button>'
       +   '<button class="kal-btn" onclick="_pamOpenTaskFromHeute(\''+idT+'\')" title="Objekt öffnen">↗ Öffnen</button>'
       + '</div>';
+    // b622: Objekt ohne jede Leistung – als Lücke kenntlich machen, nicht als leere Karte
+    if(!g.leistungen.length){
+      h+='<div style="padding:8px 12px;font-size:12px;color:var(--text2);font-style:italic;">'
+        +'Noch keine Leistung angelegt – Objekt öffnen und unter „🔁 Wiederkehrende Leistungen" eintragen.</div>';
+    }
     g.leistungen.forEach(function(l){
       var farbe=TU_FARBE[_tuAmpel(l)]||TU_FARBE.gelb;
       h+='<div style="display:flex;align-items:center;gap:9px;padding:6px 12px;border-bottom:1px solid var(--border);">'
@@ -10057,6 +10079,33 @@ function renderKanban(){
   let html='<div class="kanban">';
   // Alle-Spalte ganz links einfügen wenn aktiv
   if(_alleColVisible) html += _renderAlleCol();
+  // b622: Tasks OHNE Spalte hatten bisher nirgends ein Zuhause – für einen leeren
+  // Status legt die Schleife unten keine Spalte an (siehe `filter(s=>s&&…)`), und
+  // `t.status===s` trifft nie zu. Die Karte verschwand komplett vom Board, während
+  // der Zähler „Übersicht (n)" sie weiter mitzählte. Bewusst GANZ LINKS: fremde
+  // Spalten landen rechts und werden beim seitlichen Scrollen übersehen – genau so
+  // ist der Fall bei Frank monatelang unbemerkt geblieben. Kein Ablegen-Ziel: hier
+  // soll man nur herausziehen, nicht hineinlegen.
+  const _ohneSpalte=tasks.filter(t=>!t.status);
+  if(_ohneSpalte.length){
+    const _oc=!!collapsedCols[' ohne'];
+    html+=`<div class="kanban-col${_oc?' collapsed':''}" style="border-top:3px solid #E24B4A">
+      <div class="kanban-col-header">
+        ${_oc
+          ? `<button class="col-collapse-btn" onclick="event.stopPropagation();toggleColCollapse(' ohne')" title="Spalte einblenden">▶</button>
+             <span class="kanban-col-title">⚠ Ohne Spalte</span>
+             <span class="kanban-col-count">${_ohneSpalte.length}</span>`
+          : `<span class="kanban-col-title" title="Diese Tasks haben keine Spalte. In eine richtige Spalte ziehen, dann verschwindet die Sammelspalte von selbst.">⚠ Ohne Spalte</span>
+             <span style="display:flex;align-items:center;gap:4px;">
+               <span class="kanban-col-count">${_ohneSpalte.length}</span>
+               <button class="col-collapse-btn" onclick="event.stopPropagation();toggleColCollapse(' ohne')" title="Spalte ausblenden">◀</button>
+             </span>`
+        }
+      </div>
+      <div class="kanban-col-body">
+        ${_ohneSpalte.map(taskCardHTML).join('')}
+      </div></div>`;
+  }
   displayStatuses.forEach((s,i)=>{
     let col=tasks.filter(t=>t.status===s);
     const isCollapsed=!!collapsedCols[s];
@@ -11336,6 +11385,43 @@ function updateStatusSelect(){
   const s=getBoardStatuses();
   sel.innerHTML=s.map(st=>`<option value="${esc(st)}">${esc(st)}</option>`).join('');
   if(s.includes(cur))sel.value=cur;
+}
+
+// ── b622: SPALTE DES TASKS DARF NICHT STILL VERSCHWINDEN ────────────────────
+// Befund Frank: ein Task war am PC überhaupt nicht mehr erreichbar – keine Karte
+// im Kanban, und der Klick in der Übersicht tat nichts. Ursache war diese Kette:
+//   1. `taskStatusInput.value = task.status` – steht der Status NICHT in der
+//      Auswahlliste (fremde Spalte, z.B. aus einem E-Mail-Board mitgebracht),
+//      macht der Browser das Feld stillschweigend leer. Kein Fehler, keine Meldung.
+//   2. saveTaskData schreibt genau dieses leere Feld zurück → Spalte weg.
+//   3. Für einen leeren Status legt das Kanban keine Spalte an → keine Karte.
+// Deshalb wird ein Status ab jetzt IMMER erst als Eintrag angelegt, bevor er
+// gesetzt wird. Ein leerer Status bekommt einen sichtbaren Eintrag „— ohne Spalte —",
+// damit man am Fenster sieht, was los ist, statt ein leeres Feld zu sehen.
+function _setTaskStatusSelect(wert){
+  const sel=document.getElementById('taskStatusInput'); if(!sel)return;
+  const w=(wert==null?'':String(wert));
+  const hat=v=>Array.prototype.some.call(sel.options,o=>o.value===v);
+  if(!hat(w)){
+    const opt=document.createElement('option');
+    opt.value=w;
+    opt.textContent=w?(w+'  (fremde Spalte)'):'— ohne Spalte —';
+    sel.insertBefore(opt,sel.firstChild);
+  }
+  sel.value=w;
+}
+
+// b622: Riegel für den Rückweg. Ist das Feld leer, wird NICHT gespeichert, was
+// dort steht, sondern der bisherige Status behalten. Bewusst auch dann, wenn der
+// bisherige Status selbst leer ist: dann bleibt der Task „ohne Spalte" und taucht
+// links in der Sammelspalte auf – ein stilles Verschieben nach Spalte 1 wäre eine
+// Änderung, die niemand angeordnet hat. Nur ein NEUER Task bekommt Spalte 1.
+function _statusZumSpeichern(existingTask){
+  const v=(document.getElementById('taskStatusInput')||{}).value||'';
+  if(v)return v;
+  if(existingTask&&typeof existingTask.status==='string')return existingTask.status;
+  const s=getBoardStatuses();
+  return (s&&s[0])||'';
 }
 
 // ── BOARD TABS ──
@@ -25047,7 +25133,7 @@ async function createAbschlussHtml(){
     desc:document.getElementById('taskDescInput').value.trim(),
     owner:document.getElementById('taskOwnerInput')?.value?.trim()||'',
     due:document.getElementById('taskDueInput')?.value||'',
-    status:document.getElementById('taskStatusInput').value,
+    status:_statusZumSpeichern(findTaskById(document.getElementById('taskId')?.value||'')), // b622
     ampel:document.getElementById('taskAmpelInput')?.value||'grün',
     ausführungsdatum:document.getElementById('taskAusfInput')?.value||'',
     ausfuehrungstermin:document.getElementById('taskOrtsterminInput')?.value||'',
@@ -28469,7 +28555,8 @@ function openNewTaskModal(){
   document.getElementById('taskDescInput').value='';
   document.getElementById('taskOwnerInput').value='Braun';
   document.getElementById('taskDueInput').value='';
-  document.getElementById('taskStatusInput').value=getBoardStatuses(currentBoard)[0]||'';
+  updateStatusSelect(); // b622: Liste erst auf dieses Board bringen …
+  _setTaskStatusSelect(getBoardStatuses(currentBoard)[0]||''); // … dann die erste Spalte wählen
   document.getElementById('taskAmpelInput').value='grün';
   document.getElementById('taskAusfInput').value='';
   const _aktEl=document.getElementById('taskAktivitaetInput');if(_aktEl)_aktEl.value='';
@@ -28561,7 +28648,7 @@ function _applyStammblattPrefill(){
     if(p.nasOrdner){const el=document.getElementById('tNAS');if(el)el.value=p.nasOrdner;}
     if(p.gdriveProjOrdner){const el=document.getElementById('tGDOrdner');if(el)el.value=p.gdriveProjOrdner;}
     if(p.sbUrl){try{localStorage.setItem('pam_stammblatt_url',p.sbUrl);}catch(e){}}
-    if(p._status){const el=document.getElementById('taskStatusInput');if(el)el.value=p._status;}
+    if(p._status)_setTaskStatusSelect(p._status); // b622
     showToast('✓ Objektdaten aus Stammblatt übernommen','success',4000);
     _updateStammSummary();_updateHdrMeta();_updateMapsBtn();
     // Weg A: Drive-Ordnerstruktur mit gewähltem Namen im gewählten Eltern-Ordner anlegen
@@ -28772,7 +28859,7 @@ async function _openImmoNewTask(data){
   await new Promise(r=>setTimeout(r,200));
   const setV=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v;};
   setV('taskTitleInput',data.titel||data.nasParent||'Objekt');
-  if(data._targetStatus)setV('taskStatusInput',data._targetStatus);
+  if(data._targetStatus)_setTaskStatusSelect(data._targetStatus); // b622: statt setV, sonst leert sich das Feld bei fremder Spalte
   if(data.nasGrand)setV('tHV',data.nasGrand);   // Ordner der Hausverwaltung
   setV('tAdr',data.nasParent||'');
   setV('tNAS',data.nas||'');
@@ -28902,7 +28989,7 @@ function _openVbsNewTask(data){
     const titelFertig=data.titel||data.ordner||'';
     const tEl=document.getElementById('taskTitleInput');if(tEl)tEl.value=titelFertig;
     // Status
-    if(data._targetStatus){const stEl=document.getElementById('taskStatusInput');if(stEl)stEl.value=data._targetStatus;}
+    if(data._targetStatus)_setTaskStatusSelect(data._targetStatus); // b622
     // Stammdaten
     const tHV=document.getElementById('tHV');if(tHV)tHV.value=hvClean2;
     const tAdr=document.getElementById('tAdr');if(tAdr)tAdr.value=[data.str,data.ort].filter(Boolean).join(', '); // b560: kein ", Erfurt" mehr bei leerer Straße
@@ -29917,7 +30004,18 @@ function _pamBPClick(taskId, isEmail){
     collapsedCols[_bpT.status] = false;
     renderKanban();
   }
-  setTimeout(function(){ _pamBPScrollAndHighlight(taskId); }, 80);
+  setTimeout(function(){
+    // b622 (Befund Frank: „lässt sich nicht öffnen"): bisher wurde ausschließlich zur
+    // Karte im Kanban gesprungen. Gibt es keine – Task ohne Spalte, andere Ansicht
+    // offen, Filter aktiv – passierte lautlos gar nichts. Eine Bedienung, die weder
+    // wirkt noch etwas sagt, ist eine Sackgasse: dann den Task direkt öffnen.
+    // openEditTaskModal leitet E-Mail-Board-Tasks selbst ans E-Mail-Fenster weiter.
+    if(!document.querySelector('.task-card[data-id="'+taskId+'"]')){
+      openEditTaskModal(taskId);
+      return;
+    }
+    _pamBPScrollAndHighlight(taskId);
+  }, 80);
 }
 
 function _pamBPScrollAndHighlight(taskId){
@@ -32525,7 +32623,7 @@ function openEditTaskModal(id){
   document.getElementById('taskDescInput').value=task.desc||'';
   document.getElementById('taskOwnerInput').value=task.owner||'Braun';
   document.getElementById('taskDueInput').value=task.due||'';
-  document.getElementById('taskStatusInput').value=task.status;
+  _setTaskStatusSelect(task.status); // b622: fremde/leere Spalte sichtbar machen statt still zu leeren
   document.getElementById('taskAmpelInput').value=task.ampel||'grün';
   document.getElementById('taskAusfInput').value=task.ausführungsdatum||'';
   const _atEl=document.getElementById('taskAusfTerminInput');if(_atEl)_atEl.value=task.ausfuehrungstermin||'';
