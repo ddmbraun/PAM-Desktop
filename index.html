@@ -4251,6 +4251,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
               <button onclick="triggerFotoUploadToDrive()" style="padding:4px 9px;border-radius:6px;border:0.5px solid var(--accent);background:rgba(108,99,255,0.10);color:var(--accent);font-size:calc(11px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;">📷 Drive-Foto</button>
               <button onclick="tDriveOeffnen()" style="padding:4px 9px;border-radius:6px;border:0.5px solid var(--border);background:var(--bg3);color:var(--text2);font-size:calc(11px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;">📂 Ordner</button>
               <button onclick="loadFotosFromDriveFolder()" style="padding:4px 9px;border-radius:6px;border:0.5px solid #34a853;background:rgba(52,168,83,0.10);color:#2b8a45;font-size:calc(11px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;">🔄 Aus Ordner wählen</button>
+              <button onclick="_fotoSyncOrdner()" title="Bilder-Ordner samt Unterordnern abgleichen – trägt Neues nach und frischt die Ordner-Zuordnung auf" style="padding:4px 9px;border-radius:6px;border:0.5px solid #34a853;background:rgba(52,168,83,0.10);color:#2b8a45;font-size:calc(11px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;">🔄 Aktualisieren</button>
               <!-- b530: lose Blitz-Fotos (Mobil-Tages-Sammler „📷 Foto-Eingang") in diesen Task verschieben -->
               <button id="feEingangBtn" onclick="_feDeskOeffnen()" style="display:none;padding:4px 9px;border-radius:6px;border:0.5px solid #c77700;background:rgba(199,119,0,0.10);color:#c77700;font-size:calc(11px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;">📥 Foto-Eingang</button>
             </div>
@@ -4734,7 +4735,8 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
           <input type="url" id="tGD" placeholder="https://drive.google.com/drive/folders/…" oninput="_updateFotoOrdnerHint()" autocomplete="off">
           <button class="link-btn-2" onclick="_pickDriveFolder('tGD')" title="Ordner aus Drive wählen">📂</button>
           <button class="link-btn-2" onclick="tDriveOeffnen()" title="Ordner öffnen">📁</button>
-          <button class="link-btn-2" onclick="loadFotosFromDriveFolder()" title="Fotos einlesen" style="color:var(--accent);font-weight:700;">🔄</button>
+          <button class="link-btn-2" onclick="loadFotosFromDriveFolder()" title="Fotos auswählen (Picker)" style="color:var(--accent);font-weight:700;">📂</button>
+          <button class="link-btn-2" onclick="_fotoSyncOrdner()" title="Abgleichen – liest Ordner + Unterordner, trägt Neues nach und frischt die Zuordnung auf" style="color:var(--accent);font-weight:700;">🔄</button>
         </div>
       </div>
       <div class="modal-field full">
@@ -5263,7 +5265,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-04 · #606'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-04-b606) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-04 · #609'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-04-b609) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -11834,10 +11836,12 @@ function renderZeitGesamt(){
 // nie widersprechen: Aufgaben/Freie Termine/Außerhaus-Termine zusammen, erledigte zählen
 // nicht mit. Aufgaben haben (noch) kein Erledigt-Feld – ein vergangenes Aufgaben-Datum
 // gilt deshalb immer als überfällig, genau wie im Übersicht-Fenster.
-function _tzHeuteIso(){
+function _tzHeuteIso(datumObj){
   // absichtlich NICHT toISOString(): das rechnet nach UTC und liefert vor 2 Uhr morgens
   // (Sommerzeit) noch den Vortag
-  const d=new Date();
+  // b607: mit Argument liefert es das Kalenderdatum DIESES Zeitpunkts (Ortszeit) –
+  // ohne Argument wie bisher „heute"
+  const d=(datumObj instanceof Date&&!isNaN(datumObj))?datumObj:new Date();
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 }
 function _tzDatumKurz(iso){
@@ -12559,7 +12563,7 @@ function archiveTask(taskId,evt){
     if(idx>=0){
       const[task]=boards[bk].splice(idx,1);
       task.archiviert=true;
-      task.archiviertAm=new Date().toISOString().split('T')[0];
+      task.archiviertAm=_tzHeuteIso(); // b607: Ortszeit – UTC lieferte nachts den Vortag
       task.spaeterBearbeiten=false;
       task.spaeterBearbeitenAm='';
       task._archivProjekt=bk;
@@ -12602,7 +12606,7 @@ function setSpaeterBearbeiten(taskId,evt){
     const idx=(boards[bk]||[]).findIndex(t=>t.id===taskId);
     if(idx>=0){
       boards[bk][idx].spaeterBearbeiten=true;
-      boards[bk][idx].spaeterBearbeitenAm=new Date().toISOString().split('T')[0];
+      boards[bk][idx].spaeterBearbeitenAm=_tzHeuteIso(); // b607: Ortszeit
       render();autoSave();
       showToast('⏳ Auf „Später bearbeiten" gesetzt','success',2500);
       return;
@@ -12899,7 +12903,7 @@ function _executeMerge(){
   // Other Task als Snapshot archivieren
   const otherSnapshot=JSON.parse(JSON.stringify(otherTask));
   otherSnapshot.archiviert=true;
-  otherSnapshot.archiviertAm=new Date().toISOString().split('T')[0];
+  otherSnapshot.archiviertAm=_tzHeuteIso(); // b607: Ortszeit
   otherSnapshot.spaeterBearbeiten=false;
   otherSnapshot.spaeterBearbeitenAm='';
   otherSnapshot.zusammengefuehrtMit=masterId;
@@ -13566,6 +13570,107 @@ async function _dokDriveListe(q){
   return out;
 }
 
+// ── b609: Bilder-Ordner abgleichen – Gegenstück zu _dokSyncOrdner ────────────
+// Befund Frank: Wer Unterordner unter „Bilder" anlegt und Fotos hineinsortiert, erwartet
+// dieselbe Wirkung wie bei den Dokumenten. Bisher gab es für Fotos nur den Picker
+// („🔄 Aus Ordner wählen"), der neue Bilder auswählen lässt, aber nichts auffrischt.
+const _FOTO_DATEI_FILTER=" in parents and trashed=false and (mimeType contains 'image/' or mimeType contains 'video/')";
+async function _fotoDriveListe(q){
+  let out=[],token='';
+  do{
+    const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q)
+      +'&fields=nextPageToken,files(id,name,mimeType,size,thumbnailLink,imageMediaMetadata,createdTime)&orderBy=name&pageSize=200'
+      +(token?'&pageToken='+encodeURIComponent(token):''),
+      {headers:{Authorization:'Bearer '+gdriveToken}});
+    if(!r.ok){if(r.status===401)_handleDrive401();throw new Error('Drive '+r.status);}
+    const j=await r.json();
+    out=out.concat(j.files||[]);
+    token=j.nextPageToken||'';
+  }while(token);
+  return out;
+}
+async function _fotoSyncOrdner(){
+  if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden (oben rechts)','error',5000);return;}
+  const rootId=(typeof _getDriveFotoFolderId==='function')?_getDriveFotoFolderId():'';
+  if(!rootId){
+    const sect=document.getElementById('tVerkSect');
+    if(sect&&!sect.classList.contains('open'))toggleFormSection('tVerkSect');
+    showToast('⚠ Kein Foto-Ordner verknüpft – bitte unter „Ordner & Links" eintragen','error',6000);
+    return;
+  }
+  showToast('⏳ Bilder-Ordner wird abgeglichen…','info',4000);
+  try{
+    if(!taskFotos)taskFotos=[];
+    const vorhanden=new Set();
+    taskFotos.forEach(function(f){const id=f&&(f.editedDriveId||f.driveId);if(id)vorhanden.add(id);});
+
+    let wurzelName='';
+    try{wurzelName=await _mpOrdnerName(rootId);}catch(e){}
+    const [wurzelDateien,unterOrdner]=await Promise.all([
+      _fotoDriveListe("'"+rootId+"'"+_FOTO_DATEI_FILTER),
+      _fotoDriveListe("'"+rootId+"' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false")
+    ]);
+    const fehler=[];
+    const unterListen=await Promise.all(unterOrdner.map(function(o){
+      return _fotoDriveListe("'"+o.id+"'"+_FOTO_DATEI_FILTER).catch(function(e){fehler.push(o.name);return [];});
+    }));
+    const fund=[];
+    wurzelDateien.forEach(function(f){fund.push({f:f,ordner:wurzelName});});
+    unterListen.forEach(function(liste,i){
+      liste.forEach(function(f){fund.push({f:f,ordner:unterOrdner[i].name});});
+    });
+
+    // Erst auffrischen (kostet nichts), dann über die Neuzugänge entscheiden
+    let aufgefrischt=0;const neueOrdner=new Set();const neuListe=[];
+    fund.forEach(function(x){
+      if(vorhanden.has(x.f.id)){
+        const alt=taskFotos.find(function(f){return f&&(f.editedDriveId||f.driveId)===x.f.id;});
+        if(alt&&(alt.ordner||'')!==x.ordner){alt.ordner=x.ordner;aufgefrischt++;if(x.ordner)neueOrdner.add(x.ordner);}
+        return;
+      }
+      neuListe.push(x);
+    });
+    // Schutz vor Massen-Import: ein Bilder-Ordner kann hunderte Ortstermin-Fotos enthalten,
+    // die bewusst NICHT alle im Task liegen sollen
+    let neu=0;
+    if(neuListe.length){
+      const frage=neuListe.length+' Foto(s)/Video(s) liegen im Bilder-Ordner, aber noch nicht im Task.\n\nAlle übernehmen?';
+      if(confirm(frage)){
+        neuListe.forEach(function(x){
+          taskFotos.push({
+            driveId:x.f.id,
+            name:x.f.name,
+            mimeType:x.f.mimeType||'image/jpeg',
+            caption:'',
+            thumbnailLink:x.f.thumbnailLink||'',
+            ts:(typeof _fotoTsFromDriveMeta==='function')?(_fotoTsFromDriveMeta(x.f)||''):'',
+            ordner:x.ordner,
+            size:x.f.size||0
+          });
+          neu++;
+          if(x.ordner)neueOrdner.add(x.ordner);
+        });
+      }
+    }
+
+    const fehlerTxt=fehler.length?' ⚠ nicht lesbar: '+fehler.join(', '):'';
+    if(!neu&&!aufgefrischt){
+      showToast('✓ Alles aktuell – '+fund.length+' Bild(er)/Video(s) im Ordner'+fehlerTxt,'success',5000);
+      return;
+    }
+    try{renderFotoListDesktop();}catch(e){}
+    scheduleTaskFieldSave();
+    const teile=[];
+    if(neu)teile.push(neu+' neu eingelesen');
+    if(aufgefrischt)teile.push(aufgefrischt+' Zuordnung'+(aufgefrischt===1?'':'en')+' aufgefrischt');
+    const zusatz=neueOrdner.size?(' · '+neueOrdner.size+' Unterordner'+(neueOrdner.size===1?'':'n')):'';
+    showToast('✅ '+teile.join(' · ')+zusatz+fehlerTxt,'success',6000);
+  }catch(e){
+    console.error('[PAM] _fotoSyncOrdner:',e);
+    showToast('⚠ Abgleich fehlgeschlagen: '+e.message,'error',6000);
+  }
+}
+
 async function _dokSyncOrdner(){
   if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden (oben rechts)','error',5000);return;}
   const url=(document.getElementById('tDokOrdner')||{}).value||'';
@@ -13595,15 +13700,31 @@ async function _dokSyncOrdner(){
       return _dokDriveListe("'"+o.id+"'"+_DOK_DATEI_FILTER).catch(function(e){fehler.push(o.name);return [];});
     }));
 
+    // b608: Wurzel-Dateien bekommen den ECHTEN Ordnernamen statt '' – sonst landen sie in
+    // der Gruppe „Herkunftsordner unbekannt", und der Knopf „Zuordnung auffrischen"
+    // (_pamOrdnerAuffrischen) trüge für dieselbe Datei einen anderen Wert ein.
+    let wurzelName='';
+    try{wurzelName=await _mpOrdnerName(rootId);}catch(e){}
     const fund=[];
-    wurzelDateien.forEach(function(f){fund.push({f:f,ordner:''});});
+    wurzelDateien.forEach(function(f){fund.push({f:f,ordner:wurzelName});});
     unterListen.forEach(function(liste,i){
       liste.forEach(function(f){fund.push({f:f,ordner:unterOrdner[i].name});});
     });
 
-    let neu=0;const neueOrdner=new Set();
+    let neu=0,aufgefrischt=0;const neueOrdner=new Set();
     fund.forEach(function(x){
-      if(vorhanden.has(x.f.id))return;
+      if(vorhanden.has(x.f.id)){
+        // b608 (Befund Frank): Bekannte Datei NICHT einfach überspringen. Wer in Drive
+        // Unterordner anlegt und Dateien hineinschiebt, drückt danach genau diesen Knopf –
+        // bisher blieb der alte Herkunftsordner stehen und die neuen Gruppen tauchten nie auf.
+        const alt=taskAttachments.find(function(a){return a&&a.fileId===x.f.id;});
+        if(alt&&(alt.ordner||'')!==x.ordner){
+          alt.ordner=x.ordner;
+          aufgefrischt++;
+          if(x.ordner)neueOrdner.add(x.ordner);
+        }
+        return;
+      }
       vorhanden.add(x.f.id);
       taskAttachments.push({
         name:x.f.name,
@@ -13618,14 +13739,17 @@ async function _dokSyncOrdner(){
     });
 
     const fehlerTxt=fehler.length?' ⚠ nicht lesbar: '+fehler.join(', '):'';
-    if(!neu){
+    if(!neu&&!aufgefrischt){
       showToast('✓ Alles aktuell – '+fund.length+' Dokument(e) im Ordner'+fehlerTxt,'success',5000);
       return;
     }
     renderAttachList(); // frischt auch die Dokumente-Sektion mit den Gruppen auf
     scheduleTaskFieldSave();
     const zusatz=neueOrdner.size?(' aus '+neueOrdner.size+' Unterordner'+(neueOrdner.size===1?'':'n')):'';
-    showToast('✅ '+neu+' neue(s) Dokument(e)'+zusatz+' eingelesen'+fehlerTxt,'success',6000);
+    const teile=[];
+    if(neu)teile.push(neu+' neue(s) Dokument(e)'+zusatz+' eingelesen');
+    if(aufgefrischt)teile.push(aufgefrischt+' Zuordnung'+(aufgefrischt===1?'':'en')+' aufgefrischt');
+    showToast('✅ '+teile.join(' · ')+fehlerTxt,'success',6000);
   }catch(e){
     console.error('[PAM] _dokSyncOrdner:',e);
     showToast('⚠ Abgleich fehlgeschlagen: '+e.message,'error',6000);
@@ -14492,10 +14616,13 @@ async function _pamOrdnerAuffrischen(){
   (taskAttachments||[]).forEach(function(a){if(a.fileId)eintraege.push({obj:a,id:a.fileId});});
   if(!eintraege.length){showToast('Keine Drive-Dateien im Task','info',3000);return;}
   showToast('⏳ Zuordnung wird aufgefrischt ('+eintraege.length+' Dateien)…','info',6000);
+  // b609: bei 100+ Dateien läuft das eine halbe Minute – ohne Anzeige sieht es aus wie ein Hänger
+  _mpFortschrittZeigen(eintraege.length,'📁 Zuordnung wird aufgefrischt…');
   const hdr={headers:{Authorization:'Bearer '+gdriveToken}};
   const namen=new Map();
   let geaendert=0,fehler=0;
   for(const e of eintraege){
+    _mpFortschrittSchritt(String((e.obj&&e.obj.name)||'').substring(0,70));
     try{
       const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(e.id)+'?fields=parents',hdr);
       if(!r.ok){fehler++;continue;}
@@ -14509,6 +14636,7 @@ async function _pamOrdnerAuffrischen(){
       if((e.obj.ordner||'')!==neu){e.obj.ordner=neu;geaendert++;}
     }catch(ex){fehler++;}
   }
+  _mpFortschrittSchliessen(); // b609
   try{renderFotoListDesktop();}catch(e){}
   try{renderAttachList();}catch(e){}
   if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
@@ -22243,7 +22371,7 @@ async function exportTaskZipRestore(){
       '\nHinweis: Alle Dateien bleiben in Google Drive verknüpft.\n'+
       'Zum Wiederherstellen: ZIP in PAM importieren (↩ Wiederherstellen).\n'
     );
-    await _zipSaveAndDownload(zip,safeTitle+'_PAM-Restore_'+new Date().toISOString().slice(0,10)+'.zip');
+    await _zipSaveAndDownload(zip,safeTitle+'_PAM-Restore_'+_tzHeuteIso()+'.zip'); // b607: Ortszeit
   }catch(e){showToast('⚠ Fehler: '+e.message,'error',5000);console.error('[ZIP Restore]',e);}
 }
 // Variante 2: Notfallarchiv – lädt alle Drive-Dateien herunter
@@ -22311,7 +22439,7 @@ async function exportTaskZipNotfall(){
       '  task.json     – PAM-Datensatz (für Wiederherstellung)\n'
     );
     showToast('⏳ Erstelle ZIP-Archiv ('+downloaded+' Dateien)…','info',5000);
-    await _zipSaveAndDownload(zip,safeTitle+'_Notfallarchiv_'+new Date().toISOString().slice(0,10)+'.zip');
+    await _zipSaveAndDownload(zip,safeTitle+'_Notfallarchiv_'+_tzHeuteIso()+'.zip'); // b607: Ortszeit
     if(failed>0)showToast('⚠ '+failed+' Datei(en) konnten nicht geladen werden','warning',5000);
   }catch(e){showToast('⚠ Fehler: '+e.message,'error',5000);console.error('[ZIP Notfall]',e);}
 }
@@ -22646,7 +22774,7 @@ function stopTimer(){
     if(running){
       running.end=Date.now();
       const s=new Date(running.start),e=new Date(running.end);
-      const datum=s.toISOString().split('T')[0];
+      const datum=_tzHeuteIso(s); // b607: Kalendertag des Starts in Ortszeit (UTC schob eine Nacht-Stoppuhr auf den Vortag)
       const von=String(s.getHours()).padStart(2,'0')+':'+String(s.getMinutes()).padStart(2,'0');
       const bis=String(e.getHours()).padStart(2,'0')+':'+String(e.getMinutes()).padStart(2,'0');
       const entry={date:datum,von,bis,beschreibung:running.beschreibung||'Stoppuhr'};
