@@ -3646,6 +3646,26 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 .tu-add input,.tu-add select{padding:5px 8px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:calc(12px * var(--modal-scale,1));outline:none;}
 .tu-add input:focus{border-color:var(--accent);}
 .tu-empty{font-size:calc(11px * var(--modal-scale,1));color:var(--text2);padding:4px 0;}
+/* ── b613: Jahresraster als eigenes Fenster (12 Spalten passen nicht in die Sektion) ── */
+#tuJahrOverlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99992;display:flex;align-items:center;justify-content:center;}
+.tuj-box{background:var(--bg2,#fff);color:var(--text,#111);border-radius:12px;padding:16px 18px;width:min(960px,96vw);max-height:90vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.45);}
+.tuj-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px;}
+.tuj-title{font-weight:700;font-size:15px;}
+.tuj-sub{font-size:12px;color:var(--text2,#666);margin-bottom:10px;}
+.tuj-scroll{overflow:auto;flex:1;min-height:0;}
+.tuj-tab{width:100%;border-collapse:collapse;font-size:12px;}
+.tuj-tab th{position:sticky;top:0;background:var(--bg2);color:var(--text2);font-weight:600;padding:4px 2px;text-align:center;border-bottom:1px solid var(--border);z-index:2;}
+.tuj-tab th.nam{text-align:left;padding-left:4px;min-width:150px;}
+.tuj-tab td{padding:3px 2px;text-align:center;border-bottom:1px solid var(--border);}
+.tuj-tab td.nam{text-align:left;padding-left:4px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:230px;}
+.tuj-tab td.tur{text-align:left;color:var(--text2);font-size:11px;white-space:nowrap;}
+.tuj-tab tr:hover td{background:var(--bg3);}
+.tuj-cell{display:inline-block;min-width:23px;padding:2px 0;border-radius:5px;font-size:11px;font-weight:600;}
+.tuj-ok{background:#EAF3DE;color:#3B6D11;}
+.tuj-skip{background:var(--bg3);color:var(--text2);}
+.tuj-leer{color:var(--text2);opacity:.45;}
+.tuj-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;flex-shrink:0;}
+.tuj-legend{font-size:11px;color:var(--text2);margin-top:9px;display:flex;gap:14px;flex-wrap:wrap;}
 
 /* ── TASK-TYP: Notiz-Modus (blendet Baustelle-spezifische Felder aus) ── */
 .ptp-notiz-mode .baustelle-only{display:none!important;}
@@ -4397,7 +4417,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
         <!-- 🔁 Wiederkehrende Leistungen (b610) – Turnus-Nachweis am Objekt.
              Kein Termin: hier steht nur, WANN etwas zuletzt gemacht wurde. -->
         <div class="mv2-section mv2-r-card baustelle-only collapsible open" id="tTurnusSect">
-          <div class="mv2-section-label mv2-rhdr-purple" onclick="_toggleMv2Sect('tTurnusSect',event)" style="cursor:pointer;">🔁 Wiederkehrende Leistungen<span id="tuHdrInfo" style="margin-left:8px;font-weight:400;color:var(--text2);font-size:calc(11px * var(--modal-scale,1));text-transform:none;"></span><span class="mv2-coll-arrow" style="margin-left:auto;">›</span></div>
+          <div class="mv2-section-label mv2-rhdr-purple" onclick="_toggleMv2Sect('tTurnusSect',event)" style="cursor:pointer;">🔁 Wiederkehrende Leistungen<span id="tuHdrInfo" style="margin-left:8px;font-weight:400;color:var(--text2);font-size:calc(11px * var(--modal-scale,1));text-transform:none;"></span><button type="button" class="tu-btn" style="margin-left:auto;" onclick="_tuJahrDialog()" title="Jahresübersicht: welche Leistung wurde in welchem Monat erledigt, was ist offen">📅 Jahr</button><span class="mv2-coll-arrow" style="margin-left:8px;">›</span></div>
           <div class="mv2-r-card-body">
             <div id="tuListe"></div>
             <div class="tu-add">
@@ -5301,7 +5321,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-04 · #611'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-04-b611) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-04 · #613'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-04-b613) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -6321,6 +6341,114 @@ function _tuEintragWeg(id,datum){
   l.eintraege=(l.eintraege||[]).filter(e=>e.datum!==datum);
   renderTurnusListe();
   scheduleTaskFieldSave();
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// b613 – JAHRESRASTER: „was habe ich dieses Jahr gemacht, was ist noch offen"
+//
+// Befund Frank: 20 Leistungen an EINEM Objekt – die Datumsliste je Leistung
+// aufzuklappen und im Kopf zusammenzurechnen ist keine Übersicht.
+// Eigenes Fenster, weil 12 Monatsspalten nicht in die schmale rechte Spalte
+// passen. Liest die Arbeitskopie `taskTurnus`, wird nur aus dem offenen
+// Auftrag gerufen.
+// ══════════════════════════════════════════════════════════════════════════
+let _tuJahr=null, _tuJahrNurOffen=false;
+const TU_MON=['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
+
+function _tuJahrDialog(){
+  if(!(taskTurnus||[]).length){showToast('An diesem Auftrag sind noch keine Leistungen angelegt','info',3000);return;}
+  if(_tuJahr==null)_tuJahr=new Date().getFullYear();
+  const old=document.getElementById('tuJahrOverlay'); if(old)old.remove();
+  const titel=((document.getElementById('taskTitleInput')||{}).value||'').trim();
+  const ov=document.createElement('div'); ov.id='tuJahrOverlay';
+  ov.addEventListener('click',e=>{if(e.target===ov)_tuJahrClose();});
+  ov.innerHTML='<div class="tuj-box" role="dialog" aria-label="Jahresübersicht der wiederkehrenden Leistungen">'
+    +'<div class="tuj-head">'
+    +  '<span class="tuj-title">📅 Jahresübersicht</span>'
+    +  '<button type="button" class="tu-btn" onclick="_tuJahrNav(-1)" title="Vorjahr">‹</button>'
+    +  '<span id="tuJahrLbl" style="font-weight:700;min-width:46px;text-align:center;"></span>'
+    +  '<button type="button" class="tu-btn" onclick="_tuJahrNav(1)" title="Folgejahr">›</button>'
+    +  '<button type="button" class="tu-btn" id="tuJahrOffenBtn" onclick="_tuJahrToggleOffen()"></button>'
+    +  '<span style="flex:1;min-width:8px;"></span>'
+    +  '<button type="button" class="tu-btn" onclick="_tuJahrClose()">✕ Schließen</button>'
+    +'</div>'
+    +'<div class="tuj-sub">'+esc(titel||'(ohne Titel)')+'<span id="tuJahrZahlen"></span></div>'
+    +'<div class="tuj-scroll"><table class="tuj-tab"><thead id="tuJahrKopf"></thead><tbody id="tuJahrBody"></tbody></table></div>'
+    +'<div class="tuj-legend">'
+    +  '<span><span class="tuj-cell tuj-ok">17</span> erledigt an diesem Tag</span>'
+    +  '<span><span class="tuj-cell tuj-skip">↷</span> übersprungen</span>'
+    +  '<span><span class="tuj-leer">·</span> nichts eingetragen</span>'
+    +  '<span>Punkt links: grün im Turnus · gelb wäre dran · rot deutlich her</span>'
+    +'</div>'
+    +'</div>';
+  document.addEventListener('keydown',_tuJahrEsc);
+  document.body.appendChild(ov);
+  _tuJahrRender();
+}
+function _tuJahrEsc(e){
+  if(e.key!=='Escape')return;
+  const o=document.getElementById('tuJahrOverlay');
+  if(o){e.stopPropagation();_tuJahrClose();}
+}
+function _tuJahrClose(){
+  const o=document.getElementById('tuJahrOverlay'); if(o)o.remove();
+  document.removeEventListener('keydown',_tuJahrEsc);
+}
+function _tuJahrNav(d){_tuJahr+=d;_tuJahrRender();}
+function _tuJahrToggleOffen(){_tuJahrNurOffen=!_tuJahrNurOffen;_tuJahrRender();}
+
+// Einträge einer Leistung in einem Monat des Jahres
+function _tuJahrMonat(l,jahr,mon){
+  const pre=jahr+'-'+String(mon+1).padStart(2,'0')+'-';
+  return ((l&&l.eintraege)||[]).filter(e=>String(e.datum||'').startsWith(pre));
+}
+// Zellinhalt: Tag des jüngsten echten Eintrags, sonst ↷ bei reinem Überspringen
+function _tuJahrZelle(l,jahr,mon){
+  const e=_tuJahrMonat(l,jahr,mon);
+  if(!e.length)return '<span class="tuj-leer">·</span>';
+  const echt=e.filter(x=>!x.skip);
+  const tip=e.map(x=>_tuDe(x.datum)+(x.skip?' (übersprungen)':(x.notiz?' – '+x.notiz:''))).join('\n');
+  if(!echt.length)return '<span class="tuj-cell tuj-skip" title="'+_escHtml(tip)+'">↷</span>';
+  const tag=String(echt[0].datum).split('-')[2];
+  const mehr=(e.length>1)?'<sup style="font-weight:400;opacity:.7;">'+e.length+'</sup>':'';
+  return '<span class="tuj-cell tuj-ok" title="'+_escHtml(tip)+'">'+esc(tag)+mehr+'</span>';
+}
+function _tuJahrRender(){
+  const body=document.getElementById('tuJahrBody'); if(!body)return;
+  const lbl=document.getElementById('tuJahrLbl'); if(lbl)lbl.textContent=_tuJahr;
+  const ob=document.getElementById('tuJahrOffenBtn');
+  if(ob){
+    ob.textContent=_tuJahrNurOffen?'☑ nur offene':'☐ nur offene';
+    ob.title='Nur die Leistungen zeigen, die zurzeit fällig sind (gelb oder rot)';
+  }
+  const kopf=document.getElementById('tuJahrKopf');
+  if(kopf)kopf.innerHTML='<tr><th class="nam">Leistung</th><th style="text-align:left;">Turnus</th>'
+    +TU_MON.map(m=>'<th>'+m+'</th>').join('')+'<th title="Erledigt-Einträge in diesem Jahr">Σ</th></tr>';
+
+  const alle=(taskTurnus||[]);
+  // Zahlen immer über ALLE Leistungen – der Filter ändert die Anzeige, nicht die Bilanz
+  const mitEintrag=alle.filter(l=>(l.eintraege||[]).some(e=>!e.skip&&String(e.datum||'').startsWith(_tuJahr+'-'))).length;
+  const faellig=alle.filter(_tuFaellig).length;
+  const z=document.getElementById('tuJahrZahlen');
+  if(z)z.innerHTML=' · '+alle.length+' Leistung'+(alle.length!==1?'en':'')
+    +' · <b>'+mitEintrag+'</b> in '+_tuJahr+' erledigt · <b>'+(alle.length-mitEintrag)+'</b> ohne Eintrag'
+    +' · <b>'+faellig+'</b> zurzeit fällig';
+
+  const liste=_tuJahrNurOffen?alle.filter(_tuFaellig):alle;
+  if(!liste.length){
+    body.innerHTML='<tr><td colspan="15" style="padding:14px;color:var(--text2);text-align:center;">Nichts fällig – alles im Turnus.</td></tr>';
+    return;
+  }
+  body.innerHTML=liste.map(l=>{
+    const farbe=TU_FARBE[_tuAmpel(l)]||TU_FARBE.gelb;
+    const summe=((l.eintraege||[]).filter(e=>!e.skip&&String(e.datum||'').startsWith(_tuJahr+'-'))).length;
+    return '<tr>'
+      +'<td class="nam" title="'+_escHtml((l.name||'')+' · '+_tuStatusText(l))+'"><span class="tuj-dot" style="background:'+farbe+'"></span>'+esc(l.name||'(ohne Namen)')+'</td>'
+      +'<td class="tur">'+esc(_tuIntervall(l.intervall).label)+'</td>'
+      +TU_MON.map((m,i)=>'<td>'+_tuJahrZelle(l,_tuJahr,i)+'</td>').join('')
+      +'<td style="font-weight:600;'+(summe?'':'color:var(--text2);opacity:.5;')+'">'+summe+'</td>'
+      +'</tr>';
+  }).join('');
 }
 
 function saveTaskData(){
@@ -8884,7 +9012,12 @@ function _tuKachel(x){
     +   '<span style="font-size:11px;font-weight:600;color:var(--text);line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">'+esc(t.title||'')+'</span>'
     + '</div>'
     + '<div style="font-size:10px;color:var(--text2);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">🏠 '+esc(x.board||'')+'</div>'
-    + '<div style="font-size:10px;color:var(--text2);margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+_escHtml((l.name||'')+' · '+_tuIntervall(l.intervall).label+' · '+_tuStatusText(l))+'">🔁 '+esc(l.name||'')+' · '+esc(_tuStatusText(l))+'</div>'
+    // b612 (Befund Frank am Bild): Name und Status standen in EINER Zeile mit
+    // Abschneiden – bei schmaler Kachel fiel genau der Status weg („noch nie …"),
+    // also das, wofür die Kachel da ist. Jetzt zwei Zeilen: der Name darf
+    // abschneiden, der Status bricht um und steht in der Ampelfarbe.
+    + '<div style="font-size:10px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+_escHtml((l.name||'')+' · '+_tuIntervall(l.intervall).label)+'">🔁 '+esc(l.name||'')+'</div>'
+    + '<div style="font-size:10px;font-weight:600;color:'+farbe+';margin-bottom:6px;line-height:1.35;">'+esc(_tuStatusText(l))+'</div>'
     + '<button onclick="event.stopPropagation();_tuKachelErledigt(\''+idT+'\',\''+idL+'\')" style="width:100%;padding:4px 8px;border-radius:5px;border:none;background:#7F77DD;color:#fff;font-size:10px;font-weight:700;cursor:pointer;" title="Heutiges Datum als erledigt eintragen">✓ Heute erledigt</button>'
     + '</div>';
 }
