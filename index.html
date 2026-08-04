@@ -3668,6 +3668,20 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 .tuj-leer{color:var(--text2);opacity:.45;}
 .tuj-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;flex-shrink:0;}
 .tuj-legend{font-size:11px;color:var(--text2);margin-top:9px;display:flex;gap:14px;flex-wrap:wrap;}
+/* b621: Wiederkehrende Leistungen gehören zum OBJEKT (Wunsch Frank). Bis b620
+   stand die Karte auch in jedem Auftrag und in jedem Posteingang-Task – dort hat
+   sie nichts zu suchen. `baustelle-only` heißt nämlich nur „im Aufgaben-Modus weg",
+   nicht „nur bei Aufträgen".
+   Als Ausblendregel gebaut, zurückgeholt wird sie an zwei Stellen:
+     · .ptp-immo-mode  → Objekt-Board (Zeile darunter, b614)
+     · .ptp-hat-turnus → am Task hängen SCHON Leistungen
+   Der zweite Fall ist die Rettungsregel nach dem Muster von b616 (E-Mail-Block):
+   ohne sie wären Alt-Einträge auf einem Auftrags-Board nur noch abhakbar
+   (Heute-Kachel/Reiter Objekte), aber nicht mehr änderbar oder löschbar – und
+   das sähe man dem Fenster nicht an.
+   Spezifität: #tTurnusSect = (1,0,0), beide Rückhol-Regeln = (1,1,0) → gewinnen. */
+#tTurnusSect{display:none!important;}
+.ptp-hat-turnus #tTurnusSect{display:block!important;}
 
 /* ── b614: TASK-TYP „Immobilie" – schlankes Objektfenster ──────────────────
    Wunsch Frank: „vielleicht müssen wir da auch so 'n abgespeckten Task bauen
@@ -4948,7 +4962,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
     </div>
     <div class="modal-actions" style="margin-top:12px;flex-wrap:wrap;gap:8px;">
       <button class="topbar-btn btn-secondary" onclick="closeProjManager()">Abbrechen</button>
-      <button class="topbar-btn" style="background:var(--bg3);border:1px solid var(--border)" onclick="autoDetectProjTypes()" title="Setzt den Typ automatisch aus dem Projektnamen (Aufgaben/Notiz → ✅, sonst → 🏗)">🔄 Typen erkennen</button>
+      <button class="topbar-btn" style="background:var(--bg3);border:1px solid var(--border)" onclick="autoDetectProjTypes()" title="Setzt den Typ automatisch aus dem Projektnamen (Aufgaben/Notiz → ✅, sonst → 🏗). Bereits gesetzte 📧 E-Mail- und 🏠 Objekt-Boards bleiben unangetastet.">🔄 Typen erkennen</button>
       <button class="topbar-btn btn-primary" onclick="saveProjects()">Übernehmen</button>
     </div>
   </div>
@@ -5360,7 +5374,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-04 · #620'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-04-b620) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-04 · #621'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-04-b621) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -6234,7 +6248,17 @@ function _tuStatusText(l){
   return 'zuletzt '+_tuDe(d)+' · '+tage;
 }
 
+// b621: entscheidet, ob die Karte auf einem Nicht-Objekt-Board trotzdem stehen
+// bleibt. Läuft bei jedem Neuzeichnen mit, damit sie beim Löschen der letzten
+// Leistung sofort verschwindet und beim Anlegen der ersten sofort auftaucht –
+// ohne dass das Fenster geschlossen und neu geöffnet werden muss.
+function _tuSichtbarkeit(){
+  const box=document.getElementById('taskModalBox'); if(!box)return;
+  box.classList.toggle('ptp-hat-turnus', !!(taskTurnus&&taskTurnus.length));
+}
+
 function renderTurnusListe(){
+  _tuSichtbarkeit(); // b621 – vor dem Früh-Ausstieg, gilt auch für die leere Liste
   const box=document.getElementById('tuListe'); if(!box)return;
   // Auswahlfeld einmalig füllen
   const sel=document.getElementById('tuNeuIntervall');
@@ -9402,7 +9426,11 @@ function _pamHeuteRaster(listeAll, today, typFilter, terminFilter){
   // Besichtigungen gefiltert wird.
   // b614: Objekte sind ein eigener Typ – die Leistungen laufen bei „Alle", „Auftrag"
   // (sie können auch an einem Auftrag hängen) und „Immobilie" mit, sonst nicht.
-  grouped.turnus=(_heuteAktFilter||!(!typFilter||typFilter==='alle'||typFilter==='auftraege'||typFilter==='immobilien'))?[]:_tuSammleFaellige();
+  // b621: „Auftrag" fällt raus – seit b621 lassen sich Leistungen nur noch am Objekt
+  // anlegen, der Chip heißt ohnehin „🏠 Objekte". Alt-Einträge auf einem Auftrags-Board
+  // sind damit nicht verloren: unter „Alle Typen" (Voreinstellung) laufen sie weiter mit,
+  // denn _tuSammleFaellige sammelt bewusst über ALLE Boards.
+  grouped.turnus=(_heuteAktFilter||!(!typFilter||typFilter==='alle'||typFilter==='immobilien'))?[]:_tuSammleFaellige();
   _pamRasterGrouped=grouped;
   var rf=_pamRasterFilter;
   function fBtn(key,label,color,cnt){
@@ -11314,7 +11342,9 @@ function updateStatusSelect(){
 function renderBoardTabs(){
   const keys=Object.keys(boards);
   const sel=document.getElementById('boardTabs');
-  const _bIcon=b=>{const t=boardTypes[b]||'baustelle';return t==='notiz'?'✅ ':t==='email'?'📧 ':'🏗 ';};
+  // b621: 🏠 fehlte hier – ein Objekt-Board zeigte in der Board-Auswahl weiter den
+  // Baustellen-Kran (Befund Frank). Die Zuordnung wurde bei b614 nicht mitgezogen.
+  const _bIcon=b=>{const t=boardTypes[b]||'baustelle';return t==='notiz'?'✅ ':t==='email'?'📧 ':t==='immobilie'?'🏠 ':'🏗 ';};
   sel.innerHTML=
     `<button class="board-dropdown-btn" onclick="toggleBoardDropdown(event)">
        <span class="bd-label">${_bIcon(currentBoard)}${esc(currentBoard||'Board wählen')}</span>
@@ -28167,6 +28197,9 @@ function _applyBoardType(boardName){
   box.classList.toggle('ptp-immo-mode', type==='immobilie');
   // b616: hängt am Task wirklich eine Mail, bleibt der E-Mail-Block sichtbar
   box.classList.toggle('ptp-immo-hatmail', type==='immobilie' && _taskHatMail());
+  // b621: Wiederkehrende Leistungen sind Objekt-Sache – Rettungsregel für Tasks,
+  // an denen schon welche hängen (siehe CSS bei .ptp-hat-turnus)
+  _tuSichtbarkeit();
   const ti=document.getElementById('_taskTypeIndicator');
   if(ti){
     const _craneSvgTI='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><line x1="9" y1="22" x2="9" y2="7"/><line x1="1" y1="7" x2="21" y2="7"/><line x1="9" y1="4" x2="21" y2="7"/><line x1="1" y1="7" x2="9" y2="4"/><line x1="17" y1="7" x2="17" y2="16"/><path d="M15 16 q2 2 4 0"/><line x1="6" y1="22" x2="12" y2="22"/></svg>';
@@ -32041,7 +32074,8 @@ function _emShowBoardTaskPicker(title, onPick){
     var list=document.getElementById('_btp_list');list.innerHTML='';
     boardList.forEach(function(bk){
       const cnt=(boards[bk]||[]).filter(function(t){return !t.archiviert&&!t.spaeterBearbeiten;}).length;
-      const icon=boardTypes[bk]==='notiz'?'✅':'🏗';
+      // b621: hier fehlten 📧 UND 🏠 – Posteingang- und Objekt-Boards standen mit Kran da
+      const icon=boardTypes[bk]==='notiz'?'✅':boardTypes[bk]==='email'?'📧':boardTypes[bk]==='immobilie'?'🏠':'🏗';
       const btn=document.createElement('button');btn.className='em-pick-item';
       btn.innerHTML=_escHtml(icon+' '+bk)+'<div class="em-pick-sub">'+cnt+' Task'+(cnt!==1?'s':'')+'</div>';
       btn.onclick=function(){_curBoard=bk;renderColumns(bk);};
@@ -32848,7 +32882,7 @@ function renderProjList(){
       <span class="proj-icon">${(p.type||'baustelle')==='notiz'?'✅':(p.type||'baustelle')==='email'?'📧':(p.type||'baustelle')==='immobilie'?'🏠':'🏗'}</span>
       <input type="text" value="${esc(p.name)}" id="projinput-${i}" placeholder="Projektname" autocomplete="off" onmousedown="event.stopPropagation()" ondragstart="event.stopPropagation()">
       <span class="proj-count">${p.count} Task${p.count!==1?'s':''}</span>
-      <select id="projtype-${i}" class="proj-type-sel" title="Projekt-Typ" onmousedown="event.stopPropagation()">
+      <select id="projtype-${i}" class="proj-type-sel" title="Projekt-Typ" onmousedown="event.stopPropagation()" onchange="syncProjInputs();renderProjList()">
         <option value="baustelle" ${(p.type||'baustelle')==='baustelle'?'selected':''}>🏗 Baustelle</option>
         <option value="notiz" ${(p.type||'baustelle')==='notiz'?'selected':''}>✅ Aufgaben</option>
         <option value="email" ${(p.type||'baustelle')==='email'?'selected':''}>📧 E-Mail-Eingang</option>
@@ -32911,7 +32945,10 @@ function autoDetectProjTypes(){
   syncProjInputs();
   const _np=/aufgab|notiz|todo|to[\s_-]do/i;
   const _ep=/posteingang|eingang|e-?mail|inbox/i;
-  editProjects=editProjects.map(p=>({...p,type:p.type==='email'?'email':(_np.test(p.name)?'notiz':(_ep.test(p.name)?'email':'baustelle'))}));
+  // b621: `immobilie` wird jetzt genauso verschont wie `email`. Vorher setzte dieser
+  // Knopf ein Objekt-Board stumm auf `baustelle` zurück – kein Boardname passt auf
+  // eines der Muster. Folge wäre: schlankes Objektfenster weg, Ordner-Anlegen wieder an.
+  editProjects=editProjects.map(p=>({...p,type:(p.type==='email'||p.type==='immobilie')?p.type:(_np.test(p.name)?'notiz':(_ep.test(p.name)?'email':'baustelle'))}));
   renderProjList();
   showToast('✓ Typen aus Namen erkannt – bitte prüfen und auf Übernehmen klicken','ok',4000);
 }
