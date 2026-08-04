@@ -801,7 +801,7 @@ function _detectEmlProvider(rawText){
   return 'unknown';
 }
 // ────────────────────────────────────────────────────────────────────────────
-function _parseEmlText(rawText){
+function _parseEmlText(rawText,_tiefe){
   let he=rawText.search(/\r?\n\r?\n/);
   let hdr=he>=0?rawText.substring(0,he):rawText.substring(0,2000);
   let bdy=he>=0?rawText.substring(he).replace(/^\r?\n/,''):'';
@@ -824,7 +824,7 @@ function _parseEmlText(rawText){
 
   // Rekursiver Multipart-Extraktor – verarbeitet beliebig tief verschachtelte MIME-Strukturen
   function _extractParts(ctypeStr,body){
-    let res={plain:'',html:'',cidMap:{},attachments:[]};
+    let res={plain:'',html:'',cidMap:{},attachments:[],embedded:[]};
     let bm=ctypeStr.match(/boundary="?([^";]+)"?/i);
     if(!bm)return res;
     let sep=bm[1].trim();
@@ -904,6 +904,27 @@ function _parseEmlText(rawText){
         }catch(e){return'';}
       };
       const _attEncOk=(pe==='base64'||pe==='quoted-printable'||pe==='7bit'||pe==='8bit'||pe==='');
+      // b603: Eingebettete Nachricht (weitergeleitete Mail) auspacken statt als Klotz ablegen.
+      // Outlook/Exchange haengt sie als message/rfc822 an (bei Frank: 7bit, Name immer
+      // "ForwardedMessage.eml") – ohne diesen Zweig fiel sie als eine unlesbare Datei durch
+      // und alle darin steckenden PDFs/Bilder blieben unsichtbar.
+      const _istMailTeil=(pct==='message/rfc822')||(!!attachName&&/\.eml$/i.test(attachName)&&!pct.startsWith('image/'));
+      if(_istMailTeil&&(_tiefe||0)<6){
+        let _rohMail='';
+        try{
+          if(pe==='base64')_rohMail=_decodeB64Body(pb,pcs||'utf-8');
+          else if(pe==='quoted-printable')_rohMail=_decodeQP(pb,pcs||'utf-8');
+          else _rohMail=pb;
+        }catch(_de){_rohMail=pb;}
+        // Nur uebernehmen, wenn wirklich Mail-Header dastehen – sonst normal als Datei behandeln
+        if(_rohMail&&/^(Received|From|Subject|Date|Message-ID|MIME-Version):/mi.test(_rohMail.substring(0,2000))){
+          try{
+            const _innenMail=_parseEmlText(_rohMail,(_tiefe||0)+1);
+            res.embedded.push({parsed:_innenMail,raw:_rohMail,dateiname:attachName||''});
+            continue;
+          }catch(_ee){console.warn('[b603] Eingebettete Mail nicht lesbar:',_ee);}
+        }
+      }
       // Fix #223: CID-Inline-Bilder markieren – nicht automatisch hochladen, aber für "Als Foto speichern" verfügbar halten
       if(_attEncOk&&attachName&&pct.startsWith('image/')){
         var _isCidInlineFlag=!!(pcidArr||disp.startsWith('inline'));
@@ -922,6 +943,7 @@ function _parseEmlText(rawText){
         if(!res.html&&sub.html)res.html=sub.html;
         Object.assign(res.cidMap,sub.cidMap||{});
         res.attachments.push(...(sub.attachments||[]));
+        res.embedded.push(...(sub.embedded||[])); // b603
       }else if(!res.plain&&pct==='text/plain'){
         res.plain=pe==='quoted-printable'?_decodeQP(pb,pcs):pe==='base64'?_decodeB64Body(pb,pcs):pb;
       }else if(!res.html&&pct==='text/html'){
@@ -931,10 +953,11 @@ function _parseEmlText(rawText){
     return res;
   }
 
-  let plain='',htmlBody='',cidMap={},emlAttachments=[];
+  let plain='',htmlBody='',cidMap={},emlAttachments=[],emlEmbedded=[];
   if(/^multipart\//i.test(ctype)){
     let extracted=_extractParts(ctype,bdy);
     plain=extracted.plain;htmlBody=extracted.html;cidMap=extracted.cidMap||{};emlAttachments=extracted.attachments||[];
+    emlEmbedded=extracted.embedded||[]; // b603
   }
   if(!plain&&!htmlBody){
     plain=tenc==='quoted-printable'?_decodeQP(bdy,charset):tenc==='base64'?_decodeB64Body(bdy,charset):bdy;
@@ -949,7 +972,301 @@ function _parseEmlText(rawText){
   return{subject:subject,sender:sender,recipient:recipient||'',cc:cc||'',date:date,messageId:messageId||'',
     inReplyTo:inReplyTo||'', // Fix #369
     references:references?references.split(/\s+/).map(function(x){return x.replace(/^<|>$/g,'');}).filter(Boolean):[], // Fix #369
-    bodyText:plain.substring(0,8000),bodyHtml:htmlBody||'',cidMap:cidMap||{},attachments:emlAttachments};
+    bodyText:plain.substring(0,8000),bodyHtml:htmlBody||'',cidMap:cidMap||{},attachments:emlAttachments,
+    embedded:emlEmbedded||[]}; // b603: eingebettete (weitergeleitete) Mails, je mit eigenem parsed/raw
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// b603/b604 – MAIL-PAKET: weitergeleitete Mails auspacken, Dateien heraustrennen
+//
+// Eine Auftragsmail enthaelt bei Frank regelmaessig mehrere weitergeleitete Mails
+// (Outlook: message/rfc822, 7bit, Dateiname IMMER "ForwardedMessage.eml"), in denen
+// die eigentlichen PDFs, Fotos und Videos stecken. Frueher landete so eine Mail als
+// ein unlesbarer Klotz in den Dokumenten – der Inhalt blieb unsichtbar.
+//
+// Ablauf: _mailPaketAnalysieren(file)  -> Plan (was steckt drin, wohin gehoert es)
+//         _mailPaketVorschau(plan)     -> Fenster mit Haekchen (b604)
+//         _mailPaketAblegen(plan,ctx)  -> Upload nach Drive + Eintraege im Task
+// Der Kontext (ctx) kapselt die Unterschiede zwischen Auftrags- und E-Mail-Fenster.
+// ══════════════════════════════════════════════════════════════════════════════
+const _MP_VIDEO_RE=/\.(mp4|mov|avi|mkv|wmv|m4v|3gp|webm|mpe?g)$/i;
+const _MP_BILD_RE=/\.(jpe?g|png|gif|webp|heic|heif|avif|bmp|tiff?)$/i;
+
+function _mpEsc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function _mpGroesse(b){if(!b)return '0 KB';if(b<1024*1024)return Math.round(b/1024)+' KB';return (b/1024/1024).toFixed(1)+' MB';}
+function _mpB64Bytes(b64){return b64?Math.round(b64.length*0.75):0;}
+function _mpArt(name,mimeType){
+  const m=(mimeType||'').toLowerCase();
+  if(_MP_VIDEO_RE.test(name||'')||m.startsWith('video/'))return 'video';
+  if(_MP_BILD_RE.test(name||'')||m.startsWith('image/'))return 'bild';
+  return 'dok';
+}
+// Uint8Array aus Base64 – bei grossen Anhaengen blockweise, sonst friert der Tab ein
+function _mpB64ZuBytes(b64){
+  const bin=atob(b64);
+  const out=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++)out[i]=bin.charCodeAt(i);
+  return out;
+}
+
+// ── Analyse: aus einer Datei den vollstaendigen Plan bauen (inkl. ZIP-Inhalt) ──
+async function _mailPaketAnalysieren(file,bekannteIds){
+  const roh=await _emlDateiAlsText(file);
+  const wurzel=_parseEmlText(roh);
+  const bekannt=(bekannteIds||[]).filter(Boolean).map(function(x){return String(x).replace(/^<|>$/g,'');});
+  const plan={dateiname:file.name,gesamtBytes:0,mails:[],rohTraeger:roh};
+  let lfd=0;
+
+  async function dateienSammeln(mail,mailId){
+    const raus=[];
+    for(const att of (mail.attachments||[])){
+      const bytes=_mpB64Bytes(att.b64);
+      const art=_mpArt(att.name,att.mimeType);
+      // ZIP aufmachen – die Einzeldateien sind das, was Frank braucht
+      if(/\.zip$/i.test(att.name||'')&&window.JSZip){
+        let drin=0;
+        try{
+          const zip=await window.JSZip.loadAsync(_mpB64ZuBytes(att.b64));
+          const eintraege=[];
+          zip.forEach(function(pfad,eintrag){if(!eintrag.dir)eintraege.push(eintrag);});
+          for(const e of eintraege){
+            try{
+              const buf=await e.async('uint8array');
+              let b64='';const CH=8192;
+              for(let i=0;i<buf.length;i+=CH)b64+=String.fromCharCode.apply(null,buf.subarray(i,i+CH));
+              const kurz=(e.name||'').split('/').pop()||e.name;
+              raus.push({id:mailId+'_d'+(raus.length),name:kurz,mimeType:'',b64:btoa(b64),
+                bytes:buf.length,art:_mpArt(kurz,''),quelle:'ZIP: '+att.name,gewaehlt:true,hinweis:''});
+              drin++;
+            }catch(_ze){console.warn('[b603] ZIP-Eintrag:',e.name,_ze);}
+          }
+        }catch(_zipErr){console.warn('[b603] ZIP nicht lesbar:',att.name,_zipErr);}
+        // Das Archiv selbst nur als abgewaehlte Zeile anbieten, wenn es aufging
+        raus.push({id:mailId+'_d'+(raus.length),name:att.name,mimeType:att.mimeType||'application/zip',
+          b64:att.b64,bytes:bytes,art:'dok',quelle:'',gewaehlt:drin===0,
+          hinweis:drin?('ausgepackt in '+drin+' Datei'+(drin!==1?'en':'')):'Archiv nicht lesbar'});
+        continue;
+      }
+      raus.push({id:mailId+'_d'+(raus.length),name:att.name,mimeType:att.mimeType||'',b64:att.b64,
+        bytes:bytes,art:art,quelle:'',
+        gewaehlt:!att._isCidInline&&!(art==='bild'&&bytes<_MIN_EMAIL_IMG_BYTES),
+        hinweis:att._isCidInline?'Signatur-/Inline-Bild':(art==='bild'&&bytes<_MIN_EMAIL_IMG_BYTES?'sehr klein':'')});
+    }
+    return raus;
+  }
+
+  async function mailAufnehmen(parsed,rawText,ebene,elternId){
+    const id='m'+(lfd++);
+    const msgId=(parsed.messageId||'').replace(/^<|>$/g,'');
+    const schonDa=!!(msgId&&bekannt.includes(msgId));
+    const eintrag={
+      id:id,ebene:ebene,elternId:elternId,
+      subject:parsed.subject||'',sender:parsed.sender||'',
+      date:(parsed.date instanceof Date&&!isNaN(parsed.date))?parsed.date.toISOString():new Date().toISOString(),
+      messageId:msgId,bodyHtml:parsed.bodyHtml||'',bodyText:parsed.bodyText||'',cidMap:parsed.cidMap||{},
+      raw:rawText||'',istTraeger:ebene===0,
+      gewaehlt:!schonDa,hinweis:schonDa?'bereits im Task':'',
+      dateien:await dateienSammeln(parsed,id)
+    };
+    // Schon vorhandene Mail: auch ihre Dateien abwaehlen, sonst zeigt die Vorschau
+    // Haekchen an Dateien, die gar nicht abgelegt werden
+    if(schonDa)eintrag.dateien.forEach(function(d){d.gewaehlt=false;d.hinweis=d.hinweis||'Mail bereits im Task';});
+    plan.mails.push(eintrag);
+    eintrag.dateien.forEach(function(d){if(d.gewaehlt)plan.gesamtBytes+=d.bytes;});
+    for(const e of (parsed.embedded||[]))await mailAufnehmen(e.parsed,e.raw,ebene+1,id);
+  }
+
+  await mailAufnehmen(wurzel,roh,0,null);
+  return plan;
+}
+
+// ── Ablegen: Upload nach Drive + Eintraege im Task ────────────────────────────
+async function _mailPaketAblegen(plan,ctx,dateiOriginal){
+  const heute=new Date().toLocaleDateString('de-DE');
+  const bilanz={mails:0,bilder:0,dok:0,pdf:0,fehler:0,uebersprungen:0};
+  for(const mail of plan.mails){
+    if(!mail.gewaehlt){
+      bilanz.uebersprungen++;
+      mail.dateien.forEach(function(d){d.b64=null;}); // Speicher nicht unnoetig halten
+      mail.raw='';
+      continue;
+    }
+    const mDatum=new Date(mail.date);
+    const titel=mail.subject||mail.dateiname||'Mail';
+    // 1) Die Mail selbst als .eml sichern – Traegermail aus der Originaldatei,
+    //    eingebettete Mails aus ihrem Rohtext
+    let mailFileId='',mailUrl='';
+    try{
+      const emlName=_pamDateiname(mDatum,titel,'.eml');
+      let buf;
+      if(mail.istTraeger&&dateiOriginal){
+        buf=await new Promise(function(res,rej){const r=new FileReader();r.onload=function(e){res(e.target.result);};r.onerror=rej;r.readAsArrayBuffer(dateiOriginal);});
+      }else{
+        buf=new TextEncoder().encode(mail.raw||'').buffer;
+      }
+      const r=await _driveUploadGeneric(buf,emlName,'message/rfc822',ctx.fidMail);
+      if(r&&r.id){
+        mailFileId=r.id;mailUrl='https://drive.google.com/file/d/'+r.id+'/view';
+        ctx.aufMail({name:emlName,subject:mail.subject,sender:mail.sender,date:mail.date,
+          messageId:mail.messageId,fileId:r.id,url:mailUrl,uploadedAt:heute,
+          fwd:mail.ebene>0,fwdVon:mail.ebene>0?(plan.mails[0]?plan.mails[0].sender:''):''});
+        bilanz.mails++;
+      }else{bilanz.fehler++;console.warn('[b603] Mail-Upload ohne Ergebnis:',emlName);}
+    }catch(e){bilanz.fehler++;console.warn('[b603] Mail-Upload:',e);}
+
+    // 2) PDF-Lesekopie je Mail – damit Frank nichts entpacken muss
+    if(mail.bodyHtml||mail.bodyText){
+      try{
+        const pdfBuf=await _ezBuildPdfFromHtml({subject:mail.subject,sender:mail.sender,date:mDatum,
+          bodyHtml:mail.bodyHtml,bodyText:mail.bodyText,cidMap:mail.cidMap});
+        const pdfName=_pamDateiname(mDatum,titel,'.pdf');
+        const rp=await _ezUpload(pdfBuf,pdfName,ctx.fidMail);
+        if(rp&&rp.id){
+          ctx.aufPdf({name:pdfName,fileId:rp.id,url:'https://drive.google.com/file/d/'+rp.id+'/view',
+            uploadedAt:heute,date:mail.date,messageId:mail.messageId});
+          bilanz.pdf++;
+        }
+      }catch(e){console.warn('[b603] PDF-Lesekopie:',e);}
+    }
+
+    // 3) Die Dateien dieser Mail – Bilder/Videos in den Bilder-Ordner, Rest zu den Dokumenten
+    for(const d of mail.dateien){
+      if(!d.gewaehlt){bilanz.uebersprungen++;continue;}
+      try{
+        const istMedium=(d.art==='bild'||d.art==='video');
+        const ziel=istMedium?ctx.fidBild:ctx.fidDok;
+        const bytes=_mpB64ZuBytes(d.b64);
+        const r=await _driveUploadGeneric(bytes.buffer,d.name,d.mimeType||'application/octet-stream',ziel);
+        if(!r||!r.id){bilanz.fehler++;console.warn('[b603] Upload ohne Ergebnis:',d.name);continue;}
+        if(istMedium){
+          ctx.aufFoto({driveId:r.id,name:d.name,mimeType:d.mimeType||(d.art==='video'?'video/mp4':'image/jpeg'),
+            caption:'',thumbnailLink:r.thumbnailLink||'',messageId:mail.messageId||'',ts:mail.date});
+          bilanz.bilder++;
+        }else{
+          ctx.aufDok({name:d.name,fileId:r.id,url:'https://drive.google.com/file/d/'+r.id+'/view',
+            uploadedAt:heute,messageId:mail.messageId||''});
+          bilanz.dok++;
+        }
+      }catch(e){bilanz.fehler++;console.warn('[b603] Datei-Upload:',d.name,e);}
+      d.b64=null; // Speicher freigeben – eine Sammelmail kann 25 MB gross sein
+    }
+    mail.raw='';
+  }
+  try{ctx.speichern&&ctx.speichern();}catch(e){console.warn('[b603] Speichern:',e);}
+  return bilanz;
+}
+
+// ── b604: Vorschau mit Haekchen – nichts wandert ungefragt in die Akte ────────
+function _mailPaketVorschau(plan){
+  return new Promise(function(fertig){
+    const alt=document.getElementById('_mpVorschau');if(alt)alt.remove();
+    const ov=document.createElement('div');
+    ov.id='_mpVorschau';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000001;display:flex;align-items:center;justify-content:center;padding:20px;';
+    const kasten=document.createElement('div');
+    kasten.style.cssText='background:#fff;color:#1e2337;border-radius:10px;width:min(820px,96vw);max-height:90vh;display:flex;flex-direction:column;box-shadow:0 12px 48px rgba(0,0,0,.45);overflow:hidden;';
+
+    const traeger=plan.mails[0]||{};
+    const kopf=document.createElement('div');
+    kopf.style.cssText='padding:14px 18px;border-bottom:1px solid #e3e6ef;flex-shrink:0;';
+    kopf.innerHTML='<div style="font-size:15px;font-weight:700;">📬 Mail-Paket prüfen</div>'+
+      '<div style="font-size:12px;color:#5a6180;margin-top:3px;">'+_mpEsc(traeger.subject||plan.dateiname)+'</div>';
+
+    const liste=document.createElement('div');
+    liste.style.cssText='flex:1;overflow:auto;padding:10px 12px;';
+    let html='';
+    plan.mails.forEach(function(m){
+      const links=6+m.ebene*22;
+      const dat=new Date(m.date);
+      const datTxt=isNaN(dat)?'':(_ez2(dat.getDate())+'.'+_ez2(dat.getMonth()+1)+'.'+dat.getFullYear());
+      const marke=m.ebene===0
+        ?'<span style="background:#e8ecff;color:#3a4bc8;font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;">TRÄGERMAIL</span>'
+        :'<span style="background:#fff0e0;color:#a8631a;font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;">WEITERGELEITET</span>';
+      html+='<div style="margin:8px 0 2px 0;padding-left:'+links+'px;">'+
+        '<label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;">'+
+        '<input type="checkbox" data-mail="'+m.id+'" '+(m.gewaehlt?'checked':'')+' style="margin-top:3px;flex-shrink:0;">'+
+        '<span style="flex:1;min-width:0;">'+marke+
+        ' <span style="font-weight:600;font-size:13px;">'+_mpEsc(m.subject||'(kein Betreff)')+'</span>'+
+        (m.hinweis?' <span style="color:#c0392b;font-size:11px;">· '+_mpEsc(m.hinweis)+'</span>':'')+
+        '<br><span style="font-size:11px;color:#6b7292;">'+_mpEsc(m.sender||'')+(datTxt?' · '+datTxt:'')+'</span>'+
+        '</span></label></div>';
+      m.dateien.forEach(function(d){
+        const sym=d.art==='bild'?'🖼':(d.art==='video'?'🎬':'📄');
+        const ziel=(d.art==='bild'||d.art==='video')?'Bilder':'Dokumente';
+        html+='<div style="padding-left:'+(links+26)+'px;">'+
+          '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:1px 0;">'+
+          '<input type="checkbox" data-datei="'+d.id+'" data-von="'+m.id+'" '+(d.gewaehlt?'checked':'')+' style="flex-shrink:0;">'+
+          '<span style="font-size:12px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+
+          sym+' '+_mpEsc(d.name)+
+          '<span style="color:#8b90a8;"> · '+_mpGroesse(d.bytes)+' → '+ziel+'</span>'+
+          (d.quelle?'<span style="color:#3a7bc8;"> · '+_mpEsc(d.quelle)+'</span>':'')+
+          (d.hinweis?'<span style="color:#c0392b;"> · '+_mpEsc(d.hinweis)+'</span>':'')+
+          '</span></label></div>';
+      });
+    });
+    liste.innerHTML=html;
+
+    const fuss=document.createElement('div');
+    fuss.style.cssText='padding:12px 18px;border-top:1px solid #e3e6ef;display:flex;align-items:center;gap:12px;flex-shrink:0;flex-wrap:wrap;';
+    const zaehler=document.createElement('div');
+    zaehler.style.cssText='flex:1;font-size:12px;color:#5a6180;min-width:200px;';
+    const abbr=document.createElement('button');
+    abbr.textContent='Abbrechen';
+    abbr.style.cssText='padding:8px 16px;border:1px solid #ccd2e3;background:#f6f7fb;border-radius:6px;cursor:pointer;font-size:13px;';
+    const ok=document.createElement('button');
+    ok.textContent='📥 In den Task ablegen';
+    ok.style.cssText='padding:8px 18px;border:none;background:#3a4bc8;color:#fff;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;';
+    fuss.append(zaehler,abbr,ok);
+
+    function zaehlen(){
+      let nm=0,nd=0,by=0;
+      plan.mails.forEach(function(m){
+        if(!m.gewaehlt)return;
+        nm++;
+        m.dateien.forEach(function(d){if(d.gewaehlt){nd++;by+=d.bytes;}});
+      });
+      zaehler.textContent=nm+' Mail'+(nm!==1?'s':'')+' · '+nd+' Datei'+(nd!==1?'en':'')+' · '+_mpGroesse(by);
+      ok.disabled=nm===0;ok.style.opacity=nm===0?'.5':'1';
+    }
+    liste.addEventListener('change',function(ev){
+      const el=ev.target;if(!el||el.type!=='checkbox')return;
+      if(el.dataset.mail){
+        const m=plan.mails.find(function(x){return x.id===el.dataset.mail;});
+        if(m){
+          m.gewaehlt=el.checked;
+          // Mail abgewaehlt -> ihre Dateien mit abwaehlen; wieder an -> nur die unkritischen
+          m.dateien.forEach(function(d){
+            if(!el.checked)d.gewaehlt=false;
+            else if(!d.hinweis)d.gewaehlt=true;
+            const box=liste.querySelector('input[data-datei="'+d.id+'"]');
+            if(box)box.checked=d.gewaehlt;
+          });
+        }
+      }else if(el.dataset.datei){
+        for(const m of plan.mails){
+          const d=m.dateien.find(function(x){return x.id===el.dataset.datei;});
+          if(d){d.gewaehlt=el.checked;break;}
+        }
+      }
+      zaehlen();
+    });
+    zaehlen();
+
+    function schliessen(ergebnis){
+      document.removeEventListener('keydown',taste);
+      ov.remove();
+      fertig(ergebnis);
+    }
+    function taste(e){if(e.key==='Escape'){e.stopImmediatePropagation();schliessen(false);}}
+    document.addEventListener('keydown',taste);
+    abbr.onclick=function(){schliessen(false);};
+    ok.onclick=function(){schliessen(true);};
+    ov.addEventListener('click',function(e){if(e.target===ov)schliessen(false);});
+
+    kasten.append(kopf,liste,fuss);
+    ov.appendChild(kasten);
+    document.body.appendChild(ov);
+  });
 }
 
 function tEmailOrdnerOeffnen(){let u=(document.getElementById('tEmailOrdner')||{}).value||'';if(u.trim())window.open(u,'_blank');else showToast('⚠ Bitte zuerst eine Google Drive Ordner-URL eintragen','error',4000);}
@@ -4719,7 +5036,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-04 · #602'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-04-b602) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-04 · #604'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-04-b604) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -19744,6 +20061,8 @@ function _pamVerlaufListeHtml(tk,tkId){
         else{clickFn="_openEmailOrigInlinePreview({fileId:'"+_sqV(d.fileId)+"',name:'"+_sqV((d.subject||d.name||'email.eml').substring(0,60))+"',url:'"+_sqV(d.url)+"'})";}
         html+='<div style="display:flex;align-items:center;gap:6px;padding:7px '+ind+';border-top:0.5px solid var(--border);cursor:pointer;background:var(--bg);transition:background .1s;" onmouseenter="_pamUnifiedHover(this,\''+tip+'\')" onmouseleave="_pamUnifiedHoverOut()" onclick="'+clickFn+'">';
         html+='<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:'+dBg+';color:'+dTxt+';font-weight:700;flex-shrink:0;white-space:nowrap;">'+dLbl+'</span>';
+        // b603: aus einer Sammelmail ausgepackte Nachricht kenntlich machen
+        if(d.fwd)html+='<span style="font-size:10px;padding:2px 5px;border-radius:4px;background:rgba(168,99,26,.14);color:#A8631A;font-weight:700;flex-shrink:0;white-space:nowrap;" title="aus einer weitergeleiteten Mail ausgepackt">↩ wgl.</span>';
         html+='<span style="flex:1;min-width:0;font-size:12px;font-weight:600;color:var(--text1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(from)+'</span>';
         if(attN)html+='<span style="font-size:11px;color:var(--text2);flex-shrink:0;" title="'+attN+' Anhang/Anhänge aus dieser Mail">📎'+attN+'</span>';
         html+='<span style="font-size:11px;color:var(--text2);flex-shrink:0;">'+_fmt(m._ts)+'</span>';
@@ -25541,6 +25860,71 @@ async function _uploadEmailOriginal(file){
       }
     }
     // Dateiname mit Mail-Datum aufbauen
+    // ── b603: Sammelmail erkennen und auspacken ──────────────────────────────
+    // Steckt in der Mail eine weitergeleitete Mail oder ein ZIP, geht sie den neuen
+    // Weg (Vorschau + Auspacken). Alles andere laeuft unveraendert wie bisher weiter.
+    if(isEml&&preText){
+      let _mpPlan=null;
+      try{
+        const _vorab=_parseEmlText(preText);
+        const _hatMails=(_vorab.embedded||[]).length>0;
+        const _hatZip=(_vorab.attachments||[]).some(function(a){return /\.zip$/i.test(a.name||'');});
+        if(_hatMails||_hatZip){
+          const _tMp=findTaskById((document.getElementById('taskId')||{}).value||'');
+          const _bekannt=[].concat(
+            (taskEmailOriginals||[]).map(function(e){return e.messageId;}),
+            (_tMp&&_tMp.msMessageIds)||[],(_tMp&&_tMp.gmailMessageIds)||[]);
+          if(msgEl)msgEl.textContent='⏳ Packe Mail-Paket aus…';
+          _mpPlan=await _mailPaketAnalysieren(file,_bekannt);
+        }
+      }catch(_mpe){
+        console.warn('[b603] Analyse fehlgeschlagen:',_mpe);
+        showToast('⚠ Auspacken fehlgeschlagen ('+_mpe.message+') – die Mail wird wie bisher abgelegt','warning',7000);
+      }
+      if(_mpPlan&&_mpPlan.mails.length){
+        const _weiter=await _mailPaketVorschau(_mpPlan);
+        if(!_weiter){
+          if(msgEl)msgEl.textContent='📧 .eml / .msg hier hineinziehen';
+          showToast('Abgebrochen – nichts abgelegt','info',2500);
+          return;
+        }
+        if(msgEl)msgEl.textContent='⏳ Lege Mail-Paket ab…';
+        showToast('📥 Lege Mail-Paket ab – das kann bei grossen Mails etwas dauern…','info',6000);
+        const _tMp2=findTaskById((document.getElementById('taskId')||{}).value||'');
+        const _zRueck=(typeof _pamAnhangZiele==='function'&&_tMp2)?_pamAnhangZiele(_tMp2,fid):{bild:'',dok:''};
+        const _bilanz=await _mailPaketAblegen(_mpPlan,{
+          fidMail:fid,
+          fidBild:_ezFolderId((document.getElementById('tGD')?.value||'').trim())||_zRueck.bild||fid,
+          fidDok:_ezFolderId((document.getElementById('tDokOrdner')?.value||document.getElementById('tGDOrdner')?.value||'').trim())||_zRueck.dok||fid,
+          aufMail:function(e){if(!taskEmailOriginals)taskEmailOriginals=[];taskEmailOriginals.push(e);
+            if(_tMp2){if(!_tMp2.emailOriginals)_tMp2.emailOriginals=[];_tMp2.emailOriginals.push(e);}},
+          aufPdf:function(e){if(!taskEmailPdfs)taskEmailPdfs=[];taskEmailPdfs.push(e);
+            if(_tMp2){if(!_tMp2.emailPdfs)_tMp2.emailPdfs=[];_tMp2.emailPdfs.push(e);}},
+          aufFoto:function(e){if(!taskFotos)taskFotos=[];taskFotos.push(e);
+            if(_tMp2){if(!_tMp2.fotos)_tMp2.fotos=[];_tMp2.fotos.push(e);}},
+          aufDok:function(e){if(!taskAttachments)taskAttachments=[];taskAttachments.push(e);
+            if(_tMp2){if(!_tMp2.attachments)_tMp2.attachments=[];_tMp2.attachments.push(e);}},
+          speichern:function(){scheduleTaskFieldSave&&scheduleTaskFieldSave();scheduleSave&&scheduleSave();}
+        },file);
+        try{
+          const _fs=document.getElementById('tFotoSect');
+          if(_fs&&!_fs.classList.contains('open'))_fs.classList.add('open');
+          if(typeof renderFotoListDesktop==='function')renderFotoListDesktop();
+          if(typeof renderAttachList==='function')renderAttachList();
+          renderEmailSection();renderEmailOriginals();_pamEmailRefresh();
+        }catch(_re){console.warn('[b603] Anzeige:',_re);}
+        let _txt='✅ '+_bilanz.mails+' Mail'+(_bilanz.mails!==1?'s':'')+' abgelegt';
+        if(_bilanz.bilder)_txt+=' · '+_bilanz.bilder+' Bild/Video';
+        if(_bilanz.dok)_txt+=' · '+_bilanz.dok+' Dokument'+(_bilanz.dok!==1?'e':'');
+        if(_bilanz.pdf)_txt+=' · '+_bilanz.pdf+' PDF-Lesekopie'+(_bilanz.pdf!==1?'n':'');
+        showToast(_txt,'success',6000);
+        if(_bilanz.fehler)showToast('⚠ '+_bilanz.fehler+' Datei(en) konnten nicht hochgeladen werden – siehe Konsole','error',8000);
+        if(msgEl)msgEl.textContent='✅ Abgelegt: '+file.name;
+        setTimeout(function(){if(msgEl)msgEl.textContent='📧 .eml / .msg hier hineinziehen';},3500);
+        _openSectPopup('tEmailOrigSect');
+        return;
+      }
+    }
     let _uploadName=file.name;
     try{
       const _ppD=isEml&&preText?_parseEmlText(preText):null;
@@ -29371,6 +29755,56 @@ async function _emUploadEmlForModal(file){
     if(preMessageId){
       const already=(t.emailOriginals||[]).some(function(e){return e.messageId&&e.messageId===preMessageId;});
       if(already){showToast('ℹ Diese Mail ist bereits im Task vorhanden','info',3000);return;}
+    }
+    // ── b603: Sammelmail auspacken (gleicher Weg wie im Auftrags-Fenster) ─────
+    if(isEml&&preText){
+      let _mpPlan=null;
+      try{
+        const _vorab=_parseEmlText(preText);
+        const _hatMails=(_vorab.embedded||[]).length>0;
+        const _hatZip=(_vorab.attachments||[]).some(function(a){return /\.zip$/i.test(a.name||'');});
+        if(_hatMails||_hatZip){
+          const _bekannt=[].concat(
+            (t.emailOriginals||[]).map(function(e){return e.messageId;}),
+            t.msMessageIds||[],t.gmailMessageIds||[]);
+          _mpPlan=await _mailPaketAnalysieren(file,_bekannt);
+        }
+      }catch(_mpe){
+        console.warn('[b603] Analyse fehlgeschlagen:',_mpe);
+        showToast('⚠ Auspacken fehlgeschlagen ('+_mpe.message+') – die Mail wird wie bisher abgelegt','warning',7000);
+      }
+      if(_mpPlan&&_mpPlan.mails.length){
+        const _weiter=await _mailPaketVorschau(_mpPlan);
+        if(!_weiter){showToast('Abgebrochen – nichts abgelegt','info',2500);return;}
+        showToast('📥 Lege Mail-Paket ab – das kann bei grossen Mails etwas dauern…','info',6000);
+        const _ziele=(typeof _pamAnhangZiele==='function')?_pamAnhangZiele(t,fid):{bild:fid,dok:fid};
+        const _bilanz=await _mailPaketAblegen(_mpPlan,{
+          fidMail:fid,
+          fidBild:_ziele.bild||fid,
+          fidDok:_ziele.dok||fid,
+          aufMail:function(e){if(!t.emailOriginals)t.emailOriginals=[];t.emailOriginals.push(e);},
+          aufPdf:function(e){if(!t.emailPdfs)t.emailPdfs=[];t.emailPdfs.push(e);},
+          aufFoto:function(e){if(!t.fotos)t.fotos=[];t.fotos.push(e);},
+          aufDok:function(e){if(!t.attachments)t.attachments=[];t.attachments.push(e);},
+          speichern:function(){
+            if(t===_emCurrentTask&&typeof _emScheduleSave==='function')_emScheduleSave();
+            else if(typeof autoSave==='function')autoSave();
+          }
+        },file);
+        try{
+          if(t===_emCurrentTask){
+            if(typeof _emReloadMailList==='function')_emReloadMailList();
+            if(typeof _emUpdateTop2==='function')_emUpdateTop2();
+          }
+        }catch(_re){console.warn('[b603] Anzeige:',_re);}
+        let _txt='✅ '+_bilanz.mails+' Mail'+(_bilanz.mails!==1?'s':'')+' abgelegt';
+        if(_bilanz.bilder)_txt+=' · '+_bilanz.bilder+' Bild/Video';
+        if(_bilanz.dok)_txt+=' · '+_bilanz.dok+' Dokument'+(_bilanz.dok!==1?'e':'');
+        if(_bilanz.pdf)_txt+=' · '+_bilanz.pdf+' PDF-Lesekopie'+(_bilanz.pdf!==1?'n':'');
+        showToast(_txt,'success',6000);
+        if(_bilanz.fehler)showToast('⚠ '+_bilanz.fehler+' Datei(en) konnten nicht hochgeladen werden – siehe Konsole','error',8000);
+        return;
+      }
     }
     // b548 (V2): EML-Metadaten VOR dem Upload lesen – für Dateiname (Mail-Datum statt
     // Upload-Tag, wie im Auftrags-Pfad), Anhang-Auspacken und PDF-Lesekopie
