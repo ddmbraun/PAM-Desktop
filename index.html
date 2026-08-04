@@ -5301,7 +5301,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-04 · #610'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-04-b610) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-04 · #611'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-04-b611) – MERKE: bei jedem Build mit hochzählen!
 
 // ── GASTMODUS ──
 const _pamGuest=(function(){
@@ -8806,8 +8806,89 @@ function _heuteSetFilter(key,val){
   renderHeute();
 }
 
-var _pamRasterFilter={overdue:true,heute:true,ausf:true};
-var _pamRasterGrouped={overdue:[],heute:[],ausf:[]};
+var _pamRasterFilter={overdue:true,heute:true,ausf:true,turnus:true};
+var _pamRasterGrouped={overdue:[],heute:[],ausf:[],turnus:[]};
+
+// ══════════════════════════════════════════════════════════════════════════
+// b611 – FÄLLIGE WIEDERKEHRENDE LEISTUNGEN IN „HEUTE"
+//
+// Bewusst eine EIGENE Gruppe, nicht „Überfällig": überfällig ist etwas mit
+// Frist, Wartung hat keine. Eigener Knopf, eigene Farbe, abschaltbar.
+// Eine Kachel je LEISTUNG (nicht je Objekt) – sonst könnte man bei einem
+// Objekt mit mehreren Leistungen nicht einzeln abhaken.
+// ══════════════════════════════════════════════════════════════════════════
+function _tuSammleFaellige(){
+  var out=[];
+  Object.keys(boards||{}).forEach(function(bn){
+    if(bn.startsWith('_'))return;
+    (boards[bn]||[]).forEach(function(t){
+      if(!t||t.archiviert||t.spaeterBearbeiten)return;
+      (t.turnusListe||[]).forEach(function(l){
+        if(l&&_tuFaellig(l))out.push({t:t,board:bn,l:l});
+      });
+    });
+  });
+  // Am längsten Liegengebliebenes zuerst – ohne Eintrag ganz nach vorn
+  out.sort(function(a,b){
+    var ta=_tuTageSeit(_tuBezug(a.l)), tb=_tuTageSeit(_tuBezug(b.l));
+    if(ta===null&&tb===null)return 0;
+    if(ta===null)return -1;
+    if(tb===null)return 1;
+    return tb-ta;
+  });
+  return out;
+}
+
+// Abhaken direkt aus der Kachel – arbeitet am GESPEICHERTEN Task, nicht an der
+// Arbeitskopie des Fensters. Muster wie _kalDeleteTermin: mutieren, offenes
+// Fenster nachziehen, autoSave, neu zeichnen.
+function _tuKachelErledigt(taskId,lId){
+  var t=findTaskById(taskId); if(!t)return;
+  var l=(t.turnusListe||[]).find(function(x){return x&&x.id===lId;}); if(!l)return;
+  var heute=_tzHeuteIso();
+  if(!Array.isArray(l.eintraege))l.eintraege=[];
+  if(l.eintraege.some(function(e){return e.datum===heute;})){
+    showToast('Für heute steht schon ein Eintrag','warning',3000);
+    return;
+  }
+  l.eintraege.push({datum:heute,notiz:'',skip:false});
+  l.eintraege.sort(function(a,b){return String(b.datum||'').localeCompare(String(a.datum||''));});
+  // Bautagebuch des Tasks mitschreiben
+  if(!Array.isArray(t.notizVerlauf))t.notizVerlauf=[];
+  t.notizVerlauf.push({ts:new Date().toISOString(),
+    text:'🔁 Leistung erledigt: '+(l.name||'')+' – '+_tuDe(heute)});
+  // Steht derselbe Task gerade offen? Dann Arbeitskopie nachziehen, sonst
+  // überschreibt das nächste Speichern im Fenster den frischen Eintrag wieder.
+  try{
+    var offen=(document.getElementById('taskId')||{}).value||'';
+    if(offen===t.id){
+      taskTurnus=JSON.parse(JSON.stringify(t.turnusListe||[]));
+      if(Array.isArray(taskNotizVerlauf))taskNotizVerlauf.push(t.notizVerlauf[t.notizVerlauf.length-1]);
+      if(typeof renderTurnusListe==='function')renderTurnusListe();
+      if(typeof renderTaskNotizen==='function')renderTaskNotizen();
+    }
+  }catch(e){console.warn('[TU] offenes Fenster:',e);}
+  try{autoSave();}catch(e){console.warn('[TU] autoSave:',e);}
+  renderHeute();
+  showToast('✓ '+(l.name||'')+' – heute eingetragen','success',2200);
+}
+
+// Kachel einer fälligen Leistung. Klick öffnet den Task, der Knopf hakt ab.
+function _tuKachel(x){
+  var t=x.t, l=x.l;
+  var farbe=TU_FARBE[_tuAmpel(l)]||TU_FARBE.gelb;
+  var idT=_escHtml(t.id), idL=_escHtml(l.id);
+  return '<div style="background:var(--bg2);border-radius:10px;border:1px solid var(--border);border-left:4px solid #7F77DD;padding:9px 10px;">'
+    + '<div style="display:flex;align-items:flex-start;gap:4px;margin-bottom:5px;cursor:pointer;" onclick="_pamOpenTaskFromHeute(\''+idT+'\')" title="Objekt öffnen">'
+    +   '<span style="width:7px;height:7px;border-radius:50%;background:'+farbe+';flex-shrink:0;margin-top:3px;display:inline-block;"></span>'
+    +   '<span style="font-size:11px;font-weight:600;color:var(--text);line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">'+esc(t.title||'')+'</span>'
+    + '</div>'
+    + '<div style="font-size:10px;color:var(--text2);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">🏠 '+esc(x.board||'')+'</div>'
+    + '<div style="font-size:10px;color:var(--text2);margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+_escHtml((l.name||'')+' · '+_tuIntervall(l.intervall).label+' · '+_tuStatusText(l))+'">🔁 '+esc(l.name||'')+' · '+esc(_tuStatusText(l))+'</div>'
+    + '<button onclick="event.stopPropagation();_tuKachelErledigt(\''+idT+'\',\''+idL+'\')" style="width:100%;padding:4px 8px;border-radius:5px;border:none;background:#7F77DD;color:#fff;font-size:10px;font-weight:700;cursor:pointer;" title="Heutiges Datum als erledigt eintragen">✓ Heute erledigt</button>'
+    + '</div>';
+}
+function _pamOpenTaskFromHeute(id){ if(typeof openEditTaskModal==='function')openEditTaskModal(id); }
 function _pamToggleRasterFilter(key){
   _pamRasterFilter[key]=!_pamRasterFilter[key];
   renderHeute();
@@ -8869,6 +8950,14 @@ function _pamFilterTip(e,key){
   var html='<div style="display:flex;flex-direction:column;gap:3px;">';
   items.slice(0,10).forEach(function(item){
     var t=item.t;
+    // b611: Wartungs-Einträge haben keinen Termin – eigener Text statt Fälligkeit
+    if(item.l){
+      html+='<div style="padding:3px 0 4px;border-bottom:0.5px solid var(--border);">'
+        +'<div style="font-size:11px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:270px;">'+esc(t.title||'(kein Titel)')+'</div>'
+        +'<div style="font-size:10px;color:var(--text2);margin-top:1px;">🔁 '+esc(item.l.name||'')+' · '+esc(_tuStatusText(item.l))+'</div>'
+        +'</div>';
+      return;
+    }
     var _ftTip=t.freieTermine&&t.freieTermine.length?t.freieTermine:(t.freierTermin&&t.freierTermin.datum?[t.freierTermin]:[]);
     var matchFT=_ftTip.find(function(f){return f.datum&&f.datum<=today&&!f.erledigt;});
     var matchAufg=(t.aufgaben||[]).find(function(a){return a.datum&&a.datum<=today&&!a.erledigt;});
@@ -8933,6 +9022,10 @@ function _pamHeuteRaster(listeAll, today, typFilter, terminFilter){
     else if(hasAusf)grouped.ausf.push(item);
     else grouped.heute.push(item);
   });
+  // b611: fällige wiederkehrende Leistungen. Sie hängen an Aufträgen, laufen
+  // also nicht mit, wenn nach Aufgabe/Posteingang oder nach offenen Anrufen/
+  // Besichtigungen gefiltert wird.
+  grouped.turnus=(typFilter==='aufgaben'||typFilter==='posteingang'||_heuteAktFilter)?[]:_tuSammleFaellige();
   _pamRasterGrouped=grouped;
   var rf=_pamRasterFilter;
   function fBtn(key,label,color,cnt){
@@ -8960,6 +9053,7 @@ function _pamHeuteRaster(listeAll, today, typFilter, terminFilter){
     +fBtn('overdue','⚠️ \xdcberf\xe4llig','#E24B4A',grouped.overdue.length)
     +fBtn('heute','📅 Heute f\xe4llig','#EF9F27',grouped.heute.length)
     +fBtn('ausf','🔧 Ausf\xfchrung heute','#378ADD',grouped.ausf.length)
+    +(grouped.turnus.length?fBtn('turnus','🏠 Immobilien','#7F77DD',grouped.turnus.length):'')
     +'<span style="flex:1;min-width:6px;"></span>'
     +typSel+' '+termSel
     +'<span style="font-size:11px;color:var(--text2);white-space:nowrap;margin-left:2px;">Offen:</span>'
@@ -8971,10 +9065,13 @@ function _pamHeuteRaster(listeAll, today, typFilter, terminFilter){
   if(rf.heute)grouped.heute.forEach(function(x){liste.push(Object.assign({},x,{_grp:'heute'}));});
   if(rf.ausf)grouped.ausf.forEach(function(x){liste.push(Object.assign({},x,{_grp:'ausf'}));});
   liste=liste.filter(function(x,i,a){return a.findIndex(function(y){return y.t.id===x.t.id;})===i;});
+  // b611: NICHT in die Entdopplung oben – die geht über die Task-ID, und ein
+  // Objekt kann mehrere fällige Leistungen haben (Reinigung UND Heizung).
+  var tuListe=rf.turnus?grouped.turnus:[];
   var html='<div style="margin:0 0 12px;">';
   html+='<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text2);margin-bottom:6px;">Tages\xfcbersicht</div>';
   html+=filterBar;
-  if(!liste.length){return html+'<div style="font-size:12px;color:var(--text2);padding:8px 0;">Keine Kacheln f\xfcr aktive Filter.</div></div>';}
+  if(!liste.length&&!tuListe.length){return html+'<div style="font-size:12px;color:var(--text2);padding:8px 0;">Keine Kacheln f\xfcr aktive Filter.</div></div>';}
   html+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;">';
   liste.forEach(function(item){
     var t=item.t,board=item.board;
@@ -9019,6 +9116,9 @@ function _pamHeuteRaster(listeAll, today, typFilter, terminFilter){
       +'</div>'
       +'</div>';
   });
+  // b611: Wartungs-Kacheln ans Ende – erst die echten Fristen, dann das,
+  // was „mal wieder dran wäre"
+  tuListe.forEach(function(x){ html+=_tuKachel(x); });
   html+='</div></div>';
   return html;
 }
