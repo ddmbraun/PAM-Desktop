@@ -7682,6 +7682,8 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
         <div style="height:1px;background:var(--border);margin:4px 2px;"></div>
         <button class="pam-fmenu-item" onclick="_pamFileMenuClose();pamForceSwUpdate()" title="App aktualisieren (Service Worker)">🔄 App aktualisieren</button>
         <button class="pam-fmenu-item" onclick="_pamFileMenuClose();_pamVersionRollback()" title="HTML-Version zurücksetzen: Backup auswählen → als index.html herunterladen → zu GitHub hochladen">⏮ Version zurücksetzen</button>
+        <button class="pam-fmenu-item" onclick="_pamFileMenuClose();pamAbmelden()" title="b650: Zugänge zu Drive, Gmail und Outlook aus diesem Browser entfernen, dazu die lokale Kopie der Auftragsdaten. In Drive wird nichts gelöscht.">&#128275; Abmelden</button>
+        <div style="height:1px;background:var(--border);margin:4px 2px;"></div>
         <button class="pam-fmenu-item" onclick="_pamFileMenuClose();_clearCacheAndReload()" title="Browser-Cache leeren und Seite neu laden (bei Darstellungsproblemen oder nach Updates)">🧹 Cache leeren</button>
       </div>
     </div>
@@ -9180,7 +9182,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-12 · #649'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-11-b646) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-12 · #650'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-11-b646) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -24723,6 +24725,10 @@ function gmailConnect(){
   if(gmailToken){
     gmailToken=null;gmailUserEmail=null;
     try{localStorage.removeItem('pam_gmail_token_v1');}catch(e){}
+    // b650: Bis hierher wurde nur das kurzlebige Ticket entfernt – der DAUERHAFTE
+    // Schlüssel blieb liegen, PAM meldete sich beim nächsten Start also von selbst
+    // wieder an. „Abmelden" war damit keins.
+    try{localStorage.removeItem('pam_gmail_refresh_token');}catch(e){}
     _gmUpdateBtn();showToast('Gmail abgemeldet','info',2000);return;
   }
   // Redirect-Flow – funktioniert zuverlässig auf GitHub Pages (COOP-Header blockiert Popups)
@@ -39419,6 +39425,85 @@ function _pamFileMenuClose(){const m=document.getElementById('pamFileMenu');if(m
 document.addEventListener('click',function(e){
   if(!e.target.closest('#pamFileMenu')&&!e.target.closest('#pamFileMenuBtn'))_pamFileMenuClose();
 });
+
+/* ── b650: ABMELDEN ──────────────────────────────────────────────────────────
+   Bis b649 gab es für Google Drive kein Abmelden. Der dauerhafte Zugangsschlüssel
+   (`pam_gdrive_refresh_token`) blieb im Browser liegen, bis Google ihn irgendwann
+   ungültig machte – wer an einen unbeaufsichtigten angemeldeten Rechner kam, kam
+   damit an Drive UND das Postfach. Das war der reale Weg an die Daten, nicht der
+   öffentliche Link.
+
+   Auch das vorhandene Gmail-„Abmelden" räumte nur das kurzlebige Ticket weg und
+   ließ den dauerhaften Schlüssel stehen – beim nächsten Start meldete sich PAM
+   also von selbst wieder an. Das ist hier mit repariert.
+
+   Mit weggeräumt wird die Vollkopie der Datenbank, die PAM bei jedem Speichern
+   im Browser ablegt (`pam_board_backup_v1`) – sie enthält alle Aufträge im
+   Klartext und wurde nie gelöscht.
+
+   NICHT angetastet werden die Bedien-Einstellungen (Ansichten, Filter,
+   Spaltenbreiten). Die sind harmlos, und ihr Verlust wäre nur ärgerlich.        */
+const _ABMELDE_SCHLUESSEL = [
+  'pam_gdrive_refresh_token', 'pam_gdrive_token_v1', 'pam_gdrive_last_action',
+  'pam_gmail_refresh_token', 'pam_gmail_token_v1',
+  'pam_user_email_v1',
+  '_msPamLoginSlot', '_msPamPkce',
+  PC_BACKUP_KEY,   // Vollkopie der Datenbank im Browser
+];
+
+function _pamUngespeichert(){
+  // Dieselbe Regel wie die Verlassen-Warnung aus b637/b638
+  if(_savePending)return true;
+  try{
+    const jetzt=_pamStandHash(JSON.stringify(buildSaveObject(),null,2));
+    return _letzterStandHash!==null && jetzt!==_letzterStandHash;
+  }catch(e){ return false; }
+}
+
+function pamAbmelden(){
+  if(_pamUngespeichert()){
+    showToast('⚠ Es gibt noch nicht gespeicherte Änderungen – erst speichern lassen, dann abmelden.','warning',6000);
+    return;
+  }
+  const ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:99999;display:flex;align-items:center;justify-content:center;';
+  const box=document.createElement('div');
+  box.style.cssText='background:var(--bg2);border-radius:14px;padding:26px;max-width:460px;width:92vw;box-shadow:0 20px 60px rgba(0,0,0,.5);';
+  box.innerHTML='<div style="font-size:16px;font-weight:800;color:var(--text);margin-bottom:10px;">🔓 Abmelden</div>'
+    +'<div style="font-size:13px;color:var(--text2);line-height:1.65;">'
+    +'Entfernt aus <b>diesem Browser</b>:<br>'
+    +'• den Zugang zu Google&nbsp;Drive und Gmail<br>'
+    +'• den Zugang zu Outlook<br>'
+    +'• die lokale Kopie der Auftragsdaten<br><br>'
+    +'<b>In Google Drive wird nichts gelöscht.</b> Nach dem nächsten Anmelden ist alles wieder da.<br><br>'
+    +'Sinnvoll, bevor der Rechner unbeaufsichtigt bleibt oder weitergegeben wird.'
+    +'</div>'
+    +'<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;">'
+    +'<button id="_abmAbbr" style="padding:9px 16px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;font-size:13px;">Abbrechen</button>'
+    +'<button id="_abmOk" style="padding:9px 16px;border-radius:8px;border:none;background:#b91c1c;color:#fff;font-weight:700;cursor:pointer;font-size:13px;">Jetzt abmelden</button>'
+    +'</div>';
+  ov.appendChild(box);document.body.appendChild(ov);
+  box.querySelector('#_abmAbbr').onclick=function(){ov.remove();};
+  box.querySelector('#_abmOk').onclick=function(){
+    let weg=0;
+    for(const k of _ABMELDE_SCHLUESSEL){
+      try{ if(localStorage.getItem(k)!==null){ localStorage.removeItem(k); weg++; } }catch(e){}
+    }
+    // Alles im Speicher ebenfalls fallen lassen, damit vor dem Neuladen nichts bleibt
+    try{ gdriveToken=null; gdriveTokenExpires=0; }catch(e){}
+    try{ gmailToken=null; gmailUserEmail=null; }catch(e){}
+    try{ msToken=null; msUserEmail=null; msRefreshToken=null; }catch(e){}
+    console.log('[PAM] Abgemeldet – '+weg+' Einträge entfernt.');
+    ov.remove();
+    /* Neu laden: so bleibt garantiert nichts im Arbeitsspeicher stehen.
+       ⚠ Nachgemessen (b650): Direkt nach dem Neuladen legt die App wieder ein
+       `pam_board_backup_v1` an – das ist KEIN Rückfall. Es enthält dann nur die
+       leeren Standard-Spaltennamen (122 Zeichen, keine Boards, keine Aufträge),
+       weil ohne Anmeldung nichts geladen wird. Wer das nachprüfen will: Länge
+       ansehen, nicht bloß die Existenz des Eintrags. */
+    location.reload();
+  };
+}
 
 // ── App-Update-Button: unregistriert SW und lädt neu ───
 function pamForceSwUpdate(){
