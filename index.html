@@ -7464,6 +7464,7 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 .ptp-immo-mode .mv2-section{display:none!important;}
 .ptp-immo-mode #tObjektSect,
 .ptp-immo-mode #tTurnusSect,
+.ptp-immo-mode #tObjAuftraegeSect,  /* b652: Liste der Aufträge an diesem Objekt */
 .ptp-immo-mode #tFotoSect,
 .ptp-immo-mode #tDokuSect,
 .ptp-immo-mode #tFormulareSect,     /* b624: Formulare-Zeile – Wartungsprotokolle gehören ans Objekt */
@@ -7477,6 +7478,10 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 .ptp-immo-mode #tBaudokuSect,
 .ptp-immo-mode #tChecklisteSect,
 .ptp-immo-mode #tTermZeitSect{display:none!important;}
+/* b652: Die Liste „Aufträge an diesem Objekt" gehört ausschließlich ins Objektfenster.
+   Standard AUS – die Auswahlliste oben holt sie im Objekt-Modus zurück. Ohne diese
+   Zeile stünde sie in JEDEM Auftragsfenster, weil dort keine Ausblendliste greift. */
+#tObjAuftraegeSect{display:none;}
 /* b624: Die Zieh-Flächen (✉/📎) wohnen seit b553 IM Timer-Block – b614 hatte mit dem
    Timer unbeabsichtigt auch sie ausgeblendet (Befund Frank: „kann keine Dokumente
    reinziehen"). Block zeigen, innen Timer und E-Mail-Zone weg – ein Objekt hat
@@ -8276,6 +8281,16 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
           </div>
         </div>
 
+        <!-- 🛠 Aufträge an diesem Objekt (b652) – reine Anzeige. Der Inhalt wird bei
+             jedem Öffnen aus objektId berechnet (_renderObjAuftraege), es gibt bewusst
+             KEIN gespeichertes Verweis-Feld, das veralten könnte. -->
+        <div class="mv2-section mv2-r-card baustelle-only collapsible open" id="tObjAuftraegeSect">
+          <div class="mv2-section-label mv2-rhdr-amber" onclick="_toggleMv2Sect('tObjAuftraegeSect',event)" style="cursor:pointer;">🛠 Aufträge an diesem Objekt<span id="objAufHdrInfo" style="margin-left:8px;font-weight:400;color:var(--text2);font-size:calc(11px * var(--modal-scale,1));text-transform:none;"></span><span class="mv2-coll-arrow" style="margin-left:auto;">›</span></div>
+          <div class="mv2-r-card-body">
+            <div id="objAuftraegeListe"></div>
+          </div>
+        </div>
+
         <!-- ══ E-Mail-Block (blau Card) – Build #53 / b567 + b568: Kopf in ZWEI Zeilen –
              Zeile 1: 📧 E-Mail · Zähler · 📬 Öffnen · ▾ (klappt die Liste auf)
              Zeile 2: Absender mit voller Adresse (Klick → Aktions-Popup)
@@ -8435,6 +8450,9 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
       <button class="topbar-btn" id="dachplanBtn" onclick="Dachplan.open()" title="Dachplan (Karte/Bild mit Pins)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);">🏠 Dachplan</button>
       <button class="topbar-btn" id="archiveTaskBtn" onclick="archiveTask(document.getElementById('taskId').value,event)" title="Task archivieren" style="display:none;background:var(--bg3);border:1px solid var(--border);color:var(--text2);">📦 Archivieren</button>
       <button class="topbar-btn" id="spaeterBearbeitenBtn" onclick="setSpaeterBearbeiten(document.getElementById('taskId').value,event)" title="Task auf Später bearbeiten setzen" style="display:none;background:var(--bg3);border:1px solid var(--border);color:var(--text2);">⏳ Später bearbeiten</button>
+      <!-- b652: Nur an Auftragskarten am Objekt sichtbar (siehe _applyBoardType). Ruft
+           denselben Weg wie ⋯ → „🏗 → Auftrag erstellen", nur eben auffindbar. -->
+      <button class="topbar-btn" id="objZuAuftragBtn" onclick="_pamZuAuftragAusTask()" title="Vollständige Auftragsstruktur im Objektordner anlegen, Fotos mitnehmen und die Karte ins Auftrags-Board verschieben" style="display:none;background:#E6F1FB;border:1px solid #B5D4F4;color:#185FA5;font-weight:700;">🏗 Richtigen Auftrag daraus machen</button>
       <!-- ⋯ Mehr-Dropdown -->
       <div class="mv2-mehr-wrap" style="margin-right:auto;">
         <button type="button" class="topbar-btn" id="mv2MehrBtn" onclick="_toggleMehrMenu(event)" title="Weitere Optionen" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);letter-spacing:2px;padding:5px 10px;">⋯</button>
@@ -9183,7 +9201,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-13 · #651'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-13-b651) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-13 · #652'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-13-b652) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -13618,6 +13636,12 @@ function taskCardHTML(task){
   // neben dem Jahresstand und ist damit auch bei zugeklappter Karte erreichbar.
   const _auftragKopfBtn=((boardTypes[currentBoard]||'baustelle')==='immobilie'&&!task.objektId)
     ?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:#E6F1FB;color:#185FA5;border:1px solid #B5D4F4;white-space:nowrap;cursor:pointer;" title="Neuen Auftrag an diesem Objekt anlegen (landet in der Spalte 🛠 Aufträge)" onclick="event.stopPropagation();_objektNeuerAuftrag('${esc(task.id)}')">➕ Auftrag</span>`
+      // b652: Zähler daneben – wie viele Aufträge hängen an diesem Objekt? Zählt
+      // boardübergreifend, also auch die längst zum richtigen Auftrag ausgebauten.
+      +(function(){try{
+        const n=_objAufZaehlung().get(task.id)||0;
+        return n?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:#FAEEDA;color:#854F0B;border:1px solid #FAC775;white-space:nowrap;cursor:pointer;" title="${n} Auftrag/Aufträge an diesem Objekt – Objekt öffnen, die Liste steht im Fenster" onclick="event.stopPropagation();openEditTaskModal('${esc(task.id)}')">🛠 ${n}</span>`:'';
+      }catch(e){return '';}})()
     :'';
   const _emlBadge=(()=>{const n=(task.emailOriginals||[]).length;return n?`<span style="display:inline-flex;align-items:center;gap:2px;font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:#E0F2FE;color:#075985;border:1px solid #BAE6FD;white-space:nowrap;cursor:pointer;" onclick="event.stopPropagation();openEditTaskModal('${esc(task.id)}')"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#075985" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>${n}</span>`:'';})();
   const _pdfBadge=(()=>{const n=(task.emailPdfs||[]).length;return n?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:#FCEBEB;color:#c0392b;border:1px solid #F7C1C1;white-space:nowrap;">📄 ${n}</span>`:'';})();
@@ -28272,9 +28296,17 @@ async function _pamTaskZuAuftrag(task,vonBoard){
   if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden (☁️ oben rechts)','error',6000);return;}
   if(!task){showToast('Kein Task gefunden','error');return;}
   const titel=(task.title||'').trim()||'Auftrag';
-  const name=await _promptFolderName(titel,DEFAULT_FOLDER_BAUSTELLE);
+  // b652: Stammt die Karte von einem Objekt (Handy-Weg „➕ Auftrag an diesem Objekt"),
+  // gehört der neue Auftrag in den OBJEKTORDNER und nicht in den Sammelordner. Der
+  // Ordner ist damit vorbelegt – wechseln geht weiter über 📂 in der Zeile „Ablegen in".
+  const _objZiel=await _b652ObjektZiel(task);
+  const _startEltern=(_objZiel&&_objZiel.parentUrl)?_objZiel.parentUrl:DEFAULT_FOLDER_BAUSTELLE;
+  const _startName=(_objZiel&&_objZiel.parentUrl)?_b652OrdnerVorschlag(task,_objZiel.obj):titel;
+  const _nasBasis=(_objZiel&&_objZiel.parentUrl&&_objZiel.obj)?(_objZiel.obj.nas||''):'';
+  if(_objZiel&&!_objZiel.parentUrl)showToast('ℹ Objektordner nicht gefunden – bitte Ablageort prüfen','info',6000);
+  const name=await _promptFolderName(_startName,_startEltern,_nasBasis);
   if(!name)return;
-  const zielFid=_extractFolderIdFromUrl(_fnpLastParentUrl||'')||_extractFolderIdFromUrl(DEFAULT_FOLDER_BAUSTELLE);
+  const zielFid=_extractFolderIdFromUrl(_fnpLastParentUrl||'')||_extractFolderIdFromUrl(_startEltern);
   if(!zielFid){showToast('⚠ Kein gültiger Ablageordner gewählt','error',5000);return;}
 
   showToast('📁 Auftragsordner wird angelegt…','info',6000);
@@ -28313,6 +28345,12 @@ async function _pamTaskZuAuftrag(task,vonBoard){
   task.gdrive      =urls.fotoUrl;
   task.emailOrdner =urls.emailUrl;
   task.dokOrdner   =urls.dokUrl;
+  // b652: NAS-Pfad nachziehen – Drive und NAS sind gespiegelt, der Ordner steht dort
+  // also gleich mit. Nur beim Objekt-Weg, wo der Elternpfad bekannt ist.
+  if(_nasBasis){
+    try{task.nas=String(_nasBasis).replace(/[\\/]+$/,'')+'\\'+name;}
+    catch(e){console.warn('[b652] NAS-Pfad:',e);}
+  }
 
   showToast('✓ Auftragsordner angelegt'+(bewegt?' · '+bewegt+' Datei(en) mitgenommen':''),'success',5000);
 
@@ -28353,7 +28391,10 @@ let _autoFolderCreating=false;
 // Ablageort landet in _fnpLastParentUrl – der Rückgabewert bleibt der Ordnername (String),
 // damit die vier anderen Aufrufer (PDF-, E-Mail-, EML-Ordner) unverändert weiterlaufen.
 let _fnpLastParentUrl='';
-function _promptFolderName(suggested,parentUrl){
+// b652: Dritter Parameter nasBasis (optional) blendet den Längenwächter ein – den
+// braucht nur der Weg „Auftrag am Objekt", weil dort eine Ebene tiefer abgelegt wird
+// und Windows bei 260 Zeichen abbricht. Ohne den Parameter ist alles wie bisher.
+function _promptFolderName(suggested,parentUrl,nasBasis){
   _fnpLastParentUrl=parentUrl||'';
   return new Promise(function(resolve){
     const ex=document.getElementById('_folderNamePrompt');if(ex)ex.remove();
@@ -28372,10 +28413,12 @@ function _promptFolderName(suggested,parentUrl){
        +'</div>'
        +'<div id="_fnpParentName" style="font-size:12px;color:var(--accent);margin-top:3px;font-weight:600;">&nbsp;</div>'
       :'';
+    const nasBlock=nasBasis?'<div id="_fnpLenRow" style="font-size:11px;margin-top:10px;padding:6px 8px;border-radius:6px;line-height:1.45;"></div>':'';
     box.innerHTML='<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:10px;">📁 Drive-Ordnername anpassen</div>'
       +'<div style="font-size:12px;color:var(--text2);margin-bottom:6px;">Ordnername:</div>'
       +'<input id="_fnpInput" type="text" value="'+safe+'" autocomplete="off" style="width:100%;box-sizing:border-box;padding:8px 10px;border-radius:7px;border:1.5px solid var(--accent);background:var(--bg3);color:var(--text);font-size:13px;outline:none;">'
       +parentBlock
+      +nasBlock
       +'<div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;">'
       +'<button id="_fnpCancel" style="padding:7px 16px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:13px;cursor:pointer;">Abbrechen</button>'
       +'<button id="_fnpOk" style="padding:7px 18px;border-radius:7px;border:none;background:var(--accent);color:#fff;font-size:13px;font-weight:700;cursor:pointer;">📁 Anlegen</button>'
@@ -28383,6 +28426,24 @@ function _promptFolderName(suggested,parentUrl){
     ov.appendChild(box);document.body.appendChild(ov);
     const inp=document.getElementById('_fnpInput');
     setTimeout(function(){inp.focus();inp.select();},60);
+    // b652: Längenwächter – rechnet den TIEFSTEN Pfad aus, der später entstehen kann
+    // (…\<Ordner>\Dokumente\Verlegeanleitung\<Datei>) und zeigt, wie viel für den
+    // Dateinamen übrig bleibt. Gleiche Logik wie der VBS-Wächter am NAS.
+    if(nasBasis){
+      const _lenUpd=function(){
+        const el=document.getElementById('_fnpLenRow');if(!el)return;
+        const basis=String(nasBasis).replace(/[\\/]+$/,'');
+        const voll=basis.length+1+(inp.value||'').trim().length+B652_UNTERORDNER_TIEF;
+        const platz=259-voll-1;
+        const eng=platz<B652_DATEINAME_RESERVE;
+        el.style.background=eng?'#FDECEA':'#EAF7EE';
+        el.style.color=eng?'#8B1A10':'#1E6B3A';
+        el.style.border='1px solid '+(eng?'#F5B7B1':'#B7E4C7');
+        el.textContent=(eng?'⚠ ':'✓ ')+'NAS-Pfad '+voll+' von 259 Zeichen · Platz für Dateinamen: '+(platz>0?platz:0)
+          +(eng?' – bitte kürzen, sonst bricht Windows bei 260 Zeichen ab':'');
+      };
+      inp.addEventListener('input',_lenUpd);_lenUpd();
+    }
     if(parentUrl){
       const pickBtn=document.getElementById('_fnpPick');
       if(pickBtn)pickBtn.onclick=function(){
@@ -33882,7 +33943,9 @@ function _applyBoardType(boardName){
   // b614: Objektfenster – schlanke Auswahl an Sektionen (siehe CSS ptp-immo-mode)
   // b642: Aufträge AM Objekt (task.objektId) sind kleine Baustellen, keine Objekte –
   // sie bekommen das volle Auftragsfenster statt der schlanken Objekt-Ansicht.
-  const _b642Auftrag=(function(){try{const _t=findTaskById((document.getElementById('taskId')||{}).value||'');return !!(_t&&_t.objektId);}catch(e){return false;}})();
+  // b652: den offenen Task EINMAL auflösen – die Karte wird gleich mehrfach gebraucht
+  const _offenerTask=(function(){try{const _id=(document.getElementById('taskId')||{}).value||'';return _id?findTaskById(_id):null;}catch(e){return null;}})();
+  const _b642Auftrag=!!(_offenerTask&&_offenerTask.objektId);
   box.classList.toggle('ptp-immo-mode', type==='immobilie' && !_b642Auftrag);
   // b616: hängt am Task wirklich eine Mail, bleibt der E-Mail-Block sichtbar
   box.classList.toggle('ptp-immo-hatmail', type==='immobilie' && !_b642Auftrag && _taskHatMail());
@@ -33892,11 +33955,25 @@ function _applyBoardType(boardName){
   const ti=document.getElementById('_taskTypeIndicator');
   if(ti){
     const _craneSvgTI='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><line x1="9" y1="22" x2="9" y2="7"/><line x1="1" y1="7" x2="21" y2="7"/><line x1="9" y1="4" x2="21" y2="7"/><line x1="1" y1="7" x2="9" y2="4"/><line x1="17" y1="7" x2="17" y2="16"/><path d="M15 16 q2 2 4 0"/><line x1="6" y1="22" x2="12" y2="22"/></svg>';
+    ti.style.cursor='';ti.title='';ti.onclick=null; // b652: Zustand vom vorigen Task abräumen
     if(type==='notiz'){ti.innerHTML='✅ Aufgaben';ti.className='task-type-badge notiz';}
-    else if(type==='immobilie'&&_b642Auftrag){ti.innerHTML=_craneSvgTI+' Auftrag am Objekt';ti.className='task-type-badge baustelle';} // b642
+    else if(type==='immobilie'&&_b642Auftrag){
+      ti.innerHTML=_craneSvgTI+' Auftrag am Objekt';ti.className='task-type-badge baustelle'; // b642
+      // b652: Rückweg zum Objekt – ein Klick aufs Abzeichen öffnet die Objektkarte
+      ti.style.cursor='pointer';
+      ti.title='Zum Objekt „'+(_offenerTask.objektName||'?')+'" springen';
+      ti.onclick=function(){try{openEditTaskModal(_offenerTask.objektId);}catch(e){console.warn('[b652] Objekt öffnen:',e);}};
+    }
     else if(type==='immobilie'){ti.innerHTML='🏠 Objekt';ti.className='task-type-badge immo';} // b614
     else{ti.innerHTML=_craneSvgTI+' Auftrag';ti.className='task-type-badge baustelle';}
   }
+  // b652: „🏗 Richtigen Auftrag daraus machen" steht nur an Auftragskarten am Objekt.
+  // Der Weg selbst (⋯ → Auftrag erstellen) bleibt für alle anderen unverändert dort.
+  const _zaBtn=document.getElementById('objZuAuftragBtn');
+  if(_zaBtn)_zaBtn.style.display=_b642Auftrag?'':'none';
+  // b652: Liste „Aufträge an diesem Objekt" – nur im Objektfenster, sonst leer räumen
+  try{_renderObjAuftraege((type==='immobilie'&&!_b642Auftrag&&_offenerTask)?_offenerTask.id:'');}
+  catch(e){console.warn('[b652] Auftragsliste:',e);}
   // Abschlussakte-Button: nur sichtbar für Baustelle-Tasks (und wenn ID vorhanden)
   const abBtn=document.getElementById('abschlussBtn');
   const abHtmlBtn=document.getElementById('abschlussHtmlBtn');
@@ -34729,6 +34806,125 @@ async function _objektNeuerAuftrag(objektId){
   try{if(typeof renderBoard==='function')renderBoard();}catch(e){}
   showToast('🛠 Auftrag angelegt: '+titel,'success');
   try{openEditTaskModal(t.id);}catch(e){console.warn('[AUFTRAG] Öffnen:',e);}
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// b652: Aufträge am Objekt sichtbar machen + zum richtigen Auftrag ausbauen
+// ══════════════════════════════════════════════════════════════════════════════
+// Die Liste am Objekt wird bei JEDEM Öffnen frisch aus t.objektId berechnet und
+// nirgends gespeichert. Sie kann dadurch nicht veralten, wirkt rückwirkend für
+// alle schon angelegten Aufträge und zeigt den Auftrag auch dann noch, wenn er
+// längst in einem anderen Board liegt (nach dem Umwandeln). Ein gespeichertes
+// Verweis-Feld hätte genau das nicht geschafft.
+function _objAuftraegeZu(objektId){
+  const treffer=[];
+  if(!objektId)return treffer;
+  Object.keys(boards||{}).forEach(function(b){
+    if(b.startsWith('_'))return;
+    (boards[b]||[]).forEach(function(t){if(t&&t.objektId===objektId)treffer.push({t:t,board:b,archiv:false});});
+  });
+  try{
+    (archivedTasks||[]).forEach(function(t){
+      if(t&&t.objektId===objektId)treffer.push({t:t,board:t._archivProjekt||'',archiv:true});
+    });
+  }catch(e){console.warn('[b652] Archiv:',e);}
+  // Neueste zuerst – createdAt trägt seit v150/b623 jede Karte
+  treffer.sort(function(a,b){return String(b.t.createdAt||'').localeCompare(String(a.t.createdAt||''));});
+  return treffer;
+}
+// Zähler für die Kartenköpfe: EIN Durchlauf statt einer je Objektkarte. Der Cache
+// gilt nur für den laufenden Render-Durchgang (Aufräumen per setTimeout 0), damit
+// er nach jeder Änderung von selbst verfällt.
+let _objAufZaehlCache=null;
+function _objAufZaehlung(){
+  if(_objAufZaehlCache)return _objAufZaehlCache;
+  const m=new Map();
+  const zaehl=function(t){if(t&&t.objektId)m.set(t.objektId,(m.get(t.objektId)||0)+1);};
+  Object.keys(boards||{}).forEach(function(b){if(!b.startsWith('_'))(boards[b]||[]).forEach(zaehl);});
+  try{(archivedTasks||[]).forEach(zaehl);}catch(e){}
+  _objAufZaehlCache=m;
+  setTimeout(function(){_objAufZaehlCache=null;},0);
+  return m;
+}
+function _renderObjAuftraege(objektId){
+  const box=document.getElementById('objAuftraegeListe');
+  const hdr=document.getElementById('objAufHdrInfo');
+  if(!box)return;
+  const liste=objektId?_objAuftraegeZu(objektId):[];
+  if(hdr)hdr.textContent=liste.length?('· '+liste.length):'';
+  if(!liste.length){
+    box.innerHTML='<div style="font-size:calc(12px * var(--modal-scale,1));color:var(--text2);padding:4px 2px;">Noch kein Auftrag an diesem Objekt – „➕ Auftrag" auf der Karte oder am Handy anlegen.</div>';
+    return;
+  }
+  let objBoard='';
+  Object.keys(boards||{}).forEach(function(b){if(!objBoard&&!b.startsWith('_')&&(boards[b]||[]).some(function(x){return x&&x.id===objektId;}))objBoard=b;});
+  box.innerHTML=liste.map(function(e){
+    const t=e.t;
+    const roh=String(t.createdAt||'').substring(0,10);
+    const datum=/^\d{4}-\d{2}-\d{2}$/.test(roh)?roh.split('-').reverse().join('.'):'';
+    // Liegt die Karte nicht mehr im Objekt-Board, ist sie zum richtigen Auftrag ausgebaut
+    const ausgebaut=!e.archiv&&objBoard&&e.board!==objBoard;
+    const wo=e.archiv?'📦 Archiv':((ausgebaut?'🏗 ':'')+esc(e.board||'?')+(t.status?' · '+esc(t.status):''));
+    const farbe=e.archiv?'var(--text2)':(ausgebaut?'#185FA5':'#854F0B');
+    const ordner=(t.gdriveOrdner||t.gdrive||'').trim();
+    return '<div style="display:flex;align-items:center;gap:8px;padding:5px 4px;border-bottom:0.5px solid var(--border);'
+      +(e.archiv?'opacity:.65;':'cursor:pointer;')+'"'
+      +(e.archiv?' title="Archivierter Auftrag – über 📦 Archiv wiederherstellen"':' onclick="openEditTaskModal(\''+esc(t.id)+'\')" title="Auftrag öffnen"')+'>'
+      +'<span style="flex:1;min-width:0;">'
+        +'<span style="display:block;font-size:calc(12px * var(--modal-scale,1));font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(t.title||'(ohne Titel)')+'</span>'
+        +'<span style="display:block;font-size:calc(10px * var(--modal-scale,1));color:'+farbe+';">'+wo+(datum?' · angelegt '+datum:'')+'</span>'
+      +'</span>'
+      +(ordner?'<a href="'+esc(ordner)+'" target="_blank" onclick="event.stopPropagation();" title="Ordner in Drive öffnen" style="flex-shrink:0;text-decoration:none;font-size:13px;">📂</a>':'')
+      +'</div>';
+  }).join('');
+}
+
+// ── Elternordner beim Ausbauen: der OBJEKTORDNER (Adressebene) ────────────────
+// Reihenfolge: gdriveOrdner des Objekts (dort steht seit dem WBG-Import b626 der
+// Objektordner) → Elternordner des Jahresordners, per Drive erfragt → nichts.
+// Ein gemeinsamer Sammelordner zählt NICHT als Objektordner (b543-Regel).
+async function _b652ObjektZiel(task){
+  try{
+    if(!task||!task.objektId)return null;
+    const obj=findTaskById(task.objektId);
+    if(!obj)return null;
+    let url=(obj.gdriveOrdner||'').trim();
+    let fid=_extractFolderIdFromUrl(url);
+    if(fid&&_istSammelOrdner(fid)){fid='';url='';}
+    if(!fid){
+      const jahrFid=_extractFolderIdFromUrl(obj.gdrive||'')||_extractFolderIdFromUrl(obj.dokOrdner||'');
+      if(jahrFid&&gdriveToken){
+        const r=await fetch('https://www.googleapis.com/drive/v3/files/'+jahrFid+'?fields=parents',
+          {headers:{Authorization:'Bearer '+gdriveToken}});
+        if(r.ok){
+          const p=(((await r.json()).parents)||[])[0];
+          if(p&&!_istSammelOrdner(p)){fid=p;url='https://drive.google.com/drive/folders/'+p;}
+        }
+      }
+    }
+    return {obj:obj,parentUrl:fid?url:''};
+  }catch(e){console.warn('[b652] Objektordner:',e);return null;}
+}
+// Kurzer Ordnername „JJJJ-MM-TT_Kurztext". Kunde und Adresse stehen schon im Pfad;
+// der lange VBS-Name würde im Objektordner die 260-Zeichen-Grenze von Windows
+// sprengen. Gemessen 13.08.: längster Objektpfad 155 Zeichen, tiefster Unterordner
+// \Dokumente\Verlegeanleitung = 27 – mit einem 72-Zeichen-Namen blieben 5 Zeichen
+// für den Dateinamen übrig.
+const B652_UNTERORDNER_TIEF=27;   // \Dokumente\Verlegeanleitung
+const B652_DATEINAME_RESERVE=45;  // _ezClean kürzt Dateinamen auf 40 Zeichen (b392)
+function _b652MaxOrdnerLaenge(nasBasis){
+  const b=String(nasBasis||'').replace(/[\\/]+$/,'');
+  if(!b)return 90;
+  return 259-b.length-1-B652_UNTERORDNER_TIEF-1-B652_DATEINAME_RESERVE;
+}
+function _b652OrdnerVorschlag(task,obj){
+  const roh=String((task&&task.createdAt)||'').substring(0,10);
+  const datum=/^\d{4}-\d{2}-\d{2}$/.test(roh)?roh:_tzHeuteIso();
+  const kurz=String((task&&task.title)||'Auftrag').trim();
+  let name=(datum+'_'+kurz).replace(/[\\/:*?"<>|]/g,'-').replace(/[. ]+$/,'');
+  const max=_b652MaxOrdnerLaenge(obj&&obj.nas);
+  if(max>12&&name.length>max)name=name.substring(0,max).replace(/[. ]+$/,'');
+  return name||'Auftrag';
 }
 
 // 2) Nach Daten-Load aufgerufen: VBS-Daten prüfen und Dialog zeigen
