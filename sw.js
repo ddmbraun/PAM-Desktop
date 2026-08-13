@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pam-desktop-2026-08-12-b650';
+const CACHE_NAME = 'pam-desktop-2026-08-13-b651';
 // Aenderungsnotizen stehen bewusst NICHT hier, sondern lokal in CHANGES.md -
 // diese Datei wird oeffentlich ausgeliefert (b646, Datenschutz).
 

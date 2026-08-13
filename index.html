@@ -7684,6 +7684,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
         <button class="pam-fmenu-item" onclick="_pamFileMenuClose();_pamVersionRollback()" title="HTML-Version zurücksetzen: Backup auswählen → als index.html herunterladen → zu GitHub hochladen">⏮ Version zurücksetzen</button>
         <button class="pam-fmenu-item" onclick="_pamFileMenuClose();pamAbmelden()" title="b650: Zugänge zu Drive, Gmail und Outlook aus diesem Browser entfernen, dazu die lokale Kopie der Auftragsdaten. In Drive wird nichts gelöscht.">&#128275; Abmelden</button>
         <div style="height:1px;background:var(--border);margin:4px 2px;"></div>
+        <button class="pam-fmenu-item" onclick="_pamFileMenuClose();_pamFotospeicherLeeren()" title="b651: Zwischengespeicherte Foto-Kopien aus diesem Browser entfernen. In Google Drive wird NICHTS gelöscht – die Fotos werden beim nächsten Ansehen wieder geladen. Anmeldungen bleiben bestehen.">🖼 Fotospeicher leeren</button>
         <button class="pam-fmenu-item" onclick="_pamFileMenuClose();_clearCacheAndReload()" title="Browser-Cache leeren und Seite neu laden (bei Darstellungsproblemen oder nach Updates)">🧹 Cache leeren</button>
       </div>
     </div>
@@ -9182,7 +9183,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-12 · #650'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-11-b646) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-13 · #651'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-13-b651) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -22220,20 +22221,143 @@ const _desktopFotoBlobInflight = new Map();
 // ── DrivePhotoCache: IndexedDB-Caching für Drive-Fotos ───────────────────
 // Speichert heruntergeladene Blobs lokal. Vor erneutem Download wird
 // das modifiedTime aus Drive-Metadaten geprüft – nur bei Änderung neu laden.
+/* ── b651: OBERGRENZE, AUFRÄUMEN, LEEREN ─────────────────────────────────────
+   Gemessen am 13.08.2026 auf PC-FBRAUN-01 (Chrome, Profil 8): 5,62 GB in 1964
+   Dateien, die älteste vom 14.05.2026. Allein aus dem Mai lagen noch 4.544 MB
+   da – 81 % der Gesamtmenge, drei Monate lang nie wieder gebraucht. Diese
+   Ablage füllte sich nebenbei, ohne dass jemand etwas anklickt, und hatte
+   weder Obergrenze noch Verfallsdatum noch eine Möglichkeit, sie zu leeren.
+
+   Das Handy hatte dasselbe Problem und hat es in v157 gelöst; hier ist
+   dasselbe Verfahren nachgezogen.
+
+   ⛔ WICHTIG: Beide Apps liegen unter der Herkunft ddmbraun.github.io und
+   benutzen damit PHYSISCH DIESELBE Datenbank. Name, Version (2) und
+   Indexname (cachedAt) sind deshalb Zeichen für Zeichen gleich wie am Handy.
+   Vorher öffnete der Desktop mit Version 1 und das Handy mit Version 2 – wer
+   beide in einem Browserprofil öffnete, bekam auf der Desktop-Seite einen
+   VersionError, den get()/put() stillschweigend verschluckten: der
+   Zwischenspeicher war tot und jedes Foto wurde bei jedem Ansehen neu geladen.
+   Wer hier die Version ändert, muss sie am Handy MIT ändern.
+
+   Grenze über die ANZAHL statt über Bytes – aus demselben Grund wie am Handy:
+   die Größe steht nur im Datensatz selbst, und den zu lesen hieße, jedes
+   Vollbild in den Arbeitsspeicher zu laden. Über den Index auf cachedAt lassen
+   sich die ältesten Einträge dagegen allein anhand ihrer Schlüssel finden
+   (openKeyCursor lädt die Bilddaten NICHT).                                  */
 const DrivePhotoCache = {
   _db: null,
   _DB_NAME: 'drive-photo-cache-v1',
   _STORE: 'blobs',
+  // Kleiner als am Handy (dort 400), weil hier Drive-ORIGINALE liegen statt
+  // Handy-Vorschauen: gemessener Schnitt 2,93 MB je Datei ⇒ rund 1 GB.
+  _MAX: 350,
+  // Einzelgrenze, weil 71 der 1964 gemessenen Dateien über 20 MB lagen (größte
+  // 46,5 MB, Videogröße). Ein paar solcher Brocken heben jede Stückzahl-Grenze
+  // aus den Angeln.
+  _MAX_EINZEL: 15 * 1024 * 1024,
+  _seitAufraeumen: 0,
   async _open() {
     if (this._db) return this._db;
     return new Promise((resolve, reject) => {
-      const req = indexedDB.open(this._DB_NAME, 1);
+      const req = indexedDB.open(this._DB_NAME, 2); // b651: gleiche Version wie das Handy (v157)
       req.onupgradeneeded = e => {
-        e.target.result.createObjectStore(this._STORE, { keyPath: 'id' });
+        const db = e.target.result;
+        const store = db.objectStoreNames.contains(this._STORE)
+          ? e.target.transaction.objectStore(this._STORE)
+          : db.createObjectStore(this._STORE, { keyPath: 'id' });
+        if (!store.indexNames.contains('cachedAt')) store.createIndex('cachedAt', 'cachedAt');
       };
       req.onsuccess = e => { this._db = e.target.result; resolve(this._db); };
       req.onerror = () => reject(req.error);
     });
+  },
+  // Schlüssel-Liste, entweder aus der Ablage selbst (index=null) oder aus einem
+  // Index. openKeyCursor liest NUR Schlüssel – die Bilddaten bleiben liegen.
+  _schluessel(db, index) {
+    return new Promise(res => {
+      const liste = [];
+      try {
+        const st = db.transaction(this._STORE, 'readonly').objectStore(this._STORE);
+        const rq = (index ? st.index(index) : st).openKeyCursor();
+        rq.onsuccess = e => {
+          const c = e.target.result;
+          if (!c) return res(liste);
+          liste.push(c.primaryKey);
+          c.continue();
+        };
+        rq.onerror = () => res(liste);
+      } catch (e) { res(liste); }
+    });
+  },
+  async anzahl() {
+    try {
+      const db = await this._open();
+      return await new Promise(res => {
+        const rq = db.transaction(this._STORE, 'readonly').objectStore(this._STORE).count();
+        rq.onsuccess = () => res(rq.result || 0);
+        rq.onerror = () => res(0);
+      });
+    } catch (e) { return 0; }
+  },
+  // Wirft weg, bis wieder Luft ist – Altbestand zuerst, dann das Älteste.
+  // Läuft nur gelegentlich mit (jeder 25. Ablagevorgang), damit das Ansehen
+  // von Fotos nicht bei jedem Bild eine Aufräumrunde auslöst.
+  async aufraeumen(erzwingen) {
+    try {
+      if (!erzwingen && ++this._seitAufraeumen < 25) return 0;
+      this._seitAufraeumen = 0;
+      const db = await this._open();
+      const anzahl = await this.anzahl();
+      if (anzahl <= this._MAX) return 0;
+      const wegDamit = anzahl - Math.floor(this._MAX * 0.8); // auf 80 % herunter, nicht knapp an die Grenze
+
+      // ⚠ ALTBESTAND: Einträge von vor b651 haben KEIN cachedAt. Wer das Feld
+      //   nicht hat, steht auch nicht im Index darauf – über den Index allein
+      //   wären die gemessenen 5,62 GB unsterblich gewesen. Deshalb zuerst die
+      //   Schlüssel einsammeln, die der Index NICHT kennt, und die zuerst
+      //   wegwerfen. Beide Durchläufe sind reine Schlüssel-Durchläufe, es wird
+      //   also kein einziges Bild in den Arbeitsspeicher geladen.
+      const alle = await this._schluessel(db, null);
+      const bekannt = new Set(await this._schluessel(db, 'cachedAt'));
+      const altbestand = alle.filter(k => !bekannt.has(k));
+
+      return await new Promise(res => {
+        let weg = 0;
+        const tx = db.transaction(this._STORE, 'readwrite');
+        const st = tx.objectStore(this._STORE);
+        for (const k of altbestand) {
+          if (weg >= wegDamit) break;
+          st.delete(k); weg++;
+        }
+        if (weg < wegDamit) {
+          const rq = st.index('cachedAt').openKeyCursor(); // aufsteigend = ältestes zuerst
+          rq.onsuccess = e => {
+            const c = e.target.result;
+            if (!c || weg >= wegDamit) return;
+            st.delete(c.primaryKey); weg++;
+            c.continue();
+          };
+        }
+        tx.oncomplete = () => {
+          if (weg) console.info('[Fotospeicher] ' + weg + ' alte Bilder verworfen ('
+            + anzahl + ' → ' + (anzahl - weg) + ').');
+          res(weg);
+        };
+        tx.onerror = () => res(weg);
+      });
+    } catch (e) { console.warn('[Fotospeicher] Aufräumen:', e); return 0; }
+  },
+  async leeren() {
+    try {
+      const db = await this._open();
+      return await new Promise(res => {
+        const tx = db.transaction(this._STORE, 'readwrite');
+        tx.objectStore(this._STORE).clear();
+        tx.oncomplete = () => res(true);
+        tx.onerror = () => res(false);
+      });
+    } catch (e) { return false; }
   },
   async get(driveId) {
     try {
@@ -22247,18 +22371,29 @@ const DrivePhotoCache = {
   },
   async put(driveId, arrayBuffer, mimeType, modifiedTime) {
     try {
+      // b651: Sehr große Dateien gar nicht erst ablegen. Das Bild wird dadurch
+      // nicht schlechter angezeigt – es wird beim nächsten Mal nur wieder von
+      // Drive geholt statt aus dem Zwischenspeicher.
+      const groesse = (arrayBuffer && arrayBuffer.byteLength) || 0;
+      if (groesse > this._MAX_EINZEL) return;
       const db = await this._open();
-      return new Promise(resolve => {
+      await new Promise(resolve => {
         const tx = db.transaction(this._STORE,'readwrite');
         tx.objectStore(this._STORE).put({
           id: driveId,
           buf: arrayBuffer,
           mime: mimeType || 'image/jpeg',
-          modifiedTime: modifiedTime || ''
+          modifiedTime: modifiedTime || '',
+          // b651: gleiche Feldnamen wie am Handy (v157) – dieselbe Datenbank.
+          // ⛔ Ohne cachedAt steht der Eintrag in KEINEM Index und wird vom
+          //    Aufräumen nie gefunden. Genau so entstanden die 5,62 GB.
+          size: groesse,
+          cachedAt: Date.now()
         });
         tx.oncomplete = () => resolve();
         tx.onerror = () => resolve();
       });
+      this.aufraeumen(); // b651: gelegentlich die ältesten Einträge wegwerfen
     } catch(e) {}
   },
   createBlobUrl(entry) {
@@ -39422,6 +39557,54 @@ function _pamFileMenuToggle(e){
   if(m)m.style.display=m.style.display==='none'?'block':'none';
 }
 function _pamFileMenuClose(){const m=document.getElementById('pamFileMenu');if(m)m.style.display='none';}
+
+/* ── b651: FOTOSPEICHER LEEREN ───────────────────────────────────────────────
+   Der Zwischenspeicher der Drive-Fotos hatte bis b650 keine Möglichkeit, ihn
+   loszuwerden – gemessen am 13.08.2026 lagen darin 5,62 GB, das älteste Bild
+   vom 14.05.2026.
+
+   ⛔ WARUM NICHT ÜBER DIE BROWSER-EINSTELLUNGEN: Unter der Herkunft
+   ddmbraun.github.io liegen VIER Apps, und im selben localStorage stecken die
+   Zugangsschlüssel für Drive, Gmail und Outlook. „Websitedaten löschen" in
+   Chrome nimmt die mit – Ergebnis wäre eine Neuanmeldung aller vier Apps auf
+   allen Geräten. Dieser Knopf löscht ausschließlich die Ablage `blobs`.
+
+   In Google Drive wird nichts gelöscht: Der Zwischenspeicher ist eine reine
+   Kopie, die beim nächsten Ansehen wieder entsteht.                          */
+async function _pamFotospeicherLeeren(){
+  let anzahl = 0;
+  try { anzahl = await DrivePhotoCache.anzahl(); } catch(e) {}
+  if(!anzahl){ showToast('Der Fotospeicher ist bereits leer.','info',4000); return; }
+
+  // Belegung nur als Hinweis: storage.estimate() misst die GESAMTE Herkunft,
+  // also alle vier Apps zusammen – nicht nur diesen Zwischenspeicher.
+  let belegt = '';
+  try {
+    if(navigator.storage && navigator.storage.estimate){
+      const {usage} = await navigator.storage.estimate();
+      if(usage){
+        const mb = usage/1024/1024;
+        belegt = '\nDiese Seite belegt zurzeit insgesamt '
+          + (mb >= 1024 ? (mb/1024).toFixed(2)+' GB' : mb.toFixed(0)+' MB')
+          + ' im Browser (alle PAM-Apps zusammen).';
+      }
+    }
+  } catch(e) {}
+
+  const ok = confirm('🖼 Fotospeicher leeren\n\n'
+    + anzahl + ' zwischengespeicherte Foto-Kopien werden aus diesem Browser entfernt.'
+    + belegt + '\n\n'
+    + 'In Google Drive wird NICHTS gelöscht. Die Fotos werden beim nächsten Ansehen '
+    + 'wieder geladen – das erste Mal dauert dann etwas länger.\n\n'
+    + 'Anmeldungen und Auftragsdaten bleiben unangetastet.');
+  if(!ok) return;
+
+  const erfolg = await DrivePhotoCache.leeren();
+  showToast(erfolg
+    ? ('🖼 Fotospeicher geleert – ' + anzahl + (anzahl===1?' Kopie':' Kopien') + ' entfernt.')
+    : '⚠ Der Fotospeicher konnte nicht geleert werden.',
+    erfolg ? 'success' : 'error', 6000);
+}
 document.addEventListener('click',function(e){
   if(!e.target.closest('#pamFileMenu')&&!e.target.closest('#pamFileMenuBtn'))_pamFileMenuClose();
 });
