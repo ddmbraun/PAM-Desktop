@@ -8263,7 +8263,10 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
             </div>
             <div class="modal-field full" id="tStandortField" style="display:none;margin-bottom:0;">
               <label>📍 Standort (vom Handy erfasst)</label>
-              <div id="tStandortInfo" style="font-size:calc(12px * var(--modal-scale,1));color:var(--text2);"></div>
+              <div style="display:flex;align-items:flex-start;gap:8px;">
+                <div id="tStandortInfo" style="flex:1;min-width:0;font-size:calc(12px * var(--modal-scale,1));color:var(--text2);"></div>
+                <button type="button" id="tStandortLoeschBtn" onclick="_taskStandortLoeschen()" title="Gespeicherten GPS-Punkt entfernen – die Adresse bleibt stehen" style="flex-shrink:0;padding:3px 9px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:calc(11px * var(--modal-scale,1));cursor:pointer;">✕ Standort entfernen</button>
+              </div>
             </div>
             <div class="modal-field full">
               <label>📄 Stammblatt PDF <span style="font-weight:400;color:var(--text2);font-size:calc(10px * var(--modal-scale,1))">Drive-Ordner des Objekts — wird aus Auftragsakte automatisch befüllt</span></label>
@@ -9214,7 +9217,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-13 · #653'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-13-b652) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-13 · #655'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-13-b655) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -9796,10 +9799,53 @@ function _updateStammSummary(){
   const parts=[owner,dueFmt,status,tags,repNr?'Rep.'+repNr:''].filter(Boolean);
   el.textContent=parts.length?parts.join(' · '):'Felder einklappbar';
 }
+// b654: EINE Adress-Aufbereitung für alle Karten- und Navi-Wege.
+// Objektadressen tragen bewusst mehrere Hausnummern („Musterstraße 10, 10a" – das
+// Objekt IST der ganze Block). Als Ganzes findet Google die Adresse nicht: amtlich
+// gibt es „10" und „10a" getrennt, „10, 10a" existiert als Adresse nicht. Der Helfer
+// dafür lag seit b473 im Dachplan-Modul und wirkte deshalb NUR bei „🏠 Dach" –
+// die drei Maps-Knöpfe schickten die Adresse ungekürzt raus. Jetzt steht er global,
+// der Dachplan ruft dieselbe Funktion (eine Logik, keine zweite Kopie).
+// Angezeigt wird weiter die volle Adresse – gekürzt wird nur, was Google bekommt.
+function _pamGeoQuery(a){
+  a=String(a||'').replace(/\s+/g,' ').trim();
+  if(!a)return '';
+  var plz='',ort='',str=a;
+  var m=a.match(/\b(\d{5})\b/);
+  if(m){
+    plz=m[1];
+    str=a.slice(0,m.index).replace(/[,\s]+$/,'').trim();
+    ort=a.slice(m.index+5).replace(/^[,\s]+/,'').replace(/,/g,' ').replace(/\s+/g,' ').trim();
+  }else{
+    str=a.replace(/,/g,' ').replace(/\s+/g,' ').trim();
+  }
+  // Hausnummern-Liste am Ende auf die erste reduzieren: „2, 4, 6" · „2-6" · „10/12" · „5, 5a, 5b"
+  str=str.replace(/\s(\d+\s*[a-zA-Z]?)(\s*[,\-\/]\s*\d+\s*[a-zA-Z]?)+\s*$/,' $1').replace(/\s+/g,' ').trim();
+  return (str+(plz?', '+plz:'')+(ort?' '+ort:'')).trim();
+}
 function _openTaskMaps(){
   const adr=(document.getElementById('tAdr')?.value||'').trim();
   if(!adr)return;
-  window.open('https://maps.google.com/?q='+encodeURIComponent(adr+', Deutschland'),'_blank');
+  window.open('https://maps.google.com/?q='+encodeURIComponent((_pamGeoQuery(adr)||adr)+', Deutschland'),'_blank');
+}
+// b654: Der gespeicherte Punkt kommt vom Handy und hält fest, WO DER ERFASSER STAND –
+// nicht, wo das Haus steht. Wird er unterwegs ausgelöst, zeigt er ins Nirgendwo;
+// am 13.08. lagen zwei Objektpunkte über 13 km neben dem Haus (Befund steht in
+// CHANGES.md). Das ist nicht kosmetisch – der Dachplan nimmt `t.lat`/`t.lon` VOR
+// der Adresse (setBase), und Fotos ohne eigenes GPS erben ihn im ℹ-Popup als
+// Aufnahmeort. Die Adresse bleibt beim Löschen unangetastet.
+function _taskStandortLoeschen(){
+  const id=(document.getElementById('taskId')||{}).value||'';
+  const t=id?findTaskById(id):null;
+  if(!t){showToast('Kein Task offen','error');return;}
+  if(!t.lat&&!t.lon){showToast('An diesem Task ist kein Standort gespeichert','info');return;}
+  const wo=Number(t.lat).toFixed(5)+', '+Number(t.lon).toFixed(5);
+  if(!confirm('Gespeicherten Standort entfernen?\n\n'+wo+'\n\nDie Adresse bleibt stehen. Am Handy lässt sich der Punkt jederzeit neu erfassen.'))return;
+  delete t.lat;delete t.lon;delete t.standortErfasst;
+  try{const sf=document.getElementById('tStandortField');if(sf)sf.style.display='none';}catch(e){}
+  try{autoSave();}catch(e){console.warn('[b654] Save:',e);}
+  try{render();}catch(e){}
+  showToast('📍 Standort entfernt – die Adresse bleibt','success',4000);
 }
 function _updateMapsBtn(){
   const adr=(document.getElementById('tAdr')?.value||'').trim();
@@ -11213,6 +11259,14 @@ function saveTaskData(){
     // b642: Auftrag-am-Objekt-Verweis erhalten (b591-Falle) – gesetzt von ➕ Auftrag (Desktop) bzw. Mobil v181
     objektId:existingTask?.objektId||'',
     objektName:existingTask?.objektName||'',
+    // b654: Handy-Standort erhalten (b591-Falle). Bisher fehlten die drei Felder hier –
+    // jedes Speichern am PC warf den am Handy erfassten Punkt still weg. Aufgefallen
+    // beim Prüfen am 13.08.: nur die zuletzt am Handy angefassten Objekte trugen
+    // überhaupt noch einen Standort.
+    // Löschen geht jetzt bewusst über „✕ Standort entfernen" (_taskStandortLoeschen).
+    lat:existingTask?.lat,
+    lon:existingTask?.lon,
+    standortErfasst:existingTask?.standortErfasst||'',
     zusammengefuehrtMit:existingTask?.zusammengefuehrtMit||''
   };
   if(!boards[currentBoard])boards[currentBoard]=[];
@@ -12615,7 +12669,8 @@ async function gdriveLoadFile(fileId, fileName) {
   // VBS-Auftrag prüfen (nach Daten-Load, damit Boards verfügbar sind)
   // b615: erst der Objekt-Weg. Liegt dort etwas an, kommt der Auftrags-Dialog nicht
   // dazu – zwei Dialoge übereinander wären der sichere Weg in einen Fehlklick.
-  setTimeout(function(){ try{_auftragSpaltenBoot();}catch(e){console.warn('[AUFTRAG]',e);} try{ if(_checkVbsNewImmo())return; }catch(e){console.warn('[IMMO]',e);} _checkVbsNewAuftrag(); }, 800);
+  // b655: die Einmal-Strecke steht davor, aus demselben Grund.
+  setTimeout(function(){ try{_auftragSpaltenBoot();}catch(e){console.warn('[AUFTRAG]',e);} try{ if(_checkUsbOrdner())return; }catch(e){console.warn('[USB]',e);} try{ if(_checkVbsNewImmo())return; }catch(e){console.warn('[IMMO]',e);} _checkVbsNewAuftrag(); }, 800);
   // Popup-Modus: Task nach Daten-Load automatisch öffnen
   setTimeout(_checkPopupMode, 900);
   // b637: Fangnetz – lokales Backup nach Tasks durchsehen, die in Drive fehlen
@@ -13735,7 +13790,7 @@ function taskCardHTML(task){
     return aRows.concat(fRows).join('');
   })();
   // Maps + Tel Links
-  const _mapsLink=_adr?`<a href="https://maps.google.com/?q=${encodeURIComponent(_adr)}" target="_blank" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:2px;font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:#fff;color:#0F6E56;border:1px solid #0F6E56;text-decoration:none;white-space:nowrap;" title="${esc(_adr)}"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>Maps</a>`:'';
+  const _mapsLink=_adr?`<a href="https://maps.google.com/?q=${encodeURIComponent(_pamGeoQuery(_adr)||_adr)}" target="_blank" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:2px;font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:#fff;color:#0F6E56;border:1px solid #0F6E56;text-decoration:none;white-space:nowrap;" title="${esc(_adr)}"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>Maps</a>`:'';
   const _telLink=_tel?`<a href="tel:${_tel.replace(/[^0-9+]/g,'')}" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;justify-content:center;font-size:9px;padding:1px 5px;border-radius:4px;background:#fff;color:#0F6E56;border:1px solid #0F6E56;text-decoration:none;white-space:nowrap;" title="${esc(_tel)}"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.56 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> Tel</a>`:'';
   const _ownerCol=`<div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0;min-width:60px;">
     ${task.owner?`<span style="font-size:10px;font-weight:600;color:var(--text);">${esc(task.owner)}</span>`:''}
@@ -30907,7 +30962,8 @@ function toggleFormSection(id){
 function toggleExpandTA(ta){if(!ta)return;ta.classList.toggle('expanded');if(ta.classList.contains('expanded'))ta.focus();}
 function tMapsOeffnen(){
   const adr=document.getElementById('tAdr').value.trim();
-  if(adr)window.open('https://www.google.com/maps/search/'+encodeURIComponent(adr+', Deutschland'),'_blank');
+  // b654: Hausnummern-Liste auf die erste reduzieren (siehe _pamGeoQuery)
+  if(adr)window.open('https://www.google.com/maps/search/'+encodeURIComponent((_pamGeoQuery(adr)||adr)+', Deutschland'),'_blank');
   else alert('Bitte zuerst eine Adresse eingeben.');
 }
 function _openSbPdfOrdner(){
@@ -34750,6 +34806,20 @@ function _applyStammblattPrefill(){
   }catch(e){console.warn('[IMMO] URL-Param Fehler:',e);}
 })();
 
+// b655 – Einmal-Strecke „?usbOrdner=1" vormerken. Gleiches Muster wie oben:
+// Parameter sofort in den localStorage, Adresszeile säubern (sonst löst ein
+// Neuladen den Lauf ein zweites Mal aus). Gearbeitet wird erst nach dem
+// Daten-Load in _checkUsbOrdner – vorher gibt es weder Boards noch Token.
+(function _readUsbOrdnerParam(){
+  try{
+    const sp=new URLSearchParams(window.location.search);
+    if(sp.get('usbOrdner')!=='1')return;
+    localStorage.setItem('pam_usb_ordner',JSON.stringify({_ts:Date.now()}));
+    window.history.replaceState({},'',window.location.pathname);
+    console.log('[USB] Einmal-Lauf vorgemerkt');
+  }catch(e){console.warn('[USB] URL-Param Fehler:',e);}
+})();
+
 // ══════════════════════════════════════════════════════════════════════════
 // b639 – NUR EIN PAM-FENSTER: Übergabe + Zweitfenster-Warnung
 //
@@ -35050,16 +35120,55 @@ function _auftragSpaltenBoot(){
     try{if(typeof renderBoard==='function')renderBoard();}catch(e){}
   }
 }
+// ── b654: Titel-Vorspann „<Kürzel> <Objekt> – <Kurztext>" ─────────────────────
+// Die Auftragskarten trugen bisher nur den Kurztext; auf dem Board war nicht zu
+// sehen, an welchem Haus. Die VBS baut ihre Titel längst so (Kürzel – Straße –
+// Schaden, siehe Auftragsakte-Import), das zieht hier nach.
+// Das Kürzel steht NICHT an den Objektdaten – dort steht der ausgeschriebene
+// Firmenname der Hausverwaltung. Es steht im NAS-Pfad, im Ordner unterhalb von
+// 01_Hausverwaltungen (erstes Wort). Damit bringt jede Hausverwaltung ihr eigenes
+// Kürzel selbst mit, ohne dass an den Objekten etwas nachgepflegt werden muss.
+const B654_TRENNER=' – ';
+function _objKuerzelAusNas(nas){
+  const teile=String(nas||'').split(/[\\/]+/).filter(Boolean);
+  const i=teile.findIndex(x=>/^01_Hausverwaltungen$/i.test(x));
+  const ordner=(i>=0&&teile[i+1])?teile[i+1]:'';
+  const wort=(ordner.trim().split(/\s+/)[0]||'');
+  // Nur echte Kürzel (WBG, AHV, WEG…). Heißt der Ordner „Musterverwaltung Erfurt",
+  // bleibt der Vorspann ohne Kürzel – lieber nichts als ein sinnloses Wort davor.
+  return /^[A-ZÄÖÜ]{2,5}$/.test(wort)?wort:'';
+}
+function _objTitelVorspann(obj){
+  if(!obj)return '';
+  const ohneKs=String(obj.title||'').replace(/\s*\(\d+\)\s*$/,'').trim(); // Kostenstelle raus
+  if(!ohneKs)return '';
+  const k=_objKuerzelAusNas(obj.nas);
+  return (k?k+' ':'')+ohneKs;
+}
+function _objAuftragTitel(obj,kurz){
+  const vorspann=_objTitelVorspann(obj);
+  if(!vorspann)return kurz;
+  const flach=s=>String(s||'').toLowerCase().replace(/ß/g,'ss').replace(/[^a-z0-9äöü]/g,'');
+  const ohneKs=String(obj.title||'').replace(/\s*\(\d+\)\s*$/,'').trim();
+  // Frank schreibt die Adresse manchmal selbst mit („Musterstraße 34, 34a Loch im
+  // Dach") – dann nicht doppeln.
+  if(ohneKs&&flach(kurz).includes(flach(ohneKs)))return kurz;
+  return vorspann+B654_TRENNER+kurz;
+}
 async function _objektNeuerAuftrag(objektId){
   const obj=findTaskById(objektId);
   if(!obj){showToast('Objekt nicht gefunden','error');return;}
   let board=null;
   Object.keys(boards||{}).forEach(b=>{if(!board&&!b.startsWith('_')&&(boards[b]||[]).some(t=>t&&t.id===objektId))board=b;});
   if(!board){showToast('Board des Objekts nicht gefunden','error');return;}
-  const eingabe=prompt('Neuer Auftrag am Objekt\n„'+(obj.title||'')+'“\n\nKurztext (z. B. „Rasen mähen“ oder „Reparatur Haustür“):','');
+  const _vorspann=_objTitelVorspann(obj);
+  const eingabe=prompt('Neuer Auftrag am Objekt\n„'+(obj.title||'')+'“\n\n'
+    +(_vorspann?'Der Titel bekommt automatisch „'+_vorspann+B654_TRENNER+'“ davor.\n\n':'')
+    +'Kurztext (z. B. „Rasen mähen“ oder „Reparatur Haustür“):','');
   if(eingabe===null)return;
-  const titel=(eingabe||'').trim();
-  if(!titel){showToast('Kein Text eingegeben – abgebrochen','info');return;}
+  const kurz=(eingabe||'').trim();
+  if(!kurz){showToast('Kein Text eingegeben – abgebrochen','info');return;}
+  const titel=_objAuftragTitel(obj,kurz);
   _auftragSpalteSicher(board);
   const t={id:generateId(),title:titel,desc:'',owner:'',due:'',status:AUFTRAG_SPALTE,ampel:'grün',
     adresse:obj.adresse||'',hausverwaltung:obj.hausverwaltung||'',nas:obj.nas||'',
@@ -35072,7 +35181,10 @@ async function _objektNeuerAuftrag(objektId){
   try{
     const parentFid=_extractFolderIdFromUrl(obj.gdrive||'')||_extractFolderIdFromUrl(obj.dokOrdner||'')||_extractFolderIdFromUrl(obj.gdriveOrdner||'');
     if(parentFid&&gdriveToken){
-      const safe=((_tzHeuteIso()+' '+titel).replace(/[\\/:*?"<>|]/g,'-').substring(0,80).replace(/[. ]+$/,''))||'Auftrag';
+      // b654: bewusst `kurz` statt `titel` – der Ordner liegt schon IM Objektordner,
+      // Kürzel und Adresse stehen also im Pfad. Der Vorspann gehört auf die Karte,
+      // nicht in den Ordnernamen (260-Zeichen-Grenze, siehe _b652OrdnerVorschlag).
+      const safe=((_tzHeuteIso()+' '+kurz).replace(/[\\/:*?"<>|]/g,'-').substring(0,80).replace(/[. ]+$/,''))||'Auftrag';
       const fid=await _driveGetOrCreateFolder(safe,parentFid);
       if(fid){
         const u='https://drive.google.com/drive/folders/'+fid;
@@ -35200,11 +35312,133 @@ function _b652MaxOrdnerLaenge(nasBasis){
 function _b652OrdnerVorschlag(task,obj){
   const roh=String((task&&task.createdAt)||'').substring(0,10);
   const datum=/^\d{4}-\d{2}-\d{2}$/.test(roh)?roh:_tzHeuteIso();
-  const kurz=String((task&&task.title)||'Auftrag').trim();
+  // b654: Der Kartentitel trägt jetzt „<Kürzel> <Objekt> – " als Vorspann. Im
+  // Ordnernamen wäre der doppelt (der Ordner landet IM Objektordner) und vor allem
+  // tödlich für die 260-Zeichen-Grenze: beim längsten NAS-Pfad (155 Zeichen) bleiben
+  // nach „JJJJ-MM-TT_" nur 19 Zeichen – der Vorspann allein ist länger. Also abziehen.
+  let kurz=String((task&&task.title)||'Auftrag').trim();
+  const vorspann=_objTitelVorspann(obj);
+  if(vorspann&&kurz.startsWith(vorspann+B654_TRENNER))kurz=kurz.slice((vorspann+B654_TRENNER).length).trim()||'Auftrag';
   let name=(datum+'_'+kurz).replace(/[\\/:*?"<>|]/g,'-').replace(/[. ]+$/,'');
   const max=_b652MaxOrdnerLaenge(obj&&obj.nas);
   if(max>12&&name.length>max)name=name.substring(0,max).replace(/[. ]+$/,'');
   return name||'Auftrag';
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// b655 – EINMAL-STRECKE „?usbOrdner=1": Ordnerstruktur nachtragen
+// ══════════════════════════════════════════════════════════════════════════════
+// Gegenstück zum einmaligen WBG-Import: Karten, die schon in ihrer Spalte
+// stehen, aber noch keinen eigenen Ordner haben, bekommen ihn in EINEM Lauf
+// statt einzeln über „🏗 → Auftrag erstellen".
+//
+// ⛔ Elternordner ist der OBJEKTORDNER (Adressebene) – nicht der Jahresordner
+// und nie ein Sammelordner. Entschieden wird das von `_b652ObjektZiel`, also an
+// derselben Stelle wie beim Ausbau. Zwei Wahrheiten über den Elternordner wären
+// genau die Sorte Fehler, die man erst Wochen später am falschen Ort findet.
+//
+// ⛔ Jeder Drive-Aufruf geht über `_driveGetOrCreateFolder`. Der Lauf ist damit
+// wiederholbar: ein zweiter Durchgang findet die Ordner und legt nichts doppelt
+// an. Genau diese Eigenschaft hat den WBG-Import gefahrlos gemacht.
+//
+// ⚠ Der Lauf verschiebt NICHTS. Die Karte bleibt in ihrer Spalte und in ihrem
+// Board; er füllt nur die vier Ordnerfelder und den NAS-Pfad.
+const USB_SPALTE='USB Ergänzen';
+const USB_ORDNER='2026 Reparatur USB Ergänzen';
+
+// Master-Struktur wie `_createDriveAuftragStruktur` (b534), aber durchgehend
+// GetOrCreate. Rückgabe absichtlich gleich geformt, damit die Felder unten
+// genauso belegt werden wie beim Ausbau.
+async function _usbOrdnerStruktur(name,parentFid){
+  const safe=((name||'Auftrag').replace(/[\\/:*?"<>|]/g,'-').substring(0,100).replace(/[. ]+$/,''))||'Auftrag';
+  const mainId =await _driveGetOrCreateFolder(safe,parentFid);
+  await _driveGetOrCreateFolder('Auftrag',mainId);
+  const gutId  =await _driveGetOrCreateFolder('Gutachten',mainId);
+  await _driveGetOrCreateFolder('Entwurf',gutId);
+  await _driveGetOrCreateFolder('Final',gutId);
+  const fotoId =await _driveGetOrCreateFolder('Bilder',mainId);
+  const dokId  =await _driveGetOrCreateFolder('Dokumente',mainId);
+  await _driveGetOrCreateFolder('Verlegeanleitung',dokId);
+  await _driveGetOrCreateFolder('Dokumente AG',dokId);
+  const emailId=await _driveGetOrCreateFolder('Posteingang',mainId);
+  const base='https://drive.google.com/drive/folders/';
+  return{mainId:mainId,mainUrl:base+mainId,fotoUrl:base+fotoId,dokUrl:base+dokId,emailUrl:base+emailId};
+}
+
+// Über ALLE Boards sammeln, nicht nur das gerade offene – sonst hinge das
+// Ergebnis davon ab, welches Board zufällig aktiv ist.
+function _usbKarten(){
+  const treffer=[];
+  Object.keys(boards||{}).forEach(function(b){
+    if(b.startsWith('_'))return;
+    (boards[b]||[]).forEach(function(t){
+      if(t&&t.status===USB_SPALTE&&t.objektId)treffer.push(t);
+    });
+  });
+  return treffer;
+}
+
+async function _usbOrdnerLauf(){
+  const liste=_usbKarten();
+  if(!liste.length){showToast('Keine Karte in der Spalte „'+USB_SPALTE+'" gefunden','info',6000);return;}
+  const frage='Ordnerstruktur nachtragen\n\n'+liste.length+' Karte(n) in der Spalte „'+USB_SPALTE+'".\n\n'
+    +'Je Karte entsteht IM OBJEKTORDNER:\n„'+USB_ORDNER+'"\n'
+    +'mit Auftrag / Bilder / Dokumente / Gutachten / Posteingang.\n\n'
+    +'Vorhandene Ordner werden benutzt, nicht doppelt angelegt.\n\nJetzt starten?';
+  // ⚠ Ist im Browser „keine Dialogfelder mehr anzeigen" angehakt, liefert confirm()
+  // stumm false. Deshalb sagt der Abbruch-Zweig auch, woran es liegen kann.
+  if(!confirm(frage)){showToast('Abgebrochen – falls kein Dialog kam: im Browser „Dialogfelder anzeigen" wieder erlauben','info',9000);return;}
+
+  const bericht=[];let gebaut=0,schief=0;
+  for(let i=0;i<liste.length;i++){
+    const t=liste[i];
+    showToast('📁 '+(i+1)+' / '+liste.length+' – '+(t.title||''),'info',4000);
+    try{
+      const ziel=await _b652ObjektZiel(t);
+      const parentFid=(ziel&&ziel.parentUrl)?_extractFolderIdFromUrl(ziel.parentUrl):'';
+      if(!parentFid){bericht.push('✗ '+(t.title||'')+' – Objektordner nicht gefunden');schief++;continue;}
+      const urls=await _usbOrdnerStruktur(USB_ORDNER,parentFid);
+      if(!urls||!urls.mainId){bericht.push('✗ '+(t.title||'')+' – Ordner nicht angelegt');schief++;continue;}
+      t.gdriveOrdner=urls.mainUrl;
+      t.gdrive      =urls.fotoUrl;
+      t.dokOrdner   =urls.dokUrl;
+      t.emailOrdner =urls.emailUrl;
+      const obj=ziel.obj;
+      if(obj){
+        // Drive und NAS sind gespiegelt – der NAS-Pfad steht damit fest und muss
+        // nicht gesucht werden (dieselbe Rechnung wie in `_pamTaskZuAuftrag`).
+        if(obj.nas)t.nas=String(obj.nas).replace(/[\\/]+$/,'')+'\\'+USB_ORDNER;
+        if(!t.adresse&&obj.adresse)t.adresse=obj.adresse;
+        if(!t.hausverwaltung&&obj.hausverwaltung)t.hausverwaltung=obj.hausverwaltung;
+      }
+      bericht.push('✓ '+(t.title||''));
+      gebaut++;
+    }catch(e){
+      console.warn('[USB]',(t.title||''),e);
+      bericht.push('✗ '+(t.title||'')+' – '+((e&&e.message)?e.message:'Fehler'));
+      schief++;
+    }
+  }
+  try{await autoSave();}catch(e){console.warn('[USB] Save:',e);}
+  try{if(typeof render==='function')render();}catch(e){}
+  showToast(schief?('⚠ '+gebaut+' fertig, '+schief+' offen'):('✓ '+gebaut+' Ordnerstrukturen angelegt'),schief?'warning':'success',8000);
+  alert('Ordnerstruktur nachtragen – Ergebnis\n\n'+gebaut+' fertig'+(schief?(', '+schief+' offen'):'')+'\n\n'+bericht.join('\n'));
+}
+
+// Wird nach dem Daten-Load VOR den VBS-Prüfungen aufgerufen. Gibt true zurück,
+// wenn der Lauf übernimmt – dann bleibt der VBS-Dialog aus (zwei Dialoge
+// übereinander sind der sichere Weg in einen Fehlklick, b615-Lehre).
+function _checkUsbOrdner(){
+  try{
+    const raw=localStorage.getItem('pam_usb_ordner');
+    if(!raw)return false;
+    localStorage.removeItem('pam_usb_ordner');   // immer entwerten, auch wenn gleich abgebrochen wird
+    let d=null;try{d=JSON.parse(raw);}catch(e){return false;}
+    if(!d||!d._ts||(Date.now()-d._ts)>600000)return false;   // 10-Minuten-Fenster wie b615
+    if(!gdriveToken){showToast('⚠ Erst mit Google Drive verbinden (☁️ oben rechts), dann noch einmal mit ?usbOrdner=1 aufrufen','error',10000);return false;}
+    _usbOrdnerLauf();
+    return true;
+  }catch(e){console.warn('[USB] Start:',e);return false;}
 }
 
 // 2) Nach Daten-Load aufgerufen: VBS-Daten prüfen und Dialog zeigen
@@ -40522,7 +40756,9 @@ window.Dachplan=(function(){
     },err=>{say('Standort nicht verfügbar: '+((err&&err.message)||'Freigabe/GPS'));liveStop();},
       {enableHighAccuracy:true,maximumAge:0,timeout:25000});
   }
-  function _geoQuery(a){a=String(a||'').replace(/\s+/g,' ').trim();if(!a)return '';var plz='',ort='',str=a;var m=a.match(/\b(\d{5})\b/);if(m){plz=m[1];str=a.slice(0,m.index).replace(/[,\s]+$/,'').trim();ort=a.slice(m.index+5).replace(/^[,\s]+/,'').replace(/,/g,' ').replace(/\s+/g,' ').trim();}else{str=a.replace(/,/g,' ').replace(/\s+/g,' ').trim();}str=str.replace(/\s(\d+\s*[a-zA-Z]?)(\s*[,\-\/]\s*\d+\s*[a-zA-Z]?)+\s*$/,' $1').replace(/\s+/g,' ').trim();return (str+(plz?', '+plz:'')+(ort?' '+ort:'')).trim();}
+  // b654: leitet auf die globale _pamGeoQuery um – dieselbe Logik gilt jetzt auch für
+  // die Maps-Knöpfe. Der Name bleibt, damit searchDach/setBase unverändert bleiben.
+  function _geoQuery(a){return _pamGeoQuery(a);}
   function searchDach(){var a=(t&&t.adresse)?String(t.adresse).trim():'';if(!a){say('Keine Auftragsadresse hinterlegt – Adresse ins Suchfeld tippen');return;}var q=_geoQuery(a)||a;try{var s=E.screen.querySelector('#dpSearch');if(s)s.value=q;}catch(_){}doSearch(q+', Deutschland');}
   function pinHere(){
     if(dp.base==='bild'){say('Standort-Pin nur in der Kartenansicht (🗺️)');return;}
