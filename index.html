@@ -9222,7 +9222,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-14 · #661'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-14-b661) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-14 · #662'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-14-b662) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -9761,6 +9761,45 @@ let _savePending = false;
 // die b637-Warnung fragte sonst auch nach No-Op-Anstößen bei längst grünem
 // „✓ Gespeichert".
 let _letzterStandHash = null;
+
+// ══════════════════════════════════════════════════════════════════════════
+// b662 – MOMENTAUFNAHME DES ZULETZT MIT DRIVE ABGEGLICHENEN STANDES
+//
+// Wozu: Der Konflikt-Abgleich in gdriveSaveData baut den zusammengeführten
+// Stand aus dem REMOTE-Stand auf. Lokale Änderungen gewannen bisher nur an
+// zwei Sorten Karten – der im Fenster GEÖFFNETEN und einer brandneuen.
+// Alles, was ohne offenes Fenster geändert wird, verlor gegen den Handy-Stand:
+// eine aus der Heute-Kachel abgehakte Wartung (b618), eine dort erfasste
+// Rechnung (b626), ein Kalender-Termin, ein Haken „in Heute" (b661) – rund
+// 17 Stellen rufen autoSave() ohne offenes Fenster. Ohne Fehlermeldung; die
+// Statuszeile meldete „Gespeichert".
+//
+// Wie: Wir merken uns je Karte, wie sie beim letzten Drive-Abgleich aussah.
+// Beim Zusammenführen gilt dann dieselbe Regel wie beim offenen Fenster –
+// nur die Felder, die sich seither WIRKLICH geändert haben, gewinnen lokal.
+// Alles Unveränderte bleibt beim Handy-Stand, damit dessen Änderungen nicht
+// ihrerseits verlorengehen.
+//
+// ⚡ Gesetzt wird die Aufnahme an genau denselben vier Stellen wie
+// `_letzterStandHash` – das sind die Augenblicke, in denen lokal und Drive
+// nachweislich gleich sind. Wer eine fünfte Stelle hinzufügt, muss beide
+// zusammen setzen, sonst gelten unveränderte Karten fälschlich als geändert.
+//
+// ⚠ Fehlt die Aufnahme (null), verhält sich der Abgleich exakt wie vor b662.
+// ══════════════════════════════════════════════════════════════════════════
+let _pamDriveSnapshot = null;
+function _pamSnapshotSetzen(){
+  try{
+    const st = buildSaveObject();
+    const m = new Map();
+    for(const [k, v] of Object.entries(st)){
+      if(k.startsWith('_') || !Array.isArray(v)) continue;
+      for(const t of v){ if(t && t.id) m.set(t.id, JSON.stringify(t)); }
+    }
+    _pamDriveSnapshot = m;
+  }catch(e){ _pamDriveSnapshot = null; console.warn('[b662] Momentaufnahme:', e); }
+}
+
 function _pamStandHash(s){
   let h = 5381;
   for(let i = 0; i < s.length; i++){ h = ((h << 5) + h + s.charCodeAt(i)) | 0; }
@@ -12694,6 +12733,7 @@ async function gdriveLoadFile(fileId, fileName) {
   try{localStorage.setItem(PC_FILE_KEY,JSON.stringify({id:fileId,name:fileName}));}catch(e){}
   loadFromObject(data);
   try{_letzterStandHash=_pamStandHash(JSON.stringify(buildSaveObject(),null,2));}catch(e){} // b638: Stand == Drive
+  _pamSnapshotSetzen(); // b662: frisch geladen – ab hier ist jede Karte deckungsgleich mit Drive
   updateFileStatus('ok', '☁️ ' + fileName, '✓ Von Google Drive geladen');
   updateDriveBtnBar();
   closeStartModal(); // Fix #2: Modal schließen auch beim Auto-Connect
@@ -12778,6 +12818,7 @@ async function pollWorkboardFile(){
     render();
     workboardLastModified=meta.modifiedTime;
     try{_letzterStandHash=_pamStandHash(JSON.stringify(buildSaveObject(),null,2));}catch(e){} // b638: Stand == Drive
+    _pamSnapshotSetzen(); // b662: ab hier ist jede Karte deckungsgleich mit Drive
     try{
       const ind=document.getElementById('fileMsg');
       if(ind)ind.textContent='↻ Aktualisiert vom Handy '+new Date().toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
@@ -13037,6 +13078,61 @@ async function gdriveSaveData() {
                 }
               }
             }
+            // 1b) b662: Karten, die seit dem letzten Drive-Abgleich LOKAL geändert
+            // wurden, aber NICHT im Fenster offen sind. Ohne diesen Block gewann hier
+            // ausnahmslos der Remote-Stand – siehe die Erklärung an _pamDriveSnapshot.
+            // Betrifft rund 17 Stellen, die autoSave() ohne offenes Fenster rufen:
+            // Abhaken aus der Heute-Kachel (b618), Rechnung im Reiter Objekte (b626),
+            // Kalender-Termine, Haken „in Heute" (b661).
+            //
+            // Dieselbe Regel wie beim offenen Fenster: NUR wirklich geänderte Felder
+            // gewinnen lokal. Was hier unangetastet blieb, bleibt beim Handy-Stand –
+            // sonst würde dieser Block seinerseits Handy-Änderungen wegwerfen.
+            //
+            // ⛔ BEWUSST ANDERS ALS BLOCK 1: die chronologischen Listen werden hier
+            // NICHT über _mergeListByKey zusammengeführt, außer notizVerlauf.
+            // Grund: Zusammenführen holt GELÖSCHTES zurück. Ohne offenes Fenster ist
+            // Löschen der Normalfall (_kalDeleteTermin schneidet Termine heraus,
+            // b654 entfernt den Handy-Standort) – ein stilles Wiederauftauchen wäre
+            // schlimmer als der seltene Fall, dass zwei Geräte dieselbe Liste
+            // innerhalb derselben halben Minute anfassen. notizVerlauf ist die
+            // Ausnahme: dort wird nur angehängt, da kann Zusammenführen nichts
+            // verlieren, und das Bautagebuch beider Geräte gehört zusammen.
+            if(_pamDriveSnapshot){
+              for(const[k,v]of Object.entries(localState)){
+                if(k==='_statuses'||k.startsWith('_')||!Array.isArray(v))continue;
+                for(const lt of v){
+                  if(!lt||!lt.id)continue;
+                  if(modalTaskId&&lt.id===modalTaskId)continue;   // hat Block 1 schon behandelt
+                  const _snapTxt=_pamDriveSnapshot.get(lt.id);
+                  if(_snapTxt===undefined)continue;                // gab es beim Abgleich nicht → Block 2
+                  if(JSON.stringify(lt)===_snapTxt)continue;       // lokal unverändert → Remote gewinnt
+                  let _snapObj=null;
+                  try{_snapObj=JSON.parse(_snapTxt);}catch(e){continue;}
+                  for(const rk of Object.keys(merged)){
+                    if(rk==='_statuses'||!Array.isArray(merged[rk]))continue;
+                    const idx=merged[rk].findIndex(t=>t&&t.id===lt.id);
+                    if(idx<0)continue;
+                    const rt=merged[rk][idx]||{};
+                    const mt={...rt};
+                    for(const f of Object.keys(lt)){
+                      if(f==='id')continue;
+                      if(JSON.stringify(lt[f])!==JSON.stringify(_snapObj[f]))mt[f]=lt[f];
+                    }
+                    // ⚠ Lokal GELÖSCHTE Felder mitnehmen. Ohne das käme z.B. der
+                    // entfernte Handy-Standort zurück (b654 löscht lat/lon/standortErfasst)
+                    // oder ein abgewählter Haken, der über `delete` verschwindet (b660).
+                    for(const f of Object.keys(_snapObj)){
+                      if(f==='id')continue;
+                      if(!(f in lt))delete mt[f];
+                    }
+                    mt.notizVerlauf=_mergeNotizen(rt.notizVerlauf,lt.notizVerlauf);
+                    merged[rk][idx]=mt;
+                    break;
+                  }
+                }
+              }
+            }
             // 2) Lokal neu angelegte Boards + Tasks (noch nicht in Remote) → übernehmen
             for(const[k,v]of Object.entries(localState)){
               if(k==='_statuses'||k.startsWith('_')||!Array.isArray(v))continue;
@@ -13143,6 +13239,7 @@ async function gdriveSaveData() {
       }catch(e){console.warn('[PAM]',e);}
       _savePending = false; // b637: Save bestätigt – beforeunload muss nicht mehr warnen
       _letzterStandHash = _pamStandHash(content); // b638: genau DIESER Stand liegt jetzt in Drive
+      _pamSnapshotSetzen(); // b662: dieser Stand ist jetzt der Bezugspunkt
       updateFileStatus('ok', '☁️ ' + gdriveFileName,
         '✓ Gespeichert ' + new Date().toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}));
       _saveLocalBackup(); // Lokales Backup nach erfolgreichem Drive-Speichern aktualisieren
@@ -13517,6 +13614,7 @@ async function autoSave(){
     const f=await fileHandle.getFile();
     _savePending = false; // b637: in die lokale Datei geschrieben
     _letzterStandHash = _pamStandHash(_inhalt); // b638
+    _pamSnapshotSetzen(); // b662
     updateFileStatus('ok',f.name,'✓ Gespeichert '+new Date().toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}));
   }catch(e){updateFileStatus('unsaved',fileHandle?.name||'?','⚠ Speichern fehlgeschlagen');}
 }
