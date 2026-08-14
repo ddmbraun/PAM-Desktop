@@ -9222,7 +9222,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-14 · #662'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-14-b662) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-14 · #663'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-14-b663) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -10633,6 +10633,40 @@ function _tuRgWeg(id,datum){
   renderTurnusListe();
   scheduleTaskFieldSave();
 }
+// ── b663: Haken „in Heute" aus dem Reiter „Objekte" ─────────────────────────
+// Dritter Ort für dieselbe Sache. Es gibt sie bewusst dreimal statt einmal
+// ausgelagert, weil die drei sich im WO der Daten und im Neuzeichnen
+// unterscheiden – und weil ausgelagerte Hilfsfunktionen hier schon mehrfach
+// bestehende Prüfsuiten zerrissen haben:
+//   b660 _tuHeuteToggle      → Arbeitskopie taskTurnus, scheduleTaskFieldSave, renderTurnusListe
+//   b661 _tuKachelHeuteToggle→ gespeicherter Task, autoSave, renderHeute  (+ blendet Abgewählte ein)
+//   b663 _objHeuteToggle     → gespeicherter Task, autoSave, renderObjekte
+// Die Datenregel ist in allen dreien dieselbe und wird von test_b663 verglichen:
+// gespeichert wird NUR das Abwählen, Anhaken LÖSCHT das Feld.
+//
+// ⛔ Kein Einblenden-Schalter wie in b661: hier stehen ohnehin alle Leistungen
+// untereinander, eine abgewählte verschwindet nicht. Sie bleibt auch bei
+// „nur offene" stehen – abgewählt heißt nicht erledigt, `_tuFaellig` gilt weiter.
+function _objHeuteToggle(taskId,lId){
+  const t=findTaskById(taskId); if(!t)return;
+  const l=(t.turnusListe||[]).find(x=>x&&x.id===lId); if(!l)return;
+  if(l.nichtHeute)delete l.nichtHeute; else l.nichtHeute=true;
+  // Offenes Fenster nachziehen – sonst schreibt closeModal beim Schließen den
+  // alten Stand zurück (b543-F2/b591/b656/b659-Falle).
+  try{
+    const offen=(document.getElementById('taskId')||{}).value||'';
+    if(offen===t.id){
+      taskTurnus=JSON.parse(JSON.stringify(t.turnusListe||[]));
+      if(typeof renderTurnusListe==='function')renderTurnusListe();
+    }
+  }catch(err){console.warn('[TU] offenes Fenster:',err);}
+  try{autoSave();}catch(err){console.warn('[TU] autoSave:',err);}
+  showToast(l.nichtHeute
+    ?'„'+(l.name||'')+'" steht nicht mehr in der Tagesübersicht'
+    :'„'+(l.name||'')+'" steht wieder in der Tagesübersicht','info',2800);
+  if(typeof renderObjekte==='function')renderObjekte();
+}
+
 // Aus dem Reiter „Objekte": arbeitet am GESPEICHERTEN Task (Muster _tuKachelErledigt) –
 // mutieren, offenes Fenster nachziehen, autoSave, neu zeichnen.
 function _objRgErfassen(taskId,lId){
@@ -14512,14 +14546,22 @@ function renderObjekte(){
     }
     g.leistungen.forEach(function(l){
       var farbe=TU_FARBE[_tuAmpel(l)]||TU_FARBE.gelb;
-      h+='<div style="display:flex;align-items:center;gap:9px;padding:6px 12px;border-bottom:1px solid var(--border);">'
+      // b663: der dritte Ort für den Haken „in Heute" (nach b660 am Objekt und
+      // b661 in der Heute-Kachel). Hier stehen ALLE Objekte mit ALLEN Leistungen
+      // untereinander – das ist die Stelle, an der man in einem Durchgang durchgeht.
+      var _lAus=!!(l&&l.nichtHeute);
+      h+='<div style="display:flex;align-items:center;gap:9px;padding:6px 12px;border-bottom:1px solid var(--border);'+(_lAus?'opacity:.6;':'')+'">'
         + '<span style="width:8px;height:8px;border-radius:50%;background:'+farbe+';flex-shrink:0;"></span>'
-        + '<span style="flex:1;min-width:0;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(l.name||'(ohne Namen)')+'</span>'
+        + '<span style="flex:1;min-width:0;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+(_lAus?'☐ ':'')+esc(l.name||'(ohne Namen)')+'</span>'
         + '<span style="font-size:11px;color:var(--text2);white-space:nowrap;width:110px;">'+esc(_tuIntervall(l.intervall).label)+'</span>'
         + '<span style="font-size:11px;color:'+farbe+';font-weight:600;white-space:nowrap;width:210px;text-align:right;">'+esc(_tuStatusText(l))+'</span>'
         // b626: erledigt, aber Rechnung noch nicht vermerkt – die Geld-Warnung
         // b629: ist sie geschrieben, steht hier das Rechnungsdatum statt nichts
         + (_tuRgOffen(l)?'<button class="kal-btn" style="color:#E24B4A;border-color:#E24B4A;font-weight:700;" onclick="_objRgErfassen(\''+idT+'\',\''+_escHtml(l.id)+'\')" title="Wartung erledigt, aber noch keine Rechnung vermerkt – jetzt eintragen">€ fehlt</button>':_tuRgKurz(l))
+        // b663: Haken „in Heute". Beschriftet, weil hier – anders als in der engen
+        // Kachel – Platz dafür ist und die Zeile sonst drei namenlose Knöpfe hätte.
+        + '<label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text2);cursor:pointer;user-select:none;white-space:nowrap;flex-shrink:0;" title="'+_escHtml(_lAus?'Abgewählt – steht nicht in der Tagesübersicht „Heute“. Haken setzen, damit sie dort wieder auftaucht.':'Steht in der Tagesübersicht „Heute“. Haken wegnehmen, dann bleibt die Leistung hier stehen, taucht in „Heute“ aber nicht mehr auf. Sie gilt dadurch NICHT als erledigt.')+'">'
+        +   '<input type="checkbox"'+(_lAus?'':' checked')+' onclick="event.stopPropagation();_objHeuteToggle(\''+idT+'\',\''+_escHtml(l.id)+'\')" style="margin:0;cursor:pointer;"> in Heute</label>'
         + '<button class="kal-btn" onclick="_tuKachelErledigt(\''+idT+'\',\''+_escHtml(l.id)+'\')" title="Heutiges Datum als erledigt eintragen">✓ Heute</button>'
         + '</div>';
     });
