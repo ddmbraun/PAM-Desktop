@@ -9217,7 +9217,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-14 · #656'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-14-b656) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-14 · #657'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-14-b657) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -28638,9 +28638,67 @@ function _pamTaskInBoard(task,vonBoard,zielBoard,zielStatus){
   return true;
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// b657 – Schutz gegen die ZWEITE Umwandlung
+// ══════════════════════════════════════════════════════════════════════════════
+// Woran erkennt man, dass eine Karte schon ausgebaut ist? An den vier Ordner-
+// feldern. Beim einfachen Anlegen am Objekt zeigen alle vier auf DENSELBEN Ordner
+// (b540 „alles in EINEN Ordner" – am Rechner _objektNeuerAuftrag, am Handy v181
+// _ensureQuickNoteFolder). Erst der Ausbau verteilt sie auf Bilder / Dokumente /
+// Posteingang.
+//
+// ⛔ Bewusst NICHT am Board festgemacht. Eine ausgebaute Karte kann im Objekt-Board
+// liegen bleiben, wenn die Board-Frage abgebrochen wurde – am 14.08. an einer echten
+// Karte gemessen: volle Struktur, trotzdem im Objekt-Board. Das Board hätte sie
+// falsch eingeordnet, die Ordnerfelder erkennen sie richtig. (Fall in CHANGES.md.)
+function _b657HatAuftragsstruktur(t){
+  if(!t)return false;
+  const h=String(t.gdriveOrdner||'').trim();
+  if(!h)return false;
+  const f=String(t.gdrive||'').trim();
+  const d=String(t.dokOrdner||'').trim();
+  const e=String(t.emailOrdner||'').trim();
+  return (!!f&&f!==h)||(!!d&&d!==h)||(!!e&&e!==h);
+}
+// Eigenes Fenster statt _emShowConfirmModal: das ruft beim Abbrechen KEINEN
+// Rückweg auf – ein Promise daran hinge für immer. Hier lösen Abbrechen und
+// Danebenklicken beide sauber mit false auf.
+function _b657FrageNeuanlage(t){
+  return new Promise(function(resolve){
+    const alt=String((t&&t.gdriveOrdner)||'').trim();
+    const ov=document.createElement('div');
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100002;display:flex;align-items:center;justify-content:center;';
+    const box=document.createElement('div');
+    box.style.cssText='background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px 24px;min-width:380px;max-width:540px;box-shadow:0 8px 32px rgba(0,0,0,.5);';
+    box.innerHTML='<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:10px;">⚠ Diese Karte ist schon ein Auftrag</div>'
+      +'<div style="font-size:12px;color:var(--text2);line-height:1.55;">'
+      +'Sie hat bereits eine vollständige Auftragsstruktur in Drive.<br><br>'
+      +'Noch einmal anlegen heißt: ein <b>zweiter Ordner mit demselben Namen</b> daneben. '
+      +'Die bisherigen Fotos und Dokumente bleiben im alten Ordner liegen und sind aus PAM nicht mehr erreichbar.'
+      +'</div>'
+      +(alt?'<div style="margin-top:12px;"><a href="'+esc(alt)+'" target="_blank" style="font-size:12px;color:var(--accent);">📂 Bisherigen Auftragsordner ansehen</a></div>':'')
+      +'<div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;">'
+      +'<button id="_b657Nein" style="padding:7px 16px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:13px;font-weight:700;cursor:pointer;">Abbrechen</button>'
+      +'<button id="_b657Ja" style="padding:7px 16px;border-radius:7px;border:1px solid #F5B7B1;background:#FDECEA;color:#8B1A10;font-size:13px;cursor:pointer;">Trotzdem neu anlegen</button>'
+      +'</div>';
+    ov.appendChild(box);document.body.appendChild(ov);
+    const _weg=function(v){try{ov.remove();}catch(e){}resolve(v);};
+    box.querySelector('#_b657Nein').onclick=function(){_weg(false);};
+    box.querySelector('#_b657Ja').onclick=function(){_weg(true);};
+    ov.addEventListener('click',function(ev){if(ev.target===ov)_weg(false);});
+  });
+}
+
 async function _pamTaskZuAuftrag(task,vonBoard){
   if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden (☁️ oben rechts)','error',6000);return;}
   if(!task){showToast('Kein Task gefunden','error');return;}
+  // b657: Zweite Umwandlung abfangen. Der Weg steht an DREI Türen offen – dem blauen
+  // Knopf, ⋯ → „Auftrag erstellen" und dem E-Mail-Fenster. Die Frage sitzt deshalb
+  // hier unten, wo alle drei durchkommen, statt an einem der Knöpfe.
+  if(_b657HatAuftragsstruktur(task)){
+    const _weiter=await _b657FrageNeuanlage(task);
+    if(!_weiter)return;
+  }
   const titel=(task.title||'').trim()||'Auftrag';
   // b652: Stammt die Karte von einem Objekt (Handy-Weg „➕ Auftrag an diesem Objekt"),
   // gehört der neue Auftrag in den OBJEKTORDNER und nicht in den Sammelordner. Der
@@ -28697,6 +28755,13 @@ async function _pamTaskZuAuftrag(task,vonBoard){
     try{task.nas=String(_nasBasis).replace(/[\\/]+$/,'')+'\\'+name;}
     catch(e){console.warn('[b652] NAS-Pfad:',e);}
   }
+
+  // b657: HIER speichern – nicht erst unten im Board-Callback. Die Ordner sind an
+  // dieser Stelle in Drive fertig angelegt; wird die Board-Frage abgebrochen
+  // (Abbrechen oder danebengeklickt), lief das Save bisher nie. Die Karte kannte
+  // ihre eigenen Ordner dann nicht, und der nächste Anlauf legte sie ein zweites
+  // Mal an. Der Callback speichert weiterhin selbst – der verschiebt ja noch.
+  try{await autoSave();}catch(e){console.warn('[b657] Save nach Ordneranlage:',e);}
 
   showToast('✓ Auftragsordner angelegt'+(bewegt?' · '+bewegt+' Datei(en) mitgenommen':''),'success',5000);
 
@@ -34316,8 +34381,12 @@ function _applyBoardType(boardName){
   }
   // b652: „🏗 Richtigen Auftrag daraus machen" steht nur an Auftragskarten am Objekt.
   // Der Weg selbst (⋯ → Auftrag erstellen) bleibt für alle anderen unverändert dort.
+  // b657: … und nur, solange sie noch KEINE Auftragsstruktur hat. Vorher hing der
+  // Knopf allein am Objektbezug – und der bleibt nach dem Ausbau absichtlich stehen
+  // (Rückweg zum Objekt, Liste „Aufträge an diesem Objekt"). Der Knopf stand damit
+  // an jeder fertig ausgebauten Karte weiter da und lud zum zweiten Klick ein.
   const _zaBtn=document.getElementById('objZuAuftragBtn');
-  if(_zaBtn)_zaBtn.style.display=_b642Auftrag?'':'none';
+  if(_zaBtn)_zaBtn.style.display=(_b642Auftrag&&!_b657HatAuftragsstruktur(_offenerTask))?'':'none';
   // b652: Liste „Aufträge an diesem Objekt" – nur im Objektfenster, sonst leer räumen
   try{_renderObjAuftraege((type==='immobilie'&&!_b642Auftrag&&_offenerTask)?_offenerTask.id:'');}
   catch(e){console.warn('[b652] Auftragsliste:',e);}
