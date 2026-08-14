@@ -9222,7 +9222,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-14 · #663'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-14-b663) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-14 · #664'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-14-b664) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -13488,6 +13488,13 @@ function getBoardStatuses(board){
   return(boardStatuses[b]&&boardStatuses[b].length)?boardStatuses[b]:statuses;
 }
 function loadFromObject(data){
+  // b664: Hier wird boards komplett neu aufgebaut. Alle Kalender-Merkzettel zeigen aber
+  // auf „Auftrag + Platz in der Liste" – nach dem Neuaufbau ist der Platz nicht mehr
+  // derselbe. Ohne dieses Leeren verschiebt der Antipp-Weg (Tablet!) danach einen
+  // fremden Termin und „Rückgängig" nimmt den falschen zurück, jeweils samt Outlook.
+  // Steht bewusst in loadFromObject und nicht in pollWorkboardFile: hier laufen ALLE
+  // sechs Wege durch (Drive-Poll, Konflikt-Abgleich, Datei laden, lokales Backup, Import).
+  try{ _kalPick=null; _kalDragKey=null; if(typeof _kalwHideUndo==='function')_kalwHideUndo(); }catch(e){}
   if(data._statuses&&Array.isArray(data._statuses))statuses=data._statuses;
   // Metadaten nur überschreiben wenn im Datensatz vorhanden – fehlt ein Feld, bleibt der aktuelle Wert erhalten
   // (verhindert, dass ein unvollständiger Merge boardStatuses/boardTypes auf {} zurücksetzt)
@@ -16190,8 +16197,18 @@ async function _kalwApply(key,iso,hr,mins){
    10 Sekunden sichtbar; nimmt auch die zugehörigen Outlook-Einträge sauber
    zurück (neuer Termin → ganz weg; kam aus „Ungeplant" → dahin zurück). */
 let _kalwUndoData=null,_kalwUndoTimer=null;
+/* b664: Fingerabdruck des Termins, auf den sich „Rückgängig" bezieht.
+   Gemerkt wird bisher nur „Auftrag + Platz in der Liste". Der Knopf steht 10 Sekunden,
+   das Neuladen vom Handy/zweiten Rechner kommt alle 30 Sekunden und baut dabei ALLE
+   Boards neu auf (loadFromObject). Fällt beides zusammen, zeigt derselbe Platz auf einen
+   ANDEREN Termin – und Rückgängig löschte ihn, samt seinem Outlook-Eintrag. Still. */
+function _kalwFp(t){
+  return t?[t.date||'',t.von||'',t.bis||'',t.beschreibung||'',t.betreff||''].join('|'):'';
+}
 function _kalwShowUndo(taskId,idx,prev,isNew){
-  _kalwUndoData={taskId:taskId,idx:idx,prev:prev,isNew:isNew};
+  const _task=(typeof findTaskById==='function')?findTaskById(taskId):null;
+  const _t=(_task&&Array.isArray(_task.ausserhausTermine))?_task.ausserhausTermine[idx]:null;
+  _kalwUndoData={taskId:taskId,idx:idx,prev:prev,isNew:isNew,fp:_kalwFp(_t)};
   clearTimeout(_kalwUndoTimer);
   let el=document.getElementById('kalwUndoToast');
   if(!el){ el=document.createElement('div'); el.id='kalwUndoToast'; document.body.appendChild(el); }
@@ -16208,6 +16225,11 @@ async function _kalwUndo(){
   const task=(typeof findTaskById==='function')?findTaskById(u.taskId):null;
   const t=(task&&Array.isArray(task.ausserhausTermine))?task.ausserhausTermine[u.idx]:null;
   if(!t){ showToast('⚠ Rückgängig nicht mehr möglich – Termin nicht gefunden','warning',4000); return; }
+  // b664: Liegt an diesem Platz inzwischen ein anderer Termin, lieber gar nichts tun.
+  if(_kalwFp(t)!==u.fp){
+    showToast('⚠ Rückgängig nicht mehr möglich – die Daten wurden zwischenzeitlich neu geladen','warning',6000);
+    return;
+  }
   if(u.isNew){
     // Termin wurde gerade erst aus dem Backlog angelegt → komplett zurücknehmen
     if(msToken){
@@ -17137,7 +17159,29 @@ function erledigtAusserhausTermin(i){
   renderAusserhausTermine();
   scheduleTaskFieldSave();
 }
-function removeAusserhausTermin(i){taskAusserhausTermine.splice(i,1);renderAusserhausTermine();scheduleTaskFieldSave();}
+// b664: Der 🗑-Knopf warf den Termin nur aus der Liste – der Outlook-Eintrag samt Hin-
+// und Rückfahrt blieb für immer stehen, und mit dem Eintrag war auch die Outlook-Nummer
+// weg (nicht mehr auffindbar). Der Kalender konnte es längst richtig (_kalDeleteTermin);
+// hier fehlte es. Gleiche Nachfrage, gleiche Reihenfolge, gleiche Fehlermeldungen.
+async function removeAusserhausTermin(i){
+  const t=taskAusserhausTermine[i]; if(!t)return;
+  const inOutlook=!!t.outlookEventId;
+  if(!confirm('Diesen Termin wirklich löschen?'+(inOutlook?'\n\nEr wird auch aus Outlook entfernt.':'')))return;
+  if(inOutlook && msToken){
+    try{
+      const _del=()=>fetch('https://graph.microsoft.com/v1.0/me/events/'+encodeURIComponent(t.outlookEventId),{method:'DELETE',headers:{Authorization:'Bearer '+msToken}});
+      let r=await _del();
+      if(r.status===401){ try{ if(typeof _msRefreshToken==='function' && await _msRefreshToken()){ r=await _del(); } }catch(_){}}
+      if(!r.ok && r.status!==404) showToast('⚠ Outlook: Termin nicht gelöscht (HTTP '+r.status+') – aus PAM trotzdem entfernt','warning',6000);
+    }catch(e){ showToast('⚠ Outlook-Löschen fehlgeschlagen – aus PAM trotzdem entfernt','warning',5000); }
+  }
+  if(msToken && typeof _msDeleteFahrtEvents==='function'){
+    try{ await _msDeleteFahrtEvents(t); }catch(e){ console.warn('[TERM] Fahrt-Einträge:',e); }
+  }
+  taskAusserhausTermine.splice(i,1);
+  renderAusserhausTermine();
+  scheduleTaskFieldSave();
+}
 function syncAusserhausTermin(i,field,val){if(taskAusserhausTermine[i]){taskAusserhausTermine[i][field]=val;if(['date','von','bis','beschreibung'].includes(field))taskAusserhausTermine[i]._pamDirty=true;if(field==='von'||field==='bis'){renderTermineGesamt();_updateHdrZeitBadge();_tzDauerRefresh('a',i,taskAusserhausTermine[i].von,taskAusserhausTermine[i].bis);/* b596 */}if(field==='date'||field==='beschreibung'){if(typeof _tzStatusRender==='function')_tzStatusRender();/* b598 */}scheduleTaskFieldSave();}}
 function openGcalTermin(i){
   const t=taskAusserhausTermine[i];
