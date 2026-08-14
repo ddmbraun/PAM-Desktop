@@ -7421,6 +7421,11 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 .tu-btn:hover{border-color:var(--accent);color:var(--accent);}
 .tu-btn-ok{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600;}
 .tu-btn-ok:hover{opacity:.88;color:#fff;}
+.tu-heute{display:inline-flex;align-items:center;gap:3px;font-size:calc(11px * var(--modal-scale,1));color:var(--text2);cursor:pointer;user-select:none;white-space:nowrap;flex-shrink:0;padding:2px 5px;border-radius:5px;border:1px solid transparent;}
+.tu-heute:hover{border-color:var(--border);background:var(--bg3);}
+.tu-heute input{margin:0;cursor:pointer;}
+.tu-row.tu-aus .tu-name,.tu-row.tu-aus .tu-last{opacity:.5;}
+.tu-row.tu-aus .tu-heute{color:var(--text2);opacity:.85;}
 .tu-hist{margin:2px 0 8px 15px;padding:7px 10px;border-radius:6px;background:var(--bg3);font-size:calc(11px * var(--modal-scale,1));color:var(--text2);}
 .tu-hist-z{display:flex;align-items:center;gap:8px;padding:2px 0;}
 .tu-hist-z b{color:var(--text);font-weight:600;min-width:78px;}
@@ -9217,7 +9222,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-14 · #659'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-14-b659) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-14 · #661'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-14-b661) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -10298,12 +10303,18 @@ function renderTurnusListe(){
     const amp=_tuAmpel(l), farbe=TU_FARBE[amp]||TU_FARBE.gelb;
     const idJs=_escHtml(l.id);
     const auf=!!_tuOffen[l.id];
-    h+='<div class="tu-row">'
+    h+='<div class="tu-row'+(l.nichtHeute?' tu-aus':'')+'">'
       + '<span class="tu-dot" style="background:'+farbe+'" title="'+(amp==='gruen'?'im Turnus':amp==='gelb'?'wäre wieder dran':'ist deutlich her')+'"></span>'
       + '<span class="tu-name" onclick="_tuToggleHist(\''+idJs+'\')" title="Datumsliste auf-/zuklappen">'+esc(l.name||'(ohne Namen)')
       +   (l.notiz?' <span style="cursor:help;color:var(--accent);" title="'+_escHtml(l.notiz)+'">ℹ</span>':'') // b630: Dauer-Notiz
       +   ' <small>· '+esc(_tuIntervall(l.intervall).label)+'</small></span>'
       + '<span class="tu-last">'+esc(_tuStatusText(l))+(_tuRgOffen(l)?' <b style="color:#E24B4A;" title="Erledigt, aber noch keine Rechnung vermerkt">· € fehlt</b>':'')+'</span>'
+      // b660: Haken „in Heute" – steuert NUR die Tagesübersicht. Kein Erledigen,
+      // kein Überspringen: Ampel und Jahresnachweis bleiben davon unberührt.
+      + '<label class="tu-heute" title="'+(l.nichtHeute
+          ?'Erscheint NICHT in der Tagesübersicht „Heute“. Haken setzen, damit sie dort wieder auftaucht.'
+          :'Erscheint in der Tagesübersicht „Heute“. Haken wegnehmen, dann bleibt sie hier stehen, taucht in „Heute“ aber nicht mehr auf.')+'">'
+      +   '<input type="checkbox"'+(l.nichtHeute?'':' checked')+' onclick="event.stopPropagation();_tuHeuteToggle(\''+idJs+'\')"> in Heute</label>'
       + '<button type="button" class="tu-btn tu-btn-ok" onclick="_tuErledigt(\''+idJs+'\')" title="Heutiges Datum als erledigt eintragen">✓ Heute</button>'
       + '<button type="button" class="tu-btn" onclick="_tuToggleHist(\''+idJs+'\')" title="Datumsliste und weitere Aktionen">'+(auf?'▴':'▾')+'</button>'
       + '</div>';
@@ -10499,6 +10510,28 @@ function _tuSkip(id){
   const l=_tuFinde(id); if(!l)return;
   if(!confirm('„'+(l.name||'')+'" diesmal überspringen?\n\nDie Ampel wird für einen Turnus ruhig gestellt. Es gilt NICHT als erledigt – im Nachweis steht „übersprungen".'))return;
   _tuEintragen(id,_tzHeuteIso(),true,'');
+}
+
+// ── b660 (Wunsch Frank 14.08.): Haken „in Heute" je Leistung ────────────────
+// Steuert AUSSCHLIESSLICH, ob die Leistung in der Tagesübersicht „Heute"
+// auftaucht. Sie ist damit weder erledigt noch übersprungen – Ampel, der
+// Zähler „x fällig" am Objekt und der Jahresnachweis rechnen unverändert
+// weiter. Genau das unterscheidet den Haken von „↷ überspringen".
+//
+// ⛔ Gespeichert wird NUR das Abwählen (`nichtHeute:true`), nie das Anhaken.
+// Grund: fehlt das Feld, gilt die Leistung als angehakt. Damit bleiben alle
+// bestehenden Leistungen unverändert sichtbar (am 14.08. gemessen: 62 Stück,
+// davon 42 fällig) und jede neu angelegte meldet sich von allein. Ein
+// Anhaken löscht das Feld deshalb wieder, statt `false` zu hinterlegen –
+// sonst wüchse die Datei mit einer Angabe, die nichts aussagt.
+function _tuHeuteToggle(id){
+  const l=_tuFinde(id); if(!l)return;
+  if(l.nichtHeute)delete l.nichtHeute; else l.nichtHeute=true;
+  showToast(l.nichtHeute
+    ?'„'+(l.name||'')+'" steht nicht mehr in der Tagesübersicht'
+    :'„'+(l.name||'')+'" steht wieder in der Tagesübersicht','info',2800);
+  renderTurnusListe();
+  scheduleTaskFieldSave();
 }
 
 function _tuEintragWeg(id,datum){
@@ -13985,7 +14018,11 @@ function _heuteSetFilter(key,val){
 }
 
 var _pamRasterFilter={overdue:true,heute:true,ausf:true,turnus:true};
-var _pamRasterGrouped={overdue:[],heute:[],ausf:[],turnus:[]};
+var _pamRasterGrouped={overdue:[],heute:[],ausf:[],turnus:[],turnusAus:[]};
+// b660: zeigt die abgewählten Leistungen zur Kontrolle mit ein. Bewusst NICHT
+// gespeichert – beim nächsten Öffnen ist die Übersicht wieder aufgeräumt.
+var _tuZeigeAbgewaehlt=false;
+function _tuAbgewaehltToggle(){_tuZeigeAbgewaehlt=!_tuZeigeAbgewaehlt;renderHeute();}
 
 // ══════════════════════════════════════════════════════════════════════════
 // b611 – FÄLLIGE WIEDERKEHRENDE LEISTUNGEN IN „HEUTE"
@@ -14002,7 +14039,9 @@ function _tuSammleFaellige(){
     (boards[bn]||[]).forEach(function(t){
       if(!t||t.archiviert||t.spaeterBearbeiten)return;
       (t.turnusListe||[]).forEach(function(l){
-        if(l&&_tuFaellig(l))out.push({t:t,board:bn,l:l});
+        // b660: abgewählte laufen bewusst MIT und werden nur gekennzeichnet –
+        // sonst wüsste die Übersicht nicht, wie viele sie gerade auslässt.
+        if(l&&_tuFaellig(l))out.push({t:t,board:bn,l:l,aus:!!l.nichtHeute});
       });
     });
   });
@@ -14072,6 +14111,40 @@ function _tuKachelErledigt(taskId,lId){
 // Leistungen an einem Objekt hätte das die Tagesübersicht zugeschüttet.
 // Zugeklappt = eine Kachel, egal ob zwei oder zwanzig fällig sind.
 var _tuKachelOffen={};
+// ── b661: Haken „in Heute" direkt aus der Tagesübersicht ────────────────────
+// Gleiche Wirkung wie das Kästchen am Objekt (_tuHeuteToggle, b660), nur von
+// hier aus. Der Unterschied liegt im WO die Daten stehen: dort ist `taskTurnus`
+// die Arbeitskopie des offenen Fensters, hier gibt es kein Fenster. Deshalb das
+// Muster von _tuKachelErledigt – am GESPEICHERTEN Task mutieren, ein zufällig
+// offenes Fenster nachziehen, autoSave.
+//
+// ⛔ Ohne das Nachziehen schriebe das Fenster beim Schließen den alten Stand
+// zurück: closeModal speichert bei „dirty" erneut aus der Arbeitskopie.
+// Dieselbe Falle wie b543-F2, b591, b656 und b659.
+function _tuKachelHeuteToggle(taskId,lId){
+  var t=findTaskById(taskId); if(!t)return;
+  var l=(t.turnusListe||[]).find(function(x){return x&&x.id===lId;}); if(!l)return;
+  // Nur das Abwählen wird gespeichert – Anhaken löscht das Feld wieder (b660).
+  if(l.nichtHeute)delete l.nichtHeute; else l.nichtHeute=true;
+  // ⚡ Beim Abwählen die Abgewählten einblenden. Sonst verschwindet die Zeile
+  // unter dem Mauszeiger und die Kachel springt – bei zwei Leistungen je Objekt
+  // wäre die Liste nach jedem Klick eine andere. Eingeblendet bleibt alles
+  // stehen, nur blasser. Wer sie loswerden will, klickt den Knopf oben aus.
+  if(l.nichtHeute)_tuZeigeAbgewaehlt=true;
+  try{
+    var offen=(document.getElementById('taskId')||{}).value||'';
+    if(offen===t.id){
+      taskTurnus=JSON.parse(JSON.stringify(t.turnusListe||[]));
+      if(typeof renderTurnusListe==='function')renderTurnusListe();
+    }
+  }catch(e){console.warn('[TU] offenes Fenster:',e);}
+  try{autoSave();}catch(e){console.warn('[TU] autoSave:',e);}
+  showToast(l.nichtHeute
+    ?'„'+(l.name||'')+'" steht nicht mehr in der Tagesübersicht'
+    :'„'+(l.name||'')+'" steht wieder in der Tagesübersicht','info',2800);
+  renderHeute();
+}
+
 function _tuKachelToggle(taskId){
   _tuKachelOffen[taskId]=!_tuKachelOffen[taskId];
   renderHeute();
@@ -14093,15 +14166,20 @@ function _tuKachel(g){
   var farbe=ls.some(function(l){return _tuAmpel(l)==='rot';})?TU_FARBE.rot:TU_FARBE.gelb;
   var idT=_escHtml(t.id);
   var auf=!!_tuKachelOffen[t.id];
-  var namen=ls.slice(0,3).map(function(l){return l.name||'';}).filter(Boolean).join(' · ')
+  var namen=ls.slice(0,3).map(function(l){return (l.nichtHeute?'☐ ':'')+(l.name||'');}).filter(Boolean).join(' · ')
            +(ls.length>3?' · +'+(ls.length-3):'');
+  // b660: abgewählte tauchen hier nur auf, wenn sie ausdrücklich eingeblendet
+  // wurden. Dann müssen sie auch als solche erkennbar sein – sonst hakt Frank
+  // etwas ab, das er selbst aus der Übersicht genommen hat.
+  var _ausN=ls.filter(function(l){return l&&l.nichtHeute;}).length;
   var h='<div style="background:var(--bg2);border-radius:10px;border:1px solid var(--border);border-left:4px solid #7F77DD;padding:9px 10px;">'
     + '<div style="display:flex;align-items:flex-start;gap:4px;margin-bottom:5px;cursor:pointer;" onclick="_pamOpenTaskFromHeute(\''+idT+'\')" title="Objekt öffnen">'
     +   '<span style="width:7px;height:7px;border-radius:50%;background:'+farbe+';flex-shrink:0;margin-top:3px;display:inline-block;"></span>'
     +   '<span style="font-size:11px;font-weight:600;color:var(--text);line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">'+esc(t.title||'')+'</span>'
     + '</div>'
     + '<div style="font-size:10px;color:var(--text2);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">🏠 '+esc(g.board||'')+'</div>'
-    + '<div style="font-size:10px;font-weight:600;color:'+farbe+';line-height:1.35;">🔁 '+ls.length+' Leistung'+(ls.length!==1?'en':'')+' fällig</div>';
+    + '<div style="font-size:10px;font-weight:600;color:'+farbe+';line-height:1.35;">🔁 '+(ls.length-_ausN)+' Leistung'+((ls.length-_ausN)!==1?'en':'')+' fällig'
+    +   (_ausN?'<span style="color:var(--text2);font-weight:400;" title="abgewählt: steht sonst nicht in dieser Übersicht"> · '+_ausN+' abgew\xe4hlt</span>':'')+'</div>';
   if(!auf){
     h+='<div style="font-size:10px;color:var(--text2);margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+_escHtml(ls.map(function(l){return (l.name||'')+' · '+_tuStatusText(l);}).join('\n'))+'">'+esc(namen)+'</div>'
       + '<button onclick="event.stopPropagation();_tuKachelToggle(\''+idT+'\')" style="width:100%;padding:4px 8px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:10px;font-weight:600;cursor:pointer;">▾ Aufklappen</button>';
@@ -14109,9 +14187,14 @@ function _tuKachel(g){
     h+='<div style="margin:5px 0 6px;">';
     ls.forEach(function(l){
       var lf=TU_FARBE[_tuAmpel(l)]||TU_FARBE.gelb;
-      h+='<div style="display:flex;align-items:center;gap:5px;padding:3px 0;border-top:1px solid var(--border);">'
+      var _lAus=!!(l&&l.nichtHeute); // b660
+      h+='<div style="display:flex;align-items:center;gap:5px;padding:3px 0;border-top:1px solid var(--border);'+(_lAus?'opacity:.6;':'')+'">'
         + '<span style="width:6px;height:6px;border-radius:50%;background:'+lf+';flex-shrink:0;"></span>'
-        + '<span style="flex:1;min-width:0;font-size:10px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+_escHtml((l.name||'')+' · '+_tuStatusText(l))+'">'+esc(l.name||'')+'</span>'
+        + '<span style="flex:1;min-width:0;font-size:10px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+_escHtml((l.name||'')+' · '+_tuStatusText(l)+(_lAus?' · abgewählt („in Heute“ ohne Haken)':''))+'">'+(_lAus?'☐ ':'')+esc(l.name||'')+'</span>'
+        // b661 (Wunsch Frank 14.08.): derselbe Haken wie am Objekt, aber HIER –
+        // sonst muss für jedes Abwählen das Objektfenster auf. Am 14.08. gemessen:
+        // 23 Objekte mit fälligen Leistungen, das wären 23 Fenster.
+        + '<input type="checkbox"'+(_lAus?'':' checked')+' onclick="event.stopPropagation();_tuKachelHeuteToggle(\''+idT+'\',\''+_escHtml(l.id)+'\')" style="margin:0;cursor:pointer;flex-shrink:0;" title="'+_escHtml(_lAus?'Abgewählt – Haken setzen, damit die Leistung wieder in dieser Übersicht steht.':'Steht in dieser Übersicht – Haken wegnehmen, dann bleibt sie am Objekt stehen, taucht hier aber nicht mehr auf. Sie gilt dadurch NICHT als erledigt.')+'">'
         + '<button onclick="event.stopPropagation();_tuKachelErledigt(\''+idT+'\',\''+_escHtml(l.id)+'\')" style="padding:2px 7px;border-radius:4px;border:none;background:#7F77DD;color:#fff;font-size:10px;font-weight:700;cursor:pointer;flex-shrink:0;" title="'+_escHtml(_tuStatusText(l)+' – heutiges Datum eintragen')+'">✓</button>'
         + '</div>';
     });
@@ -14738,7 +14821,11 @@ function _pamHeuteRaster(listeAll, today, typFilter, terminFilter){
   // anlegen, der Chip heißt ohnehin „🏠 Objekte". Alt-Einträge auf einem Auftrags-Board
   // sind damit nicht verloren: unter „Alle Typen" (Voreinstellung) laufen sie weiter mit,
   // denn _tuSammleFaellige sammelt bewusst über ALLE Boards.
-  grouped.turnus=(_heuteAktFilter||!(!typFilter||typFilter==='alle'||typFilter==='immobilien'))?[]:_tuSammleFaellige();
+  // b660: eine Quelle, danach getrennt – `turnus` sind die angehakten, `turnusAus`
+  // die abgewählten. Nur so stimmt der Zähler auf beiden Knöpfen.
+  var _tuAlleF=(_heuteAktFilter||!(!typFilter||typFilter==='alle'||typFilter==='immobilien'))?[]:_tuSammleFaellige();
+  grouped.turnus=_tuAlleF.filter(function(x){return !x.aus;});
+  grouped.turnusAus=_tuAlleF.filter(function(x){return x.aus;});
   _pamRasterGrouped=grouped;
   var rf=_pamRasterFilter;
   function fBtn(key,label,color,cnt){
@@ -14767,7 +14854,13 @@ function _pamHeuteRaster(listeAll, today, typFilter, terminFilter){
     +fBtn('overdue','⚠️ \xdcberf\xe4llig','#E24B4A',grouped.overdue.length)
     +fBtn('heute','📅 Heute f\xe4llig','#EF9F27',grouped.heute.length)
     +fBtn('ausf','🔧 Ausf\xfchrung heute','#378ADD',grouped.ausf.length)
-    +(grouped.turnus.length?fBtn('turnus','🏠 Objekte','#7F77DD',grouped.turnus.length):'')
+    // b660: der Knopf bleibt auch dann stehen, wenn ALLE Leistungen abgewählt sind –
+    // sonst wäre der Schalter „turnus" unerreichbar und das Einblenden liefe ins Leere.
+    +((grouped.turnus.length||grouped.turnusAus.length)?fBtn('turnus','🏠 Objekte','#7F77DD',grouped.turnus.length):'')
+    +(grouped.turnusAus.length
+      ?'<button onclick="event.stopPropagation();_tuAbgewaehltToggle()" title="'+_escHtml(grouped.turnusAus.length+' Leistung(en) sind am Objekt abgewählt („in Heute" ohne Haken). Sie sind weder erledigt noch übersprungen – sie stehen hier nur nicht. Klick zeigt sie zur Kontrolle mit an.')+'" style="padding:3px 10px;border-radius:14px;font-size:10px;font-weight:600;cursor:pointer;white-space:nowrap;border:1.5px dashed var(--border);background:'+(_tuZeigeAbgewaehlt?'var(--bg4)':'var(--bg3)')+';color:var(--text2);">'
+        +(_tuZeigeAbgewaehlt?'☑':'☐')+' '+grouped.turnusAus.length+' abgew\xe4hlt</button>'
+      :'')
     +'<span style="flex:1;min-width:6px;"></span>'
     +typSel+' '+termSel
     +'<span style="font-size:11px;color:var(--text2);white-space:nowrap;margin-left:2px;">Offen:</span>'
@@ -14781,7 +14874,9 @@ function _pamHeuteRaster(listeAll, today, typFilter, terminFilter){
   liste=liste.filter(function(x,i,a){return a.findIndex(function(y){return y.t.id===x.t.id;})===i;});
   // b611: NICHT in die Entdopplung oben – die geht über die Task-ID, und ein
   // Objekt kann mehrere fällige Leistungen haben (Reinigung UND Heizung).
-  var tuListe=rf.turnus?grouped.turnus:[];
+  // b660: die abgewählten kommen nur dazu, wenn beide Schalter dafür stehen –
+  // der Objekte-Knopf an UND das Einblenden ausdrücklich angeklickt.
+  var tuListe=rf.turnus?(_tuZeigeAbgewaehlt?grouped.turnus.concat(grouped.turnusAus):grouped.turnus):[];
   var html='<div style="margin:0 0 12px;">';
   html+='<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text2);margin-bottom:6px;">Tages\xfcbersicht</div>';
   html+=filterBar;
