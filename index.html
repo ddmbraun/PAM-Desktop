@@ -9222,7 +9222,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-14 · #664'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-14-b664) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-14 · #665'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-14-b665) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -13488,13 +13488,26 @@ function getBoardStatuses(board){
   return(boardStatuses[b]&&boardStatuses[b].length)?boardStatuses[b]:statuses;
 }
 function loadFromObject(data){
-  // b664: Hier wird boards komplett neu aufgebaut. Alle Kalender-Merkzettel zeigen aber
-  // auf „Auftrag + Platz in der Liste" – nach dem Neuaufbau ist der Platz nicht mehr
-  // derselbe. Ohne dieses Leeren verschiebt der Antipp-Weg (Tablet!) danach einen
-  // fremden Termin und „Rückgängig" nimmt den falschen zurück, jeweils samt Outlook.
-  // Steht bewusst in loadFromObject und nicht in pollWorkboardFile: hier laufen ALLE
-  // sechs Wege durch (Drive-Poll, Konflikt-Abgleich, Datei laden, lokales Backup, Import).
-  try{ _kalPick=null; _kalDragKey=null; if(typeof _kalwHideUndo==='function')_kalwHideUndo(); }catch(e){}
+  // b664: Hier wird boards komplett neu aufgebaut. _kalPick (angetippte Karte, Tablet)
+  // und _kalDragKey zeigen aber auf „Auftrag + Platz in der Liste" – nach dem Neuaufbau
+  // ist der Platz nicht mehr derselbe, der Antipp-Weg würde danach einen fremden Termin
+  // verschieben. Steht bewusst in loadFromObject und nicht in pollWorkboardFile: hier
+  // laufen ALLE sechs Wege durch (Poll, Konflikt-Abgleich, Datei, Backup, Import, Start).
+  //
+  // ⛔ Der Rückgängig-Knopf wird hier BEWUSST NICHT geschlossen. Er hat seit b664 einen
+  //    eigenen Fingerabdruck und meldet sich ehrlich, wenn der Termin nicht mehr derselbe
+  //    ist. Ihn hier wegzunehmen hätte ihn ausgerechnet durch sein EIGENES Speichern
+  //    abgeschossen: _kalwApply stößt autoSave an und zeigt danach den Knopf – läuft im
+  //    Speichern ein Abgleich, wäre er nach Sekundenbruchteilen wieder weg. Wortlos.
+  //
+  // Getrennte try-Blöcke: scheitert der erste Schritt, sollen die übrigen trotzdem laufen.
+  try{
+    if(_kalPick){
+      _kalPick=null;
+      if(typeof showToast==='function')showToast('🔄 Daten neu geladen – die Markierung im Kalender wurde aufgehoben','info',5000);
+    }
+  }catch(e){}
+  try{ _kalDragKey=null; }catch(e){}
   if(data._statuses&&Array.isArray(data._statuses))statuses=data._statuses;
   // Metadaten nur überschreiben wenn im Datensatz vorhanden – fehlt ein Feld, bleibt der aktuelle Wert erhalten
   // (verhindert, dass ein unvollständiger Merge boardStatuses/boardTypes auf {} zurücksetzt)
@@ -16226,8 +16239,10 @@ async function _kalwUndo(){
   const t=(task&&Array.isArray(task.ausserhausTermine))?task.ausserhausTermine[u.idx]:null;
   if(!t){ showToast('⚠ Rückgängig nicht mehr möglich – Termin nicht gefunden','warning',4000); return; }
   // b664: Liegt an diesem Platz inzwischen ein anderer Termin, lieber gar nichts tun.
+  // Meldung bewusst neutral: die Ursache kann ein Neuladen sein, aber auch eine eigene
+  // Änderung an Dauer oder Name. Eine falsche Ursache schickt Frank auf Fehlersuche.
   if(_kalwFp(t)!==u.fp){
-    showToast('⚠ Rückgängig nicht mehr möglich – die Daten wurden zwischenzeitlich neu geladen','warning',6000);
+    showToast('⚠ Rückgängig nicht mehr möglich – der Termin hat sich seitdem geändert','warning',6000);
     return;
   }
   if(u.isNew){
@@ -16352,6 +16367,10 @@ function _kalwDauerSave(taskId,idx){
     }
   }catch(e){}
   _kalfClose();
+  // b664: Der Rückgängig-Knopf bezog sich auf den Stand VOR dieser Änderung – „bis"
+  // gehört zu seinem Fingerabdruck. Stehen lassen hieße: er verweigert nachher mit der
+  // Begründung „neu geladen", obwohl der Nutzer selbst die Dauer geändert hat.
+  if(typeof _kalwHideUndo==='function')_kalwHideUndo();
   try{ autoSave(); }catch(e){}
   renderKalender(true);
   showToast('✓ Dauer '+n+' min – bis '+t.bis,'info',3000);
@@ -16470,6 +16489,8 @@ function _kalfSave(taskId,idx){
     if(msToken&&r.task) _msAutoPushTermine(r.task).catch(e=>console.warn('[KALF] Push',e));
   }
   _kalfClose();
+  // b664: wie bei der Dauer – „betreff" gehört zum Fingerabdruck des Rückgängig-Knopfes.
+  if(typeof _kalwHideUndo==='function')_kalwHideUndo();
   if(currentView==='kalender')renderKalender(true);
   showToast((fahrt>0||effR>0)
     ?('✓ Fahrt '+(fahrt===effR?(fahrt+' min je Richtung'):(fahrt+' min hin / '+effR+' min zurück'))+' gespeichert')
@@ -17165,6 +17186,7 @@ function erledigtAusserhausTermin(i){
 // hier fehlte es. Gleiche Nachfrage, gleiche Reihenfolge, gleiche Fehlermeldungen.
 async function removeAusserhausTermin(i){
   const t=taskAusserhausTermine[i]; if(!t)return;
+  const fp=_kalwFp(t);                 // Fingerabdruck VOR dem Warten auf Outlook
   const inOutlook=!!t.outlookEventId;
   if(!confirm('Diesen Termin wirklich löschen?'+(inOutlook?'\n\nEr wird auch aus Outlook entfernt.':'')))return;
   if(inOutlook && msToken){
@@ -17178,7 +17200,22 @@ async function removeAusserhausTermin(i){
   if(msToken && typeof _msDeleteFahrtEvents==='function'){
     try{ await _msDeleteFahrtEvents(t); }catch(e){ console.warn('[TERM] Fahrt-Einträge:',e); }
   }
-  taskAusserhausTermine.splice(i,1);
+  // b664: Platz NEU suchen statt den gemerkten zu benutzen. Zwischen der Rückfrage und
+  // hier liegt das Warten auf Outlook – und in dieser Zeit kann der Konflikt-Abgleich
+  // taskAusserhausTermine komplett ausgetauscht haben (gdriveSaveData). Der gemerkte
+  // Platz zeigt dann auf einen ANDEREN Termin. Genau diese Falle repariert weiter oben
+  // der Fingerabdruck am Rückgängig-Knopf; durch das Warten gilt sie hier genauso.
+  // ⚠ Die Rückfrage hält den Browser an – fällige Speicher-Timer stauen sich auf und
+  //    werden beim ersten „await" losgelassen. Das Zeitfenster ist real, nicht theoretisch.
+  const j=(taskAusserhausTermine[i]&&_kalwFp(taskAusserhausTermine[i])===fp)
+            ? i
+            : taskAusserhausTermine.findIndex(x=>_kalwFp(x)===fp);
+  if(j<0){
+    renderAusserhausTermine();
+    showToast('⚠ Der Termin wurde zwischenzeitlich neu geladen und ist nicht mehr auffindbar – in PAM wurde nichts entfernt'+(inOutlook?', in Outlook schon':''),'warning',8000);
+    return;
+  }
+  taskAusserhausTermine.splice(j,1);
   renderAusserhausTermine();
   scheduleTaskFieldSave();
 }
