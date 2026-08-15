@@ -9237,7 +9237,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-15 · #667'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-15-b667) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-15 · #668'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-15-b668) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -29169,20 +29169,30 @@ async function _pamTaskZuAuftrag(task,vonBoard){
       task.nas=_o.nas;_b659FeldNachziehen(task.id,'tNAS',_o.nas);_erbe.push('NAS-Pfad');
     }
     if(_erbe.length)showToast('↳ Vom Objekt übernommen: '+_erbe.join(' · '),'info',5000);
-    // Titel: nur fragen, wenn der Vorschlag sich vom jetzigen Titel unterscheidet.
-    // _objAuftragTitel bringt den Doppelt-Schutz aus b654 mit – steht das Haus schon
-    // im Kurztext, kommt derselbe Titel zurück und es erscheint kein Fenster.
-    try{
-      const _jetzt=(task.title||'').trim();
-      const _vorschlag=_objAuftragTitel(_o,_jetzt);
-      if(_vorschlag&&_vorschlag!==_jetzt){
-        const _neu=await _b659FrageTitel(_vorschlag,_jetzt);
-        if(_neu){task.title=_neu;_b659FeldNachziehen(task.id,'taskTitleInput',_neu);}
-      }
-    }catch(e){console.warn('[b659] Titel:',e);}
+    // b668: Die eigene Titel-Frage (b659) entfällt hier. Sie lief unter GENAU derselben
+    // Bedingung wie der neue Kurztext-Dialog unten – das wären zwei Fenster hintereinander
+    // gewesen, die dasselbe fragen. Der Kurztext-Dialog baut Titel und Ordnername aus
+    // einer Eingabe und zeigt beide vorher an.
+    // ⚠ `_b659FrageTitel` bleibt im Code: Sie wird an anderer Stelle noch gebraucht.
   }
-  const name=await _promptFolderName(_startName,_startEltern,_nasBasis);
+  // b668: Am Objekt wird der KURZTEXT abgefragt statt des fertigen Ordnernamens.
+  // Grund (Befund B4): Der alte Dialog änderte nur den Ordner – ein dort korrigierter
+  // Tippfehler blieb in der Karte stehen, und Ordner und Karte liefen still auseinander.
+  // Jetzt entstehen beide aus derselben Eingabe und können nicht mehr abweichen.
+  // Ohne Objekt-Ziel (normaler Auftrag) bleibt der Dialog unverändert.
+  const _kmObj=(_objZiel&&_objZiel.obj)?_objZiel.obj:null;
+  const _km=_kmObj?{
+    kurz:_b652KurzAusTitel(task,_kmObj),
+    bauOrdner:function(k){return _b652OrdnerAusKurz(k,task,_kmObj);},
+    bauTitel :function(k){return _objAuftragTitel(_kmObj,k);}
+  }:null;
+  const name=await _promptFolderName(_startName,_startEltern,_nasBasis,_km);
   if(!name)return;
+  // b668: den im Dialog mitgebauten Titel übernehmen – das ist der eigentliche Fix.
+  if(_km&&_fnpLastTitel&&_fnpLastTitel!==(task.title||'')){
+    task.title=_fnpLastTitel;
+    try{_b659FeldNachziehen(task.id,'taskTitleInput',_fnpLastTitel);}catch(e){console.warn('[b668] Titel nachziehen:',e);}
+  }
   const zielFid=_extractFolderIdFromUrl(_fnpLastParentUrl||'')||_extractFolderIdFromUrl(_startEltern);
   if(!zielFid){showToast('⚠ Kein gültiger Ablageordner gewählt','error',5000);return;}
 
@@ -29278,8 +29288,23 @@ let _fnpLastParentUrl='';
 // b652: Dritter Parameter nasBasis (optional) blendet den Längenwächter ein – den
 // braucht nur der Weg „Auftrag am Objekt", weil dort eine Ebene tiefer abgelegt wird
 // und Windows bei 260 Zeichen abbricht. Ohne den Parameter ist alles wie bisher.
-function _promptFolderName(suggested,parentUrl,nasBasis){
+// b668: `kurzModus` (optional) dreht den Dialog um: Statt des fertigen Ordnernamens
+// wird der KURZTEXT abgefragt, und PAM baut Ordnername UND Kartentitel daraus.
+// Damit können die beiden nicht mehr auseinanderlaufen — vorher änderte der Dialog
+// nur den Ordner, die Karte behielt ihren alten Namen (Befund B4: ein hier
+// korrigierter Tippfehler blieb in der Karte stehen).
+//
+// Erwartet {kurz, bauOrdner(k), bauTitel(k)}. Die Bau-Logik bleibt bewusst beim
+// AUFRUFER — nur der weiß, wie Vorspann, Datum und Längengrenze zusammenspielen.
+// Fehlt der Parameter, ist der Dialog exakt wie bisher; die übrigen fünf
+// Aufrufstellen merken davon nichts.
+// Der gebaute Titel steht danach in `_fnpLastTitel` (Seitenkanal wie
+// `_fnpLastParentUrl`) — die Rückgabe bleibt der Ordnername, damit kein Aufrufer
+// umgebaut werden muss.
+let _fnpLastTitel='';
+function _promptFolderName(suggested,parentUrl,nasBasis,kurzModus){
   _fnpLastParentUrl=parentUrl||'';
+  _fnpLastTitel='';
   return new Promise(function(resolve){
     const ex=document.getElementById('_folderNamePrompt');if(ex)ex.remove();
     const ov=document.createElement('div');
@@ -29298,9 +29323,20 @@ function _promptFolderName(suggested,parentUrl,nasBasis){
        +'<div id="_fnpParentName" style="font-size:12px;color:var(--accent);margin-top:3px;font-weight:600;">&nbsp;</div>'
       :'';
     const nasBlock=nasBasis?'<div id="_fnpLenRow" style="font-size:11px;margin-top:10px;padding:6px 8px;border-radius:6px;line-height:1.45;"></div>':'';
-    box.innerHTML='<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:10px;">📁 Drive-Ordnername anpassen</div>'
-      +'<div style="font-size:12px;color:var(--text2);margin-bottom:6px;">Ordnername:</div>'
-      +'<input id="_fnpInput" type="text" value="'+safe+'" autocomplete="off" style="width:100%;box-sizing:border-box;padding:8px 10px;border-radius:7px;border:1.5px solid var(--accent);background:var(--bg3);color:var(--text);font-size:13px;outline:none;">'
+    // b668: Im Kurztext-Modus steht im Feld nur der Kurztext, darunter zeigen zwei
+    // graue Zeilen live mit, was daraus wird.
+    const kmAn=!!(kurzModus&&typeof kurzModus.bauOrdner==='function'&&typeof kurzModus.bauTitel==='function');
+    const startWert=kmAn?String(kurzModus.kurz||'') :suggested;
+    const safeStart=(startWert||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+    const kopf =kmAn?'📁 Auftrag anlegen':'📁 Drive-Ordnername anpassen';
+    const label=kmAn?'Kurztext:':'Ordnername:';
+    const vorschau=kmAn
+      ?'<div id="_fnpVorschau" style="font-size:11px;color:var(--text2);margin-top:7px;line-height:1.6;padding:6px 9px;border-radius:6px;background:var(--bg3);"></div>'
+      :'';
+    box.innerHTML='<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:10px;">'+kopf+'</div>'
+      +'<div style="font-size:12px;color:var(--text2);margin-bottom:6px;">'+label+'</div>'
+      +'<input id="_fnpInput" type="text" value="'+safeStart+'" autocomplete="off" style="width:100%;box-sizing:border-box;padding:8px 10px;border-radius:7px;border:1.5px solid var(--accent);background:var(--bg3);color:var(--text);font-size:13px;outline:none;">'
+      +vorschau
       +parentBlock
       +nasBlock
       +'<div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;">'
@@ -29313,11 +29349,28 @@ function _promptFolderName(suggested,parentUrl,nasBasis){
     // b652: Längenwächter – rechnet den TIEFSTEN Pfad aus, der später entstehen kann
     // (…\<Ordner>\Dokumente\Verlegeanleitung\<Datei>) und zeigt, wie viel für den
     // Dateinamen übrig bleibt. Gleiche Logik wie der VBS-Wächter am NAS.
+    // b668: Der fertige Ordnername – im Kurztext-Modus ist das NICHT der Feldinhalt.
+    // Vorschau und Längenwächter müssen beide damit rechnen, sonst zeigt der Wächter
+    // eine zu kurze Länge an und der Pfad reißt später doch die 260-Zeichen-Grenze.
+    const _fnpOrdnerJetzt=function(){
+      const roh=(inp.value||'').trim();
+      return kmAn?String(kurzModus.bauOrdner(roh)||''):roh;
+    };
+    if(kmAn){
+      const _vorUpd=function(){
+        const vEl=document.getElementById('_fnpVorschau');if(!vEl)return;
+        const roh=(inp.value||'').trim();
+        if(!roh){vEl.innerHTML='<span style="color:#a04000;">Bitte einen Kurztext eingeben.</span>';return;}
+        vEl.innerHTML='<div>Ordner wird: <b style="color:var(--text);">'+esc(_fnpOrdnerJetzt())+'</b></div>'
+                     +'<div>Karte heißt: <b style="color:var(--text);">'+esc(String(kurzModus.bauTitel(roh)||''))+'</b></div>';
+      };
+      inp.addEventListener('input',_vorUpd);_vorUpd();
+    }
     if(nasBasis){
       const _lenUpd=function(){
         const el=document.getElementById('_fnpLenRow');if(!el)return;
         const basis=String(nasBasis).replace(/[\\/]+$/,'');
-        const voll=basis.length+1+(inp.value||'').trim().length+B652_UNTERORDNER_TIEF;
+        const voll=basis.length+1+_fnpOrdnerJetzt().length+B652_UNTERORDNER_TIEF;
         const platz=259-voll-1;
         const eng=platz<B652_DATEINAME_RESERVE;
         el.style.background=eng?'#FDECEA':'#EAF7EE';
@@ -29344,6 +29397,16 @@ function _promptFolderName(suggested,parentUrl,nasBasis){
     function _done(val){
       const pEl=document.getElementById('_fnpParent');
       if(pEl)_fnpLastParentUrl=(pEl.value||'').trim();
+      // b668: Im Kurztext-Modus steht im Feld der Kurztext – erst hier wird daraus
+      // der Ordnername, und der Kartentitel wandert in den Seitenkanal. Bei
+      // „Abbrechen" (val===null) bleibt beides unangetastet.
+      if(val!==null&&kmAn){
+        _fnpLastTitel=String(kurzModus.bauTitel(val)||'');
+        val=String(kurzModus.bauOrdner(val)||'');
+        // Gebauter Name leer (z.B. nur Sonderzeichen eingegeben): nicht schließen,
+        // sonst entstünde ein Ordner „Auftrag" ohne dass jemand es wollte.
+        if(!val){_fnpLastTitel='';inp.focus();return;}
+      }
       ov.remove();resolve(val);
     }
     document.getElementById('_fnpOk').onclick=function(){const v=(inp.value||'').trim();if(v)_done(v);else inp.focus();};
@@ -35869,10 +35932,29 @@ function _b652OrdnerVorschlag(task,obj){
   // Ordnernamen wäre der doppelt (der Ordner landet IM Objektordner) und vor allem
   // tödlich für die 260-Zeichen-Grenze: beim längsten NAS-Pfad (155 Zeichen) bleiben
   // nach „JJJJ-MM-TT_" nur 19 Zeichen – der Vorspann allein ist länger. Also abziehen.
+  // b668: in zwei Bausteine zerlegt – der Dialog braucht sie einzeln, um aus einem
+  // frei eingegebenen Kurztext Ordnername UND Titel zu bauen. Die Regel steht damit
+  // weiterhin an EINER Stelle (Lehre aus der dreifach gepflegten 9er-Liste).
+  return _b652OrdnerAusKurz(_b652KurzAusTitel(task,obj),task,obj);
+}
+// b668: Den Kurztext aus dem Kartentitel herausschälen – den Vorspann abziehen.
+function _b652KurzAusTitel(task,obj){
   let kurz=String((task&&task.title)||'Auftrag').trim();
   const vorspann=_objTitelVorspann(obj);
   if(vorspann&&kurz.startsWith(vorspann+B654_TRENNER))kurz=kurz.slice((vorspann+B654_TRENNER).length).trim()||'Auftrag';
-  let name=(datum+'_'+kurz).replace(/[\\/:*?"<>|]/g,'-').replace(/[. ]+$/,'');
+  return kurz;
+}
+// b668: Aus einem beliebigen Kurztext den Ordnernamen bauen – Datum davor, verbotene
+// Zeichen raus, auf das Pfadbudget des Objekts gekürzt. Genau die Regel von b652,
+// nur eben mit frei wählbarem Kurztext statt dem aus dem Titel.
+function _b652OrdnerAusKurz(kurz,task,obj){
+  const roh=String((task&&task.createdAt)||'').substring(0,10);
+  const datum=/^\d{4}-\d{2}-\d{2}$/.test(roh)?roh:_tzHeuteIso();
+  // Leerer Kurztext ergäbe sonst „2026-08-11_" – ein Ordner, der auf einem Unterstrich
+  // endet. Über den Dialog nicht erreichbar (leere Eingabe schließt ihn nicht), über
+  // einen direkten Aufruf schon. Beim Prüfen von b668 aufgefallen.
+  const _k=String(kurz||'').trim()||'Auftrag';
+  let name=(datum+'_'+_k).replace(/[\\/:*?"<>|]/g,'-').replace(/[. ]+$/,'');
   const max=_b652MaxOrdnerLaenge(obj&&obj.nas);
   if(max>12&&name.length>max)name=name.substring(0,max).replace(/[. ]+$/,'');
   return name||'Auftrag';
