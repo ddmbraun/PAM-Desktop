@@ -2216,6 +2216,11 @@ async function _auftragConfirm(){
   let _boardType=boardTypes[boardName]||'baustelle';
   let _isNotiz=_boardType==='notiz';
   let _isEmail=_boardType==='email';
+  // b666: Objekt-Board erkennen. Hier fehlte die Abfrage als einzige der drei
+  // Anlege-Strecken – `immobilie` fiel dadurch in den Baustellen-Zweig und bekam
+  // die volle 9er-Struktur im Auftrags-Sammelordner. Der PDF-Weg daneben
+  // (_pdfAuftragCreate) hat die Sperre seit b624, dieser Weg nicht.
+  let _isObjekt=_boardType==='immobilie';
   let _folderDefault=_isNotiz
     ?DEFAULT_FOLDER_NOTIZ
     :_isEmail
@@ -2267,8 +2272,13 @@ async function _auftragConfirm(){
     gmailLinks:[],
     emailPdfs:[],
     emailOriginals:[],
-    gdriveOrdner:_folderDefault,
-    emailOrdner:_folderDefault,
+    // b666: Am Objekt-Board bleiben die Ordnerfelder LEER (gleiche Regel wie
+    // openNewTaskModal seit b624). Vorher stand hier der Auftrags-Sammelordner –
+    // die Karte zeigte dadurch dauerhaft dorthin, auch ohne angelegte Struktur.
+    // `_folderDefault` selbst bleibt unangetastet: es trägt weiter unten den
+    // Rückfall für den Datei-Upload, sonst gingen Anhänge still verloren.
+    gdriveOrdner:_isObjekt?'':_folderDefault,
+    emailOrdner:_isObjekt?'':_folderDefault,
     gdrive:'',
     nas:''
   };
@@ -2304,7 +2314,12 @@ async function _auftragConfirm(){
 
   // ── SCHRITT 1.5: Drive-Ordnerstruktur anlegen (vor Upload, damit Dateien in die richtigen Ordner kommen) ──
   let _driveUrls=null;
-  if(gdriveToken){
+  if(gdriveToken&&_isObjekt){
+    // b666: Am Objekt wird nichts angelegt – der Objektordner existiert längst und die
+    // 9er-Struktur hätte ihn beim ersten Mal vollgestellt (gleiche Regel wie b614/b624).
+    // Bewusst MIT Meldung: stummes Nichtstun sah bei b624 wie ein Fehler aus.
+    showToast('ℹ Am Objekt wird keine Auftragsstruktur angelegt. Anhänge liegen vorerst im Standardordner – Ziel unter „Ordner & Links" setzen','info',7000);
+  }else if(gdriveToken){
     try{
       const _safeFolderName=(newTask.title||'Auftrag').replace(/[\\/:*?"<>|]/g,'-').substring(0,80);
       if(_isEmail){
@@ -9222,7 +9237,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-14 · #665'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-14-b665) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-15 · #666'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-15-b666) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -25366,10 +25381,24 @@ function _dfbPickItem(id,name){
   // seine Wartungsprotokolle nirgends auftauchen.
   try{
     if(_dfbTargetField==='tGD'&&(boardTypes[currentBoard]||'baustelle')==='immobilie'){
-      const dok=document.getElementById('tDokOrdner');
-      if(dok&&!dok.value.trim()){dok.value=url;dok.dispatchEvent(new Event('input'));}
+      // b666: nicht mehr nur Dokumente – auch Projekt- und E-Mail-Feld ziehen mit.
+      // Gemessen 15.08.: bei 8 von 10 Objektkarten stand im E-Mail-Feld noch der
+      // Auftrags-Sammelordner. Der stammt aus der Vorbelegung in openNewTaskModal und
+      // wurde hier nie abgeräumt – Anhänge landeten dadurch im Sammelordner statt am
+      // Objekt. Überschrieben wird NUR, was leer ist oder auf einen Sammelordner zeigt;
+      // ein bewusst gesetzter eigener Ordner (z.B. Objektordner im Projektfeld neben
+      // einem Unterordner im Fotofeld) bleibt unangetastet.
+      ['tDokOrdner','tGDOrdner','tEmailOrdner'].forEach(function(fid){
+        const f=document.getElementById(fid); if(!f)return;
+        const jetzt=(f.value||'').trim();
+        if(jetzt){
+          const jetztId=_extractFolderIdFromUrl(jetzt);
+          if(jetztId&&!_istSammelOrdner(jetztId))return;   // eigener Ordner – stehen lassen
+        }
+        f.value=url; f.dispatchEvent(new Event('input'));
+      });
     }
-  }catch(e){console.warn('[IMMO] Dokumente-Feld spiegeln:',e);}
+  }catch(e){console.warn('[IMMO] Felder spiegeln:',e);}
 }
 function _dfbPickCurrent(){
   _dfbPickItem(_dfbCurrentId,_dfbCurrentName);
@@ -39845,14 +39874,31 @@ function openEditTaskModal(id){
   const _aufgabenDef=DEFAULT_FOLDER_NOTIZ;
   const _nDef='\\\\nas-ddbraun\\Kunden';
   const _isAufgabenEdit=(boardTypes[_taskBoard]||'baustelle')==='notiz';
-  document.getElementById('tGDOrdner').value=task.gdriveOrdner||(_isAufgabenEdit?_aufgabenDef:_dDef);
+  // b666: Am Objekt-Board KEINE Vorbelegung. Bis hierher wurde nur auf `notiz`
+  // abgefragt – `immobilie` lief in den Baustellen-Zweig, und PAM trug beim bloßen
+  // ÖFFNEN einer Karte mit leerem Feld den Auftrags-Sammelordner ein. Beim nächsten
+  // Speichern stand er fest.
+  //
+  // ⛔ Das ist die Ursache, die in b616 als „ungeklärt" notiert wurde: Der VBS-Weg
+  // leert `tEmailOrdner` korrekt (_openImmoNewTask), beim nächsten Öffnen war er
+  // wieder da. Gemessen 15.08.: 8 von 10 Objektkarten hatten den Sammelordner im
+  // E-Mail-Feld, eine sogar im Foto-Feld – von dort holt sich der ➕-Auftrag-Weg
+  // seinen Zielordner, der Auftrag landete also im Sammelordner.
+  //
+  // Ansehen darf nichts ändern. Leer bleibt leer.
+  const _isObjektEdit=(boardTypes[_taskBoard]||'baustelle')==='immobilie';
+  const _ordnerDef=_isObjektEdit?'':(_isAufgabenEdit?_aufgabenDef:_dDef);
+  document.getElementById('tGDOrdner').value=task.gdriveOrdner||_ordnerDef;
   {const _gmEl=document.getElementById('tGmAkte');if(_gmEl)_gmEl.value=task.gmAkte||'';
    const _gmH=document.getElementById('_hdrGmAkte');if(_gmH){if(task.gmAkte){_gmH.textContent='📂 GM '+_gmNr(task.gmAkte);_gmH.style.display='';}else{_gmH.style.display='none';}}}
   {const _gmF=document.getElementById('tGmAkteFolderId');if(_gmF)_gmF.value=task.gmAkteFolderId||'';}
-  document.getElementById('tGD').value=task.gdrive||(_isAufgabenEdit?_aufgabenDef:_dDef);
-  document.getElementById('tNAS').value=task.nas||_nDef;
+  document.getElementById('tGD').value=task.gdrive||_ordnerDef;
+  // b666: NAS-Pfad ebenso – am Objekt stand sonst der nackte Freigabe-Pfad
+  // „\\nas-ddbraun\Kunden" in der Karte, der auf kein Objekt zeigt und beim
+  // Speichern den echten, vom VBS gesetzten Pfad ersetzen konnte.
+  document.getElementById('tNAS').value=task.nas||(_isObjektEdit?'':_nDef);
   _updateFotoOrdnerHint();
-  document.getElementById('tEmailOrdner').value=task.emailOrdner||(_isAufgabenEdit?_aufgabenDef:_dDef);
+  document.getElementById('tEmailOrdner').value=task.emailOrdner||_ordnerDef;
   const _dokEl=document.getElementById('tDokOrdner');if(_dokEl)_dokEl.value=task.dokOrdner||'';
   document.getElementById('deleteTaskBtn').style.display='';
   const _atb2=document.getElementById('archiveTaskBtn');if(_atb2)_atb2.style.display='';
