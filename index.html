@@ -9237,7 +9237,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-15 · #668'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-15-b668) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-15 · #669'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-15-b669) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -12032,7 +12032,18 @@ async function ensureWorkspaceFolder() {
 }
 
 async function gdriveTokenCallback(resp) {
-  console.log('[Drive] gdriveTokenCallback:', JSON.stringify(resp).substring(0,200));
+  // 🔴 b669: Hier stand `JSON.stringify(resp).substring(0,200)` — das schrieb den
+  // **Google-Access-Token** bei JEDER Anmeldung in die Konsole. Von den 200 Zeichen
+  // gehen rund 17 für `{"access_token":"` ab, es blieben ~180 Zeichen Token. Wer
+  // einen Konsolen-Screenshot weitergibt, gibt damit unter Umständen Zugriff auf
+  // Drive UND Gmail weiter — das Token gilt eine Stunde.
+  // Am 15.08.2026 genau so in einem Screenshot aufgetaucht.
+  //
+  // ⛔ Nie wieder ein Token-Objekt loggen. Zum Suchen von Anmeldeproblemen reicht
+  // das Ergebnis: kam ein Token, wie lange gilt es, oder welcher Fehler kam.
+  console.log('[Drive] gdriveTokenCallback:', resp&&resp.error
+    ? ('Fehler: '+resp.error)
+    : ('ok, gültig '+((resp&&resp.expires_in)||'?')+'s'));
   if (resp.error) {
     _silentRefreshInProgress=false;    // Flag bei jedem Fehler zurücksetzen
     _autoInitSilentInProgress=false;   // Init-Flag zurücksetzen
@@ -35599,6 +35610,15 @@ function _showImmoBoardDialog(data,immoBoards){
     +(data.nasGrand?'🏢 '+esc(data.nasGrand)+'<br>':'')
     +'📁 Ordner für die Dateien: <b>'+esc(data.unterordner||'Wartungen')+'</b>'
     +'</div>'
+    // b669: Name der Karte gleich hier abfragen. Vorher setzte _openImmoNewTask ihn
+    // stumm auf den Ordnernamen – wer die Karte anders nennen wollte (z.B.
+    // „Reinigung Laden+Lager" statt der Anschrift), musste sie danach öffnen und den
+    // Titel überschreiben. Der Dialog fragt ohnehin schon nach Board und Spalte;
+    // ein zweites Fenster wäre unnötig gewesen.
+    +'<label style="font-size:11px;font-weight:700;color:var(--text2,#555);display:block;margin-bottom:4px;">Name der Karte</label>'
+    +'<input id="_immoTitel" type="text" value="'+_escHtml(String(data.titel||data.nasParent||''))+'" autocomplete="off" '
+    +'style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid #7F77DD;border-radius:7px;font-size:13px;background:var(--bg3,#f7f7f7);color:var(--text,#111);outline:none;">'
+    +'<div style="font-size:11px;color:var(--text2,#888);margin:4px 0 14px;line-height:1.5;">Vorgeschlagen ist der Ordnername. Leer lassen setzt ihn ebenfalls.</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px;">'
     +'<div><label style="font-size:11px;font-weight:700;color:var(--text2,#555);display:block;margin-bottom:4px;">Board (Liste)</label>'
     +'<select id="_immoBoard" style="width:100%;padding:7px 8px;border:1px solid var(--border,#d0d5dd);border-radius:7px;font-size:13px;background:var(--bg,#fff);color:var(--text,#111);" onchange="_immoUpdateStatus(this.value)">'+boardOpts+'</select></div>'
@@ -35613,9 +35633,21 @@ function _showImmoBoardDialog(data,immoBoards){
   ov.querySelector('#_immoCancel').addEventListener('click',function(){
     localStorage.removeItem('pam_vbs_new_immo');ov.remove();
   });
+  // b669: Enter im Titelfeld legt an – sonst müsste man extra zum Knopf greifen.
+  {const _tEl=ov.querySelector('#_immoTitel');
+   if(_tEl){
+     setTimeout(function(){_tEl.focus();_tEl.select();},60);
+     _tEl.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();ov.querySelector('#_immoOk').click();}});
+   }}
   ov.querySelector('#_immoOk').addEventListener('click',function(){
     const selBoard=ov.querySelector('#_immoBoard').value;
     const selStatus=ov.querySelector('#_immoStatus').value;
+    // b669: eingegebenen Kartennamen übernehmen – VOR dem ov.remove() lesen,
+    // danach gibt es das Feld nicht mehr. Leer gelassen bleibt es beim Ordnernamen,
+    // den _openImmoNewTask als Rückfall schon kennt.
+    const _tIn=ov.querySelector('#_immoTitel');
+    const _tWert=_tIn?String(_tIn.value||'').trim():'';
+    if(_tWert)data.titel=_tWert;
     ov.remove();
     if(selBoard&&selBoard!==currentBoard)switchBoard(selBoard);
     data._targetStatus=selStatus;
