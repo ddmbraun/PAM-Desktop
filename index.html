@@ -630,6 +630,8 @@ async function _gmApplyAkteToFields(akte){
   // Anlege-Flow laeuft weiter, der Dialog blockiert ihn nicht. Fehlt die JSON-Datei,
   // passiert gar nichts (kein Fehler, keine Nachfrage).
   try{ if(typeof _gmTitelVorschlagen==='function')_gmTitelVorschlagen(akte.name); }catch(e){}
+  // b674: Lücken der frisch verknüpften Akte gleich mit anzeigen
+  try{ if(typeof _gmLueckenAnzeigen==='function')_gmLueckenAnzeigen(); }catch(e){}
 }
 // Anlege-Flow: fragt beim neuen Auftrag nach GM-Akte. true = GM verknüpft (eigene Struktur überspringen).
 async function _gmMaybeLinkOnCreate(){
@@ -8061,6 +8063,9 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
         <div class="mv2-section collapsible" id="tAnsprchSect">
           <div class="mv2-section-label" onclick="_toggleMv2Sect('tAnsprchSect',event)"><span class="mvl-dot"><i style="background:#888780"></i></span><span class="mvl-icon">👥</span><span class="mvl-text">Ansprechpartner</span><span class="mvl-badge" id="tAnsprchTitle"></span><span class="mv2-coll-arrow">›</span></div>
           <div id="tKontakteContainer"></div>
+          <!-- b674: Was in der GM-Akte noch fehlt. Wird nur gefüllt, wenn eine GM-Akte
+               verknüpft ist und dort wirklich Angaben fehlen – sonst bleibt es unsichtbar. -->
+          <div id="tGmLuecken" style="display:none"></div>
           <button class="add-row-btn" onclick="addKontaktPTP('sonstiges','','','')">+ Kontakt hinzufügen</button>
           <button class="add-row-btn" onclick="_adrBookOpenPicker()" title="Gespeicherte Adresse aus dem Adressbuch übernehmen">📇 Adresse wählen</button>
           <button class="add-row-btn" onclick="_gmAktePick()" title="Ansprechpartner aus der verknüpften GM-Akte übernehmen">📂 Aus GM-Akte</button>
@@ -9254,7 +9259,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-16 · #673'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-16-b673) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-16 · #674'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-16-b674) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -31538,6 +31543,57 @@ function _gmTitelDialog(alt,neu){
   });
 }
 
+// ── b674: „In der GM-Akte fehlt noch …" ───────────────────────────────────────
+// PAM ist die Arbeitsseite, GM die Akte – Briefe und Einladungen entstehen dort.
+// Fehlt einem Beteiligten in GM die Anschrift, merkt man es erst, wenn der Brief
+// nicht rausgeht. Diese Liste zeigt es am Auftrag, wo ohnehin gearbeitet wird.
+// Geprüft wird der GM-Stand aus pam-akte-adressen.json, NICHT PAMs eigene Kontakte:
+// PAM speichert am Kontakt gar keine Anschrift, die Lücke wäre dort unsichtbar.
+function _gmLueckenListe(leute){
+  const out=[];
+  (leute||[]).forEach(function(k){
+    const fehlt=[];
+    if(!String(k.strasse||'').trim()||!String(k.plz||'').trim()||!String(k.ort||'').trim())fehlt.push('Anschrift');
+    if(!String(k.tel||'').trim()&&!String(k.tel2||'').trim())fehlt.push('Telefon');
+    if(!String(k.email||'').trim())fehlt.push('E-Mail');
+    const name=String(k.name||'').trim()||String(k.nachname||'').trim()||'(ohne Namen)';
+    const status=String(k.status||'').trim();
+    // Vorgabetexte und kaputte Klammern faellt sonst niemandem auf
+    const warn=[];
+    if(status.toLowerCase().indexOf('bitte überschreiben')>=0)warn.push('Vorgabetext als Rolle');
+    if((status.match(/\(/g)||[]).length!==(status.match(/\)/g)||[]).length)warn.push('Klammer unvollständig');
+    if(fehlt.length||warn.length)out.push({name:name,status:status,fehlt:fehlt,warn:warn});
+  });
+  return out;
+}
+
+async function _gmLueckenAnzeigen(){
+  const el=document.getElementById('tGmLuecken');
+  if(!el)return;
+  el.innerHTML='';el.style.display='none';
+  const akte=(document.getElementById('tGmAkte')?.value||'').trim();
+  if(!akte)return;
+  let book;
+  try{ book=await _gmAkteBookLoad(); }catch(e){ return; }   // keine Datei -> kein Hinweis
+  const leute=_gmAkteFindContacts(book,akte);
+  if(!leute.length)return;
+  const luecken=_gmLueckenListe(leute);
+  if(!luecken.length)return;                                 // alles vollständig -> nichts anzeigen
+  const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+  let html='<div style="margin:6px 0 2px;padding:8px 10px;border:1px solid #E3C08A;background:#FDF6E7;border-radius:7px;font-size:calc(11.5px*var(--modal-scale,1));line-height:1.45;">'
+    +'<div style="font-weight:700;color:#8A6114;margin-bottom:4px;">⚠ In der GM-Akte '+esc(akte)+' fehlt noch <span style="font-weight:400;">('+luecken.length+' von '+leute.length+')</span></div>';
+  luecken.forEach(function(l){
+    html+='<div style="margin-top:2px;"><b>'+esc(l.name)+'</b>'
+       +(l.status?' <span style="color:#7a7a72;">'+esc(l.status)+'</span>':'')
+       +(l.fehlt.length?' — '+esc(l.fehlt.join(', ')):'')
+       +(l.warn.length?' <span style="color:#B0480F;">· '+esc(l.warn.join(' · '))+'</span>':'')
+       +'</div>';
+  });
+  html+='<div style="margin-top:6px;color:#7a7a72;">Nachtragen im GutachtenManager unter „Beteiligte Personen bearbeiten", danach „Auffrischen" drücken.</div></div>';
+  el.innerHTML=html;
+  el.style.display='';
+}
+
 // Fragt nach dem Verknuepfen. Erscheint NUR, wenn es etwas zu entscheiden gibt:
 // Datei da, Akte gefunden, Vorschlag nicht leer und anders als der jetzige Titel.
 async function _gmTitelVorschlagen(akteNr){
@@ -31686,6 +31742,9 @@ function renderKontaktePTP(kontakte){
   c.innerHTML='';
   for(const k of(kontakte||[]))addKontaktPTP(k.rolle||'sonstiges',k.name||'',k.tel||'',k.email||'',k.anrufKontakt||false,k.tel2||'');
   if(typeof _adrRefreshMarks==='function')_adrRefreshMarks();
+  // b674: Lücken der GM-Akte anzeigen. OHNE await – das Laden darf das Öffnen
+  // des Tasks nicht aufhalten; ohne GM-Akte oder ohne Datei passiert nichts.
+  try{ if(typeof _gmLueckenAnzeigen==='function')_gmLueckenAnzeigen(); }catch(e){}
 }
 function getKontaktePTP(){
   const c=document.getElementById('tKontakteContainer');if(!c)return[];
@@ -35410,6 +35469,8 @@ function openNewTaskModal(){
   const _gmFNeuEl=document.getElementById('tGmAkteFolderId');if(_gmFNeuEl)_gmFNeuEl.value='';
   _updateFotoOrdnerHint();
   const kc=document.getElementById('tKontakteContainer');if(kc)kc.innerHTML='';
+  // b674: Lücken-Hinweis der zuvor geöffneten Akte mit wegräumen
+  {const _gl=document.getElementById('tGmLuecken');if(_gl){_gl.innerHTML='';_gl.style.display='none';}}
   updateKontaktePTPTitle();
   document.getElementById('deleteTaskBtn').style.display='none';
   const _atb=document.getElementById('archiveTaskBtn');if(_atb)_atb.style.display='none';
