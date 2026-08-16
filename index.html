@@ -9259,7 +9259,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-16 · #677'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-16-b677) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-16 · #678'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-16-b678) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -31027,13 +31027,19 @@ async function _adrBookAddFromKontakt(entryEl){
     const adrEl=document.getElementById('tAdr');
     if(adrEl&&adrEl.value){ objAddr=_adrParseObjAddr(adrEl.value); }
   }catch(e){}
-  let strasse='',plz='',ort='';
+  // b678: Anschrift aus der Kontaktzeile mitnehmen. Sie geht dem Adressbuch-Stand
+  // vor, weil sie das ist, was gerade sichtbar auf dem Schirm steht – und der
+  // Dialog zeigt sie vor dem Speichern noch einmal zum Prüfen an.
+  let strasse=_adrClean(gv('.k-strasse')),plz=_adrClean(gv('.k-plz')),ort=_adrClean(gv('.k-ort'));
   try{ await _adrBookLoad(); }
   catch(e){ if(e.message==='NO_TOKEN'){showToast('⚠ Bitte zuerst Google Drive verbinden (☁️)','warning',4000);return;} showToast('⚠ Adressbuch-Fehler: '+e.message,'error',6000); return; }
   const key=_adrKey(name,tel,email);
   const vorhanden=(_adrBook||[]).find(function(k){return _adrKey(k.name,k.tel,k.email)===key;});
   let objekte=[];
-  if(vorhanden){ firma=vorhanden.firma||firma; strasse=vorhanden.strasse||''; plz=vorhanden.plz||''; ort=vorhanden.ort||''; objekte=vorhanden.objekte||[]; }
+  // b678: früher setzte diese Zeile die Anschrift IMMER auf den Adressbuch-Stand und
+  // hätte damit eine gerade eingetippte Anschrift wieder verworfen. Jetzt füllt das
+  // Adressbuch nur noch die Lücken.
+  if(vorhanden){ firma=vorhanden.firma||firma; strasse=strasse||vorhanden.strasse||''; plz=plz||vorhanden.plz||''; ort=ort||vorhanden.ort||''; objekte=vorhanden.objekte||[]; }
   _adrOpenSaveDialog({rolle:rolle||'sonstiges',name:name,firma:firma,strasse:strasse,plz:plz,ort:ort,tel:tel,tel2:tel2,email:email,objekte:objekte,objAddr:objAddr,update:!!vorhanden,id:vorhanden?vorhanden.id:null});
 }
 
@@ -31411,7 +31417,9 @@ function _adrBookPickApply(){
     if(!k)continue;
     const kk=_adrKey(k.name,k.tel,k.email);
     if(existing.indexOf(kk)>=0){skipped++;continue;}
-    addKontaktPTP(k.rolle||'sonstiges',k.name||'',k.tel||'',k.email||'',false,k.tel2||'');
+    // b678: Anschrift aus dem Adressbuch mit in den Task nehmen. Sie stand dort
+    // schon immer drin und fiel genau hier heraus.
+    addKontaktPTP(k.rolle||'sonstiges',k.name||'',k.tel||'',k.email||'',false,k.tel2||'',{strasse:k.strasse||'',plz:k.plz||'',ort:k.ort||''});
     existing.push(kk);added++;
   }
   const m=document.getElementById('adr-picker-modal');if(m)m.remove();
@@ -31725,7 +31733,9 @@ function _gmAktePickApply(){
     if(!k)return;
     const kk=_adrKey(k.name,k.tel,k.email);
     if(existing.indexOf(kk)>=0){skipped++;return;}
-    addKontaktPTP(k.rolle||'sonstiges',k.name||'',k.tel||'',k.email||'',false,k.tel2||'');
+    // b678: Die Anschrift steht in pam-akte-adressen.json (strasse/plz/ort) und wurde
+    // bisher nur in der Auswahlliste angezeigt, aber nicht übernommen.
+    addKontaktPTP(k.rolle||'sonstiges',k.name||'',k.tel||'',k.email||'',false,k.tel2||'',{strasse:k.strasse||'',plz:k.plz||'',ort:k.ort||''});
     existing.push(kk);added++;
   });
   const m=document.getElementById('gmakte-picker-modal');if(m)m.remove();
@@ -31734,10 +31744,40 @@ function _gmAktePickApply(){
   showToast('✅ '+added+' Ansprechpartner übernommen'+(skipped?' · '+skipped+' schon vorhanden':''),'success',3500);
 }
 
-function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2){
+// b678: Anschrift am Kontakt. Sie kam aus dem Adressbuch und aus der GM-Akte schon
+// mit, fiel aber hier heraus – ein Task-Kontakt kannte nur Rolle/Name/Tel/Tel2/Mail.
+// Der Parameter steht bewusst ganz hinten und ist ein Objekt: die Funktion wird an
+// zwölf Stellen aufgerufen, alle alten Aufrufe bleiben damit unverändert gültig.
+function _kAdrText(a){
+  if(!a)return '';
+  const plzOrt=[(a.plz||'').trim(),(a.ort||'').trim()].filter(Boolean).join(' ');
+  return [(a.strasse||'').trim(),plzOrt].filter(Boolean).join(', ');
+}
+// Knopf-Aussehen an den Inhalt anpassen: gefüllt = kräftig + Anschrift im Tooltip.
+function _kAdrSync(entry){
+  if(!entry)return;
+  const btn=entry.querySelector('.k-adr-btn');if(!btn)return;
+  const g=s=>{const el=entry.querySelector(s);return el?(el.value||'').trim():'';};
+  const txt=_kAdrText({strasse:g('.k-strasse'),plz:g('.k-plz'),ort:g('.k-ort')});
+  btn.style.opacity=txt?'1':'0.4';
+  btn.title=txt?('Anschrift: '+txt+'  (klicken zum Bearbeiten)'):'Anschrift eintragen';
+}
+function _kAdrToggle(btn){
+  const entry=btn.closest('.kontakt-entry');if(!entry)return;
+  const box=entry.querySelector('.k-adr-box');if(!box)return;
+  const auf=box.style.display==='none';
+  // 'grid' und nicht '' – bei '' fiele die Box auf den Standard zurück und die drei
+  // Felder stünden untereinander statt nebeneinander.
+  box.style.display=auf?'grid':'none';
+  if(auf){const f=box.querySelector('.k-strasse');if(f)f.focus();}
+}
+function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2,adr){
   const c=document.getElementById('tKontakteContainer');if(!c)return;
   const rolleLabel={ag:'👔 AG Kontakt',mieter:'🏠 Mieter',eigentuemer:'👤 Eigentümer',sonstiges:'👥 Sonstiges'};
   name=name||'';tel=tel||'';email=email||'';tel2=tel2||'';
+  adr=adr||{};
+  const aStr=(adr.strasse||'').toString(),aPlz=(adr.plz||'').toString(),aOrt=(adr.ort||'').toString();
+  const hatAdr=!!(aStr.trim()||aPlz.trim()||aOrt.trim());
   const div=document.createElement('div');div.className='kontakt-entry';
   const fs='font-size:11px;padding:3px 6px;';
   const rolleOpts=['ag','mieter','eigentuemer','sonstiges'];
@@ -31753,6 +31793,7 @@ function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2){
     +'</div>'
     +'<label style="display:flex;align-items:center;gap:4px;font-size:10px;color:#1a56c4;cursor:pointer;margin-left:6px;" title="Dieser Kontakt wird auf Mobil als Anruf-Button angezeigt">'
     +'<input type="checkbox" class="k-anruf"'+(anrufKontakt?' checked':'')+' style="width:13px;height:13px;accent-color:#1a56c4;cursor:pointer;" onchange="_updateMapsBtn();scheduleTaskFieldSave()">📞 Anruf</label>'
+    +'<button type="button" class="k-adr-btn" style="padding:2px 6px;font-size:11px;background:transparent;border:none;cursor:pointer;opacity:'+(hatAdr?'1':'0.4')+';" onclick="_kAdrToggle(this)" title="'+(hatAdr?('Anschrift: '+_kAdrText({strasse:aStr,plz:aPlz,ort:aOrt}).replace(/"/g,'&quot;')+'  (klicken zum Bearbeiten)'):'Anschrift eintragen')+'">📍</button>'
     +'<button type="button" class="gk-create-btn" style="padding:2px 6px;font-size:11px;background:#1a56c4;color:#fff;border:none;border-radius:4px;cursor:pointer;" onclick="_showGKPreview(this.closest(\'.kontakt-entry\'))" title="Kontakt in Google Kontakte anlegen">👤+</button>'
     +'<button type="button" class="adr-save-btn" style="padding:2px 6px;font-size:11px;background:#15803d;color:#fff;border:none;border-radius:4px;cursor:pointer;" onclick="_adrBookAddFromKontakt(this.closest(\'.kontakt-entry\'))" title="Diesen Kontakt ins Adressbuch speichern">✅</button>'
     +'<button type="button" class="rm-btn" style="padding:2px 6px;font-size:11px;" onclick="this.closest(\'.kontakt-entry\').remove();updateKontaktePTPTitle();scheduleTaskFieldSave()" title="Entfernen">✕</button>'
@@ -31768,6 +31809,14 @@ function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2){
     +'<input type="tel" class="k-tel2" value="'+tel2.replace(/"/g,'&quot;')+'" style="flex:1;'+fs+'" placeholder="0172 / 123456" oninput="scheduleTaskFieldSave()" autocomplete="off">'
     +'<a class="tel2-call-btn'+(tel2?'':' disabled')+'" href="'+(tel2?'tel:'+tel2:'#')+'"><span style="font-size:15px">📞</span></a>'
     +'</div></div>'
+    +'</div>'
+    // b678: Anschrift – klappt nur auf, wenn etwas drinsteht oder 📍 gedrückt wird.
+    // Bewusst KEIN viertes Dauerfeld: die Kontaktzeile ist eng, und die meisten
+    // Kontakte brauchen keine eigene Anschrift (die Objektadresse steht am Task).
+    +'<div class="k-adr-box" style="display:'+(hatAdr?'grid':'none')+';grid-template-columns:2fr 0.8fr 1.6fr;gap:4px;margin-top:4px;">'
+    +'<div class="modal-field" style="margin:0"><label style="font-size:10px">Straße + Nr.</label><input type="text" class="k-strasse" value="'+aStr.replace(/"/g,'&quot;')+'" placeholder="Hauptstraße 1" style="'+fs+'" oninput="scheduleTaskFieldSave();_kAdrSync(this.closest(\'.kontakt-entry\'))" autocomplete="off"></div>'
+    +'<div class="modal-field" style="margin:0"><label style="font-size:10px">PLZ</label><input type="text" class="k-plz" value="'+aPlz.replace(/"/g,'&quot;')+'" placeholder="99084" style="'+fs+'" oninput="scheduleTaskFieldSave();_kAdrSync(this.closest(\'.kontakt-entry\'))" autocomplete="off"></div>'
+    +'<div class="modal-field" style="margin:0"><label style="font-size:10px">Ort</label><input type="text" class="k-ort" value="'+aOrt.replace(/"/g,'&quot;')+'" placeholder="Erfurt" style="'+fs+'" oninput="scheduleTaskFieldSave();_kAdrSync(this.closest(\'.kontakt-entry\'))" autocomplete="off"></div>'
     +'</div>';
   const telInput=div.querySelector('.k-tel');
   const telLink=div.querySelector('.tel-call-btn');
@@ -31789,7 +31838,9 @@ function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2){
 function renderKontaktePTP(kontakte){
   const c=document.getElementById('tKontakteContainer');if(!c)return;
   c.innerHTML='';
-  for(const k of(kontakte||[]))addKontaktPTP(k.rolle||'sonstiges',k.name||'',k.tel||'',k.email||'',k.anrufKontakt||false,k.tel2||'');
+  // b678: gespeicherte Anschrift wieder mitgeben – sonst wäre sie nach dem
+  // Schließen und erneuten Öffnen des Tasks aus der Anzeige verschwunden.
+  for(const k of(kontakte||[]))addKontaktPTP(k.rolle||'sonstiges',k.name||'',k.tel||'',k.email||'',k.anrufKontakt||false,k.tel2||'',{strasse:k.strasse||'',plz:k.plz||'',ort:k.ort||''});
   if(typeof _adrRefreshMarks==='function')_adrRefreshMarks();
   // b675: Der Lücken-Hinweis wird hier NICHT mehr angestoßen. renderKontaktePTP läuft
   // beim Öffnen eines Tasks, BEVOR tGmAkte gefüllt ist – die Anzeige las dadurch die
@@ -31802,13 +31853,21 @@ function getKontaktePTP(){
     const _rs=e.querySelector('.k-rolle');
     const _rc=e.querySelector('.k-rolle-custom');
     const rolle=(_rs&&_rs.value==='_custom_'&&_rc)?(_rc.value.trim()||'sonstiges'):(_rs?_rs.value:'sonstiges');
+    // b678: Anschrift mit auslesen. Der optionale Zugriff ist Absicht – ältere
+    // Kontaktzeilen im DOM können die drei Felder noch nicht haben.
+    const _v=s=>{const el=e.querySelector(s);return el?el.value.trim():'';};
     return({rolle,
     name:e.querySelector('.k-name').value.trim(),
     tel:e.querySelector('.k-tel').value.trim(),
     tel2:e.querySelector('.k-tel2')?e.querySelector('.k-tel2').value.trim():'',
     email:e.querySelector('.k-email').value.trim(),
+    strasse:_v('.k-strasse'),
+    plz:_v('.k-plz'),
+    ort:_v('.k-ort'),
     anrufKontakt:e.querySelector('.k-anruf')?e.querySelector('.k-anruf').checked:false
-  });}).filter(k=>k.name||k.tel||k.tel2||k.email);
+  // b678: Anschrift gehört in den Filter. Sonst verschwindet eine eingetippte
+  // Anschrift beim Speichern still, solange Name/Tel/Mail noch leer sind.
+  });}).filter(k=>k.name||k.tel||k.tel2||k.email||k.strasse||k.plz||k.ort);
 }
 function updateKontaktePTPTitle(){
   const c=document.getElementById('tKontakteContainer');
