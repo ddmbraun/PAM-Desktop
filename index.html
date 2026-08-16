@@ -9259,7 +9259,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-16 · #674'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-16-b674) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-16 · #675'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-16-b675) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -31580,8 +31580,27 @@ async function _gmLueckenAnzeigen(){
   const luecken=_gmLueckenListe(leute);
   if(!luecken.length)return;                                 // alles vollständig -> nichts anzeigen
   const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
-  let html='<div style="margin:6px 0 2px;padding:8px 10px;border:1px solid #E3C08A;background:#FDF6E7;border-radius:7px;font-size:calc(11.5px*var(--modal-scale,1));line-height:1.45;">'
-    +'<div style="font-weight:700;color:#8A6114;margin-bottom:4px;">⚠ In der GM-Akte '+esc(akte)+' fehlt noch <span style="font-weight:400;">('+luecken.length+' von '+leute.length+')</span></div>';
+  // Aktennummer für das onclick-Attribut entschärfen. Ordnernamen sind Freitext aus GM
+  // („26-002_Musterweg 1"); ein Hochkomma darin würde den Aufruf zerreißen.
+  // ⛔ Das Ergebnis wird in eine Variable gelegt, NICHT im Attribut-String aufgerufen –
+  //    sonst hält die Prüfung „Klick-Handler ohne Funktion" den Helfer für den Handler.
+  const akteJs=String(akte||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+
+  // b675: Nicht jede Lücke ist ein Mangel – bei manchen Beteiligten gibt es schlicht
+  // keine Telefonnummer. Deshalb wegklickbar, je Akte. Der Hinweis verschwindet aber
+  // nicht spurlos: eine Zeile bleibt stehen, damit er zurückholbar ist.
+  if(_gmLueckenIstAus(akte)){
+    el.innerHTML='<div style="margin:6px 0 2px;font-size:calc(11px*var(--modal-scale,1));color:#9a9a92;">'
+      +'⚠ '+luecken.length+' unvollständige Angabe(n) in '+esc(akte)+' · ausgeblendet '
+      +'<a href="#" onclick="event.preventDefault();_gmLueckenAus(\''+akteJs+'\',false)" style="color:var(--accent);">einblenden</a></div>';
+    el.style.display='';
+    return;
+  }
+
+  let html='<div style="margin:6px 0 2px;padding:8px 10px;border:1px solid #E3C08A;background:#FDF6E7;border-radius:7px;font-size:calc(11.5px*var(--modal-scale,1));line-height:1.45;position:relative;">'
+    +'<button type="button" title="Für diese Akte ausblenden" onclick="_gmLueckenAus(\''+akteJs+'\',true)" '
+    +'style="position:absolute;top:5px;right:6px;border:none;background:transparent;color:#8A6114;font-size:14px;line-height:1;cursor:pointer;padding:2px 4px;">✕</button>'
+    +'<div style="font-weight:700;color:#8A6114;margin-bottom:4px;padding-right:18px;">⚠ In der GM-Akte '+esc(akte)+' fehlt noch <span style="font-weight:400;">('+luecken.length+' von '+leute.length+')</span></div>';
   luecken.forEach(function(l){
     html+='<div style="margin-top:2px;"><b>'+esc(l.name)+'</b>'
        +(l.status?' <span style="color:#7a7a72;">'+esc(l.status)+'</span>':'')
@@ -31592,6 +31611,25 @@ async function _gmLueckenAnzeigen(){
   html+='<div style="margin-top:6px;color:#7a7a72;">Nachtragen im GutachtenManager unter „Beteiligte Personen bearbeiten", danach „Auffrischen" drücken.</div></div>';
   el.innerHTML=html;
   el.style.display='';
+}
+
+// b675: Ausgeblendete Akten stehen im localStorage, nicht am Task. Es ist eine reine
+// Anzeige-Einstellung – am Task gespeichert würde sie über Drive mitwandern und beim
+// Konflikt-Abgleich mitspielen, wo sie nichts zu suchen hat.
+function _gmLueckenAusListe(){
+  try{ const l=JSON.parse(localStorage.getItem('pam_gmluecken_aus')||'[]'); return Array.isArray(l)?l:[]; }
+  catch(e){ return []; }
+}
+function _gmLueckenIstAus(akte){
+  const t=String(akte||'').trim().toLowerCase();
+  return _gmLueckenAusListe().some(function(a){return String(a).trim().toLowerCase()===t;});
+}
+function _gmLueckenAus(akte,aus){
+  const t=String(akte||'').trim().toLowerCase();
+  const l=_gmLueckenAusListe().filter(function(a){return String(a).trim().toLowerCase()!==t;});
+  if(aus)l.push(String(akte).trim());
+  try{ localStorage.setItem('pam_gmluecken_aus',JSON.stringify(l)); }catch(e){}
+  if(typeof _gmLueckenAnzeigen==='function')_gmLueckenAnzeigen();
 }
 
 // Fragt nach dem Verknuepfen. Erscheint NUR, wenn es etwas zu entscheiden gibt:
@@ -31742,9 +31780,10 @@ function renderKontaktePTP(kontakte){
   c.innerHTML='';
   for(const k of(kontakte||[]))addKontaktPTP(k.rolle||'sonstiges',k.name||'',k.tel||'',k.email||'',k.anrufKontakt||false,k.tel2||'');
   if(typeof _adrRefreshMarks==='function')_adrRefreshMarks();
-  // b674: Lücken der GM-Akte anzeigen. OHNE await – das Laden darf das Öffnen
-  // des Tasks nicht aufhalten; ohne GM-Akte oder ohne Datei passiert nichts.
-  try{ if(typeof _gmLueckenAnzeigen==='function')_gmLueckenAnzeigen(); }catch(e){}
+  // b675: Der Lücken-Hinweis wird hier NICHT mehr angestoßen. renderKontaktePTP läuft
+  // beim Öffnen eines Tasks, BEVOR tGmAkte gefüllt ist – die Anzeige las dadurch die
+  // Aktennummer des zuvor geöffneten Tasks. Der Aufruf sitzt jetzt in
+  // openEditTaskModal direkt hinter der Zuweisung des Feldes.
 }
 function getKontaktePTP(){
   const c=document.getElementById('tKontakteContainer');if(!c)return[];
@@ -40239,6 +40278,11 @@ function openEditTaskModal(id){
   {const _gmEl=document.getElementById('tGmAkte');if(_gmEl)_gmEl.value=task.gmAkte||'';
    const _gmH=document.getElementById('_hdrGmAkte');if(_gmH){if(task.gmAkte){_gmH.textContent='📂 GM '+_gmNr(task.gmAkte);_gmH.style.display='';}else{_gmH.style.display='none';}}}
   {const _gmF=document.getElementById('tGmAkteFolderId');if(_gmF)_gmF.value=task.gmAkteFolderId||'';}
+  // b675: Lücken-Hinweis ERST HIER anstoßen – jetzt steht die richtige Aktennummer im
+  // Feld. Vorher hing der Aufruf in renderKontaktePTP, die früher läuft; angezeigt
+  // wurden dadurch die Lücken des zuvor geöffneten Tasks. Ohne await, damit das
+  // Öffnen nicht am Laden aus Drive hängt.
+  try{ if(typeof _gmLueckenAnzeigen==='function')_gmLueckenAnzeigen(); }catch(e){}
   document.getElementById('tGD').value=task.gdrive||_ordnerDef;
   // b666: NAS-Pfad ebenso – am Objekt stand sonst der nackte Freigabe-Pfad
   // „\\nas-ddbraun\Kunden" in der Karte, der auf kein Objekt zeigt und beim
