@@ -610,9 +610,26 @@ async function _gmApplyAkteToFields(akte){
   set('tEmailOrdner',base+find('Posteingang'));
   set('tGmAkte',akte.name);
   const h=document.getElementById('tGmAkteFolderId');if(h)h.value=akte.id;
+  // b671: NAS-Pfad der Akte mitsetzen. Das Jahr kommt aus akte.year – dem echten
+  // Jahresordner aus Drive, nicht aus der Nummer abgeleitet; Ausreisser wie 26-00112
+  // oder ein Ordner mit Zusatz stimmen damit auch. Ein individuell gesetzter Pfad
+  // (z.B. Objektordner einer Hausverwaltung) bleibt stehen – nur die Vorbelegung
+  // \\nas-ddbraun\Kunden wird ersetzt, sonst waere das stiller Datenverlust.
+  let _nasHinweis='';
+  if(akte.year&&akte.name){
+    const _nasNeu='\\\\nas-ddbraun\\GutachtenManager81\\GM-Arbeitsordner\\Dokumente\\'+akte.year+'\\'+akte.name;
+    const _nasEl=document.getElementById('tNAS');
+    const _nasAlt=_nasEl?String(_nasEl.value||'').trim():'';
+    if(_nasEl&&(!_nasAlt||_nasAlt.toLowerCase()==='\\\\nas-ddbraun\\kunden'))_nasEl.value=_nasNeu;
+    else if(_nasAlt&&_nasAlt!==_nasNeu)_nasHinweis=' · NAS-Pfad unverändert gelassen';
+  }
   if(typeof _updateFotoOrdnerHint==='function')_updateFotoOrdnerHint();
   if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
-  showToast('✓ Mit GM-Akte '+akte.name+' verknüpft – Ordner gesetzt','success',4500);
+  showToast('✓ Mit GM-Akte '+akte.name+' verknüpft – Ordner gesetzt'+_nasHinweis,'success',4500);
+  // b672: Titelvorschlag aus den GM-Kopfdaten anbieten. Bewusst OHNE await – der
+  // Anlege-Flow laeuft weiter, der Dialog blockiert ihn nicht. Fehlt die JSON-Datei,
+  // passiert gar nichts (kein Fehler, keine Nachfrage).
+  try{ if(typeof _gmTitelVorschlagen==='function')_gmTitelVorschlagen(akte.name); }catch(e){}
 }
 // Anlege-Flow: fragt beim neuen Auftrag nach GM-Akte. true = GM verknüpft (eigene Struktur überspringen).
 async function _gmMaybeLinkOnCreate(){
@@ -9237,7 +9254,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-16 · #670'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-16-b670) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-16 · #672'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-16-b672) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -31416,6 +31433,104 @@ function _gmAkteFindContacts(book,akte){
   var target=(akte||'').toString().trim().toLowerCase();
   for(var k in book){ if(k.toString().trim().toLowerCase()===target) return book[k]; }
   return [];
+}
+
+// ── b672: GM-Kopfdaten (pam-akte-daten.json) ─ Titelvorschlag aus der GM-Akte ──
+// Sache und Besichtigungsobjekt stehen in der Access-Datenbank, die ein Browser nicht
+// lesen kann. Denselben Umweg wie beim Adressbuch: export_aktendaten.bat schreibt eine
+// JSON nach Drive, PAM liest sie. Ohne Datei passiert schlicht nichts.
+let _gmAkteDaten=null;          // { "26-012": {sache,objekt,objektZeile,auftraggeber,…} }
+let _gmAkteDatenLoaded=false;
+
+async function _gmAkteDatenLoad(){
+  if(_gmAkteDatenLoaded)return _gmAkteDaten;
+  if(!gdriveToken)throw new Error('NO_TOKEN');
+  let q="name='pam-akte-daten.json' and mimeType='application/json' and trashed=false";
+  if(workspaceFolderId)q+=" and '"+workspaceFolderId+"' in parents";
+  const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q)+'&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc',{headers:{Authorization:'Bearer '+gdriveToken}});
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  const files=((await r.json()).files)||[];
+  if(files.length){
+    const fr=await fetch('https://www.googleapis.com/drive/v3/files/'+files[0].id+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
+    if(!fr.ok)throw new Error('HTTP '+fr.status);
+    let js={};try{js=await fr.json();}catch(e){js={};}
+    _gmAkteDaten=(js&&js.akten)?js.akten:{};
+  }else{ _gmAkteDaten={}; }
+  _gmAkteDatenLoaded=true;
+  return _gmAkteDaten;
+}
+
+// „Objekt – Sache". Fehlt eines von beiden, steht das andere allein.
+// Gekappt, damit die Karte lesbar bleibt; abgeschnitten wird an einer Wortgrenze.
+function _gmTitelAusAkte(d){
+  if(!d)return '';
+  const obj=String(d.objektZeile||'').trim();
+  const sache=String(d.sache||'').trim();
+  let t=(obj&&sache)?(obj+' – '+sache):(obj||sache);
+  t=t.replace(/\s+/g,' ').trim();
+  if(t.length>90){
+    t=t.substring(0,89);
+    const cut=t.lastIndexOf(' ');
+    if(cut>60)t=t.substring(0,cut);
+    t=t.replace(/[\s,;.–-]+$/,'')+'…';
+  }
+  return t;
+}
+
+function _gmAkteDatenFind(daten,akte){
+  if(!daten)return null;
+  if(daten[akte])return daten[akte];
+  const target=String(akte||'').trim().toLowerCase();
+  for(const k in daten){ if(String(k).trim().toLowerCase()===target) return daten[k]; }
+  return null;
+}
+
+function _gmTitelDialog(alt,neu){
+  return new Promise(function(res){
+    const ex=document.getElementById('gmtitel-modal');if(ex)ex.remove();
+    const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+    const ov=document.createElement('div');
+    ov.id='gmtitel-modal';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000005;display:flex;align-items:center;justify-content:center;';
+    ov.innerHTML='<div style="background:var(--bg,#fff);color:var(--text,#111);border:1px solid var(--border,#d1d5db);border-radius:10px;padding:18px 20px;width:520px;max-width:96vw;box-shadow:0 8px 32px rgba(0,0,0,0.25);">'
+      +'<div style="font-size:14px;font-weight:600;color:var(--accent,#1a56c4);margin-bottom:4px;">📋 Titel aus der GM-Akte übernehmen?</div>'
+      +'<div style="font-size:11.5px;color:var(--text2,#6b7280);margin-bottom:12px;">Objekt und Sache stehen in der Akte bereits.</div>'
+      +'<div style="font-size:11px;color:var(--text2,#6b7280);font-weight:600;margin-bottom:3px;">Jetzt</div>'
+      +'<div style="font-size:12.5px;border:1px solid var(--border,#e5e7eb);border-radius:6px;padding:7px 9px;margin-bottom:10px;background:var(--bg3,#f9fafb);">'+esc(alt||'(leer)')+'</div>'
+      +'<div style="font-size:11px;color:var(--text2,#6b7280);font-weight:600;margin-bottom:3px;">Aus der GM-Akte</div>'
+      +'<div style="font-size:12.5px;border:1px solid var(--accent,#1a56c4);border-radius:6px;padding:7px 9px;margin-bottom:14px;">'+esc(neu)+'</div>'
+      +'<div style="display:flex;gap:8px;justify-content:flex-end;">'
+      +'<button type="button" id="_gmTitelNein" style="padding:7px 14px;font-size:12px;border:1px solid var(--border,#d1d5db);background:var(--bg3,#f9fafb);color:var(--text,#111);border-radius:6px;cursor:pointer;">Titel behalten</button>'
+      +'<button type="button" id="_gmTitelJa" style="padding:7px 14px;font-size:12px;background:var(--accent,#1a56c4);color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">Übernehmen</button>'
+      +'</div></div>';
+    document.body.appendChild(ov);
+    const fertig=function(v){ov.remove();res(v);};
+    ov.querySelector('#_gmTitelJa').onclick=function(){fertig(true);};
+    ov.querySelector('#_gmTitelNein').onclick=function(){fertig(false);};
+    ov.addEventListener('click',function(e){if(e.target===ov)fertig(false);});
+    setTimeout(function(){const b=ov.querySelector('#_gmTitelJa');if(b)b.focus();},60);
+  });
+}
+
+// Fragt nach dem Verknuepfen. Erscheint NUR, wenn es etwas zu entscheiden gibt:
+// Datei da, Akte gefunden, Vorschlag nicht leer und anders als der jetzige Titel.
+async function _gmTitelVorschlagen(akteNr){
+  if(!akteNr)return;
+  let daten;
+  try{ daten=await _gmAkteDatenLoad(); }catch(e){ return; }   // keine Datei -> keine Nachfrage
+  const neu=_gmTitelAusAkte(_gmAkteDatenFind(daten,akteNr));
+  if(!neu)return;
+  const el=document.getElementById('taskTitleInput');
+  if(!el)return;
+  const alt=String(el.value||'').trim();
+  if(alt===neu)return;
+  let ja=false;
+  try{ ja=await _gmTitelDialog(alt,neu); }catch(e){ return; }
+  if(!ja)return;
+  el.value=neu;
+  if(typeof _updateHdrMeta==='function')_updateHdrMeta();
+  if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
+  showToast('✓ Titel aus GM-Akte übernommen','success',3500);
 }
 
 function _gmAktePick(){
