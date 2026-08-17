@@ -9265,7 +9265,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-17 · #682'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-17-b682) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-17 · #683'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-17-b683) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -10582,7 +10582,10 @@ function renderTurnusListe(){
           + '<b style="color:var(--text2);">vorab</b>'
           + '<span>'+(l.dateien||[]).map(function(d){return _tuDateiLink(d,{datum:''});}).join('')+'</span>'
           + '<span style="font-size:10px;color:var(--text2);white-space:nowrap;">wandert beim nächsten ✓ in den Termin</span>'
-          + '</div>';
+          + '</div>'
+          // b683: auch die vorab abgelegten Dateien mit Namen und ✕ (leeres Datum
+          // = die Liste hängt an der Leistung, nicht an einem Termin)
+          + _tuDateiZeilen(l,null,'');
       }
       if(!ein.length){
         h+='<div style="opacity:.75;">Noch kein Eintrag.</div>';
@@ -10604,9 +10607,12 @@ function renderTurnusListe(){
               _rg='<span style="color:#c47f17;font-size:11px;font-weight:600;white-space:nowrap;cursor:pointer;margin-left:4px;" onclick="_tuRgErfassen(\''+idJs+'\',\''+_escHtml(e.datum)+'\')" title="Teilrechnung vom '+_escHtml(_tuDe(e.rg))+_escHtml(_vor)+' – der Rest steht noch aus. Klick, um die Schlussrechnung einzutragen (dann ohne „+&quot;).">RE Teil '+esc(_tuDe(e.rg))+(e.rgnr?' · '+esc(e.rgnr):'')+'</span>'
                 +'<button type="button" onclick="_tuRgWeg(\''+idJs+'\',\''+_escHtml(e.datum)+'\')" title="Teilrechnungs-Vermerk entfernen">✕</button>';
             }else if(e.rg){
-              const _sam=_tuSammelZahl(e.rgSammel);
+              // b683: über `_tuSammelKey` – damit greift die Klammer auch bei von
+              // Hand zweimal eingetippter Nummer, nicht nur beim Häkchen-Weg.
+              const _samKey=_tuSammelKey(e);
+              const _sam=_tuSammelZahl(_samKey);
               _rg='<span style="color:#2f7d1e;font-size:11px;white-space:nowrap;cursor:pointer;margin-left:4px;" onclick="_tuRgErfassen(\''+idJs+'\',\''+_escHtml(e.datum)+'\')" title="Rechnung vermerkt – Klick zum Ändern">RE '+esc(_tuDe(e.rg))+(e.rgnr?' · '+esc(e.rgnr):'')+'</span>'
-                +(_sam>1?'<span style="font-size:10px;color:var(--text2);white-space:nowrap;cursor:pointer;" onclick="_tuSammelZeigen(\''+_escHtml(e.rgSammel)+'\')" title="Sammelrechnung – alle Positionen anzeigen">Sammel · '+_sam+'</span>':'')
+                +(_sam>1?'<span style="font-size:10px;color:var(--text2);white-space:nowrap;cursor:pointer;" onclick="_tuSammelZeigen(\''+_escHtml(_samKey)+'\')" title="Sammelrechnung – alle '+_sam+' Positionen anzeigen">Sammel · '+_sam+'</span>':'')
                 +'<button type="button" onclick="_tuRgWeg(\''+idJs+'\',\''+_escHtml(e.datum)+'\')" title="Rechnungsvermerk entfernen">✕</button>';
             }else{
               _rg='<button type="button" class="tu-btn" style="color:#E24B4A;border-color:#E24B4A;" onclick="_tuRgErfassen(\''+idJs+'\',\''+_escHtml(e.datum)+'\')" title="Rechnung geschrieben? Datum und Nummer vermerken – oder „-" für ohne Berechnung">RE erfassen</button>';
@@ -10621,7 +10627,9 @@ function renderTurnusListe(){
             + '<button type="button" onclick="_tuNotiz(\''+idJs+'\',\''+_escHtml(e.datum)+'\')" title="Notiz zu diesem Termin – anlegen, ändern oder leeren">📝</button>'
             + (e.skip?'':'<button type="button" onclick="_tuDateiKnopf(\''+idJs+'\',\''+_escHtml(e.datum)+'\')" title="Foto/Protokoll zu diesem Eintrag hochladen – landet im Objektordner, Name mit Datum und Leistung (b624)">📎</button>')
             + '<button type="button" onclick="_tuEintragWeg(\''+idJs+'\',\''+_escHtml(e.datum)+'\')" title="Diesen Eintrag entfernen (Fehleingabe)">✕</button>'
-            + '</div>';
+            + '</div>'
+            // b683: die Dateien darunter, mit Namen und je einem ✕ zum Lösen
+            + _tuDateiZeilen(l,e,e.datum);
         });
       }
       h+='</div>';
@@ -10937,6 +10945,23 @@ function _objRgErfassen(taskId,lId){
 // hinweg – unter EINER Kennung `rgSammel`. `rg`/`rgnr` stehen trotzdem an jedem
 // einzelnen Eintrag: die Mahn-Regel (_tuRgOffen) und alle bestehenden Ansichten
 // bleiben damit unverändert, die Kennung ist nur die Klammer zum Wiederfinden.
+// b683: Die Klammer wird jetzt AUS DER RECHNUNG SELBST gebildet, nicht nur aus
+// dem gesetzten Feld (Frank 17.08.). Sein Fall, in den echten Daten gemessen:
+// er hat dieselbe Rechnungsnummer an zwei Leistungen VON HAND eingetragen –
+// sachlich eine Sammelrechnung, aber `rgSammel` setzte bis b682 ausschliesslich
+// `_bjmSammelrechnung` (der Häkchen-Weg). Ergebnis: nirgends stand „Sammel · 2".
+//
+// Schlüssel = Nummer + Rechnungsdatum, dasselbe Format wie `rgSammel` (b629),
+// damit alte und neue Klammern zusammenfallen.
+// ⚠ NUR mit Nummer. Ohne Nummer wäre der Schlüssel „ohne-Nr#<Datum>" und würde
+// alle nummernlosen Rechnungen desselben Tages in einen Topf werfen – dort gilt
+// weiterhin allein das ausdrücklich gesetzte `rgSammel`.
+function _tuSammelKey(e){
+  if(!e)return '';
+  if(e.rgSammel)return e.rgSammel;
+  var nr=String(e.rgnr||'').trim();
+  return (nr&&e.rg)?(nr+'#'+e.rg):'';
+}
 function _tuSammelSammle(key){
   var out=[];
   if(!key)return out;
@@ -10947,7 +10972,7 @@ function _tuSammelSammle(key){
         if(!t)return;
         (t.turnusListe||[]).forEach(function(l){
           ((l&&l.eintraege)||[]).forEach(function(e){
-            if(e&&e.rgSammel===key)out.push({t:t,board:bn,l:l,e:e});
+            if(e&&_tuSammelKey(e)===key)out.push({t:t,board:bn,l:l,e:e});
           });
         });
       });
@@ -10995,6 +11020,52 @@ function _tuDateiLink(d,e){
   return '<a href="https://drive.google.com/file/d/'+_escHtml(d.id)+'/view" target="_blank"'
     +' title="'+_escHtml(nm)+(d.rolle==='rechnung'?' (Rechnung)':'')+'" style="text-decoration:none;margin-left:3px;">'
     +ico+(fremd?'<small style="color:var(--text2);margin-left:2px;">'+esc(fremd)+'</small>':'')+'</a>';
+}
+// ── b683: Dateien am Termin sichtbar machen und einzeln lösen (Frank 17.08.) ──
+// Sein Befund am Screenshot: „wie ich das an der Leistung lösche – man kann es
+// ja auch nicht anzeigen". Beides stimmte:
+//   · angezeigt wurde nur ein Emoji ohne Namen (`_tuDateiLink` oben),
+//   · und es gab KEINEN Weg, eine einzelne Datei zu entfernen – im ganzen Code
+//     kein `dateien.splice`, nur das Löschen des GANZEN Termins.
+//
+// Neu: eine eigene schmale Zeile je Datei mit Name, ↗ (in Drive öffnen) und ✕.
+// ⛔ Das ✕ löst NUR den Verweis. Die Datei bleibt im Wartungsordner – der ist der
+// Nachweis gegenüber der Hausverwaltung, und eine versehentlich gelöschte
+// Rechnung wäre schlimmer als ein überflüssiger Verweis. Der Dialog sagt das.
+// `lId` + `datum`: bei leerem `datum` ist die VORAB-Liste der Leistung gemeint
+// (b633, `l.dateien`) – die hat keinen Termin.
+function _tuDateiZeilen(l,e,datum){
+  var liste=(e?(e.dateien||[]):((l&&l.dateien)||[]));
+  if(!liste.length)return '';
+  var idJs=_escHtml((l&&l.id)||'');
+  return liste.map(function(d){
+    if(!d||!d.id)return '';
+    var nm=String(d.name||'Datei');
+    var ico=(d.rolle==='rechnung')?'🧾':(nm.toLowerCase().endsWith('.pdf')?'📄':'📷');
+    return '<div style="display:flex;align-items:center;gap:5px;padding:2px 0 2px 16px;font-size:11px;color:var(--text2);min-width:0;">'
+      +'<span style="flex-shrink:0;">'+ico+'</span>'
+      +'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+_escHtml(nm)+'">'+esc(nm)+'</span>'
+      +(d.rolle==='rechnung'?'<span style="flex-shrink:0;font-size:10px;color:#2f7d1e;font-weight:600;">Rechnung</span>':'')
+      +'<a href="https://drive.google.com/file/d/'+_escHtml(d.id)+'/view" target="_blank" title="In Drive öffnen" style="flex-shrink:0;text-decoration:none;padding:0 3px;">↗</a>'
+      +'<span onclick="_tuDateiWeg(\''+idJs+'\',\''+_escHtml(datum||'')+'\',\''+_escHtml(d.id)+'\')" title="Verweis auf diese Datei entfernen – die Datei selbst bleibt im Ordner" style="flex-shrink:0;cursor:pointer;padding:0 3px;color:var(--text2);">✕</span>'
+      +'</div>';
+  }).join('');
+}
+// Verweis lösen – am offenen Fenster, also auf der Arbeitskopie `taskTurnus`.
+function _tuDateiWeg(lId,datum,dateiId){
+  var l=_tuFinde(lId); if(!l)return;
+  var liste=datum
+    ?(((l.eintraege||[]).find(function(x){return x&&x.datum===datum;})||{}).dateien||null)
+    :(l.dateien||null);
+  if(!liste)return;
+  var i=liste.findIndex(function(d){return d&&d.id===dateiId;});
+  if(i<0)return;
+  var nm=String(liste[i].name||'Datei');
+  if(!confirm('Verweis auf „'+nm+'" entfernen?\n\nDie Datei selbst bleibt im Wartungsordner in Drive – sie wird hier nur nicht mehr angezeigt.\n\nWirklich löschen kannst du sie über den 📁-Knopf oben in der Sektion.'))return;
+  liste.splice(i,1);
+  renderTurnusListe();
+  scheduleTaskFieldSave();
+  showToast('Verweis entfernt – die Datei liegt weiter im Ordner','info',3500);
 }
 
 // Namensschema der Anhänge: <Datum>_<Leistung> – gemeinsamer Kern für den
@@ -21918,8 +21989,26 @@ function _renderDokuGruppen(){
   if(!el)return;
   const liste=taskAttachments||[];
   const chips=document.getElementById('tDokuOrdnerChips'); // b572: Ordner-Auswahl, erste Zeile im aufgeklappten Bereich
-  if(badge){badge.style.display=liste.length?'':'none';badge.textContent=liste.length;} // b572: Menge wieder dauerhaft in der Kopfzeile (war seit b567 stumm)
-  if(!liste.length){if(chips){chips.style.display='none';chips.innerHTML='';}el.innerHTML='<div style="padding:10px;text-align:center;color:var(--text2);font-size:12px;line-height:1.6;">Noch keine Dokumente –<br>📎-Zone oben rechts oder „🔄 Aus Ordner einlesen"</div>';return;}
+  // b683: Die verlinkten Dokumente der wiederkehrenden Leistungen zählen mit.
+  // ⚠ Sie MÜSSEN vor dem Frühausstieg geholt werden: an einem Objekt-Task ohne
+  // eigene Anhänge – also genau in Franks Fall – wäre die Funktion sonst mit
+  // „Noch keine Dokumente" ausgestiegen und hätte die Rechnung nie gezeigt.
+  let _refDocs=[];
+  try{_refDocs=_tuRefFotosLive().docs||[];}catch(err){console.warn('[TU] Dokumente-Sektion:',err);}
+  const _ges=liste.length+_refDocs.length;
+  if(badge){ // b572: Menge dauerhaft in der Kopfzeile (war seit b567 stumm)
+    badge.style.display=_ges?'':'none';
+    badge.textContent=_ges;
+    badge.title=_refDocs.length?(liste.length+' eigene · '+_refDocs.length+' aus wiederkehrenden Leistungen'):'';
+  }
+  if(!_ges){if(chips){chips.style.display='none';chips.innerHTML='';}el.innerHTML='<div style="padding:10px;text-align:center;color:var(--text2);font-size:12px;line-height:1.6;">Noch keine Dokumente –<br>📎-Zone oben rechts oder „🔄 Aus Ordner einlesen"</div>';return;}
+  if(!liste.length){
+    // nur Verweise, keine eigenen Anhänge: Ordnergruppen entfallen, der
+    // Verweis-Block unten trägt die Sektion allein
+    if(chips){chips.style.display='none';chips.innerHTML='';}
+    el.innerHTML=_tuDokRefBlock(_refDocs);
+    return;
+  }
   const tid=(document.getElementById('taskId')||{}).value||'';
   const tk=tid?findTaskById(tid):null;
   const mailDatum={};
@@ -21982,7 +22071,49 @@ function _renderDokuGruppen(){
     });
     html+='</div>';
   });
+  // ── b683: Dokumente aus den wiederkehrenden Leistungen (Frank 17.08.) ──────
+  // Sein Befund: „Wo finde ich die Rechnungsdokumente – warum sind die nicht bei
+  // Dokumente?" Nachgemessen: die Verweise aus `_tuRefDateien` (b630) hängen an
+  // der Fotos-Sektion, am Bautagebuch, an der 📋 Übersicht UND am 🗂-Dokumente-
+  // FENSTER – nur diese Sektion hier las ausschließlich `taskAttachments`.
+  // Sie war die einzige vergessene Stelle: bei den Fotos wurde es gemacht, bei
+  // den Dokumenten nicht. Deshalb sah Frank seine Wartungsfotos, aber nicht seine
+  // Rechnungen.
+  //
+  // ⛔ NUR verlinkt, nie kopiert – dieselbe Regel wie bei den Fotos (Franks
+  // Entscheid zu b630: „nur verlinken"). Die Zeilen tragen deshalb kein ⬇ und
+  // kein Löschen: bearbeitet wird an der Leistung, wo seit b683 auch das ✕ sitzt.
+  html+=_tuDokRefBlock(_refDocs);
   el.innerHTML=html;
+}
+// ── b683: Dokumente aus den wiederkehrenden Leistungen (Frank 17.08.) ────────
+// Sein Befund: „Wo finde ich die Rechnungsdokumente – warum sind die nicht bei
+// Dokumente?" Nachgemessen: die Verweise aus `_tuRefDateien` (b630) hängen an der
+// Fotos-Sektion, am Bautagebuch, an der 📋 Übersicht UND am 🗂-Dokumente-FENSTER –
+// nur die Sektion im Task las ausschließlich `taskAttachments`. Sie war die
+// einzige vergessene Stelle: bei den Fotos wurde es gemacht, bei den Dokumenten
+// nicht. Deshalb sah Frank seine Wartungsfotos, aber nicht seine Rechnungen.
+//
+// ⛔ NUR verlinkt, nie kopiert – Franks Entscheid zu b630 („nur verlinken"). Die
+// Zeilen tragen deshalb kein ⬇ und kein Löschen: bearbeitet wird an der Leistung,
+// wo seit b683 auch das ✕ sitzt.
+function _tuDokRefBlock(refDocs){
+  var docs=refDocs||[];
+  if(!docs.length)return '';
+  var rg=docs.filter(function(d){return d.rolle==='rechnung';}).length;
+  var html='<div style="display:flex;align-items:center;gap:6px;padding:6px 2px 3px;margin-top:4px;border-top:1px solid var(--border);">'
+    +'<span style="font-size:calc(11px*var(--modal-scale,1));font-weight:700;color:var(--text2);flex:1;">🔁 Aus wiederkehrenden Leistungen</span>'
+    +'<span style="font-size:calc(10px*var(--modal-scale,1));color:var(--text2);">'+docs.length+(rg?' · '+rg+' Rechnung'+(rg!==1?'en':''):'')+'</span></div>';
+  docs.forEach(function(d){
+    var ico=(d.rolle==='rechnung')?'🧾':'📄';
+    html+='<div style="display:flex;align-items:center;gap:7px;padding:5px 2px;border-bottom:0.5px solid var(--border);font-size:calc(12px*var(--modal-scale,1));">'
+      +'<span style="flex-shrink:0;">'+ico+'</span>'
+      +'<span style="flex:1;min-width:0;color:var(--text1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="'+esc(d.name||'')+'">'+esc(d.name||'Datei')+'</span>'
+      +'<span style="flex-shrink:0;font-size:calc(11px*var(--modal-scale,1));color:var(--text2);">'+esc(d.herkunft||'')+'</span>'
+      +'<button type="button" onclick="window.open(\'https://drive.google.com/file/d/'+esc(d.fileId)+'/view\',\'_blank\')" style="flex-shrink:0;font-size:10px;padding:1px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text1);cursor:pointer;" title="In Drive öffnen – entfernt wird der Verweis an der Leistung">↗</button>'
+      +'</div>';
+  });
+  return html;
 }
 // ── b573: Klappzustand der einzelnen Ordner ───────────────────────────────────
 // Gemerkt wird nur, was Frank selbst angeklickt hat (localStorage, pro Ordnername –
