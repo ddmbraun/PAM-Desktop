@@ -9296,7 +9296,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-17 · #692'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-17-b692) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-17 · #693'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-17-b693) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -10799,6 +10799,15 @@ function renderTurnusListe(){
         + '<button type="button" class="tu-btn" onclick="_tuErledigtAm(\''+idJs+'\')" title="Erledigt an einem anderen Tag – für den Nachtrag">✓ am …</button>'
         + '<button type="button" class="tu-btn" onclick="_tuSkip(\''+idJs+'\')" title="Diesmal ausgefallen – beruhigt die Ampel, gilt aber NICHT als erledigt">↷ überspringen</button>'
         + '<button type="button" class="tu-btn" onclick="_tuBearbeiten(\''+idJs+'\')" title="Namen oder Turnus ändern">✏ ändern</button>'
+        // b693: Der Schalter, statt sich durch vier Fragen in „✏ ändern" zu klicken.
+        // ⚠ In WORTEN, nicht als Symbol – die Beschriftung sagt den JETZIGEN Stand,
+        // der Tooltip sagt, was ein Klick daraus macht.
+        + '<button type="button" class="tu-btn" onclick="_tuRgPflichtToggle(\''+idJs+'\')" style="'
+        +   (l.rgPflicht?'color:#2f7d1e;border-color:#2f7d1e;':'color:var(--text2);')
+        +   '" title="'+(l.rgPflicht
+              ?'Für diese Leistung wird eine Rechnung erwartet – Klick schaltet das ab (eigene Objekte)'
+              :'Für diese Leistung wird KEINE Rechnung erwartet – Klick schaltet die Erinnerung ein (Kundenleistung)')
+        +   '">Rechnung: '+(l.rgPflicht?'ja':'nein')+'</button>'
         + '<button type="button" class="tu-btn" onclick="_tuDel(\''+idJs+'\')" title="Diese Leistung mitsamt ihrer Datumsliste löschen">🗑 löschen</button>'
         + '</div>';
       // b633: vorab am Handy abgelegte Dateien – sie hängen an der LEISTUNG und
@@ -10878,11 +10887,47 @@ function _tuAdd(){
   const name=(inp.value||'').trim();
   if(!name){showToast('Bitte erst einen Namen eintragen – z.B. „Reinigung"','warning',3000);inp.focus();return;}
   if(!Array.isArray(taskTurnus))taskTurnus=[];
-  taskTurnus.push({id:_tuNeueId(),name:name,intervall:(sel&&sel.value)||'monatlich',eintraege:[]});
+  // 🔴 b693: Bis hierher wurde `rgPflicht` beim Anlegen NIE gesetzt – jede neue
+  // Leistung war damit stumm „ohne Rechnung". Eine neu angelegte Kundenleistung
+  // wurde also nie angemahnt, und man merkte es erst zufällig. Franks Frage
+  // („gebe ich das da gleich an?") hat den Blindfleck aufgedeckt.
+  // ⚠ Bewusst EINE Zusatzfrage – sie beantwortet man einmal je Leistung und nie
+  // wieder. Ohne sie bleibt der Fehler unsichtbar, das wiegt schwerer als die
+  // Bremse (b630-Regel gilt für Fragen bei JEDEM Abhaken, nicht beim Anlegen).
+  const rgP=confirm('Kommt für „'+name+'" eine Rechnung?\n\n'
+    +'OK        = ja – nach dem Erledigen erinnert PAM an die Rechnung (Kundenleistung)\n'
+    +'Abbrechen = nein – wird nie berechnet (eigene Objekte, Laden, Büro)\n\n'
+    +'Später änderbar über den Knopf „Rechnung: ja/nein" an der Leistung.');
+  taskTurnus.push({id:_tuNeueId(),name:name,intervall:(sel&&sel.value)||'monatlich',
+    rgPflicht:rgP,eintraege:[]});
   inp.value='';
   renderTurnusListe();
   scheduleTaskFieldSave();
-  showToast('🔁 „'+name+'" angelegt','success',2000);
+  showToast('🔁 „'+name+'" angelegt'+(rgP?' – mit Rechnung':' – ohne Rechnung'),'success',2600);
+}
+// b693: Der Schalter an der Leistung. Bis hierher steckte die Einstellung als
+// dritte von vier Fragen in `✏ ändern` – man musste sich durch Name und Turnus
+// klicken, um sie zu erreichen. Jetzt ein Klick.
+// ⚠ Es gehen KEINE Daten verloren: `rg`/`rgnr` bleiben an den Terminen stehen,
+// sie werden nur nicht mehr angezeigt und nicht mehr angemahnt. Zurückschalten
+// bringt alles wieder. Der Dialog sagt das, wenn etwas offen ist.
+function _tuRgPflichtToggle(id){
+  const l=_tuFinde(id); if(!l)return;
+  if(l.rgPflicht){
+    let offen=0;
+    try{((l.eintraege)||[]).forEach(function(e){if(_tuRgEintragOffen(l,e))offen++;});}catch(err){console.warn('[TU] offene zählen:',err);}
+    if(!confirm('Für „'+(l.name||'')+'" keine Rechnung mehr erwarten?\n\n'
+      +(offen?('⚠ Hier '+(offen===1?'fehlt noch 1 Rechnung':'fehlen noch '+offen+' Rechnungen')+'. Sie '
+              +(offen===1?'wird':'werden')+' dann nicht mehr angemahnt.\n\n'):'')
+      +'Bereits vermerkte Rechnungen bleiben gespeichert – sie werden nur nicht mehr angezeigt.\n'
+      +'Zurückschalten bringt alles wieder.'))return;
+    l.rgPflicht=false;
+  }else l.rgPflicht=true;
+  renderTurnusListe();
+  scheduleTaskFieldSave();
+  showToast(l.rgPflicht
+    ?'„'+(l.name||'')+'": PAM erinnert jetzt an die Rechnung'
+    :'„'+(l.name||'')+'": keine Rechnung mehr erwartet','info',3200);
 }
 
 function _tuBearbeiten(id){
