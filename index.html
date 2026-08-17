@@ -7490,6 +7490,15 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
 .tuj-leer{color:var(--text2);opacity:.45;}
 .tuj-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;flex-shrink:0;}
 .tuj-legend{font-size:11px;color:var(--text2);margin-top:9px;display:flex;gap:14px;flex-wrap:wrap;}
+/* b685: Sprungleiste im Reiter „Objekte" (Frank 17.08.). Klebt beim Scrollen am
+   oberen Rand; ein Klick springt zur Karte.
+   ⚠ Unter 1100 px Fensterbreite ganz weg – sonst nimmt sie den Objektkarten die
+   Breite, und die Zeilen (Name · Turnus · Status · RE · Haken · ✓ Heute) sind
+   dort ohnehin schon eng. */
+.obj-sprung{position:sticky;top:6px;width:176px;flex-shrink:0;max-height:78vh;overflow-y:auto;
+  background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:8px 6px;}
+.obj-sprung>div[onclick]:hover{background:var(--bg3);color:var(--text);}
+@media (max-width:1100px){.obj-sprung{display:none;}}
 /* b621: Wiederkehrende Leistungen gehören zum OBJEKT (Wunsch Frank). Bis b620
    stand die Karte auch in jedem Auftrag und in jedem Posteingang-Task – dort hat
    sie nichts zu suchen. `baustelle-only` heißt nämlich nur „im Aufgaben-Modus weg",
@@ -9265,7 +9274,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-17 · #684'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-17-b684) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-17 · #685'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-17-b685) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -11182,7 +11191,7 @@ function _tuRgPdfFrage(e,l,t){
   _tuFotoMenue(function(){                       // Weg 1: hochladen
     _tuUploadDateien(fid,l,e,function(ok){if(ok){_tuRolleSetzen(e,ok);nach();}},'Rechnung');
   },function(){                                  // Weg 2: liegt schon in Drive
-    _tuFotoPickerOeffnen(fid,function(auswahl){
+    _tuFotoPickerOeffnen(fid,function(auswahl){  // b685: mitDok – hier geht es um eine Rechnung
       var vorher=(e.dateien||[]).length;
       var add=_tuDateienAnEintrag(e,auswahl);
       if(!add){showToast('Nichts Neues ausgewählt','info',2500);return;}
@@ -11193,7 +11202,7 @@ function _tuRgPdfFrage(e,l,t){
         if(n)showToast('⚠ '+n+' Datei(en) ließen sich nicht umbenennen – die Zuordnung steht trotzdem','warning',5000);
         nach();
       });
-    });
+    },true); // b685: PDFs mitzeigen
   });
 }
 
@@ -11392,8 +11401,11 @@ function _tuDateienAnEintrag(e,auswahl){
   return add;
 }
 // Picker im Übergabe-Modus öffnen: startet direkt im Wartungs-/Objektordner
-function _tuFotoPickerOeffnen(fid,uebernahme){
+// b685: `mitDok=true` holt PDFs mit in die Auswahl – für den Rechnungs-Weg.
+// Ohne den Schalter bleibt es beim Foto-Verhalten von b627.
+function _tuFotoPickerOeffnen(fid,uebernahme,mitDok){
   _dfpUebernahme=uebernahme;
+  _dfpMitDok=!!mitDok;
   _dfpSelected=new Map();     // leer starten – nichts vorausgewählt
   _dfpHistory=[];
   _dfpOpenOverlay();
@@ -14883,6 +14895,7 @@ function _objSammle(){
     if(_objBoardFilter&&bn!==_objBoardFilter)return;
     (boards[bn]||[]).forEach(function(t){
       if(!t||t.archiviert||t.spaeterBearbeiten)return;
+      if(!_tuSuchTreffer(t,t.turnusListe))return; // b685
       var ls=(t.turnusListe||[]).filter(function(l){return l&&(!_objNurOffen||_tuFaellig(l));});
       if(!ls.length){
         // b622: leere Objekte nur auf ausdrücklichen Wunsch – und NUR von Objekt-Boards.
@@ -14919,11 +14932,14 @@ function renderObjekte(){
   var summeL=liste.reduce(function(s,g){return s+g.leistungen.length;},0);
   var summeF=liste.reduce(function(s,g){return s+g.faellig;},0);
 
-  var h='<div style="max-width:1000px;margin:0 auto;padding:6px 4px 40px;">';
+  // b685: Platz für die Sprungleiste links – sie steht außerhalb der 1000px,
+  // damit die Objektkarten selbst genauso breit bleiben wie bisher.
+  var h='<div class="obj-aussen" style="max-width:1200px;margin:0 auto;padding:6px 4px 40px;">';
   h+='<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px;">'
     +'<div style="font-size:16px;font-weight:700;color:var(--text);">🏠 Objekte <small style="font-size:12px;font-weight:500;color:var(--text2);">– wiederkehrende Leistungen</small></div>'
     +'<span style="flex:1;min-width:8px;"></span>'
     +'<select class="kal-select" onchange="_objSetBoard(this.value)" title="Nur Objekte dieses Projekts">'+boardOpts+'</select>'
+    +_tuSuchFeld('obj') // b685
     // b629: Jahresübersicht über ALLE Objekte des gewählten Projekts
     +'<button class="kal-chip" onclick="_bjmOeffnen()" title="Jahresübersicht über alle Objekte dieses Projekts – wer ist dieses Jahr durch, wo fehlt die Rechnung">📅 Jahr (alle)</button>'
     // b679: die Arbeitsliste. Bewusst NICHT auf ein Jahr begrenzt – anders als
@@ -14942,23 +14958,58 @@ function renderObjekte(){
   // b626: Rechnungs-Bilanz über die KOMPLETTEN Leistungslisten der gezeigten Objekte
   // (nicht über die gefilterten – „nur offene" darf die Geld-Warnung nicht verstecken)
   var summeRg=liste.reduce(function(s,g){return s+((g.t.turnusListe||[]).filter(_tuRgOffen).length);},0);
+  // b685: bei aktiver Suche steht dabei, wie viele von wie vielen gezeigt werden –
+  // sonst wundert man sich, wo die Objekte hin sind.
+  var _gesamtOhneSuche=0;
+  if(_tuSuche){
+    try{
+      var _merk=_tuSuche; _tuSuche='';
+      _gesamtOhneSuche=_objSammle().length;
+      _tuSuche=_merk;
+    }catch(e){_gesamtOhneSuche=0;}
+  }
   h+='<div style="font-size:11px;color:var(--text2);margin:0 2px 10px;">'
-    + liste.length+' Objekt'+(liste.length!==1?'e':'')+' · '+summeL+' Leistung'+(summeL!==1?'en':'')
+    + (_tuSuche&&_gesamtOhneSuche
+        ? ('<b>'+liste.length+' von '+_gesamtOhneSuche+'</b> Objekten · Suche „'+esc(_tuSuche)+'"')
+        : (liste.length+' Objekt'+(liste.length!==1?'e':'')))
+    + ' · '+summeL+' Leistung'+(summeL!==1?'en':'')
     + (summeF?' · <b style="color:'+TU_FARBE.gelb+'">'+summeF+' fällig</b>':' · nichts fällig')
     + (summeRg?' · <b style="color:#E24B4A;">RE '+summeRg+' ohne Rechnung</b>':'')+'</div>';
 
   if(!liste.length){
     h+='<div style="padding:30px;text-align:center;color:var(--text2);font-size:13px;">'
-      +(_objNurOffen?'Nichts fällig – alles im Turnus.'
-        :'Noch keine wiederkehrenden Leistungen angelegt. Einen Objekt-Task öffnen und unter „🔁 Wiederkehrende Leistungen" eintragen, was regelmäßig zu tun ist.')
+      +(_tuSuche?('Nichts gefunden zu „'+esc(_tuSuche)+'". <span style="cursor:pointer;text-decoration:underline;" onclick="_tuSetSuche(\'\',\'obj\')">Suche leeren</span>')
+        :(_objNurOffen?'Nichts fällig – alles im Turnus.'
+        :'Noch keine wiederkehrenden Leistungen angelegt. Einen Objekt-Task öffnen und unter „🔁 Wiederkehrende Leistungen" eintragen, was regelmäßig zu tun ist.'))
       +'</div></div>';
     mc.innerHTML=h; return;
   }
 
+  // ── b685: Sprungleiste (Frank 17.08.: „seitliche Leiste zum Scrollen") ────
+  // Bei vielen Objekten scrollt man sonst endlos. Die Leiste klebt am oberen
+  // Rand mit; ein Klick springt zur Karte. Sie folgt derselben Liste wie die
+  // Karten – filtert die Suche, schrumpft auch die Leiste.
+  // ⚠ Unter 1100 px Fensterbreite blendet CSS sie aus (Regel `.obj-sprung`),
+  // sonst quetscht sie die Karten zusammen.
+  h+='<div style="display:flex;gap:14px;align-items:flex-start;">';
+  h+='<div class="obj-sprung">'
+    +'<div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text2);font-weight:700;padding:0 4px 5px;">'+liste.length+' Objekte</div>';
+  liste.forEach(function(g){
+    var _f=g.faellig?'<span style="color:'+TU_FARBE.gelb+';font-weight:700;">'+g.faellig+'</span>':'';
+    var _r=((g.t.turnusListe||[]).filter(_tuRgOffen).length);
+    h+='<div onclick="_objSpringe(\''+_escHtml(g.t.id)+'\')" title="'+_escHtml(g.t.title||'')+'" '
+      +'style="display:flex;align-items:center;gap:5px;padding:3px 5px;border-radius:5px;cursor:pointer;font-size:11px;color:var(--text2);">'
+      +'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(g.t.title||'(ohne Titel)')+'</span>'
+      +_f
+      +(_r?'<span style="color:#E24B4A;font-weight:700;">RE</span>':'')
+      +'</div>';
+  });
+  h+='</div><div style="flex:1;min-width:0;max-width:1000px;">';
+
   liste.forEach(function(g){
     var idT=_escHtml(g.t.id);
     var adr=((g.t.adresse||'')+'').trim();
-    h+='<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;margin-bottom:10px;overflow:hidden;">'
+    h+='<div id="objk_'+idT+'" style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;margin-bottom:10px;overflow:hidden;scroll-margin-top:10px;">'
       + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 12px;border-bottom:1px solid var(--border);">'
       +   '<span style="font-size:13px;font-weight:700;color:var(--text);cursor:pointer;" onclick="_pamOpenTaskFromHeute(\''+idT+'\')" title="Objekt öffnen">'+esc(g.t.title||'(ohne Titel)')+'</span>'
       +   (adr?'<span style="font-size:11px;color:var(--text2);">📍 '+esc(adr)+'</span>':'')
@@ -15004,8 +15055,20 @@ function renderObjekte(){
     });
     h+='</div>';
   });
+  h+='</div>';   // b685: Kartenspalte zu
+  h+='</div>';   // b685: Flex-Umschlag (Sprungleiste + Karten) zu
   h+='</div>';
   mc.innerHTML=h;
+}
+// b685: Klick in der Sprungleiste – zur Karte scrollen und sie kurz hervorheben,
+// damit man sieht, wo man gelandet ist.
+function _objSpringe(taskId){
+  var el=document.getElementById('objk_'+taskId); if(!el)return;
+  try{el.scrollIntoView({behavior:'smooth',block:'start'});}catch(e){el.scrollIntoView();}
+  var alt=el.style.boxShadow;
+  el.style.transition='box-shadow .25s';
+  el.style.boxShadow='0 0 0 3px var(--accent)';
+  setTimeout(function(){el.style.boxShadow=alt||'';},1200);
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -15033,6 +15096,7 @@ function _bjmSammle(){
       if(!t||t.archiviert||t.spaeterBearbeiten)return;
       var ls=(t.turnusListe||[]).filter(function(l){return !!l;});
       if(!ls.length)return;
+      if(!_tuSuchTreffer(t,ls))return; // b685: dieselbe Suche wie im Reiter Objekte
       out.push({t:t,board:bn,leistungen:ls});
     });
   });
@@ -15095,6 +15159,7 @@ function _bjmOeffnen(){
     +  '<span id="bjmJahrLbl" style="font-weight:700;min-width:46px;text-align:center;"></span>'
     +  '<button type="button" class="tu-btn" onclick="_bjmNav(1)" title="Folgejahr">›</button>'
     +  '<button type="button" class="tu-btn" id="bjmLueckenBtn" onclick="_bjmToggleLuecken()"></button>'
+    +  _tuSuchFeld('bjm','tu-btn') // b685
     +  '<span style="flex:1;min-width:8px;"></span>'
     +  '<button type="button" class="tu-btn" id="bjmSammelBtn" onclick="_bjmSammelrechnung()" style="color:#2f7d1e;border-color:#2f7d1e;font-weight:700;"></button>'
     +  '<button type="button" class="tu-btn" onclick="_bjmClose()">✕ Schließen</button>'
@@ -15347,6 +15412,73 @@ function _bjmSammelrechnung(){
 // über alle Objekte, älteste Position zuerst.
 // ⚠ Die Auswahl teilt sich `_bjmSel` mit der Matrix – damit ist der vorhandene
 // Sammelrechnungs-Knopf (_bjmSammelrechnung) ohne Zweitfassung nutzbar.
+// ── b685: Suche in Objekten, offenen Rechnungen und Jahresmatrix (Frank 17.08.) ──
+// EIN Suchbegriff für alle drei Ansichten – wer im Reiter „Objekte" nach
+// „Brentano" sucht und dann die Matrix öffnet, sucht dort dasselbe.
+// ⛔ Wird bewusst NICHT gemerkt (Franks Entscheid): beim Neuladen leer, sonst
+// steht man vor einer gefilterten Liste und sucht seine Objekte.
+let _tuSuche='';
+function _tuSetSuche(v,neu){
+  _tuSuche=String(v||'');
+  // ⚠ Die Ansichten bauen ihr HTML komplett neu – das Eingabefeld wäre danach
+  // ein anderes Element und der Cursor weg. Nach jedem Tastendruck neu tippen
+  // zu müssen, macht eine Suche unbrauchbar. Deshalb Fokus und Cursorstand
+  // merken und zurückgeben.
+  var akt=null,pos=0;
+  try{
+    var a=document.activeElement;
+    if(a&&a.id&&a.id.indexOf('tuSuch_')===0){akt=a.id;pos=(a.selectionStart==null?String(a.value||'').length:a.selectionStart);}
+  }catch(e){}
+  if(neu==='obj'&&typeof renderObjekte==='function')renderObjekte();
+  if(neu==='rgl'&&typeof _rglRender==='function')_rglRender();
+  if(neu==='bjm'&&typeof _bjmRender==='function')_bjmRender();
+  try{
+    if(akt){
+      var el=document.getElementById(akt);
+      if(el&&el.focus){el.focus();try{el.setSelectionRange(pos,pos);}catch(e2){}}
+    }
+  }catch(e){}
+}
+// Passt ein Objekt (mit seinen Leistungen) auf den Suchbegriff?
+// Gesucht wird in Objektname, Adresse, Board, Leistungsnamen und den vermerkten
+// Rechnungsnummern – „2026-44" findet damit alle Positionen dieser Rechnung.
+// ⚠ `_tuSuche` defensiv gelesen: diese Funktion wird von `_objSammle`,
+// `_rglSammle` und `_bjmSammle` gerufen – alle drei werden in Prüfsuiten
+// einzeln ausgeschnitten. Ohne die Absicherung stünde dort ein ReferenceError
+// im try/catch und die Sammlung käme STUMM leer zurück (b683-Falle).
+// Ein Zugang für alle: `_tuSuche` ist eine `let`-Variable im Hauptskript und
+// steht in ausgeschnittenen Funktionen nicht zur Verfügung.
+function _tuSuchWert(){return (typeof _tuSuche==='string')?_tuSuche:'';}
+function _tuSuchTreffer(t,leistungen,begriff){
+  var _q0=(begriff==null)?_tuSuchWert():begriff;
+  var q=String(_q0||'').trim().toLowerCase();
+  if(!q)return true;
+  if(!t)return false;
+  var heu=[(t.title||''),(t.adresse||''),(t.desc||'')];
+  ((leistungen&&leistungen.length)?leistungen:(t.turnusListe||[])).forEach(function(l){
+    if(!l)return;
+    heu.push(l.name||'');
+    ((l.eintraege)||[]).forEach(function(e){if(e&&e.rgnr)heu.push(e.rgnr);});
+  });
+  var txt=heu.join(' ').toLowerCase();
+  // alle Wörter müssen vorkommen – „brentano rinnen" grenzt weiter ein
+  return q.split(/\s+/).every(function(w){return !w||txt.indexOf(w)>=0;});
+}
+// Das Eingabefeld – dieselbe Bauart in allen drei Ansichten
+// ⚠ Die ID (`tuSuch_<ziel>`) ist kein Schmuck – `_tuSetSuche` findet das Feld
+// darüber wieder, um den Cursor zurückzugeben. Das ✕ steht IMMER da, auch bei
+// leerer Suche: sonst käme beim ersten Zeichen ein zusätzliches Element dazu,
+// und genau das verschiebt den Cursor.
+function _tuSuchFeld(ziel,klasse){
+  var v=_tuSuchWert();
+  return '<span style="position:relative;display:inline-flex;align-items:center;">'
+    +'<input type="search" id="tuSuch_'+ziel+'" value="'+_escHtml(v)+'" oninput="_tuSetSuche(this.value,\''+ziel+'\')"'
+    +' placeholder="🔍 suchen…" title="Sucht in Objektname, Adresse, Leistung und Rechnungsnummer"'
+    +' class="'+(klasse||'kal-select')+'" style="min-width:150px;max-width:220px;padding:3px 22px 3px 7px;">'
+    +'<span onclick="_tuSetSuche(\'\',\''+ziel+'\')" title="Suche leeren" style="position:absolute;right:6px;cursor:pointer;color:var(--text2);font-size:12px;'
+    +(v?'':'opacity:.3;')+'">✕</span>'
+    +'</span>';
+}
 function _rglSammle(){
   var out=[];
   try{
@@ -15355,6 +15487,7 @@ function _rglSammle(){
       if(_objBoardFilter&&bn!==_objBoardFilter)return;
       (boards[bn]||[]).forEach(function(t){
         if(!t||t.archiviert||t.spaeterBearbeiten)return;
+        if(!_tuSuchTreffer(t,t.turnusListe))return; // b685
         (t.turnusListe||[]).forEach(function(l){
           if(!l)return;
           ((l.eintraege)||[]).forEach(function(e){
@@ -15410,6 +15543,7 @@ function _rglOeffnen(){
   ov.innerHTML='<div class="tuj-box" style="width:min(1080px,97vw);" role="dialog" aria-label="Offene Rechnungen">'
     +'<div class="tuj-head">'
     +  '<span class="tuj-title">Offene Rechnungen</span>'
+    +  _tuSuchFeld('rgl','tu-btn') // b685: steht fest im Kopf, damit _rglRender es nicht neu baut
     +  '<span style="flex:1;min-width:8px;"></span>'
     +  '<button type="button" class="tu-btn" onclick="_rglAlle()" title="Alle Zeilen an- oder abhaken">☑ alle</button>'
     +  '<button type="button" class="tu-btn" id="rglSammelBtn" onclick="_bjmSammelrechnung()" style="color:#2f7d1e;border-color:#2f7d1e;font-weight:700;"></button>'
@@ -15459,6 +15593,20 @@ function _rglRgErfassen(taskId,lId,datum){
   var t=findTaskById(taskId); if(!t)return;
   var l=(t.turnusListe||[]).find(function(x){return x&&x.id===lId;}); if(!l)return;
   var e=(l.eintraege||[]).find(function(x){return x&&x.datum===datum;}); if(!e)return;
+  // 🔴 b685: Franks Fall vom 17.08. – er hatte zwei Häkchen gesetzt und dann den
+  // Knopf IN DER ZEILE gedrückt statt „RE Sammelrechnung" oben. Der Zeilen-Knopf
+  // trägt nur seine eigene Position ein: eine Leistung blieb unbezahlt stehen,
+  // und die Sammel-Klammer fehlte. Die Knöpfe liegen in derselben Zeile wie die
+  // Häkchen – das passiert wieder. Deshalb hier einmal nachfragen.
+  if(_bjmSel&&_bjmSel.size>1){
+    var _k=_bjmKey(t,l,e);
+    var _mit=_bjmSel.has(_k);
+    var _txt='Du hast '+_bjmSel.size+' Positionen angehakt.\n\n'
+      +'OK = alle '+_bjmSel.size+' auf EINE Sammelrechnung (das war vermutlich gemeint)\n'
+      +'Abbrechen = nur diese eine Position eintragen'
+      +(_mit?'':'\n\n⚠ Diese Zeile ist NICHT angehakt.');
+    if(confirm(_txt)){_bjmSammelrechnung();return;}
+  }
   var rg=_tuRgAbfragen(e); if(!rg)return;
   _tuRgSchreiben(e,rg);
   _tuBtbZeile(t,_tuRgBtbText([(l.name||'')+' ('+_tuDeKurz(e.datum)+')'],e,1)); // b631
@@ -15623,7 +15771,7 @@ function _bjmPdfFrage(pos){
       var add=_tuDateienAnEintrag(p0.e,auswahl);
       if(!add){showToast('Nichts Neues ausgewählt','info',2500);return;}
       verteilen();
-    });
+    },true); // b685: auch hier geht es um eine Rechnung – PDFs mitzeigen
   });
 }
 
@@ -20423,9 +20571,18 @@ let _dfpSelected=new Map(); // driveId → {id,name,mime}
 // b627: Übergabe-Modus – ist hier ein Callback gesetzt, geht die Picker-Auswahl NICHT in
 // taskFotos, sondern an den Aufrufer (Foto an Turnus-Eintrag). Jeder normale Start nullt ihn.
 let _dfpUebernahme=null;
+// 🔴 b685: Der Picker fragte bei Drive AUSSCHLIESSLICH nach Bildern und Videos
+// (`mimeType contains 'image/' or 'video/'`). Ein Rechnungs-PDF war damit gar
+// nicht auswählbar – obwohl PAM diesen Weg unter der Frage „Rechnungs-PDF gleich
+// anhängen?" ausdrücklich anbietet (b629). Frank hat es am 17.08. gemeldet:
+// „kein Dokument angehangen, was ich ausgewählt habe" – er KONNTE es nicht.
+// Ist dieser Schalter gesetzt, kommen PDFs mit in die Abfrage.
+// ⚠ Wie `_dfpUebernahme`: jeder normale Picker-Start nullt ihn.
+let _dfpMitDok=false;
 
 async function loadFotosFromDriveFolder(){
   _dfpUebernahme=null; // b627: normaler Foto-Sektions-Weg
+  _dfpMitDok=false;    // b685
   if(!gdriveToken){showToast('Bitte zuerst mit Google Drive verbinden (oben rechts)','error');return;}
   const folderId=_getDriveFotoFolderId();
   if(!folderId){
@@ -21015,7 +21172,8 @@ async function _dfpLoadFolder(folderId,folderName){
     const dFolder=rFolder.ok?await rFolder.json():{files:[]};
     const folders=dFolder.files||[];
     // Bilder + Videos laden
-    const qImg=`'${folderId}' in parents and (mimeType contains 'image/' or mimeType contains 'video/') and trashed=false`;
+    // b685: `_dfpMitDok` holt PDFs mit dazu – sonst ist eine Rechnung im Ordner unsichtbar
+    const qImg=`'${folderId}' in parents and (mimeType contains 'image/' or mimeType contains 'video/'${_dfpMitDok?" or mimeType='application/pdf'":''}) and trashed=false`;
     const rImg=await fetch(
       'https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(qImg)+'&fields=files(id,name,mimeType,thumbnailLink,createdTime,imageMediaMetadata(time))&orderBy=name&pageSize=200',
       {headers:{Authorization:'Bearer '+gdriveToken}});
@@ -21044,7 +21202,10 @@ async function _dfpLoadFolder(folderId,folderName){
     // Bilder + Videos anzeigen
     if(images.length){
       const vidCount=images.filter(f=>_isVideo(f.mimeType,f.name)).length;
-      const galLabel=vidCount?'🖼 Medien ('+images.length+', davon '+vidCount+' Video)':'🖼 Fotos ('+images.length+')';
+      // b685: PDFs eigens zählen – sonst stünde „Fotos (3)" über einer Liste mit Rechnungen
+      const pdfCount=images.filter(f=>String(f.mimeType||'')==='application/pdf'||/\.pdf$/i.test(f.name||'')).length;
+      const galLabel=(pdfCount?'📄 Dateien ('+images.length+', davon '+pdfCount+' PDF'+(vidCount?' und '+vidCount+' Video':'')+')'
+        :(vidCount?'🖼 Medien ('+images.length+', davon '+vidCount+' Video)':'🖼 Fotos ('+images.length+')'));
       html+='<div style="font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--text2);margin-bottom:6px;font-weight:600;">'+galLabel+'</div>';
       html+='<div style="display:flex;flex-wrap:wrap;gap:8px;">';
       images.forEach(f=>{
@@ -21053,7 +21214,9 @@ async function _dfpLoadFolder(folderId,folderName){
         const sel=_dfpSelected.has(f.id);
         const border=sel?'border:2.5px solid var(--accent);':'border:2.5px solid transparent;';
         const chk=sel?'display:flex;':'display:none;';
-        const fallbackIcon=isVid?'🎬':'🖼️';
+        // b685: PDFs haben in Drive oft kein Vorschaubild – eigenes Zeichen statt leerer Kachel
+        const isPdf=String(f.mimeType||'')==='application/pdf'||/\.pdf$/i.test(f.name||'');
+        const fallbackIcon=isVid?'🎬':(isPdf?'📄':'🖼️');
         const playBadge=isVid?`<div style="position:absolute;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;pointer-events:none;"><div style="width:34px;height:34px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;">▶</div></div>`:'';
         html+=`<div class="dfp-item" data-id="${esc(f.id)}" data-name="${esc(f.name)}" data-mime="${esc(f.mimeType||(isVid?'video/mp4':'image/jpeg'))}" data-thumb="${esc(thumb)}" data-ts="${esc(_fotoTsFromDriveMeta(f))}" data-selected="${sel?'1':'0'}" onclick="_dfpToggle(this)" style="position:relative;width:110px;height:110px;border-radius:8px;overflow:hidden;cursor:pointer;${border}background:var(--bg3);flex-shrink:0;">`
           +(thumb?`<img src="${esc(thumb)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">`
