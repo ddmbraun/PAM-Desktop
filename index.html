@@ -7990,6 +7990,12 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
       <div style="display:flex;align-items:center;gap:8px;min-width:0;">
         <!-- b578: Die Datums-Boxen standen als eigene Zeile darunter, während hier links alles
              leer war. Jetzt füllen sie diesen Platz; der Board-Name ist nach Zeile 1 gewandert. -->
+        <!-- b681: Jahres-Badges im GEÖFFNETEN Task (Platzwahl Frank: links in dieser
+             Zeile). Befüllt von `_tuHdrBadges()` aus `renderTurnusListe`, damit sie
+             beim Abhaken und beim Eintragen einer Rechnung sofort mitziehen.
+             ⚠ Vor den Datums-Boxen, damit die Knopfgruppe rechts über `margin-left:auto`
+             am Dokumente-Knopf rechts stehen bleibt. -->
+        <span id="_hdrTuBadges" style="display:none;align-items:center;gap:5px;flex-wrap:wrap;flex-shrink:0;"></span>
         <div id="_hdrDates" class="task-card-datebox-row" style="display:none;flex:1;min-width:0;margin:0;"></div>
         <!-- #500: Reihenfolge nach Vorgabe Frank – Dokumente, Übersicht, Popout-Pfeil ganz rechts -->
         <!-- b579: margin-left:auto hält die Knopfgruppe rechts, auch wenn links keine
@@ -9259,7 +9265,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-17 · #680'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-17-b680) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-17 · #681'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-17-b681) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -10381,6 +10387,94 @@ function _tuJahrRgTitel(st){
     +(st.teil?', davon '+st.teil+' nur teilweise':'')
     +'\nGezählt werden Termine, nicht Leistungen.';
 }
+// ── b681: die Badges als EIN Baustein (Frank 17.08.) ───────────────────────
+// Zwei Befunde aus Franks Screenshot:
+//   1. Drei Badges im Kartenkopf hatten exakt dieselben Farbwerte (#FAEEDA /
+//      #854F0B / #FAC775): 🛠 N, 🔁 Jahresstand und € Rechnungsstand bei
+//      „teilweise". Sie waren nicht auseinanderzuhalten.
+//   2. Im GEÖFFNETEN Task gab es sie gar nicht – nur auf der Karte.
+//
+// Beides wird hier gelöst: die Darstellung steht EINMAL und wird von der Karte
+// UND von der Fenster-Kopfzeile gerufen. Getrennte Fassungen würden über die
+// Zeit auseinanderlaufen – dieselbe Überlegung wie bei der Rechenregel in b680.
+//
+// Franks Wahl (Variante C): auffallen soll nur der MANGEL. Auf einem vollen
+// Board schreit sonst die ganze Tafel und man sieht nichts mehr.
+// ⛔ Hier stand versehentlich eine Objekt-ANZAHL aus einem Kundenbestand –
+// test_b646 hat sie beim ersten Lauf gefunden. Diese Datei geht öffentlich raus.
+//   · gar nichts abgerechnet → VOLL rot, weiße Schrift
+//   · teilweise             → weiß mit kräftigem rotem Rahmen
+//   · alles abgerechnet     → weiß mit dünnem grünem Rahmen und ✓
+// ⚠ Alle drei sind ECKIG (`border-radius:0`). Die Form trägt hier mehr als die
+// Farbe: jede andere Badge in PAM ist gerundet, damit sticht diese schon aus
+// zwei Metern Abstand heraus.
+// `gross` = Fassung für das Task-Fenster (dort skaliert die Schrift mit --modal-scale).
+function _tuBadgeMasse(gross){
+  return gross
+    ?'font-size:calc(11px * var(--modal-scale,1));padding:3px 8px;'
+    :'font-size:9px;padding:1px 5px;';
+}
+// 🔁 Jahresstand – erledigte LEISTUNGEN (b630). Bleibt gerundet und pastellig:
+// das ist die ruhige Auskunft, nicht die Warnung.
+function _tuBadgeJahrHtml(liste,gross){
+  const st=_tuJahrStand(liste||[]);
+  if(!st.gesamt)return '';
+  const alles=st.fertig===st.gesamt, nix=st.fertig===0;
+  const col=alles?'#3B6D11':(nix?'var(--text2)':'#854F0B');
+  const bg=alles?'#EAF3DE':(nix?'var(--bg3)':'#FAEEDA');
+  const br=alles?'#C0DD97':(nix?'var(--border)':'#FAC775');
+  return '<span style="'+_tuBadgeMasse(gross)+'font-weight:700;border-radius:4px;background:'+bg+';color:'+col+';border:1px solid '+br
+    +';white-space:nowrap;" title="Wiederkehrende Leistungen '+st.jahr+': '+st.fertig+' von '+st.gesamt+' erledigt">🔁 '+st.jahr+': '+st.fertig+'/'+st.gesamt+'</span>';
+}
+// € Rechnungsstand – abgerechnete TERMINE (b680). Das ist die Warnung.
+function _tuBadgeRgHtml(liste,gross){
+  const st=_tuJahrRgStand(liste||[]);
+  if(!st.gesamt)return '';
+  const titel=_escHtml(_tuJahrRgTitel(st));
+  const masse=_tuBadgeMasse(gross)+'font-weight:700;border-radius:0;white-space:nowrap;';
+  const zahl=st.fertig+'/'+st.gesamt;
+  // b681: „RE" statt „€" (Frank 17.08.) – seine Bürosprache für Rechnung. Gilt für
+  // die JAHRES-Anzeige (Badge + Sektionskopf); die Mahn-Knöpfe am einzelnen Termin
+  // heißen weiter „€ fehlt"/„€ Rest", dort ist das Zeichen kurz und eindeutig.
+  if(!st.offen){
+    // alles durch – ruhig, aber ablesbar
+    return '<span style="'+masse+'background:#fff;color:#3B6D11;border:1px solid #C0DD97;" title="'+titel+'">RE '+st.jahr+': '+zahl+' ✓</span>';
+  }
+  if(st.fertig>0){
+    // halb durch – dieselbe eckige Form, aber umrandet statt gefüllt
+    return '<span style="'+masse+'background:#fff;color:#A32D2D;border:2px solid #E24B4A;" title="'+titel+'">RE '+st.jahr+': '+zahl+(st.teil?' ·T':'')+'</span>';
+  }
+  // nichts abgerechnet – das Einzige auf der Karte, das gefüllt ist
+  return '<span style="'+masse+'background:#C62828;color:#fff;border:1px solid #8C2F2E;" title="'+titel+'">RE '+st.jahr+': '+zahl+(st.teil?' ·T':'')+'</span>';
+}
+// 🛠 N Aufträge am Objekt (b652). b681: von Bernstein auf BLAU – es gehört zum
+// ➕-Auftrag-Knopf daneben, nicht zum Jahresstand, mit dem es die Farbe teilte.
+function _tuBadgeAufHtml(taskId,gross){
+  try{
+    const n=_objAufZaehlung().get(taskId)||0;
+    if(!n)return '';
+    return '<span style="'+_tuBadgeMasse(gross)+'font-weight:700;border-radius:4px;background:#E6F1FB;color:#185FA5;border:1px solid #B5D4F4;white-space:nowrap;cursor:pointer;"'
+      +' title="'+n+' Auftrag/Aufträge an diesem Objekt – Objekt öffnen, die Liste steht im Fenster"'
+      +' onclick="event.stopPropagation();openEditTaskModal(\''+_escHtml(taskId)+'\')">🛠 '+n+'</span>';
+  }catch(e){return '';}
+}
+// b681: dieselben Badges in der Kopfzeile des GEÖFFNETEN Tasks – links in der
+// Zeile, in der rechts „🗂 Dokumente / 📋 Übersicht" stehen (Platzwahl Frank).
+// Gerufen aus `renderTurnusListe`, damit sie beim Abhaken und beim Eintragen
+// einer Rechnung sofort mitziehen, ohne dass das Fenster neu geöffnet wird.
+// ⚠ Hier wird NICHT auf den Board-Typ geprüft wie auf der Karte, sondern auf
+// vorhandene Leistungen – dieselbe Rettungsregel wie b621: hängen Leistungen am
+// Task, gehört die Auskunft dazu, egal auf welchem Board er liegt.
+function _tuHdrBadges(){
+  const el=document.getElementById('_hdrTuBadges'); if(!el)return;
+  let id='';
+  try{id=(document.getElementById('taskId')||{}).value||'';}catch(e){}
+  const liste=taskTurnus||[];
+  const h=(liste.length?(_tuBadgeJahrHtml(liste,true)+_tuBadgeRgHtml(liste,true)):'')
+    +(id?_tuBadgeAufHtml(id,true):'');
+  el.innerHTML=h;
+  el.style.display=h?'flex':'none';
+}
 // b629: kurzer Rechnungsstand einer Leistung für die Listen – '' wenn nichts zu sagen ist
 function _tuRgKurz(l){
   if(!l||!l.rgPflicht)return '';
@@ -10425,10 +10519,13 @@ function renderTurnusListe(){
     const rst=_tuJahrRgStand(liste);
     hdr.textContent=liste.length
       ?('('+liste.length+' · '+st.jahr+': '+st.fertig+' von '+st.gesamt
-        +(rst.gesamt?' · € '+rst.fertig+' von '+rst.gesamt:'')
+        +(rst.gesamt?' · RE '+rst.fertig+' von '+rst.gesamt:'') // b681: „RE" statt „€" (Frank)
         +(f?' · '+f+' fällig':'')+')')
       :'';
     hdr.title=rst.gesamt?_tuJahrRgTitel(rst):'';
+    // b681: die Badges oben in der Kopfzeile ziehen mit – hier, weil
+    // renderTurnusListe nach JEDER Änderung an den Leistungen läuft.
+    try{_tuHdrBadges();}catch(e){console.warn('[TU] Kopf-Badges:',e);}
     // ⚠ Die Farbe bleibt an der ERLEDIGT-Frage hängen (b630) und bekommt nur eine
     // Ausnahme: offene Rechnungen färben gelb, auch wenn alles erledigt ist –
     // sonst stünde die Zeile grün da, während Geld aussteht.
@@ -14069,15 +14166,11 @@ function taskCardHTML(task){
   // Steht im Kartenkopf VOR „Angel." (Platzierung Frank) und ist damit auch bei
   // ZUGEKLAPPTER Karte sichtbar; die Badge-Zeile darunter ist dann ausgeblendet,
   // und der Klappzustand wird nicht gemerkt (die b620/b623-Falle).
+  // b681: die Darstellung steht jetzt in `_tuBadgeJahrHtml` – dieselbe Quelle
+  // wie die Kopfzeile im geöffneten Task. Hier bleibt nur die Board-Frage.
   const _tuJahrKopf=(function(){
     if((boardTypes[currentBoard]||'baustelle')!=='immobilie')return '';
-    const st=_tuJahrStand(task.turnusListe||[]);
-    if(!st.gesamt)return '';
-    const alles=st.fertig===st.gesamt, nix=st.fertig===0;
-    const col=alles?'#3B6D11':(nix?'var(--text2)':'#854F0B');
-    const bg=alles?'#EAF3DE':(nix?'var(--bg3)':'#FAEEDA');
-    const br=alles?'#C0DD97':(nix?'var(--border)':'#FAC775');
-    return `<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:${bg};color:${col};border:1px solid ${br};white-space:nowrap;" title="Wiederkehrende Leistungen ${st.jahr}: ${st.fertig} von ${st.gesamt} erledigt">🔁 ${st.jahr}: ${st.fertig}/${st.gesamt}</span>`;
+    return _tuBadgeJahrHtml(task.turnusListe||[],false);
   })();
   // b680: die zweite Badge – „ist das dieses Jahr auch abgerechnet?". Eigene
   // Badge statt Anhängsel an der 🔁-Badge: die beiden beantworten verschiedene
@@ -14087,13 +14180,7 @@ function taskCardHTML(task){
   // abzurechnen, und „0/0" wäre nur ein Rätsel im Kartenkopf.
   const _tuRgJahrKopf=(function(){
     if((boardTypes[currentBoard]||'baustelle')!=='immobilie')return '';
-    const st=_tuJahrRgStand(task.turnusListe||[]);
-    if(!st.gesamt)return '';
-    const alles=st.offen===0, nix=st.fertig===0;
-    const col=alles?'#3B6D11':(nix?'#8C2F2E':'#854F0B');
-    const bg=alles?'#EAF3DE':(nix?'#FBE9E9':'#FAEEDA');
-    const br=alles?'#C0DD97':(nix?'#F0BFBE':'#FAC775');
-    return `<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:${bg};color:${col};border:1px solid ${br};white-space:nowrap;" title="${_escHtml(_tuJahrRgTitel(st))}">€ ${st.jahr}: ${st.fertig}/${st.gesamt}${st.teil?' ·T':''}</span>`;
+    return _tuBadgeRgHtml(task.turnusListe||[],false);
   })();
   // b642: ➕ Auftrag am Objekt – nur auf Objekt-Boards und nur auf Objektkarten
   // (Auftragskarten tragen selbst objektId und bekommen keinen). Sitzt im Kartenkopf
@@ -14102,10 +14189,10 @@ function taskCardHTML(task){
     ?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:#E6F1FB;color:#185FA5;border:1px solid #B5D4F4;white-space:nowrap;cursor:pointer;" title="Neuen Auftrag an diesem Objekt anlegen (landet in der Spalte 🛠 Aufträge)" onclick="event.stopPropagation();_objektNeuerAuftrag('${esc(task.id)}')">➕ Auftrag</span>`
       // b652: Zähler daneben – wie viele Aufträge hängen an diesem Objekt? Zählt
       // boardübergreifend, also auch die längst zum richtigen Auftrag ausgebauten.
-      +(function(){try{
-        const n=_objAufZaehlung().get(task.id)||0;
-        return n?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:#FAEEDA;color:#854F0B;border:1px solid #FAC775;white-space:nowrap;cursor:pointer;" title="${n} Auftrag/Aufträge an diesem Objekt – Objekt öffnen, die Liste steht im Fenster" onclick="event.stopPropagation();openEditTaskModal('${esc(task.id)}')">🛠 ${n}</span>`:'';
-      }catch(e){return '';}})()
+      // b681: Darstellung in `_tuBadgeAufHtml` ausgelagert (dieselbe Badge steht
+      // jetzt auch im geöffneten Task) und von Bernstein auf BLAU umgestellt –
+      // sie teilte sich die Farbe mit dem Jahresstand, zu dem sie gar nicht gehört.
+      +_tuBadgeAufHtml(task.id,false)
     :'';
   const _emlBadge=(()=>{const n=(task.emailOriginals||[]).length;return n?`<span style="display:inline-flex;align-items:center;gap:2px;font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:#E0F2FE;color:#075985;border:1px solid #BAE6FD;white-space:nowrap;cursor:pointer;" onclick="event.stopPropagation();openEditTaskModal('${esc(task.id)}')"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#075985" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>${n}</span>`:'';})();
   const _pdfBadge=(()=>{const n=(task.emailPdfs||[]).length;return n?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:#FCEBEB;color:#c0392b;border:1px solid #F7C1C1;white-space:nowrap;">📄 ${n}</span>`:'';})();
