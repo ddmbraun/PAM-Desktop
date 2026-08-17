@@ -9296,7 +9296,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-17 · #691'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-17-b691) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-17 · #692'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-17-b692) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -10561,44 +10561,88 @@ function _tuHakenStand(l){
   out.pdf.txt=n>0?(n>1?n+' Dateien':'liegt vor'):'fehlt';
   return out;
 }
-// Ein Kästchen. Offen = anklickbarer Knopf in Signalfarbe, erledigt = ruhige
-// Anzeige. ⛔ Ein gesetzter Haken lässt sich hier NICHT wieder aufmachen – das
-// geht wie bisher über das ✕ am Termin. Ein Rückgängig-Klick in einer Zeile,
-// in der daneben „✓ Heute" steht, wäre zu leicht zu verwechseln.
-function _tuHakenBox(an,wort,wert,klick,titel,gross,warnfarbe){
+// Ein Kästchen.
+// 🔴 b692, Franks Befund: „diese Felder sind bei mir nicht klickbar." Stimmte –
+// abgehakte waren ein <span>. Der Gedanke dahinter war richtig (eine vermerkte
+// Rechnung darf man nicht versehentlich überschreiben), ging aber zu weit: damit
+// war eine FERTIGE Rechnung überhaupt nicht mehr erreichbar, obwohl „zeig mir
+// die Rechnung" der häufigste Wunsch ist.
+//
+// ⚡ Die Regel, die daraus wurde (von Frank bestätigt):
+//      offen    → Klick ERLEDIGT es (Dialog)
+//      abgehakt → Klick ZEIGT es    (Vorschau bzw. Datumsliste)
+// ⛔ Ein abgehaktes Kästchen führt NIE in den Eintrag-Dialog. Zurücknehmen geht
+// weiter nur über das ✕ am Termin – dort steht der Warntext dazu.
+function _tuHakenBox(an,wort,wert,klick,zeig,titel,gross,warnfarbe){
   var gr=gross?'font-size:calc(11px * var(--modal-scale,1));padding:2px 8px;':'font-size:11px;padding:1px 6px;';
   var t=_escHtml(titel||'');
-  // ⚠ In der engen Fassung bleibt `wort` leer – dann steht dort nur der Haken,
-  // ohne das Leerzeichen dahinter (sonst rutscht die Kette auseinander).
+  var inhalt=(wort?' '+esc(wort):'')+(wert?' <span style="color:var(--text2);opacity:.85;">'+esc(wert)+'</span>':'');
   if(an){
-    return '<span style="'+gr+'white-space:nowrap;color:var(--text2);" title="'+t+'">☑'+(wort?' '+esc(wort):'')
-      +(wert?' <span style="color:var(--text2);opacity:.85;">'+esc(wert)+'</span>':'')+'</span>';
+    // ⚠ Ohne Zeig-Weg bleibt es eine ruhige Anzeige – etwa „Ohne Berechnung",
+    // wo es nichts anzusehen gibt.
+    if(!zeig)return '<span style="'+gr+'white-space:nowrap;color:var(--text2);" title="'+t+'">☑'+inhalt+'</span>';
+    return '<button type="button" class="tu-btn" style="'+gr+'white-space:nowrap;color:var(--text2);"'
+      +' onclick="event.stopPropagation();'+zeig+'" title="'+t+'">☑'+inhalt+'</button>';
   }
   var col=warnfarbe||'#E24B4A';
   return '<button type="button" class="tu-btn" style="'+gr+'white-space:nowrap;font-weight:700;color:'+col
-    +';border-color:'+col+';" onclick="event.stopPropagation();'+klick+'" title="'+t+'">☐'+(wort?' '+esc(wort):'')+'</button>';
+    +';border-color:'+col+';" onclick="event.stopPropagation();'+klick+'" title="'+t+'">☐'+inhalt+'</button>';
+}
+// b692: Die Datei, die als Rechnung GILT – dieselbe Regel wie `_tuRgDateiZahl`
+// (b689): ausdrücklich gekennzeichnete zuerst, sonst am ABGERECHNETEN Termin das
+// erste PDF. ⛔ Am offenen Termin nichts – dort ist ein PDF ein Protokoll.
+function _tuRgDatei(e){
+  var ds=((e&&e.dateien)||[]);
+  var echt=ds.filter(function(d){return d&&d.rolle==='rechnung';});
+  if(echt.length)return echt[0];
+  if(!e||!e.rg)return null;
+  var pdf=ds.filter(function(d){return d&&/\.pdf$/i.test(String(d.name||''));});
+  return pdf.length?pdf[0]:null;
+}
+// b692: Die Rechnung ANSEHEN – aus der Kette, aus dem Reiter Objekte und aus der
+// Rechnungsliste. `taskId` leer = Arbeitskopie im offenen Fenster.
+// ⚠ Vorschau IN PAM (b684), nicht der Sprung nach Drive.
+function _tuRgPdfZeigen(taskId,lId,datum){
+  var l=null;
+  if(taskId){
+    var t=findTaskById(taskId); if(!t)return;
+    l=(t.turnusListe||[]).find(function(x){return x&&x.id===lId;});
+  }else l=_tuFinde(lId);
+  if(!l)return;
+  var e=(l.eintraege||[]).find(function(x){return x&&x.datum===datum;}); if(!e)return;
+  var d=_tuRgDatei(e);
+  if(!d){showToast('Kein Rechnungs-PDF an diesem Termin','info',3000);return;}
+  _tuVorschau(d.id,d.name);
 }
 // Die Kette. `wo`='f' = geöffnetes Task-Fenster (Arbeitskopie `taskTurnus`),
 // `wo`='o' = Reiter Objekte (gespeicherter Task). ⛔ Die Klickziele sind bewusst
 // die VORHANDENEN Wege der jeweiligen Ansicht – hier wird nur anders angezeigt,
 // nicht anders geschrieben. Ein gemeinsamer Schreibweg würde im offenen Fenster
 // die Arbeitskopie überholen (b543-F2-Falle).
-// Im Reiter Objekte trägt nur das OFFENE Kästchen sein Wort; die erledigten
-// stehen als reine Haken da, sonst sprengt die Kette die enge Zeile.
+// 🔴 b692: Die enge Fassung zeigte nur nackte Haken – Frank: „wie weiß ich, was
+// die bedeuten?" Ein Tooltip ist darauf keine Antwort (ausdrücklich abgelehnt).
+// Jetzt tragen ALLE Kästchen ihr Wort, in beiden Fassungen. Unterschied ist nur
+// noch das Beiwerk: Rechnungsdatum und Nummer stehen im Task, nicht in der Zeile.
+// ⚠ Das Erledigt-DATUM bleibt überall stehen – es war vor b690 sichtbar und hat
+// Frank gefehlt.
 function _tuHakenHtml(l,taskId,wo){
   var s=_tuHakenStand(l);
   var gross=(wo==='f'), voll=gross;
   var lid=_escHtml((l&&l.id)||''), tid=_escHtml(taskId||'');
   var dat=_escHtml((s.e&&s.e.datum)||'');
+  // Abgehakt = ZEIGEN. Im Fenster klappt die Datumsliste auf, im Reiter Objekte
+  // gibt es keine – dort öffnet der Klick den Task, wo sie steht.
+  var zeigListe=gross?('_tuToggleHist(\''+lid+'\')'):('_pamOpenTaskFromHeute(\''+tid+'\')');
+  var zeigPdf='_tuRgPdfZeigen(\''+(gross?'':tid)+'\',\''+lid+'\',\''+dat+'\')';
   // ⚠ Ein OFFENES Kästchen sagt, was fehlt („Rechnung fehlt"), ein abgehaktes
-  // benennt die Sache („Rechnung"). In der engen Fassung tragen nur die offenen
-  // ihr Wort – sonst sprengt die Kette die Zeile.
+  // benennt die Sache („Rechnung").
   var teile=[];
   teile.push(_tuHakenBox(s.erl.an,
-    s.erl.an?(voll?'Erledigt':''):'Erledigen',
-    voll?s.erl.txt:'',
+    s.erl.an?'Erledigt':'Erledigen',
+    s.erl.an?s.erl.txt:'',
     gross?('_tuErledigt(\''+lid+'\')'):('_tuKachelErledigt(\''+tid+'\',\''+lid+'\')'),
-    s.erl.an?('Zuletzt erledigt am '+s.erl.txt)
+    zeigListe,
+    s.erl.an?('Zuletzt erledigt am '+s.erl.txt+' – Klick zeigt alle Termine')
             :((s.erl.txt==='noch nie')?'Noch nie erledigt – Klick trägt heute ein'
                                      :('Wäre wieder dran (zuletzt '+s.erl.txt+') – Klick trägt heute ein')),
     gross,'#c47f17'));
@@ -10606,22 +10650,31 @@ function _tuHakenHtml(l,taskId,wo){
     var teil=(s.rg.art==='teil'), frei=(s.rg.art==='frei');
     // ⛔ „ohne Berechnung" ist eine VOLLE Antwort, keine Rechnung – das Wort
     // „Rechnung" davor las sich widersprüchlich („Rechnung ohne Berechnung").
-    var rgWort=s.rg.an?(frei?'Ohne Berechnung':(voll?'Rechnung':''))
+    var rgWort=s.rg.an?(frei?'Ohne Berechnung':'Rechnung')
                       :(teil?'Rest offen':'Rechnung fehlt');
-    teile.push(_tuHakenBox(s.rg.an,rgWort,(voll&&!frei)?s.rg.txt:'',
+    // 🔴 Beim Vorlesen gefunden (dritter Fall nach b690/b691): der Zusatztext lief
+    // nur am ABGEHAKTEN Kästchen sinnvoll. Am offenen stand „Rechnung fehlt fehlt",
+    // bei der Teilrechnung „Rest offen Teilrechnung 2026-45". Das Wort sagt es
+    // schon; die Einzelheiten stehen im Tooltip.
+    teile.push(_tuHakenBox(s.rg.an,rgWort,(voll&&s.rg.an&&!frei)?s.rg.txt:'',
       gross?('_tuRgErfassen(\''+lid+'\',\''+dat+'\')'):('_objRgErfassen(\''+tid+'\',\''+lid+'\')'),
+      // ⛔ Bei „ohne Berechnung" gibt es nichts anzusehen – bleibt reine Anzeige.
+      frei?'':zeigListe,
       s.rg.an?(frei?'Ohne Berechnung vermerkt – dieser Termin wird nicht abgerechnet'
-                  :('Rechnung: '+s.rg.txt))
+                  :('Rechnung: '+s.rg.txt+' – Klick zeigt den Termin mit dem Vermerk'))
         :(teil?('Teilrechnung liegt vor ('+s.rg.txt+') – die Schlussrechnung fehlt noch')
              :'Erledigt, aber noch keine Rechnung vermerkt – Klick trägt sie ein'),
       gross,teil?'#c47f17':'#E24B4A'));
     // ⛔ Kein PDF-Kästchen bei „ohne Berechnung": es gibt keine Rechnung, die man
     // hochladen könnte. Ein Kästchen, das nie zugehen kann, ist eine Falle.
     if(!frei){
-      teile.push(_tuHakenBox(s.pdf.an,s.pdf.an?(voll?'PDF':''):'PDF fehlt',
+      teile.push(_tuHakenBox(s.pdf.an,s.pdf.an?'PDF':'PDF fehlt',
         (voll&&s.pdf.an)?s.pdf.txt:'',
         gross?('_tuHakenPdf(\''+lid+'\',\''+dat+'\')'):('_rglDateiAnhaengen(\''+tid+'\',\''+lid+'\',\''+dat+'\')'),
-        s.pdf.an?('Rechnungs-PDF hängt am Termin ('+s.pdf.txt+')')
+        // ⚡ b692: Das ist der Klick, der Frank gefehlt hat – die Rechnung ANSEHEN,
+        // ohne Task öffnen, Datumsliste aufklappen und Dateinamen suchen.
+        zeigPdf,
+        s.pdf.an?('Rechnungs-PDF hängt am Termin ('+s.pdf.txt+') – Klick zeigt es an')
           :'Kein Rechnungs-PDF am Termin – Klick öffnet den Weg zum Anhängen',
         gross,'#E24B4A'));
     }
@@ -15161,9 +15214,13 @@ function renderObjekte(){
     // b679: die Arbeitsliste. Bewusst NICHT auf ein Jahr begrenzt – anders als
     // die Matrix daneben. Rot nur, wenn wirklich etwas offen ist.
     +(function(){
+       // b692: Hieß „RE Offene Rechnungen" – wer nichts offen hat, sucht dort nicht
+       // und findet damit die Historie nicht, die b691 extra zugänglich gemacht hat.
+       // Jetzt sagt der Name die SACHE und die Klammer den Stand.
        var _n=_rglZahl();
        return '<button class="kal-chip" onclick="_rglOeffnen()"'+(_n?' style="color:#E24B4A;border-color:#E24B4A;font-weight:700;"':'')
-         +' title="Alle Termine, für die noch eine Rechnung fehlt – über alle Jahre und alle Objekte dieses Projekts">RE Offene Rechnungen'+(_n?' ('+_n+')':'')+'</button>';
+         +' title="Rechnungen zu den wiederkehrenden Leistungen – was offen ist und, auf Wunsch, was schon abgerechnet wurde. Über alle Jahre.">RE Rechnungen'
+         +(_n?' ('+_n+' offen)':'')+'</button>';
      })()
     +'<button class="kal-chip'+(_objNurOffen?' active':'')+'" onclick="_objSetNurOffen()" title="Nur zeigen, was zurzeit fällig ist">'+(_objNurOffen?'☑':'☐')+' nur offene</button>'
     // b622: zeigt zusätzlich Objekt-Tasks, bei denen noch gar nichts eingetragen ist
@@ -15847,6 +15904,11 @@ function _rglSammle(){
       if(_objBoardFilter&&bn!==_objBoardFilter)return;
       (boards[bn]||[]).forEach(function(t){
         if(!t||t.archiviert||t.spaeterBearbeiten)return;
+        // 🔴 b692: Der HV-Filter fehlte hier – Projekt und Suche griffen, die
+        // Hausverwaltung nicht. Das täuschte in beide Richtungen: auf eine HV
+        // gefiltert zeigte die Liste plötzlich alle. Jetzt greifen alle drei
+        // gleich, und die Kopfzeile sagt, was gerade filtert (Frank 17.08.).
+        if(_objHvFilter&&_objHvLabel(t)!==_objHvFilter)return;
         if(!_tuSuchTreffer(t,t.turnusListe))return; // b685
         (t.turnusListe||[]).forEach(function(l){
           if(!l)return;
@@ -15877,6 +15939,7 @@ function _rglArchivZahl(){
       if(_objBoardFilter&&bn!==_objBoardFilter)return;
       (boards[bn]||[]).forEach(function(t){
         if(!t||!(t.archiviert||t.spaeterBearbeiten))return;
+        if(_objHvFilter&&_objHvLabel(t)!==_objHvFilter)return; // b692: wie oben
         (t.turnusListe||[]).forEach(function(l){
           if(!l)return;
           ((l.eintraege)||[]).forEach(function(e){if(_tuRgEintragOffen(l,e))n++;});
@@ -15956,6 +16019,17 @@ function _rglClose(){
 function _rglToggle(key){
   if(_bjmSel.has(key))_bjmSel.delete(key); else _bjmSel.add(key);
   _rglRender();
+}
+// b692: Alle drei Einschränkungen auf einmal weg – aus der Liste heraus, ohne sie
+// schließen und im Reiter dahinter suchen zu müssen.
+// ⚠ Der Reiter Objekte muss mitziehen, sonst stehen dort noch die alten Filter.
+function _rglFilterWeg(){
+  _objBoardFilter=''; _objHvFilter='';
+  try{if(typeof _tuSuche!=='undefined')_tuSuche='';}catch(err){console.warn('[RGL] Suche:',err);}
+  _bjmSel=new Set();
+  _rglRender();
+  if(typeof renderObjekte==='function')renderObjekte();
+  showToast('Filter aufgehoben – die Liste zeigt jetzt alles','info',2800);
 }
 function _rglAlle(){
   // 🔴 b691: NUR die offenen. Die Kästchen der abgerechneten Zeilen sind seit
@@ -16062,8 +16136,20 @@ function _rglRender(){
   var teil=liste.filter(function(p){return _tuRgTeil(p.e);}).length;
   var aeltest=offen.length?_tuTageSeit(offen[0].e.datum):null;
   var sub=document.getElementById('rglSub');
-  if(sub)sub.innerHTML=esc(_objBoardFilter||'Alle Projekte')+' · <b'+(offen.length?' style="color:#E24B4A;"':'')+'>'+offen.length
-    +' offene Position'+(offen.length!==1?'en':'')+'</b> an '+objekte.length+' Objekt'+(objekte.length!==1?'e':'')
+  // 🔴 b692: Die Kopfzeile nannte nur das Projekt. Hausverwaltung und Suchbegriff
+  // filterten unsichtbar mit – man sah eine kurze Liste und wusste nicht, warum.
+  // Jetzt steht jede aktive Einschränkung da, mit einem Weg zurück.
+  var _sw=(typeof _tuSuchWert==='function')?_tuSuchWert():'';
+  var _eng=[];
+  if(_objBoardFilter)_eng.push('Projekt „'+esc(_objBoardFilter)+'"');
+  if(_objHvFilter)_eng.push('Verwaltung „'+esc(_objHvFilter)+'"');
+  if(_sw)_eng.push('Suche „'+esc(_sw)+'"');
+  if(sub)sub.innerHTML=(_eng.length
+      ?'<b style="color:#c47f17;">Gefiltert:</b> '+_eng.join(' · ')
+        +' <span onclick="_rglFilterWeg()" style="cursor:pointer;text-decoration:underline;color:var(--accent);">Filter aufheben</span>'
+      :'Alle Projekte · alle Verwaltungen')
+    +' · <b'+(offen.length?' style="color:#E24B4A;"':'')+'>'+offen.length
+    +' offene Position'+(offen.length!==1?'en':'')+'</b> an '+objekte.length+' Objekt'+(objekte.length!==1?'en':'')
     +(_rglZeigtFertig()?' · <b style="color:#2f7d1e;">'+(liste.length-offen.length)+' abgerechnet</b> mit dabei':'')
     +(teil?' · davon <b style="color:#c47f17;">'+teil+' teilweise abgerechnet</b>':'')
     +((aeltest!==null&&aeltest>0)?' · älteste liegt <b>'+aeltest+' Tage</b>':'')
@@ -16125,8 +16211,12 @@ function _rglRender(){
           // ⛔ Ohne Berechnung gibt es keine Rechnung – also auch kein PDF, das
           // fehlen könnte. Ein Kästchen, das nie zugeht, ist eine Falle (b690).
           if(p.e.rgFrei)return '<span style="color:var(--text2);opacity:.5;" title="Ohne Berechnung – es gibt kein Rechnungs-PDF">–</span>';
-          if(rgDat)return '<button type="button" class="tu-btn" style="color:#2f7d1e;border-color:#2f7d1e;" onclick="'+klick
-            +'" title="'+(rgDat>1?rgDat+' Rechnungs-PDF dran':'Das Rechnungs-PDF hängt dran')+' – Klick hängt ein weiteres an">☑ liegt vor</button>';
+          // ⚡ b692: Klick ZEIGT die Rechnung, statt das Anhängen-Menü zu öffnen –
+          // dieselbe Regel wie in der Abhak-Kette: abgehakt = ansehen, nicht ändern.
+          // ⚠ Ein weiteres PDF nachlegen geht weiter über den 📎 am Termin im Task.
+          if(rgDat)return '<button type="button" class="tu-btn" style="color:#2f7d1e;border-color:#2f7d1e;" onclick="_tuRgPdfZeigen(\''
+            +idT+'\',\''+_escHtml(p.l.id)+'\',\''+_escHtml(p.e.datum)+'\')'
+            +'" title="'+(rgDat>1?rgDat+' Rechnungs-PDF dran':'Das Rechnungs-PDF hängt dran')+' – Klick zeigt es an">☑ liegt vor</button>';
           // ⚠ Solange die Rechnung selbst fehlt, ist das PDF noch nicht dran.
           // Nicht doppelt rot mahnen – der Vorgang hat eine Reihenfolge.
           if(!p.fertig)return '<button type="button" class="tu-btn" style="color:var(--text2);" onclick="'+klick
