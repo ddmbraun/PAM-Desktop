@@ -9265,7 +9265,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-17 · #683'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-17-b683) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-17 · #684'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-17-b684) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -10580,7 +10580,8 @@ function renderTurnusListe(){
       if((l.dateien||[]).length){
         h+='<div class="tu-hist-z" style="background:var(--bg3);border-radius:6px;padding:3px 6px;margin-bottom:6px;">'
           + '<b style="color:var(--text2);">vorab</b>'
-          + '<span>'+(l.dateien||[]).map(function(d){return _tuDateiLink(d,{datum:''});}).join('')+'</span>'
+          // b684: auch hier kein Emoji mehr – die Dateien stehen mit Namen darunter
+          + '<span style="flex:1;"></span>'
           + '<span style="font-size:10px;color:var(--text2);white-space:nowrap;">wandert beim nächsten ✓ in den Termin</span>'
           + '</div>'
           // b683: auch die vorab abgelegten Dateien mit Namen und ✕ (leeres Datum
@@ -10622,7 +10623,10 @@ function renderTurnusListe(){
             + '<b>'+esc(_tuDe(e.datum))+'</b>'
             // b630: die Notiz war bisher nur beim Nachtragen („✓ am …") zu setzen und
             // bei übersprungenen Terminen gar nicht zu sehen – gerade da will man wissen, warum.
-            + '<span>'+(e.skip?('<i style="opacity:.7;">übersprungen</i>'+(e.notiz?' – '+esc(e.notiz):'')):esc(e.notiz||''))+_dat+'</span>'
+            // b684: `_dat` (das blanke Emoji je Datei) ist hier RAUS – seit b683
+            // steht jede Datei mit Namen in einer eigenen Zeile darunter, das
+            // Zeichen stand doppelt (Franks Screenshot).
+            + '<span>'+(e.skip?('<i style="opacity:.7;">übersprungen</i>'+(e.notiz?' – '+esc(e.notiz):'')):esc(e.notiz||''))+'</span>'
             + _rg
             + '<button type="button" onclick="_tuNotiz(\''+idJs+'\',\''+_escHtml(e.datum)+'\')" title="Notiz zu diesem Termin – anlegen, ändern oder leeren">📝</button>'
             + (e.skip?'':'<button type="button" onclick="_tuDateiKnopf(\''+idJs+'\',\''+_escHtml(e.datum)+'\')" title="Foto/Protokoll zu diesem Eintrag hochladen – landet im Objektordner, Name mit Datum und Leistung (b624)">📎</button>')
@@ -11034,22 +11038,63 @@ function _tuDateiLink(d,e){
 // Rechnung wäre schlimmer als ein überflüssiger Verweis. Der Dialog sagt das.
 // `lId` + `datum`: bei leerem `datum` ist die VORAB-Liste der Leistung gemeint
 // (b633, `l.dateien`) – die hat keinen Termin.
+// b684: Der Dateiname wiederholte, was in der Zeile darüber schon steht –
+// `2026-08-11_Rinnen-Eingangsseite_Rechnung_1.pdf` unter dem Termin vom
+// 11.08.2026 an der Leistung „Rinnen Eingangsseite" (Franks Screenshot).
+// Gekürzt wird über DIESELBE Regel, die den Namen erzeugt hat (`_tuNameBasis`,
+// b624) – passt der Anfang nicht, bleibt der volle Name stehen. Der vollständige
+// Name steht immer im Tooltip.
+function _tuDateiKurz(name,datum,leistung){
+  var nm=String(name||'');
+  if(!nm)return '';
+  var basis='';
+  try{basis=_tuNameBasis({name:leistung||''},{datum:datum||''});}catch(e){basis='';}
+  if(basis&&nm.indexOf(basis+'_')===0){
+    var rest=nm.substring(basis.length+1);
+    if(rest)return rest;
+  }
+  // wenigstens das führende Datum wegnehmen, wenn der Rest nicht passt
+  if(datum&&nm.indexOf(datum+'_')===0){
+    var r2=nm.substring(datum.length+1);
+    if(r2)return r2;
+  }
+  return nm;
+}
+// b684: Vorschau IN PAM statt Sprung nach Drive (Franks Befund: „die Rechnung,
+// wenn ich hier klicke, öffnet sich Drive und nicht wie bei den anderen und bei
+// den Bildern"). `_openAttachLightbox` braucht nur Name und Datei-Kennung –
+// genau das, was an einem Verweis hängt.
+function _tuVorschau(fileId,name){
+  if(!fileId)return;
+  try{
+    _openAttachLightbox({name:String(name||'Datei'),fileId:fileId,
+      type:String(name||'').toLowerCase().endsWith('.pdf')?'application/pdf':'',
+      url:'https://drive.google.com/file/d/'+fileId+'/view'});
+  }catch(err){
+    console.warn('[TU] Vorschau:',err);
+    window.open('https://drive.google.com/file/d/'+fileId+'/view','_blank');
+  }
+}
 function _tuDateiZeilen(l,e,datum){
   var liste=(e?(e.dateien||[]):((l&&l.dateien)||[]));
   if(!liste.length)return '';
   var idJs=_escHtml((l&&l.id)||'');
-  return liste.map(function(d){
+  // b684: dünne Linie links – die Dateien hingen vorher lose unter dem Termin
+  var h='<div style="margin:2px 0 2px 10px;border-left:2px solid var(--border);padding-left:9px;">';
+  h+=liste.map(function(d){
     if(!d||!d.id)return '';
     var nm=String(d.name||'Datei');
+    var kurz=_tuDateiKurz(nm,datum,(l&&l.name)||'');
     var ico=(d.rolle==='rechnung')?'🧾':(nm.toLowerCase().endsWith('.pdf')?'📄':'📷');
-    return '<div style="display:flex;align-items:center;gap:5px;padding:2px 0 2px 16px;font-size:11px;color:var(--text2);min-width:0;">'
+    return '<div style="display:flex;align-items:center;gap:5px;padding:2px 0;font-size:11px;color:var(--text2);min-width:0;">'
       +'<span style="flex-shrink:0;">'+ico+'</span>'
-      +'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+_escHtml(nm)+'">'+esc(nm)+'</span>'
-      +(d.rolle==='rechnung'?'<span style="flex-shrink:0;font-size:10px;color:#2f7d1e;font-weight:600;">Rechnung</span>':'')
+      +'<span onclick="_tuVorschau(\''+_escHtml(d.id)+'\',\''+_escHtml(nm)+'\')" title="'+_escHtml(nm)+' – Klick für die Vorschau" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;">'+esc(kurz)+'</span>'
+      +(d.rolle==='rechnung'?'<span style="flex-shrink:0;font-size:10px;color:#2f7d1e;background:#EAF3DE;border:1px solid #C0DD97;border-radius:3px;padding:0 5px;">Rechnung</span>':'')
       +'<a href="https://drive.google.com/file/d/'+_escHtml(d.id)+'/view" target="_blank" title="In Drive öffnen" style="flex-shrink:0;text-decoration:none;padding:0 3px;">↗</a>'
       +'<span onclick="_tuDateiWeg(\''+idJs+'\',\''+_escHtml(datum||'')+'\',\''+_escHtml(d.id)+'\')" title="Verweis auf diese Datei entfernen – die Datei selbst bleibt im Ordner" style="flex-shrink:0;cursor:pointer;padding:0 3px;color:var(--text2);">✕</span>'
       +'</div>';
   }).join('');
+  return h+'</div>';
 }
 // Verweis lösen – am offenen Fenster, also auf der Arbeitskopie `taskTurnus`.
 function _tuDateiWeg(lId,datum,dateiId){
@@ -22106,11 +22151,16 @@ function _tuDokRefBlock(refDocs){
     +'<span style="font-size:calc(10px*var(--modal-scale,1));color:var(--text2);">'+docs.length+(rg?' · '+rg+' Rechnung'+(rg!==1?'en':''):'')+'</span></div>';
   docs.forEach(function(d){
     var ico=(d.rolle==='rechnung')?'🧾':'📄';
-    html+='<div style="display:flex;align-items:center;gap:7px;padding:5px 2px;border-bottom:0.5px solid var(--border);font-size:calc(12px*var(--modal-scale,1));">'
+    // b684: Klick öffnet die Vorschau IN PAM – genau wie bei den normalen
+    // Anhängen daneben (Franks Befund: „öffnet sich Drive und nicht wie bei den
+    // anderen und bei den Bildern"). Das ↗ bleibt als Weg nach Drive.
+    // b684: Name gekürzt – Datum und Leistung stehen rechts als Herkunft.
+    var kurz=_tuDateiKurz(d.name,d.datum,d.leistung);
+    html+='<div onclick="_tuVorschau(\''+esc(d.fileId)+'\',\''+_escHtml(d.name||'')+'\')" style="display:flex;align-items:center;gap:7px;padding:5px 2px;border-bottom:0.5px solid var(--border);font-size:calc(12px*var(--modal-scale,1));cursor:pointer;">'
       +'<span style="flex-shrink:0;">'+ico+'</span>'
-      +'<span style="flex:1;min-width:0;color:var(--text1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="'+esc(d.name||'')+'">'+esc(d.name||'Datei')+'</span>'
+      +'<span style="flex:1;min-width:0;color:var(--text1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="'+esc(d.name||'')+' – Klick für die Vorschau">'+esc(kurz||d.name||'Datei')+'</span>'
       +'<span style="flex-shrink:0;font-size:calc(11px*var(--modal-scale,1));color:var(--text2);">'+esc(d.herkunft||'')+'</span>'
-      +'<button type="button" onclick="window.open(\'https://drive.google.com/file/d/'+esc(d.fileId)+'/view\',\'_blank\')" style="flex-shrink:0;font-size:10px;padding:1px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text1);cursor:pointer;" title="In Drive öffnen – entfernt wird der Verweis an der Leistung">↗</button>'
+      +'<button type="button" onclick="event.stopPropagation();window.open(\'https://drive.google.com/file/d/'+esc(d.fileId)+'/view\',\'_blank\')" style="flex-shrink:0;font-size:10px;padding:1px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text1);cursor:pointer;" title="In Drive öffnen">↗</button>'
       +'</div>';
   });
   return html;
