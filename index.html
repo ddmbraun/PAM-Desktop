@@ -9296,7 +9296,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-17 · #690'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-17-b690) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-17 · #691'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-17-b691) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -15891,9 +15891,19 @@ function _rglOeffnen(){
   var liste=_rglSammle();
   var arch=_rglArchivZahl();
   if(!liste.length){
+    // 🔴 b691: NICHT mehr aussteigen. Vorher blieb das Fenster zu, sobald nichts
+    // offen war – und damit war der Schalter „auch abgerechnete" unerreichbar,
+    // denn der sitzt IM Fenster. Wer sauber gearbeitet hatte, kam an seine
+    // Historie also gar nicht mehr heran (Franks Frage 17.08.: „wie bekomme ich
+    // diese Übersicht, wenn keine offenen Rechnungen da sind").
+    // ⚠ Dabei gleich die abgerechneten einschalten – sonst öffnet sich ein
+    // leeres Fenster, und der Schalter wäre wieder das Rätsel.
+    if(!_rglZeigtFertig()){
+      _rglMitFertig=true;
+      liste=_rglSammle();
+    }
     showToast(arch?('Nichts offen – aber '+arch+' Position(en) in archivierten Objekten')
-      :'Alles abgerechnet – keine offene Rechnung','success',4000);
-    if(!arch)return;
+      :'Alles abgerechnet – hier ist die Historie','success',4000);
   }
   // ⚠ Beide Fenster teilen sich die Auswahl `_bjmSel`. Stünden sie gleichzeitig
   // offen (die Warnzeile der Matrix führt hierher), würde das Öffnen die
@@ -15948,7 +15958,13 @@ function _rglToggle(key){
   _rglRender();
 }
 function _rglAlle(){
-  var liste=_rglSammle();
+  // 🔴 b691: NUR die offenen. Die Kästchen der abgerechneten Zeilen sind seit
+  // b688 gesperrt – eine Sammelrechnung über eine bereits abgerechnete Position
+  // würde ihre Rechnungsnummer überschreiben. „☑ alle" ging an dieser Sperre
+  // vorbei und hakte sie mit an: bei eingeschaltetem „auch abgerechnete" stand
+  // im Kopf „RE Sammelrechnung (26)", obwohl nur 13 Positionen offen waren.
+  // Ein Klick hätte 13 echte Nummern überschrieben – ohne Weg zurück.
+  var liste=_rglSammle().filter(function(p){return !p.fertig;});
   var alle=liste.length&&liste.every(function(p){return _bjmSel.has(_bjmKey(p.t,p.l,p.e));});
   liste.forEach(function(p){
     var k=_bjmKey(p.t,p.l,p.e);
@@ -16033,8 +16049,10 @@ function _rglRender(){
   var kopf=document.getElementById('rglKopf');
   if(kopf)kopf.innerHTML='<tr><th style="width:26px;"></th><th class="nam">Objekt</th><th class="nam">Leistung</th>'
     +'<th title="Tag, an dem die Leistung erledigt wurde">erledigt am</th>'
-    +'<th title="So lange wartet diese Position schon auf eine Rechnung">liegt seit</th>'
-    +'<th>Stand</th><th></th></tr>';
+    +'<th title="So lange wartet diese Position schon auf eine Rechnung. An abgerechneten steht hier nichts – dort gibt es keinen Rückstand mehr">liegt seit</th>'
+    +'<th title="Ist die Rechnung geschrieben?">Stand</th>'
+    // b691: eigene Spalte für den Beleg – vorher steckte das im 📎-Knopf
+    +'<th title="Hängt das Rechnungs-PDF am Termin?">PDF</th><th></th></tr>';
   // b688: Schalter „auch abgerechnete"
   var fb=document.getElementById('rglFertigBtn');
   if(fb)fb.textContent=(_rglZeigtFertig()?'☑':'☐')+' auch abgerechnete';
@@ -16052,7 +16070,7 @@ function _rglRender(){
     +' · über <b>alle Jahre</b>'
     +(arch?' · <span style="color:#c47f17;">⚠ '+arch+' weitere in archivierten Objekten</span>':'');
   if(!liste.length){
-    body.innerHTML='<tr><td colspan="7" style="padding:16px;color:var(--text2);text-align:center;">'
+    body.innerHTML='<tr><td colspan="8" style="padding:16px;color:var(--text2);text-align:center;">'
       +(arch?('Hier ist alles abgerechnet – aber in archivierten Objekten stehen noch '+arch+' Position(en) offen.')
            :'Alles abgerechnet – keine offene Rechnung.'
              +(_rglZeigtFertig()?'':'<br><span style="cursor:pointer;text-decoration:underline;" onclick="_rglToggleFertig()">Auch die abgerechneten zeigen</span>'))+'</td></tr>';
@@ -16089,16 +16107,36 @@ function _rglRender(){
       // dann sieht man den Knopf „€ eintragen" nicht mehr ohne Scrollen).
       +'<td class="tur" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;" title="'+_escHtml(p.l.name||'')+'">'+esc(p.l.name||'')+'</td>'
       +'<td style="white-space:nowrap;">'+esc(_tuDe(p.e.datum))+'</td>'
-      +'<td style="white-space:nowrap;'+(alt?'color:#E24B4A;font-weight:700;':'color:var(--text2);')+'" title="'
-      +  (alt?'Liegt über ein Jahr zurück':'')+'">'+(tage===null?'–':(tage+' Tag'+(tage===1?'':'en')))+'</td>'
+      // b691: „liegt seit" nur an OFFENEN Positionen. An einer abgerechneten
+      // zählte die Spalte stur ab dem Arbeitstag weiter („RE 21.07. · liegt seit
+      // 40 Tagen") – dort liegt aber nichts mehr. Sie misst den Rückstand, und
+      // den gibt es nach der Rechnung nicht mehr.
+      +'<td style="white-space:nowrap;'+(alt&&!p.fertig?'color:#E24B4A;font-weight:700;':'color:var(--text2);')+'" title="'
+      +  (p.fertig?'Abgerechnet – kein Rückstand mehr':(alt?'Liegt über ein Jahr zurück':'So lange wartet diese Position auf ihre Rechnung'))+'">'
+      // b691: „40 Tagen" war als Zelle grammatisch schief – es heißt „40 Tage"
+      +  (p.fertig?'<span style="opacity:.45;">·</span>':(tage===null?'–':(tage+' Tag'+(tage===1?'':'e'))))+'</td>'
       +'<td>'+stand+'</td>'
-      // b688: 📎 je Zeile – Rechnungs-PDF direkt aus der Liste anhängen, ohne
-      // erst das Objekt zu öffnen und die Datumsliste aufzuklappen. Die Zahl
-      // dahinter sagt, ob schon eines dranhängt.
+      // b691: eigene Spalte für den Beleg, in WORTEN. Vorher steckte die Auskunft
+      // im 📎-Knopf („📎 🧾" / „📎 2" / „📎") – Frank: „die Bildchen müssen
+      // aussagekräftig sein". Anzeige und Bedienung sind dasselbe: die Zelle ist
+      // der Knopf, der das Anhängen öffnet (Muster der Abhak-Kette aus b690).
+      +'<td style="white-space:nowrap;">'+(function(){
+          var klick='_rglDateiAnhaengen(\''+idT+'\',\''+_escHtml(p.l.id)+'\',\''+_escHtml(p.e.datum)+'\')';
+          // ⛔ Ohne Berechnung gibt es keine Rechnung – also auch kein PDF, das
+          // fehlen könnte. Ein Kästchen, das nie zugeht, ist eine Falle (b690).
+          if(p.e.rgFrei)return '<span style="color:var(--text2);opacity:.5;" title="Ohne Berechnung – es gibt kein Rechnungs-PDF">–</span>';
+          if(rgDat)return '<button type="button" class="tu-btn" style="color:#2f7d1e;border-color:#2f7d1e;" onclick="'+klick
+            +'" title="'+(rgDat>1?rgDat+' Rechnungs-PDF dran':'Das Rechnungs-PDF hängt dran')+' – Klick hängt ein weiteres an">☑ liegt vor</button>';
+          // ⚠ Solange die Rechnung selbst fehlt, ist das PDF noch nicht dran.
+          // Nicht doppelt rot mahnen – der Vorgang hat eine Reihenfolge.
+          if(!p.fertig)return '<button type="button" class="tu-btn" style="color:var(--text2);" onclick="'+klick
+            +'" title="Noch nicht dran – erst die Rechnung eintragen'+(dat?' ('+dat+' andere Datei(en) hängen dran)':'')
+            +'. Klick hängt trotzdem eine an">☐</button>';
+          return '<button type="button" class="tu-btn" style="color:#E24B4A;border-color:#E24B4A;font-weight:700;" onclick="'+klick
+            +'" title="Abgerechnet, aber kein Rechnungs-PDF am Termin'+(dat?' – '+dat+' andere Datei(en) hängen dran':'')
+            +'. Klick öffnet den Weg zum Anhängen">☐ fehlt</button>';
+        })()+'</td>'
       +'<td style="white-space:nowrap;">'
-      +  '<button type="button" class="tu-btn" onclick="_rglDateiAnhaengen(\''+idT+'\',\''+_escHtml(p.l.id)+'\',\''+_escHtml(p.e.datum)+'\')" title="'
-      +  (rgDat?'Rechnungs-PDF hängt dran ('+rgDat+') – noch eines anhängen':(dat?dat+' Datei(en) dran, aber kein PDF – Rechnungs-PDF anhängen':'Rechnungs-PDF anhängen'))
-      +  '">📎'+(rgDat?' 🧾':(dat?' '+dat:''))+'</button>'
       +  (p.fertig?''
           :' <button type="button" class="tu-btn" style="color:#2f7d1e;border-color:#2f7d1e;" onclick="_rglRgErfassen(\''+idT+'\',\''+_escHtml(p.l.id)+'\',\''+_escHtml(p.e.datum)+'\')" title="Rechnungsnummer und -datum für genau diese Position vermerken">RE eintragen</button>')
       +'</td>'
@@ -16106,19 +16144,50 @@ function _rglRender(){
   });
   body.innerHTML=h;
 }
+// 🔴 b691: EINE Regel für den Stand-Text, von Zwischenablage UND Druck genutzt.
+// Vorher stand in beiden bei JEDER Zeile „noch keine Rechnung" – auch an den
+// abgerechneten, die seit b688 mit dabei sein können. Wer die Liste in seine
+// Rechnungssoftware kopiert oder sie ausdruckt, hatte dort falsche Angaben.
+// ⛔ Zwei Fassungen desselben Satzes wären genau die Stelle, an der es wieder
+// auseinanderläuft – dieselbe Regel wie b680: EINE Rechenregel, ein Text.
+// ⚠ Wer diese Funktion in eine Prüfsuite schneidet, braucht `_tuRgTeil`, `_tuDe`
+// und `_tuRgDateiZahl` im selben eval-Bündel.
+function _rglStandText(p,kurz){
+  var e=p&&p.e; if(!e)return '';
+  if(e.rgFrei)return 'ohne Berechnung';
+  if(_tuRgTeil(e))return (kurz?'Teil ':'Teilrechnung ')+(e.rgnr||'')+(kurz?' v. ':' vom ')+_tuDe(e.rg)+' – Rest offen';
+  if(e.rg)return (kurz?'RE ':'Rechnung ')+(e.rgnr||'ohne Nr.')+(kurz?' v. ':' vom ')+_tuDe(e.rg);
+  return kurz?'noch keine':'noch keine Rechnung';
+}
+// ⛔ Ohne Berechnung gibt es kein PDF, das fehlen könnte (b690-Regel)
+// ⚠ Beim Vorlesen der Klartext-Fassung gefunden: hier stand an einer OFFENEN
+// Position „fehlt", während die Spalte daneben „noch nicht dran" meinte. Zwei
+// Aussagen über dieselbe Sache – der Vorgang hat eine Reihenfolge, und solange
+// die Rechnung fehlt, ist die Frage nach dem Beleg verfrüht.
+function _rglPdfText(p){
+  if(!p||!p.e)return '';
+  if(p.e.rgFrei)return '–';
+  if(_tuRgDateiZahl(p.e))return 'liegt vor';
+  return p.fertig?'fehlt':'';
+}
+// b691: „liegt seit" misst den Rückstand – an einer abgerechneten Position gibt
+// es keinen mehr, dort bleibt die Spalte leer statt stur weiterzuzählen.
+function _rglLiegtText(p){
+  if(!p||!p.e||p.fertig)return '';
+  var tage=_tuTageSeit(p.e.datum);
+  return tage===null?'':tage+' Tage';
+}
 // Klartext-Fassung – einmal für die Zwischenablage, einmal für den Druck
 function _rglTextZeilen(){
   return _rglSammle().map(function(p){
-    var tage=_tuTageSeit(p.e.datum);
     return [(p.t.title||''),(p.l.name||''),_tuDe(p.e.datum),
-      (tage===null?'':tage+' Tage'),
-      (_tuRgTeil(p.e)?('Teilrechnung '+(p.e.rgnr||'')+' vom '+_tuDe(p.e.rg)+' – Rest offen'):'noch keine Rechnung')].join('\t');
+      _rglLiegtText(p),_rglStandText(p,false),_rglPdfText(p)].join('\t');
   });
 }
 function _rglKopieren(){
   var z=_rglTextZeilen();
   if(!z.length){showToast('Nichts zu kopieren','info',2500);return;}
-  var txt='Objekt\tLeistung\terledigt am\tliegt seit\tStand\n'+z.join('\n');
+  var txt='Objekt\tLeistung\terledigt am\tliegt seit\tStand\tPDF\n'+z.join('\n');
   var fertig=function(){showToast('📋 '+z.length+' Zeile(n) kopiert','success',2500);};
   try{
     if(navigator.clipboard&&navigator.clipboard.writeText){
@@ -16145,11 +16214,11 @@ function _rglDrucken(){
   var win=window.open('','_blank');
   if(!win){showToast('⚠ Popup blockiert – bitte Popups für PAM erlauben','error',5000);return;}
   var heute=_tuDe(_tzHeuteIso());
+  // b691: derselbe Stand-Text wie in der Zwischenablage, plus die PDF-Spalte
   var zeilen=liste.map(function(p){
-    var tage=_tuTageSeit(p.e.datum);
     return '<tr><td class="hk">☐</td><td>'+esc(p.t.title||'')+'</td><td>'+esc(p.l.name||'')+'</td>'
-      +'<td>'+esc(_tuDe(p.e.datum))+'</td><td>'+(tage===null?'–':tage)+'</td>'
-      +'<td>'+(_tuRgTeil(p.e)?('Teil '+esc(p.e.rgnr||'')+' v. '+esc(_tuDe(p.e.rg))+' – Rest offen'):'noch keine')+'</td></tr>';
+      +'<td>'+esc(_tuDe(p.e.datum))+'</td><td>'+esc(_rglLiegtText(p))+'</td>'
+      +'<td>'+esc(_rglStandText(p,true))+'</td><td>'+esc(_rglPdfText(p))+'</td></tr>';
   }).join('');
   win.document.write('<!doctype html><html lang="de"><head><meta charset="utf-8"><title>Offene Rechnungen</title>'
     +'<style>body{font-family:Arial,sans-serif;font-size:12px;margin:18px;color:#111;}'
@@ -16161,7 +16230,7 @@ function _rglDrucken(){
     +'<button onclick="window.print()">🖨 Drucken</button>'
     +'<h1>Offene Rechnungen – wiederkehrende Leistungen</h1>'
     +'<p class="m">'+esc(_objBoardFilter||'Alle Projekte')+' · '+liste.length+' Position(en) · über alle Jahre · Stand '+esc(heute)+'</p>'
-    +'<table><thead><tr><th></th><th>Objekt</th><th>Leistung</th><th>erledigt am</th><th>Tage</th><th>Stand</th></tr></thead>'
+    +'<table><thead><tr><th></th><th>Objekt</th><th>Leistung</th><th>erledigt am</th><th>Tage</th><th>Stand</th><th>PDF</th></tr></thead>'
     +'<tbody>'+zeilen+'</tbody></table></body></html>');
   win.document.close();
   // ⚠ Kein automatisches window.print() direkt nach document.close() – der
