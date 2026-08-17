@@ -9296,7 +9296,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-17 · #689'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-17-b689) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-17 · #690'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-17-b690) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -10519,6 +10519,149 @@ function _tuRgKurz(l){
   return '';
 }
 
+// ── b690: Der Vorgang je Leistung als Abhak-Kette (Frank 17.08.) ────────────
+// Franks Befund am Screenshot: die Zeile war nicht zu lesen. Sie zeigte zwei
+// UNBESCHRIFTETE Daten nebeneinander („zuletzt 11.08." = Arbeit, „RE 17.08." =
+// Rechnung) und vom Beleg gar nichts. Nachgemessen: an VIER von fünf Stellen
+// (Karte, Task-Kopf, Task-Liste, Reiter Objekte) stand nirgends, ob ein
+// Rechnungs-PDF dranhängt – nur die Liste „Offene Rechnungen" wusste es.
+//
+// Seine Idee, und sie trägt weiter als meine Etiketten: eine Liste zum Abhaken.
+// ⛔ Der Haken ist KEIN eigenes Feld, sondern ein Spiegel dessen, was ohnehin in
+// den Daten steht. Ein eigener Speicher wäre die Stelle, an der zwei Stände
+// auseinanderlaufen – dieselbe Regel wie b680 („fertig = gesamt − offen", EINE
+// Rechenregel). Dadurch stehen alle Haken rückwirkend richtig, ohne Nacharbeit.
+//
+// Drei Schritte:  erledigt  →  Rechnung gestellt  →  PDF hochgeladen
+//   erledigt = die Leistung ist im Turnus (`_tuFaellig` sagt nein)
+//   Rechnung = am maßgeblichen Termin steht `rg`, oder „ohne Berechnung"
+//   PDF      = `_tuRgDateiZahl(e) > 0` – die b689-Regel, die auch die über den
+//              alten Weg angehängten PDFs mitzählt
+// ⚠ Maßgeblich ist der OFFENE Termin, wenn es einen gibt (dort ist die Arbeit),
+// sonst der jüngste – dieselbe Wahl, die `_tuRgOffen`/`_tuRgKurz` schon treffen.
+// ⛔ Ohne `l.rgPflicht` gibt es nur den ersten Schritt. Leistungen ohne
+// Rechnungsverfolgung sollen keine leeren Kästchen zeigen, die nie zugehen.
+function _tuHakenStand(l){
+  var out={rgPflicht:false,e:null,erl:{an:false,txt:''},rg:{an:false,art:'',txt:''},pdf:{an:false,txt:''}};
+  if(!l)return out;
+  out.rgPflicht=!!l.rgPflicht;
+  var letzt=_tuLetzter(l);
+  out.erl.an=!!letzt&&!_tuFaellig(l);
+  out.erl.txt=letzt?_tuDe(letzt):'noch nie';
+  if(!out.rgPflicht)return out;
+  var e=_tuRgOffen(l)||_tuJuengster(l);
+  if(!e)return out;
+  out.e=e;
+  if(e.rgFrei){out.rg.an=true;out.rg.art='frei';out.rg.txt='ohne Berechnung';}
+  else if(_tuRgTeil(e)){out.rg.art='teil';out.rg.txt='Teilrechnung'+(e.rgnr?' '+e.rgnr:'');}
+  else if(e.rg){out.rg.an=true;out.rg.art='voll';out.rg.txt=_tuDe(e.rg)+(e.rgnr?' · '+e.rgnr:'');}
+  else out.rg.txt='fehlt';
+  var n=_tuRgDateiZahl(e);
+  out.pdf.an=n>0;
+  out.pdf.txt=n>0?(n>1?n+' Dateien':'liegt vor'):'fehlt';
+  return out;
+}
+// Ein Kästchen. Offen = anklickbarer Knopf in Signalfarbe, erledigt = ruhige
+// Anzeige. ⛔ Ein gesetzter Haken lässt sich hier NICHT wieder aufmachen – das
+// geht wie bisher über das ✕ am Termin. Ein Rückgängig-Klick in einer Zeile,
+// in der daneben „✓ Heute" steht, wäre zu leicht zu verwechseln.
+function _tuHakenBox(an,wort,wert,klick,titel,gross,warnfarbe){
+  var gr=gross?'font-size:calc(11px * var(--modal-scale,1));padding:2px 8px;':'font-size:11px;padding:1px 6px;';
+  var t=_escHtml(titel||'');
+  // ⚠ In der engen Fassung bleibt `wort` leer – dann steht dort nur der Haken,
+  // ohne das Leerzeichen dahinter (sonst rutscht die Kette auseinander).
+  if(an){
+    return '<span style="'+gr+'white-space:nowrap;color:var(--text2);" title="'+t+'">☑'+(wort?' '+esc(wort):'')
+      +(wert?' <span style="color:var(--text2);opacity:.85;">'+esc(wert)+'</span>':'')+'</span>';
+  }
+  var col=warnfarbe||'#E24B4A';
+  return '<button type="button" class="tu-btn" style="'+gr+'white-space:nowrap;font-weight:700;color:'+col
+    +';border-color:'+col+';" onclick="event.stopPropagation();'+klick+'" title="'+t+'">☐'+(wort?' '+esc(wort):'')+'</button>';
+}
+// Die Kette. `wo`='f' = geöffnetes Task-Fenster (Arbeitskopie `taskTurnus`),
+// `wo`='o' = Reiter Objekte (gespeicherter Task). ⛔ Die Klickziele sind bewusst
+// die VORHANDENEN Wege der jeweiligen Ansicht – hier wird nur anders angezeigt,
+// nicht anders geschrieben. Ein gemeinsamer Schreibweg würde im offenen Fenster
+// die Arbeitskopie überholen (b543-F2-Falle).
+// Im Reiter Objekte trägt nur das OFFENE Kästchen sein Wort; die erledigten
+// stehen als reine Haken da, sonst sprengt die Kette die enge Zeile.
+function _tuHakenHtml(l,taskId,wo){
+  var s=_tuHakenStand(l);
+  var gross=(wo==='f'), voll=gross;
+  var lid=_escHtml((l&&l.id)||''), tid=_escHtml(taskId||'');
+  var dat=_escHtml((s.e&&s.e.datum)||'');
+  // ⚠ Ein OFFENES Kästchen sagt, was fehlt („Rechnung fehlt"), ein abgehaktes
+  // benennt die Sache („Rechnung"). In der engen Fassung tragen nur die offenen
+  // ihr Wort – sonst sprengt die Kette die Zeile.
+  var teile=[];
+  teile.push(_tuHakenBox(s.erl.an,
+    s.erl.an?(voll?'Erledigt':''):'Erledigen',
+    voll?s.erl.txt:'',
+    gross?('_tuErledigt(\''+lid+'\')'):('_tuKachelErledigt(\''+tid+'\',\''+lid+'\')'),
+    s.erl.an?('Zuletzt erledigt am '+s.erl.txt)
+            :((s.erl.txt==='noch nie')?'Noch nie erledigt – Klick trägt heute ein'
+                                     :('Wäre wieder dran (zuletzt '+s.erl.txt+') – Klick trägt heute ein')),
+    gross,'#c47f17'));
+  if(s.rgPflicht&&s.e){
+    var teil=(s.rg.art==='teil'), frei=(s.rg.art==='frei');
+    // ⛔ „ohne Berechnung" ist eine VOLLE Antwort, keine Rechnung – das Wort
+    // „Rechnung" davor las sich widersprüchlich („Rechnung ohne Berechnung").
+    var rgWort=s.rg.an?(frei?'Ohne Berechnung':(voll?'Rechnung':''))
+                      :(teil?'Rest offen':'Rechnung fehlt');
+    teile.push(_tuHakenBox(s.rg.an,rgWort,(voll&&!frei)?s.rg.txt:'',
+      gross?('_tuRgErfassen(\''+lid+'\',\''+dat+'\')'):('_objRgErfassen(\''+tid+'\',\''+lid+'\')'),
+      s.rg.an?(frei?'Ohne Berechnung vermerkt – dieser Termin wird nicht abgerechnet'
+                  :('Rechnung: '+s.rg.txt))
+        :(teil?('Teilrechnung liegt vor ('+s.rg.txt+') – die Schlussrechnung fehlt noch')
+             :'Erledigt, aber noch keine Rechnung vermerkt – Klick trägt sie ein'),
+      gross,teil?'#c47f17':'#E24B4A'));
+    // ⛔ Kein PDF-Kästchen bei „ohne Berechnung": es gibt keine Rechnung, die man
+    // hochladen könnte. Ein Kästchen, das nie zugehen kann, ist eine Falle.
+    if(!frei){
+      teile.push(_tuHakenBox(s.pdf.an,s.pdf.an?(voll?'PDF':''):'PDF fehlt',
+        (voll&&s.pdf.an)?s.pdf.txt:'',
+        gross?('_tuHakenPdf(\''+lid+'\',\''+dat+'\')'):('_rglDateiAnhaengen(\''+tid+'\',\''+lid+'\',\''+dat+'\')'),
+        s.pdf.an?('Rechnungs-PDF hängt am Termin ('+s.pdf.txt+')')
+          :'Kein Rechnungs-PDF am Termin – Klick öffnet den Weg zum Anhängen',
+        gross,'#E24B4A'));
+    }
+  }
+  return '<span style="display:inline-flex;align-items:center;gap:'+(gross?'6px':'4px')+';flex-wrap:nowrap;">'+teile.join('')+'</span>';
+}
+// PDF anhängen aus dem GEÖFFNETEN Fenster – die Arbeitskopie-Fassung von
+// `_rglDateiAnhaengen` (b688). ⚠ Es braucht sie zusätzlich: jene arbeitet über
+// `findTaskById` am gespeicherten Task und würde hier die Arbeitskopie
+// überholen. Immer als Rechnung gekennzeichnet – wer aufs PDF-Kästchen klickt,
+// hat die Frage „ist das eine Rechnung?" schon beantwortet.
+function _tuHakenPdf(lId,datum){
+  var l=_tuFinde(lId); if(!l)return;
+  var e=(l.eintraege||[]).find(function(x){return x&&x.datum===datum;}); if(!e)return;
+  if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden','error',4000);return;}
+  var fid=_getDriveFotoFolderId()
+    ||_extractFolderIdFromUrl((document.getElementById('tDokOrdner')||{}).value||'')
+    ||_extractFolderIdFromUrl((document.getElementById('tGDOrdner')||{}).value||'');
+  if(!fid){showToast('⚠ Am Objekt ist kein Ordner verlinkt – Rechnung später über 📎 nachtragen','warning',5000);return;}
+  var nach=function(){renderTurnusListe();scheduleTaskFieldSave();};
+  _tuFotoMenue(function(){
+    _tuUploadDateien(fid,l,e,function(ok){
+      if(ok){_tuRolleSetzen(e,ok);nach();showToast('🧾 Rechnung angehängt','success',3000);}
+    },'Rechnung');
+  },function(){
+    _tuFotoPickerOeffnen(fid,function(auswahl){
+      var add=_tuDateienAnEintrag(e,auswahl);
+      if(!add){showToast('Nichts Neues ausgewählt','info',2500);return;}
+      _tuRolleSetzen(e,add);
+      var neue=(e.dateien||[]).slice((e.dateien||[]).length-add);
+      nach();
+      showToast('🧾 '+add+' Datei(en) als Rechnung angehängt','success',3000);
+      _tuNamenAngleichen(l,e,neue,function(o,n){
+        if(n)showToast('⚠ '+n+' Datei(en) ließen sich nicht umbenennen – die Zuordnung steht trotzdem','warning',5000);
+        nach();
+      });
+    },true);
+  });
+}
+
 // b621: entscheidet, ob die Karte auf einem Nicht-Objekt-Board trotzdem stehen
 // bleibt. Läuft bei jedem Neuzeichnen mit, damit sie beim Löschen der letzten
 // Leistung sofort verschwindet und beim Anlegen der ersten sofort auftaucht –
@@ -10581,13 +10724,12 @@ function renderTurnusListe(){
       // Ist nichts offen, stand hier gar nichts; man sah nie, dass abgerechnet
       // wurde. `_tuRgKurz` gibt es seit b629, es wurde aber nur im Reiter Objekte
       // benutzt – hier ist es dieselbe Frage an der zweiten Stelle.
-      + '<span class="tu-last">'+esc(_tuStatusText(l))+(function(){
-          const _o=_tuRgOffen(l);
-          if(!_o){const _k=_tuRgKurz(l);return _k?' · '+_k:'';}
-          return _tuRgTeil(_o)
-            ? ' <b style="color:#c47f17;" title="Teilrechnung '+_escHtml(_o.rgnr||'')+' vom '+_escHtml(_tuDe(_o.rg))+' – der Rest ist noch nicht abgerechnet">· RE Rest</b>'
-            : ' <b style="color:#E24B4A;" title="Erledigt, aber noch keine Rechnung vermerkt">· RE fehlt</b>';
-        })()+'</span>'
+      // b690: Hier standen zwei unbeschriftete Daten nebeneinander – „zuletzt
+      // 11.08." (die Arbeit) und „RE 17.08." (die Rechnung) – und vom Beleg
+      // nichts. Jetzt die Abhak-Kette in voller Beschriftung; das „vor N Tagen"
+      // wandert in den Tooltip, es macht die Zeile breit ohne eine Frage zu
+      // beantworten, die dort steht.
+      + '<span class="tu-last" title="'+_escHtml(_tuStatusText(l))+'">'+_tuHakenHtml(l,'','f')+'</span>'
       // b660: Haken „in Heute" – steuert NUR die Tagesübersicht. Kein Erledigen,
       // kein Überspringen: Ampel und Jahresnachweis bleiben davon unberührt.
       + '<label class="tu-heute" title="'+(l.nichtHeute
@@ -15115,17 +15257,13 @@ function renderObjekte(){
         + '<span style="width:8px;height:8px;border-radius:50%;background:'+farbe+';flex-shrink:0;"></span>'
         + '<span style="flex:1;min-width:0;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+(_lAus?'☐ ':'')+esc(l.name||'(ohne Namen)')+'</span>'
         + '<span style="font-size:11px;color:var(--text2);white-space:nowrap;width:110px;">'+esc(_tuIntervall(l.intervall).label)+'</span>'
-        + '<span style="font-size:11px;color:'+farbe+';font-weight:600;white-space:nowrap;width:210px;text-align:right;">'+esc(_tuStatusText(l))+'</span>'
-        // b626: erledigt, aber Rechnung noch nicht vermerkt – die Geld-Warnung
-        // b629: ist sie geschrieben, steht hier das Rechnungsdatum statt nichts
-        // b679: derselbe Knopf, zwei Beschriftungen – „RE fehlt" rot, „RE Rest" gelb
-        + (function(){
-            var _o=_tuRgOffen(l); if(!_o)return _tuRgKurz(l);
-            var _t=_tuRgTeil(_o);
-            return '<button class="kal-btn" style="color:'+(_t?'#c47f17':'#E24B4A')+';border-color:'+(_t?'#c47f17':'#E24B4A')+';font-weight:700;" onclick="_objRgErfassen(\''+idT+'\',\''+_escHtml(l.id)+'\')" title="'
-              +(_t?'Teilrechnung '+_escHtml(_o.rgnr||'')+' vom '+_escHtml(_tuDe(_o.rg))+' – Schlussrechnung noch offen'
-                  :'Wartung erledigt, aber noch keine Rechnung vermerkt – jetzt eintragen')+'">'+_tuRgOffenText(_o)+'</button>';
-          })()
+        // b626/b629/b679: hier standen der Klartext „zuletzt … · vor N Tagen"
+        // und daneben der Mahn-Knopf – zwei Daten, keins davon beschriftet, und
+        // vom Rechnungs-PDF stand gar nichts da (Franks Befund 17.08.).
+        // b690: dieselbe Auskunft als Abhak-Kette. Die enge Fassung beschriftet
+        // nur das offene Kästchen; die Zeit steht im Tooltip.
+        + '<span style="white-space:nowrap;min-width:200px;text-align:right;flex-shrink:0;" title="'+_escHtml(_tuStatusText(l))+'">'
+        +   _tuHakenHtml(l,g.t.id,'o')+'</span>'
         // b663: Haken „in Heute". Beschriftet, weil hier – anders als in der engen
         // Kachel – Platz dafür ist und die Zeile sonst drei namenlose Knöpfe hätte.
         + '<label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text2);cursor:pointer;user-select:none;white-space:nowrap;flex-shrink:0;" title="'+_escHtml(_lAus?'Abgewählt – steht nicht in der Tagesübersicht „Heute“. Haken setzen, damit sie dort wieder auftaucht.':'Steht in der Tagesübersicht „Heute“. Haken wegnehmen, dann bleibt die Leistung hier stehen, taucht in „Heute“ aber nicht mehr auf. Sie gilt dadurch NICHT als erledigt.')+'">'
