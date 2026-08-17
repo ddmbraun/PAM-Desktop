@@ -9259,7 +9259,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-16 · #678'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-16-b678) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-17 · #680'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-17-b680) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -10282,12 +10282,21 @@ function _tuStatusText(l){
 function _tuRgOffen(l){
   if(!l||!l.rgPflicht)return null;
   const e=((l.eintraege)||[]).find(x=>x&&!x.skip);
-  return (e&&!e.rg&&!e.rgFrei)?e:null;
+  return _tuRgEintragOffen(l,e)?e:null;
 }
 // b629: zählt für einen Eintrag, ob er noch auf eine Rechnung wartet
+// b679: `rgTeil` = es ist erst eine TEILrechnung geschrieben. `rg`/`rgnr` stehen
+// dann zwar am Eintrag, der Rest steht aber noch aus – deshalb gilt er weiter als
+// offen. Ohne diese Regel hätte eine Abschlagsrechnung den Termin stumm geschaltet
+// (genau die Falle, die Frank am 17.08. beschrieben hat).
 function _tuRgEintragOffen(l,e){
-  return !!(l&&l.rgPflicht&&e&&!e.skip&&!e.rg&&!e.rgFrei);
+  return !!(l&&l.rgPflicht&&e&&!e.skip&&!e.rgFrei&&(!e.rg||e.rgTeil));
 }
+// b679: Teilrechnung geschrieben, Rest offen – der mittlere Zustand
+function _tuRgTeil(e){return !!(e&&e.rg&&e.rgTeil&&!e.rgFrei);}
+// b679: Beschriftung der Mahnung. „€ fehlt" = noch gar nichts geschrieben,
+// „€ Rest" = Teilrechnung liegt vor. Beide Fälle sind offen, aber nicht dasselbe.
+function _tuRgOffenText(e){return _tuRgTeil(e)?'€ Rest':'€ fehlt';}
 // b629: jüngster ECHTER Eintrag (nicht übersprungen) – die Einträge stehen absteigend
 function _tuJuengster(l){return ((l&&l.eintraege)||[]).find(x=>x&&!x.skip)||null;}
 // b631: „14.08." – kurz für die Bautagebuch-Zeilen
@@ -10316,7 +10325,10 @@ function _tuBtbZeile(task,text){
 // sonst stünde dieselbe Nummer in sieben Bautagebüchern siebenmal (Einwand Frank).
 function _tuRgBtbText(posTexte,e,gesamt){
   if(e.rgFrei)return '€ ohne Berechnung – '+posTexte.join(', ');
-  return '€ Rechnung '+(e.rgnr?e.rgnr+' ':'')+'vom '+_tuDe(e.rg)+' – '+posTexte.join(', ')
+  // b679: eine Teilrechnung muss im Bautagebuch als solche stehen – sonst liest
+  // man später „Rechnung geschrieben" und der Rest ist vergessen.
+  return '€ '+(_tuRgTeil(e)?'Teilrechnung':'Rechnung')+' '+(e.rgnr?e.rgnr+' ':'')+'vom '+_tuDe(e.rg)+' – '+posTexte.join(', ')
+    +(_tuRgTeil(e)?' · Rest steht noch aus':'')
     +((gesamt&&gesamt>1)?' · Sammelrechnung, '+gesamt+' Positionen gesamt':'');
 }
 // b630: „ist dieses Objekt dieses Jahr durch?" – Leistungen mit mindestens einem
@@ -10331,11 +10343,53 @@ function _tuJahrStand(liste,jahr){
   }).length;
   return {jahr:j,gesamt:ls.length,fertig:fertig};
 }
+// b680: Rechnungsstand eines JAHRES (Frank 17.08.: „sichtbar machen, dass in
+// diesem Jahr abgerechnet wurde"). Bis b679 sagte PAM nur, was FEHLT – die
+// positive Auskunft gab es nirgends.
+//
+// ⚠ Gezählt werden TERMINE, nicht Leistungen – anders als `_tuJahrStand` daneben.
+// Das ist Absicht und Franks Entscheid: Rechnungen hängen am Termin. Bei einer
+// monatlichen Reinigung wären „1 von 1 Leistungen" gelogen, wenn elf Rechnungen
+// fehlen. Bei den jährlichen Rinnenwartungen ist beides dieselbe Zahl.
+//
+// `fertig` = gesamt minus offen, und „offen" ist WÖRTLICH `_tuRgEintragOffen`
+// (b679). Damit kann die Badge nie etwas anderes behaupten als die Liste der
+// offenen Rechnungen – eine zweite Rechenregel wäre genau die Stelle, an der die
+// beiden Ansichten auseinanderlaufen.
+// Übersprungene Termine und Leistungen ohne `rgPflicht` zählen gar nicht mit;
+// „ohne Berechnung" (rgFrei) zählt als erledigt, denn da ist nichts mehr zu tun.
+function _tuJahrRgStand(liste,jahr){
+  const j=jahr||new Date().getFullYear();
+  let gesamt=0,offen=0,teil=0,frei=0;
+  (liste||[]).filter(Boolean).forEach(function(l){
+    if(!l.rgPflicht)return;
+    ((l.eintraege)||[]).forEach(function(e){
+      if(!e||e.skip||String(e.datum||'').indexOf(j+'-')!==0)return;
+      gesamt++;
+      if(e.rgFrei)frei++;
+      if(_tuRgEintragOffen(l,e)){offen++;if(_tuRgTeil(e))teil++;}
+    });
+  });
+  return {jahr:j,gesamt:gesamt,fertig:gesamt-offen,offen:offen,teil:teil,frei:frei};
+}
+// b680: Tooltip-Text dazu – einmal geschrieben, an drei Stellen benutzt
+function _tuJahrRgTitel(st){
+  if(!st.gesamt)return '';
+  return 'Rechnungen '+st.jahr+': '+st.fertig+' von '+st.gesamt+' Termin'+(st.gesamt!==1?'en':'')+' abgerechnet'
+    +(st.frei?' (davon '+st.frei+' ohne Berechnung)':'')
+    +(st.offen?' · '+st.offen+' noch offen':'')
+    +(st.teil?', davon '+st.teil+' nur teilweise':'')
+    +'\nGezählt werden Termine, nicht Leistungen.';
+}
 // b629: kurzer Rechnungsstand einer Leistung für die Listen – '' wenn nichts zu sagen ist
 function _tuRgKurz(l){
   if(!l||!l.rgPflicht)return '';
   const e=_tuJuengster(l); if(!e)return '';
   if(e.rgFrei)return '<span style="font-size:11px;color:var(--text2);white-space:nowrap;" title="Ohne Berechnung – dieser Termin wird nicht abgerechnet">o. B.</span>';
+  // b679: Teilrechnung wird hier gar nicht erreicht (sie gilt als offen und bekommt
+  // den Mahn-Knopf), steht aber der Vollständigkeit halber da – falls diese Funktion
+  // später an einer Stelle ohne Mahnung benutzt wird.
+  if(_tuRgTeil(e))return '<span style="font-size:11px;color:#c47f17;font-weight:600;white-space:nowrap;" title="Teilrechnung '+_escHtml(e.rgnr||'')+' vom '+_escHtml(_tuDe(e.rg))+' – der Rest steht noch aus">€ Teil</span>';
   if(e.rg)return '<span style="font-size:11px;color:#2f7d1e;font-weight:600;white-space:nowrap;" title="Rechnung vom '+_escHtml(_tuDe(e.rg))+(e.rgnr?' · Nr. '+_escHtml(e.rgnr):'')+'">€ '+esc(_tuDe(e.rg))+'</span>';
   return '';
 }
@@ -10365,10 +10419,20 @@ function renderTurnusListe(){
     // b630: Jahresstand dazu – „2 · 2026: 2 von 2". „fällig" beantwortet eine andere
     // Frage (Turnus abgelaufen) und bleibt deshalb daneben stehen.
     const st=_tuJahrStand(liste);
+    // b680: der Rechnungsstand des Jahres dazu – „€ 2 von 2". Er steht bewusst
+    // hinter dem Erledigt-Stand: erst die Arbeit, dann das Geld. Ohne Termin in
+    // diesem Jahr bleibt der Teil weg (nichts abzurechnen).
+    const rst=_tuJahrRgStand(liste);
     hdr.textContent=liste.length
-      ?('('+liste.length+' · '+st.jahr+': '+st.fertig+' von '+st.gesamt+(f?' · '+f+' fällig':'')+')')
+      ?('('+liste.length+' · '+st.jahr+': '+st.fertig+' von '+st.gesamt
+        +(rst.gesamt?' · € '+rst.fertig+' von '+rst.gesamt:'')
+        +(f?' · '+f+' fällig':'')+')')
       :'';
-    hdr.style.color=(st.gesamt&&st.fertig===st.gesamt)?TU_FARBE.gruen:(f?TU_FARBE.gelb:'var(--text2)');
+    hdr.title=rst.gesamt?_tuJahrRgTitel(rst):'';
+    // ⚠ Die Farbe bleibt an der ERLEDIGT-Frage hängen (b630) und bekommt nur eine
+    // Ausnahme: offene Rechnungen färben gelb, auch wenn alles erledigt ist –
+    // sonst stünde die Zeile grün da, während Geld aussteht.
+    hdr.style.color=(st.gesamt&&st.fertig===st.gesamt&&!rst.offen)?TU_FARBE.gruen:((f||rst.offen)?TU_FARBE.gelb:'var(--text2)');
   }
   if(!liste.length){
     box.innerHTML='<div class="tu-empty">Noch nichts angelegt. Unten eintragen, was an diesem Objekt regelmäßig zu tun ist – z.B. „Reinigung", monatlich.</div>';
@@ -10384,7 +10448,18 @@ function renderTurnusListe(){
       + '<span class="tu-name" onclick="_tuToggleHist(\''+idJs+'\')" title="Datumsliste auf-/zuklappen">'+esc(l.name||'(ohne Namen)')
       +   (l.notiz?' <span style="cursor:help;color:var(--accent);" title="'+_escHtml(l.notiz)+'">ℹ</span>':'') // b630: Dauer-Notiz
       +   ' <small>· '+esc(_tuIntervall(l.intervall).label)+'</small></span>'
-      + '<span class="tu-last">'+esc(_tuStatusText(l))+(_tuRgOffen(l)?' <b style="color:#E24B4A;" title="Erledigt, aber noch keine Rechnung vermerkt">· € fehlt</b>':'')+'</span>'
+      // b679: zwei Mahnstufen – „€ fehlt" (nichts geschrieben) und „€ Rest" (Teilrechnung liegt vor)
+      // b680: und der dritte Fall, der bisher gefehlt hat – die POSITIVE Auskunft.
+      // Ist nichts offen, stand hier gar nichts; man sah nie, dass abgerechnet
+      // wurde. `_tuRgKurz` gibt es seit b629, es wurde aber nur im Reiter Objekte
+      // benutzt – hier ist es dieselbe Frage an der zweiten Stelle.
+      + '<span class="tu-last">'+esc(_tuStatusText(l))+(function(){
+          const _o=_tuRgOffen(l);
+          if(!_o){const _k=_tuRgKurz(l);return _k?' · '+_k:'';}
+          return _tuRgTeil(_o)
+            ? ' <b style="color:#c47f17;" title="Teilrechnung '+_escHtml(_o.rgnr||'')+' vom '+_escHtml(_tuDe(_o.rg))+' – der Rest ist noch nicht abgerechnet">· € Rest</b>'
+            : ' <b style="color:#E24B4A;" title="Erledigt, aber noch keine Rechnung vermerkt">· € fehlt</b>';
+        })()+'</span>'
       // b660: Haken „in Heute" – steuert NUR die Tagesübersicht. Kein Erledigen,
       // kein Überspringen: Ampel und Jahresnachweis bleiben davon unberührt.
       + '<label class="tu-heute" title="'+(l.nichtHeute
@@ -10426,6 +10501,11 @@ function renderTurnusListe(){
             if(e.rgFrei){
               _rg='<span style="color:var(--text2);font-size:11px;white-space:nowrap;cursor:pointer;margin-left:4px;" onclick="_tuRgErfassen(\''+idJs+'\',\''+_escHtml(e.datum)+'\')" title="Ohne Berechnung – Klick, um doch eine Rechnung zu vermerken">o. B.</span>'
                 +'<button type="button" onclick="_tuRgWeg(\''+idJs+'\',\''+_escHtml(e.datum)+'\')" title="Vermerk „ohne Berechnung" entfernen">✕</button>';
+            }else if(e.rg&&e.rgTeil){
+              // b679: Teilrechnung – gelb statt grün, und der Termin bleibt in den offenen Rechnungen
+              const _vor=(e.rgTeilNrn||[]).length?' · vorher '+(e.rgTeilNrn||[]).join(', '):'';
+              _rg='<span style="color:#c47f17;font-size:11px;font-weight:600;white-space:nowrap;cursor:pointer;margin-left:4px;" onclick="_tuRgErfassen(\''+idJs+'\',\''+_escHtml(e.datum)+'\')" title="Teilrechnung vom '+_escHtml(_tuDe(e.rg))+_escHtml(_vor)+' – der Rest steht noch aus. Klick, um die Schlussrechnung einzutragen (dann ohne „+&quot;).">€ Teil '+esc(_tuDe(e.rg))+(e.rgnr?' · '+esc(e.rgnr):'')+'</span>'
+                +'<button type="button" onclick="_tuRgWeg(\''+idJs+'\',\''+_escHtml(e.datum)+'\')" title="Teilrechnungs-Vermerk entfernen">✕</button>';
             }else if(e.rg){
               const _sam=_tuSammelZahl(e.rgSammel);
               _rg='<span style="color:#2f7d1e;font-size:11px;white-space:nowrap;cursor:pointer;margin-left:4px;" onclick="_tuRgErfassen(\''+idJs+'\',\''+_escHtml(e.datum)+'\')" title="Rechnung vermerkt – Klick zum Ändern">€ '+esc(_tuDe(e.rg))+(e.rgnr?' · '+esc(e.rgnr):'')+'</span>'
@@ -10625,18 +10705,43 @@ function _tuEintragWeg(id,datum){
 // Zwei Fragen (Nummer, Datum vorbelegt mit heute) – deckt auch den Nachtrag ab.
 // Gibt bei Erfolg {rg,rgnr} zurück, sonst null. Gemeinsamer Kern für Fenster
 // (Arbeitskopie) und Reiter „Objekte" (gespeicherter Task).
+// b679: dritter Fall „Teilrechnung". Bewusst als GESTE in derselben Zeile wie das
+// vorhandene „-", NICHT als zusätzliche Frage: eine dritte Rückfrage bei jeder
+// Rechnung wäre eine Bremse (dieselbe Überlegung wie b630, „keine Zusatzfrage
+// nach dem Abhaken"). Ein „+" hinten an der Nummer heißt: das war erst ein Teil.
+// Gespeichert wird die Nummer OHNE das Pluszeichen.
 function _tuRgAbfragen(e){
-  const nr=prompt('Rechnungsnummer (kann leer bleiben):\n\nOder ein Minus „-" eintragen = ohne Berechnung (Kulanz).\nDer Termin gilt dann als erledigt und wird nicht mehr angemahnt.',e.rgnr||'');
+  const nr=prompt('Rechnungsnummer (kann leer bleiben):\n\nMinus „-" = ohne Berechnung (Kulanz). Der Termin gilt dann als erledigt\nund wird nicht mehr angemahnt.\n\nEin Plus „+" HINTER der Nummer (z. B. 2026-114+) = Teilrechnung.\nDer Termin bleibt dann in der Liste der offenen Rechnungen stehen.',
+    (e.rgnr||'')+(e.rgTeil?'+':''));
   if(nr===null)return null;
   // b629: Kulanzfall – keine Rechnung, kein Datum, keine Mahnung
   if(String(nr).trim()==='-')return {frei:true};
-  const dv=prompt('Rechnungsdatum (TT.MM.JJJJ):',_tuDe(e.rg||_tzHeuteIso()));
+  let roh=String(nr).trim();
+  const teil=/\+$/.test(roh);
+  if(teil)roh=roh.replace(/\s*\+$/,'').trim();
+  const dv=prompt((teil?'TEILRECHNUNG – der Rest bleibt offen.\n\n':'')+'Rechnungsdatum (TT.MM.JJJJ):',_tuDe(e.rg||_tzHeuteIso()));
   if(dv===null)return null;
   const m=/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec((dv||'').trim());
   if(!m){showToast('Datum bitte als TT.MM.JJJJ eingeben','warning',3500);return null;}
   const p=new Date(+m[3],+m[2]-1,+m[1]);
   if(isNaN(p.getTime())||p.getMonth()!==(+m[2]-1)){showToast('Dieses Datum gibt es nicht','warning',3000);return null;}
-  return {rg:m[3]+'-'+String(+m[2]).padStart(2,'0')+'-'+String(+m[1]).padStart(2,'0'),rgnr:String(nr).trim()};
+  return {rg:m[3]+'-'+String(+m[2]).padStart(2,'0')+'-'+String(+m[1]).padStart(2,'0'),rgnr:roh,teil:teil};
+}
+// b679: gemeinsames Schreiben des Rechnungs-Vermerks an EINEN Eintrag. Es gibt
+// diese Zeilen an drei Stellen (Fenster, Reiter Objekte, Sammelrechnung) – hier
+// steht nur der Teil, der bei allen dreien wortgleich ist: was mit `rgTeil` und
+// den vorherigen Teilrechnungsnummern passiert.
+// ⚠ Beim Ersetzen einer Teilrechnung durch die Schlussrechnung ginge die alte
+// Nummer sonst verloren – sie wandert deshalb in `rgTeilNrn` (reine Merkliste).
+function _tuRgSchreiben(e,rg){
+  if(!e||!rg)return;
+  if(rg.frei){e.rgFrei=true;delete e.rg;delete e.rgnr;delete e.rgTeil;return;}
+  if(e.rgTeil&&e.rgnr&&e.rgnr!==rg.rgnr){
+    if(!Array.isArray(e.rgTeilNrn))e.rgTeilNrn=[];
+    if(e.rgTeilNrn.indexOf(e.rgnr)<0)e.rgTeilNrn.push(e.rgnr);
+  }
+  e.rg=rg.rg; e.rgnr=rg.rgnr; delete e.rgFrei;
+  if(rg.teil)e.rgTeil=true; else delete e.rgTeil;
 }
 function _tuRgErfassen(id,datum){
   const l=_tuFinde(id); if(!l)return;
@@ -10646,18 +10751,18 @@ function _tuRgErfassen(id,datum){
   const _btbT=function(){try{return findTaskById((document.getElementById('taskId')||{}).value||'');}catch(err){return null;}};
   const _pos=[(l.name||'')+' ('+_tuDeKurz(e.datum)+')'];
   if(rg.frei){ // b629
-    e.rgFrei=true; delete e.rg; delete e.rgnr;
+    _tuRgSchreiben(e,rg); // b679
     _tuBtbZeile(_btbT(),_tuRgBtbText(_pos,e,1));
     renderTurnusListe();
     scheduleTaskFieldSave();
     showToast('Ohne Berechnung vermerkt – '+_tuDe(e.datum),'success',2500);
     return;
   }
-  e.rg=rg.rg; e.rgnr=rg.rgnr; delete e.rgFrei;
+  _tuRgSchreiben(e,rg); // b679: setzt/löscht auch `rgTeil` und merkt alte Teil-Nummern
   _tuBtbZeile(_btbT(),_tuRgBtbText(_pos,e,1));
   renderTurnusListe();
   scheduleTaskFieldSave();
-  showToast('€ Rechnung vermerkt – '+_tuDe(e.rg)+(e.rgnr?' · Nr. '+e.rgnr:''),'success',2500);
+  showToast((_tuRgTeil(e)?'€ Teilrechnung vermerkt – der Rest bleibt offen · ':'€ Rechnung vermerkt – ')+_tuDe(e.rg)+(e.rgnr?' · Nr. '+e.rgnr:''),'success',3200);
   _tuRgPdfFrage(e,l); // b629: gleich das Rechnungs-PDF anbieten
 }
 function _tuRgWeg(id,datum){
@@ -10665,8 +10770,10 @@ function _tuRgWeg(id,datum){
   const e=(l.eintraege||[]).find(x=>x&&x.datum===datum); if(!e||(!e.rg&&!e.rgFrei))return;
   // b629: derselbe ✕ räumt auch den Kulanz-Vermerk weg
   if(!confirm(e.rgFrei?('Vermerk „ohne Berechnung" vom '+_tuDe(e.datum)+' entfernen?')
-    :('Rechnungsvermerk vom '+_tuDe(e.rg)+' entfernen?')))return;
-  delete e.rg; delete e.rgnr; delete e.rgFrei; delete e.rgSammel;
+    :((_tuRgTeil(e)?'Teilrechnungs-Vermerk':'Rechnungsvermerk')+' vom '+_tuDe(e.rg)+' entfernen?')))return;
+  // b679: rgTeil/rgTeilNrn müssen mit weg – sonst bliebe ein Termin ohne jeden
+  // Rechnungsvermerk als „Teilrechnung" markiert stehen.
+  delete e.rg; delete e.rgnr; delete e.rgFrei; delete e.rgSammel; delete e.rgTeil; delete e.rgTeilNrn;
   renderTurnusListe();
   scheduleTaskFieldSave();
 }
@@ -10712,8 +10819,7 @@ function _objRgErfassen(taskId,lId){
   const e=_tuRgOffen(l);
   if(!e){showToast('Hier fehlt keine Rechnung (mehr)','info',2500);if(typeof renderObjekte==='function')renderObjekte();return;}
   const rg=_tuRgAbfragen(e); if(!rg)return;
-  if(rg.frei){e.rgFrei=true;delete e.rg;delete e.rgnr;} // b629
-  else {e.rg=rg.rg; e.rgnr=rg.rgnr; delete e.rgFrei;}
+  _tuRgSchreiben(e,rg); // b629 Kulanz + b679 Teilrechnung – eine Regel für alle drei Wege
   _tuBtbZeile(t,_tuRgBtbText([(l.name||'')+' ('+_tuDeKurz(e.datum)+')'],e,1)); // b631
   try{
     const offen=(document.getElementById('taskId')||{}).value||'';
@@ -10725,7 +10831,7 @@ function _objRgErfassen(taskId,lId){
   try{autoSave();}catch(err){console.warn('[TU] autoSave:',err);}
   if(typeof currentView!=='undefined'&&currentView==='objekte'&&typeof renderObjekte==='function')renderObjekte();
   if(rg.frei){showToast('Ohne Berechnung vermerkt – '+(l.name||''),'success',2500);return;}
-  showToast('€ Rechnung vermerkt – '+(l.name||''),'success',2500);
+  showToast((_tuRgTeil(e)?'€ Teilrechnung vermerkt – der Rest bleibt offen · ':'€ Rechnung vermerkt – ')+(l.name||''),'success',3200);
   _tuRgPdfFrage(e,l,t); // b629
 }
 
@@ -13973,6 +14079,22 @@ function taskCardHTML(task){
     const br=alles?'#C0DD97':(nix?'var(--border)':'#FAC775');
     return `<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:${bg};color:${col};border:1px solid ${br};white-space:nowrap;" title="Wiederkehrende Leistungen ${st.jahr}: ${st.fertig} von ${st.gesamt} erledigt">🔁 ${st.jahr}: ${st.fertig}/${st.gesamt}</span>`;
   })();
+  // b680: die zweite Badge – „ist das dieses Jahr auch abgerechnet?". Eigene
+  // Badge statt Anhängsel an der 🔁-Badge: die beiden beantworten verschiedene
+  // Fragen (erledigt ≠ abgerechnet) und haben verschiedene Nenner (Leistungen
+  // gegen Termine). In EINE Badge gepresst könnte man 2/2 · 1/8 nicht lesen.
+  // ⚠ Ohne Termin in diesem Jahr GAR KEINE Badge – dann ist auch nichts
+  // abzurechnen, und „0/0" wäre nur ein Rätsel im Kartenkopf.
+  const _tuRgJahrKopf=(function(){
+    if((boardTypes[currentBoard]||'baustelle')!=='immobilie')return '';
+    const st=_tuJahrRgStand(task.turnusListe||[]);
+    if(!st.gesamt)return '';
+    const alles=st.offen===0, nix=st.fertig===0;
+    const col=alles?'#3B6D11':(nix?'#8C2F2E':'#854F0B');
+    const bg=alles?'#EAF3DE':(nix?'#FBE9E9':'#FAEEDA');
+    const br=alles?'#C0DD97':(nix?'#F0BFBE':'#FAC775');
+    return `<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:${bg};color:${col};border:1px solid ${br};white-space:nowrap;" title="${_escHtml(_tuJahrRgTitel(st))}">€ ${st.jahr}: ${st.fertig}/${st.gesamt}${st.teil?' ·T':''}</span>`;
+  })();
   // b642: ➕ Auftrag am Objekt – nur auf Objekt-Boards und nur auf Objektkarten
   // (Auftragskarten tragen selbst objektId und bekommen keinen). Sitzt im Kartenkopf
   // neben dem Jahresstand und ist damit auch bei zugeklappter Karte erreichbar.
@@ -14091,7 +14213,7 @@ function taskCardHTML(task){
       onclick="event.stopPropagation();_toggleMergeSelect('${esc(task.id)}')"
       style="position:absolute;top:7px;right:7px;width:15px;height:15px;cursor:pointer;accent-color:var(--accent);opacity:${_isMergeSel?'1':'0'};transition:opacity .15s;"
       onmouseenter="this.style.opacity='1'" onmouseleave="if(!this.checked)this.style.opacity='0'">
-    ${_pamNeu?`<div class="pam-neu-head"><button class="pam-neu-toggle" onclick="event.stopPropagation();this.closest('.task-card').classList.toggle('pam-neu-open')"><span class="pnt-a">▾ Details anzeigen</span><span class="pnt-b">▴ Details ausblenden</span></button>${isEmailBoard?(_angelegtKopf?`<div class="pam-neu-acts">${_angelegtKopf}</div>`:''):`<div class="pam-neu-acts">${_auftragKopfBtn}${_tuJahrKopf}${_angelegtKopf}${_uebBtn}${_mapsLink}${_telLink}${task.owner?`<span class="pam-neu-owner">${esc(task.owner)}</span>`:''}</div>`}</div>`:''}
+    ${_pamNeu?`<div class="pam-neu-head"><button class="pam-neu-toggle" onclick="event.stopPropagation();this.closest('.task-card').classList.toggle('pam-neu-open')"><span class="pnt-a">▾ Details anzeigen</span><span class="pnt-b">▴ Details ausblenden</span></button>${isEmailBoard?(_angelegtKopf?`<div class="pam-neu-acts">${_angelegtKopf}</div>`:''):`<div class="pam-neu-acts">${_auftragKopfBtn}${_tuJahrKopf}${_tuRgJahrKopf}${_angelegtKopf}${_uebBtn}${_mapsLink}${_telLink}${task.owner?`<span class="pam-neu-owner">${esc(task.owner)}</span>`:''}</div>`}</div>`:''}
     <div class="task-card-toprow">
       ${_boardBadge}${_emailSenderBadge}
       ${isEmailBoard?[_taskStatusBadge,_eMailDateBadge,_angelegtBadge,_emTerminBadges,_emAnhBadge,_emFotosBadge,_vidBadge,(_pamNeu?'':_anrufOffenBadge),(_pamNeu?'':_besichtigungOffenBadge)].filter(Boolean).join(''):[_taskStatusBadge,(task.gmAkte?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:#EEEDFE;color:#3C3489;border:1px solid #AFA9EC;white-space:nowrap;">📂 GM ${esc(_gmNr(task.gmAkte))}</span>`:''),(_pamNeu?'':_planenBadge),_anfrBadge,_erteiltBadge,_repBadge,_kstBadge,_angelegtBadge,_emlBadge,_pdfBadge,_anhBadge,_fotosBadge,_vidBadge,(_pamNeu?'':_anrufOffenBadge),(_pamNeu?'':_besichtigungOffenBadge),_linksBadge,_zeitBadge,_bauBadge].filter(Boolean).join('')}
@@ -14601,6 +14723,13 @@ function renderObjekte(){
     +'<select class="kal-select" onchange="_objSetBoard(this.value)" title="Nur Objekte dieses Projekts">'+boardOpts+'</select>'
     // b629: Jahresübersicht über ALLE Objekte des gewählten Projekts
     +'<button class="kal-chip" onclick="_bjmOeffnen()" title="Jahresübersicht über alle Objekte dieses Projekts – wer ist dieses Jahr durch, wo fehlt die Rechnung">📅 Jahr (alle)</button>'
+    // b679: die Arbeitsliste. Bewusst NICHT auf ein Jahr begrenzt – anders als
+    // die Matrix daneben. Rot nur, wenn wirklich etwas offen ist.
+    +(function(){
+       var _n=_rglZahl();
+       return '<button class="kal-chip" onclick="_rglOeffnen()"'+(_n?' style="color:#E24B4A;border-color:#E24B4A;font-weight:700;"':'')
+         +' title="Alle Termine, für die noch eine Rechnung fehlt – über alle Jahre und alle Objekte dieses Projekts">€ Offene Rechnungen'+(_n?' ('+_n+')':'')+'</button>';
+     })()
     +'<button class="kal-chip'+(_objNurOffen?' active':'')+'" onclick="_objSetNurOffen()" title="Nur zeigen, was zurzeit fällig ist">'+(_objNurOffen?'☑':'☐')+' nur offene</button>'
     // b622: zeigt zusätzlich Objekt-Tasks, bei denen noch gar nichts eingetragen ist
     +'<button class="kal-chip'+(_objMitLeeren?' active':'')+'" onclick="_objSetMitLeeren()" title="Auch Objekte zeigen, bei denen noch keine Leistung angelegt ist – damit man sieht, wo noch etwas fehlt"'
@@ -14655,7 +14784,14 @@ function renderObjekte(){
         + '<span style="font-size:11px;color:'+farbe+';font-weight:600;white-space:nowrap;width:210px;text-align:right;">'+esc(_tuStatusText(l))+'</span>'
         // b626: erledigt, aber Rechnung noch nicht vermerkt – die Geld-Warnung
         // b629: ist sie geschrieben, steht hier das Rechnungsdatum statt nichts
-        + (_tuRgOffen(l)?'<button class="kal-btn" style="color:#E24B4A;border-color:#E24B4A;font-weight:700;" onclick="_objRgErfassen(\''+idT+'\',\''+_escHtml(l.id)+'\')" title="Wartung erledigt, aber noch keine Rechnung vermerkt – jetzt eintragen">€ fehlt</button>':_tuRgKurz(l))
+        // b679: derselbe Knopf, zwei Beschriftungen – „€ fehlt" rot, „€ Rest" gelb
+        + (function(){
+            var _o=_tuRgOffen(l); if(!_o)return _tuRgKurz(l);
+            var _t=_tuRgTeil(_o);
+            return '<button class="kal-btn" style="color:'+(_t?'#c47f17':'#E24B4A')+';border-color:'+(_t?'#c47f17':'#E24B4A')+';font-weight:700;" onclick="_objRgErfassen(\''+idT+'\',\''+_escHtml(l.id)+'\')" title="'
+              +(_t?'Teilrechnung '+_escHtml(_o.rgnr||'')+' vom '+_escHtml(_tuDe(_o.rg))+' – Schlussrechnung noch offen'
+                  :'Wartung erledigt, aber noch keine Rechnung vermerkt – jetzt eintragen')+'">'+_tuRgOffenText(_o)+'</button>';
+          })()
         // b663: Haken „in Heute". Beschriftet, weil hier – anders als in der engen
         // Kachel – Platz dafür ist und die Zeile sonst drei namenlose Knöpfe hätte.
         + '<label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text2);cursor:pointer;user-select:none;white-space:nowrap;flex-shrink:0;" title="'+_escHtml(_lAus?'Abgewählt – steht nicht in der Tagesübersicht „Heute“. Haken setzen, damit sie dort wieder auftaucht.':'Steht in der Tagesübersicht „Heute“. Haken wegnehmen, dann bleibt die Leistung hier stehen, taucht in „Heute“ aber nicht mehr auf. Sie gilt dadurch NICHT als erledigt.')+'">'
@@ -14837,10 +14973,18 @@ function _bjmRender(){
     if(n)mitEintrag++;
     summeOffen+=_bjmOffene(g,_bjmJahr).length;
   });
+  // b679: Diese Matrix zeigt NUR das eingestellte Jahr. Ein Rückstand aus einem
+  // anderen Jahr war damit unsichtbar – hier steht er jetzt als Hinweis, mit
+  // Klick direkt in die jahresübergreifende Liste.
+  var fremd=0;
+  try{
+    fremd=_rglSammle().filter(function(p){return String(p.e.datum||'').indexOf(_bjmJahr+'-')!==0;}).length;
+  }catch(err){console.warn('[BJM] andere Jahre:',err);}
   var sub=document.getElementById('bjmSub');
   if(sub)sub.innerHTML=esc(_objBoardFilter||'Alle Projekte')+' · '+alle.length+' Objekt'+(alle.length!==1?'e':'')
     +' · <b>'+mitEintrag+'</b> in '+_bjmJahr+' erledigt · <b>'+(alle.length-mitEintrag)+'</b> ohne Eintrag'
-    +(summeOffen?' · <b style="color:#E24B4A;">'+summeOffen+' Termin'+(summeOffen!==1?'e':'')+' ohne Rechnung</b>':' · alles abgerechnet');
+    +(summeOffen?' · <b style="color:#E24B4A;">'+summeOffen+' Termin'+(summeOffen!==1?'e':'')+' ohne Rechnung</b>':' · alles abgerechnet')
+    +(fremd?' · <b style="color:#E24B4A;cursor:pointer;text-decoration:underline;" onclick="_rglOeffnen()" title="Diese Termine liegen NICHT in '+_bjmJahr+' und sind in dieser Ansicht unsichtbar – Klick öffnet die Liste über alle Jahre">⚠ '+fremd+' weitere aus anderen Jahren</b>':'');
 
   var liste=_bjmNurLuecken?alle.filter(function(g){
     var n=0;
@@ -14929,6 +15073,10 @@ function _bjmNachSchreiben(pos){
   try{autoSave();}catch(err){console.warn('[BJM] autoSave:',err);}
   if(typeof currentView!=='undefined'&&currentView==='objekte'&&typeof renderObjekte==='function')renderObjekte();
   _bjmRender();
+  // b679: die Liste der offenen Rechnungen zieht mit – beide Fenster teilen sich
+  // die Auswahl `_bjmSel`, und beide Render-Funktionen steigen aus, wenn ihr
+  // Fenster gar nicht offen ist.
+  if(typeof _rglRender==='function')_rglRender();
 }
 
 // EINE Rechnung für alle angehakten Termine – der eigentliche Sammelrechnungs-Knopf
@@ -14953,10 +15101,20 @@ function _bjmSammelrechnung(){
   // Kennung = Nummer + Datum. Ohne Nummer trotzdem eindeutig, damit die
   // Positionen zusammenfindbar bleiben.
   var key=(String(nr).trim()||'ohne-Nr')+'#'+iso;
+  // b679: Eine Sammelrechnung ist immer eine VOLLrechnung – sie schließt einen
+  // vorher vermerkten Teil ab. `rgTeil` muss hier weg, sonst bliebe der Termin
+  // ewig in der Liste der offenen Rechnungen stehen.
+  // ⛔ Bewusst inline und nicht über `_tuRgSchreiben`: diese Stelle hat mit
+  // `rgSammel` eine eigene Regel, und ein Hineinziehen der Hilfsfunktion würde
+  // die geschnittene Funktion in test_b629 zerreißen (bekannte Falle b631).
   pos.forEach(function(p2){
-    if(frei){p2.e.rgFrei=true;delete p2.e.rg;delete p2.e.rgnr;delete p2.e.rgSammel;}
+    if(frei){p2.e.rgFrei=true;delete p2.e.rg;delete p2.e.rgnr;delete p2.e.rgSammel;delete p2.e.rgTeil;}
     else{
-      p2.e.rg=iso; p2.e.rgnr=String(nr).trim(); delete p2.e.rgFrei;
+      if(p2.e.rgTeil&&p2.e.rgnr&&p2.e.rgnr!==String(nr).trim()){
+        if(!Array.isArray(p2.e.rgTeilNrn))p2.e.rgTeilNrn=[];
+        if(p2.e.rgTeilNrn.indexOf(p2.e.rgnr)<0)p2.e.rgTeilNrn.push(p2.e.rgnr);
+      }
+      p2.e.rg=iso; p2.e.rgnr=String(nr).trim(); delete p2.e.rgFrei; delete p2.e.rgTeil;
       if(pos.length>1)p2.e.rgSammel=key; else delete p2.e.rgSammel;
     }
   });
@@ -14975,6 +15133,263 @@ function _bjmSammelrechnung(){
     :('€ Rechnung vermerkt – '+pos.length+' Termin(e) an '+objekte+' Objekt(en)'),'success',3500);
   if(!frei)_bjmPdfFrage(pos);
 }
+// ── b679: „€ Offene Rechnungen" – die Arbeitsliste (Frank 17.08.) ───────────
+// Franks Frage: „eine Liste, wo ich sehen kann, wo ich noch eine Rechnung
+// stellen muss". Die gab es bis b678 NICHT:
+//   · der rote Knopf „€ fehlt" im Reiter Objekte schaut nur auf den JÜNGSTEN
+//     Termin je Leistung (_tuRgOffen) – ein älterer Rückstand ist unsichtbar,
+//   · die Jahresmatrix (_bjm*) filtert hart auf EIN Jahr (`2026-`).
+// Wer 2025 nicht abgerechnet und 2026 dieselbe Leistung erledigt UND abgerechnet
+// hat, sah nirgends mehr etwas. Diese Liste geht deshalb über ALLE Jahre und
+// über alle Objekte, älteste Position zuerst.
+// ⚠ Die Auswahl teilt sich `_bjmSel` mit der Matrix – damit ist der vorhandene
+// Sammelrechnungs-Knopf (_bjmSammelrechnung) ohne Zweitfassung nutzbar.
+function _rglSammle(){
+  var out=[];
+  try{
+    Object.keys(boards||{}).forEach(function(bn){
+      if(bn.startsWith('_'))return;
+      if(_objBoardFilter&&bn!==_objBoardFilter)return;
+      (boards[bn]||[]).forEach(function(t){
+        if(!t||t.archiviert||t.spaeterBearbeiten)return;
+        (t.turnusListe||[]).forEach(function(l){
+          if(!l)return;
+          ((l.eintraege)||[]).forEach(function(e){
+            if(_tuRgEintragOffen(l,e))out.push({t:t,board:bn,l:l,e:e});
+          });
+        });
+      });
+    });
+  }catch(err){console.warn('[RGL] sammeln:',err);}
+  // Älteste zuerst – das ist die Reihenfolge, in der man abarbeitet
+  out.sort(function(a,b){return String(a.e.datum||'').localeCompare(String(b.e.datum||''));});
+  return out;
+}
+// ⚠ Archivierte Objekte laufen oben bewusst NICHT mit (wie in der Matrix) – aber
+// eine offene Rechnung dort wäre genau der Blindfleck, den diese Liste beheben
+// soll. Deshalb werden sie gezählt und als Hinweiszeile genannt.
+function _rglArchivZahl(){
+  var n=0;
+  try{
+    Object.keys(boards||{}).forEach(function(bn){
+      if(bn.startsWith('_'))return;
+      if(_objBoardFilter&&bn!==_objBoardFilter)return;
+      (boards[bn]||[]).forEach(function(t){
+        if(!t||!(t.archiviert||t.spaeterBearbeiten))return;
+        (t.turnusListe||[]).forEach(function(l){
+          if(!l)return;
+          ((l.eintraege)||[]).forEach(function(e){if(_tuRgEintragOffen(l,e))n++;});
+        });
+      });
+    });
+  }catch(err){console.warn('[RGL] Archiv zählen:',err);}
+  return n;
+}
+function _rglZahl(){return _rglSammle().length;}
+function _rglOeffnen(){
+  var liste=_rglSammle();
+  var arch=_rglArchivZahl();
+  if(!liste.length){
+    showToast(arch?('Nichts offen – aber '+arch+' Position(en) in archivierten Objekten')
+      :'Alles abgerechnet – keine offene Rechnung','success',4000);
+    if(!arch)return;
+  }
+  // ⚠ Beide Fenster teilen sich die Auswahl `_bjmSel`. Stünden sie gleichzeitig
+  // offen (die Warnzeile der Matrix führt hierher), würde das Öffnen die
+  // Matrix-Auswahl leeren und ihre Häkchen blieben als Leiche im Bild stehen.
+  // Deshalb: immer nur EINES von beiden.
+  if(typeof _bjmClose==='function'&&document.getElementById('bjmOverlay'))_bjmClose();
+  _bjmSel=new Set();
+  var old=document.getElementById('rglOverlay'); if(old)old.remove();
+  var ov=document.createElement('div'); ov.id='rglOverlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99992;display:flex;align-items:center;justify-content:center;';
+  ov.addEventListener('click',function(e){if(e.target===ov)_rglClose();});
+  ov.innerHTML='<div class="tuj-box" style="width:min(1080px,97vw);" role="dialog" aria-label="Offene Rechnungen">'
+    +'<div class="tuj-head">'
+    +  '<span class="tuj-title">€ Offene Rechnungen</span>'
+    +  '<span style="flex:1;min-width:8px;"></span>'
+    +  '<button type="button" class="tu-btn" onclick="_rglAlle()" title="Alle Zeilen an- oder abhaken">☑ alle</button>'
+    +  '<button type="button" class="tu-btn" id="rglSammelBtn" onclick="_bjmSammelrechnung()" style="color:#2f7d1e;border-color:#2f7d1e;font-weight:700;"></button>'
+    +  '<button type="button" class="tu-btn" onclick="_rglKopieren()" title="Liste als Text in die Zwischenablage – zum Einfügen in die Rechnungssoftware">📋 Kopieren</button>'
+    +  '<button type="button" class="tu-btn" onclick="_rglDrucken()" title="Liste zum Abhaken ausdrucken">🖨 Drucken</button>'
+    +  '<button type="button" class="tu-btn" onclick="_rglClose()">✕ Schließen</button>'
+    +'</div>'
+    +'<div class="tuj-sub" id="rglSub"></div>'
+    +'<div class="tuj-scroll"><table class="tuj-tab"><thead id="rglKopf"></thead><tbody id="rglBody"></tbody></table></div>'
+    +'<div class="tuj-legend">'
+    +  '<span><b style="color:#E24B4A;">€ fehlt</b> = noch gar nicht abgerechnet</span>'
+    +  '<span><b style="color:#c47f17;">€ Teil</b> = Teilrechnung geschrieben, Rest steht aus</span>'
+    +  '<span>Häkchen setzen und „€ Sammelrechnung" = EINE Rechnung für alle angehakten Positionen</span>'
+    +'</div>'
+    +'</div>';
+  document.addEventListener('keydown',_rglEsc);
+  document.body.appendChild(ov);
+  _rglRender();
+}
+function _rglEsc(e){
+  if(e.key!=='Escape')return;
+  var o=document.getElementById('rglOverlay');
+  if(o){e.stopPropagation();_rglClose();}
+}
+function _rglClose(){
+  var o=document.getElementById('rglOverlay'); if(o)o.remove();
+  document.removeEventListener('keydown',_rglEsc);
+  _bjmSel=new Set();
+}
+function _rglToggle(key){
+  if(_bjmSel.has(key))_bjmSel.delete(key); else _bjmSel.add(key);
+  _rglRender();
+}
+function _rglAlle(){
+  var liste=_rglSammle();
+  var alle=liste.length&&liste.every(function(p){return _bjmSel.has(_bjmKey(p.t,p.l,p.e));});
+  liste.forEach(function(p){
+    var k=_bjmKey(p.t,p.l,p.e);
+    if(alle)_bjmSel.delete(k); else _bjmSel.add(k);
+  });
+  _rglRender();
+}
+// ⚠ NICHT _objRgErfassen benutzen: das nimmt über _tuRgOffen immer den jüngsten
+// offenen Termin der Leistung. Hier steht aber jede Position als eigene Zeile –
+// bei zwei offenen Terminen derselben Leistung träfe es sonst die falsche.
+function _rglRgErfassen(taskId,lId,datum){
+  var t=findTaskById(taskId); if(!t)return;
+  var l=(t.turnusListe||[]).find(function(x){return x&&x.id===lId;}); if(!l)return;
+  var e=(l.eintraege||[]).find(function(x){return x&&x.datum===datum;}); if(!e)return;
+  var rg=_tuRgAbfragen(e); if(!rg)return;
+  _tuRgSchreiben(e,rg);
+  _tuBtbZeile(t,_tuRgBtbText([(l.name||'')+' ('+_tuDeKurz(e.datum)+')'],e,1)); // b631
+  _bjmNachSchreiben([{t:t,l:l,e:e}]);
+  if(rg.frei){showToast('Ohne Berechnung vermerkt – '+(l.name||''),'success',2500);return;}
+  showToast((_tuRgTeil(e)?'€ Teilrechnung vermerkt – der Rest bleibt offen · ':'€ Rechnung vermerkt – ')+(l.name||''),'success',3200);
+  _tuRgPdfFrage(e,l,t); // b629
+}
+function _rglRender(){
+  var body=document.getElementById('rglBody'); if(!body)return;
+  var liste=_rglSammle();
+  var arch=_rglArchivZahl();
+  var sb=document.getElementById('rglSammelBtn');
+  if(sb){
+    sb.textContent='€ Sammelrechnung'+(_bjmSel.size?' ('+_bjmSel.size+')':'');
+    sb.disabled=!_bjmSel.size;
+    sb.style.opacity=_bjmSel.size?'1':'.45';
+    sb.title=_bjmSel.size?('Für die '+_bjmSel.size+' angehakten Positionen EINE Rechnung vermerken')
+      :'Erst links anhaken, was auf dieselbe Rechnung soll';
+  }
+  var kopf=document.getElementById('rglKopf');
+  if(kopf)kopf.innerHTML='<tr><th style="width:26px;"></th><th class="nam">Objekt</th><th class="nam">Leistung</th>'
+    +'<th title="Tag, an dem die Leistung erledigt wurde">erledigt am</th>'
+    +'<th title="So lange wartet diese Position schon auf eine Rechnung">liegt seit</th>'
+    +'<th>Stand</th><th></th></tr>';
+  var objekte=[];
+  liste.forEach(function(p){if(objekte.indexOf(p.t.id)<0)objekte.push(p.t.id);});
+  var teil=liste.filter(function(p){return _tuRgTeil(p.e);}).length;
+  var aeltest=liste.length?_tuTageSeit(liste[0].e.datum):null;
+  var sub=document.getElementById('rglSub');
+  if(sub)sub.innerHTML=esc(_objBoardFilter||'Alle Projekte')+' · <b'+(liste.length?' style="color:#E24B4A;"':'')+'>'+liste.length
+    +' offene Position'+(liste.length!==1?'en':'')+'</b> an '+objekte.length+' Objekt'+(objekte.length!==1?'e':'')
+    +(teil?' · davon <b style="color:#c47f17;">'+teil+' teilweise abgerechnet</b>':'')
+    +((aeltest!==null&&aeltest>0)?' · älteste liegt <b>'+aeltest+' Tage</b>':'')
+    +' · über <b>alle Jahre</b>'
+    +(arch?' · <span style="color:#c47f17;">⚠ '+arch+' weitere in archivierten Objekten</span>':'');
+  if(!liste.length){
+    body.innerHTML='<tr><td colspan="7" style="padding:16px;color:var(--text2);text-align:center;">'
+      +(arch?('Hier ist alles abgerechnet – aber in archivierten Objekten stehen noch '+arch+' Position(en) offen.')
+           :'Alles abgerechnet – keine offene Rechnung.')+'</td></tr>';
+    return;
+  }
+  var h='', letztesObj='';
+  liste.forEach(function(p){
+    var k=_bjmKey(p.t,p.l,p.e);
+    var idT=_escHtml(p.t.id);
+    var tage=_tuTageSeit(p.e.datum);
+    var alt=(tage!==null&&tage>=365);
+    var neu=(p.t.id!==letztesObj); letztesObj=p.t.id;
+    var stand=_tuRgTeil(p.e)
+      ? '<span style="color:#c47f17;font-weight:700;white-space:nowrap;" title="Teilrechnung '+_escHtml(p.e.rgnr||'')+' vom '+_escHtml(_tuDe(p.e.rg))+'">€ Teil'+(p.e.rgnr?' · '+esc(p.e.rgnr):'')+'</span>'
+      : '<span style="color:#E24B4A;font-weight:700;white-space:nowrap;">€ fehlt</span>';
+    h+='<tr'+(neu?' style="border-top:2px solid var(--border);"':'')+'>'
+      +'<td style="text-align:center;cursor:pointer;" onclick="_rglToggle(\''+_escHtml(k)+'\')" title="Für eine Sammelrechnung anhaken">'
+      +  (_bjmSel.has(k)?'☑':'☐')+'</td>'
+      +'<td class="nam" title="'+_escHtml((p.t.title||'')+' · '+p.board)+'">'
+      +  '<span style="cursor:pointer;" onclick="_pamOpenTaskFromHeute(\''+idT+'\')">'+esc(p.t.title||'(ohne Titel)')+'</span></td>'
+      // ⚠ .tur ist nowrap ohne Breitengrenze – ein langer Leistungsname würde die
+      // Tabelle sonst in die Waagerechte schieben (die Hülle scrollt zwar, aber
+      // dann sieht man den Knopf „€ eintragen" nicht mehr ohne Scrollen).
+      +'<td class="tur" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;" title="'+_escHtml(p.l.name||'')+'">'+esc(p.l.name||'')+'</td>'
+      +'<td style="white-space:nowrap;">'+esc(_tuDe(p.e.datum))+'</td>'
+      +'<td style="white-space:nowrap;'+(alt?'color:#E24B4A;font-weight:700;':'color:var(--text2);')+'" title="'
+      +  (alt?'Liegt über ein Jahr zurück':'')+'">'+(tage===null?'–':(tage+' Tag'+(tage===1?'':'en')))+'</td>'
+      +'<td>'+stand+'</td>'
+      +'<td><button type="button" class="tu-btn" style="color:#2f7d1e;border-color:#2f7d1e;" onclick="_rglRgErfassen(\''+idT+'\',\''+_escHtml(p.l.id)+'\',\''+_escHtml(p.e.datum)+'\')" title="Rechnungsnummer und -datum für genau diese Position vermerken">€ eintragen</button></td>'
+      +'</tr>';
+  });
+  body.innerHTML=h;
+}
+// Klartext-Fassung – einmal für die Zwischenablage, einmal für den Druck
+function _rglTextZeilen(){
+  return _rglSammle().map(function(p){
+    var tage=_tuTageSeit(p.e.datum);
+    return [(p.t.title||''),(p.l.name||''),_tuDe(p.e.datum),
+      (tage===null?'':tage+' Tage'),
+      (_tuRgTeil(p.e)?('Teilrechnung '+(p.e.rgnr||'')+' vom '+_tuDe(p.e.rg)+' – Rest offen'):'noch keine Rechnung')].join('\t');
+  });
+}
+function _rglKopieren(){
+  var z=_rglTextZeilen();
+  if(!z.length){showToast('Nichts zu kopieren','info',2500);return;}
+  var txt='Objekt\tLeistung\terledigt am\tliegt seit\tStand\n'+z.join('\n');
+  var fertig=function(){showToast('📋 '+z.length+' Zeile(n) kopiert','success',2500);};
+  try{
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(txt).then(fertig,function(){_rglKopierenAlt(txt,fertig);});
+      return;
+    }
+  }catch(err){console.warn('[RGL] clipboard:',err);}
+  _rglKopierenAlt(txt,fertig);
+}
+// Rückfallweg ohne Clipboard-Recht (kommt bei lokalen Dateien vor)
+function _rglKopierenAlt(txt,fertig){
+  try{
+    var ta=document.createElement('textarea');
+    ta.value=txt; ta.style.cssText='position:fixed;left:-9999px;top:0;';
+    document.body.appendChild(ta); ta.select();
+    var ok=document.execCommand('copy');
+    document.body.removeChild(ta);
+    if(ok)fertig(); else showToast('⚠ Kopieren hat nicht geklappt','warning',3500);
+  }catch(err){console.warn('[RGL] Kopie:',err);showToast('⚠ Kopieren hat nicht geklappt','warning',3500);}
+}
+function _rglDrucken(){
+  var liste=_rglSammle();
+  if(!liste.length){showToast('Nichts zu drucken','info',2500);return;}
+  var win=window.open('','_blank');
+  if(!win){showToast('⚠ Popup blockiert – bitte Popups für PAM erlauben','error',5000);return;}
+  var heute=_tuDe(_tzHeuteIso());
+  var zeilen=liste.map(function(p){
+    var tage=_tuTageSeit(p.e.datum);
+    return '<tr><td class="hk">☐</td><td>'+esc(p.t.title||'')+'</td><td>'+esc(p.l.name||'')+'</td>'
+      +'<td>'+esc(_tuDe(p.e.datum))+'</td><td>'+(tage===null?'–':tage)+'</td>'
+      +'<td>'+(_tuRgTeil(p.e)?('Teil '+esc(p.e.rgnr||'')+' v. '+esc(_tuDe(p.e.rg))+' – Rest offen'):'noch keine')+'</td></tr>';
+  }).join('');
+  win.document.write('<!doctype html><html lang="de"><head><meta charset="utf-8"><title>Offene Rechnungen</title>'
+    +'<style>body{font-family:Arial,sans-serif;font-size:12px;margin:18px;color:#111;}'
+    +'h1{font-size:16px;margin:0 0 2px;}p.m{margin:0 0 12px;color:#555;font-size:11px;}'
+    +'table{border-collapse:collapse;width:100%;}th,td{border:1px solid #999;padding:4px 6px;text-align:left;vertical-align:top;}'
+    +'th{background:#eee;}td.hk{width:22px;text-align:center;font-size:14px;}'
+    +'button{font-size:13px;padding:6px 14px;margin-bottom:10px;cursor:pointer;}'
+    +'@media print{@page{size:landscape;margin:12mm;}button{display:none;}}</style></head><body>'
+    +'<button onclick="window.print()">🖨 Drucken</button>'
+    +'<h1>Offene Rechnungen – wiederkehrende Leistungen</h1>'
+    +'<p class="m">'+esc(_objBoardFilter||'Alle Projekte')+' · '+liste.length+' Position(en) · über alle Jahre · Stand '+esc(heute)+'</p>'
+    +'<table><thead><tr><th></th><th>Objekt</th><th>Leistung</th><th>erledigt am</th><th>Tage</th><th>Stand</th></tr></thead>'
+    +'<tbody>'+zeilen+'</tbody></table></body></html>');
+  win.document.close();
+  // ⚠ Kein automatisches window.print() direkt nach document.close() – der
+  // Dialog kommt dann je nach Browser vor dem fertigen Aufbau. Die Seite bringt
+  // stattdessen ihren eigenen Druckknopf mit (im Ausdruck ausgeblendet).
+  try{win.focus();}catch(err){console.warn('[RGL] focus:',err);}
+}
+
 // Das Rechnungs-PDF EINMAL hochladen und an alle Positionen verlinken –
 // nicht siebenmal dieselbe Datei in den Drive legen.
 function _bjmPdfFrage(pos){
