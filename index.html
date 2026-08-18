@@ -9359,7 +9359,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-18 · #707'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-18-b707) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-18 · #709'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-18-b709) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -15377,9 +15377,15 @@ var _objHvFilter=''; // b686: zweiter Filter neben dem Projekt – die Hausverwa
 // eigene Liste/kein eigenes Fenster, sondern derselbe Reiter Objekte, den es schon
 // gibt – Frank ausdrücklich: „da brauchen wir keine zweite Variante".
 var _objNurOhneRe=false;
+// b708: vierter Filter – die Spalte innerhalb des gewählten Projekts (Wunsch Frank
+// 18.08.: WBG hat „🧱 Ziegel"/„⬛ Flada" als umbenannte Status-Spalten, dort sollte
+// die Objektliste genau danach filtern können). Ergibt nur zusammen mit EINEM
+// gewählten Projekt Sinn – jedes Board hat andere Spaltennamen.
+var _objSpalteFilter='';
 function _objSetNurOffen(){_objNurOffen=!_objNurOffen;renderObjekte();}
 function _objSetNurOhneRe(){_objNurOhneRe=!_objNurOhneRe;renderObjekte();}
-function _objSetBoard(v){_objBoardFilter=v||'';renderObjekte();}
+function _objSetBoard(v){_objBoardFilter=v||'';_objSpalteFilter='';renderObjekte();} // b708: Spalte gehört zum alten Projekt, ungültig nach Wechsel
+function _objSetSpalte(v){_objSpalteFilter=v||'';renderObjekte();}
 // b622 (Frage Frank): Der Reiter beantwortete nur „welche Objekte HABEN Leistungen".
 // Ein Objekt, bei dem noch nichts eingetragen ist, tauchte gar nicht auf – man sah
 // also nie, wo noch etwas fehlt. Bewusst als Schalter und nicht immer an, sonst
@@ -15397,6 +15403,7 @@ function _objSammle(){
       if(!t||t.archiviert||t.spaeterBearbeiten)return;
       if(!_tuSuchTreffer(t,t.turnusListe))return; // b685
       if(_objHvFilter&&_objHvLabel(t)!==_objHvFilter)return; // b686
+      if(_objSpalteFilter&&t.status!==_objSpalteFilter)return; // b708
       // b703: dritter Filter kombiniert sich mit den bestehenden (UND-Verknüpfung,
       // wie schon zwischen „nur offene“ und der Suche/Hausverwaltung).
       var ls=(t.turnusListe||[]).filter(function(l){return l&&(!_objNurOffen||_tuFaellig(l))&&(!_objNurOhneRe||!l.rgPflicht);});
@@ -15430,7 +15437,10 @@ function _objSammle(){
 function renderObjekte(){
   var mc=document.getElementById('mainContent'); if(!mc)return;
   var liste=_objSammle();
-  var objBoards=Object.keys(boards||{}).filter(function(b){return !b.startsWith('_');});
+  // b708: NUR Immobilie-Projekte zur Auswahl – Posteingang, Aufgaben-Listen usw.
+  // zeigten hier zwar noch nie ein Objekt (die haben keine wiederkehrenden
+  // Leistungen), standen aber als Auswahl trotzdem da. Wunsch Frank 18.08.
+  var objBoards=Object.keys(boards||{}).filter(function(b){return !b.startsWith('_')&&(boardTypes[b]||'baustelle')==='immobilie';});
   var boardOpts='<option value="">Alle Projekte</option>'+objBoards.map(function(b){
     return '<option value="'+_escHtml(b)+'"'+(b===_objBoardFilter?' selected':'')+'>'+esc(b)+'</option>';}).join('');
   var summeL=liste.reduce(function(s,g){return s+g.leistungen.length;},0);
@@ -15443,6 +15453,27 @@ function renderObjekte(){
     +'<div style="font-size:16px;font-weight:700;color:var(--text);">🏠 Objekte <small style="font-size:12px;font-weight:500;color:var(--text2);">– wiederkehrende Leistungen</small></div>'
     +'<span style="flex:1;min-width:8px;"></span>'
     +'<select class="kal-select" onchange="_objSetBoard(this.value)" title="Nur Objekte dieses Projekts">'+boardOpts+'</select>'
+    // b708: vierter Filter – die Spalte INNERHALB des gewählten Projekts. Ergibt nur
+    // zusammen mit genau einem Projekt Sinn (jedes Board hat andere Spaltennamen),
+    // erscheint deshalb erst NACH der Projekt-Wahl – gleiches Muster wie die
+    // Hausverwaltung darunter, die auch nur bei mind. 2 Werten erscheint.
+    +(function(){
+       if(!_objBoardFilter)return '';
+       var spalten=(boardStatuses[_objBoardFilter]&&boardStatuses[_objBoardFilter].length)?boardStatuses[_objBoardFilter]:[];
+       if(spalten.length<2)return '';
+       var zahl={};
+       (boards[_objBoardFilter]||[]).forEach(function(t){
+         if(!t||t.archiviert||t.spaeterBearbeiten)return;
+         if(!(t.turnusListe||[]).length)return;
+         zahl[t.status]=(zahl[t.status]||0)+1;
+       });
+       var vorhanden=spalten.filter(function(s){return zahl[s];});
+       if(vorhanden.length<2)return ''; // bei nur einer belegten Spalte wäre der Kasten sinnlos
+       return '<select class="kal-select" onchange="_objSetSpalte(this.value)" title="Nur Objekte dieser Spalte im gewählten Projekt">'
+         +'<option value="">Alle Spalten</option>'
+         +vorhanden.map(function(s){return '<option value="'+_escHtml(s)+'"'+(s===_objSpalteFilter?' selected':'')+'>'+esc(s)+' ('+zahl[s]+')</option>';}).join('')
+         +'</select>';
+     })()
     // b686: zweiter Filter – die Hausverwaltung. Die Auswahl wird aus den
     // vorhandenen Werten gebaut, nicht aus einer festen Liste: neue Verwaltungen
     // tauchen dadurch von selbst auf.
@@ -16177,6 +16208,13 @@ var _rglMitFertig=false;
 // Diese Funktionen werden in Prüfsuiten einzeln ausgeschnitten.
 function _rglZeigtFertig(){return (typeof _rglMitFertig!=='undefined')&&!!_rglMitFertig;}
 function _rglToggleFertig(){_rglMitFertig=!_rglZeigtFertig();_bjmSel=new Set();_rglRender();}
+// b709: Wunsch Frank 18.08. – die Liste sortierte bisher nur nach Datum, dadurch
+// standen zwei Leistungen desselben Objekts (z.B. Rinnen Eingangsseite/Rückseite)
+// oft weit auseinander, mit vielen anderen Häusern dazwischen. Gleiches defensives
+// Muster wie `_rglZeigtFertig` – reine Anzeige-Einstellung, keine Filterung.
+var _rglNachObjekt=false;
+function _rglSortiertNachObjekt(){return (typeof _rglNachObjekt!=='undefined')&&!!_rglNachObjekt;}
+function _rglToggleNachObjekt(){_rglNachObjekt=!_rglSortiertNachObjekt();_rglRender();}
 function _rglSammle(){
   var out=[];
   try{
@@ -16190,6 +16228,7 @@ function _rglSammle(){
         // gefiltert zeigte die Liste plötzlich alle. Jetzt greifen alle drei
         // gleich, und die Kopfzeile sagt, was gerade filtert (Frank 17.08.).
         if(_objHvFilter&&_objHvLabel(t)!==_objHvFilter)return;
+        if(_objSpalteFilter&&t.status!==_objSpalteFilter)return; // b708
         if(!_tuSuchTreffer(t,t.turnusListe))return; // b685
         (t.turnusListe||[]).forEach(function(l){
           if(!l)return;
@@ -16207,6 +16246,20 @@ function _rglSammle(){
   }catch(err){console.warn('[RGL] sammeln:',err);}
   // Älteste zuerst – das ist die Reihenfolge, in der man abarbeitet
   out.sort(function(a,b){return String(a.e.datum||'').localeCompare(String(b.e.datum||''));});
+  // b709: auf Wunsch zusätzlich nach Objekt gruppieren – Leistungen desselben
+  // Hauses (z.B. Rinnen Eingangsseite/Rückseite) sollen direkt hintereinander
+  // stehen, statt über die ganze Liste verstreut. Stabil nach der ERSTEN
+  // Fundstelle je Objekt sortiert: weil `out` hier schon älteste-zuerst steht,
+  // ist die erste Fundstelle automatisch der älteste Rückstand dieses Objekts –
+  // die Reihenfolge der GRUPPEN bleibt also weiterhin „am längsten liegend zuerst".
+  // Innerhalb einer Gruppe bleibt die Datumsreihenfolge unverändert erhalten.
+  if(_rglSortiertNachObjekt()){
+    var reihenfolge=[], gesehen={};
+    out.forEach(function(p){if(!(p.t.id in gesehen)){gesehen[p.t.id]=reihenfolge.length;reihenfolge.push(p.t.id);}});
+    out=out.map(function(p,i){return {p:p,i:i};})
+      .sort(function(a,b){var d=gesehen[a.p.t.id]-gesehen[b.p.t.id];return d!==0?d:a.i-b.i;})
+      .map(function(x){return x.p;});
+  }
   return out;
 }
 // ⚠ Archivierte Objekte laufen oben bewusst NICHT mit (wie in der Matrix) – aber
@@ -16269,6 +16322,7 @@ function _rglOeffnen(){
     +  _tuSuchFeld('rgl','tu-btn') // b685: steht fest im Kopf, damit _rglRender es nicht neu baut
     +  '<span style="flex:1;min-width:8px;"></span>'
     +  '<button type="button" class="tu-btn" id="rglFertigBtn" onclick="_rglToggleFertig()" title="Auch die Positionen zeigen, bei denen die Rechnung schon vermerkt ist – zum Nachtragen des PDF"></button>' // b688
+    +  '<button type="button" class="tu-btn" id="rglNachObjBtn" onclick="_rglToggleNachObjekt()" title="Leistungen desselben Objekts direkt hintereinander zeigen, statt nach Datum über die ganze Liste verstreut"></button>' // b709
     +  '<button type="button" class="tu-btn" onclick="_rglAlle()" title="Alle Zeilen an- oder abhaken">☑ alle</button>'
     +  '<button type="button" class="tu-btn" id="rglSammelBtn" onclick="_bjmSammelrechnung()" style="color:#2f7d1e;border-color:#2f7d1e;font-weight:700;"></button>'
     +  '<button type="button" class="tu-btn" onclick="_rglKopieren()" title="Liste als Text in die Zwischenablage – zum Einfügen in die Rechnungssoftware">📋 Kopieren</button>'
@@ -16305,7 +16359,7 @@ function _rglToggle(key){
 // schließen und im Reiter dahinter suchen zu müssen.
 // ⚠ Der Reiter Objekte muss mitziehen, sonst stehen dort noch die alten Filter.
 function _rglFilterWeg(){
-  _objBoardFilter=''; _objHvFilter='';
+  _objBoardFilter=''; _objHvFilter=''; _objSpalteFilter=''; // b708
   try{if(typeof _tuSuche!=='undefined')_tuSuche='';}catch(err){console.warn('[RGL] Suche:',err);}
   _bjmSel=new Set();
   _rglRender();
@@ -16411,6 +16465,8 @@ function _rglRender(){
   // b688: Schalter „auch abgerechnete"
   var fb=document.getElementById('rglFertigBtn');
   if(fb)fb.textContent=(_rglZeigtFertig()?'☑':'☐')+' auch abgerechnete';
+  var nob=document.getElementById('rglNachObjBtn'); // b709
+  if(nob)nob.textContent=(_rglSortiertNachObjekt()?'☑':'☐')+' nach Objekt sortieren';
   var objekte=[];
   liste.forEach(function(p){if(objekte.indexOf(p.t.id)<0)objekte.push(p.t.id);});
   var offen=liste.filter(function(p){return !p.fertig;}); // b688
@@ -16424,6 +16480,7 @@ function _rglRender(){
   var _eng=[];
   if(_objBoardFilter)_eng.push('Projekt „'+esc(_objBoardFilter)+'"');
   if(_objHvFilter)_eng.push('Verwaltung „'+esc(_objHvFilter)+'"');
+  if(_objSpalteFilter)_eng.push('Spalte „'+esc(_objSpalteFilter)+'"'); // b708
   if(_sw)_eng.push('Suche „'+esc(_sw)+'"');
   if(sub)sub.innerHTML=(_eng.length
       ?'<b style="color:#c47f17;">Gefiltert:</b> '+_eng.join(' · ')
