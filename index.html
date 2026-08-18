@@ -8839,6 +8839,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
           <button class="link-btn-2" onclick="tDriveOrdnerOeffnen()" title="Ordner öffnen">📁</button>
           <button class="link-btn-2" onclick="_scanDriveIntoTask('tGDOrdner','anhang')" title="Dateien einlesen" style="color:var(--accent);font-weight:700;">🔄</button>
           <button class="link-btn-2" onclick="_moveTaskFolderToParent()" title="Projektordner in neuen Bauvorhaben-Ordner verschieben (sucht auch _Stammdaten)" style="color:#7c3aed;font-weight:700;">📁↗</button>
+          <button class="link-btn-2" onclick="_pamLinkDateiKnopf()" title="Link-Datei in diesen Ordner legen, die direkt zu diesem Task springt (öffnet auch aus dem Archiv)" style="color:#0d9488;font-weight:700;">🔗</button>
         </div>
       </div>
       <div class="modal-field full">
@@ -9362,7 +9363,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-18 · #712'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-18-b712) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-18 · #713'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-18-b713) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -12273,6 +12274,12 @@ function saveTaskData(){
   } else {
     document.getElementById('taskId').value=data.id; // ID setzen damit Folge-Saves updaten
     boards[currentBoard].push(data);
+    // b713: neuer Task, Projektordner beim allerersten Speichern schon gesetzt (Ordner
+    // entsteht beim Anlegen, gespeichert wird laut B1-Befund erst beim Schließen) →
+    // Link-Datei automatisch mit anlegen. Kein Aufruf hier bei jedem Folge-Save
+    // (if-Zweig oben) – das würde alte Objektordner beim nächsten Bearbeiten rückwirkend
+    // mitbefüllen, was Frank ausdrücklich nicht wollte (dafür gibt's den 🔗-Knopf).
+    if(data.gdriveOrdner)_pamLinkDateiAnlegen(data.id,data.gdriveOrdner,false);
   }
   _spalteMerken(currentBoard,data.status); // b632: gespeicherte Spalte (auch nach Wechsel im Auswahlfeld) = zuletzt bearbeitet
   render();
@@ -18720,11 +18727,43 @@ function _pamTryOpenPendingTask(){
         for(const bk of Object.keys(boards||{})){ if((boards[bk]||[]).some(x=>x.id===id)){ if(currentBoard!==bk){currentBoard=bk;render();} break; } }
         if(typeof openEditTaskModal==='function')openEditTaskModal(id);
       }catch(e){console.warn('[KAL] Deep-Link öffnen:',e);}
-    }else if(tries>375){ // ~5 min: deckt manuelles Laden von Drive/workboard.json ab
+      return;
+    }
+    // b713: nicht (mehr) im Board – archivierte Tasks liegen in einem eigenen Speicher
+    // (s. AUTO-MIGRATION beim Laden) und wurden hier bisher nie nachgeschaut, der Link
+    // lief für archivierte Tasks ins Leere. openEditTaskModal geht bewusst NICHT: das
+    // Fenster kennt archivedTasks nicht und ein versehentlicher Autosave würde den Task
+    // als Dublette zurück ins Board schreiben (genau der Fehler, den _pamMigrateOldMerges
+    // an anderer Stelle wieder aufräumt) – stattdessen in die Archiv-Ansicht springen.
+    let at=null; try{ at=(typeof archivedTasks!=='undefined'&&Array.isArray(archivedTasks))?archivedTasks.find(x=>x&&x.id===window._pamPendingTaskId):null; }catch(e){}
+    if(at){
+      clearInterval(iv); window._pamPendingPolling=false;
+      window._pamPendingTaskId=null;
+      try{ if(typeof _pamOpenArchivedTask==='function')_pamOpenArchivedTask(at.id); }catch(e){console.warn('[KAL] Deep-Link Archiv:',e);}
+      return;
+    }
+    if(tries>375){ // ~5 min: deckt manuelles Laden von Drive/workboard.json ab
       clearInterval(iv); window._pamPendingPolling=false; window._pamPendingTaskId=null;
       try{ if(typeof showToast==='function')showToast('⚠ Verlinkter Task nicht gefunden – bitte Daten (Drive/Datei) laden und Link erneut öffnen','warning',7000); }catch(e){}
     }
   },800);
+}
+// b713: Sprung zu einem archivierten Task – gleiches Muster wie _pamGSClickArchiv
+// (globale Suche „auch Archiv", b710): archivJahr/-Monat bewusst geleert statt wie
+// toggleArchivFilter() auf das laufende Jahr gesetzt, sonst verschwindet ein Treffer
+// aus einem älteren Jahr sofort wieder.
+function _pamOpenArchivedTask(taskId){
+  filters.archiv=true;
+  filters.spaeterBearbeiten=false;
+  filters.archivJahr='';
+  filters.archivMonat='';
+  searchQuery='';
+  const btn=document.getElementById('archivFilterBtn');
+  if(btn){btn.classList.add('active');btn.textContent='📦 Archiv ✓';}
+  if(typeof updateFilterDropdowns==='function')updateFilterDropdowns();
+  render();
+  setTimeout(function(){ if(typeof _pamBPScrollAndHighlight==='function')_pamBPScrollAndHighlight(taskId); },80);
+  try{ if(typeof showToast==='function')showToast('📦 Verlinkter Task ist archiviert','info',4000); }catch(e){}
 }
 function updateStatusSelect(){
   const sel=document.getElementById('taskStatusInput');const cur=sel.value;
@@ -21326,7 +21365,7 @@ async function _mergeMoveFilesToMasterFolders(){
 function archiveCardHTML(task){
   const _adr=(task.archiviertAm||'').split('-').reverse().join('.');
   const _proj=task._archivProjekt||'';
-  return`<div style="background:var(--bg3);border:1px solid var(--border);border-left:5px solid #888;border-radius:8px;padding:10px 12px;margin-bottom:8px;">
+  return`<div class="task-card" data-id="${esc(task.id)}" style="cursor:default;background:var(--bg3);border:1px solid var(--border);border-left:5px solid #888;border-radius:8px;padding:10px 12px;margin-bottom:8px;">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
       <span style="font-size:12px;font-weight:700;background:var(--bg4);color:var(--text2);padding:2px 7px;border-radius:4px;">📦 Archiviert${_adr?' am '+_adr:''}</span>
       ${_proj?`<span style="font-size:12px;font-weight:700;background:var(--bg4);color:var(--text2);padding:2px 7px;border-radius:4px;">Projekt: ${esc(_proj)}</span>`:''}
@@ -35702,6 +35741,52 @@ async function _driveUploadGeneric(buf,fname,mimeType,fid){
   // Fotos, Gutachten). Die App-Vorschau nutzt den authentifizierten Abruf (?alt=media).
   // Bestand bereinigen: _pamFreigabenBereinigen() in der Browser-Konsole.
   return result;
+}
+
+// b713: Link-Datei ".url" in einen Drive-Ordner legen/aktualisieren, die direkt auf
+// diesen Task in PAM zeigt (?task=<ID> – dieselbe Adresse, die auch beim Outlook-
+// Rücksprung benutzt wird, s. _msPushTermin). Idempotent: sucht zuerst nach einer
+// vorhandenen Datei mit demselben Namen im Ordner und aktualisiert deren Inhalt,
+// statt bei jedem Aufruf eine neue danebenzulegen (der Knopf kann mehrfach geklickt
+// werden, und b713 schaut bei jedem Neuanlegen eines Objektordners automatisch nach).
+const _PAM_LINKDATEI_NAME='🔗 In PAM öffnen.url';
+async function _pamLinkDateiAnlegen(taskId,folderUrl,manuell){
+  try{
+    if(!gdriveToken)return;
+    const fid=_extractFolderIdFromUrl(folderUrl||'');
+    if(!fid)return;
+    const link=window.location.origin+window.location.pathname+'?task='+encodeURIComponent(taskId);
+    const inhalt='[InternetShortcut]\r\nURL='+link+'\r\n';
+    const buf=new TextEncoder().encode(inhalt).buffer;
+    const q="name='"+_PAM_LINKDATEI_NAME.replace(/'/g,"\\'")+"' and '"+fid+"' in parents and trashed=false";
+    const chk=await fetch('https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q)+'&fields=files(id)&pageSize=1',{headers:{Authorization:'Bearer '+gdriveToken}});
+    if(chk.status===401){_handleDrive401();throw new Error('Drive-Verbindung abgelaufen – bitte ☁️-Button drücken');}
+    if(!chk.ok)throw new Error('Drive-Suche Fehler: HTTP '+chk.status);
+    const gefunden=(await chk.json()).files||[];
+    if(gefunden.length){
+      const pr=await fetch('https://www.googleapis.com/upload/drive/v3/files/'+gefunden[0].id+'?uploadType=media',{
+        method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'text/plain'},body:buf});
+      if(pr.status===401){_handleDrive401();throw new Error('Drive-Verbindung abgelaufen – bitte ☁️-Button drücken');}
+      if(!pr.ok)throw new Error('Drive-Update Fehler: HTTP '+pr.status);
+      if(manuell)showToast('🔗 Link-Datei war schon da – Adresse aufgefrischt','success',3500);
+    } else {
+      await _driveUploadGeneric(buf,_PAM_LINKDATEI_NAME,'text/plain',fid);
+      if(manuell)showToast('🔗 Link-Datei liegt jetzt im Ordner','success',3500);
+    }
+  }catch(e){
+    console.warn('[PAM] Link-Datei:',e);
+    if(manuell)showToast('⚠ Link-Datei fehlgeschlagen: '+(e.message||e),'error',6000);
+  }
+}
+// Knopf in der Projektordner-Zeile („🔗 Ordner & Links") – von Hand auslösen,
+// z.B. um alte, schon bestehende Objektordner nachzurüsten.
+function _pamLinkDateiKnopf(){
+  const taskId=(document.getElementById('taskId')||{}).value||'';
+  if(!taskId){showToast('⚠ Bitte Task zuerst speichern','error',5000);return;}
+  const url=(document.getElementById('tGDOrdner')||{}).value.trim();
+  if(!url){showToast('⚠ Bitte zuerst den Projektordner eintragen','error',5000);return;}
+  showToast('⏳ Lege Link-Datei an…','info',2500);
+  _pamLinkDateiAnlegen(taskId,url,true);
 }
 
 // Setzt Google Drive Datei auf "Jeder mit dem Link kann öffnen" (reader)
