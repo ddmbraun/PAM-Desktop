@@ -2567,6 +2567,47 @@ async function _auftragConfirm(){
   if(document.readyState!=='loading')initResizer();
 })();
 
+// ── b697: SPRUNGLEISTE OBJEKTE-BOARD, VERSCHIEBBAR ──────────────────────────
+// Gleiches Muster wie oben (`initResizer`/`mv2Resizer`), aber per Delegation auf
+// `mainContent`: `renderObjekte()` schreibt bei jedem Filter/Schalter das ganze
+// `innerHTML` neu, ein direkt an `objSprungResizer` angehefteter Listener wäre
+// dabei jedes Mal mitgelöscht worden. Ein einziger, dauerhafter Listener auf dem
+// stabilen Außen-Element prüft stattdessen bei jedem Mousedown das Klickziel.
+function _objSprungResizerInit(){
+  const mc=document.getElementById('mainContent');
+  if(!mc||mc._objSprungRInit)return;
+  mc._objSprungRInit=true;
+  try{
+    const saved=localStorage.getItem('objSprungW');
+    if(saved)document.documentElement.style.setProperty('--obj-sprung-w',saved);
+  }catch(e){}
+  let startX,startW;
+  mc.addEventListener('mousedown',function(e){
+    if(e.target.id!=='objSprungResizer')return;
+    e.preventDefault();
+    const box=document.querySelector('.obj-sprung');
+    if(!box)return;
+    startX=e.clientX;
+    startW=box.getBoundingClientRect().width;
+    e.target.classList.add('dragging');
+    function onMove(ev){
+      const newW=Math.max(120,Math.min(startW+(ev.clientX-startX),420));
+      document.documentElement.style.setProperty('--obj-sprung-w',newW+'px');
+    }
+    function onUp(){
+      const rz=document.getElementById('objSprungResizer'); if(rz)rz.classList.remove('dragging');
+      document.removeEventListener('mousemove',onMove);
+      document.removeEventListener('mouseup',onUp);
+      try{
+        const w=getComputedStyle(document.documentElement).getPropertyValue('--obj-sprung-w').trim();
+        if(w)localStorage.setItem('objSprungW',w);
+      }catch(err){}
+    }
+    document.addEventListener('mousemove',onMove);
+    document.addEventListener('mouseup',onUp);
+  });
+}
+
 </script>
 <!-- piexif (EXIF/GPS) - fest eingebaut 11.08.2026 (b647). Kam vorher von einem fremden Server. -->
 <script>
@@ -7510,10 +7551,17 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
    ⚠ Unter 1100 px Fensterbreite ganz weg – sonst nimmt sie den Objektkarten die
    Breite, und die Zeilen (Name · Turnus · Status · RE · Haken · ✓ Heute) sind
    dort ohnehin schon eng. */
-.obj-sprung{position:sticky;top:6px;width:176px;flex-shrink:0;max-height:78vh;overflow-y:auto;
+.obj-sprung{position:sticky;top:6px;width:var(--obj-sprung-w,176px);flex-shrink:0;max-height:78vh;overflow-y:auto;
   background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:8px 6px;}
 .obj-sprung>div[onclick]:hover{background:var(--bg3);color:var(--text);}
 @media (max-width:1100px){.obj-sprung{display:none;}}
+/* b697: verschiebbarer Trenner für die Sprungleiste – Wunsch Frank 18.08.
+   („die linke Zeile bleibt schmal, nicht alles lesbar"), gleiches Muster wie
+   `.mv2-resizer` im Task-Fenster. */
+.obj-sprung-resizer{width:5px;flex-shrink:0;cursor:col-resize;background:var(--border);
+  border-radius:3px;transition:background .15s;align-self:stretch;}
+.obj-sprung-resizer:hover,.obj-sprung-resizer.dragging{background:var(--accent);}
+@media (max-width:1100px){.obj-sprung-resizer{display:none;}}
 /* b621: Wiederkehrende Leistungen gehören zum OBJEKT (Wunsch Frank). Bis b620
    stand die Karte auch in jedem Auftrag und in jedem Posteingang-Task – dort hat
    sie nichts zu suchen. `baustelle-only` heißt nämlich nur „im Aufgaben-Modus weg",
@@ -9301,7 +9349,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-18 · #696'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-18-b696) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-18 · #697'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-18-b697) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -15462,7 +15510,9 @@ function renderObjekte(){
       +(_r?'<span style="color:#E24B4A;font-weight:700;">RE</span>':'')
       +'</div>';
   });
-  h+='</div><div style="flex:1;min-width:0;max-width:1000px;">';
+  // b697: Trenner zwischen Sprungleiste und Karten, verschiebbar (siehe CSS
+  // `.obj-sprung-resizer` und `_objSprungResizerInit` unten).
+  h+='</div><div class="obj-sprung-resizer" id="objSprungResizer" title="Breite anpassen"></div><div style="flex:1;min-width:0;max-width:1000px;">';
 
   liste.forEach(function(g){
     var idT=_escHtml(g.t.id);
@@ -15522,6 +15572,7 @@ function renderObjekte(){
   h+='</div>';   // b685: Flex-Umschlag (Sprungleiste + Karten) zu
   h+='</div>';
   mc.innerHTML=h;
+  if(typeof _objSprungResizerInit==='function')_objSprungResizerInit(); // b697
 }
 // b685: Klick in der Sprungleiste – zur Karte scrollen und sie kurz hervorheben,
 // damit man sieht, wo man gelandet ist.
