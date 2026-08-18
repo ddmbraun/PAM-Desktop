@@ -9301,7 +9301,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-18 · #694'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-18-b694) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-18 · #695'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-18-b695) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -10282,6 +10282,49 @@ function _tuMusterKnopfSync(){
   b.style.color=_tuMusterAn?'#2f7d1e':''; b.style.borderColor=_tuMusterAn?'#2f7d1e':'';
   b.textContent=_tuMusterAn?'🧪 Alte Zeile':'🧪 Neue Zeile';
 }
+// b695: derselbe Schalter, eigener Knopf im Objekte-Board – dort wird die
+// Toolbar bei jedem renderObjekte() komplett neu geschrieben, deshalb reicht
+// ein einfaches onclick statt einer eigenen Sync-Funktion wie oben.
+function _objMusterToggle(){
+  _tuMusterAn=!_tuMusterAn;
+  if(typeof renderObjekte==='function')renderObjekte();
+}
+// b695: Rechnung/PDF als reiner Text (Wunsch Frank 18.08.) – bearbeitet wird
+// nur noch über „RE Rechnungen"/„RE eintragen“. Einheitlich „RE“/„RE-PDF“,
+// nicht mehr „Rechnung“/„PDF“ (Franks Wunsch: „damit ich weiß was für ein PDF“).
+// Nutzt dieselbe Berechnung wie die alten Kästchen (`_tuHakenStand`), damit
+// beide Fassungen nie auseinanderlaufen können.
+function _tuMusterInfo(l){
+  var teile=[_tuStatusText(l)];
+  if(l&&l.rgPflicht){
+    var s=_tuHakenStand(l);
+    if(s.e){
+      teile.push('RE '+(s.rg.txt||'fehlt'));
+      if(s.rg.art!=='frei')teile.push(s.pdf.an?('RE-PDF '+(s.pdf.txt||'liegt vor')):'RE-PDF fehlt');
+    }
+  }
+  return teile.join(' · ');
+}
+// b695: Dateien je Termin nicht mehr dauerhaft einzeln aufgelistet (wächst über
+// die Jahre unbegrenzt, Franks Befund 18.08.) – standardmäßig nur die Anzahl,
+// „ansehen“ klappt dieselbe Liste (`_tuDateiZeilen`) direkt hier auf.
+let _tuDateiOffen = {};
+function _tuDateiToggle(lId,datum){
+  var k=(lId||'')+'|'+(datum||'');
+  _tuDateiOffen[k]=!_tuDateiOffen[k];
+  renderTurnusListe();
+}
+// b695: Klick auf einen belegten Monat in der Jahresübersicht (📅) springt zu
+// genau diesem Termin zurück im Task – klappt die Leistung und die Datei-Liste
+// dieses einen Termins auf. ⚠ Funktioniert nur, solange die Übersicht am
+// GEÖFFNETEN Task hängt (kein taskId) – vom Objekte-Board aus (mit taskId)
+// bleibt der Klick bewusst aus, das ist ein späterer Schritt (b695-Notiz).
+function _tuJahrZuTermin(lId,datum){
+  if(typeof _tuJahrClose==='function')_tuJahrClose();
+  _tuOffen[lId]=true;
+  _tuDateiOffen[(lId||'')+'|'+(datum||'')]=true;
+  if(typeof renderTurnusListe==='function')renderTurnusListe();
+}
 const TU_INTERVALLE = {
   woechentlich :{label:'wöchentlich',     tage:7},
   monatlich    :{label:'monatlich',       tage:30},
@@ -10808,7 +10851,9 @@ function renderTurnusListe(){
       // Zeile, „in Heute" wandert in die aufgeklappte Leiste (dort bei „Rechnung: ja/nein").
       // Nur Anzeige, hinter `_tuMusterAn`; ohne Schalter bleibt alles wie vorher.
       + (_tuMusterAn
-        ? '<span class="tu-last" style="color:var(--text2);">'+esc(_tuStatusText(l))+'</span>'
+        // b695: jetzt inklusive RE/RE-PDF als reiner Text (vorher stand hier nur
+        // der Erledigt-Stand, Rechnung/PDF fehlten ganz).
+        ? '<span class="tu-last" style="color:var(--text2);">'+esc(_tuMusterInfo(l))+'</span>'
         : '<span class="tu-last" title="'+_escHtml(_tuStatusText(l))+'">'+_tuHakenHtml(l,'','f')+'</span>'
           // b660: Haken „in Heute" – steuert NUR die Tagesübersicht. Kein Erledigen,
           // kein Überspringen: Ampel und Jahresnachweis bleiben davon unberührt.
@@ -10861,7 +10906,11 @@ function renderTurnusListe(){
       if(!ein.length){
         h+='<div style="opacity:.75;">Noch kein Eintrag.</div>';
       }else{
-        ein.forEach(e=>{
+        // b695: in der Muster-Fassung nur der aktuellste Eintrag offen – `ein` ist
+        // absteigend sortiert (neuester zuerst, siehe Datenform oben), Rest über
+        // die schon vorhandene 📅 Jahresübersicht statt Jahr für Jahr mitzuscrollen.
+        const _einZeig=_tuMusterAn?ein.slice(0,1):ein;
+        _einZeig.forEach(e=>{
           // b624: angehängte Fotos/Protokolle des Eintrags – Klick öffnet die Datei in Drive
           // b629: Rechnungs-PDF bekommt ein eigenes Zeichen, Fremdnamen werden ausgeschrieben
           const _dat=(e.dateien||[]).map(d=>_tuDateiLink(d,e)).join('');
@@ -10907,8 +10956,29 @@ function renderTurnusListe(){
             + '<button type="button" class="tu-del" onclick="_tuEintragWeg(\''+idJs+'\',\''+_escHtml(e.datum)+'\')" title="Diesen Termin mitsamt Datum entfernen (Fehleingabe) – NICHT für den Rechnungsvermerk, dafür ist das ✕ links davon da">✕</button>'
             + '</div>'
             // b683: die Dateien darunter, mit Namen und je einem ✕ zum Lösen
-            + _tuDateiZeilen(l,e,e.datum);
+            // b695: in der Muster-Fassung nur noch die Anzahl, aufklappbar – wächst
+            // sonst über die Jahre unbegrenzt (Franks Befund 18.08.).
+            + (function(){
+                var _n=(e.dateien||[]).length;
+                if(!_n)return '';
+                if(!_tuMusterAn)return _tuDateiZeilen(l,e,e.datum);
+                var _o=!!_tuDateiOffen[idJs+'|'+e.datum];
+                return '<div class="tu-hist-z" style="cursor:pointer;" onclick="_tuDateiToggle(\''+idJs+'\',\''+_escHtml(e.datum)+'\')">'
+                  +'<span>📷 '+_n+' Datei'+(_n!==1?'en':'')+'</span>'
+                  +'<span style="text-decoration:underline;flex:0;white-space:nowrap;color:var(--accent);">'+(_o?'verbergen':'ansehen')+'</span>'
+                  +'</div>'
+                  +(_o?_tuDateiZeilen(l,e,e.datum):'');
+              })();
         });
+        // b695: Rest der Jahre nicht mitscrollen, sondern zur 📅 Jahresübersicht
+        // verweisen – die kann jetzt (b695) auch direkt zu so einem alten Termin
+        // zurückspringen (Klick auf einen belegten Monat, siehe `_tuJahrZuTermin`).
+        if(_tuMusterAn&&ein.length>1){
+          h+='<div class="tu-hist-z" style="cursor:pointer;" onclick="_tuJahrDialog()">'
+            +'<span>'+(ein.length-1)+' weitere Jahr'+((ein.length-1)!==1?'e':'')+'</span>'
+            +'<span style="text-decoration:underline;flex:0;white-space:nowrap;color:var(--accent);">📅 Jahresübersicht</span>'
+            +'</div>';
+        }
       }
       h+='</div>';
     }
@@ -11826,6 +11896,11 @@ function _tuDateiZuEintrag(taskId,lId,datum){
 // Auftrag gerufen.
 // ══════════════════════════════════════════════════════════════════════════
 let _tuJahr=null, _tuJahrNurOffen=false;
+// b695: gemerkt, ob die Übersicht gerade am geöffneten Task hängt (kein taskId)
+// oder vom Objekte-Board aus offen ist (mit taskId) – nur im ersten Fall darf ein
+// Zellen-Klick direkt zurück in die Leistung springen (`_tuJahrZuTermin`), sonst
+// gäbe es keine offene Leistungs-Zeile, in die man hineinspringen könnte.
+let _tuJahrTaskId='';
 const TU_MON=['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
 
 // b618: Ohne Argument wie bisher – die Arbeitskopie des offenen Fensters.
@@ -11846,6 +11921,7 @@ function _tuJahrDialog(taskId){
   // Zeichnen die Daten des offenen Fensters überdecken.
   if(!quelle.length){showToast('Hier sind noch keine Leistungen angelegt','info',3000);return;}
   _tuJahrListe=quelle;
+  _tuJahrTaskId=taskId||'';
   if(_tuJahr==null)_tuJahr=new Date().getFullYear();
   const old=document.getElementById('tuJahrOverlay'); if(old)old.remove();
   const ov=document.createElement('div'); ov.id='tuJahrOverlay';
@@ -11907,6 +11983,13 @@ function _tuJahrZelle(l,jahr,mon){
   const tag=String(echt[0].datum).split('-')[2];
   const mehr=(e.length>1)?'<sup style="font-weight:400;opacity:.7;">'+e.length+'</sup>':'';
   const rgFehlt=(l.rgPflicht&&echt.some(x=>!x.rg&&!x.rgFrei))?'<sup style="color:#E24B4A;font-weight:700;">RE</sup>':'';
+  // b695: Klick springt zurück zum Termin – nur wenn die Übersicht am geöffneten
+  // Task hängt (kein taskId gemerkt); vom Objekte-Board aus bleibt die Zelle reine
+  // Anzeige, dort gibt es keine offene Leistungs-Zeile zum Hineinspringen.
+  if(!_tuJahrTaskId&&l&&l.id){
+    const idJs=_escHtml(l.id), datJs=_escHtml(echt[0].datum||'');
+    return '<span class="tuj-cell tuj-ok" title="'+_escHtml(tip)+' – Klick springt zum Termin zurück" style="cursor:pointer;" onclick="_tuJahrZuTermin(\''+idJs+'\',\''+datJs+'\')">'+esc(tag)+mehr+rgFehlt+'</span>';
+  }
   return '<span class="tuj-cell tuj-ok" title="'+_escHtml(tip)+'">'+esc(tag)+mehr+rgFehlt+'</span>';
 }
 function _tuJahrRender(){
@@ -15304,6 +15387,9 @@ function renderObjekte(){
          +' title="Rechnungen zu den wiederkehrenden Leistungen – was offen ist und, auf Wunsch, was schon abgerechnet wurde. Über alle Jahre.">RE Rechnungen'
          +(_n?' ('+_n+' offen)':'')+'</button>';
      })()
+    // b695: derselbe Test-Schalter wie im Task-Fenster (b694), hier zusätzlich –
+    // damit man beide Ansichten mit einem Klick zusammen umschaltet.
+    +'<button class="kal-chip'+(_tuMusterAn?' active':'')+'" onclick="_objMusterToggle()" title="Test: Rechnung/PDF nur noch als Text, ohne Klick-Dialog – bearbeitet wird dann über „RE Rechnungen“">'+(_tuMusterAn?'🧪 Alte Zeile':'🧪 Neue Zeile')+'</button>'
     +'<button class="kal-chip'+(_objNurOffen?' active':'')+'" onclick="_objSetNurOffen()" title="Nur zeigen, was zurzeit fällig ist">'+(_objNurOffen?'☑':'☐')+' nur offene</button>'
     // b622: zeigt zusätzlich Objekt-Tasks, bei denen noch gar nichts eingetragen ist
     +'<button class="kal-chip'+(_objMitLeeren?' active':'')+'" onclick="_objSetMitLeeren()" title="Auch Objekte zeigen, bei denen noch keine Leistung angelegt ist – damit man sieht, wo noch etwas fehlt"'
@@ -15401,8 +15487,11 @@ function renderObjekte(){
         // vom Rechnungs-PDF stand gar nichts da (Franks Befund 17.08.).
         // b690: dieselbe Auskunft als Abhak-Kette. Die enge Fassung beschriftet
         // nur das offene Kästchen; die Zeit steht im Tooltip.
-        + '<span style="white-space:nowrap;min-width:200px;text-align:right;flex-shrink:0;" title="'+_escHtml(_tuStatusText(l))+'">'
-        +   _tuHakenHtml(l,g.t.id,'o')+'</span>'
+        // b695: Muster-Fassung – reiner Text statt Kästchen, dieselbe Zusammenfassung
+        // wie in der Task-Zeile (`_tuMusterInfo`), damit beide Ansichten gleich lesen.
+        + (_tuMusterAn
+          ? '<span style="white-space:nowrap;flex-shrink:0;font-size:11px;color:var(--text2);" title="'+_escHtml(_tuStatusText(l))+'">'+esc(_tuMusterInfo(l))+'</span>'
+          : '<span style="white-space:nowrap;min-width:200px;text-align:right;flex-shrink:0;" title="'+_escHtml(_tuStatusText(l))+'">'+_tuHakenHtml(l,g.t.id,'o')+'</span>')
         // b663: Haken „in Heute". Beschriftet, weil hier – anders als in der engen
         // Kachel – Platz dafür ist und die Zeile sonst drei namenlose Knöpfe hätte.
         + '<label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text2);cursor:pointer;user-select:none;white-space:nowrap;flex-shrink:0;" title="'+_escHtml(_lAus?'Abgewählt – steht nicht in der Tagesübersicht „Heute“. Haken setzen, damit sie dort wieder auftaucht.':'Steht in der Tagesübersicht „Heute“. Haken wegnehmen, dann bleibt die Leistung hier stehen, taucht in „Heute“ aber nicht mehr auf. Sie gilt dadurch NICHT als erledigt.')+'">'
@@ -16208,7 +16297,7 @@ function _rglRender(){
     +'<th title="So lange wartet diese Position schon auf eine Rechnung. An abgerechneten steht hier nichts – dort gibt es keinen Rückstand mehr">liegt seit</th>'
     +'<th title="Ist die Rechnung geschrieben?">Stand</th>'
     // b691: eigene Spalte für den Beleg – vorher steckte das im 📎-Knopf
-    +'<th title="Hängt das Rechnungs-PDF am Termin?">PDF</th><th></th></tr>';
+    +'<th title="Hängt das Rechnungs-PDF am Termin?">RE-PDF</th><th></th></tr>';
   // b688: Schalter „auch abgerechnete"
   var fb=document.getElementById('rglFertigBtn');
   if(fb)fb.textContent=(_rglZeigtFertig()?'☑':'☐')+' auch abgerechnete';
@@ -16359,7 +16448,7 @@ function _rglTextZeilen(){
 function _rglKopieren(){
   var z=_rglTextZeilen();
   if(!z.length){showToast('Nichts zu kopieren','info',2500);return;}
-  var txt='Objekt\tLeistung\terledigt am\tliegt seit\tStand\tPDF\n'+z.join('\n');
+  var txt='Objekt\tLeistung\terledigt am\tliegt seit\tStand\tRE-PDF\n'+z.join('\n');
   var fertig=function(){showToast('📋 '+z.length+' Zeile(n) kopiert','success',2500);};
   try{
     if(navigator.clipboard&&navigator.clipboard.writeText){
@@ -16402,7 +16491,7 @@ function _rglDrucken(){
     +'<button onclick="window.print()">🖨 Drucken</button>'
     +'<h1>Offene Rechnungen – wiederkehrende Leistungen</h1>'
     +'<p class="m">'+esc(_objBoardFilter||'Alle Projekte')+' · '+liste.length+' Position(en) · über alle Jahre · Stand '+esc(heute)+'</p>'
-    +'<table><thead><tr><th></th><th>Objekt</th><th>Leistung</th><th>erledigt am</th><th>Tage</th><th>Stand</th><th>PDF</th></tr></thead>'
+    +'<table><thead><tr><th></th><th>Objekt</th><th>Leistung</th><th>erledigt am</th><th>Tage</th><th>Stand</th><th>RE-PDF</th></tr></thead>'
     +'<tbody>'+zeilen+'</tbody></table></body></html>');
   win.document.close();
   // ⚠ Kein automatisches window.print() direkt nach document.close() – der
@@ -37133,7 +37222,7 @@ function openNewTaskModal(){
   const _abHb=document.getElementById('abschlussHtmlBtn');if(_abHb)_abHb.style.display='none';
   taskLinks=[];taskAttachments=[];taskAufgaben=[];taskAusserhausTermine=[];taskZeitEntries=[];taskFreieTermine=[];taskNotizVerlauf=[];taskFotos=[];taskCheckliste=[];taskEmailOriginals=[];taskEmailPdfs=[];taskGmailLinks=[];
   _aufgabenIdCnt=0;
-  taskTurnus=[];_tuOffen={};_tuMusterAn=false;renderTurnusListe(); // b610 · b694
+  taskTurnus=[];_tuOffen={};_tuMusterAn=false;_tuDateiOffen={};renderTurnusListe(); // b610 · b694 · b695
   taskBaudokuMaterial=[];taskBaudokuPersonalListe=[];taskBaudokuMaschinen=[];
   renderBaudokuPlanung();
   _attachImgsOpen=false;
@@ -41932,6 +42021,7 @@ function openEditTaskModal(id){
   taskTurnus.forEach(l=>{if(!Array.isArray(l.eintraege))l.eintraege=[];_tuSort(l);});
   _tuOffen={};
   _tuMusterAn=false; // b694: Muster-Schalter beim Öffnen immer aus – gilt nur, solange Frank ihn selbst anklickt
+  _tuDateiOffen={}; // b695: dieselbe Regel für die aufgeklappten Datei-Listen
   taskNotizVerlauf=JSON.parse(JSON.stringify(task.notizVerlauf||[]));
   taskFotos=JSON.parse(JSON.stringify(task.fotos||[]));
   taskCheckliste=JSON.parse(JSON.stringify(task.checkliste||[]));
