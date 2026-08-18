@@ -9359,7 +9359,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-18 · #703'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-18-b703) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-18 · #705'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-18-b705) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -10789,8 +10789,12 @@ function _tuHakenHtml(l,taskId,wo){
     var teil=(s.rg.art==='teil'), frei=(s.rg.art==='frei');
     // ⛔ „ohne Berechnung" ist eine VOLLE Antwort, keine Rechnung – das Wort
     // „Rechnung" davor las sich widersprüchlich („Rechnung ohne Berechnung").
+    // b704: „Rechnung fehlt" → „RE fehlt" (Wunsch Frank 18.08., alte Zeile bleibt
+    // fest, nur diese eine Wortstelle). Bewusst NUR dieser Fall – die anderen drei
+    // Wörter („Ohne Berechnung", „Rest offen", „Rechnung" bei an=true) hat Frank
+    // nicht genannt, absichtlich nicht mitgeändert.
     var rgWort=s.rg.an?(frei?'Ohne Berechnung':'Rechnung')
-                      :(teil?'Rest offen':'Rechnung fehlt');
+                      :(teil?'Rest offen':'RE fehlt');
     // 🔴 Beim Vorlesen gefunden (dritter Fall nach b690/b691): der Zusatztext lief
     // nur am ABGEHAKTEN Kästchen sinnvoll. Am offenen stand „Rechnung fehlt fehlt",
     // bei der Teilrechnung „Rest offen Teilrechnung 2026-45". Das Wort sagt es
@@ -10807,7 +10811,9 @@ function _tuHakenHtml(l,taskId,wo){
     // ⛔ Kein PDF-Kästchen bei „ohne Berechnung": es gibt keine Rechnung, die man
     // hochladen könnte. Ein Kästchen, das nie zugehen kann, ist eine Falle.
     if(!frei){
-      teile.push(_tuHakenBox(s.pdf.an,s.pdf.an?'PDF':'PDF fehlt',
+      // b704: „PDF fehlt" → „RE-PDF fehlt" (Wunsch Frank 18.08.) – „PDF" (an=true)
+      // bewusst unverändert, nur der fehlende Fall wurde genannt.
+      teile.push(_tuHakenBox(s.pdf.an,s.pdf.an?'PDF':'RE-PDF fehlt',
         (voll&&s.pdf.an)?s.pdf.txt:'',
         gross?('_tuHakenPdf(\''+lid+'\',\''+dat+'\')'):('_rglDateiAnhaengen(\''+tid+'\',\''+lid+'\',\''+dat+'\')'),
         // ⚡ b692: Das ist der Klick, der Frank gefehlt hat – die Rechnung ANSEHEN,
@@ -22805,6 +22811,11 @@ function _videoPlayMime(mime,name){
 // welche Unterordner in Drive existieren, bestimmt Frank, PAM übernimmt die Namen.
 let _fotoOrdnerFilter='';
 let _attOrdnerFilter='';
+// b705: Jahresfilter NUR für die allgemeine Fotoliste (Frank 18.08.: „fotos auch
+// nach jahren anzeigen können"). Bewusst ein eigener, unabhängiger Filter statt
+// in _pamPasstFilter eingebaut – die ist mit Dokumente/Anhänge geteilt, dort gibt
+// es kein Aufnahmedatum. Wirkt zusätzlich zum Ordner/Typ-Filter oben (UND).
+let _fotoJahrFilter='';
 
 function _pamOrdnerZaehlen(arr){
   const m=new Map();
@@ -22864,6 +22875,53 @@ function _pamFilterMenu(listenId,barId,arr,filterWert,changeFn,mitMedien){
   bar.innerHTML=html;
   const sel=bar.querySelector('select');
   if(sel)sel.value=filterWert||'';
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── b705: Jahresfilter für die allgemeine Fotoliste ──────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// Nutzt f.ts (siehe _fotoTsFromFile/_fotoTsFromDriveMeta weiter unten) – wird bei
+// jedem Hochladen gesetzt und für Alt-Bestand einmalig nachgetragen (_fotoTsBackfill).
+// Fotos ohne (noch) bekanntes Datum fallen NICHT unter den Tisch, sondern laufen
+// unter „Ohne Datum" – Wunsch aus der gleichen Rückfrage wie der Filter selbst.
+function _fotoJahrVon(f){
+  // ⚠ Beim Gegenprüfen gefunden (b705): f.ts steht als UTC-ISO-Text (toISOString).
+  // Ein Foto von Silvester kurz vor Mitternacht deutscher Zeit landet als
+  // „…-12-31T23:xx…" UTC – ein Regex auf den rohen Text hätte es unter dem
+  // FALSCHEN (Vor-)Jahr einsortiert. Genau wie das Bautagebuch (_btbParseTs/
+  // _btbDayKey) über ein echtes Date-Objekt gehen, damit getFullYear() die
+  // Zeitzone des Browsers berücksichtigt statt den UTC-Text wörtlich zu lesen.
+  const s=String((f&&f.ts)||'');
+  if(!s)return'';
+  const d=new Date(s);
+  return isNaN(d.getTime())?'':String(d.getFullYear());
+}
+function _fotoPasstJahr(f,jahr){
+  if(!jahr)return true;
+  if(jahr==='__ohne')return !_fotoJahrVon(f);
+  return _fotoJahrVon(f)===jahr;
+}
+function _setFotoJahrFilter(v){_fotoJahrFilter=v;renderFotoListDesktop();}
+// Baut das Jahres-Dropdown und hängt es an die BESTEHENDE Leiste von _pamFilterMenu
+// an (dieselbe Zeile) – bewusst NICHT in _pamFilterMenu eingebaut, siehe oben.
+// Muss NACH _pamFilterMenu() aufgerufen werden, weil die dort bar.innerHTML neu setzt.
+function _fotoJahrMenuAnhaengen(barId,arr){
+  const bar=document.getElementById(barId);
+  if(!bar||bar.style.display==='none')return;
+  const jahre=new Set(); let ohneDatum=0;
+  (arr||[]).forEach(function(f){const j=_fotoJahrVon(f);if(j)jahre.add(j);else ohneDatum++;});
+  if(!jahre.size)return; // kein einziges Foto mit Datum -> Filter würde nichts bringen
+  let opt='<option value="">📅 Alle Jahre</option>';
+  Array.from(jahre).sort().reverse().forEach(function(j){opt+='<option value="'+j+'">'+j+'</option>';});
+  if(ohneDatum)opt+='<option value="__ohne">Ohne Datum ('+ohneDatum+')</option>';
+  const sel=document.createElement('select');
+  sel.setAttribute('onchange','_setFotoJahrFilter(this.value)');
+  sel.title='Nach Aufnahmejahr filtern';
+  sel.style.cssText='font-size:11px;padding:3px 7px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);max-width:150px;';
+  sel.innerHTML=opt;
+  sel.value=_fotoJahrFilter||'';
+  const anker=bar.querySelector('button');
+  if(anker)bar.insertBefore(sel,anker); else bar.appendChild(sel);
 }
 
 // Liest für jedes Foto und jeden Anhang neu aus Drive, in welchem Ordner die Datei liegt.
@@ -24897,6 +24955,12 @@ async function _fotoTsBackfill(){
     scheduleSave();
     showToast('📅 Aufnahmedatum nachgetragen: '+ok+' Foto(s)'+(pinOk?' + '+pinOk+' Dachplan-Pin(s)':'')+(fail?' ('+fail+' ohne Datum)':''),'success',4500);
     try{renderTaskNotizen();}catch(e){}
+    // 🔴 b705, beim Gegenprüfen gefunden: ohne das hier blieb das neue Jahres-
+    // Dropdown unsichtbar, wenn es genau JETZT erst entstehen würde – die Zeile
+    // 24934 zieht taskFotos zwar mit, aber ohne Neuzeichnen zeigte die offene
+    // Galerie das nicht. renderFotoListDesktop() geht selbst leer aus, wenn
+    // gerade kein Task-Fenster offen ist (eigener Element-Check am Anfang).
+    try{renderFotoListDesktop();}catch(e){}
   }
   console.log('[PAM] Foto-Zeitstempel: '+ok+' nachgetragen, '+fail+' ohne Datum'+(abort?', Abbruch wegen Token':''));
 }
@@ -24930,6 +24994,9 @@ function renderFotoListDesktop(){
   // b538: Auswahlmenü nach Herkunftsordner (plus nur Fotos / nur Videos)
   // b630: die Verweise stehen mit im Menü – je Leistung ein eigener Eintrag
   _pamFilterMenu('fotoListDesktop','fotoOrdnerFilterBar',(taskFotos||[]).concat(_ref),_fotoOrdnerFilter,'_setFotoOrdnerFilter',true);
+  // b705: Jahresfilter NUR aus den eigenen Fotos (nicht den Leistungs-Verweisen –
+  // die haben ihre eigene Jahresübersicht schon, siehe _tuJahrDialog).
+  _fotoJahrMenuAnhaengen('fotoOrdnerFilterBar',taskFotos);
   // b673: Herkunft „aus Mail" auch bei Fotos. Die messageId haengt seit b603 an jedem
   // ausgepackten Bild, wurde aber nur in der Dokumente-Sektion ausgegeben – am Foto
   // stand nichts, obwohl die Angabe da war. Datum wie dort ueber die bekannten Mails.
@@ -24952,7 +25019,7 @@ function renderFotoListDesktop(){
     return '';
   }
   const items=taskFotos.map((f,i)=>{
-    if(!_pamPasstFilter(f,_fotoOrdnerFilter))return '';
+    if(!_pamPasstFilter(f,_fotoOrdnerFilter)||!_fotoPasstJahr(f,_fotoJahrFilter))return '';
     const name=f.name||'';
     const caption=f.caption||'';
     // Bearbeitete Version bevorzugen wenn vorhanden
@@ -25011,7 +25078,7 @@ function renderFotoListDesktop(){
   // b602: Der Ordner-Filter blendet Fotos aus, die Auswahl bleibt aber bestehen – man kann
   // also Bilder im PDF haben, die gerade gar nicht zu sehen sind. Die Auswahl wegzuwerfen
   // wäre schlechter (sie war ja gewollt), deshalb wird es nur benannt.
-  const _selVersteckt=_selAlle.filter(function(f){return !_pamPasstFilter(f,_fotoOrdnerFilter);}).length;
+  const _selVersteckt=_selAlle.filter(function(f){return !_pamPasstFilter(f,_fotoOrdnerFilter)||!_fotoPasstJahr(f,_fotoJahrFilter);}).length;
   const pdfBar=_fotoSelectMode
     ?'<div class="foto-pdf-bar visible" id="fotoPdfBar">'
       +'<span style="flex:1;font-size:13px;color:var(--text2)">'+selCount+' Foto(s) gewählt'
@@ -37338,6 +37405,7 @@ function openNewTaskModal(){
   taskLinks=[];taskAttachments=[];taskAufgaben=[];taskAusserhausTermine=[];taskZeitEntries=[];taskFreieTermine=[];taskNotizVerlauf=[];taskFotos=[];taskCheckliste=[];taskEmailOriginals=[];taskEmailPdfs=[];taskGmailLinks=[];
   _aufgabenIdCnt=0;
   taskTurnus=[];_tuOffen={};_tuMusterAn=false;_tuDateiOffen={};renderTurnusListe(); // b610 · b694 · b695
+  _fotoJahrFilter=''; // b705: gleiche Regel wie _tuMusterAn/_tuDateiOffen – gilt nur je Task
   taskBaudokuMaterial=[];taskBaudokuPersonalListe=[];taskBaudokuMaschinen=[];
   renderBaudokuPlanung();
   _attachImgsOpen=false;
@@ -42137,6 +42205,12 @@ function openEditTaskModal(id){
   _tuOffen={};
   _tuMusterAn=false; // b694: Muster-Schalter beim Öffnen immer aus – gilt nur, solange Frank ihn selbst anklickt
   _tuDateiOffen={}; // b695: dieselbe Regel für die aufgeklappten Datei-Listen
+  // 🔴 b705, beim Gegenprüfen gefunden: ohne diese Zeile blieb ein gewählter
+  // Jahresfilter über den Task hinweg stehen – Objekt A auf „2023" gefiltert,
+  // Objekt B geöffnet, dort schienen plötzlich alle Fotos zu fehlen (Dropdown
+  // kann bei wenigen/undatierten Fotos sogar ganz verschwinden, ohne Weg zum
+  // Zurücksetzen außer Neuladen). Gilt nur, solange Frank ihn selbst setzt.
+  _fotoJahrFilter='';
   taskNotizVerlauf=JSON.parse(JSON.stringify(task.notizVerlauf||[]));
   taskFotos=JSON.parse(JSON.stringify(task.fotos||[]));
   taskCheckliste=JSON.parse(JSON.stringify(task.checkliste||[]));
