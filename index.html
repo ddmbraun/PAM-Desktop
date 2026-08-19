@@ -9363,7 +9363,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-19 · #717'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-19-b717) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-19 · #718'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-19-b718) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -43728,6 +43728,7 @@ window.Dachplan=(function(){
       +'<div class="dpf">Fotos</div><button class="dpb primary" id="dpPhotoBtn" style="width:100%">📷 Foto hinzufügen</button>'
       +'<input type="file" id="dpPhotoInput" accept="image/*" multiple style="display:none"><div class="dpThumbs" id="dpThumbs"></div>'
       +'<div class="dpf">Koordinaten</div><div id="dpCoord" style="font-size:12px;color:#9aa3b2"></div>'
+      +'<button class="dpb" id="dpMove" style="width:100%;margin-top:8px" title="Diesen einen Pin beweglich machen – sonst sind Pins fest, damit sie beim Wischen nicht verrutschen">📍 Verschieben</button>' /* b718 */
       +'<button class="dpb" id="dpNav" style="width:100%;margin-top:8px">🧭 Navigation zu diesem Pin</button>'
       +'<button class="dpb" id="dpDel" style="width:100%;margin-top:10px;color:#e5484d;border-color:#e5484d">🗑 Pin löschen</button>'
      +'</div>'
@@ -43741,7 +43742,8 @@ window.Dachplan=(function(){
     E.screen=d;E.mapEl=d.querySelector('#dpMap');E.imapEl=d.querySelector('#dpImap');E.sheet=d.querySelector('#dpSheet');
     E.thumbs=d.querySelector('#dpThumbs');E.photo=d.querySelector('#dpPhoto');E.photoImg=d.querySelector('#dpPhotoImg');E.msg=d.querySelector('#dpMsg');
     const q=id=>d.querySelector(id);
-    q('#dpBack').onclick=close;q('#dpSheetClose').onclick=closeSheet;
+    q('#dpBack').onclick=close;q('#dpSheetClose').onclick=closeSheetAbbruch; // b718: Schließen bricht ein laufendes Verschieben ab
+    q('#dpMove').onclick=_verschiebenStarten; // b718
     q('#dpLoc').onclick=locate;q('#dpList').onclick=openList;
     q('#dpDach').onclick=searchDach;q('#dpPinHere').onclick=pinHere;q('#dpLive').onclick=liveToggle;
     q('#dpMode').onclick=()=>setBase(dp.base==='bild'?'map':'bild');
@@ -43804,18 +43806,46 @@ window.Dachplan=(function(){
     if(!map)return;
     Object.keys(markers).forEach(k=>{try{map.removeLayer(markers[k]);}catch(_){}delete markers[k];});
     (dp.pins||[]).forEach(p=>{if(p.lat==null)return;if(filter==='schaden'&&p.status!=='rot')return;
-      const m=L.marker([p.lat,p.lng],{icon:pinIcon(COL[p.status||'rot'],p.nr),draggable:true});
+      // b718: Pins sind FEST. Vorher war jeder Pin dauerhaft ziehbar – wer beim Wischen
+      // über die Karte einen erwischte, verschob ihn, und die neue Stelle wurde sofort
+      // gespeichert (ohne Rückfrage, ohne Rückweg). Auf dem Tablet am Dach passierte das
+      // zwangsläufig. Beweglich wird ein Pin nur noch über „📍 Verschieben" im Pin-Fenster.
+      const m=L.marker([p.lat,p.lng],{icon:pinIcon(COL[p.status||'rot'],p.nr),draggable:(_verschiebePin===p.id)});
       m.on('click',()=>{sel=p.id;openSheet(p);});
-      m.on('dragend',ev=>{const ll=ev.target.getLatLng();p.lat=ll.lat;p.lng=ll.lng;if(cur()===p)setCoord(p);save();});
+      m.on('dragend',ev=>{const ll=ev.target.getLatLng();p.lat=ll.lat;p.lng=ll.lng;if(cur()===p)setCoord(p);save();_verschiebenBeenden(p.nr);});
       m.addTo(map);markers[p.id]=m;});
   }
   function addPin(lat,lng){const p={id:'dp'+Date.now(),nr:dp.nextNr++,lat,lng,status:'rot',title:'',note:'',fotos:[],ts:new Date().toISOString()};dp.pins.push(p);sel=p.id;renderPins();openSheet(p);save();} // b525: ts → Pin erscheint im Bautagebuch
+
+  /* ---- b718: Pin verschieben – nur auf Ansage ----
+     `_verschiebePin` hält die Kennung des EINEN Pins, der gerade beweglich ist. Alles
+     andere bleibt fest. Nach dem Absetzen (dragend) endet der Zustand sofort wieder,
+     ebenso beim Schließen des Pin-Fensters. Bewusst kein Dauer-Schalter: der wäre nach
+     dem ersten Verschieben offen geblieben und hätte den alten Zustand wiederhergestellt. */
+  let _verschiebePin=null;
+  function _verschiebenStarten(){
+    const p=cur();if(!p)return;
+    _verschiebePin=p.id;
+    renderPins();                    // zeichnet den Pin beweglich neu
+    closeSheet();                    // sonst verdeckt das Fenster die halbe Karte
+    say('Pin '+p.nr+' lässt sich jetzt ziehen – zum Speichern absetzen');
+  }
+  function _verschiebenBeenden(nr){
+    if(_verschiebePin===null)return;
+    _verschiebePin=null;
+    renderPins();                    // wieder fest
+    if(nr!==undefined)say('Pin '+nr+' an der neuen Stelle gespeichert');
+  }
 
   /* ---- Sheet ---- */
   function markStat(p){E.sheet.querySelectorAll('#dpStat button').forEach(b=>b.classList.toggle('sel',b.dataset.s===p.status));}
   function setCoord(p){E.sheet.querySelector('#dpCoord').textContent=(p.lat!=null&&p.lng!=null)?(Number(p.lat).toFixed(6)+', '+Number(p.lng).toFixed(6)):('Bild-Position '+Math.round((p.nx||0)*100)+'% / '+Math.round((p.ny||0)*100)+'%');}
   function openSheet(p){E.sheet.querySelector('#dpSheetTitle').textContent='Pin '+p.nr+' · '+(LBL[p.status]||'');E.sheet.querySelector('#dpTitle').value=p.title||'';E.sheet.querySelector('#dpNote').value=p.note||'';setCoord(p);markStat(p);drawThumbs(p);E.sheet.classList.add('show');}
   function closeSheet(){E.sheet.classList.remove('show');}
+  // b718: Fenster über „Schließen" zu → ein laufendes Verschieben wird abgebrochen,
+  // der Pin bleibt an seiner alten Stelle. (closeSheet allein tut das NICHT – das ruft
+  // _verschiebenStarten selbst auf, um die Karte frei zu machen.)
+  function closeSheetAbbruch(){if(_verschiebePin!==null)_verschiebenBeenden();closeSheet();}
 
   /* ---- Fotos (Drive) ---- */
   /* b716: Aufnahmedaten in die verkleinerte Fassung übertragen.
@@ -44062,9 +44092,9 @@ window.Dachplan=(function(){
   function renderImgPins(){if(!imap)return;
     Object.keys(markers).forEach(k=>{try{imap.removeLayer(markers[k]);}catch(_){}try{if(map)map.removeLayer(markers[k]);}catch(_){}delete markers[k];});
     (dp.pins||[]).forEach(p=>{if(p.nx==null)return;if(filter==='schaden'&&p.status!=='rot')return;
-      const m=L.marker(frToLatLng(p.nx,p.ny),{icon:pinIcon(COL[p.status||'rot'],p.nr),draggable:true});
+      const m=L.marker(frToLatLng(p.nx,p.ny),{icon:pinIcon(COL[p.status||'rot'],p.nr),draggable:(_verschiebePin===p.id)}); // b718: fest, siehe renderPins
       m.on('click',()=>{sel=p.id;openSheet(p);});
-      m.on('dragend',ev=>{const fr=latLngToFr(ev.target.getLatLng());p.nx=Math.min(1,Math.max(0,fr.nx));p.ny=Math.min(1,Math.max(0,fr.ny));if(cur()===p)setCoord(p);save();});
+      m.on('dragend',ev=>{const fr=latLngToFr(ev.target.getLatLng());p.nx=Math.min(1,Math.max(0,fr.nx));p.ny=Math.min(1,Math.max(0,fr.ny));if(cur()===p)setCoord(p);save();_verschiebenBeenden(p.nr);});
       m.addTo(imap);markers[p.id]=m;});
   }
   function addImgPin(ll){const fr=latLngToFr(ll);const p={id:'dp'+Date.now(),nr:dp.nextNr++,nx:Math.min(1,Math.max(0,fr.nx)),ny:Math.min(1,Math.max(0,fr.ny)),status:'rot',title:'',note:'',fotos:[]};dp.pins.push(p);sel=p.id;renderImgPins();openSheet(p);save();}
@@ -44142,7 +44172,7 @@ window.Dachplan=(function(){
     Object.keys(markers).forEach(k=>{try{if(map)map.removeLayer(markers[k]);}catch(_){}try{if(imap)imap.removeLayer(markers[k]);}catch(_){}delete markers[k];});
     closeSheet();setBase('map');save();say('Dachplan zurückgesetzt');
   }
-  function close(){try{liveStop();}catch(_){}if(map){try{dp.center=[map.getCenter().lat,map.getCenter().lng];dp.zoom=map.getZoom();}catch(e){}}if(E.screen)E.screen.classList.add('dp-hidden');save();}
+  function close(){_verschiebePin=null;/* b718: sonst wäre der Pin beim nächsten Öffnen noch beweglich */try{liveStop();}catch(_){}if(map){try{dp.center=[map.getCenter().lat,map.getCenter().lng];dp.zoom=map.getZoom();}catch(e){}}if(E.screen)E.screen.classList.add('dp-hidden');save();}
   // b525 Paket 6: Dachplan direkt auf einem Pin öffnen (Aufruf aus dem Bautagebuch).
   // Wartet bis Karte+Marker stehen, zoomt hin, öffnet das Pin-Fenster; Bild-Modus
   // ohne Marker → nach Timeout wenigstens das Pin-Fenster.
