@@ -9363,7 +9363,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-19 · #715'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-19-b715) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-19 · #716'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-19-b716) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -11799,6 +11799,65 @@ function _tuRefFotoBlock(refs){
     }).join('');
     return '<div class="foto-desktop-wrap" style="margin-top:8px;">'
       +'<div class="foto-desktop-wrap-label">🔁 '+esc(g.name)+' <small style="font-weight:400;color:var(--text2);">('+g.items.length+' – verlinkt, gehört zur Leistung)</small></div>'
+      +'<div class="foto-desktop-grid">'+kacheln+'</div>'
+      +'</div>';
+  }).join('');
+}
+/* ══════════ b716: Dachplan-Pin-Fotos als Verweis-Block ══════════
+   Gleiche Bauart wie _tuRefDateien/_tuRefFotoBlock darüber und aus demselben Grund:
+   Pin-Fotos leben in `pin.fotos`, nicht in `taskFotos` – sie haben also keinen
+   Listenplatz und dürfen weder in die Auswahl noch in die große Foto-Ansicht
+   (`openFotoDesktop` rechnet an mindestens fünf Stellen mit Listenplätzen; eine
+   erfundene Nummer würde dort FREMDE Fotos überschreiben). Deshalb schreibgeschützt:
+   kein ✕, kein 📝, dafür „↗ zum Pin". */
+function _dpRefFotos(task){
+  var out=[];
+  var pins=(task&&task.dachplan&&task.dachplan.pins)||[];
+  var LBL={rot:'Schaden',gelb:'Prüfen',gruen:'OK'};
+  pins.forEach(function(p){
+    if(!p)return;
+    (p.fotos||[]).forEach(function(f){
+      if(!f||!f.driveId)return; // ohne Drive-Datei gibt es nichts anzuzeigen
+      out.push({dpRef:true,driveId:f.driveId,caption:f.caption||'',
+        name:f.caption||('Pin '+(p.nr||'?')),
+        ts:f.ts||p.ts||'',
+        pinId:p.id||'',pinNr:p.nr||'?',pinStatus:p.status||'rot',
+        pinTitel:String(p.title||p.note||'').trim(),
+        pinLbl:LBL[p.status||'rot']||'',
+        ordner:'🗺 Dachplan'});
+    });
+  });
+  return out;
+}
+// Für das OFFENE Fenster – wie _tuRefFotosLive: frisch Gesetztes soll sofort erscheinen.
+function _dpRefFotosLive(){
+  var id=(document.getElementById('taskId')||{}).value||'';
+  var t=(id&&typeof findTaskById==='function')?findTaskById(id):null;
+  return t?_dpRefFotos(t):[];
+}
+function _dpRefFotoBlock(refs){
+  if(!refs||!refs.length)return '';
+  var grp=[];
+  refs.forEach(function(f){
+    var g=grp.find(function(x){return x.id===f.pinId;});
+    if(!g){g={id:f.pinId,nr:f.pinNr,lbl:f.pinLbl,titel:f.pinTitel,items:[]};grp.push(g);}
+    g.items.push(f);
+  });
+  grp.sort(function(a,b){return (Number(a.nr)||0)-(Number(b.nr)||0);});
+  return grp.map(function(g){
+    var kacheln=g.items.map(function(f){
+      var id=String(f.driveId||'').replace(/[^A-Za-z0-9_\-]/g,'');
+      return '<div class="foto-desktop-thumb" data-hvid="'+id+'" data-hvtitel="'+_escHtml(f.caption||f.name)+'"'
+        +' onclick="window.open(\'https://drive.google.com/file/d/'+id+'/view\',\'_blank\')"'
+        +' title="'+_escHtml((f.caption||'Foto')+' – gehört zu Pin '+g.nr+'. Klick öffnet die Datei in Drive.')+'">'
+        +'<img data-foto-id="'+id+'" alt="" loading="lazy" onerror="_desktopThumbFallback(this)">'
+        +'<div class="foto-name">'+esc(f.caption||('Pin '+g.nr))+'</div>'
+        +'<button class="foto-edit" onclick="event.stopPropagation();Dachplan.openPin(\''+_escHtml(f.pinId)+'\')" title="Zum Pin im Dachplan springen – dort kann das Foto geändert oder entfernt werden">↗</button>'
+        +'</div>';
+    }).join('');
+    return '<div class="foto-desktop-wrap" style="margin-top:8px;">'
+      +'<div class="foto-desktop-wrap-label">🗺 Dachplan-Pin '+esc(String(g.nr))+(g.lbl?' · '+esc(g.lbl):'')+(g.titel?' — '+esc(g.titel):'')
+      +' <small style="font-weight:400;color:var(--text2);">('+g.items.length+' – gehört zum Pin)</small></div>'
       +'<div class="foto-desktop-grid">'+kacheln+'</div>'
       +'</div>';
   }).join('');
@@ -19600,6 +19659,21 @@ function _btbZeitKorrigieren(i){
 // vorhandenen Blob-Weg nachgeladen (bearbeitete/beschriftete Version bevorzugt) –
 // damit sind sie im Druck/PDF FEST eingebettet, anders als die Drive-Links der
 // Abschlussakte-HTML. „Als PDF speichern" im Druckdialog = Datei für den Kunden.
+/* b716: EINE Liste für den Bericht – gebaut UND nachgeladen. Vorher baute
+   `_btbBerichtHtml` die Kacheln und `_btbBericht` seine Nachlade-Liste getrennt, und
+   beide waren sich uneinig.
+   🔴 Damit ist ein ALTFEHLER mit repariert: die Bild-Kennung war `_bf`+x.i, und alles
+   Eingemischte trägt i=-1 — ALLE Verweis-Fotos bekamen also dieselbe Kennung `_bf-1`,
+   und nachgeladen wurde ohnehin nur `taskFotos`. Ergebnis seit b631: die verlinkten
+   Leistungs-Fotos standen als LEERE KÄSTEN im Ausdruck. Jetzt trägt jede Kachel eine
+   eigene laufende Nummer `k`, und die Nachlade-Schleife läuft über dieselbe Liste. */
+function _btbFotosFuerBericht(){
+  const liste=(taskFotos||[]).map((f,i)=>({f,i,d:_btbParseTs(f.ts)}))
+    .concat(_tuRefFotosLive().fotos.map(f=>({f,i:-1,ref:true,d:_btbParseTs(f.ts)})))
+    .concat(_dpRefFotosLive().map(f=>({f,i:-1,ref:true,d:_btbParseTs(f.ts)})));
+  liste.forEach((x,k)=>{x.k=k;});
+  return liste;
+}
 function _btbBerichtHtml(){
   const gT=id=>{const e=document.getElementById(id);return e?(e.value||'').trim():'';};
   const titel=gT('taskTitleInput')||'Auftrag';
@@ -19610,8 +19684,7 @@ function _btbBerichtHtml(){
   const notizen=(taskNotizVerlauf||[]).map((n,i)=>({n,i,d:_btbParseTs(n.ts)}));
   // b631: verlinkte Leistungs-Fotos gehören in den ausgedruckten Nachweis genauso
   // wie in die Bildschirmansicht.
-  const fotos=(taskFotos||[]).map((f,i)=>({f,i,d:_btbParseTs(f.ts)}))
-    .concat(_tuRefFotosLive().fotos.map(f=>({f,i:-1,ref:true,d:_btbParseTs(f.ts)})));
+  const fotos=_btbFotosFuerBericht();
   let _bpins=[]; // b525: Dachplan-Pins gehören in die volle Doku
   try{const _t=findTaskById(gT('taskId'));if(_t&&_t.dachplan&&_t.dachplan.pins)_bpins=_t.dachplan.pins;}catch(e){}
   const pins=_bpins.map((p,i)=>({p,i,d:_btbParseTs(p.ts)}));
@@ -19640,7 +19713,7 @@ function _btbBerichtHtml(){
       let s='<div class="bg-grid">';
       list.forEach(x=>{
         const cap=[_btbZeit(x.d),(x.f.caption||'')].filter(Boolean).join(' – ');
-        s+='<figure><img id="_bf'+x.i+'" alt="">'+(cap?'<figcaption>'+esc(cap)+'</figcaption>':'')+'</figure>';
+        s+='<figure><img id="_bf'+x.k+'" alt="">'+(cap?'<figcaption>'+esc(cap)+'</figcaption>':'')+'</figure>'; // b716: eigene Kennung je Kachel, siehe Altfehler oben
       });
       return s+'</div>';
     };
@@ -19659,8 +19732,11 @@ function _btbBerichtHtml(){
         const col=({rot:'#e5484d',gelb:'#f5a623',gruen:'#30a46c'})[p.status||'rot']||'#e5484d';
         const lbl=({rot:'Schaden',gelb:'Prüfen',gruen:'OK'})[p.status||'rot']||'';
         const txt=String(p.title||p.note||'').trim();
-        const fn=(p.fotos||[]).length;
-        body+='<div class="pinrow" style="border-left:4px solid '+col+';">🏠 Dachplan-Pin '+esc(String(p.nr||''))+' · '+lbl+(txt?' — '+esc(txt):'')+(fn?' ('+fn+' Foto'+(fn!==1?'s':'')+' am Pin, siehe Dachplan)':'')+'</div>';
+        // b716: Der Zusatz „(N Fotos am Pin, siehe Dachplan)" ist weg – die Fotos sind
+        // jetzt selbst im Tagesblock abgedruckt (b525 hatte sie bewusst weggelassen,
+        // weil sie damals teils nur lokal auf dem Tablet lagen; abgedruckt wird auch
+        // heute nur, was eine Drive-Datei hat, siehe _dpRefFotos).
+        body+='<div class="pinrow" style="border-left:4px solid '+col+';">🏠 Dachplan-Pin '+esc(String(p.nr||''))+' · '+lbl+(txt?' — '+esc(txt):'')+'</div>';
       });
     }
     if(vidCount)body+='<div class="sysrow" style="display:block;">🎬 '+vidCount+' Video(s) an diesem Tag – im Druck/PDF nicht darstellbar, siehe PAM</div>';
@@ -19708,11 +19784,13 @@ async function _btbBericht(){
   win.document.write(_btbBerichtHtml());
   win.document.close();
   // Bilder nachladen: bearbeitete (beschriftete) Version bevorzugt, mit Blob-Cache
-  const jobs=(taskFotos||[]).map((f,i)=>({f,i})).filter(x=>!_isVideo(x.f.mimeType,x.f.name));
+  // b716: DIESELBE Liste wie beim Bauen der Kacheln – sonst passen die Kennungen nicht
+  // zusammen und Eingemischtes bleibt leer (siehe _btbFotosFuerBericht).
+  const jobs=_btbFotosFuerBericht().filter(x=>!_isVideo(x.f.mimeType,x.f.name));
   let done=0,fehl=0;
   for(const x of jobs){
     let img=null;
-    try{img=win.document.getElementById('_bf'+x.i);}catch(e){return;} // Fenster zu → abbrechen
+    try{img=win.document.getElementById('_bf'+x.k);}catch(e){return;} // Fenster zu → abbrechen
     if(!img){done++;continue;}
     const id=x.f.editedDriveId||x.f.driveId||'';
     try{
@@ -19830,14 +19908,19 @@ function _btbFotoTile(x){
     :((cached||thumb)?(' data-hvsrc="'+esc(cached||thumb)+'" data-hvtitel="'+esc(cap||name)+'"'):'');
   // b631: Verweis auf eine Leistungs-Datei – kein Listenplatz, also kein 📝/✕/ℹ und
   // kein Ziehen. Klick öffnet die Datei in Drive, ↗ springt zur Leistung.
+  // b716: dieselbe Bauart für Dachplan-Pin-Fotos, nur mit 🗺-Marke und Sprung zum Pin.
   if(x.i<0){
     const _rid=String(f.driveId||'').replace(/[^A-Za-z0-9_\-]/g,'');
+    const _dp=!!f.dpRef;
+    const _sprung=_dp
+      ?('Dachplan.openPin(\''+_escHtml(f.pinId||'')+'\')')
+      :('_tuRefSpringen(\''+_escHtml(f.leistungId||'')+'\')');
     return '<div'+hvAttr+' onclick="window.open(\'https://drive.google.com/file/d/'+_rid+'/view\',\'_blank\')"'
-      +' title="'+esc((cap||name)+' — gehört zur Leistung, Klick öffnet die Datei in Drive')+'"'
+      +' title="'+esc((cap||name)+(_dp?(' — gehört zu Dachplan-Pin '+(f.pinNr||'?')):' — gehört zur Leistung')+', Klick öffnet die Datei in Drive')+'"'
       +' style="position:relative;width:84px;height:64px;border-radius:6px;overflow:hidden;background:var(--bg4);border:1px dashed var(--border);cursor:pointer;flex-shrink:0;">'
       +inner
-      +'<button type="button" onclick="event.stopPropagation();_tuRefSpringen(\''+_escHtml(f.leistungId||'')+'\')" title="Zur Leistung springen" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.55);border:none;color:#fff;font-size:10px;line-height:1;padding:3px 5px;border-radius:4px;cursor:pointer;">↗</button>'
-      +'<div style="position:absolute;top:2px;left:2px;background:rgba(0,0,0,.55);color:#fff;font-size:9px;line-height:1;padding:3px 4px;border-radius:4px;pointer-events:none;">🔁</div>'
+      +'<button type="button" onclick="event.stopPropagation();'+_sprung+'" title="'+(_dp?'Zum Pin im Dachplan springen':'Zur Leistung springen')+'" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.55);border:none;color:#fff;font-size:10px;line-height:1;padding:3px 5px;border-radius:4px;cursor:pointer;">↗</button>'
+      +'<div style="position:absolute;top:2px;left:2px;background:rgba(0,0,0,.55);color:#fff;font-size:9px;line-height:1;padding:3px 4px;border-radius:4px;pointer-events:none;">'+(_dp?('🗺'+esc(String(f.pinNr||''))):'🔁')+'</div>'
       +unterzeile+'</div>';
   }
   return '<div'+hvAttr+' onclick="openFotoDesktop('+x.i+')" draggable="true" ondragstart="_btbFotoDragStart(event,'+x.i+')" ondragend="_btbFotoDragEnd()" title="'+esc(cap?cap+' — '+name:name)+' — zum Umsortieren auf eine Notiz ziehen" style="position:relative;width:84px;height:64px;border-radius:6px;overflow:hidden;background:var(--bg4);border:1px solid var(--border);cursor:pointer;flex-shrink:0;">'
@@ -19853,14 +19936,14 @@ function _btbPinZeile(p){
   const col=({rot:'#e5484d',gelb:'#f5a623',gruen:'#30a46c'})[p.status||'rot']||'#e5484d';
   const lbl=({rot:'Schaden',gelb:'Prüfen',gruen:'OK'})[p.status||'rot']||'';
   const txt=String(p.title||p.note||'').trim();
-  const fn=(p.fotos||[]).length;
+  // b716: Der Zähler „📷 N" ist weg – die Fotos stehen jetzt selbst als Kacheln im
+  // Tagesblock (siehe renderTaskNotizen). Beides nebeneinander wäre dasselbe doppelt.
   // b572 (Punkt 5): Hover zeigt das erste Foto des Pins groß
   const _pf=(p.fotos||[]).find(function(x){return x&&x.driveId;});
   const hvAttr=_pf?(' data-hvid="'+esc(String(_pf.driveId).replace(/[^A-Za-z0-9_\-]/g,''))+'" data-hvtitel="'+esc(String(p.title||p.note||('Pin '+(p.nr||'')))) +'"'):'';
   return '<div'+hvAttr+' onclick="Dachplan.openPin(\''+esc(String(p.id||''))+'\')" title="Auf dem Dachplan zeigen" style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg3);border:1px solid var(--border);border-left:4px solid '+col+';border-radius:0 8px 8px 0;cursor:pointer;">'
     +'<span style="width:20px;height:20px;border-radius:50%;background:'+col+';color:#fff;display:flex;align-items:center;justify-content:center;font-size:calc(11px*var(--modal-scale,1));font-weight:800;flex-shrink:0;">'+esc(String(p.nr||'?'))+'</span>'
     +'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:calc(12px*var(--modal-scale,1));color:var(--text);">🏠 Dachplan-Pin · '+lbl+(txt?' — '+esc(txt):'')+'</span>'
-    +(fn?'<span style="font-size:calc(11px*var(--modal-scale,1));color:var(--text2);flex-shrink:0;">📷 '+fn+'</span>':'')
     +'<span style="color:var(--text2);flex-shrink:0;">›</span>'
     +'</div>';
 }
@@ -19874,7 +19957,10 @@ function renderTaskNotizen(){
   // Tagesblock. i=-1 heißt „kein Listenplatz" – die Kachel ist dann schreibgeschützt,
   // weil die Datei der Leistung gehört und nicht dem Task (b630-Regel).
   const fotos=(taskFotos||[]).map((f,i)=>({f,i,d:_btbParseTs(f.ts)}))
-    .concat(_tuRefFotosLive().fotos.map(f=>({f,i:-1,ref:true,d:_btbParseTs(f.ts)})));
+    .concat(_tuRefFotosLive().fotos.map(f=>({f,i:-1,ref:true,d:_btbParseTs(f.ts)})))
+    // b716: Dachplan-Pin-Fotos als Bilder im Tagesblock (vorher nur die Pin-Textzeile
+    // mit einem Zähler). i=-1 wie bei den Leistungs-Verweisen = schreibgeschützt.
+    .concat(_dpRefFotosLive().map(f=>({f,i:-1,ref:true,d:_btbParseTs(f.ts)})));
   let _dpins=[]; // b525: Dachplan-Pins des Tasks (nur im „Alles"-Filter)
   try{const _t=findTaskById((document.getElementById('taskId')||{}).value||'');if(_btbFilter==='alle'&&_t&&_t.dachplan&&_t.dachplan.pins)_dpins=_t.dachplan.pins;}catch(e){}
   const pins=_dpins.map((p,i)=>({p,i,d:_btbParseTs(p.ts)}));
@@ -25088,8 +25174,15 @@ async function _fotoTsBackfill(){
   (typeof archivedTasks!=='undefined'?(archivedTasks||[]):[]).forEach(collect);
   // b525: Alt-Dachplan-Pins ohne ts über das Drive-Datum ihres ERSTEN Pin-Fotos datieren
   // (Pins ganz ohne Fotos bleiben bewusst undatiert → „Ohne Datum"-Block im Tagebuch)
+  // b716: … und zusätzlich JEDES Pin-Foto einzeln datieren. Bisher bekam nur der PIN ein
+  // Datum; die Fotos selbst hatten keins und wären im Bautagebuch alle unter „Ohne Datum"
+  // gelandet. Läuft über dieselbe Warteschlange (`jobs`) wie die normalen Fotos, damit die
+  // b579-Bremse greift und keine zweite Abruf-Welle entsteht.
   const pinJobs=[];
-  const collectPins=t=>{const ps=t&&t.dachplan&&t.dachplan.pins;if(!ps)return;ps.forEach(p=>{if(p&&!p.ts){const ff=(p.fotos||[]).find(f=>f&&f.driveId&&!failed.has(f.driveId));if(ff)pinJobs.push({p,driveId:ff.driveId});}});};
+  const collectPins=t=>{const ps=t&&t.dachplan&&t.dachplan.pins;if(!ps)return;ps.forEach(p=>{
+    if(p&&!p.ts){const ff=(p.fotos||[]).find(f=>f&&f.driveId&&!failed.has(f.driveId));if(ff)pinJobs.push({p,driveId:ff.driveId});}
+    (p&&p.fotos||[]).forEach(f=>{if(f&&!f.ts&&f.driveId&&!failed.has(f.driveId))jobs.push(f);});
+  });};
   Object.values(boards||{}).forEach(list=>(list||[]).forEach(collectPins));
   (typeof archivedTasks!=='undefined'?(archivedTasks||[]):[]).forEach(collectPins);
   if(!jobs.length&&!pinJobs.length)return;
@@ -25156,13 +25249,19 @@ function renderFotoListDesktop(){
   // in taskFotos – nur daneben. Deshalb auch der getrennte Zähler „12 +7".
   const _ref=_tuRefFotosLive().fotos;
   const _refSicht=_ref.filter(function(f){return _pamPasstFilter(f,_fotoOrdnerFilter);});
+  // b716: Dachplan-Pin-Fotos genauso daneben – bisher kam man nur über den einzelnen Pin
+  // an sie heran (Befund Frank 19.08.). Eigener Zähler-Teil, damit die Zahlen getrennt
+  // bleiben: „12 +7 +5" = eigene / verlinkte Leistungen / Dachplan.
+  const _dpRef=_dpRefFotosLive();
   if(badge){
     const _nf=(taskFotos||[]).length;
-    if(_nf||_ref.length){badge.textContent=_nf+(_ref.length?' +'+_ref.length:'');badge.style.display='inline-flex';}
+    if(_nf||_ref.length||_dpRef.length){badge.textContent=_nf+(_ref.length?' +'+_ref.length:'')+(_dpRef.length?' +'+_dpRef.length:'');badge.style.display='inline-flex';}
     else badge.style.display='none';
   } // b577: inline-flex, sonst greift die gemeinsame Mindestbreite der Zahlen nicht
   if(!taskFotos||!taskFotos.length){
-    el.innerHTML=_tuRefFotoBlock(_refSicht); // b630: auch ohne eigene Fotos zeigen
+    // b716: auch hier anhängen – ein reiner Dachplan-Auftrag hat oft GAR keine eigenen
+    // Fotos, und dann steigt die Anzeige hier aus, bevor sie unten ankommt.
+    el.innerHTML=_tuRefFotoBlock(_refSicht)+_dpRefFotoBlock(_dpRef); // b630: auch ohne eigene Fotos zeigen
     _fotoSelectMode=false;_fotoSelected.clear();
     _pamFilterMenu('fotoListDesktop','fotoOrdnerFilterBar',_ref,_fotoOrdnerFilter,'_setFotoOrdnerFilter',true);
     try{hydrateDesktopFotoThumbs();}catch(e){console.warn('hydrateDesktopFotoThumbs:',e);}
@@ -25272,7 +25371,8 @@ function renderFotoListDesktop(){
     +pdfBar
     +'<div class="foto-desktop-grid'+(_fotoExpanded?' expanded':'')+(_fotoSelectMode?' foto-select-mode':'')+'">'+items+'</div>'
     +'</div>'
-    +_tuRefFotoBlock(_refSicht); // b630: verlinkte Leistungs-Dateien, je Leistung eine Gruppe
+    +_tuRefFotoBlock(_refSicht) // b630: verlinkte Leistungs-Dateien, je Leistung eine Gruppe
+    +_dpRefFotoBlock(_dpRef);   // b716: Dachplan-Pin-Fotos, je Pin eine Gruppe
   try{hydrateDesktopFotoThumbs();}catch(e){console.warn('hydrateDesktopFotoThumbs:',e);}
   try{renderTaskNotizen();}catch(e){console.warn('[BTB] refresh:',e);} // b515: Foto-Änderungen auch im Bautagebuch zeigen
 }
@@ -25295,10 +25395,15 @@ async function _showFotoExif(i,btn){
 // b580: Kern nimmt das Foto-OBJEKT entgegen – der Foto-Eingang zeigt Fotos aus fremden
 // fe_-Sammeltasks, die stehen nicht in taskFotos. i=-1 heißt „ohne Task-Bezug": dann
 // entfallen Tagebuch-Zeile, 📍-korrigieren und 🕒-Zeit (die arbeiten alle auf taskFotos[i]).
-async function _showFotoExifKern(f,i,btn){
+// b716: `gpsKorr` schaltet „📍 korrigieren" auch OHNE Listenplatz frei – für die
+// Dachplan-Pin-Fotos, die in `pin.fotos` stehen. Der Knopf ruft dann die objektnehmende
+// Fassung (_deskGpsDialogKern) über `window._exifFotoObj`, weil der Knopf-Text als
+// Zeichenkette gebaut wird und keinen Platz für ein Objekt hat.
+async function _showFotoExifKern(f,i,btn,gpsKorr){
   // b513: Aufnahmedaten IMMER bevorzugt aus dem ORIGINAL lesen – die bemalte Kopie
   // (editedDriveId) ist ein Canvas-Bild und hatte bis Mobil v121 nie EXIF/GPS.
   // Damit zeigen auch alle FRÜHER beschrifteten Fotos wieder ihren Aufnahmeort.
+  window._exifFotoObj=f;
   const id=f.driveId||f.editedDriveId||'';
   if(!id){showToast('Keine Drive-ID','error');return;}
   if(!gdriveToken){showToast('Drive nicht verbunden','error');return;}
@@ -25357,7 +25462,7 @@ async function _showFotoExifKern(f,i,btn){
     popup.innerHTML=(rows?'<table style="border-collapse:collapse;line-height:1.7">'+rows+'</table>'
       :'<span style="color:var(--text2)">Keine EXIF-Daten gefunden</span>')
       +'<div style="display:flex;justify-content:space-between;gap:8px;margin-top:8px">'
-      +(i>=0?'<button onclick="_deskGpsDialog('+i+')" style="font-size:11px;padding:2px 10px;border-radius:5px;border:1px solid var(--accent);background:var(--bg3);color:var(--accent);cursor:pointer;font-weight:600">📍 korrigieren</button>':'') // b513: Aufnahmeort setzen/ändern; b580: nur mit Task-Bezug
+      +((i>=0||gpsKorr)?'<button onclick="'+(i>=0?('_deskGpsDialog('+i+')'):'_deskGpsDialogKern(window._exifFotoObj)')+'" style="font-size:11px;padding:2px 10px;border-radius:5px;border:1px solid var(--accent);background:var(--bg3);color:var(--accent);cursor:pointer;font-weight:600">📍 korrigieren</button>':'') // b513: Aufnahmeort setzen/ändern; b580: nur mit Task-Bezug; b716: oder ausdrücklich freigeschaltet (Dachplan)
       +(i>=0?'<button onclick="_btbZeitKorrigieren('+i+')" style="font-size:11px;padding:2px 10px;border-radius:5px;border:1px solid var(--accent);background:var(--bg3);color:var(--accent);cursor:pointer;font-weight:600">🕒 Zeit</button>':'') // b518: Tagebuch-Zeit ändern
       +'<button onclick="document.getElementById(\'_exifPopup\').remove()" style="font-size:11px;padding:2px 10px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer">✕</button></div>';
     const rect=btn.getBoundingClientRect();
@@ -25481,10 +25586,20 @@ async function _deskForwardGeocode(q){
   return null;
 }
 let _deskGpsPending=null;
+/* b716: Aufteilung wie damals bei _showFotoExif → _showFotoExifKern. Der Kern nimmt das
+   Foto-OBJEKT entgegen, damit auch Fotos ohne Platz in `taskFotos` korrigiert werden können
+   – die Dachplan-Pin-Fotos liegen in `pin.fotos`. Der eigentliche Schreibweg
+   (_deskWriteGpsToDriveFoto) bleibt unberührt, er kennt ohnehin nur eine Drive-Kennung. */
+let _deskGpsFoto=null;
 function _deskGpsDialog(i){
   const f=taskFotos&&taskFotos[i];
   if(!f){showToast('Foto nicht gefunden','error');return;}
+  return _deskGpsDialogKern(f);
+}
+function _deskGpsDialogKern(f){
+  if(!f){showToast('Foto nicht gefunden','error');return;}
   if(!f.driveId&&!f.editedDriveId){showToast('Foto hat keine Drive-Datei','error');return;}
+  _deskGpsFoto=f;
   _deskGpsPending=null;
   const old=document.getElementById('_deskGpsOv');if(old)old.remove();
   const ov=document.createElement('div');
@@ -25493,14 +25608,14 @@ function _deskGpsDialog(i){
   ov.innerHTML='<div style="background:var(--bg,#fff);color:var(--text,#222);border:1px solid var(--border,#ccc);border-radius:12px;padding:20px 22px;width:100%;max-width:460px;box-shadow:0 8px 40px rgba(0,0,0,.35);" onclick="event.stopPropagation()">'
     +'<div style="font-size:16px;font-weight:700;margin-bottom:10px;">📍 Aufnahmeort im Foto korrigieren</div>'
     +'<div style="display:flex;gap:8px;margin-bottom:10px;">'
-      +'<button onclick="_deskGpsUseTaskAdr('+i+')" style="flex:1;padding:9px 8px;border-radius:8px;border:1px solid var(--accent);background:var(--bg3,#f4f5f8);color:var(--accent);font-size:12px;font-weight:700;cursor:pointer;">🏠 Aus Objektadresse übernehmen</button>'
+      +'<button onclick="_deskGpsUseTaskAdr()" style="flex:1;padding:9px 8px;border-radius:8px;border:1px solid var(--accent);background:var(--bg3,#f4f5f8);color:var(--accent);font-size:12px;font-weight:700;cursor:pointer;">🏠 Aus Objektadresse übernehmen</button>'
     +'</div>'
     +'<input id="_deskGpsInput" type="text" placeholder="Adresse oder Koordinaten (51.108, 10.653)…" style="width:100%;padding:9px;border-radius:8px;border:1px solid var(--border,#ccc);background:var(--bg,#fff);color:var(--text,#222);font-size:13px;box-sizing:border-box;">'
     +'<div id="_deskGpsResult" style="font-size:12px;color:var(--text2,#666);margin:10px 0;min-height:16px;"></div>'
     +'<div style="display:flex;gap:8px;justify-content:flex-end;">'
       +'<button onclick="document.getElementById(\'_deskGpsOv\').remove()" style="padding:8px 14px;border-radius:8px;border:1px solid var(--border,#ccc);background:var(--bg3,#f4f5f8);color:var(--text,#222);font-size:12px;cursor:pointer;">Abbrechen</button>'
       +'<button onclick="_deskGpsResolveInput()" style="padding:8px 14px;border-radius:8px;border:none;background:var(--accent,#2e4fc4);color:#fff;font-size:12px;font-weight:700;cursor:pointer;">🔍 Prüfen</button>'
-      +'<button id="_deskGpsSaveBtn" onclick="_deskGpsSave('+i+')" disabled style="padding:8px 14px;border-radius:8px;border:none;background:#27ae60;color:#fff;font-size:12px;font-weight:700;opacity:.45;cursor:pointer;">💾 In Foto speichern</button>'
+      +'<button id="_deskGpsSaveBtn" onclick="_deskGpsSave()" disabled style="padding:8px 14px;border-radius:8px;border:none;background:#27ae60;color:#fff;font-size:12px;font-weight:700;opacity:.45;cursor:pointer;">💾 In Foto speichern</button>'
     +'</div></div>';
   ov.addEventListener('click',()=>ov.remove());
   document.body.appendChild(ov);
@@ -25532,7 +25647,7 @@ function _deskGpsSetPending(lat,lon,label){
   const btn=document.getElementById('_deskGpsSaveBtn');
   if(btn){btn.disabled=false;btn.style.opacity='1';}
 }
-function _deskGpsUseTaskAdr(i){
+function _deskGpsUseTaskAdr(){
   let a='';
   try{const t=findTaskById((document.getElementById('taskId')||{}).value||'');a=t&&t.adresse?String(t.adresse).trim():'';}catch(e){}
   if(!a){const res=document.getElementById('_deskGpsResult');if(res)res.textContent='⚠ Im Auftrag ist keine Objektadresse hinterlegt.';return;}
@@ -25559,9 +25674,9 @@ async function _deskGpsResolveInput(){
   if(hit)_deskGpsSetPending(hit.lat,hit.lon,hit.label);
   else if(res)res.textContent='⚠ Adresse nicht gefunden – bitte genauer eingeben (Straße Nr, PLZ Ort).';
 }
-async function _deskGpsSave(i){
+async function _deskGpsSave(){
   if(!_deskGpsPending)return;
-  const f=taskFotos&&taskFotos[i];if(!f)return;
+  const f=_deskGpsFoto;if(!f)return; // b716: Objekt statt Listenplatz – siehe _deskGpsDialogKern
   const btn=document.getElementById('_deskGpsSaveBtn');
   if(btn){btn.disabled=true;btn.textContent='⏳ Speichere…';}
   const lat=_deskGpsPending.lat,lon=_deskGpsPending.lon;
@@ -43606,7 +43721,10 @@ window.Dachplan=(function(){
      +'</div>'
      +'<div id="dpPhoto" class="dp-hidden"><span class="x" id="dpPhotoX">✕</span><img id="dpPhotoImg">'
       +'<div id="dpPhotoCap" style="position:absolute;left:12px;right:12px;bottom:84px;color:#fff;background:rgba(0,0,0,.55);border-radius:8px;padding:8px 10px;font-size:15px;display:none"></div>'
-      +'<button class="dpb" id="dpPhotoText" style="position:absolute;bottom:20px;left:50%;transform:translateX(-50%);z-index:2;border-color:#2d7ef7;color:#7db4ff">📝 Text</button></div>'; /* b482 */
+      +'<div style="position:absolute;bottom:20px;left:50%;transform:translateX(-50%);z-index:2;display:flex;gap:8px">'
+      +'<button class="dpb" id="dpPhotoText" style="border-color:#2d7ef7;color:#7db4ff">📝 Text</button>' /* b482 */
+      +'<button class="dpb" id="dpPhotoInfo" title="Aufnahmedaten / Ort anzeigen und korrigieren">ℹ</button>' /* b716 */
+      +'</div></div>';
     document.body.appendChild(d);
     E.screen=d;E.mapEl=d.querySelector('#dpMap');E.imapEl=d.querySelector('#dpImap');E.sheet=d.querySelector('#dpSheet');
     E.thumbs=d.querySelector('#dpThumbs');E.photo=d.querySelector('#dpPhoto');E.photoImg=d.querySelector('#dpPhotoImg');E.msg=d.querySelector('#dpMsg');
@@ -43631,6 +43749,14 @@ window.Dachplan=(function(){
     q('#dpDel').onclick=()=>{const p=cur();if(!p)return;if(!confirm('Pin '+p.nr+' löschen?'))return;dp.pins=dp.pins.filter(x=>x.id!==p.id);sel=null;closeSheet();renderPins();save();};
     q('#dpPhotoX').onclick=()=>E.photo.classList.add('dp-hidden');
     q('#dpPhotoText').onclick=()=>{if(window._dpPhotoFo)dpFotoText(window._dpPhotoFo);}; // b482
+    // b716: Aufnahmeort/Datum ansehen UND korrigieren – gleicher Kern wie bei den
+    // Auftragsfotos. i=-1, weil ein Pin-Foto keinen Platz in `taskFotos` hat; der vierte
+    // Schalter holt „📍 korrigieren" trotzdem dazu (Wunsch Frank 19.08.).
+    q('#dpPhotoInfo').onclick=function(){
+      if(!window._dpPhotoFo)return;
+      if(typeof _showFotoExifKern!=='function'){say('Aufnahmedaten hier nicht verfügbar','error');return;}
+      _showFotoExifKern(window._dpPhotoFo,-1,this,true);
+    };
     E.photo.onclick=ev=>{if(ev.target===E.photo)E.photo.classList.add('dp-hidden');};
     built=true;
   }
@@ -43680,13 +43806,51 @@ window.Dachplan=(function(){
   function closeSheet(){E.sheet.classList.remove('show');}
 
   /* ---- Fotos (Drive) ---- */
+  /* b716: Aufnahmedaten in die verkleinerte Fassung übertragen.
+     ⛔ Das VERKLEINERN darf NICHT einfach entfallen (der naheliegende Weg): `dpUpload`
+     kennt nur den einfachen Upload, und der scheitert ab ~5 MB – dieselbe Falle, die in
+     b548 für `_driveUploadGeneric` schon einmal repariert werden musste. Heute schützt
+     allein das Verkleinern den Dachplan davor; ohne es blieben große Handy-Fotos
+     stillschweigend liegen ("Upload fehlgeschlagen"). Aus "Ort fehlt" würde "Foto fehlt".
+     Deshalb: klein rechnen wie bisher, Daten hinterher wieder hineinschreiben.
+     Vorbild ist der erprobte Weg am Handy (`_mobExifTransplant`, 06_PAM-Mobil), samt
+     seiner Ausnahmeliste – dort steht auch, WARUM jede Ausnahme nötig ist. */
+  async function _dpExifUebernehmen(original,kleinDataUrl){
+    try{
+      if(!window.piexif||!original)return kleinDataUrl;
+      const typ=(original.type||'').toLowerCase();
+      if(!/jpe?g/.test(typ)&&!/\.jpe?g$/i.test(original.name||''))return kleinDataUrl;
+      if(!/^data:image\/jpe?g/i.test(kleinDataUrl))return kleinDataUrl;
+      const origUrl=await new Promise((res,rej)=>{const fr=new FileReader();fr.onload=e=>res(e.target.result);fr.onerror=rej;fr.readAsDataURL(original);});
+      if(!/^data:image\/jpe?g/i.test(origUrl))return kleinDataUrl;
+      const src=piexif.load(origUrl);
+      const dim=await new Promise(res=>{const i=new Image();i.onload=()=>res({w:i.naturalWidth,h:i.naturalHeight});i.onerror=()=>res(null);i.src=kleinDataUrl;});
+      const z=src['0th']||{},ex=src['Exif']||{};
+      const keep={'0th':Object.assign({},z),'Exif':Object.assign({},ex),'GPS':src['GPS']||{},'1st':{},'thumbnail':null};
+      delete keep['0th'][piexif.ImageIFD.Orientation];  // die verkleinerte Fassung steht schon aufrecht
+      delete keep['0th'][piexif.ImageIFD.ImageWidth];
+      delete keep['0th'][piexif.ImageIFD.ImageLength];
+      delete keep['Exif'][piexif.ExifIFD.MakerNote];    // Binärblock mit toten Verweisen
+      if(dim){keep['Exif'][piexif.ExifIFD.PixelXDimension]=dim.w;keep['Exif'][piexif.ExifIFD.PixelYDimension]=dim.h;}
+      if(!Object.keys(keep['GPS']).length&&!Object.keys(keep['0th']).length&&!Object.keys(keep['Exif']).length)return kleinDataUrl;
+      let bytes;
+      try{bytes=piexif.dump(keep);}
+      catch(eDump){ // exotische Feldtypen → Minimalsatz (Ort/Datum/Kamera), wie am Handy
+        const mini={'0th':{},'Exif':{},'GPS':src['GPS']||{},'1st':{},'thumbnail':null};
+        [piexif.ImageIFD.Make,piexif.ImageIFD.Model,piexif.ImageIFD.DateTime].forEach(t=>{if(z[t]!==undefined)mini['0th'][t]=z[t];});
+        [piexif.ExifIFD.DateTimeOriginal,piexif.ExifIFD.DateTimeDigitized].forEach(t=>{if(ex[t]!==undefined)mini['Exif'][t]=ex[t];});
+        bytes=piexif.dump(mini);
+      }
+      return piexif.insert(bytes,kleinDataUrl);
+    }catch(e){console.warn('[Dachplan-EXIF]',e);return kleinDataUrl;}
+  }
   async function addPhotos(files){
     const p=cur();if(!p)return;if(!p.fotos)p.fotos=[];
     const folderId=dpFolder();if(!folderId){say('Kein Drive-Ordner am Auftrag hinterlegt','error');return;}
     if(typeof gdriveToken==='undefined'||!gdriveToken){say('Bitte zuerst mit Google Drive verbinden');return;}
     for(const f of files){if(!/^image\//.test(f.type||''))continue;say('Foto wird hochgeladen…');
-      let up=f;try{const sc=await scaleImg(f,1600,0.82);up=await dataUrlToFile(sc.url,(f.name||'foto')+'.jpg');}catch(_){}
-      try{const meta=await dpUpload(up,folderId);const fo={driveId:meta.id};p.fotos.push(fo);drawThumbs(p);save();say('Foto gespeichert');}catch(e){say('Upload fehlgeschlagen','error');}}
+      let up=f;try{const sc=await scaleImg(f,1600,0.82);const mitExif=await _dpExifUebernehmen(f,sc.url);up=await dataUrlToFile(mitExif,(f.name||'foto')+'.jpg');}catch(_){}
+      try{const meta=await dpUpload(up,folderId);const fo={driveId:meta.id,ts:_fotoTsFromFile(f)};p.fotos.push(fo);drawThumbs(p);save();say('Foto gespeichert');}catch(e){say('Upload fehlgeschlagen','error');}}
   }
   // b715: kein roher öffentlicher Drive-Link mehr (lud nur, wenn der Browser zufällig eine
   // passende Google-Sitzung hatte – sonst blieb die Kachel lautlos leer/schwarz). Cache-Treffer
