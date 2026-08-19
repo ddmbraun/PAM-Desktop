@@ -9363,7 +9363,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-18 · #714'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-18-b714) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-19 · #715'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-19-b715) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -43557,6 +43557,7 @@ window.Dachplan=(function(){
   +'.dpThumbs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:6px}'
   +'.dpThumb{position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;background:#000}.dpThumb img{width:100%;height:100%;object-fit:cover;cursor:pointer}'
   +'.dpThumb b{position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);color:#fff;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;cursor:pointer}'
+  +'.dpThumb.fallback::before{content:"🖼️";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:32px;color:#9aa3b2}' /* b715: Platzhalter bei echtem Ladefehler statt leerer schwarzer Kachel */
   +'.dprow{display:flex;gap:8px}.dprow>*{flex:1}'
   +'#dpListPanel{position:absolute;left:0;top:56px;bottom:0;width:320px;background:#0f1115;z-index:1300;overflow:auto;padding:12px;border-right:1px solid #2a2f3a}'
   +'.dpLi{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #2a2f3a;border-radius:12px;margin-bottom:8px;background:#1e222b;cursor:pointer}'
@@ -43687,15 +43688,28 @@ window.Dachplan=(function(){
       let up=f;try{const sc=await scaleImg(f,1600,0.82);up=await dataUrlToFile(sc.url,(f.name||'foto')+'.jpg');}catch(_){}
       try{const meta=await dpUpload(up,folderId);const fo={driveId:meta.id};p.fotos.push(fo);drawThumbs(p);save();say('Foto gespeichert');}catch(e){say('Upload fehlgeschlagen','error');}}
   }
-  function fotoThumb(fo){return fo.driveId?('https://drive.google.com/thumbnail?id='+fo.driveId+'&sz=w600'):(fo.dataUrl||'');}
+  // b715: kein roher öffentlicher Drive-Link mehr (lud nur, wenn der Browser zufällig eine
+  // passende Google-Sitzung hatte – sonst blieb die Kachel lautlos leer/schwarz). Cache-Treffer
+  // sofort, sonst über den angemeldeten, gebremsten Weg nachladen (dieselben Bausteine, die
+  // Bautagebuch-Bericht/Foto-Sektion schon länger benutzen: _fetchDesktopFotoBlob/_pamLadeSchlange).
+  function _dpFotoSofort(fo){return fo.driveId?(_desktopFotoBlobCache.get(fo.driveId)||''):(fo.dataUrl||'');}
   function drawThumbs(p){const box=E.thumbs;box.innerHTML='';(p.fotos||[]).forEach((fo,i)=>{const d=document.createElement('div');d.className='dpThumb';
     if(fo.driveId){d.dataset.hvid=fo.driveId;d.dataset.hvtitel=fo.caption||('Foto '+(i+1));} // b572 (Punkt 5): Hover zeigt die Miniatur groß
-    const img=document.createElement('img');img.src=fotoThumb(fo);img.onclick=()=>showPhoto(fo);const del=document.createElement('b');del.textContent='×';del.onclick=ev=>{ev.stopPropagation();p.fotos.splice(i,1);drawThumbs(p);save();};d.appendChild(img);d.appendChild(del);
+    const img=document.createElement('img');
+    const sofort=_dpFotoSofort(fo);
+    if(sofort)img.src=sofort;else if(fo.driveId)_pamLadeSchlange(()=>loadDesktopFotoThumb(img,fo.driveId));
+    img.onclick=()=>showPhoto(fo);const del=document.createElement('b');del.textContent='×';del.onclick=ev=>{ev.stopPropagation();p.fotos.splice(i,1);drawThumbs(p);save();};d.appendChild(img);d.appendChild(del);
     if(fo.caption){const c=document.createElement('span');c.textContent=fo.caption;c.style.cssText='position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.62);color:#fff;font-size:10px;line-height:1.3;padding:2px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;';d.appendChild(c);} // b482: Foto-Text als Balken (kommt u.a. vom Tablet)
     box.appendChild(d);});}
-  function showPhoto(fo){window._dpPhotoFo=fo; /* b482: für 📝-Text-Knopf merken */
+  async function showPhoto(fo){window._dpPhotoFo=fo; /* b482: für 📝-Text-Knopf merken */
     try{const cap=E.screen.querySelector('#dpPhotoCap');if(cap){cap.textContent=fo.caption||'';cap.style.display=fo.caption?'':'none';}}catch(_){}
-    E.photoImg.src=fo.driveId?('https://drive.google.com/thumbnail?id='+fo.driveId+'&sz=w1600'):(fo.dataUrl||'');E.photo.classList.remove('dp-hidden');}
+    E.photoImg.src='';E.photo.classList.remove('dp-hidden'); // b715: erst leeren, sonst hängt kurz das vorige Foto im Vollbild
+    const sofort=_dpFotoSofort(fo);
+    if(sofort){E.photoImg.src=sofort;return;}
+    if(!fo.driveId){say('Kein Foto vorhanden','error');return;}
+    const url=await _fetchDesktopFotoBlob(fo.driveId);
+    if(window._dpPhotoFo!==fo)return; // b715: zwischenzeitlich wurde ein anderes Foto geöffnet
+    if(url)E.photoImg.src=url;else say('Foto konnte nicht geladen werden – bitte Google-Anmeldung prüfen','error');}
   // b482: Text pro Pin-Foto (wie Mobil v116) – Anzeige + Bearbeitung am Desktop
   function dpFotoText(fo){
     const old=document.getElementById('dpFotoTextPopup');if(old)old.remove();
