@@ -9363,7 +9363,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-18 · #713'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-18-b713) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-18 · #714'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-18-b714) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -15460,6 +15460,72 @@ function _objSammle(){
   return out;
 }
 
+// ══ b714: Jahreswechsel-Ordner für Immobilien-Objekte ═══════════════════════
+// Frank 18.08.: „es ist ganz schnell 2027, und dann hab ich es vergessen" – der
+// Drive-Ordner-Verweis (t.gdrive/t.dokOrdner) wird beim Anlegen EINMAL gesetzt
+// und wechselt sonst nie von selbst zum neuen Jahr; die URL enthält nur eine
+// Ordner-ID, kein Jahr (das steht nur im sichtbaren Drive-Ordnernamen). Neues
+// Feld t.wartungsjahr hält fest, für welches Jahr der aktuelle Ordner gilt.
+// ⚠ Fehlt das Feld (kompletter Altbestand), wird NICHTS gemeldet – ohne
+// bekanntes Startjahr lässt sich kein Rückstand behaupten. Muss beim
+// bestehenden WBG-Bestand einmalig per Konsolen-Skript nachgetragen werden.
+function _wjVeraltet(t){
+  return !!(t&&t.wartungsjahr&&t.wartungsjahr<new Date().getFullYear());
+}
+function _wjSammle(){
+  var out=[];
+  Object.keys(boards||{}).forEach(function(bn){
+    if(bn.startsWith('_'))return;
+    if((boardTypes[bn]||'baustelle')!=='immobilie')return;
+    (boards[bn]||[]).forEach(function(t){
+      if(!t||t.archiviert||t.spaeterBearbeiten)return;
+      if(!(t.turnusListe||[]).length)return;
+      if(_wjVeraltet(t))out.push(t);
+    });
+  });
+  return out;
+}
+function _wjZahl(){return _wjSammle().length;}
+
+// Legt „<Jahr>_Wartung_<Adresse>" als Geschwisterordner im STABILEN Objektordner
+// (t.gdriveOrdner – NICHT der Jahresordner selbst, siehe b642-Kommentar
+// „gehört dem Objekt, nicht der Auftragskarte") an, über _driveGetOrCreateFolder
+// also wiederholbar ohne Doppel-Anlage (gleiches Muster wie USB-Aufträge b655).
+// Der alte Jahresordner bleibt unverändert stehen – reines Archiv.
+async function _wjRolloverEins(t,neuesJahr){
+  var parentFid=_extractFolderIdFromUrl(t.gdriveOrdner||'');
+  if(!parentFid)return{ok:false,grund:'kein Objektordner (gdriveOrdner) hinterlegt'};
+  var adresse=(t.adresse||t.title||'Objekt').replace(/[\\/:*?"<>|]/g,'-').substring(0,80).replace(/[. ]+$/,'')||'Objekt';
+  var name=neuesJahr+'_Wartung_'+adresse;
+  try{
+    var newId=await _driveGetOrCreateFolder(name,parentFid);
+    var url='https://drive.google.com/drive/folders/'+newId;
+    t.gdrive=url;t.dokOrdner=url;t.wartungsjahr=neuesJahr;
+    return{ok:true};
+  }catch(e){return{ok:false,grund:e.message};}
+}
+
+async function _wjOeffnen(){
+  var liste=_wjSammle();
+  if(!liste.length){showToast('Alle Jahresordner sind aktuell','success');return;}
+  if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden','error');return;}
+  var neuesJahr=new Date().getFullYear();
+  var text='Für '+liste.length+' Objekt(e) wird ein neuer Ordner „'+neuesJahr+'_Wartung_<Adresse>" angelegt\n'
+    +'(der alte Jahresordner bleibt unverändert als Archiv stehen):\n\n'
+    +liste.map(function(t){return '· '+(t.adresse||t.title||'?')+' (bisher '+t.wartungsjahr+')';}).join('\n')
+    +'\n\nJetzt anlegen?';
+  if(!confirm(text))return;
+  var ok=0,fehler=[];
+  for(var i=0;i<liste.length;i++){
+    var r=await _wjRolloverEins(liste[i],neuesJahr);
+    if(r.ok){ok++;await autoSave();}
+    else fehler.push((liste[i].adresse||liste[i].title||'?')+': '+r.grund);
+  }
+  render();
+  if(fehler.length){showToast('✓ '+ok+' umgestellt, ⚠ '+fehler.length+' fehlgeschlagen (Konsole prüfen)','warning',6000);console.warn('[Jahreswechsel] Fehlgeschlagen:',fehler);}
+  else showToast('✓ '+ok+' Jahresordner angelegt und umgestellt','success');
+}
+
 function renderObjekte(){
   var mc=document.getElementById('mainContent'); if(!mc)return;
   var liste=_objSammle();
@@ -15539,6 +15605,14 @@ function renderObjekte(){
        return '<button class="kal-chip" onclick="_rglOeffnen()"'+(_n?' style="color:#E24B4A;border-color:#E24B4A;font-weight:700;"':'')
          +' title="Rechnungen zu den wiederkehrenden Leistungen – was offen ist und, auf Wunsch, was schon abgerechnet wurde. Über alle Jahre.">RE Rechnungen'
          +(_n?' ('+_n+' offen)':'')+'</button>';
+     })()
+    // b714: nur sichtbar, wenn wirklich etwas ansteht – die meiste Zeit im Jahr
+    // gibt es hier nichts zu tun, ein Dauerknopf wäre nur Ablenkung.
+    +(function(){
+       var _wj=_wjZahl();
+       if(!_wj)return '';
+       return '<button class="kal-chip" onclick="_wjOeffnen()" style="color:#E24B4A;border-color:#E24B4A;font-weight:700;"'
+         +' title="Diese Objekte zeigen noch auf den Wartungs-Ordner eines vergangenen Jahres">🔄 Jahresordner ('+_wj+')</button>';
      })()
     // b695: derselbe Test-Schalter wie im Task-Fenster (b694), hier zusätzlich –
     // damit man beide Ansichten mit einem Klick zusammen umschaltet.
