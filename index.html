@@ -9363,7 +9363,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-20 · #721'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-20-b721) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-20 · #722'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-20-b722) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -13932,6 +13932,56 @@ function _mergeNotizen(remoteList,localList){
   // Union per ts+text, Reihenfolge: Remote-Zeitordnung, dann neue lokale ans Ende
   return _mergeListByKey(remoteList,localList,n=>((n.ts||'')+'|'+(n.text||'')));
 }
+/* b722: Dachplan bei Schreib-Konflikten ZUSAMMENFÜHREN statt eine Seite komplett
+   gewinnen zu lassen. Bis b721 stand `dachplan` auf keiner Merge-Liste – hatte der
+   Desktop den Dachplan seit dem Öffnen angefasst, gewann seine Fassung vollständig
+   und warf gleichzeitige Handy-Pins still weg (dieselbe Verlustart wie b717, nur
+   über den Sync-Weg; Gegenstück am Handy: v211).
+   Regeln wie bei fotos/checkliste: Pins nach Kennung vereinigen; beim selben Pin
+   gewinnen die lokalen Felder, seine Foto-Liste wird vereinigt (kein Foto-Verweis
+   geht verloren). Bewusst in Kauf genommen (Hausregel der übrigen Listen): ein auf
+   dem anderen Gerät gelöschter Pin kann im Konfliktfall wieder auftauchen – lieber
+   ein Wiedergänger als ein Verlust. `nextNr` wird auf das Maximum gehoben, damit
+   nach der Vereinigung keine Pin-Nummer doppelt entsteht. */
+function _dachplanKonfliktMerge(remoteDp,localDp){
+  if(!remoteDp||!localDp)return localDp||remoteDp;
+  const m=Object.assign({},remoteDp,localDp); // Ansicht/Bild/Kalibrierung: lokal gewinnt, Remote füllt Fehlendes
+  /* Foto-Union je Pin: dieselbe Aufnahme erkennt man an `key` ODER `driveId` –
+     ein Nachzügler-Upload ergänzt driveId am selben key, ein Desktop-Foto trägt
+     nur driveId. Beim Zusammenlegen bleiben BEIDE Kennungen erhalten; eine
+     vorhandene darf nie vom Anlege-Zustand {key,driveId:null} überschrieben werden. */
+  const fotoUnion=(rF,lF)=>{
+    const out=[];const same=(a,b)=>!!(a&&b&&((a.key&&b.key&&a.key===b.key)||(a.driveId&&b.driveId&&a.driveId===b.driveId)));
+    for(const f of (Array.isArray(rF)?rF:[]))if(f)out.push(f);
+    for(const f of (Array.isArray(lF)?lF:[])){
+      if(!f)continue;
+      const i=out.findIndex(x=>same(x,f));
+      if(i<0){out.push(f);continue;}
+      const zs=Object.assign({},out[i],f);
+      if(out[i].driveId&&!zs.driveId)zs.driveId=out[i].driveId;
+      if(out[i].key&&!zs.key)zs.key=out[i].key;
+      out[i]=zs;
+    }
+    return out;
+  };
+  const rPins=Array.isArray(remoteDp.pins)?remoteDp.pins:[];
+  const lPins=Array.isArray(localDp.pins)?localDp.pins:[];
+  const out=[];const seen=new Set();
+  for(const rp of rPins){
+    if(!rp||rp.id==null){if(rp)out.push(rp);continue;}
+    seen.add(String(rp.id));
+    const lp=lPins.find(x=>x&&String(x.id)===String(rp.id));
+    if(!lp){out.push(rp);continue;}
+    const mp=Object.assign({},rp,lp);
+    mp.fotos=fotoUnion(rp.fotos,lp.fotos);
+    out.push(mp);
+  }
+  for(const lp of lPins){if(!lp)continue;if(lp.id==null||!seen.has(String(lp.id)))out.push(lp);}
+  m.pins=out;
+  let maxNr=0;for(const p of out){const n=Number(p&&p.nr);if(isFinite(n)&&n>maxNr)maxNr=n;}
+  m.nextNr=Math.max(Number(remoteDp.nextNr)||1,Number(localDp.nextNr)||1,maxNr+1);
+  return m;
+}
 
 // ── Resumable Upload: Two-Step-Verfahren (Session-Init + Byte-Transfer) ──
 // Robuster bei instabilen Netzwerkverbindungen. Geeignet für alle Dateigrössen.
@@ -14102,6 +14152,14 @@ async function gdriveSaveData() {
                   // Fix: checkliste und kontakte mergen statt überschreiben
                   mergedTask.checkliste=_mergeListByKey(remoteTask&&remoteTask.checkliste,lt.checkliste,c=>((c.text||'')+'|'+(c.done?'1':'0')));
                   mergedTask.kontakte=_mergeListByKey(remoteTask&&remoteTask.kontakte,lt.kontakte,k=>((k.rolle||'')+'|'+(k.name||'')+'|'+(k.tel||'')));
+                  // b722: Dachplan – NUR wenn er hier seit dem Öffnen wirklich geändert
+                  // wurde (dann hat die Snapshot-Schleife oben die lokale Fassung gesetzt,
+                  // erkennbar an der Referenz), wird mit dem Remote-Stand vereinigt statt
+                  // ihn zu ersetzen. Unverändert → Remote (Handy) bleibt wie bisher –
+                  // dort Gelöschtes bleibt dann gelöscht (siehe _dachplanKonfliktMerge).
+                  if(mergedTask.dachplan===lt.dachplan&&remoteTask&&remoteTask.dachplan){
+                    const _dpM=_dachplanKonfliktMerge(remoteTask.dachplan,lt.dachplan);if(_dpM)mergedTask.dachplan=_dpM;
+                  }
                   if(remoteTask){merged[remoteBoardKey][remoteIdx]=mergedTask;}
                   else{if(!merged[k])merged[k]=[];merged[k].push(mergedTask);}
                   break;
