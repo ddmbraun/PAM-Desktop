@@ -9363,7 +9363,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-20 · #723'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-20-b723) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-20 · #724'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-20-b724) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -14633,6 +14633,10 @@ function loadFromObject(data){
   try{_pamMigrateOldMerges();}catch(e){console.warn('[PAM] _pamMigrateOldMerges:',e);}
   // b719: Waechter gegen doppelte Karten - zaehlt nur und meldet, aendert NICHTS
   try{_pamDublettenWaechter();}catch(e){console.warn('[PAM] _pamDublettenWaechter:',e);}
+  // b724: offener Dachplan nimmt den Auftrag frisch in die Hand – nach dem Neuaufbau
+  // von boards zeigten seine Verweise sonst auf Karteileichen (siehe Dachplan.rebind;
+  // gleiche Bauart wie der _kalPick-Abwurf oben: hier laufen ALLE Lade-Wege durch).
+  try{if(window.Dachplan&&Dachplan.rebind)Dachplan.rebind();}catch(e){console.warn('[Dachplan] rebind:',e);}
 }
 
 
@@ -44060,7 +44064,15 @@ window.Dachplan=(function(){
     _startLay.addTo(map);L.control.layers(_lays,null,{position:'topright'}).addTo(map);
     map.on('baselayerchange',e=>{try{localStorage.setItem('pam_dp_layer',e.name);}catch(_){}}); // b526
     map.on('click',e=>{if(addMode)addPin(e.latlng.lat,e.latlng.lng);else say('Zum Setzen erst „➕ Pin" antippen');});
-    map.on('moveend',()=>{if(dp&&dp.base!=='bild'){try{dp.center=[map.getCenter().lat,map.getCenter().lng];dp.zoom=map.getZoom();saveViewSoon();}catch(_){}}});
+    /* b724: Mini-Bewegungen NICHT mehr speichern. Jedes Gerät rundet beim Öffnen den
+       Ausschnitt minimal anders (gemessen 20.08.: 7. Nachkommastelle, ~3 mm) – drei
+       offene Geräte überschrieben sich damit ENDLOS gegenseitig den Ausschnitt
+       (alle 10–20 s ein Drive-Schreibvorgang, protokolliert). Erst ab ~1 m Bewegung
+       oder Zoom-Änderung wird gespeichert – „öffnet, wo ich zuletzt war" bleibt. */
+    map.on('moveend',()=>{if(dp&&dp.base!=='bild'){try{
+      const c=map.getCenter(),z=map.getZoom(),alt=dp.center;
+      if(!alt||Math.abs(alt[0]-c.lat)>1e-5||Math.abs(alt[1]-c.lng)>1e-5||dp.zoom!==z){dp.center=[c.lat,c.lng];dp.zoom=z;saveViewSoon();}
+    }catch(_){}}});
     return true;
   }
   function cur(){return dp&&sel?dp.pins.find(p=>p.id===sel):null;}
@@ -44340,7 +44352,10 @@ window.Dachplan=(function(){
     if(imap)return true;if(typeof L==='undefined'){say('Leaflet nicht geladen');return false;}
     imap=L.map(E.imapEl,{crs:L.CRS.Simple,zoomControl:true,minZoom:-5,maxZoom:6,attributionControl:false,zoomSnap:0.1,zoomDelta:0.25,wheelPxPerZoomLevel:180}); // b480: Bild-Modus noch feiner zoomen (Zehntel-Stufen)
     imap.on('click',e=>{if(calStep>0){onCalibTap(e.latlng);return;}if(!dp.imgDriveId){say('Erst „📷 Bild" laden');return;}if(addMode)addImgPin(e.latlng);else say('Zum Setzen erst „➕ Pin" antippen');});
-    imap.on('moveend',()=>{if(dp&&dp.base==='bild'){try{dp.imgC=[imap.getCenter().lat,imap.getCenter().lng];dp.imgZ=imap.getZoom();saveViewSoon();}catch(_){}}});
+    imap.on('moveend',()=>{if(dp&&dp.base==='bild'){try{ // b724: gleiche Mini-Bewegungs-Bremse wie auf der Karte (Einheiten = Bildpunkte)
+      const c=imap.getCenter(),z=imap.getZoom(),alt=dp.imgC;
+      if(!alt||Math.abs(alt[0]-c.lat)>0.5||Math.abs(alt[1]-c.lng)>0.5||dp.imgZ!==z){dp.imgC=[c.lat,c.lng];dp.imgZ=z;saveViewSoon();}
+    }catch(_){}}});
     return true;
   }
   function showBaseImg(url){if(!imap)return;try{if(imgLayer)imap.removeLayer(imgLayer);}catch(_){}imgLayer=L.imageOverlay(url,bnd()).addTo(imap);imap.setMaxBounds(bnd());}
@@ -44438,7 +44453,10 @@ window.Dachplan=(function(){
     Object.keys(markers).forEach(k=>{try{if(map)map.removeLayer(markers[k]);}catch(_){}try{if(imap)imap.removeLayer(markers[k]);}catch(_){}delete markers[k];});
     closeSheet();setBase('map');save();say('Dachplan zurückgesetzt');
   }
-  function close(){_verschiebePin=null;/* b718: sonst wäre der Pin beim nächsten Öffnen noch beweglich */try{liveStop();}catch(_){}if(map){try{dp.center=[map.getCenter().lat,map.getCenter().lng];dp.zoom=map.getZoom();}catch(e){}}if(E.screen)E.screen.classList.add('dp-hidden');save();}
+  function close(){_verschiebePin=null;/* b718: sonst wäre der Pin beim nächsten Öffnen noch beweglich */try{liveStop();}catch(_){}
+    if(map){try{const c=map.getCenter(),z=map.getZoom(),alt=dp.center; // b724: gleiche Bremse wie moveend – sonst schrieb das Schließen das 3-mm-Delta doch
+      if(!alt||Math.abs(alt[0]-c.lat)>1e-5||Math.abs(alt[1]-c.lng)>1e-5||dp.zoom!==z){dp.center=[c.lat,c.lng];dp.zoom=z;}}catch(e){}}
+    if(E.screen)E.screen.classList.add('dp-hidden');save();}
   // b525 Paket 6: Dachplan direkt auf einem Pin öffnen (Aufruf aus dem Bautagebuch).
   // Wartet bis Karte+Marker stehen, zoomt hin, öffnet das Pin-Fenster; Bild-Modus
   // ohne Marker → nach Timeout wenigstens das Pin-Fenster.
@@ -44461,7 +44479,26 @@ window.Dachplan=(function(){
       }catch(e){clearInterval(_focusTimer);}
     },400);
   }
-  return {open,close,openPin};
+  /* b724: Nach jedem Daten-Neuaufbau (loadFromObject – Poll, Konflikt-Abgleich, Datei,
+     Backup, Import, Start) zeigen `t` und `dp` sonst auf KARTEILEICHEN – boards hält
+     dann lauter NEUE Objekte. Alles, was der offene Dachplan danach ändert, landete im
+     toten Objekt und wurde nie gespeichert (Gegenstück am Handy: v214, dort mit dem
+     protokollierten Pin-Verlust vom 20.08. als Beweis). rebind() nimmt den Auftrag
+     frisch in die Hand und zeichnet die Pins nach – die Karte bleibt, wo sie ist. */
+  function rebind(){
+    try{
+      if(!E.screen||E.screen.classList.contains('dp-hidden'))return; // Dachplan zu – nichts zu tun
+      const frisch=getTask();
+      if(!frisch)return;
+      if(t===frisch&&dp===frisch.dachplan)return; // gleiche Objekte – nichts gebrochen
+      if(!frisch.dachplan||frisch.dachplan.mode!=='map')frisch.dachplan={mode:'map',base:'map',center:null,zoom:null,pins:[],nextNr:1};
+      t=frisch;dp=frisch.dachplan;
+      if(!dp.pins)dp.pins=[];if(!dp.nextNr)dp.nextNr=(dp.pins.length+1);if(!dp.base)dp.base='map';
+      if(sel&&!dp.pins.some(p=>p&&p.id===sel)){sel=null;closeSheet();} // gewählter Pin existiert nicht mehr
+      renderPins(); // deckt beide Modi (leitet im Bild-Modus auf renderImgPins)
+    }catch(e){console.warn('[Dachplan] rebind:',e);}
+  }
+  return {open,close,openPin,rebind};
 })();
 </script>
 
