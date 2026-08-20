@@ -9363,7 +9363,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-19 · #718'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-19-b718) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-20 · #719'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-20-b719) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -14573,6 +14573,202 @@ function loadFromObject(data){
   try{resumeRunningTimer();}catch(e){console.warn('[PAM]',e);}
   // Einmalige Bereinigung früherer Zusammenführungen (idempotent, meldet nur bei Änderung)
   try{_pamMigrateOldMerges();}catch(e){console.warn('[PAM] _pamMigrateOldMerges:',e);}
+  // b719: Waechter gegen doppelte Karten - zaehlt nur und meldet, aendert NICHTS
+  try{_pamDublettenWaechter();}catch(e){console.warn('[PAM] _pamDublettenWaechter:',e);}
+}
+
+
+// ── b719: Wächter gegen doppelte Karten ──────────────────────────────────────
+// Am 19.08.2026 lagen 30 überzählige Kopien in workboard.json: sechs Karten je sechsfach.
+// Erzeuger war das Konflikt-Speichern von PAM Mobil (dort mit v210 abgestellt). Weder der
+// Rechner noch das Handy haben je nachgesehen, ob eine Karte mehrfach in der Datei steht —
+// gefunden wurde es durch Zufall beim Zählen. loadFromObject übernimmt die Board-Listen
+// ungeprüft, buildSaveObject schreibt sie unverändert zurück.
+//
+// ⛔ Der Wächter räumt NICHTS von allein auf. Zwei Gründe, beide gemessen:
+//   1. Karten tragen kein „zuletzt geändert" — welche Kopie die neuere ist, lässt sich nicht
+//      bestimmen. Beim Handy-Fehler war es sogar die SPÄTERE (die lokale Fassung stand hinten).
+//   2. Die Sammler-Nummer fe_JJJJMMTT kommt aus dem Tagesdatum. Zwei Geräte am selben Tag
+//      erzeugen zwei VERSCHIEDENE Karten mit derselben Nummer — das ist kein Doppel.
+// Er zählt, hängt einen Balken hin und räumt erst nach ausdrücklichem Klick auf.
+// ⛔ Bewusst KEIN autoSave beim Erkennen: loadFromObject läuft auch mitten im Konflikt-
+//    Speichern (aus gdriveSaveData heraus) und alle 30 s beim Poll.
+let _pamDublettenGemeldet=0;
+
+// Findet Karten, deren id mehrfach vorkommt. Reine Lesefunktion.
+function _pamDublettenFinden(){
+  const jeId={};
+  Object.keys(boards||{}).forEach(function(bn){
+    const arr=boards[bn];
+    if(!Array.isArray(arr))return;
+    arr.forEach(function(t,i){
+      if(!t||typeof t!=='object'||!t.id)return;
+      (jeId[t.id]=jeId[t.id]||[]).push({board:bn,idx:i,txt:JSON.stringify(t),titel:t.title||''});
+    });
+  });
+  const out=[];
+  Object.keys(jeId).forEach(function(id){
+    const v=jeId[id];
+    if(v.length<2)return;
+    const brds={};v.forEach(function(x){brds[x.board]=1;});
+    out.push({
+      id:id,
+      titel:v[0].titel,
+      anzahl:v.length,
+      boards:Object.keys(brds),
+      gleich:v.every(function(x){return x.txt===v[0].txt;}),
+      sammler:/^fe_/.test(id),
+      orte:v.map(function(x){return{board:x.board,idx:x.idx};})
+    });
+  });
+  return out;
+}
+
+// Nur DAS darf der Knopf anfassen: inhaltsgleich, in EINEM Board, kein Tages-Sammler.
+function _pamDublettenAufraeumbar(liste){
+  return (liste||[]).filter(function(d){return d.gleich&&!d.sammler&&d.boards.length===1;});
+}
+function _pamDublettenSumme(liste){
+  return (liste||[]).reduce(function(s,d){return s+(d.anzahl-1);},0);
+}
+
+// Der Balken. Bleibt stehen, bis nichts mehr doppelt ist — keine Meldung, die weghuscht.
+function _pamDublettenBanner(anzahl){
+  let b=document.getElementById('_pamDublettenBanner');
+  if(!anzahl){if(b)b.remove();return;}
+  if(!b){
+    b=document.createElement('div');
+    b.id='_pamDublettenBanner';
+    b.style.cssText='position:fixed;left:50%;transform:translateX(-50%);z-index:99997;background:#B42318;color:#fff;padding:6px 14px;border-radius:0 0 10px 10px;font-size:12.5px;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,.3);max-width:94%;display:flex;align-items:center;gap:10px;';
+    const s=document.createElement('span');
+    s.id='_pamDublettenBannerText';
+    const k=document.createElement('button');
+    k.textContent='Ansehen und aufräumen';
+    k.style.cssText='flex-shrink:0;font-size:12px;font-weight:700;padding:3px 10px;border-radius:6px;border:1px solid rgba(255,255,255,.6);background:rgba(255,255,255,.15);color:#fff;cursor:pointer;';
+    k.onclick=function(){_pamDublettenFenster();};
+    b.appendChild(s);b.appendChild(k);
+    try{document.body.appendChild(b);}catch(e){return;}
+  }
+  // nicht auf dem Zwei-Fenster-Balken sitzen (der belegt oben die Mitte)
+  b.style.top=document.getElementById('_zweiFensterBanner')?'34px':'0';
+  const st=document.getElementById('_pamDublettenBannerText');
+  if(st)st.textContent='⚠ '+anzahl+(anzahl===1?' Karte liegt':' Karten liegen')+' mehrfach in der Datei';
+}
+
+// Läuft am Ende von loadFromObject — also auf allen sechs Ladewegen.
+function _pamDublettenWaechter(){
+  // ⛔ Nicht im Popup, nicht im Gast-Fenster, nicht in der Übergabe. Gründe:
+  //   · Das Popup zählt bewusst nicht als Instanz und zeigt deshalb auch keine
+  //     Zwei-Fenster-Warnung – sein Aufräum-Knopf schriebe die ganze Datei aus einem
+  //     Fenster heraus, das genau das nicht tun soll.
+  //   · Der Gast sieht nur EIN freigegebenes Board. Das Fenster listet aber Titel und
+  //     Board-Namen aus ALLEN Projekten – das wäre eine Preisgabe fremder Daten.
+  // Dieselbe erste Zeile benutzt der Heartbeat (_hbStart).
+  if(window._pamUebergabe||_pamIstPopupOderGast())return[];
+  const liste=_pamDublettenFinden();
+  const summe=_pamDublettenSumme(liste);
+  _pamDublettenBanner(summe);
+  if(summe&&_pamDublettenGemeldet!==summe){
+    console.warn('[PAM] '+summe+' überzählige Karten-Kopien:',liste.map(function(d){
+      return d.anzahl+'x '+d.id+' ('+d.boards.join(', ')+')'+(d.gleich?'':' – INHALT WEICHT AB')+(d.sammler?' – Tages-Sammler':'');
+    }));
+  }
+  _pamDublettenGemeldet=summe;
+  return liste;
+}
+
+// Das Fenster: erst zeigen, was da ist, dann fragen.
+function _pamDublettenFenster(){
+  const liste=_pamDublettenFinden();
+  if(!liste.length){_pamDublettenBanner(0);showToast('✅ Keine doppelten Karten mehr','success',3000);return;}
+  const ok=_pamDublettenAufraeumbar(liste);
+  const summeOk=_pamDublettenSumme(ok);
+  const alt=document.getElementById('_pamDublettenOverlay');if(alt)alt.remove();
+  const ov=document.createElement('div');
+  ov.id='_pamDublettenOverlay';
+  ov.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px;';
+  ov.addEventListener('click',function(e){if(e.target===ov)ov.remove();});
+  const box=document.createElement('div');
+  box.style.cssText='background:var(--bg2,#fff);color:var(--text1,#111);border-radius:12px;max-width:760px;width:100%;max-height:82vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,.35);padding:18px 20px;';
+  const h=document.createElement('div');
+  h.style.cssText='font-size:16px;font-weight:800;margin-bottom:6px;';
+  h.textContent='Doppelte Karten in der Datei';
+  const p=document.createElement('div');
+  p.style.cssText='font-size:12.5px;line-height:1.6;color:var(--text2,#555);margin-bottom:12px;';
+  p.textContent='Dieselbe Karte steht mehrfach in workboard.json. Auf dem Board erscheint sie deshalb mehrfach (nur die Heute-Ansicht fasst sie zusammen) – bearbeitet und gespeichert wird aber immer nur die ERSTE. Wird eine Karte gezogen, archiviert oder gelöscht, kann eine alte Kopie nach vorn rücken; alles seither Gearbeitete wäre dann still weg.';
+  box.appendChild(h);box.appendChild(p);
+  liste.forEach(function(d){
+    const aufraeumbar=ok.indexOf(d)>=0;
+    const z=document.createElement('div');
+    z.style.cssText='border-top:1px solid var(--border,#ddd);padding:8px 0;display:flex;gap:10px;align-items:flex-start;';
+    const n=document.createElement('span');
+    n.style.cssText='flex-shrink:0;font-weight:800;font-size:12px;padding:2px 7px;border-radius:5px;background:'+(aufraeumbar?'rgba(180,35,24,.12);color:#B42318':'rgba(180,103,7,.14);color:#B45309')+';';
+    n.textContent=d.anzahl+'x';
+    const m=document.createElement('div');m.style.cssText='flex:1;min-width:0;';
+    const t1=document.createElement('div');
+    t1.style.cssText='font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+    t1.textContent=d.titel||'(ohne Titel)';
+    const t2=document.createElement('div');
+    t2.style.cssText='font-size:11.5px;color:var(--text2,#666);margin-top:2px;';
+    t2.textContent=d.boards.join(' + ')+' · '+(aufraeumbar
+      ?'inhaltsgleich – kann aufgeräumt werden'
+      :(d.sammler?'Tages-Sammler (Foto-Eingang): gleiche Nummer, evtl. VERSCHIEDENE Karten – bitte von Hand ansehen'
+        :(!d.gleich?'⛔ die Kopien unterscheiden sich – nicht automatisch aufräumen'
+          :'⛔ liegt in mehreren Boards – bitte von Hand entscheiden')));
+    m.appendChild(t1);m.appendChild(t2);
+    z.appendChild(n);z.appendChild(m);
+    box.appendChild(z);
+  });
+  const leiste=document.createElement('div');
+  leiste.style.cssText='display:flex;gap:8px;justify-content:flex-end;margin-top:16px;border-top:1px solid var(--border,#ddd);padding-top:12px;';
+  if(summeOk){
+    const kOk=document.createElement('button');
+    kOk.textContent='🧹 '+summeOk+(summeOk===1?' Kopie':' Kopien')+' entfernen';
+    kOk.style.cssText='padding:7px 14px;border-radius:8px;border:none;background:#B42318;color:#fff;font-weight:700;font-size:13px;cursor:pointer;';
+    kOk.onclick=function(){_pamDublettenAufraeumen();};
+    leiste.appendChild(kOk);
+  }
+  const kZu=document.createElement('button');
+  kZu.textContent='Schließen';
+  kZu.style.cssText='padding:7px 14px;border-radius:8px;border:1px solid var(--border,#ccc);background:transparent;color:var(--text1,#111);font-weight:600;font-size:13px;cursor:pointer;';
+  kZu.onclick=function(){ov.remove();};
+  leiste.appendChild(kZu);
+  box.appendChild(leiste);
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+}
+
+// Räumt auf – NUR von Hand ausgelöst, nur die eindeutig gleichen Kopien.
+async function _pamDublettenAufraeumen(){
+  const liste=_pamDublettenAufraeumbar(_pamDublettenFinden());
+  const summe=_pamDublettenSumme(liste);
+  if(!summe){showToast('Nichts, was sich sicher aufräumen ließe','info',3500);return;}
+  if(!confirm(summe+' überzählige Kopie'+(summe===1?'':'n')+' entfernen?\n\nEs bleibt jeweils die ERSTE Karte stehen.\nAlle betroffenen Kopien sind inhaltsgleich – es geht nichts verloren.'))return;
+  const raus={};liste.forEach(function(d){raus[d.id]=true;});
+  let weg=0;
+  Object.keys(boards||{}).forEach(function(bn){
+    const arr=boards[bn];
+    if(!Array.isArray(arr))return;
+    const gesehen={};
+    boards[bn]=arr.filter(function(t){
+      if(!t||!t.id||!raus[t.id])return true;
+      if(gesehen[t.id]){weg++;return false;}
+      gesehen[t.id]=true;return true;
+    });
+  });
+  console.info('[PAM] '+weg+' doppelte Karten-Kopien entfernt:',Object.keys(raus));
+  const ov=document.getElementById('_pamDublettenOverlay');if(ov)ov.remove();
+  try{render();}catch(e){console.warn('[PAM] render nach Aufräumen:',e);}
+  await autoSave();
+  // ⛔ Erst NACH dem Speichern nachsehen und erst dann melden. autoSave() gibt keinen
+  // Erfolg zurück und steigt an vier Stellen still aus (laufender Save, gescheiterter
+  // Konflikt-Check, 412, 401/HTTP); außerdem holt der Konflikt-Abgleich seine Basis aus
+  // dem Drive-Stand – die Kopien können also zurückkommen. „entfernt und gespeichert"
+  // wäre dann eine Statuszeile, die niemand gemessen hat. Genau das kostet hier sonst Tage.
+  const _rest=_pamDublettenSumme(_pamDublettenAufraeumbar(_pamDublettenFinden()));
+  _pamDublettenWaechter();
+  if(_rest)showToast('⚠ Es wurde dazwischengeschrieben – '+_rest+' Kopie'+(_rest===1?'':'n')+' stehen wieder da. Bitte noch einmal aufräumen.','warning',9000);
+  else showToast('🧹 '+weg+(weg===1?' Kopie':' Kopien')+' entfernt und gespeichert','success',5000);
 }
 
 // ── Auto-Migration: bereinigt Archiv-Dubletten (idempotent, läuft beim Laden) ──
@@ -37934,13 +38130,20 @@ function _hbSchreiben(){try{localStorage.setItem(_HB_KEY,JSON.stringify({id:_pam
 
 function _zweiFensterBanner(an){
   let b=document.getElementById('_zweiFensterBanner');
-  if(!an){if(b)b.remove();return;}
+  if(!an){if(b){b.remove();_zweiFensterBannerNachziehen(false);}return;}
   if(b)return;
   b=document.createElement('div');
   b.id='_zweiFensterBanner';
   b.style.cssText='position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:99998;background:#B54708;color:#fff;padding:6px 16px;border-radius:0 0 10px 10px;font-size:12.5px;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,.3);max-width:94%;text-align:center;';
   b.textContent='⚠ PAM ist in einem weiteren Fenster geöffnet – bitte nur eines verwenden, sonst überschreiben sich Sortierungen gegenseitig';
-  try{document.body.appendChild(b);}catch(e){}
+  try{document.body.appendChild(b);_zweiFensterBannerNachziehen(true);}catch(e){}
+}
+// b719: Dieser Balken kommt im 20-Sekunden-Takt, der Dubletten-Balken nur beim Laden.
+// Ohne diese zwei Zeilen läge er (z-index 99998) über dem roten (99997) und dessen Knopf
+// wäre nicht mehr anklickbar – und der Poll räumt das nicht auf, weil er bei unveränderter
+// Datei gar nicht erst lädt.
+function _zweiFensterBannerNachziehen(an){
+  try{const d=document.getElementById('_pamDublettenBanner');if(d)d.style.top=an?'34px':'0';}catch(e){}
 }
 
 function _hbStart(){
