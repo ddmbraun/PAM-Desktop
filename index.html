@@ -9383,7 +9383,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-21 · #737'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-21-b737) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-21 · #738'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-21-b738) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -45214,7 +45214,7 @@ function _fdkStyle(){
     +'.fdk-kachel.vorschau{box-shadow:0 0 0 2px rgba(108,99,255,.55);}'
     +'.fdk-kachel.ins-vor{box-shadow:-5px 0 0 0 var(--accent);}.fdk-kachel.ins-nach{box-shadow:5px 0 0 0 var(--accent);}'
     +'.fdk-kbild{position:relative;width:100%;aspect-ratio:4/3;background:var(--bg3);border-radius:6px;overflow:hidden;}'
-    +'.fdk-kbild img{width:100%;height:100%;object-fit:contain;display:block;}'
+    +'.fdk-kbild img{width:100%;height:100%;object-fit:contain;display:block;pointer-events:none;-webkit-user-drag:none;}'
     +'.fdk-chip{position:absolute;left:4px;top:4px;font-size:10px;padding:1px 6px;border-radius:8px;background:rgba(0,0,0,.55);color:#fff;max-width:78%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}'
     +'.fdk-check{position:absolute;right:4px;top:4px;width:22px;height:22px;border-radius:50%;background:#6b7280;color:#fff;font-size:13px;font-weight:800;display:flex;align-items:center;justify-content:center;}'
     +'.fdk-kx{position:absolute;right:4px;top:4px;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;border:none;cursor:pointer;font-size:12px;line-height:22px;padding:0;}'
@@ -45357,29 +45357,51 @@ function _fdkSortiere(art){
   else L.sort((a,b)=>a.idx-b.idx);
   _fdkListeZeichnen();
 }
-/* Ziehen: _fdkDragIdx ≥ 0 heißt „internes Ziehen läuft" (unterscheidet von Explorer-Dateien) */
-function _fdkDragStart(ev,quelle,key){if(!_fdkState)return;_fdkDragIdx=1;_fdkState.drag={quelle:quelle,key:key};try{ev.dataTransfer.effectAllowed='move';ev.dataTransfer.setData('text/plain',String(key));}catch(e){}}
-function _fdkDragEnd(){_fdkDragIdx=-1;if(_fdkState)_fdkState.drag=null;document.querySelectorAll('.fdk-kachel.ins-vor,.fdk-kachel.ins-nach').forEach(r=>r.classList.remove('ins-vor','ins-nach'));document.querySelectorAll('.fdk-flaeche.ziel,.fdk-flaeche.ablegen').forEach(f=>f.classList.remove('ziel','ablegen'));}
+/* b738: „Läuft gerade ein internes Ziehen?" – Flagge UND Zustand müssen passen. Bleibt die
+   Flagge von einem abgebrochenen Ziehen stehen (kein dragend, weil die Quell-Kachel beim
+   Neuzeichnen verschwand), wird sie hier zurückgesetzt – sonst klemmte danach die
+   Explorer-Ablage. */
+function _fdkInternesZiehen(){
+  const aktiv=_fdkDragIdx>=0&&!!(_fdkState&&_fdkState.drag);
+  if(_fdkDragIdx>=0&&!aktiv)_fdkDragIdx=-1;
+  return aktiv;
+}
+function _fdkDragStart(ev,quelle,key){
+  if(!_fdkState)return;
+  _fdkDragIdx=1;_fdkState.drag={quelle:quelle,key:key};
+  try{ev.dataTransfer.effectAllowed='move';ev.dataTransfer.setData('text/plain',String(key));}catch(e){}
+}
+function _fdkDragEnd(){
+  _fdkDragIdx=-1;if(_fdkState)_fdkState.drag=null;
+  document.querySelectorAll('.fdk-kachel.ins-vor,.fdk-kachel.ins-nach').forEach(r=>r.classList.remove('ins-vor','ins-nach'));
+  document.querySelectorAll('.fdk-flaeche.ziel,.fdk-flaeche.ablegen').forEach(f=>f.classList.remove('ziel','ablegen'));
+}
 /* Fläche als Ziel verdrahten: echte Dateien → Upload (rechts: gleich ins Dokument);
    gezogene Kachel → rechts ans Ende bzw. links wieder heraus. Kachel-eigene Ziele
-   (Einfügemarke) halten das Ereignis vorher an. */
+   (Einfügemarke) halten das Ereignis vorher an.
+   b738: internes Ziehen hat VORRANG vor der Dateierkennung – ein gezogenes Bild trägt im
+   Browser auch „Dateien" mit sich; wer danach entscheidet, landet fälschlich bei der
+   Explorer-Ablage („kopieren"), und „kopieren" ist beim Verschieben nicht erlaubt → der
+   Browser verweigert den Drop. Genau das sah Frank am 21.08.: „Ziehen geht nicht". */
 function _fdkFlaecheVerdrahten(box,art){
   if(!box)return;
   box.addEventListener('dragover',ev=>{
-    const dateien=_fdkHatDateien(ev.dataTransfer);
-    if(_fdkDragIdx<0&&!dateien)return;
+    const intern=_fdkInternesZiehen();
+    const dateien=!intern&&_fdkHatDateien(ev.dataTransfer);
+    if(!intern&&!dateien)return;
     ev.preventDefault();
-    try{ev.dataTransfer.dropEffect=dateien?'copy':'move';}catch(e){}
-    box.classList.toggle('ablegen',dateien);box.classList.toggle('ziel',!dateien);
+    try{ev.dataTransfer.dropEffect=intern?'move':'copy';}catch(e){}
+    box.classList.toggle('ablegen',dateien);box.classList.toggle('ziel',intern);
   });
   box.addEventListener('dragleave',ev=>{if(!box.contains(ev.relatedTarget))box.classList.remove('ablegen','ziel');});
   box.addEventListener('drop',ev=>{
-    const dateien=_fdkHatDateien(ev.dataTransfer);
-    if(_fdkDragIdx<0&&!dateien)return;
+    const intern=_fdkInternesZiehen();
+    const dateien=!intern&&_fdkHatDateien(ev.dataTransfer);
+    if(!intern&&!dateien)return;
     ev.preventDefault();ev.stopPropagation();
     box.classList.remove('ablegen','ziel');
     if(dateien){_fdkDateienAbgelegt(ev.dataTransfer,art==='dok');return;}
-    const d=_fdkState&&_fdkState.drag;_fdkDragEnd();
+    const d=_fdkState.drag;_fdkDragEnd();
     if(!d)return;
     if(art==='dok'){if(d.quelle==='vorrat')_fdkDokEinfuegen(d.key);else _fdkDokVerschiebe(_fdkState.dok.indexOf(d.key),_fdkState.dok.length-1);}
     else if(d.quelle==='dok')_fdkDokEntfernen(d.key);
@@ -45392,7 +45414,7 @@ function _fdkKachelHtml(e,art,nr){
   if(art==='dok')badge='<div class="fdk-knr">Abb. '+nr+'</div>';
   else badge=drin?'<div class="fdk-knr grau">✓ im Dokument (Abb. '+nr+')</div>':'<div class="fdk-knr grau">'+esc(_fdkDatum(e.ts)||' ')+'</div>';
   return '<div class="fdk-kachel '+art+(drin?' drin':'')+(_fdkState.vorschauKey===e.key?' vorschau':'')+'" draggable="'+(drin?'false':'true')+'" data-key="'+esc(e.key)+'" title="'+esc(e.caption||e.name||'Foto')+'">'
-    +'<div class="fdk-kbild"><img alt="" data-fdk-id="'+esc(e.driveId)+'"'+(src?' src="'+esc(src)+'"':'')+'><span class="fdk-chip">'+esc(_fdkEtikett(e))+'</span>'
+    +'<div class="fdk-kbild"><img alt="" draggable="false" data-fdk-id="'+esc(e.driveId)+'"'+(src?' src="'+esc(src)+'"':'')+'><span class="fdk-chip">'+esc(_fdkEtikett(e))+'</span>'
     +(art==='dok'?'<button type="button" class="fdk-kx" data-x="'+esc(e.key)+'" title="aus dem Dokument nehmen">✕</button>':(drin?'<span class="fdk-check">✓</span>':''))+'</div>'
     +badge
     +'<div class="fdk-ktxt">'+esc(e.caption||e.name||'')+'</div>'
@@ -45448,13 +45470,13 @@ function _fdkDokVerschiebe(von,nach){const S=_fdkState;if(!S)return;const L=S.do
 function _fdkAlleRein(){const S=_fdkState;if(!S)return;S.liste.filter(e=>_fdkSichtbar(e,S.filter)&&S.dok.indexOf(e.key)<0).forEach(e=>S.dok.push(e.key));_fdkListeZeichnen();}
 function _fdkAlleRaus(){const S=_fdkState;if(!S)return;S.dok=[];_fdkListeZeichnen();}
 function _fdkTileDragOver(ev,el){
-  if(_fdkDragIdx<0)return;              // Dateien aus dem Explorer: übernimmt die Fläche
+  if(!_fdkInternesZiehen())return;       // Dateien aus dem Explorer: übernimmt die Fläche
   ev.preventDefault();try{ev.dataTransfer.dropEffect='move';}catch(e){}
   const r=el.getBoundingClientRect();const vorher=(ev.clientX-r.left)<r.width/2;
   el.classList.toggle('ins-vor',vorher);el.classList.toggle('ins-nach',!vorher);
 }
 function _fdkDokTileDrop(ev,el,i){
-  if(_fdkDragIdx<0||!_fdkState||!_fdkState.drag)return;
+  if(!_fdkInternesZiehen())return;
   ev.preventDefault();ev.stopPropagation();
   const d=_fdkState.drag;
   const r=el.getBoundingClientRect();const vorher=(ev.clientX-r.left)<r.width/2;
