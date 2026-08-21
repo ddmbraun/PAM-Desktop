@@ -9383,7 +9383,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-21 · #739'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-21-b739) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-21 · #740'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-21-b739) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -13982,6 +13982,11 @@ function _mergeNotizen(remoteList,localList){
 function _dachplanKonfliktMerge(remoteDp,localDp){
   if(!remoteDp||!localDp)return localDp||remoteDp;
   const m=Object.assign({},remoteDp,localDp); // Ansicht/Bild/Kalibrierung: lokal gewinnt, Remote füllt Fehlendes
+  /* b740: Ausnahme für die ANSICHT. Sie gilt geräteübergreifend (Vorgabe Frank), also
+     gewinnt hier nicht „lokal", sondern die JÜNGERE Wahl – sonst käme die am Handy
+     getroffene Umschaltung nie am PC an. */
+  {const _rt=remoteDp.baseTs||'',_lt=localDp.baseTs||'';
+   if(_rt>_lt){m.base=remoteDp.base;m.baseTs=_rt;}}
   /* Foto-Union je Pin: dieselbe Aufnahme erkennt man an `key` ODER `driveId` –
      ein Nachzügler-Upload ergänzt driveId am selben key, ein Desktop-Foto trägt
      nur driveId. Beim Zusammenlegen bleiben BEIDE Kennungen erhalten; eine
@@ -14010,6 +14015,13 @@ function _dachplanKonfliktMerge(remoteDp,localDp){
     if(!lp){out.push(rp);continue;}
     const mp=Object.assign({},rp,lp);
     mp.fotos=fotoUnion(rp.fotos,lp.fotos);
+    /* 🔴 b740: Seit Mobil v224 kann an einem Pin ein TEILPLAN hängen (`p.plan`:
+       eigenes Bild + eigene Pins + deren Fotos). Der PC kennt ihn noch nicht (das
+       ist Etappe 3) – ohne diese Zeile gälte für ihn die Object.assign-Regel
+       „lokal gewinnt komplett", und ein älterer PC-Stand würfe die am Handy
+       gesetzten Teilplan-Pins still weg. Genau die Verlustart aus b717/v210/v211.
+       Dieselbe Funktion rekursiv – sie fängt oben ab, wenn nur eine Seite einen hat. */
+    if(rp.plan||lp.plan){const _pm=_dachplanKonfliktMerge(rp.plan,lp.plan);if(_pm)mp.plan=_pm;}
     out.push(mp);
   }
   for(const lp of lPins){if(!lp)continue;if(lp.id==null||!seen.has(String(lp.id)))out.push(lp);}
@@ -44826,8 +44838,26 @@ window.Dachplan=(function(){
       m.addTo(imap);markers[p.id]=m;});
   }
   function addImgPin(ll){const fr=latLngToFr(ll);const p={id:'dp'+Date.now(),nr:dp.nextNr++,nx:Math.min(1,Math.max(0,fr.nx)),ny:Math.min(1,Math.max(0,fr.ny)),status:'rot',title:'',note:'',fotos:[]};dp.pins.push(p);sel=p.id;renderImgPins();openSheet(p);save();}
-  function setBase(mode){
-    dp.base=mode;const isB=(mode==='bild');
+  /* b740 (Befund Frank 21.08. abends, Gegenstück zu Mobil v225): Ein Dachplan konnte
+     auf „eigenes Bild" stehen, OHNE dass ein Bild da ist – man sah eine leere Fläche,
+     und vorhandene Karten-Pins blieben unsichtbar (renderPins leitet im Bild-Modus auf
+     renderImgPins um, die nur nx/ny-Pins zeichnet). Beim Öffnen wird das gerade
+     gezogen; MANUELL bleibt der Bild-Modus erreichbar. */
+  function _baseSinnvoll(e){
+    if(!e)return 'map';
+    if(e.base==='bild'&&!e.imgKey&&!e.imgDriveId)return 'map';
+    return e.base||'map';
+  }
+  function setBase(mode,stumm){
+    /* b740 (Vorgabe Frank: „auf allen Geräten dieselbe Karte"): Wer umschaltet, trifft
+       eine Entscheidung – die muss auf die anderen Geräte. Vorher lebte sie nur im
+       Arbeitsspeicher, das Handy erfuhr nie davon. `baseTs` entscheidet, wessen Wahl
+       die jüngere ist. ⛔ NUR eine echte Änderung schreibt, `stumm` unterdrückt es für
+       automatische Umschaltungen (Öffnen) – sonst Ping-Pong zwischen offenen Geräten. */
+    const _wechsel=(dp.base!==mode);
+    dp.base=mode;
+    if(_wechsel&&!stumm){try{dp.baseTs=new Date().toISOString();save();}catch(_){}}
+    const isB=(mode==='bild');
     if(isB)try{liveStop();}catch(_){} // b481: Live-Standort gilt nur im Karten-Modus
     try{E.screen.querySelector('#dpMode').textContent=isB?'🖼️':'🗺️';E.screen.querySelector('#dpBild').style.display=isB?'':'none';E.screen.querySelector('#dpCalib').style.display=isB?'':'none';}catch(_){}
     E.mapEl.classList.toggle('dp-hidden',isB);E.imapEl.classList.toggle('dp-hidden',!isB);
@@ -44890,7 +44920,7 @@ window.Dachplan=(function(){
     E.screen.querySelector('#dpFilter').textContent='Alle';E.screen.querySelector('#dpAdd').classList.remove('on');E.screen.querySelector('#dpAdd').textContent='➕ Pin';
     E.screen.querySelector('#dpListPanel').classList.add('dp-hidden');closeSheet();
     E.screen.classList.remove('dp-hidden');
-    if(!ensureMap())return;setBase(dp.base||'map');
+    if(!ensureMap())return;setBase(_baseSinnvoll(dp),true); // b740: „Bild" ohne Bild wäre eine leere Fläche; stumm = keine Nutzer-Wahl
   }
   function resetPlan(){
     if(!confirm('Dachplan komplett zurücksetzen? Alle Pins, das Basisbild und die Kalibrierung werden entfernt. Der Auftrag selbst bleibt.'))return;
