@@ -9383,7 +9383,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-21 · #738'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-21-b738) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-21 · #739'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-21-b739) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -44990,8 +44990,8 @@ function _fdkXmlEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace
 
 /* Seitenmaße aus dem letzten <w:sectPr> des Startdokuments (Twips, 1 cm = 567).
    Fehlen Angaben: A4 hoch, 2 cm Rand. Daraus: Textbreite/-höhe und das größte
-   Bildmaß, bei dem ZWEI Blöcke (Bild + „Abb."-Zeile + Abstände) auf eine Seite passen. */
-function _fdkSeitenMasse(docXml){
+   Bildmaß für EIN oder ZWEI Blöcke je Seite (b739: proSeite, Vorgabe 2). */
+function _fdkSeitenMasse(docXml,proSeite){
   const m={w:11906,h:16838,left:1134,right:1134,top:1134,bottom:1134};
   const i=docXml.lastIndexOf('<w:sectPr');
   let sect='';
@@ -45003,8 +45003,10 @@ function _fdkSeitenMasse(docXml){
   if(mar){['left','right','top','bottom'].forEach(k=>{const v=num(mar[1],k);if(v!=null&&v>=0)m[k]=v;});}
   m.textW=Math.max(2000,m.w-m.left-m.right);
   m.textH=Math.max(3000,m.h-m.top-m.bottom);
+  m.proSeite=(parseInt(proSeite,10)===1)?1:2;
   m.bildMaxW=m.textW-300;                                  // Zellränder + Luft
-  m.bildMaxH=Math.floor((m.textH-1200)/2*0.95);            // 2 Blöcke je Seite, Reserve für Zeilen/Abstände, 5 % Luft
+  // 2 je Seite: Reserve 1200 Twips für Zeilen/Abstände, 5 % Luft · 1 je Seite: ein Block, Reserve 900
+  m.bildMaxH=(m.proSeite===1)?Math.floor((m.textH-900)*0.95):Math.floor((m.textH-1200)/2*0.95);
   return m;
 }
 /* Bild einpassen, Seitenverhältnis bleibt. Twips → EMU: ×635 */
@@ -45027,9 +45029,11 @@ function _fdkBildXml(rId,docPrId,name,cx,cy){
     +'</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>';
 }
 /* Ein Foto-Block: rahmenlose Tabelle, eine Zelle, Zeile darf nicht geteilt werden
-   (Bild und „Abb. N:" bleiben immer zusammen). Beschriftung = NUR „Abb. N: ". */
-function _fdkBlockXml(bild,nr,m){
+   (Bild und „Abb. N:" bleiben immer zusammen). Beschriftung = „Abb. N: " + wahlweise der
+   PAM-Text (b739, nur wenn Frank den Haken setzt; sonst leer). */
+function _fdkBlockXml(bild,nr,m,text){
   const tw=m.textW;
+  const cap=String(text||'').replace(/\s+/g,' ').trim();
   const borders='<w:tblBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/><w:insideH w:val="nil"/><w:insideV w:val="nil"/></w:tblBorders>';
   return '<w:tbl><w:tblPr><w:tblW w:w="'+tw+'" w:type="dxa"/><w:jc w:val="center"/>'+borders
     +'<w:tblLayout w:type="fixed"/><w:tblCellMar><w:left w:w="60" w:type="dxa"/><w:right w:w="60" w:type="dxa"/></w:tblCellMar>'
@@ -45038,8 +45042,44 @@ function _fdkBlockXml(bild,nr,m){
     +'<w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc><w:tcPr><w:tcW w:w="'+tw+'" w:type="dxa"/></w:tcPr>'
     +'<w:p><w:pPr><w:keepNext/><w:keepLines/><w:spacing w:before="0" w:after="60"/><w:jc w:val="center"/></w:pPr>'
     +_fdkBildXml(bild.rId,bild.docPrId,bild.name,bild.cx,bild.cy)+'</w:p>'
-    +'<w:p><w:pPr><w:keepLines/><w:spacing w:before="40" w:after="0"/></w:pPr><w:r><w:t xml:space="preserve">Abb. '+nr+': </w:t></w:r></w:p>'
+    +'<w:p><w:pPr><w:keepLines/><w:spacing w:before="40" w:after="0"/></w:pPr><w:r><w:t xml:space="preserve">Abb. '+nr+': '+_fdkXmlEsc(cap)+'</w:t></w:r></w:p>'
     +'</w:tc></w:tr></w:tbl>';
+}
+/* b739: Ausschnitt für das 4:3-Kästchen – mittig, Ausrichtung bleibt (quer 4:3, hochkant 3:4).
+   Reine Rechnung, damit die Suite sie prüfen kann. */
+function _fdkKastenRect(w0,h0){
+  const quer=w0>=h0;const ziel=quer?4/3:3/4;
+  let sw=w0,sh=h0;
+  if(w0/h0>ziel)sw=Math.round(h0*ziel);else sh=Math.round(w0/ziel);
+  return {sx:Math.round((w0-sw)/2),sy:Math.round((h0-sh)/2),sw:sw,sh:sh};
+}
+/* Steht die Stelle `pos` innerhalb eines Textfelds (w:txbxContent)? Dort ersetzen wir nichts. */
+function _fdkInTextfeld(docXml,pos){
+  const vor=docXml.substring(0,pos);
+  const auf=(vor.match(/<w:txbxContent\b/g)||[]).length,zu=(vor.match(/<\/w:txbxContent>/g)||[]).length;
+  return auf>zu;
+}
+/* b739: Platzhalter-Zeilen im Startdokument finden – ein Absatz, dessen ganzer Text
+   „{Foto}" oder „{Foto N}" ist (Groß/Klein egal, auch wenn Word ihn in mehrere Läufe
+   zerlegt hat). Absätze mit Bild, Abschnittswechsel oder in Textfeldern bleiben unberührt.
+   Rückgabe in Dokumentreihenfolge: [{start, ende, n}] (n = 0 für „{Foto}"). */
+function _fdkPlatzhalterFinden(docXml){
+  const out=[];const re=/<w:p(?=[\s>\/])/g;let m;
+  while((m=re.exec(docXml))){
+    const start=m.index;
+    if(docXml.substr(start,6)==='<w:p/>')continue;
+    const ende=docXml.indexOf('</w:p>',start);if(ende<0)break;
+    const p=docXml.substring(start,ende+6);
+    re.lastIndex=ende+6;
+    if(/<w:p(?=[\s>\/])/.test(p.substring(4)))continue;      // verschachtelt (Textfeld-Hülle) – auslassen
+    if(p.indexOf('<w:drawing')>=0||p.indexOf('<w:sectPr')>=0)continue;
+    const text=(p.match(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g)||[]).map(x=>x.replace(/<[^>]+>/g,'')).join('');
+    const mk=text.trim().match(/^\{\s*foto\s*(\d+)?\s*\}$/i);
+    if(!mk)continue;
+    if(_fdkInTextfeld(docXml,start))continue;
+    out.push({start:start,ende:ende+6,n:mk[1]?parseInt(mk[1],10):0});
+  }
+  return out;
 }
 /* Leeres Word-Dokument (A4 hoch, 2 cm Rand, Arial 11) für „ohne Startdokument". */
 async function _fdkLeeresDocx(JZ){
@@ -45052,8 +45092,13 @@ async function _fdkLeeresDocx(JZ){
   return zip;
 }
 /* KERN: Startdokument (ArrayBuffer/Uint8Array oder null) + Bilder
-   [{bytes:Uint8Array, w, h, name}] → Uint8Array der fertigen .docx.
-   opt.startNr = erste Abbildungsnummer. Läuft im Browser (window.JSZip) und in Node. */
+   [{bytes:Uint8Array, w, h, name, text?, plan?}] → Uint8Array der fertigen .docx.
+   opt.startNr = erste Abbildungsnummer · opt.proSeite = 1 oder 2 (Vorgabe 2) ·
+   opt.platzhalter = {Foto}-Zeilen im Startdokument füllen (Vorgabe ja).
+   b739: Platzhalter werden von oben nach unten mit den Fotos in Dokument-Reihenfolge
+   gefüllt, „{Foto N}" holt gezielt das N-te; die Dachplan-Übersicht (plan) und alle
+   übrigen Fotos kommen als Block hinten. Die Nummern folgen der Stelle im Dokument.
+   Läuft im Browser (window.JSZip) und in Node. opt.ergebnis meldet, was passiert ist. */
 async function _fdkDocxBauen(startBuf,bilder,opt){
   opt=opt||{};
   const JZ=(typeof JSZip!=='undefined')?JSZip:((typeof window!=='undefined'&&window.JSZip)?window.JSZip:null);
@@ -45072,16 +45117,17 @@ async function _fdkDocxBauen(startBuf,bilder,opt){
   const ctPart=zip.file('[Content_Types].xml');
   if(!ctPart)throw new Error('Word-Datei ohne Inhaltsverzeichnis der Teile ([Content_Types].xml)');
   let ct=await ctPart.async('string');
-  const m=_fdkSeitenMasse(docXml);
+  const proSeite=(parseInt(opt.proSeite,10)===1)?1:2;
+  const m=_fdkSeitenMasse(docXml,proSeite);
   // Kennungen eindeutig halten: über dem höchsten Bestand weiterzählen
   let rMax=0;(rels.match(/Id="rId(\d+)"/g)||[]).forEach(s=>{const n=parseInt(s.replace(/\D/g,''),10);if(n>rMax)rMax=n;});
   let dpMax=0;(docXml.match(/<wp:docPr\b[^>]*\bid="(\d+)"/g)||[]).forEach(s=>{const r=s.match(/\bid="(\d+)"/);const n=r?parseInt(r[1],10):0;if(n>dpMax)dpMax=n;});
   if(!/Extension="jpe?g"/i.test(ct))ct=ct.split('</Types>').join('<Default Extension="jpg" ContentType="image/jpeg"/></Types>');
   let nr=parseInt(opt.startNr,10);if(!(nr>0))nr=1;
-  let xml=startBuf?_FDK_P_UMBRUCH:'';   // mit Startdokument: Fotoseiten beginnen auf einer neuen Seite
+  const liste=(bilder||[]).filter(b=>b&&b.bytes&&b.bytes.length);
+  if(!liste.length)throw new Error('Kein Foto ließ sich laden');
   let k=0,neuRels='';
-  for(const b of (bilder||[])){
-    if(!b||!b.bytes||!b.bytes.length)continue;
+  const reg=b=>{                                   // Bilddatei + Beziehung anlegen, Maße rechnen
     k++;
     let v=k,datei='fdk_'+v+'.jpg';
     while(zip.file('word/media/'+datei)){v+=100;datei='fdk_'+v+'.jpg';}
@@ -45089,24 +45135,58 @@ async function _fdkDocxBauen(startBuf,bilder,opt){
     const rId='rId'+(rMax+k);
     neuRels+='<Relationship Id="'+rId+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/'+datei+'"/>';
     const s=_fdkBildMasse(b.w||4,b.h||3,m);
-    if(k>1&&(k-1)%2===0)xml+=_FDK_P_UMBRUCH;        // nach je zwei Blöcken eine neue Seite
-    xml+=_fdkBlockXml({rId:rId,docPrId:dpMax+1000+k,name:'Abb. '+nr,cx:s.cx,cy:s.cy},nr,m)+_FDK_P_LEER;
-    nr++;
+    return {rId:rId,docPrId:dpMax+1000+k,name:'Abb. '+nr,cx:s.cx,cy:s.cy};
+  };
+  // ── Platzhalter {Foto} / {Foto N} im Startdokument ─────────────────────────────
+  const verbraucht=new Set();let platz=0,leer=0;
+  if(startBuf&&opt.platzhalter!==false){
+    const fotos=liste.filter(b=>!b.plan);
+    const marker=_fdkPlatzhalterFinden(docXml);
+    const ersatz=[];let lauf=0;
+    for(const mk of marker){
+      let b=null;
+      if(mk.n){if(mk.n>=1&&mk.n<=fotos.length&&!verbraucht.has(fotos[mk.n-1]))b=fotos[mk.n-1];}
+      else{while(lauf<fotos.length&&verbraucht.has(fotos[lauf]))lauf++;if(lauf<fotos.length)b=fotos[lauf];}
+      if(!b){ersatz.push({start:mk.start,ende:mk.ende,xml:''});leer++;continue;}   // kein Foto mehr: Zeile entfernen
+      verbraucht.add(b);
+      const bild=reg(b);
+      ersatz.push({start:mk.start,ende:mk.ende,xml:_fdkBlockXml(bild,nr,m,b.text)+_FDK_P_LEER});
+      nr++;platz++;
+    }
+    // von hinten nach vorn ersetzen, damit die gemerkten Stellen gültig bleiben
+    ersatz.sort((a,b)=>b.start-a.start).forEach(e=>{docXml=docXml.substring(0,e.start)+e.xml+docXml.substring(e.ende);});
+  }
+  // ── Übrige Fotos (und die Dachplan-Übersicht) als Block hinten ──────────────────
+  const rest=liste.filter(b=>!verbraucht.has(b));
+  let xml='';
+  if(rest.length){
+    xml=startBuf?_FDK_P_UMBRUCH:'';   // mit Startdokument: Fotoseiten beginnen auf einer neuen Seite
+    let j=0;
+    for(const b of rest){
+      j++;
+      const bild=reg(b);
+      if(j>1&&(j-1)%proSeite===0)xml+=_FDK_P_UMBRUCH;        // nach je proSeite Blöcken eine neue Seite
+      xml+=_fdkBlockXml(bild,nr,m,b.text)+_FDK_P_LEER;
+      nr++;
+    }
   }
   if(!k)throw new Error('Kein Foto ließ sich laden');
   rels=rels.split('</Relationships>').join(neuRels+'</Relationships>');
-  // Einfügen VOR dem Abschnittsende des Textkörpers (letztes <w:sectPr> direkt im Körper).
-  // Hängt das letzte sectPr in einem Absatz (kein Körper-sectPr), dann vor </w:body> –
-  // sonst landete die Tabelle mitten in den Absatzeigenschaften.
-  const iBodyEnd=docXml.lastIndexOf('</w:body>');
-  if(iBodyEnd<0)throw new Error('Word-Datei ohne Textkörper');
-  let pos=iBodyEnd;
-  const iSect=docXml.lastIndexOf('<w:sectPr');
-  if(iSect>=0&&iSect<iBodyEnd&&!/<\/w:pPr>|<\/w:p>/.test(docXml.substring(iSect,iBodyEnd)))pos=iSect;
-  docXml=docXml.substring(0,pos)+xml+docXml.substring(pos);
+  if(xml){
+    // Einfügen VOR dem Abschnittsende des Textkörpers (letztes <w:sectPr> direkt im Körper).
+    // Hängt das letzte sectPr in einem Absatz (kein Körper-sectPr), dann vor </w:body> –
+    // sonst landete die Tabelle mitten in den Absatzeigenschaften.
+    const iBodyEnd=docXml.lastIndexOf('</w:body>');
+    if(iBodyEnd<0)throw new Error('Word-Datei ohne Textkörper');
+    let pos=iBodyEnd;
+    const iSect=docXml.lastIndexOf('<w:sectPr');
+    if(iSect>=0&&iSect<iBodyEnd&&!/<\/w:pPr>|<\/w:p>/.test(docXml.substring(iSect,iBodyEnd)))pos=iSect;
+    docXml=docXml.substring(0,pos)+xml+docXml.substring(pos);
+  }
   zip.file('word/document.xml',docXml);
   zip.file(relsPfad,rels);
   zip.file('[Content_Types].xml',ct);
+  opt.ergebnis={platzhalter:platz,leer:leer,hinten:rest.length,proSeite:proSeite};
   return await zip.generateAsync({type:'uint8array',compression:'DEFLATE',compressionOptions:{level:6},mimeType:_FDK_MIME_DOCX});
 }
 
@@ -45140,14 +45220,17 @@ function _fdkDateiname(t){
   return tit+'_Fotodokumentation_'+iso+'.docx';
 }
 
-/* ── Bilder für das Dokument: aus Drive holen, verkleinern (1600 px längste Kante) ── */
-function _fdkVerkleinern(objUrl,maxDim,q){
+/* ── Bilder für das Dokument: aus Drive holen, verkleinern (1600 px längste Kante),
+      b739: wahlweise mittig auf 4:3 / 3:4 zuschneiden (kasten) ── */
+function _fdkVerkleinern(objUrl,maxDim,q,kasten){
   return new Promise(resolve=>{
     const img=new Image();
     img.onload=()=>{try{
-      const w0=img.naturalWidth||1,h0=img.naturalHeight||1,r=Math.min(1,maxDim/Math.max(w0,h0));
-      const c=document.createElement('canvas');c.width=Math.max(1,Math.round(w0*r));c.height=Math.max(1,Math.round(h0*r));
-      c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+      const w0=img.naturalWidth||1,h0=img.naturalHeight||1;
+      const r=kasten?_fdkKastenRect(w0,h0):{sx:0,sy:0,sw:w0,sh:h0};
+      const f=Math.min(1,maxDim/Math.max(r.sw,r.sh));
+      const c=document.createElement('canvas');c.width=Math.max(1,Math.round(r.sw*f));c.height=Math.max(1,Math.round(r.sh*f));
+      c.getContext('2d').drawImage(img,r.sx,r.sy,r.sw,r.sh,0,0,c.width,c.height);
       resolve({dataUrl:c.toDataURL('image/jpeg',q),w:c.width,h:c.height});
     }catch(e){resolve(null);}};
     img.onerror=()=>resolve(null);
@@ -45158,10 +45241,10 @@ function _fdkDataUrlBytes(dataUrl){
   const bin=atob(dataUrl.substring(dataUrl.indexOf(',')+1));
   const u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return u;
 }
-async function _fdkFotoBytes(driveId){
+async function _fdkFotoBytes(driveId,kasten){
   try{
     const u=await _fetchDesktopFotoBlob(driveId);if(!u)return null;
-    const k=await _fdkVerkleinern(u,1600,0.85);if(!k||!k.dataUrl)return null;
+    const k=await _fdkVerkleinern(u,1600,0.85,!!kasten);if(!k||!k.dataUrl)return null;
     return {bytes:_fdkDataUrlBytes(k.dataUrl),w:k.w,h:k.h,name:'Foto'};
   }catch(e){console.warn('[FDK] Foto:',driveId,e);return null;}
 }
@@ -45304,8 +45387,12 @@ function _fdkOeffnen(){
         +'<input type="file" id="fdkStartDatei" accept=".docx" style="font-size:11px;max-width:100%;" onchange="if(this.files&&this.files[0]){document.querySelector(\'input[name=fdkStartArt][value=datei]\').checked=true;}">'
         +'<h4>Abbildungen</h4>'
         +'<label>Erste Abbildungsnummer<input type="number" id="fdkStartNr" min="1" max="9999" value="1" oninput="_fdkListeZeichnen()"></label>'
+        +'<label>Fotos je Seite<select id="fdkProSeite"><option value="2" selected>2 Fotos je Seite</option><option value="1">1 Foto je Seite (groß)</option></select></label>'
+        +'<label><input type="checkbox" id="fdkBeschriftung"> Beschriftung aus PAM unter das Foto („Abb. N: Text")</label>'
+        +'<label><input type="checkbox" id="fdkKasten"> Einheitliches 4:3-Kästchen – mittig zuschneiden, Ränder gehen verloren (hochkant bleibt 3:4)</label>'
         +(planMoeglich?'<label><input type="checkbox" id="fdkPlan" checked onchange="_fdkListeZeichnen()"> 🗺 Dachplan-Übersicht als Bild voranstellen</label>':'<div style="font-size:11px;color:var(--text2);">🗺 Dachplan-Übersicht: nur im Bild-Modus des Dachplans möglich.</div>')
-        +'<div class="fdk-hinweis">2 Fotos je Seite · unter jedem Foto steht nur „Abb. N:" – den Text schreibst du in Word.<br>'
+        +'<div class="fdk-hinweis">Unter jedem Foto steht „Abb. N:" – den Text schreibst du in Word (oder setzt den Haken „Beschriftung aus PAM").<br>'
+        +'<b>Platzhalter:</b> Schreib im Startdokument eine eigene Zeile <b>{Foto}</b> dort, wo ein Foto hin soll – PAM füllt sie von oben nach unten aus dem Dokument rechts; <b>{Foto 3}</b> holt gezielt das dritte. Übrige Fotos kommen als Block hinten.<br>'
         +'Ergebnis = <b>neue Datei</b> im Dokumente-Ordner des Auftrags (+ Herunterladen; ohne Dokumente-Ordner: im Projektordner), Startdokument und Vorlage bleiben unverändert. Kopf-/Fußzeile und Seitenzahlen laufen aus deinem Dokument weiter.</div>'
         +'</div>'
       +'</div>'
@@ -45669,7 +45756,7 @@ async function _fdkErstellen(){
   const t=findTaskById(S.taskId);
   if(!t){showToast('Auftrag nicht gefunden','error');return;}
   const auswahl=_fdkAuswahl();
-  if(!auswahl.length){showToast('Bitte mindestens ein Foto anhaken','warning');return;}
+  if(!auswahl.length){showToast('Bitte mindestens ein Foto ins Dokument ziehen','warning');return;}
   const art=(document.querySelector('input[name="fdkStartArt"]:checked')||{}).value||'ohne';
   const btn=document.getElementById('fdkErstellen'),st=document.getElementById('fdkStatus'),dl=document.getElementById('fdkDownload');
   const sag=m=>{if(st)st.textContent=m;};
@@ -45680,7 +45767,7 @@ async function _fdkErstellen(){
     let startBuf=null;
     if(art==='drive'){
       const fid=(document.getElementById('fdkStartSel')||{}).value||'';
-      if(!fid)throw new Error('Bitte eine Word-Datei aus dem Auftragsordner wählen – oder „ohne Startdokument".');
+      if(!fid)throw new Error('Bitte eine Word-Datei aus Stammblatt- oder Auftragsordner wählen – oder „ohne Startdokument".');
       sag('⏳ Startdokument wird geladen…');
       const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fid)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
       if(r.status===401){_handleDrive401();throw new Error('Drive-Verbindung abgelaufen – bitte ☁️ drücken');}
@@ -45693,22 +45780,27 @@ async function _fdkErstellen(){
       if(!/\.docx$/i.test(f.name))throw new Error('Nur .docx geht – das alte .doc-Format bitte in Word als .docx speichern.');
       startBuf=await f.arrayBuffer();
     }
+    // b739: Einstellungen
+    const proSeite=(parseInt((document.getElementById('fdkProSeite')||{}).value,10)===1)?1:2;
+    const beschriftung=!!((document.getElementById('fdkBeschriftung')||{}).checked);
+    const kasten=!!((document.getElementById('fdkKasten')||{}).checked);
     const bilder=[],fehl=[];
     if(S.planMoeglich&&((document.getElementById('fdkPlan')||{}).checked)){
       sag('⏳ Dachplan-Übersicht wird gezeichnet…');
       const pb=await _fdkPlanBild(t);
-      if(pb)bilder.push(pb);else fehl.push('Dachplan-Übersicht');
+      if(pb){pb.plan=true;bilder.push(pb);}else fehl.push('Dachplan-Übersicht');
     }
     let n=0;
     for(const e of auswahl){
       n++;sag('⏳ Foto '+n+' von '+auswahl.length+' wird geholt…');
-      const b=await _fdkFotoBytes(e.driveId);
-      if(b)bilder.push(b);else fehl.push(e.caption||e.name||e.driveId);
+      const b=await _fdkFotoBytes(e.driveId,kasten);
+      if(b){b.text=beschriftung?(e.caption||''):'';bilder.push(b);}else fehl.push(e.caption||e.name||e.driveId);
     }
     if(!bilder.length)throw new Error('Kein Foto ließ sich laden.');
     const startNr=parseInt((document.getElementById('fdkStartNr')||{}).value,10)||1;
     sag('⏳ Word-Datei wird zusammengesetzt…');
-    const bytes=await _fdkDocxBauen(startBuf,bilder,{startNr:startNr});
+    const bau={startNr:startNr,proSeite:proSeite,platzhalter:true};
+    const bytes=await _fdkDocxBauen(startBuf,bilder,bau);
     const fname=_fdkDateiname(t);
     S.ergebnis={bytes:bytes,fname:fname};
     let ablage='';
@@ -45722,7 +45814,9 @@ async function _fdkErstellen(){
         if(S.ordnerArt==='dokumente'){try{if(typeof _dokSyncOrdner==='function')_dokSyncOrdner();}catch(e){}}
       }catch(e){console.warn('[FDK] Ablage:',e);ablage='⚠ Ablage in Drive fehlgeschlagen – bitte herunterladen';}
     }else ablage='ℹ kein Drive-Ordner am Auftrag – bitte herunterladen';
-    sag('✓ Fertig: '+bilder.length+' Abbildung'+(bilder.length!==1?'en':'')+(fehl.length?' · '+fehl.length+' nicht ladbar':'')+' · '+ablage);
+    const erg=bau.ergebnis||{};
+    const platzText=(erg.platzhalter?(' · '+erg.platzhalter+' Platzhalter gefüllt'):'')+(erg.leer?(' · '+erg.leer+' Platzhalter ohne Foto entfernt'):'');
+    sag('✓ Fertig: '+bilder.length+' Abbildung'+(bilder.length!==1?'en':'')+platzText+(fehl.length?' · '+fehl.length+' nicht ladbar':'')+' · '+ablage);
     if(dl)dl.style.display='';
     showToast('📚 Fotodokumentation erstellt: '+fname,'success',5000);
     if(fehl.length)showToast('⚠ Nicht geladen: '+fehl.slice(0,5).join(', ')+(fehl.length>5?' …':''),'warning',8000);
