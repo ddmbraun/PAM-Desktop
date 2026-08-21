@@ -7873,6 +7873,13 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
         <span style="font-size:9px;color:var(--text2);text-transform:uppercase;letter-spacing:.3px;">Objekt</span>
         <select id="pamFObjSel" onchange="_pamFSetObjOffen(this.value)" class="filter-btn" style="padding:2px 6px;height:24px;"></select>
       </span>
+      <!-- b727: Sammel-Aktionen zum Handy-Haken (b726) – AKTIONEN, kein Filter, deshalb
+           eigener Knopf mit Rückfrage. Nur auf Objekt-Boards, eingeblendet von updateFilterDropdowns(). -->
+      <span class="filter-fgroup" id="pamFMobAktGroup" style="display:none;align-items:center;gap:5px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:2px 6px;" title="Handy-Haken für alle Objekte dieses Boards setzen oder lösen">
+        <span style="font-size:9px;color:var(--text2);text-transform:uppercase;letter-spacing:.3px;">Handy</span>
+        <button class="filter-btn" id="pamFMobAktBtn" onclick="_pamFMobAktToggle()">📱 ▾</button>
+        <div class="filter-dropdown" id="pamFMobAktDropdown"></div>
+      </span>
       <span class="filter-fgroup" style="display:inline-flex;align-items:center;gap:5px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:2px 6px;" title="Sortierung der Task-Listen">
         <span style="font-size:9px;color:var(--text2);text-transform:uppercase;letter-spacing:.3px;">Sort.</span>
         <select id="pamFSortSel" onchange="_pamFApply()" class="filter-btn" style="padding:2px 6px;height:24px;">
@@ -9371,7 +9378,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-20 · #726'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-20-b726) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-21 · #727'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-21-b727) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -16561,6 +16568,9 @@ function _pamFSetObjOffen(v){_pamFObjOffen=String(v||'');render();}
 // tun?"): eine Karte reicht schon, wenn EINES von beidem offen ist.
 function _pamFObjTrifft(x){
   if(!_pamFObjOffen)return true;
+  // b727: Handy-Haken – eigener Zweig VOR der Leistungs-Prüfung, der Haken
+  // hängt am Objekt selbst, nicht an den Leistungen
+  if(_pamFObjOffen==='mobAus')return !!(x&&x.mobilAusblenden);
   var ls=((x&&x.turnusListe)||[]).filter(Boolean);
   if(!ls.length)return false; // ohne Leistungen gibt es hier nichts zu zeigen
   var faellig=false,rg=false;
@@ -16575,10 +16585,11 @@ function _pamFObjTrifft(x){
 // Zählt für die Beschriftung im Auswahlkasten – über die Karten des AKTUELLEN
 // Boards, damit die Zahl zu dem passt, was man vor sich hat.
 function _pamFObjZahlen(){
-  var out={faellig:0,rg:0,beides:0,objekte:0};
+  var out={faellig:0,rg:0,beides:0,objekte:0,mobAus:0};
   try{
     (boards[currentBoard]||[]).forEach(function(x){
       if(!x||x.archiviert||x.spaeterBearbeiten)return;
+      if(x.mobilAusblenden)out.mobAus++; // b727: vor der Leistungs-Prüfung – der Haken braucht keine Leistungen
       var ls=((x.turnusListe)||[]).filter(Boolean);
       if(!ls.length)return;
       out.objekte++;
@@ -21249,8 +21260,9 @@ function updateFilterDropdowns(){
   const _ogr=document.getElementById('pamFObjGroup');
   const _osel=document.getElementById('pamFObjSel');
   if(_ogr&&_osel){
-    const _z=(typeof _pamFObjZahlen==='function')?_pamFObjZahlen():{objekte:0,faellig:0,rg:0,beides:0};
-    if(!_z.objekte){
+    const _z=(typeof _pamFObjZahlen==='function')?_pamFObjZahlen():{objekte:0,faellig:0,rg:0,beides:0,mobAus:0};
+    // b727: auch zeigen, wenn es zwar keine Leistungs-Objekte, aber Handy-Haken gibt
+    if(!_z.objekte&&!_z.mobAus){
       _ogr.style.display='none';
       // ⚠ Beim Wechsel auf ein Board ohne Objekte den Filter zurücknehmen –
       // sonst filtert er unsichtbar weiter und das Board wirkt leer.
@@ -21261,7 +21273,8 @@ function updateFilterDropdowns(){
         ['','alles ('+_z.objekte+')'],
         ['faellig','🔁 fällig ('+_z.faellig+')'],
         ['rg','RE fehlt ('+_z.rg+')'],
-        ['beides','beides ('+_z.beides+')']
+        ['beides','beides ('+_z.beides+')'],
+        ['mobAus','📱🚫 ausgeblendet ('+_z.mobAus+')'] // b727: Handy-Haken (b726)
       ];
       _osel.innerHTML=_opt.map(o=>'<option value="'+o[0]+'"'+(o[0]===_pamFObjOffen?' selected':'')+'>'+esc(o[1])+'</option>').join('');
       _osel.value=_pamFObjOffen;
@@ -21269,6 +21282,9 @@ function updateFilterDropdowns(){
       _osel.classList.toggle('active',!!_pamFObjOffen);
     }
   }
+  // b727: Sammel-Aktionen zum Handy-Haken – nur auf Objekt-Boards
+  const _mag=document.getElementById('pamFMobAktGroup');
+  if(_mag)_mag.style.display=((boardTypes[currentBoard]||'baustelle')==='immobilie')?'inline-flex':'none';
 }
 // #444: toggleFilter()/setFilter() (tote Owner/Ampel/Tag-Dropdowns) entfernt
 function closeAllDropdowns(){document.querySelectorAll('.filter-dropdown').forEach(d=>d.classList.remove('open'));}
@@ -21307,6 +21323,58 @@ function _pamFToggleMehr(){
 }
 function _pamFSetSortDir(d){_pamFSortDir=d;render();}
 function _pamFToggleSortDir(){_pamFSortDir=_pamFSortDir===1?-1:1;render();}
+
+// ── b727: Sammel-Aktionen zum Handy-Haken (b726) ────────────────────────────
+// Zwei Handgriffe für das ganze Board: alle Objekte am Handy ausblenden oder
+// alle wieder anzeigen. Bewusst AKTIONEN mit Rückfrage in einem eigenen Knopf –
+// nicht im Auswahlkasten daneben, der nur filtert (ein Fehlgriff beim Filtern
+// darf keine Daten ändern). Typischer Ablauf „Wochenliste": alle ausblenden,
+// dann bei den vorgenommenen Objekten den Haken einzeln wieder rausnehmen.
+function _pamFMobAktToggle(){
+  const btn=document.getElementById('pamFMobAktBtn'),dd=document.getElementById('pamFMobAktDropdown');
+  if(!btn||!dd)return;
+  const was=dd.classList.contains('open');
+  closeAllDropdowns();
+  if(was)return;
+  const alle=(boards[currentBoard]||[]).filter(t=>t&&!t.archiviert&&!t.spaeterBearbeiten);
+  const mit=alle.filter(t=>t.mobilAusblenden).length;
+  dd.innerHTML=
+    '<div class="filter-dropdown-item" onclick="_pamMobAlleAusblenden()">🚫 Alle ausblenden ('+(alle.length-mit)+')</div>'
+    +'<div class="filter-dropdown-item" onclick="_pamMobAlleEinblenden()">✓ Alle einblenden ('+mit+')</div>';
+  const r=btn.getBoundingClientRect();
+  dd.style.top=(r.bottom+4)+'px';dd.style.left='auto';dd.style.right=(window.innerWidth-r.right)+'px';
+  dd.classList.add('open');
+}
+function _pamMobAlleAusblenden(){
+  closeAllDropdowns();
+  const liste=(boards[currentBoard]||[]).filter(t=>t&&!t.archiviert&&!t.spaeterBearbeiten&&!t.mobilAusblenden);
+  if(!liste.length){showToast('Schon alle am Handy ausgeblendet','success');return;}
+  if(!confirm(liste.length+' Objekt'+(liste.length!==1?'e':'')+' von „'+currentBoard+'“ am Handy ausblenden?'))return;
+  liste.forEach(t=>{t.mobilAusblenden=true;});
+  _pamMobModalCbSetzen(true);
+  autoSave();render();
+  showToast('✓ '+liste.length+' Objekt'+(liste.length!==1?'e':'')+' am Handy ausgeblendet','success');
+}
+function _pamMobAlleEinblenden(){
+  closeAllDropdowns();
+  const liste=(boards[currentBoard]||[]).filter(t=>t&&t.mobilAusblenden);
+  if(!liste.length){showToast('Kein Objekt ist am Handy ausgeblendet','success');return;}
+  if(!confirm(liste.length+' Objekt'+(liste.length!==1?'e':'')+' von „'+currentBoard+'“ wieder am Handy anzeigen?'))return;
+  liste.forEach(t=>{delete t.mobilAusblenden;});
+  _pamMobModalCbSetzen(false);
+  // Steht der Auswahlkasten gerade auf „ausgeblendet", wäre das Board jetzt leer – zurücknehmen.
+  if(_pamFObjOffen==='mobAus')_pamFObjOffen='';
+  autoSave();render();
+  showToast('✓ Alle wieder am Handy sichtbar','success');
+}
+// Offenes Task-Fenster synchron halten – sonst schriebe das nächste Feld-Speichern
+// den alten Kästchen-Stand still zurück (gleiches Muster wie _pamMobilHakenLoesen, b726).
+function _pamMobModalCbSetzen(wert){
+  const _openId=(document.getElementById('taskId')||{}).value;
+  if(!_openId)return;
+  if(!(boards[currentBoard]||[]).some(t=>t&&t.id===_openId))return;
+  const cb=document.getElementById('taskMobilAusblendenCb');if(cb)cb.checked=!!wert;
+}
 
 // ── ARCHIV-SYSTEM ──
 function toggleArchivFilter(){
