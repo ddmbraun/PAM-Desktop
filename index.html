@@ -9383,7 +9383,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-21 · #728'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-21-b728) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-21 · #729'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-21-b729) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -13865,6 +13865,11 @@ async function pollWorkboardFile(){
     const r=await fetch('https://www.googleapis.com/drive/v3/files/'+gdriveFileId+'?alt=media&_='+Date.now(),
       {headers:{Authorization:'Bearer '+gdriveToken,'Cache-Control':'no-cache'},cache:'no-store'});
     if(!r.ok)return;
+    /* b729 (Loch D, wie Mobil v220): Fingerabdruck der übernommenen Fassung MITNEHMEN.
+       Vorher behielt der PC nach jeder Poll-Übernahme seinen alten – und das nächste
+       eigene Speichern lief damit GARANTIERT in den 412-Schreibkonflikt. */
+    const _pollETagPC=r.headers.get('ETag')||r.headers.get('etag');
+    if(_pollETagPC)gdriveETag=_pollETagPC;
     const data=await r.json();
     loadFromObject(data);
     render();
@@ -14096,6 +14101,12 @@ async function gdriveSaveData() {
           const fr=await fetch('https://www.googleapis.com/drive/v3/files/'+gdriveFileId+'?alt=media&_='+Date.now(),
             {headers:{Authorization:'Bearer '+gdriveToken,'Cache-Control':'no-cache'},cache:'no-store'});
           if(fr.ok){
+            /* b729 (Loch A, wie Mobil v220): Fingerabdruck der geladenen Fassung nur
+               MERKEN – übernommen wird er erst am ENDE dieses Zweigs, nach vollständig
+               gelungenem Zusammenführen. Vorher behielt der PC hier seinen ALTEN
+               Fingerabdruck, und der Upload nach jedem Merge lief GARANTIERT in den
+               412-Schreibkonflikt. */
+            const _frETagPC=fr.headers.get('ETag')||fr.headers.get('etag');
             const remote=await fr.json();
             // ID der Task, die gerade im Edit-Modal offen ist (falls überhaupt)
             const tidEl=document.getElementById('taskId');
@@ -14227,7 +14238,15 @@ async function gdriveSaveData() {
                     const mt={...rt};
                     for(const f of Object.keys(lt)){
                       if(f==='id')continue;
-                      if(JSON.stringify(lt[f])!==JSON.stringify(_snapObj[f]))mt[f]=lt[f];
+                      if(JSON.stringify(lt[f])!==JSON.stringify(_snapObj[f])){
+                        /* b729 (Loch E): dachplan ist ein BEHÄLTER mit Pin-Foto-Listen.
+                           „Lokal gewinnt komplett" warf hier fremde Pin-Fotos weg, sobald
+                           die eigene Ansicht nur center/zoom angefasst hatte – bisher
+                           deckte das allein der zufällig veraltete Fingerabdruck (412).
+                           Jetzt wie im offenen Fenster (b722): VEREINIGEN statt ersetzen. */
+                        if(f==='dachplan'&&rt.dachplan){const _dpM=_dachplanKonfliktMerge(rt.dachplan,lt.dachplan);mt.dachplan=_dpM||lt.dachplan;}
+                        else mt[f]=lt[f];
+                      }
                     }
                     // ⚠ Lokal GELÖSCHTE Felder mitnehmen. Ohne das käme z.B. der
                     // entfernte Handy-Standort zurück (b654 löscht lat/lon/standortErfasst)
@@ -14315,6 +14334,7 @@ async function gdriveSaveData() {
                 try{if(typeof renderCheckliste==='function')renderCheckliste();}catch(e){console.warn('[PAM]',e);}
               }
             }
+            if(_frETagPC)gdriveETag=_frETagPC; // b729 (Loch A): ERST JETZT übernehmen – das Zusammenführen ist vollständig durch
           }
         }
       }
@@ -14923,6 +14943,7 @@ function buildSaveObject(){
   if(Object.keys(mobileStatusFilter).length)out._mobileStatusFilter={...mobileStatusFilter};
   if(Object.keys(boardTypes).length)out._boardTypes={...boardTypes};
   out._boardOrder=Object.keys(boards); // b643: Reihenfolge als eigenes Merkfeld – das Handy (v182) reicht es durch, Laden sortiert danach
+  out._lastWriter={app:'Desktop',version:PAM_BUILD,geraet:'PC',zeit:new Date().toISOString()}; // b729: Schreib-Kennzeichen (Geisterschreiber-Lehre 21.08.) – Mobil v220 stempelt genauso, gleiche Position
   for(const[k,v]of Object.entries(boards))out[k]=v;
   return out;
 }
