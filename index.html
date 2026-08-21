@@ -9383,7 +9383,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-21 · #733'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-21-b733) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-21 · #734'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-21-b734) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -25753,7 +25753,7 @@ function renderFotoListDesktop(){
     :'';
   el.innerHTML='<div class="foto-desktop-wrap'+(_fotoExpanded?' expanded':'')+'">'
     +'<div class="foto-desktop-wrap-label" style="position:sticky;top:0;background:var(--bg3);z-index:1;padding-bottom:6px;">'+(function(){var c=_fvCounts(taskFotos);return c.v?('📷 Drive-Medien ('+c.f+' Foto'+(c.f!==1?'s':'')+' · 🎬 '+c.v+' Video'+(c.v!==1?'s':'')+')'):('📷 Drive-Fotos ('+taskFotos.length+' Stück)');})()
-      +'<button onclick="startFotoSelectMode()" style="margin-left:10px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:11px;cursor:pointer">☑ Auswahl / PDF</button>'+'<button onclick="createPdfAllFotos()" style="margin-left:6px;padding:3px 10px;border-radius:6px;border:none;background:var(--accent);color:#fff;font-size:11px;font-weight:600;cursor:pointer">📄 Alle als PDF</button>'
+      +'<button onclick="startFotoSelectMode()" style="margin-left:10px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:11px;cursor:pointer">☑ Auswahl / PDF</button>'+'<button onclick="createPdfAllFotos()" style="margin-left:6px;padding:3px 10px;border-radius:6px;border:none;background:var(--accent);color:#fff;font-size:11px;font-weight:600;cursor:pointer">📄 Alle als PDF</button>'+'<button onclick="_fdkOeffnen()" title="Word-Startdokument vorne, Fotoseiten hinten – ein Dokument (b734)" style="margin-left:6px;padding:3px 10px;border-radius:6px;border:1px solid var(--accent);background:var(--bg3);color:var(--accent);font-size:11px;font-weight:600;cursor:pointer">📚 Fotodokumentation…</button>'
       +(gdriveToken?'':'<span style="margin-left:8px;font-size:10px;color:var(--red);opacity:.8">⚠ Drive verbinden für Vorschau</span>')
     +'</div>'
     +pdfBar
@@ -44950,6 +44950,489 @@ window.Dachplan=(function(){
   }
   return {open,close,openPin,rebind};
 })();
+</script>
+
+<script>
+/* ══════════════ b734: 📚 FOTODOKUMENTATION – Word-Weg, Stufe 1 ══════════════
+   Franks Wunsch vom 21.08.2026 (Vorbild: sein Fotodoku-Programm am PC): ein Word-
+   Startdokument (z. B. die Stellungnahme) vorne, dahinter die Fotoseiten – EIN
+   Dokument, das in Word weiter bearbeitbar bleibt. Beschlüsse vom 21.08.:
+   · Auswahl EINZELN je Foto über alle drei Quellen (Fotos des Auftrags, Leistungs-
+     Verweise, Dachplan-Pins) – „Alle" nur als Abkürzung. Reihenfolge frei (Ziehen
+     oder ▲▼), dazu Sortierknöpfe als Abkürzung.
+   · Unter jedem Foto NUR „Abb. N:" – kein automatischer Text, kein Pin-Text, kein
+     Stempel. Den Text schreibt Frank selbst in Word. Nummern ab frei wählbarem Start.
+   · Fest 2 Fotos je Seite (Stufe 1). Ergebnis = NEUE Datei
+     <Auftrag>_Fotodokumentation_<Datum>.docx im Auftrags-/Objektordner (Drive) plus
+     „Herunterladen" (für Ablagen außerhalb von Drive). Das Startdokument bleibt
+     unangetastet. Nur PC.
+   · Dachplan-Übersicht als Bild (Basisbild + Nummern-Kreise an den nx/ny-Positionen,
+     dieselben Werte wie im HTML-Bericht `_dpBerichtHtml`) – nur im Bild-Modus.
+   Bauart: eine Word-Datei ist innen ein Zip-Paket; JSZip ist seit der Einbettung
+   der Bibliotheken (b647-Reihe) fest an Bord. Die Fotoseiten werden als FLIESSENDE
+   Blöcke vor dem Abschnittsende des Textkörpers eingefügt: je Foto eine rahmenlose
+   Tabelle mit einer Zelle (Bild „mit Text in Zeile" + Zeile „Abb. N:", Zeile darf
+   nicht geteilt werden). ⛔ BEWUSST KEINE frei positionierten Textfelder – so baut
+   es das Vorbild, und genau die verschieben sich beim Weiterbearbeiten. Keine Kopf-/
+   Fußzeile, keine Formatvorlage wird angefasst; Words eigene Seitenzählung läuft
+   weiter. Alle Funktionen heißen _fdk… und berühren nichts Bestehendes.
+   Der Kern (_fdkDocxBauen + Helfer) kommt ohne Browser aus – test_b734.js führt
+   ihn mit der eingebetteten Zip-Bibliothek in Node aus. */
+const _FDK_MIME_DOCX='application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const _FDK_NS={wp:'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing',a:'http://schemas.openxmlformats.org/drawingml/2006/main',pic:'http://schemas.openxmlformats.org/drawingml/2006/picture',r:'http://schemas.openxmlformats.org/officeDocument/2006/relationships'};
+const _FDK_COL={rot:'#e5484d',gelb:'#f5a623',gruen:'#30a46c'};
+const _FDK_P_LEER='<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="140" w:lineRule="exact"/><w:rPr><w:sz w:val="2"/></w:rPr></w:pPr></w:p>';
+const _FDK_P_UMBRUCH='<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/><w:rPr><w:sz w:val="2"/></w:rPr></w:pPr><w:r><w:rPr><w:sz w:val="2"/></w:rPr><w:br w:type="page"/></w:r></w:p>';
+let _fdkState=null;
+let _fdkDragIdx=-1;
+
+function _fdkXmlEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+/* Seitenmaße aus dem letzten <w:sectPr> des Startdokuments (Twips, 1 cm = 567).
+   Fehlen Angaben: A4 hoch, 2 cm Rand. Daraus: Textbreite/-höhe und das größte
+   Bildmaß, bei dem ZWEI Blöcke (Bild + „Abb."-Zeile + Abstände) auf eine Seite passen. */
+function _fdkSeitenMasse(docXml){
+  const m={w:11906,h:16838,left:1134,right:1134,top:1134,bottom:1134};
+  const i=docXml.lastIndexOf('<w:sectPr');
+  let sect='';
+  if(i>=0){const e=docXml.indexOf('</w:sectPr>',i);sect=docXml.substring(i,e>0?e:docXml.length);}
+  const pg=sect.match(/<w:pgSz\b([^>]*)>/);
+  const mar=sect.match(/<w:pgMar\b([^>]*)>/);
+  const num=(s,k)=>{const r=s&&s.match(new RegExp('w:'+k+'="(-?\\d+)"'));return r?parseInt(r[1],10):null;};
+  if(pg){const w=num(pg[1],'w'),h=num(pg[1],'h');if(w>0)m.w=w;if(h>0)m.h=h;}
+  if(mar){['left','right','top','bottom'].forEach(k=>{const v=num(mar[1],k);if(v!=null&&v>=0)m[k]=v;});}
+  m.textW=Math.max(2000,m.w-m.left-m.right);
+  m.textH=Math.max(3000,m.h-m.top-m.bottom);
+  m.bildMaxW=m.textW-300;                                  // Zellränder + Luft
+  m.bildMaxH=Math.floor((m.textH-1200)/2*0.95);            // 2 Blöcke je Seite, Reserve für Zeilen/Abstände, 5 % Luft
+  return m;
+}
+/* Bild einpassen, Seitenverhältnis bleibt. Twips → EMU: ×635 */
+function _fdkBildMasse(pxW,pxH,m){
+  const maxW=m.bildMaxW*635,maxH=m.bildMaxH*635;
+  const r=Math.min(maxW/Math.max(1,pxW),maxH/Math.max(1,pxH));
+  return {cx:Math.max(1,Math.round(pxW*r)),cy:Math.max(1,Math.round(pxH*r))};
+}
+/* Ein Bild „mit Text in Zeile" (wp:inline). Die Namensräume stehen am Element selbst,
+   damit es auch in Startdokumenten funktioniert, die sie im Wurzelelement nicht führen. */
+function _fdkBildXml(rId,docPrId,name,cx,cy){
+  return '<w:r><w:drawing><wp:inline xmlns:wp="'+_FDK_NS.wp+'" distT="0" distB="0" distL="0" distR="0">'
+    +'<wp:extent cx="'+cx+'" cy="'+cy+'"/><wp:effectExtent l="0" t="0" r="0" b="0"/>'
+    +'<wp:docPr id="'+docPrId+'" name="'+_fdkXmlEsc(name)+'"/>'
+    +'<wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="'+_FDK_NS.a+'" noChangeAspect="1"/></wp:cNvGraphicFramePr>'
+    +'<a:graphic xmlns:a="'+_FDK_NS.a+'"><a:graphicData uri="'+_FDK_NS.pic+'">'
+    +'<pic:pic xmlns:pic="'+_FDK_NS.pic+'"><pic:nvPicPr><pic:cNvPr id="0" name="'+_fdkXmlEsc(name)+'"/><pic:cNvPicPr/></pic:nvPicPr>'
+    +'<pic:blipFill><a:blip xmlns:r="'+_FDK_NS.r+'" r:embed="'+rId+'"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
+    +'<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="'+cx+'" cy="'+cy+'"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'
+    +'</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>';
+}
+/* Ein Foto-Block: rahmenlose Tabelle, eine Zelle, Zeile darf nicht geteilt werden
+   (Bild und „Abb. N:" bleiben immer zusammen). Beschriftung = NUR „Abb. N: ". */
+function _fdkBlockXml(bild,nr,m){
+  const tw=m.textW;
+  const borders='<w:tblBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/><w:insideH w:val="nil"/><w:insideV w:val="nil"/></w:tblBorders>';
+  return '<w:tbl><w:tblPr><w:tblW w:w="'+tw+'" w:type="dxa"/><w:jc w:val="center"/>'+borders
+    +'<w:tblLayout w:type="fixed"/><w:tblCellMar><w:left w:w="60" w:type="dxa"/><w:right w:w="60" w:type="dxa"/></w:tblCellMar>'
+    +'<w:tblLook w:val="0000" w:firstRow="0" w:lastRow="0" w:firstColumn="0" w:lastColumn="0" w:noHBand="0" w:noVBand="0"/></w:tblPr>'
+    +'<w:tblGrid><w:gridCol w:w="'+tw+'"/></w:tblGrid>'
+    +'<w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc><w:tcPr><w:tcW w:w="'+tw+'" w:type="dxa"/></w:tcPr>'
+    +'<w:p><w:pPr><w:keepNext/><w:keepLines/><w:spacing w:before="0" w:after="60"/><w:jc w:val="center"/></w:pPr>'
+    +_fdkBildXml(bild.rId,bild.docPrId,bild.name,bild.cx,bild.cy)+'</w:p>'
+    +'<w:p><w:pPr><w:keepLines/><w:spacing w:before="40" w:after="0"/></w:pPr><w:r><w:t xml:space="preserve">Abb. '+nr+': </w:t></w:r></w:p>'
+    +'</w:tc></w:tr></w:tbl>';
+}
+/* Leeres Word-Dokument (A4 hoch, 2 cm Rand, Arial 11) für „ohne Startdokument". */
+async function _fdkLeeresDocx(JZ){
+  const zip=new JZ();
+  zip.file('[Content_Types].xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="jpg" ContentType="image/jpeg"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>');
+  zip.file('_rels/.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
+  zip.file('word/_rels/document.xml.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>');
+  zip.file('word/styles.xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="22"/><w:szCs w:val="22"/><w:lang w:val="de-DE"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="120" w:line="264" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Standard"><w:name w:val="Normal"/><w:qFormat/></w:style></w:styles>');
+  zip.file('word/document.xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="709" w:footer="709" w:gutter="0"/></w:sectPr></w:body></w:document>');
+  return zip;
+}
+/* KERN: Startdokument (ArrayBuffer/Uint8Array oder null) + Bilder
+   [{bytes:Uint8Array, w, h, name}] → Uint8Array der fertigen .docx.
+   opt.startNr = erste Abbildungsnummer. Läuft im Browser (window.JSZip) und in Node. */
+async function _fdkDocxBauen(startBuf,bilder,opt){
+  opt=opt||{};
+  const JZ=(typeof JSZip!=='undefined')?JSZip:((typeof window!=='undefined'&&window.JSZip)?window.JSZip:null);
+  if(!JZ)throw new Error('Zip-Bibliothek fehlt');
+  let zip;
+  if(startBuf){
+    try{zip=await JZ.loadAsync(startBuf);}
+    catch(e){throw new Error('Das ist keine lesbare Word-Datei (.docx) – altes .doc-Format oder passwortgeschützt?');}
+  }else zip=await _fdkLeeresDocx(JZ);
+  const docPart=zip.file('word/document.xml');
+  if(!docPart)throw new Error('Das ist keine Word-Datei (.docx) – altes .doc-Format oder passwortgeschützt?');
+  let docXml=await docPart.async('string');
+  const relsPfad='word/_rels/document.xml.rels';
+  let rels=zip.file(relsPfad)?await zip.file(relsPfad).async('string')
+    :'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>';
+  const ctPart=zip.file('[Content_Types].xml');
+  if(!ctPart)throw new Error('Word-Datei ohne Inhaltsverzeichnis der Teile ([Content_Types].xml)');
+  let ct=await ctPart.async('string');
+  const m=_fdkSeitenMasse(docXml);
+  // Kennungen eindeutig halten: über dem höchsten Bestand weiterzählen
+  let rMax=0;(rels.match(/Id="rId(\d+)"/g)||[]).forEach(s=>{const n=parseInt(s.replace(/\D/g,''),10);if(n>rMax)rMax=n;});
+  let dpMax=0;(docXml.match(/<wp:docPr\b[^>]*\bid="(\d+)"/g)||[]).forEach(s=>{const r=s.match(/\bid="(\d+)"/);const n=r?parseInt(r[1],10):0;if(n>dpMax)dpMax=n;});
+  if(!/Extension="jpe?g"/i.test(ct))ct=ct.split('</Types>').join('<Default Extension="jpg" ContentType="image/jpeg"/></Types>');
+  let nr=parseInt(opt.startNr,10);if(!(nr>0))nr=1;
+  let xml=startBuf?_FDK_P_UMBRUCH:'';   // mit Startdokument: Fotoseiten beginnen auf einer neuen Seite
+  let k=0,neuRels='';
+  for(const b of (bilder||[])){
+    if(!b||!b.bytes||!b.bytes.length)continue;
+    k++;
+    let v=k,datei='fdk_'+v+'.jpg';
+    while(zip.file('word/media/'+datei)){v+=100;datei='fdk_'+v+'.jpg';}
+    zip.file('word/media/'+datei,b.bytes,{binary:true});
+    const rId='rId'+(rMax+k);
+    neuRels+='<Relationship Id="'+rId+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/'+datei+'"/>';
+    const s=_fdkBildMasse(b.w||4,b.h||3,m);
+    if(k>1&&(k-1)%2===0)xml+=_FDK_P_UMBRUCH;        // nach je zwei Blöcken eine neue Seite
+    xml+=_fdkBlockXml({rId:rId,docPrId:dpMax+1000+k,name:'Abb. '+nr,cx:s.cx,cy:s.cy},nr,m)+_FDK_P_LEER;
+    nr++;
+  }
+  if(!k)throw new Error('Kein Foto ließ sich laden');
+  rels=rels.split('</Relationships>').join(neuRels+'</Relationships>');
+  // Einfügen VOR dem Abschnittsende des Textkörpers (letztes <w:sectPr> direkt im Körper).
+  // Hängt das letzte sectPr in einem Absatz (kein Körper-sectPr), dann vor </w:body> –
+  // sonst landete die Tabelle mitten in den Absatzeigenschaften.
+  const iBodyEnd=docXml.lastIndexOf('</w:body>');
+  if(iBodyEnd<0)throw new Error('Word-Datei ohne Textkörper');
+  let pos=iBodyEnd;
+  const iSect=docXml.lastIndexOf('<w:sectPr');
+  if(iSect>=0&&iSect<iBodyEnd&&!/<\/w:pPr>|<\/w:p>/.test(docXml.substring(iSect,iBodyEnd)))pos=iSect;
+  docXml=docXml.substring(0,pos)+xml+docXml.substring(pos);
+  zip.file('word/document.xml',docXml);
+  zip.file(relsPfad,rels);
+  zip.file('[Content_Types].xml',ct);
+  return await zip.generateAsync({type:'uint8array',compression:'DEFLATE',compressionOptions:{level:6},mimeType:_FDK_MIME_DOCX});
+}
+
+/* ── Fotoliste: dieselben drei Quellen wie der Bautagebuch-Bericht (_btbFotosFuerBericht) ──
+   eigeneFotos = Arbeitskopie des offenen Fensters (taskFotos) oder t.fotos. Nur Fotos mit
+   Drive-Datei (b716-Regel), Videos raus, bemalte Fassung hat Vorrang (editedDriveId). */
+function _fdkEintraege(t,eigeneFotos){
+  const out=[];const seen=new Set();
+  const push=(f,quelle,extra)=>{
+    if(!f)return;
+    const id=f.editedDriveId||f.driveId;
+    if(!id)return;
+    if(_isVideo(f.mimeType,f.name))return;
+    if(seen.has(id))return;seen.add(id);
+    out.push(Object.assign({key:id,driveId:id,quelle:quelle,caption:f.caption||'',name:f.name||'',ts:f.ts||'',thumb:f.thumbnailLink||'',pinNr:0},extra||{}));
+  };
+  (eigeneFotos||(t&&t.fotos)||[]).forEach(f=>push(f,'auftrag',{gruppe:'Fotos des Auftrags'}));
+  ((_tuRefFuerTask(t)||{}).fotos||[]).forEach(f=>push(f,'leistung',{gruppe:'🔁 '+(f.leistung||'Leistung')}));
+  _dpRefFotos(t||{}).forEach(f=>push(f,'dachplan',{gruppe:'🗺 Dachplan · Pin '+f.pinNr,pinNr:Number(f.pinNr)||0}));
+  out.forEach((e,i)=>{e.idx=i;});
+  return out;
+}
+function _fdkAuswahl(){return (_fdkState?_fdkState.liste:[]).filter(e=>_fdkState.an.has(e.key));}
+function _fdkDatum(ts){if(!ts)return '';const d=new Date(ts);return isNaN(d)?'':d.toLocaleDateString('de-DE');}
+function _fdkDateiname(t){
+  const roh=((document.getElementById('taskTitleInput')||{}).value||(t&&t.title)||'Auftrag');
+  const tit=String(roh).replace(/[^a-zA-Z0-9äöüÄÖÜß \-_]/g,'_').replace(/_+/g,'_').replace(/\s+/g,' ').trim().replace(/[ _]+$/,'').slice(0,80)||'Auftrag';
+  const d=new Date();
+  const iso=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  return tit+'_Fotodokumentation_'+iso+'.docx';
+}
+
+/* ── Bilder für das Dokument: aus Drive holen, verkleinern (1600 px längste Kante) ── */
+function _fdkVerkleinern(objUrl,maxDim,q){
+  return new Promise(resolve=>{
+    const img=new Image();
+    img.onload=()=>{try{
+      const w0=img.naturalWidth||1,h0=img.naturalHeight||1,r=Math.min(1,maxDim/Math.max(w0,h0));
+      const c=document.createElement('canvas');c.width=Math.max(1,Math.round(w0*r));c.height=Math.max(1,Math.round(h0*r));
+      c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+      resolve({dataUrl:c.toDataURL('image/jpeg',q),w:c.width,h:c.height});
+    }catch(e){resolve(null);}};
+    img.onerror=()=>resolve(null);
+    img.src=objUrl;
+  });
+}
+function _fdkDataUrlBytes(dataUrl){
+  const bin=atob(dataUrl.substring(dataUrl.indexOf(',')+1));
+  const u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return u;
+}
+async function _fdkFotoBytes(driveId){
+  try{
+    const u=await _fetchDesktopFotoBlob(driveId);if(!u)return null;
+    const k=await _fdkVerkleinern(u,1600,0.85);if(!k||!k.dataUrl)return null;
+    return {bytes:_fdkDataUrlBytes(k.dataUrl),w:k.w,h:k.h,name:'Foto'};
+  }catch(e){console.warn('[FDK] Foto:',driveId,e);return null;}
+}
+/* Dachplan-Übersicht: Basisbild + Nummern-Kreise an den Prozent-Positionen der Pins
+   (dieselben Werte wie _dpBerichtHtml), Ampelfarbe, weißer Rand. Nur Bild-Modus. */
+async function _fdkPlanBild(t){
+  try{
+    const dp=(t&&t.dachplan)||{};
+    if(!(dp.base==='bild'&&dp.imgDriveId))return null;
+    const u=await _fetchDesktopFotoBlob(dp.imgDriveId);if(!u)return null;
+    const im=await new Promise(res=>{const x=new Image();x.onload=()=>res(x);x.onerror=()=>res(null);x.src=u;});
+    if(!im)return null;
+    const w0=im.naturalWidth||1,h0=im.naturalHeight||1,r=Math.min(1,1600/Math.max(w0,h0));
+    const c=document.createElement('canvas');c.width=Math.max(1,Math.round(w0*r));c.height=Math.max(1,Math.round(h0*r));
+    const g=c.getContext('2d');g.drawImage(im,0,0,c.width,c.height);
+    const rad=Math.max(12,Math.round(c.width/70));
+    (dp.pins||[]).slice().sort((a,b)=>((a&&a.nr)||0)-((b&&b.nr)||0)).forEach(p=>{
+      if(!p||p.nx==null||p.ny==null)return;
+      const x=p.nx*c.width,y=p.ny*c.height;
+      g.beginPath();g.arc(x,y,rad,0,Math.PI*2);g.fillStyle=_FDK_COL[p.status||'rot']||_FDK_COL.rot;g.fill();
+      g.lineWidth=Math.max(2,Math.round(rad/6));g.strokeStyle='#fff';g.stroke();
+      g.fillStyle='#fff';g.font='bold '+Math.round(rad*1.1)+'px Arial';g.textAlign='center';g.textBaseline='middle';
+      g.fillText(String(p.nr||'?'),x,y+1);
+    });
+    return {bytes:_fdkDataUrlBytes(c.toDataURL('image/jpeg',0.85)),w:c.width,h:c.height,name:'Dachplan'};
+  }catch(e){console.warn('[FDK] Plan:',e);return null;}
+}
+
+/* ── Fenster ─────────────────────────────────────────────────────────────── */
+function _fdkStyle(){
+  if(document.getElementById('fdkStyle'))return;
+  const s=document.createElement('style');s.id='fdkStyle';
+  s.textContent='.fdk-grp{display:flex;align-items:center;justify-content:space-between;font-size:12px;font-weight:700;color:var(--text2);padding:8px 6px 4px;border-bottom:1px solid var(--border);margin-top:6px;}'
+    +'.fdk-grp button,.fdk-tools button,.fdk-pfeile button{padding:2px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:11px;cursor:pointer;}'
+    +'.fdk-tools{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:4px;font-size:11px;color:var(--text2);}'
+    +'.fdk-row{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:8px;border:1px solid transparent;cursor:grab;}'
+    +'.fdk-row.an{background:rgba(108,99,255,.10);border-color:rgba(108,99,255,.35);}'
+    +'.fdk-row.ueber{border-top:2px solid var(--accent);}'
+    +'.fdk-griff{color:var(--text2);opacity:.6;font-size:14px;user-select:none;}'
+    +'.fdk-thumb{width:64px;height:48px;object-fit:cover;border-radius:6px;background:var(--bg3);flex-shrink:0;}'
+    +'.fdk-txt{flex:1;min-width:0;display:flex;flex-direction:column;font-size:12px;}.fdk-txt b{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}.fdk-txt small{color:var(--text2);font-size:11px;}'
+    +'.fdk-pfeile{display:flex;flex-direction:column;gap:2px;}.fdk-pfeile button{padding:0 6px;font-size:10px;line-height:16px;}'
+    +'.fdk-opt label{display:block;font-size:12px;margin:6px 0;cursor:pointer;}.fdk-opt select,.fdk-opt input[type=number]{width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px;padding:6px 8px;margin-top:3px;}'
+    +'.fdk-opt h4{font-size:12px;margin:12px 0 4px;color:var(--text);}'
+    +'.fdk-hinweis{font-size:11px;color:var(--text2);line-height:1.5;background:var(--bg3);border-radius:8px;padding:8px 10px;margin-top:12px;}'
+    +'.fdk-btn{padding:9px 14px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:13px;cursor:pointer;}'
+    +'.fdk-btn.haupt{background:var(--accent);color:#fff;border:none;font-weight:700;}.fdk-btn:disabled{opacity:.45;cursor:default;}';
+  document.head.appendChild(s);
+}
+function _fdkOeffnen(){
+  const id=(document.getElementById('taskId')||{}).value||'';
+  const t=id?findTaskById(id):null;
+  if(!t){showToast('Bitte zuerst einen Auftrag öffnen','error');return;}
+  if(!gdriveTokenValid()){showToast('⚠ Drive verbinden (☁️) – die Fotos liegen dort','error',4500);return;}
+  // Arbeitskopie des offenen Fensters (taskFotos) – ist sie leer, der gespeicherte Stand
+  const eigene=(typeof taskFotos!=='undefined'&&Array.isArray(taskFotos)&&taskFotos.length)?taskFotos:(t.fotos||[]);
+  const liste=_fdkEintraege(t,eigene);
+  if(!liste.length){showToast('Keine Fotos mit Drive-Datei an diesem Auftrag','info',4000);return;}
+  const dp=t.dachplan||{};
+  const planMoeglich=!!(dp.base==='bild'&&dp.imgDriveId&&(dp.pins||[]).length);
+  const ordnerUrl=String((document.getElementById('tGDOrdner')||{}).value||'').trim();
+  _fdkState={taskId:t.id,liste:liste,an:new Set(),planMoeglich:planMoeglich,ordnerId:_extractFolderIdFromUrl(ordnerUrl)||'',ergebnis:null};
+  _fdkStyle();
+  const alt=document.getElementById('fdkOverlay');if(alt)alt.remove();
+  const ov=document.createElement('div');ov.id='fdkOverlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000001;display:flex;align-items:center;justify-content:center;';
+  const bx=document.createElement('div');
+  bx.style.cssText='background:var(--bg2);border-radius:14px;padding:16px 18px;width:min(1000px,96vw);height:min(88vh,780px);display:flex;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,.5);color:var(--text);';
+  bx.innerHTML='<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">'
+      +'<div style="font-size:15px;font-weight:700;">📚 Fotodokumentation (Word)</div>'
+      +'<div style="font-size:12px;color:var(--text2);">'+esc(t.title||'')+'</div>'
+      +'<button type="button" class="fdk-btn" style="margin-left:auto;padding:5px 10px;" onclick="_fdkSchliessen()">✕ Schließen</button></div>'
+    +'<div style="display:flex;gap:16px;flex:1;min-height:0;">'
+      +'<div style="flex:1.25;min-width:0;display:flex;flex-direction:column;">'
+        +'<div class="fdk-tools"><span>Auswahl:</span><button type="button" onclick="_fdkAlle(1)">Alle</button><button type="button" onclick="_fdkAlle(0)">Keine</button>'
+        +'<span style="margin-left:10px;">Sortieren:</span><button type="button" onclick="_fdkSortiere(\'zeit\')">⏱ Aufnahmezeit</button><button type="button" onclick="_fdkSortiere(\'pin\')">🗺 Pin-Nr</button><button type="button" onclick="_fdkSortiere(\'name\')">🔤 Name</button><button type="button" onclick="_fdkSortiere(\'ursprung\')">↺ Ursprung</button>'
+        +'<span style="margin-left:auto;">Reihenfolge = Dokument · Ziehen oder ▲▼</span></div>'
+        +'<div id="fdkListe" style="flex:1;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:4px 6px;background:var(--bg1,transparent);"></div>'
+      +'</div>'
+      +'<div class="fdk-opt" style="width:330px;flex-shrink:0;overflow:auto;">'
+        +'<h4>Vorne anhängen (Startdokument)</h4>'
+        +'<label><input type="radio" name="fdkStartArt" value="ohne" checked> ohne Startdokument (nur Fotoseiten)</label>'
+        +'<label><input type="radio" name="fdkStartArt" value="drive"> Word-Datei aus dem Auftragsordner</label>'
+        +'<select id="fdkStartSel" onchange="if(this.value){document.querySelector(\'input[name=fdkStartArt][value=drive]\').checked=true;}"><option value="">⏳ Ordner wird gelesen…</option></select>'
+        +'<label style="margin-top:8px;"><input type="radio" name="fdkStartArt" value="datei"> Word-Datei von Festplatte / NAS</label>'
+        +'<input type="file" id="fdkStartDatei" accept=".docx" style="font-size:11px;max-width:100%;" onchange="if(this.files&&this.files[0]){document.querySelector(\'input[name=fdkStartArt][value=datei]\').checked=true;}">'
+        +'<h4>Abbildungen</h4>'
+        +'<label>Erste Abbildungsnummer<input type="number" id="fdkStartNr" min="1" max="9999" value="1"></label>'
+        +(planMoeglich?'<label><input type="checkbox" id="fdkPlan" checked> 🗺 Dachplan-Übersicht als Bild voranstellen</label>':'<div style="font-size:11px;color:var(--text2);">🗺 Dachplan-Übersicht: nur im Bild-Modus des Dachplans möglich.</div>')
+        +'<div class="fdk-hinweis">2 Fotos je Seite · unter jedem Foto steht nur „Abb. N:" – den Text schreibst du in Word.<br>'
+        +'Ergebnis = <b>neue Datei</b> im Auftragsordner (+ Herunterladen), das Startdokument bleibt unverändert. Kopf-/Fußzeile und Seitenzahlen laufen aus deinem Dokument weiter.</div>'
+      +'</div>'
+    +'</div>'
+    +'<div style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap;">'
+      +'<span id="fdkZaehler" style="font-size:12px;color:var(--text2);"></span>'
+      +'<span id="fdkStatus" style="font-size:12px;color:var(--text);flex:1;min-width:200px;"></span>'
+      +'<button type="button" class="fdk-btn" id="fdkDownload" style="display:none;" onclick="_fdkHerunterladen()">💾 Herunterladen</button>'
+      +'<button type="button" class="fdk-btn haupt" id="fdkErstellen" onclick="_fdkErstellen()" disabled>📚 Erstellen</button>'
+    +'</div>';
+  ov.appendChild(bx);document.body.appendChild(ov);
+  _fdkListeZeichnen();
+  _fdkStartListeLaden();
+}
+function _fdkSchliessen(){const ov=document.getElementById('fdkOverlay');if(ov)ov.remove();_fdkState=null;_fdkDragIdx=-1;}
+function _fdkListeZeichnen(){
+  const box=document.getElementById('fdkListe');if(!box||!_fdkState)return;
+  const S=_fdkState;let html='',letzte=null;
+  S.liste.forEach((e,i)=>{
+    if(e.gruppe!==letzte){
+      letzte=e.gruppe;
+      const keys=S.liste.filter(x=>x.gruppe===e.gruppe).map(x=>x.key);
+      const alleAn=keys.every(k=>S.an.has(k));
+      html+='<div class="fdk-grp"><span>'+esc(e.gruppe)+'</span><button type="button" data-grp="'+esc(e.gruppe)+'" data-an="'+(alleAn?0:1)+'">'+(alleAn?'Keine':'Alle')+'</button></div>';
+    }
+    const an=S.an.has(e.key);
+    const cache=(typeof _desktopFotoBlobCache!=='undefined'&&_desktopFotoBlobCache&&_desktopFotoBlobCache.get)?_desktopFotoBlobCache.get(e.driveId):null;
+    const src=cache||e.thumb||'';
+    html+='<div class="fdk-row'+(an?' an':'')+'" draggable="true" data-i="'+i+'">'
+      +'<span class="fdk-griff" title="Ziehen zum Umsortieren">⋮⋮</span>'
+      +'<input type="checkbox" data-key="'+esc(e.key)+'" '+(an?'checked':'')+'>'
+      +'<img class="fdk-thumb" alt="" data-fdk-id="'+esc(e.driveId)+'"'+(src?' src="'+esc(src)+'"':'')+'>'
+      +'<span class="fdk-txt"><b>'+esc(e.caption||e.name||'Foto')+'</b><small>'+esc(_fdkDatum(e.ts))+(e.quelle!=='auftrag'?(e.ts?' · ':'')+esc(e.gruppe):'')+'</small></span>'
+      +'<span class="fdk-pfeile"><button type="button" data-mv="-1" title="nach oben">▲</button><button type="button" data-mv="1" title="nach unten">▼</button></span>'
+      +'</div>';
+  });
+  box.innerHTML=html;
+  box.querySelectorAll('.fdk-grp button').forEach(b=>{b.onclick=()=>_fdkGruppe(b.dataset.grp,b.dataset.an==='1');});
+  box.querySelectorAll('.fdk-row').forEach(row=>{
+    const i=parseInt(row.dataset.i,10);
+    row.querySelector('input[type=checkbox]').onchange=function(){_fdkToggle(this.dataset.key,this.checked);};
+    row.querySelectorAll('[data-mv]').forEach(b=>{b.onclick=()=>_fdkSchieb(i,parseInt(b.dataset.mv,10));});
+    row.ondragstart=ev=>_fdkDragStart(ev,i);
+    row.ondragover=ev=>_fdkDragOver(ev,row);
+    row.ondragleave=()=>row.classList.remove('ueber');
+    row.ondrop=ev=>_fdkDrop(ev,i);
+    row.ondragend=_fdkDragEnd;
+    const img=row.querySelector('img');
+    if(img){
+      if(img.getAttribute('src'))img.onerror=()=>{img.onerror=null;img.removeAttribute('src');_fdkThumbLaden(img);};
+      else _fdkThumbLaden(img);
+    }
+  });
+  _fdkZaehler();
+}
+function _fdkThumbLaden(img){
+  const id=img.getAttribute('data-fdk-id');if(!id||img.dataset.fdkLaedt==='1')return;
+  img.dataset.fdkLaedt='1';
+  _pamLadeSchlange(()=>_fetchDesktopFotoBlob(id).then(u=>{if(u&&img.isConnected)img.src=u;}),true);
+}
+function _fdkToggle(key,an){if(!_fdkState)return;if(an)_fdkState.an.add(key);else _fdkState.an.delete(key);_fdkListeZeichnen();}
+function _fdkGruppe(gruppe,an){if(!_fdkState)return;_fdkState.liste.filter(e=>e.gruppe===gruppe).forEach(e=>{if(an)_fdkState.an.add(e.key);else _fdkState.an.delete(e.key);});_fdkListeZeichnen();}
+function _fdkAlle(an){if(!_fdkState)return;_fdkState.liste.forEach(e=>{if(an)_fdkState.an.add(e.key);else _fdkState.an.delete(e.key);});_fdkListeZeichnen();}
+function _fdkZaehler(){
+  if(!_fdkState)return;
+  const n=_fdkState.an.size;
+  const z=document.getElementById('fdkZaehler');if(z)z.textContent=n+' von '+_fdkState.liste.length+' Fotos ausgewählt';
+  const b=document.getElementById('fdkErstellen');if(b)b.disabled=!n;
+}
+function _fdkSortiere(art){
+  if(!_fdkState)return;
+  const L=_fdkState.liste;
+  if(art==='zeit')L.sort((a,b)=>String(a.ts||'9').localeCompare(String(b.ts||'9'))||a.idx-b.idx);
+  else if(art==='pin')L.sort((a,b)=>((a.quelle==='dachplan')?0:1)-((b.quelle==='dachplan')?0:1)||(a.pinNr||0)-(b.pinNr||0)||a.idx-b.idx);
+  else if(art==='name')L.sort((a,b)=>String(a.caption||a.name||'').localeCompare(String(b.caption||b.name||''),'de')||a.idx-b.idx);
+  else L.sort((a,b)=>a.idx-b.idx);
+  _fdkListeZeichnen();
+}
+function _fdkVerschiebe(von,nach){if(!_fdkState)return;const L=_fdkState.liste;if(von<0||von>=L.length||nach<0||nach>=L.length||von===nach)return;const e=L.splice(von,1)[0];L.splice(nach,0,e);_fdkListeZeichnen();}
+function _fdkSchieb(i,d){_fdkVerschiebe(i,i+d);}
+function _fdkDragStart(ev,i){_fdkDragIdx=i;try{ev.dataTransfer.effectAllowed='move';ev.dataTransfer.setData('text/plain',String(i));}catch(e){}}
+function _fdkDragOver(ev,el){if(_fdkDragIdx<0)return;ev.preventDefault();try{ev.dataTransfer.dropEffect='move';}catch(e){}el.classList.add('ueber');}
+function _fdkDrop(ev,ziel){ev.preventDefault();const von=_fdkDragIdx;_fdkDragIdx=-1;if(von<0||von===ziel){_fdkDragEnd();return;}_fdkVerschiebe(von,ziel);}
+function _fdkDragEnd(){_fdkDragIdx=-1;document.querySelectorAll('.fdk-row.ueber').forEach(r=>r.classList.remove('ueber'));}
+
+/* Word-Dateien im Auftragsordner (+ eine Ebene Unterordner) für die Auswahl „Startdokument" */
+async function _fdkStartListeLaden(){
+  const sel=document.getElementById('fdkStartSel');if(!sel||!_fdkState)return;
+  const fid=_fdkState.ordnerId;
+  if(!fid){sel.innerHTML='<option value="">(kein Auftragsordner am Task – Datei von Festplatte wählen)</option>';return;}
+  try{
+    const q="'"+fid+"' in parents and trashed=false and (mimeType='"+_FDK_MIME_DOCX+"' or mimeType='application/vnd.google-apps.folder')";
+    const erste=await _dokDriveListe(q);
+    const dateien=erste.filter(f=>f.mimeType===_FDK_MIME_DOCX).map(f=>({id:f.id,name:f.name}));
+    const unter=erste.filter(f=>f.mimeType==='application/vnd.google-apps.folder').slice(0,20);
+    for(const u of unter){
+      try{
+        const l=await _dokDriveListe("'"+u.id+"' in parents and trashed=false and mimeType='"+_FDK_MIME_DOCX+"'");
+        l.forEach(f=>dateien.push({id:f.id,name:u.name+' / '+f.name}));
+      }catch(e){console.warn('[FDK] Unterordner:',u.name,e);}
+    }
+    if(!_fdkState||!document.getElementById('fdkStartSel'))return;   // Fenster inzwischen zu
+    dateien.sort((a,b)=>a.name.localeCompare(b.name,'de'));
+    sel.innerHTML=dateien.length
+      ?'<option value="">– Word-Datei wählen –</option>'+dateien.map(d=>'<option value="'+esc(d.id)+'">'+esc(d.name)+'</option>').join('')
+      :'<option value="">(keine Word-Datei im Auftragsordner)</option>';
+  }catch(e){console.warn('[FDK] Ordnerliste:',e);sel.innerHTML='<option value="">(Ordner nicht lesbar)</option>';}
+}
+
+/* ── Erstellen: Startdokument holen → Bilder holen → Word bauen → ablegen ── */
+async function _fdkErstellen(){
+  const S=_fdkState;if(!S)return;
+  const t=findTaskById(S.taskId);
+  if(!t){showToast('Auftrag nicht gefunden','error');return;}
+  const auswahl=_fdkAuswahl();
+  if(!auswahl.length){showToast('Bitte mindestens ein Foto anhaken','warning');return;}
+  const art=(document.querySelector('input[name="fdkStartArt"]:checked')||{}).value||'ohne';
+  const btn=document.getElementById('fdkErstellen'),st=document.getElementById('fdkStatus'),dl=document.getElementById('fdkDownload');
+  const sag=m=>{if(st)st.textContent=m;};
+  if(btn)btn.disabled=true;
+  if(dl)dl.style.display='none';
+  S.ergebnis=null;
+  try{
+    let startBuf=null;
+    if(art==='drive'){
+      const fid=(document.getElementById('fdkStartSel')||{}).value||'';
+      if(!fid)throw new Error('Bitte eine Word-Datei aus dem Auftragsordner wählen – oder „ohne Startdokument".');
+      sag('⏳ Startdokument wird geladen…');
+      const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fid)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
+      if(r.status===401){_handleDrive401();throw new Error('Drive-Verbindung abgelaufen – bitte ☁️ drücken');}
+      if(!r.ok)throw new Error('Startdokument nicht ladbar (HTTP '+r.status+')');
+      startBuf=await r.arrayBuffer();
+    }else if(art==='datei'){
+      const inp=document.getElementById('fdkStartDatei');
+      const f=inp&&inp.files&&inp.files[0];
+      if(!f)throw new Error('Bitte eine Word-Datei (.docx) von der Festplatte wählen.');
+      if(!/\.docx$/i.test(f.name))throw new Error('Nur .docx geht – das alte .doc-Format bitte in Word als .docx speichern.');
+      startBuf=await f.arrayBuffer();
+    }
+    const bilder=[],fehl=[];
+    if(S.planMoeglich&&((document.getElementById('fdkPlan')||{}).checked)){
+      sag('⏳ Dachplan-Übersicht wird gezeichnet…');
+      const pb=await _fdkPlanBild(t);
+      if(pb)bilder.push(pb);else fehl.push('Dachplan-Übersicht');
+    }
+    let n=0;
+    for(const e of auswahl){
+      n++;sag('⏳ Foto '+n+' von '+auswahl.length+' wird geholt…');
+      const b=await _fdkFotoBytes(e.driveId);
+      if(b)bilder.push(b);else fehl.push(e.caption||e.name||e.driveId);
+    }
+    if(!bilder.length)throw new Error('Kein Foto ließ sich laden.');
+    const startNr=parseInt((document.getElementById('fdkStartNr')||{}).value,10)||1;
+    sag('⏳ Word-Datei wird zusammengesetzt…');
+    const bytes=await _fdkDocxBauen(startBuf,bilder,{startNr:startNr});
+    const fname=_fdkDateiname(t);
+    S.ergebnis={bytes:bytes,fname:fname};
+    let ablage='';
+    if(S.ordnerId&&gdriveTokenValid()){
+      sag('⏳ Ablage im Auftragsordner…');
+      try{
+        await _driveUploadGeneric(bytes,fname,_FDK_MIME_DOCX,S.ordnerId);
+        ablage='✓ im Auftragsordner abgelegt';
+        try{if(typeof _dokSyncOrdner==='function')_dokSyncOrdner();}catch(e){}
+      }catch(e){console.warn('[FDK] Ablage:',e);ablage='⚠ Ablage in Drive fehlgeschlagen – bitte herunterladen';}
+    }else ablage='ℹ kein Auftragsordner am Task – bitte herunterladen';
+    sag('✓ Fertig: '+bilder.length+' Abbildung'+(bilder.length!==1?'en':'')+(fehl.length?' · '+fehl.length+' nicht ladbar':'')+' · '+ablage);
+    if(dl)dl.style.display='';
+    showToast('📚 Fotodokumentation erstellt: '+fname,'success',5000);
+    if(fehl.length)showToast('⚠ Nicht geladen: '+fehl.slice(0,5).join(', ')+(fehl.length>5?' …':''),'warning',8000);
+  }catch(e){
+    console.warn('[FDK]',e);
+    sag('⚠ '+((e&&e.message)||e));
+    showToast('⚠ '+((e&&e.message)||'Fehler beim Erstellen'),'error',7000);
+  }finally{if(btn)btn.disabled=false;}
+}
+function _fdkHerunterladen(){
+  const S=_fdkState;if(!S||!S.ergebnis)return;
+  const blob=new Blob([S.ergebnis.bytes],{type:_FDK_MIME_DOCX});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=S.ergebnis.fname;
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+}
 </script>
 
 <!-- PAM Task-Uebersicht Overlay -->
