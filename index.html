@@ -9383,7 +9383,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-21 · #730'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-21-b730) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-21 · #733'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-21-b733) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -11882,6 +11882,7 @@ function _dpRefFotoBlock(refs){
         +'<img data-foto-id="'+id+'" alt="" loading="lazy" onerror="_desktopThumbFallback(this)">'
         +'<div class="foto-name">'+esc(f.caption||('Pin '+g.nr))+'</div>'
         +'<button class="foto-edit" onclick="event.stopPropagation();Dachplan.openPin(\''+_escHtml(f.pinId)+'\')" title="Zum Pin im Dachplan springen – dort kann das Foto geändert oder entfernt werden">↗</button>'
+        +'<button class="foto-send" onclick="event.stopPropagation();_fsMenueDp(\''+id+'\',this)" title="Foto wegschicken – ohne Standort- und Kameradaten">📤</button>' // b732
         +'</div>';
     }).join('');
     return '<div class="foto-desktop-wrap" style="margin-top:8px;">'
@@ -25637,6 +25638,9 @@ function renderFotoListDesktop(){
   // an sie heran (Befund Frank 19.08.). Eigener Zähler-Teil, damit die Zahlen getrennt
   // bleiben: „12 +7 +5" = eigene / verlinkte Leistungen / Dachplan.
   const _dpRef=_dpRefFotosLive();
+  // b732: Pin-Fotos folgen dem Ordner-Filter wie alles andere – sie tragen seit b716
+  // den Herkunftsordner „🗺 Dachplan" und tauchen damit auch im Auswahlmenü auf.
+  const _dpRefSicht=_dpRef.filter(function(f){return _pamPasstFilter(f,_fotoOrdnerFilter);});
   if(badge){
     const _nf=(taskFotos||[]).length;
     if(_nf||_ref.length||_dpRef.length){badge.textContent=_nf+(_ref.length?' +'+_ref.length:'')+(_dpRef.length?' +'+_dpRef.length:'');badge.style.display='inline-flex';}
@@ -25645,15 +25649,15 @@ function renderFotoListDesktop(){
   if(!taskFotos||!taskFotos.length){
     // b716: auch hier anhängen – ein reiner Dachplan-Auftrag hat oft GAR keine eigenen
     // Fotos, und dann steigt die Anzeige hier aus, bevor sie unten ankommt.
-    el.innerHTML=_tuRefFotoBlock(_refSicht)+_dpRefFotoBlock(_dpRef); // b630: auch ohne eigene Fotos zeigen
+    el.innerHTML=_tuRefFotoBlock(_refSicht)+_dpRefFotoBlock(_dpRefSicht); // b630: auch ohne eigene Fotos zeigen · b732: gefiltert
     _fotoSelectMode=false;_fotoSelected.clear();
-    _pamFilterMenu('fotoListDesktop','fotoOrdnerFilterBar',_ref,_fotoOrdnerFilter,'_setFotoOrdnerFilter',true);
+    _pamFilterMenu('fotoListDesktop','fotoOrdnerFilterBar',_ref.concat(_dpRef),_fotoOrdnerFilter,'_setFotoOrdnerFilter',true); // b732: 🗺-Eintrag ins Menü
     try{hydrateDesktopFotoThumbs();}catch(e){console.warn('hydrateDesktopFotoThumbs:',e);}
     return;
   }
   // b538: Auswahlmenü nach Herkunftsordner (plus nur Fotos / nur Videos)
   // b630: die Verweise stehen mit im Menü – je Leistung ein eigener Eintrag
-  _pamFilterMenu('fotoListDesktop','fotoOrdnerFilterBar',(taskFotos||[]).concat(_ref),_fotoOrdnerFilter,'_setFotoOrdnerFilter',true);
+  _pamFilterMenu('fotoListDesktop','fotoOrdnerFilterBar',(taskFotos||[]).concat(_ref).concat(_dpRef),_fotoOrdnerFilter,'_setFotoOrdnerFilter',true); // b732: 🗺 Dachplan als Sammeleintrag (b716-Restpunkt)
   // b705: Jahresfilter NUR aus den eigenen Fotos (nicht den Leistungs-Verweisen –
   // die haben ihre eigene Jahresübersicht schon, siehe _tuJahrDialog).
   _fotoJahrMenuAnhaengen('fotoOrdnerFilterBar',taskFotos);
@@ -25756,7 +25760,7 @@ function renderFotoListDesktop(){
     +'<div class="foto-desktop-grid'+(_fotoExpanded?' expanded':'')+(_fotoSelectMode?' foto-select-mode':'')+'">'+items+'</div>'
     +'</div>'
     +_tuRefFotoBlock(_refSicht) // b630: verlinkte Leistungs-Dateien, je Leistung eine Gruppe
-    +_dpRefFotoBlock(_dpRef);   // b716: Dachplan-Pin-Fotos, je Pin eine Gruppe
+    +_dpRefFotoBlock(_dpRefSicht);   // b716: Dachplan-Pin-Fotos, je Pin eine Gruppe · b732: gefiltert
   try{hydrateDesktopFotoThumbs();}catch(e){console.warn('hydrateDesktopFotoThumbs:',e);}
   try{renderTaskNotizen();}catch(e){console.warn('[BTB] refresh:',e);} // b515: Foto-Änderungen auch im Bautagebuch zeigen
 }
@@ -26361,6 +26365,15 @@ function _fsMenueAt(i,btn){
 function _fsMenueLb(btn){
   const f=(typeof taskFotos!=='undefined'&&taskFotos&&_currentFotoLbIdx>=0)?taskFotos[_currentFotoLbIdx]:null;
   _fsMenueAuf(f,btn);
+}
+// b732: Wegschicken auch für Dachplan-Pin-Fotos. Die Verweise aus _dpRefFotosLive
+// tragen bereits die bemalt-bevorzugte Drive-Kennung (b725) und die Beschriftung –
+// der bestehende Kern (_fsMenueAuf/_fsBlankeBytes) arbeitet objektbasiert und kann
+// sie direkt nehmen. ⛔ NUR LESEN: der Verweis ist eine Anzeige-Kopie, nie das
+// Pin-Foto selbst.
+function _fsMenueDp(driveId,btn){
+  const ref=_dpRefFotosLive().find(function(x){return String(x.driveId||'')===String(driveId||'');});
+  _fsMenueAuf(ref||null,btn);
 }
 async function _fsWeg(weg){
   const f=_fsFoto;
@@ -44044,6 +44057,179 @@ function _pamRollbackSelected(evt){
 /* ══════════════ DACHPLAN – DESKTOP (Leaflet, Karte + Bild + Kalibrierung) ══════════════
    Gleiche Daten wie Mobil (task.dachplan). Fotos/Basisbild aus Google Drive (driveId).
    Speichern über scheduleSave(), Task über findTaskById(#taskId). */
+/* ══ b731: Dachplan-Bericht (Wunsch Frank 21.08.) ════════════════════════════
+   EIN Dokument für die Hausverwaltung: oben der Plan (im Bild-Modus das Basisbild
+   mit den Pins als Nummern-Kreisen an ihrer nx/ny-Position — reines HTML, kein
+   Karten-Schnappschuss), darunter je Pin Kopfzeile (Nr/Ampel/Titel/Notiz, bei
+   Karten-Pins mit Maps-Link) und seine Fotos. Gleiche Bauart wie das Bautagebuch
+   (_btbBericht): Fenster + Druckleiste, „Als PDF speichern" = Kundenweg. NEU dazu:
+   „💾 Als HTML-Datei speichern" bettet die Bilder ein (Leinwand → verkleinerte
+   Kopie) und lädt EINE eigenständige Datei herunter — zum Mailen.
+   ⛔ Abgedruckt wird nur, was eine Drive-Datei hat (b716-Regel) — nur auf einem
+   Gerät liegende Fotos werden gezählt und im Bericht ehrlich genannt.
+   Bemalte Fassung hat Vorrang (editedDriveId, wie überall seit v215/b725). */
+function _dpBerichtFotos(t){
+  const out=[];let nurGeraet=0;
+  const pins=((t&&t.dachplan&&t.dachplan.pins)||[]).slice().sort((a,b)=>(a&&a.nr||0)-(b&&b.nr||0));
+  for(const p of pins){
+    if(!p)continue;
+    for(const fo of (p.fotos||[])){
+      if(!fo)continue;
+      if(fo.editedDriveId||fo.driveId)out.push({fo,p,k:out.length});
+      else nurGeraet++;
+    }
+  }
+  return {liste:out,nurGeraet,pins};
+}
+function _dpBerichtHtml(t){
+  const COL={rot:'#e5484d',gelb:'#f5a623',gruen:'#30a46c'};
+  const LBL={rot:'Schaden',gelb:'Prüfen',gruen:'OK'};
+  const dp=(t&&t.dachplan)||{};
+  const {liste,nurGeraet,pins}=_dpBerichtFotos(t);
+  const heute=new Date().toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'});
+  const bildModus=!!(dp.base==='bild'&&dp.imgDriveId);
+  let plan='';
+  if(bildModus){
+    plan='<h2>Der Plan</h2><div class="planbox"><img id="_dpbasis" alt="Dachplan">'
+      +pins.map(p=>(p&&p.nx!=null)?('<span class="pinkreis" style="left:'+(p.nx*100).toFixed(2)+'%;top:'+(p.ny*100).toFixed(2)+'%;background:'+(COL[p.status||'rot']||COL.rot)+';">'+esc(String(p.nr||'?'))+'</span>'):'').join('')
+      +'</div>';
+  }else if(pins.length){
+    plan='<div class="sysrow" style="display:block;">Die Pins liegen auf der Luftbild-Karte — je Pin führt unten ein 🗺-Link auf die Karte.</div>';
+  }
+  let body='';
+  for(const p of pins){
+    if(!p)continue;
+    const col=COL[p.status||'rot']||COL.rot;
+    const txt=String(p.title||'').trim();
+    const note=String(p.note||'').trim();
+    const koord=(p.lat!=null&&p.lng!=null)
+      ?('<a href="https://maps.google.com/?q='+Number(p.lat).toFixed(6)+','+Number(p.lng).toFixed(6)+'" target="_blank">🗺 auf der Karte zeigen</a>')
+      :((p.nx!=null)?('Bild-Position '+Math.round((p.nx||0)*100)+'% / '+Math.round((p.ny||0)*100)+'%'):'');
+    body+='<div class="pinkopf" style="border-left:6px solid '+col+';">'
+      +'<span class="pinnr" style="background:'+col+';">'+esc(String(p.nr||'?'))+'</span>'
+      +'<span class="pintitel">Pin '+esc(String(p.nr||'?'))+' · '+(LBL[p.status||'rot']||'')+(txt?' — '+esc(txt):'')+'</span>'
+      +(koord?'<span class="pinkoord">'+koord+'</span>':'')
+      +'</div>'
+      +(note?'<div class="pinnote">'+esc(note)+'</div>':'');
+    const eigene=liste.filter(x=>x.p===p);
+    if(eigene.length){
+      body+='<div class="bg-grid">';
+      for(const x of eigene){
+        const cap=[(x.fo.ts?new Date(x.fo.ts).toLocaleDateString('de-DE'):''),(x.fo.caption||'')].filter(Boolean).join(' – ');
+        body+='<figure><img id="_dpb'+x.k+'" alt="">'+(cap?'<figcaption>'+esc(cap)+'</figcaption>':'')+'</figure>';
+      }
+      body+='</div>';
+    }else{
+      body+='<div class="sysrow" style="display:block;">Keine Fotos an diesem Pin'+(nurGeraet?' (oder nur auf einem Gerät)':'')+'.</div>';
+    }
+  }
+  if(nurGeraet)body+='<div class="sysrow" style="display:block;margin-top:10px;">📱 '+nurGeraet+' Foto'+(nurGeraet!==1?'s':'')+' liegen nur auf einem Gerät (noch nicht in Drive) und fehlen deshalb hier.</div>';
+  return '<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>Dachplan-Bericht – '+esc(t.title||'Auftrag')+'</title><style>'
+    +'body{font-family:Arial,Helvetica,sans-serif;color:#1a1a2e;margin:24px;max-width:860px;}'
+    +'h1{font-size:20px;margin:0 0 2px;}'
+    +'h2{font-size:14px;margin:18px 0 6px;padding:4px 8px;background:#eef6ee;border-left:4px solid #30a46c;page-break-after:avoid;}'
+    +'.kopf{color:#555;font-size:12px;margin-bottom:3px;}'
+    +'.planbox{position:relative;display:inline-block;max-width:100%;margin:4px 0 10px;page-break-inside:avoid;}'
+    +'.planbox img{max-width:100%;height:auto;display:block;border:1px solid #ccc;border-radius:4px;background:#f0f0f4;min-height:60px;}'
+    +'.pinkreis{position:absolute;transform:translate(-50%,-50%);width:26px;height:26px;border-radius:50%;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.5);}'
+    +'.pinkopf{display:flex;align-items:center;gap:8px;margin:16px 0 4px;padding:6px 10px;background:#f6f6fa;border-radius:0 6px 6px 0;page-break-after:avoid;}'
+    +'.pinnr{width:24px;height:24px;border-radius:50%;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0;}'
+    +'.pintitel{font-size:13px;font-weight:700;}'
+    +'.pinkoord{margin-left:auto;font-size:11px;color:#555;}.pinkoord a{color:#2e4fc4;}'
+    +'.pinnote{font-size:12px;color:#333;margin:2px 0 6px 10px;white-space:pre-wrap;}'
+    +'.bg-grid{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 10px;}'
+    +'figure{margin:0;width:244px;page-break-inside:avoid;}'
+    +'figure img{width:244px;height:auto;border:1px solid #ccc;border-radius:4px;background:#f0f0f4;min-height:50px;display:block;}'
+    +'figcaption{font-size:10px;color:#555;margin-top:2px;}'
+    +'.sysrow{font-size:11px;color:#888;margin:3px 0;}'
+    +'.bar{position:sticky;top:0;background:#fff;padding:8px 0;border-bottom:1px solid #ddd;margin-bottom:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;}'
+    +'.bar button{padding:8px 16px;font-size:13px;cursor:pointer;border-radius:6px;border:1px solid #30a46c;background:#30a46c;color:#fff;font-weight:bold;}'
+    +'.bar .zu{background:#fff;color:#555;border-color:#aaa;font-weight:normal;}'
+    +'#dpLadehinweis,#dpSaveHinweis{font-size:12px;color:#b45309;}'
+    +'@media print{.bar{display:none;}body{margin:0;max-width:none;}}'
+    +'</style></head><body>'
+    +'<div class="bar">'
+    +'<button onclick="window.print()">🖨 Drucken / Als PDF speichern</button>'
+    +'<button onclick="dpAlsDatei()">💾 Als HTML-Datei speichern</button>'
+    +'<span id="dpLadehinweis">⏳ Bilder werden geladen…</span>' // b731: eigene Kennung – „ladehinweis" gehört dem Bautagebuch-Bericht
+    +'<span id="dpSaveHinweis"></span>'
+    +'<button class="zu" onclick="window.close()">✕ Schließen</button>'
+    +'</div>'
+    +'<h1>🏠 Dachplan-Bericht</h1>'
+    +'<div class="kopf" style="font-size:14px;color:#1a1a2e;font-weight:bold;">'+esc(t.title||'')+(t.repNr?' · Rep. '+esc(t.repNr):'')+'</div>'
+    +(t.adresse?'<div class="kopf">📍 '+esc(t.adresse)+'</div>':'')
+    +(t.hausverwaltung?'<div class="kopf">Auftraggeber / HV: '+esc(t.hausverwaltung)+'</div>':'')
+    +'<div class="kopf">Erstellt am '+heute+' · '+pins.length+' Pin'+(pins.length!==1?'s':'')+' · '+liste.length+' Foto'+(liste.length!==1?'s':'')+'</div>'
+    +plan
+    +body
+    /* Das Skript läuft IM Bericht-Fenster: bettet alle Bilder als verkleinerte
+       Kopien ein (Leinwand, 1400 px längste Kante) und lädt das Dokument als EINE
+       Datei herunter. Blob-Adressen sind gleicher Herkunft → kein Leinwand-Verbot. */
+    +'<scr'+'ipt>'
+    +'async function dpAlsDatei(){'
+    +'const st=document.getElementById("dpSaveHinweis");'
+    +'const imgs=Array.prototype.slice.call(document.images).filter(function(i){return i.src&&i.src.indexOf("data:")!==0;});'
+    +'var n=0;'
+    +'for(var x=0;x<imgs.length;x++){var im=imgs[x];'
+    +'try{'
+    +'if(!im.complete)await new Promise(function(r){im.onload=r;im.onerror=r;});'
+    +'var w=im.naturalWidth,h=im.naturalHeight;if(!w)continue;'
+    +'var max=1400;if(Math.max(w,h)>max){var s=max/Math.max(w,h);w=Math.round(w*s);h=Math.round(h*s);}'
+    +'var cv=document.createElement("canvas");cv.width=w;cv.height=h;'
+    +'cv.getContext("2d").drawImage(im,0,0,w,h);'
+    +'im.src=cv.toDataURL("image/jpeg",0.85);'
+    +'n++;if(st)st.textContent="💾 Bild "+n+"/"+imgs.length+" eingebettet…";'
+    +'}catch(e){}'
+    +'}'
+    +'var blob=new Blob(["<!DOCTYPE html>\\n"+document.documentElement.outerHTML],{type:"text/html"});'
+    +'var a=document.createElement("a");'
+    +'a.href=URL.createObjectURL(blob);'
+    +'a.download=document.title.replace(/[^\\wäöüÄÖÜß().-]+/g,"_")+".html";'
+    +'a.click();'
+    +'if(st)st.textContent="✓ Datei gespeichert – liegt in Downloads";'
+    +'}'
+    +'</scr'+'ipt>'
+    +'</body></html>';
+}
+async function _dpBerichtOeffnen(taskId){
+  const t=findTaskById(taskId);
+  if(!t||!t.dachplan||!((t.dachplan.pins||[]).length)){showToast('Der Dachplan hat noch keine Pins – nichts zu berichten','info',4000);return;}
+  const win=window.open('','_blank');
+  if(!win){showToast('⚠ Popup blockiert – bitte Popups für PAM erlauben','error',5000);return;}
+  win.document.write(_dpBerichtHtml(t));
+  win.document.close();
+  const dp=t.dachplan||{};
+  const {liste}=_dpBerichtFotos(t);
+  let done=0,fehl=0;
+  // Basisbild zuerst (nur im Bild-Modus vorhanden)
+  if(dp.base==='bild'&&dp.imgDriveId){
+    try{
+      const u=_desktopFotoBlobCache.get(dp.imgDriveId)||await _fetchDesktopFotoBlob(dp.imgDriveId);
+      const img=win.document.getElementById('_dpbasis');
+      if(img&&u)img.src=u;
+    }catch(e){console.warn('[DP-Bericht] Basisbild:',e);}
+  }
+  for(const x of liste){
+    let img=null;
+    try{img=win.document.getElementById('_dpb'+x.k);}catch(e){return;} // Fenster zu → abbrechen
+    if(!img){done++;continue;}
+    const id=x.fo.editedDriveId||x.fo.driveId;
+    try{
+      const u=_desktopFotoBlobCache.get(id)||await _fetchDesktopFotoBlob(id);
+      if(u)img.src=u;else fehl++;
+    }catch(e){fehl++;console.warn('[DP-Bericht]',e);}
+    done++;
+    try{
+      const lh=win.document.getElementById('dpLadehinweis');
+      if(lh)lh.textContent='⏳ Bild '+done+'/'+liste.length+' geladen…';
+    }catch(e){return;}
+  }
+  try{
+    const lh=win.document.getElementById('dpLadehinweis');
+    if(lh)lh.textContent=liste.length?('✓ '+(liste.length-fehl)+' von '+liste.length+' Bildern geladen'+(fehl?' ('+fehl+' nicht ladbar)':'')):'';
+    if(lh&&!fehl)lh.style.color='#15803d';
+  }catch(e){}
+}
 window.Dachplan=(function(){
   const COL={rot:'#e5484d',gelb:'#f5a623',gruen:'#30a46c'};
   const LBL={rot:'Schaden',gelb:'Prüfen',gruen:'OK'};
@@ -44113,6 +44299,7 @@ window.Dachplan=(function(){
       +'<button class="dpb" id="dpLive" title="Live-Standort: Punkt wandert mit, ±m-Anzeige, Blickrichtung">📡 Live</button>'
       +'<button class="dpb" id="dpAdd">➕ Pin</button>'
       +'<button class="dpb" id="dpList" title="Pin-Liste">☰ Liste</button>'
+      +'<button class="dpb" id="dpBericht" title="Dachplan-Bericht: Drucken/PDF oder als HTML-Datei zum Mailen">🧾 Bericht</button>' // b731
       +'<button class="dpb" id="dpFilter">Alle</button>'
       +'<button class="dpb" id="dpReset" title="Dachplan zurücksetzen">🗑 Reset</button>'
       +'<input type="file" id="dpBildInput" accept="image/*" style="display:none">'
@@ -44138,6 +44325,8 @@ window.Dachplan=(function(){
       +'<div id="dpPhotoCap" style="position:absolute;left:12px;right:12px;bottom:84px;color:#fff;background:rgba(0,0,0,.55);border-radius:8px;padding:8px 10px;font-size:15px;display:none"></div>'
       +'<div style="position:absolute;bottom:20px;left:50%;transform:translateX(-50%);z-index:2;display:flex;gap:8px">'
       +'<button class="dpb" id="dpPhotoText" style="border-color:#2d7ef7;color:#7db4ff">📝 Text</button>' /* b482 */
+      +'<button class="dpb" id="dpPhotoMal" style="border-color:#2d7ef7;color:#7db4ff">✏️ Malen</button>' /* b733 */
+      +'<button class="dpb" id="dpPhotoSend" title="Foto wegschicken – ohne Standort- und Kameradaten">📤</button>' /* b733: b653-Weg */
       +'<button class="dpb" id="dpPhotoInfo" title="Aufnahmedaten / Ort anzeigen und korrigieren">ℹ</button>' /* b716 */
       +'</div></div>';
     document.body.appendChild(d);
@@ -44161,10 +44350,16 @@ window.Dachplan=(function(){
     q('#dpNote').oninput=e=>{const p=cur();if(p){p.note=e.target.value;save();}};
     q('#dpPhotoBtn').onclick=()=>q('#dpPhotoInput').click();
     q('#dpPhotoInput').onchange=e=>{addPhotos([...e.target.files]);e.target.value='';};
+    q('#dpBericht').onclick=()=>{if(t)_dpBerichtOeffnen(t.id);}; // b731
     q('#dpNav').onclick=()=>{const p=cur();if(!p)return;let lat=p.lat,lng=p.lng;if((lat==null||lng==null)&&p.nx!=null){const w=calFrToLatLng(p.nx,p.ny);if(w){lat=w.lat;lng=w.lng;}}if(lat!=null&&lng!=null)window.open('https://www.google.com/maps/dir/?api=1&destination='+lat+','+lng,'_blank');else say('Navigation im Bild-Modus braucht die Kalibrierung');};
     q('#dpDel').onclick=()=>{const p=cur();if(!p)return;if(!confirm('Pin '+p.nr+' löschen?'))return;dp.pins=dp.pins.filter(x=>x.id!==p.id);sel=null;closeSheet();renderPins();save();};
     q('#dpPhotoX').onclick=()=>E.photo.classList.add('dp-hidden');
     q('#dpPhotoText').onclick=()=>{if(window._dpPhotoFo)dpFotoText(window._dpPhotoFo);}; // b482
+    q('#dpPhotoMal').onclick=()=>{if(window._dpPhotoFo)malStart(window._dpPhotoFo);}; // b733
+    q('#dpPhotoSend').onclick=function(){ // b733: b653-Weg – Verweis mit bemalt-Vorrang, Pin-Foto bleibt unangetastet
+      const fo=window._dpPhotoFo;if(!fo)return;
+      if(typeof _fsMenueAuf==='function')_fsMenueAuf({driveId:(fo.editedDriveId||fo.driveId),caption:fo.caption||''},this);
+    };
     // b716: Aufnahmeort/Datum ansehen UND korrigieren – gleicher Kern wie bei den
     // Auftragsfotos. i=-1, weil ein Pin-Foto keinen Platz in `taskFotos` hat; der vierte
     // Schalter holt „📍 korrigieren" trotzdem dazu (Wunsch Frank 19.08.).
@@ -44295,6 +44490,124 @@ window.Dachplan=(function(){
       }
       return piexif.insert(bytes,kleinDataUrl);
     }catch(e){console.warn('[Dachplan-EXIF]',e);return kleinDataUrl;}
+  }
+  /* ══ b733: ✏️ Malen an Pin-Fotos – das PC-Gegenstück zu v215 ══════════════════
+     Gemalt wird auf einer Leinwand ÜBER dem Vollbild (Stift/Pfeil/Rechteck/Kreis/
+     Radierer, vier Farben, ↶ je Strich über Schnappschüsse). Speichern setzt
+     Original + Striche in NATÜRLICHER Bildgröße zusammen und lädt die bemalte
+     Fassung als EIGENE Datei hoch (dachplan_pin_bearbeitet.jpg, wie das Handy):
+     fo.editedDriveId + fo.editedName – das Original bleibt. Die Anzeige bevorzugt
+     die bemalte Fassung ohnehin (b725/_dpFotoId).
+     ⛔ Kennung + Speichern SOFORT nach dem Upload, alles Weitere ist Kür
+     (v217-Lehre). Scheitert der Upload, wird NICHTS am Foto geändert – der PC hat
+     keinen Gerätespeicher für lose Kopien. */
+  let malFo=null,malCtx=null,malDown=null,malSnap=null,malMode='pen',malFarbe='#e5484d',malZug=[];
+  function malStart(fo){
+    if(!_dpFotoId(fo)){say('Erst hochladen – dann malen','error');return;}
+    malFo=fo;malMode='pen';malFarbe='#e5484d';malZug=[];
+    let ov=document.getElementById('dpMalOv');if(ov)ov.remove();
+    ov=document.createElement('div');
+    ov.id='dpMalOv';
+    ov.style.cssText='position:fixed;inset:0;z-index:100010;background:rgba(0,0,0,.92);display:flex;flex-direction:column;';
+    ov.innerHTML='<div id="dpMalBar" style="display:flex;gap:8px;align-items:center;padding:10px 14px;flex-wrap:wrap;">'
+      +'<span style="color:#fff;font-weight:700;font-size:14px;margin-right:6px;">✏️ Malen</span>'
+      +[['pen','✏️ Stift'],['arrow','↗ Pfeil'],['rect','▭ Rechteck'],['circ','◯ Kreis'],['erase','🧽 Radierer']].map(x=>'<button class="dpb dpMalM" data-m="'+x[0]+'"'+(x[0]==='pen'?' style="border-color:#7db4ff;color:#7db4ff"':'')+'>'+x[1]+'</button>').join('')
+      +'<span style="width:12px"></span>'
+      +[['#e5484d','Rot'],['#f5a623','Gelb'],['#2d7ef7','Blau'],['#ffffff','Weiß']].map(x=>'<button class="dpMalF" data-f="'+x[0]+'" title="'+x[1]+'" style="width:30px;height:30px;border-radius:50%;border:3px solid '+(x[0]==='#e5484d'?'#fff':'transparent')+';background:'+x[0]+';cursor:pointer;"></button>').join('')
+      +'<span style="flex:1"></span>'
+      +'<button class="dpb" id="dpMalUndo" title="Letzten Strich zurücknehmen">↶ Zurück</button>'
+      +'<button class="dpb" id="dpMalAbbruch">Verwerfen</button>'
+      +'<button class="dpb primary" id="dpMalSave">💾 Speichern</button>'
+      +'</div>'
+      +'<div id="dpMalStage" style="flex:1;position:relative;display:flex;align-items:center;justify-content:center;min-height:0;padding:0 14px 14px;">'
+      +'<img id="dpMalImg" style="max-width:100%;max-height:100%;display:block;" alt="">'
+      +'<canvas id="dpMalCv" style="position:absolute;cursor:crosshair;touch-action:none;"></canvas>'
+      +'</div>';
+    document.body.appendChild(ov);
+    ov.querySelectorAll('.dpMalM').forEach(b=>{b.onclick=()=>{malMode=b.dataset.m;ov.querySelectorAll('.dpMalM').forEach(x=>{x.style.borderColor='';x.style.color='';});b.style.borderColor='#7db4ff';b.style.color='#7db4ff';};});
+    ov.querySelectorAll('.dpMalF').forEach(b=>{b.onclick=()=>{malFarbe=b.dataset.f;ov.querySelectorAll('.dpMalF').forEach(x=>x.style.borderColor='transparent');b.style.borderColor='#fff';};});
+    ov.querySelector('#dpMalAbbruch').onclick=()=>ov.remove();
+    ov.querySelector('#dpMalUndo').onclick=malUndo;
+    ov.querySelector('#dpMalSave').onclick=malSpeichern;
+    const img=ov.querySelector('#dpMalImg');
+    (async()=>{
+      const sofort=_dpFotoSofort(fo);
+      let u=sofort||await _fetchDesktopFotoBlob(_dpFotoId(fo));
+      if(!u){say('Bild konnte nicht geladen werden','error');ov.remove();return;}
+      img.onload=()=>{malLeinwand(ov,img);};
+      img.src=u;
+    })();
+  }
+  function malLeinwand(ov,img){
+    const cv=ov.querySelector('#dpMalCv');if(!cv)return;
+    const r=img.getBoundingClientRect(),s=ov.querySelector('#dpMalStage').getBoundingClientRect();
+    cv.style.left=(r.left-s.left)+'px';cv.style.top=(r.top-s.top)+'px';
+    cv.style.width=r.width+'px';cv.style.height=r.height+'px';
+    cv.width=Math.round(r.width);cv.height=Math.round(r.height);
+    malCtx=cv.getContext('2d');malZug=[];
+    cv.onpointerdown=malAb;cv.onpointermove=malZieh;cv.onpointerup=malAuf;cv.onpointercancel=malAuf;
+  }
+  function malAb(e){
+    if(!malCtx)return;
+    e.preventDefault();try{e.target.setPointerCapture(e.pointerId);}catch(_){}
+    malZug.push(malCtx.getImageData(0,0,malCtx.canvas.width,malCtx.canvas.height)); // je Strich ein Schnappschuss → ↶
+    malDown={x:e.offsetX,y:e.offsetY};
+    malSnap=(['rect','circ','arrow'].indexOf(malMode)>=0)?malCtx.getImageData(0,0,malCtx.canvas.width,malCtx.canvas.height):null;
+    malCtx.lineWidth=(malMode==='erase')?26:5;malCtx.lineCap='round';malCtx.lineJoin='round';
+    malCtx.strokeStyle=malFarbe;
+    malCtx.globalCompositeOperation=(malMode==='erase')?'destination-out':'source-over';
+    if(malMode==='pen'||malMode==='erase'){malCtx.beginPath();malCtx.moveTo(malDown.x,malDown.y);}
+  }
+  function malZieh(e){
+    if(!malDown||!malCtx)return;
+    const x=e.offsetX,y=e.offsetY;
+    if(malMode==='pen'||malMode==='erase'){malCtx.lineTo(x,y);malCtx.stroke();return;}
+    malCtx.putImageData(malSnap,0,0);
+    malCtx.beginPath();
+    if(malMode==='rect')malCtx.strokeRect(malDown.x,malDown.y,x-malDown.x,y-malDown.y);
+    else if(malMode==='circ'){malCtx.ellipse((malDown.x+x)/2,(malDown.y+y)/2,Math.abs(x-malDown.x)/2,Math.abs(y-malDown.y)/2,0,0,Math.PI*2);malCtx.stroke();}
+    else if(malMode==='arrow')malPfeil(malDown.x,malDown.y,x,y);
+  }
+  function malPfeil(x1,y1,x2,y2){
+    malCtx.beginPath();malCtx.moveTo(x1,y1);malCtx.lineTo(x2,y2);malCtx.stroke();
+    const a=Math.atan2(y2-y1,x2-x1),L=16;
+    malCtx.beginPath();malCtx.moveTo(x2,y2);
+    malCtx.lineTo(x2-L*Math.cos(a-0.5),y2-L*Math.sin(a-0.5));
+    malCtx.moveTo(x2,y2);
+    malCtx.lineTo(x2-L*Math.cos(a+0.5),y2-L*Math.sin(a+0.5));
+    malCtx.stroke();
+  }
+  function malAuf(){malDown=null;malSnap=null;}
+  function malUndo(){if(!malZug.length||!malCtx)return;malCtx.globalCompositeOperation='source-over';malCtx.putImageData(malZug.pop(),0,0);}
+  async function malSpeichern(){
+    const fo=malFo,ov=document.getElementById('dpMalOv');
+    if(!fo||!ov)return;
+    const img=ov.querySelector('#dpMalImg'),cv=ov.querySelector('#dpMalCv');
+    if(!img||!cv||!img.naturalWidth){say('Bild noch nicht bereit','error');return;}
+    try{
+      say('Bemalte Fassung wird gespeichert…');
+      const folderId=dpFolder();
+      if(!folderId){say('Kein Drive-Ordner am Auftrag hinterlegt','error');return;}
+      // Original + Striche in NATÜRLICHER Größe zusammensetzen (Blob-Adresse → Leinwand erlaubt)
+      const out=document.createElement('canvas');
+      out.width=img.naturalWidth;out.height=img.naturalHeight;
+      const ctx=out.getContext('2d');
+      ctx.drawImage(img,0,0);
+      ctx.drawImage(cv,0,0,out.width,out.height);
+      const blob=await new Promise(res=>out.toBlob(res,'image/jpeg',0.9));
+      if(!blob)throw new Error('Bild konnte nicht umgewandelt werden');
+      const file=new File([blob],'dachplan_pin_bearbeitet.jpg',{type:'image/jpeg'});
+      const meta=await dpUpload(file,folderId);
+      // ⛔ v217-Lehre: Kennung + Speichern SOFORT – alles Weitere ist Kür
+      fo.editedDriveId=meta.id;
+      fo.editedName='dachplan_pin_bearbeitet.jpg';
+      save();
+      try{if(typeof _desktopFotoBlobCache!=='undefined'&&_desktopFotoBlobCache.delete)_desktopFotoBlobCache.delete(meta.id);}catch(_){}
+      ov.remove();
+      try{const p=cur();if(p)drawThumbs(p);}catch(_){}
+      try{showPhoto(fo);}catch(_){}
+      say('✓ Bemalte Fassung gespeichert – Original bleibt erhalten');
+    }catch(e){say('Speichern fehlgeschlagen: '+((e&&e.message)||e),'error');}
   }
   async function addPhotos(files){
     const p=cur();if(!p)return;if(!p.fotos)p.fotos=[];
