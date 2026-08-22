@@ -7157,7 +7157,9 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 #desktopPannellumContainer.active{display:block;}
 #desktopDrawCanvas{display:none;position:fixed;cursor:crosshair;touch-action:none;z-index:3100;}
 #desktopDrawCanvas.active{display:block;}
-.desk-draw-bar{position:fixed;top:16px;left:50%;transform:translateX(-50%);display:none;gap:8px;align-items:center;background:rgba(0,0,0,.78);border:1px solid rgba(255,255,255,.2);border-radius:12px;padding:8px 14px;z-index:3200;white-space:nowrap;}
+/* b754: max-width + wrap – die Leiste ist mit T, ①, ✋ und 🗑 lang geworden. Ohne das
+   ragt sie auf schmalen Bildschirmen aus dem Bild, wie es b749 beim ⚙-Dialog passiert ist. */
+.desk-draw-bar{position:fixed;top:16px;left:50%;transform:translateX(-50%);display:none;gap:8px;align-items:center;background:rgba(0,0,0,.78);border:1px solid rgba(255,255,255,.2);border-radius:12px;padding:8px 14px;z-index:3200;flex-wrap:wrap;justify-content:center;max-width:94vw;}
 .desk-draw-bar.visible{display:flex;}
 .desk-draw-color{width:34px;height:34px;border:2px solid rgba(255,255,255,.5);border-radius:6px;cursor:pointer;padding:2px;background:none;}
 .desk-draw-size{width:80px;accent-color:var(--accent);}
@@ -9045,8 +9047,10 @@ function _pamGuestSubmit(){
       <button class="desk-draw-btn desk-tool-btn" data-tool="pfeil" onclick="event.stopPropagation();_deskSetTool('pfeil')" title="Pfeil">➜</button>
       <button class="desk-draw-btn desk-tool-btn" data-tool="text" onclick="event.stopPropagation();_deskSetTool('text')" title="Text ins Bild – auf die Stelle klicken, dann tippen" style="font-weight:800;">T</button>
       <button class="desk-draw-btn desk-tool-btn" data-tool="nummer" onclick="event.stopPropagation();_deskSetTool('nummer')" title="Nummern-Marke setzen – jeder Klick zählt weiter (1, 2, 3 …)">①</button>
+      <button class="desk-draw-btn desk-tool-btn" data-tool="schieben" onclick="event.stopPropagation();_deskSetTool('schieben')" title="Verschieben – auf einen Pfeil, Kreis oder Text klicken und ziehen">✋</button>
     </div>
     <button class="desk-draw-btn" id="deskEraserBtn" onclick="event.stopPropagation();deskToggleEraser(this)">⬜ Radierer</button>
+    <button class="desk-draw-btn" id="deskDelBtn" onclick="event.stopPropagation();deskLoescheWahl()" title="Den angeklickten Zug löschen (auch mit der Entf-Taste)">🗑 Weg</button>
     <button class="desk-draw-btn" id="deskUndoBtn" onclick="event.stopPropagation();deskUndoDraw()" title="Letzten Schritt zurücknehmen">↶ Zurück</button>
     <button class="desk-draw-btn save" onclick="event.stopPropagation();deskSaveDraw()">💾 Speichern</button>
     <button class="desk-draw-btn discard" onclick="event.stopPropagation();deskDiscardDraw()">✕ Verwerfen</button>
@@ -9408,7 +9412,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-22 · #753'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-22-b753) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-22 · #754'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-22-b754) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -27595,6 +27599,14 @@ let _deskDrawTool='freihand';
    3. Die neuen Werkzeuge T (Text) und ① (Nummern-Marke), Entscheidung Frank 22.08.2026. */
 let _deskDrawObjs=[];
 let _deskDrawStart=null;
+/* b754: ✋ Verschieben. Möglich wird das nur, weil der Maler seit b750 die ZÜGE kennt –
+   ein Pfeil ist ein Eintrag mit Koordinaten, kein Pixelhaufen. _deskDrawWahl ist der
+   Index des angefassten Zuges (-1 = keiner), _deskSchiebeVon die zuletzt gesehene
+   Zeigerstelle, um daraus die Verschiebung zu rechnen.
+   ⛔ Die Markierung wird NUR in der Anzeige gezeichnet (_deskRedraw), nie in
+   _deskZeichneAlle – sonst stünde der gestrichelte Rahmen im gespeicherten Foto. */
+let _deskDrawWahl=-1;
+let _deskSchiebeVon=null;
 /* b752: Bisher konnte der Maler NUR ein Foto aus `taskFotos` bearbeiten (über
    _currentFotoLbIdx). 🔁 Leistungsfotos sind aber gar keine – sie liegen als blosser
    Datei-Verweis in der Turnus-Liste. Mit einem Ziel wird der Maler leihweise woanders
@@ -27606,6 +27618,8 @@ function _deskSetTool(tool){
   _deskDrawTool=tool;
   _deskDrawErasing=false;
   _deskTextFeldSchliessen();
+  // b754: Wer ein Malwerkzeug wählt, will nichts mehr verschieben – Markierung weg.
+  if(tool!=='schieben'&&_deskDrawWahl>=0){_deskDrawWahl=-1;_deskSchiebeVon=null;_deskRedraw();}
   document.getElementById('deskEraserBtn')?.classList.remove('on');
   document.querySelectorAll('.desk-tool-btn').forEach(b=>b.classList.toggle('on',b.dataset.tool===tool));
 }
@@ -27789,10 +27803,118 @@ function _deskRedraw(){
   if(!c||!_deskDrawCtx)return;
   _deskDrawCtx.clearRect(0,0,c.width,c.height);
   _deskZeichneAlle(_deskDrawCtx,c.width,c.height);
+  _deskWahlRahmen(_deskDrawCtx,c.width,c.height);   // b754: nur Anzeige, nie im Foto
+}
+
+/* ══ b754: Züge anfassen, verschieben, einzeln löschen ═════════════════════════════ */
+function _deskAbstandStrecke(px,py,x0,y0,x1,y1){
+  const dx=x1-x0, dy=y1-y0;
+  const laenge=dx*dx+dy*dy;
+  let anteil=laenge?(((px-x0)*dx+(py-y0)*dy)/laenge):0;
+  anteil=Math.max(0,Math.min(1,anteil));
+  return Math.hypot(px-(x0+anteil*dx),py-(y0+anteil*dy));
+}
+/* Ein Zug gilt als getroffen, wenn der Zeiger nah genug dran ist. Bei Flächen (Rechteck,
+   Kreis) zählt der RAND – sonst würde ein großes Rechteck alles darunter für sich
+   beanspruchen und man käme an die Züge darin nicht mehr heran. */
+function _deskObjTreffer(o,px,py,W,H){
+  if(!o)return false;
+  const tol=Math.max(9,(o.s||0.004)*W*2.5);
+  if(o.t==='text'){
+    const f=Math.max(8,(o.f||0.024)*W);
+    if(!_deskDrawCtx)return false;
+    _deskDrawCtx.font='bold '+Math.round(f)+'px Arial, sans-serif';
+    const pad=f*0.3, bw=_deskDrawCtx.measureText(String(o.txt||'')).width+pad*2, bh=f*1.34;
+    return px>=o.x*W-5&&px<=o.x*W+bw+5&&py>=o.y*H-5&&py<=o.y*H+bh+5;
+  }
+  if(o.t==='nummer'){
+    const f=Math.max(8,(o.f||0.024)*W), r=f*0.8;
+    return Math.hypot(px-o.x*W,py-o.y*H)<=r+6;
+  }
+  if(o.t==='frei'){
+    return (o.pts||[]).some(p=>Math.hypot(px-p.x*W,py-p.y*H)<=tol+5);
+  }
+  const x0=(o.x0||0)*W,y0=(o.y0||0)*H,x1=(o.x1||0)*W,y1=(o.y1||0)*H;
+  if(o.t==='linie'||o.t==='pfeil')return _deskAbstandStrecke(px,py,x0,y0,x1,y1)<=tol;
+  if(o.t==='rechteck'){
+    const l=Math.min(x0,x1),r=Math.max(x0,x1),ob=Math.min(y0,y1),u=Math.max(y0,y1);
+    const aussen=(px>=l-tol&&px<=r+tol&&py>=ob-tol&&py<=u+tol);
+    const innen =(px>=l+tol&&px<=r-tol&&py>=ob+tol&&py<=u-tol);
+    return aussen&&!innen;
+  }
+  if(o.t==='kreis'){
+    const cx=(x0+x1)/2, cy=(y0+y1)/2, rx=Math.abs(x1-x0)/2, ry=Math.abs(y1-y0)/2;
+    if(rx<2||ry<2)return false;
+    const d=Math.hypot((px-cx)/rx,(py-cy)/ry);
+    return Math.abs(d-1)<=Math.max(0.14,tol/Math.max(rx,ry));
+  }
+  return false;
+}
+/* Von OBEN nach unten suchen: der zuletzt gemalte Zug liegt vorn und wird zuerst gefasst. */
+function _deskTrefferIndex(px,py,W,H){
+  for(let i=(_deskDrawObjs||[]).length-1;i>=0;i--){
+    if(_deskObjTreffer(_deskDrawObjs[i],px,py,W,H))return i;
+  }
+  return -1;
+}
+function _deskObjSchieben(o,dx,dy){
+  if(!o)return;
+  if(o.t==='text'||o.t==='nummer'){o.x+=dx;o.y+=dy;return;}
+  if(o.t==='frei'){(o.pts||[]).forEach(p=>{p.x+=dx;p.y+=dy;});return;}
+  o.x0=(o.x0||0)+dx;o.y0=(o.y0||0)+dy;o.x1=(o.x1||0)+dx;o.y1=(o.y1||0)+dy;
+}
+function _deskObjRahmen(o,W,H){
+  if(!o)return null;
+  if(o.t==='text'){
+    const f=Math.max(8,(o.f||0.024)*W);
+    if(!_deskDrawCtx)return null;
+    _deskDrawCtx.font='bold '+Math.round(f)+'px Arial, sans-serif';
+    const pad=f*0.3;
+    return {x:o.x*W,y:o.y*H,w:_deskDrawCtx.measureText(String(o.txt||'')).width+pad*2,h:f*1.34};
+  }
+  if(o.t==='nummer'){
+    const r=Math.max(8,(o.f||0.024)*W)*0.8;
+    return {x:o.x*W-r,y:o.y*H-r,w:r*2,h:r*2};
+  }
+  if(o.t==='frei'){
+    const pts=o.pts||[];if(!pts.length)return null;
+    let l=1e9,r=-1e9,ob=1e9,u=-1e9;
+    pts.forEach(p=>{l=Math.min(l,p.x*W);r=Math.max(r,p.x*W);ob=Math.min(ob,p.y*H);u=Math.max(u,p.y*H);});
+    return {x:l,y:ob,w:r-l,h:u-ob};
+  }
+  const x0=(o.x0||0)*W,y0=(o.y0||0)*H,x1=(o.x1||0)*W,y1=(o.y1||0)*H;
+  return {x:Math.min(x0,x1),y:Math.min(y0,y1),w:Math.abs(x1-x0),h:Math.abs(y1-y0)};
+}
+function _deskWahlRahmen(ctx,W,H){
+  if(_deskDrawWahl<0)return;
+  const o=(_deskDrawObjs||[])[_deskDrawWahl];
+  const r=_deskObjRahmen(o,W,H);
+  if(!r)return;
+  ctx.save();
+  ctx.setLineDash([7,5]);ctx.lineWidth=2;ctx.strokeStyle='#6c63ff';
+  ctx.globalCompositeOperation='source-over';
+  ctx.strokeRect(r.x-5,r.y-5,r.w+10,r.h+10);
+  ctx.restore();
+}
+function deskLoescheWahl(){
+  if(_deskDrawWahl<0||!(_deskDrawObjs||[])[_deskDrawWahl]){showToast('Erst einen Strich oder Text anklicken','info');return;}
+  _deskDrawObjs.splice(_deskDrawWahl,1);
+  _deskDrawWahl=-1;
+  _deskRedraw();
+}
+/* Entf löscht den angefassten Zug. ⛔ In der Erfassungsphase (true) abfangen: der
+   Lightbox-Tastaturhandler hängt ebenfalls am document. Im Textfeld gilt die Taste nicht. */
+function _deskTasten(ev){
+  if(ev.key!=='Delete'&&ev.key!=='Backspace')return;
+  if(document.getElementById('deskTextInput'))return;
+  if(_deskDrawWahl<0)return;
+  ev.preventDefault();ev.stopPropagation();
+  deskLoescheWahl();
 }
 function deskUndoDraw(){
   if(!_deskDrawObjs||!_deskDrawObjs.length){showToast('Nichts zurückzunehmen','info');return;}
   _deskDrawObjs.pop();
+  _deskDrawWahl=-1;   // b754: die Markierung zeigte sonst auf einen Zug, den es nicht mehr gibt
   _deskRedraw();
 }
 function _deskTextFeldSchliessen(){const a=document.getElementById('deskTextInput');if(a)a.remove();}
@@ -27842,6 +27964,9 @@ function deskStartDraw(imgEl){
   _deskDrawErasing=false;
   _deskDrawTool='freihand';
   _deskDrawObjs=[];_deskDrawStart=null;_deskTextFeldSchliessen();
+  _deskDrawWahl=-1;_deskSchiebeVon=null;                                  // b754
+  document.removeEventListener('keydown',_deskTasten,true);
+  document.addEventListener('keydown',_deskTasten,true);                  // b754: Entf löscht
   document.querySelectorAll('.desk-tool-btn').forEach(b=>b.classList.toggle('on',b.dataset.tool==='freihand'));
   canvas.classList.add('active');
   document.getElementById('deskDrawBar').classList.add('visible');
@@ -27860,13 +27985,28 @@ function _deskOnDown(e){
   if(!c||!_deskDrawCtx)return;
   const rx=e.offsetX/c.width, ry=e.offsetY/c.height;
   const g=_deskDrawGroesse(), farbe=_deskDrawFarbe();
+  // b754: ✋ fasst einen vorhandenen Zug an, statt einen neuen zu beginnen.
+  if(!_deskDrawErasing&&_deskDrawTool==='schieben'){
+    _deskDrawWahl=_deskTrefferIndex(e.offsetX,e.offsetY,c.width,c.height);
+    if(_deskDrawWahl>=0){
+      try{c.setPointerCapture(e.pointerId);}catch(err){}
+      _deskDrawPointer={x:e.offsetX,y:e.offsetY};
+      _deskSchiebeVon={x:rx,y:ry};
+    }
+    _deskRedraw();
+    return;
+  }
   // b750: Text und Nummer werden GESETZT, nicht gezogen – kein Zug, kein Zeiger-Fang.
   if(!_deskDrawErasing&&_deskDrawTool==='text'){_deskTextFeld(e.clientX,e.clientY,rx,ry);return;}
   if(!_deskDrawErasing&&_deskDrawTool==='nummer'){
     _deskDrawObjs.push({t:'nummer',x:rx,y:ry,n:_deskNaechsteNr(),c:farbe,s:g/c.width,f:(g*6)/c.width});
     _deskRedraw();return;
   }
-  c.setPointerCapture(e.pointerId);
+  /* b754: abgesichert. Gemessen: setPointerCapture wirft in manchen Lagen NotFoundError
+     („No active pointer with the given id"). Ungeschützt bricht das Aufsetzen dann
+     mittendrin ab – der Zug beginnt nie, und beim Loslassen entsteht nichts. Das Malen
+     läuft auch ohne Zeigerfang, nur endet ein Zug dann am Rand der Leinwand. */
+  try{c.setPointerCapture(e.pointerId);}catch(err){}
   _deskDrawPointer={x:e.offsetX,y:e.offsetY};
   if(_deskDrawTool==='freihand'||_deskDrawErasing){
     _deskDrawObjs.push({t:'frei',pts:[{x:rx,y:ry}],c:farbe,s:g/c.width,erase:!!_deskDrawErasing});
@@ -27881,6 +28021,13 @@ function _deskOnMove(e){
   if(!c||!_deskDrawCtx)return;
   const ctx=_deskDrawCtx;
   const rx=e.offsetX/c.width, ry=e.offsetY/c.height;
+  if(_deskDrawTool==='schieben'){                                    // b754
+    if(_deskDrawWahl<0||!_deskSchiebeVon)return;
+    _deskObjSchieben(_deskDrawObjs[_deskDrawWahl],rx-_deskSchiebeVon.x,ry-_deskSchiebeVon.y);
+    _deskSchiebeVon={x:rx,y:ry};
+    _deskRedraw();
+    return;
+  }
   if(_deskDrawTool==='freihand'||_deskDrawErasing){
     // Laufenden Zug verlaengern und nur das NEUE Stueck zeichnen – ein voller Neuaufbau
     // je Mausbewegung waere bei langen Freihandzuegen zaeh.
@@ -27907,6 +28054,10 @@ function _deskOnMove(e){
 }
 function _deskOnUp(e){
   const c=document.getElementById('desktopDrawCanvas');
+  if(_deskDrawTool==='schieben'){        // b754: Auswahl bleibt bestehen, nur das Ziehen endet
+    _deskSchiebeVon=null;_deskDrawPointer=null;
+    return;
+  }
   if(_deskDrawStart&&c&&e&&_deskDrawTool!=='freihand'&&!_deskDrawErasing){
     const rx=e.offsetX/c.width, ry=e.offsetY/c.height;
     // Ein blosser Klick ohne Ziehen erzeugt keine Form – sonst sammelt die
@@ -27943,6 +28094,8 @@ function deskToggleEraser(btn){
 function deskDiscardDraw(){
   _deskDrawPointer=null;_deskDrawErasing=false;
   _deskDrawObjs=[];_deskDrawStart=null;_deskTextFeldSchliessen();   // b750
+  _deskDrawWahl=-1;_deskSchiebeVon=null;                            // b754
+  document.removeEventListener('keydown',_deskTasten,true);
   // b752: Ein geliehenes Ziel raeumt sein eigenes Fenster weg – gleich ob gespeichert
   // oder verworfen. Erst abhaengen, dann schliessen: sonst kann ein Fehler im
   // Schliessen das Ziel stehen lassen und der naechste Malvorgang liefe hinein.
