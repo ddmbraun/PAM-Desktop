@@ -9043,8 +9043,11 @@ function _pamGuestSubmit(){
       <button class="desk-draw-btn desk-tool-btn" data-tool="rechteck" onclick="event.stopPropagation();_deskSetTool('rechteck')" title="Rechteck">▭</button>
       <button class="desk-draw-btn desk-tool-btn" data-tool="kreis" onclick="event.stopPropagation();_deskSetTool('kreis')" title="Kreis">◯</button>
       <button class="desk-draw-btn desk-tool-btn" data-tool="pfeil" onclick="event.stopPropagation();_deskSetTool('pfeil')" title="Pfeil">➜</button>
+      <button class="desk-draw-btn desk-tool-btn" data-tool="text" onclick="event.stopPropagation();_deskSetTool('text')" title="Text ins Bild – auf die Stelle klicken, dann tippen" style="font-weight:800;">T</button>
+      <button class="desk-draw-btn desk-tool-btn" data-tool="nummer" onclick="event.stopPropagation();_deskSetTool('nummer')" title="Nummern-Marke setzen – jeder Klick zählt weiter (1, 2, 3 …)">①</button>
     </div>
     <button class="desk-draw-btn" id="deskEraserBtn" onclick="event.stopPropagation();deskToggleEraser(this)">⬜ Radierer</button>
+    <button class="desk-draw-btn" id="deskUndoBtn" onclick="event.stopPropagation();deskUndoDraw()" title="Letzten Schritt zurücknehmen">↶ Zurück</button>
     <button class="desk-draw-btn save" onclick="event.stopPropagation();deskSaveDraw()">💾 Speichern</button>
     <button class="desk-draw-btn discard" onclick="event.stopPropagation();deskDiscardDraw()">✕ Verwerfen</button>
   </div>
@@ -9405,7 +9408,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-22 · #749'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-22-b749) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-22 · #750'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-22-b750) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -27579,11 +27582,22 @@ let _deskFotoKbHandler=null;
 let _deskPannellumViewer=null;
 let _deskDrawPointer=null,_deskDrawCtx=null,_deskDrawErasing=false;
 let _deskDrawTool='freihand';
-let _deskDrawSnapshot=null;
+/* b750: Der Maler merkt sich jetzt die ZUEGE (nicht nur fertige Pixel) – in relativen
+   Koordinaten 0..1, Strichstaerke und Schriftgroesse als Anteil der Breite. Das loest
+   drei Dinge auf einmal:
+   1. "↶ Zurück" – das gab es hier bis b750 gar nicht (nur der Dachplan-Maler b733 hatte
+      eins). _deskDrawSnapshot war NUR die Vorschau waehrend des Ziehens, kein Undo.
+   2. Scharfe Buchstaben: bis b750 wurde die Bildschirm-Leinwand beim Speichern als Ganzes
+      auf die volle Fotogroesse GESTRECKT. Bei Strichen faellt das kaum auf, Text wurde
+      dabei weich. Jetzt wird in Zielgroesse NEU gezeichnet.
+   3. Die neuen Werkzeuge T (Text) und ① (Nummern-Marke), Entscheidung Frank 22.08.2026. */
+let _deskDrawObjs=[];
+let _deskDrawStart=null;
 
 function _deskSetTool(tool){
   _deskDrawTool=tool;
   _deskDrawErasing=false;
+  _deskTextFeldSchliessen();
   document.getElementById('deskEraserBtn')?.classList.remove('on');
   document.querySelectorAll('.desk-tool-btn').forEach(b=>b.classList.toggle('on',b.dataset.tool===tool));
 }
@@ -27703,6 +27717,109 @@ function _lbForce360(){
   }
 }
 // ── Zeichen-Tool Desktop ──
+/* ══ b750: Hilfen des Malers ═══════════════════════════════════════════════════
+   Jeder Zug liegt als Objekt in _deskDrawObjs, alle Masse RELATIV (0..1 bzw. Anteil
+   der Breite). Dieselbe Liste zeichnet die Anzeige-Leinwand und – beim Speichern –
+   das Foto in voller Aufloesung. */
+function _deskKontrast(hex){
+  // Kaestchen-/Schriftfarbe zur gewaehlten Farbe: helle Farbe (Weiss, Gelb) bekommt
+  // dunklen Grund, dunkle Farbe (Rot, Blau) weissen. Sonst waere Weiss auf Weiss weg.
+  const h=String(hex||'#ff0000').replace('#','');
+  const r=parseInt(h.substring(0,2),16)||0,g=parseInt(h.substring(2,4),16)||0,b=parseInt(h.substring(4,6),16)||0;
+  return ((r*299+g*587+b*114)/1000)>150?'#333333':'#ffffff';
+}
+function _deskDrawGroesse(){return parseInt((document.getElementById('deskDrawSize')||{}).value||4)||4;}
+function _deskDrawFarbe(){return (document.getElementById('deskDrawColor')||{}).value||'#ff0000';}
+function _deskNaechsteNr(){return (_deskDrawObjs||[]).filter(o=>o&&o.t==='nummer').length+1;}
+function _deskZeichneObj(ctx,o,W,H){
+  if(!o)return;
+  const s=Math.max(1,(o.s||0.004)*W), c=o.c||'#ff0000';
+  ctx.globalCompositeOperation=o.erase?'destination-out':'source-over';
+  ctx.strokeStyle=c;ctx.fillStyle=c;ctx.lineWidth=s;ctx.lineCap='round';ctx.lineJoin='round';
+  ctx.textAlign='left';ctx.textBaseline='alphabetic';
+  if(o.t==='frei'){
+    const pts=o.pts||[];if(!pts.length)return;
+    if(o.erase)ctx.lineWidth=s*3;
+    ctx.beginPath();ctx.moveTo(pts[0].x*W,pts[0].y*H);
+    if(pts.length===1)ctx.lineTo(pts[0].x*W+0.5,pts[0].y*H);
+    for(let i=1;i<pts.length;i++)ctx.lineTo(pts[i].x*W,pts[i].y*H);
+    ctx.stroke();return;
+  }
+  if(o.t==='text'){
+    const f=Math.max(8,(o.f||0.024)*W), txt=String(o.txt||'');
+    ctx.font='bold '+Math.round(f)+'px Arial, sans-serif';
+    const pad=f*0.3, bw=ctx.measureText(txt).width+pad*2, bh=f*1.34, bx=o.x*W, by=o.y*H;
+    ctx.fillStyle=_deskKontrast(c);   // das weisse Kaestchen (Wunsch Frank 22.08.)
+    if(ctx.roundRect){ctx.beginPath();ctx.roundRect(bx,by,bw,bh,f*0.2);ctx.fill();}
+    else ctx.fillRect(bx,by,bw,bh);
+    ctx.fillStyle=c;ctx.fillText(txt,bx+pad,by+f);
+    return;
+  }
+  if(o.t==='nummer'){
+    const f=Math.max(8,(o.f||0.024)*W), r=f*0.8, cx=o.x*W, cy=o.y*H;
+    ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fillStyle=c;ctx.fill();
+    ctx.lineWidth=Math.max(2,r/6);ctx.strokeStyle=_deskKontrast(c);ctx.stroke();
+    ctx.fillStyle=_deskKontrast(c);ctx.font='bold '+Math.round(r*1.15)+'px Arial, sans-serif';
+    ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(String(o.n||1),cx,cy);
+    return;
+  }
+  const x0=(o.x0||0)*W,y0=(o.y0||0)*H,x1=(o.x1||0)*W,y1=(o.y1||0)*H;
+  if(o.t==='linie'){ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke();return;}
+  if(o.t==='rechteck'){ctx.strokeRect(x0,y0,x1-x0,y1-y0);return;}
+  if(o.t==='kreis'){
+    const rx=Math.abs(x1-x0)/2,ry=Math.abs(y1-y0)/2;
+    ctx.beginPath();ctx.ellipse(x0+(x1-x0)/2,y0+(y1-y0)/2,rx,ry,0,0,2*Math.PI);ctx.stroke();return;
+  }
+  if(o.t==='pfeil'){_deskDrawArrow(ctx,x0,y0,x1,y1,s,c);return;}
+}
+function _deskZeichneAlle(ctx,W,H){
+  (_deskDrawObjs||[]).forEach(o=>{try{_deskZeichneObj(ctx,o,W,H);}catch(e){console.warn('[Malen]',e);}});
+  ctx.globalCompositeOperation='source-over';
+}
+function _deskRedraw(){
+  const c=document.getElementById('desktopDrawCanvas');
+  if(!c||!_deskDrawCtx)return;
+  _deskDrawCtx.clearRect(0,0,c.width,c.height);
+  _deskZeichneAlle(_deskDrawCtx,c.width,c.height);
+}
+function deskUndoDraw(){
+  if(!_deskDrawObjs||!_deskDrawObjs.length){showToast('Nichts zurückzunehmen','info');return;}
+  _deskDrawObjs.pop();
+  _deskRedraw();
+}
+function _deskTextFeldSchliessen(){const a=document.getElementById('deskTextInput');if(a)a.remove();}
+function _deskTextFeld(clientX,clientY,rx,ry){
+  _deskTextFeldSchliessen();
+  const c=document.getElementById('desktopDrawCanvas');if(!c)return;
+  const inp=document.createElement('input');
+  inp.id='deskTextInput';inp.type='text';inp.autocomplete='off';
+  inp.placeholder='Text… Enter = setzen, Esc = abbrechen';
+  // am rechten/unteren Rand nach innen ruecken, sonst steht das Feld halb ausserhalb
+  const lx=Math.max(8,Math.min(Math.round(clientX),(window.innerWidth||1200)-240));
+  const ly=Math.max(8,Math.min(Math.round(clientY),(window.innerHeight||800)-60));
+  inp.style.cssText='position:fixed;left:'+lx+'px;top:'+ly+'px;z-index:100060;'
+    +'min-width:200px;padding:6px 9px;border-radius:6px;border:2px solid #6c63ff;background:rgba(255,255,255,.97);'
+    +'color:#111;font-size:14px;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,.55);';
+  inp.onclick=ev=>ev.stopPropagation();
+  inp.onpointerdown=ev=>ev.stopPropagation();
+  inp.onkeydown=function(ev){
+    /* ⛔ stopPropagation ist PFLICHT: der Lightbox-Tastaturhandler (_deskFotoKbHandler)
+       haengt am document und blaettert bei ← / → zum naechsten Foto. Ohne das hier
+       springt das Bild weg, sobald man im Text eine Pfeiltaste benutzt. */
+    ev.stopPropagation();
+    if(ev.key==='Enter'){
+      const t=(inp.value||'').trim();
+      if(t){
+        const g=_deskDrawGroesse();
+        _deskDrawObjs.push({t:'text',x:rx,y:ry,txt:t,c:_deskDrawFarbe(),s:g/c.width,f:(g*6)/c.width});
+        _deskRedraw();
+      }
+      inp.remove();
+    } else if(ev.key==='Escape'){inp.remove();}
+  };
+  document.body.appendChild(inp);
+  setTimeout(()=>{try{inp.focus();}catch(e){}},10);
+}
 function deskStartDraw(){
   const img=document.getElementById('deskLbImg');
   if(!img){return;}
@@ -27715,7 +27832,7 @@ function deskStartDraw(){
   _deskDrawCtx=canvas.getContext('2d');
   _deskDrawErasing=false;
   _deskDrawTool='freihand';
-  _deskDrawSnapshot=null;
+  _deskDrawObjs=[];_deskDrawStart=null;_deskTextFeldSchliessen();
   document.querySelectorAll('.desk-tool-btn').forEach(b=>b.classList.toggle('on',b.dataset.tool==='freihand'));
   canvas.classList.add('active');
   document.getElementById('deskDrawBar').classList.add('visible');
@@ -27730,55 +27847,68 @@ function deskStartDraw(){
 }
 function _deskOnDown(e){
   e.preventDefault();
-  document.getElementById('desktopDrawCanvas').setPointerCapture(e.pointerId);
+  const c=document.getElementById('desktopDrawCanvas');
+  if(!c||!_deskDrawCtx)return;
+  const rx=e.offsetX/c.width, ry=e.offsetY/c.height;
+  const g=_deskDrawGroesse(), farbe=_deskDrawFarbe();
+  // b750: Text und Nummer werden GESETZT, nicht gezogen – kein Zug, kein Zeiger-Fang.
+  if(!_deskDrawErasing&&_deskDrawTool==='text'){_deskTextFeld(e.clientX,e.clientY,rx,ry);return;}
+  if(!_deskDrawErasing&&_deskDrawTool==='nummer'){
+    _deskDrawObjs.push({t:'nummer',x:rx,y:ry,n:_deskNaechsteNr(),c:farbe,s:g/c.width,f:(g*6)/c.width});
+    _deskRedraw();return;
+  }
+  c.setPointerCapture(e.pointerId);
   _deskDrawPointer={x:e.offsetX,y:e.offsetY};
   if(_deskDrawTool==='freihand'||_deskDrawErasing){
-    _deskDrawCtx.beginPath();_deskDrawCtx.moveTo(e.offsetX,e.offsetY);
+    _deskDrawObjs.push({t:'frei',pts:[{x:rx,y:ry}],c:farbe,s:g/c.width,erase:!!_deskDrawErasing});
+    _deskDrawStart=null;
   } else {
-    const c=document.getElementById('desktopDrawCanvas');
-    _deskDrawSnapshot=_deskDrawCtx.getImageData(0,0,c.width,c.height);
+    _deskDrawStart={x:rx,y:ry};
   }
 }
 function _deskOnMove(e){
   if(!_deskDrawPointer)return;e.preventDefault();
+  const c=document.getElementById('desktopDrawCanvas');
+  if(!c||!_deskDrawCtx)return;
   const ctx=_deskDrawCtx;
-  const size=parseInt(document.getElementById('deskDrawSize')?.value||4);
-  const color=document.getElementById('deskDrawColor')?.value||'#ff0000';
-  if(_deskDrawErasing){
-    ctx.globalCompositeOperation='destination-out';ctx.lineWidth=size*3;
-    ctx.lineCap='round';ctx.lineJoin='round';
-    ctx.lineTo(e.offsetX,e.offsetY);ctx.stroke();ctx.beginPath();ctx.moveTo(e.offsetX,e.offsetY);
+  const rx=e.offsetX/c.width, ry=e.offsetY/c.height;
+  if(_deskDrawTool==='freihand'||_deskDrawErasing){
+    // Laufenden Zug verlaengern und nur das NEUE Stueck zeichnen – ein voller Neuaufbau
+    // je Mausbewegung waere bei langen Freihandzuegen zaeh.
+    const o=_deskDrawObjs[_deskDrawObjs.length-1];
+    if(o&&o.t==='frei'){
+      const vor=o.pts[o.pts.length-1];
+      o.pts.push({x:rx,y:ry});
+      ctx.globalCompositeOperation=o.erase?'destination-out':'source-over';
+      ctx.strokeStyle=o.c;ctx.lineWidth=Math.max(1,o.s*c.width*(o.erase?3:1));
+      ctx.lineCap='round';ctx.lineJoin='round';
+      ctx.beginPath();ctx.moveTo(vor.x*c.width,vor.y*c.height);ctx.lineTo(e.offsetX,e.offsetY);ctx.stroke();
+      ctx.globalCompositeOperation='source-over';
+    }
     return;
   }
-  ctx.globalCompositeOperation='source-over';ctx.strokeStyle=color;ctx.lineWidth=size;ctx.lineCap='round';ctx.lineJoin='round';
-  if(_deskDrawTool==='freihand'){
-    ctx.lineTo(e.offsetX,e.offsetY);ctx.stroke();ctx.beginPath();ctx.moveTo(e.offsetX,e.offsetY);
-  } else if(_deskDrawSnapshot){
-    const c=document.getElementById('desktopDrawCanvas');
-    ctx.putImageData(_deskDrawSnapshot,0,0);
-    const x0=_deskDrawPointer.x,y0=_deskDrawPointer.y,x1=e.offsetX,y1=e.offsetY;
-    ctx.beginPath();
-    if(_deskDrawTool==='linie'){ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke();}
-    else if(_deskDrawTool==='rechteck'){ctx.strokeRect(x0,y0,x1-x0,y1-y0);}
-    else if(_deskDrawTool==='kreis'){const rx=Math.abs(x1-x0)/2,ry=Math.abs(y1-y0)/2,cx=x0+(x1-x0)/2,cy=y0+(y1-y0)/2;ctx.ellipse(cx,cy,rx,ry,0,0,2*Math.PI);ctx.stroke();}
-    else if(_deskDrawTool==='pfeil'){_deskDrawArrow(ctx,x0,y0,x1,y1,size,color);}
+  if(_deskDrawStart){
+    // Formen: alles neu zeichnen und die Form als Vorschau daruebersetzen (ersetzt den
+    // frueheren Pixel-Schnappschuss).
+    _deskRedraw();
+    _deskZeichneObj(ctx,{t:_deskDrawTool,x0:_deskDrawStart.x,y0:_deskDrawStart.y,x1:rx,y1:ry,
+      c:_deskDrawFarbe(),s:_deskDrawGroesse()/c.width},c.width,c.height);
+    ctx.globalCompositeOperation='source-over';
   }
 }
 function _deskOnUp(e){
-  if(_deskDrawTool!=='freihand'&&!_deskDrawErasing&&_deskDrawPointer&&e&&_deskDrawSnapshot){
-    const ctx=_deskDrawCtx,c=document.getElementById('desktopDrawCanvas');
-    const size=parseInt(document.getElementById('deskDrawSize')?.value||4);
-    const color=document.getElementById('deskDrawColor')?.value||'#ff0000';
-    ctx.putImageData(_deskDrawSnapshot,0,0);
-    _deskDrawSnapshot=null;
-    ctx.globalCompositeOperation='source-over';ctx.strokeStyle=color;ctx.lineWidth=size;ctx.lineCap='round';ctx.lineJoin='round';
-    const x0=_deskDrawPointer.x,y0=_deskDrawPointer.y,x1=e.offsetX,y1=e.offsetY;
-    ctx.beginPath();
-    if(_deskDrawTool==='linie'){ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke();}
-    else if(_deskDrawTool==='rechteck'){ctx.strokeRect(x0,y0,x1-x0,y1-y0);}
-    else if(_deskDrawTool==='kreis'){const rx=Math.abs(x1-x0)/2,ry=Math.abs(y1-y0)/2,cx=x0+(x1-x0)/2,cy=y0+(y1-y0)/2;ctx.ellipse(cx,cy,rx,ry,0,0,2*Math.PI);ctx.stroke();}
-    else if(_deskDrawTool==='pfeil'){_deskDrawArrow(ctx,x0,y0,x1,y1,size,color);}
+  const c=document.getElementById('desktopDrawCanvas');
+  if(_deskDrawStart&&c&&e&&_deskDrawTool!=='freihand'&&!_deskDrawErasing){
+    const rx=e.offsetX/c.width, ry=e.offsetY/c.height;
+    // Ein blosser Klick ohne Ziehen erzeugt keine Form – sonst sammelt die
+    // Zurueck-Liste unsichtbare Eintraege.
+    if(Math.abs(rx-_deskDrawStart.x)>0.004||Math.abs(ry-_deskDrawStart.y)>0.004){
+      _deskDrawObjs.push({t:_deskDrawTool,x0:_deskDrawStart.x,y0:_deskDrawStart.y,x1:rx,y1:ry,
+        c:_deskDrawFarbe(),s:_deskDrawGroesse()/c.width});
+    }
+    _deskRedraw();
   }
+  _deskDrawStart=null;
   _deskDrawPointer=null;
 }
 function _deskDrawArrow(ctx,x0,y0,x1,y1,size,color){
@@ -27803,6 +27933,7 @@ function deskToggleEraser(btn){
 }
 function deskDiscardDraw(){
   _deskDrawPointer=null;_deskDrawErasing=false;
+  _deskDrawObjs=[];_deskDrawStart=null;_deskTextFeldSchliessen();   // b750
   const c=document.getElementById('desktopDrawCanvas');
   if(c){c.classList.remove('active');c.removeEventListener('pointerdown',_deskOnDown);c.removeEventListener('pointermove',_deskOnMove);c.removeEventListener('pointerup',_deskOnUp);c.removeEventListener('pointercancel',_deskOnUp);const ctx=c.getContext('2d');if(ctx)ctx.clearRect(0,0,c.width,c.height);}
   document.getElementById('deskDrawBar')?.classList.remove('visible');
@@ -27812,6 +27943,8 @@ async function deskSaveDraw(){
   const canvas=document.getElementById('desktopDrawCanvas');
   if(!img||!canvas){deskDiscardDraw();return;}
   if(_currentFotoLbIdx<0||!taskFotos||!taskFotos[_currentFotoLbIdx]){showToast('Kein Foto gewählt','error');deskDiscardDraw();return;}
+  // b750: Ohne einen einzigen Zug entstuende nur eine zweite, identische Datei im Drive.
+  if(!_deskDrawObjs||!_deskDrawObjs.length){showToast('Nichts gemalt – nichts zu speichern','warning');deskDiscardDraw();return;}
   // Index VOR dem ersten await sichern – _currentFotoLbIdx kann sich während des
   // asynchronen Uploads ändern (z.B. Lightbox geschlossen → -1), was sonst
   // taskFotos[-1]=undefined liefert und einen Duplikat-Eintrag per push() erzeugt.
@@ -27822,7 +27955,11 @@ async function deskSaveDraw(){
   mc.height=img.naturalHeight||canvas.height;
   const mCtx=mc.getContext('2d');
   mCtx.drawImage(img,0,0,mc.width,mc.height);
-  mCtx.drawImage(canvas,0,0,mc.width,mc.height);
+  /* b750: Die Zuege werden in ZIELGROESSE neu gezeichnet. Vorher wurde die
+     Bildschirm-Leinwand als Ganzes auf die Fotogroesse hochgezogen – meist mehr als
+     das Vierfache. Striche verziehen das, Buchstaben wurden dabei weich.
+     Ein Waechter in test_b750.js haelt den alten Weg draussen. */
+  _deskZeichneAlle(mCtx,mc.width,mc.height);
   const blob=await new Promise(r=>mc.toBlob(r,'image/jpeg',0.92));
   if(!blob){showToast('Fehler beim Erstellen','error');deskDiscardDraw();return;}
   const folderId=_getDriveFotoFolderId();
