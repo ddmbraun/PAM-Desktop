@@ -9383,7 +9383,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-21 · #743'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-21-b739) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-22 · #744'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-21-b739) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -11838,22 +11838,51 @@ function _tuRefFotoBlock(refs){
    (`openFotoDesktop` rechnet an mindestens fünf Stellen mit Listenplätzen; eine
    erfundene Nummer würde dort FREMDE Fotos überschreiben). Deshalb schreibgeschützt:
    kein ✕, kein 📝, dafür „↗ zum Pin". */
+/* ══ b744 (Etappe 3b, Rest): ALLE Dachplan-Pins beider Ebenen, mit Gliederungsnummer ══
+   Wortgleich zu Mobil v229 `_dpAllePins` – dieselbe Quelle, dieselbe Reihenfolge,
+   dieselben Nummern. So verhalten sich Handy und PC gleich, und wer eine Liste
+   umbaut, muss nicht raten, wie es auf der anderen Seite heißt.
+   ⛔ EINE Quelle für alle Listen – nicht drei eigene Schleifen. */
+function _dpAllePins(t){
+  const out=[];
+  for(const p of ((t&&t.dachplan&&t.dachplan.pins)||[])){
+    if(!p)continue;
+    const hn=String(p.nr!=null?p.nr:'?');
+    out.push({p:p,nr:hn,eltern:null});
+    for(const sp of ((p.plan&&p.plan.pins)||[])){
+      if(!sp)continue;
+      out.push({p:sp,nr:hn+'.'+String(sp.nr!=null?sp.nr:'?'),eltern:p});
+    }
+  }
+  return out;
+}
+/* b744: Sortierwert aus einer Gliederungsnummer. Number() taugt dafuer nicht:
+   Number("2.10") und Number("2.1") sind beide 2.1. Hauptnummer * 1000 + Unternummer
+   haelt die Reihenfolge auch ab dem zehnten Pin eines Teilbereichs. */
+function _dpNrSort(nr){
+  const teile=String(nr==null?'':nr).split('.');
+  const haupt=Number(teile[0])||0;
+  const unter=teile.length>1?(Number(teile[1])||0):0;
+  return haupt*1000+unter;
+}
 function _dpRefFotos(task){
   var out=[];
-  var pins=(task&&task.dachplan&&task.dachplan.pins)||[];
   var LBL={rot:'Schaden',gelb:'Prüfen',gruen:'OK'};
-  pins.forEach(function(p){
-    if(!p)return;
+  /* b744: beide Ebenen (siehe _dpAllePins). Vorher fehlten hier genau die Detailfotos
+     aus den Teilbereichen – die, fuer die der Teilbereich ueberhaupt da ist. */
+  _dpAllePins(task).forEach(function(x){
+    var p=x.p;if(!p)return;
     (p.fotos||[]).forEach(function(f){
       if(!f||!(f.editedDriveId||f.driveId))return; // ohne Drive-Datei gibt es nichts anzuzeigen
       // b725: die am Tablet bemalte Fassung (editedDriveId, v215) hat Vorrang – wie bei t.fotos
       out.push({dpRef:true,driveId:(f.editedDriveId||f.driveId),caption:f.caption||'',
-        name:f.caption||('Pin '+(p.nr||'?')),
+        name:f.caption||('Pin '+x.nr),
         ts:f.ts||p.ts||'',
-        pinId:p.id||'',pinNr:p.nr||'?',pinStatus:p.status||'rot',
+        pinId:p.id||'',pinNr:x.nr,pinStatus:p.status||'rot',
         pinTitel:String(p.title||p.note||'').trim(),
         pinLbl:LBL[p.status||'rot']||'',
-        ordner:'🗺 Dachplan'});
+        pinEltern:(x.eltern?String(x.eltern.nr!=null?x.eltern.nr:'?'):''), // b744: Herkunft fuer die Gruppenzeile
+        ordner:(x.eltern?'🔍 Bereich '+(x.eltern.nr!=null?x.eltern.nr:'?'):'🗺 Dachplan')});
     });
   });
   return out;
@@ -20025,9 +20054,9 @@ function _btbBerichtHtml(){
   // b631: verlinkte Leistungs-Fotos gehören in den ausgedruckten Nachweis genauso
   // wie in die Bildschirmansicht.
   const fotos=_btbFotosFuerBericht();
-  let _bpins=[]; // b525: Dachplan-Pins gehören in die volle Doku
-  try{const _t=findTaskById(gT('taskId'));if(_t&&_t.dachplan&&_t.dachplan.pins)_bpins=_t.dachplan.pins;}catch(e){}
-  const pins=_bpins.map((p,i)=>({p,i,d:_btbParseTs(p.ts)}));
+  let _bpins=[]; // b525: Dachplan-Pins gehören in die volle Doku · b744: beide Ebenen
+  try{const _t=findTaskById(gT('taskId'));if(_t)_bpins=_dpAllePins(_t);}catch(e){}
+  const pins=_bpins.map((x,i)=>({p:x.p,nr:x.nr,eltern:x.eltern,i,d:_btbParseTs(x.p.ts)}));
   const days={};
   const add=(key,kind,item)=>{if(!days[key])days[key]={notiz:[],foto:[],pin:[]};days[key][kind].push(item);};
   notizen.forEach(x=>add(x.d?_btbDayKey(x.d):'','notiz',x));
@@ -20076,7 +20105,7 @@ function _btbBerichtHtml(){
         // jetzt selbst im Tagesblock abgedruckt (b525 hatte sie bewusst weggelassen,
         // weil sie damals teils nur lokal auf dem Tablet lagen; abgedruckt wird auch
         // heute nur, was eine Drive-Datei hat, siehe _dpRefFotos).
-        body+='<div class="pinrow" style="border-left:4px solid '+col+';">🏠 Dachplan-Pin '+esc(String(p.nr||''))+' · '+lbl+(txt?' — '+esc(txt):'')+'</div>';
+        body+='<div class="pinrow" style="border-left:4px solid '+col+';">🏠 Dachplan-Pin '+esc(String(x.nr||p.nr||''))+' · '+lbl+(txt?' — '+esc(txt):'')+'</div>'; // b744: Gliederungsnummer
       });
     }
     if(vidCount)body+='<div class="sysrow" style="display:block;">🎬 '+vidCount+' Video(s) an diesem Tag – im Druck/PDF nicht darstellbar, siehe PAM</div>';
@@ -20272,7 +20301,7 @@ function _btbFotoTile(x){
 }
 // b525 Paket 6: Dachplan-Pin als Zeile im Tagesblock (Ampelfarbe, Nummer,
 // Titel/Notiz, Foto-Zähler). Klick → Dachplan.openPin springt auf den Pin.
-function _btbPinZeile(p){
+function _btbPinZeile(p,nr){ // b744: nr = Gliederungsnummer („2" bzw. „2.1")
   const col=({rot:'#e5484d',gelb:'#f5a623',gruen:'#30a46c'})[p.status||'rot']||'#e5484d';
   const lbl=({rot:'Schaden',gelb:'Prüfen',gruen:'OK'})[p.status||'rot']||'';
   const txt=String(p.title||p.note||'').trim();
@@ -20283,7 +20312,7 @@ function _btbPinZeile(p){
   const hvAttr=_pf?(' data-hvid="'+esc(String(_pf.driveId).replace(/[^A-Za-z0-9_\-]/g,''))+'" data-hvtitel="'+esc(String(p.title||p.note||('Pin '+(p.nr||'')))) +'"'):'';
   return '<div'+hvAttr+' onclick="Dachplan.openPin(\''+esc(String(p.id||''))+'\')" title="Auf dem Dachplan zeigen" style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg3);border:1px solid var(--border);border-left:4px solid '+col+';border-radius:0 8px 8px 0;cursor:pointer;">'
     +'<span style="width:20px;height:20px;border-radius:50%;background:'+col+';color:#fff;display:flex;align-items:center;justify-content:center;font-size:calc(11px*var(--modal-scale,1));font-weight:800;flex-shrink:0;">'+esc(String(p.nr||'?'))+'</span>'
-    +'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:calc(12px*var(--modal-scale,1));color:var(--text);">🏠 Dachplan-Pin · '+lbl+(txt?' — '+esc(txt):'')+'</span>'
+    +'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:calc(12px*var(--modal-scale,1));color:var(--text);">🏠 Dachplan-Pin '+esc(String(nr||p.nr||'?'))+' · '+lbl+(txt?' — '+esc(txt):'')+'</span>'
     +'<span style="color:var(--text2);flex-shrink:0;">›</span>'
     +'</div>';
 }
@@ -20301,9 +20330,9 @@ function renderTaskNotizen(){
     // b716: Dachplan-Pin-Fotos als Bilder im Tagesblock (vorher nur die Pin-Textzeile
     // mit einem Zähler). i=-1 wie bei den Leistungs-Verweisen = schreibgeschützt.
     .concat(_dpRefFotosLive().map(f=>({f,i:-1,ref:true,d:_btbParseTs(f.ts)})));
-  let _dpins=[]; // b525: Dachplan-Pins des Tasks (nur im „Alles"-Filter)
-  try{const _t=findTaskById((document.getElementById('taskId')||{}).value||'');if(_btbFilter==='alle'&&_t&&_t.dachplan&&_t.dachplan.pins)_dpins=_t.dachplan.pins;}catch(e){}
-  const pins=_dpins.map((p,i)=>({p,i,d:_btbParseTs(p.ts)}));
+  let _dpins=[]; // b525: Dachplan-Pins des Tasks (nur im „Alles"-Filter) · b744: beide Ebenen
+  try{const _t=findTaskById((document.getElementById('taskId')||{}).value||'');if(_btbFilter==='alle'&&_t)_dpins=_dpAllePins(_t);}catch(e){} // b744: beide Ebenen
+  const pins=_dpins.map((x,i)=>({p:x.p,nr:x.nr,eltern:x.eltern,i,d:_btbParseTs(x.p.ts)})); // b744
   if(!notizen.length&&!fotos.length&&!pins.length){
     el.innerHTML='<div class="notiz-empty">Noch keine Einträge — unten die erste Notiz schreiben oder Fotos hinzufügen</div>';
     return;
@@ -20378,7 +20407,7 @@ function renderTaskNotizen(){
     if(g.pin&&g.pin.length){ // b525: Dachplan-Pins am Ende des Tagesblocks
       g.pin.sort((a,b)=>((a.d?a.d.getTime():0)-(b.d?b.d.getTime():0))||(a.i-b.i));
       html+='<div style="display:flex;flex-direction:column;gap:4px;margin:4px 0 2px;">';
-      g.pin.forEach(x=>{html+=_btbPinZeile(x.p);});
+      g.pin.forEach(x=>{html+=_btbPinZeile(x.p,x.nr);}); // b744
       html+='</div>';
     }
     html+='</div>'; // b575: Ende des Tagesblock-Körpers
@@ -25576,7 +25605,7 @@ async function _fotoTsBackfill(){
   // gelandet. Läuft über dieselbe Warteschlange (`jobs`) wie die normalen Fotos, damit die
   // b579-Bremse greift und keine zweite Abruf-Welle entsteht.
   const pinJobs=[];
-  const collectPins=t=>{const ps=t&&t.dachplan&&t.dachplan.pins;if(!ps)return;ps.forEach(p=>{
+  const collectPins=t=>{const ps=t&&t.dachplan&&t.dachplan.pins?_dpAllePins(t).map(x=>x.p):null;if(!ps)return;ps.forEach(p=>{ // b744: beide Ebenen
     if(p&&!p.ts){const ff=(p.fotos||[]).find(f=>f&&f.driveId&&!failed.has(f.driveId));if(ff)pinJobs.push({p,driveId:ff.driveId});}
     (p&&p.fotos||[]).forEach(f=>{if(f&&!f.ts&&f.driveId&&!failed.has(f.driveId))jobs.push(f);});
   });};
@@ -44236,7 +44265,7 @@ function _dpBerichtHtml(t){
 }
 async function _dpBerichtOeffnen(taskId){
   const t=findTaskById(taskId);
-  if(!t||!t.dachplan||!((t.dachplan.pins||[]).length)){showToast('Der Dachplan hat noch keine Pins – nichts zu berichten','info',4000);return;}
+  if(!t||!t.dachplan||!(_dpAllePins(t).length)){showToast('Der Dachplan hat noch keine Pins – nichts zu berichten','info',4000);return;} // b744: Pins in einem Teilbereich zaehlen mit
   const win=window.open('','_blank');
   if(!win){showToast('⚠ Popup blockiert – bitte Popups für PAM erlauben','error',5000);return;}
   win.document.write(_dpBerichtHtml(t));
@@ -45417,11 +45446,12 @@ function _fdkEintraege(t,eigeneFotos){
     if(!id)return;
     if(_isVideo(f.mimeType,f.name))return;
     if(seen.has(id))return;seen.add(id);
-    out.push(Object.assign({key:id,driveId:id,quelle:quelle,caption:f.caption||'',name:f.name||'',ts:f.ts||'',thumb:f.thumbnailLink||'',pinNr:0},extra||{}));
+    out.push(Object.assign({key:id,driveId:id,quelle:quelle,caption:f.caption||'',name:f.name||'',ts:f.ts||'',thumb:f.thumbnailLink||'',pinNr:0,pinSort:0},extra||{})); // b744: pinSort = Reihenfolge
   };
   (eigeneFotos||(t&&t.fotos)||[]).forEach(f=>push(f,'auftrag',{gruppe:'Fotos des Auftrags'}));
   ((_tuRefFuerTask(t)||{}).fotos||[]).forEach(f=>push(f,'leistung',{gruppe:'🔁 '+(f.leistung||'Leistung')}));
-  _dpRefFotos(t||{}).forEach(f=>push(f,'dachplan',{gruppe:'🗺 Dachplan · Pin '+f.pinNr,pinNr:Number(f.pinNr)||0}));
+  // b744: pinNr bleibt der ANZEIGE-Text („2.1"), pinSort traegt die Reihenfolge.
+  _dpRefFotos(t||{}).forEach(f=>push(f,'dachplan',{gruppe:(f.pinEltern?('🔍 Bereich '+f.pinEltern+' · Pin '+f.pinNr):('🗺 Dachplan · Pin '+f.pinNr)),pinNr:f.pinNr,pinSort:_dpNrSort(f.pinNr)}));
   out.forEach((e,i)=>{e.idx=i;});
   return out;
 }
@@ -45655,7 +45685,7 @@ function _fdkSortiere(art){
   if(!_fdkState)return;
   const L=_fdkState.liste;
   if(art==='zeit')L.sort((a,b)=>String(a.ts||'9').localeCompare(String(b.ts||'9'))||a.idx-b.idx);
-  else if(art==='pin')L.sort((a,b)=>((a.quelle==='dachplan')?0:1)-((b.quelle==='dachplan')?0:1)||(a.pinNr||0)-(b.pinNr||0)||a.idx-b.idx);
+  else if(art==='pin')L.sort((a,b)=>((a.quelle==='dachplan')?0:1)-((b.quelle==='dachplan')?0:1)||(a.pinSort||0)-(b.pinSort||0)||a.idx-b.idx); // b744: nach pinSort, nicht nach dem Anzeige-Text
   else if(art==='name')L.sort((a,b)=>String(a.caption||a.name||'').localeCompare(String(b.caption||b.name||''),'de')||a.idx-b.idx);
   else L.sort((a,b)=>a.idx-b.idx);
   _fdkListeZeichnen();
