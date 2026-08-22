@@ -8416,6 +8416,21 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
           <div class="mv2-section-label mv2-rhdr-amber" onclick="_toggleMv2Sect('tObjektSect',event)" style="cursor:pointer;">📍 Objekt<span class="mv2-coll-arrow" style="margin-left:auto;">›</span></div>
           <div class="mv2-r-card-body">
           <div class="modal-grid">
+            <!-- b759: Rechnungsanschrift – der mehrzeilige Briefkopf-Block, so wie er im
+                 Brief steht. Kommt beim ASCII-Import aus den Zeilen vor dem ersten
+                 Doppelpunkt; von Hand geändert bleibt er stehen (tRaManuell).
+                 Zugeklappt zeigt die Kopfzeile IMMER die erste Zeile bzw. einen Hinweis –
+                 sonst wiederholt sich die Falle des eingeklappten Anschrift-Knopfs bei den
+                 Kontakten, wo 78 von 80 leer blieben, weil man es zugeklappt nicht sieht. -->
+            <div class="modal-field full" id="tRaField">
+              <div style="display:flex;align-items:center;gap:8px;cursor:pointer;" onclick="_raToggle()" title="Anschrift, an die die Rechnung geht – anklicken zum Auf- und Zuklappen">
+                <label style="margin:0;cursor:pointer;flex-shrink:0;">Rechnungsanschrift</label>
+                <span id="tRaVorschau" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:calc(12px * var(--modal-scale,1));color:var(--text2);"></span>
+                <span id="tRaPfeil" style="flex-shrink:0;color:var(--text2);font-size:calc(13px * var(--modal-scale,1));">›</span>
+              </div>
+              <textarea id="tRaText" rows="4" style="display:none;width:100%;resize:vertical;font-family:inherit;" placeholder="Empfänger&#10;c/o Verwaltung&#10;Straße Nr.&#10;PLZ Ort" oninput="_raGeaendert()" autocomplete="off"></textarea>
+              <input type="hidden" id="tRaManuell" value="">
+            </div>
             <div class="modal-field full"><label>Auftraggeber / Hausverwaltung</label><input type="text" id="tHV" placeholder="z.B. AHV, Muster Verwaltung" oninput="scheduleTaskFieldSave();_updateMapsBtn()" autocomplete="off"></div>
             <div class="modal-field full">
               <label>Adresse (Straße + PLZ + Ort)</label>
@@ -9426,7 +9441,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-22 · #758'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-22-b758) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-22 · #759'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-22-b759) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -12334,6 +12349,8 @@ function saveTaskData(){
     repNr:document.getElementById('taskRepNr').value.trim(),
     kundenNr:document.getElementById('taskKundenNr').value.trim(),
     hausverwaltung:document.getElementById('tHV').value.trim(),
+    rechnungsanschrift:(typeof _raWert==='function')?_raWert():'',
+    rechnungsanschriftManuell:((document.getElementById('tRaManuell')||{}).value==='1'),
     adresse:document.getElementById('tAdr').value.trim(),
     sbPdfOrdner:(document.getElementById('tSbPdfOrdner')||{value:''}).value.trim(),
     schadensbild:document.getElementById('tSch').value.trim(),
@@ -21073,6 +21090,11 @@ function parseAuftragText(text){
     if(schadensbild)document.getElementById('taskDescInput').value=schadensbild;
     if(hausverwaltung)document.getElementById('tHV').value=hausverwaltung;
     if(adresseFull)document.getElementById('tAdr').value=adresseFull;
+    // b759: Rechnungsanschrift – benanntes Feld zuerst, sonst der Briefkopf-Block oben.
+    try{
+      if(typeof _raAusImport==='function')
+        _raAusImport(get('Rechnungsanschrift')||_raBlockAusAkte(text));
+    }catch(e){console.warn('[b759] Rechnungsanschrift:',e);}
     // Stammblatt PDF Ordner: aus Auftragsakte (Google_Drive_Link) oder gespeichertem Wert
     try{
       let sbEl=document.getElementById('tSbPdfOrdner');
@@ -21203,6 +21225,10 @@ function _akteNachtragenFuellen(text){
   if(fill('taskRepNr',repNr)){filled.push('Rep.-Nr.');scheduleTaskFieldSave();}
   if(fill('taskKundenNr',kundenNr)){filled.push('Kunden-Nr.');scheduleTaskFieldSave();}
   if(fill('tHV',hv))filled.push('Hausverwaltung');
+  // b759: Rechnungsanschrift – erst das benannte Feld, sonst der Briefkopf-Block, der in
+  // einer MF-dach-Akte ganz oben ohne Feldnamen steht.
+  if(typeof _raAusImport==='function'&&
+     _raAusImport(getML('Rechnungsanschrift')||_raBlockAusAkte(text)))filled.push('Rechnungsanschrift');
   if(fill('tAdr',strasse))filled.push('Adresse');
   if(fill('tSch',schaden))filled.push('Schadensbild');
   if(fill('taskDescInput',schaden)){filled.push('Beschreibung');}
@@ -34832,6 +34858,89 @@ function _kAdrToggle(btn){
   box.style.display=auf?'grid':'none';
   if(auf){const f=box.querySelector('.k-strasse');if(f)f.focus();}
 }
+
+/* ── b759: Rechnungsanschrift ────────────────────────────────────────────────────
+   Der mehrzeilige Briefkopf-Block am Auftrag. Er kommt aus der MF-dach-Datei und ist
+   von Hand überschreibbar; wer ihn anfasst, setzt tRaManuell, und ein erneuter Import
+   lässt ihn dann in Ruhe.
+   Die Vorschauzeile ist kein Beiwerk: Zugeklappt MUSS man sehen, ob etwas drinsteht.
+   Beim Anschrift-Knopf der Kontakte fehlt das – dort sind 78 von 80 Anschriften leer. */
+function _raVorschauSetzen(){
+  const t=document.getElementById('tRaText'),v=document.getElementById('tRaVorschau');
+  if(!t||!v)return;
+  const zeilen=String(t.value||'').split('\n').map(s=>s.trim()).filter(Boolean);
+  if(zeilen.length){
+    v.textContent=zeilen.join(' · ');
+    v.style.color='var(--text2)';v.style.fontWeight='400';
+  }else{
+    v.textContent='⚠ noch keine – hier eintragen';
+    v.style.color='#b45309';v.style.fontWeight='600';
+  }
+}
+function _raToggle(){
+  const t=document.getElementById('tRaText'),p=document.getElementById('tRaPfeil'),
+        v=document.getElementById('tRaVorschau');
+  if(!t)return;
+  const auf=(t.style.display==='none');
+  t.style.display=auf?'block':'none';
+  if(p)p.textContent=auf?'˅':'›';
+  if(v)v.style.display=auf?'none':'block';
+  if(auf)t.focus();
+}
+function _raGeaendert(){
+  const m=document.getElementById('tRaManuell');
+  if(m)m.value='1';                        // ab jetzt fasst der Import das Feld nicht mehr an
+  _raVorschauSetzen();
+  if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
+}
+/* Aus dem gespeicherten Task setzen – ohne den Merker zu verändern. */
+function _raSetzen(text,manuell){
+  const t=document.getElementById('tRaText'),m=document.getElementById('tRaManuell'),
+        p=document.getElementById('tRaPfeil'),v=document.getElementById('tRaVorschau');
+  if(t){t.value=String(text||'');t.style.display='none';}
+  if(m)m.value=manuell?'1':'';
+  if(p)p.textContent='›';
+  if(v)v.style.display='block';
+  _raVorschauSetzen();
+}
+/* Der Briefkopf-Block einer MF-dach-Akte: alle nichtleeren Zeilen VOR der ersten Zeile
+   mit Doppelpunkt. An drei echten Akten geprüft – 3 Zeilen bei Privatkunden, 4 bei einer
+   Verwaltung mit c/o-Zeile. Der PLZ-Wächter verhindert, dass aus einer fremd aufgebauten
+   Datei irgendeine Überschrift als Anschrift durchrutscht. */
+function _raBlockAusAkte(text){
+  const zeilen=String(text||'').replace(/\r\n?/g,'\n').split('\n');
+  const out=[];
+  for(const z of zeilen){
+    const t=z.trim();
+    if(!t){if(out.length)break;continue;}   // Leerzeile nach dem Block = Ende
+    if(t.indexOf(':')>=0)break;             // ab hier beginnen die benannten Felder
+    out.push(t);
+    if(out.length>6)return'';               // so lang ist kein Adressblock
+  }
+  if(out.length<2)return'';
+  if(!out.some(z=>/\b\d{5}\b/.test(z)))return'';   // ohne PLZ ist es keine Anschrift
+  return out.join('\n');
+}
+/* Import: nur füllen, wenn das Feld leer ist und nicht von Hand geändert wurde.
+   Steht schon etwas drin, bleibt es stehen – ein zweiter Import überschreibt nichts. */
+function _raAusImport(text){
+  const t=document.getElementById('tRaText'),m=document.getElementById('tRaManuell');
+  if(!t)return false;
+  const neu=String(text||'').replace(/\r\n?/g,'\n').split('\n').map(s=>s.trim()).filter(Boolean).join('\n');
+  if(!neu)return false;
+  if(m&&m.value==='1')return false;        // von Hand geändert – bleibt stehen
+  if(t.value.trim()!=='')return false;     // schon gefüllt – nicht anfassen
+  t.value=neu;
+  _raVorschauSetzen();
+  if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
+  return true;
+}
+/* Für die Word-Vorlage: der Block als Text, leere Zeilen raus. */
+function _raWert(){
+  const t=document.getElementById('tRaText');
+  return t?String(t.value||'').split('\n').map(s=>s.trim()).filter(Boolean).join('\n'):'';
+}
+
 function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2,adr){
   const c=document.getElementById('tKontakteContainer');if(!c)return;
   const rolleLabel={ag:'👔 AG Kontakt',mieter:'🏠 Mieter',eigentuemer:'👤 Eigentümer',sonstiges:'👥 Sonstiges'};
@@ -35022,6 +35131,8 @@ async function createAbschlussHtml(){
     repNr:document.getElementById('taskRepNr')?.value?.trim()||'',
     kundenNr:document.getElementById('taskKundenNr')?.value?.trim()||'',
     hausverwaltung:document.getElementById('tHV').value.trim(),
+    rechnungsanschrift:(typeof _raWert==='function')?_raWert():'',
+    rechnungsanschriftManuell:((document.getElementById('tRaManuell')||{}).value==='1'),
     adresse:document.getElementById('tAdr').value.trim(),
     schadensbild:document.getElementById('tSch').value.trim(),
     gdriveOrdner:document.getElementById('tGDOrdner')?.value?.trim()||'',
@@ -38654,6 +38765,7 @@ function openNewTaskModal(){
   document.getElementById('taskRepNr').value='';
   document.getElementById('taskKundenNr').value='';
   ['tHV','tAdr','tSch'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  if(typeof _raSetzen==='function')_raSetzen('',false);   // b759: neuer Task – Block leer, Merker zurück
   const _driveDefault=DEFAULT_FOLDER_BAUSTELLE;
   const _aufgabenDefault=DEFAULT_FOLDER_NOTIZ;
   const _nasDefault='\\\\nas-ddbraun\\Kunden';
@@ -43488,6 +43600,7 @@ function openEditTaskModal(id){
   document.getElementById('taskRepNr').value=task.repNr||'';
   document.getElementById('taskKundenNr').value=task.kundenNr||'';
   document.getElementById('tHV').value=task.hausverwaltung||'';
+  if(typeof _raSetzen==='function')_raSetzen(task.rechnungsanschrift||'',!!task.rechnungsanschriftManuell);   // b759
   document.getElementById('tAdr').value=task.adresse||'';
   document.getElementById('tSch').value=task.schadensbild||'';
   // v384: Standort-Anzeige (lat/lon vom Handy erfasst) · b390: in Objekt-Sektion + Erfassungszeitpunkt
@@ -46082,6 +46195,61 @@ function _fdkPlatzhalterFinden(docXml){
   }
   return out;
 }
+/* ── b759: Textplatzhalter ({Objekt}, {Datum}, …) ────────────────────────────────
+   NICHT zu verwechseln mit _fdkPlatzhalterFinden – das kann ausschließlich {Foto} und
+   ersetzt GANZE ABSÄTZE durch ein Bild. Hier geht es um Text mitten in der Zeile.
+   Word hält solche Platzhalter normalerweise ungeteilt in EINEM <w:t>; an beiden
+   Vorlagen nachgemessen, alle 16 Vorkommen. Zerlegt Word einen doch einmal
+   (Rechtschreibprüfung, rsid-Wechsel), findet der Ersatz ihn nicht und lässt ihn
+   STEHEN, statt Text zu zerstören – ein gebliebener Platzhalter fällt in Word sofort
+   auf, ein zerschossener Satz nicht. */
+/* ⛔ Kein eigenes Maskieren hier: _fdkXmlEsc gibt es weiter oben schon, und die dortige
+   Fassung maskiert zusätzlich das Anführungszeichen. Eine zweite Definition würde die
+   erste still überschreiben – genau das war beim Bauen dieses Schritts kurz passiert. */
+function _fdkFeldErsatz(xml,felder){
+  const marken=Object.keys(felder||{}).filter(k=>String(felder[k]==null?'':felder[k]).trim()!=='');
+  if(!marken.length)return {xml:String(xml||''),n:0};
+  let n=0;
+  const neu=String(xml||'').replace(/<w:t(\s[^>]*)?>([^<]*)<\/w:t>/g,function(ganz,attr,inhalt){
+    if(inhalt.indexOf('{')<0)return ganz;
+    // xml:space erhalten, sonst frisst Word Leerzeichen am Rand des eingesetzten Werts
+    const a=(attr&&attr.indexOf('xml:space')>=0)?attr:((attr||'')+' xml:space="preserve"');
+    let txt=inhalt,traf=false;
+    for(const k of marken){
+      const marke='{'+k+'}';
+      if(txt.indexOf(marke)<0)continue;
+      // mehrzeilige Werte (Anschrift!) als echte Word-Zeilenumbrüche
+      const wert=_fdkXmlEsc(felder[k]).split('\n').join('</w:t><w:br/><w:t'+a+'>');
+      txt=txt.split(marke).join(wert);
+      traf=true;n++;
+    }
+    if(!traf)return ganz;
+    return '<w:t'+a+'>'+txt+'</w:t>';
+  });
+  return {xml:neu,n:n};
+}
+/* Datum für einen Brief: immer TT.MM.JJJJ mit führenden Nullen.
+   ⛔ toLocaleDateString('de-DE') schreibt „14.8.2026" – in einem Bericht sieht das
+   schlampig aus, und je nach Windows-Einstellung kommt sogar etwas anderes heraus. */
+function _fdkDatumDE(d){
+  if(!(d instanceof Date)||isNaN(d))return '';
+  const z=n=>(n<10?'0':'')+n;
+  return z(d.getDate())+'.'+z(d.getMonth()+1)+'.'+d.getFullYear();
+}
+/* Ortstermin aus den Aufnahmedaten der Fotos – als Spanne, wenn sie von mehreren
+   Tagen stammen (gemessen: 22 von 49 Aufträgen mit Fotos). */
+function _fdkOrtsterminAusFotos(bilder){
+  const tage=[];
+  (bilder||[]).forEach(b=>{
+    if(!b||!b.ts)return;
+    const d=new Date(b.ts);
+    if(!isNaN(d))tage.push(d);
+  });
+  if(!tage.length)return '';
+  tage.sort((a,b)=>a-b);
+  const von=_fdkDatumDE(tage[0]),bis=_fdkDatumDE(tage[tage.length-1]);
+  return (von===bis)?von:(von+'–'+bis);
+}
 /* Leeres Word-Dokument (A4 hoch, 2 cm Rand, Arial 11) für „ohne Startdokument". */
 async function _fdkLeeresDocx(JZ){
   const zip=new JZ();
@@ -46184,10 +46352,26 @@ async function _fdkDocxBauen(startBuf,bilder,opt){
     if(iSect>=0&&iSect<iBodyEnd&&!/<\/w:pPr>|<\/w:p>/.test(docXml.substring(iSect,iBodyEnd)))pos=iSect;
     docXml=docXml.substring(0,pos)+xml+docXml.substring(pos);
   }
+  // b759: Textplatzhalter füllen – im Textkörper UND in allen Kopf-/Fußzeilen.
+  // Kopf- und Fußzeilen blieben bisher bewusst unangetastet; für {Kostenstelle},
+  // {Datum} und {Objekt} müssen sie mit, dort stehen sie in den Vorlagen.
+  let feldZahl=0;
+  if(opt.felder&&typeof opt.felder==='object'){
+    const rDoc=_fdkFeldErsatz(docXml,opt.felder);
+    docXml=rDoc.xml;feldZahl+=rDoc.n;
+    const teile=Object.keys(zip.files||{}).filter(p=>/^word\/(header|footer)\d*\.xml$/i.test(p));
+    for(const p of teile){
+      try{
+        const alt=await zip.file(p).async('string');
+        const r=_fdkFeldErsatz(alt,opt.felder);
+        if(r.n){zip.file(p,r.xml);feldZahl+=r.n;}
+      }catch(e){console.warn('[b759] Kopf-/Fußzeile '+p+':',e);}
+    }
+  }
   zip.file('word/document.xml',docXml);
   zip.file(relsPfad,rels);
   zip.file('[Content_Types].xml',ct);
-  opt.ergebnis={platzhalter:platz,leer:leer,hinten:rest.length,proSeite:proSeite};
+  opt.ergebnis={platzhalter:platz,leer:leer,hinten:rest.length,proSeite:proSeite,felder:feldZahl};
   return await zip.generateAsync({type:'uint8array',compression:'DEFLATE',compressionOptions:{level:6},mimeType:_FDK_MIME_DOCX});
 }
 
@@ -47023,12 +47207,24 @@ async function _fdkErstellen(){
     for(const e of auswahl){
       n++;sag('⏳ Foto '+n+' von '+auswahl.length+' wird geholt…');
       const b=await _fdkFotoBytes(e.driveId,kasten);
-      if(b){b.text=beschriftung?(e.caption||''):'';bilder.push(b);}else fehl.push(e.caption||e.name||e.driveId);
+      if(b){b.text=beschriftung?(e.caption||''):'';b.ts=e.ts||'';bilder.push(b);}else fehl.push(e.caption||e.name||e.driveId);
     }
     if(!bilder.length)throw new Error('Kein Foto ließ sich laden.');
     const startNr=parseInt((document.getElementById('fdkStartNr')||{}).value,10)||1;
     sag('⏳ Word-Datei wird zusammengesetzt…');
-    const bau={startNr:startNr,proSeite:proSeite,platzhalter:true};
+    // b759: Werte für die Textplatzhalter der Vorlage. Was leer bleibt, wird NICHT
+    // eingesetzt – dann steht der Platzhalter im fertigen Word noch da und ist sofort
+    // als „hier von Hand nachtragen" zu erkennen (besser als eine leere Zeile).
+    const _kstTag=(Array.isArray(t.tags)&&t.tags.length)?String(t.tags[0]||'').trim():'';
+    const felder={
+      Objekt:String(t.adresse||'').trim()||String(t.title||'').trim(),
+      Auftraggeber:String(t.rechnungsanschrift||'').trim(),
+      Aufgabe:String(t.schadensbild||'').trim()||String(t.desc||'').trim(),
+      Kostenstelle:/^\d{3,8}$/.test(_kstTag)?_kstTag:'',
+      Datum:_fdkDatumDE(new Date()),
+      Ortstermin:_fdkOrtsterminAusFotos(bilder)
+    };
+    const bau={startNr:startNr,proSeite:proSeite,platzhalter:true,felder:felder};
     const bytes=await _fdkDocxBauen(startBuf,bilder,bau);
     const fname=_fdkDateiname(t);
     S.ergebnis={bytes:bytes,fname:fname};
@@ -47044,7 +47240,7 @@ async function _fdkErstellen(){
       }catch(e){console.warn('[FDK] Ablage:',e);ablage='⚠ Ablage in Drive fehlgeschlagen – bitte herunterladen';}
     }else ablage='ℹ kein Drive-Ordner am Auftrag – bitte herunterladen';
     const erg=bau.ergebnis||{};
-    const platzText=(erg.platzhalter?(' · '+erg.platzhalter+' Platzhalter gefüllt'):'')+(erg.leer?(' · '+erg.leer+' Platzhalter ohne Foto entfernt'):'');
+    const platzText=(erg.platzhalter?(' · '+erg.platzhalter+' Platzhalter gefüllt'):'')+(erg.leer?(' · '+erg.leer+' Platzhalter ohne Foto entfernt'):'')+(erg.felder?(' · '+erg.felder+(erg.felder===1?' Feld':' Felder')+' eingesetzt'):'');
     sag('✓ Fertig: '+bilder.length+' Abbildung'+(bilder.length!==1?'en':'')+platzText+(fehl.length?' · '+fehl.length+' nicht ladbar':'')+' · '+ablage);
     if(dl)dl.style.display='';
     showToast('📚 Fotodokumentation erstellt: '+fname,'success',5000);
