@@ -9408,7 +9408,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-22 · #751'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-22-b751) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-22 · #752'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-22-b752) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -27595,6 +27595,12 @@ let _deskDrawTool='freihand';
    3. Die neuen Werkzeuge T (Text) und ① (Nummern-Marke), Entscheidung Frank 22.08.2026. */
 let _deskDrawObjs=[];
 let _deskDrawStart=null;
+/* b752: Bisher konnte der Maler NUR ein Foto aus `taskFotos` bearbeiten (über
+   _currentFotoLbIdx). 🔁 Leistungsfotos sind aber gar keine – sie liegen als blosser
+   Datei-Verweis in der Turnus-Liste. Mit einem Ziel wird der Maler leihweise woanders
+   eingesetzt: {img, name, ordnerId, fertig(meta,blob), schliessen()}.
+   null = der gewohnte Weg über die Grossansicht, unveraendert. */
+let _deskDrawZiel=null;
 
 function _deskSetTool(tool){
   _deskDrawTool=tool;
@@ -27822,8 +27828,9 @@ function _deskTextFeld(clientX,clientY,rx,ry){
   document.body.appendChild(inp);
   setTimeout(()=>{try{inp.focus();}catch(e){}},10);
 }
-function deskStartDraw(){
-  const img=document.getElementById('deskLbImg');
+function deskStartDraw(imgEl){
+  // b752: imgEl = ein fremdes Bild (Leihbetrieb). Ohne Angabe wie bisher die Grossansicht.
+  const img=imgEl||document.getElementById('deskLbImg');
   if(!img){return;}
   const canvas=document.getElementById('desktopDrawCanvas');
   if(!canvas)return;
@@ -27936,22 +27943,28 @@ function deskToggleEraser(btn){
 function deskDiscardDraw(){
   _deskDrawPointer=null;_deskDrawErasing=false;
   _deskDrawObjs=[];_deskDrawStart=null;_deskTextFeldSchliessen();   // b750
+  // b752: Ein geliehenes Ziel raeumt sein eigenes Fenster weg – gleich ob gespeichert
+  // oder verworfen. Erst abhaengen, dann schliessen: sonst kann ein Fehler im
+  // Schliessen das Ziel stehen lassen und der naechste Malvorgang liefe hinein.
+  const z=_deskDrawZiel;_deskDrawZiel=null;
+  if(z&&typeof z.schliessen==='function'){try{z.schliessen();}catch(e){console.warn('[Malen] schliessen:',e);}}
   const c=document.getElementById('desktopDrawCanvas');
   if(c){c.classList.remove('active');c.removeEventListener('pointerdown',_deskOnDown);c.removeEventListener('pointermove',_deskOnMove);c.removeEventListener('pointerup',_deskOnUp);c.removeEventListener('pointercancel',_deskOnUp);const ctx=c.getContext('2d');if(ctx)ctx.clearRect(0,0,c.width,c.height);}
   document.getElementById('deskDrawBar')?.classList.remove('visible');
 }
 async function deskSaveDraw(){
-  const img=document.getElementById('deskLbImg');
+  const ziel=_deskDrawZiel;                                    // b752: Leihbetrieb?
+  const img=(ziel&&ziel.img)||document.getElementById('deskLbImg');
   const canvas=document.getElementById('desktopDrawCanvas');
   if(!img||!canvas){deskDiscardDraw();return;}
-  if(_currentFotoLbIdx<0||!taskFotos||!taskFotos[_currentFotoLbIdx]){showToast('Kein Foto gewählt','error');deskDiscardDraw();return;}
+  if(!ziel&&(_currentFotoLbIdx<0||!taskFotos||!taskFotos[_currentFotoLbIdx])){showToast('Kein Foto gewählt','error');deskDiscardDraw();return;}
   // b750: Ohne einen einzigen Zug entstuende nur eine zweite, identische Datei im Drive.
   if(!_deskDrawObjs||!_deskDrawObjs.length){showToast('Nichts gemalt – nichts zu speichern','warning');deskDiscardDraw();return;}
   // Index VOR dem ersten await sichern – _currentFotoLbIdx kann sich während des
   // asynchronen Uploads ändern (z.B. Lightbox geschlossen → -1), was sonst
   // taskFotos[-1]=undefined liefert und einen Duplikat-Eintrag per push() erzeugt.
   const savedIdx=_currentFotoLbIdx;
-  const f=taskFotos[savedIdx];
+  const f=ziel?null:taskFotos[savedIdx];
   const mc=document.createElement('canvas');
   mc.width=img.naturalWidth||canvas.width;
   mc.height=img.naturalHeight||canvas.height;
@@ -27964,9 +27977,9 @@ async function deskSaveDraw(){
   _deskZeichneAlle(mCtx,mc.width,mc.height);
   const blob=await new Promise(r=>mc.toBlob(r,'image/jpeg',0.92));
   if(!blob){showToast('Fehler beim Erstellen','error');deskDiscardDraw();return;}
-  const folderId=_getDriveFotoFolderId();
+  const folderId=(ziel&&ziel.ordnerId)||_getDriveFotoFolderId();
   if(!folderId){showToast('Kein Drive-Ordner verknüpft – bitte unter „Ordner & Links" eintragen','error');deskDiscardDraw();return;}
-  const base=(f.name||'foto.jpg').replace(/\.[^.]+$/,'');
+  const base=String((ziel?ziel.name:(f&&f.name))||'foto.jpg').replace(/\.[^.]+$/,'');
   const copyName=base+'_zeichnung.jpg';
   const body=new FormData();
   body.append('metadata',new Blob([JSON.stringify({name:copyName,parents:[folderId]})],{type:'application/json'}));
@@ -27979,7 +27992,11 @@ async function deskSaveDraw(){
   if(!r.ok){showToast('Fehler beim Speichern ('+r.status+')','error');deskDiscardDraw();return;}
   const meta=await r.json().catch(()=>null);
   showToast('✓ Zeichnung in Drive gespeichert','success');
-  if(meta&&meta.id){
+  if(meta&&meta.id&&ziel){
+    // b752: Leihbetrieb – wohin die bemalte Fassung gehört, weiß nur der Aufrufer.
+    try{_desktopFotoBlobCache.set(meta.id,URL.createObjectURL(blob));}catch(e){}
+    try{ziel.fertig(meta,blob);}catch(e){console.warn('[Malen] Ziel:',e);showToast('Gespeichert, aber nicht eingehängt','warning');}
+  } else if(meta&&meta.id){
     if(!taskFotos)taskFotos=[];
     const blobUrl=URL.createObjectURL(blob);
     _desktopFotoBlobCache.set(meta.id,blobUrl);
@@ -45762,7 +45779,9 @@ function _fdkEintraege(t,eigeneFotos){
     out.push(Object.assign({key:id,driveId:id,quelle:quelle,fo:(f.fo||f),pinRef:(f.pinRef||null),caption:f.caption||'',name:f.name||'',ts:f.ts||'',thumb:f.thumbnailLink||'',pinNr:0,pinSort:0},extra||{})); // b744: pinSort = Reihenfolge
   };
   (eigeneFotos||(t&&t.fotos)||[]).forEach(f=>push(f,'auftrag',{gruppe:'Fotos des Auftrags'}));
-  ((_tuRefFuerTask(t)||{}).fotos||[]).forEach(f=>push(f,'leistung',{gruppe:'🔁 '+(f.leistung||'Leistung')}));
+  // b752: Leistung, Termin und Kennung mitgeben – die bemalte Fassung trägt sie als Herkunft.
+  ((_tuRefFuerTask(t)||{}).fotos||[]).forEach(f=>push(f,'leistung',{gruppe:'🔁 '+(f.leistung||'Leistung'),
+    lId:f.leistungId||'',lName:f.leistung||'',lDatum:f.datum||''}));
   // b744: pinNr bleibt der ANZEIGE-Text („2.1"), pinSort traegt die Reihenfolge.
   _dpRefFotos(t||{}).forEach(f=>push(f,'dachplan',{gruppe:(f.pinEltern?('🔍 Bereich '+f.pinEltern+' · Pin '+f.pinNr):('🗺 Dachplan · Pin '+f.pinNr)),pinNr:f.pinNr,pinSort:_dpNrSort(f.pinNr)}));
   out.forEach((e,i)=>{e.idx=i;});
@@ -46061,11 +46080,13 @@ function _fdkKachelHtml(e,art,nr){
   let badge;
   if(art==='dok')badge='<div class="fdk-knr">Abb. '+nr+'</div>';
   else badge=drin?'<div class="fdk-knr grau">✓ im Dokument (Abb. '+nr+')</div>':'<div class="fdk-knr grau">'+esc(_fdkDatum(e.ts)||' ')+'</div>';
-  /* b751: Das ✏️ steht nur dort, wo eine bemalte Fassung auch abgelegt werden kann –
-     an Auftrags- und Dachplan-Pin-Fotos. 🔁 Leistungs-Fotos sind blosse Drive-Verweise
-     in der Turnus-Liste; sie haben kein Feld fuer eine bearbeitete Fassung. Lieber gar
-     kein Knopf als einer, der nur eine Fehlermeldung bringt. */
-  const malbar=(e.quelle==='auftrag'||e.quelle==='dachplan');
+  /* b751/b752: Das ✏️ steht an allen drei Fotoarten – sie werden nur unterschiedlich
+     abgelegt (siehe _fdkMalen). 🔁 Leistungsfotos hatten in b751 bewusst keins, weil sie
+     blosse Drive-Verweise in der Turnus-Liste sind und kein Feld fuer eine bearbeitete
+     Fassung haben. b752 loest das ohne Eingriff in die Turnus-Daten: die bemalte Fassung
+     wird ein eigenes Auftragsfoto mit Herkunftsvermerk, der Wartungsnachweis bleibt
+     unberuehrt (Entscheidung Frank 22.08.2026). */
+  const malbar=(e.quelle==='auftrag'||e.quelle==='dachplan'||e.quelle==='leistung');
   return '<div class="fdk-kachel '+art+(drin?' drin':'')+(_fdkState.vorschauKey===e.key?' vorschau':'')+'" draggable="'+(drin?'false':'true')+'" data-key="'+esc(e.key)+'" title="'+esc(e.caption||e.name||'Foto')+'">'
     +'<div class="fdk-kbild"><img alt="" draggable="false" data-fdk-id="'+esc(e.driveId)+'"'+(src?' src="'+esc(src)+'"':'')+'><span class="fdk-chip">'+esc(_fdkEtikett(e))+'</span>'
     +(malbar?'<button type="button" class="fdk-kmal" data-mal="'+esc(e.key)+'" title="Malen und beschriften – Pfeil, Text, Nummer">✏️</button>':'')
@@ -46259,6 +46280,7 @@ function _fdkMalen(key){
   const t=findTaskById(S.taskId);
   if(!t){showToast('Auftrag nicht gefunden','error');return;}
   const ov=document.getElementById('fdkOverlay');
+  if(e.quelle==='leistung'){_fdkMalenLeihweise(e);return;}   // b752
   if(e.quelle==='dachplan'){
     if(!(window.Dachplan&&typeof window.Dachplan.malenFuer==='function')){showToast('Dachplan-Maler nicht verfügbar','error');return;}
     if(ov)ov.style.display='none';
@@ -46325,6 +46347,82 @@ function _fdkZurueckAusMalen(altKey){
     showToast('✓ Bemalte Fassung übernommen','success');
   }
   _fdkListeAuffrischen(new Set(S.liste.map(x=>x.key)),false);
+}
+
+/* ══ b752: 🔁 Leistungsfoto bemalen, ohne den Wartungsnachweis anzufassen ═══════════
+   Ein Leistungsfoto gehört der wiederkehrenden Leistung – es ist der BELEG, dass die
+   Arbeit an dem Tag gemacht wurde. In der Turnus-Liste steht dazu nur ein Datei-Verweis
+   (Name + Drive-Kennung), kein Feld für eine bearbeitete Fassung.
+   **Entscheidung Frank 22.08.2026:** Der Beleg bleibt unverändert. Die bemalte Fassung
+   wird ein EIGENES Auftragsfoto und trägt ihre Herkunft in `ausLeistung` mit.
+   ⛔ Bewusst NICHT `tuLeistung`: dieses Feld bedeutet „ist ein Beleg dieser Leistung", und
+   das Handy trägt ein so markiertes Foto beim nächsten Laden selbsttätig als Datei in die
+   Turnus-Liste nach (Mobil `_tuDateiNachtragen`, dort Zeile ~9339). Genau das soll nicht
+   passieren. Will Frank es doch beim Nachweis haben, ordnet er es am Handy von Hand zu –
+   dieser Weg ist umkehrbar, der selbsttätige wäre es kaum (eine entfernte Zuordnung holt
+   die Reparaturroutine zurück, solange der Datei-Verweis steht). */
+async function _fdkMalenLeihweise(e){
+  const S=_fdkState;if(!S||!e)return;
+  if(typeof taskFotos==='undefined'||!Array.isArray(taskFotos)){showToast('Fotoliste nicht bereit','error');return;}
+  if(!_getDriveFotoFolderId()){showToast('Kein Drive-Ordner am Auftrag – dort kann nichts abgelegt werden','error');return;}
+  showToast('Bild wird geladen…','info');
+  const url=await _fetchDesktopFotoBlob(e.driveId);
+  if(!url){showToast('Bild konnte nicht geladen werden','error');return;}
+  const alt=document.getElementById('fdkMalOv');if(alt)alt.remove();
+  const buehne=document.createElement('div');
+  buehne.id='fdkMalOv';
+  /* z-index 3000: UNTER der Zeichenfläche (3100) und der Werkzeugleiste (3200) – sonst
+     läge das Bild über dem, worauf man malt. */
+  buehne.style.cssText='position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,.94);display:flex;align-items:center;justify-content:center;padding:74px 16px 16px;';
+  const img=document.createElement('img');
+  img.id='fdkMalImg';img.alt='';img.style.cssText='max-width:100%;max-height:100%;display:block;';
+  buehne.appendChild(img);
+  buehne.onclick=ev=>ev.stopPropagation();
+  document.body.appendChild(buehne);
+  const fdkOv=document.getElementById('fdkOverlay');
+  const zurueck=function(){const o=document.getElementById('fdkOverlay');if(o)o.style.display='';};
+  img.onerror=function(){buehne.remove();zurueck();showToast('Bild konnte nicht angezeigt werden','error');};
+  img.onload=function(){
+    if(fdkOv)fdkOv.style.display='none';
+    _deskDrawZiel={
+      img:img,
+      name:(e.name||'Leistungsfoto')+'_zeichnung.jpg',
+      ordnerId:_getDriveFotoFolderId(),
+      fertig:function(meta){_fdkLeihErgebnis(e,meta);},
+      schliessen:function(){const b=document.getElementById('fdkMalOv');if(b)b.remove();zurueck();}
+    };
+    deskStartDraw(img);
+  };
+  img.src=url;
+}
+/* Die bemalte Fassung als eigenes Auftragsfoto einhängen – mit Herkunft, ohne Turnus-Eingriff. */
+function _fdkLeihErgebnis(e,meta){
+  if(!meta||!meta.id)return;
+  const datum=e.lDatum?_fdkDatum(e.lDatum):'';
+  taskFotos.push({
+    driveId:meta.id,
+    name:meta.name||((e.name||'Foto')+'_zeichnung.jpg'),
+    caption:((e.lName||'Leistung')+(datum?(' · '+datum):'')+' (bearbeitet)'),
+    ts:e.ts||'',
+    mimeType:'image/jpeg',
+    // Herkunft, maschinenlesbar – aber ausdrücklich KEIN tuLeistung (siehe oben).
+    ausLeistung:{lId:e.lId||'',name:e.lName||'',datum:e.lDatum||'',ausDriveId:e.driveId||''}
+  });
+  try{scheduleTaskFieldSave();}catch(err){console.warn('[FDK] speichern:',err);}
+  try{renderFotoListDesktop();}catch(err){}
+  const S=_fdkState;if(!S)return;
+  const o=document.getElementById('fdkOverlay');if(o)o.style.display='';
+  _fdkListeAuffrischen(new Set(S.liste.map(x=>x.key)),false);   // holt das neue Auftragsfoto herein
+  /* Lag der Beleg im Dokument, tritt die bemalte Fassung an SEINE Stelle – sonst stünde
+     im Bericht das unbeschriftete Bild und die Abbildungsnummern verschöben sich. */
+  const i=S.dok.indexOf(e.key);
+  if(i>=0){
+    if(S.dok.indexOf(meta.id)<0)S.dok[i]=meta.id;
+    else S.dok.splice(i,1);
+  }
+  S.vorschauKey=meta.id;
+  _fdkListeZeichnen();
+  showToast('✓ Als Auftragsfoto abgelegt – der Wartungsnachweis bleibt unberührt','success',6000);
 }
 
 /* Punkt 7: Dateien aus dem Explorer → derselbe Upload-Weg wie die Fotos-Sektion
