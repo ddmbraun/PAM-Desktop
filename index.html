@@ -9062,7 +9062,7 @@ function _pamGuestSubmit(){
     <div class="foto-lb-capbar-btns">
       <button class="foto-lb-cancel" onclick="closePreview()">Abbrechen</button>
       <button class="foto-lb-save" onclick="saveFotoCaptionFromLightbox()">💾 Speichern</button>
-      <button class="foto-lb-save" style="background:rgba(255,255,255,.15)" onclick="event.stopPropagation();deskStartDraw()">✏️ Malen</button>
+      <button class="foto-lb-save" style="background:rgba(255,255,255,.15)" onclick="event.stopPropagation();deskMalenStarten()">✏️ Malen</button>
       <button class="foto-lb-save" style="background:rgba(21,128,61,.9)" onclick="event.stopPropagation();_fsMenueLb(this)" title="Foto wegschicken – ohne Standort- und Kameradaten">📤 Senden</button>
     </div>
   </div>
@@ -9412,7 +9412,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-22 · #754'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-22-b754) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-22 · #755'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-22-b755) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -25773,7 +25773,11 @@ function renderFotoListDesktop(){
     const is360=_deskIs360Name(_nm360)||f.is360===true;
     const badge360=is360?'<div class="foto-360-badge">360°</div>':'';
     const _ebLeft=is360?'44px':'4px';
-    const editedBadge=f.editedDriveId?'<div style="position:absolute;top:4px;left:'+_ebLeft+';background:rgba(108,99,255,.75);color:#fff;font-size:9px;padding:2px 5px;border-radius:4px;pointer-events:none">✏ bearb.</div>':'';
+    /* b755: Die Marke ist jetzt ein Knopf – ein Klick nimmt die Zeichnung zurück, dann gilt
+       wieder das Original. Kein zusätzlicher Knopf, weil an der Kachel kein Platz frei ist
+       (b673: oben rechts drei Knöpfe, oben links die Marken, unten die Beschriftung).
+       Das ↩ zeigt an, dass man darauf klicken kann. */
+    const editedBadge=f.editedDriveId?'<div onclick="event.stopPropagation();deskZeichnungZurueck('+i+')" title="Zeichnung zurücknehmen – danach gilt wieder das unbemalte Original (die Zeichnung bleibt in Drive)" style="position:absolute;top:4px;left:'+_ebLeft+';background:rgba(108,99,255,.75);color:#fff;font-size:9px;padding:2px 5px;border-radius:4px;cursor:pointer;">✏ bearb. ↩</div>':'';
     // b673: Herkunft als 📧 vor der Beschriftung (immer sichtbar) und ausgeschrieben
     // im Tooltip. Bewusst kein eigenes Badge: oben rechts sitzen drei Knoepfe, oben
     // links 360°- und „bearb."-Marke, unten die Beschriftung – es ist kein Platz frei.
@@ -27623,7 +27627,9 @@ function _deskSetTool(tool){
   document.getElementById('deskEraserBtn')?.classList.remove('on');
   document.querySelectorAll('.desk-tool-btn').forEach(b=>b.classList.toggle('on',b.dataset.tool===tool));
 }
-async function openFotoDesktop(i){
+/* b755: zeigeOriginal = ausdrücklich das unbemalte Original anzeigen (für „vom Original neu
+   anfangen"). Ohne Angabe wie bisher die bemalte Fassung, wenn es eine gibt. */
+async function openFotoDesktop(i,zeigeOriginal){
   const f=taskFotos&&taskFotos[i];if(!f)return;
   _deskClosePannellum();deskDiscardDraw();
   _currentFotoLbIdx=i;
@@ -27662,7 +27668,7 @@ async function openFotoDesktop(i){
     else{cnt.innerHTML='<div style="color:#fff;padding:20px">Video-Vorschau nicht verfügbar</div>';}
     return;
   }
-  const _viewId=f.editedDriveId||f.driveId;
+  const _viewId=(zeigeOriginal?(f.driveId||f.editedDriveId):(f.editedDriveId||f.driveId));   // b755
   if(_viewId){
     const url=await _fetchDesktopFotoBlob(_viewId);
     if(url){
@@ -27917,6 +27923,49 @@ function deskUndoDraw(){
   _deskDrawWahl=-1;   // b754: die Markierung zeigte sonst auf einen Zug, den es nicht mehr gibt
   _deskRedraw();
 }
+/* ══ b755: „Dieses Foto ist schon bemalt" ═══════════════════════════════════════════
+   Bis b754 öffnete der Maler IMMER die bemalte Fassung (`editedDriveId||driveId`) – wer ein
+   zweites Mal malte, malte auf seine eigenen Pfeile, und es entstand eine dritte Datei.
+   Befund Frank 22.08.2026: „Wo finde ich jetzt das Originalfoto, falls ich es noch mal neu
+   bearbeiten will?"
+   ⛔ Drei Möglichkeiten – `confirm()` kann nur zwei, deshalb ein eigener kleiner Dialog. */
+function _deskFrageZeichnung(){
+  return new Promise(function(res){
+    const alt=document.getElementById('deskFrageOv');if(alt)alt.remove();
+    const knopf='padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;font-size:13px;font-weight:600;';
+    const ov=document.createElement('div');
+    ov.id='deskFrageOv';
+    ov.style.cssText='position:fixed;inset:0;z-index:100080;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px;';
+    ov.innerHTML='<div style="background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:12px;padding:20px 22px;max-width:460px;box-shadow:0 18px 60px rgba(0,0,0,.55);">'
+      +'<div style="font-weight:700;font-size:15px;margin-bottom:8px;">Dieses Foto ist schon bemalt</div>'
+      +'<div style="font-size:13px;line-height:1.55;margin-bottom:18px;">Willst du auf der vorhandenen Zeichnung <b>weitermalen</b> oder vom unbemalten <b>Original neu anfangen</b>?'
+      +'<br><span style="opacity:.75;">Das Original bleibt in beiden Fällen erhalten – es liegt unverändert im Bilder-Ordner.</span></div>'
+      +'<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">'
+      +'<button type="button" data-w="abbruch" style="'+knopf+'">Abbrechen</button>'
+      +'<button type="button" data-w="neu" style="'+knopf+'">↩ Vom Original neu</button>'
+      +'<button type="button" data-w="weiter" style="'+knopf+'border-color:var(--accent);color:var(--accent);">✏️ Auf der Zeichnung weiter</button>'
+      +'</div></div>';
+    ov.querySelectorAll('button').forEach(function(b){
+      b.onclick=function(ev){ev.stopPropagation();const w=b.dataset.w;ov.remove();res(w);};
+    });
+    ov.onclick=function(ev){if(ev.target===ov){ov.remove();res('abbruch');}};
+    document.body.appendChild(ov);
+  });
+}
+/* Nimmt die Zeichnung eines Auftragsfotos zurück – das Original gilt wieder.
+   ⛔ Die bemalte Datei wird NICHT gelöscht; sie bleibt im Drive-Ordner liegen. Löschen wäre
+   nicht umkehrbar, und PAM löscht keine Bilddateien ohne ausdrückliche Ansage. */
+function deskZeichnungZurueck(i){
+  const f=(typeof taskFotos!=='undefined'&&Array.isArray(taskFotos))?taskFotos[i]:null;
+  if(!f||!f.editedDriveId){showToast('An diesem Foto ist keine Zeichnung','info');return;}
+  const name=f.editedName||'die bemalte Fassung';
+  if(!confirm('Zeichnung zurücknehmen?\n\nDas Original gilt danach wieder als das Bild dieses Fotos.\n\n„'+name+'" bleibt im Bilder-Ordner in Drive liegen – dort kannst du sie ansehen oder von Hand löschen.'))return;
+  delete f.editedDriveId;
+  delete f.editedName;
+  scheduleTaskFieldSave();
+  try{renderFotoListDesktop();}catch(e){}
+  showToast('✓ Original gilt wieder – die Zeichnung liegt weiter in Drive','success',6000);
+}
 function _deskTextFeldSchliessen(){const a=document.getElementById('deskTextInput');if(a)a.remove();}
 function _deskTextFeld(clientX,clientY,rx,ry){
   _deskTextFeldSchliessen();
@@ -27949,6 +27998,24 @@ function _deskTextFeld(clientX,clientY,rx,ry){
   };
   document.body.appendChild(inp);
   setTimeout(()=>{try{inp.focus();}catch(e){}},10);
+}
+/* b755: Der Weg über den Knopf „✏️ Malen" in der Großansicht. Ist das Foto schon bemalt,
+   wird erst gefragt – sonst malt man unbemerkt auf die eigenen Pfeile.
+   `deskStartDraw` selbst bleibt unverändert und wird weiter direkt gerufen, wo die Frage
+   schon beantwortet ist (Fotodokumentation, Leihbetrieb). */
+async function deskMalenStarten(){
+  const f=(typeof taskFotos!=='undefined'&&Array.isArray(taskFotos))?taskFotos[_currentFotoLbIdx]:null;
+  if(f&&f.editedDriveId){
+    const wahl=await _deskFrageZeichnung();
+    if(wahl==='abbruch')return;
+    if(wahl==='neu'){
+      const i=_currentFotoLbIdx;
+      await openFotoDesktop(i,true);                 // das unbemalte Original anzeigen
+      _fdkWarteAufBild(function(){deskStartDraw();}); // erst wenn es geladen ist, den Stift an
+      return;
+    }
+  }
+  deskStartDraw();
 }
 function deskStartDraw(imgEl){
   // b752: imgEl = ein fremdes Bild (Leihbetrieb). Ohne Angabe wie bisher die Grossansicht.
@@ -45150,8 +45217,12 @@ window.Dachplan=(function(){
      (v217-Lehre). Scheitert der Upload, wird NICHTS am Foto geändert – der PC hat
      keinen Gerätespeicher für lose Kopien. */
   let malFo=null,malCtx=null,malDown=null,malSnap=null,malMode='pen',malFarbe='#e5484d',malZug=[];
-  function malStart(fo){
-    if(!_dpFotoId(fo)){say('Erst hochladen – dann malen','error');return;}
+  /* b755: vomOriginal = das unbemalte Original malen statt der vorhandenen Zeichnung.
+     Ohne das malte ein zweiter Durchgang auf die eigenen Pfeile (_dpFotoId nimmt immer
+     editedDriveId zuerst). Gefragt wird in der Fotodokumentation, nicht hier. */
+  function malStart(fo,vomOriginal){
+    const malId=vomOriginal?((fo&&fo.driveId)||_dpFotoId(fo)):_dpFotoId(fo);
+    if(!malId){say('Erst hochladen – dann malen','error');return;}
     malFo=fo;malMode='pen';malFarbe='#e5484d';malZug=[];
     let ov=document.getElementById('dpMalOv');if(ov)ov.remove();
     ov=document.createElement('div');
@@ -45179,8 +45250,10 @@ window.Dachplan=(function(){
     ov.querySelector('#dpMalSave').onclick=malSpeichern;
     const img=ov.querySelector('#dpMalImg');
     (async()=>{
-      const sofort=_dpFotoSofort(fo);
-      let u=sofort||await _fetchDesktopFotoBlob(_dpFotoId(fo));
+      // b755: Beim Neuanfang vom Original NICHT den Sofort-Zwischenspeicher nehmen –
+      // der hält die bemalte Fassung.
+      const sofort=vomOriginal?null:_dpFotoSofort(fo);
+      let u=sofort||await _fetchDesktopFotoBlob(malId);
       if(!u){say('Bild konnte nicht geladen werden','error');ov.remove();return;}
       img.onload=()=>{malLeinwand(ov,img);};
       img.src=u;
@@ -45666,12 +45739,12 @@ window.Dachplan=(function(){
      Fotodokumentation gerade offen ist. Ohne dieses Binden landete die bemalte Fassung
      im Ordner eines FREMDEN Auftrags. Ohne bestimmbaren Zielordner wird gar nicht erst
      angefangen (false), statt irgendwo abzulegen. */
-  function malenFuer(task,fo){
+  function malenFuer(task,fo,vomOriginal){
     if(!task||!fo)return false;
     const u=String((task.gdrive||task.gdriveOrdner)||'');
     if(!/[-\w]{25,}/.test(u))return false;
     t=task; if(task.dachplan)dp=task.dachplan;
-    malStart(fo);
+    malStart(fo,!!vomOriginal);   // b755
     return true;
   }
   return {open,close,openPin,rebind,malenFuer};
@@ -46436,18 +46509,28 @@ async function _fdkGrossAnsicht(key){
    ⛔ Das Fotodoku-Fenster liegt auf z-index 1000002, die Mal-Leiste auf 3200 – der Maler
    wäre dahinter unsichtbar. Es wird deshalb AUSGEBLENDET, nicht geschlossen: Vorrat,
    Reihenfolge im Dokument und alle Einstellungen bleiben in `_fdkState` stehen. */
-function _fdkMalen(key){
+async function _fdkMalen(key){
   const S=_fdkState;if(!S)return;
   const e=S.liste.find(x=>x.key===key);
   if(!e){showToast('Foto nicht mehr in der Liste','error');return;}
   const t=findTaskById(S.taskId);
   if(!t){showToast('Auftrag nicht gefunden','error');return;}
   const ov=document.getElementById('fdkOverlay');
-  if(e.quelle==='leistung'){_fdkMalenLeihweise(e);return;}   // b752
+  /* b752: 🔁 Leistungsfotos gehen den Leihweg – dort entsteht IMMER ein neues Auftragsfoto
+     aus dem Beleg, es kann also gar nicht auf eine Zeichnung gemalt werden. Keine Frage nötig. */
+  if(e.quelle==='leistung'){_fdkMalenLeihweise(e);return;}
+  /* b755: Ist das Foto schon bemalt, erst fragen – sonst malt man auf die eigenen Pfeile
+     und es entsteht eine dritte Datei. */
+  let vomOriginal=false;
+  if(e.fo&&e.fo.editedDriveId){
+    const wahl=await _deskFrageZeichnung();
+    if(wahl==='abbruch')return;
+    vomOriginal=(wahl==='neu');
+  }
   if(e.quelle==='dachplan'){
     if(!(window.Dachplan&&typeof window.Dachplan.malenFuer==='function')){showToast('Dachplan-Maler nicht verfügbar','error');return;}
     if(ov)ov.style.display='none';
-    if(!window.Dachplan.malenFuer(t,e.fo)){
+    if(!window.Dachplan.malenFuer(t,e.fo,vomOriginal)){   // b755
       if(ov)ov.style.display='';   // gar nicht erst angefangen – Fenster sofort zurück
       showToast('Am Auftrag ist kein Drive-Ordner hinterlegt – dort kann nichts abgelegt werden','error');
       return;
@@ -46459,7 +46542,7 @@ function _fdkMalen(key){
     ? taskFotos.findIndex(f=>f&&(f.editedDriveId||f.driveId)===key) : -1;
   if(i<0){showToast('Foto nicht mehr am Auftrag','error');return;}
   if(ov)ov.style.display='none';
-  Promise.resolve(openFotoDesktop(i)).then(function(){
+  Promise.resolve(openFotoDesktop(i,vomOriginal)).then(function(){   // b755
     _fdkWarteAufBild(function(){try{deskStartDraw();}catch(err){console.warn('[FDK] Malen:',err);}});
   });
   _fdkNachDemMalen('previewLightbox',key);
