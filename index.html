@@ -9426,7 +9426,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-22 · #757'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-22-b757) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-22 · #758'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-22-b758) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -27643,7 +27643,7 @@ function _deskSetTool(tool){
      (erst anfassen, dann löschen) nirgends stand. */
   const _c=document.getElementById('desktopDrawCanvas');
   if(_c)_c.style.cursor=(tool==='schieben')?'grab':'crosshair';
-  if(tool==='schieben')showToast('✋ Auf einen Pfeil, Kreis oder Text tippen – dann ziehen oder 🗑 · Doppelklick auf Text = ändern','info',6000);
+  if(tool==='schieben')showToast('✋ Auf einen Pfeil, Kreis oder Text tippen – dann ziehen oder 🗑 · Doppelklick auf Text oder Nummer = ändern','info',6000);
   document.getElementById('deskEraserBtn')?.classList.remove('on');
   document.querySelectorAll('.desk-tool-btn').forEach(b=>b.classList.toggle('on',b.dataset.tool===tool));
 }
@@ -28046,7 +28046,8 @@ function _deskTextFeld(clientX,clientY,rx,ry,bearbeiten){
         _deskRedraw();
       } else if(t){
         const g=_deskDrawGroesse();
-        _deskDrawObjs.push({t:'text',x:rx,y:ry,txt:t,c:_deskDrawFarbe(),s:g/c.width,f:(g*6)/c.width});
+        // b758: Obergrenze – bei Regler 30 füllte die Schrift sonst das halbe Bild.
+        _deskDrawObjs.push({t:'text',x:rx,y:ry,txt:t,c:_deskDrawFarbe(),s:g/c.width,f:Math.min((g*6)/c.width,0.08)});
         _deskRedraw();
       }
       inp.remove();
@@ -28055,6 +28056,59 @@ function _deskTextFeld(clientX,clientY,rx,ry,bearbeiten){
   document.body.appendChild(inp);
   // Beim Ändern den alten Text gleich markieren – Überschreiben ohne Löschen.
   setTimeout(()=>{try{inp.focus();if(bearb!=null)inp.select();}catch(e){}},10);
+}
+/* ══ b758: Was gehört zu Nummer N? ════════════════════════════════════════════════════
+   Franks Vorschlag: „Hier schreib ich ja dann zu Riss oder so – da können wir das in unsere
+   Zeile bei der Fotobeschreibung mit reinbringen." Genau so: die Nummer bleibt klein im
+   Bild, die Erklärung steht unter dem Bild – lesbar, in Word änderbar, und sie verdeckt
+   nichts. Ein Arbeitsgang statt zwei.
+   Leer lassen ist erlaubt: dann nur die Marke, ohne Legendeneintrag. */
+function _deskNummerText(clientX,clientY,idx,nr){
+  _deskTextFeldSchliessen();
+  const o=(_deskDrawObjs||[])[idx];
+  if(!o||o.t!=='nummer')return;
+  const inp=document.createElement('input');
+  inp.id='deskTextInput';inp.type='text';inp.autocomplete='off';
+  inp.value=String(o.txt||'');
+  inp.placeholder='Was ist an Stelle '+nr+'? (Enter · leer = nur die Nummer)';
+  const lx=Math.max(8,Math.min(Math.round(clientX),(window.innerWidth||1200)-300));
+  const ly=Math.max(8,Math.min(Math.round(clientY),(window.innerHeight||800)-60));
+  inp.style.cssText='position:fixed;left:'+lx+'px;top:'+ly+'px;z-index:100060;'
+    +'min-width:260px;padding:6px 9px;border-radius:6px;border:2px solid #6c63ff;background:rgba(255,255,255,.97);'
+    +'color:#111;font-size:14px;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,.55);';
+  inp.onclick=ev=>ev.stopPropagation();
+  inp.onpointerdown=ev=>ev.stopPropagation();
+  inp.onkeydown=function(ev){
+    ev.stopPropagation();   // ⛔ sonst blättert der Lightbox-Handler bei ← / → das Foto weiter
+    if(ev.key==='Enter'){
+      const cur=(_deskDrawObjs||[])[idx];
+      if(cur&&cur.t==='nummer')cur.txt=(inp.value||'').trim();
+      inp.remove();_deskRedraw();
+    } else if(ev.key==='Escape'){inp.remove();}
+  };
+  document.body.appendChild(inp);
+  setTimeout(()=>{try{inp.focus();inp.select();}catch(e){}},10);
+}
+/* Die Legende aus allen Nummern, die einen Text tragen – in Nummernfolge.
+   ⛔ Sie entsteht ERST BEIM SPEICHERN aus dem, was tatsächlich im Bild steht. Wer eine
+   Marke mit 🗑 wegnimmt, verliert damit auch ihren Eintrag – ohne Aufräumen von Hand. */
+function _deskLegende(){
+  return (_deskDrawObjs||[])
+    .filter(o=>o&&o.t==='nummer'&&String(o.txt||'').trim())
+    .slice().sort((a,b)=>(a.n||0)-(b.n||0))
+    .map(o=>(o.n||'?')+' = '+String(o.txt).trim())
+    .join(' · ');
+}
+/* Legende an eine vorhandene Beschreibung ANHÄNGEN (Entscheidung Frank 22.08.).
+   ⛔ Eine früher von PAM gesetzte Legende am Ende wird dabei ersetzt statt verdoppelt –
+   sonst stünde nach dem zweiten Speichern „1 = Riss · 1 = Riss" darunter. Was Frank selbst
+   geschrieben hat, bleibt vorn stehen. */
+function _deskLegendeEinsetzen(alt,neu){
+  const teile=String(alt||'').trim().split(' · ');
+  while(teile.length&&/^\d+\s*=\s*/.test(String(teile[teile.length-1]).trim()))teile.pop();
+  const rest=teile.join(' · ').trim();
+  if(!neu)return rest;
+  return rest?(rest+' · '+neu):neu;
 }
 /* b757: Doppelklick mit ✋ auf einen Text öffnet ihn wieder zum Ändern.
    ⛔ Nur bei ✋ – beim Malen wäre ein Doppelklick ein zweiter Zug, kein Bearbeiten. */
@@ -28065,11 +28119,13 @@ function _deskOnDblClick(e){
   if(i<0)return;
   const o=(_deskDrawObjs||[])[i];
   if(!o)return;
-  if(o.t!=='text'){showToast('Nur Text lässt sich ändern – Striche und Pfeile neu malen','info');return;}
+  if(o.t!=='text'&&o.t!=='nummer'){showToast('Nur Text und Nummern lassen sich ändern – Striche und Pfeile neu malen','info');return;}
   e.preventDefault();
   _deskDrawWahl=i;_deskSchiebeVon=null;_deskDrawPointer=null;
   _deskRedraw();
-  _deskTextFeld(e.clientX,e.clientY,o.x,o.y,i);
+  // b758: An einer Nummer wird der Legendentext geändert, nicht die Ziffer.
+  if(o.t==='nummer')_deskNummerText(e.clientX,e.clientY,i,o.n);
+  else _deskTextFeld(e.clientX,e.clientY,o.x,o.y,i);
 }
 /* b755: Der Weg über den Knopf „✏️ Malen" in der Großansicht. Ist das Foto schon bemalt,
    wird erst gefragt – sonst malt man unbemerkt auf die eigenen Pfeile.
@@ -28145,8 +28201,17 @@ function _deskOnDown(e){
   // b750: Text und Nummer werden GESETZT, nicht gezogen – kein Zug, kein Zeiger-Fang.
   if(!_deskDrawErasing&&_deskDrawTool==='text'){_deskTextFeld(e.clientX,e.clientY,rx,ry);return;}
   if(!_deskDrawErasing&&_deskDrawTool==='nummer'){
-    _deskDrawObjs.push({t:'nummer',x:rx,y:ry,n:_deskNaechsteNr(),c:farbe,s:g/c.width,f:(g*6)/c.width});
-    _deskRedraw();return;
+    /* b758: Die Marke bekommt eine FESTE Größe (gut 4 % der Bildbreite) statt der an den
+       Stärke-Regler gekoppelten. Vorher wuchs sie mit: bei Regler 30 war die Ziffer 180 px
+       groß und der Kreis füllte das halbe Foto (Befund Frank 22.08. mit Bildschirmfoto).
+       ⛔ Strichstärke und Schriftgröße sind zwei Dinge – man will einen dicken Pfeil UND
+       eine normale Nummer. */
+    const nr=_deskNaechsteNr();
+    _deskDrawObjs.push({t:'nummer',x:rx,y:ry,n:nr,c:farbe,s:g/c.width,f:0.042,txt:''});
+    _deskRedraw();
+    // b758: gleich fragen, was an dieser Stelle ist – daraus entsteht die Legende unter dem Bild.
+    _deskNummerText(e.clientX,e.clientY,_deskDrawObjs.length-1,nr);
+    return;
   }
   /* b754: abgesichert. Gemessen: setPointerCapture wirft in manchen Lagen NotFoundError
      („No active pointer with the given id"). Ungeschützt bricht das Aufsetzen dann
@@ -28292,10 +28357,12 @@ async function deskSaveDraw(){
   if(!r.ok){showToast('Fehler beim Speichern ('+r.status+')','error');deskDiscardDraw();return;}
   const meta=await r.json().catch(()=>null);
   showToast('✓ Zeichnung in Drive gespeichert','success');
+  /* b758: Die Legende JETZT lesen – `deskDiscardDraw()` am Ende leert die Zugliste. */
+  const legende=_deskLegende();
   if(meta&&meta.id&&ziel){
     // b752: Leihbetrieb – wohin die bemalte Fassung gehört, weiß nur der Aufrufer.
     try{_desktopFotoBlobCache.set(meta.id,URL.createObjectURL(blob));}catch(e){}
-    try{ziel.fertig(meta,blob);}catch(e){console.warn('[Malen] Ziel:',e);showToast('Gespeichert, aber nicht eingehängt','warning');}
+    try{ziel.fertig(meta,blob,legende);}catch(e){console.warn('[Malen] Ziel:',e);showToast('Gespeichert, aber nicht eingehängt','warning');}
   } else if(meta&&meta.id){
     if(!taskFotos)taskFotos=[];
     const blobUrl=URL.createObjectURL(blob);
@@ -28305,6 +28372,8 @@ async function deskSaveDraw(){
     if(origFoto){
       origFoto.editedDriveId=meta.id;
       origFoto.editedName=meta.name||copyName;
+      // b758: „1 = Riss · 2 = Naht offen" hinter die vorhandene Beschreibung.
+      if(legende)origFoto.caption=_deskLegendeEinsetzen(origFoto.caption,legende);
     } else {
       // Fallback: Foto existiert nicht mehr (z.B. zwischenzeitlich gelöscht)
       console.warn('[PTP] deskSaveDraw: origFoto nicht mehr gefunden bei Index',savedIdx);
@@ -45858,11 +45927,13 @@ window.Dachplan=(function(){
       // Beim Neuanfang NICHT den Sofort-Zwischenspeicher nehmen – der hält die bemalte Fassung.
       sofortUrl:vomOriginal?null:_dpFotoSofort(fo),
       vorbereiten:function(){try{E.photo.classList.add('dp-hidden');}catch(_){}} ,
-      fertig:function(meta){
+      fertig:function(meta,blob,legende){
         if(!meta||!meta.id)return;
         /* ⛔ v217-Lehre: Kennung + Speichern SOFORT, alles Weitere ist Kür. */
         fo.editedDriveId=meta.id;
         fo.editedName='dachplan_pin_bearbeitet.jpg';
+        // b758: Nummern-Legende an den Text des Pin-Fotos anhängen (📝 Text).
+        if(legende&&typeof _deskLegendeEinsetzen==='function')fo.caption=_deskLegendeEinsetzen(fo.caption,legende);
         save();
         try{const p=cur();if(p)drawThumbs(p);}catch(_){}
         try{showPhoto(fo);}catch(_){}
@@ -46792,18 +46863,20 @@ async function _fdkMalenLeihweise(e){
     name:(e.name||'Leistungsfoto')+'_zeichnung.jpg',
     ordnerId:_getDriveFotoFolderId(),
     vorbereiten:function(){if(fdkOv)fdkOv.style.display='none';},
-    fertig:function(meta){_fdkLeihErgebnis(e,meta);},
+    fertig:function(meta,blob,legende){_fdkLeihErgebnis(e,meta,legende);},   // b758
     schliessen:zurueck
   });
 }
 /* Die bemalte Fassung als eigenes Auftragsfoto einhängen – mit Herkunft, ohne Turnus-Eingriff. */
-function _fdkLeihErgebnis(e,meta){
+function _fdkLeihErgebnis(e,meta,legende){
   if(!meta||!meta.id)return;
   const datum=e.lDatum?_fdkDatum(e.lDatum):'';
+  const grund=((e.lName||'Leistung')+(datum?(' · '+datum):'')+' (bearbeitet)');
   taskFotos.push({
     driveId:meta.id,
     name:meta.name||((e.name||'Foto')+'_zeichnung.jpg'),
-    caption:((e.lName||'Leistung')+(datum?(' · '+datum):'')+' (bearbeitet)'),
+    // b758: Herkunftszeile, dahinter die Nummern-Legende.
+    caption:(legende?_deskLegendeEinsetzen(grund,legende):grund),
     ts:e.ts||'',
     mimeType:'image/jpeg',
     // Herkunft, maschinenlesbar – aber ausdrücklich KEIN tuLeistung (siehe oben).
