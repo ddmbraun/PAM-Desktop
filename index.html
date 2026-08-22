@@ -9412,7 +9412,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-22 · #755'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-22-b755) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-22 · #756'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-22-b756) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -27624,6 +27624,12 @@ function _deskSetTool(tool){
   _deskTextFeldSchliessen();
   // b754: Wer ein Malwerkzeug wählt, will nichts mehr verschieben – Markierung weg.
   if(tool!=='schieben'&&_deskDrawWahl>=0){_deskDrawWahl=-1;_deskSchiebeVon=null;_deskRedraw();}
+  /* b756: Der Zeiger zeigt, was das Werkzeug tut – und beim ✋ steht einmal dabei, wie es
+     geht. Ohne diesen Satz hielt Frank den 🗑-Knopf für kaputt, weil der zweistufige Weg
+     (erst anfassen, dann löschen) nirgends stand. */
+  const _c=document.getElementById('desktopDrawCanvas');
+  if(_c)_c.style.cursor=(tool==='schieben')?'grab':'crosshair';
+  if(tool==='schieben')showToast('✋ Auf einen Pfeil, Kreis oder Text tippen – dann ziehen oder 🗑','info',5000);
   document.getElementById('deskEraserBtn')?.classList.remove('on');
   document.querySelectorAll('.desk-tool-btn').forEach(b=>b.classList.toggle('on',b.dataset.tool===tool));
 }
@@ -27825,7 +27831,10 @@ function _deskAbstandStrecke(px,py,x0,y0,x1,y1){
    beanspruchen und man käme an die Züge darin nicht mehr heran. */
 function _deskObjTreffer(o,px,py,W,H){
   if(!o)return false;
-  const tol=Math.max(9,(o.s||0.004)*W*2.5);
+  /* b756: 9 px waren zu eng – bei einem dünnen Pfeil musste man fast genau auf die Linie
+     treffen. Frank kam beim ersten Versuch nicht an seinen Zug heran. 16 px sind etwa eine
+     Fingerbreite und immer noch genau genug, um zwei Striche nebeneinander zu unterscheiden. */
+  const tol=Math.max(16,(o.s||0.004)*W*2.5);
   if(o.t==='text'){
     const f=Math.max(8,(o.f||0.024)*W);
     if(!_deskDrawCtx)return false;
@@ -27903,7 +27912,13 @@ function _deskWahlRahmen(ctx,W,H){
   ctx.restore();
 }
 function deskLoescheWahl(){
-  if(_deskDrawWahl<0||!(_deskDrawObjs||[])[_deskDrawWahl]){showToast('Erst einen Strich oder Text anklicken','info');return;}
+  /* b756: Die Meldung nennt jetzt den WEG. Vorher stand hier „Erst einen Strich oder Text
+     anklicken" – Frank drückte 🗑 ohne vorher ✋ zu wählen und hielt den Knopf für kaputt.
+     Eine Meldung, die nur sagt was fehlt, hilft nicht; sie muss sagen, was zu tun ist. */
+  if(_deskDrawWahl<0||!(_deskDrawObjs||[])[_deskDrawWahl]){
+    showToast('So geht es: erst ✋ anklicken, dann auf den Pfeil oder Text tippen – dann 🗑','info',6000);
+    return;
+  }
   _deskDrawObjs.splice(_deskDrawWahl,1);
   _deskDrawWahl=-1;
   _deskRedraw();
@@ -28059,6 +28074,10 @@ function _deskOnDown(e){
       try{c.setPointerCapture(e.pointerId);}catch(err){}
       _deskDrawPointer={x:e.offsetX,y:e.offsetY};
       _deskSchiebeVon={x:rx,y:ry};
+      c.style.cursor='grabbing';
+    }else if((_deskDrawObjs||[]).length){
+      // b756: ins Leere gefasst – sagen statt schweigen. Schweigen liest sich wie „kaputt".
+      showToast('Nichts getroffen – näher an den Strich oder auf den Text tippen','info');
     }
     _deskRedraw();
     return;
@@ -28123,6 +28142,7 @@ function _deskOnUp(e){
   const c=document.getElementById('desktopDrawCanvas');
   if(_deskDrawTool==='schieben'){        // b754: Auswahl bleibt bestehen, nur das Ziehen endet
     _deskSchiebeVon=null;_deskDrawPointer=null;
+    if(c)c.style.cursor='grab';          // b756
     return;
   }
   if(_deskDrawStart&&c&&e&&_deskDrawTool!=='freihand'&&!_deskDrawErasing){
@@ -44996,7 +45016,18 @@ window.Dachplan=(function(){
       dp.pins=dp.pins.filter(x=>x.id!==p.id);sel=null;closeSheet();renderPins();save();};
     q('#dpPhotoX').onclick=()=>E.photo.classList.add('dp-hidden');
     q('#dpPhotoText').onclick=()=>{if(window._dpPhotoFo)dpFotoText(window._dpPhotoFo);}; // b482
-    q('#dpPhotoMal').onclick=()=>{if(window._dpPhotoFo)malStart(window._dpPhotoFo);}; // b733
+    /* b756: derselbe große Maler wie bei Auftragsfotos (T, ①, ✋, 🗑). Ist das Pin-Foto
+       schon bemalt, wird vorher gefragt – sonst malt man auf die eigenen Pfeile (b755). */
+    q('#dpPhotoMal').onclick=async()=>{
+      const fo=window._dpPhotoFo;if(!fo)return;
+      let vomOriginal=false;
+      if(fo.editedDriveId&&typeof _deskFrageZeichnung==='function'){
+        const wahl=await _deskFrageZeichnung();
+        if(wahl==='abbruch')return;
+        vomOriginal=(wahl==='neu');
+      }
+      if(!malenGross(fo,vomOriginal))say('Am Auftrag ist kein Drive-Ordner hinterlegt','error');
+    };
     q('#dpPhotoSend').onclick=function(){ // b733: b653-Weg – Verweis mit bemalt-Vorrang, Pin-Foto bleibt unangetastet
       const fo=window._dpPhotoFo;if(!fo)return;
       if(typeof _fsMenueAuf==='function')_fsMenueAuf({driveId:(fo.editedDriveId||fo.driveId),caption:fo.caption||''},this);
@@ -45217,9 +45248,17 @@ window.Dachplan=(function(){
      (v217-Lehre). Scheitert der Upload, wird NICHTS am Foto geändert – der PC hat
      keinen Gerätespeicher für lose Kopien. */
   let malFo=null,malCtx=null,malDown=null,malSnap=null,malMode='pen',malFarbe='#e5484d',malZug=[];
-  /* b755: vomOriginal = das unbemalte Original malen statt der vorhandenen Zeichnung.
-     Ohne das malte ein zweiter Durchgang auf die eigenen Pfeile (_dpFotoId nimmt immer
-     editedDriveId zuerst). Gefragt wird in der Fotodokumentation, nicht hier. */
+  /* ⚠⚠ b756: DIESER MALER WIRD NICHT MEHR GERUFEN. Beide Einstiege (Fotodokumentation und
+     der ✏️-Knopf im Pin-Vollbild) gehen seit b756 über `malenGross` → `deskMalenAmFoto`,
+     also über denselben großen Maler wie bei Auftragsfotos (T, ①, ✋, 🗑, freie Farbe,
+     Strichstärke). Grund: Hier gab es nur Stift/Pfeil/Rechteck/Kreis/Radierer und vier
+     feste Farben – ausgerechnet am Dach fehlte das T zum Beschriften.
+     ⛔ Der Block steht noch, weil Aufräumen ein eigener Schritt ist und nicht nebenbei in
+     einem Umbau passieren soll. Wer hier etwas ändert, ändert etwas Totes – der lebende
+     Weg heißt `malenGross`. Vor dem Entfernen nachsehen, ob der Name wirklich nirgends
+     mehr aufgerufen wird, und `test_b733.js` mit anpassen.
+
+     (b755: vomOriginal = das unbemalte Original statt der vorhandenen Zeichnung.) */
   function malStart(fo,vomOriginal){
     const malId=vomOriginal?((fo&&fo.driveId)||_dpFotoId(fo)):_dpFotoId(fo);
     if(!malId){say('Erst hochladen – dann malen','error');return;}
@@ -45739,13 +45778,45 @@ window.Dachplan=(function(){
      Fotodokumentation gerade offen ist. Ohne dieses Binden landete die bemalte Fassung
      im Ordner eines FREMDEN Auftrags. Ohne bestimmbaren Zielordner wird gar nicht erst
      angefangen (false), statt irgendwo abzulegen. */
+  /* ══ b756: Pin-Fotos bekommen denselben großen Maler wie Auftragsfotos ═══════════════
+     Bis b755 öffnete hier `malStart` – der ältere Dachplan-Maler mit Stift, Pfeil,
+     Rechteck, Kreis, Radierer und vier festen Farben. Ausgerechnet am Dach fehlten damit
+     T (Text) und ① (Nummer), also genau das, womit man Schadstellen beschriftet.
+     Jetzt läuft `deskMalenAmFoto` – ein Maler für alle Fotoarten.
+     ⛔ Gespeichert wird weiterhin AM PIN: `fo.editedDriveId` + `save()`. Der Ordner kommt
+     aus `dpFolder()`, also aus dem hier gebundenen Auftrag (b751-Lehre: der Modul-Zustand
+     kann sonst auf einem fremden Auftrag stehen). */
+  function malenGross(fo,vomOriginal){
+    if(!fo)return false;
+    const bildId=vomOriginal?((fo.driveId)||_dpFotoId(fo)):_dpFotoId(fo);
+    const ordner=dpFolder();
+    if(!bildId||!ordner)return false;
+    deskMalenAmFoto({
+      bildId:bildId,
+      name:'dachplan_pin_bearbeitet.jpg',
+      ordnerId:ordner,
+      // Beim Neuanfang NICHT den Sofort-Zwischenspeicher nehmen – der hält die bemalte Fassung.
+      sofortUrl:vomOriginal?null:_dpFotoSofort(fo),
+      vorbereiten:function(){try{E.photo.classList.add('dp-hidden');}catch(_){}} ,
+      fertig:function(meta){
+        if(!meta||!meta.id)return;
+        /* ⛔ v217-Lehre: Kennung + Speichern SOFORT, alles Weitere ist Kür. */
+        fo.editedDriveId=meta.id;
+        fo.editedName='dachplan_pin_bearbeitet.jpg';
+        save();
+        try{const p=cur();if(p)drawThumbs(p);}catch(_){}
+        try{showPhoto(fo);}catch(_){}
+        say('✓ Bemalte Fassung gespeichert – Original bleibt erhalten');
+      }
+    });
+    return true;
+  }
   function malenFuer(task,fo,vomOriginal){
     if(!task||!fo)return false;
     const u=String((task.gdrive||task.gdriveOrdner)||'');
     if(!/[-\w]{25,}/.test(u))return false;
     t=task; if(task.dachplan)dp=task.dachplan;
-    malStart(fo,!!vomOriginal);   // b755
-    return true;
+    return malenGross(fo,!!vomOriginal);   // b756: derselbe Maler wie überall
   }
   return {open,close,openPin,rebind,malenFuer};
 })();
@@ -46607,39 +46678,63 @@ function _fdkZurueckAusMalen(altKey){
    passieren. Will Frank es doch beim Nachweis haben, ordnet er es am Handy von Hand zu –
    dieser Weg ist umkehrbar, der selbsttätige wäre es kaum (eine entfernte Zuordnung holt
    die Reparaturroutine zurück, solange der Datei-Verweis steht). */
-async function _fdkMalenLeihweise(e){
-  const S=_fdkState;if(!S||!e)return;
-  if(typeof taskFotos==='undefined'||!Array.isArray(taskFotos)){showToast('Fotoliste nicht bereit','error');return;}
-  if(!_getDriveFotoFolderId()){showToast('Kein Drive-Ordner am Auftrag – dort kann nichts abgelegt werden','error');return;}
+/* ══ b756: DER EINE Weg, den großen Maler an einem beliebigen Foto zu benutzen ═════════
+   Vorher gab es zwei Maler: den großen (T, ①, ✋, 🗑, freie Farbe, Strichstärke) und den
+   älteren Dachplan-Maler (nur Stift/Pfeil/Rechteck/Kreis/Radierer, vier feste Farben).
+   Befund Frank 22.08.2026 am Bildschirm: „Warum kann ich bei Pin-Bildern nur das bearbeiten
+   und nicht wie bei Auftragsfotos?" – ausgerechnet am Dach fehlte das T zum Beschriften.
+   Seit b756 öffnet überall derselbe Maler. Wohin das Ergebnis gehört, weiß nur der
+   Aufrufer und sagt es in `fertig`.
+   opt = {bildId, name, ordnerId, fertig(meta,blob), vorbereiten?, schliessen?, sofortUrl?}
+   ⛔ z-index 3000: UNTER Zeichenfläche (3100) und Werkzeugleiste (3200) – sonst läge das
+   Bild über dem, worauf man malt. */
+async function deskMalenAmFoto(opt){
+  if(!opt||!opt.bildId){showToast('Kein Bild zum Bearbeiten','error');return false;}
+  if(!opt.ordnerId){showToast('Kein Drive-Ordner am Auftrag – dort kann nichts abgelegt werden','error');return false;}
   showToast('Bild wird geladen…','info');
-  const url=await _fetchDesktopFotoBlob(e.driveId);
-  if(!url){showToast('Bild konnte nicht geladen werden','error');return;}
-  const alt=document.getElementById('fdkMalOv');if(alt)alt.remove();
+  const url=opt.sofortUrl||await _fetchDesktopFotoBlob(opt.bildId);
+  if(!url){showToast('Bild konnte nicht geladen werden','error');return false;}
+  const alt=document.getElementById('deskMalOv');if(alt)alt.remove();
   const buehne=document.createElement('div');
-  buehne.id='fdkMalOv';
-  /* z-index 3000: UNTER der Zeichenfläche (3100) und der Werkzeugleiste (3200) – sonst
-     läge das Bild über dem, worauf man malt. */
+  buehne.id='deskMalOv';
   buehne.style.cssText='position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,.94);display:flex;align-items:center;justify-content:center;padding:74px 16px 16px;';
   const img=document.createElement('img');
-  img.id='fdkMalImg';img.alt='';img.style.cssText='max-width:100%;max-height:100%;display:block;';
+  img.id='deskMalImg';img.alt='';img.style.cssText='max-width:100%;max-height:100%;display:block;';
   buehne.appendChild(img);
   buehne.onclick=ev=>ev.stopPropagation();
   document.body.appendChild(buehne);
-  const fdkOv=document.getElementById('fdkOverlay');
-  const zurueck=function(){const o=document.getElementById('fdkOverlay');if(o)o.style.display='';};
-  img.onerror=function(){buehne.remove();zurueck();showToast('Bild konnte nicht angezeigt werden','error');};
+  const aufraeumen=function(){
+    const b=document.getElementById('deskMalOv');if(b)b.remove();
+    if(typeof opt.schliessen==='function'){try{opt.schliessen();}catch(e){console.warn('[Malen] schliessen:',e);}}
+  };
+  img.onerror=function(){aufraeumen();showToast('Bild konnte nicht angezeigt werden','error');};
   img.onload=function(){
-    if(fdkOv)fdkOv.style.display='none';
+    if(typeof opt.vorbereiten==='function'){try{opt.vorbereiten();}catch(e){}}
     _deskDrawZiel={
-      img:img,
-      name:(e.name||'Leistungsfoto')+'_zeichnung.jpg',
-      ordnerId:_getDriveFotoFolderId(),
-      fertig:function(meta){_fdkLeihErgebnis(e,meta);},
-      schliessen:function(){const b=document.getElementById('fdkMalOv');if(b)b.remove();zurueck();}
+      img:img,name:opt.name||'foto.jpg',ordnerId:opt.ordnerId,
+      fertig:function(meta,blob){try{opt.fertig(meta,blob);}catch(e){console.warn('[Malen] Ablage:',e);showToast('Gespeichert, aber nicht eingehängt','warning');}},
+      schliessen:aufraeumen
     };
-    deskStartDraw(img);
+    deskStartDraw(img);   // erst wenn das Bild steht – sonst stimmt die Zeichenfläche nicht
   };
   img.src=url;
+  return true;
+}
+/* 🔁 Leistungsfoto: gemalt wird auf dem Beleg, abgelegt wird ein NEUES Auftragsfoto
+   (b752, Entscheidung Frank – der Wartungsnachweis bleibt unberührt). */
+async function _fdkMalenLeihweise(e){
+  const S=_fdkState;if(!S||!e)return;
+  if(typeof taskFotos==='undefined'||!Array.isArray(taskFotos)){showToast('Fotoliste nicht bereit','error');return;}
+  const fdkOv=document.getElementById('fdkOverlay');
+  const zurueck=function(){const o=document.getElementById('fdkOverlay');if(o)o.style.display='';};
+  await deskMalenAmFoto({
+    bildId:e.driveId,
+    name:(e.name||'Leistungsfoto')+'_zeichnung.jpg',
+    ordnerId:_getDriveFotoFolderId(),
+    vorbereiten:function(){if(fdkOv)fdkOv.style.display='none';},
+    fertig:function(meta){_fdkLeihErgebnis(e,meta);},
+    schliessen:zurueck
+  });
 }
 /* Die bemalte Fassung als eigenes Auftragsfoto einhängen – mit Herkunft, ohne Turnus-Eingriff. */
 function _fdkLeihErgebnis(e,meta){
