@@ -9451,7 +9451,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-23 · #765'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-23-b764) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-23 · #766'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-23-b766) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -21684,6 +21684,21 @@ function archiveTask(taskId,evt){
       task._archivProjekt=bk;
       archivedTasks.push(task);
       _pamMarkTaskDeleted(taskId); // #487: verhindert, dass der Task beim 30-Sek-Cloud-Sync aus der Remote-Basis zurück ins Board kommt (sonst Dublette Archiv+Board)
+      // b766: Fenster mitschließen, wenn genau DIESE Karte darin offen steht. Der Knopf
+      // „📦 Archivieren" sitzt im Fußteil des Task-Fensters – bisher blieb die Maske auf
+      // einer Karte stehen, die es im Board nicht mehr gibt. Der nächste Auto-Save (1 s)
+      // bzw. das Schließen schrieb sie als zweite, abgespeckte Karte zurück; genau so
+      // entstand die Dublette vom 23.08. b764 fängt das inzwischen ab (Änderung geht ins
+      // Archiv), b766 lässt die Lage gar nicht erst entstehen.
+      // ⛔ _taskModalDirty ZUERST zurücksetzen: closeModal() speichert nur, wenn es
+      // gesetzt ist – dasselbe Muster benutzt deleteTask. Den laufenden Auto-Save-Timer
+      // stoppt closeModal() selbst in seiner ersten Zeile.
+      // ⛔ Nur bei Übereinstimmung der Nummer: archiveTask wird auch von der
+      // „Später bearbeiten"-Karte aus gerufen, wo gar kein Fenster offen steht.
+      try{
+        const _offen=(document.getElementById('taskId')||{}).value;
+        if(_offen&&_offen===taskId&&typeof closeModal==='function'){_taskModalDirty=false;closeModal();}
+      }catch(e){console.warn('[b766] Task-Fenster schließen:',e);}
       render();autoSave();
       showToast('📦 Task archiviert','success',2500);
       return;
@@ -21695,6 +21710,29 @@ function restoreTask(taskId,evt){
   if(evt)evt.stopPropagation();
   const idx=archivedTasks.findIndex(t=>t.id===taskId);
   if(idx<0)return;
+  // b766: Liegt schon eine Karte mit dieser Nummer in einem Projekt? Dann NICHT ein
+  // zweites Mal anhängen – genau so entstünden zwei Karten mit derselben Nummer, und
+  // „Löschen" träfe danach BEIDE auf einmal (deleteTask filtert nach id).
+  // ⛔ Der Archiv-Eintrag wird NICHT stillschweigend verworfen. Er kann der reichere
+  // Stand sein: beim Befund vom 23.08. lag im Board die abgespeckte Kopie (ohne
+  // dachplan/GPS), der vollständige Stand im Archiv. Deshalb wird gefragt, und
+  // „Abbrechen" lässt beide Seiten unangetastet.
+  let _schonIn='';
+  for(const bk of Object.keys(boards)){
+    if((boards[bk]||[]).some(t=>t&&t.id===taskId)){_schonIn=bk;break;}
+  }
+  if(_schonIn){
+    if(!confirm('Im Projekt „'+_schonIn+'" liegt bereits eine Karte mit dieser Nummer.\n\n'
+      +'Sie wird NICHT ein zweites Mal angelegt – zwei Karten mit derselben Nummer\n'
+      +'lassen sich später nicht mehr einzeln löschen.\n\n'
+      +'OK = Archiv-Eintrag entfernen, die Karte im Projekt bleibt unverändert\n'
+      +'Abbrechen = nichts ändern (erst vergleichen, welcher Stand vollständiger ist)'))return;
+    archivedTasks.splice(idx,1);
+    _pamUnmarkTaskDeleted(taskId);
+    render();autoSave();
+    showToast('↩ Archiv-Eintrag entfernt – die Karte in „'+_schonIn+'" blieb unverändert','success',6000);
+    return;
+  }
   const[task]=archivedTasks.splice(idx,1);
   let target=task._archivProjekt;
   let movedNotice='';
