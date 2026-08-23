@@ -9451,7 +9451,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-23 · #771'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-23-b771) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-23 · #772'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-23-b772) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -14208,19 +14208,37 @@ function _fotoKennung(f){return (f&&(f.id||f.driveId||f.path||f.name))||'';}
 // Befund Frank 23.08.2026: Vier Handy-Fotos verschwanden aus dem Auftrag, während sie in
 // Drive vollständig lagen. Block 2 (Task nicht im offenen Fenster) kannte bis hier nur
 // `dachplan` als Ausnahme – für `fotos` gewann die lokale Fassung vollständig.
-function _mergeFotosGerichtet(remoteList,localList,snapList){
+function _mergeListeGerichtet(remoteList,localList,snapList,kennung){
   const rem=Array.isArray(remoteList)?remoteList:[];
   const loc=Array.isArray(localList)?localList:[];
-  const imSchnappschuss=new Set((Array.isArray(snapList)?snapList:[]).map(_fotoKennung).filter(Boolean));
-  const schonDa=new Set(loc.map(_fotoKennung).filter(Boolean));
+  const imSchnappschuss=new Set((Array.isArray(snapList)?snapList:[]).map(kennung).filter(Boolean));
+  const schonDa=new Set(loc.map(kennung).filter(Boolean));
   const out=loc.slice();
-  for(const f of rem){
-    const k=_fotoKennung(f);
+  for(const x of rem){
+    const k=kennung(x);
     if(!k||schonDa.has(k)||imSchnappschuss.has(k))continue;
-    schonDa.add(k);out.push(f);
+    schonDa.add(k);out.push(x);
   }
   return out;
 }
+function _mergeFotosGerichtet(remoteList,localList,snapList){
+  return _mergeListeGerichtet(remoteList,localList,snapList,_fotoKennung);
+}
+// b772: dieselbe Absicherung für die übrigen Listen in Block 2 (Auftrag Frank 23.08.).
+// ⛔ Die Kennung muss STABIL sein – sie darf sich nicht ändern, wenn man den Eintrag
+// bearbeitet. Die Kennungen aus Block 1 taugen dafür NICHT: dort steckt bei der
+// Checkliste der Haken und beim Kontakt die Telefonnummer mit drin. Wer am Handy einen
+// Haken setzt, erzeugte damit eine zweite Kennung – und der Eintrag käme ein zweites
+// Mal in die Liste, statt erkannt zu werden.
+// An den echten Daten gemessen (112 Aufträge, 23.08.2026): attachments 118 Einträge,
+// checkliste 23, kontakte 84 – KEINER davon hat ein id-Feld; nur pruefberichte (1) hat es.
+// Deshalb je Liste ein eigener, unveränderlicher Anker.
+const _LISTEN_KENNUNG={
+  attachments:  f=>(f&&(f.fileId||f.url||((f.name||'')+'|'+(f.size||0))))||'',
+  pruefberichte:b=>(b&&(b.id||((b.titel||'')+'|'+(b.datum||''))))||'',
+  checkliste:   c=>(c&&(c.id||(c.text||'')))||'',
+  kontakte:     k=>(k&&(k.id||((k.rolle||'')+'|'+(k.name||''))))||''
+};
 /* b722: Dachplan bei Schreib-Konflikten ZUSAMMENFÜHREN statt eine Seite komplett
    gewinnen zu lassen. Bis b721 stand `dachplan` auf keiner Merge-Liste – hatte der
    Desktop den Dachplan seit dem Öffnen angefasst, gewann seine Fassung vollständig
@@ -14537,6 +14555,12 @@ async function gdriveSaveData() {
                         // Handy-Fotos weg, sobald am PC an der Liste etwas anders war.
                         // Gerichtet statt vereinigt: Gelöschtes kommt trotzdem nicht zurück.
                         else if(f==='fotos'){mt.fotos=_mergeFotosGerichtet(rt.fotos,lt.fotos,_snapObj.fotos);}
+                        // b772: dieselbe Regel für die vier übrigen Listen desselben Baus.
+                        // Array-Prüfung ist Absicht: ein Feld, das lokal (noch) keine Liste
+                        // ist, darf hier nicht stillschweigend zu einer gemacht werden.
+                        else if(_LISTEN_KENNUNG[f]&&Array.isArray(lt[f])){
+                          mt[f]=_mergeListeGerichtet(rt[f],lt[f],_snapObj[f],_LISTEN_KENNUNG[f]);
+                        }
                         else mt[f]=lt[f];
                       }
                     }
@@ -21447,13 +21471,15 @@ function _akteNachtragenFuellen(text){
 
   // Kontakte hinzufügen (nur wenn noch nicht vorhanden)
   try{
-    if(agName||agTel||agEmail){addKontaktPTP('ag',agName||hv,agTel||'',agEmail||'');filled.push('AG-Kontakt');}
+    // b772: nur anlegen, was der Task noch nicht kennt – sonst wächst die Liste bei jedem
+    // Klick auf „📂 Akte" weiter (Befund Frank 23.08.2026: aus 3 Kontakten wurden 5).
+    if((agName||agTel||agEmail)&&!_kontaktSchonDa(agName||hv,agTel,agEmail)){addKontaktPTP('ag',agName||hv,agTel||'',agEmail||'');filled.push('AG-Kontakt');}
   }catch(e){}
   try{
-    if(mieter||mieterTel||mieterEmail){addKontaktPTP('mieter',mieter,mieterTel||'',mieterEmail||'');filled.push('Mieter-Kontakt');}
+    if((mieter||mieterTel||mieterEmail)&&!_kontaktSchonDa(mieter,mieterTel,mieterEmail)){addKontaktPTP('mieter',mieter,mieterTel||'',mieterEmail||'');filled.push('Mieter-Kontakt');}
   }catch(e){}
   try{
-    if(eig||eigTel||eigEmail){addKontaktPTP('eigentuemer',eig,eigTel||'',eigEmail||'');filled.push('Eigentümer-Kontakt');}
+    if((eig||eigTel||eigEmail)&&!_kontaktSchonDa(eig,eigTel,eigEmail)){addKontaktPTP('eigentuemer',eig,eigTel||'',eigEmail||'');filled.push('Eigentümer-Kontakt');}
   }catch(e){}
 
   try{scheduleTaskFieldSave();}catch(e){}
@@ -35629,6 +35655,28 @@ function renderKontaktePTP(kontakte){
   // beim Öffnen eines Tasks, BEVOR tGmAkte gefüllt ist – die Anzeige las dadurch die
   // Aktennummer des zuvor geöffneten Tasks. Der Aufruf sitzt jetzt in
   // openEditTaskModal direkt hinter der Zuweisung des Feldes.
+}
+// b772: Kennt der offene Task diesen Kontakt schon? Befund Frank 23.08.2026: „📂 Akte"
+// hängte die Kontakte aus der Akte ungeprüft an – aus 3 Ansprechpartnern wurden 5, darunter
+// eine Zeile für Zeile gleiche Dublette. Zweimal geklickt hieß vier Einträge zu viel.
+// ⛔ Bewusst OHNE die Rolle verglichen: In Franks Fall lag dieselbe Person einmal als
+// „hausverwaltung" und einmal als „ag" vor – für ihn zwei Karteileichen derselben Frau.
+// Telefonnummern werden auf Ziffern reduziert – sonst gilt dieselbe Nummer einmal mit
+// und einmal ohne Bindestrich als zwei verschiedene.
+function _kontaktSchonDa(name,tel,email){
+  const norm=s=>String(s||'').trim().toLowerCase();
+  const nr=s=>norm(s).replace(/[^0-9+]/g,'');
+  const n=norm(name),t=nr(tel),e=norm(email);
+  if(!n&&!t&&!e)return true;      // nichts Verwertbares – dann auch nichts anlegen
+  let vorhanden=[];
+  try{vorhanden=(typeof getKontaktePTP==='function')?getKontaktePTP():[];}catch(err){return false;}
+  return vorhanden.some(k=>{
+    if(n&&norm(k.name)===n)return true;
+    if(t&&nr(k.tel)===t)return true;
+    if(t&&nr(k.tel2)===t)return true;
+    if(e&&norm(k.email)===e)return true;
+    return false;
+  });
 }
 function getKontaktePTP(){
   const c=document.getElementById('tKontakteContainer');if(!c)return[];
