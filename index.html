@@ -9451,7 +9451,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-23 · #769'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-23-b769) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-23 · #770'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-23-b770) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -14198,6 +14198,14 @@ function _dachplanKonfliktMerge(remoteDp,localDp){
      Gerät getroffene Wahl käme nie an, genau wie die Ansicht bis b740. */
   {const _rt=remoteDp.layerTs||'',_lt=localDp.layerTs||'';
    if(_rt>_lt){m.layer=remoteDp.layer;m.layerTs=_rt;}}
+  // b770: dasselbe für die gespeicherte Übersicht. Es wird an mehreren Rechnern
+  // gearbeitet – die zuletzt gespeicherte ist die richtige, nicht die zuletzt
+  // eingetroffene. Das Handy kennt das Feld nicht und reicht es unverändert durch.
+  // ⛔ Zwei Schrägstriche statt eines Blockkommentars: ein neues Kommentarende in
+  // index.html verschiebt die Grenze des Phantom-Blocks aus b764 und trifft damit
+  // fremde Prüfsuiten.
+  {const _rt=remoteDp.ovTs||'',_lt=localDp.ovTs||'';
+   if(_rt>_lt){m.ovDriveId=remoteDp.ovDriveId;m.ovTs=_rt;m.ovW=remoteDp.ovW;m.ovH=remoteDp.ovH;}}
   /* Foto-Union je Pin: dieselbe Aufnahme erkennt man an `key` ODER `driveId` –
      ein Nachzügler-Upload ergänzt driveId am selben key, ein Desktop-Foto trägt
      nur driveId. Beim Zusammenlegen bleiben BEIDE Kennungen erhalten; eine
@@ -45471,6 +45479,160 @@ function _dpBerichtFotos(t){
   }
   return {liste:out,nurGeraet,pins};
 }
+// ═══ b770: Der Kartenausschnitt als Bild – Übersicht für Fotodoku und Bericht ═══
+// Im Bild-Modus zeichnet _fdkPlanBild die Übersicht aus dem hochgeladenen Bild und den
+// Prozent-Positionen der Pins. Auf der Luftbild-Karte geht das nicht: die Karte besteht
+// aus Kacheln fremder Server, und die Pins tragen dort Geo-Koordinaten statt einer
+// Position im Bild. Deshalb wird der Ausschnitt hier selbst zusammengesetzt und einmal
+// als fertiges Bild in Drive abgelegt.
+// Die drei Rechen-Funktionen brauchen keinen Browser – test_b770 führt sie echt aus.
+//
+// Web-Mercator: dieselbe Abbildung, die alle vier Kartenquellen benutzen. Ergebnis 0..1,
+// links oben ist 0/0.
+function _dpMercNorm(lat,lon){
+  const la=Math.max(-85.05112878,Math.min(85.05112878,Number(lat)||0));
+  const s=Math.sin(la*Math.PI/180);
+  return {x:((Number(lon)||0)+180)/360,y:0.5-Math.log((1+s)/(1-s))/(4*Math.PI)};
+}
+// Tiefer als hier liefert die Ebene keine eigenen Bilder mehr, sie würde nur
+// hochskalieren – dieselben Werte wie maxNativeZoom in ensureMap.
+const _DP_LAYER_MAXZ={'Luftbild amtlich (TH)':20,'Luftbild Welt (Esri)':19,'Luftbild Google':20,'Karte':19};
+const _DP_UEBER_PX=1600;
+// Zoomstufe für die Wunschbreite. Eine Stufe tiefer heißt doppelt so viele Bildpunkte.
+function _dpZoomFuerBreite(west,ost,zielPx,maxZ){
+  const dx=Math.abs(_dpMercNorm(0,ost).x-_dpMercNorm(0,west).x);
+  const mz=Number(maxZ)||19;
+  if(!(dx>0))return mz;
+  let z=Math.floor(Math.log2(((Number(zielPx)||_DP_UEBER_PX)/256)/dx));
+  if(!isFinite(z))z=17;
+  return Math.max(2,Math.min(mz,z));
+}
+// ⛔ Die Kachelkanten werden GERUNDET, und zwar jede Kante genau einmal: die rechte
+// Kante einer Kachel ist die linke der naechsten. Mit krummen Kanten rechnet der
+// Browser dort weich und laesst feine helle Fugen stehen – im ersten Abzug quer durch
+// das ganze Luftbild zu sehen. Deshalb schwankt die Breite einer Kachel um bis zu
+// einen Bildpunkt; das ist gewollt.
+// Was muss geladen werden? Die drei Kachel-Ebenen liefern 256er-Kacheln, der amtliche
+// Thüringen-Dienst dagegen auf EINE Anfrage genau den gewünschten Ausschnitt – dort
+// entsteht sogar ein Bild ganz ohne Kachelfugen.
+// px0/py0 ist die linke obere Ecke des Ausschnitts in Weltbildpunkten dieser Zoomstufe;
+// damit sitzen später auch die Pins auf den Bildpunkt genau.
+function _dpKachelPlan(sw,ne,layerName,zielPx){
+  const name=String(layerName||'Luftbild Welt (Esri)');
+  const maxZ=_DP_LAYER_MAXZ[name]||19;
+  const west=Math.min(Number(sw.lng),Number(ne.lng)),ost=Math.max(Number(sw.lng),Number(ne.lng));
+  const sued=Math.min(Number(sw.lat),Number(ne.lat)),nord=Math.max(Number(sw.lat),Number(ne.lat));
+  const ziel=zielPx||_DP_UEBER_PX;
+  let z=_dpZoomFuerBreite(west,ost,ziel,maxZ);
+  const wms=(name==='Luftbild amtlich (TH)');
+  // Eine Stufe tiefer holen, wo es erlaubt ist: echte Bildpunkte sind besser als
+  // aufgeblasene. Die Grenze verhindert, dass ein weiter Ausschnitt hunderte Kacheln
+  // von fremden Servern zieht. Beim amtlichen Dienst faellt das weg – der liefert die
+  // Wunschgröße auf EINE Anfrage.
+  if(!wms&&z<maxZ){
+    const p2=256*Math.pow(2,z+1);
+    const bw=Math.abs(_dpMercNorm(0,ost).x-_dpMercNorm(0,west).x)*p2;
+    const bh=Math.abs(_dpMercNorm(sued,0).y-_dpMercNorm(nord,0).y)*p2;
+    if((Math.ceil(bw/256)+1)*(Math.ceil(bh/256)+1)<=90)z++;
+  }
+  const welt=256*Math.pow(2,z);
+  const nw=_dpMercNorm(nord,west),se=_dpMercNorm(sued,ost);
+  const px0=nw.x*welt,py0=nw.y*welt,px1=se.x*welt,py1=se.y*welt;
+  const w0=Math.max(1,px1-px0),h0=Math.max(1,py1-py0);
+  // Was die Ebene an echten Bildpunkten nicht hergibt, wird vergrößert – hoechstens
+  // vierfach, darueber wird es nur noch matschig. Ist der Ausschnitt groesser als
+  // gewuenscht, wird verkleinert; das ist der scharfe Fall.
+  const skal=Math.min(4,ziel/w0);
+  const w=Math.max(1,Math.round(w0*skal)),h=Math.max(1,Math.round(h0*skal));
+  const plan={z:z,w:w,h:h,px0:px0,py0:py0,welt:welt,skal:skal,layer:name,wms:null,kacheln:[]};
+  if(wms){
+    const M=20037508.342789244;
+    const mx=(px)=>((px/welt)-0.5)*2*M,my=(py)=>(0.5-(py/welt))*2*M;
+    const bbox=[mx(px0),my(py1),mx(px1),my(py0)].map(v=>v.toFixed(3)).join(',');
+    plan.wms={url:'https://www.geoproxy.geoportal-th.de/geoproxy/services/DOP?service=WMS&request=GetMap&version=1.3.0&layers=th_dop&styles=&format=image/png&transparent=false&crs=EPSG:3857&width='+w+'&height='+h+'&bbox='+bbox,w:w,h:h};
+    return plan;
+  }
+  const kx0=Math.floor(px0/256),kx1=Math.floor((px1-0.0001)/256);
+  const ky0=Math.floor(py0/256),ky1=Math.floor((py1-0.0001)/256);
+  const rund=Math.pow(2,z);
+  for(let ky=ky0;ky<=ky1;ky++){
+    if(ky<0||ky>=rund)continue;
+    for(let kx=kx0;kx<=kx1;kx++){
+      const x=((kx%rund)+rund)%rund,y=ky;
+      let url='';
+      if(name==='Luftbild Welt (Esri)')url='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/'+z+'/'+y+'/'+x;
+      else if(name==='Luftbild Google')url='https://mt'+((x+y)%4)+'.google.com/vt/lyrs=s&x='+x+'&y='+y+'&z='+z;
+      else url='https://'+'abc'.charAt((x+y)%3)+'.tile.openstreetmap.org/'+z+'/'+x+'/'+y+'.png';
+      // Von gerundeter Kante zu gerundeter Kante – siehe Kopf von _dpKachelPlan.
+      const ax=Math.round((kx*256-px0)*skal),ay=Math.round((ky*256-py0)*skal);
+      const ex=Math.round(((kx+1)*256-px0)*skal),ey=Math.round(((ky+1)*256-py0)*skal);
+      plan.kacheln.push({url:url,dx:ax,dy:ay,bw:ex-ax,bh:ey-ay,gr:ex-ax});
+    }
+  }
+  return plan;
+}
+// Die Nummern-Kreise: dieselbe Aussage wie auf der Karte und im Bild-Modus – Ampelfarbe,
+// weißer Rand, Nummer. Ein Pin mit Teilbereich ist ECKIG (b742/v228: die Form
+// unterscheidet, nicht die Farbe – bei Sonne war der farbige Rand nicht zu erkennen).
+function _dpPinKreis(g,x,y,rad,farbe,text,eckig){
+  g.beginPath();
+  if(eckig){
+    const r=Math.max(3,Math.round(rad/3)),x0=x-rad,y0=y-rad,br=rad*2;
+    g.moveTo(x0+r,y0);
+    g.arcTo(x0+br,y0,x0+br,y0+br,r);
+    g.arcTo(x0+br,y0+br,x0,y0+br,r);
+    g.arcTo(x0,y0+br,x0,y0,r);
+    g.arcTo(x0,y0,x0+br,y0,r);
+    g.closePath();
+  }else{
+    g.arc(x,y,rad,0,Math.PI*2);
+  }
+  g.fillStyle=farbe;g.fill();
+  g.lineWidth=Math.max(2,Math.round(rad/6));g.strokeStyle='#fff';g.stroke();
+  g.fillStyle='#fff';g.font='bold '+Math.round(rad*1.1)+'px Arial';g.textAlign='center';g.textBaseline='middle';
+  g.fillText(String(text||'?'),x,y+1);
+}
+// Kacheln holen, zusammensetzen, Pins darauf. crossOrigin ist Pflicht: ohne dieses
+// Merkmal gilt die Leinwand als fremdbefüllt und gibt ihr Bild nicht mehr heraus.
+// Gemessen am 23.08.2026: alle vier Quellen senden die nötige Freigabe.
+// Eine fehlende Kachel lässt nur ein graues Feld – sie darf den ganzen Abzug nicht
+// scheitern lassen, deshalb werden Fehler gezählt statt geworfen.
+async function _dpUeberBildBauen(sw,ne,layerName,pins,zielPx){
+  const plan=_dpKachelPlan(sw,ne,layerName,zielPx||_DP_UEBER_PX);
+  const c=document.createElement('canvas');c.width=plan.w;c.height=plan.h;
+  const g=c.getContext('2d');
+  g.fillStyle='#e8e8ee';g.fillRect(0,0,c.width,c.height);
+  const hol=(u)=>new Promise(res=>{const im=new Image();im.crossOrigin='anonymous';im.onload=()=>res(im);im.onerror=()=>res(null);im.src=u;});
+  let fehl=0;
+  if(plan.wms){
+    const im=await hol(plan.wms.url);
+    if(im)g.drawImage(im,0,0,c.width,c.height);else fehl++;
+  }else{
+    const ims=await Promise.all(plan.kacheln.map(k=>hol(k.url)));
+    ims.forEach((im,i)=>{const k=plan.kacheln[i];if(im)g.drawImage(im,k.dx,k.dy,k.bw||k.gr,k.bh||k.gr);else fehl++;});
+  }
+  const farben=(typeof _FDK_COL!=='undefined'&&_FDK_COL)?_FDK_COL:{rot:'#e5484d',gelb:'#f5a623',gruen:'#30a46c'};
+  const rad=Math.max(12,Math.round(c.width/70));
+  (pins||[]).slice().sort((a,b)=>((a&&a.nr)||0)-((b&&b.nr)||0)).forEach(p=>{
+    if(!p||p.lat==null||p.lng==null)return;
+    const m=_dpMercNorm(p.lat,p.lng);
+    const sk=plan.skal||1;
+    const x=(m.x*plan.welt-plan.px0)*sk,y=(m.y*plan.welt-plan.py0)*sk;
+    if(x<-rad||y<-rad||x>c.width+rad||y>c.height+rad)return;
+    _dpPinKreis(g,x,y,rad,(farben[p.status||'rot']||farben.rot),(p.nr||'?'),!!(p&&p.plan&&p.plan.imgDriveId));
+  });
+  return {canvas:c,fehl:fehl,plan:plan};
+}
+// Die abgelöste Übersicht wandert in den Drive-PAPIERKORB, nicht ins Nichts – wer die
+// vorige Fassung doch noch braucht, holt sie dort zurück.
+async function _dpDriveInPapierkorb(driveId){
+  if(!driveId)return false;
+  try{
+    if(typeof gdriveToken==='undefined'||!gdriveToken)return false;
+    const r=await fetch('https://www.googleapis.com/drive/v3/files/'+driveId,{method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},body:JSON.stringify({trashed:true})});
+    return !!r.ok;
+  }catch(e){console.warn('[DP] Papierkorb:',e);return false;}
+}
 function _dpBerichtHtml(t){
   const COL={rot:'#e5484d',gelb:'#f5a623',gruen:'#30a46c'};
   const LBL={rot:'Schaden',gelb:'Prüfen',gruen:'OK'};
@@ -45478,10 +45640,15 @@ function _dpBerichtHtml(t){
   const {liste,nurGeraet,pins}=_dpBerichtFotos(t);
   const heute=new Date().toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'});
   const bildModus=!!(dp.base==='bild'&&dp.imgDriveId);
+  // b770: Auf der Luftbild-Karte gibt es kein Basisbild – dort steht die gespeicherte
+  // Übersicht, in der die Nummern schon eingebrannt sind (kein Kreis-Aufsatz nötig).
+  const ueberModus=!bildModus&&!!dp.ovDriveId;
   let plan='';
-  if(bildModus){
+  // b770: EIN Bild-Element für beide Wege. Im Bild-Modus werden die Nummern als Kreise
+  // darübergelegt; in der gespeicherten Übersicht stecken sie schon im Bild.
+  if(bildModus||ueberModus){
     plan='<h2>Der Plan</h2><div class="planbox"><img id="_dpbasis" alt="Dachplan">'
-      +pins.map(p=>(p&&p.nx!=null)?('<span class="pinkreis" style="left:'+(p.nx*100).toFixed(2)+'%;top:'+(p.ny*100).toFixed(2)+'%;background:'+(COL[p.status||'rot']||COL.rot)+';">'+esc(String(p.nr||'?'))+'</span>'):'').join('')
+      +(!bildModus?'':pins.map(p=>(p&&p.nx!=null)?('<span class="pinkreis" style="left:'+(p.nx*100).toFixed(2)+'%;top:'+(p.ny*100).toFixed(2)+'%;background:'+(COL[p.status||'rot']||COL.rot)+';">'+esc(String(p.nr||'?'))+'</span>'):'').join(''))
       +'</div>';
   }else if(pins.length){
     plan='<div class="sysrow" style="display:block;">Die Pins liegen auf der Luftbild-Karte — je Pin führt unten ein 🗺-Link auf die Karte.</div>';
@@ -45633,6 +45800,13 @@ async function _dpBerichtOeffnen(taskId){
       const img=win.document.getElementById('_dpbasis');
       if(img&&u)img.src=u;
     }catch(e){console.warn('[DP-Bericht] Basisbild:',e);}
+  }else if(dp.ovDriveId){
+    // b770: dasselbe Bild-Element, dieselbe Bauart – nur eine andere Quelle.
+    try{
+      const u=_desktopFotoBlobCache.get(dp.ovDriveId)||await _fetchDesktopFotoBlob(dp.ovDriveId);
+      const img=win.document.getElementById('_dpbasis');
+      if(img&&u)img.src=u;
+    }catch(e){console.warn('[DP-Bericht] Uebersicht:',e);}
   }
   for(const x of liste){
     let img=null;
@@ -45666,6 +45840,9 @@ window.Dachplan=(function(){
   const markers={},E={};
   let _vsT=null;const saveViewSoon=()=>{clearTimeout(_vsT);_vsT=setTimeout(()=>save(),800);};
   let calStep=0,calTmp=null;
+  // b770: läuft gerade die Ausschnitt-Wahl für die Übersicht? _ueberAlt hält den
+  // Arbeits-Ausschnitt fest, auf den danach zurückgesprungen wird.
+  let _ueberModus=false,_ueberAlt=null;
   const say=(m)=>{try{if(E.msg){E.msg.textContent=m;E.msg.classList.remove('dp-hidden');clearTimeout(E._mt);E._mt=setTimeout(()=>{try{E.msg.classList.add('dp-hidden');}catch(_){}},3600);}}catch(e){}try{if(typeof showToast==='function')showToast(m,'info',2500);}catch(e){}};
   const getTask=()=>{try{return findTaskById((document.getElementById('taskId')||{}).value||'');}catch(e){return null;}};
   const save=()=>{try{if(typeof scheduleSave==='function')scheduleSave();}catch(e){}};
@@ -45757,6 +45934,12 @@ window.Dachplan=(function(){
       +'<button class="dpb" id="dpAdd">➕ Pin</button>'
       +'<button class="dpb" id="dpList" title="Pin-Liste">☰ Liste</button>'
       +'<button class="dpb" id="dpBericht" title="Dachplan-Bericht: Drucken/PDF oder als HTML-Datei zum Mailen">🧾 Bericht</button>' // b731
+      +'<button class="dpb" id="dpUeber" title="Kartenausschnitt mit den Pins als Bild speichern – für Fotodokumentation und Bericht">🖼 Übersicht</button>'
+      +'<span id="dpUeberBar" class="dp-hidden" style="display:inline-flex;align-items:center;gap:8px;margin-left:4px;padding:4px 10px;border:1px solid #30a46c;border-radius:8px;background:rgba(48,164,108,.14)">'
+       +'<span style="font-size:13px;font-weight:700;color:#7fe0ae;white-space:nowrap">Ausschnitt für die Übersicht</span>'
+       +'<button class="dpb" id="dpUeberOk" style="padding:2px 8px;font-size:12px">📸 Speichern</button>'
+       +'<button class="dpb" id="dpUeberAb" style="padding:2px 8px;font-size:12px">Abbrechen</button>'
+      +'</span>'
       +'<button class="dpb" id="dpFilter">Alle</button>'
       +'<button class="dpb" id="dpReset" title="Dachplan zurücksetzen">🗑 Reset</button>'
       +'<input type="file" id="dpBildInput" accept="image/*" style="display:none">'
@@ -45814,6 +45997,7 @@ window.Dachplan=(function(){
     q('#dpPhotoBtn').onclick=()=>q('#dpPhotoInput').click();
     q('#dpPhotoInput').onchange=e=>{addPhotos([...e.target.files]);e.target.value='';};
     q('#dpBericht').onclick=()=>{if(t)_dpBerichtOeffnen(t.id);}; // b731
+    q('#dpUeber').onclick=ueberStart;q('#dpUeberOk').onclick=ueberSpeichern;q('#dpUeberAb').onclick=ueberEnde; // b770
     q('#dpNav').onclick=()=>{const p=cur();if(!p)return;let lat=p.lat,lng=p.lng;if((lat==null||lng==null)&&p.nx!=null){const w=calFrToLatLng(p.nx,p.ny);if(w){lat=w.lat;lng=w.lng;}}if(lat!=null&&lng!=null)window.open('https://www.google.com/maps/dir/?api=1&destination='+lat+','+lng,'_blank');else say('Navigation im Bild-Modus braucht die Kalibrierung');};
     q('#dpDel').onclick=()=>{const p=cur();if(!p)return;
       /* b742: Am Pin kann ein ganzer Teilbereich hängen (Foto + eigene Pins + deren
@@ -45915,7 +46099,9 @@ window.Dachplan=(function(){
        offene Geräte überschrieben sich damit ENDLOS gegenseitig den Ausschnitt
        (alle 10–20 s ein Drive-Schreibvorgang, protokolliert). Erst ab ~1 m Bewegung
        oder Zoom-Änderung wird gespeichert – „öffnet, wo ich zuletzt war" bleibt. */
-    map.on('moveend',()=>{if(dp&&dp.base!=='bild'){try{
+    // b770: !_ueberModus – während der Ausschnitt-Wahl für die Übersicht wird nichts
+    // gemerkt, sonst wäre der weite Ausschnitt danach der Arbeitsstand (auch am Handy).
+    map.on('moveend',()=>{if(dp&&dp.base!=='bild'&&!_ueberModus){try{
       const c=map.getCenter(),z=map.getZoom(),alt=dp.center;
       if(z>=DP_ARBEITS_ZOOM&&(!alt||Math.abs(alt[0]-c.lat)>1e-5||Math.abs(alt[1]-c.lng)>1e-5||dp.zoom!==z)){dp.center=[c.lat,c.lng];dp.zoom=z;saveViewSoon();}
     }catch(_){}}});
@@ -46471,12 +46657,72 @@ window.Dachplan=(function(){
     const isB=(mode==='bild');
     if(isB)try{liveStop();}catch(_){} // b481: Live-Standort gilt nur im Karten-Modus
     try{E.screen.querySelector('#dpMode').textContent=isB?'🖼️':'🗺️';E.screen.querySelector('#dpBild').style.display=isB?'':'none';E.screen.querySelector('#dpCalib').style.display=isB?'':'none';}catch(_){}
+    // b770: Die Übersicht gibt es nur auf der Luftbild-Karte. Ein laufender Schritt
+    // wird still beendet – ohne Rücksprung, denn die Karte ist ohnehin weg.
+    try{E.screen.querySelector('#dpUeber').style.display=isB?'none':'';}catch(_){}
+    if(isB&&_ueberModus){_ueberModus=false;_ueberAlt=null;ueberBarSync();}
     E.mapEl.classList.toggle('dp-hidden',isB);E.imapEl.classList.toggle('dp-hidden',!isB);
     Object.keys(markers).forEach(k=>{try{if(map)map.removeLayer(markers[k]);}catch(_){}try{if(imap)imap.removeLayer(markers[k]);}catch(_){}delete markers[k];});
     if(isB){if(!ensureImap())return;setTimeout(()=>{try{imap.invalidateSize();}catch(e){}
       if(dp.imgDriveId){dpImgUrl().then(url=>{if(url)showBaseImg(url);try{if(dp.imgC&&dp.imgZ!=null)imap.setView(dp.imgC,dp.imgZ);else imap.fitBounds(bnd());}catch(_){}renderImgPins();});}
       else{hideBaseImg();say('Kein Bild – „📷 Bild" antippen');} /* b742: leere Ebene zeigt auch WIRKLICH nichts */},60);
     }else{setTimeout(()=>{try{map.invalidateSize();}catch(e){}let c=_dpArbeitsAusschnitt(dp)?dp.center:null,z=dp.zoom; /* b745: eine Uebersichts-Karte zaehlt nicht als gemerkter Stand */if(!c&&t.lat&&t.lon){c=[+t.lat,+t.lon];z=19;}if(!c){c=[51.1657,10.4515];z=6;}map.setView(c,z||18);renderPins();if(!dp.center&&!(t.lat&&t.lon)&&t&&t.adresse){doSearch(_geoQuery(t.adresse)+', Deutschland');}},60);}
+  }
+  // ── b770: Übersicht der Luftbild-Karte als Bild ──────────────────────────────────
+  // Zweistufig mit Absicht: erst den Ausschnitt wählen, dann speichern. Bei einem Dach
+  // mit weit auseinander liegenden Pins trifft man sonst nie das, was man haben will.
+  // ⛔ Während dieser Wahl darf der Ausschnitt NICHT als Arbeitsstand gemerkt werden
+  // (Riegel im moveend) – sonst öffnet der Dachplan danach auf JEDEM Gerät weit
+  // draußen, denn center/zoom gehören zum Auftrag und wandern mit.
+  function ueberBarSync(){
+    try{E.screen.querySelector('#dpUeberBar').classList.toggle('dp-hidden',!_ueberModus);}catch(_){}
+    try{E.screen.querySelector('#dpUeber').classList.toggle('on',_ueberModus);}catch(_){}
+  }
+  function ueberStart(){
+    if(dp.base==='bild'){say('Die Übersicht gibt es auf der Luftbild-Karte');return;}
+    if(!ensureMap())return;
+    const mit=(dp.pins||[]).filter(p=>p&&p.lat!=null&&p.lng!=null);
+    if(!mit.length){say('Noch keine Pins auf der Karte');return;}
+    _ueberModus=true;
+    try{_ueberAlt={c:map.getCenter(),z:map.getZoom()};}catch(_){_ueberAlt=null;}
+    ueberBarSync();
+    try{map.fitBounds(L.latLngBounds(mit.map(p=>[p.lat,p.lng])).pad(0.25));}catch(_){}
+    say('Ausschnitt wählen – dann „📸 Speichern"');
+  }
+  // Zurück auf den Ausschnitt von vorher. Das ist kein Schönheitsschritt: ohne ihn wäre
+  // der weite Übersichts-Ausschnitt der neue Arbeitsstand.
+  function ueberEnde(){
+    _ueberModus=false;ueberBarSync();
+    if(_ueberAlt){try{map.setView(_ueberAlt.c,_ueberAlt.z);}catch(_){}}
+    _ueberAlt=null;
+  }
+  async function ueberSpeichern(){
+    const folderId=dpFolder();
+    if(!folderId){say('Kein Drive-Ordner am Auftrag','error');return;}
+    if(typeof gdriveToken==='undefined'||!gdriveToken){say('Bitte mit Google Drive verbinden');return;}
+    let sw=null,ne=null;
+    try{const b=map.getBounds();sw=b.getSouthWest();ne=b.getNorthEast();}catch(_){}
+    if(!sw||!ne){say('Kartenausschnitt nicht lesbar','error');return;}
+    say('Übersicht wird gezeichnet…');
+    let erg=null;
+    try{erg=await _dpUeberBildBauen(sw,ne,_dpLayName,(dp.pins||[]),_DP_UEBER_PX);}catch(e){console.warn('[DP] Uebersicht:',e);}
+    if(!erg){say('Übersicht ließ sich nicht zeichnen','error');return;}
+    let durl='';
+    // Gibt eine Quelle ihr Bild wider Erwarten doch nicht heraus, sagt das die Meldung
+    // klar – der Umweg ist dann eine andere Kartenebene, nicht ein Neustart.
+    try{durl=erg.canvas.toDataURL('image/jpeg',0.88);}
+    catch(e){console.warn('[DP] Uebersicht Leinwand:',e);say('Dieses Luftbild gibt sein Bild nicht heraus – bitte andere Kartenebene wählen','error');return;}
+    const alt=dp.ovDriveId||'';
+    try{
+      const f=await dataUrlToFile(durl,'dachplan_uebersicht.jpg');
+      const meta=await dpUpload(f,folderId);
+      dp.ovDriveId=meta.id;dp.ovTs=new Date().toISOString();
+      dp.ovW=erg.canvas.width;dp.ovH=erg.canvas.height;
+      save();
+    }catch(e){console.warn('[DP] Uebersicht Upload:',e);say('Upload fehlgeschlagen','error');return;}
+    if(alt&&alt!==dp.ovDriveId)_dpDriveInPapierkorb(alt);
+    ueberEnde();
+    say(erg.fehl?('Übersicht gespeichert – '+erg.fehl+' Kachel(n) fehlten'):'Übersicht gespeichert ✓ – steht in der Fotodokumentation bereit');
   }
   function startCalib(){if(!dp.imgDriveId){say('Erst ein Bild laden');return;}calStep=1;calTmp={};say('Kalibrieren: Punkt A – markante Ecke im Bild anklicken');}
   function onCalibTap(ll){const fr=latLngToFr(ll),which=calStep===1?'A':'B';
@@ -46539,7 +46785,7 @@ window.Dachplan=(function(){
     // b723: dp.imgKey MIT nullen – das Feld gehört dem Handy (Gerätespeicher-Verweis),
     // aber es steht im geteilten Task. Blieb es stehen, zeigte das Handy nach einem
     // PC-Reset das alte Basisbild weiter, mit Ersatzmaßen 1000×750 (Befund 4, 20.08.).
-    dp.pins=[];dp.nextNr=1;dp.cal=null;dp.imgKey=null;dp.imgDriveId=null;dp.imgW=null;dp.imgH=null;dp.imgC=null;dp.imgZ=null;dp.center=null;dp.zoom=null;dp.base='map';
+    dp.pins=[];dp.nextNr=1;dp.cal=null;dp.imgKey=null;dp.imgDriveId=null;dp.imgW=null;dp.imgH=null;dp.imgC=null;dp.imgZ=null;dp.center=null;dp.zoom=null;dp.ovDriveId=null;dp.ovTs=null;dp.ovW=null;dp.ovH=null;dp.base='map';
     sel=null;calStep=0;
     try{if(imgLayer&&imap){imap.removeLayer(imgLayer);imgLayer=null;}}catch(_){}
     Object.keys(markers).forEach(k=>{try{if(map)map.removeLayer(markers[k]);}catch(_){}try{if(imap)imap.removeLayer(markers[k]);}catch(_){}delete markers[k];});
@@ -47066,7 +47312,15 @@ async function _fdkFotoBytes(driveId,kasten){
 async function _fdkPlanBild(t){
   try{
     const dp=(t&&t.dachplan)||{};
-    if(!(dp.base==='bild'&&dp.imgDriveId))return null;
+    // b770: Auf der Luftbild-Karte liegt eine fertige Übersicht in Drive – die Kreise
+    // sind dort schon eingebrannt, es wird nur noch auf Dokumentgröße gebracht.
+    if(!(dp.base==='bild'&&dp.imgDriveId)){
+      if(!dp.ovDriveId)return null;
+      const uo=await _fetchDesktopFotoBlob(dp.ovDriveId);if(!uo)return null;
+      const ko=await _fdkVerkleinern(uo,1600,0.85,false);
+      if(!ko||!ko.dataUrl)return null;
+      return {bytes:_fdkDataUrlBytes(ko.dataUrl),w:ko.w,h:ko.h,name:'Dachplan'};
+    }
     const u=await _fetchDesktopFotoBlob(dp.imgDriveId);if(!u)return null;
     const im=await new Promise(res=>{const x=new Image();x.onload=()=>res(x);x.onerror=()=>res(null);x.src=u;});
     if(!im)return null;
@@ -47154,7 +47408,8 @@ function _fdkOeffnen(){
   const eigene=(typeof taskFotos!=='undefined'&&Array.isArray(taskFotos)&&taskFotos.length)?taskFotos:(t.fotos||[]);
   const liste=_fdkEintraege(t,eigene);
   const dp=t.dachplan||{};
-  const planMoeglich=!!(dp.base==='bild'&&dp.imgDriveId&&(dp.pins||[]).length);
+  // b770: auch auf der Luftbild-Karte, sobald dort eine Übersicht gespeichert wurde.
+  const planMoeglich=!!(((dp.base==='bild'&&dp.imgDriveId)||(dp.base!=='bild'&&dp.ovDriveId))&&(dp.pins||[]).length);
   // b735: Ablage in den Dokumente-Ordner (dort liest die PAM-Dokumentliste); ist keiner
   // eingetragen, in den Projektordner (Hauptordner des Auftrags). Feld zuerst (ungespeicherte
   // Eingabe), dann der gespeicherte Stand am Task. Für die Startdokument-Auswahl werden
@@ -47208,7 +47463,7 @@ function _fdkOeffnen(){
         +'<label>Fotos je Seite<select id="fdkProSeite"><option value="2" selected>2 Fotos je Seite</option><option value="1">1 Foto je Seite (groß)</option></select></label>'
         +'<label><input type="checkbox" id="fdkBeschriftung"> Beschriftung aus PAM unter das Foto („Abb. N: Text")</label>'
         +'<label><input type="checkbox" id="fdkKasten"> Einheitliches 4:3-Kästchen – mittig zuschneiden, Ränder gehen verloren (hochkant bleibt 3:4)</label>'
-        +(planMoeglich?'<label><input type="checkbox" id="fdkPlan" checked onchange="_fdkListeZeichnen()"> 🗺 Dachplan-Übersicht als Bild voranstellen</label>':'<div style="font-size:11px;color:var(--text2);">🗺 Dachplan-Übersicht: nur im Bild-Modus des Dachplans möglich.</div>')
+        +(planMoeglich?'<label><input type="checkbox" id="fdkPlan" checked onchange="_fdkListeZeichnen()"> 🗺 Dachplan-Übersicht als Bild voranstellen</label>':'<div style="font-size:11px;color:var(--text2);">🗺 Dachplan-Übersicht: im Dachplan erst „🖼 Übersicht“ speichern (oder ein eigenes Bild laden).</div>')
         +'<div class="fdk-hinweis">Unter jedem Foto steht „Abb. N:" – den Text schreibst du in Word (oder setzt den Haken „Beschriftung aus PAM").<br>'
         +'<b>Platzhalter:</b> Schreib im Startdokument eine eigene Zeile <b>{Foto}</b> dort, wo ein Foto hin soll – PAM füllt sie von oben nach unten aus dem Dokument rechts; <b>{Foto 3}</b> holt gezielt das dritte. Übrige Fotos kommen als Block hinten.<br>'
         +'Ergebnis = <b>neue Datei</b> im Dokumente-Ordner des Auftrags (+ Herunterladen; ohne Dokumente-Ordner: im Projektordner), Startdokument und Vorlage bleiben unverändert. Kopf-/Fußzeile und Seitenzahlen laufen aus deinem Dokument weiter.</div>'
