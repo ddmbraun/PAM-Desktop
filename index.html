@@ -9451,7 +9451,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-23 · #763'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-23-b763) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-23 · #764'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-23-b764) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -12406,7 +12406,25 @@ function saveTaskData(){
   const title=document.getElementById('taskTitleInput').value.trim();
   if(!title) return false;
   const id=document.getElementById('taskId').value;
-  const existingTask=id?findTaskById(id):null;
+  // 🔴 b764 – DUBLETTEN-REPARATUR. findTaskById sieht NUR `boards`, nie das Archiv.
+  // Der Knopf „📦 Archivieren" sitzt aber IM offenen Task-Fenster: er nimmt die Karte
+  // aus dem Board, das Fenster bleibt stehen, und der nächste Auto-Save (1 s) fand
+  // nichts mehr. Die Maske baute daraufhin unten einen NEUEN Task mit derselben Nummer –
+  // frisches Anlegedatum, nur Maskenfelder, dachplan/lat/lon still weg.
+  // Dieselbe Falle hat Mobil in v153 für den Foto-Sammler bereits geschlossen (Kommentar
+  // dort: „ein ZWEITER Task mit derselben ID ... doppelt in die JSON geschrieben").
+  // ⛔ findTaskById selbst bleibt unangetastet – sie wird an sehr vielen Stellen benutzt,
+  // die alle nur lebende Karten erwarten (b664-Lehre: keine Reparatur, die denselben
+  // Fehler woanders neu einbaut). Nachgesehen wird NUR hier.
+  // ⛔ Bewusst //-Zeilen statt /* */: ein neues `*/` verschiebt die Grenze des
+  // Phantom-Kommentars, den ohneKommentare() in den Prüfsuiten bei `accept='image/*'`
+  // aufmacht – das würde fremde Suiten treffen. Näheres in test_b764.js.
+  let existingTask=id?findTaskById(id):null;
+  let _ausArchiv=false;
+  if(!existingTask&&id&&Array.isArray(archivedTasks)){
+    const _arch=archivedTasks.find(t=>t&&t.id===id);
+    if(_arch){existingTask=_arch;_ausArchiv=true;}
+  }
   const data={
     id:id||generateId(),title,
     desc:document.getElementById('taskDescInput').value.trim(),
@@ -12538,10 +12556,26 @@ function saveTaskData(){
         const i=(boards[bk]||[]).findIndex(t=>t.id===id);
         if(i>=0){boards[bk][i]=_b717Merge(boards[bk][i]);currentBoard=bk;_savedInBoard=true;break;}
       }
+      // b764: Liegt die Karte im ARCHIV, gehört die Änderung DORTHIN – nicht als zweite
+      // Karte ins Board. `archiviert`/`archiviertAm` stehen in `data` schon richtig, weil
+      // `existingTask` oben der Archiv-Eintrag ist; `_archivProjekt` und alle Felder, die
+      // die Maske gar nicht kennt (dachplan, wartungsjahr …), überleben durch _b717Merge
+      // – dieselbe Überlagerungs-Regel wie bei b717.
+      if(!_savedInBoard&&_ausArchiv){
+        const _ai=archivedTasks.findIndex(t=>t&&t.id===id);
+        if(_ai>=0){
+          archivedTasks[_ai]=_b717Merge(archivedTasks[_ai]);
+          archivedTasks[_ai].archiviert=true; // die Maske könnte den Vermerk auf false gesetzt haben
+          _savedInBoard=true;
+        }
+      }
       if(!_savedInBoard){
         // Task komplett nicht gefunden – als Neueintrag im aktuellen Board sichern
         console.warn('[PTP] saveTaskData: Task '+id+' in keinem Board gefunden, wird neu angelegt');
         boards[currentBoard].push(data);
+        // b764: Notrettung SICHTBAR machen. Bisher stand sie nur in der Entwicklerkonsole,
+        // die im Alltag niemand ansieht – deshalb blieb die Dublette wochenlang unbemerkt.
+        try{if(typeof showToast==='function')showToast('⚠ Diese Karte war in keinem Projekt auffindbar und wurde neu angelegt – bitte auf doppelte Karten prüfen','warning',9000);}catch(e){}
       }
     }
   } else {
