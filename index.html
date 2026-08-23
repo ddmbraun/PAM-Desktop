@@ -9451,7 +9451,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-23 · #766'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-23-b766) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-23 · #767'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-23-b767) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -14193,6 +14193,11 @@ function _dachplanKonfliktMerge(remoteDp,localDp){
      getroffene Umschaltung nie am PC an. */
   {const _rt=remoteDp.baseTs||'',_lt=localDp.baseTs||'';
    if(_rt>_lt){m.base=remoteDp.base;m.baseTs=_rt;}}
+  /* b767: dieselbe Regel für die KARTENEBENE (amtlich TH / Esri / Google / Karte).
+     Ohne sie gälte die Object.assign-Zeile oben – „lokal gewinnt" – und die am anderen
+     Gerät getroffene Wahl käme nie an, genau wie die Ansicht bis b740. */
+  {const _rt=remoteDp.layerTs||'',_lt=localDp.layerTs||'';
+   if(_rt>_lt){m.layer=remoteDp.layer;m.layerTs=_rt;}}
   /* Foto-Union je Pin: dieselbe Aufnahme erkennt man an `key` ODER `driveId` –
      ein Nachzügler-Upload ergänzt driveId am selben key, ein Desktop-Foto trägt
      nur driveId. Beim Zusammenlegen bleiben BEIDE Kennungen erhalten; eine
@@ -45405,6 +45410,10 @@ window.Dachplan=(function(){
   const COL={rot:'#e5484d',gelb:'#f5a623',gruen:'#30a46c'};
   const LBL={rot:'Schaden',gelb:'Prüfen',gruen:'OK'};
   let t=null,dp=null,sel=null,addMode=false,filter='alle',built=false,map=null,imap=null,imgLayer=null,locM=null,locC=null,locMi=null,locCi=null;
+  /* b767: Die vier Kartenebenen und die gerade aktive. Bis b766 lebten sie nur in
+     ensureMap – von außen kam niemand daran, und rebind konnte die am Handy getroffene
+     Wahl nicht nachvollziehen. Am Handy heißen dieselben Dinge layObjs/layName (v129). */
+  let _dpLays=null,_dpLayName='';
   const markers={},E={};
   let _vsT=null;const saveViewSoon=()=>{clearTimeout(_vsT);_vsT=setTimeout(()=>save(),800);};
   let calStep=0,calTmp=null;
@@ -45594,6 +45603,36 @@ window.Dachplan=(function(){
     built=true;
   }
 
+  /* ══ b767: Die KARTENEBENE gehört zum AUFTRAG, nicht zum Gerät ═══════════════════
+     Bis b766 stand die Wahl (amtlich TH / Esri / Google / Karte) ausschließlich in
+     localStorage['pam_dp_layer'] – am Handy unter dem anderen Namen 'ptpm_dp_layer'.
+     localStorage wandert nie nach Drive, es gab also gar keine Leitung dazwischen:
+     „am PC Google, am Handy amtlich TH" blieb für immer verschieden (Befund Frank 23.08.).
+     Jetzt trägt der Auftrag `dachplan.layer` + `dachplan.layerTs` – dasselbe Muster wie
+     `base`/`baseTs` seit b740, KEIN zweiter Weg.
+     ⛔ Nur eine Umschaltung durch den Nutzer schreibt. Automatisches Setzen beim Öffnen
+     und beim Nachladen läuft `stumm` – sonst entstünde das Ping-Pong aus b724/v214, bei
+     dem sich offene Geräte alle 10–20 s im Kreis überschrieben.
+     ⛔ Der Teilbereich hat keine Kartenebene (Riegel in setBase, b742) – dort fällt
+     nichts davon an. */
+  function _dpLayerWahl(name,stumm){
+    if(!name||!dp)return;
+    const _wechsel=(dp.layer!==name);
+    dp.layer=name;_dpLayName=name;
+    if(_wechsel&&!stumm){try{dp.layerTs=new Date().toISOString();save();}catch(e){}}
+  }
+  /* Von außen umschalten (rebind). Ein programmatischer Wechsel löst KEIN
+     `baselayerchange` aus – deshalb wird `_dpLayName` hier selbst nachgeführt, sonst
+     schaltete rebind bei jedem Nachladen erneut um. */
+  function _dpLayerAnwenden(name){
+    if(!map||!_dpLays||!_dpLays[name])return false;
+    if(_dpLayName===name)return false;
+    Object.keys(_dpLays).forEach(k=>{try{if(map.hasLayer(_dpLays[k]))map.removeLayer(_dpLays[k]);}catch(_){}});
+    try{_dpLays[name].addTo(map);}catch(_){return false;}
+    _dpLayName=name;
+    try{localStorage.setItem('pam_dp_layer',name);}catch(_){}
+    return true;
+  }
   /* ---- Karte (geo) ---- */
   function ensureMap(){
     if(map)return true;if(typeof L==='undefined'){say('Leaflet nicht geladen (Internet?)');return false;}
@@ -45613,8 +45652,14 @@ window.Dachplan=(function(){
     const _inTH=(la,lo)=>la>=50.15&&la<=51.75&&lo>=9.80&&lo<=12.75;
     let _startLay=(t&&t.lat&&t.lon&&!_inTH(Number(t.lat),Number(t.lon)))?esri:dopTH;
     try{const _sav=localStorage.getItem('pam_dp_layer');if(_sav&&_lays[_sav])_startLay=_lays[_sav];}catch(e){} // b526: gewählte Ebene gemerkt
+    /* b767: Die Wahl am AUFTRAG hat Vorrang vor der Geräte-Notiz darüber. Die bleibt für
+       den ALTBESTAND – Aufträge ohne `layer` sollen nicht alle auf „amtlich TH" springen.
+       Kennt dieses Gerät den Namen nicht, bleibt es beim Gerätewert statt bei grauer Fläche. */
+    try{const _al=dp&&dp.layer;if(_al&&_lays[_al])_startLay=_lays[_al];}catch(e){}
+    _dpLays=_lays;
+    _dpLayName=(Object.keys(_lays).find(k=>_lays[k]===_startLay))||'';
     _startLay.addTo(map);L.control.layers(_lays,null,{position:'topright'}).addTo(map);
-    map.on('baselayerchange',e=>{try{localStorage.setItem('pam_dp_layer',e.name);}catch(_){}}); // b526
+    map.on('baselayerchange',e=>{try{localStorage.setItem('pam_dp_layer',e.name);}catch(_){}_dpLayerWahl(e.name);}); // b526 · b767: Wahl an den Auftrag
     map.on('click',e=>{if(addMode)addPin(e.latlng.lat,e.latlng.lng);else say('Zum Setzen erst „➕ Pin" antippen');});
     /* b724: Mini-Bewegungen NICHT mehr speichern. Jedes Gerät rundet beim Öffnen den
        Ausschnitt minimal anders (gemessen 20.08.: 7. Nachkommastelle, ~3 mm) – drei
@@ -46309,11 +46354,18 @@ window.Dachplan=(function(){
       /* b742 (Mobil v225): merken, was GERADE auf dem Schirm ist – gleich zeigt dp auf
          das frische Objekt, und dessen `base` ist der gespeicherte, nicht der gewählte Stand. */
       const _altBase=(dp&&dp.base)||'map', _altTs=(dp&&dp.baseTs)||'';
+      const _altLay=(dp&&dp.layer)||'', _altLayTs=(dp&&dp.layerTs)||''; // b767: dasselbe für die Kartenebene
       if(!frisch.dachplan||frisch.dachplan.mode!=='map')frisch.dachplan={mode:'map',base:'map',center:null,zoom:null,pins:[],nextNr:1};
       t=frisch;dp=frisch.dachplan;
       if(!dp.pins)dp.pins=[];if(!dp.nextNr)dp.nextNr=(dp.pins.length+1);if(!dp.base)dp.base='map';
       /* Es gewinnt die ZULETZT GETROFFENE Wahl, nicht das zuletzt eingetroffene Paket. */
       if(_altTs&&_altTs>(dp.baseTs||'')){dp.base=_altBase;dp.baseTs=_altTs;}
+      /* b767: dieselbe Regel für die Kartenebene – und hat die Gegenseite die jüngere
+         Wahl, wird die Karte WIRKLICH umgeschaltet, nicht nur der Wert gesetzt. Sonst
+         stünde am offenen PC weiter das alte Luftbild, obwohl der Auftrag schon das
+         neue trägt. Der Teilbereich hat keine Ebene – dort greift nichts davon. */
+      if(_altLayTs&&_altLayTs>(dp.layerTs||'')){dp.layer=_altLay;dp.layerTs=_altLayTs;}
+      else if(!_tpStack&&dp.layer&&dp.layer!==_altLay)_dpLayerAnwenden(dp.layer);
       if(sel&&!dp.pins.some(p=>p&&p.id===sel)){sel=null;closeSheet();} // gewählter Pin existiert nicht mehr
       const _soll=_baseSinnvoll(dp);
       if(_soll!==_altBase)setBase(_soll,true); // stumm: kommt vom Nachladen, nicht vom Nutzer
