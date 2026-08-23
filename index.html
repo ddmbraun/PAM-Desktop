@@ -9451,7 +9451,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-23 · #768'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-23-b768) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-23 · #769'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-23-b769) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -28071,20 +28071,37 @@ async function _deskFotoInhalt(f,zeigeOriginal){
 // b768: Sucht zu einer Drive-Kennung den passenden Verweis und sagt, woher er stammt.
 // Gesucht wird ueber die KENNUNG, nicht ueber einen gemerkten Listenplatz - der
 // verschiebt sich, sobald ein Abgleich die Berichte oder die Pins umsortiert.
+// b769: Der Treffer bringt seine GESCHWISTER mit - die Fotos desselben Pins, desselben
+// Protokolls oder derselben Leistung. Daraus entstehen die Blaetterpfeile. Entscheidung
+// Frank 23.08.2026: innerhalb der Gruppe blaettern, nicht quer ueber alles. Grund: die
+// Reihenfolge in der Fotoliste ist eine andere als im Bautagebuch (dort nach Tag und
+// Uhrzeit) - eine gruppenweise Reihenfolge ist an beiden Orten dieselbe.
 function _deskRefFinden(driveId){
   const id=String(driveId||'');
   if(!id)return null;
   const gleich=function(x){return String((x&&x.driveId)||'')===id;};
-  let d=null;
-  try{d=(typeof _dpRefFotosLive==='function'?_dpRefFotosLive():[]).find(gleich);}catch(e){}
-  if(d)return {quelle:'dachplan',ref:d,fo:d.fo||null,pinRef:d.pinRef||null};
-  let w=null;
-  try{w=(typeof _wpRefFotosLive==='function'?_wpRefFotosLive():[]).find(gleich);}catch(e){}
-  if(w)return {quelle:'wartung',ref:w,fo:w.fo||null,berichtRef:w.berichtRef||null};
-  let l=null;
-  try{const tl=(typeof _tuRefFotosLive==='function'?_tuRefFotosLive():null);
-      l=((tl&&tl.fotos)||[]).find(gleich);}catch(e){}
-  if(l)return {quelle:'leistung',ref:l,fo:null};
+  // Geschwister ueber den Gruppenschluessel. Fehlt der Schluessel, steht das Foto
+  // fuer sich allein - dann gibt es nichts zu blaettern und die Pfeile bleiben aus.
+  const bauen=function(liste,quelle,schluessel,tr,zusatz){
+    const key=String((tr&&tr[schluessel])||'');
+    let gruppe=key?liste.filter(function(x){return String((x&&x[schluessel])||'')===key;}):[tr];
+    if(!gruppe.length)gruppe=[tr];
+    let pos=gruppe.indexOf(tr);
+    if(pos<0)pos=0;
+    const r={quelle:quelle,ref:tr,fo:tr.fo||null,gruppe:gruppe,pos:pos};
+    if(zusatz)Object.keys(zusatz).forEach(function(k){r[k]=zusatz[k];});
+    return r;
+  };
+  let L=[];
+  try{L=(typeof _dpRefFotosLive==='function'?_dpRefFotosLive():[])||[];}catch(e){L=[];}
+  const d=L.find(gleich);
+  if(d)return bauen(L,'dachplan','pinId',d,{pinRef:d.pinRef||null});
+  try{L=(typeof _wpRefFotosLive==='function'?_wpRefFotosLive():[])||[];}catch(e){L=[];}
+  const w=L.find(gleich);
+  if(w)return bauen(L,'wartung','berichtId',w,{berichtRef:w.berichtRef||null});
+  try{const tl=(typeof _tuRefFotosLive==='function'?_tuRefFotosLive():null);L=((tl&&tl.fotos)||[]);}catch(e){L=[];}
+  const l=L.find(gleich);
+  if(l)return bauen(L,'leistung','leistungId',l,null);
   return null;
 }
 // b768: Wunsch Frank 23.08.2026 - eine Verweis-Kachel soll dieselbe grosse Ansicht
@@ -28105,7 +28122,9 @@ async function openFotoRefDesktop(driveId,zeigeOriginal){
   if(!lb||!cnt)return;
   const marke=(r.quelle==='dachplan')?('🗺 Pin '+((r.ref&&r.ref.pinNr)||'?'))
     :(r.quelle==='wartung')?'📋 Wartungsprotokoll':'🔁 Leistung';
-  if(lbl)lbl.textContent=marke+' · '+((r.ref&&(r.ref.caption||r.ref.name))||'Foto');
+  // b769: Bei mehreren Fotos in der Gruppe steht dabei, an welcher Stelle man ist.
+  const _wo=(r.gruppe&&r.gruppe.length>1)?(' · Foto '+(r.pos+1)+'/'+r.gruppe.length):'';
+  if(lbl)lbl.textContent=marke+' · '+((r.ref&&(r.ref.caption||r.ref.name))||'Foto')+_wo;
   if(capInput){
     capInput.value=(r.ref&&r.ref.caption)||'';
     // Ein Leistungsfoto gehoert zum Wartungsnachweis - der wird hier nicht angefasst.
@@ -28115,11 +28134,21 @@ async function openFotoRefDesktop(driveId,zeigeOriginal){
       :'Kurze Beschreibung zum Foto…';
   }
   if(capBar)capBar.classList.add('visible');
+  // b769: Die Pfeile gelten jetzt auch hier - aber nur innerhalb der Gruppe und nur,
+  // wenn es dort ueberhaupt etwas zu blaettern gibt.
+  const _mehr=!!(r.gruppe&&r.gruppe.length>1);
   const _p=document.getElementById('lbNavPrev'),_n=document.getElementById('lbNavNext'),_b=document.getElementById('lb360Btn');
-  if(_p)_p.style.display='none';
-  if(_n)_n.style.display='none';
+  if(_p)_p.style.display=_mehr?'':'none';
+  if(_n)_n.style.display=_mehr?'':'none';
   if(_b)_b.style.display='none';
   if(_deskFotoKbHandler){document.removeEventListener('keydown',_deskFotoKbHandler);_deskFotoKbHandler=null;}
+  if(_mehr){
+    _deskFotoKbHandler=function(e){
+      if(e.key==='ArrowLeft')_lbNav(-1);
+      else if(e.key==='ArrowRight')_lbNav(1);
+    };
+    document.addEventListener('keydown',_deskFotoKbHandler);
+  }
   cnt.innerHTML='<div style="color:#fff;font-size:13px;padding:20px">Lade Foto…</div>';
   lb.classList.add('open');
   await _deskFotoInhalt(r.fo||r.ref,zeigeOriginal);
@@ -28228,6 +28257,18 @@ function _deskClosePannellum(){
 // #312: Lightbox-Klicknavigation + manueller 360-Schalter
 var _deskCurrentFotoUrl='';
 function _lbNav(dir){
+  // b769: Steht ein Verweis-Foto offen, wird innerhalb SEINER Gruppe geblaettert.
+  // ⛔ Nicht ueber die Auftragsliste - darin hat ein Verweis keinen Platz, der Sprung ginge
+  // ins Leere. (Der Listenname steht hier bewusst NICHT ausgeschrieben: test_b769 prueft die
+  // Reihenfolge im Quelltext, und ein Wort im Kommentar wuerde dabei als Code gelesen.)
+  if(_deskLbFremd&&_deskLbFremd.gruppe&&_deskLbFremd.gruppe.length>1){
+    const g=_deskLbFremd.gruppe;
+    let ni=_deskLbFremd.pos+dir;
+    if(ni<0)ni=g.length-1;else if(ni>=g.length)ni=0;
+    const naechstes=g[ni];
+    if(naechstes&&naechstes.driveId)openFotoRefDesktop(naechstes.driveId);
+    return;
+  }
   if(!taskFotos||!taskFotos.length)return;
   let ni=_currentFotoLbIdx+dir;
   if(ni<0)ni=taskFotos.length-1;else if(ni>=taskFotos.length)ni=0;
