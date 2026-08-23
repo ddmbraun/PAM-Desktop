@@ -9451,7 +9451,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-23 · #770'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-23-b770) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-23 · #771'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-23-b771) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -14044,6 +14044,26 @@ async function migrateFileToWorkspaceFolder(fileId) {
 let workboardLastModified=null;
 let workboardPollTimer=null;
 let _pamRemotePollPending=false; // Fix #366: fremde Änderung erkannt, aber Modal offen/User tippt
+// b771: Der Hinweis auf wartende Handy-Änderungen ging bisher NUR nach #fileMsg – ein
+// 11-Pixel-Span in der Dateileiste ganz oben. Gezeigt wird er aber genau dann, wenn ein
+// Task-Fenster offen ist – und das liegt darüber. Frank am 23.08.2026: „Beim PC habe ich
+// diesen Hinweis noch nie gesehen." Deshalb zusätzlich ein Band, das über dem Fenster
+// liegt. pointer-events:none, damit es nichts anklickbar verdeckt.
+function _pamHandyHinweis(anzeigen){
+  try{
+    let el=document.getElementById('pamHandyHinweisBand');
+    if(!anzeigen){if(el)el.remove();return;}
+    if(el)return;
+    el=document.createElement('div');
+    el.id='pamHandyHinweisBand';
+    el.style.cssText='position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:99994;'+
+      'background:#f59e0b;color:#1f2937;font-size:13px;font-weight:600;padding:7px 16px;'+
+      'border-radius:0 0 10px 10px;box-shadow:0 2px 10px rgba(0,0,0,0.35);pointer-events:none;'+
+      'max-width:92vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+    el.textContent='↻ Änderungen vom Handy liegen bereit – sie kommen an, sobald dieses Fenster zu ist';
+    document.body.appendChild(el);
+  }catch(e){console.warn('[b771] Hinweisband:',e);}
+}
 async function pollWorkboardFile(){
   if(!gdriveFileId||!gdriveTokenValid())return;
   try{
@@ -14072,10 +14092,13 @@ async function pollWorkboardFile(){
           _pamRemotePollPending=true;
           try{const ind=document.getElementById('fileMsg');if(ind)ind.textContent='↻ Änderungen vom Handy liegen vor…';}catch(e){}
         }
+        _pamHandyHinweis(true);   // b771: außerhalb des if – sonst käme das Band nach einem
+                                  // zwischenzeitlichen Ausblenden nicht wieder
         return;
       }
     }
     _pamRemotePollPending=false;
+    _pamHandyHinweis(false);   // b771: es wird jetzt geladen – das Band hat seinen Zweck erfüllt
     // Datei hat sich geändert — neu laden
     const r=await fetch('https://www.googleapis.com/drive/v3/files/'+gdriveFileId+'?alt=media&_='+Date.now(),
       {headers:{Authorization:'Bearer '+gdriveToken,'Cache-Control':'no-cache'},cache:'no-store'});
@@ -14173,6 +14196,30 @@ function _mergeListByKey(remoteList,localList,keyFn){
 function _mergeNotizen(remoteList,localList){
   // Union per ts+text, Reihenfolge: Remote-Zeitordnung, dann neue lokale ans Ende
   return _mergeListByKey(remoteList,localList,n=>((n.ts||'')+'|'+(n.text||'')));
+}
+// b771: Kennung eines Fotos – dieselbe Reihenfolge wie im Modal-Merge (Block 1).
+function _fotoKennung(f){return (f&&(f.id||f.driveId||f.path||f.name))||'';}
+// b771: Fotos beim Schreibkonflikt GERICHTET zusammenführen, ohne Wiedergänger.
+// Ausgangspunkt ist der lokale Stand – er trägt die eigenen Löschungen. Aus der fremden
+// Fassung kommt nur dazu, was beim letzten Abgleich noch gar nicht da war; das kann nur
+// ein Neuzugang des anderen Geräts sein. Ein hier gelöschtes Foto stand im Schnappschuss
+// und bleibt damit draußen – genau der Punkt, an dem die reine Vereinigung von Block 1
+// Gelöschtes zurückholen würde.
+// Befund Frank 23.08.2026: Vier Handy-Fotos verschwanden aus dem Auftrag, während sie in
+// Drive vollständig lagen. Block 2 (Task nicht im offenen Fenster) kannte bis hier nur
+// `dachplan` als Ausnahme – für `fotos` gewann die lokale Fassung vollständig.
+function _mergeFotosGerichtet(remoteList,localList,snapList){
+  const rem=Array.isArray(remoteList)?remoteList:[];
+  const loc=Array.isArray(localList)?localList:[];
+  const imSchnappschuss=new Set((Array.isArray(snapList)?snapList:[]).map(_fotoKennung).filter(Boolean));
+  const schonDa=new Set(loc.map(_fotoKennung).filter(Boolean));
+  const out=loc.slice();
+  for(const f of rem){
+    const k=_fotoKennung(f);
+    if(!k||schonDa.has(k)||imSchnappschuss.has(k))continue;
+    schonDa.add(k);out.push(f);
+  }
+  return out;
 }
 /* b722: Dachplan bei Schreib-Konflikten ZUSAMMENFÜHREN statt eine Seite komplett
    gewinnen zu lassen. Bis b721 stand `dachplan` auf keiner Merge-Liste – hatte der
@@ -14485,6 +14532,11 @@ async function gdriveSaveData() {
                            deckte das allein der zufällig veraltete Fingerabdruck (412).
                            Jetzt wie im offenen Fenster (b722): VEREINIGEN statt ersetzen. */
                         if(f==='dachplan'&&rt.dachplan){const _dpM=_dachplanKonfliktMerge(rt.dachplan,lt.dachplan);mt.dachplan=_dpM||lt.dachplan;}
+                        // b771 (Loch F, Befund Frank 23.08.): fotos wie dachplan behandeln.
+                        // „Lokal gewinnt komplett" warf hier gleichzeitig entstandene
+                        // Handy-Fotos weg, sobald am PC an der Liste etwas anders war.
+                        // Gerichtet statt vereinigt: Gelöschtes kommt trotzdem nicht zurück.
+                        else if(f==='fotos'){mt.fotos=_mergeFotosGerichtet(rt.fotos,lt.fotos,_snapObj.fotos);}
                         else mt[f]=lt[f];
                       }
                     }
@@ -39287,6 +39339,7 @@ function closeModal(){
   // NUR wenn hier nichts gespeichert wurde – sonst übernimmt der Konflikt-Merge in
   // gdriveSaveData() das Zusammenführen (sofortiges Neuladen würde die gerade
   // gespeicherten Modal-Änderungen aus boards[] überschreiben, bevor der Save läuft).
+  _pamHandyHinweis(false);   // b771: Fenster ist zu – ab hier greift wieder das normale Nachladen
   if(_pamRemotePollPending&&!_didSave){
     setTimeout(()=>{try{pollWorkboardFile();}catch(e){console.warn('[PAM]',e);}},300);
   }
@@ -39487,7 +39540,11 @@ function _applyStammblattPrefill(){
       agtel:    sp.get('agtel')    ||'',
       agemail:  sp.get('agemail')  ||'',
       titel:    sp.get('titel')    ||'',
-      kurzform: sp.get('kurzform') ||''
+      kurzform: sp.get('kurzform') ||'',
+      // b771: Rechnungsanschrift, mehrzeilig (%0D%0A). Die VBS ermittelt sie seit b759
+      // ohnehin für die Auftragsakte – bis hier schickte sie sie nur nicht mit, und
+      // dieser Weg liest die Akte gar nicht. Ergebnis: bei 112 Aufträgen war das Feld leer.
+      ra:       sp.get('ra')       ||''
     };
     localStorage.setItem('pam_vbs_new_auftrag',JSON.stringify(data));
     window._pamVbsStartTyp='auftrag'; // b639: Merker für die Fenster-Übergabe weiter unten
@@ -40330,7 +40387,7 @@ function _openVbsNewTask(data){
   // wörtlich als "(noch offen)" mit – daraus entstanden Kontakte namens "(noch offen)"
   // (Mieter/HV-Ansprechpartner) und vorbefüllte Felder mit Platzhaltertext.
   const _nv=function(v){v=(v||'').trim();return v.toLowerCase()==='(noch offen)'?'':v;};
-  ['hv','ks','str','ort','mieter','miet_tel','miet_email','datum','repnr','kdnr','schaden','bauobj','kuerzel','agname','agtel','agemail','titel','kurzform'].forEach(function(k){data[k]=_nv(data[k]);});
+  ['hv','ks','str','ort','mieter','miet_tel','miet_email','datum','repnr','kdnr','schaden','bauobj','kuerzel','agname','agtel','agemail','titel','kurzform','ra'].forEach(function(k){data[k]=_nv(data[k]);});
   openNewTaskModal();
   setTimeout(function(){
     // Titel: fertig aus VBS übernehmen – ist er leer (alles "(noch offen)"), trägt der
@@ -40343,6 +40400,11 @@ function _openVbsNewTask(data){
     // Stammdaten
     const tHV=document.getElementById('tHV');if(tHV)tHV.value=hvClean2;
     const tAdr=document.getElementById('tAdr');if(tAdr)tAdr.value=[data.str,data.ort].filter(Boolean).join(', '); // b560: kein ", Erfurt" mehr bei leerer Straße
+    // b771: Rechnungsanschrift aus der VBS-Adresse. _raAusImport füllt nur ein LEERES
+    // Feld und rührt von Hand Geändertes nicht an – hier ist der Task ohnehin neu.
+    if(data.ra&&typeof _raAusImport==='function'){
+      try{_raAusImport(data.ra);}catch(e){console.warn('[b771] Rechnungsanschrift:',e);}
+    }
     const tSch=document.getElementById('tSch');if(tSch)tSch.value=data.schaden;
     // Beschreibung & Anweisungen – voller Schadentext
     const tDesc=document.getElementById('taskDescInput');if(tDesc&&data.schaden)tDesc.value=data.schaden;
