@@ -8331,6 +8331,8 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
               <button onclick="_dokSyncOrdner()" title="Dokumente-Ordner samt Unterordnern abgleichen – trägt automatisch alles Neue nach" style="padding:4px 9px;border-radius:6px;border:0.5px solid #34a853;background:rgba(52,168,83,0.10);color:#2b8a45;font-size:calc(11px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;">🔄 Aktualisieren</button>
               <button onclick="_scanDriveIntoTask('tDokOrdner','anhang')" title="Dateien selbst aussuchen – auch aus anderen Drive-Ordnern" style="padding:4px 9px;border-radius:6px;border:0.5px solid var(--border);background:var(--bg3);color:var(--text2);font-size:calc(11px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;">📂 Durchsuchen</button>
               <button onclick="_openPamDokUebersicht()" style="padding:4px 9px;border-radius:6px;border:0.5px solid var(--border);background:var(--bg3);color:var(--text2);font-size:calc(11px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;">⛶ Alle Dokumente</button>
+              <!-- b774: Pfad am Rechner – zum Öffnen und Zurückspeichern in Word ohne Umweg -->
+              <button onclick="_pamDokPfadKopieren()" title="Windows-Pfad dieses Ordners kopieren – Datei in Word öffnen, mit Strg+S speichern, Drive lädt selbst hoch" style="padding:4px 9px;border-radius:6px;border:0.5px solid var(--border);background:var(--bg3);color:var(--text2);font-size:calc(11px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;">📁 Pfad</button>
               <span style="flex:1;"></span>
               <button onclick="_openSectPopup('tAnhangSect')" title="Anhänge-Fenster öffnen" style="padding:4px 8px;border-radius:6px;border:0.5px solid var(--border);background:var(--bg3);color:var(--text2);font-size:calc(11px * var(--modal-scale,1));cursor:pointer;line-height:1;">📎</button>
               <button class="baustelle-only" onclick="_openSectPopup('tPruefSect')" title="Formulare / Prüfvorlagen öffnen" style="padding:4px 8px;border-radius:6px;border:0.5px solid var(--border);background:var(--bg3);color:var(--text2);font-size:calc(11px * var(--modal-scale,1));cursor:pointer;line-height:1;">📋<span id="tPruefCount" style="display:none;margin-left:3px;color:var(--accent);font-weight:700;"></span><span id="tPruefTitle" style="display:none;"></span></button><!-- b559: Zähler-Element war beim Auflösen der rechten Karte (b553) verlorengegangen; b572: nur noch versteckter Anker für die bestehenden JS-Aufrufe -->
@@ -9451,7 +9453,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-23 · #773'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-23-b773) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-24 · #774'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-24-b774) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -26813,7 +26815,7 @@ function _fsMenueAuf(f,anker){
     +'<div class="fs-form"><button type="button" id="_fsFormBild">Als Bild</button>'
     +'<button type="button" id="_fsFormPdf">Als PDF</button></div>'
     +'<label class="fs-txt"><input type="checkbox" id="_fsChkTxt"> Beschreibung mitschicken</label>'
-    +'<button type="button" class="fs-weg" id="_fsWegMail">📧 Per Mail senden</button>'
+    +'<button type="button" class="fs-weg" id="_fsWegMail">📧 Als Entwurf in Outlook</button>'
     +'<button type="button" class="fs-weg" id="_fsWegTeilen">📤 Weitergeben (WhatsApp …)</button>'
     +'<button type="button" class="fs-weg" id="_fsWegKopie">📋 Kopieren</button>'
     +'<button type="button" class="fs-weg" id="_fsWegDl">⬇ Herunterladen</button>'
@@ -26953,24 +26955,23 @@ async function _fsMail(blob,name){
   });
   if(!wahl){showToast('Senden abgebrochen – es wurde nichts verschickt','info',3000);return;}
   const token=(typeof msToken!=='undefined'&&msToken)||(typeof msToken2!=='undefined'&&msToken2)||null;
+  let _grund='Outlook ist nicht verbunden';
   if(token){
     try{
+      showToast('📧 Entwurf wird angelegt…','info',3000);
       const b64=_fsB64(await blob.arrayBuffer());
-      const koerper={message:{
-        subject:wahl.subj,
-        body:{contentType:'Text',content:wahl.body||''},
-        toRecipients:wahl.to?[{emailAddress:{address:wahl.to}}]:[],
-        attachments:[{'@odata.type':'#microsoft.graph.fileAttachment',name:name,
-          contentType:blob.type||'application/octet-stream',contentBytes:b64}]
-      },saveToSentItems:true};
-      const r=await fetch('https://graph.microsoft.com/v1.0/me/sendMail',
-        {method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(koerper)});
-      if(r.ok||r.status===202){showToast('✓ Mail mit '+name+' versendet','success',5000);return;}
-      console.warn('[FotoSenden] Graph HTTP',r.status);
-    }catch(e){console.warn('[FotoSenden] Graph-Fehler:',e);}
+      const erg=await _pamOutlookEntwurf(token,{to:wahl.to,subj:wahl.subj,body:wahl.body,
+        anhaenge:[{name:name,contentType:blob.type||'application/octet-stream',contentBytes:b64}]});
+      if(!erg.fehl.length){
+        _pamShowDraftToast(erg.link,'✅ Entwurf mit '+name+' liegt in Outlook unter <b>Entwürfe</b>');
+        showToast('✓ Entwurf angelegt – es wurde nichts verschickt','success',6000);
+        return;
+      }
+      _grund='Der Anhang ging nicht an den Entwurf: '+erg.fehl.join(', ');
+    }catch(e){console.warn('[FotoSenden] Entwurf:',e);_grund=(e&&e.message)||'Entwurf nicht möglich';}
   }
-  // Ohne Outlook-Verbindung: Datei speichern, Mailfenster öffnen. Der Anhang
-  // muss dort von Hand dran – das wird auch so gesagt, statt still zu scheitern.
+  // Notweg: Datei speichern, Mailfenster öffnen. Der Anhang muss dort von Hand dran –
+  // b774: der Grund wird jetzt genannt, vorher stand da immer „ohne Outlook-Verbindung".
   try{
     const u=URL.createObjectURL(blob);
     const a=document.createElement('a');a.href=u;a.download=name;
@@ -26979,7 +26980,7 @@ async function _fsMail(blob,name){
   }catch(e){console.warn('[FotoSenden] Download:',e);}
   window.open('mailto:'+encodeURIComponent(wahl.to)+'?subject='+encodeURIComponent(wahl.subj)
     +'&body='+encodeURIComponent(wahl.body||''),'_blank');
-  showToast('Ohne Outlook-Verbindung: '+name+' wurde gespeichert – bitte im Mailfenster anhängen','warning',8000);
+  showToast('⚠ '+_grund+' – '+name+' wurde gespeichert, bitte im Mailfenster anhängen','warning',10000);
 }
 
 async function createPdfFromSelected(){
@@ -27654,7 +27655,7 @@ function _openPdfSendenModus(taskId){
   btnPdf.style.cssText='padding:9px 15px;border-radius:8px;background:var(--accent);color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer;';
   btnPdf.onclick=()=>_pdfSendenCreate(t,false);
   const btnSend=document.createElement('button');btnSend.type='button';
-  btnSend.textContent='📧 Erstellen & senden';
+  btnSend.textContent='📧 Als Entwurf in Outlook'; // b774: es geht nichts mehr direkt raus
   btnSend.style.cssText='padding:9px 15px;border-radius:8px;background:#185FA5;color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer;';
   btnSend.onclick=()=>_pdfSendenCreate(t,true);
   const btnCancel=document.createElement('button');btnCancel.type='button';
@@ -27920,8 +27921,8 @@ function _pdfSendenDialog(vorgabe){
     bx.style.cssText='background:var(--bg2);border-radius:14px;padding:18px 20px;width:min(560px,94vw);max-height:90vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,.5);';
     const inp='width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;padding:8px 10px;outline:none;';
     const lbl='display:block;font-size:11px;font-weight:700;color:var(--text2);margin:10px 0 4px;';
-    bx.innerHTML='<div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:4px;">📧 Unterlagen senden</div>'
-      +'<div style="font-size:12px;color:var(--text2);">Vor dem Absenden prüfen – die Mail geht direkt raus.</div>'
+    bx.innerHTML='<div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:4px;">📧 Entwurf für Outlook</div>'
+      +'<div style="font-size:12px;color:var(--text2);">PAM legt die Mail mit Anhang in <b>Entwürfe</b> ab. Abgeschickt wird sie erst von dir in Outlook.</div>'
       +'<label style="'+lbl+'">Empfänger</label><input type="text" id="_psdTo" value="'+esc(vorgabe.to)+'" placeholder="name@firma.de" style="'+inp+'">'
       +(vorgabe.vorschlaege&&vorgabe.vorschlaege.length>1
         ?'<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:5px;">'+vorgabe.vorschlaege.map(function(v){
@@ -27933,7 +27934,7 @@ function _pdfSendenDialog(vorgabe){
         +vorgabe.anhaenge.map(function(n){return '📎 '+esc(n);}).join('<br>')+'</div>'
       +'<div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;">'
       +'<button type="button" id="_psdAb" style="padding:9px 14px;border-radius:8px;background:var(--bg3);color:var(--text2);border:1px solid var(--border);font-size:13px;cursor:pointer;">Abbrechen</button>'
-      +'<button type="button" id="_psdOk" style="padding:9px 18px;border-radius:8px;background:#185FA5;color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer;">Senden</button></div>';
+      +'<button type="button" id="_psdOk" style="padding:9px 18px;border-radius:8px;background:#185FA5;color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer;">Entwurf anlegen</button></div>';
     ov.appendChild(bx);document.body.appendChild(ov);
     const schliessen=function(erg){ov.remove();fertig(erg);};
     bx.querySelectorAll('[data-psdmail]').forEach(function(b){
@@ -27950,7 +27951,7 @@ function _pdfSendenDialog(vorgabe){
   });
 }
 async function _pdfSendenMail(bytes,fname,t,extraAnhänge,vorgabeMail){
-  const b64=btoa(Array.from(new Uint8Array(bytes),b=>String.fromCharCode(b)).join(''));
+  const b64=_fsB64(bytes); // b774: stückweise – die alte Zeile baute erst einen Riesen-String
   const kontakte=(t.kontakte||[]);
   // b593: Empfänger, Betreff und Text erst bestätigen lassen
   const wahl=await _pdfSendenDialog({
@@ -27965,6 +27966,7 @@ async function _pdfSendenMail(bytes,fname,t,extraAnhänge,vorgabeMail){
   const toAddr=wahl.to;
   const subj=wahl.subj;
   const token=msToken||msToken2||null;
+  let _grund='Outlook ist nicht verbunden';
   if(token){
     try{
       // Hauptanhang: generiertes PDF
@@ -27981,7 +27983,7 @@ async function _pdfSendenMail(bytes,fname,t,extraAnhänge,vorgabeMail){
             if(!r.ok){console.warn('[PdfSenden] Drive-Download fehlgeschlagen:',anh.name,r.status);_fehlen.push(anh.name||'Anhang');continue;}
             const blob=await r.blob();
             const ab=await blob.arrayBuffer();
-            const ab64=btoa(Array.from(new Uint8Array(ab),b=>String.fromCharCode(b)).join(''));
+            const ab64=_fsB64(ab); // b774: stückweise – die alte Zeile baute erst einen Riesen-String
             const mime=blob.type||'application/octet-stream';
             attachments.push({'@odata.type':'#microsoft.graph.fileAttachment',name:anh.name,contentType:mime,contentBytes:ab64});
           }catch(e){console.warn('[PdfSenden] Anhang-Fehler:',anh.name,e);_fehlen.push(anh.name||'Anhang');}
@@ -27989,23 +27991,24 @@ async function _pdfSendenMail(bytes,fname,t,extraAnhänge,vorgabeMail){
       }else if(extraAnhänge&&extraAnhänge.length){
         (extraAnhänge||[]).forEach(function(a){_fehlen.push(a&&a.name?a.name:String(a));}); // Drive nicht verbunden
       }
-      const body={message:{subject:subj,body:{contentType:'Text',content:wahl.body||''},
-        toRecipients:toAddr?[{emailAddress:{address:toAddr}}]:[],
-        attachments:attachments
-      },saveToSentItems:true};
-      const r=await fetch('https://graph.microsoft.com/v1.0/me/sendMail',
-        {method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body)});
-      if(r.ok||r.status===202){
-        const extra=attachments.length>1?' + '+( attachments.length-1)+' Dokument(e)':'';
-        showToast('✓ Mail mit PDF'+extra+' versendet!','success',5000);
+      // b774: Entwurf statt Direktversand – siehe _pamOutlookEntwurf. Der Versand hier
+      // konnte nie klappen (Mail.Send fehlt im Token), er fiel nur still auf mailto zurück.
+      showToast('📧 Entwurf wird angelegt…','info',4000);
+      const erg=await _pamOutlookEntwurf(token,{to:toAddr,subj:subj,body:wahl.body,anhaenge:attachments});
+      _fehlen.push.apply(_fehlen,erg.fehl);
+      if(_fehlen.length<attachments.length){
+        const dran=attachments.length-erg.fehl.length;
+        _pamShowDraftToast(erg.link,'✅ Entwurf mit '+dran+' Anlage'+(dran!==1?'n':'')+' liegt in Outlook unter <b>Entwürfe</b>');
+        showToast('✓ Entwurf angelegt – es wurde nichts verschickt','success',6000);
         // b593: nie still schlucken – was der Dialog versprochen hat, aber nicht mitging
-        if(_fehlen.length)showToast('⚠ NICHT mitgeschickt: '+_fehlen.join(', ')+' – bitte von Hand nachreichen','warning',10000);
+        if(_fehlen.length)showToast('⚠ NICHT am Entwurf: '+_fehlen.join(', ')+' – bitte von Hand nachreichen','warning',10000);
         return;
       }
-      console.warn('[PdfSenden] Graph HTTP',r.status);
-    }catch(e){console.warn('[PdfSenden] Graph-Fehler:',e);}
+      _grund='Kein Anhang ging an den Entwurf: '+_fehlen.join(', ');
+    }catch(e){console.warn('[PdfSenden] Entwurf:',e);_grund=(e&&e.message)||'Entwurf nicht möglich';}
   }
-  // Fallback ohne Outlook-Verbindung: Datei herunterladen + Mailfenster mit Text öffnen
+  // Notweg: Datei herunterladen + Mailfenster mit Text öffnen. b774: mit Grund –
+  // vorher stand hier eine Meldung, die den Anschein erweckte, es liege an der Bedienung.
   try{
     const a=document.createElement('a');
     a.href=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));
@@ -28013,7 +28016,7 @@ async function _pdfSendenMail(bytes,fname,t,extraAnhänge,vorgabeMail){
   }catch(e){console.warn('[PdfSenden] Download:',e);}
   const mailto='mailto:'+encodeURIComponent(toAddr)+'?subject='+encodeURIComponent(subj)+'&body='+encodeURIComponent(wahl.body||'');
   window.open(mailto,'_blank');
-  showToast('Dokument heruntergeladen – bitte im Mailfenster als Anhang hinzufügen','warning',7000);
+  showToast('⚠ '+_grund+' – '+fname+' wurde gespeichert, bitte im Mailfenster anhängen','warning',10000);
 }
 
 let _currentFotoLbIdx=-1;
@@ -29314,6 +29317,75 @@ function _dfbSearchNavInto(id,name){
   _dfbLoad(id,name);
 }
 
+// b774: Windows-Pfad zum Drive-Ordner ermitteln und in die Zwischenablage legen. Damit
+// lässt sich die Fotodokumentation in Word öffnen und mit Strg+S zurückspeichern – ohne
+// Herunterladen und Hochladen, es bleibt dieselbe Drive-Datei. Setzt „Google Drive für
+// Desktop" auf G: voraus; in einer Geteilten Ablage stimmt der obere Teil des Pfades nicht,
+// darauf wird hingewiesen statt still etwas Falsches zu liefern.
+const _PAM_DRIVE_LW='G:\\Meine Ablage';
+async function _pamDrivePfad(ordnerId){
+  if(typeof gdriveToken==='undefined'||!gdriveToken)throw new Error('Drive ist nicht verbunden');
+  const teile=[];let id=ordnerId,tiefe=0,geteilt=false;
+  while(id&&tiefe++<12){
+    const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(id)
+      +'?fields=name,parents,driveId&supportsAllDrives=true',{headers:{Authorization:'Bearer '+gdriveToken}});
+    if(!r.ok)throw new Error('Drive-Ordner nicht lesbar (HTTP '+r.status+')');
+    const d=await r.json();
+    if(d.driveId)geteilt=true;
+    teile.unshift(d.name||'');
+    const oben=(d.parents&&d.parents[0])||'';
+    if(!oben)break;
+    id=oben;
+  }
+  // Die oberste Ebene ist der Laufwerksname selbst („Meine Ablage" heißt in Drive „My Drive")
+  if(teile.length&&/^(my drive|meine ablage)$/i.test(teile[0]))teile.shift();
+  return {pfad:_PAM_DRIVE_LW+(teile.length?'\\'+teile.join('\\'):''),geteilt:geteilt};
+}
+async function _pamDokPfadKopieren(){
+  const gid=s=>(typeof _extractFolderIdFromUrl==='function')?_extractFolderIdFromUrl(((document.getElementById(s)||{}).value)||''):'';
+  const fid=gid('tDokOrdner')||gid('tGDOrdner');
+  if(!fid){showToast('⚠ Am Auftrag ist kein Dokumente- oder Projektordner hinterlegt','warning',5000);return;}
+  try{
+    showToast('⏳ Pfad wird ermittelt…','info',3000);
+    const erg=await _pamDrivePfad(fid);
+    let kopiert=false;
+    try{await navigator.clipboard.writeText(erg.pfad);kopiert=true;}catch(e){console.warn('[Pfad] Zwischenablage:',e);}
+    _pamPfadFenster(erg.pfad,kopiert,erg.geteilt);
+  }catch(e){
+    console.warn('[Pfad]',e);
+    showToast('⚠ '+((e&&e.message)||'Pfad nicht ermittelbar'),'error',7000);
+  }
+}
+// Der Pfad wird immer auch angezeigt – ohne Fenster stünde bei gesperrter Zwischenablage
+// gar nichts da, und zum Nachlesen taugt ein Toast nicht.
+function _pamPfadFenster(pfad,kopiert,geteilt){
+  const alt=document.getElementById('_pamPfadOv');if(alt)alt.remove();
+  const ov=document.createElement('div');ov.id='_pamPfadOv';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000003;display:flex;align-items:center;justify-content:center;';
+  const bx=document.createElement('div');
+  bx.style.cssText='background:var(--bg2);border-radius:12px;padding:18px 20px;width:min(620px,94vw);box-shadow:0 8px 40px rgba(0,0,0,.5);color:var(--text);';
+  const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  bx.innerHTML='<div style="font-size:15px;font-weight:700;margin-bottom:6px;">📁 Ordner am Rechner</div>'
+    +'<div style="font-size:12px;color:var(--text2);margin-bottom:10px;">'
+      +(kopiert?'Der Pfad liegt in der Zwischenablage. In Word <b>Datei → Öffnen</b> oder im Explorer oben in die Adresszeile einfügen (Strg+V) und Enter.'
+               :'Die Zwischenablage ließ sich nicht beschreiben – Pfad bitte von Hand markieren und kopieren.')
+    +'</div>'
+    +'<input type="text" id="_pamPfadFeld" readonly value="'+esc(pfad)+'" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;padding:9px 10px;font-family:monospace;">'
+    +(geteilt?'<div style="font-size:12px;color:#b45309;margin-top:8px;">⚠ Dieser Ordner liegt in einer <b>Geteilten Ablage</b>. Dort beginnt der Pfad am Rechner mit <b>G:\\Geteilte Ablagen\\…</b> – der obere Teil oben stimmt dann nicht.</div>':'')
+    +'<div style="font-size:11px;color:var(--text2);margin-top:8px;">In Word bearbeiten und mit <b>Strg+S</b> speichern – Drive lädt die Datei von selbst wieder hoch. Es bleibt dieselbe Datei, nichts muss zurückgespeichert werden.</div>'
+    +'<div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;">'
+    +'<button type="button" id="_pamPfadKop" style="padding:8px 14px;border-radius:8px;background:var(--bg3);color:var(--text);border:1px solid var(--border);font-size:13px;cursor:pointer;">📋 Nochmal kopieren</button>'
+    +'<button type="button" id="_pamPfadZu" style="padding:8px 16px;border-radius:8px;background:#185FA5;color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer;">Schließen</button></div>';
+  ov.appendChild(bx);document.body.appendChild(ov);
+  const feld=bx.querySelector('#_pamPfadFeld');
+  bx.querySelector('#_pamPfadKop').onclick=function(){
+    try{feld.select();feld.setSelectionRange(0,9999);}catch(e){}
+    try{navigator.clipboard.writeText(pfad);showToast('✓ Pfad kopiert','success',2500);}catch(e){}
+  };
+  bx.querySelector('#_pamPfadZu').onclick=function(){ov.remove();};
+  ov.addEventListener('click',function(e){if(e.target===ov)ov.remove();});
+  setTimeout(function(){try{feld.select();}catch(e){}},60);
+}
 function _extractFolderIdFromUrl(url){
   if(!url)return null;
   const m=String(url).match(/\/folders\/([a-zA-Z0-9_-]+)/);
@@ -30821,13 +30893,44 @@ async function _msTPSelectMail(taskId,idx){
 }
 
 // ─────────────────────────────────────────────────────────────────
+// b774: Entwurf in Outlook anlegen statt sofort zu senden. Der Versand über
+// /me/sendMail scheiterte immer still – dafür bräuchte das Token Mail.Send, und das
+// steht nicht in MS_SCOPES. Ein Entwurf kommt mit Mail.ReadWrite aus, das ist da.
+// Frank will die Mail ohnehin vor dem Abschicken lesen (24.08.2026).
+// Rückgabe {id,link,fehl}: fehl = Namen der Anhänge, die nicht drangingen.
+const _PAM_ANH_MAX=3*1024*1024;
+async function _pamOutlookEntwurf(token,opt){
+  const H={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
+  const r1=await fetch('https://graph.microsoft.com/v1.0/me/messages',{method:'POST',headers:H,
+    body:JSON.stringify({subject:opt.subj||'',body:{contentType:'Text',content:opt.body||''},
+      toRecipients:opt.to?[{emailAddress:{address:opt.to}}]:[]})});
+  if(!r1.ok)throw new Error('Entwurf anlegen HTTP '+r1.status);
+  const draft=await r1.json();
+  const ziel='https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(draft.id)+'/attachments';
+  const fehl=[];
+  for(const a of (opt.anhaenge||[])){
+    const nm=(a&&a.name)||'Anhang';
+    try{
+      // Graph nimmt je Anhang rund 3 MB. Größeres ginge nur über eine Upload-Sitzung,
+      // deren Adresse auf outlook.office.com zeigt – das lässt die CSP nicht durch, und
+      // die wird nicht aufgeweicht. Zu Großes wird gemeldet, nicht still verschluckt.
+      const gr=Math.floor(String(a.contentBytes||'').length*3/4);
+      if(gr>_PAM_ANH_MAX){fehl.push(nm+' ('+(gr/1048576).toFixed(1)+' MB)');continue;}
+      const r=await fetch(ziel,{method:'POST',headers:H,
+        body:JSON.stringify(Object.assign({'@odata.type':'#microsoft.graph.fileAttachment'},a))});
+      if(!r.ok){console.warn('[Entwurf] Anhang HTTP',r.status,nm);fehl.push(nm);}
+    }catch(e){console.warn('[Entwurf] Anhang:',nm,e);fehl.push(nm);}
+  }
+  return {id:draft.id,link:draft.webLink||('https://outlook.office.com/mail/drafts/id/'+draft.id),fehl:fehl};
+}
 // Fix #372: Nach createReply NICHT mehr automatisch Outlook Web öffnen (Wunsch Frank:
 // Option 3). Stattdessen anklickbarer Toast – Klick öffnet den Entwurf im Web,
 // ohne Klick liegt er im lokalen Outlook unter "Entwürfe" (synct automatisch).
-function _pamShowDraftToast(link){
+// b774: zweiter Parameter ist freiwillig – ohne ihn bleibt der bisherige Text stehen.
+function _pamShowDraftToast(link,txt){
   const d=document.createElement('div');
   d.style.cssText='position:fixed;bottom:24px;right:24px;background:#185FA5;color:#fff;padding:12px 18px;border-radius:8px;font-size:13px;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,.3);cursor:pointer;display:flex;align-items:center;gap:10px;';
-  d.innerHTML='<span>✅ Entwurf liegt in Outlook unter <b>Entwürfe</b></span>'
+  d.innerHTML='<span>'+(txt||'✅ Entwurf liegt in Outlook unter <b>Entwürfe</b>')+'</span>'
     +'<span style="background:rgba(255,255,255,.2);padding:3px 10px;border-radius:5px;font-weight:700;white-space:nowrap;">🌐 Im Web öffnen</span>';
   d.onclick=function(){try{window.open(link,'_blank');}catch(e){}d.remove();};
   document.body.appendChild(d);
@@ -47438,7 +47541,8 @@ async function _fdkFotoBytes(driveId,kasten){
   try{
     const u=await _fetchDesktopFotoBlob(driveId);if(!u)return null;
     const k=await _fdkVerkleinern(u,1600,0.85,!!kasten);if(!k||!k.dataUrl)return null;
-    return {bytes:_fdkDataUrlBytes(k.dataUrl),w:k.w,h:k.h,name:'Foto'};
+    // b774: dataUrl bleibt dran – der PDF-Weg braucht sie, Word nimmt weiter bytes.
+    return {bytes:_fdkDataUrlBytes(k.dataUrl),dataUrl:k.dataUrl,w:k.w,h:k.h,name:'Foto'};
   }catch(e){console.warn('[FDK] Foto:',driveId,e);return null;}
 }
 /* Dachplan-Übersicht: Basisbild + Nummern-Kreise an den Prozent-Positionen der Pins
@@ -47453,7 +47557,7 @@ async function _fdkPlanBild(t){
       const uo=await _fetchDesktopFotoBlob(dp.ovDriveId);if(!uo)return null;
       const ko=await _fdkVerkleinern(uo,1600,0.85,false);
       if(!ko||!ko.dataUrl)return null;
-      return {bytes:_fdkDataUrlBytes(ko.dataUrl),w:ko.w,h:ko.h,name:'Dachplan'};
+      return {bytes:_fdkDataUrlBytes(ko.dataUrl),dataUrl:ko.dataUrl,w:ko.w,h:ko.h,name:'Dachplan'};
     }
     const u=await _fetchDesktopFotoBlob(dp.imgDriveId);if(!u)return null;
     const im=await new Promise(res=>{const x=new Image();x.onload=()=>res(x);x.onerror=()=>res(null);x.src=u;});
@@ -47470,7 +47574,8 @@ async function _fdkPlanBild(t){
       g.fillStyle='#fff';g.font='bold '+Math.round(rad*1.1)+'px Arial';g.textAlign='center';g.textBaseline='middle';
       g.fillText(String(p.nr||'?'),x,y+1);
     });
-    return {bytes:_fdkDataUrlBytes(c.toDataURL('image/jpeg',0.85)),w:c.width,h:c.height,name:'Dachplan'};
+    const _du=c.toDataURL('image/jpeg',0.85);
+    return {bytes:_fdkDataUrlBytes(_du),dataUrl:_du,w:c.width,h:c.height,name:'Dachplan'};
   }catch(e){console.warn('[FDK] Plan:',e);return null;}
 }
 
@@ -47564,7 +47669,7 @@ function _fdkOeffnen(){
   const bx=document.createElement('div');
   bx.style.cssText='background:var(--bg2);border-radius:14px;padding:16px 18px;width:min(1400px,97vw);height:min(92vh,860px);display:flex;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,.5);color:var(--text);';
   bx.innerHTML='<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">'
-      +'<div style="font-size:15px;font-weight:700;">📚 Fotodokumentation (Word)</div>'
+      +'<div style="font-size:15px;font-weight:700;">📚 Fotodokumentation (Word / PDF)</div>'
       +'<div style="font-size:12px;color:var(--text2);">'+esc(t.title||'')+'</div>'
       +'<button type="button" class="fdk-btn" style="margin-left:auto;padding:5px 10px;" onclick="_fdkSchliessen()">✕ Schließen</button></div>'
     +'<div class="fdk-tipp">Links der Vorrat, rechts das Dokument: Foto nach rechts ziehen (oder Doppelklick) = kommt ins Word · rechts ziehen = Reihenfolge · ✕ = wieder raus · Klick = Vorschau · ✏️ an der Kachel = malen und beschriften ·Bilder aus dem Explorer auf eine Fläche ziehen = hochladen (rechts: gleich ins Dokument)</div>'
@@ -47608,6 +47713,9 @@ function _fdkOeffnen(){
       +'<span id="fdkZaehler" style="font-size:12px;color:var(--text2);"></span>'
       +'<span id="fdkStatus" style="font-size:12px;color:var(--text);flex:1;min-width:200px;"></span>'
       +'<button type="button" class="fdk-btn" id="fdkDownload" style="display:none;" onclick="_fdkHerunterladen()">💾 Herunterladen</button>'
+      // b774: dieselbe Auswahl, drei Ausgaben. PDF und Entwurf gehen nur ohne Startdokument.
+      +'<button type="button" class="fdk-btn" id="fdkPdf" onclick="_fdkErstellen(\'pdf\')" title="Fotoseiten als PDF – nur ohne Startdokument, der Word-Briefkopf lässt sich nicht in PDF verwandeln" disabled>📄 Als PDF</button>'
+      +'<button type="button" class="fdk-btn" id="fdkEntwurf" onclick="_fdkErstellen(\'entwurf\')" title="PDF bauen und als Entwurf in Outlook ablegen – abgeschickt wird nichts" disabled>📧 Als Entwurf in Outlook</button>'
       +'<button type="button" class="fdk-btn haupt" id="fdkErstellen" onclick="_fdkErstellen()" disabled>📚 Erstellen</button>'
     +'</div>';
   ov.appendChild(bx);document.body.appendChild(ov);
@@ -47641,6 +47749,8 @@ function _fdkZaehler(){
   const vt=document.getElementById('fdkVorratTitel');if(vt)vt.textContent='Vorrat ('+n+')';
   const dt=document.getElementById('fdkDokTitel');if(dt)dt.textContent='Dokument ('+m+')';
   const b=document.getElementById('fdkErstellen');if(b)b.disabled=!m;
+  // b774: PDF und Entwurf hängen an derselben Bedingung wie „Erstellen"
+  ['fdkPdf','fdkEntwurf'].forEach(function(id){const e=document.getElementById(id);if(e)e.disabled=!m;});
 }
 function _fdkSortiere(art){
   if(!_fdkState)return;
@@ -48191,16 +48301,28 @@ async function _fdkStartListeLaden(){
 }
 
 /* ── Erstellen: Startdokument holen → Bilder holen → Word bauen → ablegen ── */
-async function _fdkErstellen(){
+// b774: ziel = 'word' (wie bisher, Vorgabe) | 'pdf' | 'entwurf'. Gesammelt wird für alle
+// drei gleich; nur die Ausgabe unterscheidet sich.
+async function _fdkErstellen(ziel){
+  ziel=ziel||'word';
   const S=_fdkState;if(!S)return;
   const t=findTaskById(S.taskId);
   if(!t){showToast('Auftrag nicht gefunden','error');return;}
   const auswahl=_fdkAuswahl();
   if(!auswahl.length){showToast('Bitte mindestens ein Foto ins Dokument ziehen','warning');return;}
   const art=(document.querySelector('input[name="fdkStartArt"]:checked')||{}).value||'ohne';
+  // Der Briefkopf steckt in einer .docx – die kann ein Browser nicht in PDF-Seiten
+  // verwandeln. Lieber hier abbrechen als still etwas anderes bauen als angezeigt.
+  if(ziel!=='word'&&art!=='ohne'){
+    showToast('⚠ Mit Startdokument geht nur Word – der Briefkopf steckt in der .docx. Für PDF oben „ohne Startdokument" wählen (oder das Word in Word als PDF speichern).','warning',11000);
+    return;
+  }
+  if(ziel!=='word'&&!window.jspdf){showToast('PDF-Bibliothek nicht geladen','error',5000);return;}
   const btn=document.getElementById('fdkErstellen'),st=document.getElementById('fdkStatus'),dl=document.getElementById('fdkDownload');
   const sag=m=>{if(st)st.textContent=m;};
-  if(btn)btn.disabled=true;
+  // b774: alle drei Ausgabeknöpfe sperren, sonst lässt sich währenddessen nochmal drücken
+  const _knoepfe=['fdkErstellen','fdkPdf','fdkEntwurf'].map(function(id){return document.getElementById(id);}).filter(Boolean);
+  _knoepfe.forEach(function(e){e.disabled=true;});
   if(dl)dl.style.display='none';
   S.ergebnis=null;
   try{
@@ -48252,15 +48374,23 @@ async function _fdkErstellen(){
       Ortstermin:_fdkOrtsterminAusFotos(bilder)
     };
     const bau={startNr:startNr,proSeite:proSeite,platzhalter:true,felder:felder};
-    const bytes=await _fdkDocxBauen(startBuf,bilder,bau);
-    const fname=_fdkDateiname(t);
-    S.ergebnis={bytes:bytes,fname:fname};
+    // b774: derselbe Vorrat, dieselbe Reihenfolge – nur die Ausgabe unterscheidet sich.
+    let bytes,fname,mime;
+    if(ziel==='word'){
+      bytes=await _fdkDocxBauen(startBuf,bilder,bau);
+      fname=_fdkDateiname(t);mime=_FDK_MIME_DOCX;
+    }else{
+      sag('⏳ PDF wird gesetzt…');
+      bytes=_fdkPdfBauen(bilder,{proSeite:proSeite,startNr:startNr}).output('arraybuffer');
+      fname=_fdkDateiname(t).replace(/\.docx$/i,'.pdf');mime='application/pdf';
+    }
+    S.ergebnis={bytes:bytes,fname:fname,mime:mime};
     let ablage='';
     const wohin=(S.ordnerArt==='dokumente')?'Dokumente-Ordner':'Projektordner';
     if(S.ordnerId&&gdriveTokenValid()){
       sag('⏳ Ablage im '+wohin+'…');
       try{
-        await _driveUploadGeneric(bytes,fname,_FDK_MIME_DOCX,S.ordnerId);
+        await _driveUploadGeneric(bytes,fname,mime,S.ordnerId);
         ablage='✓ im '+wohin+' abgelegt'+(S.ordnerArt==='dokumente'?' – erscheint in der Dokumentliste':' (kein Dokumente-Ordner am Auftrag)');
         // b735: Dokumentliste nur auffrischen, wenn die Datei auch dort liegt
         if(S.ordnerArt==='dokumente'){try{if(typeof _dokSyncOrdner==='function')_dokSyncOrdner();}catch(e){}}
@@ -48272,15 +48402,74 @@ async function _fdkErstellen(){
     if(dl)dl.style.display='';
     showToast('📚 Fotodokumentation erstellt: '+fname,'success',5000);
     if(fehl.length)showToast('⚠ Nicht geladen: '+fehl.slice(0,5).join(', ')+(fehl.length>5?' …':''),'warning',8000);
+    // b774: Entwurf gleich hinterher – die Datei liegt schon fertig in S.ergebnis.
+    if(ziel==='entwurf')await _fdkEntwurf(t,bytes,fname,mime,sag);
   }catch(e){
     console.warn('[FDK]',e);
     sag('⚠ '+((e&&e.message)||e));
     showToast('⚠ '+((e&&e.message)||'Fehler beim Erstellen'),'error',7000);
-  }finally{if(btn)btn.disabled=false;}
+  }finally{_knoepfe.forEach(function(e){e.disabled=false;});}
+}
+// b774: Fotoseiten als PDF – dasselbe Raster wie im Word (2 oder 1 je Seite, „Abb. N:"
+// darunter). Die Bilder sind aus _fdkFotoBytes schon auf 1600 px gebracht, das PDF bleibt
+// dadurch klein genug für einen Mail-Anhang.
+function _fdkPdfBauen(bilder,opt){
+  const {jsPDF}=window.jspdf;
+  const doc=new jsPDF({orientation:'portrait',unit:'mm',format:[210,297]});
+  const RL=20,RO=20,BR=210-2*RL;
+  const proSeite=(opt&&opt.proSeite===1)?1:2;
+  const hBild=proSeite===1?232:112;
+  const hBlock=proSeite===1?245:124;
+  let nr=(opt&&opt.startNr)||1,platz=0;
+  for(const b of (bilder||[])){
+    if(!b||!b.dataUrl)continue;
+    if(platz>=proSeite){doc.addPage([210,297],'portrait');platz=0;}
+    const y0=RO+platz*hBlock;
+    const w0=b.w||1,h0=b.h||1;
+    const s=Math.min(BR/w0,hBild/h0);
+    const w=w0*s,h=h0*s;
+    doc.addImage(b.dataUrl,'JPEG',RL+(BR-w)/2,y0,w,h,'','FAST');
+    doc.setFontSize(9);doc.setFont('helvetica','normal');doc.setTextColor(60,60,60);
+    const txt='Abb. '+nr+':'+(b.text?(' '+b.text):'');
+    doc.text(doc.splitTextToSize(txt,BR).slice(0,2),RL,y0+h+5);
+    nr++;platz++;
+  }
+  return doc;
+}
+// b774: Entwurf in Outlook mit der eben gebauten Datei. Empfänger kommt aus demselben
+// Fenster wie überall sonst (_pdfSendenDialog), abgeschickt wird nichts.
+async function _fdkEntwurf(t,bytes,fname,mime,sag){
+  const token=(typeof msToken!=='undefined'&&msToken)||(typeof msToken2!=='undefined'&&msToken2)||null;
+  if(!token){showToast('⚠ Outlook ist nicht verbunden – oben in der Leiste auf 📨 Outlook klicken. Die Datei liegt im Ordner und unter „💾 Herunterladen".','warning',10000);return;}
+  const kontakte=(t.kontakte||[]).filter(function(k){return k.email;});
+  const wahl=await _pdfSendenDialog({
+    to:((kontakte[0]||{}).email)||'',
+    vorschlaege:kontakte.map(function(k){return {name:k.name||'',email:k.email};}),
+    subj:'Fotodokumentation',
+    body:'Sehr geehrte Damen und Herren,\n\nanbei die Fotodokumentation.\n\nMit freundlichen Grüßen\n',
+    anhaenge:[fname]
+  });
+  if(!wahl){showToast('Abgebrochen – es wurde kein Entwurf angelegt','info',3000);return;}
+  try{
+    if(sag)sag('⏳ Entwurf wird angelegt…');
+    const erg=await _pamOutlookEntwurf(token,{to:wahl.to,subj:wahl.subj,body:wahl.body,
+      anhaenge:[{name:fname,contentType:mime,contentBytes:_fsB64(bytes)}]});
+    if(erg.fehl.length){
+      showToast('⚠ Anhang ging nicht an den Entwurf: '+erg.fehl.join(', ')+' – bitte über „💾 Herunterladen" von Hand anhängen','warning',11000);
+      if(sag)sag('⚠ Entwurf ohne Anhang – bitte herunterladen und von Hand anhängen.');
+      return;
+    }
+    _pamShowDraftToast(erg.link,'✅ Entwurf mit '+fname+' liegt in Outlook unter <b>Entwürfe</b>');
+    showToast('✓ Entwurf angelegt – es wurde nichts verschickt','success',6000);
+    if(sag)sag('✓ Entwurf liegt in Outlook unter „Entwürfe".');
+  }catch(e){
+    console.warn('[FDK] Entwurf:',e);
+    showToast('⚠ Entwurf nicht möglich: '+((e&&e.message)||'')+' – bitte „💾 Herunterladen" nehmen','error',9000);
+  }
 }
 function _fdkHerunterladen(){
   const S=_fdkState;if(!S||!S.ergebnis)return;
-  const blob=new Blob([S.ergebnis.bytes],{type:_FDK_MIME_DOCX});
+  const blob=new Blob([S.ergebnis.bytes],{type:S.ergebnis.mime||_FDK_MIME_DOCX});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=S.ergebnis.fname;
   document.body.appendChild(a);a.click();a.remove();
   setTimeout(()=>URL.revokeObjectURL(a.href),5000);
