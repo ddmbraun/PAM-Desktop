@@ -9453,7 +9453,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-24 · #775'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-24-b775) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-24 · #776'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-24-b776) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -27181,10 +27181,30 @@ function _uebMehrZeigen(btn){
   wrap.querySelectorAll('[data-uebmehr]').forEach(function(el){el.style.display='contents';});
   btn.remove();
 }
+// b776: Die Verweis-Fotos des gerade gezeigten Auftrags – 🔁 Leistung, 🗺 Dachplan-Pin,
+// Wartungsprotokoll. Sie haben keinen Platz in t.fotos, ihre Häkchen heißen deshalb
+// `_pdfS_r_<n>` und n ist der Platz in dieser Liste. Wird bei jedem Öffnen neu gefüllt.
+// ⛔ Nur Leseware: hier steht nie etwas drin, das nach t.fotos zurückgeschrieben wird.
+let _uebRefFotos=[];
+// b776: Woher stammt dieses Verweis-Foto? Die drei Quellen tragen verschiedene Merkmale –
+// gemessen an _dpRefFotos (pinRef/pinNr/pinLbl), _wpRefFotos (wpRef/berichtTitel) und
+// _tuRefDateien (tuRef/leistung). ⛔ Die Namen nicht raten: `leistung` heißt NICHT
+// `leistungTitel`. Steht im PDF unter dem Bild, sonst weiß der Empfänger nicht, wo ein
+// Pin-Foto herkommt.
+function _uebRefHerkunft(f){
+  if(!f)return '';
+  // ⛔ nicht `f.pinNr||''` – bei Pin 0 fiele die Null durch das Oder heraus und es stünde
+  // „Dachplan-Pin" ohne Nummer da. Die Prüfung hat genau das abgefangen.
+  if(f.pinRef||(f.pinNr!=null&&f.pinNr!==''))return 'Dachplan-Pin '+String(f.pinNr!=null?f.pinNr:'')+(f.pinLbl?(' · '+f.pinLbl):'');
+  if(f.wpRef)return String(f.berichtTitel||'Wartungsprotokoll');
+  if(f.tuRef)return String(f.leistung||'');
+  return '';
+}
 function _openPdfSendenModus(taskId){
   const tid=taskId||(document.getElementById('taskId')||{}).value||'';
   const t=findTaskById(tid);
   if(!t){showToast('Task nicht gefunden','error');return;}
+  _uebRefFotos=[];
 
   const ov=document.createElement('div');
   ov.id='_pdfSendenOv';
@@ -27446,8 +27466,15 @@ function _openPdfSendenModus(taskId){
   // t.fotos – dadurch liefert _uebIdxVon für sie -1, und die Kachel erscheint (so
   // ist der Zweig gebaut) ohne Häkchen und ohne Titelbild-Knopf. Genau richtig:
   // bearbeitet wird an der Leistung.
+  // b776: Bis b775 kannte die Übersicht nur Auftragsfotos und 🔁 Leistungsfotos. Die
+  // Dachplan-Pin-Fotos und die Fotos aus dem Wartungsprotokoll fehlten ganz – dieselben
+  // vier Quellen, die die Fotodokumentation über _btbFotosFuerBericht sammelt.
+  // ⛔ Die Verweise werden NUR gelesen, nie nach t.fotos kopiert: das hatte schon einmal
+  // doppelte Karten erzeugt (v210). Sie bekommen deshalb unten eine eigene Auswahlspur.
   const _fotosB=((_isLive&&typeof taskFotos!=='undefined'&&taskFotos)?taskFotos:(t.fotos||[]))
-    .concat(_tuRefFuerTask(t).fotos);
+    .concat(_tuRefFuerTask(t).fotos)
+    .concat((typeof _dpRefFotos==='function')?_dpRefFotos(t):[])
+    .concat((typeof _wpRefFotos==='function')?_wpRefFotos(t):[]);
   // b589: die grauen ⚙-System-Zeilen (automatische Protokolle wie „Termin gemacht…",
   // „Aufgabe entfernt…") fliegen aus der Übersicht raus – Franks Notizen und Fotos bleiben
   // vollständig; im Auftrag sind die ⚙-Zeilen weiter über den ⚙-Chip erreichbar.
@@ -27473,11 +27500,25 @@ function _openPdfSendenModus(taskId){
       // (Bis b591 stand hier die Nummer aus der Live-Kopie; sobald die beiden Listen
       // auseinanderliefen, öffnete die Lightbox das falsche Bild.)
       const ti=_uebIdxVon(t.fotos||[],f);
-      const ky=ti>=0?_uebKey((t.fotos||[])[ti]):'';
-      const an=ti>=0&&_selF.has(ky);
-      const chk=ti>=0?('<input type="checkbox" id="_pdfS_f_'+ti+'" data-uebchk="f" data-uebkey="'+_e(ky)+'"'+(an?' checked':'')+' title="Für PDF/Drucken auswählen" style="position:absolute;top:3px;left:3px;z-index:3;'+_CHK+'">'):'';
+      // b776: Verweis-Fotos (🔁 Leistung, 🗺 Dachplan-Pin, Wartungsprotokoll) haben keinen
+      // Platz in t.fotos – bis b775 blieben sie deshalb ohne Häkchen: sichtbar, aber nicht
+      // mitschickbar. Sie bekommen jetzt eine eigene Spur `_pdfS_r_<n>` über _uebRefFotos.
+      // Das Merken, „Alle"/„Keine" und der Zähler laufen unverändert über data-uebchk.
+      let rn=-1;
+      if(ti<0&&f&&f.driveId){
+        rn=_uebRefFotos.findIndex(function(x){return String(x.driveId)===String(f.driveId);});
+        if(rn<0){rn=_uebRefFotos.length;_uebRefFotos.push(f);}
+      }
+      const ky=ti>=0?_uebKey((t.fotos||[])[ti]):(rn>=0?_uebKey(f):'');
+      const an=!!ky&&_selF.has(ky);
+      const chk=(ti>=0||rn>=0)
+        ?('<input type="checkbox" id="_pdfS_'+(ti>=0?('f_'+ti):('r_'+rn))+'" data-uebchk="f" data-uebkey="'+_e(ky)+'"'+(an?' checked':'')+' title="Für PDF/Drucken auswählen" style="position:absolute;top:3px;left:3px;z-index:3;'+_CHK+'">')
+        :'';
       const tb=ti>=0?('<button type="button" data-uebtb="'+ti+'" title="Als Titelbild setzen" style="position:absolute;top:3px;right:3px;z-index:3;background:'+((t.titelbildId&&t.titelbildId===f.driveId)?'#185FA5':'rgba(0,0,0,.55)')+';border:none;border-radius:4px;cursor:pointer;font-size:10px;padding:1px 4px;line-height:1.4;">'+((t.titelbildId&&t.titelbildId===f.driveId)?'📌':'📍')+'</button>'):'';
-      return '<div'+hv+(ti>=0?' data-uebfoto="'+ti+'"':'')+' title="'+_e(nm)+' – klicken zum Großansehen" style="position:relative;width:76px;height:57px;border-radius:6px;overflow:hidden;background:var(--bg4);border:'+(an?'2px solid #185FA5':'1px solid var(--border)')+';cursor:pointer;flex-shrink:0;">'+inner+chk+tb+unten+'</div>';
+      // b776: data-uebfoto trägt den Listenplatz in t.fotos und steuert damit die Lightbox –
+      // ein Verweis hat dort keinen Platz, deshalb bekommt er ein eigenes Merkmal. Würde er
+      // data-uebfoto tragen, öffnete die Großansicht das falsche Bild.
+      return '<div'+hv+(ti>=0?' data-uebfoto="'+ti+'"':(rn>=0?' data-uebref="'+_e(String(f.driveId||''))+'"':''))+' title="'+_e(nm)+' – klicken zum Großansehen" style="position:relative;width:76px;height:57px;border-radius:6px;overflow:hidden;background:var(--bg4);border:'+(an?'2px solid #185FA5':'1px solid var(--border)')+';cursor:pointer;flex-shrink:0;">'+inner+chk+tb+unten+'</div>';
     };
     const _strip=function(list){
       if(!list||!list.length)return'';
@@ -27573,6 +27614,9 @@ function _openPdfSendenModus(taskId){
     if(u){window.open(u.dataset.ueburl,'_blank');return;}
     const fo=cl('[data-uebfoto]');
     if(fo){_pamFotoLightbox(t.id,+fo.dataset.uebfoto);return;}
+    // b776: Verweis-Foto groß ansehen – über die Drive-Kennung, nicht über einen Listenplatz
+    const fr=cl('[data-uebref]');
+    if(fr&&typeof openFotoRefDesktop==='function'){openFotoRefDesktop(fr.dataset.uebref);return;}
     const dv=cl('[data-uebfid]');
     if(dv){_pamDocPinPreview({name:dv.dataset.uebname||'Dokument',fileId:dv.dataset.uebfid});return;}
   });
@@ -27612,7 +27656,7 @@ function _openPdfSendenModus(taskId){
   function _uebAlle(an){
     box.querySelectorAll('input[data-uebchk]').forEach(function(c){
       c.checked=!!an;
-      if(c.dataset.uebchk==='f'){const w=c.closest('[data-uebfoto]');if(w)w.style.border=an?'2px solid #185FA5':'1px solid var(--border)';}
+      if(c.dataset.uebchk==='f'){const w=c.closest('[data-uebfoto],[data-uebref]');if(w)w.style.border=an?'2px solid #185FA5':'1px solid var(--border)';}
     });
     const s=_uebSammeln();_uebSelSchreiben(tid,s.f,s.a,s.e);_uebZaehler();
   }
@@ -27628,7 +27672,8 @@ function _openPdfSendenModus(taskId){
     }
     if(!c||c.type!=='checkbox'||!c.dataset.uebchk)return;
     if(c.dataset.uebchk==='f'){
-      const w=c.closest('[data-uebfoto]');
+      // b776: Verweis-Kacheln zeigen ihre Auswahl genauso wie die Auftragsfotos
+      const w=c.closest('[data-uebfoto],[data-uebref]');
       if(w)w.style.border=c.checked?'2px solid #185FA5':'1px solid var(--border)';
     }
     const s=_uebSammeln();_uebSelSchreiben(tid,s.f,s.a,s.e);
@@ -27757,6 +27802,34 @@ async function _pdfSendenCreate(t,sendMail){
     _addPage(landscape);
     const fmt=landscape?[297,210]:[210,297];
     const cap=f.caption||f.name||'';
+    doc.addImage(imgInfo.src,'JPEG',0,0,fmt[0],fmt[1]-(cap?8:0),'','FAST');
+    if(cap){doc.setFontSize(8);doc.setTextColor(80,80,80);doc.setFont('helvetica','normal');doc.text(cap,6,fmt[1]-3);}
+  }
+
+  // ── Verweis-Fotos (b776) ─────────────────────────────────────
+  // 🔁 Leistung, 🗺 Dachplan-Pin, Wartungsprotokoll. Gleicher Seitenaufbau wie oben, nur
+  // die Herkunft steht mit in der Bildunterschrift – sonst weiß der Empfänger bei einem
+  // Pin-Foto nicht, wo es herkommt. ⛔ Gelesen wird nur; die Verweise bleiben unberührt.
+  for(let n=0;n<(_uebRefFotos||[]).length;n++){
+    const chk=document.getElementById('_pdfS_r_'+n);
+    if(!chk||!chk.checked)continue;
+    const f=_uebRefFotos[n];
+    if(!f||!f.driveId)continue;
+    let url=_desktopFotoBlobCache.get(f.driveId);
+    if(!url){try{url=await _fetchDesktopFotoBlob(f.driveId);}catch(e){continue;}}
+    if(!url)continue;
+    const corrUrl=await _correctFotoForPdf(url);
+    const imgInfo=await new Promise(res=>{
+      const img=new Image();
+      img.onload=()=>res({w:img.naturalWidth,h:img.naturalHeight,src:corrUrl});
+      img.onerror=()=>res(null);img.src=corrUrl;
+    });
+    if(!imgInfo)continue;
+    const landscape=imgInfo.w>imgInfo.h;
+    _addPage(landscape);
+    const fmt=landscape?[297,210]:[210,297];
+    const herk=_uebRefHerkunft(f);
+    const cap=[(f.caption||f.name||''),herk].filter(Boolean).join(' · ');
     doc.addImage(imgInfo.src,'JPEG',0,0,fmt[0],fmt[1]-(cap?8:0),'','FAST');
     if(cap){doc.setFontSize(8);doc.setTextColor(80,80,80);doc.setFont('helvetica','normal');doc.text(cap,6,fmt[1]-3);}
   }
