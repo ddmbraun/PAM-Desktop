@@ -9453,7 +9453,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-24 · #774'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-24-b774) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-24 · #775'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-24-b775) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -24313,6 +24313,9 @@ function _renderDokuGruppen(){
       if(herk)html+='<span style="flex-shrink:0;font-size:calc(11px*var(--modal-scale,1));color:var(--text2);">'+herk+'</span>';
       if(a.url)html+='<button type="button" onclick="event.stopPropagation();window.open(\''+String(a.url).replace(/'/g,'')+'\',\'_blank\')" style="flex-shrink:0;font-size:10px;padding:1px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text1);cursor:pointer;" title="In Drive öffnen">📂</button>';
       html+='<button type="button" onclick="event.stopPropagation();downloadAttach('+it.i+')" style="flex-shrink:0;font-size:10px;padding:1px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text1);cursor:pointer;" title="Herunterladen">⬇</button>';
+      // b775: Wegschicken direkt an der Zeile – vorher ging das nur über den Umweg
+      // 📋 Übersicht, und dort verlangt PAM zusätzlich einen eigenen Inhalt.
+      html+='<button type="button" onclick="event.stopPropagation();_pamDokEntwurf('+it.i+')" style="flex-shrink:0;font-size:10px;padding:1px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text1);cursor:pointer;" title="Als Entwurf nach Outlook – abgeschickt wird nichts">📤</button>';
       html+='</div>';
     });
     html+='</div>';
@@ -33930,6 +33933,64 @@ function editFotoCaptionDesktop(i){
   taskFotos[i].caption=trimmed;
   renderFotoListDesktop();
   scheduleTaskFieldSave(); // b516: sofort sichern statt erst beim Modal-Schließen (Beschriftung ging sonst bei hartem Schließen verloren)
+}
+// b775: Eine Datei aus der Dokumente-Liste direkt als Outlook-Entwurf wegschicken.
+// Bis b774 ging das nur über 📋 Übersicht – und dort verlangt PAM zusätzlich einen eigenen
+// Inhalt (Deckblatt, Foto oder PDF-Anlage), sonst bricht es ab. Eine Word-Datei allein war
+// damit gar nicht verschickbar. Hier geht die Datei unverändert und als EINZIGE Anlage raus.
+// ⛔ Betreff bewusst neutral: der Auftragstitel steckt schon im Dateinamen, er muss nicht
+// zusätzlich in der Betreffzeile stehen. Im Fenster lässt sich beides frei ändern.
+async function _pamDokEntwurf(i){
+  const a=(typeof taskAttachments!=='undefined'&&taskAttachments)?taskAttachments[i]:null;
+  if(!a){showToast('Datei nicht gefunden','error',3000);return;}
+  const name=a.name||a.filename||'Anlage';
+  const token=msToken||msToken2||null;
+  if(!token){showToast('⚠ Outlook ist nicht verbunden – oben in der Leiste auf 📨 Outlook klicken, dann nochmal','warning',9000);return;}
+  const fid=a.fileId||_pamExtractFileId(a.url||'');
+  if(!fid||!gdriveToken){
+    showToast('⚠ Diese Datei liegt nicht in Drive oder Drive ist nicht verbunden – bitte über ⬇ herunterladen und von Hand anhängen','warning',10000);return;
+  }
+  let blob;
+  try{
+    showToast('⏳ '+name+' wird geholt…','info',4000);
+    const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fid)+'?alt=media',
+      {headers:{Authorization:'Bearer '+gdriveToken}});
+    if(r.status===401){if(typeof _handleDrive401==='function')_handleDrive401();throw new Error('Drive-Verbindung abgelaufen – bitte ☁️ drücken');}
+    if(!r.ok)throw new Error('Drive HTTP '+r.status);
+    blob=await r.blob();
+  }catch(e){
+    console.warn('[DokEntwurf] Laden:',e);
+    showToast('⚠ '+((e&&e.message)||'Datei nicht ladbar')+' – bitte über ⬇ herunterladen','error',8000);return;
+  }
+  // Früh prüfen: sonst füllt man erst das Fenster aus und erfährt danach, dass es nicht geht.
+  if(blob.size>_PAM_ANH_MAX){
+    showToast('⚠ '+name+' ist '+(blob.size/1048576).toFixed(1)+' MB – an einen Entwurf gehen höchstens 3 MB. Bitte über ⬇ herunterladen und von Hand anhängen.','warning',11000);
+    return;
+  }
+  let t=null;
+  try{t=findTaskById((document.getElementById('taskId')||{}).value||'');}catch(e){t=null;}
+  const kontakte=((t&&t.kontakte)||[]).filter(function(k){return k.email;});
+  const wahl=await _pdfSendenDialog({
+    to:((kontakte[0]||{}).email)||'',
+    vorschlaege:kontakte.map(function(k){return {name:k.name||'',email:k.email};}),
+    subj:'Unterlagen',
+    body:'Sehr geehrte Damen und Herren,\n\nanbei die Unterlagen.\n\nMit freundlichen Grüßen\n',
+    anhaenge:[name]
+  });
+  if(!wahl){showToast('Abgebrochen – es wurde kein Entwurf angelegt','info',3000);return;}
+  try{
+    showToast('📧 Entwurf wird angelegt…','info',4000);
+    const erg=await _pamOutlookEntwurf(token,{to:wahl.to,subj:wahl.subj,body:wahl.body,
+      anhaenge:[{name:name,contentType:blob.type||'application/octet-stream',contentBytes:_fsB64(await blob.arrayBuffer())}]});
+    if(erg.fehl.length){
+      showToast('⚠ '+name+' ging nicht an den Entwurf ('+erg.fehl.join(', ')+') – bitte über ⬇ herunterladen und von Hand anhängen','warning',11000);return;
+    }
+    _pamShowDraftToast(erg.link,'✅ Entwurf mit '+name+' liegt in Outlook unter <b>Entwürfe</b>');
+    showToast('✓ Entwurf angelegt – es wurde nichts verschickt','success',6000);
+  }catch(e){
+    console.warn('[DokEntwurf] Entwurf:',e);
+    showToast('⚠ Entwurf nicht möglich: '+((e&&e.message)||'')+' – bitte über ⬇ herunterladen','error',9000);
+  }
 }
 async function downloadAttach(i){
   const a=taskAttachments[i];
