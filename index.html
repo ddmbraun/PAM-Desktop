@@ -9451,7 +9451,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-23 · #772'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-23-b772) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-23 · #773'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-23-b773) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -45967,7 +45967,26 @@ window.Dachplan=(function(){
     if(typeof gdriveToken!=='undefined'&&gdriveToken){try{const r=await fetch('https://www.googleapis.com/drive/v3/files/'+dp.imgDriveId+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});if(r.ok){const b=await r.blob();return URL.createObjectURL(b);}}catch(e){}}
     return 'https://drive.google.com/thumbnail?id='+dp.imgDriveId+'&sz=w2000';}
   function scaleImg(file,maxDim,q){return new Promise(res=>{const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=()=>{let w=im.width,h=im.height;const s=Math.min(1,maxDim/Math.max(w,h));w=Math.round(w*s);h=Math.round(h*s);const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(im,0,0,w,h);res({url:c.toDataURL('image/jpeg',q),w:w,h:h});};im.onerror=()=>res({url:r.result,w:1000,h:750});im.src=r.result;};r.readAsDataURL(file);});}
-  function dataUrlToFile(durl,name){return fetch(durl).then(r=>r.blob()).then(b=>new File([b],name,{type:'image/jpeg'}));}
+  // b773: Diese Funktion holte das fertige Bild frueher ueber seine EIGENE Adresse ab
+  // (fetch auf eine Bilddaten-Adresse). Die Sicherheitsregel der Seite erlaubt das
+  // Abholen nur von bestimmten Zielen – Bilddaten-Adressen gehoeren bewusst NICHT dazu.
+  // Ergebnis war „Upload fehlgeschlagen" an DREI Stellen: eigenes Basisbild (loadBild),
+  // Pin-Foto (dort still verschluckt, es ging das Original hoch) und die Uebersicht aus
+  // b770. Steckte seit dem Neuaufbau b648 darin, gemeldet hat es Frank am 23.08.2026.
+  // Jetzt wird selbst entschluesselt – genau wie es _fdkDataUrlBytes in der
+  // Fotodokumentation seit b734 tut; die hat deshalb nie gestockt.
+  // ⛔ Die Sicherheitsregel bleibt unangetastet. Sie zu lockern waere der bequeme,
+  // aber falsche Weg – test_b773 wacht ueber beides.
+  function dataUrlToFile(durl,name){
+    try{
+      const s=String(durl||''),k=s.indexOf(',');
+      if(k<0)return Promise.reject(new Error('Keine Bilddaten'));
+      const bin=atob(s.substring(k+1));
+      const u=new Uint8Array(bin.length);
+      for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);
+      return Promise.resolve(new File([u],name,{type:'image/jpeg'}));
+    }catch(e){return Promise.reject(e);}
+  }
   function pinSVGok(){return 0;}
   /* b742 (Mobil v228, Wunsch Frank): Ob hinter einem Pin ein Teilbereich steckt, muss man
      SEHEN. Ein andersfarbiger Rand reichte am Handy nicht – die FORM dagegen sofort:
@@ -46514,7 +46533,12 @@ window.Dachplan=(function(){
     const folderId=dpFolder();if(!folderId){say('Kein Drive-Ordner am Auftrag hinterlegt','error');return;}
     if(typeof gdriveToken==='undefined'||!gdriveToken){say('Bitte zuerst mit Google Drive verbinden');return;}
     for(const f of files){if(!/^image\//.test(f.type||''))continue;say('Foto wird hochgeladen…');
-      let up=f;try{const sc=await scaleImg(f,1600,0.82);const mitExif=await _dpExifUebernehmen(f,sc.url);up=await dataUrlToFile(mitExif,(f.name||'foto')+'.jpg');}catch(_){}
+      // b773: Ein Fehler hier bleibt folgenlos – es geht dann das Original hoch, und das
+      // ist der richtige Rueckfall (besser als gar kein Foto). Er darf aber nicht mehr
+      // STILL sein: genau dieser Block hat den Fehler aus b648 elf Tage lang verdeckt,
+      // wodurch JEDES Pin-Foto unverkleinert und ohne uebernommene Aufnahmedaten nach
+      // Drive ging.
+      let up=f;try{const sc=await scaleImg(f,1600,0.82);const mitExif=await _dpExifUebernehmen(f,sc.url);up=await dataUrlToFile(mitExif,(f.name||'foto')+'.jpg');}catch(e){console.warn('[DP] Pin-Foto verkleinern/Aufnahmedaten fehlgeschlagen, Original wird hochgeladen:',e);}
       try{const meta=await dpUpload(up,folderId);const fo={driveId:meta.id,ts:_fotoTsFromFile(f)};p.fotos.push(fo);drawThumbs(p);save();say('Foto gespeichert');}catch(e){say('Upload fehlgeschlagen','error');}}
   }
   // b715: kein roher öffentlicher Drive-Link mehr (lud nur, wenn der Browser zufällig eine
