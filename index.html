@@ -9469,7 +9469,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-24 · #778'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-24-b778) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-24 · #779'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-24-b779) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -27206,7 +27206,14 @@ let _uebRefFotos=[];
 // Termin, der nicht in der Zukunft liegt – das ist der, über den berichtet wird. Gibt es nur
 // künftige, steht der nächste da. Frank kann die Zeile ohnehin überschreiben.
 function _uebOrtsterminText(t){
-  const alle=[].concat((t&&t.aufgaben)||[],(t&&t.freieTermine)||[])
+  // ⛔ b779: PAM hat DREI Terminlisten, nicht zwei. b777 las nur aufgaben + freieTermine –
+  // ausgerechnet die Außerhaus-Termine fehlten, und genau die sind der Ortstermin. Befund
+  // Frank 24.08.: die Zeile blieb leer, obwohl direkt darunter ein Termin stand.
+  // ⛔ Und sie tragen ihr Datum in `date`, nicht in `datum`. Feldnamen nie raten.
+  const aus=((t&&t.ausserhausTermine)||[]).map(function(x){
+    return x?{datum:x.date||x.datum,von:x.von,bis:x.bis}:null;
+  }).filter(Boolean);
+  const alle=[].concat((t&&t.aufgaben)||[],(t&&t.freieTermine)||[],aus)
     .filter(function(x){return x&&x.datum;})
     .sort(function(a,b){return String(a.datum)<String(b.datum)?-1:1;});
   if(!alle.length)return '';
@@ -27617,7 +27624,10 @@ function _openPdfSendenModus(taskId){
       });
       n2+='</table>';
     });
-    _uebHtml+=_secHtml('Bautagebuch',n2,_nvSicht.length+_fCnt,_SEKT.btb);
+    // b779: Die Fotos stehen in dieser Sektion, die Überschrift sagte das aber nicht.
+    // Befund Frank 24.08.: „ich bin mir nicht sicher, ob alles in der Übersicht auftaucht" –
+    // er hat unter „Bautagebuch" keine Fotos vermutet. Die Zahl der Fotos steht jetzt dabei.
+    _uebHtml+=_secHtml('📷 Fotos & Bautagebuch'+(_fCnt?(' · '+_fCnt+' Foto'+(_fCnt!==1?'s':'')):''),n2,_nvSicht.length+_fCnt,_SEKT.btb);
   }
   const _uebDiv=document.createElement('div');
   _uebDiv.innerHTML=_uebHtml;
@@ -27744,6 +27754,23 @@ function _openPdfSendenModus(taskId){
   };
   const btnAlle=mkMini('Alle','Alle Fotos und Dokumente ankreuzen',function(){_uebAlle(true);});
   const btnKeine=mkMini('Keine','Alle Häkchen entfernen',function(){_uebAlle(false);});
+  // b779: Wunsch Frank 24.08. – von hier aus soll man überall hinkommen, ohne das Fenster
+  // zu verlassen und die Auswahl zweimal zu treffen. Die angekreuzten Fotos wandern als
+  // Drive-Kennungen mit; `data-uebkey` trägt bei Fotos genau diese Kennung.
+  const btnFdk=mkMini('📚 Dokument aus Vorlage…','Fotodokumentation, Word-Vorlage oder „Nur Formular" – die hier angekreuzten Fotos sind dort schon im Dokument',function(){
+    const ids=[];
+    box.querySelectorAll('input[data-uebchk="f"]:checked').forEach(function(c){
+      const k=c.dataset.uebkey||'';if(k)ids.push(k);
+    });
+    ov.remove();
+    if(typeof _fdkOeffnen==='function')_fdkOeffnen(ids);
+    else showToast('⚠ Fotodokumentation nicht verfügbar','warning',4000);
+  });
+  const btnAlleDok=mkMini('⛶ Alle Dokumente','Große Vorschau aller Dateien und E-Mails dieses Auftrags',function(){
+    ov.remove();
+    if(typeof _openPamDokUebersicht==='function')_openPamDokUebersicht();
+    else showToast('⚠ Dokumentfenster nicht verfügbar','warning',4000);
+  });
   const spacer=document.createElement('span');spacer.style.cssText='flex:1;min-width:8px;';
   // b593: Der eigene „🖨 Drucken"-Knopf ist WEG. Er ignorierte die Auswahl komplett und
   // öffnete nur das alte zweite Übersichtsfenster. Gedruckt wird künftig aus dem fertigen
@@ -27760,7 +27787,7 @@ function _openPdfSendenModus(taskId){
   btnCancel.textContent='Schließen';
   btnCancel.style.cssText='padding:9px 13px;border-radius:8px;background:var(--bg3);color:var(--text2);border:1px solid var(--border);font-size:13px;cursor:pointer;';
   btnCancel.onclick=()=>ov.remove();
-  footer.append(cnt,btnAlle,btnKeine,spacer,btnPdf,btnSend,btnCancel);
+  footer.append(cnt,btnAlle,btnKeine,btnFdk,btnAlleDok,spacer,btnPdf,btnSend,btnCancel);
   box.appendChild(footer);
   _uebZaehler(); // b592: gemerkte Auswahl sofort in der Leiste zeigen
 
@@ -47898,7 +47925,11 @@ function _fdkZielOrdner(dokUrl,projUrl){
   if(p)return {id:p,art:'projekt'};
   return {id:'',art:''};
 }
-function _fdkOeffnen(){
+// b779: `vorauswahl` = Drive-Kennungen, die schon im Dokument liegen sollen. Kommt aus der
+// 📋 Übersicht, damit die dort gesetzten Häkchen nicht noch einmal geklickt werden müssen.
+// ⛔ Der Parameter ist freiwillig – der vorhandene Knopf ruft weiter `_fdkOeffnen()` ohne
+// Argument auf, und genau darauf hängt ein Anker in test_b734. Nicht umschreiben.
+function _fdkOeffnen(vorauswahl){
   const id=(document.getElementById('taskId')||{}).value||'';
   const t=id?findTaskById(id):null;
   if(!t){showToast('Bitte zuerst einen Auftrag öffnen','error');return;}
@@ -47922,6 +47953,13 @@ function _fdkOeffnen(){
   _fdkState={taskId:t.id,liste:liste,dok:[],planMoeglich:planMoeglich,ordnerId:ziel.id,ordnerArt:ziel.art,
     projektOrdnerId:_extractFolderIdFromUrl(projUrl)||'',dokOrdnerId:_extractFolderIdFromUrl(dokUrl)||'',
     sbOrdnerId:_extractFolderIdFromUrl(sbUrl)||'',sbAuto:false,ergebnis:null,filter:'alle',vorschauKey:null,drag:null};
+  // b779: Vorauswahl aus der Übersicht ins Dokument übernehmen – in der Reihenfolge, in der
+  // sie übergeben wurde. Was der Vorrat nicht kennt (Video, gelöschtes Foto), fällt still
+  // weg; das Fenster zeigt ohnehin, was drin liegt.
+  if(Array.isArray(vorauswahl)&&vorauswahl.length){
+    const da=new Set(liste.map(function(x){return String(x.key);}));
+    _fdkState.dok=vorauswahl.map(String).filter(function(k){return da.has(k);});
+  }
   _fdkStyle();
   const alt=document.getElementById('fdkOverlay');if(alt)alt.remove();
   const ov=document.createElement('div');ov.id='fdkOverlay';
@@ -47931,7 +47969,10 @@ function _fdkOeffnen(){
   bx.innerHTML='<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">'
       +'<div style="font-size:15px;font-weight:700;">📚 Fotodokumentation (Word / PDF)</div>'
       +'<div style="font-size:12px;color:var(--text2);">'+esc(t.title||'')+'</div>'
-      +'<button type="button" class="fdk-btn" style="margin-left:auto;padding:5px 10px;" onclick="_fdkSchliessen()">✕ Schließen</button></div>'
+      // b779: Rückweg. Bewusst HIER oben und nicht in der Knopfleiste unten – die trägt
+      // seit b778 schon fünf Knöpfe, ein sechster wäre nicht mehr zu lesen.
+      +'<button type="button" class="fdk-btn" style="margin-left:auto;padding:5px 10px;" onclick="_fdkZurUebersicht()" title="Zurück zur Übersicht des Auftrags">📋 Übersicht</button>'
+      +'<button type="button" class="fdk-btn" style="padding:5px 10px;" onclick="_fdkSchliessen()">✕ Schließen</button></div>'
     +'<div class="fdk-tipp">Links der Vorrat, rechts das Dokument: Foto nach rechts ziehen (oder Doppelklick) = kommt ins Word · rechts ziehen = Reihenfolge · ✕ = wieder raus · Klick = Vorschau · ✏️ an der Kachel = malen und beschriften ·Bilder aus dem Explorer auf eine Fläche ziehen = hochladen (rechts: gleich ins Dokument)</div>'
     +'<div style="display:flex;gap:12px;flex:1;min-height:0;">'
       +'<div class="fdk-pane" style="flex:1.15;">'
@@ -47989,6 +48030,13 @@ function _fdkOeffnen(){
   if(!liste.length){const st=document.getElementById('fdkStatus');if(st)st.textContent='Noch keine Fotos mit Drive-Datei am Auftrag – Bilder aus dem Explorer auf eine Fläche ziehen.';}
 }
 function _fdkSchliessen(){const ov=document.getElementById('fdkOverlay');if(ov)ov.remove();_fdkState=null;_fdkDragIdx=-1;}
+// b779: zurück zur 📋 Übersicht desselben Auftrags. Die Auftragsnummer wird VOR dem
+// Schließen gemerkt – _fdkSchliessen räumt _fdkState ab.
+function _fdkZurUebersicht(){
+  const tid=(_fdkState&&_fdkState.taskId)||'';
+  _fdkSchliessen();
+  if(typeof _openPdfSendenModus==='function')_openPdfSendenModus(tid||undefined);
+}
 function _fdkListeZeichnen(){
   if(!_fdkState)return;
   const S=_fdkState;
