@@ -9469,7 +9469,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-24 · #783'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-24-b783) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-24 · #784'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-24-b784) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -24332,6 +24332,10 @@ function _renderDokuGruppen(){
       // b775: Wegschicken direkt an der Zeile – vorher ging das nur über den Umweg
       // 📋 Übersicht, und dort verlangt PAM zusätzlich einen eigenen Inhalt.
       html+='<button type="button" onclick="event.stopPropagation();_pamDokEntwurf('+it.i+')" style="flex-shrink:0;font-size:10px;padding:1px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text1);cursor:pointer;" title="Als Entwurf nach Outlook – abgeschickt wird nichts">📤</button>';
+      // b784: Pfad zu GENAU DIESER Datei. ⛔ Nicht aus Ordner + Name zusammenrechnen –
+      // die Dateien liegen in Unterordnern, und deren Namen stehen nur als Anzeigetext da.
+      // `_pamDrivePfad` läuft die echte Elternkette hoch und nimmt den Dateinamen mit.
+      html+='<button type="button" onclick="event.stopPropagation();_pamDokPfad('+it.i+')" style="flex-shrink:0;font-size:10px;padding:1px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text1);cursor:pointer;" title="Windows-Pfad dieser Datei kopieren – Windows-Taste+R, Strg+V, Enter">📁</button>';
       html+='</div>';
     });
     html+='</div>';
@@ -28163,7 +28167,23 @@ async function _pdfSendenCreate(t,sendMail){
     const url=URL.createObjectURL(new Blob([fertigeBytes],{type:'application/pdf'}));
     window.open(url,'_blank');
     const n=pdfEinheften.length-nichtEingeheftet.length;
-    showToast('✓ Dokument erstellt'+(n>0?' – '+n+' Anlage(n) eingeheftet':''),'success',4000);
+    // b784: Das PDF wird jetzt auch ABGELEGT. Befund Frank 24.08.: Der Weg hier öffnete nur
+    // einen Tab, während „📄 Als PDF" in der Fotodokumentation die Datei in Drive legt –
+    // zwei Knöpfe mit derselben Beschriftung, zwei Verhalten. Jetzt findet man beide
+    // Ergebnisse unter 🗂 Dokumente.
+    // ⛔ Ohne Dokumente-Ordner am Auftrag wird NICHT ersatzweise irgendwohin gelegt: die
+    // Dokumentliste liest nur diesen einen Ordner, sonst wäre die Datei unauffindbar.
+    let _abgelegt='';
+    const _dokUrl=String((document.getElementById('tDokOrdner')||{}).value||t.dokOrdner||'').trim();
+    const _dokId=_extractFolderIdFromUrl(_dokUrl);
+    if(_dokId&&typeof gdriveTokenValid==='function'&&gdriveTokenValid()){
+      try{
+        await _driveUploadGeneric(fertigeBytes,pdfName,'application/pdf',_dokId);
+        _abgelegt=' · ✓ im Dokumente-Ordner abgelegt';
+        try{if(typeof _dokSyncOrdner==='function')_dokSyncOrdner();}catch(e){}
+      }catch(e){console.warn('[PdfSenden] Ablage:',e);_abgelegt=' · ⚠ Ablage in Drive fehlgeschlagen';}
+    }else _abgelegt=' · ℹ kein Dokumente-Ordner am Auftrag – nur im Tab geöffnet';
+    showToast('✓ Dokument erstellt'+(n>0?' – '+n+' Anlage(n) eingeheftet':'')+_abgelegt,'success',6000);
     if(nichtEingeheftet.length)showToast('⚠ Nicht einheftbar: '+nichtEingeheftet.map(function(a){return a.name;}).join(', '),'warning',8000);
   }
 }
@@ -34196,6 +34216,26 @@ function editFotoCaptionDesktop(i){
 // damit gar nicht verschickbar. Hier geht die Datei unverändert und als EINZIGE Anlage raus.
 // ⛔ Betreff bewusst neutral: der Auftragstitel steckt schon im Dateinamen, er muss nicht
 // zusätzlich in der Betreffzeile stehen. Im Fenster lässt sich beides frei ändern.
+// b784: Windows-Pfad zu einer einzelnen Datei aus der Dokumentliste. Wunsch Frank 24.08.
+// ⚡ `_pamDrivePfad` kann das direkt: sie nimmt eine Drive-Kennung, läuft die Elternkette
+// hoch und stellt den Namen des Startelements voran – bei einer DATEI ist das der
+// Dateiname. Deshalb kommt hier ein fertiger Dateipfad heraus, ohne Zusammenrechnen.
+async function _pamDokPfad(i){
+  const a=(typeof taskAttachments!=='undefined'&&taskAttachments)?taskAttachments[i]:null;
+  if(!a){showToast('Datei nicht gefunden','error',3000);return;}
+  const fid=a.fileId||_pamExtractFileId(a.url||'');
+  if(!fid){showToast('⚠ Diese Datei liegt nicht in Drive – es gibt keinen Pfad dazu','warning',7000);return;}
+  try{
+    showToast('⏳ Pfad wird ermittelt…','info',3000);
+    const erg=await _pamDrivePfad(fid);
+    let kopiert=false;
+    try{await navigator.clipboard.writeText(erg.pfad);kopiert=true;}catch(e){console.warn('[DokPfad] Zwischenablage:',e);}
+    if(typeof _pamPfadFenster==='function')_pamPfadFenster(erg.pfad,kopiert,erg.geteilt);
+  }catch(e){
+    console.warn('[DokPfad]',e);
+    showToast('⚠ '+((e&&e.message)||'Pfad nicht ermittelbar'),'error',7000);
+  }
+}
 async function _pamDokEntwurf(i){
   const a=(typeof taskAttachments!=='undefined'&&taskAttachments)?taskAttachments[i]:null;
   if(!a){showToast('Datei nicht gefunden','error',3000);return;}
