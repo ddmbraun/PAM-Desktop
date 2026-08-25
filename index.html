@@ -9469,7 +9469,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-24 · #786'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-24-b786) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-25 · #787'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-25-b787) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -14970,7 +14970,17 @@ function loadFromObject(data){
   }
   // ── AUTO-MIGRATION: archivierte Tasks in eigenen, projektunabhängigen Speicher überführen ──
   // (früher blieben sie im jeweiligen boards[k] liegen – ein Löschen des Projekts hat sie mitgelöscht)
-  archivedTasks=Array.isArray(data._archivedTasks)?data._archivedTasks.slice():[];
+  // b787: Fach VORHANDEN → übernehmen, auch wenn es leer ist (dann ist das ein echtes Leeren).
+  // Fach FEHLT → bisherigen Stand BEHALTEN statt zu leeren. Dieselbe Regel wie oben bei
+  // _boardStatuses/_boardTypes ("nur überschreiben wenn im Datensatz vorhanden").
+  // ⛔ Bis b786 stand hier ":[]" – das war die Ursache dafür, dass sich das Archiv leerte
+  //    (Befund Frank 25.08.2026): Schrieb IRGENDEIN Gerät einen Stand ohne das Fach, war das
+  //    Archiv hier still weg, und der nächste Auto-Save schrieb den Verlust nach Drive fest.
+  //    Weil archiveTask die Karte zugleich aus dem Board nimmt und per _pamMarkTaskDeleted
+  //    am Zurückkommen hindert, war sie danach NIRGENDS mehr – ohne dass jemand gelöscht hat.
+  if(Array.isArray(data._archivedTasks))archivedTasks=data._archivedTasks.slice();
+  else if(Array.isArray(archivedTasks)&&archivedTasks.length)_pamArchivFachFehltMelden(archivedTasks.length);
+  else archivedTasks=[];
   {const _knownIds=new Set(archivedTasks.map(t=>t.id));let _migrated=0;
   Object.keys(boards).forEach(k=>{
     const still=[];
@@ -15015,6 +15025,27 @@ function loadFromObject(data){
   try{if(window.Dachplan&&Dachplan.rebind)Dachplan.rebind();}catch(e){console.warn('[Dachplan] rebind:',e);}
 }
 
+
+// ── b787: Wächter – der geladene Stand hatte gar kein Archiv-Fach ────────────
+// Befund Frank 25.08.2026: „Das Archiv leert sich." Gemessen an workboard.json –
+// _archivedTasks fehlte komplett, und in den Boards lag keine einzige Karte mit
+// archiviert:true, also gab es auch kein Auffangnetz.
+// Seit b787 versteht loadFromObject ein fehlendes Fach NICHT mehr als „leeren".
+// Fehlen kann es aber weiterhin: nämlich dann, wenn ein Gerät im Verbund noch auf
+// einem Stand VOR Desktop b787 / Mobil v237 läuft und das Fach beim Speichern wegließ.
+// ⛔ Der Wächter ändert NICHTS, er meldet nur – Bauart wie b719. Er ist die einzige
+//    Stelle, an der von außen sichtbar wird, dass ein Gerät noch nachgezogen gehört.
+// ⛔ Bewusst gedämpft: loadFromObject läuft alle 30 s beim Poll und mitten im
+//    Konflikt-Speichern. Ohne Dämpfung stünde der Hinweis im Dauerlauf.
+let _pamArchivFachFehltGemeldet=-1;
+function _pamArchivFachFehltMelden(anzahl){
+  try{
+    console.warn('[b787] Geladener Stand ohne _archivedTasks – Archiv ('+anzahl+' Karten) BEHALTEN, nicht geleert.');
+    if(_pamArchivFachFehltGemeldet===anzahl)return;
+    _pamArchivFachFehltGemeldet=anzahl;
+    if(typeof showToast==='function')showToast('⚠ Der geladene Stand enthielt kein Archiv-Fach. Die '+anzahl+' archivierten Karten wurden BEHALTEN, nichts ging verloren. Ein Gerät läuft noch auf einem alten Stand (vor Desktop b787 / Mobil v237) – dort die App bitte einmal ganz schließen und neu öffnen.','error',12000);
+  }catch(e){console.warn('[b787] Archiv-Waechter:',e);}
+}
 
 // ── b719: Wächter gegen doppelte Karten ──────────────────────────────────────
 // Am 19.08.2026 lagen 30 überzählige Kopien in workboard.json: sechs Karten je sechsfach.
@@ -15271,7 +15302,7 @@ function _pamMigrateOldMerges(){
 }
 function buildSaveObject(){
   const out={_statuses:statuses};
-  if(archivedTasks.length)out._archivedTasks=archivedTasks.slice();
+  out._archivedTasks=archivedTasks.slice(); // b787: IMMER, auch leer (Mobil v237 gleich; Näheres in CHANGES.md)
   if(Object.keys(boardStatuses).length)out._boardStatuses={...boardStatuses};
   if(Array.isArray(mobileBoards)&&mobileBoards.length)out._mobileBoards=mobileBoards.slice();
   if(Object.keys(mobileStatusFilter).length)out._mobileStatusFilter={...mobileStatusFilter};
@@ -45153,7 +45184,14 @@ function openProjManager(){
     mobile: hasWhitelist ? mobileBoards.includes(k) : true,
     type: boardTypes[k]||'baustelle',
     mobileFilter: mobileStatusFilter[k]?[...mobileStatusFilter[k]]:[],
-    mobilHaken:(boards[k]||[]).filter(t=>t&&t.mobilAusblenden).length // b726: für den Sammel-Lösen-Knopf
+    mobilHaken:(boards[k]||[]).filter(t=>t&&t.mobilAusblenden).length, // b726: für den Sammel-Lösen-Knopf
+    // b787: Zurückgestellte Karten getrennt zählen. count oben lässt sie bewusst aus
+    // (die Liste zeigt die im Projekt sichtbaren) – die LÖSCHWARNUNG verschwieg sie damit
+    // aber ebenfalls: „Alle 3 Tasks gehen verloren", während 5 verschwanden. Die zwei auf
+    // „Später bearbeiten" liegen weiter in boards[k] und werden beim Löschen mitgelöscht,
+    // obwohl sie in der projektübergreifenden Liste sichtbar waren.
+    // ⛔ count NICHT verändern – daran hängt die Anzeige in der Projektliste.
+    spaeter:(boards[k]||[]).filter(x=>x&&x.spaeterBearbeiten&&!x.archiviert).length
   }));
   renderProjList();
   document.getElementById('projAddInput').value='';
@@ -45286,7 +45324,18 @@ function toggleProjMobile(i){
 function removeProject(i){
   syncProjInputs();if(editProjects.length<=1)return;
   const p=editProjects[i];
-  const msg=p.count>0?`Projekt "${p.name}" löschen? Alle ${p.count} Tasks gehen verloren.`:`Projekt "${p.name}" löschen?`;
+  // b787: Zurückgestellte Karten mit ausweisen. Sie liegen weiter in boards[k] und werden
+  // mitgelöscht, tauchten in dieser Warnung aber nicht auf – bei 3 sichtbaren und 2 auf
+  // „Später bearbeiten" stand hier „Alle 3 Tasks gehen verloren", und 5 waren weg.
+  // ⛔ Archivierte Karten sind hier bewusst NICHT genannt: die liegen seit der
+  //    Auto-Migration im eigenen Fach _archivedTasks und überleben das Projekt-Löschen.
+  const _sp=p.spaeter||0;
+  const _teile=[];
+  if(p.count>0)_teile.push(`${p.count} Task${p.count!==1?'s':''}`);
+  if(_sp>0)_teile.push(`${_sp} auf „Später bearbeiten"`);
+  const msg=_teile.length
+    ?`Projekt "${p.name}" löschen?\n\nEs gehen verloren: ${_teile.join(' und ')}.`
+    :`Projekt "${p.name}" löschen?`;
   if(!confirm(msg))return;
   editProjects.splice(i,1);renderProjList();
 }
