@@ -9469,7 +9469,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-25 · #788'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-25-b788) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-25 · #789'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-25-b789) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -14074,6 +14074,18 @@ async function migrateFileToWorkspaceFolder(fileId) {
 let workboardLastModified=null;
 let workboardPollTimer=null;
 let _pamRemotePollPending=false; // Fix #366: fremde Änderung erkannt, aber Modal offen/User tippt
+// b789 (Befund Frank 25.08.2026: „Die Aufforderung ist nicht weggegangen"): Merker fuer den
+// letzten Tastendruck. Bis b788 galt als „tippt gerade", WO der Cursor steht – ein einmal
+// angeklicktes Feld behielt den Fokus und hielt den Abgleich damit DAUERHAFT auf, ohne dass
+// jemand tippte. Gemeint war immer „tippt in diesem Augenblick", und genau das wird hier
+// gemessen. ⛔ In der Erfassungsphase (true), damit auch Tastendruecke in Feldern zaehlen,
+// die das Ereignis selbst abfangen.
+let _pamLetzterTastendruck=0;
+try{document.addEventListener('keydown',function(){_pamLetzterTastendruck=Date.now();},true);}
+catch(e){console.warn('[b789] Tastenmerker:',e);}
+// b789: Wie lange nach dem letzten Tastendruck noch „tippt gerade" gilt. Kurz genug, dass ein
+// vergessener Cursor nichts blockiert, lang genug, dass niemand mitten im Wort unterbrochen wird.
+const _PAM_TIPP_FENSTER=3000;
 // b771: Der Hinweis auf wartende Handy-Änderungen ging bisher NUR nach #fileMsg – ein
 // 11-Pixel-Span in der Dateileiste ganz oben. Gezeigt wird er aber genau dann, wenn ein
 // Task-Fenster offen ist – und das liegt darüber. Frank am 23.08.2026: „Beim PC habe ich
@@ -14094,6 +14106,28 @@ function _pamHandyHinweis(anzeigen){
     document.body.appendChild(el);
   }catch(e){console.warn('[b771] Hinweisband:',e);}
 }
+// b789: Waechter – nimmt das Band zurueck, sobald es nichts mehr zu melden hat.
+// Befund Frank 25.08.2026: „Die Aufforderung ist nicht weggegangen." Bis b788 wurde das Band
+// an genau ZWEI Stellen entfernt: im Poll (erst NACH allen fruehen Ausstiegen) und in
+// closeModal() – und das ist nur das TASK-Fenster. Franks Fall fiel durch beide Maschen:
+//   • offen war der PROJEKT-Dialog; closeProjManager klappt das Fenster zu und fasst das
+//     Band nicht an,
+//   • und der Poll steigt vorher aus (`if(meta.modifiedTime===workboardLastModified)return;`),
+//     weil das EIGENE Speichern workboardLastModified auf den neuen Wert setzt.
+// Das Band blieb dadurch dauerhaft stehen, obwohl die Handy-Aenderung laengst ueber den
+// Konflikt-Abgleich hereingekommen war – es log also.
+// ⛔ Aendert NICHTS an den Daten. Es raeumt nur eine Anzeige weg, die nicht mehr stimmt.
+// ⛔ Bewusst ein Netz mit eigenem Takt statt eines Aufrufs in jedem Schliessen-Weg: Fenster
+//    werden an vielen Stellen geschlossen, und der naechste vergessene Weg faellt sonst
+//    wieder auf. Diese Pruefung ist billig (ein getElementById) und kann nichts kaputtmachen.
+function _pamHandyHinweisPruefen(){
+  try{
+    if(!document.getElementById('pamHandyHinweisBand'))return; // steht gar nicht
+    if(_pamRemotePollPending)return;                           // es steht wirklich noch etwas aus
+    _pamHandyHinweis(false);
+  }catch(e){console.warn('[b789] Hinweis-Waechter:',e);}
+}
+setInterval(_pamHandyHinweisPruefen,2000);
 async function pollWorkboardFile(){
   if(!gdriveFileId||!gdriveTokenValid())return;
   try{
@@ -14115,7 +14149,14 @@ async function pollWorkboardFile(){
     // closeModal() lädt ausstehende Änderungen dann sofort nach.
     {
       const ae=document.activeElement;
-      const _typing=ae&&['INPUT','TEXTAREA','SELECT'].includes(ae.tagName);
+      // b789: „tippt gerade" heisst jetzt: Cursor steht in einem Schreibfeld UND es wurde in
+      // den letzten Sekunden wirklich getippt. Vorher genuegte der Cursor-Standort – ein
+      // einmal angeklicktes Feld hielt den Abgleich fuer immer auf.
+      // ⛔ SELECT ist bewusst RAUS: eine Auswahlliste ist kein Schreibfeld. Wer eine Auswahl
+      //    getroffen hat, tippt nicht mehr – genau so entstand Franks Dauerband (der offene
+      //    Projekt-Dialog ist voller Auswahllisten).
+      const _typing=!!ae&&['INPUT','TEXTAREA'].includes(ae.tagName)
+        &&(Date.now()-_pamLetzterTastendruck)<_PAM_TIPP_FENSTER;
       const _modalOpen=!!document.querySelector('.modal-overlay.open');
       if(_typing||_modalOpen){
         if(!_pamRemotePollPending){
@@ -14705,6 +14746,12 @@ async function gdriveSaveData() {
             }catch(e){console.warn('[b788] Sicherheitsnetz:',e);}
             // Merged-State zurück ins Frontend laden, damit UI und folgende Saves konsistent sind
             loadFromObject(merged);
+            // b789: Hier – und nur hier – kommt die fremde Aenderung beim Schreib-Konflikt
+            // tatsaechlich an. Bis b788 blieb der Aufschub-Merker danach stehen, das Band
+            // meldete also weiter „liegen bereit", obwohl laengst alles da war. Genau das
+            // war Franks „Die Aufforderung ist nicht weggegangen".
+            _pamRemotePollPending=false;
+            _pamHandyHinweis(false);
             render();
             // Fix #368: Posteingang-Modal nach Merge neu binden – loadFromObject() baut
             // boards[] mit NEUEN Objekten auf; _emCurrentTask zeigte sonst auf ein
@@ -45275,7 +45322,10 @@ function openProjManager(){
   document.getElementById('projAddInput').value='';
   document.getElementById('projModal').classList.add('open');
 }
-function closeProjManager(){document.getElementById('projModal').classList.remove('open');}
+// b789: Beim Schliessen sofort nachsehen, ob das Handy-Band noch stehen darf. Der
+// Intervall-Waechter faengt es ohnehin, aber ohne diese Zeile bliebe es bis zu zwei
+// Sekunden stehen – und genau dieses Fenster war Franks Fall am 25.08.2026.
+function closeProjManager(){document.getElementById('projModal').classList.remove('open');try{_pamHandyHinweisPruefen();}catch(e){}}
 function renderProjList(){
   document.getElementById('projList').innerHTML=editProjects.map((p,i)=>`
     <div class="proj-row" draggable="true" data-idx="${i}"
