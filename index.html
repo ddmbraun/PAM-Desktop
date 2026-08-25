@@ -9469,7 +9469,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-25 · #787'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-25-b787) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-25 · #788'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-25-b788) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -10051,6 +10051,9 @@ let _letzterStandHash = null;
 // ⚠ Fehlt die Aufnahme (null), verhält sich der Abgleich exakt wie vor b662.
 // ══════════════════════════════════════════════════════════════════════════
 let _pamDriveSnapshot = null;
+// b788: Nummern, die beim letzten Abgleich im Archiv lagen. null = noch nicht ermittelt →
+// dann wird beim Zusammenfuehren NICHTS aussortiert (im Zweifel behalten, nie wegwerfen).
+let _pamArchivSnapshot = null;
 function _pamSnapshotSetzen(){
   try{
     const st = buildSaveObject();
@@ -10060,7 +10063,16 @@ function _pamSnapshotSetzen(){
       for(const t of v){ if(t && t.id) m.set(t.id, JSON.stringify(t)); }
     }
     _pamDriveSnapshot = m;
-  }catch(e){ _pamDriveSnapshot = null; console.warn('[b662] Momentaufnahme:', e); }
+    // b788 (Stufe 2): EIGENE Momentaufnahme fuer das Archiv – welche Nummern lagen beim
+    // letzten Abgleich im Archiv-Fach. Sie beantwortet beim Zusammenfuehren die eine Frage,
+    // die man sonst nicht beantworten kann: ist ein Eintrag drueben NEU dazugekommen, oder
+    // habe ICH ihn hier herausgenommen? Ohne sie holt jedes Vereinigen Weggeraeumtes zurueck.
+    // ⛔ BEWUSST GETRENNT von der Karten-Aufnahme oben. Archiv-Karten dort mit hineinzumischen
+    //    haette den Karten-Abgleich (Block 1b) beruehrt – genau die Art Nebenwirkung, die die
+    //    b664-Lehre meint. Diese Map steht fuer sich und wird NUR fuers Archiv gelesen.
+    _pamArchivSnapshot = new Set((Array.isArray(st._archivedTasks)?st._archivedTasks:[])
+      .map(t=>t&&t.id).filter(Boolean));
+  }catch(e){ _pamDriveSnapshot = null; _pamArchivSnapshot = null; console.warn('[b662] Momentaufnahme:', e); }
 }
 
 function _pamStandHash(s){
@@ -14242,6 +14254,33 @@ function _mergeListeGerichtet(remoteList,localList,snapList,kennung){
 function _mergeFotosGerichtet(remoteList,localList,snapList){
   return _mergeListeGerichtet(remoteList,localList,snapList,_fotoKennung);
 }
+// b788 (Stufe 2, Befund Frank 25.08.2026): Die beiden Archiv-Faecher zusammenfuehren.
+// Bis b787 kam das Archiv beim Abgleich AUSSCHLIESSLICH aus der Cloud – der Nachtrag-Schritt
+// ueberspringt alle _-Faecher. b787 hat verhindert, dass es dabei ABGERAEUMT wird; hier wird
+// es jetzt richtig VEREINIGT.
+// ⛔ GERICHTET, nicht einfach vereinigt – dieselbe Lehre wie bei den Fotos (b771/b772):
+//    Ausgangspunkt ist der eigene Stand, denn er traegt die eigenen Entnahmen. Aus der Cloud
+//    kommt nur dazu, was beim letzten Abgleich noch NICHT im Archiv lag; das kann dann nur
+//    ein Neuzugang des anderen Geraets sein. Ein hier Zurueckgeholtes stand im Schnappschuss
+//    und bleibt damit draussen – eine reine Vereinigung wuerde es als Wiedergaenger zurueckholen.
+// ⛔ Ohne Schnappschuss (null, noch kein Abgleich gelaufen) wird NICHTS aussortiert: im
+//    Zweifel behalten. Lieber ein Eintrag zu viel im Archiv als eine Karte verloren.
+// ⛔ Liegt eine Nummer auf BEIDEN Seiten, gewinnt die hiesige Fassung. Das Handy aendert
+//    Archiv-Eintraege nie (es reicht sie nur durch, v215) – nur der PC schreibt dort hinein
+//    (b764), und das ist dann genau diese Fassung.
+function _archivMergeGerichtet(remoteArch,localArch,snapIds){
+  const rem=Array.isArray(remoteArch)?remoteArch:[];
+  const loc=Array.isArray(localArch)?localArch:[];
+  const out=loc.slice();
+  const schonDa=new Set(out.map(t=>t&&t.id).filter(Boolean));
+  for(const t of rem){
+    if(!t||!t.id)continue;
+    if(schonDa.has(t.id))continue;              // beide kennen ihn → hiesige Fassung behalten
+    if(snapIds&&snapIds.has(t.id))continue;     // lag beim letzten Abgleich schon hier → hier entnommen
+    schonDa.add(t.id);out.push(t);
+  }
+  return out;
+}
 // b772: dieselbe Absicherung für die übrigen Listen in Block 2 (Auftrag Frank 23.08.).
 // ⛔ Die Kennung muss STABIL sein – sie darf sich nicht ändern, wenn man den Eintrag
 // bearbeitet. Die Kennungen aus Block 1 taugen dafür NICHT: dort steckt bei der
@@ -14470,6 +14509,12 @@ async function gdriveSaveData() {
                 merged[mk]=Array.isArray(localState[mk])?localState[mk].slice():{...localState[mk]};
               }
             }
+            // b788 (Stufe 2): Archiv GERICHTET zusammenfuehren statt die Cloud gewinnen zu lassen.
+            // ⛔ Muss NACH der Schleife oben stehen: _archivedTasks ist ein Array und wurde dort
+            //    schon als „Board" aus Remote uebernommen – das wird hier bewusst ueberschrieben.
+            // ⛔ _archivedTasks gehoert NICHT in _metaKeys: dort gewaenne der PC vollstaendig,
+            //    und ein am anderen Geraet neu Archiviertes fiele weg.
+            merged._archivedTasks=_archivMergeGerichtet(remote._archivedTasks,localState._archivedTasks,_pamArchivSnapshot);
             // 1) Modal-Task: lokale Skalar-Felder gewinnen, aber chronologische Listen werden gemerged
             if(modalTaskId){
               for(const[k,v]of Object.entries(localState)){
@@ -14625,6 +14670,39 @@ async function gdriveSaveData() {
               for(const did of [..._pamDeletedIds]){if(!remoteIds.has(did))_pamDeletedIds.delete(did);}
               _pamPersistDeletedIds();
             }
+            // ── b788 (Stufe 2): SICHERHEITSNETZ – keine Karte darf beide Toepfe verlassen ──
+            // Der Fall, den Stufe 2 sonst erst moeglich macht: Eine Karte liegt in der Cloud im
+            // ARCHIV und wurde hier gerade ZURUECKGEHOLT (liegt also lokal im Board). Dann
+            //   • steht ihre Nummer in remoteIds (das Archiv-Fach ist eine Liste und zaehlt mit),
+            //     deshalb ueberspringt der Nachtrag-Schritt sie als „kennt die Cloud schon",
+            //   • und der Archiv-Abgleich laesst sie draussen, weil sie im Schnappschuss stand.
+            // Ergebnis waere: weder im Board noch im Archiv – die Karte waere weg. Bis b787 fiel
+            // das nicht auf, weil das Archiv damals einfach komplett aus der Cloud kam.
+            // ⛔ Bewusst ein NETZ und kein Umbau: remoteIds bleibt unangetastet (Aenderungen dort
+            //    koennen Dubletten erzeugen – der b764-Fall vom 23.08.). Hier wird nur
+            //    zurueckgetragen, was nachweislich nirgends mehr liegt.
+            // ⛔ Ausgenommen, was ausdruecklich geloescht wurde – sonst kaeme Geloeschtes zurueck.
+            try{
+              const _drin=new Set();
+              for(const rk of Object.keys(merged)){
+                if(!Array.isArray(merged[rk]))continue;   // erfasst Boards UND das Archiv-Fach
+                for(const t of merged[rk])if(t&&t.id)_drin.add(t.id);
+              }
+              let _gerettet=0;
+              for(const[k,v]of Object.entries(localState)){
+                if(k==='_statuses'||k.startsWith('_')||!Array.isArray(v))continue;
+                for(const lt of v){
+                  if(!lt||!lt.id||_drin.has(lt.id))continue;
+                  if(_pamDeletedIds.has(lt.id))continue;  // absichtlich geloescht → nicht zurueckholen
+                  if(!merged[k])merged[k]=[];
+                  merged[k].push(lt);_drin.add(lt.id);_gerettet++;
+                }
+              }
+              if(_gerettet){
+                console.warn('[b788] Sicherheitsnetz: '+_gerettet+' Karte(n) waeren beim Abgleich aus Board UND Archiv gefallen – zurueckgetragen.');
+                if(typeof showToast==='function')showToast('🛟 '+_gerettet+' Karte'+(_gerettet!==1?'n':'')+' beim Abgleich zurückgeholt – sie wäre weder im Projekt noch im Archiv gelandet.','info',8000);
+              }
+            }catch(e){console.warn('[b788] Sicherheitsnetz:',e);}
             // Merged-State zurück ins Frontend laden, damit UI und folgende Saves konsistent sind
             loadFromObject(merged);
             render();
