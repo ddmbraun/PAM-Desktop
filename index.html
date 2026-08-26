@@ -9469,7 +9469,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-26 · #803'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-26-b803) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-26 · #804'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-26-b804) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -9483,6 +9483,8 @@ var zettelFileId=null;
 var _ztlSyncTimer=null,_ztlSyncLaeuft=false;
 var _ztlZeilen=[];
 try{if(typeof localStorage!=='undefined'){var _zLade=JSON.parse(localStorage.getItem(ZETTEL_LS_KEY)||'null');if(_zLade&&Array.isArray(_zLade.zeilen))_ztlZeilen=_zLade.zeilen;}}catch(e){}
+var _ztlEditId=null; // b804: Zeile, die gerade bearbeitet wird (null = keine)
+var _ztlDragAktiv=false,_ztlDragId=null,_ztlDragZiel=-1; // b804: laufender Zieh-Vorgang
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -45842,7 +45844,11 @@ function _ztlMerge(a,b,jetztIso){
   const grenze=new Date(new Date(jetztIso||_ztlJetzt()).getTime()-ZETTEL_WEG_TAGE*864e5).toISOString();
   return Object.keys(map).map(function(k){return map[k];})
     .filter(function(z){return !(z.weg&&String(z.weg)<grenze);})
-    .sort(function(x,y){return String(x.ang||'')<String(y.ang||'')?-1:1;});
+    .sort(function(x,y){
+      var px=(typeof x.pos==='number')?x.pos:(Date.parse(x.ang||'')||0);
+      var py=(typeof y.pos==='number')?y.pos:(Date.parse(y.ang||'')||0);
+      return px===py?(String(x.ang||'')<String(y.ang||'')?-1:1):(px-py);
+    });
 }
 function _ztlSichtbar(){return _ztlZeilen.filter(function(z){return _ztlGueltig(z)&&!z.weg;});}
 function _ztlSpeichereLokal(){try{if(typeof localStorage!=='undefined')localStorage.setItem(ZETTEL_LS_KEY,JSON.stringify({version:1,zeilen:_ztlZeilen}));}catch(e){}}
@@ -45850,7 +45856,9 @@ function _ztlNeu(text){
   const t=String(text||'').trim();
   if(!t)return false;
   const now=_ztlJetzt();
-  _ztlZeilen=_ztlMerge(_ztlZeilen,[{id:_ztlNeuId(),text:t,ang:now,erl:null,weg:null,ts:now}],now);
+  var posNeu=Date.parse(now)||0;
+  _ztlZeilen.forEach(function(z){var p=(z&&typeof z.pos==='number')?z.pos:(Date.parse((z&&z.ang)||'')||0);if(p>=posNeu)posNeu=p+60000;});
+  _ztlZeilen=_ztlMerge(_ztlZeilen,[{id:_ztlNeuId(),text:t,ang:now,erl:null,weg:null,ts:now,pos:posNeu}],now);
   _ztlSpeichereLokal();_ztlZeichne();_ztlSyncBald();
   return true;
 }
@@ -45880,6 +45888,7 @@ function _ztlToggleZu(){
 }
 function _ztlZeichne(){
   if(typeof document==='undefined')return;
+  if(typeof _ztlDragAktiv!=='undefined'&&_ztlDragAktiv)return; // b804: laufenden Zieh-Vorgang nicht abreißen (b664-Lehre: Neuzeichnen veraltet die gegriffene Zeile)
   const el=document.getElementById('ztlKasten');
   if(el)el.outerHTML=_ztlKastenHtml();
 }
@@ -45892,31 +45901,141 @@ function _ztlNeuAusFeld(){
   const n=document.getElementById('ztlNeu');
   if(n)n.focus();
 }
+// b804: Sortierwert einer Zeile – pos, sonst die Anlagezeit in Millisekunden. Dieselbe
+// Rechnung steht INLINE auch in _ztlMerge und _ztlNeu – bewusst nicht zusammengezogen,
+// damit die Suiten-Schnitte autark bleiben (Bauart b660).
+function _ztlPosWert(z){return (z&&typeof z.pos==='number')?z.pos:(Date.parse((z&&z.ang)||'')||0);}
+function _ztlEditStart(id){
+  _ztlEditId=id;
+  _ztlZeichne();
+  if(typeof document!=='undefined'){var f=document.getElementById('ztlEditFeld');if(f){f.focus();try{f.setSelectionRange(f.value.length,f.value.length);}catch(e){}}}
+}
+function _ztlEditAbbruch(){_ztlEditId=null;_ztlZeichne();}
+function _ztlEditSichern(id){
+  if(typeof document==='undefined')return;
+  var f=document.getElementById('ztlEditFeld');
+  var z=_ztlZeilen.find(function(x){return _ztlGueltig(x)&&x.id===id;});
+  _ztlEditId=null;
+  if(!f||!z){_ztlZeichne();return;}
+  var t=String(f.value||'').trim();
+  if(!t||t===z.text){_ztlZeichne();return;} // leer oder unverändert: alten Text stehen lassen
+  var now=_ztlJetzt();
+  z.text=t;z.ts=now;
+  _ztlSpeichereLokal();_ztlZeichne();_ztlSyncBald();
+}
+// b804: Zeile an eine Ziel-Stelle der SICHTBAREN Liste setzen. pos wird ZWISCHEN die
+// neuen Nachbarn gelegt – so reist die Reihenfolge über den ts-Abgleich mit ans andere Gerät.
+function _ztlMoveTo(id,zielIndex){
+  var z=_ztlZeilen.find(function(x){return _ztlGueltig(x)&&x.id===id;});
+  if(!z)return;
+  var rest=_ztlSichtbar().filter(function(x){return x.id!==id;});
+  if(zielIndex<0)zielIndex=0;
+  if(zielIndex>rest.length)zielIndex=rest.length;
+  var oben=zielIndex>0?rest[zielIndex-1]:null;
+  var unten=zielIndex<rest.length?rest[zielIndex]:null;
+  var now=_ztlJetzt();
+  var p;
+  if(oben&&unten)p=(_ztlPosWert(oben)+_ztlPosWert(unten))/2;
+  else if(unten)p=_ztlPosWert(unten)-60000;
+  else if(oben)p=_ztlPosWert(oben)+60000;
+  else p=Date.parse(now)||0;
+  if(p===_ztlPosWert(z)){_ztlZeichne();return;}
+  z.pos=p;z.ts=now;
+  _ztlZeilen=_ztlMerge(_ztlZeilen,[],now);
+  _ztlSpeichereLokal();_ztlZeichne();_ztlSyncBald();
+}
+// b804: Verschieben per Ziehen (Maus UND Finger – Pointer Events). Gezogen wird NUR am
+// ≡-Griff (touch-action:none dort), die Liste selbst bleibt normal blätterbar.
+function _ztlDragStart(ev,id){
+  if(typeof document==='undefined')return;
+  if(ev&&ev.preventDefault)ev.preventDefault();
+  _ztlDragAktiv=true;_ztlDragId=id;_ztlDragZiel=-1;
+  var move=function(e){
+    var lis=Array.prototype.slice.call(document.querySelectorAll('#ztlKasten li[data-ztlid]'));
+    var y=e.clientY;
+    var ziel=lis.length;
+    for(var i=0;i<lis.length;i++){
+      var r=lis[i].getBoundingClientRect();
+      if(y<r.top+r.height/2){ziel=i;break;}
+    }
+    _ztlDragZiel=ziel;
+    lis.forEach(function(li,i){
+      li.style.borderTop=(i===ziel)?'3px solid #7F77DD':'';
+      li.style.opacity=(li.getAttribute('data-ztlid')===id)?'0.45':'';
+    });
+    var ol=document.getElementById('ztlListe');
+    if(ol)ol.style.borderBottom=(ziel>=lis.length)?'3px solid #7F77DD':'';
+  };
+  var up=function(e){
+    document.removeEventListener('pointermove',move);
+    document.removeEventListener('pointerup',up);
+    document.removeEventListener('pointercancel',up);
+    _ztlDragAktiv=false;
+    var ziel=_ztlDragZiel;_ztlDragZiel=-1;_ztlDragId=null;
+    if(ziel<0){_ztlZeichne();return;}
+    // Das Ziel zählt in der Liste MIT der gezogenen Zeile – auf die Rest-Liste
+    // umrechnen: hinter der eigenen alten Stelle rückt alles um 1 vor.
+    var sicht=_ztlSichtbar();
+    var alt=-1;
+    sicht.forEach(function(x,i){if(x.id===id)alt=i;});
+    var zielRest=ziel;
+    if(alt>=0&&ziel>alt)zielRest=ziel-1;
+    _ztlMoveTo(id,zielRest);
+  };
+  document.addEventListener('pointermove',move);
+  document.addEventListener('pointerup',up);
+  document.addEventListener('pointercancel',up);
+}
 function _ztlKastenHtml(){
   if(typeof _ztlZeilen==='undefined'||!Array.isArray(_ztlZeilen))return''; // Wache: läuft ein früher render() VOR den Zustands-Variablen, gibt es still keinen Kasten statt eines Absturzes (Lehre 26.08.)
   const zu=_ztlIstZu();
   const sicht=_ztlSichtbar();
   const offen=sicht.filter(function(z){return !z.erl;}).length;
   const erledigte=sicht.length-offen;
+  const editId=(typeof _ztlEditId==='undefined')?null:_ztlEditId; // b804: typeof-Wache wie beim Rest
   let wert='';
   try{if(typeof document!=='undefined'){const f=document.getElementById('ztlNeu');if(f)wert=f.value||'';}}catch(e){}
-  let h='<div id="ztlKasten" style="background:var(--bg2);border:1px solid var(--border);border-left:3px solid #7F77DD;border-radius:0 10px 10px 0;margin-bottom:12px;overflow:hidden;">'
+  let editWert=null;
+  try{if(typeof document!=='undefined'){const f=document.getElementById('ztlEditFeld');if(f)editWert=f.value;}}catch(e){}
+  // Die Kasten-Kennung steht bewusst nur EINMAL im Quelltext (ID-Prüfer, Punkt 4) – beide
+  // Zweige bauen auf demselben Anfang auf, zur Laufzeit existiert immer nur einer.
+  const kastenAuf='<div id="ztlKasten" ';
+  if(zu){
+    // b804: zugeklappt nur noch eine KLEINE Kachel statt der Zeile über die volle Breite
+    return kastenAuf+'onclick="_ztlToggleZu()" style="display:inline-flex;align-items:center;gap:7px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid #7F77DD;border-radius:0 8px 8px 0;padding:8px 14px;margin-bottom:12px;cursor:pointer;user-select:none;">'
+      +'<span style="font-size:11px;color:var(--text2);">▶</span>'
+      +'<span style="font-size:14px;">📝</span>'
+      +'<span style="font-size:14px;font-weight:700;color:var(--text);">Zettel</span>'
+      +(offen?'<span style="font-size:12px;font-weight:600;color:#7F77DD;">'+offen+' offen</span>':'<span style="font-size:12px;color:var(--text2);">nichts offen</span>')
+      +'</div>';
+  }
+  let h=kastenAuf+'style="max-width:520px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid #7F77DD;border-radius:0 10px 10px 0;margin-bottom:12px;overflow:hidden;">'
     +'<div onclick="_ztlToggleZu()" style="display:flex;align-items:center;gap:8px;padding:9px 12px;cursor:pointer;user-select:none;">'
-    +'<span style="font-size:12px;color:var(--text2);">'+(zu?'▶':'▼')+'</span>'
+    +'<span style="font-size:12px;color:var(--text2);">▼</span>'
     +'<span style="font-size:14px;">📝</span>'
     +'<span style="font-size:14px;font-weight:700;color:var(--text);">Zettel</span>'
     +(offen?'<span style="font-size:12px;font-weight:600;color:#7F77DD;">'+offen+' offen</span>':'<span style="font-size:12px;color:var(--text2);">nichts offen</span>')
     +'</div>';
-  if(!zu){
+  {
     h+='<div style="padding:2px 12px 11px;">';
     if(sicht.length){
-      h+='<ol style="list-style:none;margin:0;padding:0;">';
+      h+='<ol id="ztlListe" style="list-style:none;margin:0;padding:0;">';
       sicht.forEach(function(z,i){
-        h+='<li style="display:flex;align-items:center;gap:9px;padding:6px 0;border-bottom:1px solid var(--border);">'
+        h+='<li data-ztlid="'+_ztlAttr(z.id)+'" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);">'
           +'<span style="font-size:12px;color:var(--text2);min-width:20px;text-align:right;flex-shrink:0;">'+(i+1)+'.</span>'
-          +'<span onclick="_ztlHaken(\''+_ztlAttr(z.id)+'\')" title="'+(z.erl?'Haken wegnehmen':'als erledigt abhaken')+'" style="width:24px;height:24px;border:2px solid '+(z.erl?'#639922':'var(--text2)')+';border-radius:6px;background:'+(z.erl?'#EAF3DE':'transparent')+';color:#3B6D11;display:inline-flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;cursor:pointer;flex-shrink:0;">'+(z.erl?'✓':'')+'</span>'
-          +'<span style="flex:1;min-width:0;font-size:14px;line-height:1.35;color:var(--text);word-break:break-word;'+(z.erl?'text-decoration:line-through;opacity:.55;':'')+'">'+_ztlEsc(z.text)+'</span>'
-          +'</li>';
+          +'<span onclick="_ztlHaken(\''+_ztlAttr(z.id)+'\')" title="'+(z.erl?'Haken wegnehmen':'als erledigt abhaken')+'" style="width:24px;height:24px;border:2px solid '+(z.erl?'#639922':'var(--text2)')+';border-radius:6px;background:'+(z.erl?'#EAF3DE':'transparent')+';color:#3B6D11;display:inline-flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;cursor:pointer;flex-shrink:0;">'+(z.erl?'✓':'')+'</span>';
+        if(editId===z.id){
+          const v=(editWert==null)?z.text:editWert;
+          h+='<input id="ztlEditFeld" type="text" value="'+_ztlAttr(v)+'" autocomplete="off"'
+            +' onkeydown="if(event.key===\'Enter\')_ztlEditSichern(\''+_ztlAttr(z.id)+'\');if(event.key===\'Escape\')_ztlEditAbbruch()"'
+            +' style="flex:1;min-width:0;padding:6px 8px;border-radius:7px;border:1px solid #7F77DD;background:var(--bg3);color:var(--text);font-size:14px;">'
+            +'<span onclick="_ztlEditSichern(\''+_ztlAttr(z.id)+'\')" title="Änderung speichern" style="width:28px;height:28px;border-radius:7px;background:#639922;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;cursor:pointer;flex-shrink:0;">✓</span>';
+        }else{
+          h+='<span ondblclick="_ztlEditStart(\''+_ztlAttr(z.id)+'\')" style="flex:1;min-width:0;font-size:14px;line-height:1.35;color:var(--text);word-break:break-word;'+(z.erl?'text-decoration:line-through;opacity:.55;':'')+'">'+_ztlEsc(z.text)+'</span>'
+            +'<span onclick="_ztlEditStart(\''+_ztlAttr(z.id)+'\')" title="Text ändern" style="width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;color:var(--text2);cursor:pointer;flex-shrink:0;">✏️</span>'
+            +'<span onpointerdown="_ztlDragStart(event,\''+_ztlAttr(z.id)+'\')" title="Zum Verschieben ziehen (auch mit dem Finger)" style="width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;color:var(--text2);cursor:grab;touch-action:none;flex-shrink:0;font-size:16px;">≡</span>';
+        }
+        h+='</li>';
       });
       h+='</ol>';
     }else{
