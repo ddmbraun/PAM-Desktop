@@ -9469,7 +9469,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-26 · #798'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-26-b798) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-26 · #799'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-26-b799) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -44711,12 +44711,59 @@ function _emShowConfirmModal(message,onConfirm){
   document.body.appendChild(ov);
 }
 
+// ── b799: Arbeitsstände beim Eingliedern mitnehmen ──
+// Checkliste, Notiz, freie Termine, Aufgaben, Frist und Kontakte hingen nur am
+// geparkten E-Mail-Task und verschwanden mit ihm beim Eingliedern. Reine
+// Datenzusammenführung ohne DOM und ohne Drive – am Ziel-Auftrag wird nichts
+// überschrieben, nur ergänzt.
+function _emMergeArbeitsstaende(src,tt){
+  if(!src||!tt)return;
+  if(!Array.isArray(tt.checkliste))tt.checkliste=[];
+  (src.checkliste||[]).forEach(function(c){
+    var ct=((c&&c.text)||'').trim();
+    if(!ct)return;
+    if(!tt.checkliste.some(function(x){return ((x&&x.text)||'').trim()===ct;}))
+      tt.checkliste.push(c);
+  });
+  if(src.emNotiz&&String(src.emNotiz).trim()){
+    tt.desc=(tt.desc||'')+'\n\n[Notiz aus geparkter E-Mail, übernommen '+new Date().toLocaleDateString('de-DE')+']:\n'+src.emNotiz;
+  }
+  if(!Array.isArray(tt.freieTermine))tt.freieTermine=[];
+  if(!tt.freieTermine.length&&tt.freierTermin&&tt.freierTermin.datum)tt.freieTermine.push(tt.freierTermin); // Alt-Einzeltermin des Ziels retten – die Anzeige liest ihn nur bei leerer Liste
+  (src.freieTermine||[]).forEach(function(ft){
+    if(!ft||(!(ft.text||'').trim()&&!ft.datum))return;
+    if(!tt.freieTermine.some(function(x){return x&&(x.text||'')===(ft.text||'')&&(x.datum||'')===(ft.datum||'');}))
+      tt.freieTermine.push(ft);
+  });
+  if(!Array.isArray(tt.aufgaben))tt.aufgaben=[];
+  var nextId=tt.aufgaben.reduce(function(m,a){var n=Number(a&&a.id);return isNaN(n)?m:Math.max(m,n+1);},0);
+  (src.aufgaben||[]).forEach(function(a){
+    if(!a||!(a.typ||a.text))return;
+    if(tt.aufgaben.some(function(x){return x&&(x.typ||'')===(a.typ||'')&&(x.text||'')===(a.text||'')&&(x.datum||'')===(a.datum||'');}))return;
+    var neu=JSON.parse(JSON.stringify(a));
+    neu.id=nextId++;
+    tt.aufgaben.push(neu);
+  });
+  if(!tt.due&&src.due)tt.due=src.due;
+  if(!Array.isArray(tt.kontakte))tt.kontakte=[];
+  (src.kontakte||[]).forEach(function(k){
+    if(!k||!(k.name||k.tel||k.tel2||k.email))return;
+    var kk=k.id||((k.rolle||'')+'|'+(k.name||''));
+    if(!tt.kontakte.some(function(x){return x&&(x.id||((x.rolle||'')+'|'+(x.name||'')))===kk;}))
+      tt.kontakte.push(k);
+  });
+}
+
 function _emInAuftragEinglieder(){
   if(!_emCurrentTask)return;
   _emShowBoardTaskPicker('In Auftrag eingliedern',function(target){
       let tt=target.task;
       let src=_emCurrentTask;
       const _doMerge=async function(){
+        // b799: Formularfelder ZUERST in den Quell-Task übernehmen – Notiz, Frist,
+        // Termine und Aufgaben leben bis dahin nur im Fenster; der Speicherpunkt
+        // weiter unten kam für das Kopieren zu spät.
+        _emDoSave();
         // b537: Erst die DATEIEN in Drive mitnehmen, dann die Daten zusammenführen.
         // Vorher wurden nur die Verweise kopiert – die Mails blieben physisch im
         // E-Mail-Ordner liegen, während der Auftrag beim Kunden lag.
@@ -44799,6 +44846,7 @@ function _emInAuftragEinglieder(){
           if(!tt[k])tt[k]=[];
           (src[k]||[]).forEach(function(id){if(id&&tt[k].indexOf(id)===-1)tt[k].push(id);});
         });
+        _emMergeArbeitsstaende(src,tt); // b799: Checkliste, Notiz, Termine, Aufgaben, Frist, Kontakte
         // Quell-Task löschen
         // Fix #232: Formularfelder sichern und sofort speichern
         _emDoSave();
