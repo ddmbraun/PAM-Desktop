@@ -9469,7 +9469,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-26 · #801'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-26-b801) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-26 · #802'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-26-b802) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -18224,6 +18224,7 @@ function renderHeute(){
     +'<span style="font-size:18px;font-weight:600;color:var(--text);">Was steht heute an?</span>'
     +'<span style="font-size:13px;color:var(--text2);">'+dateStr+'</span>'
     +'</div>'
+    +_ztlKastenHtml() // b802: Franks Tageszettel – ganz oben bei „Heute", in Karten- UND Kachel-Ansicht
     +zoomBar
     +toggleBar
     +filterBar
@@ -45791,6 +45792,192 @@ if(window._gsiPending && typeof gdriveInit==='function'){gdriveInit();window._gs
 if(typeof _gmVerbindungWiederherstellen==='function')_gmVerbindungWiederherstellen();
 // b486: Outlook-Init direkt aufrufen (MSAL-Script entfernt, kein onload-Hook mehr)
 if(typeof msInit==='function')msInit();
+
+// ══════════════════════════════════════════════
+// ── ZETTEL (pam_zettel.json) – b802 ──
+// ══════════════════════════════════════════════
+// Franks Tageszettel oben bei „Heute": Kurzzeilen tippen oder diktieren (Windows-Taste+H),
+// abhaken, „🧹 Erledigte aufräumen". Bewusst dumm wie Papier – keine Tasks, keine Termine,
+// keine Objekt-Zuordnung. EIGENE Drive-Datei wie pam_settings.json (Begründung im
+// b531-Block darunter): workboard.json bleibt unangetastet – ein Fehler hier kann den
+// Karten nichts tun.
+// Abgleich PC↔Handy = VEREINIGUNG je Zeilen-Kennung (_ztlMerge), nie „Datei gewinnt":
+// je Zeile entscheidet der jüngere Änderungsstempel ts. Aufräumen LÖSCHT nicht, sondern
+// setzt weg=<Zeitpunkt> – ein Gerät mit altem Stand brächte sonst Gelöschtes zurück
+// (Archiv-Lehre, b787). Endgültig heraus fällt eine Zeile erst ZETTEL_WEG_TAGE nach weg.
+// Am Handy steht DERSELBE Block (v239), zeichengleich bis auf ZETTEL_ZU_VORGABE –
+// test_v239 vergleicht die Kernfunktionen Zeichen für Zeichen (wie test_v195).
+const ZETTEL_FILE_NAME='pam_zettel.json';
+const ZETTEL_LS_KEY='pam_zettel_lokal';
+const ZETTEL_ZU_KEY='pam_zettel_zu';
+const ZETTEL_ZU_VORGABE='0'; // '0' = Kasten startet offen (Handy: '1' = zugeklappt)
+const ZETTEL_WEG_TAGE=14;
+let zettelFileId=null;
+let _ztlSyncTimer=null,_ztlSyncLaeuft=false;
+let _ztlZeilen=[];
+try{if(typeof localStorage!=='undefined'){const _z=JSON.parse(localStorage.getItem(ZETTEL_LS_KEY)||'null');if(_z&&Array.isArray(_z.zeilen))_ztlZeilen=_z.zeilen;}}catch(e){}
+function _ztlJetzt(){return new Date().toISOString();}
+function _ztlNeuId(){return 'z'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,8);}
+function _ztlGueltig(z){return !!(z&&typeof z==='object'&&typeof z.id==='string'&&z.id&&typeof z.text==='string');}
+function _ztlEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function _ztlAttr(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');}
+// Vereinigung zweier Stände: je Kennung gewinnt der jüngere ts (ISO-Strings vergleichen
+// sich als Text korrekt). Zeilen, deren weg-Stempel älter als ZETTEL_WEG_TAGE ist,
+// fallen endgültig weg. Ergebnis sortiert nach Anlagezeit ang (= Papier-Reihenfolge).
+function _ztlMerge(a,b,jetztIso){
+  const map={};
+  [].concat(a||[],b||[]).forEach(function(z){
+    if(!_ztlGueltig(z))return;
+    const alt=map[z.id];
+    if(!alt||String(z.ts||'')>String(alt.ts||''))map[z.id]=z;
+  });
+  const grenze=new Date(new Date(jetztIso||_ztlJetzt()).getTime()-ZETTEL_WEG_TAGE*864e5).toISOString();
+  return Object.keys(map).map(function(k){return map[k];})
+    .filter(function(z){return !(z.weg&&String(z.weg)<grenze);})
+    .sort(function(x,y){return String(x.ang||'')<String(y.ang||'')?-1:1;});
+}
+function _ztlSichtbar(){return _ztlZeilen.filter(function(z){return _ztlGueltig(z)&&!z.weg;});}
+function _ztlSpeichereLokal(){try{if(typeof localStorage!=='undefined')localStorage.setItem(ZETTEL_LS_KEY,JSON.stringify({version:1,zeilen:_ztlZeilen}));}catch(e){}}
+function _ztlNeu(text){
+  const t=String(text||'').trim();
+  if(!t)return false;
+  const now=_ztlJetzt();
+  _ztlZeilen=_ztlMerge(_ztlZeilen,[{id:_ztlNeuId(),text:t,ang:now,erl:null,weg:null,ts:now}],now);
+  _ztlSpeichereLokal();_ztlZeichne();_ztlSyncBald();
+  return true;
+}
+function _ztlHaken(id){
+  const z=_ztlZeilen.find(function(x){return _ztlGueltig(x)&&x.id===id;});
+  if(!z)return;
+  const now=_ztlJetzt();
+  z.erl=z.erl?null:now;z.ts=now;
+  _ztlSpeichereLokal();_ztlZeichne();_ztlSyncBald();
+}
+function _ztlAufraeumen(){
+  const now=_ztlJetzt();let n=0;
+  _ztlZeilen.forEach(function(z){if(_ztlGueltig(z)&&z.erl&&!z.weg){z.weg=now;z.ts=now;n++;}});
+  if(!n)return;
+  _ztlSpeichereLokal();_ztlZeichne();_ztlSyncBald();
+}
+function _ztlIstZu(){
+  let v='';
+  try{if(typeof localStorage!=='undefined')v=localStorage.getItem(ZETTEL_ZU_KEY)||'';}catch(e){}
+  if(v==='1')return true;
+  if(v==='0')return false;
+  return ZETTEL_ZU_VORGABE==='1';
+}
+function _ztlToggleZu(){
+  try{if(typeof localStorage!=='undefined')localStorage.setItem(ZETTEL_ZU_KEY,_ztlIstZu()?'0':'1');}catch(e){}
+  _ztlZeichne();
+}
+function _ztlZeichne(){
+  if(typeof document==='undefined')return;
+  const el=document.getElementById('ztlKasten');
+  if(el)el.outerHTML=_ztlKastenHtml();
+}
+function _ztlNeuAusFeld(){
+  if(typeof document==='undefined')return;
+  const f=document.getElementById('ztlNeu');
+  if(!f)return;
+  const t=f.value;f.value='';
+  if(!_ztlNeu(t)){f.value=t;return;}
+  const n=document.getElementById('ztlNeu');
+  if(n)n.focus();
+}
+function _ztlKastenHtml(){
+  const zu=_ztlIstZu();
+  const sicht=_ztlSichtbar();
+  const offen=sicht.filter(function(z){return !z.erl;}).length;
+  const erledigte=sicht.length-offen;
+  let wert='';
+  try{if(typeof document!=='undefined'){const f=document.getElementById('ztlNeu');if(f)wert=f.value||'';}}catch(e){}
+  let h='<div id="ztlKasten" style="background:var(--bg2);border:1px solid var(--border);border-left:3px solid #7F77DD;border-radius:0 10px 10px 0;margin-bottom:12px;overflow:hidden;">'
+    +'<div onclick="_ztlToggleZu()" style="display:flex;align-items:center;gap:8px;padding:9px 12px;cursor:pointer;user-select:none;">'
+    +'<span style="font-size:12px;color:var(--text2);">'+(zu?'▶':'▼')+'</span>'
+    +'<span style="font-size:14px;">📝</span>'
+    +'<span style="font-size:14px;font-weight:700;color:var(--text);">Zettel</span>'
+    +(offen?'<span style="font-size:12px;font-weight:600;color:#7F77DD;">'+offen+' offen</span>':'<span style="font-size:12px;color:var(--text2);">nichts offen</span>')
+    +'</div>';
+  if(!zu){
+    h+='<div style="padding:2px 12px 11px;">';
+    if(sicht.length){
+      h+='<ol style="list-style:none;margin:0;padding:0;">';
+      sicht.forEach(function(z,i){
+        h+='<li style="display:flex;align-items:center;gap:9px;padding:6px 0;border-bottom:1px solid var(--border);">'
+          +'<span style="font-size:12px;color:var(--text2);min-width:20px;text-align:right;flex-shrink:0;">'+(i+1)+'.</span>'
+          +'<span onclick="_ztlHaken(\''+_ztlAttr(z.id)+'\')" title="'+(z.erl?'Haken wegnehmen':'als erledigt abhaken')+'" style="width:24px;height:24px;border:2px solid '+(z.erl?'#639922':'var(--text2)')+';border-radius:6px;background:'+(z.erl?'#EAF3DE':'transparent')+';color:#3B6D11;display:inline-flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;cursor:pointer;flex-shrink:0;">'+(z.erl?'✓':'')+'</span>'
+          +'<span style="flex:1;min-width:0;font-size:14px;line-height:1.35;color:var(--text);word-break:break-word;'+(z.erl?'text-decoration:line-through;opacity:.55;':'')+'">'+_ztlEsc(z.text)+'</span>'
+          +'</li>';
+      });
+      h+='</ol>';
+    }else{
+      h+='<div style="font-size:13px;color:var(--text2);padding:4px 0 2px;">Noch nichts notiert.</div>';
+    }
+    h+='<div style="display:flex;gap:7px;margin-top:9px;align-items:center;">'
+      +'<input id="ztlNeu" type="text" value="'+_ztlAttr(wert)+'" placeholder="Neuen Punkt eintippen oder diktieren…" autocomplete="off"'
+      +' onkeydown="if(event.key===\'Enter\')_ztlNeuAusFeld()"'
+      +' style="flex:1;min-width:0;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:14px;">'
+      +'<button onclick="_ztlNeuAusFeld()" title="Punkt anhängen" style="flex-shrink:0;width:38px;height:36px;border-radius:8px;border:1px solid var(--border);background:#7F77DD;color:#fff;font-size:17px;font-weight:700;cursor:pointer;">+</button>'
+      +'</div>';
+    if(erledigte>0){
+      h+='<div style="display:flex;justify-content:flex-end;margin-top:8px;">'
+        +'<button onclick="_ztlAufraeumen()" style="font-size:12px;padding:5px 11px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;">🧹 Erledigte aufräumen ('+erledigte+')</button>'
+        +'</div>';
+    }
+    h+='</div>';
+  }
+  return h+'</div>';
+}
+function _ztlSyncBald(){clearTimeout(_ztlSyncTimer);_ztlSyncTimer=setTimeout(function(){_ztlSync();},2000);}
+async function _ztlSync(){
+  if(_ztlSyncLaeuft)return;
+  const tokOk=(typeof gdriveTokenValid==='function')?gdriveTokenValid():!!(typeof gdriveToken!=='undefined'&&gdriveToken);
+  if(!tokOk)return;
+  if(!zettelFileId&&!_ztlZeilen.length)return;
+  _ztlSyncLaeuft=true;
+  try{
+    if(!zettelFileId){
+      const q=encodeURIComponent("name='"+ZETTEL_FILE_NAME+"' and trashed=false");
+      const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,modifiedTime)&orderBy=modifiedTime desc&pageSize=5',
+        {headers:{Authorization:'Bearer '+gdriveToken}});
+      if(r.status===401){if(typeof _handleDrive401==='function')_handleDrive401();return;}
+      if(!r.ok)return;
+      const d=await r.json();
+      if(d.files&&d.files.length)zettelFileId=d.files[0].id;
+    }
+    let fern=[],fernRoh='[]';
+    if(zettelFileId){
+      const r=await fetch('https://www.googleapis.com/drive/v3/files/'+zettelFileId+'?alt=media&_='+Date.now(),
+        {headers:{Authorization:'Bearer '+gdriveToken,'Cache-Control':'no-cache'},cache:'no-store'});
+      if(r.ok){const d=await r.json();if(d&&Array.isArray(d.zeilen)){fern=d.zeilen;fernRoh=JSON.stringify(fern);}}
+    }
+    const vorher=JSON.stringify(_ztlZeilen);
+    _ztlZeilen=_ztlMerge(_ztlZeilen,fern,_ztlJetzt());
+    const nachher=JSON.stringify(_ztlZeilen);
+    if(nachher!==vorher){_ztlSpeichereLokal();_ztlZeichne();}
+    if(zettelFileId&&nachher===fernRoh)return;
+    const content=JSON.stringify({version:1,zeilen:_ztlZeilen,lastUpdated:_ztlJetzt()});
+    if(zettelFileId){
+      await fetch('https://www.googleapis.com/upload/drive/v3/files/'+zettelFileId+'?uploadType=media',
+        {method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},body:content});
+    }else{
+      const b='zt_'+Date.now();
+      const meta={name:ZETTEL_FILE_NAME,mimeType:'application/json'};
+      if(typeof workspaceFolderId!=='undefined'&&workspaceFolderId)meta.parents=[workspaceFolderId];
+      const body='--'+b+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify(meta)
+        +'\r\n--'+b+'\r\nContent-Type: application/json\r\n\r\n'+content+'\r\n--'+b+'--';
+      const r=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',
+        {method:'POST',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'multipart/related; boundary='+b},body});
+      if(r.ok){const f=await r.json();zettelFileId=f.id;}
+    }
+  }catch(e){console.warn('[Zettel] Abgleich:',e);}
+  finally{_ztlSyncLaeuft=false;}
+}
+// ── ZETTEL-TIMER – ab hier nichts in Prüfsuiten ausführen ──
+if(typeof setInterval==='function'&&typeof document!=='undefined'){
+  setInterval(function(){_ztlSync();},60000);
+  setTimeout(function(){_ztlSync();},4000);
+}
 
 // ══════════════════════════════════════════════
 // ── EINSTELLUNGEN (pam_settings.json) – b531 ──
