@@ -9469,7 +9469,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-26 · #799'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-26-b799) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-26 · #801'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-26-b801) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -15968,8 +15968,9 @@ function _heuteSetFilter(key,val){
   renderHeute();
 }
 
-var _pamRasterFilter={overdue:true,heute:true,ausf:true,turnus:true};
+var _pamRasterFilter={overdue:true,heute:true,ausf:true,turnus:true,post:true};
 var _pamRasterGrouped={overdue:[],heute:[],ausf:[],turnus:[],turnusAus:[]};
+_pamRasterGrouped.post=[]; // b801: getrennt ergänzt – test_b660 prüft das Startwert-Objekt wörtlich
 // b660: zeigt die abgewählten Leistungen zur Kontrolle mit ein. Bewusst NICHT
 // gespeichert – beim nächsten Öffnen ist die Übersicht wieder aufgeräumt.
 var _tuZeigeAbgewaehlt=false;
@@ -17669,8 +17670,11 @@ function _bjmPdfFrage(pos){
   });
 }
 
-function _pamHeuteRaster(listeAll, today, typFilter, terminFilter){
-  if(!listeAll||!listeAll.length)return'';
+function _pamHeuteRaster(listeAll, today, typFilter, terminFilter, postListe){
+  // b801: E-Mail-Tasks MIT Frist (der Heute-Topf „Posteingang") bekommen eine eigene
+  // Gruppe samt Knopf – bisher floss dieser Topf in die Kachel-Ansicht gar nicht ein.
+  var _postL=(!typFilter||typFilter==='alle'||typFilter==='posteingang')?(postListe||[]):[];
+  if((!listeAll||!listeAll.length)&&!_postL.length)return'';
   var _fD=function(d){if(!d)return'–';var p=d.split('-');return p[2]+'.'+p[1]+'.';};
   // Typ-Filter
   var liste2=listeAll.filter(function(item){
@@ -17693,7 +17697,7 @@ function _pamHeuteRaster(listeAll, today, typFilter, terminFilter){
       return true;
     });
   }
-  var grouped={overdue:[],heute:[],ausf:[]};
+  var grouped={overdue:[],heute:[],ausf:[],post:_postL};
   liste2.forEach(function(item){
     var t=item.t;
     var _ft=t.freieTermine&&t.freieTermine.length?t.freieTermine:(t.freierTermin&&t.freierTermin.datum?[t.freierTermin]:[]);
@@ -17752,6 +17756,7 @@ function _pamHeuteRaster(listeAll, today, typFilter, terminFilter){
     +fBtn('overdue','⚠️ \xdcberf\xe4llig','#E24B4A',grouped.overdue.length)
     +fBtn('heute','📅 Heute f\xe4llig','#EF9F27',grouped.heute.length)
     +fBtn('ausf','🔧 Ausf\xfchrung heute','#378ADD',grouped.ausf.length)
+    +(grouped.post.length?fBtn('post','📧 Posteingang','#075985',grouped.post.length):'')
     // b660: der Knopf bleibt auch dann stehen, wenn ALLE Leistungen abgewählt sind –
     // sonst wäre der Schalter „turnus" unerreichbar und das Einblenden liefe ins Leere.
     +((grouped.turnus.length||grouped.turnusAus.length)?fBtn('turnus','🏠 Objekte','#7F77DD',grouped.turnus.length):'')
@@ -17769,6 +17774,7 @@ function _pamHeuteRaster(listeAll, today, typFilter, terminFilter){
   if(rf.overdue)grouped.overdue.forEach(function(x){liste.push(Object.assign({},x,{_grp:'overdue'}));});
   if(rf.heute)grouped.heute.forEach(function(x){liste.push(Object.assign({},x,{_grp:'heute'}));});
   if(rf.ausf)grouped.ausf.forEach(function(x){liste.push(Object.assign({},x,{_grp:'ausf'}));});
+  if(rf.post)grouped.post.forEach(function(x){liste.push(Object.assign({},x,{_grp:'post'}));});
   liste=liste.filter(function(x,i,a){return a.findIndex(function(y){return y.t.id===x.t.id;})===i;});
   // b611: NICHT in die Entdopplung oben – die geht über die Task-ID, und ein
   // Objekt kann mehrere fällige Leistungen haben (Reinigung UND Heizung).
@@ -17801,14 +17807,15 @@ function _pamHeuteRaster(listeAll, today, typFilter, terminFilter){
     else if(matchAufg){grundLine='✅ '+esc(matchAufg.typ||matchAufg.text||'Aufgabe');}
     else if(t.due&&t.due<=today){grundLine='📋 F\xe4lligkeit: '+_fD(t.due);}
     else if(t.ausfuehrungstermin===today){grundLine='🔧 Ausf\xfchrung heute';}
+    else if(item._grp==='post'&&t.due){grundLine='📧 Frist: '+_fD(t.due);}
     var bottomLeft='';
     if(bt==='email'){bottomLeft=anhCnt>0?'📎 '+anhCnt+' Anh.':'📧 Mail';}
     else{bottomLeft=fotoCnt>0?_fvBadge(t.fotos):'&nbsp;';}
     // b594: Kachel öffnet jetzt DIESELBE Übersicht wie die Karten-Knöpfe „📋 Übersicht"
     // und der Auftrag. Vorher ging hier das alte Übersichtsfenster (`_pamTaskDrucken`) auf –
     // gleicher Name, andere Optik, ohne Häkchen/PDF/Senden.
-    var clickFn="_openPdfSendenModus('"+t.id+"')";
-    var grpColor=item._grp==='overdue'?'#E24B4A':item._grp==='heute'?'#EF9F27':'#378ADD';
+    var clickFn=item._grp==='post'?"openEditTaskModal('"+t.id+"')":"_openPdfSendenModus('"+t.id+"')"; // b801: Posteingang-Kachel öffnet das E-Mail-Fenster wie die Karten-Ansicht
+    var grpColor=item._grp==='overdue'?'#E24B4A':item._grp==='heute'?'#EF9F27':item._grp==='post'?'#075985':'#378ADD';
     html+='<div onclick="'+clickFn+'" style="background:var(--bg2);border-radius:10px;border:1px solid var(--border);border-left:4px solid '+grpColor+';padding:9px 10px;cursor:pointer;" onmouseenter="_pamKachelHov(event,\''+t.id+'\',\''+esc(item.board)+'\')" onmouseleave="_pamKachelHovOut()">'
       +'<div style="display:flex;align-items:flex-start;gap:4px;margin-bottom:5px;">'
       +'<span style="width:7px;height:7px;border-radius:50%;background:'+ampelColor+';flex-shrink:0;margin-top:3px;display:inline-block;"></span>'
@@ -18178,7 +18185,7 @@ function renderHeute(){
   var _rasterListe=[...ueberfaellig,...heuteFaellig,...ausfuehrungHeute].filter(function(x,i,a){
     return a.findIndex(function(y){return y.t.id===x.t.id;})===i;
   });
-  var _rasterHtml=_pamHeuteRaster(_rasterListe,today,_heuteTypFilter2,_heuteTerminFilter);
+  var _rasterHtml=_pamHeuteRaster(_rasterListe,today,_heuteTypFilter2,_heuteTerminFilter,posteingang); // b801
   // ── b528: „Heute unterwegs" – heutige Außer-Haus-Termine mit Uhrzeit + Fahrzeit ──
   // (wie PAM Mobil v131; vorher musste man dafür in den Kalender wechseln)
   unterwegs.sort(function(a,b){return (a.tm.von?_normTime(a.tm.von):'99')<(b.tm.von?_normTime(b.tm.von):'99')?-1:1;});
@@ -18253,28 +18260,29 @@ function renderHeute(){
     let cntAufg=spHeu.aufg.length+spUeb.aufg.length+spAusf.aufg.length+spBald.aufg.length;
     let cntAuftr=spHeu.auftr.length+spUeb.auftr.length+spAusf.auftr.length+spBald.auftr.length;
     var _tf2=_heuteTypFilter2||'alle';
+    // b800: Die Spalten-Kennung reist mit der Spalte selbst – vorher wurde sie über
+    // die Position vergeben, und bei gefiltertem Aufbau erbte z.B. „Posteingang"
+    // Einklapp-Zustand und gemerkte Breite von „Aufgaben".
     if(_tf2==='alle'||_tf2==='aufgaben')
-      _cols.push(_hCol('aufgaben','background:#E6F1FB;border-color:#B5D4F4;color:#185FA5;','✅','Aufgaben',cntAufg,'#B5D4F4',colAufgHTML||'<div style="color:var(--text2);font-size:13px;padding:8px 0;">Keine Aufgaben fällig ✓</div>'));
+      _cols.push({id:'aufgaben',html:_hCol('aufgaben','background:#E6F1FB;border-color:#B5D4F4;color:#185FA5;','✅','Aufgaben',cntAufg,'#B5D4F4',colAufgHTML||'<div style="color:var(--text2);font-size:13px;padding:8px 0;">Keine Aufgaben fällig ✓</div>')});
     if(_tf2==='alle'||_tf2==='auftraege')
-      _cols.push(_hCol('auftraege','background:#EAF3DE;border-color:#C0DD97;color:#3B6D11;','🏗','Aufträge',cntAuftr,'#C0DD97',colAuftrHTML||'<div style="color:var(--text2);font-size:13px;padding:8px 0;">Keine Aufträge fällig ✓</div>'));
+      _cols.push({id:'auftraege',html:_hCol('auftraege','background:#EAF3DE;border-color:#C0DD97;color:#3B6D11;','🏗','Aufträge',cntAuftr,'#C0DD97',colAuftrHTML||'<div style="color:var(--text2);font-size:13px;padding:8px 0;">Keine Aufträge fällig ✓</div>')});
     if(hasPost&&(_tf2==='alle'||_tf2==='posteingang')){
-      _cols.push(_hCol('posteingang','background:#E0F2FE;border-color:#BAE6FD;color:#075985;','📧','Posteingang',posteingang.length,'#BAE6FD',posteingang.map(function(item){return postRow(item);}).join('')));
+      _cols.push({id:'posteingang',html:_hCol('posteingang','background:#E0F2FE;border-color:#BAE6FD;color:#075985;','📧','Posteingang',posteingang.length,'#BAE6FD',posteingang.map(function(item){return postRow(item);}).join(''))});
     }
-    let _gridCols=_cols.map(function(_,i){let ids=['aufgaben','auftraege','posteingang'];return _heuteCollapsed[ids[i]]?'36px':'1fr';}).join(' ');
     // Gespeicherte Spaltenbreiten laden
     var _hcw={}; try{_hcw=JSON.parse(localStorage.getItem('pam_heute_col_w')||'{}');}catch(e){}
     function _colW(id,def){return _hcw[id]?(_hcw[id]+'px'):def;}
     html+='<div id="heuteColsFlex" style="display:flex;gap:0;align-items:start;width:100%;">';
 
-    var _colIds=['aufgaben','auftraege','posteingang'];
     var _handleStyle='flex:0 0 6px;min-width:6px;cursor:col-resize;background:var(--border);border-radius:3px;align-self:stretch;opacity:.4;transition:opacity .15s;';
     var _colHtml='';
     _cols.forEach(function(col,i){
-      var id=_colIds[i];
+      var id=col.id;
       var collapsed=!!_heuteCollapsed[id];
       var w=collapsed?'36px':_colW(id,'1fr');
       var flexStyle=collapsed?'flex:0 0 36px;min-width:36px;max-width:36px;':'flex:'+(w.endsWith('px')?'0 0 '+w:1)+';min-width:220px;overflow:hidden;';
-      _colHtml+='<div style="'+flexStyle+'" id="heuteColDiv_'+id+'">'+col+'</div>';
+      _colHtml+='<div style="'+flexStyle+'" id="heuteColDiv_'+id+'">'+col.html+'</div>';
       if(i<_cols.length-1&&!collapsed){
         _colHtml+='<div style="'+_handleStyle+'" '
           +'onmouseenter="this.style.opacity=\'1\'" onmouseleave="this.style.opacity=\'.4\'" '
