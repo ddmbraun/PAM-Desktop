@@ -9064,8 +9064,8 @@ function _pamGuestSubmit(){
 }
 </script>
 <!-- PREVIEW LIGHTBOX -->
-<div class="preview-lightbox" id="previewLightbox" onclick="closePreview()">
-  <div class="preview-close" onclick="closePreview()">✕</div>
+<div class="preview-lightbox" id="previewLightbox" onclick="_lbSchliessenWunsch()">
+  <div class="preview-close" onclick="_lbSchliessenWunsch()">✕</div>
   <button class="lb-nav prev" id="lbNavPrev" onclick="event.stopPropagation();_lbNav(-1)" title="Vorheriges Foto (←)" style="display:none;">‹</button>
   <button class="lb-nav next" id="lbNavNext" onclick="event.stopPropagation();_lbNav(1)" title="Nächstes Foto (→)" style="display:none;">›</button>
   <button class="lb-360-btn" id="lb360Btn" onclick="event.stopPropagation();_lbForce360()" title="Als 360°-Panorama öffnen" style="display:none;">🌐 Als 360° öffnen</button>
@@ -9469,7 +9469,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-25 · #789'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-25-b789) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-25 · #794'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-25-b794) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -28513,6 +28513,7 @@ let _deskSchiebeVon=null;
    eingesetzt: {img, name, ordnerId, fertig(meta,blob), schliessen()}.
    null = der gewohnte Weg über die Grossansicht, unveraendert. */
 let _deskDrawZiel=null;
+let _deskCapBarWar=false;   // b791: stand die Beschreibungs-Leiste vor dem Malen offen?
 // b768: Das gerade GEZEIGTE Foto, wenn es kein Auftragsfoto ist und deshalb keinen
 // Platz in taskFotos hat. null = der gewohnte Weg ueber _currentFotoLbIdx, unveraendert.
 // Inhalt: {quelle:'dachplan'|'wartung'|'leistung', ref, fo, pinRef, berichtRef}
@@ -28968,8 +28969,15 @@ function _deskObjTreffer(o,px,py,W,H){
 }
 /* Von OBEN nach unten suchen: der zuletzt gemalte Zug liegt vorn und wird zuerst gefasst. */
 function _deskTrefferIndex(px,py,W,H){
-  for(let i=(_deskDrawObjs||[]).length-1;i>=0;i--){
-    if(_deskObjTreffer(_deskDrawObjs[i],px,py,W,H))return i;
+  // b792: Ein-Punkt-Tupfer (Stift-Klick) deckten mit 21 px Fangzone ganze Pins zu -
+  // erst kommt alles andere dran, die Tupfer nur, wenn sonst nichts trifft.
+  const L=_deskDrawObjs||[];
+  const tupfer=function(o){return o&&o.t==='frei'&&(o.pts||[]).length===1;};
+  for(let i=L.length-1;i>=0;i--){
+    if(!tupfer(L[i])&&_deskObjTreffer(L[i],px,py,W,H))return i;
+  }
+  for(let i=L.length-1;i>=0;i--){
+    if(tupfer(L[i])&&_deskObjTreffer(L[i],px,py,W,H))return i;
   }
   return -1;
 }
@@ -29093,6 +29101,13 @@ function deskZeichnungZurueck(i){
    ⛔ Ein Eingabefeld, das nur bei Enter übernimmt, ist eine Falle: Niemand drückt Enter,
    bevor er woanders hinklickt. Übernehmen ist das Erwartbare, Verwerfen muss man
    ausdrücklich sagen (Esc). */
+function _deskTextFeldVerwerfen(){
+  // b792: schliesst das Eingabefeld OHNE zu uebernehmen - fuer Pins, die gleich wieder wegkommen.
+  const a=document.getElementById('deskTextInput');
+  if(!a)return;
+  a._erledigt=true;
+  a.remove();
+}
 function _deskTextFeldSchliessen(){
   const a=document.getElementById('deskTextInput');
   if(!a)return;
@@ -29214,10 +29229,30 @@ function _deskLegendeEinsetzen(alt,neu){
 /* b757: Doppelklick mit ✋ auf einen Text öffnet ihn wieder zum Ändern.
    ⛔ Nur bei ✋ – beim Malen wäre ein Doppelklick ein zweiter Zug, kein Bearbeiten. */
 function _deskOnDblClick(e){
-  if(_deskDrawTool!=='schieben'||_deskDrawErasing)return;
+  // b792: Doppelklick bearbeitet bei JEDEM Werkzeug - vorher nur mit der Hand, und Frank
+  // malte sich mit Stift-Doppelklicks unsichtbare Tupfer AUF die Pins. Nur der Radierer
+  // bleibt aussen vor: dort will man radieren, nicht bearbeiten.
+  if(_deskDrawErasing)return;
   const c=document.getElementById('desktopDrawCanvas');if(!c)return;
+  // Der Doppelklick selbst hat je nach Werkzeug gerade etwas angelegt - das kommt zuerst
+  // wieder weg, erkannt an der Geburtszeit (unter 0,7 s). Absichtlich leere Marken von
+  // frueher bleiben unangetastet.
+  const frisch=function(o){return o&&o.geb&&(Date.now()-o.geb)<700;};
+  if(_deskDrawTool==='freihand'){
+    for(let k=0;k<2;k++){
+      const o=_deskDrawObjs[_deskDrawObjs.length-1];
+      if(o&&o.t==='frei'&&(o.pts||[]).length===1&&!o.erase&&frisch(o))_deskDrawObjs.pop();else break;
+    }
+  }
+  if(_deskDrawTool==='nummer'){
+    _deskTextFeldVerwerfen();
+    for(let k=0;k<2;k++){
+      const o=_deskDrawObjs[_deskDrawObjs.length-1];
+      if(o&&o.t==='nummer'&&!String(o.txt||'').trim()&&frisch(o))_deskDrawObjs.pop();else break;
+    }
+  }
   const i=_deskTrefferIndex(e.offsetX,e.offsetY,c.width,c.height);
-  if(i<0)return;
+  if(i<0){_deskRedraw();return;}
   const o=(_deskDrawObjs||[])[i];
   if(!o)return;
   if(o.t!=='text'&&o.t!=='nummer'){showToast('Nur Text und Bild-Pins lassen sich ändern – Striche und Pfeile neu malen','info');return;}
@@ -29267,6 +29302,9 @@ function deskStartDraw(imgEl){
   document.querySelectorAll('.desk-tool-btn').forEach(b=>b.classList.toggle('on',b.dataset.tool==='freihand'));
   canvas.classList.add('active');
   document.getElementById('deskDrawBar').classList.add('visible');
+  // b791: Beim Malen bleibt nur EIN Speichern-Knopf sichtbar – der gruene der Mal-Leiste.
+  const _cb=document.getElementById('fotoLbCapBar');
+  if(_cb&&_cb.classList.contains('visible')){_cb.classList.remove('visible');_deskCapBarWar=true;}
   canvas.removeEventListener('pointerdown',_deskOnDown);
   canvas.removeEventListener('pointermove',_deskOnMove);
   canvas.removeEventListener('pointerup',_deskOnUp);
@@ -29309,7 +29347,7 @@ function _deskOnDown(e){
        ⛔ Strichstärke und Schriftgröße sind zwei Dinge – man will einen dicken Pfeil UND
        eine normale Nummer. */
     const nr=_deskNaechsteNr();
-    _deskDrawObjs.push({t:'nummer',x:rx,y:ry,n:nr,c:farbe,s:g/c.width,f:0.042,txt:''});
+    _deskDrawObjs.push({t:'nummer',x:rx,y:ry,n:nr,c:farbe,s:g/c.width,f:0.042,txt:'',geb:Date.now()});
     _deskRedraw();
     // b758: gleich fragen, was an dieser Stelle ist – daraus entsteht die Legende unter dem Bild.
     _deskNummerText(e.clientX,e.clientY,_deskDrawObjs.length-1,nr);
@@ -29322,7 +29360,7 @@ function _deskOnDown(e){
   try{c.setPointerCapture(e.pointerId);}catch(err){}
   _deskDrawPointer={x:e.offsetX,y:e.offsetY};
   if(_deskDrawTool==='freihand'||_deskDrawErasing){
-    _deskDrawObjs.push({t:'frei',pts:[{x:rx,y:ry}],c:farbe,s:g/c.width,erase:!!_deskDrawErasing});
+    _deskDrawObjs.push({t:'frei',pts:[{x:rx,y:ry}],c:farbe,s:g/c.width,erase:!!_deskDrawErasing,geb:Date.now()});
     _deskDrawStart=null;
   } else {
     _deskDrawStart={x:rx,y:ry};
@@ -29418,6 +29456,18 @@ function deskDiscardDraw(){
   const c=document.getElementById('desktopDrawCanvas');
   if(c){c.classList.remove('active');c.removeEventListener('pointerdown',_deskOnDown);c.removeEventListener('pointermove',_deskOnMove);c.removeEventListener('pointerup',_deskOnUp);c.removeEventListener('pointercancel',_deskOnUp);c.removeEventListener('dblclick',_deskOnDblClick);const ctx=c.getContext('2d');if(ctx)ctx.clearRect(0,0,c.width,c.height);}
   document.getElementById('deskDrawBar')?.classList.remove('visible');
+  // b791: Leiste zurueckholen und das Feld aus dem ECHTEN Stand fuellen – es zeigte sonst den
+  // alten Leerstand, und der blaue Knopf schrieb damit die frische Legende wieder weg.
+  if(_deskCapBarWar){
+    _deskCapBarWar=false;
+    const lb=document.getElementById('previewLightbox'),cb=document.getElementById('fotoLbCapBar');
+    if(cb&&lb&&lb.classList.contains('open'))cb.classList.add('visible');
+  }
+  const ci=document.getElementById('fotoLbCapInput');
+  if(ci){
+    if(typeof _deskLbFremd!=='undefined'&&_deskLbFremd&&_deskLbFremd.fo)ci.value=_deskLbFremd.fo.caption||'';
+    else if(_currentFotoLbIdx>=0&&typeof taskFotos!=='undefined'&&taskFotos&&taskFotos[_currentFotoLbIdx])ci.value=taskFotos[_currentFotoLbIdx].caption||'';
+  }
 }
 async function deskSaveDraw(){
   const ziel=_deskDrawZiel;                                    // b752: Leihbetrieb?
@@ -29427,6 +29477,8 @@ async function deskSaveDraw(){
   if(!ziel&&(_currentFotoLbIdx<0||!taskFotos||!taskFotos[_currentFotoLbIdx])){showToast('Kein Foto gewählt','error');deskDiscardDraw();return;}
   // b750: Ohne einen einzigen Zug entstuende nur eine zweite, identische Datei im Drive.
   if(!_deskDrawObjs||!_deskDrawObjs.length){showToast('Nichts gemalt – nichts zu speichern','warning');deskDiscardDraw();return;}
+  // b791: Legende sofort lesen – wer die Grossansicht noch waehrend des Hochladens schliesst, leert die Zugliste.
+  const legende=_deskLegende();
   // Index VOR dem ersten await sichern – _currentFotoLbIdx kann sich während des
   // asynchronen Uploads ändern (z.B. Lightbox geschlossen → -1), was sonst
   // taskFotos[-1]=undefined liefert und einen Duplikat-Eintrag per push() erzeugt.
@@ -29459,8 +29511,7 @@ async function deskSaveDraw(){
   if(!r.ok){showToast('Fehler beim Speichern ('+r.status+')','error');deskDiscardDraw();return;}
   const meta=await r.json().catch(()=>null);
   showToast('✓ Zeichnung in Drive gespeichert','success');
-  /* b758: Die Legende JETZT lesen – `deskDiscardDraw()` am Ende leert die Zugliste. */
-  const legende=_deskLegende();
+  // b758/b791: Die Legende wurde oben, vor dem Hochladen, gelesen.
   if(meta&&meta.id&&ziel){
     // b752: Leihbetrieb – wohin die bemalte Fassung gehört, weiß nur der Aufrufer.
     try{_desktopFotoBlobCache.set(meta.id,URL.createObjectURL(blob));}catch(e){}
@@ -34987,6 +35038,14 @@ function _openAttachGallery(startNonImgIdx){
   _showCurrent();
 }
 
+function _lbSchliessenWunsch(){
+  // b791: Ein Danebenklicken beim Malen warf vorher die ganze Zeichnung stumm weg.
+  const c=document.getElementById('desktopDrawCanvas');
+  if(c&&c.classList.contains('active')&&_deskDrawObjs&&_deskDrawObjs.length){
+    if(!confirm('Die Zeichnung ist nicht gespeichert. Wirklich verwerfen?'))return;
+  }
+  closePreview();
+}
 function closePreview(){
   _deskClosePannellum();deskDiscardDraw();
   try{const _v=document.getElementById('deskLbVideo');if(_v){_v.pause();_v.removeAttribute('src');_v.load();}}catch(e){}
@@ -48242,11 +48301,15 @@ function _fdkStyle(){
        das ✏️ muss trotzdem zu sehen und zu treffen sein. */
     +'.fdk-kachel.drin .fdk-kmal{opacity:1;}'
     +'.fdk-knr{font-size:13px;font-weight:800;text-align:center;color:var(--accent);}.fdk-knr.grau{color:var(--text2);font-weight:500;font-size:11px;}'
-    +'.fdk-ktxt{font-size:11px;color:var(--text2);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}'
+    +'.fdk-ktxt{font-size:11px;color:var(--text2);text-align:center;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word;}'
     +'.fdk-vorschau{border:1px solid var(--border);border-radius:10px;background:var(--bg3);padding:6px;margin-bottom:8px;}'
     +'.fdk-vorschau img{width:100%;max-height:230px;object-fit:contain;display:block;border-radius:6px;background:#111;min-height:110px;}'
     +'.fdk-vorschau .txt{font-size:11px;color:var(--text2);margin-top:4px;min-height:14px;line-height:1.4;display:flex;gap:6px;align-items:flex-start;}'
     +'.fdk-vorschau .txt span{flex:1;min-width:0;}'
+    +'.fdk-vlegende{margin-top:6px;font-size:13px;color:var(--text);font-weight:600;line-height:1.5;}'
+    +'.fdk-vedit{display:flex;gap:6px;margin-top:6px;}'
+    +'.fdk-vedit input{flex:1;min-width:0;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:12px;}'
+    +'.fdk-gross-txt{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);max-width:80vw;background:rgba(0,0,0,.72);color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;line-height:1.5;text-align:center;}'
     +'.fdk-gross{position:fixed;inset:0;z-index:1000002;background:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;cursor:zoom-out;}'
     +'.fdk-gross img{max-width:96vw;max-height:94vh;object-fit:contain;}'
     +'.fdk-opt label{display:block;font-size:12px;margin:6px 0;cursor:pointer;}.fdk-opt select,.fdk-opt input[type=number]{width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px;padding:6px 8px;margin-top:3px;}'
@@ -48302,6 +48365,11 @@ function _fdkOeffnen(vorauswahl){
   if(Array.isArray(vorauswahl)&&vorauswahl.length){
     const da=new Set(liste.map(function(x){return String(x.key);}));
     _fdkState.dok=vorauswahl.map(String).filter(function(k){return da.has(k);});
+  } else if(t.fdkStand&&Array.isArray(t.fdkStand.dok)&&t.fdkStand.dok.length){
+    // b793: gemerkte Zusammenstellung zurueckholen - was es nicht mehr gibt, faellt still weg.
+    const da=new Set(liste.map(function(x){return String(x.key);}));
+    _fdkState.dok=t.fdkStand.dok.map(String).filter(function(k){return da.has(k);});
+    _fdkState.filter=t.fdkStand.filter||'alle';
   }
   _fdkStyle();
   const alt=document.getElementById('fdkOverlay');if(alt)alt.remove();
@@ -48332,7 +48400,7 @@ function _fdkOeffnen(vorauswahl){
         +'<div id="fdkDok" class="fdk-flaeche"></div>'
       +'</div>'
       +'<div style="width:300px;flex-shrink:0;overflow:auto;">'
-        +'<div class="fdk-vorschau" id="fdkVorschau"><img id="fdkVorschauBild" alt=""><div class="txt"><span id="fdkVorschauTxt">Kachel anklicken – hier erscheint die Vorschau.</span><button type="button" class="fdk-btn" style="padding:2px 8px;font-size:11px;" onclick="if(_fdkState&&_fdkState.vorschauKey)_fdkGrossAnsicht(_fdkState.vorschauKey)" title="Großansicht">🔍</button></div></div>'
+        +'<div class="fdk-vorschau" id="fdkVorschau"><img id="fdkVorschauBild" alt=""><div class="txt"><span id="fdkVorschauTxt">Kachel anklicken – hier erscheint die Vorschau.</span></div><div class="fdk-vedit" id="fdkVorschauEdit" style="display:none;"><input type="text" id="fdkVorschauEditFeld" placeholder="Beschreibung zum Foto…" autocomplete="off"><button type="button" class="fdk-btn" onclick="_fdkBeschreibungSpeichern()">💾</button><button type="button" class="fdk-btn" style="padding:2px 8px;font-size:11px;" onclick="if(_fdkState&&_fdkState.vorschauKey)_fdkGrossAnsicht(_fdkState.vorschauKey)" title="Großansicht">🔍</button></div></div>'
         +'<div class="fdk-opt">'
         +'<h4>Vorne anhängen (Startdokument)</h4>'
         +'<label><input type="radio" name="fdkStartArt" value="ohne" checked> ohne Startdokument (nur Fotoseiten)</label>'
@@ -48380,11 +48448,30 @@ function _fdkOeffnen(vorauswahl){
   bx.querySelectorAll('input[name="fdkStartArt"],#fdkStartSel,#fdkStartDatei').forEach(function(el){
     el.addEventListener('change',function(){setTimeout(_fdkKnoepfeLage,0);});
   });
+  // b793: gemerkte Einstellungen in die Felder zurueckschreiben.
+  if(t.fdkStand){
+    const st=t.fdkStand;
+    const setW=function(id,v){const el=document.getElementById(id);if(el&&v!==''&&v!=null)el.value=v;};
+    const setH=function(id,v){const el=document.getElementById(id);if(el)el.checked=!!v;};
+    setW('fdkStartNr',st.startNr);setW('fdkProSeite',st.proSeite);
+    setH('fdkBeschriftung',st.beschriftung);setH('fdkKasten',st.kasten);
+    if(document.getElementById('fdkPlan'))setH('fdkPlan',st.plan);
+  }
   _fdkListeZeichnen();
   _fdkStartListeLaden();
   if(!liste.length){const st=document.getElementById('fdkStatus');if(st)st.textContent='Noch keine Fotos mit Drive-Datei am Auftrag – Bilder aus dem Explorer auf eine Fläche ziehen.';}
 }
-function _fdkSchliessen(){const ov=document.getElementById('fdkOverlay');if(ov)ov.remove();_fdkState=null;_fdkDragIdx=-1;}
+function _fdkStandMerken(){
+  // b793: Auswahl, Reihenfolge und Einstellungen ueberleben das Schliessen am Auftrag.
+  const S=_fdkState;if(!S)return;
+  const t=findTaskById(S.taskId);if(!t)return;
+  const w=function(id){const el=document.getElementById(id);return el?el.value:'';};
+  const h=function(id){const el=document.getElementById(id);return !!(el&&el.checked);};
+  t.fdkStand={dok:(S.dok||[]).slice(),startNr:w('fdkStartNr'),proSeite:w('fdkProSeite'),
+    beschriftung:h('fdkBeschriftung'),kasten:h('fdkKasten'),plan:h('fdkPlan'),filter:S.filter||'alle'};
+  if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
+}
+function _fdkSchliessen(){_fdkStandMerken();const ov=document.getElementById('fdkOverlay');if(ov)ov.remove();_fdkState=null;_fdkDragIdx=-1;}
 // b779: zurück zur 📋 Übersicht desselben Auftrags. Die Auftragsnummer wird VOR dem
 // Schließen gemerkt – _fdkSchliessen räumt _fdkState ab.
 function _fdkZurUebersicht(){
@@ -48511,7 +48598,8 @@ function _fdkKachelHtml(e,art,nr){
      Fassung haben. b752 loest das ohne Eingriff in die Turnus-Daten: die bemalte Fassung
      wird ein eigenes Auftragsfoto mit Herkunftsvermerk, der Wartungsnachweis bleibt
      unberuehrt (Entscheidung Frank 22.08.2026). */
-  const malbar=(e.quelle==='auftrag'||e.quelle==='dachplan'||e.quelle==='leistung');
+  // b794: auch Wartungsprotokoll-Fotos - der Speicherweg dafuer steht seit b768 (_wpFotoMalen).
+  const malbar=(e.quelle==='auftrag'||e.quelle==='dachplan'||e.quelle==='leistung'||e.quelle==='wartungsprotokoll');
   return '<div class="fdk-kachel '+art+(drin?' drin':'')+(_fdkState.vorschauKey===e.key?' vorschau':'')+'" draggable="'+(drin?'false':'true')+'" data-key="'+esc(e.key)+'" title="'+esc(e.caption||e.name||'Foto')+'">'
     +'<div class="fdk-kbild"><img alt="" draggable="false" data-fdk-id="'+esc(e.driveId)+'"'+(src?' src="'+esc(src)+'"':'')+'><span class="fdk-chip">'+esc(_fdkEtikett(e))+'</span>'
     +(malbar?'<button type="button" class="fdk-kmal" data-mal="'+esc(e.key)+'" title="Malen und beschriften – Pfeil, Text, Nummer">✏️</button>':'')
@@ -48665,6 +48753,15 @@ function _fdkBildQuelle(e){
 
 
 
+// b790: Beschreibung zerlegen - vorn der Freitext, hinten die Nummern-Zeilen der Bild-Pins.
+function _fdkLegendeTeile(cap){
+  const zeilen=[],rest=[];
+  String(cap||'').split(' · ').forEach(function(s){
+    const t=s.trim();if(!t)return;
+    if(/^[0-9]+ *= */.test(t))zeilen.push(t);else rest.push(t);
+  });
+  return {text:rest.join(' · '),zeilen:zeilen};
+}
 async function _fdkVorschau(key){
   const S=_fdkState;if(!S)return;
   const e=S.liste.find(x=>x.key===key);
@@ -48673,11 +48770,35 @@ async function _fdkVorschau(key){
   S.vorschauKey=key;
   document.querySelectorAll('.fdk-kachel').forEach(k=>k.classList.toggle('vorschau',k.dataset.key===key));
   const nr=_fdkNummern().get(key);
-  txt.innerHTML='<b>'+esc(e.caption||e.name||'Foto')+'</b>'+(nr?' · <b style="color:var(--accent)">Abb. '+nr+'</b>':' · nicht im Dokument')
-    +'<br>'+esc(_fdkEtikett(e))+(e.ts?' · '+esc(_fdkDatum(e.ts)):'');
+  const teile=_fdkLegendeTeile(e.caption);
+  txt.innerHTML='<b>'+esc(teile.text||e.name||'Foto')+'</b>'+(nr?' · <b style="color:var(--accent)">Abb. '+nr+'</b>':' · nicht im Dokument')
+    +'<br>'+esc(_fdkEtikett(e))+(e.ts?' · '+esc(_fdkDatum(e.ts)):'')
+    +(teile.zeilen.length?'<div class="fdk-vlegende">'+teile.zeilen.map(function(z){return '<div>'+esc(z)+'</div>';}).join('')+'</div>':'');
+  // b793: Beschreibung direkt hier aendern - ohne den Umweg uebers Auftragsfenster.
+  // Leistungs-Fotos sind Belege des Wartungsnachweises und bleiben nur lesbar (b752-Linie).
+  const ed=document.getElementById('fdkVorschauEdit'),ef=document.getElementById('fdkVorschauEditFeld');
+  if(ed&&ef){
+    if(e.quelle==='leistung'){ed.style.display='none';}
+    else{ed.style.display='flex';ef.value=e.caption||'';ef.onkeydown=function(ev){ev.stopPropagation();if(ev.key==='Enter')_fdkBeschreibungSpeichern();};}
+  }
   const schnell=_fdkBildQuelle(e);
   if(schnell)img.src=schnell;
   try{const u=await _fetchDesktopFotoBlob(e.driveId);if(u&&S.vorschauKey===key&&img.isConnected)img.src=u;}catch(err){}
+}
+function _fdkBeschreibungSpeichern(){
+  const S=_fdkState;if(!S||!S.vorschauKey)return;
+  const e=S.liste.find(function(x){return x.key===S.vorschauKey;});
+  const ef=document.getElementById('fdkVorschauEditFeld');
+  if(!e||!ef)return;
+  if(e.quelle==='leistung'){showToast('Leistungs-Fotos sind Belege – Beschreibung dort nicht änderbar','warning');return;}
+  const val=(ef.value||'').trim();
+  e.caption=val;
+  if(e.fo)e.fo.caption=val;
+  if(e.quelle==='dachplan'){if(typeof scheduleSave==='function')scheduleSave();else if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();}
+  else{if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();}
+  _fdkListeZeichnen();
+  _fdkVorschau(S.vorschauKey);
+  showToast('✓ Beschreibung gespeichert','success');
 }
 
 async function _fdkGrossAnsicht(key){
@@ -48686,7 +48807,10 @@ async function _fdkGrossAnsicht(key){
   const alt=document.getElementById('fdkGross');if(alt)alt.remove();
   const g=document.createElement('div');g.id='fdkGross';g.className='fdk-gross';g.onclick=()=>g.remove();
   const img=document.createElement('img');img.alt='';const schnell=_fdkBildQuelle(e);if(schnell)img.src=schnell;
-  g.appendChild(img);document.body.appendChild(g);
+  g.appendChild(img);
+  const gt=_fdkLegendeTeile(e.caption);
+  if(gt.text||gt.zeilen.length){const cap=document.createElement('div');cap.className='fdk-gross-txt';cap.innerHTML=(gt.text?'<div><b>'+esc(gt.text)+'</b></div>':'')+gt.zeilen.map(function(z){return '<div>'+esc(z)+'</div>';}).join('');g.appendChild(cap);}
+  document.body.appendChild(g);
   try{const u=await _fetchDesktopFotoBlob(e.driveId);if(u&&g.isConnected)img.src=u;}catch(err){}
 }
 
@@ -48732,6 +48856,16 @@ async function _fdkMalen(key){
       showToast('Am Auftrag ist kein Drive-Ordner hinterlegt – dort kann nichts abgelegt werden','error');
       return;
     }
+    return;
+  }
+  if(e.quelle==='wartungsprotokoll'){
+    // b794: derselbe Weg wie der Stift im Protokoll-Formular (b768) - Kennung landet am
+    // Protokoll-Foto, gespeichert wird am Auftrag. Fenster solange ausblenden.
+    if(ov)ov.style.display='none';
+    const fertigZurueck=function(){_fdkZurueckAusMalen(key);};
+    Promise.resolve(_wpFotoMalen(e.fo,vomOriginal,fertigZurueck)).then(function(ge){
+      if(ge===false){if(ov)ov.style.display='';}
+    });
     return;
   }
   const i=(typeof taskFotos!=='undefined'&&Array.isArray(taskFotos))
