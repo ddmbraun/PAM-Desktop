@@ -9469,7 +9469,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-26 · #796'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-26-b796) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-26 · #797'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-26-b797) – MERKE: bei jedem Build mit hochzählen!
 // ⚠ b646 (Datenschutz): In index.html und sw.js gehören KEINE Kundennamen, Personennamen
 // oder Fallbeispiele aus dem Tagesgeschäft – beide Dateien werden öffentlich ausgeliefert.
 // Änderungsnotizen ausschließlich in die lokale CHANGES.md (steht in .gitignore).
@@ -25471,6 +25471,7 @@ async function _wpFotoMalen(f,vomOriginal,danach){
   await deskMalenAmFoto({
     bildId:bildId,
     name:'protokoll_bearbeitet.jpg',
+    nrBasis:(!vomOriginal&&f.editedDriveId)?_deskNrBasisAus(String(f.caption||'')):0,
     ordnerId:ordner,
     fertig:function(meta,blob,legende){
       if(!meta||!meta.id)return;
@@ -28515,6 +28516,7 @@ let _deskSchiebeVon=null;
 let _deskDrawZiel=null;
 let _deskCapBarWar=false;   // b791: stand die Beschreibungs-Leiste vor dem Malen offen?
 let _desk360War=false;      // b795: stand der 360-Grad-Knopf vor dem Malen offen?
+let _deskNrBasis=0;         // b797: hoechste schon vergebene Pin-Nummer (aus der Beschreibung)
 // b768: Das gerade GEZEIGTE Foto, wenn es kein Auftragsfoto ist und deshalb keinen
 // Platz in taskFotos hat. null = der gewohnte Weg ueber _currentFotoLbIdx, unveraendert.
 // Inhalt: {quelle:'dachplan'|'wartung'|'leistung', ref, fo, pinRef, berichtRef}
@@ -28867,7 +28869,16 @@ function _deskFarbMarke(){
 }
 function _deskDrawGroesse(){return parseInt((document.getElementById('deskDrawSize')||{}).value||4)||4;}
 function _deskDrawFarbe(){return (document.getElementById('deskDrawColor')||{}).value||'#ff0000';}
-function _deskNaechsteNr(){return (_deskDrawObjs||[]).filter(o=>o&&o.t==='nummer').length+1;}
+function _deskNrBasisAus(cap){
+  // b797: hoechste Nummer aus den Zeilen der Form N = ... - dort zaehlt das Weitermalen weiter.
+  let max=0;
+  String(cap||'').split(' · ').forEach(function(s){
+    const t=s.trim();
+    if(/^[0-9]+ *= */.test(t)){const n=parseInt(t,10);if(n>max)max=n;}
+  });
+  return max;
+}
+function _deskNaechsteNr(){const basis=(typeof _deskNrBasis!=='undefined')?_deskNrBasis:0;return basis+(_deskDrawObjs||[]).filter(o=>o&&o.t==='nummer').length+1;}
 function _deskZeichneObj(ctx,o,W,H){
   if(!o)return;
   const s=Math.max(1,(o.s||0.004)*W), c=o.c||'#ff0000';
@@ -29246,11 +29257,22 @@ function _deskLegende(){
    sonst stünde nach dem zweiten Speichern „1 = Riss · 1 = Riss" darunter. Was Frank selbst
    geschrieben hat, bleibt vorn stehen. */
 function _deskLegendeEinsetzen(alt,neu){
-  const teile=String(alt||'').trim().split(' · ');
-  while(teile.length&&/^\d+\s*=\s*/.test(String(teile[teile.length-1]).trim()))teile.pop();
-  const rest=teile.join(' · ').trim();
-  if(!neu)return rest;
-  return rest?(rest+' · '+neu):neu;
+  // b797: Beim Weitermalen (Basis > 0) bleiben die alten Zeilen stehen und die neuen kommen
+  // dazu - vorher warf das Speichern die Erklaerungen der eingebrannten Pins weg (Befund
+  // Frank 26.08.: drei Einsen im Bild, Beschreibung erklaerte nur noch die neuen).
+  // Ohne Basis (erstes Malen, vom Original neu) wird ersetzt wie bisher.
+  const altZeilen=[],rest=[];
+  String(alt||'').split(' · ').forEach(function(s){const t=s.trim();if(!t)return;if(/^[0-9]+ *= */.test(t))altZeilen.push(t);else rest.push(t);});
+  const neuZeilen=String(neu||'').split(' · ').map(function(s){return s.trim();}).filter(function(t){return /^[0-9]+ *= */.test(t);});
+  let zeilen;
+  const basis=(typeof _deskNrBasis!=='undefined')?_deskNrBasis:0;   // Wache: Suiten fuehren die Funktion isoliert aus
+  if(basis>0){
+    const m=new Map();
+    altZeilen.forEach(function(z){m.set(parseInt(z,10),z);});
+    neuZeilen.forEach(function(z){m.set(parseInt(z,10),z);});
+    zeilen=Array.from(m.keys()).sort(function(a,b){return a-b;}).map(function(k){return m.get(k);});
+  } else zeilen=neuZeilen;
+  return rest.concat(zeilen).join(' · ');
 }
 /* b757: Doppelklick mit ✋ auf einen Text öffnet ihn wieder zum Ändern.
    ⛔ Nur bei ✋ – beim Malen wäre ein Doppelklick ein zweiter Zug, kein Bearbeiten. */
@@ -29306,6 +29328,8 @@ async function deskMalenStarten(){
       return;
     }
   }
+  // b797: Weitermalen auf einer bemalten Fassung zaehlt hinter der letzten Nummer weiter.
+  _deskNrBasis=(f&&f.editedDriveId)?_deskNrBasisAus(String(f.caption||'')):0;
   deskStartDraw();
 }
 function deskStartDraw(imgEl){
@@ -29477,6 +29501,7 @@ function deskDiscardDraw(){
   _deskDrawPointer=null;_deskDrawErasing=false;
   _deskDrawObjs=[];_deskDrawStart=null;_deskTextFeldSchliessen();   // b750
   _deskDrawWahl=-1;_deskSchiebeVon=null;                            // b754
+  _deskNrBasis=0;                                                   // b797
   document.removeEventListener('keydown',_deskTasten,true);
   // b752: Ein geliehenes Ziel raeumt sein eigenes Fenster weg – gleich ob gespeichert
   // oder verworfen. Erst abhaengen, dann schliessen: sonst kann ein Fehler im
@@ -47845,6 +47870,7 @@ window.Dachplan=(function(){
     deskMalenAmFoto({
       bildId:bildId,
       name:'dachplan_pin_bearbeitet.jpg',
+      nrBasis:(!vomOriginal&&fo.editedDriveId)?_deskNrBasisAus(String(fo.caption||'')):0,
       ordnerId:ordner,
       // Beim Neuanfang NICHT den Sofort-Zwischenspeicher nehmen – der hält die bemalte Fassung.
       sofortUrl:vomOriginal?null:_dpFotoSofort(fo),
@@ -48908,6 +48934,7 @@ async function _fdkMalen(key){
   if(i<0){showToast('Foto nicht mehr am Auftrag','error');return;}
   if(ov)ov.style.display='none';
   Promise.resolve(openFotoDesktop(i,vomOriginal)).then(function(){   // b755
+    _deskNrBasis=(!vomOriginal&&taskFotos[i]&&taskFotos[i].editedDriveId)?_deskNrBasisAus(String(taskFotos[i].caption||'')):0;   // b797
     _fdkWarteAufBild(function(){try{deskStartDraw();}catch(err){console.warn('[FDK] Malen:',err);}});
   });
   _fdkNachDemMalen('previewLightbox',key);
@@ -49024,6 +49051,7 @@ async function deskMalenAmFoto(opt){
       fertig:function(meta,blob,legende){try{opt.fertig(meta,blob,legende);}catch(e){console.warn('[Malen] Ablage:',e);showToast('Gespeichert, aber nicht eingehängt','warning');}},
       schliessen:aufraeumen
     };
+    _deskNrBasis=opt.nrBasis||0;   // b797: der Aufrufer kennt die Beschreibung
     deskStartDraw(img);   // erst wenn das Bild steht – sonst stimmt die Zeichenfläche nicht
   };
   img.src=url;
