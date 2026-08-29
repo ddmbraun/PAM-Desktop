@@ -9478,7 +9478,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-29 · #807'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-29-b807) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-29 · #808'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-29-b808) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -14396,6 +14396,16 @@ function _dachplanKonfliktMerge(remoteDp,localDp){
   // fremde Prüfsuiten.
   {const _rt=remoteDp.ovTs||'',_lt=localDp.ovTs||'';
    if(_rt>_lt){m.ovDriveId=remoteDp.ovDriveId;m.ovTs=_rt;m.ovW=remoteDp.ovW;m.ovH=remoteDp.ovH;}}
+  // 🔴 b808 (Franks Befund 29.08.: „wenn ich ein Pin lösch kommt er gleich wieder"):
+  // Die Pin-Schleifen unten VEREINIGEN beide Seiten – für sie sah ein gerade gelöschter
+  // Pin genauso aus wie einer, den dieses Gerät noch nicht kennt, und er kam zurück.
+  // `weg` hält je Kennung den Löschzeitpunkt. Beide Seiten werden vereinigt: eine
+  // Löschung ist eine Entscheidung, die auf JEDES Gerät gehört, egal wo sie fiel.
+  // ⛔ MUSS nach dem Object.assign oben stehen – das heißt „lokal gewinnt" und würfe
+  // die Löschungen des anderen Geräts sonst still weg (Fehlerart aus b740/b767).
+  // ⛔ Zwei Schrägstriche, kein Blockkommentar – siehe b764/b770 darüber.
+  const _wegAlle=Object.assign({},(remoteDp&&remoteDp.weg)||{},(localDp&&localDp.weg)||{});
+  const _istWeg=id=>(id!=null&&!!_wegAlle[String(id)]);
   /* Foto-Union je Pin: dieselbe Aufnahme erkennt man an `key` ODER `driveId` –
      ein Nachzügler-Upload ergänzt driveId am selben key, ein Desktop-Foto trägt
      nur driveId. Beim Zusammenlegen bleiben BEIDE Kennungen erhalten; eine
@@ -14420,6 +14430,7 @@ function _dachplanKonfliktMerge(remoteDp,localDp){
   for(const rp of rPins){
     if(!rp||rp.id==null){if(rp)out.push(rp);continue;}
     seen.add(String(rp.id));
+    if(_istWeg(rp.id))continue; // b808: gelöscht bleibt gelöscht – auch samt Teilplan
     const lp=lPins.find(x=>x&&String(x.id)===String(rp.id));
     if(!lp){out.push(rp);continue;}
     const mp=Object.assign({},rp,lp);
@@ -14433,8 +14444,9 @@ function _dachplanKonfliktMerge(remoteDp,localDp){
     if(rp.plan||lp.plan){const _pm=_dachplanKonfliktMerge(rp.plan,lp.plan);if(_pm)mp.plan=_pm;}
     out.push(mp);
   }
-  for(const lp of lPins){if(!lp)continue;if(lp.id==null||!seen.has(String(lp.id)))out.push(lp);}
+  for(const lp of lPins){if(!lp)continue;if(_istWeg(lp.id))continue;if(lp.id==null||!seen.has(String(lp.id)))out.push(lp);}
   m.pins=out;
+  if(Object.keys(_wegAlle).length)m.weg=_wegAlle; // b808: die Liste selbst muss den Merge überleben
   let maxNr=0;for(const p of out){const n=Number(p&&p.nr);if(isFinite(n)&&n>maxNr)maxNr=n;}
   m.nextNr=Math.max(Number(remoteDp.nextNr)||1,Number(localDp.nextNr)||1,maxNr+1);
   return m;
@@ -47585,6 +47597,11 @@ window.Dachplan=(function(){
       const _tn=_tpPinsZahl(p);
       const _warn=_tpHatPlan(p)?('\n\n⚠ An diesem Pin hängt ein Teilbereich mit '+_tn+' Pin'+(_tn!==1?'s':'')+' und deren Fotos.\nEr wird mitgelöscht.'):'';
       if(!confirm('Pin '+_tpNr(p)+' löschen?'+_warn))return;
+      // b808: Löschliste. Ohne sie holt der Konflikt-Merge den Pin von Drive zurück –
+      // für ihn sah „gerade gelöscht" genauso aus wie „kenne ich noch nicht".
+      // ⛔ Zwei Schrägstriche, kein Blockkommentar – siehe b764/b770.
+      if(!dp.weg||typeof dp.weg!=='object')dp.weg={};
+      dp.weg[p.id]=new Date().toISOString();
       dp.pins=dp.pins.filter(x=>x.id!==p.id);sel=null;closeSheet();renderPins();save();};
     q('#dpPhotoX').onclick=()=>E.photo.classList.add('dp-hidden');
     q('#dpPhotoText').onclick=()=>{if(window._dpPhotoFo)dpFotoText(window._dpPhotoFo);}; // b482
