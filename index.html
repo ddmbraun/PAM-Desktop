@@ -9478,7 +9478,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-28 · #806'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-28-b806) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-29 · #807'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-29-b807) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -29790,7 +29790,10 @@ async function deskSaveDraw(){
   if(!r.ok){showToast('Fehler beim Speichern ('+r.status+')','error');deskDiscardDraw();return;}
   const meta=await r.json().catch(()=>null);
   showToast(_deskCropGemacht?'✓ Zuschnitt in Drive gespeichert':'✓ Zeichnung in Drive gespeichert','success');   // b806
-  _deskCropUrlAlt='';   // b806: gespeichert - deskDiscardDraw darf das Bild nicht zurueckdrehen
+  // b807: Nach einem Zuschnitt bleibt der Merker STEHEN - die Grossansicht soll wieder das
+  // ganze Original zeigen, denn der Ausschnitt ist ab jetzt ein eigenes Foto daneben.
+  // Beim reinen Bemalen wird er wie bisher geleert (sonst dreht deskDiscardDraw zurueck).
+  if(!_deskCropGemacht)_deskCropUrlAlt='';   // b806/b807
   // b758/b791: Die Legende wurde oben, vor dem Hochladen, gelesen.
   if(meta&&meta.id&&ziel){
     // b752: Leihbetrieb – wohin die bemalte Fassung gehört, weiß nur der Aufrufer.
@@ -29802,7 +29805,28 @@ async function deskSaveDraw(){
     _desktopFotoBlobCache.set(meta.id,blobUrl);
     // savedIdx verwenden – nicht _currentFotoLbIdx (könnte sich geändert haben)
     const origFoto=taskFotos[savedIdx];
-    if(origFoto){
+    if(origFoto&&_deskCropGemacht){
+      // b807: Ein Ausschnitt ERSETZT das Foto nicht, er kommt als eigenes daneben. Frank
+      // braucht beide im Dokument - Uebersicht und Detail. Deshalb wird hier KEINE Verknuepfung
+      // zur bearbeiteten Fassung gesetzt: das Original bleibt vollstaendig, wie es war.
+      // Platz: direkt hinter dem Original. Das ist gefahrlos, weil _fotoSelected seit b601
+      // stabile Kennungen haelt und keine Positionsnummern (sonst waere die Auswahl verrutscht).
+      const _capO=String(origFoto.caption||'').trim();
+      let _capN=_capO?(_capO+' (Ausschnitt)'):'Ausschnitt';
+      if(legende)_capN=_deskLegendeEinsetzen(_capN,legende);
+      taskFotos.splice(savedIdx+1,0,{
+        driveId:meta.id,
+        name:meta.name||copyName,
+        mimeType:meta.mimeType||'image/jpeg',
+        caption:_capN,
+        thumbnailLink:'',
+        // Aufnahmezeit und Ordner vom Original erben - sonst sortiert der Jahresfilter
+        // den Ausschnitt ins falsche Jahr.
+        ts:origFoto.ts||'',
+        ordner:origFoto.ordner||''
+      });
+      showToast('✂ Ausschnitt liegt als eigenes Foto neben dem Original','success',6000);
+    } else if(origFoto){
       origFoto.editedDriveId=meta.id;
       origFoto.editedName=meta.name||copyName;
       // b758: „1 = Riss · 2 = Naht offen" hinter die vorhandene Beschreibung.
@@ -29815,7 +29839,10 @@ async function deskSaveDraw(){
     // das alte Bild stehen, bis man das Foto neu oeffnete (Befund Frank 26.08.). Umgeschaltet
     // wird nur, wenn sie noch offen ist und noch DIESES Foto zeigt (waehrend des Hochladens
     // kann geblaettert oder geschlossen worden sein).
-    if(_currentFotoLbIdx===savedIdx){
+    // b807: Nach einem Zuschnitt NICHT umschalten - an dieser Stelle steht weiterhin das
+    // Original, der Ausschnitt sitzt eine Position weiter. deskDiscardDraw holt gleich
+    // das ganze Bild zurueck.
+    if(_currentFotoLbIdx===savedIdx&&!_deskCropGemacht){
       const lbImg=document.getElementById('deskLbImg');
       const lb=document.getElementById('previewLightbox');
       if(lbImg&&lb&&lb.classList.contains('open')){
