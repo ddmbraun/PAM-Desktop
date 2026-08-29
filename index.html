@@ -9478,7 +9478,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-29 · #808'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-29-b808) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-29 · #809'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-29-b809) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -14410,11 +14410,19 @@ function _dachplanKonfliktMerge(remoteDp,localDp){
      ein Nachzügler-Upload ergänzt driveId am selben key, ein Desktop-Foto trägt
      nur driveId. Beim Zusammenlegen bleiben BEIDE Kennungen erhalten; eine
      vorhandene darf nie vom Anlege-Zustand {key,driveId:null} überschrieben werden. */
-  const fotoUnion=(rF,lF)=>{
+  // 🔴 b809: `fweg` je Pin ist das Gegenstück zu `weg` je Dachplan (b808), eine Ebene
+  // tiefer. Ohne diesen Filter holte die Union unten ein gerade gelöschtes Pin-Foto vom
+  // Drive-Stand zurück - derselbe Fehler wie bei den Pins, nur am Foto.
+  // ⛔ Beide Kennungen prüfen: ein Foto trägt mal nur `key`, mal nur `driveId`, oft
+  // beides. Es genügt, wenn EINE davon gestempelt ist - sonst käme dieselbe Aufnahme
+  // über ihre andere Kennung zurück.
+  const _istWegF=(f,fweg)=>!!(f&&fweg&&((f.key&&fweg['k:'+f.key])||(f.driveId&&fweg['d:'+f.driveId])));
+  const fotoUnion=(rF,lF,fweg)=>{
     const out=[];const same=(a,b)=>!!(a&&b&&((a.key&&b.key&&a.key===b.key)||(a.driveId&&b.driveId&&a.driveId===b.driveId)));
-    for(const f of (Array.isArray(rF)?rF:[]))if(f)out.push(f);
+    for(const f of (Array.isArray(rF)?rF:[])){if(f&&!_istWegF(f,fweg))out.push(f);}
     for(const f of (Array.isArray(lF)?lF:[])){
       if(!f)continue;
+      if(_istWegF(f,fweg))continue;
       const i=out.findIndex(x=>same(x,f));
       if(i<0){out.push(f);continue;}
       const zs=Object.assign({},out[i],f);
@@ -14434,7 +14442,12 @@ function _dachplanKonfliktMerge(remoteDp,localDp){
     const lp=lPins.find(x=>x&&String(x.id)===String(rp.id));
     if(!lp){out.push(rp);continue;}
     const mp=Object.assign({},rp,lp);
-    mp.fotos=fotoUnion(rp.fotos,lp.fotos);
+    // b809: Foto-Löschliste beider Seiten vereinigen. ⛔ MUSS nach dem Object.assign
+    // stehen - das heißt "lokal gewinnt" und würfe die Foto-Löschungen des anderen
+    // Geräts sonst still weg. Dieselbe Falle wie bei m.weg in b808.
+    const _fw=Object.assign({},rp.fweg||{},lp.fweg||{});
+    mp.fotos=fotoUnion(rp.fotos,lp.fotos,_fw);
+    if(Object.keys(_fw).length)mp.fweg=_fw;
     /* 🔴 b740: Seit Mobil v224 kann an einem Pin ein TEILPLAN hängen (`p.plan`:
        eigenes Bild + eigene Pins + deren Fotos). Der PC kennt ihn noch nicht (das
        ist Etappe 3) – ohne diese Zeile gälte für ihn die Object.assign-Regel
@@ -48016,12 +48029,24 @@ window.Dachplan=(function(){
   // b725: die am Tablet bemalte Fassung (editedDriveId, Mobil v215) hat überall Vorrang
   function _dpFotoId(fo){return (fo&&(fo.editedDriveId||fo.driveId))||'';}
   function _dpFotoSofort(fo){const id=_dpFotoId(fo);return id?(_desktopFotoBlobCache.get(id)||''):(fo.dataUrl||'');}
+  // b809: Gegenstück zu dp.weg aus b808, eine Ebene tiefer. Ohne Stempel holte
+  // `fotoUnion` im Konflikt-Merge ein gerade gelöschtes Pin-Foto von Drive zurück.
+  // ⛔ BEIDE Kennungen stempeln: ein Foto trägt mal nur `key` (am Handy aufgenommen,
+  // Upload noch offen), mal nur `driveId` (vom PC), oft beides. Das andere Gerät kennt
+  // womöglich nur die eine – ein Stempel auf nur eine Kennung ginge dort ins Leere.
+  function _fotoWeg(p,fo){
+    if(!p||!fo)return;
+    if(!p.fweg||typeof p.fweg!=='object')p.fweg={};
+    const ts=new Date().toISOString();
+    if(fo.key)p.fweg['k:'+fo.key]=ts;
+    if(fo.driveId)p.fweg['d:'+fo.driveId]=ts;
+  }
   function drawThumbs(p){const box=E.thumbs;box.innerHTML='';(p.fotos||[]).forEach((fo,i)=>{const d=document.createElement('div');d.className='dpThumb';
     if(_dpFotoId(fo)){d.dataset.hvid=_dpFotoId(fo);d.dataset.hvtitel=fo.caption||('Foto '+(i+1));} // b572 (Punkt 5): Hover zeigt die Miniatur groß
     const img=document.createElement('img');
     const sofort=_dpFotoSofort(fo);
     if(sofort)img.src=sofort;else if(_dpFotoId(fo))_pamLadeSchlange(()=>loadDesktopFotoThumb(img,_dpFotoId(fo)));
-    img.onclick=()=>showPhoto(fo);const del=document.createElement('b');del.textContent='×';del.onclick=ev=>{ev.stopPropagation();p.fotos.splice(i,1);drawThumbs(p);save();};d.appendChild(img);d.appendChild(del);
+    img.onclick=()=>showPhoto(fo);const del=document.createElement('b');del.textContent='×';del.onclick=ev=>{ev.stopPropagation();_fotoWeg(p,fo);p.fotos.splice(i,1);drawThumbs(p);save();};d.appendChild(img);d.appendChild(del);
     if(fo.caption){const c=document.createElement('span');c.textContent=fo.caption;c.style.cssText='position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.62);color:#fff;font-size:10px;line-height:1.3;padding:2px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;';d.appendChild(c);} // b482: Foto-Text als Balken (kommt u.a. vom Tablet)
     box.appendChild(d);});}
   async function showPhoto(fo){window._dpPhotoFo=fo; /* b482: für 📝-Text-Knopf merken */
