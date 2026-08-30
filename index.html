@@ -9617,7 +9617,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-29 · #817'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-29-b817) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-30 · #819'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-30-b819) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -9629,6 +9629,10 @@ var ZETTEL_ZU_VORGABE='0'; // '0' = Kasten startet offen (Handy: '1' = zugeklapp
 var ZETTEL_BLATT_KEY='pam_zettel_blatt';
 var ZETTEL_REITER='1'; // '1' = zwei Reiter Jetzt/Spaeter (Handy: '0' = beide Listen untereinander)
 var _ztlKachelNeu=false; // b811: Eingabefeld an der zugeklappten Kachel offen? (hier oben, nicht beim Rest - b803-Lehre)
+var ZETTEL_PW_KEY='pam_zettel_pw';
+var ZETTEL_BLATT3='1'; // '1' = drittes Blatt (nur Rechner); Handy '0' = gibt es dort nicht
+var ZETTEL_BLATT3_NAME='Privat';
+var _ztlBlatt3Auf=false; // b818: entsperrt? BEWUSST nirgends gespeichert - nach Neustart wieder zu
 var ZETTEL_WEG_TAGE=14;
 var zettelFileId=null;
 var _ztlSyncTimer=null,_ztlSyncLaeuft=false;
@@ -46506,14 +46510,14 @@ function _ztlNeu(text,blatt){
   const t=String(text||'').trim();
   if(!t)return false;
   const now=_ztlJetzt();
-  const bl=(blatt==='s')?'s':'j';
+  const bl=(blatt==='s')?'s':((blatt==='p')?'p':'j');
   var posNeu=Date.parse(now)||0;
   // b811: nur das ZIEL-Blatt zaehlt mit - sonst schoebe eine lange Spaeter-Liste jeden
   // neuen Jetzt-Punkt immer weiter nach hinten. Dieselbe pos-Rechnung wie in _ztlMerge
   // und _ztlPosWert (b804: alle DREI Stellen gleich halten).
   _ztlZeilen.forEach(function(z){
     if(!_ztlGueltig(z)||z.weg)return;
-    if(((z&&z.bl==='s')?'s':'j')!==bl)return;
+    if(((z&&z.bl==='s')?'s':((z&&z.bl==='p')?'p':'j'))!==bl)return;
     var p=(z&&typeof z.pos==='number')?z.pos:(Date.parse((z&&z.ang)||'')||0);
     if(p>=posNeu)posNeu=p+60000;
   });
@@ -46571,26 +46575,34 @@ function _ztlNeuAusFeld(){
 function _ztlPosWert(z){return (z&&typeof z.pos==='number')?z.pos:(Date.parse((z&&z.ang)||'')||0);}
 // b811: Blatt einer Zeile. Fehlt das Feld, gehoert sie zu 'j' (Jetzt) - so behaelt der
 // Bestand seinen Platz, ohne dass bl flaechig nachgeruestet werden muss (pos-Bauart b804).
-function _ztlBlattVon(z){return (z&&z.bl==='s')?'s':'j';}
+function _ztlBlattVon(z){return (z&&z.bl==='s')?'s':((z&&z.bl==='p')?'p':'j');}
 function _ztlBlatt(){
   var v='';
   try{if(typeof localStorage!=='undefined')v=localStorage.getItem(ZETTEL_BLATT_KEY)||'';}catch(e){}
+  // b818: 'p' gilt nur, solange in DIESER Sitzung entsperrt wurde. _ztlBlatt3Auf wird
+  // nirgends gespeichert - nach einem Neustart faellt die Anzeige von selbst auf 'j'.
+  if(v==='p')return (typeof _ztlBlatt3Auf!=='undefined'&&_ztlBlatt3Auf&&typeof ZETTEL_BLATT3!=='undefined'&&ZETTEL_BLATT3==='1')?'p':'j';
   return v==='s'?'s':'j';
 }
 function _ztlBlattWaehle(b){
-  try{if(typeof localStorage!=='undefined')localStorage.setItem(ZETTEL_BLATT_KEY,b==='s'?'s':'j');}catch(e){}
+  try{if(typeof localStorage!=='undefined')localStorage.setItem(ZETTEL_BLATT_KEY,(b==='s')?'s':((b==='p')?'p':'j'));}catch(e){}
   _ztlEditId=null;_ztlZeichne();
 }
-function _ztlSichtbarBlatt(b){var w=(b==='s')?'s':'j';return _ztlSichtbar().filter(function(z){return _ztlBlattVon(z)===w;});}
+function _ztlSichtbarBlatt(b){var w=(b==='s')?'s':((b==='p')?'p':'j');return _ztlSichtbar().filter(function(z){return _ztlBlattVon(z)===w;});}
 // b811: Was gerade GEZEICHNET wird - am Rechner das gewaehlte Blatt, am Handy beides.
 // Zeichnen, Zaehlen und Aufraeumen haengen bewusst an DIESER einen Quelle.
-function _ztlAnzeigeZeilen(){return (ZETTEL_REITER==='1')?_ztlSichtbarBlatt(_ztlBlatt()):_ztlSichtbar();}
+// b818: Am Handy faellt das dritte Blatt hier heraus - damit ist es dort weder zu sehen
+// noch vom Aufraeumen zu treffen (beides haengt an dieser einen Quelle).
+function _ztlAnzeigeZeilen(){
+  if(ZETTEL_REITER==='1')return _ztlSichtbarBlatt(_ztlBlatt());
+  return _ztlSichtbar().filter(function(z){return _ztlBlattVon(z)!=='p';});
+}
 // b811: Zeile aufs jeweils andere Blatt. pos wird neu ans Ende des Ziel-Blatts gelegt,
 // damit sie drueben nicht mitten hineinspringt; ts hebt sich, also reist es ueber den Merge.
 function _ztlSchieben(id){
   var z=_ztlZeilen.find(function(x){return _ztlGueltig(x)&&x.id===id;});
   if(!z)return;
-  var ziel=(_ztlBlattVon(z)==='s')?'j':'s';
+  var ziel=(_ztlBlattVon(z)==='j')?'s':'j'; // b818: aus Spaeter UND aus dem dritten Blatt geht es zurueck nach Jetzt
   var now=_ztlJetzt();
   var posNeu=Date.parse(now)||0;
   _ztlSichtbarBlatt(ziel).forEach(function(x){var p=_ztlPosWert(x);if(p>=posNeu)posNeu=p+60000;});
@@ -46627,6 +46639,82 @@ function _ztlKachelAusFeld(){
   f.value='';
   _ztlKachelNeu=false;
   _ztlNeu(t,'j'); // zugeklappt sieht man das Blatt nicht - deshalb IMMER nach Jetzt
+}
+// b818: Kennwort für das dritte Blatt. ⛔⛔ Das ist SICHTSCHUTZ, KEIN echter Schutz –
+// Frank hat das ausdrücklich so gewollt („ob man das von außen auslesen kann, spielt keine
+// Rolle"). Die Zeilen stehen unverschlüsselt in pam_zettel.json; wer die Datei öffnet, liest
+// sie. Zweck ist allein, dass am Bildschirm niemand mitliest, der daneben steht.
+// ⛔ NICHT mit dem Kennwort der NAS-Leseansicht verwechseln – das schützt echt und darf
+// nie „vereinfacht" werden. Hier ist der einfache Streuwert Absicht: er hält nur das
+// Klartext-Kennwort aus dem Gerätespeicher heraus.
+function _ztlPwHash(s){
+  var h=5381,t=String(s==null?'':s);
+  for(var i=0;i<t.length;i++){h=((h*33)^t.charCodeAt(i))>>>0;}
+  return 'h'+h.toString(36);
+}
+function _ztlPwGesetzt(){
+  // b819: Drive FÜHRT – dadurch gilt dasselbe Kennwort an allen Rechnern. Die lokale Kopie
+  // ist nur der Rückfall, solange die Einstellungen noch nicht geladen sind: der Zettel
+  // selbst läuft auch ohne Verbindung weiter (eigener Speicher pam_zettel_lokal), also darf
+  // das dritte Blatt nicht daran hängen.
+  // ⛔ Ein LEERER String heißt „Sichtschutz aus" und ist ein gültiger Stand – deshalb wird
+  // auf typeof geprüft, nicht auf Wahrheitswert. Andernfalls käme das Abschalten nie an.
+  var d=null;
+  try{if(typeof pamSettings!=='undefined'&&pamSettings&&typeof pamSettings.zettelPw==='string')d=pamSettings.zettelPw;}catch(e){}
+  if(d!==null){
+    try{if(typeof localStorage!=='undefined')localStorage.setItem(ZETTEL_PW_KEY,d);}catch(e){}
+    return d;
+  }
+  var v='';
+  try{if(typeof localStorage!=='undefined')v=localStorage.getItem(ZETTEL_PW_KEY)||'';}catch(e){}
+  return v;
+}
+// b819: schreibt an BEIDE Stellen – Drive für die anderen Rechner, lokal als Rückfall.
+// Am Handy gibt es settingsSaveToDrive nicht; die typeof-Wache hält den Baustein
+// zeichengleich, ohne dort etwas auszulösen (dort ruft ohnehin nichts diese Funktion).
+function _ztlPwSchreiben(wert){
+  var w=String(wert==null?'':wert);
+  try{if(typeof localStorage!=='undefined')localStorage.setItem(ZETTEL_PW_KEY,w);}catch(e){}
+  try{if(typeof pamSettings!=='undefined'&&pamSettings)pamSettings.zettelPw=w;}catch(e){}
+  try{if(typeof settingsSaveToDrive==='function')settingsSaveToDrive();}catch(e){}
+}
+function _ztlPwSetzen(pw){_ztlPwSchreiben(_ztlPwHash(pw));}
+// Klick auf den dritten Reiter. Beim ersten Mal wird das Kennwort festgelegt.
+function _ztlBlatt3Klick(){
+  if(typeof ZETTEL_BLATT3==='undefined'||ZETTEL_BLATT3!=='1')return;
+  if(typeof _ztlBlatt3Auf!=='undefined'&&_ztlBlatt3Auf){_ztlBlattWaehle('p');return;}
+  var gesetzt=_ztlPwGesetzt();
+  if(!gesetzt){
+    // b819: Kein Kennwort hinterlegt = kein Sichtschutz - dann geht das Blatt einfach auf.
+    // Eingerichtet wird über den Knopf AUF dem Blatt. Vorher wurde hier nach einem NEUEN
+    // Kennwort gefragt; wer da abbrach, kam an sein eigenes Blatt gar nicht mehr heran.
+    _ztlBlatt3Auf=true;_ztlBlattWaehle('p');
+    return;
+  }
+  var ein=(typeof prompt==='function')?prompt('Kennwort:'):null;
+  if(ein===null||ein===undefined)return;
+  if(_ztlPwHash(String(ein).trim())!==gesetzt){if(typeof alert==='function')alert('Kennwort stimmt nicht.');return;}
+  _ztlBlatt3Auf=true;_ztlBlattWaehle('p');
+}
+// Der Sperren-Knopf: sofort zu, ohne Warten. Danach steht wieder „Jetzt" vorn.
+function _ztlBlatt3Zu(){
+  _ztlBlatt3Auf=false;
+  _ztlEditId=null;
+  _ztlBlattWaehle('j');
+}
+// Kennwort ändern – nur vom offenen Blatt aus erreichbar. Leer eingeben schaltet den
+// Sichtschutz ab; die Zeilen bleiben dabei unangetastet (nichts wird gelöscht).
+function _ztlPwAendern(){
+  if(typeof _ztlBlatt3Auf==='undefined'||!_ztlBlatt3Auf)return;
+  var neu=(typeof prompt==='function')?prompt('Neues Kennwort (leer eingeben = Sichtschutz aus):'):null;
+  if(neu===null||neu===undefined)return;
+  neu=String(neu).trim();
+  // b819: über _ztlPwSchreiben, damit Drive UND die lokale Kopie gleich stehen.
+  // ⛔ Abschalten schreibt einen LEEREN Wert statt das Feld zu entfernen - ein fehlendes
+  // Feld überschriebe beim nächsten Lesen nichts, das Abschalten käme nie an.
+  if(neu)_ztlPwSetzen(neu);
+  else _ztlPwSchreiben('');
+  _ztlZeichne();
 }
 function _ztlEditStart(id){
   _ztlEditId=id;
@@ -46716,8 +46804,11 @@ function _ztlKastenHtml(){
   if(typeof _ztlZeilen==='undefined'||!Array.isArray(_ztlZeilen))return''; // Wache: läuft ein früher render() VOR den Zustands-Variablen, gibt es still keinen Kasten statt eines Absturzes (Lehre 26.08.)
   const zu=_ztlIstZu();
   const sicht=_ztlSichtbar();
-  const offen=sicht.filter(function(z){return !z.erl;}).length;
+  // b818: Das dritte Blatt zählt NIRGENDS mit – weder hier noch am Reiter. Eine Zahl, die
+  // sich ändert, sobald dort etwas liegt, verriete genau das, was verdeckt sein soll.
+  const offen=sicht.filter(function(z){return !z.erl&&_ztlBlattVon(z)!=='p';}).length;
   const reiter=(typeof ZETTEL_REITER!=='undefined'&&ZETTEL_REITER==='1');
+  const blatt3=(typeof ZETTEL_BLATT3!=='undefined'&&ZETTEL_BLATT3==='1');
   const blatt=(typeof _ztlBlatt==='function')?_ztlBlatt():'j';
   const kachelNeu=(typeof _ztlKachelNeu==='undefined')?false:_ztlKachelNeu;
   const editId=(typeof _ztlEditId==='undefined')?null:_ztlEditId; // b804: typeof-Wache wie beim Rest
@@ -46759,7 +46850,8 @@ function _ztlKastenHtml(){
   // Handy (dort stehen beide Blätter untereinander) im eigenen Blatt bleibt.
   const zeile=function(z,i){
     const ds=_ztlDatumText(z.ang,jetztIso);
-    let r='<li data-ztlid="'+_ztlAttr(z.id)+'" data-ztlbl="'+_ztlBlattVon(z)+'" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);">'
+    const bv=_ztlBlattVon(z);
+    let r='<li data-ztlid="'+_ztlAttr(z.id)+'" data-ztlbl="'+bv+'" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);">'
       +'<span style="font-size:12px;color:var(--text2);min-width:20px;text-align:right;flex-shrink:0;">'+(i+1)+'.</span>'
       +'<span onclick="_ztlHaken(\''+_ztlAttr(z.id)+'\')" title="'+(z.erl?'Haken wegnehmen':'als erledigt abhaken')+'" style="width:24px;height:24px;border:2px solid '+(z.erl?'#639922':'var(--text2)')+';border-radius:6px;background:'+(z.erl?'#EAF3DE':'transparent')+';color:#3B6D11;display:inline-flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;cursor:pointer;flex-shrink:0;">'+(z.erl?'✓':'')+'</span>';
     if(editId===z.id){
@@ -46772,7 +46864,7 @@ function _ztlKastenHtml(){
       r+='<span ondblclick="_ztlEditStart(\''+_ztlAttr(z.id)+'\')" style="flex:1;min-width:0;font-size:14px;line-height:1.35;color:var(--text);word-break:break-word;'+(z.erl?'text-decoration:line-through;opacity:.55;':'')+'">'+_ztlEsc(z.text)+'</span>'
         +(ds?'<span title="angelegt" style="font-size:11px;color:var(--text2);flex-shrink:0;white-space:nowrap;">'+_ztlEsc(ds)+'</span>':'')
         +'<span onclick="_ztlEditStart(\''+_ztlAttr(z.id)+'\')" title="Text ändern" style="width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;color:var(--text2);cursor:pointer;flex-shrink:0;">✏️</span>'
-        +(reiter?('<span onclick="_ztlSchieben(\''+_ztlAttr(z.id)+'\')" title="'+(_ztlBlattVon(z)==='s'?'zurück zu Jetzt':'nach Später schieben')+'" style="width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;color:#7F77DD;cursor:pointer;flex-shrink:0;font-size:15px;font-weight:700;">'+(_ztlBlattVon(z)==='s'?'←':'→')+'</span>'):'')
+        +(reiter?('<span onclick="_ztlSchieben(\''+_ztlAttr(z.id)+'\')" title="'+((bv==='s'||bv==='p')?'zurück zu Jetzt':'nach Später schieben')+'" style="width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;color:#7F77DD;cursor:pointer;flex-shrink:0;font-size:15px;font-weight:700;">'+((bv==='s'||bv==='p')?'←':'→')+'</span>'):'')
         +'<span onpointerdown="_ztlDragStart(event,\''+_ztlAttr(z.id)+'\')" title="Zum Verschieben ziehen (auch mit dem Finger)" style="width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;color:var(--text2);cursor:grab;touch-action:none;flex-shrink:0;font-size:16px;">≡</span>';
     }
     return r+'</li>';
@@ -46794,7 +46886,15 @@ function _ztlKastenHtml(){
         +(aktiv?'background:var(--bg3);color:var(--text);font-weight:700;border:1px solid var(--border);border-bottom:none;':'color:var(--text2);border:1px solid transparent;')+'">'
         +titel+((!aktiv&&off)?(' <span style="font-size:11px;color:#7F77DD;font-weight:600;">('+off+')</span>'):'')+'</span>';
     };
-    h+='<div style="display:flex;gap:4px;padding:0 12px;border-bottom:1px solid var(--border);">'+rB('j','Jetzt')+rB('s','Später')+'</div>';
+    // b818: der dritte Reiter trägt BEWUSST keine Zahl – sonst verriete sie, dass dort
+    // etwas liegt. Der Klick geht über _ztlBlatt3Klick (fragt das Kennwort ab).
+    const rB3=function(){
+      const aktiv=(blatt==='p');
+      return '<span onclick="_ztlBlatt3Klick()" title="'+(aktiv?'offen – zum Sperren den Knopf unten':'durch Kennwort verdeckt')+'" style="padding:5px 13px;border-radius:8px 8px 0 0;font-size:13px;cursor:pointer;user-select:none;'
+        +(aktiv?'background:var(--bg3);color:var(--text);font-weight:700;border:1px solid var(--border);border-bottom:none;':'color:var(--text2);border:1px solid transparent;')+'">'
+        +(aktiv?'🔓 ':'🔒 ')+_ztlEsc((typeof ZETTEL_BLATT3_NAME!=='undefined')?ZETTEL_BLATT3_NAME:'Privat')+'</span>';
+    };
+    h+='<div style="display:flex;gap:4px;padding:0 12px;border-bottom:1px solid var(--border);">'+rB('j','Jetzt')+rB('s','Später')+(blatt3?rB3():'')+'</div>';
   }
   {
     h+='<div style="padding:2px 12px 11px;">';
@@ -46828,10 +46928,15 @@ function _ztlKastenHtml(){
       +'<button onclick="_ztlNeuAusFeld()" title="Punkt anhängen" style="flex-shrink:0;width:38px;height:36px;border-radius:8px;border:1px solid var(--border);background:#7F77DD;color:#fff;font-size:17px;font-weight:700;cursor:pointer;">+</button>'
       +'</div>';
     const erledigte=zeigen.length-zeigen.filter(function(z){return !z.erl;}).length;
-    if(erledigte>0){
-      h+='<div style="display:flex;justify-content:flex-end;margin-top:8px;">'
-        +'<button onclick="_ztlAufraeumen()" style="font-size:12px;padding:5px 11px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;">🧹 Erledigte aufräumen ('+erledigte+')</button>'
-        +'</div>';
+    const knoepfe=[];
+    if(erledigte>0)knoepfe.push('<button onclick="_ztlAufraeumen()" style="font-size:12px;padding:5px 11px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;">🧹 Erledigte aufräumen ('+erledigte+')</button>');
+    // b818: Sperren und Kennwort ändern stehen NUR auf dem dritten Blatt.
+    if(reiter&&blatt3&&blatt==='p'){
+      knoepfe.push('<button onclick="_ztlPwAendern()" style="font-size:12px;padding:5px 11px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;">'+(((typeof _ztlPwGesetzt==='function')&&_ztlPwGesetzt())?'Kennwort ändern':'🔑 Kennwort setzen')+'</button>');
+      knoepfe.push('<button onclick="_ztlBlatt3Zu()" style="font-size:12px;padding:5px 11px;border-radius:7px;border:1px solid #7F77DD;background:#7F77DD;color:#fff;font-weight:600;cursor:pointer;">🔒 Sperren</button>');
+    }
+    if(knoepfe.length){
+      h+='<div style="display:flex;justify-content:flex-end;gap:7px;margin-top:8px;flex-wrap:wrap;">'+knoepfe.join('')+'</div>';
     }
     h+='</div>';
   }
