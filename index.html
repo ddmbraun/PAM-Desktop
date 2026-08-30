@@ -7964,6 +7964,14 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
       </span>
       <!-- b727: Sammel-Aktionen zum Handy-Haken (b726) – AKTIONEN, kein Filter, deshalb
            eigener Knopf mit Rückfrage. Nur auf Objekt-Boards, eingeblendet von updateFilterDropdowns(). -->
+      <!-- b822: Objekte aus einer Drive-Ordnerebene anlegen. Nur auf Objekt-Boards,
+           eingeblendet von updateFilterDropdowns() - gleiches Muster wie die beiden
+           Gruppen daneben. AKTION, kein Filter: eigener Knopf, eigener Dialog mit
+           Vorschau; angelegt wird erst nach ausdruecklichem Klick. -->
+      <span class="filter-fgroup" id="pamFObjImpGroup" style="display:none;align-items:center;gap:5px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:2px 6px;" title="Objektkarten aus den Unterordnern eines Drive-Ordners anlegen">
+        <span style="font-size:9px;color:var(--text2);text-transform:uppercase;letter-spacing:.3px;">Anlegen</span>
+        <button class="filter-btn" id="pamFObjImpBtn" onclick="_objImpOeffnen()">🏠 aus Ordnern …</button>
+      </span>
       <span class="filter-fgroup" id="pamFMobAktGroup" style="display:none;align-items:center;gap:5px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:2px 6px;" title="Handy-Haken für alle Objekte dieses Boards setzen oder lösen">
         <span style="font-size:9px;color:var(--text2);text-transform:uppercase;letter-spacing:.3px;">Handy</span>
         <!-- b728: Button+Menü MÜSSEN in .filter-wrapper stecken – der globale
@@ -9631,7 +9639,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-30 · #821'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-30-b821) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-30 · #822'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-30-b822) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -22041,6 +22049,9 @@ function updateFilterDropdowns(){
   // b727: Sammel-Aktionen zum Handy-Haken – nur auf Objekt-Boards
   const _mag=document.getElementById('pamFMobAktGroup');
   if(_mag)_mag.style.display=((boardTypes[currentBoard]||'baustelle')==='immobilie')?'inline-flex':'none';
+  // b822: dieselbe Bedingung - die Massenanlage ergibt nur am Objekt-Board Sinn
+  const _oig=document.getElementById('pamFObjImpGroup');
+  if(_oig)_oig.style.display=((boardTypes[currentBoard]||'baustelle')==='immobilie')?'inline-flex':'none';
 }
 // #444: toggleFilter()/setFilter() (tote Owner/Ampel/Tag-Dropdowns) entfernt
 function closeAllDropdowns(){document.querySelectorAll('.filter-dropdown').forEach(d=>d.classList.remove('open'));}
@@ -41339,6 +41350,186 @@ async function _objektNeuerAuftrag(objektId){
    sofort mit, inklusive Archiv. Es entsteht KEIN zweites Verweis-Feld.
    Gesetzt wird direkt am Live-Task; `saveTaskData` traegt `objektId`/`objektName`
    seit b642 ohnehin aus dem bestehenden Task weiter (b591-Falle). */
+/* == b822: Objektkarten aus einer Drive-Ordnerebene anlegen =================
+   Anlass (Frank, 30.08.): Unter 01_Hausverwaltungen\<Verwaltung>\<Ort>\ liegt je
+   Haus ein Ordner - bei einer einzigen Verwaltung sind es an EINEM Ort dreistellig
+   viele. Von Hand ist das keine Option, und ein Schreiben von aussen in
+   workboard.json waere gefaehrlich: ein Fehler dort trifft ALLE Boards.
+
+   Deshalb dieses Werkzeug IN PAM, nach dem Muster der Einmal-Strecke b655:
+     - EIN Drive-Abruf liefert alle Unterordner samt IDs (kein Abruf je Ordner),
+     - die Liste wird ANGEZEIGT und ist abwaehlbar,
+     - angelegt wird erst nach ausdruecklichem Klick,
+     - schon vorhandene Objekte werden erkannt und uebersprungen (wiederholbar).
+
+   ⛔ Ordnernamen werden NICHT umgedeutet. Die Ablage kennt gewachsene Formen -
+   Sammel-Anschriften mit mehreren Hausnummern, Klammerzusaetze, Bindestrich-Spannen.
+   Der Ordnername wandert 1:1 in Titel und Adresse; Raten waere hier schlimmer als
+   nichts. ⚠ Beispiele bewusst NICHT hier - diese Datei wird oeffentlich ausgeliefert
+   (test_b658 wacht darueber). Echte Faelle stehen in CHANGES.md.
+   ⚠ PAM ersetzt beim Oeffnen einer Karte Binde- und Unterstriche im Titel durch
+   Leerzeichen (von Frank so gewollt, 23.08.). "Str. 38-39" heisst danach "Str. 38 39".
+   Der ORDNERNAME bleibt davon unberuehrt - nur die Karte heisst anders. */
+let _objImpTreffer=[];
+function _objImpSchliessen(){const o=document.getElementById("_objImpDlg");if(o)try{o.remove();}catch(e){}}
+function _objImpNasVorschlag(){
+  /* Drive und NAS sind gespiegelt. Aus dem Namen des gewaehlten Drive-Ordners laesst
+     sich der NAS-Pfad nicht ableiten - deshalb ein Feld, vorbelegt mit dem Stamm.
+     Frank ergaenzt Verwaltung und Ort einmal, der Ordnername kommt je Zeile dazu. */
+  return "\\\\nas-ddbraun\\Kunden\\01_Hausverwaltungen\\";
+}
+function _objImpVorhandene(){
+  // Titel aller schon angelegten Objekte - ueber ALLE Objekt-Boards, nicht nur das offene.
+  const s=new Set();
+  Object.keys(boards||{}).forEach(function(bn){
+    if(bn.startsWith("_"))return;
+    if((boardTypes[bn]||"baustelle")!=="immobilie")return;
+    (boards[bn]||[]).forEach(function(x){if(x&&!x.objektId&&x.title)s.add(String(x.title).trim().toLowerCase());});
+  });
+  try{(archivedTasks||[]).forEach(function(x){if(x&&!x.objektId&&x.title)s.add(String(x.title).trim().toLowerCase());});}catch(e){}
+  return s;
+}
+function _objImpTitelWieGespeichert(n){
+  // Wie die Karte nach dem ersten Oeffnen heissen WIRD (b763-Regel), damit die
+  // Dublettenpruefung beim zweiten Lauf nicht danebengreift.
+  return String(n||"").replace(/[-_]+/g," ").replace(/\s+/g," ").trim();
+}
+async function _objImpLesen(){
+  const url=((document.getElementById("_objImpQuelle")||{}).value||"").trim();
+  const fid=_extractFolderIdFromUrl(url);
+  const box=document.getElementById("_objImpListe");
+  if(!fid){if(box)box.innerHTML="<div style=\"padding:16px;color:#a04000;font-size:13px;\">Bitte oben einen Drive-Ordner w\u00e4hlen (\uD83D\uDCC2).</div>";return;}
+  if(!gdriveToken){showToast("\u26A0 Bitte zuerst mit Google Drive verbinden","error",5000);return;}
+  if(box)box.innerHTML="<div style=\"padding:16px;color:var(--text2);font-size:13px;\">\u23F3 Ordner werden gelesen \u2026</div>";
+  try{
+    // EIN Abruf fuer die ganze Ebene. pageSize 1000 deckt auch grosse Verwaltungen ab;
+    // gibt es mehr, sagt die Zeile unter der Liste es ausdruecklich (kein stilles Kappen).
+    const q="'"+fid+"' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false";
+    const r=await fetch("https://www.googleapis.com/drive/v3/files?q="+encodeURIComponent(q)+"&fields=files(id,name),nextPageToken&orderBy=name&pageSize=1000",{headers:{Authorization:"Bearer "+gdriveToken}});
+    if(!r.ok){if(r.status===401)_handleDrive401();throw new Error("HTTP "+r.status);}
+    const j=await r.json();
+    const files=(j.files)||[];
+    const vorhanden=_objImpVorhandene();
+    _objImpTreffer=files.map(function(f){
+      const wird=_objImpTitelWieGespeichert(f.name);
+      const da=vorhanden.has(String(f.name).trim().toLowerCase())||vorhanden.has(wird.toLowerCase());
+      return {id:f.id,name:f.name,wird:wird,schonDa:da,an:!da};
+    });
+    _objImpZeichnen(!!j.nextPageToken);
+  }catch(e){
+    console.warn("[b822] Lesen:",e);
+    if(box)box.innerHTML="<div style=\"padding:16px;color:#a04000;font-size:13px;\">\u26A0 Konnte nicht gelesen werden: "+esc(e.message)+"</div>";
+  }
+}
+function _objImpUmschalten(i){if(_objImpTreffer[i])_objImpTreffer[i].an=!_objImpTreffer[i].an;_objImpZeichnen(false,true);}
+function _objImpAlle(an){_objImpTreffer.forEach(function(x){if(!x.schonDa)x.an=!!an;});_objImpZeichnen(false,true);}
+function _objImpZeichnen(mehrDa,nurListe){
+  const box=document.getElementById("_objImpListe");if(!box)return;
+  const neu=_objImpTreffer.filter(function(x){return !x.schonDa;});
+  const da=_objImpTreffer.filter(function(x){return x.schonDa;});
+  const gew=_objImpTreffer.filter(function(x){return x.an&&!x.schonDa;}).length;
+  const kopf=document.getElementById("_objImpKopf");
+  if(kopf)kopf.textContent=_objImpTreffer.length+" Ordner gefunden \u00b7 "+neu.length+" neu \u00b7 "+da.length+" schon als Objekt vorhanden";
+  const btn=document.getElementById("_objImpOkBtn");
+  if(btn){btn.textContent="\uD83C\uDFE0 "+gew+" Objekt(e) anlegen";btn.disabled=!gew;btn.style.opacity=gew?"1":".5";btn.style.cursor=gew?"pointer":"default";}
+  if(nurListe&&box.dataset.gezeichnet==="1"){
+    _objImpTreffer.forEach(function(x,i){const c=document.getElementById("_objImpCb"+i);if(c)c.checked=!!x.an;});
+    return;
+  }
+  if(!_objImpTreffer.length){box.innerHTML="<div style=\"padding:16px;color:var(--text2);font-size:13px;\">Keine Unterordner gefunden.</div>";return;}
+  box.dataset.gezeichnet="1";
+  box.innerHTML=_objImpTreffer.map(function(x,i){
+    const grau=x.schonDa?"opacity:.5;":"";
+    const hinweis=x.schonDa?"<span style=\"font-size:10px;color:var(--text2);\">\u00b7 schon vorhanden</span>":
+      (x.wird!==x.name?"<span style=\"font-size:10px;color:#a04000;\" title=\"PAM ersetzt Binde- und Unterstriche im Titel durch Leerzeichen\">\u00b7 hei\u00dft dann: "+esc(x.wird)+"</span>":"");
+    return "<label style=\"display:flex;align-items:center;gap:8px;padding:5px 10px;border-bottom:1px solid var(--border);cursor:"+(x.schonDa?"default":"pointer")+";"+grau+"\">"
+      +"<input type=\"checkbox\" id=\"_objImpCb"+i+"\" "+(x.an?"checked":"")+" "+(x.schonDa?"disabled":"")+" onchange=\"_objImpUmschalten("+i+")\">"
+      +"<span style=\"flex:1;min-width:0;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;\">"+esc(x.name)+"</span>"
+      +hinweis
+      +"</label>";
+  }).join("")
+  +(mehrDa?"<div style=\"padding:10px;color:#a04000;font-size:12px;\">\u26A0 Es gibt MEHR als 1000 Unterordner \u2013 diese Liste ist unvollst\u00e4ndig.</div>":"");
+}
+async function _objImpAnlegen(){
+  const gew=_objImpTreffer.filter(function(x){return x.an&&!x.schonDa;});
+  if(!gew.length){showToast("Nichts ausgew\u00e4hlt","info");return;}
+  const board=((document.getElementById("_objImpBoard")||{}).value)||currentBoard;
+  const spalte=((document.getElementById("_objImpSpalte")||{}).value)||"";
+  const hv=(((document.getElementById("_objImpHv")||{}).value)||"").trim();
+  let nasBasis=(((document.getElementById("_objImpNas")||{}).value)||"").trim();
+  if(nasBasis)nasBasis=nasBasis.replace(/[\\\/]+$/,"");
+  if(!confirm(gew.length+" Objektkarte(n) im Board \u201e"+board+"\u201c anlegen?\n\nEs wird nichts \u00fcberschrieben und nichts verschoben \u2013 es kommen nur neue Karten dazu."))return;
+  const base="https://drive.google.com/drive/folders/";
+  if(!Array.isArray(boards[board]))boards[board]=[];
+  let n=0;
+  gew.forEach(function(x){
+    const url=base+x.id;
+    const t={id:generateId(),title:x.name,desc:"",owner:"",due:"",status:spalte,ampel:"gr\u00fcn",
+      adresse:x.name,hausverwaltung:hv,nas:nasBasis?(nasBasis+"\\"+x.name):"",
+      // Alle vier Ordnerfelder auf denselben Ordner - wie _immoNeuenOrdnerAnlegen (b624):
+      // am Objekt gehoeren Fotos UND Dokumente in EINEN Ordner (Beschluss Frank 04.08.).
+      gdrive:url,gdriveOrdner:url,dokOrdner:url,emailOrdner:url,
+      tags:[],source:"",links:[],attachments:[],aufgaben:[],turnusListe:[],notizVerlauf:[],fotos:[],checkliste:[],
+      createdAt:new Date().toISOString()};
+    boards[board].push(t);n++;
+  });
+  try{_auftragSpalteSicher(board);}catch(e){}
+  try{await autoSave();}catch(e){console.warn("[b822] Save:",e);}
+  try{pushToSync();}catch(e){}
+  _objImpSchliessen();
+  try{render();}catch(e){}
+  showToast("\u2713 "+n+" Objekt(e) angelegt in \u201e"+board+"\u201c","success",6000);
+}
+function _objImpBoardWechsel(){
+  const b=((document.getElementById("_objImpBoard")||{}).value)||"";
+  const sel=document.getElementById("_objImpSpalte");if(!sel)return;
+  const st=getBoardStatuses(b)||[];
+  // Vorwahl: die erste Spalte, die NICHT die Auffangspalte fuer Auftraege ist -
+  // Objektkarten gehoeren nicht in "\uD83D\uDEE0 Auftraege" (Befund Frank 30.08.).
+  const vor=st.find(function(s){return s!==AUFTRAG_SPALTE;})||st[0]||"";
+  sel.innerHTML=st.map(function(s){return "<option value=\""+esc(s)+"\""+(s===vor?" selected":"")+">"+esc(s)+"</option>";}).join("");
+}
+function _objImpOeffnen(){
+  _objImpSchliessen();
+  _objImpTreffer=[];
+  const immoBoards=Object.keys(boards||{}).filter(function(b){return !b.startsWith("_")&&(boardTypes[b]||"baustelle")==="immobilie";});
+  if(!immoBoards.length){showToast("\u26A0 Kein Board vom Typ \uD83C\uDFE0 Objekt vorhanden","warning",6000);return;}
+  const ov=document.createElement("div");
+  ov.id="_objImpDlg";
+  ov.style.cssText="position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;";
+  const boardOpts=immoBoards.map(function(b){return "<option value=\""+esc(b)+"\""+(b===currentBoard?" selected":"")+">\uD83C\uDFE0 "+esc(b)+"</option>";}).join("");
+  ov.innerHTML="<div style=\"background:var(--bg2);border:1px solid var(--border);border-radius:12px;width:96%;max-width:720px;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,.45);\">"
+    +"<div style=\"padding:16px 18px 8px;\">"
+      +"<div style=\"font-size:15px;font-weight:800;color:var(--text);margin-bottom:4px;\">\uD83C\uDFE0 Objekte aus Ordnern anlegen</div>"
+      +"<div style=\"font-size:11px;color:var(--text2);line-height:1.6;margin-bottom:10px;\">Jeder Unterordner des gew\u00e4hlten Drive-Ordners wird zu einer Objektkarte. Es wird <b>nichts \u00fcberschrieben und nichts verschoben</b> \u2013 es kommen nur neue Karten dazu. Ein zweiter Lauf legt nichts doppelt an.</div>"
+      +"<div style=\"display:flex;gap:6px;align-items:center;margin-bottom:8px;\">"
+        +"<input id=\"_objImpQuelle\" type=\"text\" placeholder=\"Drive-Ordner der Ortsebene (darunter liegen die Objektordner)\" autocomplete=\"off\" style=\"flex:1;min-width:0;padding:7px 9px;border-radius:7px;border:1.5px solid var(--accent);background:var(--bg3);color:var(--text);font-size:12px;\">"
+        +"<button type=\"button\" onclick=\"_pickDriveFolder('_objImpQuelle')\" title=\"Ordner w\u00e4hlen\" style=\"flex-shrink:0;padding:7px 11px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;\">\uD83D\uDCC2</button>"
+        +"<button type=\"button\" onclick=\"_objImpLesen()\" style=\"flex-shrink:0;padding:7px 14px;border-radius:7px;border:none;background:var(--accent);color:#fff;font-size:12px;font-weight:700;cursor:pointer;\">Ordner lesen</button>"
+      +"</div>"
+      +"<div style=\"display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;\">"
+        +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Board</label><select id=\"_objImpBoard\" onchange=\"_objImpBoardWechsel()\" style=\"width:100%;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\">"+boardOpts+"</select></div>"
+        +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Spalte</label><select id=\"_objImpSpalte\" style=\"width:100%;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></select></div>"
+        +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Auftraggeber / Hausverwaltung</label><input id=\"_objImpHv\" type=\"text\" placeholder=\"z.B. AHV, Muster Verwaltung\" autocomplete=\"off\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></div>"
+        +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">NAS-Pfad bis zur Ortsebene</label><input id=\"_objImpNas\" type=\"text\" autocomplete=\"off\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:11px;\"></div>"
+      +"</div>"
+      +"<div style=\"display:flex;align-items:center;gap:10px;\">"
+        +"<div id=\"_objImpKopf\" style=\"flex:1;font-size:11px;color:var(--text2);\">Noch nichts gelesen.</div>"
+        +"<button type=\"button\" onclick=\"_objImpAlle(true)\" style=\"padding:3px 9px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:11px;cursor:pointer;\">alle</button>"
+        +"<button type=\"button\" onclick=\"_objImpAlle(false)\" style=\"padding:3px 9px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:11px;cursor:pointer;\">keine</button>"
+      +"</div>"
+    +"</div>"
+    +"<div id=\"_objImpListe\" style=\"flex:1;overflow-y:auto;border-top:1px solid var(--border);border-bottom:1px solid var(--border);min-height:120px;\"><div style=\"padding:16px;color:var(--text2);font-size:13px;\">Oben einen Drive-Ordner w\u00e4hlen und auf \u201eOrdner lesen\u201c klicken.</div></div>"
+    +"<div style=\"padding:12px 18px;display:flex;justify-content:flex-end;gap:8px;\">"
+      +"<button type=\"button\" onclick=\"_objImpSchliessen()\" style=\"padding:7px 16px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:13px;cursor:pointer;\">Abbrechen</button>"
+      +"<button type=\"button\" id=\"_objImpOkBtn\" onclick=\"_objImpAnlegen()\" disabled style=\"padding:7px 18px;border-radius:7px;border:none;background:var(--accent);color:#fff;font-size:13px;font-weight:700;opacity:.5;\">\uD83C\uDFE0 0 Objekt(e) anlegen</button>"
+    +"</div>"
+  +"</div>";
+  ov.addEventListener("click",function(e){if(e.target===ov)_objImpSchliessen();});
+  document.body.appendChild(ov);
+  _objImpBoardWechsel();
+  const nas=document.getElementById("_objImpNas");if(nas)nas.value=_objImpNasVorschlag();
+}
 function _objZuordnenSammle(){
   const out=[];
   Object.keys(boards||{}).forEach(function(bn){
