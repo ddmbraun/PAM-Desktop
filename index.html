@@ -9639,7 +9639,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-30 · #823'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-30-b823) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-30 · #824'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-30-b824) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -41454,6 +41454,11 @@ async function _objektNeuerAuftrag(objektId){
    Leerzeichen (von Frank so gewollt, 23.08.). "Str. 38-39" heisst danach "Str. 38 39".
    Der ORDNERNAME bleibt davon unberuehrt - nur die Karte heisst anders. */
 let _objImpTreffer=[];
+/* b824: Wo stehen wir gerade? Die Kette der Ordner, in die hineingegangen wurde.
+   Ohne sie kam man an die Objektordner nur, indem man die Drive-URL der Ortsebene
+   von Hand einfuegte - genau daran ist Frank am 30.08. haengengeblieben. */
+let _objImpPfad=[];
+const OBJIMP_LETZTER='pam_objimp_letzter_ordner';
 function _objImpSchliessen(){const o=document.getElementById("_objImpDlg");if(o)try{o.remove();}catch(e){}}
 function _objImpNasVorschlag(){
   /* Drive und NAS sind gespiegelt. Aus dem Namen des gewaehlten Drive-Ordners laesst
@@ -41477,9 +41482,18 @@ function _objImpTitelWieGespeichert(n){
   // Dublettenpruefung beim zweiten Lauf nicht danebengreift.
   return String(n||"").replace(/[-_]+/g," ").replace(/\s+/g," ").trim();
 }
-async function _objImpLesen(){
+async function _objImpLesen(fidDirekt,name){
+  /* b824: Mit `fidDirekt` liest die Funktion einen Unterordner, ohne dass eine URL
+     im Feld stehen muss - so funktioniert das Hineingehen in der Liste. Ohne Angabe
+     wie bisher aus dem Eingabefeld. */
   const url=((document.getElementById("_objImpQuelle")||{}).value||"").trim();
-  const fid=_extractFolderIdFromUrl(url);
+  const fid=fidDirekt||_extractFolderIdFromUrl(url);
+  if(fidDirekt){
+    _objImpPfad.push({id:fidDirekt,name:name||"Ordner"});
+  }else{
+    _objImpPfad=[];
+    try{if(url)localStorage.setItem(OBJIMP_LETZTER,url);}catch(e){}
+  }
   const box=document.getElementById("_objImpListe");
   if(!fid){if(box)box.innerHTML="<div style=\"padding:16px;color:#a04000;font-size:13px;\">Bitte oben einen Drive-Ordner w\u00e4hlen (\uD83D\uDCC2).</div>";return;}
   if(!gdriveToken){showToast("\u26A0 Bitte zuerst mit Google Drive verbinden","error",5000);return;}
@@ -41498,11 +41512,32 @@ async function _objImpLesen(){
       const da=vorhanden.has(String(f.name).trim().toLowerCase())||vorhanden.has(wird.toLowerCase());
       return {id:f.id,name:f.name,wird:wird,schonDa:da,an:!da};
     });
+    const _lb=document.getElementById("_objImpListe");if(_lb)_lb.dataset.gezeichnet="";
     _objImpZeichnen(!!j.nextPageToken);
   }catch(e){
     console.warn("[b822] Lesen:",e);
     if(box)box.innerHTML="<div style=\"padding:16px;color:#a04000;font-size:13px;\">\u26A0 Konnte nicht gelesen werden: "+esc(e.message)+"</div>";
   }
+}
+function _objImpHinein(i){
+  const x=_objImpTreffer[i];
+  if(!x)return;
+  _objImpLesen(x.id,x.name);
+}
+function _objImpHoch(){
+  // Eine Ebene zurueck: den letzten Schritt verwerfen und den davor neu lesen.
+  if(!_objImpPfad.length)return;
+  _objImpPfad.pop();
+  const ziel=_objImpPfad.length?_objImpPfad[_objImpPfad.length-1]:null;
+  if(ziel){_objImpPfad.pop();_objImpLesen(ziel.id,ziel.name);}
+  else{_objImpLesen();}
+}
+function _objImpPfadHtml(){
+  const p=document.getElementById("_objImpPfad");if(!p)return;
+  if(!_objImpPfad.length){p.innerHTML="";p.style.display="none";return;}
+  p.style.display="";
+  p.innerHTML="<button type=\"button\" onclick=\"_objImpHoch()\" style=\"padding:2px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:11px;cursor:pointer;\">\u2191 zur\u00fcck</button>"
+    +"<span style=\"font-size:11px;color:var(--text2);\">\uD83D\uDCC1 "+esc(_objImpPfad.map(function(x){return x.name;}).join(" \u203A "))+"</span>";
 }
 function _objImpUmschalten(i){if(_objImpTreffer[i])_objImpTreffer[i].an=!_objImpTreffer[i].an;_objImpZeichnen(false,true);}
 function _objImpAlle(an){_objImpTreffer.forEach(function(x){if(!x.schonDa)x.an=!!an;});_objImpZeichnen(false,true);}
@@ -41511,6 +41546,7 @@ function _objImpZeichnen(mehrDa,nurListe){
   const neu=_objImpTreffer.filter(function(x){return !x.schonDa;});
   const da=_objImpTreffer.filter(function(x){return x.schonDa;});
   const gew=_objImpTreffer.filter(function(x){return x.an&&!x.schonDa;}).length;
+  _objImpPfadHtml();
   const kopf=document.getElementById("_objImpKopf");
   if(kopf)kopf.textContent=_objImpTreffer.length+" Ordner gefunden \u00b7 "+neu.length+" neu \u00b7 "+da.length+" schon als Objekt vorhanden";
   const btn=document.getElementById("_objImpOkBtn");
@@ -41525,11 +41561,15 @@ function _objImpZeichnen(mehrDa,nurListe){
     const grau=x.schonDa?"opacity:.5;":"";
     const hinweis=x.schonDa?"<span style=\"font-size:10px;color:var(--text2);\">\u00b7 schon vorhanden</span>":
       (x.wird!==x.name?"<span style=\"font-size:10px;color:#a04000;\" title=\"PAM ersetzt Binde- und Unterstriche im Titel durch Leerzeichen\">\u00b7 hei\u00dft dann: "+esc(x.wird)+"</span>":"");
-    return "<label style=\"display:flex;align-items:center;gap:8px;padding:5px 10px;border-bottom:1px solid var(--border);cursor:"+(x.schonDa?"default":"pointer")+";"+grau+"\">"
-      +"<input type=\"checkbox\" id=\"_objImpCb"+i+"\" "+(x.an?"checked":"")+" "+(x.schonDa?"disabled":"")+" onchange=\"_objImpUmschalten("+i+")\">"
-      +"<span style=\"flex:1;min-width:0;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;\">"+esc(x.name)+"</span>"
+    /* b824: Der Zeilenrahmen ist kein <label> mehr. Ein Klick irgendwo im Label setzt
+       das Haekchen - der Hineingehen-Knopf haette dabei IMMER auch an-/abgehakt.
+       Jetzt: Haekchen und Name schalten das Haekchen, der Pfeil rechts geht hinein. */
+    return "<div style=\"display:flex;align-items:center;gap:8px;padding:5px 10px;border-bottom:1px solid var(--border);"+grau+"\">"
+      +"<input type=\"checkbox\" id=\"_objImpCb"+i+"\" "+(x.an?"checked":"")+" "+(x.schonDa?"disabled":"")+" onchange=\"_objImpUmschalten("+i+")\" style=\"cursor:"+(x.schonDa?"default":"pointer")+";\">"
+      +"<span onclick=\""+(x.schonDa?"":"document.getElementById('_objImpCb"+i+"').click()")+"\" style=\"flex:1;min-width:0;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:"+(x.schonDa?"default":"pointer")+";\">"+esc(x.name)+"</span>"
       +hinweis
-      +"</label>";
+      +"<button type=\"button\" onclick=\"_objImpHinein("+i+")\" title=\"In diesen Ordner hineingehen\" style=\"flex-shrink:0;padding:1px 8px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:12px;cursor:pointer;\">\u203A</button>"
+      +"</div>";
   }).join("")
   +(mehrDa?"<div style=\"padding:10px;color:#a04000;font-size:12px;\">\u26A0 Es gibt MEHR als 1000 Unterordner \u2013 diese Liste ist unvollst\u00e4ndig.</div>":"");
 }
@@ -41540,6 +41580,13 @@ async function _objImpAnlegen(){
   const spalte=((document.getElementById("_objImpSpalte")||{}).value)||"";
   const hv=(((document.getElementById("_objImpHv")||{}).value)||"").trim();
   let nasBasis=(((document.getElementById("_objImpNas")||{}).value)||"").trim();
+  /* b824: Rechnungsanschrift. Nur die ERSTE Zeile ist je Objekt anders ("WEG <Haus>"),
+     der Block darunter ist bei einer Verwaltung fuer alle gleich (Befund Frank 30.08.).
+     {Objekt} wird je Karte durch den Ordnernamen ersetzt.
+     ⛔ Wo statt "WEG" ein Eigentuemername steht, bessert Frank die Karte nach - das
+     Werkzeug raet nicht, welcher Fall vorliegt. */
+  const raZeile=(((document.getElementById("_objImpRaZeile")||{}).value)||"").trim();
+  const raBlock=(((document.getElementById("_objImpRaBlock")||{}).value)||"").replace(/\s+$/,"");
   if(nasBasis)nasBasis=nasBasis.replace(/[\\\/]+$/,"");
   if(!confirm(gew.length+" Objektkarte(n) im Board \u201e"+board+"\u201c anlegen?\n\nEs wird nichts \u00fcberschrieben und nichts verschoben \u2013 es kommen nur neue Karten dazu."))return;
   const base="https://drive.google.com/drive/folders/";
@@ -41547,7 +41594,9 @@ async function _objImpAnlegen(){
   let n=0;
   gew.forEach(function(x){
     const url=base+x.id;
+    const _ra=[raZeile.split("{Objekt}").join(x.name),raBlock].filter(function(s){return s&&s.trim();}).join("\n");
     const t={id:generateId(),title:x.name,desc:"",owner:"",due:"",status:spalte,ampel:"gr\u00fcn",
+      rechnungsanschrift:_ra,rechnungsanschriftManuell:!!_ra,
       adresse:x.name,hausverwaltung:hv,nas:nasBasis?(nasBasis+"\\"+x.name):"",
       // Alle vier Ordnerfelder auf denselben Ordner - wie _immoNeuenOrdnerAnlegen (b624):
       // am Objekt gehoeren Fotos UND Dokumente in EINEN Ordner (Beschluss Frank 04.08.).
@@ -41572,9 +41621,18 @@ function _objImpBoardWechsel(){
   const vor=st.find(function(s){return s!==AUFTRAG_SPALTE;})||st[0]||"";
   sel.innerHTML=st.map(function(s){return "<option value=\""+esc(s)+"\""+(s===vor?" selected":"")+">"+esc(s)+"</option>";}).join("");
 }
+function _objImpPick(){
+  /* b824: Der Drive-Browser liegt auf z-index 10050, dieser Dialog auf 99999 - er
+     oeffnete also DAHINTER und war nicht bedienbar (Befund Frank 30.08.). Dieselbe
+     Loesung wie bei _promptFolderName: den Browser beim Oeffnen nach vorn holen.
+     ⚠ Der Kommentar dort beschreibt genau dieses Symptom - die Falle war bekannt. */
+  const dov=document.getElementById("driveFolderBrowserOverlay");
+  if(dov)dov.style.zIndex="100001";
+  _pickDriveFolder("_objImpQuelle");
+}
 function _objImpOeffnen(){
   _objImpSchliessen();
-  _objImpTreffer=[];
+  _objImpTreffer=[];_objImpPfad=[];
   const immoBoards=Object.keys(boards||{}).filter(function(b){return !b.startsWith("_")&&(boardTypes[b]||"baustelle")==="immobilie";});
   if(!immoBoards.length){showToast("\u26A0 Kein Board vom Typ \uD83C\uDFE0 Objekt vorhanden","warning",6000);return;}
   const ov=document.createElement("div");
@@ -41587,7 +41645,7 @@ function _objImpOeffnen(){
       +"<div style=\"font-size:11px;color:var(--text2);line-height:1.6;margin-bottom:10px;\">Jeder Unterordner des gew\u00e4hlten Drive-Ordners wird zu einer Objektkarte. Es wird <b>nichts \u00fcberschrieben und nichts verschoben</b> \u2013 es kommen nur neue Karten dazu. Ein zweiter Lauf legt nichts doppelt an.</div>"
       +"<div style=\"display:flex;gap:6px;align-items:center;margin-bottom:8px;\">"
         +"<input id=\"_objImpQuelle\" type=\"text\" placeholder=\"Drive-Ordner der Ortsebene (darunter liegen die Objektordner)\" autocomplete=\"off\" style=\"flex:1;min-width:0;padding:7px 9px;border-radius:7px;border:1.5px solid var(--accent);background:var(--bg3);color:var(--text);font-size:12px;\">"
-        +"<button type=\"button\" onclick=\"_pickDriveFolder('_objImpQuelle')\" title=\"Ordner w\u00e4hlen\" style=\"flex-shrink:0;padding:7px 11px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;\">\uD83D\uDCC2</button>"
+        +"<button type=\"button\" onclick=\"_objImpPick()\" title=\"Ordner w\u00e4hlen\" style=\"flex-shrink:0;padding:7px 11px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;\">\uD83D\uDCC2</button>"
         +"<button type=\"button\" onclick=\"_objImpLesen()\" style=\"flex-shrink:0;padding:7px 14px;border-radius:7px;border:none;background:var(--accent);color:#fff;font-size:12px;font-weight:700;cursor:pointer;\">Ordner lesen</button>"
       +"</div>"
       +"<div style=\"display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;\">"
@@ -41596,6 +41654,11 @@ function _objImpOeffnen(){
         +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Auftraggeber / Hausverwaltung</label><input id=\"_objImpHv\" type=\"text\" placeholder=\"z.B. AHV, Muster Verwaltung\" autocomplete=\"off\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></div>"
         +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">NAS-Pfad bis zur Ortsebene</label><input id=\"_objImpNas\" type=\"text\" autocomplete=\"off\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:11px;\"></div>"
       +"</div>"
+      +"<div style=\"display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;\">"
+        +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Rechnungsanschrift \u2013 erste Zeile <span style=\"opacity:.7;\">({Objekt} wird ersetzt)</span></label><input id=\"_objImpRaZeile\" type=\"text\" placeholder=\"z.B. WEG {Objekt}\" autocomplete=\"off\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></div>"
+        +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">\u2026 Anschrift darunter (f\u00fcr alle gleich)</label><textarea id=\"_objImpRaBlock\" rows=\"3\" placeholder=\"c/o Verwaltung&#10;Stra\u00dfe Nr.&#10;PLZ Ort\" autocomplete=\"off\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;resize:vertical;font-family:inherit;\"></textarea></div>"
+      +"</div>"
+      +"<div id=\"_objImpPfad\" style=\"display:none;align-items:center;gap:8px;margin-bottom:6px;\"></div>"
       +"<div style=\"display:flex;align-items:center;gap:10px;\">"
         +"<div id=\"_objImpKopf\" style=\"flex:1;font-size:11px;color:var(--text2);\">Noch nichts gelesen.</div>"
         +"<button type=\"button\" onclick=\"_objImpAlle(true)\" style=\"padding:3px 9px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:11px;cursor:pointer;\">alle</button>"
@@ -41612,6 +41675,13 @@ function _objImpOeffnen(){
   document.body.appendChild(ov);
   _objImpBoardWechsel();
   const nas=document.getElementById("_objImpNas");if(nas)nas.value=_objImpNasVorschlag();
+  // b824: den zuletzt gelesenen Ordner vorbelegen - _pickDriveFolder startet dann
+  // dort statt bei "Mein Drive" (es liest das Feld aus).
+  try{
+    const letzt=localStorage.getItem(OBJIMP_LETZTER);
+    const q=document.getElementById("_objImpQuelle");
+    if(letzt&&q)q.value=letzt;
+  }catch(e){}
 }
 function _objZuordnenSammle(){
   const out=[];
