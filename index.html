@@ -7699,6 +7699,11 @@ textarea.em-field-input{resize:vertical;min-height:60px;}
    Standard AUS – die Auswahlliste oben holt sie im Objekt-Modus zurück. Ohne diese
    Zeile stünde sie in JEDEM Auftragsfenster, weil dort keine Ausblendliste greift. */
 #tObjAuftraegeSect{display:none;}
+/* b820: Die Zeile "Gehoert zum Objekt" ist eine AUFTRAGS-Sache. Im Objektfenster waere
+   sie sinnlos (ein Objekt gehoert nicht zu einem Objekt) und gefaehrlich - man koennte
+   ein Objekt zum Auftrag eines anderen machen. Der Abschnitt tObjektSect selbst wird
+   im Objektfenster bewusst eingeblendet, deshalb muss genau diese Zeile einzeln weg. */
+.ptp-immo-mode #tObjZuordnungField{display:none!important;}
 /* b624: Die Zieh-Flächen (✉/📎) wohnen seit b553 IM Timer-Block – b614 hatte mit dem
    Timer unbeabsichtigt auch sie ausgeblendet (Befund Frank: „kann keine Dokumente
    reinziehen"). Block zeigen, innen Timer und E-Mail-Zone weg – ein Objekt hat
@@ -8502,6 +8507,15 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
                  Zugeklappt zeigt die Kopfzeile IMMER die erste Zeile bzw. einen Hinweis –
                  sonst wiederholt sich die Falle des eingeklappten Anschrift-Knopfs bei den
                  Kontakten, wo 78 von 80 leer blieben, weil man es zugeklappt nicht sieht. -->
+            <div class="modal-field full" id="tObjZuordnungField">
+              <label>&#127968; Geh&ouml;rt zum Objekt <span style="font-weight:400;color:var(--text2);font-size:calc(10px * var(--modal-scale,1))">&mdash; verbindet diesen Auftrag mit einer Objektkarte (&#128736; Liste am Objekt, R&uuml;ckweg, Vererbung)</span></label>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <div id="tObjZuordnungText" style="flex:1;min-width:0;padding:8px 10px;border-radius:8px;background:var(--bg3);border:1px solid var(--border);font-size:calc(13px * var(--modal-scale,1));color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">&ndash;</div>
+                <button type="button" id="tObjZuordnenBtn" onclick="_objZuordnenOeffnen()" title="Diesen Auftrag einer Objektkarte zuordnen" style="flex-shrink:0;padding:8px 12px;border-radius:8px;border:1px solid #B5D4F4;background:#E6F1FB;color:#185FA5;font-size:calc(12px * var(--modal-scale,1));font-weight:700;cursor:pointer;white-space:nowrap;">&#127968; Zuordnen</button>
+                <button type="button" id="tObjOeffnenBtn" onclick="_objZuordnungOeffnenKarte()" title="Objektkarte &ouml;ffnen" style="display:none;flex-shrink:0;padding:8px 11px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:calc(12px * var(--modal-scale,1));font-weight:600;cursor:pointer;white-space:nowrap;">&rarr; &Ouml;ffnen</button>
+                <button type="button" id="tObjLoesenBtn" onclick="_objZuordnungLoesen()" title="Verbindung zum Objekt aufheben &ndash; der Auftrag selbst bleibt unver&auml;ndert" style="display:none;flex-shrink:0;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:calc(11px * var(--modal-scale,1));cursor:pointer;white-space:nowrap;">&#10005; L&ouml;sen</button>
+              </div>
+            </div>
             <div class="modal-field full" id="tRaField">
               <div style="display:flex;align-items:center;gap:8px;cursor:pointer;" onclick="_raToggle()" title="Anschrift, an die die Rechnung geht – anklicken zum Auf- und Zuklappen">
                 <label style="margin:0;cursor:pointer;flex-shrink:0;">Rechnungsanschrift</label>
@@ -9617,7 +9631,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-30 · #819'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-30-b819) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-30 · #820'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-30-b820) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -41311,6 +41325,149 @@ async function _objektNeuerAuftrag(objektId){
 // alle schon angelegten Aufträge und zeigt den Auftrag auch dann noch, wenn er
 // längst in einem anderen Board liegt (nach dem Umwandeln). Ein gespeichertes
 // Verweis-Feld hätte genau das nicht geschafft.
+/* == b820: Bestehenden Auftrag einer Objektkarte zuordnen =====================
+   Bis b819 entstand `objektId` AUSSCHLIESSLICH beim Anlegen ueber "+ Auftrag" an
+   der Objektkarte (_objektNeuerAuftrag) bzw. am Handy (v181). Ein Auftrag, der
+   anders entstanden ist - VBS-Import, E-Mail, von Hand - liess sich nie mit
+   seinem Haus verbinden. Genau das war Franks Befund am 30.08.: ein neu
+   angelegtes Objekt bleibt leer, weil die vorhandenen Auftraege nicht zugeordnet
+   werden koennen.
+   Die Liste am Objekt (_objAuftraegeZu, direkt darunter) rechnet bei jedem
+   Oeffnen frisch aus `objektId` - sie zeigt einen hier zugeordneten Auftrag also
+   sofort mit, inklusive Archiv. Es entsteht KEIN zweites Verweis-Feld.
+   Gesetzt wird direkt am Live-Task; `saveTaskData` traegt `objektId`/`objektName`
+   seit b642 ohnehin aus dem bestehenden Task weiter (b591-Falle). */
+function _objZuordnenSammle(){
+  const out=[];
+  Object.keys(boards||{}).forEach(function(bn){
+    if(bn.startsWith("_"))return;
+    if((boardTypes[bn]||"baustelle")!=="immobilie")return;
+    (boards[bn]||[]).forEach(function(t){
+      if(!t||t.archiviert||t.spaeterBearbeiten)return;
+      if(t.objektId)return;
+      out.push({id:t.id,board:bn,title:t.title||"",adresse:t.adresse||"",hv:t.hausverwaltung||""});
+    });
+  });
+  out.sort(function(a,b){return String(a.title).localeCompare(String(b.title),"de");});
+  return out;
+}
+function _objZuordnenOffenerTask(){
+  try{
+    const id=(document.getElementById("taskId")||{}).value||"";
+    return id?findTaskById(id):null;
+  }catch(e){return null;}
+}
+function _objZuordnungAnzeige(){
+  const txt=document.getElementById("tObjZuordnungText");
+  if(!txt)return;
+  const zu=document.getElementById("tObjZuordnenBtn");
+  const auf=document.getElementById("tObjOeffnenBtn");
+  const los=document.getElementById("tObjLoesenBtn");
+  const t=_objZuordnenOffenerTask();
+  const oid=(t&&t.objektId)||"";
+  if(!oid){
+    txt.textContent="– nicht zugeordnet";
+    txt.style.color="var(--text2)";
+    if(zu)zu.textContent="🏠 Zuordnen";
+    if(auf)auf.style.display="none";
+    if(los)los.style.display="none";
+    return;
+  }
+  const obj=findTaskById(oid);
+  const name=(t.objektName||(obj&&obj.title)||"")||"(Objekt nicht gefunden)";
+  txt.textContent="🏠 "+name+(obj?"":" · Karte nicht gefunden");
+  txt.style.color=obj?"var(--text)":"#a04000";
+  if(zu)zu.textContent="↻ Ändern";
+  if(auf)auf.style.display=obj?"":"none";
+  if(los)los.style.display="";
+}
+function _objZuordnungOeffnenKarte(){
+  const t=_objZuordnenOffenerTask();
+  if(!t||!t.objektId){showToast("Kein Objekt zugeordnet","info");return;}
+  try{openEditTaskModal(t.objektId);}catch(e){console.warn("[b820] Objekt oeffnen:",e);}
+}
+async function _objZuordnungLoesen(){
+  const t=_objZuordnenOffenerTask();
+  if(!t||!t.objektId){showToast("Kein Objekt zugeordnet","info");return;}
+  const name=t.objektName||"diesem Objekt";
+  if(!confirm("Verbindung zu „"+name+"“ aufheben?\n\nDer Auftrag selbst bleibt unverändert – er verschwindet nur aus der Liste am Objekt."))return;
+  t.objektId="";t.objektName="";
+  try{await autoSave();}catch(e){console.warn("[b820] Save:",e);}
+  _objZuordnungAnzeige();
+  try{render();}catch(e){}
+  showToast("✓ Verbindung aufgehoben","success",4000);
+}
+async function _objZuordnenSetzen(objektId){
+  const t=_objZuordnenOffenerTask();
+  if(!t){showToast("Kein Auftrag offen","error");return;}
+  if(t.id===objektId){showToast("Eine Karte kann sich nicht selbst zugeordnet werden","error",5000);return;}
+  const obj=findTaskById(objektId);
+  if(!obj){showToast("Objekt nicht gefunden","error");return;}
+  t.objektId=obj.id;
+  t.objektName=obj.title||"";
+  const geerbt=[];
+  if(!(t.adresse||"").trim()&&(obj.adresse||"").trim()){t.adresse=obj.adresse;_b659FeldNachziehen(t.id,"tAdr",obj.adresse);geerbt.push("Adresse");}
+  if(!(t.hausverwaltung||"").trim()&&(obj.hausverwaltung||"").trim()){t.hausverwaltung=obj.hausverwaltung;_b659FeldNachziehen(t.id,"tHV",obj.hausverwaltung);geerbt.push("Auftraggeber");}
+  if(!(t.nas||"").trim()&&(obj.nas||"").trim()){t.nas=obj.nas;_b659FeldNachziehen(t.id,"tNAS",obj.nas);geerbt.push("NAS-Pfad");}
+  try{await autoSave();}catch(e){console.warn("[b820] Save:",e);}
+  _objZuordnenSchliessen();
+  _objZuordnungAnzeige();
+  try{render();}catch(e){}
+  showToast("✓ Zugeordnet: "+(obj.title||"Objekt")+(geerbt.length?" · übernommen: "+geerbt.join(", "):""),"success",5000);
+}
+function _objZuordnenSchliessen(){
+  const ov=document.getElementById("_objZuordnenDlg");
+  if(ov)try{ov.remove();}catch(e){}
+}
+function _objZuordnenListeZeichnen(){
+  const box=document.getElementById("_ozdListe");
+  if(!box)return;
+  const q=((document.getElementById("_ozdSuche")||{}).value||"").toLowerCase().trim();
+  const worte=q?q.split(/\s+/).filter(Boolean):[];
+  const alle=_objZuordnenSammle();
+  const liste=alle.filter(function(o){
+    if(!worte.length)return true;
+    const hay=(o.title+" "+o.adresse+" "+o.hv+" "+o.board).toLowerCase();
+    return worte.every(function(w){return hay.indexOf(w)>=0;});
+  });
+  if(!alle.length){
+    box.innerHTML="<div style=\"padding:18px;color:var(--text2);font-size:13px;line-height:1.6;\">Kein Objekt gefunden.<br>Objekte stehen auf Boards vom Typ 🏠 Objekt – dort zuerst eine Karte für das Haus anlegen.</div>";
+    return;
+  }
+  if(!liste.length){
+    box.innerHTML="<div style=\"padding:18px;color:var(--text2);font-size:13px;\">Keine Treffer für diesen Suchtext.</div>";
+    return;
+  }
+  box.innerHTML=liste.map(function(o){
+    return "<div onclick=\"_objZuordnenSetzen('"+esc(o.id)+"')\" style=\"padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;\" onmouseover=\"this.style.background='var(--bg3)'\" onmouseout=\"this.style.background=''\">"
+      +"<div style=\"font-size:13px;font-weight:700;color:var(--text);\">"+esc(o.title||"(ohne Titel)")+"</div>"
+      +"<div style=\"font-size:11px;color:var(--text2);margin-top:2px;\">"+esc([o.adresse,o.hv,"🏠 "+o.board].filter(Boolean).join(" · "))+"</div>"
+      +"</div>";
+  }).join("");
+}
+function _objZuordnenOeffnen(){
+  const t=_objZuordnenOffenerTask();
+  if(!t){showToast("Kein Auftrag offen","error");return;}
+  _objZuordnenSchliessen();
+  const ov=document.createElement("div");
+  ov.id="_objZuordnenDlg";
+  ov.style.cssText="position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;";
+  ov.innerHTML="<div style=\"background:var(--bg2);border:1px solid var(--border);border-radius:12px;width:94%;max-width:560px;max-height:78vh;display:flex;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,.4);\">"
+    +"<div style=\"padding:16px 18px 10px;\">"
+      +"<div style=\"font-size:15px;font-weight:800;color:var(--text);margin-bottom:4px;\">🏠 Auftrag einem Objekt zuordnen</div>"
+      +"<div style=\"font-size:11px;color:var(--text2);line-height:1.6;margin-bottom:10px;\">Danach steht der Auftrag in der Liste „🛠 Aufträge an diesem Objekt“ – auch nach dem Archivieren. Leere Felder (Adresse, Auftraggeber, NAS-Pfad) werden vom Objekt übernommen; gefüllte bleiben unangetastet.</div>"
+      +"<input id=\"_ozdSuche\" type=\"text\" placeholder=\"🔍 Objekt suchen – Straße, Verwaltung, Board …\" autocomplete=\"off\" oninput=\"_objZuordnenListeZeichnen()\" style=\"width:100%;box-sizing:border-box;padding:8px 10px;border-radius:8px;border:1.5px solid var(--accent);background:var(--bg3);color:var(--text);font-size:13px;outline:none;\">"
+    +"</div>"
+    +"<div id=\"_ozdListe\" style=\"flex:1;overflow-y:auto;border-top:1px solid var(--border);\"></div>"
+    +"<div style=\"padding:12px 18px;display:flex;justify-content:flex-end;border-top:1px solid var(--border);\">"
+      +"<button type=\"button\" onclick=\"_objZuordnenSchliessen()\" style=\"padding:7px 18px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:13px;cursor:pointer;\">Abbrechen</button>"
+    +"</div>"
+  +"</div>";
+  ov.addEventListener("click",function(e){if(e.target===ov)_objZuordnenSchliessen();});
+  document.body.appendChild(ov);
+  _objZuordnenListeZeichnen();
+  setTimeout(function(){const s=document.getElementById("_ozdSuche");if(s)try{s.focus();}catch(e){}},60);
+}
 function _objAuftraegeZu(objektId){
   const treffer=[];
   if(!objektId)return treffer;
@@ -45924,6 +46081,11 @@ function openEditTaskModal(id){
   const _gu=document.getElementById('newGmailLinkUrl');if(_gu)_gu.value='';
   const _gl=document.getElementById('newGmailLinkLabel');if(_gl)_gl.value='';
   _applyBoardType(_taskBoard);
+  /* b820: Zeile "Gehoert zum Objekt" fuellen. Steht bewusst NACH _applyBoardType -
+     jene entscheidet ueber ptp-immo-mode, und im Objektfenster ist die Zeile per CSS
+     ausgeblendet. Die Anzeige liest vom Task-Objekt, nicht aus der Eingabemaske, ist
+     also unabhaengig davon, ob die Felder oben schon gefuellt sind. */
+  try{if(typeof _objZuordnungAnzeige==='function')_objZuordnungAnzeige();}catch(e){console.warn('[b820] Anzeige:',e);}
   openModal();
   // Alle Sektionen bleiben beim Öffnen geschlossen (User öffnet selbst)
   }catch(err){
