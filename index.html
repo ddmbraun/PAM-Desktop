@@ -9642,7 +9642,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-31 · #851'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b851) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-31 · #852'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b852) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -31618,10 +31618,14 @@ async function _msLoadEmailThread(){
     // PDFs + Originale automatisch speichern
     if(stEl)stEl.textContent=threadMsgs.length+' Mails – speichere…';
     const _pdfSaved=await _msSaveThreadPdfs(task,threadMsgs);
-    await _saveThreadMailsAsEml(task,threadMsgs,'outlook');
-    if(stEl)stEl.textContent=threadMsgs.length+' Mails'+(_pdfSaved>0?', '+_pdfSaved+' PDF'+(_pdfSaved>1?'s':'')+' gespeichert':'');
+    const _emlSaved=(await _saveThreadMailsAsEml(task,threadMsgs,'outlook'))||0;
+    // b852: Die Anhaenge der Mails hierher holen - vorher steckten sie nur in der .eml.
+    const _attErg=await _msSaveThreadAttachments(task,threadMsgs);
+    if(stEl)stEl.textContent=threadMsgs.length+' Mails'+(_attErg.geholt>0?' · '+_attErg.geholt+' 📎':'');
     await autoSave();
-    showToast('✅ '+threadMsgs.length+' Mails geladen'+(_pdfSaved>0?', '+_pdfSaved+' PDFs gespeichert':''),'success',4000);
+    // b852: sagt, was WIRKLICH abgelegt wurde - vorher gruener Haken auch bei null Dateien.
+    const _mld=_b852Meldung(threadMsgs.length,_pdfSaved,_emlSaved,_attErg);
+    showToast(_mld.text,_mld.art,_mld.dauer);
   }catch(e){
     if(stEl)stEl.textContent='⚠ Fehler';
     showToast('⚠ '+e.message,'error',6000);
@@ -31728,6 +31732,209 @@ async function _msSaveThreadPdfs(task,threadMsgs){
   }
   if(saved>0){if(typeof renderEmailSection==='function')renderEmailSection();scheduleTaskFieldSave();}
   return saved;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── b852: Datei-Anhaenge der Verlaufsmails in die Karte holen ────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// Bis b851 holte der Verlauf-Knopf vom Postfach nur ein Ja/Nein „hat Anhaenge"
+// (`hasAttachments`) und legte zwei Dinge ab: eine PDF-Lesekopie NUR aus dem
+// Mailtext und das MIME-Original als .eml. Der Anhang steckte damit zwar IN der
+// .eml, war aber nirgends als eigene Datei greifbar.
+//
+// ⛔ Die Richtung spielt bewusst KEINE Rolle. Eingang und Gesendet laufen hier
+// gleich - die beiden aelteren Speicherwege tun das ebenfalls, und die Annahme
+// „es liegt am Gesendet" war beim Messen am 31.08. widerlegt worden.
+//
+// ⛔ Die Filter sind NICHT neu erfunden: es sind dieselben zwei wie beim
+// Hineinziehen einer .eml (Signatur-/Inline-Bilder raus, Bilder unter 50 KB
+// raus). Zwei eigene Regeln fuer dieselbe Frage wuerden auseinanderlaufen.
+const B852_MIN_BILD_BYTES=50*1024;
+const B852_BILD_ENDUNGEN=/\.(jpe?g|png|gif|webp|heic|heif|avif|bmp|tiff?)$/i;
+
+// Reine Entscheidung, kein Netz - deshalb aus der Pruefung heraus aufrufbar.
+// Rueckgabe {nehmen, art, grund}; art ist 'bild' oder 'dok', grund nur bei nehmen=false.
+// ⛔ typeof-Wache beim Lesen der Konstanten: Suiten, die nur diesen Ausschnitt
+// ausfuehren, sollen nicht an einer fehlenden aeusseren Konstante abstuerzen
+// (die Falle hat seit b747 viermal zugeschlagen).
+function _b852AnhangPruefen(att,minBild){
+  const _min=(typeof minBild==='number')?minBild
+    :((typeof B852_MIN_BILD_BYTES!=='undefined')?B852_MIN_BILD_BYTES:50*1024);
+  const _end=(typeof B852_BILD_ENDUNGEN!=='undefined')?B852_BILD_ENDUNGEN
+    :/\.(jpe?g|png|gif|webp|heic|heif|avif|bmp|tiff?)$/i;
+  const a=att||{};
+  const typ=String(a['@odata.type']||'');
+  // Eingebettete Mails und Verweis-Anhaenge tragen keinen Dateiinhalt. Sie werden
+  // GEMELDET statt still verschluckt - sonst sucht man spaeter eine Datei, die nie kam.
+  if(typ&&typ.toLowerCase().indexOf('fileattachment')<0)
+    return {nehmen:false,art:'',grund:'kein Dateianhang'};
+  const name=String(a.name||'');
+  if(!name)return {nehmen:false,art:'',grund:'ohne Namen'};
+  const mime=String(a.contentType||'').toLowerCase();
+  const istBild=_end.test(name)||mime.indexOf('image/')===0;
+  if(a.isInline&&a.contentId)
+    return {nehmen:false,art:'',grund:'Signatur-/Inline-Bild'};
+  const gr=Number(a.size||0);
+  if(istBild&&gr>0&&gr<_min)
+    return {nehmen:false,art:'',grund:'sehr kleines Bild'};
+  return {nehmen:true,art:istBild?'bild':'dok',grund:''};
+}
+
+// Schluessel gegen Dubletten: Name UND Groesse.
+// ⛔⛔ Der Name allein reicht nicht - dieselbe Falle wie beim Foto-Nachladen am
+// Handy (v254): zwei Vorgaenge tragen oft „Angebot.pdf", und eine Nachschau nur
+// ueber den Namen haelt ein FREMDES Dokument fuer schon vorhanden.
+// Altbestand kennt noch keine Groesse; deshalb prueft der Aufrufer zusaetzlich
+// gegen den Schluessel mit Groesse 0 - lieber einmal zu wenig laden als doppelt.
+function _b852Schluessel(name,groesse){
+  return String(name||'').trim().toLowerCase()+'|'+(Number(groesse)||0);
+}
+
+// Sagt, was wirklich abgelegt wurde.
+// ⛔ Bis b851 stand dort „✅ N Mails geladen" - auch dann, wenn NICHTS abgelegt
+// werden konnte, weil Drive nicht verbunden war: `_saveThreadMailsAsEml` stieg in
+// dem Fall wortlos aus, `_msSaveThreadPdfs` immerhin mit Warnung. Gemessen
+// 31.08.: eine Karte zeigte 5 Nachrichten, in der Ablage lagen 1 Original und
+// 1 Lesekopie - und die Meldung war gruen gewesen.
+function _b852Meldung(anzMails,pdfs,emls,att){
+  const a=att||{};
+  const _n=function(x){return Number(x)||0;};
+  const mailWort=anzMails===1?'Mail':'Mails';
+  if(a.keinDrive)
+    return {text:'⚠ '+anzMails+' '+mailWort+' geladen · 0 abgelegt – Google Drive nicht verbunden',
+            art:'error',dauer:8000};
+  const teile=[];
+  if(_n(pdfs)>0)teile.push(_n(pdfs)+' Lesekopie'+(_n(pdfs)!==1?'n':''));
+  if(_n(emls)>0)teile.push(_n(emls)+' Original'+(_n(emls)!==1?'e':''));
+  if(_n(a.geholt)>0)teile.push(_n(a.geholt)+(_n(a.geholt)!==1?' Anhänge':' Anhang'));
+  let text='✅ '+anzMails+' '+mailWort+' geladen';
+  let art='success';
+  text+=teile.length?(' · '+teile.join(' · ')+' abgelegt'):' · nichts Neues abzulegen';
+  const warn=[];
+  if(_n(a.ohneInhalt)>0)warn.push(_n(a.ohneInhalt)+'× Anhang ohne Inhalt (eingebettete Mail)');
+  if(_n(a.fehler)>0)warn.push(_n(a.fehler)+'× Anhang nicht ladbar');
+  if(warn.length){text+=' · ⚠ '+warn.join(' · ');art='warning';}
+  return {text:text,art:art,dauer:(art==='success'?4000:8000)};
+}
+
+// Holt die Datei-Anhaenge aller Verlaufsmails, die welche melden, und legt sie
+// in der Karte ab: Bilder ueber `_pamAnhangZiele` in den Foto-Ordner, alles
+// andere in den Dokumente-Ordner. Jeder Eintrag traegt die Kennung SEINER Mail
+// (`messageId`) - daran haengt die 📎-Marke an der Verlaufszeile.
+async function _msSaveThreadAttachments(task,threadMsgs){
+  const erg={geholt:0,uebersprungen:0,fehler:0,ohneInhalt:0,keinDrive:false};
+  if(typeof gdriveToken==='undefined'||!gdriveToken){erg.keinDrive=true;return erg;}
+  if(!task)return erg;
+  const mitAnhang=(threadMsgs||[]).filter(function(m){return m&&m.hasAttachments&&m.id;});
+  if(!mitAnhang.length)return erg;
+  const folderUrl=((document.getElementById('tEmailOrdner')||{}).value||(document.getElementById('tGDOrdner')||{}).value||'').trim();
+  const _fbFid=(typeof _ezFolderId==='function')?_ezFolderId(folderUrl):'';
+  const fid=(await _getOrCreateEmailFid(task,_fbFid))||_fbFid;
+  if(!fid)return erg;
+  const ziele=(typeof _pamAnhangZiele==='function')?_pamAnhangZiele(task,fid):{bild:fid,dok:fid};
+  // Was die Karte schon kennt - je Mail getrennt, damit ein gleichnamiges
+  // Dokument aus einer ANDEREN Mail nicht faelschlich als Dublette gilt.
+  const bekannt=new Set();
+  const merken=function(x){if(x&&x.messageId){bekannt.add(x.messageId+'::'+_b852Schluessel(x.name,x.size));}};
+  (task.attachments||[]).forEach(merken);
+  (task.fotos||[]).forEach(merken);
+  for(const m of mitAnhang){
+    const mid=m.internetMessageId||m.messageId||'';
+    let liste=[];
+    try{
+      const rl=await _msGetMsgDual(task,'https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(m.id)
+        +'/attachments?$select=id,name,contentType,size,isInline,contentId',false);
+      if(!rl||!rl.ok){erg.fehler++;console.warn('[b852] Anhangsliste HTTP',rl&&rl.status);continue;}
+      liste=((await rl.json()).value)||[];
+    }catch(e){erg.fehler++;console.warn('[b852] Anhangsliste:',e);continue;}
+    for(const att of liste){
+      const pr=_b852AnhangPruefen(att);
+      if(!pr.nehmen){
+        if(pr.grund==='kein Dateianhang')erg.ohneInhalt++;else erg.uebersprungen++;
+        continue;
+      }
+      const schl=mid+'::'+_b852Schluessel(att.name,att.size);
+      const schlAlt=mid+'::'+_b852Schluessel(att.name,0);   // Altbestand ohne Groesse
+      if(bekannt.has(schl)||bekannt.has(schlAlt)){erg.uebersprungen++;continue;}
+      try{
+        const ra=await _msGetMsgDual(task,'https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(m.id)
+          +'/attachments/'+encodeURIComponent(att.id),false);
+        if(!ra||!ra.ok){erg.fehler++;continue;}
+        const ad=await ra.json();
+        if(!ad.contentBytes){erg.ohneInhalt++;continue;}
+        const bin=atob(ad.contentBytes);
+        const bytes=new Uint8Array(bin.length);
+        for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+        const zielFid=(pr.art==='bild')?(ziele.bild||fid):(ziele.dok||fid);
+        const res=await _driveUploadGeneric(bytes.buffer,att.name,att.contentType||'application/octet-stream',zielFid);
+        if(!res||!res.id){erg.fehler++;continue;}
+        const heute=new Date().toLocaleDateString('de-DE');
+        if(pr.art==='bild'){
+          if(!task.fotos)task.fotos=[];
+          task.fotos.push({driveId:res.id,name:att.name,mimeType:att.contentType||'image/jpeg',caption:'',
+            thumbnailLink:res.thumbnailLink||'',size:bytes.length,messageId:mid,fromEmail:true});
+        }else{
+          if(!task.attachments)task.attachments=[];
+          task.attachments.push({name:att.name,fileId:res.id,url:'https://drive.google.com/file/d/'+res.id+'/view',
+            uploadedAt:heute,size:bytes.length,messageId:mid,fromEmail:true});
+        }
+        bekannt.add(schl);
+        erg.geholt++;
+      }catch(e){erg.fehler++;console.warn('[b852] Anhang holen:',att&&att.name,e);}
+    }
+  }
+  if(erg.geholt>0){
+    if(typeof renderEmailSection==='function')renderEmailSection();
+    if(typeof renderAttachList==='function')renderAttachList();
+    if(typeof renderFotoListDesktop==='function')renderFotoListDesktop();
+    if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
+  }
+  return erg;
+}
+
+// ── b852: Der ANHAENGE-Kasten darf beim Anklicken einer Mail nicht verschwinden ──
+// `_emOpenMail` fuellte ihn fuer Verlaufs-Mails aus `d.attachments`. Dieses Feld
+// wird NIRGENDS im Programm gesetzt (`_msLoadEmailThread` merkt sich nur
+// `hasAttachments`) - die Liste war also immer leer, und eine leere Liste blendet
+// in `_emRenderAttachPanel` den ganzen Abschnitt aus. Ein Klick auf eine Zeile
+// liess damit auch die Dateien der Karte verschwinden.
+//
+// `_b852KartenDateien` ist der Rueckfall und zugleich die EINE Quelle fuer die
+// Liste beim Fenster-Oeffnen - vorher stand derselbe Aufbau dort noch einmal.
+function _b852KartenDateien(task){
+  const raus=[];
+  if(!task)return raus;
+  const _kl=function(n){return String(n||'').toLowerCase();};
+  (task.fotos||[]).forEach(function(f){
+    raus.push({icon:'🖼',name:f.name||'Bild',url:f.url||f.webViewLink||f.thumbnailLink||'',isImg:true,data:f,mime:'image/jpeg'});});
+  (task.attachments||[]).forEach(function(a){
+    const n=_kl(a.name||a.filename);
+    const istBild=!!n.match(/\.(jpe?g|png|gif|webp)$/);
+    raus.push({icon:istBild?'🖼':(n.endsWith('.pdf')?'📄':'📎'),name:a.name||a.filename||'Anhang',
+      url:a.url||a.webViewLink||'',isImg:istBild,data:a,mime:istBild?'image/jpeg':'application/octet-stream'});});
+  (task.emailOriginals||[]).filter(function(e){return e.fileId;}).forEach(function(e){
+    raus.push({icon:'📨',name:e.subject||e.name||'E-Mail Original',url:e.url||'',isImg:false,data:e,mime:'message/rfc822'});});
+  (task.emailPdfs||[]).filter(function(p){return p.fileId;}).forEach(function(p){
+    raus.push({icon:'📄',name:p.name||p.subject||'E-Mail PDF',url:p.url||'',isImg:false,data:p,mime:'application/pdf'});});
+  return raus;
+}
+
+// Die Dateien, die zu GENAU dieser Verlaufsmail gehoeren (ueber `messageId`).
+function _b852PanelDateien(task,mail){
+  const raus=[];
+  if(!task||!mail)return raus;
+  const mid=mail.internetMessageId||mail.messageId||'';
+  if(!mid)return raus;
+  const _kl=function(n){return String(n||'').toLowerCase();};
+  (task.fotos||[]).forEach(function(f){
+    if(!f||f.messageId!==mid)return;
+    raus.push({icon:'🖼',name:f.name||'Bild',url:f.url||f.webViewLink||f.thumbnailLink||'',isImg:true,data:f,mime:f.mimeType||'image/jpeg'});});
+  (task.attachments||[]).forEach(function(a){
+    if(!a||a.messageId!==mid)return;
+    const n=_kl(a.name);
+    raus.push({icon:n.endsWith('.pdf')?'📄':(n.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':'📎'),
+      name:a.name||'Anhang',url:a.url||a.webViewLink||'',isImg:false,data:a,mime:'application/octet-stream'});});
+  return raus;
 }
 
 function _msToggleThreadList(){
@@ -45028,12 +45235,9 @@ function openEmailTaskModal(task,board){
   setTimeout(function(){_pamInitBoardTaskListBadge('em');}, 50);
   // ANHÄNGE-Sektion beim Öffnen aktualisieren
   (function(){
-    let _allF=[];
-    (task.fotos||[]).forEach(function(f){_allF.push({icon:'🖼',name:f.name||'Bild',url:f.url||f.webViewLink||f.thumbnailLink||'',isImg:true,data:f,mime:'image/jpeg'});});
-    (task.attachments||[]).forEach(function(a){let n=(a.name||a.filename||'').toLowerCase();let isImg=!!n.match(/\.(jpe?g|png|gif|webp)$/);_allF.push({icon:isImg?'🖼':(n.endsWith('.pdf')?'📄':'📎'),name:a.name||a.filename||'Anhang',url:a.url||a.webViewLink||'',isImg:isImg,data:a,mime:isImg?'image/jpeg':'application/octet-stream'});});
-    (task.emailOriginals||[]).filter(function(e){return e.fileId;}).forEach(function(e){_allF.push({icon:'📨',name:e.subject||e.name||'E-Mail Original',url:e.url||'',isImg:false,data:e,mime:'message/rfc822'});});
-    (task.emailPdfs||[]).filter(function(p){return p.fileId;}).forEach(function(p){_allF.push({icon:'📄',name:p.name||p.subject||'E-Mail PDF',url:p.url||'',isImg:false,data:p,mime:'application/pdf'});});
-    _emRenderAttachPanel(_allF);
+    // b852: EINE Quelle fuer diese Liste - _emOpenMail nutzt sie als Rueckfall,
+    // damit beide Stellen nicht auseinanderlaufen.
+    _emRenderAttachPanel(_b852KartenDateien(task));
   })();
   if(_emKeyHandler){document.removeEventListener('keydown',_emKeyHandler);_emKeyHandler=null;}
   _emKeyHandler=function(e){if((e.ctrlKey||e.metaKey)&&e.key==='s'&&document.getElementById('emailTaskModal').classList.contains('open')){e.preventDefault();_emDoSave();showToast('✓ Gespeichert','ok',1500);}};  
@@ -46281,7 +46485,12 @@ async function _emOpenMail(idx,mails){
     // Fix #377: Graph-/Gmail-Anhänge haben keine URL – Mail-ID + Quelle mitgeben,
     // damit _emShowAttachPreview den Inhalt per API nachladen kann
     (d.attachments||[]).forEach(function(a){let name=a.filename||a.name||'Anhang';let nl=name.toLowerCase();let icon=nl.endsWith('.pdf')?'📄':(nl.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':'📎');allFiles.push({icon:icon,name:name,url:a.url||a.webViewLink||'',mime:a.contentType||a.mimeType||'',data:Object.assign({},a,{_graphMailId:d.id,_graphSrc:(isMs?'ms':'gmail')})});});
-    _emRenderAttachPanel(allFiles);
+    // b852: Dateien, die zu GENAU dieser Mail gehoeren, dazunehmen …
+    _b852PanelDateien(_emCurrentTask,d).forEach(function(x){
+      if(!allFiles.some(function(y){return y.name===x.name;}))allFiles.push(x);});
+    // … und wenn zu dieser Mail nichts vorliegt, die Dateien der KARTE zeigen,
+    // statt den ganzen Abschnitt auszublenden (leere Liste = Kasten weg).
+    _emRenderAttachPanel(allFiles.length?allFiles:_b852KartenDateien(_emCurrentTask));
     const pane=document.getElementById('emReadingPane');
     const taskId=_emCurrentTask.id;
     const msgs=isMs?(_emCurrentTask.msThreadMessages||[]):(_emCurrentTask.gmailThreadMessages||[]);
