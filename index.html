@@ -7969,8 +7969,9 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
            Gruppen daneben. AKTION, kein Filter: eigener Knopf, eigener Dialog mit
            Vorschau; angelegt wird erst nach ausdruecklichem Klick. -->
       <span class="filter-fgroup" id="pamFObjImpGroup" style="display:none;align-items:center;gap:5px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:2px 6px;" title="Objektkarten aus den Unterordnern eines Drive-Ordners anlegen">
-        <span style="font-size:9px;color:var(--text2);text-transform:uppercase;letter-spacing:.3px;">Anlegen</span>
+        <span style="font-size:9px;color:var(--text2);text-transform:uppercase;letter-spacing:.3px;">Objekte</span>
         <button class="filter-btn" id="pamFObjImpBtn" onclick="_objImpOeffnen()">🏠 aus Ordnern …</button>
+        <button class="filter-btn" id="pamFPlzNachBtn" onclick="_plzNachOeffnen()" title="Fehlende Postleitzahlen an den Objekten dieses Boards erg&auml;nzen">📮 PLZ nachtragen …</button>
       </span>
       <span class="filter-fgroup" id="pamFMobAktGroup" style="display:none;align-items:center;gap:5px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:2px 6px;" title="Handy-Haken für alle Objekte dieses Boards setzen oder lösen">
         <span style="font-size:9px;color:var(--text2);text-transform:uppercase;letter-spacing:.3px;">Handy</span>
@@ -8539,6 +8540,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
               <label>Adresse (Straße + PLZ + Ort)</label>
               <div style="display:flex;gap:6px;">
                 <input type="text" id="tAdr" placeholder="Musterstraße 44, 99086 Erfurt" style="flex:1;" oninput="scheduleTaskFieldSave();_updateMapsBtn()" onblur="_autoFillSbOrdner()" autocomplete="off">
+                <button type="button" id="tPlzBtn" onclick="_plzAusTabelleKnopf()" title="Postleitzahl aus der Stra&szlig;entabelle erg&auml;nzen (Th&uuml;ringen)" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:calc(12px * var(--modal-scale,1));cursor:pointer;flex-shrink:0;white-space:nowrap;">&darr; PLZ</button>
                 <button type="button" onclick="tMapsOeffnen()" style="padding:8px 14px;border-radius:8px;background:var(--accent);color:#fff;font-size:calc(13px * var(--modal-scale,1));font-weight:600;border:none;cursor:pointer;flex-shrink:0;">🗺 Maps</button>
               </div>
             </div>
@@ -9640,7 +9642,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-31 · #832'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b832) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-31 · #833'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b833) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -41797,6 +41799,118 @@ function _plzOrtFuer(ortFeld,name){
   return p?(p+" "+o):o;
 }
 // Ort geaendert -> die Liste muss die PLZ neu zeigen (voller Neuaufbau, nicht nur Haekchen).
+/* b833: Postleitzahl an EINER Karte ergaenzen (Objekt wie Auftrag).
+   Anlass (Frank, 31.08.): b832 setzt die PLZ nur beim Massenlauf. Einzeln angelegte
+   Karten und alles, was vorher entstand, blieben ohne - und genau dieses Feld fuellt
+   `{Objekt}` in den Word-Vorlagen (b759).
+   ⛔ Nichts wird still ueberschrieben: Steht schon eine PLZ da, passiert gar nichts. */
+async function _plzAusTabelleKnopf(){
+  const el=document.getElementById("tAdr");
+  if(!el)return;
+  const roh=String(el.value||"").trim();
+  if(!roh){showToast("\u26A0 Erst eine Adresse eintragen","error",5000);return;}
+  await _plzLaden();
+  if(!_plzTab||!_plzTab.size){showToast("\u26A0 Die Stra\u00dfentabelle ist nicht geladen \u2013 einmal neu laden","error",7000);return;}
+  // ⛔ Kein eigenes Zerlegen: `_adrParseObjAddr` macht das seit b678 an fuenf Stellen.
+  const p=_adrParseObjAddr(roh);
+  if(p.plz){showToast("Die Adresse hat schon eine Postleitzahl","info",5000);return;}
+  if(!p.ort){showToast("\u26A0 Es fehlt der Ort \u2013 ohne ihn l\u00e4sst sich die PLZ nicht finden","error",7000);return;}
+  const plz=_plzSuchen(p.ort,p.strasse);
+  if(!plz){showToast("\u26A0 Diese Stra\u00dfe steht nicht eindeutig in der Tabelle \u2013 bitte selbst eintragen","error",8000);return;}
+  el.value=p.strasse+", "+plz+" "+p.ort;
+  try{scheduleTaskFieldSave();}catch(e){}
+  try{_updateMapsBtn();}catch(e){}
+  showToast("\u2713 Postleitzahl "+plz+" erg\u00e4nzt","success",4000);
+}
+/* b833: Fehlende Postleitzahlen an einem GANZEN Board nachtragen.
+   Anlass (Frank, 31.08.): b832 setzt die PLZ nur beim Massenlauf - alles, was vorher
+   angelegt wurde, blieb ohne. Einzeln nachbessern waere bei ueber hundert Karten
+   Handarbeit.
+   ⛔ Vorschau mit Haekchen wie bei der Massenanlage: erst sehen, dann anwenden.
+   ⛔ Nur das ADRESSFELD wird geaendert, nie der Titel - der kann von Hand angepasst
+      sein, und andere Karten verweisen ueber ihn auf dieses Objekt (b821). */
+let _plzNachListe=[];
+function _plzNachSchliessen(){const o=document.getElementById("_plzNachDlg");if(o)try{o.remove();}catch(e){}}
+function _plzNachSammle(board){
+  const raus=[];
+  (boards[board]||[]).forEach(function(x){
+    if(!x)return;
+    const roh=String(x.adresse||"").trim();
+    if(!roh)return;
+    const p=_adrParseObjAddr(roh);
+    if(p.plz)return;                       // hat schon eine - nicht anfassen
+    const plz=p.ort?_plzSuchen(p.ort,p.strasse):"";
+    raus.push({id:x.id,titel:String(x.title||""),strasse:p.strasse,ort:p.ort,plz:plz,an:!!plz});
+  });
+  return raus;
+}
+function _plzNachUmschalten(i){const x=_plzNachListe[i];if(x&&x.plz){x.an=!x.an;_plzNachZeichnen();}}
+function _plzNachAlle(an){_plzNachListe.forEach(function(x){if(x.plz)x.an=!!an;});_plzNachZeichnen();}
+function _plzNachZeichnen(){
+  const box=document.getElementById("_plzNachListe");if(!box)return;
+  const gew=_plzNachListe.filter(function(x){return x.an&&x.plz;}).length;
+  const ohne=_plzNachListe.filter(function(x){return !x.plz;}).length;
+  const kopf=document.getElementById("_plzNachKopf");
+  if(kopf)kopf.textContent=_plzNachListe.length+" Karte(n) ohne Postleitzahl \u00b7 "+(_plzNachListe.length-ohne)+" gefunden \u00b7 "+ohne+" unklar";
+  const btn=document.getElementById("_plzNachOkBtn");
+  if(btn){btn.textContent="\uD83D\uDCEE "+gew+" Adresse(n) erg\u00e4nzen";btn.disabled=!gew;btn.style.opacity=gew?"1":".5";btn.style.cursor=gew?"pointer":"default";}
+  if(!_plzNachListe.length){box.innerHTML="<div style=\"padding:16px;color:var(--text2);font-size:13px;\">Alle Karten dieses Boards haben schon eine Postleitzahl \u2013 oder gar keine Adresse.</div>";return;}
+  box.innerHTML=_plzNachListe.map(function(x,i){
+    const grau=x.plz?"":"opacity:.55;";
+    const rechts=x.plz
+      ?("<span style=\"font-size:11px;color:var(--text);font-weight:600;\">"+esc(x.plz)+"</span>")
+      :("<span style=\"font-size:10px;color:#a04000;\">"+(x.ort?"nicht eindeutig":"kein Ort in der Adresse")+"</span>");
+    return "<div style=\"display:flex;align-items:center;gap:8px;padding:5px 10px;border-bottom:1px solid var(--border);"+grau+"\">"
+      +"<input type=\"checkbox\" id=\"_plzNachCb"+i+"\" "+(x.an?"checked":"")+" "+(x.plz?"":"disabled")+" onchange=\"_plzNachUmschalten("+i+")\" style=\"cursor:"+(x.plz?"pointer":"default")+";\">"
+      +"<span style=\"flex:1;min-width:0;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;\">"+esc(x.titel||x.strasse)+"</span>"
+      +rechts+"</div>";
+  }).join("");
+}
+async function _plzNachOeffnen(){
+  _plzNachSchliessen();
+  const board=currentBoard;
+  await _plzLaden();
+  if(!_plzTab||!_plzTab.size){showToast("\u26A0 Die Stra\u00dfentabelle ist nicht geladen \u2013 einmal neu laden","error",7000);return;}
+  _plzNachListe=_plzNachSammle(board);
+  const ov=document.createElement("div");
+  ov.id="_plzNachDlg";
+  ov.style.cssText="position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;";
+  ov.innerHTML="<div style=\"background:var(--bg1);border:1px solid var(--border);border-radius:12px;width:min(560px,94vw);max-height:86vh;display:flex;flex-direction:column;overflow:hidden;\">"
+    +"<div style=\"padding:12px 14px;border-bottom:1px solid var(--border);\">"
+    +"<div style=\"font-size:14px;font-weight:600;color:var(--text);\">\uD83D\uDCEE Postleitzahlen nachtragen</div>"
+    +"<div id=\"_plzNachKopf\" style=\"font-size:11px;color:var(--text2);margin-top:3px;\"></div>"
+    +"<div style=\"font-size:10px;color:var(--text2);margin-top:5px;\">Board \u201e"+esc(board)+"\u201c \u00b7 ge\u00e4ndert wird nur das Adressfeld, nicht der Titel \u00b7 Quelle: OpenStreetMap</div>"
+    +"</div>"
+    +"<div style=\"padding:6px 14px;border-bottom:1px solid var(--border);display:flex;gap:8px;\">"
+    +"<button type=\"button\" onclick=\"_plzNachAlle(true)\" style=\"font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;\">alle</button>"
+    +"<button type=\"button\" onclick=\"_plzNachAlle(false)\" style=\"font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;\">keine</button>"
+    +"</div>"
+    +"<div id=\"_plzNachListe\" style=\"flex:1;overflow-y:auto;min-height:80px;\"></div>"
+    +"<div style=\"padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;\">"
+    +"<button type=\"button\" onclick=\"_plzNachSchliessen()\" style=\"padding:7px 14px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:13px;cursor:pointer;\">Abbrechen</button>"
+    +"<button type=\"button\" id=\"_plzNachOkBtn\" onclick=\"_plzNachAnwenden()\" style=\"padding:7px 14px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:13px;font-weight:600;cursor:pointer;\"></button>"
+    +"</div></div>";
+  ov.addEventListener("click",function(e){if(e.target===ov)_plzNachSchliessen();});
+  document.body.appendChild(ov);
+  _plzNachZeichnen();
+}
+async function _plzNachAnwenden(){
+  const gew=_plzNachListe.filter(function(x){return x.an&&x.plz;});
+  if(!gew.length){showToast("Nichts ausgew\u00e4hlt","info");return;}
+  if(!confirm("Bei "+gew.length+" Karte(n) die Postleitzahl in die Adresse eintragen?\n\nDer Titel bleibt unver\u00e4ndert. Vorhandene Postleitzahlen wurden gar nicht erst aufgelistet."))return;
+  let n=0;
+  gew.forEach(function(x){
+    const k=(typeof findTaskById==="function")?findTaskById(x.id):null;
+    if(!k)return;
+    k.adresse=x.strasse+", "+x.plz+" "+x.ort;
+    n++;
+  });
+  try{await autoSave();}catch(e){console.warn("[b833] Save:",e);}
+  try{pushToSync();}catch(e){}
+  _plzNachSchliessen();
+  try{render();}catch(e){}
+  showToast("\u2713 "+n+" Adresse(n) erg\u00e4nzt","success",6000);
+}
 function _plzNeuZeichnen(){
   const box=document.getElementById("_objImpListe");
   if(box)box.dataset.gezeichnet="";
