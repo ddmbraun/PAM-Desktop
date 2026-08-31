@@ -9639,7 +9639,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-31 · #827'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b827) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-31 · #828'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b828) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -41991,37 +41991,121 @@ function _objAufZaehlung(){
   setTimeout(function(){_objAufZaehlCache=null;},0);
   return m;
 }
+/* b828: Jahr eines Auftrags. Reihenfolge nach Franks Vorgabe (31.08.): erst das
+   Ausführungsdatum - „wann war ich da" -, sonst das Anlegedatum.
+   ⚠ Es gibt ZWEI Ausführungs-Felder (`ausfuehrungstermin` und `ausführungsdatum`);
+   welches gepflegt wird, ist von Fall zu Fall verschieden. Deshalb wird das erste
+   gefüllte genommen, statt sich auf eines festzulegen.
+   ⛔ Das Anlegedatum kommt über `_pamAngelegtDate` (b620), NICHT über `createdAt`
+   allein: alte Aufträge haben das Feld nicht, und ihr Datum steckt in der Nummer.
+   Genau daran fehlte in dieser Liste bisher jede Datumsangabe. */
+function _objAufJahrVon(task){
+  if(!task)return 0;
+  const roh=[task.ausfuehrungstermin,task["ausführungsdatum"]]
+    .map(function(x){return String(x||"").trim();}).find(Boolean)||"";
+  const m=/^(\d{4})-\d{2}-\d{2}/.exec(roh);
+  if(m)return +m[1];
+  const d=(typeof _pamAngelegtDate==="function")?_pamAngelegtDate(task):null;
+  return d?d.getFullYear():0;
+}
+function _objAufDatumText(task){
+  const roh=[task&&task.ausfuehrungstermin,task&&task["ausführungsdatum"]]
+    .map(function(x){return String(x||"").trim();}).find(Boolean)||"";
+  const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(roh);
+  if(m)return {txt:m[3]+"."+m[2]+"."+m[1],art:"ausgef\u00fchrt"};
+  const d=(typeof _pamAngelegtDate==="function")?_pamAngelegtDate(task):null;
+  if(!d)return null;
+  const p=function(n){return String(n).padStart(2,"0");};
+  return {txt:p(d.getDate())+"."+p(d.getMonth()+1)+"."+d.getFullYear(),art:"angelegt"};
+}
+/* Zustand der Liste. Bewusst NICHT gespeichert: beim nächsten Öffnen soll wieder
+   das laufende Jahr offen sein, nicht der Stand von vorletzter Woche. */
+let _objAufJahrZu={};      // {jahr:true} = zugeklappt
+let _objAufOhneArchiv=false;
+let _objAufAktuelleId="";
+function _objAufJahrToggle(jahr){
+  /* ⛔ Den EFFEKTIVEN Zustand umkehren, nicht den gespeicherten. Aeltere Jahre sind
+     zugeklappt, ohne dass etwas gespeichert ist - ein Umkehren des gespeicherten
+     Werts setzte sie beim ersten Klick erneut auf "zu". Gefunden in der
+     Browser-Gegenprobe; die Suite hatte den Zustand direkt gesetzt statt zu klicken. */
+  const heuer=new Date().getFullYear();
+  const zuJetzt=(jahr in _objAufJahrZu)?_objAufJahrZu[jahr]:(jahr!==heuer);
+  _objAufJahrZu[jahr]=!zuJetzt;
+  _renderObjAuftraege(_objAufAktuelleId);
+}
+function _objAufArchivToggle(){
+  _objAufOhneArchiv=!_objAufOhneArchiv;
+  _renderObjAuftraege(_objAufAktuelleId);
+}
 function _renderObjAuftraege(objektId){
   const box=document.getElementById('objAuftraegeListe');
   const hdr=document.getElementById('objAufHdrInfo');
   if(!box)return;
-  const liste=objektId?_objAuftraegeZu(objektId):[];
-  if(hdr)hdr.textContent=liste.length?('· '+liste.length):'';
-  if(!liste.length){
+  _objAufAktuelleId=objektId||"";
+  const alle=objektId?_objAuftraegeZu(objektId):[];
+  if(hdr)hdr.textContent=alle.length?('· '+alle.length):'';
+  if(!alle.length){
     box.innerHTML='<div style="font-size:calc(12px * var(--modal-scale,1));color:var(--text2);padding:4px 2px;">Noch kein Auftrag an diesem Objekt – „➕ Auftrag" auf der Karte oder am Handy anlegen.</div>';
     return;
   }
   let objBoard='';
   Object.keys(boards||{}).forEach(function(b){if(!objBoard&&!b.startsWith('_')&&(boards[b]||[]).some(function(x){return x&&x.id===objektId;}))objBoard=b;});
-  box.innerHTML=liste.map(function(e){
-    const t=e.t;
-    const roh=String(t.createdAt||'').substring(0,10);
-    const datum=/^\d{4}-\d{2}-\d{2}$/.test(roh)?roh.split('-').reverse().join('.'):'';
-    // Liegt die Karte nicht mehr im Objekt-Board, ist sie zum richtigen Auftrag ausgebaut
-    const ausgebaut=!e.archiv&&objBoard&&e.board!==objBoard;
-    const wo=e.archiv?'📦 Archiv':((ausgebaut?'🏗 ':'')+esc(e.board||'?')+(t.status?' · '+esc(t.status):''));
-    const farbe=e.archiv?'var(--text2)':(ausgebaut?'#185FA5':'#854F0B');
-    const ordner=(t.gdriveOrdner||t.gdrive||'').trim();
-    return '<div style="display:flex;align-items:center;gap:8px;padding:5px 4px;border-bottom:0.5px solid var(--border);'
-      +(e.archiv?'opacity:.65;':'cursor:pointer;')+'"'
-      +(e.archiv?' title="Archivierter Auftrag – über 📦 Archiv wiederherstellen"':' onclick="openEditTaskModal(\''+esc(t.id)+'\')" title="Auftrag öffnen"')+'>'
-      +'<span style="flex:1;min-width:0;">'
-        +'<span style="display:block;font-size:calc(12px * var(--modal-scale,1));font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(t.title||'(ohne Titel)')+'</span>'
-        +'<span style="display:block;font-size:calc(10px * var(--modal-scale,1));color:'+farbe+';">'+wo+(datum?' · angelegt '+datum:'')+'</span>'
-      +'</span>'
-      +(ordner?'<a href="'+esc(ordner)+'" target="_blank" onclick="event.stopPropagation();" title="Ordner in Drive öffnen" style="flex-shrink:0;text-decoration:none;font-size:13px;">📂</a>':'')
+
+  // ── Jahre bilden. Die ZÄHLZEILE oben rechnet immer über ALLE Einträge, auch
+  //    wenn das Archiv gerade ausgeblendet ist - sonst stimmte Franks Frage
+  //    „wie oft war ich da" nicht mehr.
+  const jahrAlle={};
+  alle.forEach(function(e){const j=_objAufJahrVon(e.t)||0;jahrAlle[j]=(jahrAlle[j]||0)+1;});
+  const archivAnz=alle.filter(function(e){return e.archiv;}).length;
+  const liste=_objAufOhneArchiv?alle.filter(function(e){return !e.archiv;}):alle;
+
+  const jahre={};
+  liste.forEach(function(e){const j=_objAufJahrVon(e.t)||0;(jahre[j]=jahre[j]||[]).push(e);});
+  const sortiert=Object.keys(jahre).map(Number).sort(function(x,y){return y-x;});
+  const heuer=new Date().getFullYear();
+
+  const zaehlzeile=Object.keys(jahrAlle).map(Number).sort(function(x,y){return y-x;})
+    .map(function(j){return (j?j:'ohne Datum')+': '+jahrAlle[j];}).join(' · ');
+
+  let html='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:2px 2px 6px;">'
+    +'<span style="flex:1;min-width:0;font-size:calc(11px * var(--modal-scale,1));color:var(--text2);">'+esc(zaehlzeile)+'</span>'
+    +(archivAnz?'<button type="button" onclick="_objAufArchivToggle()" title="Archivierte Aufträge ein- oder ausblenden" style="flex-shrink:0;padding:2px 8px;border-radius:6px;border:1px solid var(--border);background:'+(_objAufOhneArchiv?'var(--accent)':'var(--bg3)')+';color:'+(_objAufOhneArchiv?'#fff':'var(--text2)')+';font-size:calc(10px * var(--modal-scale,1));cursor:pointer;">'+(_objAufOhneArchiv?'nur offene ✓':'nur offene')+'</button>':'')
+    +'</div>';
+
+  if(!liste.length){
+    html+='<div style="font-size:calc(11px * var(--modal-scale,1));color:var(--text2);padding:6px 2px;">Alle '+archivAnz+' Aufträge sind archiviert – „nur offene" abschalten, um sie zu sehen.</div>';
+    box.innerHTML=html;return;
+  }
+
+  sortiert.forEach(function(j){
+    const eintraege=jahre[j];
+    // Das laufende Jahr ist offen, ältere zugeklappt - außer Frank hat es umgestellt.
+    const zu=(j in _objAufJahrZu)?_objAufJahrZu[j]:(j!==heuer);
+    html+='<div onclick="_objAufJahrToggle('+j+')" style="display:flex;align-items:center;gap:6px;padding:4px 2px;cursor:pointer;border-bottom:0.5px solid var(--border);">'
+      +'<span style="font-size:calc(11px * var(--modal-scale,1));color:var(--text2);width:12px;">'+(zu?'▶':'▼')+'</span>'
+      +'<span style="flex:1;font-size:calc(12px * var(--modal-scale,1));font-weight:700;color:var(--text);">'+(j?j:'ohne Datum')+'</span>'
+      +'<span style="font-size:calc(11px * var(--modal-scale,1));color:var(--text2);">'+eintraege.length+'</span>'
       +'</div>';
-  }).join('');
+    if(zu)return;
+    html+=eintraege.map(function(e){
+      const t2=e.t;
+      const dat=_objAufDatumText(t2);
+      const ausgebaut=!e.archiv&&objBoard&&e.board!==objBoard;
+      const wo=e.archiv?'📦 Archiv':((ausgebaut?'🏗 ':'')+esc(e.board||'?')+(t2.status?' · '+esc(t2.status):''));
+      const farbe=e.archiv?'var(--text2)':(ausgebaut?'#185FA5':'#854F0B');
+      const ordner=(t2.gdriveOrdner||t2.gdrive||'').trim();
+      return '<div style="display:flex;align-items:center;gap:8px;padding:5px 4px 5px 18px;border-bottom:0.5px solid var(--border);'
+        +(e.archiv?'opacity:.65;':'cursor:pointer;')+'"'
+        +(e.archiv?' title="Archivierter Auftrag – über 📦 Archiv wiederherstellen"':' onclick="openEditTaskModal(\''+esc(t2.id)+'\')" title="Auftrag öffnen"')+'>'
+        +'<span style="flex:1;min-width:0;">'
+          +'<span style="display:block;font-size:calc(12px * var(--modal-scale,1));font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(t2.title||'(ohne Titel)')+'</span>'
+          +'<span style="display:block;font-size:calc(10px * var(--modal-scale,1));color:'+farbe+';">'+wo+(dat?' · '+dat.art+' '+dat.txt:'')+'</span>'
+        +'</span>'
+        +(ordner?'<a href="'+esc(ordner)+'" target="_blank" onclick="event.stopPropagation();" title="Ordner in Drive öffnen" style="flex-shrink:0;text-decoration:none;font-size:13px;">📂</a>':'')
+        +'</div>';
+    }).join('');
+  });
+  box.innerHTML=html;
 }
 
 // ── Elternordner beim Ausbauen: der OBJEKTORDNER (Adressebene) ────────────────
