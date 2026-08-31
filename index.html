@@ -9639,7 +9639,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-30 · #824'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-30-b824) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-30 · #826'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-30-b826) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -32208,7 +32208,7 @@ function _pamAbsenderAusKontakten(ziel){
       const name=k.name||'';
       const email=k.email||'';
       const tel=k.tel||'';
-      const rolleLabel={ag:'AG',mieter:'Mieter',eigentuemer:'Eigentümer',sonstiges:'Sonst.'};
+      const rolleLabel={ag:'AG',mieter:'Mieter',eigentuemer:'Eigentümer',hausverwaltung:'HV',sonstiges:'Sonst.'};
       const badge=rolleLabel[k.rolle]||k.rolle;
       const senderVal=name&&email?'"'+name+'" <'+email+'>':email||(name&&tel?name:'');
       return '<button data-idx="'+i+'" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;text-align:left;font-size:12px;">'
@@ -32639,6 +32639,10 @@ function _pamExtractFileId(url){
 // sonst fehlt sie, sobald zuerst irgendwo gehovert wurde.
 const _PAM_DOCPIN_KEY='pam_docpin_groesse_v1';
 const _PAM_DOCPIN_MINB=320, _PAM_DOCPIN_MINH=240;
+// b826: Die Startgröße. Sie steht ZWEIMAL – hier und im `style`-Attribut des Fensters
+// (damit sie auch gilt, bevor JavaScript sie anfasst). Eine Probe wacht darüber, dass
+// beide gleich bleiben; wer eine ändert, muss die andere mitziehen.
+const _PAM_DOCPIN_VORGABE_B='min(800px,92vw)', _PAM_DOCPIN_VORGABE_H='min(900px,85vh)';
 // Unsichtbare Schicht über dem PDF. Ohne sie reißt jeder Zug ab, sobald die Maus über
 // den PDF-Rahmen läuft – ein <iframe> gibt seine Maus-Ereignisse nicht nach außen.
 function _pamDocPinSchutz(an){
@@ -32651,7 +32655,13 @@ function _pamDocPinGroesseAnwenden(prev){
   if(!prev)return;
   let g=null;
   try{g=JSON.parse(localStorage.getItem(_PAM_DOCPIN_KEY)||'null');}catch(e){}
-  if(!g||!g.w||!g.h){prev.style.width='';prev.style.height='';return;} // nichts gemerkt → Vorgabe aus dem Stil
+  // ⛔ b826 (Befund Frank 30.08.: „das Ziehen funktioniert nicht"): Hier stand
+  // `prev.style.width=''` mit dem Kommentar „Vorgabe aus dem Stil". Das war falsch
+  // gedacht – die Vorgabe steht NICHT in einem CSS-Block, sondern INLINE im
+  // `style`-Attribut des Fensters. `style.width=''` löscht also genau sie. Gemessen:
+  // das Fenster stand danach auf 320px (nur noch die Mindestbreite), die tatsächliche
+  // Größe bestimmte der Inhalt. Deshalb wird die Vorgabe jetzt ausdrücklich gesetzt.
+  if(!g||!g.w||!g.h){prev.style.width=_PAM_DOCPIN_VORGABE_B;prev.style.height=_PAM_DOCPIN_VORGABE_H;return;}
   const maxB=Math.round(window.innerWidth*0.92), maxH=Math.round(window.innerHeight*0.85);
   prev.style.width=Math.max(_PAM_DOCPIN_MINB,Math.min(g.w,maxB))+'px';
   prev.style.height=Math.max(_PAM_DOCPIN_MINH,Math.min(g.h,maxH))+'px';
@@ -36912,7 +36922,7 @@ function _raWert(){
 
 function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2,adr){
   const c=document.getElementById('tKontakteContainer');if(!c)return;
-  const rolleLabel={ag:'👔 AG Kontakt',mieter:'🏠 Mieter',eigentuemer:'👤 Eigentümer',sonstiges:'👥 Sonstiges'};
+  const rolleLabel={ag:'👔 AG Kontakt',mieter:'🏠 Mieter',eigentuemer:'👤 Eigentümer',hausverwaltung:'🏢 Hausverwaltung',sonstiges:'👥 Sonstiges'};
   name=name||'';tel=tel||'';email=email||'';tel2=tel2||'';
   adr=adr||{};
   const aStr=(adr.strasse||'').toString(),aPlz=(adr.plz||'').toString(),aOrt=(adr.ort||'').toString();
@@ -41459,6 +41469,85 @@ let _objImpTreffer=[];
    von Hand einfuegte - genau daran ist Frank am 30.08. haengengeblieben. */
 let _objImpPfad=[];
 const OBJIMP_LETZTER='pam_objimp_letzter_ordner';
+const OBJIMP_ADR='pam_objimp_letzte_adresse';
+/* b825: Verwaltung aus dem Adressbuch statt Abtippen (Wunsch Frank 30.08.).
+   Gezeigt werden alle Eintraege MIT Anschrift - nicht nach Rolle gefiltert. Grund:
+   Am Rechner gab es bis b825 gar keine Rolle "Hausverwaltung" (nur am Handy), Frank
+   hat seine Verwaltung deshalb unter "Sonstiges" abgelegt. Die Rolle kommt mit diesem
+   Build dazu - eine Filterung wuerde Altbestand aber unsichtbar machen.
+   ⛔ Die Felder werden 1:1 uebernommen. PAM setzt KEIN "c/o" davor - das schreibt
+   Frank selbst in die Firma-Zeile (seine ausdrueckliche Entscheidung). Raten waere hier
+   falsch: bei manchen Verwaltungen geht die Rechnung direkt an die Firma. */
+function _objImpAdrListe(){
+  const b=(typeof _adrBook!=="undefined"&&Array.isArray(_adrBook))?_adrBook:[];
+  return b.filter(function(k){
+    return k&&(String(k.strasse||"").trim()||String(k.ort||"").trim());
+  }).sort(function(a,b2){
+    return String(a.name||a.firma||"").localeCompare(String(b2.name||b2.firma||""),"de");
+  });
+}
+function _objImpAdrAnschrift(k){
+  // Zeile 2 bis 4 der Rechnungsanschrift: Firma / Strasse / PLZ Ort.
+  if(!k)return "";
+  const plzOrt=[String(k.plz||"").trim(),String(k.ort||"").trim()].filter(Boolean).join(" ");
+  return [String(k.firma||"").trim(),String(k.strasse||"").trim(),plzOrt].filter(Boolean).join("\n");
+}
+function _objImpAdrWahl(){
+  const sel=document.getElementById("_objImpAdr");if(!sel)return;
+  const id=sel.value;
+  if(!id)return;
+  const k=_objImpAdrListe().find(function(x){return String(x.id)===String(id);});
+  if(!k)return;
+  const hv=document.getElementById("_objImpHv");
+  if(hv)hv.value=String(k.name||k.firma||"").trim();
+  const blk=document.getElementById("_objImpRaBlock");
+  if(blk)blk.value=_objImpAdrAnschrift(k);
+  try{localStorage.setItem(OBJIMP_ADR,String(id));}catch(e){}
+}
+function _objImpAdrFuellen(){
+  const sel=document.getElementById("_objImpAdr");if(!sel)return;
+  const liste=_objImpAdrListe();
+  sel.innerHTML="<option value=\"\">\u2013 nichts \u00fcbernehmen \u2013</option>"
+    +liste.map(function(k){
+      const bez=[String(k.name||k.firma||"(ohne Namen)").trim(),String(k.ort||"").trim()].filter(Boolean).join(" \u00b7 ");
+      return "<option value=\""+esc(String(k.id))+"\">"+esc(bez)+"</option>";
+    }).join("");
+  if(!liste.length){
+    sel.innerHTML="<option value=\"\">\u2013 keine Adresse mit Anschrift im Adressbuch \u2013</option>";
+    return;
+  }
+  try{
+    const letzt=localStorage.getItem(OBJIMP_ADR);
+    if(letzt&&liste.some(function(k){return String(k.id)===String(letzt);})){
+      sel.value=letzt;_objImpAdrWahl();
+    }
+  }catch(e){}
+}
+/* b825: NAS-Pfad aus dem Drive-Pfad ableiten, statt ihn abtippen zu lassen.
+   ⛔ Anker ist `01_Hausverwaltungen` - derselbe, an dem `_objKuerzelAusNas` schon
+   das Verwaltungs-Kuerzel erkennt. Der Drive-Zweig heisst anders als der NAS-Zweig
+   (Spiegelung), deshalb wird NICHT der ganze Pfad uebernommen, sondern nur der Teil
+   AB diesem Ordner - an den bekannten NAS-Stamm gehaengt.
+   ⚠ Findet sich der Anker nicht, bleibt das Feld wie es ist: lieber leer als falsch. */
+async function _objImpNasAusDrive(fid){
+  if(!fid||!gdriveToken)return "";
+  try{
+    const teile=[];
+    let cur=fid;
+    for(let i=0;i<10&&cur;i++){
+      const r=await fetch("https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(cur)+"?fields=name,parents",{headers:{Authorization:"Bearer "+gdriveToken}});
+      if(!r.ok)break;
+      const j=await r.json();
+      if(!j.name)break;
+      teile.unshift(j.name);
+      if(/^01_Hausverwaltungen$/i.test(j.name))break;
+      cur=(j.parents&&j.parents[0])||null;
+    }
+    const i=teile.findIndex(function(x){return /^01_Hausverwaltungen$/i.test(x);});
+    if(i<0)return "";
+    return "\\\\nas-ddbraun\\Kunden\\"+teile.slice(i).join("\\");
+  }catch(e){console.warn("[b825] NAS-Pfad:",e);return "";}
+}
 function _objImpSchliessen(){const o=document.getElementById("_objImpDlg");if(o)try{o.remove();}catch(e){}}
 function _objImpNasVorschlag(){
   /* Drive und NAS sind gespiegelt. Aus dem Namen des gewaehlten Drive-Ordners laesst
@@ -41512,6 +41601,15 @@ async function _objImpLesen(fidDirekt,name){
       const da=vorhanden.has(String(f.name).trim().toLowerCase())||vorhanden.has(wird.toLowerCase());
       return {id:f.id,name:f.name,wird:wird,schonDa:da,an:!da};
     });
+    // b825: NAS-Pfad zur gelesenen Ebene nachtragen - nur wenn das Feld noch leer
+    // ist oder noch auf dem Vorschlag steht. Ein von Hand gesetzter Pfad bleibt stehen.
+    try{
+      const nf=document.getElementById("_objImpNas");
+      if(nf&&(!nf.value.trim()||nf.value.trim()===_objImpNasVorschlag().trim())){
+        const abgeleitet=await _objImpNasAusDrive(fid);
+        if(abgeleitet)nf.value=abgeleitet;
+      }
+    }catch(e){console.warn("[b825] NAS setzen:",e);}
     const _lb=document.getElementById("_objImpListe");if(_lb)_lb.dataset.gezeichnet="";
     _objImpZeichnen(!!j.nextPageToken);
   }catch(e){
@@ -41651,6 +41749,7 @@ function _objImpOeffnen(){
       +"<div style=\"display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;\">"
         +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Board</label><select id=\"_objImpBoard\" onchange=\"_objImpBoardWechsel()\" style=\"width:100%;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\">"+boardOpts+"</select></div>"
         +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Spalte</label><select id=\"_objImpSpalte\" style=\"width:100%;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></select></div>"
+        +"<div style=\"grid-column:1/-1;\"><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">\uD83D\uDCC7 Verwaltung aus dem Adressbuch <span style=\"opacity:.7;\">(f\u00fcllt Auftraggeber und Anschrift)</span></label><select id=\"_objImpAdr\" onchange=\"_objImpAdrWahl()\" style=\"width:100%;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></select></div>"
         +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Auftraggeber / Hausverwaltung</label><input id=\"_objImpHv\" type=\"text\" placeholder=\"z.B. AHV, Muster Verwaltung\" autocomplete=\"off\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></div>"
         +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">NAS-Pfad bis zur Ortsebene</label><input id=\"_objImpNas\" type=\"text\" autocomplete=\"off\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:11px;\"></div>"
       +"</div>"
@@ -41682,6 +41781,12 @@ function _objImpOeffnen(){
     const q=document.getElementById("_objImpQuelle");
     if(letzt&&q)q.value=letzt;
   }catch(e){}
+  // b825: Adressbuch nachladen und die Auswahl fuellen. Laeuft NACH dem Zeichnen des
+  // Dialogs, damit der sofort steht - die Liste kommt Sekundenbruchteile spaeter.
+  (async function(){
+    try{if(typeof _adrBookLoad==="function")await _adrBookLoad();}catch(e){console.warn("[b825] Adressbuch:",e);}
+    try{_objImpAdrFuellen();}catch(e){console.warn("[b825] Auswahl:",e);}
+  })();
 }
 function _objZuordnenSammle(){
   const out=[];
@@ -44640,7 +44745,7 @@ function _emRenderKontakte(){
 }
 function _emBuildKontaktRow(k,i){
   var rolleOpts=['ag','mieter','eigentuemer','sonstiges'];
-  var rolleLabel={ag:'👔 AG Kontakt',mieter:'🏠 Mieter',eigentuemer:'👤 Eigentümer',sonstiges:'👥 Sonstiges'};
+  var rolleLabel={ag:'👔 AG Kontakt',mieter:'🏠 Mieter',eigentuemer:'👤 Eigentümer',hausverwaltung:'🏢 Hausverwaltung',sonstiges:'👥 Sonstiges'};
   var fs='font-size:11px;padding:3px 6px;';
   var esc=function(s){return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;');};
   var div=document.createElement('div');div.className='kontakt-entry';
@@ -51231,7 +51336,16 @@ function _fdkHerunterladen(){
      Fenster auf einem kleinen Laptop-Bildschirm von allein mitschrumpft und nie über den
      Rand ragt. min-width/min-height verhindern, dass man es beim Ziehen auf null zieht.
      „pamUebPreviewGriff" = Ziehecke, „pamUebPreviewSchutz" fängt beim Ziehen die Maus ab,
-     weil der PDF-Rahmen (iframe) die Ereignisse sonst schluckt. -->
-<div id="pamUebPreview" style="display:none;position:fixed;z-index:13000;background:var(--bg2);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.4);overflow:hidden;width:min(800px,92vw);height:min(900px,85vh);min-width:320px;min-height:240px;pointer-events:auto;"><div style="display:flex;align-items:center;padding:6px 10px;background:var(--bg3);border-bottom:1px solid var(--border);gap:8px;cursor:move;"><div id="pamUebPreviewLabel" style="font-size:11px;font-weight:600;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;"></div><button onclick="document.getElementById('pamUebPreview').style.display='none'" style="flex-shrink:0;padding:2px 8px;border-radius:5px;font-size:11px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;">&#10005;</button></div><iframe id="pamUebPreviewFrame" src="" style="width:100%;height:calc(100% - 34px);border:none;background:#fff;" allowfullscreen></iframe><div id="pamUebPreviewSchutz" style="display:none;position:absolute;left:0;top:0;right:0;bottom:0;z-index:4;"></div><div id="pamUebPreviewGriff" title="Größe ziehen" style="position:absolute;right:0;bottom:0;width:18px;height:18px;z-index:5;cursor:nwse-resize;color:var(--text2);font-size:13px;line-height:18px;text-align:center;user-select:none;">◢</div></div>
+     weil der PDF-Rahmen (iframe) die Ereignisse sonst schluckt.
+     ⛔ b826: Die Breitenangabe hier ist die EINZIGE Größenvorgabe des Fensters – es gibt
+     dazu keine CSS-Regel. `style.width=''` im Skript löscht sie und lässt das Fenster
+     ohne Größe zurück (Befund Frank 30.08.). Sie steht deshalb zusätzlich als Konstante
+     `_PAM_DOCPIN_VORGABE_B/_H` im Skript; eine Probe hält beide gleich.
+     ⛔ b826: Der Rahmen endet 18px über dem Fensterboden (`calc(100% - 52px)` = 34 Kopf
+     + 18 Fuß). In diesem Fußstreifen sitzt die Ziehecke – so liegt sie NIE über dem PDF.
+     Chrome zeigt PDFs mit einem eigenen Viewer, der Mausklicks abfangen kann; mit dem
+     Streifen ist diese Frage gegenstandslos statt geraten. Wer die Kopfhöhe oder die
+     Fußhöhe ändert, muss `calc(100% - 52px)` mitziehen. -->
+<div id="pamUebPreview" style="display:none;position:fixed;z-index:13000;background:var(--bg2);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.4);overflow:hidden;width:min(800px,92vw);height:min(900px,85vh);min-width:320px;min-height:240px;pointer-events:auto;"><div style="display:flex;align-items:center;padding:6px 10px;background:var(--bg3);border-bottom:1px solid var(--border);gap:8px;cursor:move;"><div id="pamUebPreviewLabel" style="font-size:11px;font-weight:600;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;"></div><button onclick="document.getElementById('pamUebPreview').style.display='none'" style="flex-shrink:0;padding:2px 8px;border-radius:5px;font-size:11px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;">&#10005;</button></div><iframe id="pamUebPreviewFrame" src="" style="width:100%;height:calc(100% - 52px);border:none;background:#fff;" allowfullscreen></iframe><div id="pamUebPreviewFuss" style="position:absolute;left:0;right:0;bottom:0;height:18px;background:var(--bg3);border-top:1px solid var(--border);z-index:3;"></div><div id="pamUebPreviewSchutz" style="display:none;position:absolute;left:0;top:0;right:0;bottom:0;z-index:4;"></div><div id="pamUebPreviewGriff" title="Zum Ändern der Größe hier ziehen" style="position:absolute;right:3px;bottom:0;width:18px;height:18px;z-index:5;cursor:nwse-resize;color:var(--text1);font-size:14px;line-height:18px;text-align:center;user-select:none;">◢</div></div>
 </body>
 </html>
