@@ -9642,7 +9642,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-31 · #846'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b846) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-31 · #847'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b847) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -32239,7 +32239,7 @@ function _pamAbsenderAusKontakten(ziel){
       const name=k.name||'';
       const email=k.email||'';
       const tel=k.tel||'';
-      const rolleLabel={ag:'AG',mieter:'Mieter',eigentuemer:'Eigentümer',hausverwaltung:'HV',sonstiges:'Sonst.'};
+      const rolleLabel={ag:'AG',mieter:'Mieter',eigentuemer:'Eigentümer',hausverwaltung:'HV',privatkunde:'Privat',sonstiges:'Sonst.'};
       const badge=rolleLabel[k.rolle]||k.rolle;
       const senderVal=name&&email?'"'+name+'" <'+email+'>':email||(name&&tel?name:'');
       return '<button data-idx="'+i+'" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;text-align:left;font-size:12px;">'
@@ -36094,8 +36094,8 @@ function _adrKey(name,tel,email){const t=(tel&&tel.trim())?tel:(email||'');retur
    Datenbestand seit langem: das VBS setzt sie beim Anlegen eines Auftrags.
    ⛔ Der Rückfall `🏷 <Wert>` bleibt - eigene Rollen (Freitext, „✏️ Andere…") sollen
    weiter angezeigt werden und nicht stillschweigend zu „Sonstiges" werden. */
-const ADR_ROLLEN=['ag','mieter','eigentuemer','hausverwaltung','sonstiges'];
-function _adrRoleLabel(r){const m={ag:'👔 AG',mieter:'🏠 Mieter',eigentuemer:'👤 Eigentümer',hausverwaltung:'🏢 Hausverwaltung',sonstiges:'👥 Sonstiges'};return m[r]||('🏷 '+(r||'Sonstiges'));}
+const ADR_ROLLEN=['ag','mieter','eigentuemer','hausverwaltung','privatkunde','sonstiges'];
+function _adrRoleLabel(r){const m={ag:'👔 AG',mieter:'🏠 Mieter',eigentuemer:'👤 Eigentümer',hausverwaltung:'🏢 Hausverwaltung',privatkunde:'🧍 Privatkunde',sonstiges:'👥 Sonstiges'};return m[r]||('🏷 '+(r||'Sonstiges'));}
 
 async function _adrBookLoad(){
   if(_adrBookLoaded)return _adrBook;
@@ -36239,7 +36239,7 @@ function _adrOpenSaveDialog(d){
     +(function(){
        const jetzt=String(d.rolle||'sonstiges');
        // ⛔ typeof-Wache, siehe addKontaktPTP. Rückfall muss ADR_ROLLEN entsprechen.
-       const opts=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','sonstiges'];
+       const opts=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','privatkunde','sonstiges'];
        if(opts.indexOf(jetzt)<0)opts.push(jetzt);
        /* ⚠ Das `esc` dieser Funktion laesst `<` stehen - fuer die festen Feldwerte
           reichte das, fuer einen selbst eingetippten Rollennamen nicht. */
@@ -36465,6 +36465,7 @@ function _objEntryMatches(k,q){
 function _adrBookOpenPicker(mode){
   mode=(mode==='manage')?'manage':'pick';
   window._adrPickMode=mode;
+  window._adrRolleFilter='';   // b847: jeder Aufruf startet ungefiltert
   if(!gdriveToken){showToast('⚠ Bitte zuerst Google Drive verbinden (☁️)','warning',4000);return;}
   const ex=document.getElementById('adr-picker-modal');if(ex)ex.remove();
   const overlay=document.createElement('div');
@@ -36499,6 +36500,10 @@ function _adrBookOpenPicker(mode){
     +'<input id="adr-search" type="text" placeholder="🔍 suchen…" autocomplete="off" style="width:100%;padding:6px 8px;font-size:12px;box-sizing:border-box;border:1px solid var(--border,#d1d5db);border-radius:6px;background:var(--bg,#fff);color:var(--text,#111);margin-bottom:8px;">'
     +objBox
     +hint
+    /* b847: Filterzeile nach Rolle. flex-shrink:0 ist Pflicht - die Liste
+       darunter steht auf flex:1 und quetscht sonst ihre Geschwister zusammen
+       (die Falle aus b845). Der Inhalt kommt aus _adrRenderRolleFilter. */
+    +'<div id="adr-rollefilter" style="display:none;flex-wrap:wrap;gap:4px;margin-bottom:6px;flex-shrink:0;"></div>'
     +'<div id="adr-list" style="flex:1;overflow-y:auto;min-height:90px;border:1px solid var(--border,#e5e7eb);border-radius:6px;padding:4px;"></div>'
     +'<div style="display:flex;gap:8px;margin-top:12px;justify-content:space-between;align-items:center;">'
     +footLinks+'<span style="display:flex;gap:8px;">'+footRight+'</span>'
@@ -36513,7 +36518,7 @@ function _adrBookOpenPicker(mode){
     _adrRenderPickerList(s?s.value:'');
   });
   _objIdxBuild();
-  _adrBookLoad().then(function(){_adrRenderPickerList('');}).catch(function(e){
+  _adrBookLoad().then(function(){_adrRenderRolleFilter();_adrRenderPickerList('');}).catch(function(e){
     const L=document.getElementById('adr-list');
     if(L)L.innerHTML='<div style="padding:12px;color:var(--text2,#6b7280);font-size:12px;">'+(e.message==='NO_TOKEN'?'Bitte Google Drive verbinden.':'Fehler: '+e.message)+'</div>';
   });
@@ -36547,8 +36552,14 @@ function _adrRenderPickerList(filter){
   const f=_adrNorm(filter);
   const all=_adrBook||[];
   if(!all.length){L.innerHTML='<div style="padding:12px;color:var(--text2,#6b7280);font-size:12px;">Noch keine Adressen gespeichert.'+(manage?' Mit „➕ Neue Adresse" anlegen.':' Nutze ✅ an einem Kontakt.')+'</div>';return;}
-  const list=all.filter(function(k){return !f||_adrNorm((k.name||'')+(k.firma||'')+(k.strasse||'')+(k.tel||'')+(k.email||'')+(k.ort||'')+(k.rolle||'')+(((k&&k.objekte)||[]).join(' '))).includes(f);});
-  if(!list.length){L.innerHTML='<div style="padding:12px;color:var(--text2,#6b7280);font-size:12px;">Kein Treffer.</div>';return;}
+  /* b847: Der Rollenfilter wirkt ZUSÄTZLICH zur Suche - „alle Hausverwaltungen,
+     in deren Adresse Erfurt vorkommt" muss gehen. */
+  const rf=window._adrRolleFilter||'';
+  const list=all.filter(function(k){
+    if(rf&&((k.rolle||'sonstiges')!==rf))return false;
+    return !f||_adrNorm((k.name||'')+(k.firma||'')+(k.strasse||'')+(k.tel||'')+(k.email||'')+(k.ort||'')+(k.rolle||'')+(((k&&k.objekte)||[]).join(' '))).includes(f);
+  });
+  if(!list.length){L.innerHTML='<div style="padding:12px;color:var(--text2,#6b7280);font-size:12px;">Kein Treffer.'+(rf?' <b>Filter „'+_adrRoleLabel(rf)+'" ist an.</b>':'')+'</div>';return;}
   // Objekte je Eintrag einmal auflösen (abgeleitet aus den Tasks + fest angeheftet)
   const objQ=manage?'':_objQueryKey(window._adrPickObj||'');
   const objs={};
@@ -36808,7 +36819,7 @@ function _mfImpDialog(){
   const liste=window._mfImpListe||[];
   const neu=liste.filter(function(k){return !k._da;}).length;
   const da=liste.length-neu;
-  const rollen=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','sonstiges'];
+  const rollen=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','privatkunde','sonstiges'];
   const rollOpts=rollen.map(function(r){
     return '<option value="'+r+'"'+(r==='sonstiges'?' selected':'')+'>'+esc(_adrRoleLabel(r))+'</option>';
   }).join('');
@@ -36909,6 +36920,65 @@ async function _mfImpApply(){
   showToast('✅ '+neu+' neu im Adressbuch'+(aktualisiert?' · '+aktualisiert+' ergänzt':''),'success',4000);
   const p=document.getElementById('adr-picker-modal');
   if(p){p.remove();_adrBookOpenPicker('manage');}   // Liste frisch zeichnen
+}
+
+/* ── b847: Filterzeile nach Rolle im Adressbuch ──────────────────────────────
+   Franks Anlass (31.08.2026): „Welche Filtermöglichkeiten schlägst du mir vor,
+   dass ich nach Privatkunde, nach Auftraggeber … filtern kann?"
+
+   ⚡ Gesucht werden konnte nach der Rolle schon vorher – `_adrRenderPickerList`
+   nimmt `k.rolle` in den durchsuchten String auf. Nur half das nicht: `_adrNorm`
+   wandelt **keine Umlaute um**, also fand „Eigentümer" nichts (intern steht
+   `eigentuemer`). Ein Knopf ist ohnehin schneller als getippter Text.
+
+   ⛔ Die Zahlen zählen den GESAMTBESTAND, nicht die Suchtreffer. Sonst sprängen
+   sie bei jedem Tastendruck und man könnte sie nicht als Übersicht lesen.
+   ⛔ Rollen ohne Einträge erscheinen nicht – sonst steht die halbe Zeile leer da.
+   ⛔ Eigene Rollen (Freitext über „✏️ Andere…") bekommen ebenfalls einen Knopf,
+   sonst wären so gekennzeichnete Kontakte über die Zeile nicht erreichbar. */
+function _adrRolleZaehlung(){
+  const all=(typeof _adrBook!=='undefined'&&_adrBook)?_adrBook:[];
+  const z={};
+  all.forEach(function(k){ const r=(k&&k.rolle)?k.rolle:'sonstiges'; z[r]=(z[r]||0)+1; });
+  return z;
+}
+
+/* Die Reihenfolge folgt ADR_ROLLEN; eigene Rollen hängen hinten an. */
+function _adrRolleFilterReihe(){
+  const z=_adrRolleZaehlung();
+  const rollen=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','privatkunde','sonstiges'];
+  Object.keys(z).forEach(function(r){ if(rollen.indexOf(r)<0)rollen.push(r); });
+  return rollen.filter(function(r){ return (z[r]||0)>0; });
+}
+
+function _adrRenderRolleFilter(){
+  const box=document.getElementById('adr-rollefilter');if(!box)return;
+  const z=_adrRolleZaehlung();
+  const reihe=_adrRolleFilterReihe();
+  const gesamt=Object.keys(z).reduce(function(s,k){return s+z[k];},0);
+  const aktiv=window._adrRolleFilter||'';
+  /* Bei nur einer belegten Rolle bringt die Zeile nichts – dann bleibt sie weg
+     und der Kasten wird nicht unnötig hoch. */
+  if(reihe.length<2){ box.innerHTML=''; box.style.display='none'; return; }
+  box.style.display='flex';
+  const esc=function(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');};
+  const knopf=function(wert,text,anzahl){
+    const an=(aktiv===wert);
+    return '<button type="button" onclick="_adrSetRolleFilter(\''+esc(wert).replace(/'/g,"\\'")+'\')" '
+      +'style="flex-shrink:0;padding:2px 7px;font-size:10px;border-radius:10px;cursor:pointer;white-space:nowrap;'
+      +(an?'border:1px solid var(--accent,#1a56c4);background:var(--accent,#1a56c4);color:#fff;font-weight:600;'
+          :'border:1px solid var(--border,#d1d5db);background:var(--bg3,#f3f4f6);color:var(--text,#111);')
+      +'">'+esc(text)+' <span style="opacity:.7;">'+anzahl+'</span></button>';
+  };
+  box.innerHTML=knopf('','Alle',gesamt)
+    +reihe.map(function(r){ return knopf(r,_adrRoleLabel(r),z[r]||0); }).join('');
+}
+
+function _adrSetRolleFilter(r){
+  window._adrRolleFilter=(window._adrRolleFilter===r)?'':r;   // nochmal klicken = aus
+  _adrRenderRolleFilter();
+  const s=document.getElementById('adr-search');
+  _adrRenderPickerList(s?s.value:'');
 }
 
 // ── GM-Akte-Adressen (pam-akte-adressen.json) ─ Ansprechpartner einer GM-Akte übernehmen ──
@@ -37479,7 +37549,7 @@ function _raWert(){
 
 function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2,adr){
   const c=document.getElementById('tKontakteContainer');if(!c)return;
-  const rolleLabel={ag:'👔 AG Kontakt',mieter:'🏠 Mieter',eigentuemer:'👤 Eigentümer',hausverwaltung:'🏢 Hausverwaltung',sonstiges:'👥 Sonstiges'};
+  const rolleLabel={ag:'👔 AG Kontakt',mieter:'🏠 Mieter',eigentuemer:'👤 Eigentümer',hausverwaltung:'🏢 Hausverwaltung',privatkunde:'🧍 Privatkunde',sonstiges:'👥 Sonstiges'};
   name=name||'';tel=tel||'';email=email||'';tel2=tel2||'';
   adr=adr||{};
   const aStr=(adr.strasse||'').toString(),aPlz=(adr.plz||'').toString(),aOrt=(adr.ort||'').toString();
@@ -37494,13 +37564,13 @@ function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2,adr){
      nicht wieder auseinanderlaufen. */
   // ⛔ typeof-Wache wie in _dfbPickItem: Prüfsuiten führen diese Funktion ohne
   // Umgebung aus. Der Rückfall MUSS mit ADR_ROLLEN übereinstimmen - test_b842 wacht.
-  const rolleOpts=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','sonstiges'];
+  const rolleOpts=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','privatkunde','sonstiges'];
   const isCustom=rolle&&!rolleOpts.includes(rolle);
   const selVal=isCustom?'_custom_':rolle;
   div.innerHTML='<div class="kontakt-entry-header">'
     +'<div style="display:flex;flex-direction:column;gap:2px;flex:1;">'
     +'<select class="k-rolle" style="font-size:11px;padding:2px 4px;width:100%;" onchange="var ci=this.parentNode.querySelector(\'.k-rolle-custom\');if(ci){ci.style.display=this.value===\'_custom_\'?\'\':\' none\';if(this.value===\'_custom_\')ci.focus();}scheduleTaskFieldSave();">'
-    +rolleOpts.map(r=>'<option value="'+r+'"'+(r===selVal?' selected':'')+'>'+rolleLabel[r]+'</option>').join('')
+    +rolleOpts.map(r=>'<option value="'+r+'"'+(r===selVal?' selected':'')+'>'+(rolleLabel[r]||r)+'</option>').join('')
     +'<option value="_custom_"'+(isCustom?' selected':'')+'>✏️ Andere…</option>'
     +'</select>'
     +'<input type="text" class="k-rolle-custom" value="'+(isCustom?rolle.replace(/"/g,'&quot;'):'')+'" placeholder="Eigene Rolle eingeben…" oninput="scheduleTaskFieldSave()" style="display:'+(isCustom?'':'none')+';font-size:11px;padding:2px 4px;width:100%;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);">'
@@ -46096,8 +46166,8 @@ function _emBuildKontaktRow(k,i){
      Falsches, solange niemand am Auswahlfeld drehte; wer drehte, hatte danach
      wirklich „ag" drin. */
   // ⛔ typeof-Wache, siehe addKontaktPTP. Rückfall muss ADR_ROLLEN entsprechen.
-  var rolleOpts=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','sonstiges'];
-  var rolleLabel={ag:'👔 AG Kontakt',mieter:'🏠 Mieter',eigentuemer:'👤 Eigentümer',hausverwaltung:'🏢 Hausverwaltung',sonstiges:'👥 Sonstiges'};
+  var rolleOpts=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','privatkunde','sonstiges'];
+  var rolleLabel={ag:'👔 AG Kontakt',mieter:'🏠 Mieter',eigentuemer:'👤 Eigentümer',hausverwaltung:'🏢 Hausverwaltung',privatkunde:'🧍 Privatkunde',sonstiges:'👥 Sonstiges'};
   /* b842: Eine Rolle, die in keiner Option vorkommt (eigener Freitext aus dem
      Task-Fenster), bekommt eine eigene Zeile statt still auf die erste zu fallen.
      Angezeigt wird der rohe Wert - das ist die Wahrheit, und beim Speichern geht
