@@ -9640,7 +9640,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-31 · #831'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b831) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-31 · #832'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b832) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -41713,8 +41713,18 @@ function _objImpZeichnen(mehrDa,nurListe){
   box.dataset.gezeichnet="1";
   box.innerHTML=_objImpTreffer.map(function(x,i){
     const grau=x.schonDa?"opacity:.5;":"";
+    /* b832: Vor dem Anlegen sichtbar machen, welches Haus eine PLZ bekommt und
+       welches nicht - eine stille Luecke faellt sonst erst im Kundenschreiben auf. */
+    const _po=(((document.getElementById("_objImpOrt")||{}).value)||"").trim();
+    let _plzHin="";
+    if(_po&&!x.schonDa&&_plzTab){
+      if(/\d{5}/.test(_po)){_plzHin="";}
+      else{const _pz=_plzSuchen(_po,x.name);
+        _plzHin=_pz?("<span style=\"font-size:10px;color:var(--text2);\" title=\"aus der PLZ-Tabelle\"> \u00b7 "+esc(_pz)+"</span>")
+                   :("<span style=\"font-size:10px;color:#a04000;\" title=\"Diese Stra\u00dfe steht nicht eindeutig in der Tabelle \u2013 PAM tr\u00e4gt keine PLZ ein\"> \u00b7 PLZ unklar</span>");}
+    }
     const hinweis=x.schonDa?"<span style=\"font-size:10px;color:var(--text2);\">\u00b7 schon vorhanden</span>":
-      (x.wird!==x.name?"<span style=\"font-size:10px;color:#a04000;\" title=\"PAM ersetzt Binde- und Unterstriche im Titel durch Leerzeichen\">\u00b7 hei\u00dft dann: "+esc(x.wird)+"</span>":"");
+      (x.wird!==x.name?"<span style=\"font-size:10px;color:#a04000;\" title=\"PAM ersetzt Binde- und Unterstriche im Titel durch Leerzeichen\">\u00b7 hei\u00dft dann: "+esc(x.wird)+"</span>":"")+_plzHin;
     /* b824: Der Zeilenrahmen ist kein <label> mehr. Ein Klick irgendwo im Label setzt
        das Haekchen - der Hineingehen-Knopf haette dabei IMMER auch an-/abgehakt.
        Jetzt: Haekchen und Name schalten das Haekchen, der Pfeil rechts geht hinein. */
@@ -41726,6 +41736,73 @@ function _objImpZeichnen(mehrDa,nurListe){
       +"</div>";
   }).join("")
   +(mehrDa?"<div style=\"padding:10px;color:#a04000;font-size:12px;\">\u26A0 Es gibt MEHR als 1000 Unterordner \u2013 diese Liste ist unvollst\u00e4ndig.</div>":"");
+}
+/* b832: Postleitzahl je Haus nachschlagen.
+   Anlass (Frank, 31.08.): Im Ort-Feld steht EIN Text fuer den ganzen Lauf. Traegt man
+   dort eine PLZ mit ein, bekommen ALLE Haeuser des Laufs dieselbe Zahl - in einer
+   groesseren Stadt ist die PLZ je Stadtteil verschieden, die meisten waeren falsch.
+   Und sie bleibt nicht im
+   Verborgenen: `{Objekt}` in den Word-Vorlagen (b759) wird aus dem Adressfeld gefuellt,
+   eine falsche PLZ stuende also im Schreiben an den Kunden.
+   Quelle der Tabelle: OpenStreetMap (ODbL), aus der Adressdatei von MF Dach gewonnen.
+   ⛔ Wo eine Strasse durch MEHRERE PLZ-Bezirke laeuft, steht sie gar nicht erst in der
+   Tabelle - PAM traegt dann nichts ein statt zu raten. */
+let _plzTab=null;
+async function _plzLaden(){
+  if(_plzTab)return _plzTab;
+  const m=new Map();
+  try{
+    const r=await fetch("plz-thueringen.txt");
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    const txt=await r.text();
+    txt.split("\n").forEach(function(z){
+      if(!z||z.charAt(0)==="#")return;
+      const s=z.split(";");
+      if(s.length<3)return;
+      m.set(_objNorm(s[0])+"|"+_objNorm(s[1]),String(s[2]).trim());
+    });
+  }catch(e){console.warn("[b832] PLZ-Tabelle nicht geladen:",e);}
+  _plzTab=m;
+  return _plzTab;
+}
+/* Der Ordner heisst mal nur nach der Strasse, mal mit Hausnummern dahinter. Beide Formen
+   probieren - erst wie er heisst, dann ohne den Hausnummern-Schwanz. */
+function _plzKandidaten(name){
+  const roh=String(name||"").trim();
+  const out=[roh];
+  const m=roh.match(/^(.*?)[\s,]+\d/);
+  if(m&&m[1].trim()&&m[1].trim()!==roh)out.push(m[1].trim());
+  return out;
+}
+/* ⛔ Kein eigenes Normalisieren: `_objNorm` macht das seit b512 (strasse/str.,
+   Umlaute, Grossschreibung). Zwei Schreibweisen-Regeln waeren ein spaeter Fehler. */
+function _plzSuchen(ort,name){
+  if(!_plzTab||!ort||!name)return "";
+  const o=_objNorm(String(ort).replace(/\d{5}/g,""));
+  const k=_plzKandidaten(name);
+  for(let i=0;i<k.length;i++){
+    const tr=_plzTab.get(o+"|"+_objNorm(k[i]));
+    if(tr)return tr;
+  }
+  return "";
+}
+/* Ortsangabe fuer GENAU diese eine Karte.
+   ⛔ Steht im Feld schon eine PLZ, bleibt sie unangetastet - dann hat Frank bewusst
+   eine gesetzt, und die sticht jede Tabelle. */
+function _plzOrtFuer(ortFeld,name){
+  const o=String(ortFeld||"").trim();
+  if(!o)return "";
+  if(/\d{5}/.test(o))return o;
+  const p=_plzSuchen(o,name);
+  return p?(p+" "+o):o;
+}
+// Ort geaendert -> die Liste muss die PLZ neu zeigen (voller Neuaufbau, nicht nur Haekchen).
+function _plzNeuZeichnen(){
+  const box=document.getElementById("_objImpListe");
+  if(box)box.dataset.gezeichnet="";
+  // ⚠ Kein stiller catch: er hat beim Bau eine tote Probe wie einen Baufehler
+  //   aussehen lassen. Fangen ja - verschweigen nein.
+  try{_objImpZeichnen();}catch(e){console.warn("[b832] Liste neu zeichnen:",e);}
 }
 async function _objImpAnlegen(){
   const gew=_objImpTreffer.filter(function(x){return x.an&&!x.schonDa;});
@@ -41759,7 +41836,8 @@ async function _objImpAnlegen(){
   gew.forEach(function(x){
     const url=base+x.id;
     const _ra=[raZeile.split("{Objekt}").join(x.name),raBlock].filter(function(s){return s&&s.trim();}).join("\n");
-    const _voll=ort?(x.name+", "+ort):x.name;
+    // b832: PLZ je Haus statt einer Zahl fuer alle.
+    const _voll=ort?(x.name+", "+_plzOrtFuer(ort,x.name)):x.name;
     const t={id:generateId(),title:_voll,desc:"",owner:"",due:"",status:spalte,ampel:"gr\u00fcn",
       rechnungsanschrift:_ra,rechnungsanschriftManuell:!!_ra,
       adresse:_voll,hausverwaltung:hv,nas:nasBasis?(nasBasis+"\\"+x.name):"",
@@ -41797,6 +41875,9 @@ function _objImpPick(){
 }
 function _objImpOeffnen(){
   _objImpSchliessen();
+  /* b832: PLZ-Tabelle im Hintergrund holen (1 MB, danach aus dem Zwischenspeicher).
+     Ist sie da, zeigt die Liste je Haus die gefundene PLZ - deshalb danach neu zeichnen. */
+  try{_plzLaden().then(function(){try{_plzNeuZeichnen();}catch(e){}});}catch(e){}
   _objImpTreffer=[];_objImpPfad=[];
   const immoBoards=Object.keys(boards||{}).filter(function(b){return !b.startsWith("_")&&(boardTypes[b]||"baustelle")==="immobilie";});
   if(!immoBoards.length){showToast("\u26A0 Kein Board vom Typ \uD83C\uDFE0 Objekt vorhanden","warning",6000);return;}
@@ -41818,7 +41899,7 @@ function _objImpOeffnen(){
         +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Spalte</label><select id=\"_objImpSpalte\" style=\"width:100%;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></select></div>"
         +"<div style=\"grid-column:1/-1;\"><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">\uD83D\uDCC7 Verwaltung aus dem Adressbuch <span style=\"opacity:.7;\">(f\u00fcllt Auftraggeber und Anschrift)</span></label><select id=\"_objImpAdr\" onchange=\"_objImpAdrWahl()\" style=\"width:100%;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></select></div>"
         +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Auftraggeber / Hausverwaltung</label><input id=\"_objImpHv\" type=\"text\" placeholder=\"z.B. AHV, Muster Verwaltung\" autocomplete=\"off\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></div>"
-        +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Ort <span style=\"opacity:.7;\">(wird an Titel und Adresse geh\u00e4ngt)</span></label><input id=\"_objImpOrt\" type=\"text\" placeholder=\"z.B. 99096 Erfurt\" autocomplete=\"off\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></div>"
+        +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Ort <span style=\"opacity:.7;\">(PLZ kommt je Haus dazu)</span></label><input id=\"_objImpOrt\" type=\"text\" placeholder=\"z.B. Erfurt\" autocomplete=\"off\" oninput=\"_plzNeuZeichnen()\" title=\"Nur den Ort eintragen \u2013 die Postleitzahl sucht PAM je Haus heraus. Eine hier eingetippte PLZ sticht die Tabelle.\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></div>"
         +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">NAS-Pfad bis zur Ortsebene</label><input id=\"_objImpNas\" type=\"text\" autocomplete=\"off\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:11px;\"></div>"
       +"</div>"
       +"<div style=\"display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;\">"
