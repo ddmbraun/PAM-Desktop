@@ -9642,7 +9642,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-31 · #842'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b842) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-31 · #843'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b843) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -41921,6 +41921,104 @@ function _objImpQuelleHinweis(text){
   h.textContent=text||"";
   h.style.display=text?"":"none";
 }
+/* ── b843: Der Straßenname vor dem Ordnernamen ────────────────────────────────
+   Befund von Frank (31.08.): Er legte für eine Hausverwaltung ein neues Objekt an
+   und bekam eine Karte, die nur „7 9" hieß – ohne Straßennamen. Gemessen: Dieser
+   Dialog nimmt ausschließlich den Namen des angehakten Ordners. In Franks Ablage
+   ist bei Hausnummern-Gruppen aber die GRUPPE das Objekt (<Straße>\<Hausnummern>);
+   der Straßenname steht eine Ebene höher und ging dabei verloren. Er fehlte damit
+   auch in der Rechnungsanschrift und in {Objekt} der Word-Vorlagen (b759) – also
+   im Schreiben an den Kunden.
+
+   ⛔ Es wird weiterhin NICHTS umgedeutet. Der Straßenname kommt aus einem Feld,
+   das Frank sieht und ändern kann, nicht aus einer Namensregel. Vorbelegt wird er
+   nur dort, wo die gelesenen Ordner wirklich wie Hausnummern aussehen.
+   ⛔ EINE Funktion baut den Namen (`_objImpVollerName`). Vorschau,
+   Dublettenprüfung und Anlegen rufen genau diese. Zwei Rechenwege wären zwei
+   Wahrheiten: die Vorschau zeigte X, angelegt würde Y – und der zweite Lauf legte
+   alles doppelt an, weil die Dublettenprüfung den alten Namen vergliche. */
+function _objImpStrasseFeld(){
+  return (((document.getElementById("_objImpStr")||{}).value)||"").trim();
+}
+function _objImpOrtFeld(){
+  return (((document.getElementById("_objImpOrt")||{}).value)||"").trim().replace(/^[,\s]+/,"");
+}
+/* Name OHNE Ort – so heißt das Objekt selbst. Geht auch in {Objekt} der ersten
+   Zeile der Rechnungsanschrift; die Stadt gehört dort in den Block darunter. */
+function _objImpBasisName(ordnerName){
+  const n=String(ordnerName||"").trim();
+  const s=_objImpStrasseFeld();
+  return (s?(s+" "+n):n).trim();
+}
+/* Name MIT Ort – so heißt die Karte und so steht es im Adressfeld. */
+function _objImpVollerName(ordnerName){
+  const basis=_objImpBasisName(ordnerName);
+  const ort=_objImpOrtFeld();
+  return ort?(basis+", "+_plzOrtFuer(ort,basis)):basis;
+}
+/* Sieht dieser Ordnername nach einer bloßen Hausnummer aus? Kein Buchstabenlauf
+   von drei – dann steckt kein Straßenname darin. „7-9" und „1-5" ja, „62a-b" auch
+   (einzelne Buchstaben sind Hausnummern-Zusätze), ein Ordner mit Straßennamen nicht.
+   ⛔ Hier stehen bewusst KEINE echt aussehenden Anschriften: diese Datei wird
+   öffentlich ausgeliefert, test_b658 wacht darüber. Beispiele in CHANGES.md.
+   ⚠ Absichtlich grob: die Erkennung entscheidet nur über Vorbelegung und Warnung,
+   nie über den Namen selbst. */
+function _objImpWieHausnummer(n){
+  return !/[A-Za-z\u00c0-\u024f]{3,}/.test(String(n||""));
+}
+/* Namen und Dublettenstand der ganzen Liste neu rechnen – nach dem Lesen und nach
+   jeder Änderung an Straße oder Ort.
+   ⛔ Verglichen wird AUCH gegen den bloßen Ordnernamen: Karten, die vor b843 ohne
+   Straße angelegt wurden, gelten weiter als vorhanden. Sonst legte ein Lauf mit
+   gefülltem Straßenfeld sie ein zweites Mal an. */
+function _objImpNamenNeu(){
+  let vorhanden;
+  try{vorhanden=_objImpVorhandene();}catch(e){console.warn("[b843] Vorhandene:",e);vorhanden=new Set();}
+  _objImpTreffer.forEach(function(x){
+    x.voll=_objImpVollerName(x.name);
+    x.wird=_objImpTitelWieGespeichert(x.voll);
+    const da=vorhanden.has(String(x.voll).trim().toLowerCase())
+      ||vorhanden.has(String(x.wird).trim().toLowerCase())
+      ||vorhanden.has(String(x.name).trim().toLowerCase())
+      ||vorhanden.has(_objImpTitelWieGespeichert(x.name).toLowerCase());
+    /* Häkchen nur anfassen, wenn der Stand sich wirklich dreht – sonst hakte jede
+       Eingabe im Ort-Feld eine von Hand abgewählte Zeile wieder an. */
+    if(da!==x.schonDa){x.schonDa=da;x.an=!da;}
+  });
+}
+/* Hinweis unter dem Straßenfeld: an EINER Stelle setzen und wegnehmen.
+   `textContent`, nicht `innerHTML` – der Text enthält einen Ordnernamen aus Drive. */
+function _objImpStrHinweis(text){
+  const h=document.getElementById("_objImpStrHinweis");
+  if(h)h.textContent=text||"";
+}
+/* Straßenfeld vorbelegen – mit dem Namen der Ebene, die gerade gelesen wurde (den
+   kennt seit b840 `_objImpAktName`). Nur wenn ALLE gelesenen Ordner wie Hausnummern
+   aussehen; bei Straßenordnern bleibt das Feld leer, sonst stünde der Name der
+   Hausverwaltung vor jeder Straße.
+   ⛔ Ein von Hand gesetzter Wert wird nie überschrieben. Erkennungsmerkmal ist
+   `dataset.auto` – ein Textvergleich wäre falsch, sobald Frank genau den
+   vorbelegten Namen selbst eintippt. */
+function _objImpStrVorbelegen(){
+  const sf=document.getElementById("_objImpStr");
+  if(!sf)return;
+  if(sf.value.trim()&&sf.dataset.auto!=="1")return;
+  const alle=_objImpTreffer.length>0&&_objImpTreffer.every(function(x){return _objImpWieHausnummer(x.name);});
+  if(alle&&_objImpAktName){
+    sf.value=_objImpAktName;sf.dataset.auto="1";
+    _objImpStrHinweis("↳ vorbelegt aus dem Ordner „"+_objImpAktName+"“ – bitte prüfen und berichtigen, wenn die Straße anders heißt.");
+  }else{
+    if(sf.dataset.auto==="1"){sf.value="";sf.dataset.auto="";}
+    _objImpStrHinweis("");
+  }
+}
+/* Frank tippt selbst – ab dann gehört das Feld ihm. */
+function _objImpStrGeaendert(){
+  const sf=document.getElementById("_objImpStr");
+  if(sf)sf.dataset.auto="";
+  _objImpStrHinweis("");
+  _plzNeuZeichnen();
+}
 function _objImpVorhandene(){
   // Titel aller schon angelegten Objekte - ueber ALLE Objekt-Boards, nicht nur das offene.
   const s=new Set();
@@ -41967,17 +42065,13 @@ async function _objImpLesen(fidDirekt,name){
     if(!r.ok){if(r.status===401)_handleDrive401();throw new Error("HTTP "+r.status);}
     const j=await r.json();
     const files=(j.files)||[];
-    const vorhanden=_objImpVorhandene();
     _objImpTreffer=files.map(function(f){
-      const wird=_objImpTitelWieGespeichert(f.name);
-      /* b829: Mit Ort-Zusatz heisst die Karte "Stra\u00dfe, PLZ Ort" - beim zweiten Lauf
-         muss auch DIESE Form als "schon vorhanden" gelten, sonst legt er alles neu an. */
-      const _o=(((document.getElementById("_objImpOrt")||{}).value)||"").trim().replace(/^[,\s]+/,"");
-      const mitOrt=_o?(f.name+", "+_o):"";
-      const da=vorhanden.has(String(f.name).trim().toLowerCase())
-        ||vorhanden.has(wird.toLowerCase())
-        ||(!!mitOrt&&(vorhanden.has(mitOrt.toLowerCase())||vorhanden.has(_objImpTitelWieGespeichert(mitOrt).toLowerCase())));
-      return {id:f.id,name:f.name,wird:wird,schonDa:da,an:!da};
+      /* b843: Nur die Rohdaten. Name, Dublettenstand und Häkchen rechnet
+         `_objImpNamenNeu` gleich darunter – dieselbe Funktion, die auch die Vorschau
+         und das Anlegen benutzen. Bis b842 stand die Dublettenlogik hier inline; mit
+         dem Straßenfeld vergliche sie den falschen Namen, weil das Feld erst NACH
+         dieser Zeile vorbelegt wird. */
+      return {id:f.id,name:f.name,wird:f.name,voll:f.name,schonDa:false,an:true};
     });
     // b825: NAS-Pfad zur gelesenen Ebene nachtragen - nur wenn das Feld noch leer
     // ist oder noch auf dem Vorschlag steht. Ein von Hand gesetzter Pfad bleibt stehen.
@@ -42001,6 +42095,12 @@ async function _objImpLesen(fidDirekt,name){
       _objImpAktName=fidDirekt?String(name||""):(await _objImpOrdnerName(fid));
       if(!fidDirekt&&_objImpAktName)_objImpQuelleHinweis("↳ Adresse zeigt auf: „"+_objImpAktName+"“");
     }catch(e){console.warn("[b840] Name:",e);}
+    /* b843: Erst hier – `_objImpStrVorbelegen` braucht den Namen der Ebene aus b840,
+       und `_objImpNamenNeu` braucht das vorbelegte Feld. Beides steht AUSSERHALB des
+       b840-Blocks: Wer den Namen nicht bekommt, soll die Liste trotzdem mit richtigem
+       Dublettenstand sehen. */
+    try{_objImpStrVorbelegen();}catch(e){console.warn("[b843] Straße vorbelegen:",e);}
+    try{_objImpNamenNeu();}catch(e){console.warn("[b843] Namen rechnen:",e);}
     const _lb=document.getElementById("_objImpListe");if(_lb)_lb.dataset.gezeichnet="";
     _objImpZeichnen(!!j.nextPageToken);
   }catch(e){
@@ -42099,12 +42199,16 @@ function _objImpZeichnen(mehrDa,nurListe){
     let _plzHin="";
     if(_po&&!x.schonDa&&_plzTab){
       if(/\d{5}/.test(_po)){_plzHin="";}
-      else{const _pz=_plzSuchen(_po,x.name);
+      // b843: mit der Straße davor – sonst sucht die Vorschau nach der Hausnummer.
+      else{const _pz=_plzSuchen(_po,_objImpBasisName(x.name));
         _plzHin=_pz?("<span style=\"font-size:10px;color:var(--text2);\" title=\"aus der PLZ-Tabelle\"> \u00b7 "+esc(_pz)+"</span>")
                    :("<span style=\"font-size:10px;color:#a04000;\" title=\"Diese Stra\u00dfe steht nicht eindeutig in der Tabelle \u2013 PAM tr\u00e4gt keine PLZ ein\"> \u00b7 PLZ unklar</span>");}
     }
+    /* b843: Fehlt der Straßenname, fällt es hier auf – nicht erst im Kundenschreiben. */
+    const _ohneStr=(!x.schonDa&&!_objImpStrasseFeld()&&_objImpWieHausnummer(x.name))
+      ?"<span style=\"font-size:10px;color:#a04000;font-weight:700;\" title=\"Dieser Ordner heißt nur nach der Hausnummer. Ohne Straße stünde sie so im Titel, in der Adresse und in {Objekt} der Word-Vorlagen.\"> \u00b7 \u26a0 ohne Straßenname</span>":"";
     const hinweis=x.schonDa?"<span style=\"font-size:10px;color:var(--text2);\">\u00b7 schon vorhanden</span>":
-      (x.wird!==x.name?"<span style=\"font-size:10px;color:#a04000;\" title=\"PAM ersetzt Binde- und Unterstriche im Titel durch Leerzeichen\">\u00b7 hei\u00dft dann: "+esc(x.wird)+"</span>":"")+_plzHin;
+      (x.wird!==x.name?"<span style=\"font-size:10px;color:#a04000;\" title=\"So heißt die Karte nach dem Anlegen – Straße, Ort und PLZ kommen dazu, Binde- und Unterstriche werden zu Leerzeichen\">\u00b7 hei\u00dft dann: "+esc(x.wird)+"</span>":"")+_ohneStr+_plzHin;
     /* b824: Der Zeilenrahmen ist kein <label> mehr. Ein Klick irgendwo im Label setzt
        das Haekchen - der Hineingehen-Knopf haette dabei IMMER auch an-/abgehakt.
        Jetzt: Haekchen und Name schalten das Haekchen, der Pfeil rechts geht hinein. */
@@ -42294,6 +42398,9 @@ function _plzNeuZeichnen(){
   if(box)box.dataset.gezeichnet="";
   // ⚠ Kein stiller catch: er hat beim Bau eine tote Probe wie einen Baufehler
   //   aussehen lassen. Fangen ja - verschweigen nein.
+  // b843: erst rechnen, dann zeichnen – sonst zeigt die Liste den alten Namen und
+  // einen Dublettenstand, der nicht mehr stimmt.
+  try{_objImpNamenNeu();}catch(e){console.warn("[b843] Namen rechnen:",e);}
   try{_objImpZeichnen();}catch(e){console.warn("[b832] Liste neu zeichnen:",e);}
 }
 async function _objImpAnlegen(){
@@ -42321,15 +42428,22 @@ async function _objImpAnlegen(){
   // b827: Die erste Zeile merken - sie ist bei jedem Lauf dieselbe, wurde aber
   // bisher jedes Mal neu getippt (Befund Frank 31.08.).
   try{if(raZeile)localStorage.setItem(OBJIMP_RAZEILE,raZeile);}catch(e){}
-  if(!confirm(gew.length+" Objektkarte(n) im Board \u201e"+board+"\u201c anlegen?\n\nEs wird nichts \u00fcberschrieben und nichts verschoben \u2013 es kommen nur neue Karten dazu."))return;
+  /* b843: Wer die Warnung in der Liste übersehen hat, liest sie spätestens hier.
+     ⛔ Nicht sperren – es kann Objekte geben, die wirklich so heißen. Nur sagen. */
+  const _ohne=_objImpStrasseFeld()?0:gew.filter(function(x){return _objImpWieHausnummer(x.name);}).length;
+  const _warn=_ohne?("\n\n\u26a0 "+_ohne+" davon tragen nur eine Hausnummer und KEINEN Straßennamen.\nSo stünde es im Titel, in der Adresse und in {Objekt} der Word-Vorlagen."):"";
+  if(!confirm(gew.length+" Objektkarte(n) im Board \u201e"+board+"\u201c anlegen?"+_warn+"\n\nEs wird nichts \u00fcberschrieben und nichts verschoben \u2013 es kommen nur neue Karten dazu."))return;
   const base="https://drive.google.com/drive/folders/";
   if(!Array.isArray(boards[board]))boards[board]=[];
   let n=0;
   gew.forEach(function(x){
     const url=base+x.id;
-    const _ra=[raZeile.split("{Objekt}").join(x.name),raBlock].filter(function(s){return s&&s.trim();}).join("\n");
+    /* b843: mit Straße, ohne Ort – „WEG {Objekt}" wird zu „WEG " + Straße und
+       Ohne Straßenfeld ist das Ergebnis unverändert der Ordnername. */
+    const _ra=[raZeile.split("{Objekt}").join(_objImpBasisName(x.name)),raBlock].filter(function(s){return s&&s.trim();}).join("\n");
     // b832: PLZ je Haus statt einer Zahl fuer alle.
-    const _voll=ort?(x.name+", "+_plzOrtFuer(ort,x.name)):x.name;
+    // b843: EINE Funktion – genau die, deren Ergebnis in der Vorschau stand.
+    const _voll=_objImpVollerName(x.name);
     const t={id:generateId(),title:_voll,desc:"",owner:"",due:"",status:spalte,ampel:"gr\u00fcn",
       rechnungsanschrift:_ra,rechnungsanschriftManuell:!!_ra,
       adresse:_voll,hausverwaltung:hv,nas:nasBasis?(nasBasis+"\\"+x.name):"",
@@ -42405,6 +42519,11 @@ function _objImpOeffnen(){
         +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Spalte</label><select id=\"_objImpSpalte\" style=\"width:100%;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></select></div>"
         +"<div style=\"grid-column:1/-1;\"><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">\uD83D\uDCC7 Verwaltung aus dem Adressbuch <span style=\"opacity:.7;\">(f\u00fcllt Auftraggeber und Anschrift)</span></label><select id=\"_objImpAdr\" onchange=\"_objImpAdrWahl()\" style=\"width:100%;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></select></div>"
         +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Auftraggeber / Hausverwaltung</label><input id=\"_objImpHv\" type=\"text\" placeholder=\"z.B. AHV, Muster Verwaltung\" autocomplete=\"off\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></div>"
+        /* b843: Straße davorsetzen. ⛔ Wird bewusst NICHT gemerkt (kein localStorage):
+           der Wert gilt je Ebene – gemerkt stünde beim nächsten Lauf die Straße der
+           vorigen Verwaltung vor den neuen Häusern. */
+        +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Straße davorsetzen <span style=\"opacity:.7;\">(leer, wenn der Ordner schon die Straße ist)</span></label><input id=\"_objImpStr\" type=\"text\" placeholder=\"nur nötig, wenn die Ordner Hausnummern sind\" autocomplete=\"off\" oninput=\"_objImpStrGeaendert()\" title=\"Heißen die Ordner nur nach der Hausnummer, gehört der Straßenname hierher. Er wird jedem Ordnernamen vorangestellt.\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\">"
+          +"<div id=\"_objImpStrHinweis\" style=\"font-size:10px;color:var(--text2);line-height:1.4;margin-top:3px;\"></div></div>"
         +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Ort <span style=\"opacity:.7;\">(PLZ kommt je Haus dazu)</span></label><input id=\"_objImpOrt\" type=\"text\" placeholder=\"z.B. Erfurt\" autocomplete=\"off\" oninput=\"_plzNeuZeichnen()\" title=\"Nur den Ort eintragen \u2013 die Postleitzahl sucht PAM je Haus heraus. Eine hier eingetippte PLZ sticht die Tabelle.\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></div>"
         +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">NAS-Pfad bis zur Ortsebene</label><input id=\"_objImpNas\" type=\"text\" autocomplete=\"off\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:11px;\">"
           /* b838: Platz fuer die Warnung, wenn der Pfad nicht abgeleitet werden konnte.
