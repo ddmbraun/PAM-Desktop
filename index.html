@@ -9642,7 +9642,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-31 · #847'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b847) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-31 · #848'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b848) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -36089,6 +36089,60 @@ let _adrBookLoaded=false;
 
 function _adrNorm(s){return (s||'').toString().toLowerCase().replace(/[\s\/().+-]/g,'').trim();}
 function _adrKey(name,tel,email){const t=(tel&&tel.trim())?tel:(email||'');return _adrNorm(name)+'|'+_adrNorm(t);}
+
+/* ── b848: Suche mit Umlauten · Sortierung · Dubletten-Warnung ───────────────
+   Alle drei Punkte hat Frank am 31.08.2026 zurückgestellt und dann freigegeben.
+
+   ⛔⛔ Warum eine EIGENE Normalisierung und nicht `_adrNorm` erweitert:
+   `_adrNorm` speist über `_adrKey` den **Dubletten-Schlüssel** (12 Aufrufstellen,
+   darunter das Speichern) und über `_objContactKeys` die **Objektzuordnung**.
+   Würde man dort Umlaute umschreiben, änderten sich alle Schlüssel auf einmal:
+   Zwei Einträge, die heute getrennt sind, bekämen denselben Schlüssel - und beim
+   Speichern überschriebe einer den anderen. Genau der Datenverlust, den es beim
+   Task-Speichern schon einmal gab. `_adrNorm` bleibt deshalb unangetastet;
+   `_adrNormSuche` wird NUR beim Suchen und beim Dubletten-Zählen benutzt. */
+function _adrNormSuche(s){
+  /* `_adrNorm` hat schon kleingeschrieben - hier stehen nur Kleinbuchstaben.
+     Beide Seiten des Vergleichs laufen hier durch, darum findet „Krueger" auch
+     „Krüger" und umgekehrt. Und „Eigentümer" findet endlich die intern ohne
+     Umlaut geschriebene Rolle `eigentuemer`. */
+  return _adrNorm(s).replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/ß/g,'ss');
+}
+
+/* Wonach sortiert wird: der Name, ersatzweise die Firma. Ein Eintrag ohne beides
+   hat nichts zum Einsortieren und rutscht ans Ende statt nach ganz oben. */
+function _adrSortName(k){
+  const n=((k&&k.name)||'').trim()||((k&&k.firma)||'').trim();
+  return n||'￿';
+}
+
+/* Zählt Namen, die mehrfach vorkommen.
+   ⛔ Diese Funktion ändert NICHTS - sie markiert nur. Zusammenführen bleibt
+   Handarbeit: welcher der beiden Einträge der gepflegte ist, weiß nur Frank.
+   ⚡ Der Grund für die Dubletten liegt in `_adrKey`: Es nimmt Telefon ODER -
+   wenn keines da ist - E-Mail, nie beides. Fehlt bei einem Eintrag die Nummer,
+   gilt derselbe Mensch als neuer. Deshalb wird hier nur über den NAMEN gezählt. */
+/* Die Marke am Eintrag. Eigene Funktion, damit sie einzeln prüfbar ist. */
+function _adrDubMarke(k,dub){
+  if(!dub)return '';
+  const n=_adrNormSuche((k&&k.name)||'');
+  const anz=n?(dub[n]||0):0;
+  if(anz<2)return '';
+  return ' <span title="Dieser Name steht '+anz+'× im Adressbuch. PAM führt nichts von allein zusammen – beide ansehen und den überflüssigen löschen." '
+    +'style="padding:0 5px;font-size:10px;border-radius:8px;background:#fef3c7;color:#92400e;border:1px solid #fcd34d;white-space:nowrap;">⚠ '+anz+'×</span>';
+}
+
+function _adrDublettenZaehlung(){
+  const z={};
+  ((typeof _adrBook!=='undefined'&&_adrBook)?_adrBook:[]).forEach(function(k){
+    const n=_adrNormSuche((k&&k.name)||'');
+    if(n)z[n]=(z[n]||0)+1;
+  });
+  const out={};
+  Object.keys(z).forEach(function(n){ if(z[n]>1)out[n]=z[n]; });
+  return out;
+}
+
 /* b842: `hausverwaltung` fehlte hier - ein so gekennzeichneter Kontakt stand im
    Adressbuch als „🏷 hausverwaltung" da, im rohen Feldnamen. Die Rolle gibt es im
    Datenbestand seit langem: das VBS setzt sie beim Anlegen eines Auftrags.
@@ -36549,7 +36603,10 @@ function _adrRenderPickerList(filter){
   const L=document.getElementById('adr-list');if(!L)return;
   const manage=(window._adrPickMode==='manage');
   const esc=s=>(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
-  const f=_adrNorm(filter);
+  /* b848: _adrNormSuche statt _adrNorm - NUR hier und in der Zeile unten.
+     ⛔ Die Schlüssel-Stellen (`_adrKey`, `_objContactKeys`) bleiben auf
+     `_adrNorm`, sonst änderten sich alle Dubletten-Schlüssel auf einmal. */
+  const f=_adrNormSuche(filter);
   const all=_adrBook||[];
   if(!all.length){L.innerHTML='<div style="padding:12px;color:var(--text2,#6b7280);font-size:12px;">Noch keine Adressen gespeichert.'+(manage?' Mit „➕ Neue Adresse" anlegen.':' Nutze ✅ an einem Kontakt.')+'</div>';return;}
   /* b847: Der Rollenfilter wirkt ZUSÄTZLICH zur Suche - „alle Hausverwaltungen,
@@ -36557,13 +36614,23 @@ function _adrRenderPickerList(filter){
   const rf=window._adrRolleFilter||'';
   const list=all.filter(function(k){
     if(rf&&((k.rolle||'sonstiges')!==rf))return false;
-    return !f||_adrNorm((k.name||'')+(k.firma||'')+(k.strasse||'')+(k.tel||'')+(k.email||'')+(k.ort||'')+(k.rolle||'')+(((k&&k.objekte)||[]).join(' '))).includes(f);
+    return !f||_adrNormSuche((k.name||'')+(k.firma||'')+(k.strasse||'')+(k.tel||'')+(k.email||'')+(k.ort||'')+(k.rolle||'')+(((k&&k.objekte)||[]).join(' '))).includes(f);
   });
+  /* b848: Grundordnung alphabetisch. Im Auswahl-Modus sortiert der Objektbezug
+     weiter unten nochmal in „an diesem Objekt" / „andere" - innerhalb beider
+     Gruppen bleibt es dann alphabetisch, weil hier schon sortiert wurde.
+     `localeCompare` mit 'de' stellt ä/ö/ü zu a/o/u, nicht ans Alphabetende. */
+  list.sort(function(a,b){return _adrSortName(a).localeCompare(_adrSortName(b),'de',{sensitivity:'base',numeric:true});});
   if(!list.length){L.innerHTML='<div style="padding:12px;color:var(--text2,#6b7280);font-size:12px;">Kein Treffer.'+(rf?' <b>Filter „'+_adrRoleLabel(rf)+'" ist an.</b>':'')+'</div>';return;}
   // Objekte je Eintrag einmal auflösen (abgeleitet aus den Tasks + fest angeheftet)
   const objQ=manage?'':_objQueryKey(window._adrPickObj||'');
   const objs={};
   list.forEach(function(k){ objs[k.id]=_objForEntry(k); });
+  /* b848: Namen, die mehrfach im Adressbuch stehen. ⛔ Nur eine Marke -
+     zusammengeführt wird NICHTS automatisch. Gezählt wird über den ganzen
+     Bestand, nicht über die gefilterte Liste: sonst verschwände die Warnung,
+     sobald ein Filter nur einen der beiden Einträge übrig lässt. */
+  const dub=_adrDublettenZaehlung();
   const row=function(k){
     var adr=[k.strasse,[k.plz,k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ');
     var sub=[k.firma,adr,k.tel,k.email].filter(Boolean).map(esc).join(' · ');
@@ -36576,7 +36643,7 @@ function _adrRenderPickerList(filter){
       ?'<div id="objlist_'+esc(k.id)+'" style="display:none;margin-top:3px;padding:4px 6px;background:var(--bg3,#f9fafb);border-radius:4px;font-size:10px;color:var(--text2,#6b7280);line-height:1.5;">'
         +oKeys.map(function(kk){return (o[kk].fest?'📌 ':'📍 ')+esc(o[kk].adr);}).join('<br>')+'</div>'
       :'';
-    var inner='<span style="flex:1;min-width:0;"><span style="font-size:10px;color:var(--text2,#6b7280);">'+_adrRoleLabel(k.rolle)+'</span>'+badge+'<br><b>'+esc(k.name||'(ohne Name)')+'</b>'+(sub?'<br><span style="font-size:11px;color:var(--text2,#6b7280);">'+sub+'</span>':'')+oList+'</span>'
+    var inner='<span style="flex:1;min-width:0;"><span style="font-size:10px;color:var(--text2,#6b7280);">'+_adrRoleLabel(k.rolle)+'</span>'+badge+_adrDubMarke(k,dub)+'<br><b>'+esc(k.name||'(ohne Name)')+'</b>'+(sub?'<br><span style="font-size:11px;color:var(--text2,#6b7280);">'+sub+'</span>':'')+oList+'</span>'
       +'<button type="button" title="Aus Adressbuch löschen" onclick="event.preventDefault();event.stopPropagation();_adrBookDelete(\''+esc(k.id)+'\')" style="flex-shrink:0;padding:2px 6px;font-size:13px;border:none;background:transparent;cursor:pointer;">🗑</button>';
     if(manage){
       return '<div class="adr-row" onclick="_adrBookEditEntry(\''+esc(k.id)+'\')" style="display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:5px;cursor:pointer;font-size:12px;">'+inner+'</div>';
