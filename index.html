@@ -9642,7 +9642,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-31 · #845'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b845) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-31 · #846'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b846) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -36475,6 +36475,10 @@ function _adrBookOpenPicker(mode){
   const btnClose='<button type="button" onclick="document.getElementById(\'adr-picker-modal\').remove()" style="padding:6px 14px;font-size:12px;border:1px solid var(--border,#d1d5db);background:var(--bg3,#f9fafb);color:var(--text,#111);border-radius:6px;cursor:pointer;">'+(mode==='manage'?'Schließen':'Abbrechen')+'</button>';
   const footLinks=(mode==='manage')
     ?'<button type="button" onclick="_adrBookNewEntry()" style="padding:6px 12px;font-size:12px;border:none;background:#15803d;color:#fff;border-radius:6px;cursor:pointer;font-weight:600;">➕ Neue Adresse</button>'
+     /* b846: zweiter Knopf, NUR im Verwalten-Modus. Im Auswahl-Modus („📇 Adresse
+        wählen" aus einem Task) darf er nicht erscheinen - dort sucht man einen
+        Kontakt für den offenen Task und legt nicht nebenbei hundert neue an. */
+     +'<button type="button" onclick="_mfImpOpen()" title="Kundenexport aus MF dach einlesen (CSV)" style="padding:6px 12px;font-size:12px;border:1px solid var(--border,#d1d5db);background:var(--bg3,#f3f4f6);color:var(--text,#111);border-radius:6px;cursor:pointer;margin-left:6px;">📥 Aus MF dach</button>'
     :'<button type="button" onclick="_adrPickToggleAll()" style="padding:6px 12px;font-size:12px;border:1px solid var(--border,#d1d5db);background:var(--bg3,#f3f4f6);color:var(--text,#111);border-radius:6px;cursor:pointer;">Alle</button>';
   const footRight=(mode==='manage')
     ?btnClose
@@ -36625,6 +36629,286 @@ async function _adrBookDelete(id){
     _adrRenderPickerList(se?se.value:'');
     showToast('🗑 Aus Adressbuch gelöscht','info',2500);
   }catch(e){showToast('⚠ Löschen fehlgeschlagen: '+e.message,'error',5000);}
+}
+
+// ── b846: Adressen aus MF dach einlesen (CSV) ───────────────────────────────
+/* MF dach exportiert seinen Kundenstamm als CSV: Trenner Semikolon, Zeichensatz
+   Windows-1252 (ANSI) – NICHT UTF-8. Liest man die Datei als UTF-8, kommt
+   „Große Arche" als „Gro?e Arche" an. Es ist dieselbe Falle wie auf dem Rückweg
+   (Werkzeug 28_PAM_zu_MFdach, dort an ETC.csv gemessen), nur andersherum.
+   ⛔ Der Zeichensatz ist deshalb fest verdrahtet und wird nicht geraten.
+
+   ⛔ MF dach hat fünf Telefonfelder, ein Adressbuch-Eintrag hier zwei. Festgelegt
+   von Frank am 31.08.2026: Festnetz (Tel1) und Mobil. Tel2/Privat/Fax kommen
+   NICHT mit – lieber zwei verlässliche Nummern als vier vermischte.
+
+   ⛔ Der Knopf sitzt allein im Verwalten-Modus des Adressbuchs. Im Auswahl-Modus
+   („📇 Adresse wählen" aus einem Task) darf er nicht auftauchen: dort sucht man
+   einen Kontakt für den offenen Task und legt nicht nebenbei hundert neue an. */
+const MF_IMP_SPALTEN={firma:'AdrZeile2',name:'AdrZeile3',strasse:'Straße',plz:'PLZ',ort:'Ort',tel:'Tel1',tel2:'Mobil',email:'EMail'};
+/* Schreibweisen, die dieselbe Spalte meinen. MF dach schreibt „Straße"; ältere
+   Ausleitungen und von Hand nachbearbeitete Dateien schreiben „Strasse". */
+const MF_IMP_SPALTEN_ALT={strasse:['Strasse','Straße','Str.'],email:['EMail','E-Mail','Email'],plz:['PLZ','Plz'],ort:['Ort','Stadt']};
+
+/* Zerlegt den Dateiinhalt. Werte dürfen in "…" stehen und dann selbst ein
+   Semikolon enthalten; "" ist ein maskiertes Anführungszeichen. */
+function _mfImpParseCsv(text){
+  const zeilen=[];let feld='',zeile=[],inQ=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(inQ){
+      if(c==='"'){ if(text[i+1]==='"'){feld+='"';i++;} else inQ=false; }
+      else feld+=c;
+    }else{
+      if(c==='"')inQ=true;
+      else if(c===';'){zeile.push(feld);feld='';}
+      else if(c==='\r'){}
+      else if(c==='\n'){zeile.push(feld);zeilen.push(zeile);zeile=[];feld='';}
+      else feld+=c;
+    }
+  }
+  if(feld!==''||zeile.length){zeile.push(feld);zeilen.push(zeile);}
+  // Leerzeilen weg – MF dach hängt gern eine an.
+  return zeilen.filter(function(z){return z.some(function(v){return (v||'').trim()!=='';});});
+}
+
+/* Sucht eine Spalte in der Kopfzeile: erst der amtliche Name, dann die
+   bekannten Schreibvarianten. Vergleich ohne Groß/Klein und ohne Leerzeichen. */
+function _mfImpSpalte(kopf,feld){
+  const spalten=(typeof MF_IMP_SPALTEN!=='undefined')?MF_IMP_SPALTEN:{};
+  const alt=(typeof MF_IMP_SPALTEN_ALT!=='undefined')?MF_IMP_SPALTEN_ALT:{};
+  const norm=function(s){return (s||'').replace(/^\uFEFF/,'').replace(/\s+/g,'').toLowerCase();};
+  const kandidaten=[spalten[feld]].concat(alt[feld]||[]).filter(Boolean);
+  const knorm=kopf.map(norm);
+  for(let i=0;i<kandidaten.length;i++){
+    const p=knorm.indexOf(norm(kandidaten[i]));
+    if(p>=0)return p;
+  }
+  return -1;
+}
+
+/* Macht aus den Zeilen der Datei Adressbuch-Einträge. Die Kopfzeile wird nicht
+   zum Kontakt – sie liefert nur die Spaltenpositionen. */
+function _mfImpZuKontakte(zeilen,rolle){
+  if(!zeilen||zeilen.length<2)return [];
+  const kopf=zeilen[0];
+  const idx={};
+  ['firma','name','strasse','plz','ort','tel','tel2','email'].forEach(function(k){idx[k]=_mfImpSpalte(kopf,k);});
+  const hol=function(z,k){const p=idx[k];return (p>=0&&z[p]!=null)?String(z[p]).trim():'';};
+  const out=[];
+  for(let i=1;i<zeilen.length;i++){
+    const z=zeilen[i];
+    const k={
+      rolle:rolle||'sonstiges',
+      name:hol(z,'name'),firma:hol(z,'firma'),
+      strasse:hol(z,'strasse'),plz:hol(z,'plz'),ort:hol(z,'ort'),
+      tel:hol(z,'tel'),tel2:hol(z,'tel2'),email:hol(z,'email'),
+      objekte:[]
+    };
+    /* Steht der Name nur in der Firmenzeile (bei MF dach der Regelfall für
+       Firmen und Vereine), rutscht er in den Namen – ein Eintrag ohne Namen
+       wäre im Adressbuch nicht auffindbar. */
+    if(!k.name&&k.firma){k.name=k.firma;k.firma='';}
+    if(!k.name&&!k.tel&&!k.email)continue;  // nichts Brauchbares in der Zeile
+    out.push(k);
+  }
+  return out;
+}
+
+/* ── Der zuletzt benutzte Ordner ──────────────────────────────────────────────
+   Ein fester Pfad lässt sich nicht eintragen: der Browser gibt einer Seite von
+   sich aus keinen Zugriff auf \\nas-ddbraun\… Was geht, ist die Datei vom letzten
+   Mal zu merken; der Auswahldialog öffnet dann gleich im richtigen Ordner.
+   ⛔ Alles hier ist bewusst fehlertolerant: ohne Merker fällt der Import auf die
+   normale Dateiauswahl zurück, er darf daran nie scheitern. */
+function _mfImpIdb(){
+  return new Promise(function(res,rej){
+    const rq=indexedDB.open('pam-mfimport',1);
+    rq.onupgradeneeded=function(){try{rq.result.createObjectStore('h');}catch(e){}};
+    rq.onsuccess=function(){res(rq.result);};
+    rq.onerror=function(){rej(rq.error);};
+  });
+}
+async function _mfImpMerken(handle){
+  try{
+    const db=await _mfImpIdb();
+    await new Promise(function(res,rej){
+      const tx=db.transaction('h','readwrite');
+      tx.objectStore('h').put(handle,'letzte');
+      tx.oncomplete=res;tx.onerror=function(){rej(tx.error);};
+    });
+  }catch(e){}
+}
+async function _mfImpGemerkt(){
+  try{
+    const db=await _mfImpIdb();
+    return await new Promise(function(res){
+      const tx=db.transaction('h','readonly');
+      const rq=tx.objectStore('h').get('letzte');
+      rq.onsuccess=function(){res(rq.result||null);};
+      rq.onerror=function(){res(null);};
+    });
+  }catch(e){return null;}
+}
+
+/* Liest eine gewählte Datei als Windows-1252 ein. */
+async function _mfImpDateiLesen(file){
+  const buf=await file.arrayBuffer();
+  return new TextDecoder('windows-1252').decode(buf);
+}
+
+/* Einstieg am Knopf. Bietet die Datei vom letzten Mal an, sonst Dateiauswahl. */
+async function _mfImpOpen(){
+  if(!gdriveToken){showToast('⚠ Bitte zuerst Google Drive verbinden (☁️)','warning',4000);return;}
+  let file=null,handle=null;
+  const alt=await _mfImpGemerkt();
+  if(alt){
+    try{
+      /* Die Erlaubnis kann der Browser zurückgesetzt haben (gelöschte Browserdaten,
+         langes Nichtbenutzen). Dann wird sie einmal neu erfragt; sagt der Nutzer
+         nein, geht es ganz normal über die Dateiauswahl weiter. */
+      let p=await alt.queryPermission({mode:'read'});
+      if(p!=='granted')p=await alt.requestPermission({mode:'read'});
+      if(p==='granted'){file=await alt.getFile();handle=alt;}
+    }catch(e){}
+  }
+  if(!file){
+    try{
+      const opt={types:[{description:'MF-dach-Export',accept:{'text/csv':['.csv','.txt']}}],excludeAcceptAllOption:false,multiple:false};
+      if(alt)opt.startIn=alt;   // öffnet im Ordner vom letzten Mal
+      const [h]=await window.showOpenFilePicker(opt);
+      handle=h;file=await h.getFile();
+    }catch(e){
+      if(e&&e.name==='AbortError')return;      // Nutzer hat abgebrochen
+      showToast('⚠ Datei konnte nicht geöffnet werden: '+(e&&e.message||e),'error',5000);return;
+    }
+  }
+  let kontakte=[];
+  try{
+    const text=await _mfImpDateiLesen(file);
+    kontakte=_mfImpZuKontakte(_mfImpParseCsv(text),'sonstiges');
+  }catch(e){showToast('⚠ Datei nicht lesbar: '+(e&&e.message||e),'error',5000);return;}
+  if(!kontakte.length){showToast('In der Datei steht keine Adresse – ist es der Kundenexport aus MF dach?','info',5000);return;}
+  if(handle)_mfImpMerken(handle);
+  try{await _adrBookLoad();}
+  catch(e){showToast('⚠ Adressbuch-Fehler: '+(e&&e.message||e),'error',6000);return;}
+  /* Wer schon im Adressbuch steht, wird gezeigt, aber NICHT angehakt – so
+     überschreibt ein zweiter Lauf nichts, was Frank inzwischen gepflegt hat.
+     Der Schlüssel ist derselbe wie beim Speichern aus einem Kontakt heraus. */
+  const bekannt={};
+  (_adrBook||[]).forEach(function(k){bekannt[_adrKey(k.name,k.tel,k.email)]=true;});
+  kontakte.forEach(function(k){k._da=!!bekannt[_adrKey(k.name,k.tel,k.email)];});
+  window._mfImpListe=kontakte;
+  window._mfImpDatei=file.name;
+  _mfImpDialog();
+}
+
+function _mfImpDialog(){
+  const ex=document.getElementById('mfimp-modal');if(ex)ex.remove();
+  const liste=window._mfImpListe||[];
+  const neu=liste.filter(function(k){return !k._da;}).length;
+  const da=liste.length-neu;
+  const rollen=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','sonstiges'];
+  const rollOpts=rollen.map(function(r){
+    return '<option value="'+r+'"'+(r==='sonstiges'?' selected':'')+'>'+esc(_adrRoleLabel(r))+'</option>';
+  }).join('');
+  const ov=document.createElement('div');
+  ov.id='mfimp-modal';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10000;display:flex;align-items:center;justify-content:center;';
+  /* ⛔ Bauweise nach b845: Der Kopfteil bekommt flex-shrink:0 und eine eigene
+     Obergrenze, sonst quetscht ihn eine lange Liste aus dem Bild – bei „Objekte
+     aus Ordnern" lagen so 396 px unerreichbar hinter der Liste. Die 190 px sind
+     Boden der Liste (120) + Knopfzeile (57) + 13 px Luft; test_b845 rechnet das
+     Verhältnis für JEDEN Dialog dieser Bauweise nach, auch für diesen hier. */
+  ov.innerHTML=
+    '<div style="background:var(--bg2,#fff);border-radius:12px;max-width:680px;width:94%;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,0.3);">'
+     +'<div style="padding:16px 18px 8px;min-height:0;overflow-y:auto;flex-shrink:0;max-height:calc(88vh - 190px);">'
+       +'<div style="font-size:15px;font-weight:800;color:var(--text,#111);margin-bottom:4px;">📥 Adressen aus MF dach</div>'
+       +'<div style="font-size:11px;color:var(--text2,#6b7280);line-height:1.6;margin-bottom:10px;">'
+         +'Aus <b>'+esc(window._mfImpDatei||'')+'</b>: <b>'+liste.length+'</b> Adresse'+(liste.length===1?'':'n')+' gelesen'
+         +(da?' · <b>'+da+'</b> schon im Adressbuch (Haken offen gelassen)':'')
+         +'. Es wird <b>nichts überschrieben</b> – es kommen nur neue Einträge dazu.</div>'
+       +'<div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">'
+         +'<label style="font-size:11px;color:var(--text2,#6b7280);">Rolle für alle:</label>'
+         +'<select id="_mfImpRolle" style="padding:6px 8px;border-radius:7px;border:1.5px solid var(--accent,#1a56c4);background:var(--bg3,#f9fafb);color:var(--text,#111);font-size:12px;">'+rollOpts+'</select>'
+       +'</div>'
+     +'</div>'
+     +'<div id="_mfImpListe" style="flex:1;overflow-y:auto;padding:8px 10px;min-height:120px;border-top:1px solid var(--border,#e5e7eb);border-bottom:1px solid var(--border,#e5e7eb);"></div>'
+     +'<div style="flex-shrink:0;padding:10px 16px;display:flex;gap:8px;align-items:center;justify-content:space-between;">'
+       +'<button type="button" onclick="_mfImpAlle()" style="padding:6px 12px;font-size:12px;border:1px solid var(--border,#d1d5db);background:var(--bg3,#f3f4f6);color:var(--text,#111);border-radius:6px;cursor:pointer;">Alle / keine</button>'
+       +'<div style="display:flex;gap:8px;">'
+         +'<button type="button" onclick="document.getElementById(\'mfimp-modal\').remove()" style="padding:6px 14px;font-size:12px;border:1px solid var(--border,#d1d5db);background:var(--bg3,#f9fafb);color:var(--text,#111);border-radius:6px;cursor:pointer;">Abbrechen</button>'
+         +'<button type="button" onclick="_mfImpApply()" style="padding:6px 14px;font-size:12px;background:#15803d;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">Übernehmen</button>'
+       +'</div>'
+     +'</div>'
+   +'</div>';
+  document.body.appendChild(ov);
+  _mfImpRender();
+}
+
+function _mfImpRender(){
+  const box=document.getElementById('_mfImpListe');if(!box)return;
+  const liste=window._mfImpListe||[];
+  box.innerHTML=liste.map(function(k,i){
+    const zeile2=[k.strasse,[k.plz,k.ort].filter(Boolean).join(' ')].filter(Boolean).join(' · ');
+    const zeile3=[k.tel,k.tel2,k.email].filter(Boolean).join(' · ');
+    return '<label style="display:flex;gap:8px;align-items:flex-start;padding:6px 4px;border-bottom:1px solid var(--border,#f1f5f9);cursor:pointer;">'
+      +'<input type="checkbox" class="_mfImpCb" data-i="'+i+'"'+(k._da?'':' checked')+' style="margin-top:3px;">'
+      +'<div style="flex:1;min-width:0;">'
+        +'<div style="font-size:12px;font-weight:600;color:var(--text,#111);">'+esc(k.name||'(ohne Namen)')
+          +(k.firma?' <span style="font-weight:400;color:var(--text2,#6b7280);">· '+esc(k.firma)+'</span>':'')
+          +(k._da?' <span style="font-size:10px;color:#b45309;">schon im Adressbuch</span>':'')+'</div>'
+        +(zeile2?'<div style="font-size:11px;color:var(--text2,#6b7280);">'+esc(zeile2)+'</div>':'')
+        +(zeile3?'<div style="font-size:11px;color:var(--text2,#6b7280);">'+esc(zeile3)+'</div>':'')
+      +'</div></label>';
+  }).join('');
+}
+
+function _mfImpAlle(){
+  const cbs=document.querySelectorAll('._mfImpCb');
+  let an=0;cbs.forEach(function(c){if(c.checked)an++;});
+  const neu=(an<cbs.length);
+  cbs.forEach(function(c){c.checked=neu;});
+}
+
+async function _mfImpApply(){
+  const liste=window._mfImpListe||[];
+  const rolleEl=document.getElementById('_mfImpRolle');
+  const rolle=rolleEl?(rolleEl.value||'sonstiges'):'sonstiges';
+  const gewaehlt=[];
+  document.querySelectorAll('._mfImpCb').forEach(function(c){
+    if(c.checked){const k=liste[parseInt(c.getAttribute('data-i'),10)];if(k)gewaehlt.push(k);}
+  });
+  if(!gewaehlt.length){showToast('Nichts ausgewählt','info',2500);return;}
+  try{await _adrBookLoad();}
+  catch(e){showToast('⚠ Adressbuch-Fehler: '+(e&&e.message||e),'error',6000);return;}
+  let neu=0,aktualisiert=0;
+  gewaehlt.forEach(function(k){
+    const key=_adrKey(k.name,k.tel,k.email);
+    const ex=(_adrBook||[]).find(function(a){return _adrKey(a.name,a.tel,a.email)===key;});
+    const rec={rolle:rolle,name:k.name,firma:k.firma,strasse:k.strasse,plz:k.plz,ort:k.ort,tel:k.tel,tel2:k.tel2,email:k.email};
+    if(ex){
+      /* Ein vorhandener Eintrag wird nur ergänzt, wo ein Feld leer ist. Was
+         dort schon steht, ist von Hand gepflegt und gilt – die Datei aus MF dach
+         darf es nicht zurückwerfen. */
+      ['firma','strasse','plz','ort','tel','tel2','email'].forEach(function(f){
+        if(!ex[f]&&rec[f])ex[f]=rec[f];
+      });
+      aktualisiert++;
+    }else{
+      _adrBook.push(Object.assign({
+        id:'adr_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
+        quelle:'mfdach',angelegt:new Date().toISOString(),objekte:[]
+      },rec));
+      neu++;
+    }
+  });
+  try{await _adrBookSave();}
+  catch(e){showToast('⚠ Speichern fehlgeschlagen: '+(e&&e.message||e),'error',6000);return;}
+  const m=document.getElementById('mfimp-modal');if(m)m.remove();
+  showToast('✅ '+neu+' neu im Adressbuch'+(aktualisiert?' · '+aktualisiert+' ergänzt':''),'success',4000);
+  const p=document.getElementById('adr-picker-modal');
+  if(p){p.remove();_adrBookOpenPicker('manage');}   // Liste frisch zeichnen
 }
 
 // ── GM-Akte-Adressen (pam-akte-adressen.json) ─ Ansprechpartner einer GM-Akte übernehmen ──
