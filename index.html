@@ -9647,7 +9647,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-31 · #854'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b854) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-31 · #855'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b855) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -34494,7 +34494,21 @@ async function _pamTaskZuAuftrag(task,vonBoard){
   // b652: Stammt die Karte von einem Objekt (Handy-Weg „➕ Auftrag an diesem Objekt"),
   // gehört der neue Auftrag in den OBJEKTORDNER und nicht in den Sammelordner. Der
   // Ordner ist damit vorbelegt – wechseln geht weiter über 📂 in der Zeile „Ablegen in".
-  const _objZiel=await _b652ObjektZiel(task);
+  let _objZiel=await _b652ObjektZiel(task);
+  // b855: Karte ohne Objekt (z.B. aus einer E-Mail)? Dann eins vorschlagen.
+  // ⛔ NUR fragen, nie still setzen - und nur bei GENAU EINEM eindeutigen Treffer
+  // (Straße UND Hausnummer). Lehre aus b850, wo eine automatische Zuordnung drei
+  // Ordner falsch traf, weil jeweils nur ein Kandidat uebrig blieb.
+  if(!_objZiel){
+    try{
+      const _rat=_b855ObjektRaten(task);
+      if(_rat&&await _b855ObjektFragen(_rat)){
+        task.objektId=_rat.id;
+        _objZiel=await _b652ObjektZiel(task);
+        if(!_objZiel)showToast('ℹ Objekt gemerkt, aber sein Drive-Ordner fehlt – bitte Ablageort prüfen','info',6000);
+      }
+    }catch(e){console.warn('[b855] Objekt-Vorschlag:',e);}
+  }
   const _startEltern=(_objZiel&&_objZiel.parentUrl)?_objZiel.parentUrl:DEFAULT_FOLDER_BAUSTELLE;
   const _startName=(_objZiel&&_objZiel.parentUrl)?_b652OrdnerVorschlag(task,_objZiel.obj):titel;
   const _nasBasis=(_objZiel&&_objZiel.parentUrl&&_objZiel.obj)?(_objZiel.obj.nas||''):'';
@@ -34656,6 +34670,163 @@ let _fnpLastParentUrl='';
 // `_fnpLastParentUrl`) — die Rückgabe bleibt der Ordnername, damit kein Aufrufer
 // umgebaut werden muss.
 let _fnpLastTitel='';
+// ══════════════════════════════════════════════════════════════════════════════
+// ── b855: Aus einer E-Mail-Karte das passende Objekt vorschlagen ─────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// Anlass (Frank, 31.08.): „Das kann ich doch nicht jedes Mal selber auswählen, das
+// müssen wir doch automatisieren." Wird aus einer E-Mail-Karte ein Auftrag, kennt
+// PAM kein Objekt (`task.objektId` fehlt) - `_b652ObjektZiel` liefert nichts, der
+// Ablageort bleibt der Sammelordner, und man klickt sich durch fünf Ebenen
+// (Kunden_Syno ➜ 01_Hausverwaltungen ➜ HV ➜ Ort ➜ Objekt).
+//
+// ⛔⛔ DIE LEHRE AUS b850 GILT HIER DOPPELT. Dort ordnete eine automatische Suche
+// drei Ordner nachweislich FALSCH zu, und alle drei sahen richtig aus: zwei trafen
+// nur über den ORT, einer nur über den Nachnamen. Weil jeweils nur EIN Kandidat
+// übrig blieb, galt das als eindeutig und wurde still eingetragen.
+// Daraus folgen hier zwei harte Regeln:
+//   1. Straßenname UND Hausnummer müssen BEIDE passen. Ein Treffer allein über den
+//      Straßennamen reicht nicht - „Bahnhofstraße" gibt es in jedem Ort.
+//   2. Es wird NIE still gesetzt. PAM fragt, Frank bestätigt. Bleiben mehrere
+//      Kandidaten übrig, wird gar nichts vorgeschlagen.
+
+// Straßennamen vergleichbar machen: „…str." und „…straße" sollen dasselbe sein.
+// ⛔ Reihenfolge beachten - erst ß/ss, dann die Endung, sonst greift „strasse" nicht.
+function _b855StrasseNorm(s){
+  return String(s||'')
+    .toLowerCase()
+    .replace(/ß/g,'ss')
+    .replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue')
+    .replace(/str\.?(?=$|[^a-z])/g,'strasse')   // „str." und „str" am Wortende
+    .replace(/[^a-z0-9]/g,'');                  // Punkte, Striche, Leerzeichen raus
+}
+
+// Zieht „Straße + Hausnummer" aus einem Text.
+// ⛔ KEIN \b am Ende (Lehre aus test_b658): „_" ist ein Wortzeichen, „…straße 59_b"
+// würde sonst übersehen. Stattdessen ein ausdrücklicher Blick auf das Folgezeichen.
+function _b855AdressenAusText(text){
+  const t=String(text||'').replace(/\s+/g,' ');
+  // ⛔ DREI Fallen, alle beim Bau am 31.08. zugeschlagen und gemessen:
+  //  a) `\s*` vor dem Hausnummern-Buchstaben machte aus „Musterstr. 10 Reparatur"
+  //     die Nummer „10r". Der Buchstabe muss DIREKT an der Zahl kleben, und
+  //     dahinter darf kein weiterer Buchstabe folgen.
+  //  b) Ohne Wortgrenze vorn fing der Name mitten im Wort an: der zweite Treffer
+  //     in „Musterstraße 10 Musterstraße 10" hiess „usterstraße".
+  //  c) Leerzeichen im Namen sind noetig („Gustav Freytag Str 16a"), schlucken aber
+  //     Vorwoerter („siehe Musterstraße"). Deshalb wird ZUSAETZLICH das letzte
+  //     Namenswort als eigener Schluessel gefuehrt - und verglichen wird exakt,
+  //     nie als Teilzeichenkette. Sonst waere „Hauptstraße" ein Treffer in
+  //     „Bahnhauptstraße" (genau die Sorte Fehlgriff wie bei b850).
+  const re=/(?:^|[^A-Za-zÄÖÜäöüß0-9])([A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß\-. ]{1,40}?(?:stra(?:ß|ss)e|str\.?|weg|platz|allee|gasse|ring|damm|ufer|chaussee))[\s,.]{0,3}(\d{1,4})([a-zA-Z]?)(?![A-Za-zÄÖÜäöüß0-9])/g;
+  const raus=[];
+  let m;
+  while((m=re.exec(t))!==null){
+    const roh=String(m[1]).trim();
+    const voll=_b855StrasseNorm(roh);
+    const woerter=roh.split(/\s+/);
+    const letztes=_b855StrasseNorm(woerter[woerter.length-1]);
+    const nr=String(m[2])+String(m[3]||'').toLowerCase();
+    // Schluessel: die volle Form UND das letzte Namenswort, beide mit Hausnummer.
+    const schl=[];
+    if(voll.length>=6)schl.push(voll+'|'+nr);
+    if(letztes.length>=6&&letztes!==voll)schl.push(letztes+'|'+nr);
+    if(!schl.length)continue;                     // „weg 3" o.ä. ist kein Fund
+    const haupt=schl[schl.length-1];              // das kuerzeste, stabilste
+    if(raus.some(function(x){return x.schluessel.indexOf(haupt)>=0;}))continue;
+    raus.push({strasse:voll,nummer:nr,schluessel:schl,haupt:haupt,
+      roh:(woerter[woerter.length-1]+' '+m[2]+(m[3]||'')).trim()});
+  }
+  return raus;
+}
+
+// Vergleicht die gefundenen Adressen mit einer Liste von Objekten.
+// objekte: [{id,titel,adresse}]  →  Rückgabe: Liste der EINDEUTIGEN Treffer.
+// ⛔ Ein Objekt zählt nur, wenn Straße UND Hausnummer stimmen.
+function _b855Treffer(adressen,objekte){
+  const raus=[];
+  (adressen||[]).forEach(function(a){
+    (objekte||[]).forEach(function(o){
+      if(!o)return;
+      const ausObj=_b855AdressenAusText((o.adresse||'')+' · '+(o.titel||''));
+      // Treffer nur bei EXAKTER Uebereinstimmung eines Schluessels - nie als
+      // Teilzeichenkette - sonst waere ein kurzer Strassenname ein Treffer in
+      // jedem laengeren, der zufaellig darauf endet.
+      if(!ausObj.some(function(x){
+        return x.schluessel.some(function(s){return a.schluessel.indexOf(s)>=0;});
+      }))return;
+      if(raus.some(function(x){return x.id===o.id;}))return;
+      raus.push({id:o.id,titel:o.titel||'',adresse:o.adresse||'',gefunden:a.roh});
+    });
+  });
+  return raus;
+}
+
+// Sammelt die echten Objekte: Karten auf Objekt-Boards, die nicht selbst ein
+// Auftrag AM Objekt sind (`objektId` gesetzt heißt: hängt an einem Objekt).
+function _b855ObjekteSammeln(){
+  const raus=[];
+  Object.keys(window.boards||{}).forEach(function(bn){
+    if(bn.startsWith('_'))return;
+    if((window.boardTypes&&window.boardTypes[bn]||'baustelle')!=='immobilie')return;
+    ((window.boards[bn])||[]).forEach(function(t){
+      if(!t||t.objektId||t.archiviert)return;
+      raus.push({id:t.id,titel:t.title||t.titel||'',adresse:t.adresse||''});
+    });
+  });
+  return raus;
+}
+
+// Der eigentliche Vorschlag. Sucht in Titel und Mail-Betreffen der Karte nach einer
+// Adresse und gibt NUR bei genau einem Treffer etwas zurück.
+// ⛔ Mehrere Treffer ⇒ null. Lieber nichts vorschlagen als das Falsche.
+function _b855ObjektRaten(task,objekte){
+  if(!task||task.objektId)return null;
+  const quellen=[task.title||task.titel||'',task.adresse||''];
+  ((task.msThreadMessages)||[]).forEach(function(m){if(m&&m.subject)quellen.push(m.subject);});
+  ((task.gmailThreadMessages)||[]).forEach(function(m){if(m&&m.subject)quellen.push(m.subject);});
+  ((task.emailOriginals)||[]).forEach(function(e){if(e&&e.subject)quellen.push(e.subject);});
+  const adressen=_b855AdressenAusText(quellen.join(' · '));
+  if(!adressen.length)return null;
+  const liste=objekte||_b855ObjekteSammeln();
+  const treffer=_b855Treffer(adressen,liste);
+  if(treffer.length!==1)return null;
+  return treffer[0];
+}
+
+// Fragt nach. Gibt true zurück, wenn Frank zustimmt.
+// ⛔ Bewusst eine ausdrückliche Frage statt einer stillen Vorbelegung - eine
+// vorbelegte Adresse sieht aus wie eine getroffene Wahl (Lehre b840/b841).
+function _b855ObjektFragen(rat){
+  return new Promise(function(resolve){
+    const alt=document.getElementById('_b855Frage');if(alt)alt.remove();
+    const ov=document.createElement('div');
+    ov.id='_b855Frage';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100002;display:flex;align-items:center;justify-content:center;padding:16px;';
+    const box=document.createElement('div');
+    box.style.cssText='background:var(--bg2,#fff);border:1px solid var(--border,#e5e7eb);border-radius:12px;padding:20px 24px;min-width:340px;max-width:520px;box-shadow:0 8px 32px rgba(0,0,0,.5);';
+    const _e=function(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');};
+    box.innerHTML='<div style="font-size:14px;font-weight:700;color:var(--text,#111);margin-bottom:10px;">🏠 Gehört das zu einem Objekt?</div>'
+      +'<div style="font-size:13px;color:var(--text2,#6b7280);line-height:1.6;margin-bottom:12px;">'
+      +'In dieser Karte steht die Adresse <b style="color:var(--text,#111);">'+_e(rat.gefunden)+'</b>. '
+      +'Dazu passt ein Objekt:</div>'
+      +'<div style="background:var(--bg3,#f7f7fb);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--text,#111);">'
+      +'<b>'+_e(rat.titel||'(ohne Namen)')+'</b>'
+      +(rat.adresse?'<div style="font-size:12px;color:var(--text2,#6b7280);margin-top:2px;">'+_e(rat.adresse)+'</div>':'')
+      +'</div>'
+      +'<div style="font-size:12px;color:var(--text2,#6b7280);margin-top:10px;line-height:1.5;">'
+      +'Bei „Ja" wird der Auftrag im Ordner dieses Objekts angelegt, und Adresse, Auftraggeber '
+      +'und NAS-Pfad werden übernommen.</div>'
+      +'<div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;">'
+      +'<button id="_b855Nein" style="padding:7px 16px;border-radius:7px;border:1px solid var(--border,#e5e7eb);background:var(--bg3,#f7f7fb);color:var(--text2,#6b7280);font-size:13px;cursor:pointer;">Nein, selbst wählen</button>'
+      +'<button id="_b855Ja" style="padding:7px 18px;border-radius:7px;border:none;background:var(--accent,#6C63FF);color:#fff;font-size:13px;font-weight:700;cursor:pointer;">🏠 Ja, dieses Objekt</button>'
+      +'</div>';
+    ov.appendChild(box);document.body.appendChild(ov);
+    const fertig=function(v){try{ov.remove();}catch(e){}resolve(v);};
+    document.getElementById('_b855Ja').onclick=function(){fertig(true);};
+    document.getElementById('_b855Nein').onclick=function(){fertig(false);};
+    ov.addEventListener('click',function(e){if(e.target===ov)fertig(false);});
+  });
+}
+
 function _promptFolderName(suggested,parentUrl,nasBasis,kurzModus){
   _fnpLastParentUrl=parentUrl||'';
   _fnpLastTitel='';
