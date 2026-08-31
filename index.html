@@ -9649,7 +9649,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-31 · #857'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b857) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-31 · #858'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b858) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -31586,12 +31586,18 @@ async function _msLoadEmailThread(){
       const _rDel=await fetch('https://graph.microsoft.com/v1.0/me/mailFolders/deleteditems?$select=id',{headers:{Authorization:'Bearer '+_msActiveToken}});
       if(_rDel.ok){const _dDel=await _rDel.json();_deletedFolderId=_dDel.id||'';}
     }catch(e){}
+    // b858: zweite Quelle fuer die Richtung - derselbe Weg wie beim Papierkorb.
+    let _sentFolderId='';
+    try{
+      const _rSent=await fetch('https://graph.microsoft.com/v1.0/me/mailFolders/sentitems?$select=id',{headers:{Authorization:'Bearer '+_msActiveToken}});
+      if(_rSent.ok){const _dSent=await _rSent.json();_sentFolderId=_dSent.id||'';}
+    }catch(e){}
     const allMsgsMap=new Map();
     for(const convId of convIds){
       try{
         const _f2Base=`conversationId eq '${convId}' and isDraft eq false`;
         const _f2=encodeURIComponent(_deletedFolderId?_f2Base+` and parentFolderId ne '${_deletedFolderId}'`:_f2Base);
-        const r2=await fetch(`https://graph.microsoft.com/v1.0/me/messages?$filter=${_f2}&$select=id,subject,from,receivedDateTime,internetMessageId,bodyPreview,isDraft,hasAttachments&$top=100`,
+        const r2=await fetch(`https://graph.microsoft.com/v1.0/me/messages?$filter=${_f2}&$select=id,subject,from,receivedDateTime,internetMessageId,bodyPreview,isDraft,hasAttachments,parentFolderId&$top=100`,
           {headers:{Authorization:'Bearer '+_msActiveToken}});
         if(!r2.ok){const _e2=await r2.json().catch(()=>({}));console.warn('[MS] Thread',convId,':',_e2.error?.message);continue;}
         const d2=await r2.json();
@@ -31608,7 +31614,7 @@ async function _msLoadEmailThread(){
       fromName:m.from?.emailAddress?.name||'',
       date:m.receivedDateTime||'',
       preview:_msCleanPreview(m.bodyPreview||''),
-      direction:myAddrs.includes((m.from?.emailAddress?.address||'').toLowerCase())?'gesendet':'eingang',
+      direction:_b858Richtung(m,myAddrs,_sentFolderId),   // b858: zwei Quellen statt einer
       internetMessageId:(m.internetMessageId||'').replace(/^<|>$/g,''),
       hasAttachments:m.hasAttachments||false,
     }));
@@ -31619,6 +31625,9 @@ async function _msLoadEmailThread(){
       showToast('⚠ Konversation gefunden, aber 0 Mails geladen (Token-/Konto-Problem?) – bitte erneut versuchen','warning',6000);
       return;
     }
+    // b858: Messhilfe - zeigt in der Browser-Konsole, welche Absenderadresse Graph
+    // wirklich liefert. Ohne das laesst sich der Fall vom 31.08. nicht aufklaeren.
+    _b858RichtungProtokoll(msgs,myAddrs,_sentFolderId);
     task.msThreadMessages=threadMsgs;
     _msRenderThread(task);
     // PDFs + Originale automatisch speichern
@@ -32046,6 +32055,46 @@ function _b854NichtGefunden(ids,betreff){
 function _b857OriginalName(e){
   const o=e||{};
   return o.name||o.subject||'E-Mail Original';
+}
+
+// ── b858: Woran PAM erkennt, ob eine Mail gesendet oder eingegangen ist ──────
+// Bis b857 zaehlte allein die Absenderadresse. Am 31.08. gemessen: eine Mail von
+// einer EIGENEN Adresse an einen Empfaenger ausser Haus wurde trotzdem als
+// „Eingang" gefuehrt - obwohl die Adresse in der Liste der eigenen Adressen steht.
+//
+// ⛔ Die Ursache ist von aussen nicht messbar: was Graph als
+// `from.emailAddress.address` liefert, sieht man nur im laufenden Programm.
+// Deshalb hier ZWEI Quellen statt einer, und ein Protokolleintrag, der die
+// Ursache in einem Durchgang sichtbar macht.
+//
+// ⚠ Die zweite Quelle hilft nicht immer: liegt die Mail in einem eigenen Ordner
+// (verschoben, z.B. „Aufgaben"), ist sie nicht mehr in „Gesendete Elemente".
+// Genau so lag der Fall vom 31.08. - deshalb ist das hier eine Verbesserung,
+// keine Loesung.
+function _b858Richtung(m,myAddrs,sentFolderId){
+  const nachricht=m||{};
+  const von=String((nachricht.from&&nachricht.from.emailAddress&&nachricht.from.emailAddress.address)||'').toLowerCase();
+  if(von&&(myAddrs||[]).indexOf(von)>=0)return 'gesendet';
+  if(sentFolderId&&nachricht.parentFolderId===sentFolderId)return 'gesendet';
+  return 'eingang';
+}
+
+// Schreibt in die Browser-Konsole, WARUM eine Mail so eingeordnet wurde.
+// ⛔ Nur ins Protokoll, nie ins Fenster: es ist eine Messhilfe, kein Hinweis fuer
+// den taeglichen Gebrauch. Die Adressen stehen ohnehin im Browser.
+function _b858RichtungProtokoll(msgs,myAddrs,sentFolderId){
+  try{
+    if(typeof console==='undefined'||!console.log)return;
+    console.log('[b858] eigene Adressen:',(myAddrs||[]).join(' · ')||'(keine)',
+      '| Ordner „Gesendet":',sentFolderId||'(nicht gefunden)');
+    console.log('[b858] Richtung je Mail:',(msgs||[]).map(function(m){
+      const von=(m&&m.from&&m.from.emailAddress&&m.from.emailAddress.address)||'(keine Adresse)';
+      return {von:von,
+        imGesendetOrdner:!!(sentFolderId&&m&&m.parentFolderId===sentFolderId),
+        ergebnis:_b858Richtung(m,myAddrs,sentFolderId),
+        betreff:String((m&&m.subject)||'').substring(0,40)};
+    }));
+  }catch(e){}
 }
 
 function _msToggleThreadList(){
@@ -34330,7 +34379,15 @@ async function _createDriveAuftragStruktur(folderName,parentFid){
 // fehlgeschlagene Verschiebungen wurden gar nicht bemerkt.
 // Rückgabe: {bewegt,fehler} – oder null, wenn schon die Dateiliste nicht lesbar war
 // (b543/K0: Aufrufer darf bei null NICHT löschen).
-async function _pamMoveDriveFiles(vonFid,fotoFid,restFid){
+// b858: `dokFid` und `mailIds` kamen dazu. Vorher kannte die Funktion nur ZWEI
+// Ziele - Bilder und „Rest" (der Posteingang). Ein Dokument, das vor dem Umwandeln
+// in der Karte lag, wanderte damit in den Posteingang, ein spaeter geholtes in
+// `Dokumente`: dieselbe Datei-Art an zwei Orten, je nach Zeitpunkt.
+//
+// ⛔ Welche Datei eine Mail ist, wird NICHT am Namen geraten. Der Aufrufer kennt
+// die Karte und gibt die Drive-Nummern der Mail-Dateien (`emailPdfs` +
+// `emailOriginals`) direkt mit. Ohne diese Angabe verhaelt sich alles wie vorher.
+async function _pamMoveDriveFiles(vonFid,fotoFid,restFid,dokFid,mailIds){
   let bewegt=0,fehler=0;
   if(!vonFid||!gdriveToken)return {bewegt:0,fehler:0};
   const dateien=[];
@@ -34349,7 +34406,17 @@ async function _pamMoveDriveFiles(vonFid,fotoFid,restFid){
   }catch(e){console.warn('[ZuAuftrag] Dateien lesen:',e);return null;}
   for(const f of dateien){
     const istBild=/^image\/|^video\//.test(f.mimeType||'');
-    const ziel=istBild?(fotoFid||restFid):(restFid||fotoFid);
+    // b858: Mail-Dateien bleiben im Posteingang, alles andere geht in `Dokumente`.
+    // Erkannt an der Drive-Nummer (sicher) oder an der Endung .eml/.msg (Rueckfall
+    // fuer Dateien, die die Karte nicht kennt, z.B. von Hand dort abgelegte).
+    const _idBekannt=!!(mailIds&&typeof mailIds.has==='function'&&mailIds.has(f.id));
+    const istMail=_idBekannt
+      ||/message\/rfc822|vnd\.ms-outlook/.test(f.mimeType||'')
+      ||/\.(eml|msg)$/i.test(f.name||'');
+    let ziel;
+    if(istBild)ziel=fotoFid||restFid;
+    else if(istMail)ziel=restFid||dokFid||fotoFid;
+    else ziel=dokFid||restFid||fotoFid;   // ohne dokFid genau wie vor b858
     if(!ziel){fehler++;continue;}
     try{
       const mR=await fetch('https://www.googleapis.com/drive/v3/files/'+f.id+'?fields=parents',
@@ -34609,7 +34676,13 @@ async function _pamTaskZuAuftrag(task,vonBoard){
     // Seitenwechsel), kein einziger Fehlschlag, und der Ordner ist nachweislich leer.
     // Vorher reichte ein lesbarer erster Seitenabruf, und Datei 201+ oder einzeln
     // gescheiterte Verschiebungen wanderten mit dem Ordner in den Papierkorb.
-    const erg=await _pamMoveDriveFiles(altFid,urls.fotoId,urls.emailId);
+    // b858: Dokumente-Ordner als drittes Ziel, und die Drive-Nummern der
+    // Mail-Dateien mitgeben - sie sollen im Posteingang bleiben.
+    const _mailIds=new Set([].concat(
+      (task.emailPdfs||[]).map(function(p){return p&&p.fileId;}),
+      (task.emailOriginals||[]).map(function(e){return e&&e.fileId;})
+    ).filter(Boolean));
+    const erg=await _pamMoveDriveFiles(altFid,urls.fotoId,urls.emailId,urls.dokId,_mailIds);
     if(erg===null){
       showToast('⚠ Dateien konnten nicht gelesen werden – alter Ordner bleibt erhalten','error',7000);
     }else{
@@ -48518,7 +48591,13 @@ function _emInAuftragEinglieder(){
           if(gdriveToken&&_srcFid&&(_dstFoto||_dstMail)&&_srcFid!==_dstMail&&_srcFid!==_dstFoto&&!_istSammelOrdner(_srcFid)){
             // b561: gleiche Absicherung wie bei „Auftrag erstellen" – Papierkorb nur bei
             // 0 Fehlschlägen UND nachweislich leerem Ordner (s. _pamTaskZuAuftrag)
-            const _erg=await _pamMoveDriveFiles(_srcFid,_dstFoto,_dstMail);
+            // b858: auch hier der Dokumente-Ordner und die Mail-Kennungen.
+            const _dstDok=_extractFolderIdFromUrl((tt.dokOrdner||'').trim());
+            const _mailIds2=new Set([].concat(
+              (tt.emailPdfs||[]).map(function(p){return p&&p.fileId;}),
+              (tt.emailOriginals||[]).map(function(e){return e&&e.fileId;})
+            ).filter(Boolean));
+            const _erg=await _pamMoveDriveFiles(_srcFid,_dstFoto,_dstMail,_dstDok,_mailIds2);
             if(_erg===null){
               showToast('⚠ Dateien konnten nicht gelesen werden – alter Ordner bleibt erhalten','error',7000);
             }else{
