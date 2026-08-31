@@ -1750,7 +1750,12 @@ async function _auftragDrop(dt){
           info._rawEmlText=text;
           if(!info.subject)info.subject=f.name.replace(/\.eml$/i,'');
         }else{
+          // b854: .msg ist Outlooks Binaerformat - Text und Anhaenge bleiben darin
+          // unerreichbar. Vorher lief das stillschweigend durch: Betreff aus dem
+          // Dateinamen, Absender leer, Datum = jetzt. Wer das nicht wusste, sah
+          // spaeter nur Zeichensalat und eine Karte, die zu keiner Mail passt.
           info={subject:f.name.replace(/\.msg$/i,''),sender:'',date:new Date(),bodyText:''};
+          if(typeof showToast==='function')showToast('📭 .msg-Datei: Text und Anhänge bleiben darin unlesbar. Besser: dieselbe Mail in Outlook im Browser über ··· → Herunterladen als .eml holen.','warning',9000);
         }
       }
     }
@@ -9642,7 +9647,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-31 · #853'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b853) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-31 · #854'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b854) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -31567,10 +31572,9 @@ async function _msLoadEmailThread(){
       }catch(e){console.warn('[MS2] Betreff-Suche Konto 2:',e);}
     }
     if(convIds.size===0){
-      if(_allMsgIds.length>0){
-        throw new Error('E-Mail nicht im Exchange-Postfach gefunden. Hinweis: Der Outlook-Verlauf funktioniert nur für E-Mails die direkt in deinem Exchange-Konto (nicht T-Online IMAP) liegen.');
-      }
-      throw new Error('E-Mails nicht in Outlook gefunden – Betreff: "'+((_msSubjFallback||'–').substring(0,40))+'"');
+      // b854: beide Faelle sagen jetzt, WONACH gesucht wurde. Vorher liess die
+      // obere Meldung offen, dass der Suchbegriff gar nicht zur Mail passte.
+      throw new Error(_b854NichtGefunden(_allMsgIds,_msSubjFallback));
     }
     // Ersten convId für Rückwärtskompatibilität speichern
     task.msConversationId=[...convIds][0];
@@ -31955,6 +31959,57 @@ function _b852PanelDateien(task,mail){
     raus.push({icon:n.endsWith('.pdf')?'📄':(n.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':'📎'),
       name:a.name||'Anhang',url:a.url||a.webViewLink||'',isImg:false,data:a,mime:'application/octet-stream'});});
   return raus;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── b854: .msg sagt es, und der ANHAENGE-Kasten bleibt ueberall stehen ───────
+// ══════════════════════════════════════════════════════════════════════════════
+// Anlass (31.08., direkt nach b853): Eine Mail wurde als `.msg` hineingezogen.
+// PAM nahm sie an, lud 11,2 MB nach Drive und zeigte im Lesebereich Zeichensalat -
+// den Binaerinhalt der Datei, durch den EML-Leser gejagt. Kein Wort des Hinweises.
+//
+// `.msg` ist Outlooks eigenes Binaerformat. Beim EINLESEN wusste PAM das schon
+// (Betreff wird dort aus dem Dateinamen gebaut, Absender bleibt leer), beim
+// ANZEIGEN nicht - dort lief es durch `_parseEmlText` wie eine normale Mail.
+function _b854IstMsg(name){
+  return /\.msg$/i.test(String(name||'').trim());
+}
+
+// Was der Leser statt des Zeichensalats zeigt. Nennt den Weg, der funktioniert:
+// Outlook im Browser kann dieselbe Mail als .eml herunterladen.
+function _b854MsgHinweis(name){
+  const n=String(name||'Datei').replace(/[<>&]/g,'');
+  return '<div style="padding:22px 26px;color:var(--text1,#222);font-size:13px;line-height:1.6;">'
+    +'<div style="font-size:15px;font-weight:700;margin-bottom:8px;">📭 Diese Datei lässt sich nicht lesen</div>'
+    +'<div style="margin-bottom:12px;"><b>'+n+'</b> liegt im Outlook-eigenen Format <b>.msg</b>. '
+    +'Darin steht der Text nicht als Text, sondern verpackt – PAM kann ihn nicht herausholen, '
+    +'und Anhänge findet es darin auch nicht.</div>'
+    +'<div style="background:rgba(108,99,255,.08);border-left:3px solid var(--accent,#6C63FF);padding:10px 14px;border-radius:0 6px 6px 0;">'
+    +'<b>So klappt es:</b><br>'
+    +'1. Dieselbe Mail in <b>Outlook im Browser</b> öffnen (outlook.office.com)<br>'
+    +'2. Oben auf <b>···</b> → <b>Herunterladen</b> – das ergibt eine <b>.eml</b><br>'
+    +'3. Die .eml hier hineinziehen – dann kommen Text und Anhänge mit'
+    +'</div>'
+    +'<div style="margin-top:12px;color:var(--text2,#6b7280);font-size:12px;">'
+    +'Im Outlook-Programm auf dem PC gibt es diesen Weg nicht – „Speichern unter" liefert dort immer .msg.'
+    +'</div></div>';
+}
+
+// Sagt beim Nicht-Finden, WONACH gesucht wurde.
+// ⛔ Vorher stand da nur „nicht gefunden" plus ein T-Online-Hinweis. Man konnte nicht
+// sehen, dass der Suchbegriff gar nicht zur Mail passte - genau das war am 31.08. der
+// Fall: die Karte hiess anders als die Mail, weil der Betreff bei einer .msg aus dem
+// DATEINAMEN gebaut wird.
+function _b854NichtGefunden(ids,betreff){
+  const _ids=(ids||[]).filter(Boolean);
+  const teile=[];
+  if(_ids.length)teile.push(_ids.length===1?'Kennung '+String(_ids[0]).substring(0,50):_ids.length+' Kennungen');
+  if(betreff)teile.push('Betreff „'+String(betreff).substring(0,50)+'"');
+  let t='E-Mail nicht im Postfach gefunden.';
+  t+=teile.length?(' Gesucht wurde nach: '+teile.join(' · ')+'.'):' Es war nichts zum Suchen hinterlegt.';
+  if(betreff)t+=' Passt der Betreff nicht zur Mail, stimmt die Verknüpfung nicht – dann die Mail neu einziehen.';
+  t+=' Hinweis: Der Verlauf findet nur Mails im Exchange-Konto, nicht in T-Online/IMAP.';
+  return t;
 }
 
 function _msToggleThreadList(){
@@ -46598,7 +46653,19 @@ async function _emOpenMail(idx,mails){
       '<div id="emBodyContainer" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0;align-items:center;justify-content:center;">'+
         '<div style="color:var(--text2);font-size:13px;">⏳ E-Mail wird geladen…</div>'+
       '</div>';
-    _emRenderAttachPanel([]);
+    // b854: den Kasten NICHT mehr leeren. Dieselbe Reparatur wie in b852 an den
+    // beiden anderen Stellen - hier war sie vergessen worden, deshalb verschwand
+    // beim Anklicken einer gespeicherten Original-Mail der ganze Abschnitt.
+    {
+      const _zurMail=_b852PanelDateien(_emCurrentTask,d);
+      _emRenderAttachPanel(_zurMail.length?_zurMail:_b852KartenDateien(_emCurrentTask));
+    }
+    // b854: .msg gar nicht erst durch den EML-Leser jagen - das ergab Zeichensalat.
+    if(_b854IstMsg(d.name)){
+      const _bcMsg=document.getElementById('emBodyContainer');
+      if(_bcMsg)_bcMsg.innerHTML=_b854MsgHinweis(d.name);
+      return;
+    }
     if(!gdriveToken){
       document.getElementById('emBodyContainer').innerHTML='<div style="padding:20px;color:#c00;font-size:13px;">⚠ Nicht mit Google Drive verbunden.</div>';
       return;
@@ -46636,7 +46703,8 @@ async function _emOpenMail(idx,mails){
   }
   const allFiles2=[...emlAttachFiles];
   (d.attachments||[]).forEach(function(a){let name=a.filename||a.name||'Anhang';let nl=name.toLowerCase();let icon=nl.endsWith('.pdf')?'📄':(nl.match(/\.(jpe?g|png|gif|webp|heic)$/)?'🖼':'📎');allFiles2.push({icon:icon,name:name,url:a.url||a.webViewLink||'',mime:a.contentType||a.mimeType||'',data:a});});
-  _emRenderAttachPanel(allFiles2);
+  // b854: leere Liste hiess auch hier „Abschnitt ausblenden" - Rueckfall wie in b852.
+  _emRenderAttachPanel(allFiles2.length?allFiles2:_b852KartenDateien(_emCurrentTask));
   const pane=document.getElementById('emReadingPane');
   pane.innerHTML=
     '<div class="em-rp-header">'+
