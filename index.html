@@ -9642,7 +9642,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-31 · #843'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b843) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-31 · #844'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b844) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -42200,9 +42200,14 @@ function _objImpZeichnen(mehrDa,nurListe){
     if(_po&&!x.schonDa&&_plzTab){
       if(/\d{5}/.test(_po)){_plzHin="";}
       // b843: mit der Straße davor – sonst sucht die Vorschau nach der Hausnummer.
-      else{const _pz=_plzSuchen(_po,_objImpBasisName(x.name));
-        _plzHin=_pz?("<span style=\"font-size:10px;color:var(--text2);\" title=\"aus der PLZ-Tabelle\"> \u00b7 "+esc(_pz)+"</span>")
-                   :("<span style=\"font-size:10px;color:#a04000;\" title=\"Diese Stra\u00dfe steht nicht eindeutig in der Tabelle \u2013 PAM tr\u00e4gt keine PLZ ein\"> \u00b7 PLZ unklar</span>");}
+      /* b844: Kam die Zahl über einen Nachbarort, steht das in der Zeile – in eigener
+         Farbe. ⛔ Still eintragen wäre genau die Zahl, die richtig AUSSIEHT. */
+      else{const _pf=_plzFinden(_po,_objImpBasisName(x.name));
+        _plzHin=_pf.plz
+          ?(_pf.ueber
+            ?("<span style=\"font-size:10px;color:#8a5a00;font-weight:600;\" title=\"Diese Stra\u00dfe steht in der Tabelle unter \u201e"+esc(_pf.ueber)+"\u201c \u2013 einem Ort mit derselben Postleitzahl. Bitte kurz ansehen.\"> \u00b7 "+esc(_pf.plz)+" \u00fcber "+esc(_pf.ueber)+"</span>")
+            :("<span style=\"font-size:10px;color:var(--text2);\" title=\"aus der PLZ-Tabelle\"> \u00b7 "+esc(_pf.plz)+"</span>"))
+          :("<span style=\"font-size:10px;color:#a04000;\" title=\"Diese Stra\u00dfe steht nicht eindeutig in der Tabelle \u2013 PAM tr\u00e4gt keine PLZ ein\"> \u00b7 PLZ unklar</span>");}
     }
     /* b843: Fehlt der Straßenname, fällt es hier auf – nicht erst im Kundenschreiben. */
     const _ohneStr=(!x.schonDa&&!_objImpStrasseFeld()&&_objImpWieHausnummer(x.name))
@@ -42232,21 +42237,59 @@ function _objImpZeichnen(mehrDa,nurListe){
    ⛔ Wo eine Strasse durch MEHRERE PLZ-Bezirke laeuft, steht sie gar nicht erst in der
    Tabelle - PAM traegt dann nichts ein statt zu raten. */
 let _plzTab=null;
+/* ── b844: Postleitzahl ueber einen Nachbarort ────────────────────────────────
+   Anlass (Frank, 31.08.): 52 Erfurter Strassen stehen in der Tabelle unter einem
+   Ortsteilnamen (Urbich, Egstedt) statt unter „Erfurt". Wer „Erfurt" eintippt, findet
+   sie nie – obwohl die Postleitzahl in derselben Datei steht.
+
+   Die Regel: Eine Postleitzahl wird nur genommen, wenn der eingetippte Ort sie
+   NACHWEISLICH selbst führt. Der Beweis steht in derselben Tabelle – „Erfurt" läuft
+   dort unter 14 Postleitzahlen. Findet sich die Straße unter einem Ort, der eine
+   dieser 14 trägt, gehört sie zum selben Postbezirk.
+
+   ⛔ VERWORFEN: der naheliegendere Rückfall „Straße landesweit eindeutig". Eine
+   Sabotageprobe über alle 32.938 Zeilen (jede weggedacht, dann nachgeschlagen) ergab
+   12,2 % falsche Postleitzahlen. Jede achte – das gehört nicht in ein Kundenschreiben.
+
+   ⛔ Der Umweg darf keine Straße wiederbeleben, die der Tabellen-Erzeuger ABSICHTLICH
+   weggelassen hat. Ausgeschlossen wird dort je (Ort, Straße); eine für „Gera"
+   mehrdeutige Straße steht unter einem Nachbarort mit EINER Zahl und käme sonst mit
+   genau dieser zurück – gemessen 38 Fälle, teils mit einer Zahl, die nicht einmal eine
+   der echten ist. Der Erzeuger schreibt diese 246 Paare deshalb seit b844 als
+   Sperrzeilen `!Ort;Straße` mit in die Tabelle.
+   ⚠ Zwei Felder statt drei: eine ältere PAM-Fassung überspringt sie von selbst
+   (`s.length<3`) und kann daraus nie eine Postleitzahl machen. */
+let _plzOrtPlz=null;    // Ort  -> Menge der Postleitzahlen, die dieser Ort führt
+let _plzStrIdx=null;    // Straße -> [{o:Ortname, p:PLZ}] über alle Orte
+let _plzGesperrt=null;  // "Ort|Straße" -> hier darf NICHTS eingetragen werden
 async function _plzLaden(){
   if(_plzTab)return _plzTab;
   const m=new Map();
+  const ortPlz=new Map(),strIdx=new Map(),ges=new Set();   // b844
   try{
     const r=await fetch("plz-thueringen.txt");
     if(!r.ok)throw new Error("HTTP "+r.status);
     const txt=await r.text();
+    /* b844: EIN Durchgang füllt alle vier Verzeichnisse. Ein zweiter Durchgang wäre
+       eine zweite Stelle, an der die Schreibweisen-Regel steht. */
     txt.split("\n").forEach(function(z){
       if(!z||z.charAt(0)==="#")return;
+      if(z.charAt(0)==="!"){                       // b844: Sperrzeile !Ort;Straße
+        const g=z.slice(1).split(";");
+        if(g.length>=2&&g[0].trim()&&g[1].trim())ges.add(_objNorm(g[0])+"|"+_objNorm(g[1]));
+        return;
+      }
       const s=z.split(";");
       if(s.length<3)return;
-      m.set(_objNorm(s[0])+"|"+_objNorm(s[1]),String(s[2]).trim());
+      const o=_objNorm(s[0]),st=_objNorm(s[1]),plz=String(s[2]).trim();
+      if(!o||!st||!plz)return;
+      m.set(o+"|"+st,plz);
+      let op=ortPlz.get(o); if(!op){op=new Set();ortPlz.set(o,op);} op.add(plz);
+      let si=strIdx.get(st); if(!si){si=[];strIdx.set(st,si);} si.push({o:String(s[0]).trim(),p:plz});
     });
   }catch(e){console.warn("[b832] PLZ-Tabelle nicht geladen:",e);}
   _plzTab=m;
+  _plzOrtPlz=ortPlz;_plzStrIdx=strIdx;_plzGesperrt=ges;   // b844
   return _plzTab;
 }
 /* Der Ordner heisst mal nur nach der Strasse, mal mit Hausnummern dahinter. Beide Formen
@@ -42273,11 +42316,53 @@ function _plzSuchen(ort,name){
 /* Ortsangabe fuer GENAU diese eine Karte.
    ⛔ Steht im Feld schon eine PLZ, bleibt sie unangetastet - dann hat Frank bewusst
    eine gesetzt, und die sticht jede Tabelle. */
+/* b844: EINE Stelle entscheidet, WIE eine Postleitzahl gefunden wurde. Alle Anzeigen
+   lesen dasselbe Ergebnis – sonst zeigte eine Stelle „gefunden" und eine andere nicht.
+   Rückgabe: {plz, ueber}. `ueber` ist der Ortsname, über den es ging – leer bei einem
+   direkten Treffer. Wer `ueber` sieht, MUSS es anzeigen. */
+function _plzFinden(ortFeld,name){
+  const o=_objNorm(String(ortFeld||"").replace(/\d{5}/g,""));
+  const k=_plzKandidaten(name);
+  /* ⛔ Gesperrt sticht ALLES – auch einen direkten Treffer, und sofort, nicht „nächsten
+     Kandidaten probieren".
+     Warum auch den direkten: PAMs Schreibweisen-Regel (`_objNorm`, b512) führt „…str."
+     und „…straße" auf DENSELBEN Schlüssel. Die Quelle listet mitunter die eine Form mit
+     genau einer Postleitzahl und die andere als mehrdeutig – es ist dieselbe Straße, und
+     die mehrdeutige Angabe ist die genauere. Gemessen 31.08.: genau EIN solcher Fall in
+     ganz Thüringen (test_b844 wacht, dass daraus keine Zahl wird).
+     ⛔ Das ist Franks Regel aus dem Tabellen-Erzeuger: lieber nichts eintragen als etwas
+     Falsches. */
+  if(o&&_plzGesperrt){
+    for(let i=0;i<k.length;i++){
+      const s=_objNorm(k[i]);
+      if(s&&_plzGesperrt.has(o+"|"+s))return {plz:"",ueber:""};
+    }
+  }
+  const direkt=_plzSuchen(ortFeld,name);
+  if(direkt)return {plz:direkt,ueber:""};
+  if(!_plzOrtPlz||!_plzStrIdx)return {plz:"",ueber:""};
+  if(!o)return {plz:"",ueber:""};
+  const meine=_plzOrtPlz.get(o);
+  if(!meine||!meine.size)return {plz:"",ueber:""};
+  for(let i=0;i<k.length;i++){
+    const s=_objNorm(k[i]);
+    if(!s)continue;
+    const tr=(_plzStrIdx.get(s)||[]).filter(function(x){return meine.has(x.p);});
+    if(!tr.length)continue;
+    const versch=[];
+    tr.forEach(function(x){if(versch.indexOf(x.p)<0)versch.push(x.p);});
+    /* Mehrere verschiedene Zahlen im selben Postbezirk: nichts eintragen und auch
+       keinen weiteren Kandidaten probieren – die kürzere Form wäre unschärfer. */
+    if(versch.length!==1)return {plz:"",ueber:""};
+    return {plz:versch[0],ueber:tr[0].o};
+  }
+  return {plz:"",ueber:""};
+}
 function _plzOrtFuer(ortFeld,name){
   const o=String(ortFeld||"").trim();
   if(!o)return "";
   if(/\d{5}/.test(o))return o;
-  const p=_plzSuchen(o,name);
+  const p=_plzFinden(o,name).plz;   // b844: schließt den Nachbarort mit ein
   return p?(p+" "+o):o;
 }
 // Ort geaendert -> die Liste muss die PLZ neu zeigen (voller Neuaufbau, nicht nur Haekchen).
@@ -42297,12 +42382,13 @@ async function _plzAusTabelleKnopf(){
   const p=_adrParseObjAddr(roh);
   if(p.plz){showToast("Die Adresse hat schon eine Postleitzahl","info",5000);return;}
   if(!p.ort){showToast("\u26A0 Es fehlt der Ort \u2013 ohne ihn l\u00e4sst sich die PLZ nicht finden","error",7000);return;}
-  const plz=_plzSuchen(p.ort,p.strasse);
-  if(!plz){showToast("\u26A0 Diese Stra\u00dfe steht nicht eindeutig in der Tabelle \u2013 bitte selbst eintragen","error",8000);return;}
-  el.value=p.strasse+", "+plz+" "+p.ort;
+  const pf=_plzFinden(p.ort,p.strasse);   // b844: schließt den Nachbarort mit ein
+  if(!pf.plz){showToast("\u26A0 Diese Stra\u00dfe steht nicht eindeutig in der Tabelle \u2013 bitte selbst eintragen","error",8000);return;}
+  el.value=p.strasse+", "+pf.plz+" "+p.ort;
   try{scheduleTaskFieldSave();}catch(e){}
   try{_updateMapsBtn();}catch(e){}
-  showToast("\u2713 Postleitzahl "+plz+" erg\u00e4nzt","success",4000);
+  /* b844: Kam sie über einen Nachbarort, sagt die Meldung es – und steht länger. */
+  showToast("\u2713 Postleitzahl "+pf.plz+" erg\u00e4nzt"+(pf.ueber?(" \u2013 gefunden \u00fcber \u201e"+pf.ueber+"\u201c, einen Ort mit derselben Zahl"):""),"success",pf.ueber?9000:4000);
 }
 /* b833: Fehlende Postleitzahlen an einem GANZEN Board nachtragen.
    Anlass (Frank, 31.08.): b832 setzt die PLZ nur beim Massenlauf - alles, was vorher
@@ -42321,8 +42407,8 @@ function _plzNachSammle(board){
     if(!roh)return;
     const p=_adrParseObjAddr(roh);
     if(p.plz)return;                       // hat schon eine - nicht anfassen
-    const plz=p.ort?_plzSuchen(p.ort,p.strasse):"";
-    raus.push({id:x.id,titel:String(x.title||""),strasse:p.strasse,ort:p.ort,plz:plz,an:!!plz});
+    const pf=p.ort?_plzFinden(p.ort,p.strasse):{plz:"",ueber:""};   // b844
+    raus.push({id:x.id,titel:String(x.title||""),strasse:p.strasse,ort:p.ort,plz:pf.plz,ueber:pf.ueber,an:!!pf.plz});
   });
   return raus;
 }
@@ -42333,14 +42419,19 @@ function _plzNachZeichnen(){
   const gew=_plzNachListe.filter(function(x){return x.an&&x.plz;}).length;
   const ohne=_plzNachListe.filter(function(x){return !x.plz;}).length;
   const kopf=document.getElementById("_plzNachKopf");
-  if(kopf)kopf.textContent=_plzNachListe.length+" Karte(n) ohne Postleitzahl \u00b7 "+(_plzNachListe.length-ohne)+" gefunden \u00b7 "+ohne+" unklar";
+  const ueb=_plzNachListe.filter(function(x){return x.plz&&x.ueber;}).length;   // b844
+  if(kopf)kopf.textContent=_plzNachListe.length+" Karte(n) ohne Postleitzahl \u00b7 "+(_plzNachListe.length-ohne)+" gefunden \u00b7 "+ohne+" unklar"+(ueb?(" \u00b7 "+ueb+" \u00fcber einen Nachbarort"):"");
   const btn=document.getElementById("_plzNachOkBtn");
   if(btn){btn.textContent="\uD83D\uDCEE "+gew+" Adresse(n) erg\u00e4nzen";btn.disabled=!gew;btn.style.opacity=gew?"1":".5";btn.style.cursor=gew?"pointer":"default";}
   if(!_plzNachListe.length){box.innerHTML="<div style=\"padding:16px;color:var(--text2);font-size:13px;\">Alle Karten dieses Boards haben schon eine Postleitzahl \u2013 oder gar keine Adresse.</div>";return;}
   box.innerHTML=_plzNachListe.map(function(x,i){
     const grau=x.plz?"":"opacity:.55;";
+    /* b844: dieselbe Markierung wie in der Massenanlage – eine über den Nachbarort
+       gefundene Zahl sieht überall gleich aus. */
     const rechts=x.plz
-      ?("<span style=\"font-size:11px;color:var(--text);font-weight:600;\">"+esc(x.plz)+"</span>")
+      ?(x.ueber
+        ?("<span style=\"font-size:11px;color:#8a5a00;font-weight:600;\" title=\"gefunden \u00fcber \u201e"+esc(x.ueber)+"\u201c \u2013 einen Ort mit derselben Postleitzahl\">"+esc(x.plz)+" <span style=\"font-weight:400;font-size:10px;\">\u00fcber "+esc(x.ueber)+"</span></span>")
+        :("<span style=\"font-size:11px;color:var(--text);font-weight:600;\">"+esc(x.plz)+"</span>"))
       :("<span style=\"font-size:10px;color:#a04000;\">"+(x.ort?"nicht eindeutig":"kein Ort in der Adresse")+"</span>");
     return "<div style=\"display:flex;align-items:center;gap:8px;padding:5px 10px;border-bottom:1px solid var(--border);"+grau+"\">"
       +"<input type=\"checkbox\" id=\"_plzNachCb"+i+"\" "+(x.an?"checked":"")+" "+(x.plz?"":"disabled")+" onchange=\"_plzNachUmschalten("+i+")\" style=\"cursor:"+(x.plz?"pointer":"default")+";\">"
@@ -42432,7 +42523,11 @@ async function _objImpAnlegen(){
      ⛔ Nicht sperren – es kann Objekte geben, die wirklich so heißen. Nur sagen. */
   const _ohne=_objImpStrasseFeld()?0:gew.filter(function(x){return _objImpWieHausnummer(x.name);}).length;
   const _warn=_ohne?("\n\n\u26a0 "+_ohne+" davon tragen nur eine Hausnummer und KEINEN Straßennamen.\nSo stünde es im Titel, in der Adresse und in {Objekt} der Word-Vorlagen."):"";
-  if(!confirm(gew.length+" Objektkarte(n) im Board \u201e"+board+"\u201c anlegen?"+_warn+"\n\nEs wird nichts \u00fcberschrieben und nichts verschoben \u2013 es kommen nur neue Karten dazu."))return;
+  /* b844: Wer die braune Markierung in der Liste übersehen hat, liest sie hier. */
+  const _po2=_objImpOrtFeld();
+  const _ueber=_po2?gew.filter(function(x){return _plzFinden(_po2,_objImpBasisName(x.name)).ueber;}).length:0;
+  const _warnU=_ueber?("\n\n\u26a0 Bei "+_ueber+" Karte(n) stammt die Postleitzahl aus einem Nachbarort mit derselben Zahl.\nIn der Liste steht, aus welchem."):"";
+  if(!confirm(gew.length+" Objektkarte(n) im Board \u201e"+board+"\u201c anlegen?"+_warn+_warnU+"\n\nEs wird nichts \u00fcberschrieben und nichts verschoben \u2013 es kommen nur neue Karten dazu."))return;
   const base="https://drive.google.com/drive/folders/";
   if(!Array.isArray(boards[board]))boards[board]=[];
   let n=0;
