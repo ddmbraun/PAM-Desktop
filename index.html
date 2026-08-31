@@ -9642,7 +9642,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-31 · #852'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b852) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-31 · #853'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b853) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -31787,7 +31787,12 @@ function _b852AnhangPruefen(att,minBild){
 // Altbestand kennt noch keine Groesse; deshalb prueft der Aufrufer zusaetzlich
 // gegen den Schluessel mit Groesse 0 - lieber einmal zu wenig laden als doppelt.
 function _b852Schluessel(name,groesse){
-  return String(name||'').trim().toLowerCase()+'|'+(Number(groesse)||0);
+  // b853: Leerzeichen fliegen raus. Ein Dateiname, der ueber einen Umweg gelaufen
+  // ist (Mail-Kopfzeile mit Zeilenumbruch, herunterladen, wieder hochladen), traegt
+  // danach oft ein Leerzeichen mehr oder weniger - „Nr._4948" und „Nr._ 4948" sind
+  // dieselbe Datei. Am 31.08. genau so passiert, als ein Angebot aus einer .eml
+  // geholt und von Hand wieder eingelegt wurde.
+  return String(name||'').toLowerCase().replace(/\s+/g,'')+'|'+(Number(groesse)||0);
 }
 
 // Sagt, was wirklich abgelegt wurde.
@@ -31835,7 +31840,17 @@ async function _msSaveThreadAttachments(task,threadMsgs){
   // Was die Karte schon kennt - je Mail getrennt, damit ein gleichnamiges
   // Dokument aus einer ANDEREN Mail nicht faelschlich als Dublette gilt.
   const bekannt=new Set();
-  const merken=function(x){if(x&&x.messageId){bekannt.add(x.messageId+'::'+_b852Schluessel(x.name,x.size));}};
+  // b853: Von Hand nachgelegte Dateien tragen KEINE Mail-Kennung. Ohne diesen
+  // zweiten Satz erkennt PAM sie nicht wieder und holt denselben Anhang ein
+  // zweites Mal - aufgefallen am 31.08. beim ersten Einsatz von b852, nachdem
+  // ein Angebot vorher von Hand in die Karte gelegt worden war.
+  const ohneKennung=new Set();
+  const merken=function(x){
+    if(!x||!x.name)return;
+    const s=_b852Schluessel(x.name,x.size);
+    if(x.messageId)bekannt.add(x.messageId+'::'+s);
+    else ohneKennung.add(s);
+  };
   (task.attachments||[]).forEach(merken);
   (task.fotos||[]).forEach(merken);
   for(const m of mitAnhang){
@@ -31855,7 +31870,12 @@ async function _msSaveThreadAttachments(task,threadMsgs){
       }
       const schl=mid+'::'+_b852Schluessel(att.name,att.size);
       const schlAlt=mid+'::'+_b852Schluessel(att.name,0);   // Altbestand ohne Groesse
-      if(bekannt.has(schl)||bekannt.has(schlAlt)){erg.uebersprungen++;continue;}
+      // b853: auch gegen die von Hand nachgelegten Dateien pruefen. Der Drive-Weg
+      // speichert dort KEINE Groesse (gemessen), deshalb zaehlt der 0-Schluessel mit.
+      const schlHand=_b852Schluessel(att.name,att.size);
+      const schlHand0=_b852Schluessel(att.name,0);
+      if(bekannt.has(schl)||bekannt.has(schlAlt)
+         ||ohneKennung.has(schlHand)||ohneKennung.has(schlHand0)){erg.uebersprungen++;continue;}
       try{
         const ra=await _msGetMsgDual(task,'https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(m.id)
           +'/attachments/'+encodeURIComponent(att.id),false);
