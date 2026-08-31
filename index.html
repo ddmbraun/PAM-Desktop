@@ -9642,7 +9642,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-31 · #839'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b839) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-31 · #842'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b842) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -30228,6 +30228,22 @@ function _dfbBack(){
 }
 function _dfbPickItem(id,name){
   const url='https://drive.google.com/drive/folders/'+id;
+  /* b841: Sonderfall - hier wurde nicht ein Ordner AUSGEWAEHLT, sondern der Ort
+     bestimmt, an dem ein neuer Objektordner ENTSTEHEN soll. Also nichts in ein Feld
+     schreiben, sondern anlegen. Gleiches Muster wie `_moveParentPickerInput` weiter
+     unten: der Zielname ist die Kennung des Vorgangs, kein Eingabefeld. */
+  /* ⛔ `typeof`-Wache: Prüfsuiten schneiden diese Funktion einzeln aus und führen sie
+     OHNE Umgebung aus - eine nackte Abhängigkeit von einer äußeren Konstante lässt
+     `test_b666` abstürzen. Genau diese Falle steht seit b747 im Aufschrieb; sie hat
+     hier zum zweiten Mal zugeschlagen. Wer eine Konstante ergänzt: Wache mitliefern. */
+  if(typeof IMMO_NEU_ELTERN_ZIEL!=='undefined'&&_dfbTargetField===IMMO_NEU_ELTERN_ZIEL){
+    _dfbClose();
+    const titel=_immoNeuOrdnerTitel;
+    _immoNeuOrdnerTitel='';   // ⛔ sofort leeren, sonst legt der naechste Klick nochmal an
+    if(!titel){showToast('⚠ Kein Kartenname gemerkt – bitte das Titelfeld noch einmal verlassen','warning',6000);return;}
+    _immoNeuenOrdnerAnlegen(titel,id);
+    return;
+  }
   const el=document.getElementById(_dfbTargetField);
   if(el){el.value=url;el.dispatchEvent(new Event('input'));}
   _dfbClose();
@@ -34664,8 +34680,14 @@ function _immoOrdnerFrage(title){
       +'<div style="font-size:12px;color:var(--text2,#666);margin-bottom:14px;line-height:1.6;">PAM legt am Objekt keine Auftragsstruktur an. Vorhandene Ablage (NAS/Drive) verlinken – oder einen neuen Ordner anlegen.</div>'
       +'<div style="display:flex;flex-direction:column;gap:8px;">'
       +'<button id="_iodWahl" style="padding:10px 14px;border-radius:8px;border:1px solid var(--border,#ccc);background:var(--bg3,#f5f5f5);color:var(--text,#111);cursor:pointer;font-size:13px;font-weight:600;text-align:left;">📂 Vorhandenen Objektordner wählen</button>'
-      +'<button id="_iodNeu" style="padding:10px 14px;border-radius:8px;border:none;background:'+(kannNeu?'#7F77DD':'#9aa0a6')+';color:#fff;cursor:pointer;font-size:13px;font-weight:700;text-align:left;">➕ Neuen Ordner „'+esc((title||'Objekt').substring(0,40))+'" anlegen</button>'
-      +(kannNeu?'':'<div style="font-size:11px;color:#a04000;">⚠ Dafür erst in ⚙ Einstellungen den 🏠 Objekte-Ordner eintragen.</div>')
+      /* b841: Der Knopf ist nicht mehr grau, wenn kein Sammelordner eingetragen ist.
+         Befund Frank 31.08.: Ohne 🏠 Objekte-Ordner in ⚙ konnte PAM gar keinen
+         Objektordner anlegen - und den Sammelordner eintragen ist bei ihm KEINE
+         Lösung: seine Ablage ist nach `01_Hausverwaltungen\<HV>\…` bzw.
+         `02_Privatkunden\…` getrennt, ein Sammeltopf würde das zerreißen.
+         Jetzt fragt der Knopf in diesem Fall nach dem Ort, statt ihn zu raten. */
+      +'<button id="_iodNeu" style="padding:10px 14px;border-radius:8px;border:none;background:#7F77DD;color:#fff;cursor:pointer;font-size:13px;font-weight:700;text-align:left;">➕ Neuen Ordner „'+esc((title||'Objekt').substring(0,40))+'" anlegen'+(kannNeu?'':' – Ort wählen')+'</button>'
+      +(kannNeu?'':'<div style="font-size:11px;color:var(--text2,#666);">Es ist kein 🏠 Objekte-Sammelordner eingetragen – du wählst gleich selbst, wo der Ordner entstehen soll.</div>')
       +'<button id="_iodSpaeter" style="padding:8px 14px;border-radius:8px;border:1px solid var(--border,#ccc);background:transparent;color:var(--text2,#666);cursor:pointer;font-size:12px;">Später – Felder bleiben leer</button>'
       +'</div></div>';
     document.body.appendChild(ov);
@@ -34677,7 +34699,17 @@ function _immoOrdnerFrage(title){
       if(typeof _pickDriveFolder==='function')setTimeout(function(){_pickDriveFolder('tGD');},150);
     });
     ov.querySelector('#_iodNeu').addEventListener('click',async function(){
-      if(!kannNeu){showToast('⚠ Bitte zuerst in ⚙ Einstellungen den 🏠 Objekte-Ordner eintragen','warning',6000);return;}
+      /* b841: Ohne Sammelordner wird der Ort erfragt statt geraten. Aufgelöst wird
+         SOFORT – wie beim 📂-Knopf darüber: der Drive-Browser läuft außerhalb dieses
+         Dialogs weiter, und `_autoFolderCreating` darf nicht so lange klemmen. */
+      if(!kannNeu){
+        _immoNeuOrdnerTitel=String(title||'Objekt');
+        zu('neu-ortwahl');
+        if(typeof _pickDriveFolder==='function')setTimeout(function(){
+          _pickDriveFolder(IMMO_NEU_ELTERN_ZIEL);
+        },150);
+        return;
+      }
       try{ov.remove();}catch(e){}
       // await hält _autoFolderCreating (im Aufrufer) bis zum Ende der Anlage –
       // sonst könnte ein erneutes onblur die Frage während der Anlage nochmal öffnen
@@ -34686,10 +34718,21 @@ function _immoOrdnerFrage(title){
   });
 }
 
-async function _immoNeuenOrdnerAnlegen(title){
+/* b841: Kennung fuer den Drive-Browser, wenn der ELTERNORDNER eines neuen
+   Objektordners gewaehlt wird. `_dfbPickItem` erkennt sie und legt dann an, statt in
+   ein Feld zu schreiben - dasselbe Muster, mit dem dort schon `_moveParentPickerInput`
+   behandelt wird. ⛔ Kein echtes Eingabefeld dieses Namens anlegen: der Sonderfall
+   greift VOR dem Feldzugriff, ein Feld waere tote Kulisse. */
+const IMMO_NEU_ELTERN_ZIEL='_immoNeuerOrdnerEltern';
+let _immoNeuOrdnerTitel='';
+
+async function _immoNeuenOrdnerAnlegen(title,parentFidWahl){
   try{
-    const parentFid=_extractFolderIdFromUrl(DEFAULT_FOLDER_OBJEKTE||'');
-    if(!parentFid){showToast('⚠ Kein 🏠 Objekte-Ordner in ⚙ Einstellungen eingetragen','warning',6000);return;}
+    /* b841: Ohne ausdrueckliche Wahl wie bisher der Sammelordner aus ⚙. Mit Wahl
+       (Ordner-Browser) genau der gewaehlte Ordner. ⛔ EINE Funktion fuer beide Wege -
+       zwei Anlegewege waeren zwei Wahrheiten darueber, wie ein Objektordner entsteht. */
+    const parentFid=parentFidWahl||_extractFolderIdFromUrl(DEFAULT_FOLDER_OBJEKTE||'');
+    if(!parentFid){showToast('⚠ Kein Zielordner – bitte den Ort wählen oder in ⚙ den 🏠 Objekte-Ordner eintragen','warning',6000);return;}
     const safeName=((title||'Objekt').replace(/[\\/:*?"<>|]/g,'-').substring(0,100).replace(/[. ]+$/,''))||'Objekt'; // b560-Muster
     showToast('📁 Lege Ordner an: '+safeName.substring(0,40)+'…','info',4000);
     const id=await _driveCreateFolder(safeName,parentFid);
@@ -36046,7 +36089,13 @@ let _adrBookLoaded=false;
 
 function _adrNorm(s){return (s||'').toString().toLowerCase().replace(/[\s\/().+-]/g,'').trim();}
 function _adrKey(name,tel,email){const t=(tel&&tel.trim())?tel:(email||'');return _adrNorm(name)+'|'+_adrNorm(t);}
-function _adrRoleLabel(r){const m={ag:'👔 AG',mieter:'🏠 Mieter',eigentuemer:'👤 Eigentümer',sonstiges:'👥 Sonstiges'};return m[r]||('🏷 '+(r||'Sonstiges'));}
+/* b842: `hausverwaltung` fehlte hier - ein so gekennzeichneter Kontakt stand im
+   Adressbuch als „🏷 hausverwaltung" da, im rohen Feldnamen. Die Rolle gibt es im
+   Datenbestand seit langem: das VBS setzt sie beim Anlegen eines Auftrags.
+   ⛔ Der Rückfall `🏷 <Wert>` bleibt - eigene Rollen (Freitext, „✏️ Andere…") sollen
+   weiter angezeigt werden und nicht stillschweigend zu „Sonstiges" werden. */
+const ADR_ROLLEN=['ag','mieter','eigentuemer','hausverwaltung','sonstiges'];
+function _adrRoleLabel(r){const m={ag:'👔 AG',mieter:'🏠 Mieter',eigentuemer:'👤 Eigentümer',hausverwaltung:'🏢 Hausverwaltung',sonstiges:'👥 Sonstiges'};return m[r]||('🏷 '+(r||'Sonstiges'));}
 
 async function _adrBookLoad(){
   if(_adrBookLoaded)return _adrBook;
@@ -36168,9 +36217,38 @@ function _adrOpenSaveDialog(d){
   const overlay=document.createElement('div');
   overlay.id='adr-save-modal';
   overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10000;display:flex;align-items:center;justify-content:center;';
-  overlay.innerHTML='<div style="background:var(--bg,#fff);color:var(--text,#111);border:1px solid var(--border,#d1d5db);border-radius:10px;padding:18px 20px;width:400px;max-width:96vw;box-shadow:0 8px 32px rgba(0,0,0,0.25);">'
-    +'<div style="font-size:14px;font-weight:600;color:#15803d;margin-bottom:12px;">'+(d.update?'✏️ Adressbuch-Eintrag aktualisieren':'✅ In Adressbuch speichern')+' <span style="font-weight:400;color:var(--text2,#6b7280);font-size:11px;">('+_adrRoleLabel(d.rolle)+')</span></div>'
-    +'<div style="display:flex;flex-direction:column;gap:7px;">'
+  /* b842: `max-height` + Flex-Spalte. Der Kasten hatte NIE eine Höhenbegrenzung und
+     `overflow:visible` - er wuchs einfach über den Bildschirm hinaus. Im Browser
+     gemessen: bei 560 px Fensterhöhe war er ohne das neue Rollen-Feld 543 px hoch
+     und „Speichern" gerade noch im Bild (533 px); mit dem Feld 602 px, und der Knopf
+     lag 2 px darunter. ⛔ Dieselbe Falle wie b749 und b838 - und wieder hat sie KEINE
+     Textprüfung gefunden, nur die Messung im Browser.
+     ⛔ `min-height:0` am Scrollbereich ist Pflicht, sonst schrumpft er nicht und die
+     max-height wirkt nicht. Die Knopfzeile steht AUSSERHALB davon - das ist die
+     eigentliche Absicherung, nicht die Höhe. */
+  overlay.innerHTML='<div style="background:var(--bg,#fff);color:var(--text,#111);border:1px solid var(--border,#d1d5db);border-radius:10px;padding:18px 20px;width:400px;max-width:96vw;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.25);">'
+    +'<div style="font-size:14px;font-weight:600;color:#15803d;margin-bottom:12px;flex-shrink:0;">'+(d.update?'✏️ Adressbuch-Eintrag aktualisieren':'✅ In Adressbuch speichern')+'</div>'
+    +'<div style="display:flex;flex-direction:column;gap:7px;flex:1;min-height:0;overflow-y:auto;">'
+    /* b842: Die Rolle stand hier nur als Text in der Überschrift - wählen konnte man
+       sie NICHT, weder beim Anlegen noch beim Bearbeiten. `_adrBookNewEntry` setzt
+       fest `sonstiges`; jede über „➕ Neue Adresse" angelegte Verwaltung landete
+       darum unter „Sonstiges". Befund Frank 31.08.
+       ⛔ Eine Rolle, die nicht in der Liste steht (eigener Freitext aus dem
+       Task-Fenster), bekommt eine eigene Zeile - sonst ginge sie beim Speichern
+       still verloren. */
+    +(function(){
+       const jetzt=String(d.rolle||'sonstiges');
+       // ⛔ typeof-Wache, siehe addKontaktPTP. Rückfall muss ADR_ROLLEN entsprechen.
+       const opts=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','sonstiges'];
+       if(opts.indexOf(jetzt)<0)opts.push(jetzt);
+       /* ⚠ Das `esc` dieser Funktion laesst `<` stehen - fuer die festen Feldwerte
+          reichte das, fuer einen selbst eingetippten Rollennamen nicht. */
+       const escOpt=function(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');};
+       return '<div><label style="font-size:10px;color:var(--text2,#6b7280);">Rolle</label>'
+         +'<select id="adrs-rolle" style="'+fs+'">'
+         +opts.map(function(r){return '<option value="'+escOpt(r)+'"'+(r===jetzt?' selected':'')+'>'+escOpt(_adrRoleLabel(r))+'</option>';}).join('')
+         +'</select></div>';
+     })()
     +row('adrs-name','Name',d.name)
     +row('adrs-firma','Firma',d.firma)
     +row('adrs-str','Straße',d.strasse)
@@ -36188,7 +36266,8 @@ function _adrOpenSaveDialog(d){
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;">'+row('adrs-tel','Telefon',d.tel)+row('adrs-tel2','Tel 2',d.tel2)+'</div>'
     +row('adrs-email','E-Mail',d.email)
     +'</div>'
-    +'<div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;">'
+    // b842: flex-shrink:0 - die Knopfzeile darf nie zusammengedrückt oder weggescrollt werden.
+    +'<div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;flex-shrink:0;">'
     +'<button type="button" onclick="document.getElementById(\'adr-save-modal\').remove()" style="padding:7px 16px;font-size:12px;border:1px solid var(--border,#d1d5db);background:var(--bg3,#f9fafb);color:var(--text,#111);border-radius:6px;cursor:pointer;">Abbrechen</button>'
     +'<button type="button" id="adrs-ok" style="padding:7px 16px;font-size:12px;background:#15803d;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">'+(d.update?'Aktualisieren':'Speichern')+'</button>'
     +'</div></div>';
@@ -36247,7 +36326,10 @@ function _adrObjDel(i){
 
 async function _adrDoSaveEntry(d){
   const g=function(id){const el=document.getElementById(id);return el?(el.value||'').trim():'';};
-  const rec={rolle:d.rolle||'sonstiges',name:g('adrs-name'),firma:g('adrs-firma'),strasse:g('adrs-str'),plz:g('adrs-plz'),ort:g('adrs-ort'),tel:g('adrs-tel'),tel2:g('adrs-tel2'),email:g('adrs-email'),objekte:(Array.isArray(window._adrSaveDlgObjekte)?window._adrSaveDlgObjekte.slice():[])};
+  /* b842: Die Rolle kommt jetzt aus dem Auswahlfeld. ⛔ Der Rueckfall auf `d.rolle`
+     bleibt: `_adrDoSaveEntry` wird auch aus Wegen gerufen, die den Dialog gar nicht
+     zeigen - ohne ihn wuerde die mitgegebene Rolle dort still zu `sonstiges`. */
+  const rec={rolle:(g('adrs-rolle')||d.rolle||'sonstiges'),name:g('adrs-name'),firma:g('adrs-firma'),strasse:g('adrs-str'),plz:g('adrs-plz'),ort:g('adrs-ort'),tel:g('adrs-tel'),tel2:g('adrs-tel2'),email:g('adrs-email'),objekte:(Array.isArray(window._adrSaveDlgObjekte)?window._adrSaveDlgObjekte.slice():[])};
   if(!rec.name&&!rec.tel&&!rec.email){showToast('Nichts zu speichern','info',2500);return;}
   try{
     await _adrBookLoad();
@@ -37120,7 +37202,15 @@ function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2,adr){
   const hatAdr=!!(aStr.trim()||aPlz.trim()||aOrt.trim());
   const div=document.createElement('div');div.className='kontakt-entry';
   const fs='font-size:11px;padding:3px 6px;';
-  const rolleOpts=['ag','mieter','eigentuemer','sonstiges'];
+  /* b842: `hausverwaltung` war in der Beschriftungstabelle darüber vorhanden, fehlte
+     aber in dieser Auswahl - die Rolle war also NIRGENDS von Hand wählbar, obwohl das
+     VBS sie setzt. Ein so angelegter Kontakt rutschte in „✏️ Andere…" und stand dort
+     als roher Feldname. ⛔ Die Liste bestimmt zugleich, was als eigene Rolle gilt;
+     sie kommt jetzt aus einer Quelle (ADR_ROLLEN), damit die drei Stellen im Programm
+     nicht wieder auseinanderlaufen. */
+  // ⛔ typeof-Wache wie in _dfbPickItem: Prüfsuiten führen diese Funktion ohne
+  // Umgebung aus. Der Rückfall MUSS mit ADR_ROLLEN übereinstimmen - test_b842 wacht.
+  const rolleOpts=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','sonstiges'];
   const isCustom=rolle&&!rolleOpts.includes(rolle);
   const selVal=isCustom?'_custom_':rolle;
   div.innerHTML='<div class="kontakt-entry-header">'
@@ -41678,6 +41768,15 @@ let _objImpTreffer=[];
    von Hand einfuegte - genau daran ist Frank am 30.08. haengengeblieben. */
 let _objImpPfad=[];
 let _objImpAktFid='';   // b827: welche Ebene ist gerade gelesen?
+/* b840: WIE HEISST die gerade gelesene Ebene? Bis b839 stand das nirgends im Dialog:
+   im Feld oben steht nur eine Drive-Kennung, und die Pfadzeile darunter blieb beim
+   Lesen aus dem Feld ausgeblendet (sie zeigt nur den selbst geklickten Weg).
+   Befund Frank 31.08.: Er drueckte "Ordner lesen", ohne einen Ordner gewaehlt zu
+   haben - das Feld war vom letzten Mal vorbelegt (b824). Gelesen wurde der ALTE
+   Ordner. Dass der keine Unterordner hatte, war ein Zufall zu seinen Gunsten: haette
+   er welche gehabt, waeren die Haeuser der vorigen Verwaltung eingelesen worden -
+   mit Auftraggeber, Anschrift und NAS-Pfad der neuen. */
+let _objImpAktName='';
 const OBJIMP_LETZTER='pam_objimp_letzter_ordner';
 const OBJIMP_ADR='pam_objimp_letzte_adresse';
 const OBJIMP_RAZEILE='pam_objimp_ra_erste_zeile';
@@ -41799,6 +41898,29 @@ function _objImpNasHinweis(text){
   const nf=document.getElementById("_objImpNas");
   if(nf)nf.style.borderColor=text?"#a04000":"var(--border)";
 }
+/* b840: Wie heisst dieser Drive-Ordner? Ein Abruf, nur fuer die Anzeige.
+   ⚠ Bewusst NICHT aus `_objImpNasAusDrive` mitgenommen: die laeuft nur, wenn das
+   NAS-Feld noch unberuehrt ist. Der Name muss aber IMMER kommen - gerade dann, wenn
+   jemand den Pfad von Hand gesetzt hat und den Ordner erst recht nicht mehr sieht.
+   ⚠ Ohne Anmeldung oder bei einem Fehler kommt "" zurueck: dann steht eben kein
+   Name da. Geraten wird nicht. */
+async function _objImpOrdnerName(fid){
+  if(!fid||!gdriveToken)return "";
+  try{
+    const r=await fetch("https://www.googleapis.com/drive/v3/files/"+encodeURIComponent(fid)+"?fields=name",{headers:{Authorization:"Bearer "+gdriveToken}});
+    if(!r.ok){if(r.status===401)_handleDrive401();return "";}
+    const j=await r.json();
+    return String(j.name||"");
+  }catch(e){console.warn("[b840] Ordnername:",e);return "";}
+}
+/* b840: Die Zeile unter dem Adressfeld - was steckt hinter der Kennung im Feld?
+   Sie wird beim Oeffnen gefuellt (vorbelegter Ordner) und nach jedem Lesen neu. */
+function _objImpQuelleHinweis(text){
+  const h=document.getElementById("_objImpQuelleHinweis");
+  if(!h)return;
+  h.textContent=text||"";
+  h.style.display=text?"":"none";
+}
 function _objImpVorhandene(){
   // Titel aller schon angelegten Objekte - ueber ALLE Objekt-Boards, nicht nur das offene.
   const s=new Set();
@@ -41828,6 +41950,11 @@ async function _objImpLesen(fidDirekt,name){
     _objImpPfad=[];
     try{if(url)localStorage.setItem(OBJIMP_LETZTER,url);}catch(e){}
   }
+  /* b840: Der Name der Ebene, die JETZT gelesen wird. Beim Hineinklicken ist er
+     schon bekannt, beim Lesen aus dem Feld wird er geholt. Zuerst geleert - sonst
+     stuende waehrend des Ladens noch der Name der vorigen Ebene da. */
+  _objImpAktName="";
+  try{_objImpPfadHtml();}catch(e){}
   const box=document.getElementById("_objImpListe");
   if(!fid){if(box)box.innerHTML="<div style=\"padding:16px;color:#a04000;font-size:13px;\">Bitte oben einen Drive-Ordner w\u00e4hlen (\uD83D\uDCC2).</div>";return;}
   if(!gdriveToken){showToast("\u26A0 Bitte zuerst mit Google Drive verbinden","error",5000);return;}
@@ -41867,6 +41994,13 @@ async function _objImpLesen(fidDirekt,name){
       // b838: von Hand gesetzter Pfad - dann ist eine fruehere Warnung erledigt.
       else _objImpNasHinweis("");
     }catch(e){console.warn("[b825] NAS setzen:",e);}
+    /* b840: Namen der gelesenen Ebene besorgen und anzeigen. Steht NACH dem
+       Listen-Abruf: Wer den Namen nicht bekommt (Fehler, keine Anmeldung), soll
+       trotzdem seine Ordner sehen - die Anzeige darf das Lesen nie aufhalten. */
+    try{
+      _objImpAktName=fidDirekt?String(name||""):(await _objImpOrdnerName(fid));
+      if(!fidDirekt&&_objImpAktName)_objImpQuelleHinweis("↳ Adresse zeigt auf: „"+_objImpAktName+"“");
+    }catch(e){console.warn("[b840] Name:",e);}
     const _lb=document.getElementById("_objImpListe");if(_lb)_lb.dataset.gezeichnet="";
     _objImpZeichnen(!!j.nextPageToken);
   }catch(e){
@@ -41913,10 +42047,19 @@ async function _objImpEbeneHoeher(){
 }
 function _objImpPfadHtml(){
   const p=document.getElementById("_objImpPfad");if(!p)return;
-  if(!_objImpPfad.length){p.innerHTML="";p.style.display="none";return;}
+  /* b840: Bis b839 blieb diese Zeile leer, solange man sich nicht selbst
+     durchgeklickt hatte - beim Lesen aus dem Feld stand also NIRGENDS, welcher
+     Ordner gelesen wurde. Jetzt zeigt sie immer den Namen der gelesenen Ebene;
+     "\u2191 zur\u00fcck" bleibt an die selbst geklickte Kette gebunden (sonst stuende dort
+     ein Knopf, der nur denselben Ordner neu liest). */
+  const weg=_objImpPfad.length?_objImpPfad.map(function(x){return x.name;}).join(" \u203A ")
+                              :(_objImpAktName||"");
+  if(!weg){p.innerHTML="";p.style.display="none";return;}
   p.style.display="";
-  p.innerHTML="<button type=\"button\" onclick=\"_objImpHoch()\" style=\"padding:2px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:11px;cursor:pointer;\">\u2191 zur\u00fcck</button>"
-    +"<span style=\"font-size:11px;color:var(--text2);\">\uD83D\uDCC1 "+esc(_objImpPfad.map(function(x){return x.name;}).join(" \u203A "))+"</span>";
+  p.innerHTML=(_objImpPfad.length
+      ?"<button type=\"button\" onclick=\"_objImpHoch()\" style=\"padding:2px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:11px;cursor:pointer;\">\u2191 zur\u00fcck</button>"
+      :"")
+    +"<span style=\"font-size:11px;color:var(--text2);\">\uD83D\uDCC1 Gelesen: <b style=\"color:var(--text);\">"+esc(weg)+"</b></span>";
 }
 function _objImpUmschalten(i){if(_objImpTreffer[i])_objImpTreffer[i].an=!_objImpTreffer[i].an;_objImpZeichnen(false,true);}
 function _objImpAlle(an){_objImpTreffer.forEach(function(x){if(!x.schonDa)x.an=!!an;});_objImpZeichnen(false,true);}
@@ -41934,7 +42077,19 @@ function _objImpZeichnen(mehrDa,nurListe){
     _objImpTreffer.forEach(function(x,i){const c=document.getElementById("_objImpCb"+i);if(c)c.checked=!!x.an;});
     return;
   }
-  if(!_objImpTreffer.length){box.innerHTML="<div style=\"padding:16px;color:var(--text2);font-size:13px;\">Keine Unterordner gefunden.</div>";return;}
+  /* b840: "Keine Unterordner gefunden." stand da ohne jeden Anhaltspunkt - man sah
+     weder WELCHER Ordner gelesen wurde noch was zu tun ist. Genau an dieser Meldung
+     ist Frank am 31.08. haengengeblieben. Jetzt: Name der Ebene und der Grund, der
+     in aller Regel dahintersteckt (eine Ebene zu tief gezeigt). */
+  if(!_objImpTreffer.length){
+    box.innerHTML="<div style=\"padding:16px;font-size:13px;line-height:1.7;\">"
+      +"<div style=\"color:var(--text);font-weight:700;margin-bottom:6px;\">Keine Unterordner"
+        +(_objImpAktName?(" in „"+esc(_objImpAktName)+"“"):"")+".</div>"
+      +"<div style=\"color:var(--text2);\">Dieser Dialog liest immer die <b>Unterordner</b> des gewählten Ordners – er darf also nicht auf ein einzelnes Objekt zeigen, sondern auf die Ebene <b>darüber</b>."
+      +"<br>Mit 📂 einen anderen Ordner wählen oder „↑ eine Ebene höher“.</div>"
+      +"</div>";
+    return;
+  }
   box.dataset.gezeichnet="1";
   box.innerHTML=_objImpTreffer.map(function(x,i){
     const grau=x.schonDa?"opacity:.5;":"";
@@ -42216,6 +42371,7 @@ function _objImpOeffnen(){
      Ist sie da, zeigt die Liste je Haus die gefundene PLZ - deshalb danach neu zeichnen. */
   try{_plzLaden().then(function(){try{_plzNeuZeichnen();}catch(e){}});}catch(e){}
   _objImpTreffer=[];_objImpPfad=[];
+  _objImpAktName="";   // b840: sonst stuende der Name aus dem vorigen Aufruf da
   const immoBoards=Object.keys(boards||{}).filter(function(b){return !b.startsWith("_")&&(boardTypes[b]||"baustelle")==="immobilie";});
   if(!immoBoards.length){showToast("\u26A0 Kein Board vom Typ \uD83C\uDFE0 Objekt vorhanden","warning",6000);return;}
   const ov=document.createElement("div");
@@ -42240,6 +42396,10 @@ function _objImpOeffnen(){
         +"<button type=\"button\" onclick=\"_objImpPick()\" title=\"Ordner w\u00e4hlen\" style=\"flex-shrink:0;padding:7px 11px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;\">\uD83D\uDCC2</button>"
         +"<button type=\"button\" onclick=\"_objImpLesen()\" style=\"flex-shrink:0;padding:7px 14px;border-radius:7px;border:none;background:var(--accent);color:#fff;font-size:12px;font-weight:700;cursor:pointer;\">Ordner lesen</button>"
       +"</div>"
+      /* b840: Uebersetzt die Kennung im Feld in einen Namen. Ohne sie sieht eine
+         vom letzten Mal stehengebliebene Adresse (b824) genauso aus wie eine eben
+         getroffene Wahl. Steht leer da und nimmt dann keine Hoehe ein. */
+      +"<div id=\"_objImpQuelleHinweis\" style=\"display:none;font-size:11px;color:var(--text2);margin:-4px 0 8px 2px;\"></div>"
       +"<div style=\"display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;\">"
         +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Board</label><select id=\"_objImpBoard\" onchange=\"_objImpBoardWechsel()\" style=\"width:100%;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\">"+boardOpts+"</select></div>"
         +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Spalte</label><select id=\"_objImpSpalte\" style=\"width:100%;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></select></div>"
@@ -42302,6 +42462,21 @@ function _objImpOeffnen(){
   (async function(){
     try{if(typeof _adrBookLoad==="function")await _adrBookLoad();}catch(e){console.warn("[b825] Adressbuch:",e);}
     try{_objImpAdrFuellen();}catch(e){console.warn("[b825] Auswahl:",e);}
+  })();
+  /* b840: Die vorbelegte Adresse in einen Namen uebersetzen. EIGENER Block, nicht im
+     Adressbuch-Block: sonst haengt der Name daran, ob Drive gerade das Adressbuch
+     liefert. Ohne Anmeldung oder ohne Vorbelegung bleibt die Zeile weg. */
+  (async function(){
+    try{
+      const q=document.getElementById("_objImpQuelle");
+      const fid=q?_extractFolderIdFromUrl((q.value||"").trim()):"";
+      if(!fid)return;
+      const nam=await _objImpOrdnerName(fid);
+      // ⚠ Nur setzen, wenn inzwischen nichts gelesen wurde - sonst ueberschriebe
+      // diese spaete Antwort die Zeile, die _objImpLesen schon gesetzt hat.
+      if(nam&&!_objImpAktName&&document.getElementById("_objImpDlg"))
+        _objImpQuelleHinweis("↳ vom letzten Mal: „"+nam+"“ – mit 📂 einen anderen wählen");
+    }catch(e){console.warn("[b840] Vorbelegung:",e);}
   })();
 }
 function _objZuordnenSammle(){
@@ -45398,14 +45573,34 @@ function _emRenderKontakte(){
   _emUpdateKontakteBadge();
 }
 function _emBuildKontaktRow(k,i){
-  var rolleOpts=['ag','mieter','eigentuemer','sonstiges'];
+  /* b842: Auch hier fehlte `hausverwaltung` in der Auswahl, obwohl die Beschriftung
+     darunter sie kennt. ⛔ Schlimmer als im Task-Fenster: hier gibt es kein
+     „✏️ Andere…". Passte keine Option, wählte der Browser die ERSTE - ein vom VBS
+     angelegter HV-Kontakt stand also als „👔 AG Kontakt" da. Gespeichert wurde nichts
+     Falsches, solange niemand am Auswahlfeld drehte; wer drehte, hatte danach
+     wirklich „ag" drin. */
+  // ⛔ typeof-Wache, siehe addKontaktPTP. Rückfall muss ADR_ROLLEN entsprechen.
+  var rolleOpts=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','sonstiges'];
   var rolleLabel={ag:'👔 AG Kontakt',mieter:'🏠 Mieter',eigentuemer:'👤 Eigentümer',hausverwaltung:'🏢 Hausverwaltung',sonstiges:'👥 Sonstiges'};
+  /* b842: Eine Rolle, die in keiner Option vorkommt (eigener Freitext aus dem
+     Task-Fenster), bekommt eine eigene Zeile statt still auf die erste zu fallen.
+     Angezeigt wird der rohe Wert - das ist die Wahrheit, und beim Speichern geht
+     nichts verloren. */
+  var kRolle=String(k.rolle||'sonstiges');
+  if(rolleOpts.indexOf(kRolle)<0){rolleOpts=rolleOpts.concat([kRolle]);rolleLabel[kRolle]='🏷 '+kRolle;}
+  /* b842: Eigene Funktion fuer die Auswahl-Zeilen. ⚠ Das `esc` weiter unten in dieser
+     Funktion laesst `<` stehen - fuer die festen Woerter reichte das, fuer einen
+     selbst eingetippten Rollennamen nicht. */
+  var escOpt=function(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');};
   var fs='font-size:11px;padding:3px 6px;';
   var esc=function(s){return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;');};
   var div=document.createElement('div');div.className='kontakt-entry';
   div.innerHTML='<div class="kontakt-entry-header">'
     +'<select class="k-rolle" style="font-size:11px;padding:2px 4px;" onchange="_emKontaktChange('+i+',\'rolle\',this.value)">'
-    +rolleOpts.map(function(r){return '<option value="'+r+'"'+(r===(k.rolle||'sonstiges')?' selected':'')+'>'+rolleLabel[r]+'</option>';}).join('')
+    /* b842: `esc` um Wert UND Beschriftung. Bis b841 standen dort nur feste Wörter
+       aus der Liste; seit b842 kann eine eigene Rolle darunter sein, und die kommt
+       aus einem Eingabefeld. */
+    +rolleOpts.map(function(r){return '<option value="'+escOpt(r)+'"'+(r===kRolle?' selected':'')+'>'+escOpt(rolleLabel[r]||r)+'</option>';}).join('')
     +'</select>'
     +'<label style="display:flex;align-items:center;gap:4px;font-size:10px;color:#1a56c4;cursor:pointer;margin-left:6px;" title="Auf Mobil als Anruf-Button anzeigen">'
     +'<input type="checkbox" class="k-anruf"'+(k.anrufKontakt?' checked':'')+' style="width:13px;height:13px;accent-color:#1a56c4;cursor:pointer;" onchange="_emKontaktChange('+i+',\'anrufKontakt\',this.checked)">📞 Anruf</label>'
