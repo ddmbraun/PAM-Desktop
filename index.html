@@ -9642,7 +9642,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-31 · #850'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b850) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-31 · #851'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b851) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -42275,18 +42275,43 @@ function _objImpKundeFinden(ordnerName){
   const tr=[];
   buch.forEach(function(k){
     if(!k)return;
-    const kw=_objImpWorte([k.name||"",k.firma||"",k.ort||""].join(" "));
-    if(!kw.length)return;
-    let p=0;
-    worte.forEach(function(w){if(kw.indexOf(w)>=0)p++;});
-    if(p)tr.push({k:k,punkte:p});
+    /* ⛔⛔ b851: Name/Firma und ORT werden GETRENNT gezählt.
+       Vorher lagen sie in einem Topf - und ein Ortsname allein trug dann die ganze
+       Zuordnung. Befund von Frank (31.08., Screenshot aus 446 Ordnern): Ein Firmenordner,
+       der nach einem Ort benannt ist, bekam die Anschrift einer Privatperson, die
+       zufällig in demselben Ort wohnt. Ein Ordner mit einem Allerweltswort aus einem
+       Ortsnamen bekam eine fremde Anschrift aus einem gleichnamigen Ort. Beides sah
+       völlig richtig aus.
+       ⛔ Beispiele bewusst OHNE echte Namen - diese Datei wird öffentlich ausgeliefert
+       (test_b646/test_b686 wachen darüber). Die echten Fälle stehen in CHANGES.md. */
+    const nw=_objImpWorte([k.name||"",k.firma||""].join(" "));
+    const ow=_objImpWorte(k.ort||"");
+    if(!nw.length)return;
+    let pName=0,pOrt=0;
+    worte.forEach(function(w){
+      if(nw.indexOf(w)>=0)pName++;
+      else if(ow.indexOf(w)>=0)pOrt++;
+    });
+    if(!pName)return;   // ⛔ Ohne Namenstreffer gar kein Kandidat. Der Ort hilft nur.
+    tr.push({k:k,punkte:pName+pOrt,abdeckung:(pName+pOrt)/worte.length});
   });
   if(!tr.length)return null;
   tr.sort(function(a,b){return b.punkte-a.punkte;});
-  /* Eindeutig ist nur, was BESSER ist als der Zweitbeste. Ein einziger Treffer ist
-     eindeutig, ein Gleichstand nie - auch nicht bei hoher Punktzahl. */
-  const sicher=(tr.length===1)||(tr[0].punkte>tr[1].punkte);
-  return {k:tr[0].k,punkte:tr[0].punkte,sicher:sicher,
+  /* Zwei Bedingungen müssen BEIDE erfüllt sein:
+     1. eindeutig - besser als der Zweitbeste (ein Gleichstand ist es nie),
+     2. vollständig - JEDES aussagekräftige Wort des Ordnernamens kommt vor.
+     ⛔⛔ Bedingung 2 kam mit b851. Ohne sie bekamen zwei Geschwister mit demselben
+     Nachnamen dieselbe Anschrift: Der Nachname traf, der Vorname widersprach - und
+     weil nur EIN Eintrag mit diesem Nachnamen im Adressbuch stand, galt das als
+     eindeutig. Zwei verschiedene Menschen mit derselben Adresse, und nichts sagte es
+     an. Ein widersprechendes Wort wiegt schwerer als ein passendes.
+     ⛔ Ohne echte Namen - diese Datei wird öffentlich ausgeliefert. */
+  const best=tr[0];
+  const eindeutig=(tr.length===1)||(best.punkte>tr[1].punkte);
+  const vollstaendig=best.abdeckung>=1;
+  return {k:best.k,punkte:best.punkte,abdeckung:best.abdeckung,
+    sicher:eindeutig&&vollstaendig,
+    grund:(!eindeutig?"mehrdeutig":(!vollstaendig?"unvollstaendig":"")),
     mehr:tr.slice(0,4).map(function(x){return x.k;})};
 }
 /* Welche Objektadresse schlägt ein Adressbuch-Eintrag vor?
@@ -42306,7 +42331,8 @@ function _objImpKundeObjAdr(k){
 }
 /* Der Kartentitel im Privatkunden-Modus: die Objektadresse der Zeile, sonst nichts.
    ⛔ KEIN Rückfall auf den Ordnernamen - der ist ein Personenname. Lieber eine leere,
-   rot markierte Zeile, die sich nicht anlegen lässt, als eine Karte namens „Grimm". */
+   rot markierte Zeile, die sich nicht anlegen lässt, als eine Karte, die nach einer
+   Person heißt statt nach einem Haus. */
 function _objImpPrivatVoll(x){
   return String((x&&x.objAdr)||"").trim();
 }
@@ -42334,6 +42360,72 @@ function _objImpKartenWerte(x,hv,raZeile,raBlock){
   const ra=[raZeile.split("{Objekt}").join(_objImpBasisName(x.name)),raBlock]
     .filter(function(s){return s&&s.trim();}).join(NL);
   return {voll:_objImpVollerName(x.name),ra:ra,hv:hv};
+}
+/* ── b851: Die eingetippte Objektadresse ins Adressbuch zurückschreiben ────────
+   Anlass (Frank, 31.08.): Bei 446 Kundenordnern und 10 Adressbuch-Einträgen findet
+   PAM fast nichts - er müsste jede Adresse tippen, und beim nächsten Lauf wieder.
+   Mit dem Häkchen fällt die Pflege beim Arbeiten ab: einmal tippen, ab dann steht sie
+   von selbst da.
+
+   ⛔ Es wird NICHTS überschrieben. Eine Adresse kommt nur dazu, wenn sie noch nicht
+   in der Liste steht - verglichen über `_objKeyFromAdr`, dieselbe Funktion, die auch
+   der Adressbuch-Dialog zum Dublettenvergleich benutzt.
+   ⛔ Ist gar kein Eintrag gefunden, entsteht ein NEUER mit dem Ordnernamen und der
+   Rolle „privatkunde" - ohne Anschrift, denn die kennt PAM nicht. Der Ordnername ist
+   ein Personenname, keine Adresse; ihn in `strasse` zu schreiben wäre geraten. */
+async function _objImpAdressbuchPflegen(gew){
+  const cb=document.getElementById("_objImpPflege");
+  if(!cb||!cb.checked)return 0;
+  let n=0;
+  try{
+    await _adrBookLoad();
+    if(!Array.isArray(_adrBook))return 0;
+    gew.forEach(function(x){
+      const adr=String((x&&x.objAdr)||"").trim();
+      if(!adr)return;
+      let k=x.kunde;
+      if(!k){
+        k={id:"adr_"+Date.now()+"_"+Math.random().toString(36).slice(2,6),
+           quelle:"objektimport",angelegt:new Date().toISOString(),
+           rolle:"privatkunde",name:String(x.name||"").trim(),firma:"",
+           strasse:"",plz:"",ort:"",tel:"",tel2:"",email:"",objekte:[]};
+        _adrBook.push(k);
+      }
+      if(!Array.isArray(k.objekte))k.objekte=[];
+      const key=_objKeyFromAdr(adr);
+      const schonDa=k.objekte.some(function(a){return _objKeyFromAdr(a)===key;});
+      if(!schonDa){k.objekte.push(adr);n++;}
+    });
+    if(n)await _adrBookSave();
+  }catch(e){console.warn("[b851] Adressbuch-Pflege:",e);}
+  return n;
+}
+/* ── b851: Suchen in der Liste ────────────────────────────────────────────────
+   Befund von Frank (31.08.): „Ich habe keine Möglichkeit, in den 446 Ordnern nach
+   einem bestimmten zu suchen." Scrollen ist bei der Menge keine Bedienung.
+   ⛔ Der Filter versteckt Zeilen nur - er hakt nichts ab und legt nichts an. Was
+   ausgewählt ist, bleibt ausgewählt, auch wenn es gerade nicht zu sehen ist. Genau
+   darum zählt der Knopf über ALLE Treffer, nicht über die sichtbaren. */
+let _objImpSuche="";
+function _objImpSuchGeaendert(v){
+  _objImpSuche=String(v||"").trim();
+  _objImpZeichnen(false,false);
+  /* Nach dem Neuzeichnen steht der Schreibcursor sonst nicht mehr im Feld. */
+  try{
+    const f=document.getElementById("_objImpSuche");
+    if(f){f.focus();f.setSelectionRange(f.value.length,f.value.length);}
+  }catch(e){}
+}
+/* Passt diese Zeile zur Suche? Über dieselbe Wortzerlegung wie die Kundensuche,
+   damit „Kruger" auch „Krüger" findet - und als einfacher Teiltext, damit Bruchstücke
+   wie „grim" ebenfalls greifen. */
+function _objImpPasstZurSuche(x){
+  if(!_objImpSuche)return true;
+  const s=_objImpWorte(_objImpSuche).join(" ");
+  if(!s)return true;
+  const n=_objImpWorte(x&&x.name).join(" ");
+  const a=_objImpWorte((x&&x.objAdr)||"").join(" ");
+  return (n+" "+a).indexOf(s)>=0;
 }
 /* Darf diese Zeile angelegt werden?
    ⛔ EINE Funktion für den Knopf („n Objekt(e) anlegen") UND fürs Anlegen selbst.
@@ -42363,6 +42455,9 @@ function _objImpModusFelder(){
       const el=document.getElementById(id);
       if(el)el.style.display=p?"none":"";
     });
+  // b851: Umgekehrt - nur im Privatkunden-Modus sichtbar.
+  const pf=document.getElementById("_objImpFeldPflege");
+  if(pf)pf.style.display=p?"inline-flex":"none";
   _objImpModusKnopf(document.getElementById("_objImpModusHv"),!p);
   _objImpModusKnopf(document.getElementById("_objImpModusPr"),p);
   const e=document.getElementById("_objImpErklaerung");
@@ -42384,6 +42479,10 @@ function _objImpModusSetzen(m){
   _objImpTreffer.forEach(function(x){
     x.kundeGesucht=false;
     if(!x.objAdrHand){x.objAdr="";x.objAdrQuelle="";x.objAdrListe=null;x.kunde=null;x.kundeMehr=[];}
+    /* ⛔ b851: Beim Wechsel die Häkchen ausdrücklich neu setzen. `_objImpNamenNeu`
+       fasst sie nur an, wenn sich der Dubletten-Stand DREHT - beim bloßen Umschalten
+       dreht er sich nicht, und die 446 Haken aus dem Verwaltungs-Modus blieben stehen. */
+    if(!x.schonDa)x.an=!_objImpIstPrivat();
   });
   _objImpModusFelder();
   try{_objImpNamenNeu();}catch(e){console.warn("[b850] Namen:",e);}
@@ -42627,6 +42726,8 @@ function _objImpNamenNeu(){
       try{f=_objImpKundeFinden(x.name);}catch(e){console.warn("[b850] Kundensuche:",e);}
       x.kunde=(f&&f.sicher)?f.k:null;
       x.kundeMehr=(f&&!f.sicher)?f.mehr:[];
+      // b851: WARUM es nicht gereicht hat - steht in der Zeile, damit man es sieht.
+      x.kundeGrund=(f&&!f.sicher)?f.grund:"";
       if(x.kunde&&!x.objAdrHand){
         const v=_objImpKundeObjAdr(x.kunde);
         x.objAdr=v.text;x.objAdrQuelle=v.quelle;x.objAdrListe=v.liste||null;
@@ -42651,8 +42752,12 @@ function _objImpNamenNeu(){
       ||vorhanden.has(String(x.name).trim().toLowerCase())
       ||vorhanden.has(_objImpTitelWieGespeichert(x.name).toLowerCase()));
     /* Häkchen nur anfassen, wenn der Stand sich wirklich dreht – sonst hakte jede
-       Eingabe im Ort-Feld eine von Hand abgewählte Zeile wieder an. */
-    if(da!==x.schonDa){x.schonDa=da;x.an=!da;}
+       Eingabe im Ort-Feld eine von Hand abgewählte Zeile wieder an.
+       ⛔ b851: Im Privatkunden-Modus wird NICHTS vorangehakt. Befund von Frank
+       (31.08.): 446 Ordner, alle angehakt - er hätte 378 Haken wegklicken müssen, um
+       den einen Kunden anzulegen, den er braucht. Bei einer Verwaltung ist Vorhaken
+       richtig (man will alle Häuser), bei Privatkunden ist es genau verkehrt. */
+    if(da!==x.schonDa){x.schonDa=da;x.an=!da&&!_objImpIstPrivat();}
   });
 }
 /* Hinweis unter dem Straßenfeld: an EINER Stelle setzen und wegnehmen.
@@ -42831,7 +42936,15 @@ function _objImpPfadHtml(){
     +"<span style=\"font-size:11px;color:var(--text2);\">\uD83D\uDCC1 Gelesen: <b style=\"color:var(--text);\">"+esc(weg)+"</b></span>";
 }
 function _objImpUmschalten(i){if(_objImpTreffer[i])_objImpTreffer[i].an=!_objImpTreffer[i].an;_objImpZeichnen(false,true);}
-function _objImpAlle(an){_objImpTreffer.forEach(function(x){if(!x.schonDa)x.an=!!an;});_objImpZeichnen(false,true);}
+/* ⛔ b851: „alle" und „keine" wirken nur auf das, was die Suche gerade ZEIGT.
+   Sonst hakte ein Klick auf „alle" bei eingetippter Suche 446 unsichtbare Zeilen mit
+   an - und der Knopf legte Karten an, die man nie gesehen hat. */
+function _objImpAlle(an){
+  _objImpTreffer.forEach(function(x){
+    if(!x.schonDa&&_objImpPasstZurSuche(x))x.an=!!an;
+  });
+  _objImpZeichnen(false,true);
+}
 function _objImpZeichnen(mehrDa,nurListe){
   const box=document.getElementById("_objImpListe");if(!box)return;
   const neu=_objImpTreffer.filter(function(x){return !x.schonDa;});
@@ -42839,7 +42952,12 @@ function _objImpZeichnen(mehrDa,nurListe){
   const gew=_objImpTreffer.filter(_objImpAnlegbar).length;
   _objImpPfadHtml();
   const kopf=document.getElementById("_objImpKopf");
-  if(kopf)kopf.textContent=_objImpTreffer.length+" Ordner gefunden \u00b7 "+neu.length+" neu \u00b7 "+da.length+" schon als Objekt vorhanden";
+  /* b851: Der Z\u00e4hler sagt jetzt auch, wie viele AUSGEW\u00c4HLT sind. Bei 446 Zeilen sah
+     man vorher nur \u201e446 neu" und musste dem Knopf glauben, was er gleich anlegt. */
+  const sicht=_objImpSuche?_objImpTreffer.filter(_objImpPasstZurSuche).length:0;
+  if(kopf)kopf.textContent=_objImpTreffer.length+" Ordner gefunden \u00b7 "+neu.length+" neu \u00b7 "+da.length+" schon als Objekt vorhanden"
+    +" \u00b7 "+gew+" ausgew\u00e4hlt"
+    +(_objImpSuche?(" \u00b7 "+sicht+" von der Suche gezeigt"):"");
   const btn=document.getElementById("_objImpOkBtn");
   if(btn){btn.textContent="\uD83C\uDFE0 "+gew+" Objekt(e) anlegen";btn.disabled=!gew;btn.style.opacity=gew?"1":".5";btn.style.cursor=gew?"pointer":"default";}
   if(nurListe&&box.dataset.gezeichnet==="1"){
@@ -42861,6 +42979,10 @@ function _objImpZeichnen(mehrDa,nurListe){
   }
   box.dataset.gezeichnet="1";
   box.innerHTML=_objImpTreffer.map(function(x,i){
+    /* ⛔ b851: Gefilterte Zeilen geben "" zurück, statt aus der Liste zu fallen.
+       Der Index `i` steckt in den Kennungen der Häkchen und in `_objImpUmschalten(i)` -
+       ein neu durchgezähltes Array würde beim Klick die falsche Zeile treffen. */
+    if(!_objImpPasstZurSuche(x))return "";
     const grau=x.schonDa?"opacity:.5;":"";
     /* b832: Vor dem Anlegen sichtbar machen, welches Haus eine PLZ bekommt und
        welches nicht - eine stille Luecke faellt sonst erst im Kundenschreiben auf. */
@@ -42917,9 +43039,14 @@ function _objImpZeichnen(mehrDa,nurListe){
         +"border:1px solid "+(x.objAdr?"var(--border)":"#a04000")+";background:var(--bg);color:var(--text);\">"
         +(vors.length?("<datalist id=\""+lid+"\">"+vors.map(function(v){return "<option value=\""+esc(v)+"\">";}).join("")+"</datalist>"):"");
       if(!x.objAdr){
-        _pHin=(x.kundeMehr&&x.kundeMehr.length)
-          ?"<span style=\"font-size:10px;color:#a04000;font-weight:700;\" title=\"Mehrere Adressbuch-Einträge passen gleich gut auf diesen Ordnernamen. PAM rät nicht – bitte auswählen oder eintippen.\">· ⚠ mehrere passen</span>"
-          :"<span style=\"font-size:10px;color:#a04000;font-weight:700;\" title=\"Ohne Objektadresse kann keine Karte angelegt werden – der Ordnername ist ein Personenname.\">· ⚠ fehlt</span>";
+        /* b851: WARUM nichts eingetragen wurde, statt nur „fehlt". Bei 446 Zeilen ist
+           der Unterschied wichtig: „passt nur teilweise" heißt, dass es einen ähnlichen
+           Eintrag GIBT - da lohnt ein Blick, bevor man tippt. */
+        _pHin=(x.kundeGrund==="mehrdeutig")
+          ?"<span style=\"font-size:10px;color:#a04000;font-weight:700;\" title=\"Mehrere Adressbuch-Einträge passen gleich gut auf diesen Ordnernamen. PAM rät nicht – bitte eintippen oder aus der Vorschlagsliste wählen.\">· ⚠ mehrere passen</span>"
+          :(x.kundeGrund==="unvollstaendig"
+            ?"<span style=\"font-size:10px;color:#a04000;font-weight:700;\" title=\"Ein Adressbuch-Eintrag passt nur zum Teil – etwa der Nachname, aber nicht der Vorname. Das wäre eine fremde Anschrift; bitte selbst eintragen oder aus der Vorschlagsliste wählen.\">· ⚠ passt nur teilweise</span>"
+            :"<span style=\"font-size:10px;color:#a04000;font-weight:700;\" title=\"Ohne Objektadresse kann keine Karte angelegt werden – der Ordnername ist ein Personenname.\">· ⚠ fehlt</span>");
       }else if(x.objAdrQuelle==="wohn"){
         _pHin="<span style=\"font-size:10px;color:#8a5a00;font-weight:600;\" title=\"Übernommen aus der WOHNanschrift des Kunden, weil im Adressbuch kein Objekt hinterlegt ist. Wohnt er woanders als das Dach steht, bitte ändern.\">· aus der Wohnadresse</span>";
       }else if(x.objAdrQuelle==="objekt"){
@@ -43263,11 +43390,19 @@ async function _objImpAnlegen(){
     boards[board].push(t);n++;
   });
   try{_auftragSpalteSicher(board);}catch(e){}
+  /* b851: VOR dem Speichern der Boards - so liegt bei einem Fehler im Adressbuch
+     wenigstens noch nichts halb Gespeichertes herum. Der Rückgabewert wandert in die
+     Erfolgsmeldung, damit Frank sieht, was nebenbei gepflegt wurde. */
+  let _adrNeu=0;
+  if(_objImpIstPrivat()){
+    try{_adrNeu=await _objImpAdressbuchPflegen(gew);}catch(e){console.warn("[b851] Pflege:",e);}
+  }
   try{await autoSave();}catch(e){console.warn("[b822] Save:",e);}
   try{pushToSync();}catch(e){}
   _objImpSchliessen();
   try{render();}catch(e){}
-  showToast("\u2713 "+n+" Objekt(e) angelegt in \u201e"+board+"\u201c","success",6000);
+  // b851: Was nebenbei ins Adressbuch ging, steht in der Meldung - sonst merkt es niemand.
+  showToast("✓ "+n+" Objekt(e) angelegt in „"+board+"“"+(_adrNeu?(" · "+_adrNeu+" Objektadresse(n) ins Adressbuch übernommen"):""),"success",_adrNeu?9000:6000);
 }
 function _objImpBoardWechsel(){
   const b=((document.getElementById("_objImpBoard")||{}).value)||"";
@@ -43373,7 +43508,15 @@ function _objImpOeffnen(){
         +"<div id=\"_objImpPfad\" style=\"display:none;align-items:center;gap:8px;\"></div>"
       +"</div>"
       +"<div style=\"display:flex;align-items:center;gap:10px;\">"
-        +"<div id=\"_objImpKopf\" style=\"flex:1;font-size:11px;color:var(--text2);\">Noch nichts gelesen.</div>"
+        +"<div id=\"_objImpKopf\" style=\"flex:1;min-width:0;font-size:11px;color:var(--text2);\">Noch nichts gelesen.</div>"
+        /* b851: Das Suchfeld sitzt in der vorhandenen Zeile neben „alle/keine" -
+           ⛔ keine eigene Zeile, sonst reißt die Obergrenze aus b845. */
+        +"<input id=\"_objImpSuche\" type=\"text\" oninput=\"_objImpSuchGeaendert(this.value)\" placeholder=\"🔍 in der Liste suchen …\" autocomplete=\"off\" style=\"flex-shrink:0;width:190px;padding:3px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:11px;\">"
+        /* b851: Nur im Privatkunden-Modus sichtbar. Wer die Objektadresse einmal
+           eintippt, soll sie nicht beim nächsten Lauf noch einmal tippen müssen. */
+        +"<label id=\"_objImpFeldPflege\" style=\"display:none;flex-shrink:0;align-items:center;gap:4px;font-size:11px;color:var(--text2);cursor:pointer;\" title=\"Legt die eingetippte Objektadresse beim Kunden im Adressbuch ab – unter Fest zugeordnete Objekte. Beim nächsten Mal steht sie dann von selbst da.\">"
+          +"<input type=\"checkbox\" id=\"_objImpPflege\" checked style=\"cursor:pointer;\">ins Adressbuch"
+        +"</label>"
         +"<button type=\"button\" onclick=\"_objImpAlle(true)\" style=\"padding:3px 9px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:11px;cursor:pointer;\">alle</button>"
         +"<button type=\"button\" onclick=\"_objImpAlle(false)\" style=\"padding:3px 9px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:11px;cursor:pointer;\">keine</button>"
       +"</div>"
