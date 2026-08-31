@@ -9642,7 +9642,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-31 · #849'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b849) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-31 · #850'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b850) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -42224,6 +42224,186 @@ function _objImpAdrAnschrift(k){
   const plzOrt=[String(k.plz||"").trim(),String(k.ort||"").trim()].filter(Boolean).join(" ");
   return [String(k.firma||"").trim(),String(k.strasse||"").trim(),plzOrt].filter(Boolean).join("\n");
 }
+/* ── b850: Privatkunden ───────────────────────────────────────────────────────
+   Bis b849 kannte dieser Dialog nur EINEN Fall: eine Verwaltung, viele Häuser an
+   einem Ort. Bei einer Verwaltung sagt der Ordnername, WO das Objekt ist. Bei einem
+   Privatkunden sagt er, WER der Kunde ist - die Objektadresse steht im Ordner
+   nirgends. Aus „Nachname Vorname" + Ort baute der Dialog trotzdem eine Anschrift;
+   ein Personenname landete so in `title`, `adresse` und in {Objekt} der Word-Vorlagen.
+
+   ⛔⛔ Die Ordner sind über 20 Jahre gewachsen und uneinheitlich (Frank, 31.08.):
+   mal „Nachname Vorname", mal nur der Nachname, manchmal mit Ort. Im Adressbuch steht
+   derselbe Mensch als „Vorname Nachname" oder als „Nachname, Vorname". Eine feste
+   Schreibregel scheidet damit aus - Frank soll NICHTS umbenennen müssen. Sein Anker,
+   wörtlich: „der Nachname steht auf jeden Fall da". Deshalb Wort-Überschneidung:
+   Reihenfolge egal, fehlender Vorname egal, ein Ort im Namen hilft zusätzlich.
+
+   ⛔ Es wird NIE still zugeordnet. Ein Treffer zählt nur bei eindeutigem Abstand zum
+   zweitbesten; bei Gleichstand bleibt das Feld leer und die Kandidaten stehen daneben.
+   Grund: Bei „Müller" oder „Braun" gibt es mehrere, und eine falsche Objektadresse
+   sieht genauso richtig aus wie eine richtige. */
+let _objImpModus="hv";
+function _objImpIstPrivat(){return _objImpModus==="privat";}
+/* Zerlegt einen Namen in vergleichbare Wörter.
+   ⛔ Über `_adrNormSuche` (b848), damit „Krüger" und „Krueger" dasselbe Wort ergeben -
+   sonst scheitert die Zuordnung an einem Umlaut. `typeof`-Wache, weil die Funktion
+   weiter oben in der Datei steht und diese hier auch ohne sie arbeiten können muss.
+   Wörter unter drei Zeichen fliegen raus: „am", „zu", einzelne Initialen sind Rauschen
+   und würden bei genug Einträgen jeden mit jedem verbinden. */
+function _objImpWorte(s){
+  /* ⛔ Die Umlaut-Wandlung steht HIER und ruft nicht `_adrNormSuche` (b848).
+     Erster Versuch tat das - und fiel still auf die Nase: `_adrNormSuche` ruft
+     intern `_adrNorm`, und ein `try/catch` drumherum schluckte den Fehler. Ergebnis
+     waeren unverwandelte Umlaute gewesen, ohne dass irgendwo etwas aufgefallen waere.
+     Die beiden haben ohnehin verschiedene Aufgaben: `_adrNormSuche` sucht im
+     Adressbuch, das hier zerlegt Ordnernamen. */
+  return String(s||"").toLowerCase()
+    .replace(/ä/g,"ae").replace(/ö/g,"oe").replace(/ü/g,"ue").replace(/ß/g,"ss")
+    .replace(/[.,;:_\-\/\\()\[\]]+/g," ")
+    .split(/\s+/)
+    .filter(function(w){return w.length>=3;});
+}
+/* Sucht den Adressbuch-Eintrag zu einem Ordnernamen.
+   Rückgabe: {k, punkte, sicher, mehr:[…]} oder null.
+   ⛔ `_adrBook` direkt, NICHT `_objImpAdrListe()`: Die filtert auf „hat eine Anschrift",
+   ein frisch angelegter Kunde ohne Adresse fiele damit aus der Zuordnung heraus - und
+   genau bei dem will man ja die Objektadresse eintragen. */
+function _objImpKundeFinden(ordnerName){
+  const worte=_objImpWorte(ordnerName);
+  if(!worte.length)return null;
+  const buch=(typeof _adrBook!=="undefined"&&Array.isArray(_adrBook))?_adrBook:[];
+  const tr=[];
+  buch.forEach(function(k){
+    if(!k)return;
+    const kw=_objImpWorte([k.name||"",k.firma||"",k.ort||""].join(" "));
+    if(!kw.length)return;
+    let p=0;
+    worte.forEach(function(w){if(kw.indexOf(w)>=0)p++;});
+    if(p)tr.push({k:k,punkte:p});
+  });
+  if(!tr.length)return null;
+  tr.sort(function(a,b){return b.punkte-a.punkte;});
+  /* Eindeutig ist nur, was BESSER ist als der Zweitbeste. Ein einziger Treffer ist
+     eindeutig, ein Gleichstand nie - auch nicht bei hoher Punktzahl. */
+  const sicher=(tr.length===1)||(tr[0].punkte>tr[1].punkte);
+  return {k:tr[0].k,punkte:tr[0].punkte,sicher:sicher,
+    mehr:tr.slice(0,4).map(function(x){return x.k;})};
+}
+/* Welche Objektadresse schlägt ein Adressbuch-Eintrag vor?
+   Vorrang hat die gepflegte Liste „📌 Fest zugeordnete Objekte" - sie ist eine
+   ausdrückliche Angabe. Die Wohnanschrift ist nur der Rückfall und wird als solcher
+   MARKIERT: Bei einem Vermieter oder Erben steht das Dach woanders als der Mensch,
+   und dieser Fall ist bei Frank real, nicht theoretisch. */
+function _objImpKundeObjAdr(k){
+  if(!k)return {text:"",quelle:"leer"};
+  const liste=(Array.isArray(k.objekte)?k.objekte:[]).map(function(a){return String(a||"").trim();})
+    .filter(Boolean);
+  if(liste.length===1)return {text:liste[0],quelle:"objekt"};
+  if(liste.length>1)return {text:"",quelle:"mehrere",liste:liste};
+  const plzOrt=[String(k.plz||"").trim(),String(k.ort||"").trim()].filter(Boolean).join(" ");
+  const wohn=[String(k.strasse||"").trim(),plzOrt].filter(Boolean).join(", ");
+  return wohn?{text:wohn,quelle:"wohn"}:{text:"",quelle:"leer"};
+}
+/* Der Kartentitel im Privatkunden-Modus: die Objektadresse der Zeile, sonst nichts.
+   ⛔ KEIN Rückfall auf den Ordnernamen - der ist ein Personenname. Lieber eine leere,
+   rot markierte Zeile, die sich nicht anlegen lässt, als eine Karte namens „Grimm". */
+function _objImpPrivatVoll(x){
+  return String((x&&x.objAdr)||"").trim();
+}
+/* Titel, Rechnungsanschrift und Auftraggeber EINER Karte.
+   Verwaltung: Titel aus dem Ordnernamen, eine Anschrift für alle, Auftraggeber aus
+   dem Kopffeld - unverändert seit b843.
+   Privatkunde: Titel aus der Objektadresse DIESER Zeile, Anschrift und Auftraggeber
+   aus SEINEM Adressbuch-Eintrag, also bei jeder Karte anders.
+   ⛔ Ohne gefundenen Adressbuch-Eintrag bleibt die Rechnungsanschrift LEER. Eine halbe
+   wäre schlimmer als keine: Im Kundenschreiben sähe sie vollständig aus. Der Kundenname
+   steht dann trotzdem als Auftraggeber auf der Karte - er kommt aus dem Ordnernamen. */
+function _objImpKartenWerte(x,hv,raZeile,raBlock){
+  const NL=String.fromCharCode(10);
+  if(_objImpIstPrivat()){
+    const k=x&&x.kunde;
+    const nam=(k&&String(k.name||k.firma||"").trim())||String((x&&x.name)||"").trim();
+    let ra="";
+    if(k){
+      const po=[String(k.plz||"").trim(),String(k.ort||"").trim()].filter(Boolean).join(" ");
+      ra=[String(k.name||"").trim(),String(k.firma||"").trim(),String(k.strasse||"").trim(),po]
+        .filter(function(s){return s&&s.trim();}).join(NL);
+    }
+    return {voll:String((x&&x.objAdr)||"").trim(),ra:ra,hv:nam};
+  }
+  const ra=[raZeile.split("{Objekt}").join(_objImpBasisName(x.name)),raBlock]
+    .filter(function(s){return s&&s.trim();}).join(NL);
+  return {voll:_objImpVollerName(x.name),ra:ra,hv:hv};
+}
+/* Darf diese Zeile angelegt werden?
+   ⛔ EINE Funktion für den Knopf („n Objekt(e) anlegen") UND fürs Anlegen selbst.
+   Zwei getrennte Bedingungen liefen sonst irgendwann auseinander, und der Knopf
+   verspräche Karten, die nicht entstehen. */
+function _objImpAnlegbar(x){
+  if(!x||!x.an||x.schonDa)return false;
+  if(_objImpIstPrivat()&&!String(x.objAdr||"").trim())return false;
+  return true;
+}
+function _objImpModusKnopf(el,aktiv){
+  if(!el)return;
+  el.style.background=aktiv?"var(--accent)":"var(--bg3)";
+  el.style.color=aktiv?"#fff":"var(--text2)";
+}
+/* Welche Felder gehören zu welchem Fall.
+   ⛔ Im Privatkunden-Modus verschwinden Verwaltungs-Auswahl, Auftraggeber-Feld,
+   „Straße davorsetzen" und BEIDE Rechnungsanschrift-Felder. Der gemeinsame
+   Anschriftblock ist dort sinnlos: Jeder Kunde hat seine eigene, und „WEG {Objekt}"
+   wäre schlicht falsch - WEG heißt Wohnungseigentümergemeinschaft.
+   ⚠ Ausblenden macht den Dialog KÜRZER, nie länger - die Obergrenze aus b845 kann
+   dadurch nicht reißen. */
+function _objImpModusFelder(){
+  const p=_objImpIstPrivat();
+  ["_objImpFeldAdr","_objImpFeldHv","_objImpFeldStr","_objImpFeldRaZeile","_objImpFeldRaBlock"]
+    .forEach(function(id){
+      const el=document.getElementById(id);
+      if(el)el.style.display=p?"none":"";
+    });
+  _objImpModusKnopf(document.getElementById("_objImpModusHv"),!p);
+  _objImpModusKnopf(document.getElementById("_objImpModusPr"),p);
+  const e=document.getElementById("_objImpErklaerung");
+  if(e)e.innerHTML=p
+    ?"Jeder Unterordner ist ein <b>Kunde</b>. Weil der Ordnername ein Personenname ist, steht die <b>Objektadresse</b> je Zeile – daraus wird der Titel der Karte. PAM schlägt vor, was es im Adressbuch findet; ohne Adresse lässt sich eine Zeile nicht anlegen."
+    :"Jeder Unterordner des gewählten Drive-Ordners wird zu einer Objektkarte. Es wird <b>nichts überschrieben und nichts verschoben</b> – es kommen nur neue Karten dazu. Ein zweiter Lauf legt nichts doppelt an.";
+}
+/* ⛔ Der Modus wird NICHT gemerkt. Beim Öffnen steht immer „Hausverwaltung" - der
+   häufigere Fall und der, bei dem nichts von selbst passiert. Ein gemerkter Modus
+   wäre genau die Falle, die b849 beim Adressfeld beheben musste: ein Zustand, den
+   niemand gesetzt hat und niemand ansagt. */
+function _objImpModusSetzen(m){
+  const neu=(m==="privat")?"privat":"hv";
+  if(neu===_objImpModus){_objImpModusFelder();return;}
+  _objImpModus=neu;
+  /* Beim Wechsel gilt die alte Zuordnung nicht mehr - neu suchen lassen. Von Hand
+     Eingetipptes bleibt: `objAdrHand` ist Franks Wort und wiegt schwerer als jede
+     Automatik. */
+  _objImpTreffer.forEach(function(x){
+    x.kundeGesucht=false;
+    if(!x.objAdrHand){x.objAdr="";x.objAdrQuelle="";x.objAdrListe=null;x.kunde=null;x.kundeMehr=[];}
+  });
+  _objImpModusFelder();
+  try{_objImpNamenNeu();}catch(e){console.warn("[b850] Namen:",e);}
+  try{_objImpZeichnen(false,false);}catch(e){console.warn("[b850] Zeichnen:",e);}
+}
+/* Frank tippt eine Objektadresse - ab da gehört die Zeile ihm.
+   ⛔ `objAdrHand` verhindert, dass die Adressbuch-Automatik sie beim nächsten
+   Neuzeichnen überschreibt. Ohne die Marke wäre jede Eingabe nach dem nächsten
+   Tastendruck im Ort-Feld wieder weg. */
+function _objImpObjAdrGeaendert(i,wert){
+  const x=_objImpTreffer[i];
+  if(!x)return;
+  x.objAdr=String(wert||"").trim();
+  x.objAdrHand=true;
+  x.objAdrQuelle="hand";
+  try{_objImpNamenNeu();}catch(e){console.warn("[b850] Namen:",e);}
+  /* Nur Kopf und Knopf auffrischen, NICHT die Liste neu bauen - sonst verlöre das
+     Feld bei jedem Tastendruck den Schreibcursor. */
+  try{_objImpZeichnen(false,true);}catch(e){}
+}
 /* ── b849: Die Adress-Vorbelegung war unsichtbar ──────────────────────────────
    Befund von Frank (31.08.): Er wollte Privatkunden anlegen und hatte im Dialog
    eine Hausverwaltung stehen, samt deren Auftraggeber und Anschrift - ohne das
@@ -42241,6 +42421,14 @@ function _objImpAdrHinweis(text){
   const h=document.getElementById("_objImpAdrHinweis");
   if(!h)return;
   h.textContent=text||"";
+}
+/* b850: Das sichtbare ✕ neben dem Auswahlfeld.
+   ⛔ Kein zweiter Weg zum Leeren - es stellt das Feld auf „nichts übernehmen" und ruft
+   genau den Pfad, den b849 gebaut hat. Zwei Wege liefen später auseinander. */
+function _objImpAdrLeeren(){
+  const sel=document.getElementById("_objImpAdr");
+  if(sel)sel.value="";
+  _objImpAdrWahl();
 }
 function _objImpAdrWahl(){
   const sel=document.getElementById("_objImpAdr");if(!sel)return;
@@ -42429,12 +42617,39 @@ function _objImpNamenNeu(){
   let vorhanden;
   try{vorhanden=_objImpVorhandene();}catch(e){console.warn("[b843] Vorhandene:",e);vorhanden=new Set();}
   _objImpTreffer.forEach(function(x){
-    x.voll=_objImpVollerName(x.name);
+    /* b850: Im Privatkunden-Modus einmal je Zeile im Adressbuch nachschlagen.
+       ⛔ Nur EINMAL (`kundeGesucht`), sonst überschriebe jedes Neuzeichnen - und das
+       läuft bei jedem Tastendruck im Ort-Feld - eine von Hand eingetippte Adresse.
+       Dieselbe Falle wie beim Straßenfeld in b843, dort hilft `dataset.auto`. */
+    if(_objImpIstPrivat()&&x.kundeGesucht!==true){
+      x.kundeGesucht=true;
+      let f=null;
+      try{f=_objImpKundeFinden(x.name);}catch(e){console.warn("[b850] Kundensuche:",e);}
+      x.kunde=(f&&f.sicher)?f.k:null;
+      x.kundeMehr=(f&&!f.sicher)?f.mehr:[];
+      if(x.kunde&&!x.objAdrHand){
+        const v=_objImpKundeObjAdr(x.kunde);
+        x.objAdr=v.text;x.objAdrQuelle=v.quelle;x.objAdrListe=v.liste||null;
+      }
+    }
+    /* b850: Im Privatkunden-Modus ist der Ordnername ein PERSONENname - der Titel
+       kommt aus der Objektadresse der Zeile. Im Verwaltungsfall bleibt alles, wie es
+       seit b843 ist; `_objImpVollerName` wurde bewusst nicht angefasst, es hängen vier
+       Prüfsuiten daran. */
+    x.voll=_objImpIstPrivat()?_objImpPrivatVoll(x):_objImpVollerName(x.name);
     x.wird=_objImpTitelWieGespeichert(x.voll);
-    const da=vorhanden.has(String(x.voll).trim().toLowerCase())
+    /* b850: Im Privatkunden-Modus NICHT gegen den Ordnernamen vergleichen. Der ist
+       ein Personenname; eine Karte, die so heißt, wäre eine alte Fehlanlage und darf
+       das Anlegen der richtigen Karte („Straße Hausnr") nicht blockieren.
+       ⛔ Ohne Objektadresse gibt es nichts zu vergleichen - `voll` ist dann leer, und
+       leere Zeilen fängt `_objImpZeichnen` ab, nicht diese Prüfung. */
+    const da=_objImpIstPrivat()
+      ?(!!x.voll&&(vorhanden.has(String(x.voll).trim().toLowerCase())
+                 ||vorhanden.has(String(x.wird).trim().toLowerCase())))
+      :(vorhanden.has(String(x.voll).trim().toLowerCase())
       ||vorhanden.has(String(x.wird).trim().toLowerCase())
       ||vorhanden.has(String(x.name).trim().toLowerCase())
-      ||vorhanden.has(_objImpTitelWieGespeichert(x.name).toLowerCase());
+      ||vorhanden.has(_objImpTitelWieGespeichert(x.name).toLowerCase()));
     /* Häkchen nur anfassen, wenn der Stand sich wirklich dreht – sonst hakte jede
        Eingabe im Ort-Feld eine von Hand abgewählte Zeile wieder an. */
     if(da!==x.schonDa){x.schonDa=da;x.an=!da;}
@@ -42621,7 +42836,7 @@ function _objImpZeichnen(mehrDa,nurListe){
   const box=document.getElementById("_objImpListe");if(!box)return;
   const neu=_objImpTreffer.filter(function(x){return !x.schonDa;});
   const da=_objImpTreffer.filter(function(x){return x.schonDa;});
-  const gew=_objImpTreffer.filter(function(x){return x.an&&!x.schonDa;}).length;
+  const gew=_objImpTreffer.filter(_objImpAnlegbar).length;
   _objImpPfadHtml();
   const kopf=document.getElementById("_objImpKopf");
   if(kopf)kopf.textContent=_objImpTreffer.length+" Ordner gefunden \u00b7 "+neu.length+" neu \u00b7 "+da.length+" schon als Objekt vorhanden";
@@ -42671,10 +42886,51 @@ function _objImpZeichnen(mehrDa,nurListe){
     /* b824: Der Zeilenrahmen ist kein <label> mehr. Ein Klick irgendwo im Label setzt
        das Haekchen - der Hineingehen-Knopf haette dabei IMMER auch an-/abgehakt.
        Jetzt: Haekchen und Name schalten das Haekchen, der Pfeil rechts geht hinein. */
+    /* ── b850: Im Privatkunden-Modus trägt jede Zeile ihre eigene Objektadresse ──
+       Der Ordnername ist hier ein Personenname; der Titel kommt aus diesem Feld.
+       ⛔ Die Vorschlagsliste ist eine `datalist`, kein Auswahlfeld: Frank muss frei
+       tippen können, wenn PAM nichts oder das Falsche findet. Ein Auswahlfeld würde
+       ihn auf die Vorschläge festnageln.
+       ⛔ Woher die Adresse stammt, steht IMMER daneben. Eine aus der Wohnanschrift
+       geratene Adresse sieht sonst genauso richtig aus wie eine gepflegte - und beim
+       Vermieter ist sie falsch. */
+    let _pFeld="",_pHin="";
+    if(_objImpIstPrivat()&&!x.schonDa){
+      const vors=[];
+      const sammle=function(k){
+        if(!k)return;
+        (Array.isArray(k.objekte)?k.objekte:[]).forEach(function(a){
+          const t=String(a||"").trim();
+          if(t&&vors.indexOf(t)<0)vors.push(t);
+        });
+        const po=[String(k.plz||"").trim(),String(k.ort||"").trim()].filter(Boolean).join(" ");
+        const w=[String(k.strasse||"").trim(),po].filter(Boolean).join(", ");
+        if(w&&vors.indexOf(w)<0)vors.push(w);
+      };
+      sammle(x.kunde);
+      (x.kundeMehr||[]).forEach(sammle);
+      const lid="_objImpDl"+i;
+      _pFeld="<input type=\"text\" list=\""+lid+"\" value=\""+esc(x.objAdr||"")+"\""
+        +" onchange=\"_objImpObjAdrGeaendert("+i+",this.value)\""
+        +" placeholder=\"Objektadresse – Straße Hausnr, PLZ Ort\""
+        +" style=\"flex:1.6;min-width:0;padding:3px 7px;border-radius:5px;font-size:11px;"
+        +"border:1px solid "+(x.objAdr?"var(--border)":"#a04000")+";background:var(--bg);color:var(--text);\">"
+        +(vors.length?("<datalist id=\""+lid+"\">"+vors.map(function(v){return "<option value=\""+esc(v)+"\">";}).join("")+"</datalist>"):"");
+      if(!x.objAdr){
+        _pHin=(x.kundeMehr&&x.kundeMehr.length)
+          ?"<span style=\"font-size:10px;color:#a04000;font-weight:700;\" title=\"Mehrere Adressbuch-Einträge passen gleich gut auf diesen Ordnernamen. PAM rät nicht – bitte auswählen oder eintippen.\">· ⚠ mehrere passen</span>"
+          :"<span style=\"font-size:10px;color:#a04000;font-weight:700;\" title=\"Ohne Objektadresse kann keine Karte angelegt werden – der Ordnername ist ein Personenname.\">· ⚠ fehlt</span>";
+      }else if(x.objAdrQuelle==="wohn"){
+        _pHin="<span style=\"font-size:10px;color:#8a5a00;font-weight:600;\" title=\"Übernommen aus der WOHNanschrift des Kunden, weil im Adressbuch kein Objekt hinterlegt ist. Wohnt er woanders als das Dach steht, bitte ändern.\">· aus der Wohnadresse</span>";
+      }else if(x.objAdrQuelle==="objekt"){
+        _pHin="<span style=\"font-size:10px;color:var(--text2);\" title=\"Aus „📌 Fest zugeordnete Objekte“ des Adressbuch-Eintrags\">· aus dem Adressbuch</span>";
+      }
+    }
     return "<div style=\"display:flex;align-items:center;gap:8px;padding:5px 10px;border-bottom:1px solid var(--border);"+grau+"\">"
       +"<input type=\"checkbox\" id=\"_objImpCb"+i+"\" "+(x.an?"checked":"")+" "+(x.schonDa?"disabled":"")+" onchange=\"_objImpUmschalten("+i+")\" style=\"cursor:"+(x.schonDa?"default":"pointer")+";\">"
       +"<span onclick=\""+(x.schonDa?"":"document.getElementById('_objImpCb"+i+"').click()")+"\" style=\"flex:1;min-width:0;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:"+(x.schonDa?"default":"pointer")+";\">"+esc(x.name)+"</span>"
-      +hinweis
+      +_pFeld
+      +(_objImpIstPrivat()?_pHin:hinweis)
       +"<button type=\"button\" onclick=\"_objImpHinein("+i+")\" title=\"In diesen Ordner hineingehen\" style=\"flex-shrink:0;padding:1px 8px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:12px;cursor:pointer;\">\u203A</button>"
       +"</div>";
   }).join("")
@@ -42949,7 +43205,7 @@ function _plzNeuZeichnen(){
   try{_objImpZeichnen();}catch(e){console.warn("[b832] Liste neu zeichnen:",e);}
 }
 async function _objImpAnlegen(){
-  const gew=_objImpTreffer.filter(function(x){return x.an&&!x.schonDa;});
+  const gew=_objImpTreffer.filter(_objImpAnlegbar);
   if(!gew.length){showToast("Nichts ausgew\u00e4hlt","info");return;}
   const board=((document.getElementById("_objImpBoard")||{}).value)||currentBoard;
   const spalte=((document.getElementById("_objImpSpalte")||{}).value)||"";
@@ -42989,13 +43245,16 @@ async function _objImpAnlegen(){
     const url=base+x.id;
     /* b843: mit Straße, ohne Ort – „WEG {Objekt}" wird zu „WEG " + Straße und
        Ohne Straßenfeld ist das Ergebnis unverändert der Ordnername. */
-    const _ra=[raZeile.split("{Objekt}").join(_objImpBasisName(x.name)),raBlock].filter(function(s){return s&&s.trim();}).join("\n");
+    /* b850: Verwaltung und Privatkunde fuehren hier auseinander - eine Weiche,
+       damit im forEach nichts doppelt gerechnet wird. */
+    const _w=_objImpKartenWerte(x,hv,raZeile,raBlock);
+    const _ra=_w.ra;
     // b832: PLZ je Haus statt einer Zahl fuer alle.
     // b843: EINE Funktion – genau die, deren Ergebnis in der Vorschau stand.
-    const _voll=_objImpVollerName(x.name);
+    const _voll=_w.voll;
     const t={id:generateId(),title:_voll,desc:"",owner:"",due:"",status:spalte,ampel:"gr\u00fcn",
       rechnungsanschrift:_ra,rechnungsanschriftManuell:!!_ra,
-      adresse:_voll,hausverwaltung:hv,nas:nasBasis?(nasBasis+"\\"+x.name):"",
+      adresse:_voll,hausverwaltung:_w.hv,nas:nasBasis?(nasBasis+"\\"+x.name):"",
       // Alle vier Ordnerfelder auf denselben Ordner - wie _immoNeuenOrdnerAnlegen (b624):
       // am Objekt gehoeren Fotos UND Dokumente in EINEN Ordner (Beschluss Frank 04.08.).
       gdrive:url,gdriveOrdner:url,dokOrdner:url,emailOrdner:url,
@@ -43068,8 +43327,18 @@ function _objImpOeffnen(){
        beiden Zahlen ändert, muss diese mitziehen – test_b845 rechnet das nach.
        ⚠ `min-height:0` bleibt stehen: es hält den eigenen Scrollbereich am Laufen. */
     +"<div style=\"padding:16px 18px 8px;min-height:0;overflow-y:auto;flex-shrink:0;max-height:calc(88vh - 190px);\">"
-      +"<div style=\"font-size:15px;font-weight:800;color:var(--text);margin-bottom:4px;\">\uD83C\uDFE0 Objekte aus Ordnern anlegen</div>"
-      +"<div style=\"font-size:11px;color:var(--text2);line-height:1.6;margin-bottom:10px;\">Jeder Unterordner des gew\u00e4hlten Drive-Ordners wird zu einer Objektkarte. Es wird <b>nichts \u00fcberschrieben und nichts verschoben</b> \u2013 es kommen nur neue Karten dazu. Ein zweiter Lauf legt nichts doppelt an.</div>"
+      /* b850: Der Umschalter sitzt NEBEN der \u00DCberschrift, nicht darunter.
+         \u26D4 Bau-Lehre b823/b845: Der Kopfteil hat eine feste Obergrenze
+         (die in b845 festgelegte Obergrenze); eine zus\u00e4tzliche Zeile sch\u00F6be die Kn\u00F6pfe
+         unter den Rand. Rechts neben der \u00DCberschrift ist Platz, der sonst leer bleibt. */
+      +"<div style=\"display:flex;align-items:center;gap:10px;margin-bottom:4px;\">"
+        +"<div style=\"font-size:15px;font-weight:800;color:var(--text);flex:1;min-width:0;\">\uD83C\uDFE0 Objekte aus Ordnern anlegen</div>"
+        +"<div style=\"display:flex;flex-shrink:0;border:1px solid var(--border);border-radius:7px;overflow:hidden;\">"
+          +"<button type=\"button\" id=\"_objImpModusHv\" onclick=\"_objImpModusSetzen('hv')\" style=\"padding:5px 10px;border:none;font-size:11px;font-weight:700;cursor:pointer;\">\uD83C\uDFE2 Hausverwaltung</button>"
+          +"<button type=\"button\" id=\"_objImpModusPr\" onclick=\"_objImpModusSetzen('privat')\" style=\"padding:5px 10px;border:none;border-left:1px solid var(--border);font-size:11px;font-weight:700;cursor:pointer;\">\uD83E\uDDCD Privatkunde</button>"
+        +"</div>"
+      +"</div>"
+      +"<div id=\"_objImpErklaerung\" style=\"font-size:11px;color:var(--text2);line-height:1.6;margin-bottom:10px;\">Jeder Unterordner des gew\u00e4hlten Drive-Ordners wird zu einer Objektkarte. Es wird <b>nichts \u00fcberschrieben und nichts verschoben</b> \u2013 es kommen nur neue Karten dazu. Ein zweiter Lauf legt nichts doppelt an.</div>"
       +"<div style=\"display:flex;gap:6px;align-items:center;margin-bottom:8px;\">"
         +"<input id=\"_objImpQuelle\" type=\"text\" placeholder=\"Drive-Ordner der Ortsebene (darunter liegen die Objektordner)\" autocomplete=\"off\" style=\"flex:1;min-width:0;padding:7px 9px;border-radius:7px;border:1.5px solid var(--accent);background:var(--bg3);color:var(--text);font-size:12px;\">"
         +"<button type=\"button\" onclick=\"_objImpPick()\" title=\"Ordner w\u00e4hlen\" style=\"flex-shrink:0;padding:7px 11px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;\">\uD83D\uDCC2</button>"
@@ -43082,12 +43351,12 @@ function _objImpOeffnen(){
       +"<div style=\"display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;\">"
         +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Board</label><select id=\"_objImpBoard\" onchange=\"_objImpBoardWechsel()\" style=\"width:100%;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\">"+boardOpts+"</select></div>"
         +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Spalte</label><select id=\"_objImpSpalte\" style=\"width:100%;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></select></div>"
-        +"<div style=\"grid-column:1/-1;\"><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">\uD83D\uDCC7 Verwaltung aus dem Adressbuch <span id=\"_objImpAdrHinweis\" style=\"opacity:.7;\">(f\u00fcllt Auftraggeber und Anschrift)</span></label><select id=\"_objImpAdr\" onchange=\"_objImpAdrWahl()\" style=\"width:100%;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></select></div>"
-        +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Auftraggeber / Hausverwaltung</label><input id=\"_objImpHv\" type=\"text\" placeholder=\"z.B. AHV, Muster Verwaltung\" autocomplete=\"off\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></div>"
+        +"<div id=\"_objImpFeldAdr\" style=\"grid-column:1/-1;\"><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">\uD83D\uDCC7 Verwaltung aus dem Adressbuch <span id=\"_objImpAdrHinweis\" style=\"opacity:.7;\">(f\u00fcllt Auftraggeber und Anschrift)</span></label><div style=\"display:flex;gap:6px;align-items:stretch;\"><select id=\"_objImpAdr\" onchange=\"_objImpAdrWahl()\" style=\"width:100%;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></select><button type=\"button\" onclick=\"_objImpAdrLeeren()\" title=\"Auftraggeber und Anschrift leeren \u2013 nichts aus dem Adressbuch \u00fcbernehmen\" style=\"flex-shrink:0;padding:0 11px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:13px;cursor:pointer;\">\u2715</button></div></div>"
+        +"<div id=\"_objImpFeldHv\"><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Auftraggeber / Hausverwaltung</label><input id=\"_objImpHv\" type=\"text\" placeholder=\"z.B. AHV, Muster Verwaltung\" autocomplete=\"off\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></div>"
         /* b843: Straße davorsetzen. ⛔ Wird bewusst NICHT gemerkt (kein localStorage):
            der Wert gilt je Ebene – gemerkt stünde beim nächsten Lauf die Straße der
            vorigen Verwaltung vor den neuen Häusern. */
-        +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Straße davorsetzen <span style=\"opacity:.7;\">(leer, wenn der Ordner schon die Straße ist)</span></label><input id=\"_objImpStr\" type=\"text\" placeholder=\"nur nötig, wenn die Ordner Hausnummern sind\" autocomplete=\"off\" oninput=\"_objImpStrGeaendert()\" title=\"Heißen die Ordner nur nach der Hausnummer, gehört der Straßenname hierher. Er wird jedem Ordnernamen vorangestellt.\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\">"
+        +"<div id=\"_objImpFeldStr\"><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Straße davorsetzen <span style=\"opacity:.7;\">(leer, wenn der Ordner schon die Straße ist)</span></label><input id=\"_objImpStr\" type=\"text\" placeholder=\"nur nötig, wenn die Ordner Hausnummern sind\" autocomplete=\"off\" oninput=\"_objImpStrGeaendert()\" title=\"Heißen die Ordner nur nach der Hausnummer, gehört der Straßenname hierher. Er wird jedem Ordnernamen vorangestellt.\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\">"
           +"<div id=\"_objImpStrHinweis\" style=\"font-size:10px;color:var(--text2);line-height:1.4;margin-top:3px;\"></div></div>"
         +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Ort <span style=\"opacity:.7;\">(PLZ kommt je Haus dazu)</span></label><input id=\"_objImpOrt\" type=\"text\" placeholder=\"z.B. Erfurt\" autocomplete=\"off\" oninput=\"_plzNeuZeichnen()\" title=\"Nur den Ort eintragen \u2013 die Postleitzahl sucht PAM je Haus heraus. Eine hier eingetippte PLZ sticht die Tabelle.\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></div>"
         +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">NAS-Pfad bis zur Ortsebene</label><input id=\"_objImpNas\" type=\"text\" autocomplete=\"off\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:11px;\">"
@@ -43096,8 +43365,8 @@ function _objImpOeffnen(){
           +"<div id=\"_objImpNasHinweis\" style=\"font-size:10px;color:#a04000;line-height:1.4;margin-top:3px;\"></div></div>"
       +"</div>"
       +"<div style=\"display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;\">"
-        +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Rechnungsanschrift \u2013 erste Zeile <span style=\"opacity:.7;\">({Objekt} wird ersetzt)</span></label><input id=\"_objImpRaZeile\" type=\"text\" placeholder=\"z.B. WEG {Objekt}\" autocomplete=\"off\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></div>"
-        +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">\u2026 Anschrift darunter (f\u00fcr alle gleich)</label><textarea id=\"_objImpRaBlock\" rows=\"3\" placeholder=\"c/o Verwaltung&#10;Stra\u00dfe Nr.&#10;PLZ Ort\" autocomplete=\"off\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;resize:vertical;font-family:inherit;\"></textarea></div>"
+        +"<div id=\"_objImpFeldRaZeile\"><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Rechnungsanschrift \u2013 erste Zeile <span style=\"opacity:.7;\">({Objekt} wird ersetzt)</span></label><input id=\"_objImpRaZeile\" type=\"text\" placeholder=\"z.B. WEG {Objekt}\" autocomplete=\"off\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></div>"
+        +"<div id=\"_objImpFeldRaBlock\"><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">\u2026 Anschrift darunter (f\u00fcr alle gleich)</label><textarea id=\"_objImpRaBlock\" rows=\"3\" placeholder=\"c/o Verwaltung&#10;Stra\u00dfe Nr.&#10;PLZ Ort\" autocomplete=\"off\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;resize:vertical;font-family:inherit;\"></textarea></div>"
       +"</div>"
       +"<div style=\"display:flex;align-items:center;gap:8px;margin-bottom:6px;\">"
         +"<button type=\"button\" onclick=\"_objImpEbeneHoeher()\" title=\"Eine Ordner-Ebene h\u00f6her \u2013 auch \u00fcber den Startordner hinaus\" style=\"flex-shrink:0;padding:2px 9px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:11px;cursor:pointer;\">\u2191 eine Ebene h\u00f6her</button>"
@@ -43148,6 +43417,13 @@ function _objImpOeffnen(){
   (async function(){
     try{if(typeof _adrBookLoad==="function")await _adrBookLoad();}catch(e){console.warn("[b825] Adressbuch:",e);}
     try{_objImpAdrFuellen();}catch(e){console.warn("[b825] Auswahl:",e);}
+    /* b850: Jeder Dialog startet im Verwaltungs-Modus - der häufigere Fall, und der,
+       bei dem nichts von selbst geschieht. `_objImpModusFelder` färbt die beiden
+       Knöpfe und blendet die Felder passend ein.
+       ⛔ NACH `_objImpAdrFuellen`: Das füllt das Adressfeld und darf nicht auf
+       ausgeblendete Elemente treffen, wenn später einmal mit Privat gestartet wird. */
+    _objImpModus="hv";
+    try{_objImpModusFelder();}catch(e){console.warn("[b850] Modus:",e);}
   })();
   /* b840: Die vorbelegte Adresse in einen Namen uebersetzen. EIGENER Block, nicht im
      Adressbuch-Block: sonst haengt der Name daran, ob Drive gerade das Adressbuch
