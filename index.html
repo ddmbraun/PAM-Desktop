@@ -9642,7 +9642,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-31 · #838'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b838) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-31 · #839'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b839) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -32685,29 +32685,87 @@ function _pamDocPinGroesseMerken(prev){
   if(!prev)return;
   try{localStorage.setItem(_PAM_DOCPIN_KEY,JSON.stringify({w:prev.offsetWidth,h:prev.offsetHeight}));}catch(e){}
 }
+// ═══ b839: Ein Zug, der wirklich endet ═══════════════════════════════════════════
+// ⛔ Befund Frank 31.08.: „das Ziehen funktioniert zwar, aber es bleibt nicht stehen -
+// es hakt". In einer Mitschrift aus seinem Browser nachgemessen: Nach dem Loslassen
+// wuchs das Fenster weiter (871 → 1059 → 1741 px), und für diesen Zug gab es GAR KEIN
+// „LOSLASSEN"-Ereignis. Ursache: Beim Ziehen verlässt die Maus das Fenster und läuft
+// über die PDF-Vorschau des E-Mail-Fensters darunter. Ein <iframe> gibt Maus-Ereignisse
+// nicht nach außen - das Loslassen kam nie an, der Zug lief weiter, das Fenster klebte
+// an der Maus. Beendet wurde es erst durch einen Klick woanders.
+//
+// ⛔ Die Schutzschicht aus b823 hilft dagegen NICHT: Sie liegt INNERHALB des Fensters
+// (`position:absolute`) und deckt nur dessen eigene Fläche ab, nicht den Weg außerhalb.
+//
+// Die Lösung ist nicht noch eine Schicht, sondern den Zeiger festzuhalten:
+// `setPointerCapture` bindet alle weiteren Zeiger-Ereignisse an das Element, bis
+// losgelassen wird - auch über fremde <iframe> hinweg. Genau dafür ist es gemacht.
+// Deshalb `pointerdown/-move/-up` statt `mousedown/-move/-up`.
+//
+// Der Ablauf steht bewusst EINMAL hier: Ziehecke und Verschieben am Kopf hatten
+// denselben Fehler, und derselbe Code stand dreimal im Haus (Ecke + zwei
+// Verschiebe-Handler, siehe Hinweis oben zum geteilten `_dragInit`).
+//
+// Rückgabe: true, wenn der Zug begonnen hat.
+function _pamDocPinZugStart(el,e,beiBewegung,beiEnde){
+  if(e.button!==0)return false;          // nur die linke Taste
+  e.preventDefault();
+  const pid=e.pointerId;
+  let gefangen=false;
+  try{el.setPointerCapture(pid);gefangen=true;}catch(_e){}
+  _pamDocPinSchutz(true);                // bleibt: hält das PDF im eigenen Fenster ruhig
+  function mm(ev){
+    if(ev.pointerId!==pid)return;        // ein zweiter Finger darf nicht mitziehen
+    beiBewegung(ev);
+  }
+  function mu(ev){
+    if(ev&&ev.pointerId!==undefined&&ev.pointerId!==pid)return;
+    try{if(gefangen)el.releasePointerCapture(pid);}catch(_e){}
+    el.removeEventListener('pointermove',mm);
+    el.removeEventListener('pointerup',mu);
+    el.removeEventListener('pointercancel',mu);
+    if(!gefangen){document.removeEventListener('pointermove',mm);document.removeEventListener('pointerup',mu);}
+    _pamDocPinSchutz(false);
+    if(beiEnde)beiEnde(ev);
+  }
+  el.addEventListener('pointermove',mm);
+  el.addEventListener('pointerup',mu);
+  el.addEventListener('pointercancel',mu);   // Sicherheitsnetz: bricht der Zeiger ab, endet der Zug trotzdem
+  // Rückfall, falls das Festhalten nicht ging (sehr alte Browser): wie bisher über das
+  // Dokument. Dann bleibt der alte Schwachpunkt bestehen, aber gar nichts wäre schlimmer.
+  if(!gefangen){document.addEventListener('pointermove',mm);document.addEventListener('pointerup',mu);}
+  return true;
+}
 function _pamDocPinGriffInit(prev){
   if(!prev||prev._griffInit)return;
   const griff=document.getElementById('pamUebPreviewGriff');
   if(!griff)return;
   prev._griffInit=true;
-  griff.addEventListener('mousedown',function(e){
-    e.preventDefault();e.stopPropagation(); // stopPropagation: sonst zieht der Verschiebe-Handler mit
+  griff.addEventListener('pointerdown',function(e){
+    e.stopPropagation();                 // sonst zieht der Verschiebe-Handler mit
     const rr=prev.getBoundingClientRect();
     const sx=e.clientX, sy=e.clientY, sw=rr.width, sh=rr.height;
-    _pamDocPinSchutz(true);
-    function mm(ev){
+    _pamDocPinZugStart(griff,e,function(ev){
       // Nach unten und rechts nur bis zum Bildschirmrand – sonst zieht man die Ecke aus
       // dem Bild heraus und kommt nicht mehr an sie heran.
       const maxB=window.innerWidth-rr.left-8, maxH=window.innerHeight-rr.top-8;
       prev.style.width=Math.max(_PAM_DOCPIN_MINB,Math.min(sw+(ev.clientX-sx),maxB))+'px';
       prev.style.height=Math.max(_PAM_DOCPIN_MINH,Math.min(sh+(ev.clientY-sy),maxH))+'px';
-    }
-    function mu(){
-      _pamDocPinSchutz(false);
+    },function(){
       _pamDocPinGroesseMerken(prev);
-      document.removeEventListener('mousemove',mm);document.removeEventListener('mouseup',mu);
-    }
-    document.addEventListener('mousemove',mm);document.addEventListener('mouseup',mu);
+    });
+  });
+}
+// b839: Verschieben am Kopf – derselbe Ablauf. Beide Einklinkstellen (_pamDocHover und
+// _pamDocPinPreview) rufen diese eine Funktion, statt den Code je eigen mitzuführen.
+function _pamDocPinVerschiebeStart(prev,e){
+  if(e.target.tagName==='BUTTON'||e.target.tagName==='IFRAME')return;
+  if(e.target.id==='pamUebPreviewGriff')return;   // die Ziehecke zieht, sie verschiebt nicht
+  const rr=prev.getBoundingClientRect();
+  const sx=e.clientX, sy=e.clientY, sl=rr.left, st=rr.top;
+  _pamDocPinZugStart(prev,e,function(ev){
+    prev.style.left=Math.max(0,sl+(ev.clientX-sx))+'px';
+    prev.style.top=Math.max(0,st+(ev.clientY-sy))+'px';
   });
 }
 function _pamDocHover(el,idx){
@@ -32734,17 +32792,11 @@ function _pamDocHover(el,idx){
   let top=r.top;if(top+ph>window.innerHeight-8)top=window.innerHeight-ph-8;if(top<8)top=8;
   // #466: z-index über das PDF-&-Senden-Fenster (z 99999) heben – sonst liegt die Vorschau dahinter
   prev.style.zIndex='100000';prev.style.left=left+'px';prev.style.top=top+'px';
-  // Drag-Support
+  // Drag-Support – b839: der Ablauf steht jetzt EINMAL in _pamDocPinVerschiebeStart.
+  // Vorher trug jede der beiden Einklinkstellen ihn selbst; der Zug endete nicht, sobald
+  // die Maus über ein fremdes PDF lief.
   if(!prev._dragInit){prev._dragInit=true;
-    let sx,sy,sl,st;
-    prev.addEventListener('mousedown',function(e){if(e.target.tagName==='BUTTON'||e.target.tagName==='IFRAME')return;
-      if(e.target.id==='pamUebPreviewGriff')return; // b823: die Ziehecke zieht, sie verschiebt nicht
-      e.preventDefault();const r=prev.getBoundingClientRect();sx=e.clientX;sy=e.clientY;sl=r.left;st=r.top;
-      _pamDocPinSchutz(true); // b823: sonst reißt der Zug ab, sobald die Maus über das PDF läuft
-      function mm(e){prev.style.left=Math.max(0,sl+(e.clientX-sx))+'px';prev.style.top=Math.max(0,st+(e.clientY-sy))+'px';}
-      function mu(){_pamDocPinSchutz(false);document.removeEventListener('mousemove',mm);document.removeEventListener('mouseup',mu);}
-      document.addEventListener('mousemove',mm);document.addEventListener('mouseup',mu);
-    });
+    prev.addEventListener('pointerdown',function(e){_pamDocPinVerschiebeStart(prev,e);});
   }
   _pamDocPinGriffInit(prev); // b823: eigenes Flag – NICHT in den _dragInit-Block, siehe Hinweis oben
 }
@@ -32775,16 +32827,9 @@ async function _pamDocPinPreview(doc){
   prev.style.left=Math.max(8,window.innerWidth-pw-24)+'px';
   prev.style.top=Math.max(8,Math.round((window.innerHeight-ph)/2))+'px';
   // Drag am Kopf (einmalig; Flag mit _pamDocHover geteilt)
+  // b839: siehe _pamDocPinVerschiebeStart – der Ablauf steht dort einmal für beide Stellen.
   if(!prev._dragInit){prev._dragInit=true;
-    prev.addEventListener('mousedown',function(e){
-      if(e.target.tagName==='BUTTON'||e.target.tagName==='IFRAME')return;
-      if(e.target.id==='pamUebPreviewGriff')return; // b823: die Ziehecke zieht, sie verschiebt nicht
-      e.preventDefault();var rr=prev.getBoundingClientRect();var sx=e.clientX,sy=e.clientY,sl=rr.left,st=rr.top;
-      _pamDocPinSchutz(true); // b823: sonst reißt der Zug ab, sobald die Maus über das PDF läuft
-      function mm(e){prev.style.left=Math.max(0,sl+(e.clientX-sx))+'px';prev.style.top=Math.max(0,st+(e.clientY-sy))+'px';}
-      function mu(){_pamDocPinSchutz(false);document.removeEventListener('mousemove',mm);document.removeEventListener('mouseup',mu);}
-      document.addEventListener('mousemove',mm);document.addEventListener('mouseup',mu);
-    });
+    prev.addEventListener('pointerdown',function(e){_pamDocPinVerschiebeStart(prev,e);});
   }
   _pamDocPinGriffInit(prev); // b823: eigenes Flag – NICHT in den _dragInit-Block, siehe Hinweis oben
   // Inhalt laden: Datei per Token holen → Blob (zuverlässig, kein Google-Block); Fallback /preview bzw. Link
@@ -51955,6 +52000,6 @@ function _fdkHerunterladen(){
      Chrome zeigt PDFs mit einem eigenen Viewer, der Mausklicks abfangen kann; mit dem
      Streifen ist diese Frage gegenstandslos statt geraten. Wer die Kopfhöhe oder die
      Fußhöhe ändert, muss `calc(100% - 52px)` mitziehen. -->
-<div id="pamUebPreview" style="display:none;position:fixed;z-index:13000;background:var(--bg2);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.4);overflow:hidden;width:min(800px,92vw);height:min(900px,85vh);min-width:320px;min-height:240px;pointer-events:auto;"><div style="display:flex;align-items:center;padding:6px 10px;background:var(--bg3);border-bottom:1px solid var(--border);gap:8px;cursor:move;"><div id="pamUebPreviewLabel" style="font-size:11px;font-weight:600;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;"></div><button onclick="document.getElementById('pamUebPreview').style.display='none'" style="flex-shrink:0;padding:2px 8px;border-radius:5px;font-size:11px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;">&#10005;</button></div><iframe id="pamUebPreviewFrame" src="" style="width:100%;height:calc(100% - 52px);border:none;background:#fff;" allowfullscreen></iframe><div id="pamUebPreviewFuss" style="position:absolute;left:0;right:0;bottom:0;height:18px;background:var(--bg3);border-top:1px solid var(--border);z-index:3;"></div><div id="pamUebPreviewSchutz" style="display:none;position:absolute;left:0;top:0;right:0;bottom:0;z-index:4;"></div><div id="pamUebPreviewGriff" title="Zum Ändern der Größe hier ziehen" style="position:absolute;right:3px;bottom:0;width:18px;height:18px;z-index:5;cursor:nwse-resize;color:var(--text1);font-size:14px;line-height:18px;text-align:center;user-select:none;">◢</div></div>
+<div id="pamUebPreview" style="display:none;position:fixed;z-index:13000;background:var(--bg2);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.4);overflow:hidden;width:min(800px,92vw);height:min(900px,85vh);min-width:320px;min-height:240px;pointer-events:auto;"><div style="display:flex;align-items:center;padding:6px 10px;background:var(--bg3);border-bottom:1px solid var(--border);gap:8px;cursor:move;"><div id="pamUebPreviewLabel" style="font-size:11px;font-weight:600;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;"></div><button onclick="document.getElementById('pamUebPreview').style.display='none'" style="flex-shrink:0;padding:2px 8px;border-radius:5px;font-size:11px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;">&#10005;</button></div><iframe id="pamUebPreviewFrame" src="" style="width:100%;height:calc(100% - 52px);border:none;background:#fff;" allowfullscreen></iframe><div id="pamUebPreviewFuss" style="position:absolute;left:0;right:0;bottom:0;height:18px;background:var(--bg3);border-top:1px solid var(--border);z-index:3;"></div><div id="pamUebPreviewSchutz" style="display:none;position:absolute;left:0;top:0;right:0;bottom:0;z-index:4;"></div><div id="pamUebPreviewGriff" title="Zum Ändern der Größe hier ziehen" style="position:absolute;right:3px;bottom:0;width:18px;height:18px;z-index:5;cursor:nwse-resize;color:var(--text1);font-size:14px;line-height:18px;text-align:center;user-select:none;touch-action:none;">◢</div></div>
 </body>
 </html>
