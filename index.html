@@ -8532,7 +8532,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
                 <span id="tRaVorschau" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:calc(12px * var(--modal-scale,1));color:var(--text2);"></span>
                 <span id="tRaPfeil" style="flex-shrink:0;color:var(--text2);font-size:calc(13px * var(--modal-scale,1));">›</span>
               </div>
-              <textarea id="tRaText" rows="4" style="display:none;width:100%;resize:vertical;font-family:inherit;" placeholder="Empfänger&#10;c/o Verwaltung&#10;Straße Nr.&#10;PLZ Ort" oninput="_raGeaendert()" autocomplete="off"></textarea>
+              <div id="tRaWahlZeile" style="display:none;gap:6px;align-items:center;margin-bottom:5px;"><span style="font-size:calc(11px * var(--modal-scale,1));color:var(--text2);flex-shrink:0;">aus dem Adressbuch:</span><select id="tRaWahl" onchange="_raAusAdressbuch()" style="flex:1;min-width:0;padding:5px 7px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:calc(12px * var(--modal-scale,1));"></select></div><textarea id="tRaText" rows="4" style="display:none;width:100%;resize:vertical;font-family:inherit;" placeholder="Empfänger&#10;c/o Verwaltung&#10;Straße Nr.&#10;PLZ Ort" oninput="_raGeaendert()" autocomplete="off"></textarea>
               <input type="hidden" id="tRaManuell" value="">
             </div>
             <div class="modal-field full"><label>Auftraggeber / Hausverwaltung</label><input type="text" id="tHV" placeholder="z.B. AHV, Muster Verwaltung" oninput="scheduleTaskFieldSave();_updateMapsBtn()" autocomplete="off"></div>
@@ -9642,7 +9642,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-31 · #833'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b833) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-08-31 · #834'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b834) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -36825,6 +36825,41 @@ function _kAdrToggle(btn){
    lässt ihn dann in Ruhe.
    Die Vorschauzeile ist kein Beiwerk: Zugeklappt MUSS man sehen, ob etwas drinsteht.
    Beim Anschrift-Knopf der Kontakte fehlt das – dort sind 78 von 80 Anschriften leer. */
+/* b834: Rechnungsanschrift aus dem Adressbuch uebernehmen.
+   Anlass (Frank, 31.08.): Am geoeffneten Task musste die Anschrift von Hand getippt
+   werden - dabei steht sie im Adressbuch, und die Massenanlage (b825) holt sie dort
+   auch schon ab.
+   ⛔ Kein zweiter Adressbuch-Weg: `_objImpAdrListe`/`_objImpAdrAnschrift` aus b825
+   werden mitbenutzt. Zwei Regeln, wie eine Anschrift aussieht, waeren ein spaeter Fehler.
+   ⛔ Nur der Verwaltungsblock (Firma/Strasse/PLZ Ort). Die erste Zeile - "WEG ..." oder
+   ein Eigentuemername - wird NICHT geraten, die traegt Frank selbst ein. */
+function _raWahlFuellen(){
+  const sel=document.getElementById("tRaWahl");if(!sel)return;
+  const liste=(typeof _objImpAdrListe==="function")?_objImpAdrListe():[];
+  if(!liste.length){sel.innerHTML="<option value=\"\">\u2013 Adressbuch noch nicht geladen \u2013</option>";return;}
+  sel.innerHTML="<option value=\"\">\u2013 ausw\u00e4hlen \u2013</option>"
+    +liste.map(function(k){
+      const bez=[String(k.name||k.firma||"(ohne Namen)").trim(),String(k.ort||"").trim()].filter(Boolean).join(" \u00b7 ");
+      return "<option value=\""+esc(String(k.id))+"\">"+esc(bez)+"</option>";
+    }).join("");
+}
+function _raAusAdressbuch(){
+  const sel=document.getElementById("tRaWahl"),tx=document.getElementById("tRaText");
+  if(!sel||!tx)return;
+  const id=sel.value;
+  if(!id)return;
+  const k=(typeof _objImpAdrListe==="function")?_objImpAdrListe().find(function(x){return String(x.id)===String(id);}):null;
+  sel.value="";
+  if(!k){showToast("\u26A0 Eintrag nicht gefunden","error",5000);return;}
+  const block=_objImpAdrAnschrift(k);
+  if(!block){showToast("\u26A0 Bei diesem Eintrag steht keine Anschrift","error",6000);return;}
+  // ⛔ Eine vorhandene Anschrift nicht stillschweigend ersetzen.
+  const alt=String(tx.value||"").trim();
+  if(alt&&alt!==block&&!confirm("Vorhandene Rechnungsanschrift ersetzen?\n\nAlt:\n"+alt+"\n\nNeu:\n"+block))return;
+  tx.value=block;
+  _raGeaendert();
+  showToast("\u2713 Anschrift \u00fcbernommen \u2013 erste Zeile ggf. noch erg\u00e4nzen","success",6000);
+}
 function _raVorschauSetzen(){
   const t=document.getElementById('tRaText'),v=document.getElementById('tRaVorschau');
   if(!t||!v)return;
@@ -36843,6 +36878,11 @@ function _raToggle(){
   if(!t)return;
   const auf=(t.style.display==='none');
   t.style.display=auf?'block':'none';
+  /* b834: Die Adressbuch-Auswahl haengt an derselben Klappe. Gefuellt wird sie
+     erst beim Aufklappen - das Adressbuch kommt aus Drive und ist beim Laden
+     der Seite oft noch nicht da (Befund Frank 31.08. bei der Massenanlage). */
+  const w=document.getElementById('tRaWahlZeile');
+  if(w){w.style.display=auf?'flex':'none';if(auf)try{_raWahlFuellen();}catch(e){console.warn('[b834] Adressbuch:',e);}}
   if(p)p.textContent=auf?'˅':'›';
   if(v)v.style.display=auf?'none':'block';
   if(auf)t.focus();
@@ -36858,6 +36898,7 @@ function _raSetzen(text,manuell){
   const t=document.getElementById('tRaText'),m=document.getElementById('tRaManuell'),
         p=document.getElementById('tRaPfeil'),v=document.getElementById('tRaVorschau');
   if(t){t.value=String(text||'');t.style.display='none';}
+  const w=document.getElementById('tRaWahlZeile');if(w)w.style.display='none';   // b834
   if(m)m.value=manuell?'1':'';
   if(p)p.textContent='›';
   if(v)v.style.display='block';
@@ -41419,6 +41460,9 @@ async function _objektNeuerAuftrag(objektId){
   _auftragSpalteSicher(board);
   const t={id:generateId(),title:titel,desc:'',owner:'',due:'',status:AUFTRAG_SPALTE,ampel:'grün',
     adresse:obj.adresse||'',hausverwaltung:obj.hausverwaltung||'',nas:obj.nas||'',
+      /* b834: Die Rechnungsanschrift wurde bisher NICHT mitgegeben (Befund Frank
+         31.08.) - dabei fuellt sie `{Auftraggeber}` in den Word-Vorlagen (b759). */
+      rechnungsanschrift:obj.rechnungsanschrift||'',rechnungsanschriftManuell:!!obj.rechnungsanschriftManuell,
     objektId:obj.id,objektName:obj.title||'',
     tags:[],links:[],attachments:[],aufgaben:[],turnusListe:[],notizVerlauf:[],fotos:[],checkliste:[],
     createdAt:new Date().toISOString()};
@@ -42181,6 +42225,14 @@ async function _objZuordnenSetzen(objektId){
   if(!(t.adresse||"").trim()&&(obj.adresse||"").trim()){t.adresse=obj.adresse;_b659FeldNachziehen(t.id,"tAdr",obj.adresse);geerbt.push("Adresse");}
   if(!(t.hausverwaltung||"").trim()&&(obj.hausverwaltung||"").trim()){t.hausverwaltung=obj.hausverwaltung;_b659FeldNachziehen(t.id,"tHV",obj.hausverwaltung);geerbt.push("Auftraggeber");}
   if(!(t.nas||"").trim()&&(obj.nas||"").trim()){t.nas=obj.nas;_b659FeldNachziehen(t.id,"tNAS",obj.nas);geerbt.push("NAS-Pfad");}
+  /* b834: Rechnungsanschrift genauso - nur wenn am Auftrag noch nichts steht. */
+  if(!(t.rechnungsanschrift||"").trim()&&(obj.rechnungsanschrift||"").trim()){
+    t.rechnungsanschrift=obj.rechnungsanschrift;
+    t.rechnungsanschriftManuell=!!obj.rechnungsanschriftManuell;
+    _b659FeldNachziehen(t.id,"tRaText",obj.rechnungsanschrift);
+    try{_raVorschauSetzen();}catch(e){}
+    geerbt.push("Rechnungsanschrift");
+  }
   try{await autoSave();}catch(e){console.warn("[b820] Save:",e);}
   _objZuordnenSchliessen();
   _objZuordnungAnzeige();
