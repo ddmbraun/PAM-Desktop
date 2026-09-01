@@ -9785,7 +9785,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-01 · #871'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-01-b871) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-01 · #872'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-01-b872) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -37144,6 +37144,10 @@ async function _gkVergleichStarten(){
   try{
     await _gkAlleLaden(true);
     var s=document.getElementById('adr-search');
+    /* ⛔ b872: erst JETZT gibt es etwas zu filtern - ohne dieses Neuzeichnen
+       erschiene das Google-Feld nie, weil die Filterzeile nur beim Oeffnen
+       gebaut wird. Die Browser-Gegenprobe hat genau das gefunden. */
+    _adrRenderRolleFilter();
     _adrRenderPickerList(s?s.value:'');
     _gkZusammenfassung();
   }catch(e){
@@ -37746,6 +37750,7 @@ function _adrBookOpenPicker(mode){
   mode=(mode==='manage')?'manage':'pick';
   window._adrPickMode=mode;
   window._adrRolleFilter='';   // b847: jeder Aufruf startet ungefiltert
+  window._adrGkFilter='';      // b872: der Google-Filter startet ebenfalls aus
   if(!gdriveToken){showToast('⚠ Bitte zuerst Google Drive verbinden (☁️)','warning',4000);return;}
   const ex=document.getElementById('adr-picker-modal');if(ex)ex.remove();
   const overlay=document.createElement('div');
@@ -37778,7 +37783,7 @@ function _adrBookOpenPicker(mode){
       +'<input id="adr-obj" type="text" value="'+escA(objVor)+'" placeholder="Straße – auch nur ein Teil, z.B. Pestlozzi" autocomplete="off" style="flex:1;min-width:0;padding:5px 8px;font-size:12px;box-sizing:border-box;border:1px solid var(--border,#d1d5db);border-radius:6px;background:var(--bg,#fff);color:var(--text,#111);">'
       +'<button type="button" onclick="_adrPickClearObj()" title="Objektbezug aufheben – alle Kontakte zeigen" style="flex-shrink:0;padding:4px 9px;font-size:12px;border:1px solid var(--border,#d1d5db);background:var(--bg3,#f3f4f6);color:var(--text2,#6b7280);border-radius:6px;cursor:pointer;">✕</button>'
       +'</div>';
-  overlay.innerHTML='<div style="background:var(--bg,#fff);color:var(--text,#111);border:1px solid var(--border,#d1d5db);border-radius:10px;padding:16px 18px;width:460px;max-width:96vw;max-height:86vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.25);">'
+  overlay.innerHTML='<div id="adr-picker-box" style="background:var(--bg,#fff);color:var(--text,#111);border:1px solid var(--border,#d1d5db);border-radius:10px;padding:16px 18px;box-sizing:border-box;width:498px;max-width:96vw;max-height:86vh;position:relative;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.25);">'
     +'<div style="font-size:14px;font-weight:600;color:var(--accent,#1a56c4);margin-bottom:10px;">'+titel+'</div>'
     +'<input id="adr-search" type="text" placeholder="🔍 suchen…" autocomplete="off" style="width:100%;padding:6px 8px;font-size:12px;box-sizing:border-box;border:1px solid var(--border,#d1d5db);border-radius:6px;background:var(--bg,#fff);color:var(--text,#111);margin-bottom:8px;">'
     +objBox
@@ -37793,8 +37798,13 @@ function _adrBookOpenPicker(mode){
     +'<div id="adr-list" style="flex:1;overflow-y:auto;min-height:90px;border:1px solid var(--border,#e5e7eb);border-radius:6px;padding:4px;"></div>'
     +'<div style="display:flex;gap:8px;margin-top:12px;justify-content:space-between;align-items:center;">'
     +footLinks+'<span style="display:flex;gap:8px;">'+footRight+'</span>'
-    +'</div></div>';
+    +'</div>'
+    /* b872: Griff zum Groesserziehen. touch-action:none ist Pflicht, sonst
+       scrollt das Tablet die Seite, statt das Fenster zu ziehen. */
+    +'<div id="adr-resize" title="Fenster größer ziehen" style="position:absolute;right:3px;bottom:3px;width:18px;height:18px;cursor:nwse-resize;opacity:.45;touch-action:none;background:linear-gradient(135deg,transparent 55%,var(--text2,#6b7280) 55%,var(--text2,#6b7280) 64%,transparent 64%,transparent 74%,var(--text2,#6b7280) 74%,var(--text2,#6b7280) 83%,transparent 83%);"></div>'
+    +'</div>';
   document.body.appendChild(overlay);
+  _adrZiehEckeAnbauen();   // b872: Griff scharfschalten + gemerktes Mass anwenden
   overlay.addEventListener('click',function(e){if(e.target===overlay)overlay.remove();});
   const s=document.getElementById('adr-search');
   if(s)s.addEventListener('input',function(){_adrRenderPickerList(s.value);});
@@ -37844,8 +37854,16 @@ function _adrRenderPickerList(filter){
   /* b847: Der Rollenfilter wirkt ZUSÄTZLICH zur Suche - „alle Hausverwaltungen,
      in deren Adresse Erfurt vorkommt" muss gehen. */
   const rf=window._adrRolleFilter||'';
+  const gf=window._adrGkFilter||'';
   const list=all.filter(function(k){
     if(rf&&((k.rolle||'sonstiges')!==rf))return false;
+    /* b872: der Google-Filter wirkt ZUSAETZLICH zu Rolle und Suchtext -
+       "alle Hausverwaltungen, die noch nicht in Google stehen" muss gehen. */
+    if(gf){
+      const _tr=(typeof _gkFinde==='function')?_gkFinde(k.name,k.tel,k.tel2,k.email):null;
+      if(gf==='drin'&&!_tr)return false;
+      if(gf==='raus'&&_tr)return false;
+    }
     return !f||_adrNormSuche((k.name||'')+(k.firma||'')+(k.strasse||'')+(k.tel||'')+(k.email||'')+(k.ort||'')+(k.rolle||'')+(((k&&k.objekte)||[]).join(' '))).includes(f);
   });
   /* b848: Grundordnung alphabetisch. Im Auswahl-Modus sortiert der Objektbezug
@@ -38250,6 +38268,36 @@ function _adrRolleFilterReihe(){
   return rollen.filter(function(r){ return (z[r]||0)>0; });
 }
 
+/* ── b872: alle Rollen fürs Aufklappfeld ────────────────────────────────────
+   ⛔ `_adrRolleFilterReihe()` daneben bleibt unangetastet: sie liefert weiter
+   nur die BELEGTEN Rollen und entscheidet damit, OB die Zeile überhaupt
+   erscheint. Hier geht es um den INHALT des Feldes – dort sollen laut Frank
+   alle Möglichkeiten stehen, auch die noch unbenutzten. */
+function _adrRolleFilterAlle(){
+  const z=_adrRolleZaehlung();
+  const rollen=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','privatkunde','sonstiges'];
+  Object.keys(z).forEach(function(r){ if(rollen.indexOf(r)<0)rollen.push(r); });
+  return rollen;
+}
+
+/* Zählt für das Google-Feld. ⛔ Gibt `null` zurück, solange nicht verglichen
+   wurde – nicht etwa Nullen. Ein Feld mit „0 in Google" wäre eine Aussage über
+   etwas, das PAM nie angesehen hat (dieselbe Überlegung wie bei der Marke). */
+function _adrGkZaehlung(){
+  if(typeof _gkIdx==='undefined'||!_gkIdx)return null;
+  if(typeof _gkFinde!=='function')return null;
+  const alle=_adrBook||[];
+  let drin=0;
+  alle.forEach(function(k){ if(_gkFinde(k.name,k.tel,k.tel2,k.email))drin++; });
+  return {drin:drin, raus:alle.length-drin, gesamt:alle.length};
+}
+
+/* ── b872: aus der Knopfreihe werden zwei Aufklappfelder ─────────────────────
+   Bis b871 stand hier eine Reihe Knöpfe. Mit allen sechs Rollen UND den zwei
+   Google-Filtern wären es neun geworden – die Reihe wäre umgebrochen und hätte
+   der Liste zwei Zeilen Höhe weggenommen. Franks Befund: „in Reihen nimmt es
+   so viel Platz weg". Zwei Felder brauchen eine Zeile, egal wie viele Rollen
+   dazukommen. */
 function _adrRenderRolleFilter(){
   const box=document.getElementById('adr-rollefilter');if(!box)return;
   const z=_adrRolleZaehlung();
@@ -38257,27 +38305,118 @@ function _adrRenderRolleFilter(){
   const gesamt=Object.keys(z).reduce(function(s,k){return s+z[k];},0);
   const aktiv=window._adrRolleFilter||'';
   /* Bei nur einer belegten Rolle bringt die Zeile nichts – dann bleibt sie weg
-     und der Kasten wird nicht unnötig hoch. */
+     und der Kasten wird nicht unnötig hoch. (unverändert seit b847) */
   if(reihe.length<2){ box.innerHTML=''; box.style.display='none'; return; }
   box.style.display='flex';
   const esc=function(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');};
-  const knopf=function(wert,text,anzahl){
-    const an=(aktiv===wert);
-    return '<button type="button" onclick="_adrSetRolleFilter(\''+esc(wert).replace(/'/g,"\\'")+'\')" '
-      +'style="flex-shrink:0;padding:2px 7px;font-size:10px;border-radius:10px;cursor:pointer;white-space:nowrap;'
-      +(an?'border:1px solid var(--accent,#1a56c4);background:var(--accent,#1a56c4);color:#fff;font-weight:600;'
-          :'border:1px solid var(--border,#d1d5db);background:var(--bg3,#f3f4f6);color:var(--text,#111);')
-      +'">'+esc(text)+' <span style="opacity:.7;">'+anzahl+'</span></button>';
-  };
-  box.innerHTML=knopf('','Alle',gesamt)
-    +reihe.map(function(r){ return knopf(r,_adrRoleLabel(r),z[r]||0); }).join('');
+  const feld='flex:1;min-width:0;padding:3px 6px;font-size:11px;border-radius:6px;cursor:pointer;'
+    +'border:1px solid var(--border,#d1d5db);background:var(--bg,#fff);color:var(--text,#111);';
+  /* Ein gesetzter Filter wird hervorgehoben – sonst sieht man einem
+     zugeklappten Feld nicht an, dass es gerade etwas ausblendet. */
+  const an='border:1px solid var(--accent,#1a56c4);font-weight:600;';
+
+  let rOpt='<option value=""'+(aktiv?'':' selected')+'>Alle '+gesamt+'</option>';
+  _adrRolleFilterAlle().forEach(function(r){
+    const n=z[r]||0;
+    /* Unbenutzte Rollen stehen mit „(0)" da, sind aber nicht wählbar: sie
+       zeigen, was es gibt, ohne eine leere Liste anbieten zu können. */
+    rOpt+='<option value="'+esc(r)+'"'+(aktiv===r?' selected':'')+(n?'':' disabled')+'>'
+      +esc(_adrRoleLabel(r))+' '+(n?n:'(0)')+'</option>';
+  });
+  const rFeld='<select id="adr-f-rolle" title="Nach Rolle filtern" onchange="_adrSetRolleFilter(this.value)" '
+    +'style="'+feld+(aktiv?an:'')+'">'+rOpt+'</select>';
+
+  /* Das Google-Feld erscheint erst NACH einem Vergleich. Vorher gäbe es nichts
+     zu filtern, und ein totes Feld würde nur Platz kosten. */
+  const g=_adrGkZaehlung();
+  const gAktiv=window._adrGkFilter||'';
+  let gFeld='';
+  if(g){
+    gFeld='<select id="adr-f-gk" title="Nach dem Google-Abgleich filtern" onchange="_adrSetGkFilter(this.value)" '
+      +'style="'+feld+(gAktiv?an:'')+'">'
+      +'<option value=""'+(gAktiv?'':' selected')+'>Google: alle '+g.gesamt+'</option>'
+      +'<option value="drin"'+(gAktiv==='drin'?' selected':'')+(g.drin?'':' disabled')+'>✅ in Google '+g.drin+'</option>'
+      +'<option value="raus"'+(gAktiv==='raus'?' selected':'')+(g.raus?'':' disabled')+'>➖ nur PAM '+g.raus+'</option>'
+      +'</select>';
+  }
+  box.innerHTML=rFeld+gFeld;
 }
 
+/* ⛔ b872: der Wert kommt jetzt aus dem Aufklappfeld und wird GESETZT, nicht
+   umgeschaltet. Das „nochmal klicken = aus" von b847 gehörte zur Knopfreihe;
+   im Aufklappfeld löst man den Filter, indem man „Alle" wählt. */
 function _adrSetRolleFilter(r){
-  window._adrRolleFilter=(window._adrRolleFilter===r)?'':r;   // nochmal klicken = aus
+  window._adrRolleFilter=r||'';
   _adrRenderRolleFilter();
   const s=document.getElementById('adr-search');
   _adrRenderPickerList(s?s.value:'');
+}
+
+function _adrSetGkFilter(v){
+  window._adrGkFilter=(v==='drin'||v==='raus')?v:'';
+  _adrRenderRolleFilter();
+  const s=document.getElementById('adr-search');
+  _adrRenderPickerList(s?s.value:'');
+}
+
+/* ── b872: Adressbuch-Fenster größer ziehen ─────────────────────────────────
+   ⛔⛔ Ziehen IMMER mit `setPointerCapture` (b823) – sonst reißt der Zeiger ab,
+   sobald er beim schnellen Ziehen den kleinen Griff verlässt.
+   ⛔ Der Aufruf selbst wird abgesichert: er wirft in manchen Lagen
+   NotFoundError (b754). */
+function _adrGroesseLaden(){
+  try{
+    const s=localStorage.getItem('pam_adrbuch_groesse_v1');
+    if(!s)return null;
+    const o=JSON.parse(s);
+    if(!o||!(o.b>0)||!(o.h>0))return null;
+    return o;
+  }catch(e){ return null; }
+}
+function _adrGroesseMerken(b,h){
+  try{ localStorage.setItem('pam_adrbuch_groesse_v1',JSON.stringify({b:Math.round(b),h:Math.round(h)})); }catch(e){}
+}
+/* Grenzen: kleiner als 380x300 wird das Fenster unbedienbar, größer als das
+   Browserfenster sinnlos. Beides wird auch beim LADEN geprüft – ein an einem
+   großen Bildschirm gemerktes Maß darf am Notebook nicht aus dem Bild ragen.
+   ⛔ 96vw/86vh sind KEINE frei gewählten Zahlen: sie müssen zu `max-width` und
+   `max-height` am Kasten passen. Wäre die Grenze hier größer, zöge man ins
+   Leere – der Kasten bliebe stehen, weil CSS ihn vorher deckelt. */
+function _adrGroesseGrenzen(b,h){
+  const maxB=Math.max(380,Math.floor(window.innerWidth*0.96));
+  const maxH=Math.max(300,Math.floor(window.innerHeight*0.86));
+  return { b:Math.min(Math.max(380,b),maxB), h:Math.min(Math.max(300,h),maxH) };
+}
+function _adrZiehEckeAnbauen(){
+  const kasten=document.getElementById('adr-picker-box');
+  const griff=document.getElementById('adr-resize');
+  if(!kasten||!griff)return;
+  const g=_adrGroesseLaden();
+  if(g){
+    const k=_adrGroesseGrenzen(g.b,g.h);
+    kasten.style.width=k.b+'px'; kasten.style.height=k.h+'px';
+  }
+  let start=null;
+  griff.addEventListener('pointerdown',function(e){
+    e.preventDefault(); e.stopPropagation();
+    const r=kasten.getBoundingClientRect();
+    start={x:e.clientX,y:e.clientY,b:r.width,h:r.height};
+    try{ griff.setPointerCapture(e.pointerId); }catch(err){}
+  });
+  griff.addEventListener('pointermove',function(e){
+    if(!start)return;
+    const k=_adrGroesseGrenzen(start.b+(e.clientX-start.x), start.h+(e.clientY-start.y));
+    kasten.style.width=k.b+'px'; kasten.style.height=k.h+'px';
+  });
+  const ende=function(e){
+    if(!start)return;
+    start=null;
+    try{ griff.releasePointerCapture(e.pointerId); }catch(err){}
+    const r=kasten.getBoundingClientRect();
+    _adrGroesseMerken(r.width,r.height);
+  };
+  griff.addEventListener('pointerup',ende);
+  griff.addEventListener('pointercancel',ende);
 }
 
 // ── GM-Akte-Adressen (pam-akte-adressen.json) ─ Ansprechpartner einer GM-Akte übernehmen ──
