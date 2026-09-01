@@ -9700,7 +9700,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-01 · #864'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-01-b864) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-01 · #865'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-01-b865) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -30826,8 +30826,16 @@ async function _gmFindByMsgId(task){
           const r=await fetch('https://www.googleapis.com/gmail/v1/users/me/messages?q='+encodeURIComponent(q)+'&maxResults=1',
             {headers:{Authorization:'Bearer '+gmailToken}});
           if(r.status===403){
-            // 403 = kein Zugriff (Mail nicht in Gmail / falsches Konto) → sofort abbrechen
-            console.info('[GM] _gmFindByMsgId: 403 – Mail nicht in Gmail, suche abgebrochen');
+            /* b865: ⛔ Die alte Deutung war FALSCH. Hier stand „Mail nicht in Gmail" -
+               das kann 403 nicht heissen. Findet Gmail nichts, antwortet es mit HTTP 200
+               und einer LEEREN Trefferliste. 403 heisst: Google laesst uns gar nicht erst
+               suchen - fehlende Leseberechtigung, abgeschaltete Schnittstelle im
+               Google-Projekt oder eine Abfragegrenze.
+               🔴 Der echte Fehler wurde damit als Normalfall weggeschluckt: dass die
+               Gmail-Suche womoeglich GRUNDSAETZLICH nicht laeuft, konnte so nie auffallen.
+               Der Grund steht in der Antwort - er wird jetzt mitgelesen (b865-Lehre). */
+            await _b865Warum('Gmail-Suche',r);
+            console.info('[GM] _gmFindByMsgId: 403 – Google verweigert die Suche (NICHT „Mail nicht vorhanden"), abgebrochen');
             if(stEl)stEl.textContent='';
             _gmAbort=true;break;
           }
@@ -32038,6 +32046,32 @@ function _b856Warnung(att){
   return {text:'⚠ Anhänge: '+teile.join(' · '),art:'warning',dauer:8000};
 }
 
+/* b865: Schreibt bei einem fehlgeschlagenen Graph-Abruf den ANTWORTTEXT mit, nicht nur
+   die Fehlernummer.
+   ⛔⛔ Die Lehre, die diesen Bau ausgeloest hat: Bis b864 stand in der Konsole nur
+   `[b852] Anhangsliste HTTP 400`. Damit lag die Ursache fuenf Tage im Dunkeln, obwohl
+   Microsoft die Begruendung bei JEDER Antwort frei Haus mitliefert - am 01.09. in
+   30 Sekunden im Netzwerk-Reiter zu lesen:
+     "Could not find a property named 'contentId' on type 'microsoft.graph.attachment'."
+   **Wer nur den Status protokolliert, wirft die Begruendung weg.**
+   ⛔ Darf NIE selbst stolpern: der Text ist nur eine Messhilfe. Alles in try, und die
+   Antwort wird geklont, damit ein spaeterer Leser sie noch unverbraucht vorfindet. */
+async function _b865Warum(was,resp){
+  const st=(resp&&typeof resp.status!=='undefined')?resp.status:'(keine Antwort)';
+  let grund='';
+  try{
+    if(resp&&typeof resp.clone==='function'){
+      const txt=await resp.clone().text();
+      if(txt){
+        try{const j=JSON.parse(txt);grund=(j&&j.error&&j.error.message)?j.error.message:txt;}
+        catch(e){grund=txt;}
+      }
+    }
+  }catch(e){grund='(Antworttext nicht lesbar: '+((e&&e.message)||e)+')';}
+  console.warn('[b865] '+was+' HTTP '+st+(grund?(' – '+String(grund).substring(0,400)):' – (ohne Begruendung)'));
+  return grund;
+}
+
 // Holt die Datei-Anhaenge aller Verlaufsmails, die welche melden, und legt sie
 // in der Karte ab: Bilder ueber `_pamAnhangZiele` in den Foto-Ordner, alles
 // andere in den Dokumente-Ordner. Jeder Eintrag traegt die Kennung SEINER Mail
@@ -32073,9 +32107,19 @@ async function _msSaveThreadAttachments(task,threadMsgs){
     const mid=m.internetMessageId||m.messageId||'';
     let liste=[];
     try{
+      /* b865: ⛔ `contentId` MUSS hier raus. Microsoft hat es am 01.09.2026 im Klartext
+         gesagt (Netzwerk-Antwort, von Frank abfotografiert):
+           "Parsing OData Select and Expand failed: Could not find a property named
+            'contentId' on type 'microsoft.graph.attachment'."
+         `contentId` gehoert erst zum abgeleiteten `fileAttachment`, nicht zum Grundtyp der
+         Liste. Graph liefert dann NICHT etwa weniger Angaben, sondern weist die ganze
+         Anfrage mit 400 ab ⇒ **b852 hat seit dem Bau live KEINEN einzigen Anhang geholt**.
+         ⛔ Die Logo-Erkennung braucht `contentId` weiter - sie wandert deshalb nach unten
+         an den Einzelabruf, der das volle `fileAttachment` liefert. Keine Regel wird
+         gelockert, sie greift nur einen Schritt spaeter. */
       const rl=await _msGetMsgDual(task,'https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(m.id)
-        +'/attachments?$select=id,name,contentType,size,isInline,contentId',false);
-      if(!rl||!rl.ok){erg.fehler++;console.warn('[b852] Anhangsliste HTTP',rl&&rl.status);continue;}
+        +'/attachments?$select=id,name,contentType,size,isInline',false);
+      if(!rl||!rl.ok){erg.fehler++;await _b865Warum('Anhangsliste',rl);continue;}
       liste=((await rl.json()).value)||[];
     }catch(e){erg.fehler++;console.warn('[b852] Anhangsliste:',e);continue;}
     for(const att of liste){
@@ -32095,8 +32139,18 @@ async function _msSaveThreadAttachments(task,threadMsgs){
       try{
         const ra=await _msGetMsgDual(task,'https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(m.id)
           +'/attachments/'+encodeURIComponent(att.id),false);
-        if(!ra||!ra.ok){erg.fehler++;continue;}
+        if(!ra||!ra.ok){erg.fehler++;await _b865Warum('Anhang '+(att.name||''),ra);continue;}
         const ad=await ra.json();
+        /* b865: HIER greift die Logo-Erkennung, die vorher an der Liste hing. Der
+           Einzelabruf hat KEIN $select und liefert deshalb das volle `fileAttachment`
+           samt `contentId`. Geprueft wird mit derselben Funktion und denselben Regeln -
+           nur mit den vollstaendigen Angaben. Ohne diese Zeile rutschten Signatur-Logos
+           in die Karte, sobald sie ueber der 50-KB-Schwelle liegen. */
+        const prVoll=_b852AnhangPruefen(Object.assign({},att,ad));
+        if(!prVoll.nehmen){
+          if(prVoll.grund==='kein Dateianhang')erg.ohneInhalt++;else erg.uebersprungen++;
+          continue;
+        }
         if(!ad.contentBytes){erg.ohneInhalt++;continue;}
         const bin=atob(ad.contentBytes);
         const bytes=new Uint8Array(bin.length);
@@ -32377,6 +32431,7 @@ function _pamOpenBestVerlauf(){
   // landeten sogar im falschen (Outlook-)Fenster.
   _openPamEmailPreview(0);
 }
+/* b865 · OHNE AUFRUFER: reines Outlook-Fenster; b554/b555 ersetzt durch „Vollstaendigen Verlauf oeffnen" */
 function _msOpenThreadPopup(){
   const taskId=(document.getElementById('taskId')||{}).value||_pamActiveTaskId||'';
   const task=findTaskById(taskId)||(_pamCurrentTask&&_pamCurrentTask.id===taskId?_pamCurrentTask:null);
@@ -33614,6 +33669,7 @@ function _pamFotoHovClick(fi){
   _pamFotoLightbox(tid,fi);
 }
 
+/* b865 · OHNE AUFRUFER: altes Uebersichtsfenster; b594 ersetzt durch „📋 Uebersicht". ⛔ test_b706 prueft den Inhalt - nicht loeschen */
 async function _pamTaskDrucken(extId){
   const taskId=extId||(document.getElementById('taskId')||{}).value||_pamActiveTaskId||'';
   const task=findTaskById(taskId);
@@ -34341,6 +34397,7 @@ async function _msShowInlinePreview(taskId,idx){
   }
 }
 
+/* b865 · OHNE AUFRUFER: Mail-Momentaufnahmen; ruft _msSaveMailSnapshot, hat selbst keinen Aufrufer. ⛔ Enthielt bis b865 die kaputte contentId-Abfrage - vor dem Wiederanschliessen an Graph gegenpruefen */
 async function _msSaveAllSnapshots(taskId){
   const task=findTaskById(taskId);if(!task)return;
   const msgs=task.msThreadMessages||[];
@@ -34365,31 +34422,52 @@ async function _msSaveMailSnapshot(taskId,idx,_silent=false){
   // Prefer-Header zwingt Graph API zur HTML-Ausgabe (auch bei ursprünglich Plain-Text-Mails)
   if(msToken&&m.id){
     try{
+      /* b865: Hier stand dieselbe unzulaessige Frage wie in der Anhangsliste - `contentId`
+         UND `contentBytes` gehoeren zum abgeleiteten `fileAttachment`, nicht zum Grundtyp
+         `microsoft.graph.attachment`, den `$expand=attachments($select=…)` anspricht.
+         Microsoft weist die ganze Anfrage mit 400 ab (im Klartext gemessen am 01.09.).
+         ⚠ Diese Stelle ist heute NICHT erreichbar - `_msSaveMailSnapshot` wird nur von
+         `_msSaveAllSnapshots` gerufen, und die hat keinen einzigen Aufrufer. Sie wird
+         trotzdem berichtigt: eine tote Funktion mit eingebauter Falle ist genau das, was
+         beim naechsten Wiederanschliessen sofort umfaellt.
+         ⛔ Gefragt wird jetzt nur nach Grundtyp-Angaben. Den Inhalt (`contentBytes`) und
+         die Kennung holt der Einzelabruf weiter unten - den Weg gab es hier schon als
+         Rueckfall („ohne contentBytes → separater Abruf"), er ist jetzt der Normalweg. */
       const r=await fetch(
-        `https://graph.microsoft.com/v1.0/me/messages/${m.id}?$select=body,hasAttachments&$expand=attachments($select=id,name,contentId,isInline,contentBytes,contentType)`,
+        `https://graph.microsoft.com/v1.0/me/messages/${m.id}?$select=body,hasAttachments&$expand=attachments($select=id,name,isInline,contentType)`,
         {headers:{Authorization:'Bearer '+msToken,'Prefer':'outlook.body-content-type="html"'}}
       );
+      if(!r.ok)await _b865Warum('Mail-Momentaufnahme',r);
       if(r.ok){
         const data=await r.json();
         bodyHtml=data.body?.content||'';
         // Inline-Anhänge mit contentBytes direkt verwenden; ohne contentBytes → separater Abruf
-    const _rawAtts=(data.attachments||[]).filter(a=>a.isInline&&a.contentId);
+        // b865: nur noch `isInline` als Vorfilter - `contentId` steht erst am Einzelabruf
+        // zur Verfuegung und wird dort geprueft (siehe unten).
+    const _rawAtts=(data.attachments||[]).filter(a=>a.isInline);
     inlineAtts=[];
     for(const _att of _rawAtts){
-      if(_att.contentBytes){
+      /* b865: Seit die Liste kein `contentId` mehr liefert, ist der Einzelabruf der
+         Normalweg statt des Rueckfalls. Er hat KEIN $select und bringt das volle
+         `fileAttachment` - also `contentBytes` UND `contentId`.
+         ⛔ Ohne `contentId` darf ein Eintrag NICHT in `inlineAtts`: weiter unten steht
+         `att.contentId.replace(...)`, das wuerde sonst abstuerzen und die ganze
+         Momentaufnahme mitreissen. */
+      if(_att.contentBytes&&_att.contentId){
         inlineAtts.push(_att);
       }else if(_att.id){
-        // Fallback: Anhang separat abrufen (Graph liefert contentBytes nicht immer inline)
         try{
           const _ar=await fetch(
             `https://graph.microsoft.com/v1.0/me/messages/${m.id}/attachments/${_att.id}`,
             {headers:{Authorization:'Bearer '+msToken}}
           );
+          if(!_ar.ok)await _b865Warum('CID-Anhang '+(_att.name||''),_ar);
           if(_ar.ok){
             const _ad=await _ar.json();
-            if(_ad.contentBytes)inlineAtts.push({..._att,contentBytes:_ad.contentBytes,contentType:_ad.contentType||_att.contentType});
+            const _cid=_ad.contentId||_att.contentId||'';
+            if(_ad.contentBytes&&_cid)inlineAtts.push({..._att,contentId:_cid,contentBytes:_ad.contentBytes,contentType:_ad.contentType||_att.contentType});
           }
-        }catch(_e){console.warn('[CID] Fallback-Abruf fehlgeschlagen:',_att.contentId,_e);}
+        }catch(_e){console.warn('[CID] Einzelabruf fehlgeschlagen:',_att.name,_e);}
       }
     }
         m._cachedBodyHtml=bodyHtml;
@@ -35537,6 +35615,7 @@ async function _createDriveEmailStruktur(folderName,parentFid){
 }
 
 let _emAutoFolderCreating=false;
+/* b865 · OHNE AUFRUFER: wollte einen Drive-Ordner nach dem Kartentitel anlegen; nie angeschlossen */
 async function _emAutoCreateTaskFolder(){
   if(!_emCurrentTask)return;
   if(!gdriveToken)return; // Drive nicht verbunden
@@ -46872,7 +46951,9 @@ function _emDokListe(t){
   });
   return out;
 }
+/* b865 · OHNE AUFRUFER: klappte die Dokumente-Karte auf/zu - die Karte gibt es seit b815 nicht mehr */
 function _emToggleDokKarte(){_emCollapseToggle('emDokBody','emDokArrow');}
+/* b865 · OHNE AUFRUFER: zeigte das n-te Dokument rechts; heute klickt man die Zeile direkt. ⛔ test_b813/b814/b815 verlangen ausdruecklich, dass es sie GIBT - nicht loeschen */
 function _emVorschauDokIdx(i){
   const liste=_emDokListe(_emCurrentTask);
   if(!liste[i])return;
@@ -47374,6 +47455,7 @@ function _emToggleSpalte(welche){
 function _emToggleLeft(){_emToggleSpalte('liste');}
 function _emToggleMitte(){_emToggleSpalte('mitte');}
 function _emToggleVorschau(){_emToggleSpalte('vorschau');}
+/* b865 · OHNE AUFRUFER: Altname des Spaltenknopfes, ersetzt durch _emToggleMitte */
 function _emToggleRight(){_emToggleSpalte('mitte');} // Altname – falls noch irgendwo gerufen
 // b569: Klappzustand merken (vorher nur Variablen → nach jedem Neuladen wieder alles offen)
 const _EM_PANEL_KEY='pam_em_panels_v1';
@@ -47518,6 +47600,7 @@ function _emCollapseToggle(bodyId,arrowId){
 // .eml → aus Drive lesen (funktioniert ohne Postfach); Postfach-Mail → Graph/Gmail.
 // b569: wird seit dem 3-Spalten-Umbau nicht mehr gerufen – der Mailtext kommt jetzt über
 // _emOpenMail in die Vorschau-Spalte. Steht noch hier, falls die schmale Variante zurückkommt.
+/* b865 · OHNE AUFRUFER: zeigte eine einzelne Mail in einem Kasten; ersetzt durch die grosse Vorschau rechts */
 async function _emZeigeEineMail(tk,m,ziel){
   if(!ziel)return;
   const d=m&&m.data||{};
@@ -47569,13 +47652,16 @@ async function _emZeigeEineMail(tk,m,ziel){
 }
 // b559: ⋯-Menü der rechten Spalte – Seltenes und Gefährliches (Eingliedern, Verschieben,
 // Löschen) liegt nicht mehr direkt neben den harmlosen Knöpfen
+/* b865 · OHNE AUFRUFER: gehoerte zum „⋯ Mehr"-Menue, entfallen in b815 */
 function _emToggleMehrMenu(ev){
   if(ev&&ev.stopPropagation)ev.stopPropagation();
   const m=document.getElementById('emMehrMenu');
   if(!m)return;
   m.style.display=(m.style.display==='none'||!m.style.display)?'block':'none';
 }
+/* b865 · OHNE AUFRUFER: gehoerte zum „⋯ Mehr"-Menue, entfallen in b815 */
 function _emCloseMehrMenu(){const m=document.getElementById('emMehrMenu');if(m)m.style.display='none';}
+/* b865 · OHNE AUFRUFER: klappte den Status/Frist-Block zu; der steht heute immer offen */
 function _emToggleTaskBlock(){_emCollapseToggle('emTaskCollapseBody','emTaskCollapseArrow');}
 function _emToggleKontakte(){_emCollapseToggle('emKontakteBody','emKontakteArrow');}
 function _emToggleCheckliste(){_emCollapseToggle('emChecklisteBody','emChecklisteArrow');}
@@ -47990,6 +48076,7 @@ function _emUpdateTop2(){
   });
   row2.innerHTML=parts.join('');
 }
+/* b865 · OHNE AUFRUFER: oeffnet ein LEERES Outlook-Terminfenster (nur Betreff+Adresse, ohne Datum). ⛔ Nicht anschliessen: „Termine & Zeiterfassung" am Task schreibt vollstaendige Termine automatisch nach Outlook (_msAutoPushTermine) - das kann mehr */
 function _emTerminVereinbaren(){
   if(!_emCurrentTask)return;
   let title=_emCurrentTask.title||'Termin';
@@ -48173,6 +48260,12 @@ function _emRenderMailKnoepfe(anzahl){
   }
   // Das Einlesen einer .eml/.msg von der Platte bleibt erreichbar.
   h+='<label title="E-Mail-Datei von der Festplatte einlesen" style="display:flex;align-items:center;gap:3px;padding:3px 9px;font-size:calc(11px * var(--modal-scale,1));font-weight:600;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text);cursor:pointer;">📁 Datei<input type="file" accept=".msg,.eml" style="display:none" onchange="_emHandleEmlSelect(event)" autocomplete="off"></label>';
+  /* b865: „📎 Datei" - beliebige Datei von der Platte an die Karte haengen. Die Funktion
+     dahinter war seit dem Umbau b812-b817 gebaut, aber ohne Knopf; „📁 Datei" daneben
+     nimmt NUR .eml/.msg. ⛔ Bewusst in DIESE Reihe: sie hat `flex-wrap`, ein Knopf mehr
+     bricht also um, statt etwas unter den Fensterrand zu schieben (b812-Lehre).
+     ⛔ Kein `accept`: hier soll jede Datei gehen - PDF, Bild, Angebot. */
+  h+='<label title="Beliebige Datei an diese Karte hängen (Bilder in den Foto-Ordner, alles andere in Dokumente)" style="display:flex;align-items:center;gap:3px;padding:3px 9px;font-size:calc(11px * var(--modal-scale,1));font-weight:600;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text);cursor:pointer;">📎 Datei<input type="file" multiple style="display:none" onchange="_emAddAttachmentFile(event)" autocomplete="off"></label>';
   ziel.innerHTML=h;
 }
 function _emRenderAttachPanel(allFiles){
@@ -48247,6 +48340,7 @@ function _emOpenEmlGallery(){
   if(!files.length){showToast('Keine EML-Dateien vorhanden','info',2000);return;}
   _emShowFileListOverlay('📨 EML-Dateien ('+files.length+')',files);
 }
+/* b865 · OHNE AUFRUFER: zeigte die Fotos in einem eigenen Fenster; der Anhaenge-Kasten zeigt sie laengst */
 function _emOpenFotoGallery(){
   if(!_emCurrentTask)return;
   let files=[];
@@ -48366,20 +48460,30 @@ function _emOpenViewer(files,startIdx){
   ov.appendChild(prev);ov.appendChild(img);ov.appendChild(next);ov.appendChild(cls);ov.appendChild(cap);
   document.body.appendChild(ov);
 }
+/* b865 · OHNE AUFRUFER: oeffnete einen Anhang ueber eine „Chip"-Marke; ersetzt durch die Zeilenliste */
 function _emOpenChipById(id){
   let f=window._emChipReg&&window._emChipReg[id];
   if(!f){_emOpenAttachGallery();return;}
   if(f.url)_emShowAttachPreview(f.icon,f.name,f.url,f.mime,f.data||{});
   else _emOpenAttachGallery();
 }
+/* b865: Diese Funktion war gebaut, aber seit dem Umbau b812-b817 ohne Knopf - sie ist
+   jetzt wieder erreichbar („📎 Datei"). ⛔ Dabei berichtigt: sie kannte die Aufteilung
+   Bilder/Dokumente NICHT und lud alles in den allgemeinen Kartenordner. PAM sortiert
+   sonst ueberall ueber `_pamAnhangZiele` - eine von Hand gelegte Datei waere sonst als
+   einzige am falschen Platz gelandet. Gemessen vor dem Anschliessen, nicht danach. */
 async function _emAddAttachmentFile(evt){
   const files=[...(evt.target.files||[])];
   evt.target.value='';
   if(!files.length||!_emCurrentTask)return;
   const t=_emCurrentTask;
-  const folderId=_ezFolderId((t.gdriveOrdner||'').trim());
+  const rueckfall=_ezFolderId((t.gdriveOrdner||'').trim());
+  const ziele=(typeof _pamAnhangZiele==='function')?_pamAnhangZiele(t,rueckfall):{bild:rueckfall,dok:rueckfall};
   for(const file of files){
     const mime=file.type||'application/octet-stream';
+    // Dieselbe Bild-Erkennung wie im Mail-Weg: Endung ODER Typ.
+    const istBild=/\.(jpe?g|png|gif|webp|heic|heif|avif|bmp|tiff?)$/i.test(file.name||'')||mime.indexOf('image/')===0;
+    const folderId=(istBild?ziele.bild:ziele.dok)||rueckfall;
     if(gdriveToken&&folderId){
       showToast('⏳ "'+file.name+'" wird hochgeladen…','info',4000);
       try{
@@ -48843,6 +48947,7 @@ function _emShowBoardPicker(title, excludeBoard, onPick){
   }
   renderBoards();
 }
+/* b865 · OHNE AUFRUFER: kleines Auswahlfenster; ruft niemand mehr */
 function _emShowPickModal(title,items,onPick){
   // items: [{label, sub, value}]
   const ov=document.createElement('div');ov.className='em-pick-overlay';
