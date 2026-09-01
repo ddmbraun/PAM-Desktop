@@ -9785,7 +9785,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-01 · #870'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-01-b870) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-01 · #871'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-01-b871) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -37014,6 +37014,166 @@ async function _getOrCreateGroup(name){
 }
 // ── Google Kontakt Vorschau-Dialog ──
 let _gkPreviewDiv=null;
+/* ── b871: Steht dieser Mensch schon in den Google-Kontakten? ────────────────
+   PAM redete mit Google bisher nur in EINE Richtung: es legte Kontakte an und
+   sah nie nach, was drüben liegt. Darum konnte es auch nicht warnen, wenn eine
+   Nummer dort längst steht – die doppelte Karte fiel erst in Google auf.
+   Die Berechtigung dafür (`auth/contacts` im GDRIVE_SCOPE) steckt seit jeher im
+   Login; benutzt wurde bisher nur die Schreibhälfte.
+
+   ⛔ Es wird ausschließlich GELESEN. Kein Anlegen, kein Ändern, kein Löschen und
+   vor allem kein automatisches Zusammenführen – was doppelt ist, entscheidet
+   Frank selbst. Die Marke zeigt nur, wo es etwas zu entscheiden gibt.
+   ⛔ Die geholten Kontakte bleiben im Arbeitsspeicher: nichts davon geht nach
+   `pam-adressen.json`, nichts in den localStorage. Es sind fremde Adressdaten,
+   die PAM nur zum Vergleichen ansieht – nach dem Neuladen sind sie weg. */
+let _gkAlle=null;   // [{name,firma,tels:[],mails:[]}] – NUR im Speicher
+let _gkIdx=null;    // Schlüssel → Person, fürs Nachschlagen ohne Durchsuchen
+
+/* Telefonnummern schreiben sich verschieden: Google speichert gern in der
+   internationalen Form, PAM hat sie mit führender Null. Verglichen werden
+   darum nur die Ziffern, und davon die letzten acht – die sind bei beiden
+   Schreibweisen gleich.
+   ⛔ Kürzeres als acht Ziffern fällt raus (Durchwahlen, Kurzwahlen): bei fünf
+   Ziffern träfen sonst wildfremde Anschlüsse aufeinander, und die Marke
+   behauptete eine Übereinstimmung, die es nicht gibt. */
+function _gkTelKey(s){
+  var d=String(s||'').replace(/[^0-9]/g,'');
+  if(d.length<8)return '';
+  return d.slice(-8);
+}
+function _gkMailKey(s){ return String(s||'').trim().toLowerCase(); }
+/* Name über dieselbe Umlaut-Wandlung wie die Adressbuch-Suche (b848): sonst
+   gälten „Krüger" und „Krueger" als zwei Menschen.
+   ⛔ `_adrNorm` bleibt unangetastet – daran hängt der Dubletten-Schlüssel. */
+function _gkNameKey(s){
+  return (typeof _adrNormSuche==='function')
+    ? _adrNormSuche(s)
+    : String(s||'').toLowerCase().replace(/[\s\/().+-]/g,'').trim();
+}
+
+/* Holt die Google-Kontakte. Seitenweise, weil die Schnittstelle höchstens 1000
+   auf einmal herausgibt. Die Schleifengrenze von 20 Seiten ist eine Notbremse
+   gegen ein nie endendes `nextPageToken` – bei 20.000 Kontakten stimmt eher
+   etwas anderes nicht. */
+async function _gkAlleLaden(frisch){
+  if(!frisch&&_gkAlle)return _gkAlle;
+  if(!gdriveToken)throw new Error('NO_TOKEN');
+  var out=[],seite='',n=0;
+  do{
+    var url='https://people.googleapis.com/v1/people/me/connections'
+      +'?personFields=names,emailAddresses,phoneNumbers,organizations'
+      +'&pageSize=1000&sortOrder=LAST_MODIFIED_DESCENDING'
+      +(seite?('&pageToken='+encodeURIComponent(seite)):'');
+    var r=await fetch(url,{headers:{Authorization:'Bearer '+gdriveToken}});
+    /* 403/401 heißt hier fast immer: der gespeicherte Zugang stammt noch aus
+       der Zeit vor der Kontakte-Berechtigung. Gleiche Behandlung wie beim
+       Anlegen – Zugang wegwerfen und neu anmelden lassen. */
+    if(r.status===403||r.status===401){
+      try{localStorage.removeItem('pam_gdrive_token_v1');}catch(e){}
+      gdriveToken=null; gdriveTokenExpires=0;
+      throw new Error('NO_SCOPE');
+    }
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    var d=await r.json();
+    (d.connections||[]).forEach(function(p){
+      out.push({
+        name:(((p.names||[])[0])||{}).displayName||'',
+        firma:(((p.organizations||[])[0])||{}).name||'',
+        tels:(p.phoneNumbers||[]).map(function(x){return x.value||'';}).filter(Boolean),
+        mails:(p.emailAddresses||[]).map(function(x){return x.value||'';}).filter(Boolean)
+      });
+    });
+    seite=d.nextPageToken||''; n++;
+  }while(seite&&n<20);
+  _gkAlle=out;
+  _gkIdxBauen();
+  return out;
+}
+
+/* Ein Nachschlagewerk statt einer Suche über alle: bei jedem der 21 Einträge
+   durch 2000 Google-Kontakte zu laufen wäre spürbar. Der ERSTE Eintrag je
+   Schlüssel gewinnt – steht jemand in Google selbst doppelt, zeigt die Marke
+   eben einen der beiden; für „ist er drüben schon da" reicht das. */
+function _gkIdxBauen(){
+  var idx={tel:{},mail:{},name:{}};
+  (_gkAlle||[]).forEach(function(p){
+    p.tels.forEach(function(t){var k=_gkTelKey(t); if(k&&!idx.tel[k])idx.tel[k]=p;});
+    p.mails.forEach(function(m){var k=_gkMailKey(m); if(k&&!idx.mail[k])idx.mail[k]=p;});
+    var n=_gkNameKey(p.name); if(n&&!idx.name[n])idx.name[n]=p;
+  });
+  _gkIdx=idx;
+}
+
+/* Ein Treffer, sobald EINES übereinstimmt. Telefon und E-Mail wiegen schwerer
+   als der Name – Namen wie „Müller" gibt es viele, die Nummer nur einmal.
+   Darum steht der Name zuletzt, und die Marke sagt dazu, woran es lag: bei
+   „Name" schaut man besser selbst nach, bei „Telefon" ist es sicher. */
+function _gkFinde(name,tel,tel2,email){
+  if(!_gkIdx)return null;
+  var k;
+  k=_gkTelKey(tel);    if(k&&_gkIdx.tel[k]) return {person:_gkIdx.tel[k], wieso:'Telefon'};
+  k=_gkTelKey(tel2);   if(k&&_gkIdx.tel[k]) return {person:_gkIdx.tel[k], wieso:'Telefon 2'};
+  k=_gkMailKey(email); if(k&&_gkIdx.mail[k])return {person:_gkIdx.mail[k],wieso:'E-Mail'};
+  k=_gkNameKey(name);  if(k&&_gkIdx.name[k])return {person:_gkIdx.name[k],wieso:'Name'};
+  return null;
+}
+
+/* Die Marke in der Adressbuch-Zeile.
+   ⛔ Solange nicht verglichen wurde, kommt KEINE Marke – weder ✅ noch ➖.
+   Ein graues „nur PAM" ohne gelaufenen Vergleich wäre eine Behauptung über
+   etwas, das PAM nie angesehen hat. */
+function _gkMarke(k){
+  if(!_gkIdx)return '';
+  var e=function(s){return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');};
+  var t=_gkFinde(k&&k.name,k&&k.tel,k&&k.tel2,k&&k.email);
+  if(t){
+    return ' <span title="Steht in den Google-Kontakten als &quot;'+e(t.person.name||'(ohne Name)')+'&quot; – gefunden über: '+e(t.wieso)+'" '
+      +'style="padding:0 5px;font-size:10px;border-radius:8px;background:#dcfce7;color:#166534;border:1px solid #86efac;white-space:nowrap;">✅ Google</span>';
+  }
+  return ' <span title="In den Google-Kontakten nicht gefunden – weder über Telefon noch E-Mail noch Name." '
+    +'style="padding:0 5px;font-size:10px;border-radius:8px;background:var(--bg3,#f3f4f6);color:var(--text2,#6b7280);border:1px solid var(--border,#d1d5db);white-space:nowrap;">➖ nur PAM</span>';
+}
+
+/* Der Knopf im Adressbuch. Lädt immer frisch – wer vergleicht, will den
+   heutigen Stand sehen, nicht den von vor einer Stunde. */
+async function _gkVergleichStarten(){
+  var btn=document.getElementById('adr-gk-btn');
+  var alt=btn?btn.textContent:'';
+  if(btn){btn.disabled=true;btn.textContent='⏳ lädt…';}
+  try{
+    await _gkAlleLaden(true);
+    var s=document.getElementById('adr-search');
+    _adrRenderPickerList(s?s.value:'');
+    _gkZusammenfassung();
+  }catch(e){
+    var txt=(e.message==='NO_SCOPE')
+      ? '⚠ Kontakte-Berechtigung fehlt – bitte über ☁️ neu bei Google anmelden, dann nochmal vergleichen.'
+      : (e.message==='NO_TOKEN' ? '⚠ Bitte zuerst Google Drive verbinden (☁️)' : '⚠ Google-Kontakte nicht lesbar: '+e.message);
+    showToast(txt,'error',8000);
+    console.warn('[GK-Vergleich]',e);
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent=alt||'🔍 Google';}
+  }
+}
+
+/* Die Zeile über der Liste: „14 von 21 stehen auch in Google".
+   ⛔ Gezählt wird der GESAMTE Bestand, nicht die gefilterte Liste – sonst
+   änderte sich die Zahl bei jedem Tastendruck im Suchfeld (dieselbe
+   Überlegung wie bei der Dubletten-Zählung aus b848). */
+function _gkZusammenfassung(){
+  var box=document.getElementById('adr-gk-info');
+  if(!box)return;
+  if(!_gkIdx){box.style.display='none';return;}
+  var alle=_adrBook||[];
+  var drin=alle.filter(function(k){return !!_gkFinde(k.name,k.tel,k.tel2,k.email);}).length;
+  var fehlt=alle.length-drin;
+  box.style.display='';
+  box.innerHTML='📇 <b>'+drin+'</b> von <b>'+alle.length+'</b> stehen auch in Google'
+    +(fehlt?(' · <b>'+fehlt+'</b> nur in PAM'):'')
+    +' <span style="color:var(--text2,#6b7280);">(aus '+((_gkAlle||[]).length)+' Google-Kontakten · nur angesehen, nichts geändert)</span>';
+}
+
 function _showGKPreview(kontaktDiv){
   if(!gdriveToken){showToast('⚠ Bitte zuerst Google Drive verbinden','warning',4000);return;}
   _gkPreviewDiv=kontaktDiv;
@@ -37036,8 +37196,9 @@ function _showGKPreview(kontaktDiv){
   const overlay=document.createElement('div');
   overlay.id='gk-preview-modal';
   overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;display:flex;align-items:center;justify-content:center;';
-  overlay.innerHTML='<div style="background:#fff;border-radius:10px;padding:20px 22px;width:380px;max-width:96vw;box-shadow:0 8px 32px rgba(0,0,0,0.18);">'
+  overlay.innerHTML='<div style="background:#fff;border-radius:10px;padding:20px 22px;width:380px;max-width:96vw;max-height:92vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.18);">'
     +'<div style="font-size:14px;font-weight:600;color:#1a56c4;margin-bottom:14px;">👤 Kontakt prüfen &amp; anlegen</div>'
+    +'<div id="gkp-dub" style="font-size:11px;padding:6px 8px;border-radius:5px;margin:-8px 0 12px;background:#f3f4f6;color:#6b7280;">⏳ Prüfe, ob es ihn in Google schon gibt…</div>'
     +'<div style="display:flex;flex-direction:column;gap:8px;">'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+row('gkp-vorname','Vorname','text',nm.first)+row('gkp-nachname','Nachname','text',nm.last)+'</div>'+rolleSelect
     +row('gkp-tel','Telefon','tel',tel)
@@ -37052,6 +37213,30 @@ function _showGKPreview(kontaktDiv){
     +'</div></div>';
   document.body.appendChild(overlay);
   overlay.addEventListener('click',e=>{if(e.target===overlay){overlay.remove();_gkPreviewDiv=null;}});
+  /* b871: Vor dem Anlegen nachsehen, ob es ihn drüben schon gibt. Laeuft
+     nebenher - der Dialog steht sofort da, die Antwort kommt nach.
+     ⛔ Der Anlegen-Knopf bleibt in JEDEM Fall bedienbar: die Zeile warnt,
+     sie entscheidet nicht. Auch wenn die Pruefung scheitert, muss der
+     Kontakt anlegbar bleiben - sonst nimmt ein Netzaussetzer die Funktion. */
+  var _tel2=(kontaktDiv.querySelector('.k-tel2')||{value:''}).value||'';
+  _gkAlleLaden().then(function(){
+    var el=document.getElementById('gkp-dub'); if(!el)return;
+    var t=_gkFinde(fullName,tel,_tel2,email);
+    if(t){
+      el.style.background='#fef3c7'; el.style.color='#92400e';
+      el.innerHTML='⚠ <b>Steht schon in Google:</b> '+esc(t.person.name||'(ohne Name)')
+        +' <span style="opacity:.85;">– gefunden über '+esc(t.wieso)+'</span><br>Anlegen erzeugt eine zweite Karte.';
+    }else{
+      el.style.background='#dcfce7'; el.style.color='#166534';
+      el.innerHTML='✅ Noch nicht in Google.';
+    }
+  }).catch(function(e){
+    var el=document.getElementById('gkp-dub'); if(!el)return;
+    el.style.background='#fef3c7'; el.style.color='#92400e';
+    el.innerHTML=(e.message==='NO_SCOPE')
+      ? '⚠ Konnte nicht nachsehen – bitte über ☁️ neu anmelden. Anlegen geht trotzdem.'
+      : '⚠ Konnte nicht nachsehen ('+esc(e.message)+'). Anlegen geht trotzdem.';
+  });
   // Labels asynchron laden
   _loadContactGroups().then(groups=>{
     const sel=document.getElementById('gkp-label');if(!sel)return;
@@ -37575,6 +37760,9 @@ function _adrBookOpenPicker(mode){
         wählen" aus einem Task) darf er nicht erscheinen - dort sucht man einen
         Kontakt für den offenen Task und legt nicht nebenbei hundert neue an. */
      +'<button type="button" onclick="_mfImpOpen()" title="Kundenexport aus MF dach einlesen (CSV)" style="padding:6px 12px;font-size:12px;border:1px solid var(--border,#d1d5db);background:var(--bg3,#f3f4f6);color:var(--text,#111);border-radius:6px;cursor:pointer;margin-left:6px;">📥 Aus MF dach</button>'
+     /* b871: Nur im Verwalten-Modus. Im Auswahl-Modus sucht man einen Kontakt
+        fuer den offenen Task und vergleicht nicht nebenbei das ganze Buch. */
+     +'<button type="button" id="adr-gk-btn" onclick="_gkVergleichStarten()" title="Liest die Google-Kontakte und markiert, welche Eintraege dort schon stehen. Es wird nur angesehen - nichts angelegt, geaendert oder zusammengefuehrt." style="padding:6px 12px;font-size:12px;border:1px solid var(--border,#d1d5db);background:var(--bg3,#f3f4f6);color:var(--text,#111);border-radius:6px;cursor:pointer;margin-left:6px;white-space:nowrap;">🔍 Google</button>'
     :'<button type="button" onclick="_adrPickToggleAll()" style="padding:6px 12px;font-size:12px;border:1px solid var(--border,#d1d5db);background:var(--bg3,#f3f4f6);color:var(--text,#111);border-radius:6px;cursor:pointer;">Alle</button>';
   const footRight=(mode==='manage')
     ?btnClose
@@ -37599,6 +37787,9 @@ function _adrBookOpenPicker(mode){
        darunter steht auf flex:1 und quetscht sonst ihre Geschwister zusammen
        (die Falle aus b845). Der Inhalt kommt aus _adrRenderRolleFilter. */
     +'<div id="adr-rollefilter" style="display:none;flex-wrap:wrap;gap:4px;margin-bottom:6px;flex-shrink:0;"></div>'
+    /* b871: Ergebniszeile des Google-Vergleichs. Bleibt leer und unsichtbar,
+       solange nicht verglichen wurde. */
+    +'<div id="adr-gk-info" style="display:none;font-size:11px;padding:5px 7px;margin-bottom:6px;border-radius:5px;background:var(--bg3,#f3f4f6);color:var(--text,#111);border:1px solid var(--border,#e5e7eb);flex-shrink:0;"></div>'
     +'<div id="adr-list" style="flex:1;overflow-y:auto;min-height:90px;border:1px solid var(--border,#e5e7eb);border-radius:6px;padding:4px;"></div>'
     +'<div style="display:flex;gap:8px;margin-top:12px;justify-content:space-between;align-items:center;">'
     +footLinks+'<span style="display:flex;gap:8px;">'+footRight+'</span>'
@@ -37684,7 +37875,7 @@ function _adrRenderPickerList(filter){
       ?'<div id="objlist_'+esc(k.id)+'" style="display:none;margin-top:3px;padding:4px 6px;background:var(--bg3,#f9fafb);border-radius:4px;font-size:10px;color:var(--text2,#6b7280);line-height:1.5;">'
         +oKeys.map(function(kk){return (o[kk].fest?'📌 ':'📍 ')+esc(o[kk].adr);}).join('<br>')+'</div>'
       :'';
-    var inner='<span style="flex:1;min-width:0;"><span style="font-size:10px;color:var(--text2,#6b7280);">'+_adrRoleLabel(k.rolle)+'</span>'+badge+_adrDubMarke(k,dub)+'<br><b>'+esc(k.name||'(ohne Name)')+'</b>'+(sub?'<br><span style="font-size:11px;color:var(--text2,#6b7280);">'+sub+'</span>':'')+oList+'</span>'
+    var inner='<span style="flex:1;min-width:0;"><span style="font-size:10px;color:var(--text2,#6b7280);">'+_adrRoleLabel(k.rolle)+'</span>'+badge+_adrDubMarke(k,dub)+_gkMarke(k)+'<br><b>'+esc(k.name||'(ohne Name)')+'</b>'+(sub?'<br><span style="font-size:11px;color:var(--text2,#6b7280);">'+sub+'</span>':'')+oList+'</span>'
       +'<button type="button" title="Aus Adressbuch löschen" onclick="event.preventDefault();event.stopPropagation();_adrBookDelete(\''+esc(k.id)+'\')" style="flex-shrink:0;padding:2px 6px;font-size:13px;border:none;background:transparent;cursor:pointer;">🗑</button>';
     if(manage){
       return '<div class="adr-row" onclick="_adrBookEditEntry(\''+esc(k.id)+'\')" style="display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:5px;cursor:pointer;font-size:12px;">'+inner+'</div>';
