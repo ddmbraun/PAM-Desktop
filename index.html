@@ -9785,7 +9785,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-01 · #874'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-01-b874) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-01 · #875'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-01-b875) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -44448,7 +44448,9 @@ function _objImpZeichnen(mehrDa,nurListe){
           ?(_pf.ueber
             ?("<span style=\"font-size:10px;color:#8a5a00;font-weight:600;\" title=\"Diese Stra\u00dfe steht in der Tabelle unter \u201e"+esc(_pf.ueber)+"\u201c \u2013 einem Ort mit derselben Postleitzahl. Bitte kurz ansehen.\"> \u00b7 "+esc(_pf.plz)+" \u00fcber "+esc(_pf.ueber)+"</span>")
             :("<span style=\"font-size:10px;color:var(--text2);\" title=\"aus der PLZ-Tabelle\"> \u00b7 "+esc(_pf.plz)+"</span>"))
-          :("<span style=\"font-size:10px;color:#a04000;\" title=\"Diese Stra\u00dfe steht nicht eindeutig in der Tabelle \u2013 PAM tr\u00e4gt keine PLZ ein\"> \u00b7 PLZ unklar</span>");}
+          /* b875: \u201ePLZ unklar" allein war eine Sackgasse \u2013 daneben steht jetzt,
+             falls es einen gibt, der anklickbare Vorschlag aus dem Nachbarort. */
+          :_plzUnklarHinweis(_po,_objImpBasisName(x.name));}
     }
     /* b843: Fehlt der Straßenname, fällt es hier auf – nicht erst im Kundenschreiben. */
     const _ohneStr=(!x.schonDa&&!_objImpStrasseFeld()&&_objImpWieHausnummer(x.name))
@@ -44651,6 +44653,85 @@ function _plzOrtFuer(ortFeld,name){
   if(/\d{5}/.test(o))return o;
   const p=_plzFinden(o,name).plz;   // b844: schließt den Nachbarort mit ein
   return p?(p+" "+o):o;
+}
+/* ── b875: „PLZ unklar" war eine Sackgasse ────────────────────────────────────
+   `_plzFinden` sucht die Straße AUSSCHLIESSLICH innerhalb des eingetippten Ortes.
+   Kennt die Tabelle diesen Ort gar nicht, findet sie nichts – auch dann nicht,
+   wenn die Straße unter dem Nachbarort sauber mit einer Zahl dasteht. Frank sah
+   dann nur „PLZ unklar" und hatte keinen Weg weiter (Befund 01.09.2026).
+
+   ⛔⛔ Diese Funktion trägt NICHTS ein und wird von `_plzFinden`/`_plzSuchen`
+   NICHT benutzt – jene bleiben unverändert. Sie liefert nur einen Vorschlag,
+   den Frank sieht und anklicken muss. Grund: der stille Rückfall „landesweit
+   eindeutig" wurde bei b844 gemessen und war zu **12,2 % falsch**. Eine falsche
+   Postleitzahl sieht richtig aus und fällt im Kundenschreiben niemandem auf.
+
+   ⛔ Angeboten wird nur bei GENAU EINEM Ort UND GENAU EINER Zahl. Steht die
+   Straße in mehreren Orten, kann PAM nicht wissen, welcher gemeint ist.
+   ⛔ Gesperrte Zeilen (`!Ort;Straße`, b844) zählen nicht als Treffer – weder für
+   den eingetippten Ort noch für einen Kandidatenort. Eine Sperre heißt „hier
+   niemals eine Zahl", und das gilt auch für diesen Weg. */
+function _plzOrtsUnabhaengig(ortFeld,name){
+  if(!_plzStrIdx)return {plz:"",ort:""};
+  const o=_objNorm(String(ortFeld||"").replace(/\d{5}/g,""));
+  const k=_plzKandidaten(name);
+  for(let i=0;i<k.length;i++){
+    const s=_objNorm(k[i]);
+    if(!s)continue;
+    if(o&&_plzGesperrt&&_plzGesperrt.has(o+"|"+s))return {plz:"",ort:""};
+    const tr=(_plzStrIdx.get(s)||[]).filter(function(x){
+      return !(_plzGesperrt&&_plzGesperrt.has(_objNorm(x.o)+"|"+s));
+    });
+    /* Wie in `_plzFinden`: der erste Kandidat mit Treffern entscheidet. Beim
+       nächsten weiterzusuchen hieße, die unschärfere Form zu bevorzugen. */
+    if(!tr.length)continue;
+    const orte=[],plzs=[];
+    tr.forEach(function(x){
+      if(orte.indexOf(x.o)<0)orte.push(x.o);
+      if(plzs.indexOf(x.p)<0)plzs.push(x.p);
+    });
+    if(orte.length!==1||plzs.length!==1)return {plz:"",ort:""};
+    return {plz:plzs[0],ort:orte[0]};
+  }
+  return {plz:"",ort:""};
+}
+/* Die Zeile in der Vorschauliste: „PLZ unklar" und daneben, wenn es einen gibt,
+   der anklickbare Vorschlag MIT Nennung des Ortes. Der Ortsname ist der Punkt –
+   ohne ihn könnte Frank nicht beurteilen, ob die Zahl passt. */
+function _plzUnklarHinweis(ortFeld,name){
+  const unklar="<span style=\"font-size:10px;color:#a04000;\" title=\"Diese Straße steht nicht eindeutig in der Tabelle – PAM trägt keine PLZ ein\"> · PLZ unklar</span>";
+  let v={plz:"",ort:""};
+  // ⚠ Kein stiller catch – ein verschluckter Fehler sähe aus wie „kein Vorschlag".
+  try{v=_plzOrtsUnabhaengig(ortFeld,name);}catch(e){console.warn("[b875] Vorschlag:",e);}
+  if(!v.plz)return unklar;
+  return unklar+"<span onclick=\"event.stopPropagation();_plzVorschlagNehmen('"+esc(v.plz)+"')\""
+    +" title=\"Diese Straße steht in der Tabelle nur unter „"+esc(v.ort)+"“. PAM trägt von allein nichts ein. Ein Klick setzt "+esc(v.plz)+" ins Ortsfeld – die Zahl gilt dann für ALLE Zeilen dieses Laufs.\""
+    +" style=\"font-size:10px;color:#185FA5;font-weight:600;cursor:pointer;text-decoration:underline;\"> · "+esc(v.plz)+" aus „"+esc(v.ort)+"“ übernehmen?</span>";
+}
+/* ⛔ Kein zweiter Weg: geschrieben wird ins vorhandene Ortsfeld. Die Regel
+   „eine eingetippte PLZ sticht die Tabelle" (b832) und `_plzNeuZeichnen`
+   erledigen den Rest – hier wird nichts nachgebaut. */
+function _plzVorschlagNehmen(plz){
+  const p=String(plz||"").trim();
+  if(!/^\d{5}$/.test(p)){showToast("⚠ Keine gültige Postleitzahl","error",5000);return;}
+  const el=document.getElementById("_objImpOrt");
+  if(!el)return;
+  const ort=String(el.value||"").trim().replace(/^[,\s]+/,"");
+  if(/\d{5}/.test(ort)){showToast("Im Ortsfeld steht schon eine Postleitzahl","info",4000);return;}
+  el.value=(p+" "+ort).trim();
+  _plzNeuZeichnen();
+  showToast("✓ "+p+" ins Ortsfeld übernommen – bitte kurz prüfen","success",6000);
+}
+/* b875 (Wunsch Frank): die Postleitzahl selbst nachsehen können, ohne den
+   Dialog zu verlassen. ⛔ Kein eigener Maps-Aufruf – dieselbe Bauform wie
+   `tMapsOeffnen`, damit es nur EINEN Weg nach Maps gibt.
+   ⚠ Das Ortsfeld gilt für den ganzen Lauf; die Straße kann PAM nur aus dem Feld
+   „Straße davorsetzen" nehmen. Heißen die Ordner selbst nach der Straße, führt
+   der Knopf nur zum Ort – dann muss Frank die Straße in Maps ergänzen. */
+function _objImpMapsOeffnen(){
+  const q=[_objImpStrasseFeld(),_objImpOrtFeld()].filter(function(s){return s&&s.trim();}).join(" ").trim();
+  if(!q){showToast("Erst den Ort eintragen – dann zeigt Maps die Gegend","info",5000);return;}
+  window.open("https://www.google.com/maps/search/"+encodeURIComponent(q+", Deutschland"),"_blank");
 }
 // Ort geaendert -> die Liste muss die PLZ neu zeigen (voller Neuaufbau, nicht nur Haekchen).
 /* b833: Postleitzahl an EINER Karte ergaenzen (Objekt wie Auftrag).
@@ -44943,7 +45024,12 @@ function _objImpOeffnen(){
            vorigen Verwaltung vor den neuen Häusern. */
         +"<div id=\"_objImpFeldStr\"><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Straße davorsetzen <span style=\"opacity:.7;\">(leer, wenn der Ordner schon die Straße ist)</span></label><input id=\"_objImpStr\" type=\"text\" placeholder=\"nur nötig, wenn die Ordner Hausnummern sind\" autocomplete=\"off\" oninput=\"_objImpStrGeaendert()\" title=\"Heißen die Ordner nur nach der Hausnummer, gehört der Straßenname hierher. Er wird jedem Ordnernamen vorangestellt.\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\">"
           +"<div id=\"_objImpStrHinweis\" style=\"font-size:10px;color:var(--text2);line-height:1.4;margin-top:3px;\"></div></div>"
-        +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Ort <span style=\"opacity:.7;\">(PLZ kommt je Haus dazu)</span></label><input id=\"_objImpOrt\" type=\"text\" placeholder=\"z.B. Erfurt\" autocomplete=\"off\" oninput=\"_plzNeuZeichnen()\" title=\"Nur den Ort eintragen \u2013 die Postleitzahl sucht PAM je Haus heraus. Eine hier eingetippte PLZ sticht die Tabelle.\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"></div>"
+        /* b875: Der \ud83d\uddfa-Knopf sitzt IN der Zeile des Ortsfeldes (flex), nicht darunter.
+           Der Kopfteil hat eine H\u00f6hen-Obergrenze (b845, die Zahl steht eine Ebene
+           weiter oben) \u2013 eine zus\u00e4tzliche Zeile h\u00e4tte sie angeknabbert.
+           \u26d4 Die Regel hier NICHT w\u00f6rtlich zitieren: `test_b845` z\u00e4hlt ihr Vorkommen
+           im ganzen Funktionstext und schl\u00e4gt sonst auf den Kommentar an. */
+        +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">Ort <span style=\"opacity:.7;\">(PLZ kommt je Haus dazu)</span></label><div style=\"display:flex;gap:6px;align-items:stretch;\"><input id=\"_objImpOrt\" type=\"text\" placeholder=\"z.B. Erfurt\" autocomplete=\"off\" oninput=\"_plzNeuZeichnen()\" title=\"Nur den Ort eintragen \u2013 die Postleitzahl sucht PAM je Haus heraus. Eine hier eingetippte PLZ sticht die Tabelle.\" style=\"flex:1;min-width:0;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;\"><button type=\"button\" onclick=\"_objImpMapsOeffnen()\" title=\"Ort (und Stra\u00dfe, falls oben eingetragen) in Google Maps ansehen \u2013 um die Postleitzahl selbst nachzuschlagen\" style=\"flex-shrink:0;padding:0 11px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:13px;cursor:pointer;\">\ud83d\uddfa</button></div></div>"
         +"<div><label style=\"font-size:10px;color:var(--text2);display:block;margin-bottom:2px;\">NAS-Pfad bis zur Ortsebene</label><input id=\"_objImpNas\" type=\"text\" autocomplete=\"off\" style=\"width:100%;box-sizing:border-box;padding:6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:11px;\">"
           /* b838: Platz fuer die Warnung, wenn der Pfad nicht abgeleitet werden konnte.
              Steht leer da und nimmt dann keine Hoehe ein - der Dialog springt nicht. */
