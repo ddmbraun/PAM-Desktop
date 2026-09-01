@@ -8630,7 +8630,11 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
 
         <!-- 📍 Objekt (b553 Punkt 8: von links nach rechts, Position 3) -->
         <div class="mv2-section mv2-r-card baustelle-only collapsible open" id="tObjektSect">
-          <div class="mv2-section-label mv2-rhdr-amber" onclick="_toggleMv2Sect('tObjektSect',event)" style="cursor:pointer;">📍 Objekt<span class="mv2-coll-arrow" style="margin-left:auto;">›</span></div>
+          <!-- b876: Der Abschnitt ist beim Öffnen zugeklappt. Ohne diese Zeile sah man
+               nicht, OB ein Objekt verknüpft ist – und konnte „kein weiterer Auftrag"
+               nicht von „kein Objekt verknüpft" unterscheiden. Gleiche Bauform wie
+               #objAufHdrInfo und #tuHdrInfo. -->
+          <div class="mv2-section-label mv2-rhdr-amber" onclick="_toggleMv2Sect('tObjektSect',event)" style="cursor:pointer;"><span style="flex-shrink:0;white-space:nowrap;">📍 Objekt</span><span id="tObjHdrInfo" style="margin-left:8px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:400;color:var(--text2);font-size:calc(11px * var(--modal-scale,1));text-transform:none;"></span><span class="mv2-coll-arrow" style="margin-left:auto;">›</span></div>
           <div class="mv2-r-card-body">
           <div class="modal-grid">
             <!-- b759: Rechnungsanschrift – der mehrzeilige Briefkopf-Block, so wie er im
@@ -9785,7 +9789,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-01 · #875'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-01-b875) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-01 · #878'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-01-b878) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -39133,6 +39137,21 @@ function renderKontaktePTP(kontakte){
   // Schließen und erneuten Öffnen des Tasks aus der Anzeige verschwunden.
   for(const k of(kontakte||[]))addKontaktPTP(k.rolle||'sonstiges',k.name||'',k.tel||'',k.email||'',k.anrufKontakt||false,k.tel2||'',{strasse:k.strasse||'',plz:k.plz||'',ort:k.ort||''});
   if(typeof _adrRefreshMarks==='function')_adrRefreshMarks();
+  /* b878: Zähler UNBEDINGT neu setzen, nicht nur über die Schleife.
+     Befund: `addKontaktPTP` frischt den Zähler am Ende auf – bei LEERER Kontaktliste
+     läuft die Schleife aber null mal, und in der Kopfzeile blieb die Zahl des zuvor
+     geöffneten Tasks stehen. `openNewTaskModal` setzt ihn zurück, `openEditTaskModal`
+     ging nur über diesen Weg hier – also traf es genau den Wechsel von einem Task MIT
+     Ansprechpartnern zu einem OHNE.
+     ⛔ Der Aufruf in `addKontaktPTP` bleibt: die Funktion wird auch einzeln gerufen
+     (aus dem E-Mail-Weg), dort gibt es keine Schleife, die hinterher aufräumt.
+     ⚡ Vorlage ist `renderCheckliste`: die ruft `_updateChecklisteTitle` auch im
+     Leer-Fall. Ein Zähler gehört an das Zeichnen, nicht an das Einfügen.
+     ⛔ `typeof`-Wache wie bei `_adrRefreshMarks` eine Zeile darüber – dieselbe
+     Bauform am selben Ort. Sie kostet nichts und hält `test_b678` grün, dessen
+     Attrappe diese Funktion nicht kennt. Die Wache hängt AUSDRÜCKLICH NICHT an der
+     Länge der Kontaktliste: genau das war der Fehler. */
+  if(typeof updateKontaktePTPTitle==='function')updateKontaktePTPTitle();
   // b675: Der Lücken-Hinweis wird hier NICHT mehr angestoßen. renderKontaktePTP läuft
   // beim Öffnen eines Tasks, BEVOR tGmAkte gefüllt ist – die Anzeige las dadurch die
   // Aktennummer des zuvor geöffneten Tasks. Der Aufruf sitzt jetzt in
@@ -44739,6 +44758,33 @@ function _objImpMapsOeffnen(){
    Karten und alles, was vorher entstand, blieben ohne - und genau dieses Feld fuellt
    `{Objekt}` in den Word-Vorlagen (b759).
    ⛔ Nichts wird still ueberschrieben: Steht schon eine PLZ da, passiert gar nichts. */
+/* ── b877: Den Ort auch OHNE Komma erkennen ───────────────────────────────────
+   Befund Frank 01.09.2026: Er tippte „⟨Straße⟩ ⟨Hausnr⟩ erfurt", drückte „↓ PLZ"
+   und bekam „Es fehlt der Ort" – obwohl der Ort dastand. Grund: `_adrParseObjAddr`
+   trennt Straße und Ort am KOMMA (oder an einer fünfstelligen Zahl). Ohne Komma
+   gilt der ganze Text als Straßenname, der Ort bleibt leer. Die Meldung stimmte
+   formal und führte trotzdem in die Irre.
+
+   ⛔ Das ist KEIN Raten: Die letzten ein bis drei Wörter werden gegen die
+   ORTSLISTE der Tabelle gehalten. Nur wenn dort wirklich ein Ort steht, wird
+   getrennt. Trifft nichts zu, passiert nichts.
+   ⛔ Längster Treffer zuerst – sonst gewänne bei einem zweiteiligen Ortsnamen
+   der kurze zweite Teil.
+   ⛔ Mindestens ein Wort muss als Straße übrig bleiben.
+   ⚡ Selbst eine falsche Trennung kann keine falsche Zahl erzeugen: Die Zahl kommt
+   danach unverändert aus `_plzFinden`. Passt die Straße nicht zum Ort, findet es
+   nichts – und geschrieben wird gar nichts. */
+function _plzOrtAusAdresse(roh){
+  const s=String(roh||"").trim();
+  if(!s||!_plzOrtPlz)return {strasse:"",ort:""};
+  const w=s.split(/\s+/);
+  if(w.length<2)return {strasse:"",ort:""};
+  for(let k=Math.min(3,w.length-1);k>=1;k--){
+    const kand=w.slice(w.length-k).join(" ");
+    if(_plzOrtPlz.has(_objNorm(kand)))return {strasse:w.slice(0,w.length-k).join(" "),ort:kand};
+  }
+  return {strasse:"",ort:""};
+}
 async function _plzAusTabelleKnopf(){
   const el=document.getElementById("tAdr");
   if(!el)return;
@@ -44746,17 +44792,33 @@ async function _plzAusTabelleKnopf(){
   if(!roh){showToast("\u26A0 Erst eine Adresse eintragen","error",5000);return;}
   await _plzLaden();
   if(!_plzTab||!_plzTab.size){showToast("\u26A0 Die Stra\u00dfentabelle ist nicht geladen \u2013 einmal neu laden","error",7000);return;}
-  // ⛔ Kein eigenes Zerlegen: `_adrParseObjAddr` macht das seit b678 an fuenf Stellen.
+  /* ⛔ Kein eigenes Zerlegen: `_adrParseObjAddr` macht das seit b678 an SIEBEN
+     Stellen – am 01.09.2026 nachgezählt; hier stand jahrelang „fünf".
+     ⛔ Deshalb bleibt die Funktion unangetastet: eine Änderung dort träfe alle
+     sieben Wege auf einmal. Die Nachhilfe steht daneben (`_plzOrtAusAdresse`). */
   const p=_adrParseObjAddr(roh);
   if(p.plz){showToast("Die Adresse hat schon eine Postleitzahl","info",5000);return;}
-  if(!p.ort){showToast("\u26A0 Es fehlt der Ort \u2013 ohne ihn l\u00e4sst sich die PLZ nicht finden","error",7000);return;}
-  const pf=_plzFinden(p.ort,p.strasse);   // b844: schließt den Nachbarort mit ein
+  let strasse=p.strasse,ort=p.ort,erkannt="";
+  if(!ort){
+    const g=_plzOrtAusAdresse(roh);   // b877: Ort auch ohne Komma erkennen
+    if(g.ort){strasse=g.strasse;ort=g.ort;erkannt=g.ort;}
+  }
+  /* b877: Die alte Meldung sagte \u201ees fehlt der Ort", obwohl er dastand. Sie nennt
+     jetzt das, was wirklich fehlt, und zeigt die Schreibweise dazu.
+     \u26d4 Musteradresse, nie eine echte - die Datei wird oeffentlich ausgeliefert. */
+  if(!ort){showToast("\u26A0 Ohne Ort findet PAM keine Postleitzahl. Den Ort mit Komma anh\u00e4ngen \u2013 z. B. \u201eMusterstra\u00dfe 12, Musterstadt\u201c","error",9000);return;}
+  const pf=_plzFinden(ort,strasse);   // b844: schließt den Nachbarort mit ein
   if(!pf.plz){showToast("\u26A0 Diese Stra\u00dfe steht nicht eindeutig in der Tabelle \u2013 bitte selbst eintragen","error",8000);return;}
-  el.value=p.strasse+", "+pf.plz+" "+p.ort;
+  el.value=strasse+", "+pf.plz+" "+ort;
   try{scheduleTaskFieldSave();}catch(e){}
   try{_updateMapsBtn();}catch(e){}
   /* b844: Kam sie über einen Nachbarort, sagt die Meldung es – und steht länger. */
-  showToast("\u2713 Postleitzahl "+pf.plz+" erg\u00e4nzt"+(pf.ueber?(" \u2013 gefunden \u00fcber \u201e"+pf.ueber+"\u201c, einen Ort mit derselben Zahl"):""),"success",pf.ueber?9000:4000);
+  showToast("\u2713 Postleitzahl "+pf.plz+" erg\u00e4nzt"
+    /* b877: Wurde der Ort ohne Komma erkannt, steht auch das in der Meldung \u2013
+       Frank soll sehen, WAS PAM als Ort genommen hat, nicht nur das Ergebnis. */
+    +(erkannt?(" \u2013 Ort \u201e"+erkannt+"\u201c aus der Adresse erkannt"):"")
+    +(pf.ueber?(" \u2013 gefunden \u00fcber \u201e"+pf.ueber+"\u201c, einen Ort mit derselben Zahl"):""),
+    "success",(pf.ueber||erkannt)?9000:4000);
 }
 /* b833: Fehlende Postleitzahlen an einem GANZEN Board nachtragen.
    Anlass (Frank, 31.08.): b832 setzt die PLZ nur beim Massenlauf - alles, was vorher
@@ -45140,6 +45202,39 @@ function _objZuordnenOffenerTask(){
     return id?findTaskById(id):null;
   }catch(e){return null;}
 }
+/* ── b876: Der Stand auch bei ZUGEKLAPPTEM Abschnitt ──────────────────────────
+   Anlass (Frank, 01.09.2026): „🛠 Weitere Aufträge an diesem Haus" erscheint nur
+   bei verknüpftem Objekt und verschwindet sonst wortlos. Der Abschnitt „📍 Objekt"
+   ist beim Öffnen zugeklappt, seine Kopfzeile sagte nichts – man konnte „kein
+   weiterer Auftrag" nicht von „kein Objekt verknüpft" unterscheiden.
+   ⚠ Dieselbe Falle steht über `#tRaField` dokumentiert: beim eingeklappten
+   Anschrift-Knopf der Kontakte blieben 78 von 80 leer, weil man es zu nicht sieht.
+
+   ⛔ LEISE, nicht laut. Bei den meisten Aufträgen fehlt das Objekt heute noch,
+   weil Frank die Objektkarten erst anlegt. Ein Warnton stünde damit an fast jeder
+   Karte und wäre nach drei Tagen unsichtbar – genau dann, wenn er gebraucht wird.
+   Deshalb grau und klein, kein Amber, kein Ausrufezeichen.
+
+   ⛔⛔ Im OBJEKTfenster bleibt die Zeile leer. `_objZuordnungAnzeige` läuft dort
+   weiter, obwohl die Zuordnungszeile per CSS ausgeblendet ist (b614) – die
+   Kopfzeile ist aber sichtbar, und dort stünde sonst „kein Objekt" AN einem Objekt. */
+function _objHdrInfoSetzen(text,farbe){
+  const el=document.getElementById("tObjHdrInfo");
+  if(!el)return false;
+  /* ⛔ Genau das EINE Element fragen, an dem `_applyBoardType` die Klasse setzt
+     (`#taskModalBox`) – nicht `querySelector(".ptp-immo-mode")` über das ganze
+     Dokument. Zwei Gründe, beide beim Bau aufgefallen:
+     1. Ein Dokumentweiter Griff träfe auch ein zufällig gleich benanntes Element.
+     2. `test_b820` baut eine schlanke DOM-Attrappe, die nur `getElementById` kennt –
+        mit `querySelector` stürzte die ganze Zuordnung dort ab. In einem echten
+        Browser wäre das nie aufgefallen. */
+  const box=document.getElementById("taskModalBox");
+  const imObjektfenster=!!(box&&box.classList&&box.classList.contains("ptp-immo-mode"));
+  if(imObjektfenster){el.textContent="";return false;}
+  el.textContent=String(text||"");
+  el.style.color=farbe||"var(--text2)";
+  return true;
+}
 function _objZuordnungAnzeige(){
   const txt=document.getElementById("tObjZuordnungText");
   if(!txt)return;
@@ -45150,6 +45245,7 @@ function _objZuordnungAnzeige(){
   const t=_objZuordnenOffenerTask();
   const oid=(t&&t.objektId)||"";
   if(!oid){
+    _objHdrInfoSetzen("kein Objekt","var(--text2)");   // b876
     txt.textContent="– nicht zugeordnet";
     txt.style.color="var(--text2)";
     if(zu)zu.textContent="🏠 Zuordnen";
@@ -45162,6 +45258,8 @@ function _objZuordnungAnzeige(){
   /* b821: Titel der Objektkarte zuerst - `objektName` ist nur eine Kopie vom
      Zuordnungs-Zeitpunkt und veraltet, sobald das Objekt umbenannt wird. */
   const name=((obj&&obj.title)||t.objektName||"")||"(Objekt nicht gefunden)";
+  // b876: derselbe Wortlaut wie in der Zeile darunter – EIN Text, zwei Anzeigeorte.
+  _objHdrInfoSetzen("🏠 "+name+(obj?"":" · Karte nicht gefunden"),obj?"var(--text2)":"#a04000");
   txt.textContent="🏠 "+name+(obj?"":" · Karte nicht gefunden");
   txt.style.color=obj?"var(--text)":"#a04000";
   if(zu)zu.textContent="↻ Ändern";
