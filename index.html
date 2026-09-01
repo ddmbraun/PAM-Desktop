@@ -9700,7 +9700,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-01 · #865'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-01-b865) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-01 · #866'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-01-b866) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -14776,6 +14776,19 @@ async function _driveResumableUpdate(token, fileId, content, mimeType, etag) {
 }
 
 let _saveNochmal = false; // b638: Anstoß fiel in einen laufenden Save – nachholen statt verfallen
+// b866: Ein Netzwerk-Aussetzer beim Speichern heilt sich jetzt von allein.
+// Vorher gab _driveResumableUpdate nach 3 schnellen Anlaeufen (Fix #420, Sekundenbereich)
+// endgueltig auf: in der Statuszeile blieb die nackte Browser-Meldung „Failed to fetch“
+// stehen und NICHTS versuchte es erneut. Der Konflikt-Check ein paar Zeilen weiter oben
+// hatte diesen Nachversuch laengst (15 s) - beim Upload fehlte er. Am 01.09.2026 war die
+// Google-Stoerung nach gut einer Minute vorbei, die Daten lagen trotzdem nur lokal.
+let _saveNetzVersuch = 0;                              // wie oft schon nachgefasst wurde
+let _saveNetzTimer = null;                             // damit sich Nachversuche nicht stapeln
+const _SAVE_NETZ_ABSTAENDE = [15000, 30000, 60000];    // steigend, wie bei Fix #420
+function _saveNetzAufraeumen(){
+  _saveNetzVersuch = 0;
+  if(_saveNetzTimer){ clearTimeout(_saveNetzTimer); _saveNetzTimer = null; }
+}
 async function gdriveSaveData() {
   if (!gdriveFileId || !gdriveToken || gdriveSaving) {
     // b638: Vorher verfiel ein Anstoß, dessen Timer in einen laufenden Save fiel,
@@ -15112,6 +15125,7 @@ async function gdriveSaveData() {
       return;
     }
     if (r.ok) {
+      _saveNetzAufraeumen(); // b866: hat geklappt - Nachversuch-Zaehler zurueck auf Anfang
       // Nach eigenem Speichern den neuen modifiedTime übernehmen, damit der Poller nicht selbst triggert
       try{
         const meta=await r.json();
@@ -15140,9 +15154,31 @@ async function gdriveSaveData() {
     }
   } catch(e) {
     const _lb=_saveLocalBackup(); // Immer lokal sichern wenn Drive-Speichern fehlschlägt; b805: Erfolg prüfen
-    updateFileStatus('unsaved', '☁️ ' + gdriveFileName, '⚠ ' + e.message);
-    if(_lb)showToast('⚠ Speichern fehlgeschlagen – Daten lokal gesichert: ' + e.message, 'error', 5000);
-    else showToast('⚠ Speichern fehlgeschlagen UND lokale Sicherung fehlgeschlagen (Speicher voll?) – Browser NICHT schließen! ' + e.message, 'error', 10000);
+    /* b866: War es nur ein Netzwerk-Aussetzer? Dann nicht aufgeben, sondern zeitversetzt
+       nachfassen. Ausschliesslich TypeError - genau den wirft fetch() selbst, wenn gar
+       keine Antwort ankam: Verbindung weg, oder eine Antwort ohne CORS-Kopfzeile, die der
+       Browser verwirft (Franks Fall am 01.09.2026). Echte HTTP-Antworten landen nie hier,
+       die haben oben ihre eigenen Zweige (412 / 404 / 401 / sonstige). */
+    const _netz = (e instanceof TypeError);
+    if(_netz && _saveNetzVersuch < _SAVE_NETZ_ABSTAENDE.length){
+      const _ms = _SAVE_NETZ_ABSTAENDE[_saveNetzVersuch];
+      _saveNetzVersuch++;
+      updateFileStatus('unsaved', '☁️ ' + gdriveFileName,
+        '⚠ Drive nicht erreichbar – neuer Versuch in ' + Math.round(_ms/1000) + ' s (' + _saveNetzVersuch + '/' + _SAVE_NETZ_ABSTAENDE.length + ')');
+      if(_saveNetzTimer) clearTimeout(_saveNetzTimer);
+      _saveNetzTimer = setTimeout(function(){ _saveNetzTimer=null; try{ gdriveSaveData(); }catch(e2){ console.warn('[PAM]',e2); } }, _ms);
+      console.warn('[Drive] Speichern scheiterte am Netzwerk – Nachversuch ' + _saveNetzVersuch + '/' + _SAVE_NETZ_ABSTAENDE.length + ' in ' + Math.round(_ms/1000) + ' s:', e.message);
+      /* Kein Toast, solange noch ein Versuch aussteht - die Statuszeile sagt alles.
+         AUSNAHME: wenn sogar die lokale Sicherung versagt hat, ist Schweigen gefaehrlich. */
+      if(!_lb)showToast('⚠ Drive nicht erreichbar UND lokale Sicherung fehlgeschlagen (Speicher voll?) – Browser NICHT schließen!', 'error', 10000);
+    } else {
+      /* b866: Klartext statt der nackten Browser-Meldung „Failed to fetch“, mit der
+         niemand etwas anfangen kann. Andere Fehler nennen weiter ihren eigenen Wortlaut. */
+      const _klartext = _netz ? 'Drive nicht erreichbar – nur lokal gesichert' : e.message;
+      updateFileStatus('unsaved', '☁️ ' + gdriveFileName, '⚠ ' + _klartext);
+      if(_lb)showToast('⚠ Speichern fehlgeschlagen – Daten lokal gesichert: ' + _klartext, 'error', 5000);
+      else showToast('⚠ Speichern fehlgeschlagen UND lokale Sicherung fehlgeschlagen (Speicher voll?) – Browser NICHT schließen! ' + _klartext, 'error', 10000);
+    }
   } finally {
     gdriveSaving = false;
     // b638: während des Saves eingegangenen Anstoß jetzt nachholen (debounced)
