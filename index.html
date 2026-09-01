@@ -9785,7 +9785,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-01 · #873'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-01-b873) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-01 · #874'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-01-b874) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -39025,6 +39025,34 @@ function _raWert(){
   const t=document.getElementById('tRaText');
   return t?String(t.value||'').split('\n').map(s=>s.trim()).filter(Boolean).join('\n'):'';
 }
+/* ── b874: Zwei Helfer für das Zuordnen (Aufrufer: `_objZuordnenSetzen`) ──────
+   Beide sind reine Rechenfunktionen ohne Zustand – sie stehen bei den übrigen
+   `_ra`-Helfern, nicht beim Aufrufer, weil `test_b759` die Familie hier zählt. */
+function _raZeilen(s){
+  return String(s||'').replace(/\r\n?/g,'\n').split('\n').map(x=>x.trim()).filter(Boolean);
+}
+/* „Gleich" darf nicht an einem Zeilenumbruch oder an Randleerzeichen scheitern –
+   sonst fragt PAM bei zwei identischen Anschriften trotzdem nach. */
+function _raGleich(a,b){
+  return _raZeilen(a).join('\n')===_raZeilen(b).join('\n');
+}
+/* Die Rückfrage beim Zuordnen.
+   ⛔⛔ NICHT einfach überschreiben. Am 01.09.2026 an den Livedaten gemessen:
+   von 8 Objektkarten eines Objekt-Boards tragen 4 nur die Empfängerzeile –
+   ohne Verwaltung, ohne Straße, ohne Postleitzahl. Ein stilles Ersetzen hätte
+   dort eine vollständige vierzeilige Anschrift gegen eine einzeilige getauscht.
+   Deshalb: beide Texte stehen im Fenster, ein sichtbarer Warnsatz, wenn die
+   des Objekts dürftiger aussieht, und Abbrechen lässt alles wie es war. */
+function _raObjektAnschriftFragen(taskRa,objRa){
+  const zt=_raZeilen(taskRa),zo=_raZeilen(objRa);
+  const hatPlz=a=>a.some(x=>/\b\d{5}\b/.test(x));
+  let warn='';
+  if(hatPlz(zt)&&!hatPlz(zo))warn='\n⚠ Die Anschrift am Objekt hat keine Postleitzahl – sie sieht unvollständig aus.\n';
+  else if(zo.length<zt.length)warn='\n⚠ Die Anschrift am Objekt hat weniger Zeilen ('+zo.length+' statt '+zt.length+').\n';
+  return confirm('Am Auftrag steht eine ANDERE Rechnungsanschrift als am Objekt.\n\n'
+    +'Am Auftrag:\n'+zt.join('\n')+'\n\nAm Objekt:\n'+zo.join('\n')+'\n'+warn
+    +'\nDie vom Objekt übernehmen?\nAbbrechen = die des Auftrags bleibt stehen.');
+}
 
 function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2,adr){
   const c=document.getElementById('tKontakteContainer');if(!c)return;
@@ -45130,6 +45158,18 @@ async function _objZuordnenSetzen(objektId){
     _b659FeldNachziehen(t.id,"tRaText",obj.rechnungsanschrift);
     try{_raVorschauSetzen();}catch(e){}
     geerbt.push("Rechnungsanschrift");
+  }else if((obj.rechnungsanschrift||"").trim()&&!_raGleich(t.rechnungsanschrift,obj.rechnungsanschrift)){
+    /* b874: Steht am Auftrag schon eine ANDERE Anschrift, hat b834 sie
+       stillschweigend behalten. Nichts wies darauf hin, dass die des Objekts
+       gerade nicht genommen wurde - Frank ordnete zu, hielt die Sache fuer
+       erledigt und musste sie danach von Hand ueber das Adressbuch nachholen. */
+    if(_raObjektAnschriftFragen(t.rechnungsanschrift,obj.rechnungsanschrift)){
+      t.rechnungsanschrift=obj.rechnungsanschrift;
+      t.rechnungsanschriftManuell=true;   // bewusst gewaehlt - kein Import fasst sie mehr an
+      _b659FeldNachziehen(t.id,"tRaText",obj.rechnungsanschrift);
+      try{_raVorschauSetzen();}catch(e){}
+      geerbt.push("Rechnungsanschrift (auf Nachfrage)");
+    }
   }
   try{await autoSave();}catch(e){console.warn("[b820] Save:",e);}
   _objZuordnenSchliessen();
