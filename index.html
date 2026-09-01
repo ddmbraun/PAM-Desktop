@@ -9664,7 +9664,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-08-31 · #861'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-08-31-b861) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-01 · #862'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-01-b862) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -27137,23 +27137,48 @@ function _galThumbClick(i,el){
 }
 // EXIF-Rotation korrigieren bevor Foto ins PDF kommt
 // Gibt eine (ggf. rotierte) Data-URL zurück; bei Fehler die Original-URL
-async function _correctFotoForPdf(url){
+/* b862: „opt" ist FREIWILLIG. Ohne sie verhaelt sich diese Funktion Zeichen fuer Zeichen
+   wie bisher - volle Groesse, Guete 0,92, und bei einem Fehlschlag der Rueckfall auf das
+   Original. Alle fuenf bisherigen Aufrufstellen geben nichts mit und bleiben unberuehrt.
+   Nur der MAIL-Weg gibt etwas mit:
+     opt.strikt   ⇒ bei Fehlschlag `null` statt des Originals. ⛔ Das ist der Kern:
+                    bis b862 wanderte bei getrbter Leinwand das UNGESAEUBERTE Bild ins
+                    PDF - mit GPS und Kameradaten, ohne ein Wort. Frank hat am 01.09.
+                    ausdruecklich verlangt, dass an verschickten Bildern keine Daten
+                    haengen. Eine Zusage, die nur meistens gilt, ist keine.
+     opt.maxKante ⇒ laengste Kante herunterrechnen (Seitenverhaeltnis bleibt)
+     opt.guete    ⇒ JPEG-Guete
+   ⛔ NICHT fuer die abgelegten PDFs („Alle als PDF", „Auswahl / PDF"): die liegen im
+   Projektordner und werden gedruckt, die bleiben scharf und vollstaendig. */
+async function _correctFotoForPdf(url,opt){
+  const o=opt||{};
   return new Promise(resolve=>{
     const img=new Image();
     img.crossOrigin='anonymous';
     img.onload=function(){
       try{
+        let bw=img.naturalWidth,bh=img.naturalHeight;
+        const laengste=Math.max(bw,bh);
+        if(o.maxKante&&laengste>o.maxKante){
+          const s=o.maxKante/laengste;
+          bw=Math.max(1,Math.round(bw*s));
+          bh=Math.max(1,Math.round(bh*s));
+        }
         const canvas=document.createElement('canvas');
-        canvas.width=img.naturalWidth;canvas.height=img.naturalHeight;
+        canvas.width=bw;canvas.height=bh;
         const ctx=canvas.getContext('2d');
-        ctx.drawImage(img,0,0);
-        resolve(canvas.toDataURL('image/jpeg',0.92));
-      }catch(e){resolve(url);}
+        ctx.drawImage(img,0,0,bw,bh);
+        resolve(canvas.toDataURL('image/jpeg',o.guete||0.92));
+      }catch(e){resolve(o.strikt?null:url);}
     };
-    img.onerror=function(){resolve(url);};
+    img.onerror=function(){resolve(o.strikt?null:url);};
     img.src=url;
   });
 }
+/* b862: Die Werte fuer den Mail-Weg an EINER Stelle. 2000 px lange Kante bei Guete 0,85 -
+   von Frank am 01.09. so bestaetigt („gut am Bildschirm"). Damit faellt ein Drei-Foto-PDF
+   von grob 8-12 MB auf deutlich unter 1 MB und passt in die 3-MB-Grenze eines Entwurfs. */
+const _B862_MAIL_BILD={strikt:true,maxKante:2000,guete:0.85};
 /* ═══ Foto aus dem Task wegschicken ════════════════════════════════════════
    Knopf an der Kachel und in beiden Großansichten. Kern ist der Weg über die
    Leinwand: das dort neu gezeichnete Bild trägt KEINE EXIF-Daten mehr –
@@ -27169,7 +27194,13 @@ let _fsMitText=false;  // Vorgabe: ohne Beschreibung
 let _fsFoto=null;      // Foto, für das das Menü gerade offen ist
 
 // Blanke Bilddatei: neu auf die Leinwand zeichnen → sämtliche Metadaten weg.
-async function _fsBlankeBytes(f,mime){
+/* b862: „opt" ist auch hier FREIWILLIG - ohne sie volle Groesse und Guete 0,92 wie bisher.
+   ⛔ Das ist wichtig: DIESELBE Zeile bedient „Herunterladen" UND „E-Mail" (_fsWeg, else-Zweig).
+   Wuerde hier fest verkleinert, bekaeme Frank ab sofort auch beim Herunterladen nur noch ein
+   kleines Bild. Verkleinert wird deshalb NUR, wenn der Aufrufer es ausdruecklich verlangt -
+   und das tut allein der Mail-Weg. */
+async function _fsBlankeBytes(f,mime,opt){
+  const o=opt||{};
   const roh=(f&&f.driveId)?await _fetchDesktopFotoBlob(f.driveId):((f&&(f.localUrl||f.url))||'');
   if(!roh)throw new Error('Bild konnte nicht geladen werden – ist Drive verbunden?');
   const img=await new Promise(function(res,rej){
@@ -27178,10 +27209,19 @@ async function _fsBlankeBytes(f,mime){
     i.onerror=function(){rej(new Error('Bild ist nicht lesbar'));};
     i.src=roh;
   });
+  let bw=img.naturalWidth,bh=img.naturalHeight;
+  const laengste=Math.max(bw,bh);
+  if(o.maxKante&&laengste>o.maxKante){
+    const s=o.maxKante/laengste;
+    bw=Math.max(1,Math.round(bw*s));
+    bh=Math.max(1,Math.round(bh*s));
+  }
   const c=document.createElement('canvas');
-  c.width=img.naturalWidth;c.height=img.naturalHeight;
-  c.getContext('2d').drawImage(img,0,0);
-  const blob=await new Promise(function(res){c.toBlob(res,mime||'image/jpeg',0.92);});
+  c.width=bw;c.height=bh;
+  c.getContext('2d').drawImage(img,0,0,bw,bh);
+  const blob=await new Promise(function(res){c.toBlob(res,mime||'image/jpeg',o.guete||0.92);});
+  // ⛔ Kein Rueckfall auf das Original: misslingt das Saeubern, wird NICHTS verschickt.
+  // Diese Zeile war schon vor b862 richtig - der PDF-Weg hatte sie nicht.
   if(!blob)throw new Error('Bild konnte nicht umgewandelt werden');
   return blob;
 }
@@ -27192,9 +27232,11 @@ function _fsDateiname(endung){
   if(!d){const n=new Date();d=n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0')+'-'+String(n.getDate()).padStart(2,'0');}
   return 'Foto_'+d+'.'+endung;
 }
-async function _fsBlankesPdf(f,mitText){
+// b862: reicht „opt" nur durch - ein einzelnes Foto als PDF geht denselben Mail-Weg und
+// muss deshalb genauso verkleinert werden wie das Foto als Bild.
+async function _fsBlankesPdf(f,mitText,opt){
   if(!window.jspdf)throw new Error('PDF-Bibliothek nicht geladen');
-  const blob=await _fsBlankeBytes(f,'image/jpeg');
+  const blob=await _fsBlankeBytes(f,'image/jpeg',opt);
   const dataUrl=await new Promise(function(res,rej){
     const r=new FileReader();
     r.onload=function(){res(r.result);};
@@ -27331,6 +27373,11 @@ async function _fsWeg(weg){
   const alsPdf=_fsAlsPdf,mitText=_fsMitText;
   _fsMenueZu();
   let blob,name;
+  // b862: Verkleinert wird NUR fuer die E-Mail. „Herunterladen", „Kopieren" und
+  // „Weitergeben" bekommen das Bild weiterhin in voller Groesse - wer ein Foto
+  // herunterlaedt, will es ganz. ⛔ Das ist der Grund fuer die Weiche hier oben statt
+  // eines festen Wertes in _fsBlankeBytes: dieselbe Zeile bedient beide Wege.
+  const _b862opt=(weg==='mail')?_B862_MAIL_BILD:null;
   try{
     showToast('Foto wird vorbereitet…','info',2500);
     if(weg==='kopieren'){
@@ -27338,9 +27385,9 @@ async function _fsWeg(weg){
       // größer, EXIF ist ohnehin schon weg.
       blob=await _fsBlankeBytes(f,'image/png');name=_fsDateiname('png');
     }else if(alsPdf){
-      blob=await _fsBlankesPdf(f,mitText);name=_fsDateiname('pdf');
+      blob=await _fsBlankesPdf(f,mitText,_b862opt);name=_fsDateiname('pdf');
     }else{
-      blob=await _fsBlankeBytes(f,'image/jpeg');name=_fsDateiname('jpg');
+      blob=await _fsBlankeBytes(f,'image/jpeg',_b862opt);name=_fsDateiname('jpg');
     }
   }catch(e){
     showToast('⚠ '+((e&&e.message)||'Foto konnte nicht vorbereitet werden'),'error',6000);
@@ -28334,6 +28381,12 @@ async function _pdfSendenCreate(t,sendMail){
   const M=14;
   let doc=null;
   let hasContent=false;
+  /* b862: Geht das PDF in eine E-Mail, werden die Bilder verkleinert UND es gibt keinen
+     stillen Rueckfall mehr auf das ungesaeuberte Original. Beim Ansehen/Ablegen
+     (sendMail=false) bleibt alles wie bisher: volle Groesse, Rueckfall erlaubt.
+     ⛔ _b862Roh sammelt, was deshalb NICHT mitgeht - nichts davon wird verschwiegen. */
+  const _b862opt=sendMail?_B862_MAIL_BILD:null;
+  const _b862Roh=[];
 
   function _addPage(landscape){
     const fmt=landscape?[297,210]:[210,297];
@@ -28439,7 +28492,10 @@ async function _pdfSendenCreate(t,sendMail){
     let url=f.driveId?_desktopFotoBlobCache.get(f.driveId):null;
     if(!url&&f.driveId){try{url=await _fetchDesktopFotoBlob(f.driveId);}catch(e){continue;}}
     if(!url)continue;
-    const corrUrl=await _correctFotoForPdf(url);
+    const corrUrl=await _correctFotoForPdf(url,_b862opt);
+    // b862: null heisst „nicht saeuberbar" – dann kommt es NICHT ins PDF (statt wie
+    // bisher ungesaeubert). Der Name wird gemerkt und hinterher genannt.
+    if(corrUrl===null){_b862Roh.push(f.caption||f.name||'Foto');continue;}
     const imgInfo=await new Promise(res=>{
       const img=new Image();
       img.onload=()=>res({w:img.naturalWidth,h:img.naturalHeight,src:corrUrl});
@@ -28466,7 +28522,9 @@ async function _pdfSendenCreate(t,sendMail){
     let url=_desktopFotoBlobCache.get(f.driveId);
     if(!url){try{url=await _fetchDesktopFotoBlob(f.driveId);}catch(e){continue;}}
     if(!url)continue;
-    const corrUrl=await _correctFotoForPdf(url);
+    const corrUrl=await _correctFotoForPdf(url,_b862opt);
+    // b862: wie oben – ungesaeubert geht nichts raus (gilt auch fuer Verweis-Fotos).
+    if(corrUrl===null){_b862Roh.push(f.caption||f.name||'Verweis-Foto');continue;}
     const imgInfo=await new Promise(res=>{
       const img=new Image();
       img.onload=()=>res({w:img.naturalWidth,h:img.naturalHeight,src:corrUrl});
@@ -28505,7 +28563,12 @@ async function _pdfSendenCreate(t,sendMail){
         }catch(e){console.warn('[PdfSenden]',e);}
       }
       if(!src){textAnhNames.push({name:a.name||a.filename||'Anhang',fileId:a.fileId||_pamExtractFileId(a.url||'')||''});continue;} // b593: als Objekt, damit Schlussseite + Mail-Anhang den Namen kennen
-      const corrUrl=await _correctFotoForPdf(src);
+      const corrUrl=await _correctFotoForPdf(src,_b862opt);
+      /* b862: ⛔ HIER ist der gefaehrlichste Fall gewesen. Ein Bild, das als DOKUMENT an
+         der Karte haengt: liess es sich nicht einheften, landete es in textAnhNames und
+         ging in _pdfSendenMail als ROHE Datei mit - also mit GPS und Kameradaten. Jetzt
+         wird es beim Senden gar nicht erst weitergereicht, sondern gemeldet. */
+      if(corrUrl===null){_b862Roh.push(a.name||a.filename||'Bild');continue;}
       const imgInfo=await new Promise(res=>{
         const img=new Image();
         img.onload=()=>res({w:img.naturalWidth,h:img.naturalHeight,src:corrUrl});
@@ -28544,7 +28607,12 @@ async function _pdfSendenCreate(t,sendMail){
   // Dateiname
   const tit=(t.title||'PAM').replace(/[^a-zA-Z0-9äöüÄÖÜß \-_]/g,'_').trim();
   const dateStr=new Date().toLocaleDateString('de-DE').replace(/\./g,'-');
-  const pdfName=tit+'_'+dateStr+'.pdf';
+  /* b862: Beim SENDEN ein neutraler Name. Der Auftragstitel traegt bei uns Adresse oder
+     Kundennamen - der stuende sonst beim Empfaenger im Anhang. Der Einzelfoto-Weg macht
+     das seit jeher so (_fsDateiname, mit genau dieser Begruendung im Kommentar), der
+     PDF-Weg nicht. ⛔ NUR beim Senden: das PDF, das Frank ansieht oder ablegt, behaelt
+     den sprechenden Namen - sonst findet er es im Ordner nicht wieder. */
+  const pdfName=sendMail?('Unterlagen_'+dateStr+'.pdf'):(tit+'_'+dateStr+'.pdf');
 
   // ── b593: EIN Dokument – fremde PDFs seitenweise einheften ───────────────────
   // jsPDF kann nur Bilder und Text setzen; pdf-lib übernimmt fremde Seiten. Läuft die
@@ -28623,6 +28691,10 @@ async function _pdfSendenCreate(t,sendMail){
   document.getElementById('_pdfSendenOv')?.remove();
 
   if(sendMail){
+    // b862: Was sich nicht saeubern liess, ist NICHT im PDF - und das wird gesagt, nicht
+    // verschwiegen. Eigene Meldung, damit sie neben der Entwurfs-Meldung stehen bleibt
+    // und nicht mit ihr zusammen zu breit wird (b856-Lehre).
+    if(_b862Roh.length)showToast('⚠ Nicht mitgeschickt, weil die Bilddaten nicht entfernt werden konnten: '+_b862Roh.join(', '),'warning',11000);
     await _pdfSendenMail(fertigeBytes,pdfName,t,textAnhNames,(inclKontakte[0]||{}).email||'');
   }else{
     const url=URL.createObjectURL(new Blob([fertigeBytes],{type:'application/pdf'}));
@@ -28722,9 +28794,29 @@ async function _pdfSendenMail(bytes,fname,t,extraAnhänge,vorgabeMail){
               {headers:{Authorization:'Bearer '+gdriveToken}});
             if(!r.ok){console.warn('[PdfSenden] Drive-Download fehlgeschlagen:',anh.name,r.status);_fehlen.push(anh.name||'Anhang');continue;}
             const blob=await r.blob();
-            const ab=await blob.arrayBuffer();
+            let mime=blob.type||'application/octet-stream';
+            let ab;
+            /* b862: ⛔ Bis hierher ging JEDE Zusatzdatei ROH raus - auch ein Bild, also mit
+               GPS, Kamera und Aufnahmezeit. Genau das darf nach Franks Vorgabe vom
+               01.09. nicht passieren. Bilder werden deshalb erst gesaeubert (und dabei
+               gleich verkleinert). Geht das nicht, wird die Datei NICHT angehaengt,
+               sondern gemeldet - lieber fehlt sie, als dass Daten mitgehen.
+               ⛔ Nicht-Bilder (PDF, Word, ...) bleiben unveraendert: an denen haengen
+               keine EXIF-Daten, und ein Umbau wuerde sie beschaedigen. */
+            if(/^image\//i.test(mime)||/\.(jpe?g|png|gif|webp|hei[cf]|bmp|tiff?)$/i.test(anh.name||'')){
+              const _roh=URL.createObjectURL(blob);
+              let _sauber=null;
+              try{_sauber=await _correctFotoForPdf(_roh,_B862_MAIL_BILD);}
+              catch(e){console.warn('[b862] Bild saeubern:',anh.name,e);_sauber=null;}
+              try{URL.revokeObjectURL(_roh);}catch(e){}
+              if(!_sauber){_fehlen.push((anh.name||'Bild')+' (Bilddaten nicht entfernbar)');continue;}
+              const _bl=await (await fetch(_sauber)).blob();
+              ab=await _bl.arrayBuffer();
+              mime='image/jpeg';
+            } else {
+              ab=await blob.arrayBuffer();
+            }
             const ab64=_fsB64(ab); // b774: stückweise – die alte Zeile baute erst einen Riesen-String
-            const mime=blob.type||'application/octet-stream';
             attachments.push({'@odata.type':'#microsoft.graph.fileAttachment',name:anh.name,contentType:mime,contentBytes:ab64});
           }catch(e){console.warn('[PdfSenden] Anhang-Fehler:',anh.name,e);_fehlen.push(anh.name||'Anhang');}
         }
@@ -35865,6 +35957,25 @@ async function _pamDokEntwurf(i){
   }catch(e){
     console.warn('[DokEntwurf] Laden:',e);
     showToast('⚠ '+((e&&e.message)||'Datei nicht ladbar')+' – bitte über ⬇ herunterladen','error',8000);return;
+  }
+  /* b862: ⛔ Auch dieser Weg haengte die Datei ROH an - ist das „Dokument" ein Bild, gingen
+     GPS, Kamera und Aufnahmezeit mit. Das ist derselbe Fehler wie im PDF-Weg, nur eine Tuer
+     weiter; gefunden, weil bei dieser Reparatur ALLE vier Wege zu einem Entwurf gezaehlt
+     wurden (Lehre aus b852/b861). Bilder werden gesaeubert und dabei verkleinert - laesst
+     sich das nicht saeubern, geht die Datei NICHT mit.
+     ⛔ Vor der Groessenpruefung, denn nach dem Verkleinern ist die Datei kleiner: sonst
+     wuerde ein Foto abgewiesen, das nach dem Saeubern laengst gepasst haette. */
+  if(/^image\//i.test(blob.type||'')||/\.(jpe?g|png|gif|webp|hei[cf]|bmp|tiff?)$/i.test(name)){
+    const _roh=URL.createObjectURL(blob);
+    let _sauber=null;
+    try{_sauber=await _correctFotoForPdf(_roh,_B862_MAIL_BILD);}
+    catch(e){console.warn('[b862] Bild saeubern:',name,e);_sauber=null;}
+    try{URL.revokeObjectURL(_roh);}catch(e){}
+    if(!_sauber){
+      showToast('⚠ '+name+' geht nicht mit: die Bilddaten (Standort, Kamera) lassen sich nicht entfernen. Bitte über ⬇ herunterladen.','error',11000);
+      return;
+    }
+    blob=await (await fetch(_sauber)).blob();
   }
   // Früh prüfen: sonst füllt man erst das Fenster aus und erfährt danach, dass es nicht geht.
   if(blob.size>_PAM_ANH_MAX){
