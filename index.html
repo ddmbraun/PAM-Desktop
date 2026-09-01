@@ -9789,7 +9789,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-01 · #879'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-01-b879) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-01 · #880'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-01-b880) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -44671,10 +44671,17 @@ let _plzTab=null;
 let _plzOrtPlz=null;    // Ort  -> Menge der Postleitzahlen, die dieser Ort führt
 let _plzStrIdx=null;    // Straße -> [{o:Ortname, p:PLZ}] über alle Orte
 let _plzGesperrt=null;  // "Ort|Straße" -> hier darf NICHTS eingetragen werden
+/* b880: "Ort|Straße" -> Map(Hausnummer -> PLZ). Nur für die gesperrten Straßen, und
+   nur dort, wo die Nummern die Bezirke sauber trennen. Der Erzeuger schreibt sie als
+   `?Ort;Straße|PLZ:nr,nr|PLZ:nr,nr` ans Ende der Tabelle.
+   ⚠ Zwei Strichpunkt-Felder wie bei den Sperrzeilen: eine ältere PAM-Fassung
+   überspringt sie (`s.length<3`) und verhält sich genau wie bisher. */
+let _plzHausNr=null;
 async function _plzLaden(){
   if(_plzTab)return _plzTab;
   const m=new Map();
   const ortPlz=new Map(),strIdx=new Map(),ges=new Set();   // b844
+  const hnr=new Map();                                     // b880
   try{
     const r=await fetch("plz-thueringen.txt");
     if(!r.ok)throw new Error("HTTP "+r.status);
@@ -44688,6 +44695,32 @@ async function _plzLaden(){
         if(g.length>=2&&g[0].trim()&&g[1].trim())ges.add(_objNorm(g[0])+"|"+_objNorm(g[1]));
         return;
       }
+      if(z.charAt(0)==="?"){                     // b880: ?Ort;Straße|PLZ:nr,nr|PLZ:nr,nr
+        const g=z.slice(1).split(";");
+        if(g.length!==2)return;
+        const t=g[1].split("|");
+        if(t.length<3)return;                    // Straße + mindestens zwei PLZ-Abschnitte
+        const key=_objNorm(g[0])+"|"+_objNorm(t[0]);
+        if(!_objNorm(g[0])||!_objNorm(t[0]))return;
+        const m2=hnr.get(key)||new Map();
+        for(let i=1;i<t.length;i++){
+          const teil=t[i],dp=teil.indexOf(":");
+          if(dp<0)continue;
+          const plz2=teil.slice(0,dp).trim();
+          if(!/^\d{5}$/.test(plz2))continue;
+          teil.slice(dp+1).split(",").forEach(function(n){
+            const nn=String(n||"").trim().toLowerCase().replace(/\s+/g,"");
+            /* ⛔ Eine Nummer, die in ZWEI Bezirken steht, entscheidet nichts – dann
+               lieber ganz raus. Der Erzeuger schließt das aus, aber die Tabelle wird
+               öffentlich ausgeliefert und könnte von Hand bearbeitet worden sein. */
+            if(!nn)return;
+            if(m2.has(nn)&&m2.get(nn)!==plz2)m2.set(nn,"");
+            else if(!m2.has(nn))m2.set(nn,plz2);
+          });
+        }
+        hnr.set(key,m2);
+        return;
+      }
       const s=z.split(";");
       if(s.length<3)return;
       const o=_objNorm(s[0]),st=_objNorm(s[1]),plz=String(s[2]).trim();
@@ -44699,6 +44732,7 @@ async function _plzLaden(){
   }catch(e){console.warn("[b832] PLZ-Tabelle nicht geladen:",e);}
   _plzTab=m;
   _plzOrtPlz=ortPlz;_plzStrIdx=strIdx;_plzGesperrt=ges;   // b844
+  _plzHausNr=hnr;                                          // b880
   return _plzTab;
 }
 /* Der Ordner heisst mal nur nach der Strasse, mal mit Hausnummern dahinter. Beide Formen
@@ -44729,9 +44763,42 @@ function _plzSuchen(ort,name){
    lesen dasselbe Ergebnis – sonst zeigte eine Stelle „gefunden" und eine andere nicht.
    Rückgabe: {plz, ueber}. `ueber` ist der Ortsname, über den es ging – leer bei einem
    direkten Treffer. Wer `ueber` sieht, MUSS es anzeigen. */
+/* ── b880: Die Hausnummer entscheidet ─────────────────────────────────────────
+   Läuft eine Straße durch mehrere PLZ-Bezirke, stand bisher „nicht eindeutig" und
+   PAM trug nichts ein – zu Recht, denn ohne Hausnummer IST es nicht entscheidbar.
+   Mit ihr schon: Der Erzeuger schreibt seit b880 für 122 dieser Straßen auf, welche
+   Nummer zu welcher Zahl gehört, und zwar nur dort, wo sich die Nummern der Bezirke
+   NICHT überschneiden.
+   ⛔ Das ist kein Raten: Die Zuordnung steht schwarz auf weiß in der Tabelle. Passt
+   die Nummer nicht oder fehlt sie, wird nichts geliefert und alles bleibt beim Alten.
+   ⛔ Trennt „Musterweg 12a" in Straße und Nummer – NICHT `_plzKandidaten` benutzen,
+   die liefert nur die Straße ohne Nummer, und genau die Nummer wird hier gebraucht. */
+function _plzHnZerlegen(name){
+  const s=String(name||"").trim();
+  const m=/^(.*?)[\s,]+(\d{1,4}\s?[a-zA-ZäöüÄÖÜß]?)$/.exec(s);
+  if(!m||!m[1].trim())return null;
+  return {strasse:m[1].trim(),nr:m[2].toLowerCase().replace(/\s+/g,"")};
+}
+function _plzAusHausnummer(ortNorm,name){
+  if(!_plzHausNr||!_plzHausNr.size||!ortNorm)return null;
+  const z=_plzHnZerlegen(name);
+  if(!z)return null;
+  const m=_plzHausNr.get(ortNorm+"|"+_objNorm(z.strasse));
+  if(!m)return null;
+  const plz=m.get(z.nr);
+  /* Leerer Eintrag = die Nummer stand in zwei Bezirken, sie entscheidet nichts. */
+  if(!plz||!/^\d{5}$/.test(plz))return null;
+  return {plz:plz,nr:z.nr};
+}
 function _plzFinden(ortFeld,name){
   const o=_objNorm(String(ortFeld||"").replace(/\d{5}/g,""));
   const k=_plzKandidaten(name);
+  /* b880: VOR der Sperre – die Hausnummer ist genauer als sie. Die Sperre sagt
+     „in diesem Ort mehrdeutig", die Nummer sagt „aber genau diese hier nicht". */
+  /* ⛔ `typeof`-Wache wie an den anderen Stellen: `test_b843` schneidet `_plzFinden`
+     einzeln aus und kennt diese Funktion nicht. Im Browser ist sie immer da. */
+  const _hn=(typeof _plzAusHausnummer==="function")?_plzAusHausnummer(o,name):null;
+  if(_hn)return {plz:_hn.plz,ueber:"",hausnr:_hn.nr};
   /* ⛔ Gesperrt sticht ALLES – auch einen direkten Treffer, und sofort, nicht „nächsten
      Kandidaten probieren".
      Warum auch den direkten: PAMs Schreibweisen-Regel (`_objNorm`, b512) führt „…str."
@@ -44917,9 +44984,12 @@ async function _plzAusTabelleKnopf(){
   showToast("\u2713 Postleitzahl "+pf.plz+" erg\u00e4nzt"
     /* b877: Wurde der Ort ohne Komma erkannt, steht auch das in der Meldung \u2013
        Frank soll sehen, WAS PAM als Ort genommen hat, nicht nur das Ergebnis. */
+    /* b880: Kam sie \u00fcber die Hausnummer, steht das dabei \u2013 die Stra\u00dfe l\u00e4uft dort
+       durch mehrere Bezirke, das soll Frank sehen. */
+    +(pf.hausnr?(" \u2013 \u00fcber die Hausnummer "+pf.hausnr+" bestimmt"):"")
     +(erkannt?(" \u2013 Ort \u201e"+erkannt+"\u201c aus der Adresse erkannt"):"")
     +(pf.ueber?(" \u2013 gefunden \u00fcber \u201e"+pf.ueber+"\u201c, einen Ort mit derselben Zahl"):""),
-    "success",(pf.ueber||erkannt)?9000:4000);
+    "success",(pf.ueber||erkannt||pf.hausnr)?9000:4000);
 }
 /* b833: Fehlende Postleitzahlen an einem GANZEN Board nachtragen.
    Anlass (Frank, 31.08.): b832 setzt die PLZ nur beim Massenlauf - alles, was vorher
