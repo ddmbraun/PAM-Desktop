@@ -1823,7 +1823,7 @@ async function _pdfAuftragCreate(boardName){
     title:p.title||'Neuer Auftrag',
     desc:'',owner:'Braun',due:'',
     status:(getBoardStatuses(boardName)||[])[0]||'',
-    ampel:'grün',ausführungsdatum:'',ausfuehrungstermin:'',ortstermin:'',aktivitaet:'',anrufOffen:false,besichtigungOffen:false,tags:[],source:'',repNr:'',kundenNr:'',
+    ampel:'grün',ausführungsdatum:'',ausfuehrungstermin:'',ortstermin:'',aktivitaet:'',anrufOffen:false,besichtigungOffen:false,inAusfuehrung:false,tags:[],source:'',repNr:'',kundenNr:'',
     hausverwaltung:'',adresse:'',schadensbild:'',kontakte:[],
     links:[],attachments:[],ausserhausTermine:[],zeitEntries:[],
     notizVerlauf:[],fotos:[],checkliste:[],gmailLinks:[],
@@ -7880,6 +7880,9 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
     <div class="board-selector" id="boardTabs"></div>
     <button class="board-add-btn" onclick="openProjManager()" title="Projekte verwalten">+</button>
     <button id="pamBoardListBtn" onclick="_pamOpenGlobalSearch()" title="Globale Suche über alle Boards" style="padding:3px 10px;border-radius:6px;font-size:12px;font-weight:600;background:var(--bg3);border:1px solid var(--border);color:var(--text);cursor:pointer;display:inline-flex;align-items:center;gap:5px;">≡ Alle Tasks</button>
+    <!-- b863: Aufträge, die gerade abgefertigt werden – über ALLE Boards. Die Zahl
+         füllt _pamAusfBtnUpdate() bei jedem render(); ohne Haken bleibt sie weg. -->
+    <button id="pamAusfBtn" onclick="_pamOpenAusfListe()" title="Alle Aufträge, die gerade in Ausführung sind – über alle Boards" style="padding:3px 10px;border-radius:6px;font-size:12px;font-weight:600;background:var(--bg3);border:1px solid var(--border);color:var(--text);cursor:pointer;display:inline-flex;align-items:center;gap:5px;">🔨 In Ausführung<span id="pamAusfBtnCount" style="display:none;font-size:10px;font-weight:700;background:#0F6E56;color:#fff;padding:0 6px;border-radius:8px;"></span></button>
   </div>
 
   <div class="topbar-right">
@@ -8167,6 +8170,11 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
               <input type="checkbox" id="_hdrBesiCb" onchange="_hdrAktChange('besi')" style="width:13px;height:13px;cursor:pointer;accent-color:#854F0B;">
               <span style="font-size:calc(11px * var(--modal-scale,1));font-weight:600;color:#854F0B;">📍 Besichtigung</span>
             </label>
+            <!-- b863: dritter Haken im Kopf, gleiche Bauart wie die zwei darüber -->
+            <label class="baustelle-only" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;" title="Auftrag ist erteilt und wird gerade abgefertigt">
+              <input type="checkbox" id="_hdrAusfCb" onchange="_hdrAktChange('ausf')" style="width:13px;height:13px;cursor:pointer;accent-color:#0F6E56;">
+              <span style="font-size:calc(11px * var(--modal-scale,1));font-weight:600;color:#0F6E56;">🔨 In Ausführung</span>
+            </label>
             <!-- b726: Handy-Sichtschalter – Kästchen nur im Objektfenster sichtbar (CSS .ptp-immo-mode) -->
             <label id="taskMobilAusblendenWrap" style="display:none;align-items:center;gap:5px;cursor:pointer;user-select:none;" title="Dieses Objekt in der Board-Liste am Handy ausblenden. Alle Haken eines Boards auf einmal lösen: + → Projekte verwalten">
               <input type="checkbox" id="taskMobilAusblendenCb" onchange="scheduleTaskFieldSave()" style="width:13px;height:13px;cursor:pointer;accent-color:#7A4FB5;">
@@ -8333,6 +8341,14 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
             <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">
               <input type="checkbox" id="taskBesichtigungOffenCb" onchange="_syncHdrAktCb();scheduleTaskFieldSave();" style="width:15px;height:15px;cursor:pointer;accent-color:#854F0B;">
               <span style="font-size:calc(12px * var(--modal-scale,1));font-weight:600;color:#854F0B;">📍 Besichtigung offen</span>
+            </label>
+            <!-- b863: „In Ausführung" – der Auftrag ist erteilt und wird gerade abgefertigt.
+                 Bewusst ein eigener Haken und NICHT die Spalte des Boards: die Bretter
+                 benennen denselben Zustand jeweils anders. Ein Haken am Auftrag
+                 überlebt Umbenennen und Verschieben. Begründung in CHANGES.md. -->
+            <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;user-select:none;" title="Auftrag ist erteilt und wird gerade abgefertigt – erscheint im Knopf „🔨 In Ausführung" über allen Boards">
+              <input type="checkbox" id="taskInAusfuehrungCb" onchange="_syncHdrAktCb();scheduleTaskFieldSave();" style="width:15px;height:15px;cursor:pointer;accent-color:#0F6E56;">
+              <span style="font-size:calc(12px * var(--modal-scale,1));font-weight:600;color:#0F6E56;">🔨 In Ausführung</span>
             </label>
           </div>
           <input type="date" id="taskAusfInput" style="display:none;" onchange="scheduleTaskFieldSave();" autocomplete="off">
@@ -9648,10 +9664,30 @@ function _pamGuestSubmit(){
         <button id="pamGSBtnBesi" onclick="_pamGSToggleAkt('besichtigung')" style="font-size:11px;padding:2px 10px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;">📍 Besichtigung</button>
         <button id="pamGSBtnPlanen" onclick="_pamGSToggleAkt('planen')" style="font-size:11px;padding:2px 10px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;">📋 Auftrag planen</button>
         <button id="pamGSBtnErteilt" onclick="_pamGSToggleAkt('erteilt')" style="font-size:11px;padding:2px 10px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;">📋 Auftrag erteilt</button>
+        <!-- b863: fünfter Filter. Anders als „📋 Auftrag erteilt" (das prüft ein
+             gesetztes DATUM) hängt dieser am Haken – und geht beim Archivieren weg. -->
+        <button id="pamGSBtnAusf" onclick="_pamGSToggleAkt('ausfuehrung')" style="font-size:11px;padding:2px 10px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;">🔨 In Ausführung</button>
       </div>
       <div id="pamGSCount" style="font-size:11px;color:var(--text2);cursor:default;"></div>
     </div>
     <div id="pamGSList" style="overflow-y:auto;flex:1;padding:6px 8px;min-height:0;"></div>
+  </div>
+</div>
+
+<!-- b863: AUFTRÄGE IN AUSFÜHRUNG – board-übergreifend.
+     Bewusst ein EIGENES Fenster und nicht die globale Suche mitbenutzt: dort müsste
+     für den direkten Sprung ins Auftragsfenster das Klickverhalten ALLER Treffer
+     umgestellt werden, auch für die gewohnte Suche. So bleibt die Suche unangetastet.
+     Kein Ziehen – die Liste wird geöffnet, angeklickt, und schließt sich dabei.
+     (Ziehen müsste sonst mit setPointerCapture gebaut werden, b823.) -->
+<div id="pamAusfOverlay" style="display:none;position:fixed;inset:0;z-index:10500;background:rgba(0,0,0,.35);" onclick="if(event.target===this)_pamCloseAusfListe();">
+  <div id="pamAusfBox" style="position:absolute;top:70px;left:50%;transform:translateX(-50%);background:var(--bg);border:1px solid var(--border);border-radius:12px;width:780px;max-width:96vw;max-height:84vh;display:flex;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,.4);overflow:hidden;">
+    <div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-shrink:0;">
+      <span style="font-size:13px;font-weight:700;color:var(--text);flex:1;">🔨 Aufträge in Ausführung – alle Boards</span>
+      <span id="pamAusfCount" style="font-size:11px;color:var(--text2);"></span>
+      <button onclick="_pamCloseAusfListe()" style="background:transparent;border:none;color:var(--text2);font-size:16px;cursor:pointer;padding:0 4px;flex-shrink:0;">✕</button>
+    </div>
+    <div id="pamAusfList" style="overflow-y:auto;flex:1;padding:6px 8px;min-height:0;"></div>
   </div>
 </div>
 
@@ -9664,7 +9700,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-01 · #862'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-01-b862) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-01 · #863'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-01-b863) – MERKE: bei jedem Build mit hochzählen!
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -10643,20 +10679,31 @@ function _hdrOrdnerDefs(t){
   return out;
 }
 // Synct Kopfzeilen-Checkboxen → Termine-Checkboxen
+// b863: Zweier-Ternär → Tabelle. Mit dem dritten Haken („🔨 In Ausführung") hätte
+// `which==='anruf'?A:B` jeden unbekannten Wert stillschweigend auf Besichtigung
+// gelenkt – dieselbe Falle wie bei den Absender-IDs (#571). Ein vierter Haken
+// kostet jetzt eine Zeile in dieser Tabelle und sonst nichts.
+// Reihenfolge je Eintrag: [ Kopfzeilen-Kästchen , Kästchen in der Termine-Zeile ]
+const _HDR_AKT_CB={
+  anruf:['_hdrAnrufCb','taskAnrufOffenCb'],
+  besi :['_hdrBesiCb','taskBesichtigungOffenCb'],
+  ausf :['_hdrAusfCb','taskInAusfuehrungCb']
+};
 function _hdrAktChange(which){
-  const hdrCb=document.getElementById(which==='anruf'?'_hdrAnrufCb':'_hdrBesiCb');
-  const termCb=document.getElementById(which==='anruf'?'taskAnrufOffenCb':'taskBesichtigungOffenCb');
+  const paar=_HDR_AKT_CB[which];
+  if(!paar)return; // b863: unbekannter Schlüssel ändert nichts, statt den falschen Haken zu setzen
+  const hdrCb=document.getElementById(paar[0]);
+  const termCb=document.getElementById(paar[1]);
   if(termCb&&hdrCb)termCb.checked=hdrCb.checked;
   scheduleTaskFieldSave();
 }
 // Synct Termine-Checkboxen → Kopfzeilen-Checkboxen
 function _syncHdrAktCb(){
-  const a=document.getElementById('taskAnrufOffenCb');
-  const b=document.getElementById('taskBesichtigungOffenCb');
-  const ha=document.getElementById('_hdrAnrufCb');
-  const hb=document.getElementById('_hdrBesiCb');
-  if(ha&&a)ha.checked=a.checked;
-  if(hb&&b)hb.checked=b.checked;
+  for(const k of Object.keys(_HDR_AKT_CB)){
+    const h=document.getElementById(_HDR_AKT_CB[k][0]);
+    const t=document.getElementById(_HDR_AKT_CB[k][1]);
+    if(h&&t)h.checked=t.checked;
+  }
 }
 // Speichert Task-Daten ohne Modal zu schließen
 // ══════════════════════════════════════════════════════════════════════════
@@ -12689,6 +12736,7 @@ function saveTaskData(){
     anrufOffen:!!(document.getElementById('taskAnrufOffenCb')?.checked),
     mobilAusblenden:!!(document.getElementById('taskMobilAusblendenCb')?.checked), // b726: Handy-Sichtschalter – MUSS in dieser Liste stehen (b591-Falle)
     besichtigungOffen:!!(document.getElementById('taskBesichtigungOffenCb')?.checked),
+    inAusfuehrung:!!(document.getElementById('taskInAusfuehrungCb')?.checked), // b863: MUSS in dieser Liste stehen (b591-Falle), sonst wird der Haken nie gespeichert
     ortstermin:(document.getElementById('taskOrtsterminInput')?document.getElementById('taskOrtsterminInput').value:''),
     tags:document.getElementById('taskTagsInput').value.split(',').map(s=>s.trim()).filter(Boolean),
     source:document.getElementById('taskSourceInput').value.trim(),
@@ -18773,7 +18821,7 @@ function render(){
   const _mr=document.querySelector('.mv2-right');
   const _scL=_ml?_ml.scrollTop:0;
   const _scR=_mr?_mr.scrollTop:0;
-  renderBoardTabs();updateFilterDropdowns();updateStatusSelect();_updateAlleColCount();
+  renderBoardTabs();updateFilterDropdowns();updateStatusSelect();_updateAlleColCount();_pamAusfBtnUpdate(); // b863: Zahl am Knopf „🔨 In Ausführung" mitziehen
   document.querySelectorAll('.view-tab').forEach(t=>t.classList.toggle('active',t.dataset.view===currentView));
   if(currentView==='heute')renderHeute();
   else if(currentView==='kalender')renderKalender();
@@ -22204,6 +22252,11 @@ function archiveTask(taskId,evt){
       task.archiviertAm=_tzHeuteIso(); // b607: Ortszeit – UTC lieferte nachts den Vortag
       task.spaeterBearbeiten=false;
       task.spaeterBearbeitenAm='';
+      // b863 (Entscheidung Frank): Archivieren heißt „fertig" – der Ausführungs-Haken geht
+      // von selbst weg. Wichtig fürs WIEDERHERSTELLEN: ohne das käme ein zurückgeholter
+      // Auftrag sofort wieder als „läuft" in die Liste, obwohl er abgeschlossen war.
+      // Die Liste selbst siebt Archiviertes ohnehin aus – das hier ist die Datenhygiene.
+      task.inAusfuehrung=false;
       task._archivProjekt=bk;
       archivedTasks.push(task);
       _pamMarkTaskDeleted(taskId); // #487: verhindert, dass der Task beim 30-Sek-Cloud-Sync aus der Remote-Basis zurück ins Board kommt (sonst Dublette Archiv+Board)
@@ -42215,6 +42268,7 @@ function openNewTaskModal(){
   const _apNEl=document.getElementById('taskAuftragPlanen');if(_apNEl){_apNEl.checked=false;_updateAuftragPlanenChip();}
   const _anrufNEl=document.getElementById('taskAnrufOffenCb');if(_anrufNEl)_anrufNEl.checked=false;
   const _besiNEl=document.getElementById('taskBesichtigungOffenCb');if(_besiNEl)_besiNEl.checked=false;
+  const _ausfNEl=document.getElementById('taskInAusfuehrungCb');if(_ausfNEl)_ausfNEl.checked=false; // b863: neuer Task erbt keinen Ausführungs-Haken vom zuvor geöffneten
   const _mobAusNEl=document.getElementById('taskMobilAusblendenCb');if(_mobAusNEl)_mobAusNEl.checked=false; // b726: neuer Task erbt keinen Handy-Haken vom zuvor geöffneten
   _syncHdrAktCb();
   const _sbNewEl=document.getElementById('tSbPdfOrdner');if(_sbNewEl)_sbNewEl.value='';
@@ -46112,6 +46166,103 @@ function _pamOpenGlobalSearch(){
   _pamGSRender();
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// b863 – AUFTRÄGE IN AUSFÜHRUNG (board-übergreifend)
+//
+// Frage Frank: „Wie sehe ich board-übergreifend, welche Aufträge ich habe –
+// nur die, die beauftragt sind und abgefertigt werden müssen?"
+//
+// ⛔ Bewusst NICHT an der Board-Spalte festgemacht: dieselbe Sache heißt auf
+//    den Auftrags-Brettern jeweils anders, und die Spaltennamen ändern sich.
+//    Eine Zuordnung Spalte→Zustand müsste bei jedem Umbenennen nachgezogen
+//    werden und fehlte danach STILL. Der Haken am Auftrag überlebt
+//    Umbenennen, Verschieben und neue Bretter.
+// ⛔ Bewusst NICHT in die Heute-Ansicht gehängt: renderHeute steigt je Task
+//    mit `if(!_allDates.length)return;` aus – ohne Datum kein Eintrag. Die
+//    Mehrzahl der Aufträge hat kein Datum und wäre dort nie erschienen.
+//    Zahlen zur Messung stehen in CHANGES.md, nicht hier (öffentliche Datei).
+// ══════════════════════════════════════════════════════════════════════════
+function _pamAusfSammle(){
+  const out=[];
+  Object.keys(boards||{}).forEach(function(bn){
+    if(!bn||bn.charAt(0)==='_')return;
+    if(!Array.isArray(boards[bn]))return;
+    (boards[bn]||[]).forEach(function(t){
+      if(!t||!t.inAusfuehrung)return;
+      if(t.archiviert||t.spaeterBearbeiten)return; // wie in jeder anderen Ansicht
+      out.push({t:t,board:bn});
+    });
+  });
+  out.sort(function(a,b){
+    const ab=(a.board||'').toLowerCase(),bb=(b.board||'').toLowerCase();
+    if(ab!==bb)return ab<bb?-1:1;
+    const at=(a.t.title||'').toLowerCase(),btl=(b.t.title||'').toLowerCase();
+    return at<btl?-1:at>btl?1:0;
+  });
+  return out;
+}
+// Zahl am Knopf in der Kopfleiste. Läuft in render() mit; ohne Haken bleibt sie weg.
+function _pamAusfBtnUpdate(){
+  const el=document.getElementById('pamAusfBtnCount');
+  if(!el)return;
+  let n=0;
+  try{n=_pamAusfSammle().length;}catch(e){n=0;}
+  if(n>0){el.textContent=String(n);el.style.display='inline-block';}
+  else{el.textContent='';el.style.display='none';}
+}
+function _pamOpenAusfListe(){
+  const ov=document.getElementById('pamAusfOverlay');
+  if(!ov)return;
+  ov.style.display='block';
+  _pamAusfRender();
+}
+function _pamCloseAusfListe(){
+  const ov=document.getElementById('pamAusfOverlay');
+  if(ov)ov.style.display='none';
+}
+// Entscheidung Frank: der Klick öffnet DIREKT das Auftragsfenster (ein Klick
+// weniger als in der globalen Suche, die stattdessen zur Karte springt).
+// openEditTaskModal sucht selbst über alle Boards und setzt currentBoard um –
+// der Auftrag darf also auf einem beliebigen Brett liegen.
+function _pamAusfClick(taskId){
+  _pamCloseAusfListe();
+  openEditTaskModal(taskId);
+}
+function _pamAusfRender(){
+  const el=document.getElementById('pamAusfList');
+  const cnt=document.getElementById('pamAusfCount');
+  if(!el)return;
+  const liste=_pamAusfSammle();
+  if(cnt)cnt.textContent=liste.length===1?'1 Auftrag':liste.length+' Aufträge';
+  if(!liste.length){
+    el.innerHTML='<div style="padding:22px 14px;color:var(--text2);font-size:13px;line-height:1.6;">'
+      +'Kein Auftrag ist als „in Ausführung" gekennzeichnet.<br><br>'
+      +'<span style="color:var(--text);">So kennzeichnest du einen:</span> Auftrag öffnen → Abschnitt '
+      +'<b>📅 Termine &amp; Zeiterfassung</b> → Haken bei <b>🔨 In Ausführung</b>. '
+      +'Der Haken steht auch oben im Fensterkopf neben „📞 Anruf" und „📍 Besichtigung".<br><br>'
+      +'Beim Archivieren verschwindet der Haken von selbst.'
+      +'</div>';
+    return;
+  }
+  let rows='';
+  liste.forEach(function(item){
+    const t=item.t;
+    const safeId=String(t.id).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); // gleiche Absicherung wie in der globalen Suche
+    const spalte=t.status?esc(t.status):'–';
+    rows+='<tr onclick="_pamAusfClick(\''+safeId+'\')" style="cursor:pointer;border-bottom:0.5px solid var(--border);" onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'\'">'
+      +'<td style="padding:7px 10px;font-size:11px;color:var(--text2);white-space:nowrap;">'+esc(item.board)+'</td>'
+      +'<td style="padding:7px 10px;font-size:13px;color:var(--text);max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(t.title||'(kein Titel)')+'</td>'
+      +'<td style="padding:7px 10px;font-size:11px;color:var(--text2);white-space:nowrap;">'+spalte+'</td>'
+      +'</tr>';
+  });
+  el.innerHTML='<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;">'
+    +'<thead><tr style="border-bottom:1.5px solid var(--border);background:var(--bg3);">'
+    +'<th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text2);font-weight:600;white-space:nowrap;">Board</th>'
+    +'<th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text2);font-weight:600;">Auftrag</th>'
+    +'<th style="padding:6px 10px;text-align:left;font-size:11px;color:var(--text2);font-weight:600;white-space:nowrap;">Spalte</th>'
+    +'</tr></thead><tbody>'+rows+'</tbody></table></div>';
+}
+
 function _pamCloseGlobalSearch(){
   const ov = document.getElementById('pamGSOverlay');
   if(ov) ov.style.display = 'none';
@@ -46230,6 +46381,8 @@ function _pamGSUpdateAktBtns(){
   if(bB){bB.style.background=_pamGSAktFilter==='besichtigung'?'#854F0B':'var(--bg3)';bB.style.color=_pamGSAktFilter==='besichtigung'?'#fff':'var(--text2)';bB.style.borderColor=_pamGSAktFilter==='besichtigung'?'#854F0B':'var(--border)';}
   if(bP){bP.style.background=_pamGSAktFilter==='planen'?'#FFB74D':'var(--bg3)';bP.style.color=_pamGSAktFilter==='planen'?'#5c3d05':'var(--text2)';bP.style.borderColor=_pamGSAktFilter==='planen'?'#FFB74D':'var(--border)';}
   if(bE){bE.style.background=_pamGSAktFilter==='erteilt'?'#7F77DD':'var(--bg3)';bE.style.color=_pamGSAktFilter==='erteilt'?'#fff':'var(--text2)';bE.style.borderColor=_pamGSAktFilter==='erteilt'?'#7F77DD':'var(--border)';}
+  const bF=document.getElementById('pamGSBtnAusf'); // b863
+  if(bF){bF.style.background=_pamGSAktFilter==='ausfuehrung'?'#0F6E56':'var(--bg3)';bF.style.color=_pamGSAktFilter==='ausfuehrung'?'#fff':'var(--text2)';bF.style.borderColor=_pamGSAktFilter==='ausfuehrung'?'#0F6E56':'var(--border)';}
 }
 // b710: „auch Archiv" – defensives Lese-Muster wie _rglZeigtFertig (b664-Falle: alte
 // Prüfdateien schneiden _pamGSRender isoliert aus, typeof wirft dort nie ReferenceError)
@@ -46263,6 +46416,7 @@ function _pamGSRender(){
     if(_pamGSAktFilter==='besichtigung' && !t.besichtigungOffen) return false;
     if(_pamGSAktFilter==='planen' && !t.auftragPlanen) return false;
     if(_pamGSAktFilter==='erteilt' && !t.auftragVomDatum) return false;
+    if(_pamGSAktFilter==='ausfuehrung' && !t.inAusfuehrung) return false; // b863
     if(q){
       // b710-Nachbesserung: NICHT mehr der ganze Suchtext als EIN Stück (Straßenname +
       // Hausnummer stehen so nie am Stück in der Adresse – dazwischen liegt die Endung,
@@ -49121,6 +49275,7 @@ function openEditTaskModal(id){
   const _anrufCb=document.getElementById('taskAnrufOffenCb');if(_anrufCb)_anrufCb.checked=!!(task.anrufOffen);
   const _mobAusCb=document.getElementById('taskMobilAusblendenCb');if(_mobAusCb)_mobAusCb.checked=!!(task.mobilAusblenden); // b726: nur befüllen – Ansehen ändert nichts
   const _besiCb=document.getElementById('taskBesichtigungOffenCb');if(_besiCb)_besiCb.checked=!!(task.besichtigungOffen);
+  const _ausfCb=document.getElementById('taskInAusfuehrungCb');if(_ausfCb)_ausfCb.checked=!!(task.inAusfuehrung); // b863
   _syncHdrAktCb();
   const _aeEl=document.getElementById('taskAnfrageEingangDatum');if(_aeEl)_aeEl.value=task.anfrageEingangDatum||'';
   const _esInp=document.getElementById('taskEmailSenderInput');if(_esInp)_esInp.value=task.emailSender||'';
