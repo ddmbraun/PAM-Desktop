@@ -14,7 +14,10 @@
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PGNpcmNsZSBjeD0iMzIiIGN5PSIzMiIgcj0iMzIiIGZpbGw9IiMyNTYzZWIiLz48dGV4dCB4PSIzMiIgeT0iNDMiIGZvbnQtZmFtaWx5PSJBcmlhbCxzYW5zLXNlcmlmIiBmb250LXNpemU9IjMwIiBmb250LXdlaWdodD0iYm9sZCIgZmlsbD0iI2ZmZiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+UDwvdGV4dD48L3N2Zz4=">
 <script>
 // ── Service Worker: registrieren + bei neuer Version automatisch neu laden ──
-if("serviceWorker" in navigator){
+// b886: Im Notbetrieb (127.0.0.1, Ordner 32) bewusst KEIN Service Worker – der
+// Helfer liefert immer frisch aus, eine Cache-Schicht würde alte Stände festhalten.
+// (Direkte Adressprüfung, weil PAM_NOTBETRIEB erst weiter unten definiert wird.)
+if("serviceWorker" in navigator && location.hostname!=='127.0.0.1' && location.hostname!=='localhost'){
   var _swReloading=false;
   navigator.serviceWorker.register("./sw.js").then(function(reg){
     // Sofort nach Update suchen
@@ -9847,7 +9850,225 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-02 · #885'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-02-b885) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-02 · #888'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-02-b888) – MERKE: bei jedem Build mit hochzählen!
+// ══════════════════════════════════════════════════════════════════════════
+// ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
+// Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
+// ausgeliefert wird. Im Normalbetrieb (github.io) schläft dieser Block komplett.
+// Der Helfer reicht die vier Kerndateien aus dem Google-Drive-Ordner des PCs
+// durch (/api/datei) – Google lädt Änderungen nach dem Ausfall selbst hoch.
+// ⛔ Hier dürfen NIE PC-Pfade oder Geheimnisse stehen – diese Datei ist öffentlich.
+// Bewusst HIER, weit vor dem INIT (b802/b803-Lehre: nichts hinter den INIT).
+// ══════════════════════════════════════════════════════════════════════════
+const PAM_NOTBETRIEB=(typeof location!=='undefined')&&(location.hostname==='127.0.0.1'||location.hostname==='localhost');
+var _nbSaveWiederholTimer=null;
+function _nbBanner(st){
+  if(document.getElementById('nbBanner'))return;
+  const b=document.createElement('div');
+  b.id='nbBanner';
+  b.style.cssText='background:#7c2d12;color:#fff;padding:8px 14px;font-size:14px;line-height:1.5;text-align:center;';
+  b.innerHTML='<b>🔌 NOTBETRIEB</b> – PAM speichert auf DIESEM PC ('+((st&&st.datenOrdner)?st.datenOrdner:'Google-Drive-Ordner')+'). '
+    +'<b>Regeln:</b> ① nicht gleichzeitig am Handy in PAM arbeiten &nbsp;② nur EIN PAM-Fenster offen. '
+    +'Ist das Internet zurück, lädt Google alles von selbst hoch. '
+    +'<button id="nbBeendenBtn" style="margin-left:10px;padding:2px 10px;border-radius:6px;border:1px solid #fff;background:transparent;color:#fff;cursor:pointer;">Notbetrieb beenden – alles speichern</button>';
+  if(b.addEventListener)b.addEventListener('click',function(ev){ // b888 (kein nacktes onclick – b861-Regel)
+    if(ev&&ev.target&&ev.target.id==='nbBeendenBtn')_nbBeenden();
+  });
+  document.body.insertBefore(b,document.body.firstChild);
+}
+async function _nbInit(){
+  let st=null;
+  try{st=await fetch('/api/stand',{cache:'no-store'}).then(function(r){return r.json();});}catch(e){}
+  _nbBanner(st);
+  try{await settingsInit();}catch(e){}
+  try{
+    const r=await fetch('/api/datei?name=workboard.json',{cache:'no-store'});
+    if(!r.ok){updateFileStatus('unsaved','workboard.json (Notbetrieb)','⚠ Datei nicht gefunden – ist Google Drive am PC angemeldet?');return;}
+    const data=await r.json();
+    loadFromObject(data);
+    try{_letzterStandHash=_pamStandHash(JSON.stringify(buildSaveObject(),null,2));}catch(e){}
+    _pamSnapshotSetzen();
+    updateFileStatus('ok','workboard.json (Notbetrieb)','✓ Von diesem PC geladen');
+    if(typeof closeStartModal==='function')closeStartModal();
+    render();
+    showToast('🔌 Notbetrieb aktiv – Daten von diesem PC. Nicht parallel am Handy arbeiten!','info',9000);
+  }catch(e){
+    updateFileStatus('unsaved','workboard.json (Notbetrieb)','⚠ Helfer nicht erreichbar – ist das schwarze Fenster noch offen?');
+  }
+}
+async function _nbSaveWorkboard(){
+  const _inhalt=JSON.stringify(buildSaveObject(),null,2);
+  try{
+    const r=await fetch('/api/datei?name=workboard.json',{method:'POST',headers:{'Content-Type':'application/json'},body:_inhalt});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    _savePending=false;
+    _letzterStandHash=_pamStandHash(_inhalt);
+    _pamSnapshotSetzen();
+    _saveLocalBackup();
+    if(_nbSaveWiederholTimer){clearTimeout(_nbSaveWiederholTimer);_nbSaveWiederholTimer=null;}
+    updateFileStatus('ok','workboard.json (Notbetrieb)','✓ Auf diesem PC gespeichert '+new Date().toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}));
+  }catch(e){
+    _saveLocalBackup();
+    updateFileStatus('unsaved','workboard.json (Notbetrieb)','⚠ Speichern fehlgeschlagen – neuer Versuch in 15 s');
+    if(!_nbSaveWiederholTimer){_nbSaveWiederholTimer=setTimeout(function(){_nbSaveWiederholTimer=null;_nbSaveWorkboard();},15000);}
+  }
+}
+// – b887: Fotos im Notbetrieb –
+// Namens-Tabelle driveId→Dateiname aus den Board-Daten: der Helfer kennt nur
+// Dateinamen (er durchsucht die Projektordner_* auf diesem PC), die App nur
+// Drive-Kennungen. Neue Notbetriebs-Fotos tragen die Pseudo-Kennung 'nb:<name>',
+// die der Rückkehr-Helfer (Stufe 4) gegen die echte Drive-Kennung tauscht.
+var _nbFotoNamen=null,_nbFotoNamenZeit=0;
+function _nbFotoNamenBauen(){
+  const m={};
+  function nimm(id,name,hinweis){if(id&&name&&!m[id])m[id]={name:name,hinweis:hinweis||''};}
+  try{
+    Object.keys(typeof boards==='object'&&boards?boards:{}).forEach(function(bn){
+      (Array.isArray(boards[bn])?boards[bn]:[]).forEach(function(t){
+        if(!t||typeof t!=='object')return;
+        const hin=t.nas?String(t.nas).split(/[\\/]/).filter(function(x){return x;}).pop():'';
+        (t.fotos||[]).forEach(function(f){nimm(f.driveId,f.name,hin);nimm(f.editedDriveId,f.editedName||f.name,hin);});
+        (t.attachments||[]).forEach(function(a){nimm(a.fileId,a.name,hin);});
+        (t.turnusListe||[]).forEach(function(l){
+          (l.dateien||[]).forEach(function(d){nimm(d.id,d.name,hin);});
+          (l.eintraege||[]).forEach(function(e2){(e2.dateien||[]).forEach(function(d){nimm(d.id,d.name,hin);});});
+        });
+        (t.pruefberichte||[]).forEach(function(b2){(b2.fotos||[]).forEach(function(f){nimm(f.driveId,f.name,hin);nimm(f.editedDriveId,f.editedName||f.name,hin);});});
+      });
+    });
+  }catch(e){}
+  return m;
+}
+function _nbFotoEintrag(id){
+  if(!_nbFotoNamen||Date.now()-_nbFotoNamenZeit>60000){_nbFotoNamen=_nbFotoNamenBauen();_nbFotoNamenZeit=Date.now();}
+  return _nbFotoNamen[id]||null;
+}
+async function _nbFotoAblegen(file,ordnerHinweis){
+  // Zielordner: erst der echte Auftragsordner (Namenssuche beim Helfer), sonst
+  // der Sammel-Eingang – den räumt der Rückkehr-Helfer (Stufe 4) auf.
+  let ordner='Projektordner_Aufgaben/_Notbetrieb-Eingang';
+  try{
+    if(ordnerHinweis){
+      const r=await fetch('/api/ordnersuche?name='+encodeURIComponent(ordnerHinweis),{cache:'no-store'});
+      if(r.ok){const d=await r.json();if(d&&d.pfad)ordner=d.pfad;}
+    }
+  }catch(e){}
+  let name=file.name;
+  for(let versuch=0;versuch<2;versuch++){
+    const r=await fetch('/api/foto?name='+encodeURIComponent(name)+'&ordner='+encodeURIComponent(ordner),{method:'POST',body:file});
+    if(r.ok)return {name:name,ordner:ordner};
+    if(r.status===409&&versuch===0){
+      const p=name.lastIndexOf('.');
+      const stempel='_'+new Date().toISOString().slice(11,19).replace(/:/g,'');
+      name=p>0?name.slice(0,p)+stempel+name.slice(p):name+stempel;
+      continue;
+    }
+    throw new Error('HTTP '+r.status);
+  }
+  throw new Error('Ablegen fehlgeschlagen');
+}
+async function _nbFotoDateienAblegen(dateien){
+  const nasWert=(document.getElementById('tNAS')||{}).value||'';
+  const hinweis=nasWert?String(nasWert).split(/[\\/]/).filter(function(x){return x;}).pop():'';
+  if(!taskFotos)taskFotos=[];
+  let zahl=0;
+  for(const file of dateien){
+    try{
+      const ab=await _nbFotoAblegen(file,hinweis);
+      _desktopFotoBlobCache.set('nb:'+ab.name,URL.createObjectURL(file));
+      let thumb='';
+      try{thumb=await _genLocalThumb(file);}catch(e){}
+      taskFotos.push({driveId:'nb:'+ab.name,name:ab.name,mimeType:file.type,caption:'',thumbnailLink:thumb,ts:_fotoTsFromFile(file),nbOffline:true,nbOrdner:ab.ordner});
+      zahl++;
+    }catch(err){showToast('⚠ Notbetrieb: „'+file.name+'" konnte nicht abgelegt werden ('+err.message+')','error',7000);}
+  }
+  if(zahl){
+    renderFotoListDesktop();
+    scheduleTaskFieldSave();
+    showToast('🔌 '+zahl+' Datei(en) auf diesem PC abgelegt – Google lädt sie nach dem Ausfall selbst hoch','info',6000);
+  }
+}
+// – b888: Rückkehr-Helfer (läuft im NORMALBETRIEB nach dem Ausfall) –
+// Verknüpft im Notbetrieb abgelegte Fotos (Kennung 'nb:<name>') mit ihrer echten
+// Drive-Kennung, sobald Google sie hochgeladen hat, und meldet Konfliktkopien
+// der Kerndateien. Läuft automatisch 10 s nach jedem Drive-Load – und tut
+// NICHTS, wenn es keine Notbetriebs-Reste gibt.
+var _nbRueckkehrLief=false;
+async function _nbRueckkehrLauf(){
+  if(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB)return; // nur im Normalbetrieb
+  if(_nbRueckkehrLief)return;
+  if(typeof gdriveTokenValid!=='function'||!gdriveTokenValid())return;
+  const offene=[];
+  try{
+    Object.keys(typeof boards==='object'&&boards?boards:{}).forEach(function(bn){
+      (Array.isArray(boards[bn])?boards[bn]:[]).forEach(function(t){
+        (t&&t.fotos?t.fotos:[]).forEach(function(f){
+          if(f&&(String(f.driveId||'').indexOf('nb:')===0||f.nbOffline))offene.push(f);
+        });
+      });
+    });
+  }catch(e){}
+  _nbRueckkehrLief=true;
+  let verknuepft=0,wartet=0;
+  if(offene.length){
+    showToast('🔌 Notbetrieb-Nacharbeit: '+offene.length+' Foto(s) werden mit Drive verknüpft…','info',5000);
+    const ordnerIds={};
+    for(const f of offene){
+      try{
+        const ordnerName=String(f.nbOrdner||'').split('/').filter(function(x){return x;}).pop()||'_Notbetrieb-Eingang';
+        let fid=ordnerIds[ordnerName];
+        if(fid===undefined){
+          const q1=encodeURIComponent("name='"+ordnerName.replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+          const r1=await fetch('https://www.googleapis.com/drive/v3/files?q='+q1+'&fields=files(id)&pageSize=3',{headers:{Authorization:'Bearer '+gdriveToken}});
+          const d1=r1.ok?await r1.json():null;
+          fid=(d1&&d1.files&&d1.files.length)?d1.files[0].id:null;
+          ordnerIds[ordnerName]=fid;
+        }
+        if(!fid){wartet++;continue;}
+        const q2=encodeURIComponent("name='"+String(f.name).replace(/'/g,"\\'")+"' and '"+fid+"' in parents and trashed=false");
+        const r2=await fetch('https://www.googleapis.com/drive/v3/files?q='+q2+'&fields=files(id)&pageSize=2',{headers:{Authorization:'Bearer '+gdriveToken}});
+        const d2=r2.ok?await r2.json():null;
+        if(d2&&d2.files&&d2.files.length){
+          f.driveId=d2.files[0].id;
+          delete f.nbOffline;delete f.nbOrdner;
+          verknuepft++;
+        }else{wartet++;}
+      }catch(e){wartet++;}
+    }
+    if(verknuepft){
+      try{scheduleSave();}catch(e){}
+      showToast('✓ '+verknuepft+' Notbetriebs-Foto(s) mit Drive verknüpft','success',6000);
+    }
+    if(wartet){
+      showToast('⏳ '+wartet+' Foto(s) noch nicht in Drive gefunden – Google lädt vielleicht noch hoch. Läuft „Drive für Desktop" am Büro-PC? Nächster Versuch beim nächsten Start.','info',9000);
+    }
+  }
+  // Konfliktkopien der Kerndateien melden (Franks eigene Sicherungen "_alt_" zählen NICHT)
+  try{
+    if(typeof workspaceFolderId!=='undefined'&&workspaceFolderId){
+      const q3=encodeURIComponent("'"+workspaceFolderId+"' in parents and trashed=false and name contains '('");
+      const r3=await fetch('https://www.googleapis.com/drive/v3/files?q='+q3+'&fields=files(name)&pageSize=20',{headers:{Authorization:'Bearer '+gdriveToken}});
+      const d3=r3.ok?await r3.json():null;
+      const basen=['workboard','pam_settings','pam_zettel','pam_workboard_sync'];
+      const funde=((d3&&d3.files)||[]).map(function(x){return x.name;}).filter(function(n){
+        const klein=String(n).toLowerCase();
+        return basen.some(function(b2){return klein.indexOf(b2)===0;})&&klein.indexOf('_alt_')<0;
+      });
+      if(funde.length){
+        showToast('⚠ Mögliche KONFLIKTKOPIEN im Drive-Datenordner gefunden: '+funde.join(', ')+' – bitte mit Claude ansehen, bevor etwas gelöscht wird.','error',15000);
+      }
+    }
+  }catch(e){}
+}
+// – b888: Notbetrieb sauber beenden (Knopf im Banner) –
+async function _nbBeenden(){
+  try{await _nbSaveWorkboard();}catch(e){}
+  try{await _ztlSync();}catch(e){}
+  showToast('✓ Alles auf diesem PC gespeichert. Dieses Fenster jetzt schließen. Wenn das Internet zurück ist: das normale PAM öffnen – Google lädt alles von selbst hoch.','success',15000);
+}
+if(PAM_NOTBETRIEB&&typeof document!=='undefined'){
+  document.addEventListener('DOMContentLoaded',function(){_nbInit();});
+}
 // b803: Zustands-Variablen des Zettels (die Funktionen stehen beim ZETTEL-Block weiter
 // unten, hinter dem INIT). Bewusst var statt const/let und bewusst HIER, weit vor dem
 // INIT-Aufruf render(): b802 hatte sie HINTER dem INIT – der allererste render()-Lauf
@@ -13542,6 +13763,7 @@ function _driveSetStatus(msg, isErr) {
 // Bewusst `var`: die Marke wird aus mehreren Skriptblöcken heraus gelesen.
 var _gdInitOhneAutoConnect = false;
 function gdriveInit() {
+  if (typeof PAM_NOTBETRIEB !== 'undefined' && PAM_NOTBETRIEB) return; // b886: Notbetrieb startet über _nbInit – ohne Google-Anmeldung, Modal, Redirect
   // b639: Übergabe-Modus – dieses Fenster reicht den VBS-Auftrag nur an die schon
   // laufende PAM-Instanz weiter und schließt sich gleich; hier darf NICHTS booten
   // (kein Token-Client, kein Auto-Connect, kein Drive-Load – sonst wäre es doch
@@ -14586,6 +14808,8 @@ async function gdriveLoadFile(fileId, fileName) {
   // b637: Fangnetz – lokales Backup nach Tasks durchsehen, die in Drive fehlen
   // (nach den VBS-Dialogen bei 800 ms; bei offenem Dialog verschiebt es sich selbst)
   setTimeout(function(){try{_checkBackupVerlust();}catch(e){console.warn('[PAM]',e);}},1800);
+  // b888: Notbetrieb-Nacharbeit – nb:-Fotos mit Drive verknüpfen, Konfliktkopien melden
+  setTimeout(function(){try{_nbRueckkehrLauf();}catch(e){console.warn('[Notbetrieb-Rückkehr]',e);}},10000);
   // Migration: Datei in Arbeitsordner verschieben, falls noch im Drive-Root
   if (workspaceFolderId) migrateFileToWorkspaceFolder(fileId).catch(() => {});
 }
@@ -15616,6 +15840,8 @@ document.addEventListener('DOMContentLoaded',()=>{
   (function _gsiWatchdog(){
     const _start=Date.now(), _maxWait=12000;
     const _check=()=>{
+      if(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB)return; // b886: im Notbetrieb weder Start-Modal noch Warn-Toast
+
       if(gdriveTokenClient)return;                                     // Dienst ist da → keine Meldung
       if(Date.now()-_start<_maxWait){setTimeout(_check,1000);return;}   // noch Zeit lassen
       const _fb_email=localStorage.getItem('pam_user_email_v1');
@@ -16040,6 +16266,9 @@ function buildSaveObject(){
   return out;
 }
 async function autoSave(){
+  // b886: Notbetrieb – über den Helfer auf diesen PC speichern (alle ~90 Auslöser
+  // laufen durch diesen einen Trichter, deshalb sitzt die Weiche genau hier)
+  if(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB){ await _nbSaveWorkboard(); return; }
   // Prefer Google Drive if connected
   if(gdriveFileId){ await gdriveSaveData(); return; }
   // Otherwise use local File System Access API
@@ -24399,6 +24628,11 @@ async function handleFotoUploadToDrive(e){
   const files=[...e.target.files];
   e.target.value='';
   if(!files.length)return;
+  // b887: Notbetrieb – Datei über den Helfer auf diesen PC, Google lädt später selbst hoch
+  if(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB){
+    await _nbFotoDateienAblegen(files.filter(f=>f.type.startsWith('image/')||_fileIsVideo(f)));
+    return;
+  }
   if(!gdriveToken){showToast('Bitte zuerst mit Google Drive verbinden','error');return;}
   const folderId=_getDriveFotoFolderId();
   if(!folderId){showToast('Kein Drive-Ordner verknüpft','error');return;}
@@ -26179,7 +26413,7 @@ function _openWartungsprotokoll(existingIdx){
             // thumbnailLink (lh3.googleusercontent.com) zuerst; schlägt fehl → Auth-Fetch
             const _tl1=f.thumbnailLink||f.thumbnail||'';
             if(_tl1){img.src=_tl1;}
-            img.onerror=()=>{img.onerror=null;if(gdriveToken)_fetchDesktopFotoBlob(f.driveId).then(u=>{if(u){img.src=u;img.style.display='';}});};
+            img.onerror=()=>{img.onerror=null;if(gdriveToken||PAM_NOTBETRIEB)_fetchDesktopFotoBlob(f.driveId).then(u=>{if(u){img.src=u;img.style.display='';}});};
             thumb.appendChild(img);
             thumb.onclick=()=>{const idx=bericht.fotos.indexOf(f);if(idx>=0)_wpOpenFoto(bericht,idx);};
           }
@@ -26310,8 +26544,8 @@ function _wpRenderFotos(bericht,grid){
       const _wpId=f.editedDriveId||f.driveId;
       const _tl2=f.editedDriveId?'':(f.thumbnailLink||f.thumbnail||'');
       if(_tl2){img.src=_tl2;}
-      else if(gdriveToken){_fetchDesktopFotoBlob(_wpId).then(u=>{if(u)img.src=u;});}
-      img.onerror=()=>{img.onerror=null;if(gdriveToken)_fetchDesktopFotoBlob(_wpId).then(u=>{if(u){img.src=u;img.style.display='';}});};
+      else if(gdriveToken||PAM_NOTBETRIEB){_fetchDesktopFotoBlob(_wpId).then(u=>{if(u)img.src=u;});}
+      img.onerror=()=>{img.onerror=null;if(gdriveToken||PAM_NOTBETRIEB)_fetchDesktopFotoBlob(_wpId).then(u=>{if(u){img.src=u;img.style.display='';}});};
       cell.appendChild(img);
     }
     const openBtn=document.createElement('button');
@@ -26409,7 +26643,7 @@ async function _wpOpenFoto(bericht,startIdx){
     const f=fotos[idx];
     lbl.textContent=(f.name||'Foto '+(idx+1))+' ('+(idx+1)+'/'+fotos.length+')';
     cnt.innerHTML='<div style="color:#fff;font-size:13px;padding:20px">Lade…</div>';
-    if((f.editedDriveId||f.driveId)&&gdriveToken){
+    if((f.editedDriveId||f.driveId)&&(gdriveToken||PAM_NOTBETRIEB)){
       try{
         const url=await _fetchDesktopFotoBlob(f.editedDriveId||f.driveId); // b763: bemalte Fassung zuerst
         if(url){
@@ -26911,6 +27145,22 @@ const DrivePhotoCache = {
 };
 // ── Hole Foto-Blob mit IndexedDB-Cache + modifiedTime-Vergleich ───────────
 async function _fetchFotoBlobCached(driveId, token) {
+  // b887: Notbetrieb – Foto über den Helfer per DATEINAME holen, kein Google.
+  // Diese eine Stelle ist der Trichter für praktisch alle Anzeige-Wege
+  // (Kacheln, Großansicht, Verweis-Fotos, Galerien, PDF-Berichte, Maler).
+  if (typeof PAM_NOTBETRIEB !== 'undefined' && PAM_NOTBETRIEB) {
+    try {
+      let nbName = null, nbHinweis = '';
+      if (String(driveId).indexOf('nb:') === 0) nbName = String(driveId).slice(3);
+      else { const e = _nbFotoEintrag(driveId); if (e) { nbName = e.name; nbHinweis = e.hinweis; } }
+      if (!nbName) return null;
+      const r = await fetch('/api/foto?name=' + encodeURIComponent(nbName) + (nbHinweis ? '&ordner=' + encodeURIComponent(nbHinweis) : ''), { cache: 'no-store' });
+      if (!r.ok) return null;
+      const buf = await r.arrayBuffer();
+      const ct = r.headers.get('content-type') || 'image/jpeg';
+      return URL.createObjectURL(new Blob([buf], { type: ct }));
+    } catch (e) { return null; }
+  }
   if (!driveId || !token) return null;
   try {
     // 1) Cache-Eintrag prüfen
@@ -26956,7 +27206,7 @@ async function _fetchDesktopFotoBlob(driveId){
   if(_desktopFotoBlobCache.has(driveId))return _desktopFotoBlobCache.get(driveId);
   if(_desktopFotoBlobInflight.has(driveId))return _desktopFotoBlobInflight.get(driveId);
   const p=(async()=>{
-    if(!gdriveTokenValid()){throw new Error('Kein gültiger Token – bitte anmelden');}
+    if(!gdriveTokenValid()&&!(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB)){throw new Error('Kein gültiger Token – bitte anmelden');}
     // IndexedDB-Cache mit modifiedTime-Vergleich
     const url=await _fetchFotoBlobCached(driveId, gdriveToken);
     if(url)_desktopFotoBlobCache.set(driveId,url);
@@ -26978,7 +27228,7 @@ function _desktopThumbFallback(img){
   if(img.dataset.fbDone==='1')return; // kein Loop
   img.dataset.fbDone='1';
   const id=img.getAttribute('data-foto-id');
-  if(id&&gdriveToken){
+  if(id&&(gdriveToken||PAM_NOTBETRIEB)){ // b887: im Notbetrieb übernimmt der Helfer
     img.removeAttribute('onerror');
     // b581: durch die b579-Warteschlange. Vorher feuerten hier (Bautagebuch + Foto-Sektion)
     // bei vielen abgelaufenen Vorschau-Adressen ALLE Vollbild-Nachladungen gleichzeitig –
@@ -26994,7 +27244,7 @@ function _desktopThumbFallback(img){
   }
 }
 function hydrateDesktopFotoThumbs(){
-  if(!gdriveTokenValid())return; // Kein gültiger Token → keine 401-Requests
+  if(!gdriveTokenValid()&&!PAM_NOTBETRIEB)return; // Kein gültiger Token → keine 401-Requests (b887: im Notbetrieb liefert der Helfer)
   document.querySelectorAll('#fotoListDesktop img[data-foto-id], #taskNotizList img[data-foto-id]').forEach(img=>{ // b515: auch Bautagebuch-Leiste
     if(img.dataset.hydrated==='1')return;
     // Performance-Fix (#310): Wenn bereits eine schnelle Drive-Vorschau (thumbnailLink) als src
@@ -41266,6 +41516,8 @@ function _openAttachThumbnailGrid(){
 async function _handleFotoDrop(dt){
   const files=[...dt.files].filter(f=>f.type.startsWith('image/')||IMAGE_EXTS.test(f.name));
   if(!files.length){showToast('⚠ Nur Bilddateien hier ablegen','error',3000);return;}
+  // b887: Notbetrieb – Datei über den Helfer auf diesen PC, Google lädt später selbst hoch
+  if(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB){await _nbFotoDateienAblegen(files);return;}
   if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden','error');return;}
   const folderId=_getDriveFotoFolderId();
   if(!folderId){
@@ -51845,6 +52097,28 @@ function _ztlKastenHtml(){
 function _ztlSyncBald(){clearTimeout(_ztlSyncTimer);_ztlSyncTimer=setTimeout(function(){_ztlSync();},2000);}
 async function _ztlSync(){
   if(_ztlSyncLaeuft)return;
+  // b886: Notbetrieb – Zettel über den Helfer lesen/mergen/schreiben (gleiche
+  // Merge-Logik wie bei Drive). Schreibt NUR, wenn das Lesen sauber war (ok
+  // oder ehrliches 404) – nie blind überschreiben.
+  if(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB){
+    _ztlSyncLaeuft=true;
+    try{
+      let fern=[],fernRoh='[]',leseOk=false;
+      const r=await fetch('/api/datei?name='+ZETTEL_FILE_NAME,{cache:'no-store'});
+      if(r.ok){const d=await r.json();if(d&&Array.isArray(d.zeilen)){fern=d.zeilen;fernRoh=JSON.stringify(fern);}leseOk=true;}
+      else if(r.status===404){leseOk=true;}
+      if(!leseOk)return;
+      const vorher=JSON.stringify(_ztlZeilen);
+      _ztlZeilen=_ztlMerge(_ztlZeilen,fern,_ztlJetzt());
+      const nachher=JSON.stringify(_ztlZeilen);
+      if(nachher!==vorher){_ztlSpeichereLokal();_ztlZeichne();}
+      if(nachher===fernRoh)return;
+      const content=JSON.stringify({version:1,zeilen:_ztlZeilen,lastUpdated:_ztlJetzt()});
+      await fetch('/api/datei?name='+ZETTEL_FILE_NAME,{method:'POST',headers:{'Content-Type':'application/json'},body:content});
+    }catch(e){console.warn('[Zettel] Notbetrieb-Abgleich:',e);}
+    finally{_ztlSyncLaeuft=false;}
+    return;
+  }
   const tokOk=(typeof gdriveTokenValid==='function')?gdriveTokenValid():!!(typeof gdriveToken!=='undefined'&&gdriveToken);
   if(!tokOk)return;
   if(!zettelFileId&&!_ztlZeilen.length)return;
@@ -51930,6 +52204,8 @@ function _pamFirma(){
 }
 
 async function settingsInit(){
+  // b886: Notbetrieb – Einstellungen direkt vom Helfer lesen (keine Drive-Suche)
+  if(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB){await settingsRead();return;}
   if(!gdriveTokenValid())return;
   try{
     const q=encodeURIComponent("name='"+SETTINGS_FILE_NAME+"' and trashed=false");
@@ -51943,6 +52219,16 @@ async function settingsInit(){
 }
 
 async function settingsRead(){
+  // b886: Notbetrieb – über den Helfer lesen, gleiche Übernahme wie bei Drive
+  if(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB){
+    try{
+      const r=await fetch('/api/datei?name='+SETTINGS_FILE_NAME,{cache:'no-store'});
+      if(!r.ok)return;
+      const d=await r.json();
+      if(d&&typeof d==='object'){pamSettings=Object.assign({},pamSettings,d);settingsApply();}
+    }catch(e){console.warn('[Einstellungen] Notbetrieb-Lesen:',e);}
+    return;
+  }
   if(!settingsFileId||!gdriveTokenValid())return;
   try{
     const r=await fetch('https://www.googleapis.com/drive/v3/files/'+settingsFileId+'?alt=media&_='+Date.now(),
@@ -51963,6 +52249,18 @@ function settingsApply(){
 }
 
 async function settingsSaveToDrive(){
+  // b886: Notbetrieb – über den Helfer auf diesen PC schreiben
+  if(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB){
+    const _nbInhalt=JSON.stringify(Object.assign({},pamSettings,{lastUpdated:new Date().toISOString()}),null,2);
+    try{
+      const r=await fetch('/api/datei?name='+SETTINGS_FILE_NAME,{method:'POST',headers:{'Content-Type':'application/json'},body:_nbInhalt});
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      return true;
+    }catch(e){
+      showToast('⚠ Einstellungen speichern fehlgeschlagen (Notbetrieb): '+e.message,'error',7000);
+      return false;
+    }
+  }
   if(!gdriveTokenValid()){showToast('⚠ Nicht mit Google Drive verbunden – Einstellungen nicht gespeichert','error',6000);return false;}
   const content=JSON.stringify(Object.assign({},pamSettings,{lastUpdated:new Date().toISOString()}),null,2);
   try{
