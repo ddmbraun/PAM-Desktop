@@ -7986,6 +7986,8 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
     <button id="pamThemeBtn" class="topbar-btn" onclick="toggleTheme()" title="Hell/Dunkel wechseln" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);font-size:16px;padding:4px 10px;border-radius:6px;">🌙</button>
     <button id="feTopBtn" class="topbar-btn" onclick="_feDeskOeffnen(true)" title="Blitz-Fotos vom Handy ansehen und einem Task zuordnen – ohne einen Task zu öffnen" style="display:none;background:rgba(199,119,0,0.10);border:1px solid #c77700;color:#c77700;font-size:12px;font-weight:500;padding:6px 12px;border-radius:6px;">📥 Foto-Eingang</button>
     <button id="pamSettingsBtn" class="topbar-btn" onclick="openPamSettings()" title="Einstellungen (Standardordner)" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);font-size:16px;padding:4px 10px;border-radius:6px;">⚙</button>
+    <!-- b891: Rettungsknopf – holt aus dem Bild gerutschte Fenster zurück in die Mitte -->
+    <button id="pamFensterHolBtn" class="topbar-btn" onclick="_pamFensterZurueckholen()" title="Aus dem Bild gerutschte Fenster (Task, Übersicht, E-Mail …) zurück in die Mitte holen" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);font-size:12px;font-weight:500;padding:6px 12px;border-radius:6px;">🧲 Fenster zurück</button>
     <!-- b539: „📋 Auftrag anlegen" aus der Topbar genommen (Wunsch Frank 31.07. – wird nicht mehr
          benutzt, seit das VBS PAM selbst aufruft). Der Knopf las eine Auftragsakte.txt ein und
          füllte damit einen neuen Task. Die Funktionen openAuftragDatei/readAuftragDatei/
@@ -9850,7 +9852,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-02 · #890'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-02-b890) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-02 · #891'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-02-b891) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -10348,11 +10350,11 @@ let _colSort = {}; // { [status]: {field:'title'|'tags', dir:1|-1} }
     box.style.height=h+'px';
     box.style.zoom=''; // alten Zoom-Wert löschen
     if(d.left!=null&&d.top!=null){
-      // Gespeicherte Position: sicherstellen, dass Modal auf Bildschirm liegt
-      const l=Math.max(0,Math.min(vw-120,d.left));
-      const t=Math.max(0,Math.min(vh-80,d.top));
-      box.style.left=l+'px';
-      box.style.top=t+'px';
+      // Gespeicherte Position: mit der gemeinsamen Zieh-Klammer ins Bild holen (b891) –
+      // gleicher Mindest-Rest wie beim Ziehen, statt eigener kleinerer Grenzen.
+      const p=_pamZugKlammer(d.left,d.top);
+      box.style.left=p.x+'px';
+      box.style.top=p.y+'px';
     } else {
       // Kein gespeicherter Ort: mittig platzieren
       box.style.left=Math.max(0,Math.round((vw-w)/2))+'px';
@@ -10427,8 +10429,9 @@ let _colSort = {}; // { [status]: {field:'title'|'tags', dir:1|-1} }
   document.addEventListener('mousemove',function(e){
     const box=_mb();if(!box)return;
     if(_mdDrag){
-      box.style.left=Math.max(0,Math.min(window.innerWidth-120,e.clientX-_mdOx))+'px';
-      box.style.top=Math.max(0,Math.min(window.innerHeight-60,e.clientY-_mdOy))+'px';
+      const p=_pamZugKlammer(e.clientX-_mdOx,e.clientY-_mdOy); // b891: eine Klammer für alle Griffe
+      box.style.left=p.x+'px';
+      box.style.top=p.y+'px';
     }
     if(_mdResize){
       const nw=Math.max(340,_mdRW+(e.clientX-_mdRSX));
@@ -10464,6 +10467,105 @@ let _colSort = {}; // { [status]: {field:'title'|'tags', dir:1|-1} }
     box.classList.add('is-placed');
   };
 })();
+
+// ── b891: FENSTER-RETTUNG – verschobene Fenster zurück ins Bild ──
+// Befund Frank 02.09.: Schwebende Fenster ließen sich aus dem Bild ziehen; wurde der
+// Browser danach kleiner, stand ein offenes Fenster komplett außerhalb und nichts holte
+// es zurück. Drei Schichten: (1) EINE Zieh-Klammer für alle Verschiebe-Griffe, damit beim
+// Ziehen immer ein greifbares Eck im Bild bleibt; (2) ein Wächter, der beim Verkleinern
+// des Browsers offene Fenster hereinzieht; (3) der Topbar-Knopf 🧲, der alles Offene in
+// die Mitte zurückholt. ⛔ Breiten und Höhen werden hier NIE angefasst, nur left/top –
+// eine Größen-Vorgabe kann die einzige Quelle sein (b826).
+const _PAM_FENSTER_REST_B=220, _PAM_FENSTER_REST_H=120; // Mindest-Rest, der beim Ziehen sichtbar bleibt
+
+// Gewünschte Fensterlage (echte Bildschirm-Pixel) auf den sichtbaren Bereich klammern.
+// ALLE Verschiebe-Griffe rufen diese eine Funktion – eine neue Grenze wird HIER für alle
+// geändert, nicht an den einzelnen Griffen.
+function _pamZugKlammer(x,y){
+  return { x: Math.max(0, Math.min(window.innerWidth - _PAM_FENSTER_REST_B, x)),
+           y: Math.max(0, Math.min(window.innerHeight - _PAM_FENSTER_REST_H, y)) };
+}
+
+// Ein schwebendes Fenster wieder ganz ins Bild holen (Lage möglichst erhalten). Trägt das
+// Element einen eigenen zoom (Task-Übersicht, b589), wirken left/top im gezoomten
+// Maßstab – deshalb wird beim Setzen durch den zoom geteilt.
+function _pamFixLageKlammern(el){
+  if(!el)return false;
+  const r=el.getBoundingClientRect();
+  if(!r.width&&!r.height)return false; // unsichtbar – nichts zu holen
+  const vw=window.innerWidth, vh=window.innerHeight;
+  const l=Math.max(0, Math.min(r.left, vw - Math.min(r.width, vw)));
+  const t=Math.max(0, Math.min(r.top,  vh - Math.min(r.height, vh)));
+  if(Math.abs(l-r.left)<1 && Math.abs(t-r.top)<1) return false; // liegt schon im Bild
+  const z=parseFloat(el.style.zoom)||1;
+  el.style.position='fixed';
+  el.style.left=(l/z)+'px'; el.style.top=(t/z)+'px';
+  if(el.style.transform && el.style.transform!=='none') el.style.transform='none';
+  return true;
+}
+
+// Alle schwebenden Fenster, die gerade OFFEN sind. Die Task-Übersicht kann mehrfach
+// gleichzeitig offen sein (je Task ein Fenster) – deshalb querySelectorAll statt
+// getElementById.
+function _pamSchwebendeFenster(){
+  const f=[];
+  const tm=document.getElementById('taskModal');
+  if(tm&&tm.classList.contains('open'))f.push(document.getElementById('taskModalBox'));
+  const em=document.getElementById('emailTaskModal');
+  if(em&&em.classList.contains('open'))f.push(document.getElementById('emModalBox'));
+  document.querySelectorAll('[id="_pdfSendenOv"]').forEach(function(ov){if(ov.firstElementChild)f.push(ov.firstElementChild);});
+  const dp=document.getElementById('pamUebPreview');
+  if(dp&&dp.style.display!=='none')f.push(dp);
+  ['pamUebersichtBox','pamGSBox','pamBoardPopupBox'].forEach(function(id){
+    const el=document.getElementById(id);
+    if(el&&el.getBoundingClientRect().width)f.push(el);
+  });
+  document.querySelectorAll('.sect-popup.open').forEach(function(el){f.push(el);});
+  return f.filter(Boolean);
+}
+
+// Der Wächter: Browser wird kleiner → offene Fenster nach kurzer Ruhe hereinziehen.
+let _pamFensterWaechterT=null;
+window.addEventListener('resize',function(){
+  clearTimeout(_pamFensterWaechterT);
+  _pamFensterWaechterT=setTimeout(function(){
+    try{_pamSchwebendeFenster().forEach(_pamFixLageKlammern);}catch(e){}
+  },200);
+});
+
+// 🧲 Topbar-Knopf: alles Offene zurück in die Mitte – schließt nichts, verwirft nichts.
+function _pamFensterZurueckholen(){
+  let n=0;
+  // Task-Fenster: zurück in die CSS-Mittellage. Die gemerkte Standard-LAGE wird dabei
+  // vergessen (die gemerkte Größe bleibt) – sonst öffnete sich das Fenster gleich wieder
+  // am Rand, wo es zuletzt losgelassen wurde.
+  const tm=document.getElementById('taskModal');
+  const tb=document.getElementById('taskModalBox');
+  if(tm&&tb&&tm.classList.contains('open')){
+    tb.classList.remove('is-placed');
+    tb.style.left='';tb.style.top='';
+    n++;
+  }
+  try{
+    const s=JSON.parse(localStorage.getItem('pam_modal_default_v2')||'null');
+    if(s&&(s.left!=null||s.top!=null)){delete s.left;delete s.top;localStorage.setItem('pam_modal_default_v2',JSON.stringify(s));}
+  }catch(e){}
+  // Task-Übersichten: zurück in die Geburtslage (zentriert im eigenen Schleier)
+  document.querySelectorAll('[id="_pdfSendenOv"]').forEach(function(ov){
+    const box=ov.firstElementChild;if(!box)return;
+    box.style.position='';box.style.left='';box.style.top='';
+    ov.style.alignItems='center';ov.style.justifyContent='center';
+    n++;
+  });
+  // Alle übrigen offenen Fenster: ins Bild klammern (Task-Fenster und Übersichten sind
+  // oben schon behandelt)
+  _pamSchwebendeFenster().forEach(function(el){
+    if(el===tb)return;
+    if(el.closest&&el.closest('[id="_pdfSendenOv"]'))return;
+    if(_pamFixLageKlammern(el))n++;
+  });
+  if(typeof showToast==='function')showToast(n?'🧲 Offene Fenster zurückgeholt':'Kein schwebendes Fenster offen','info',2200);
+}
 
 // ── MODAL DATA STATE ──
 let taskAusserhausTermine = [];
@@ -28647,7 +28749,10 @@ function _openPdfSendenModus(taskId){
     // Arbeitskopien neu auf und würde ungespeicherte Änderungen im Fenster verwerfen.
     +((((document.getElementById('taskId')||{}).value||'')===tid)?''
       :'<button data-uebtaskauf="1" title="Auftrag zum Bearbeiten öffnen" style="flex-shrink:0;margin-right:10px;padding:5px 12px;border-radius:8px;background:var(--bg3);border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:700;cursor:pointer;">✏️ Task öffnen</button>')
-    +'<button onclick="document.getElementById(\'_pdfSendenOv\').remove()" style="flex-shrink:0;background:none;border:none;font-size:18px;cursor:pointer;color:var(--text2);line-height:1;">✕</button>';
+    // b891: Es können MEHRERE Übersichten gleichzeitig offen sein (gleiche Kennung).
+    // Der ✕ muss über closest das EIGENE Fenster schließen – eine Suche über die Kennung
+    // fände immer das zuerst geöffnete und schlösse bei mehreren das falsche.
+    +'<button onclick="this.closest(\'[id=_pdfSendenOv]\').remove()" style="flex-shrink:0;background:none;border:none;font-size:18px;cursor:pointer;color:var(--text2);line-height:1;">✕</button>';
   box.appendChild(hdr);
   // b837: Der Knopf „✏️ Task öffnen“ oben rechts war seit b785 ohne Wirkung – beim
   // Umbau der Titelzeile ging sein Klick-Handler mit weg, das HTML blieb stehen und der
@@ -28676,7 +28781,9 @@ function _openPdfSendenModus(taskId){
       box.style.left=(r.left/_z)+'px';box.style.top=(r.top/_z)+'px';
       ov.style.alignItems='flex-start';ov.style.justifyContent='flex-start';
     }
-    const mv=function(e){box.style.left=((e.clientX-dx)/_z)+'px';box.style.top=((e.clientY-dy)/_z)+'px';};
+    // b891: geklammert – in echten Bildschirm-Pixeln gerechnet, erst beim Setzen durch
+    // den Fenster-Zoom geteilt (left/top wirken im gezoomten Maßstab).
+    const mv=function(e){const p=_pamZugKlammer(e.clientX-dx,e.clientY-dy);box.style.left=(p.x/_z)+'px';box.style.top=(p.y/_z)+'px';};
     const up=function(){document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);};
     document.addEventListener('mousemove',mv);
     document.addEventListener('mouseup',up);
@@ -34813,7 +34920,7 @@ async function _pamTaskDrucken(extId){
       box.style.left=r.left+'px';box.style.top=r.top+'px';
       sx=e.clientX;sy=e.clientY;bx=r.left;by=r.top;
       hdr.style.cursor='grabbing';
-      function mm(e){box.style.left=Math.max(0,bx+(e.clientX-sx))+'px';box.style.top=Math.max(0,by+(e.clientY-sy))+'px';}
+      function mm(e){const p=_pamZugKlammer(bx+(e.clientX-sx),by+(e.clientY-sy));box.style.left=p.x+'px';box.style.top=p.y+'px';} // b891: geklammert
       function mu(){hdr.style.cursor='grab';document.removeEventListener('mousemove',mm);document.removeEventListener('mouseup',mu);}
       document.addEventListener('mousemove',mm);document.addEventListener('mouseup',mu);
     });
@@ -47547,8 +47654,9 @@ function _pamBPInitDrag(){
     sx=e.clientX; sy=e.clientY; bx=r.left; by=r.top;
     hdr.style.cursor='grabbing';
     function onMove(e){
-      box.style.left = Math.max(0, bx+(e.clientX-sx)) + 'px';
-      box.style.top  = Math.max(0, by+(e.clientY-sy)) + 'px';
+      const p=_pamZugKlammer(bx+(e.clientX-sx),by+(e.clientY-sy)); // b891: geklammert
+      box.style.left = p.x + 'px';
+      box.style.top  = p.y + 'px';
     }
     function onUp(){
       hdr.style.cursor='grab';
@@ -47919,7 +48027,7 @@ function _pamGSInitDrag(){
     box.style.left=r.left+'px'; box.style.top=r.top+'px'; box.style.transform='none';
     sx=e.clientX; sy=e.clientY; bx=r.left; by=r.top;
     hdr.style.cursor='grabbing';
-    function onMove(e){ box.style.left=Math.max(0,bx+(e.clientX-sx))+'px'; box.style.top=Math.max(0,by+(e.clientY-sy))+'px'; }
+    function onMove(e){ const p=_pamZugKlammer(bx+(e.clientX-sx),by+(e.clientY-sy)); box.style.left=p.x+'px'; box.style.top=p.y+'px'; } // b891: geklammert
     function onUp(){ hdr.style.cursor='grab'; document.removeEventListener('mousemove',onMove); document.removeEventListener('mouseup',onUp); }
     document.addEventListener('mousemove',onMove);
     document.addEventListener('mouseup',onUp);
@@ -50849,13 +50957,10 @@ function _initEmailResizers(){
         const startX=e.clientX-rect.left;
         const startY=e.clientY-rect.top;
         function onMove(ev){
-          let nx=ev.clientX-startX;
-          let ny=ev.clientY-startY;
-          // An Bildschirmkanten begrenzen
-          nx=Math.max(0,Math.min(window.innerWidth-80,nx));
-          ny=Math.max(0,Math.min(window.innerHeight-40,ny));
-          modal.style.left=nx+'px';
-          modal.style.top=ny+'px';
+          // b891: gemeinsame Zieh-Klammer – es bleibt immer ein greifbares Eck im Bild
+          const p=_pamZugKlammer(ev.clientX-startX,ev.clientY-startY);
+          modal.style.left=p.x+'px';
+          modal.style.top=p.y+'px';
         }
         function onUp(){
           document.removeEventListener('mousemove',onMove);
@@ -51572,12 +51677,15 @@ function closeQuickAdd(){document.getElementById('quickAddBar').classList.remove
   });
   document.addEventListener('mousemove',function(e){
     if(!dragging||!modal)return;
-    let x=Math.max(0,Math.min(window.innerWidth-120,e.clientX-ox));
-    let y=Math.max(0,Math.min(window.innerHeight-60,e.clientY-oy));
-    modal.style.left=x+'px';
-    modal.style.top=y+'px';
+    const p=_pamZugKlammer(e.clientX-ox,e.clientY-oy); // b891: eine Klammer für alle Griffe
+    modal.style.left=p.x+'px';
+    modal.style.top=p.y+'px';
   });
   document.addEventListener('mouseup',function(){dragging=false;});
+  // b891: Wird die Taste außerhalb des Browsers losgelassen, kommt kein mouseup an und
+  // das Fenster klebte beim Zurückkehren an der Maus – gleiches Sicherheitsnetz wie im
+  // Block der Standardgrößen-Verwaltung weiter oben.
+  document.addEventListener('mouseleave',function(){dragging=false;});
 })();
 document.getElementById('quickAddInput').addEventListener('keydown',function(e){
   if(e.key==='Enter'){
