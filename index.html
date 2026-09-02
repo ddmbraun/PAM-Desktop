@@ -9850,7 +9850,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-02 · #889'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-02-b889) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-02 · #890'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-02-b890) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -9921,19 +9921,30 @@ async function _nbSaveWorkboard(){
 var _nbFotoNamen=null,_nbFotoNamenZeit=0;
 function _nbFotoNamenBauen(){
   const m={};
-  function nimm(id,name,hinweis){if(id&&name&&!m[id])m[id]={name:name,hinweis:hinweis||''};}
+  function nimm(id,name,hinweis,kunde){if(id&&name&&!m[id])m[id]={name:name,hinweis:hinweis||'',kunde:kunde||''};}
   try{
-    Object.keys(typeof boards==='object'&&boards?boards:{}).forEach(function(bn){
-      (Array.isArray(boards[bn])?boards[bn]:[]).forEach(function(t){
+    // b890: AUCH das Archiv durchgehen — der Probe-Auftrag 260084 lag archiviert,
+    // seine Fotos fehlten in der Tabelle (live gemessen 02.09.).
+    const _listen=[];
+    Object.keys(typeof boards==='object'&&boards?boards:{}).forEach(function(bn){_listen.push(boards[bn]);});
+    if(typeof archivedTasks!=='undefined'&&Array.isArray(archivedTasks))_listen.push(archivedTasks);
+    _listen.forEach(function(liste){
+      (Array.isArray(liste)?liste:[]).forEach(function(t){
         if(!t||typeof t!=='object')return;
-        const hin=t.nas?String(t.nas).split(/[\\/]/).filter(function(x){return x;}).pop():'';
-        (t.fotos||[]).forEach(function(f){nimm(f.driveId,f.name,hin);nimm(f.editedDriveId,f.editedName||f.name,hin);});
-        (t.attachments||[]).forEach(function(a){nimm(a.fileId,a.name,hin);});
+        const nasRoh=t.nas?String(t.nas):'';
+        const hin=nasRoh?nasRoh.split(/[\\/]/).filter(function(x){return x;}).pop():'';
+        // b890: Kunden-Weg — zeigt das NAS-Feld in die Kundenfreigabe, ist der
+        // Rest-Pfad zugleich der Ort unter Kunden_Syno auf G: (Cloud-Sync-Spiegel).
+        // Gemessen 02.09.: 702 von 726 Fotos liegen dort, nicht im App-Ordner.
+        const km=/^\\\\[^\\]+\\kunden\\(.+)$/i.exec(nasRoh);
+        const kunde=km?km[1].replace(/\\/g,'/'):'';
+        (t.fotos||[]).forEach(function(f){nimm(f.driveId,f.name,hin,kunde);nimm(f.editedDriveId,f.editedName||f.name,hin,kunde);});
+        (t.attachments||[]).forEach(function(a){nimm(a.fileId,a.name,hin,kunde);});
         (t.turnusListe||[]).forEach(function(l){
-          (l.dateien||[]).forEach(function(d){nimm(d.id,d.name,hin);});
-          (l.eintraege||[]).forEach(function(e2){(e2.dateien||[]).forEach(function(d){nimm(d.id,d.name,hin);});});
+          (l.dateien||[]).forEach(function(d){nimm(d.id,d.name,hin,kunde);});
+          (l.eintraege||[]).forEach(function(e2){(e2.dateien||[]).forEach(function(d){nimm(d.id,d.name,hin,kunde);});});
         });
-        (t.pruefberichte||[]).forEach(function(b2){(b2.fotos||[]).forEach(function(f){nimm(f.driveId,f.name,hin);nimm(f.editedDriveId,f.editedName||f.name,hin);});});
+        (t.pruefberichte||[]).forEach(function(b2){(b2.fotos||[]).forEach(function(f){nimm(f.driveId,f.name,hin,kunde);nimm(f.editedDriveId,f.editedName||f.name,hin,kunde);});});
       });
     });
   }catch(e){}
@@ -27157,11 +27168,13 @@ async function _fetchFotoBlobCached(driveId, token) {
   // (Kacheln, Großansicht, Verweis-Fotos, Galerien, PDF-Berichte, Maler).
   if (typeof PAM_NOTBETRIEB !== 'undefined' && PAM_NOTBETRIEB) {
     try {
-      let nbName = null, nbHinweis = '';
+      let nbName = null, nbHinweis = '', nbKunde = '';
       if (String(driveId).indexOf('nb:') === 0) nbName = String(driveId).slice(3);
-      else { const e = _nbFotoEintrag(driveId); if (e) { nbName = e.name; nbHinweis = e.hinweis; } }
+      else { const e = _nbFotoEintrag(driveId); if (e) { nbName = e.name; nbHinweis = e.hinweis; nbKunde = e.kunde || ''; } }
       if (!nbName) return null;
-      const r = await fetch('/api/foto?name=' + encodeURIComponent(nbName) + (nbHinweis ? '&ordner=' + encodeURIComponent(nbHinweis) : ''), { cache: 'no-store' });
+      const r = await fetch('/api/foto?name=' + encodeURIComponent(nbName)
+        + (nbHinweis ? '&ordner=' + encodeURIComponent(nbHinweis) : '')
+        + (nbKunde ? '&kunde=' + encodeURIComponent(nbKunde) : ''), { cache: 'no-store' });
       if (!r.ok) return null;
       const buf = await r.arrayBuffer();
       const ct = r.headers.get('content-type') || 'image/jpeg';
