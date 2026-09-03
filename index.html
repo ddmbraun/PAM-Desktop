@@ -9852,7 +9852,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-02 · #893'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-02-b893) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-02 · #895'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-02-b895) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -33485,13 +33485,25 @@ function _msRefreshThreadPopup(task){
   if(msgs.length)setTimeout(()=>_msTPSelectMail(taskId,0),80);
 }
 // b553 (Umbau V2, Punkt 2): „Anhänge dieser Mail" + PDF-Lesekopie direkt an der Mail –
+// b894: 👁-PDF-Chip – im Notbetrieb die Lesekopie als lokale Blob-Ansicht über den
+// Dokumente-Trichter öffnen (die Drive-Webseite braucht Internet), sonst wie immer.
+function _pamMailPdfOeffnen(fileId,url){
+  if(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB&&fileId&&typeof _pamDokCachedUrl==='function'){
+    _pamDokCachedUrl(fileId).then(function(u){
+      if(u)window.open(u,'_blank');
+      else showToast('⚠ PDF im Notbetrieb nicht auffindbar – liegt die Datei lokal vor?','warning',6000);
+    }).catch(function(e){showToast('⚠ PDF nicht lesbar: '+((e&&e.message)||e),'error',6000);});
+    return;
+  }
+  window.open(url,'_blank');
+}
 // zugeordnet über die messageId (V3/b548). Chips mit data-hvid erben die Hover-Vorschau.
 function _pamMailAnhangChipsHtml(tk,messageId){
   if(!tk||!messageId)return'';
   const chips=[];
   const _sq=function(s){return String(s||'').replace(/"/g,'').replace(/'/g,'');};
   (tk.emailPdfs||[]).forEach(function(p){
-    if(p&&p.url&&[p.messageId,p.gmailMessageId,p.msMessageId].indexOf(messageId)>=0)chips.push('<button type="button" onclick="event.stopPropagation();window.open(\''+_sq(p.url)+'\',\'_blank\')" style="padding:2px 8px;border-radius:5px;border:1px solid #f5c6c6;background:#fdf0f0;color:#922b21;font-size:10px;font-weight:700;cursor:pointer;" title="PDF-Lesekopie dieser Mail">👁 PDF</button>');
+    if(p&&p.url&&[p.messageId,p.gmailMessageId,p.msMessageId].indexOf(messageId)>=0)chips.push('<button type="button" onclick="event.stopPropagation();_pamMailPdfOeffnen(\''+_sq(p.fileId||'')+'\',\''+_sq(p.url)+'\')" style="padding:2px 8px;border-radius:5px;border:1px solid #f5c6c6;background:#fdf0f0;color:#922b21;font-size:10px;font-weight:700;cursor:pointer;" title="PDF-Lesekopie dieser Mail">👁 PDF</button>');
   });
   (tk.attachments||[]).forEach(function(a){
     if(a&&a.messageId===messageId)chips.push('<button type="button"'+(a.fileId?' data-hvid="'+esc(a.fileId)+'" data-hvtitel="'+esc(a.name||'')+'"':'')+' onclick="event.stopPropagation();window.open(\''+_sq(a.url)+'\',\'_blank\')" style="padding:2px 8px;border-radius:5px;border:1px solid var(--border,#e5e7eb);background:var(--bg1,#fff);color:var(--text1,#111);font-size:10px;cursor:pointer;">📎 '+esc((a.name||'Datei').substring(0,32))+'</button>');
@@ -34034,7 +34046,7 @@ function _pamDateienBereichHtml(tk){
     rows+='<div data-hvid="'+esc(o.fileId||'')+'" data-hvtitel="'+esc(o.subject||o.name||'')+'" style="'+zeile+'">';
     rows+='<span style="flex-shrink:0;">✉</span>';
     rows+='<span style="flex:1;min-width:0;color:var(--text1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="'+esc(o.name||'')+'">'+(_dstr(o.date)?_dstr(o.date)+' · ':'')+esc(o.subject||o.name||'E-Mail')+'</span>';
-    if(pdf)rows+='<button onclick="event.stopPropagation();window.open(\''+_sqV(pdf.url)+'\',\'_blank\')" style="'+knopf+'" title="PDF-Lesekopie ansehen">👁 PDF</button>';
+    if(pdf)rows+='<button onclick="event.stopPropagation();_pamMailPdfOeffnen(\''+_sqV(pdf.fileId||'')+'\',\''+_sqV(pdf.url)+'\')" style="'+knopf+'" title="PDF-Lesekopie ansehen">👁 PDF</button>';
     if(o.fileId)rows+='<button onclick="event.stopPropagation();_downloadEmailOrig(\''+_sqV(o.fileId)+'\',\''+_sqV(o.name||'email.eml')+'\')" style="'+knopf+'" title="Original herunterladen (in Outlook zu öffnen)">⬇ .eml</button>';
     rows+='</div>';
   });
@@ -37143,6 +37155,21 @@ async function downloadAttach(i){
       showToast('⚠ Download fehlgeschlagen: '+e.message,'error');return;
     }
   }
+  // b895: Notbetrieb – lokal über den Dokumente-Trichter laden, statt still
+  // die Drive-Webseite zu öffnen (die braucht Internet + Google-Anmeldung)
+  if(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB&&a.fileId){
+    try{
+      showToast('⏳ Wird lokal geladen…','info',3000);
+      const u=await _pamDokCachedUrl(a.fileId);
+      const blob2=await (await fetch(u)).blob();
+      const url2=URL.createObjectURL(blob2);
+      const el2=document.createElement('a');el2.href=url2;el2.download=a.name;el2.click();
+      setTimeout(function(){URL.revokeObjectURL(url2);},5000);
+    }catch(e){
+      showToast('⚠ Im Notbetrieb nicht auffindbar – liegt die Datei lokal vor? ('+((e&&e.message)||e)+')','warning',7000);
+    }
+    return;
+  }
   // Drive-Anhang ohne Token: URL öffnen
   if(a.url){window.open(a.url,'_blank');return;}
   // Lokaler Base64-Anhang
@@ -37329,8 +37356,50 @@ function _openAttachLightbox(a){
   ov.id='_attachLbOverlay';
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999999;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:zoom-out;gap:10px;';
   // Schließen per Klick auf Hintergrund oder Escape
-  ov.addEventListener('click',function(e){if(e.target===ov||e.target.id==='_attachLbClose')ov.remove();});
+  ov.addEventListener('click',function(e){if(e.target===ov||e.target.id==='_attachLbClose'||e.target.id==='_attachLbCloseNb')ov.remove();});
   document.addEventListener('keydown',function _lbEsc(e){if(e.key==='Escape'){e.stopImmediatePropagation();ov.remove();document.removeEventListener('keydown',_lbEsc);}});
+  // b895: Notbetrieb – Datei über den Dokumente-Trichter lokal holen. Die
+  // Google-Zweige unten hätten keinen Token, und iframe/img direkt auf die
+  // Drive-Adresse blieben still weiß (frame-ancestors). Fehlt die Datei
+  // lokal, gibt es eine EHRLICHE Meldung statt eines leeren Fensters.
+  if(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB&&a.fileId&&!a.data){
+    const nbLade='<div id="_attachLbNbWrap" style="color:#fff;padding:40px;text-align:center">⏳ Wird lokal geladen…<br><span style="opacity:.6;font-size:12px;">'+esc(a.name||'')+'</span></div>';
+    const nameLabelNb='<div style="color:rgba(255,255,255,.75);font-size:12px;background:rgba(0,0,0,.5);padding:4px 14px;border-radius:20px;max-width:80vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(a.name)+'</div>';
+    const closeBtnNb='<div id="_attachLbCloseNb" style="position:fixed;top:14px;right:18px;color:#fff;font-size:20px;cursor:pointer;background:rgba(0,0,0,.6);width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;z-index:1000000;">✕</div>';
+    ov.innerHTML=closeBtnNb+nameLabelNb+nbLade;
+    document.body.appendChild(ov);
+    (async function(){
+      try{
+        const u=await _pamDokCachedUrl(a.fileId);
+        const ph=document.getElementById('_attachLbNbWrap');
+        if(!ph)return;
+        const lname=String(a.name||'').toLowerCase();
+        if((a.type&&a.type.startsWith('image/'))||/\.(png|jpe?g|gif|webp|bmp)$/.test(lname)){
+          const img=document.createElement('img');
+          img.src=u;img.style.cssText='max-width:90vw;max-height:82vh;border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.7);cursor:default;object-fit:contain;';
+          img.onclick=function(e){e.stopPropagation();};
+          ph.replaceWith(img);
+        }else if(a.type==='application/pdf'||lname.endsWith('.pdf')){
+          const fr=document.createElement('iframe');
+          fr.src=u;fr.style.cssText='width:85vw;height:85vh;border:none;border-radius:8px;background:#fff;';
+          ph.replaceWith(fr);
+        }else if(_isVideo(a.type,a.name)&&_videoIsPlayable(a.type,a.name)){
+          const v=document.createElement('video');
+          v.src=u;v.controls=true;v.autoplay=true;v.setAttribute('playsinline','');
+          v.style.cssText='max-width:90vw;max-height:82vh;border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.7);background:#000;';
+          v.onclick=function(e){e.stopPropagation();};
+          ph.replaceWith(v);
+        }else{
+          window.open(u,'_blank');
+          ph.innerHTML='✅ Datei geöffnet (neuer Tab)<br><span style="font-size:12px;opacity:.7">'+esc(a.name)+'</span>';
+        }
+      }catch(e){
+        const ph=document.getElementById('_attachLbNbWrap');
+        if(ph)ph.innerHTML='⚠ Im Notbetrieb nicht auffindbar – liegt die Datei lokal vor?<br><span style="font-size:12px;opacity:.6">'+esc(a.name||'')+'</span>';
+      }
+    })();
+    return;
+  }
   // Inhalt
   let inner='';
   if(_isVideo(a.type,a.name)){
@@ -41709,14 +41778,12 @@ async function _handleFotoDrop(dt){
 
 // Download via Drive API → Datei in Downloads speichern → dort doppelklicken für Outlook
 async function _downloadEmailOrig(fileId,filename){
-  if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden.','error');return;}
+  if(!gdriveToken&&!(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB)){showToast('⚠ Bitte zuerst mit Google Drive verbinden.','error');return;}
   try{
     showToast('⏳ Lädt herunter…','info');
-    const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media',{
-      headers:{Authorization:'Bearer '+gdriveToken}
-    });
-    if(!r.ok)throw new Error('HTTP '+r.status);
-    const arrayBuf=await r.arrayBuffer();
+    // b894: über den Dokumente-Trichter – trägt Notbetrieb (Helfer) und Normalweg
+    const u=await _pamDokCachedUrl(fileId);
+    const arrayBuf=await (await fetch(u)).arrayBuffer();
     // MIME-Type anhand Endung setzen damit Windows/Mac die richtige App zuordnet
     const lname=(filename||'').toLowerCase();
     const mime=lname.endsWith('.eml')?'message/rfc822':lname.endsWith('.msg')?'application/vnd.ms-outlook':'application/octet-stream';
@@ -42643,16 +42710,14 @@ async function _openEmailOrigInlinePreview(item){
     showToast('⚠ Diese E-Mail wurde nicht in Drive gespeichert (kein fileId). Bitte erneut einziehen.','error',5000);
     return;
   }
-  if(!gdriveToken){
+  if(!gdriveToken&&!(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB)){
     _closeEmlPreview();
     showToast('⚠ Bitte zuerst mit Google Drive verbinden (oben rechts: ☁️ Google Drive)','error',4000);
     return;
   }
   try{
-    const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(item.fileId)+'?alt=media',
-      {headers:{Authorization:'Bearer '+gdriveToken}});
-    if(!r.ok)throw new Error('HTTP '+r.status);
-    const text=await r.text();
+    // b894: über den Dokumente-Trichter – trägt Notbetrieb (Helfer) und Normalweg
+    const text=await _pamDokCachedText(item.fileId);
     if(!document.getElementById(GID))return; // overlay was closed
     const info=_parseEmlText(text);
     if(info.subject)titleEl.textContent='📨 '+(info.subject||item.name||'E-Mail');
@@ -43019,6 +43084,9 @@ async function _pamDokCachedUrl(fileId){
     const u=await _fetchFotoBlobCached(fileId,gdriveToken);
     if(u)return u;
   }catch(e){console.warn('[PAM] Dokument-Cache nicht verfügbar:',e);}
+  // b895: Im Notbetrieb gibt es keinen Google-Rückfall – ehrlicher Fehler statt
+  // eines sinnlosen Abrufs ohne Token (der zeigte nur verwirrend „HTTP 401")
+  if(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB)throw new Error('Im Notbetrieb nicht auffindbar – liegt die Datei lokal vor?');
   // Rückfall: direkter Abruf ohne dauerhaften Speicher
   const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
   if(!r.ok)throw new Error('HTTP '+r.status);
@@ -47488,17 +47556,30 @@ async function _pepLoadPreview(m,task,previewEl){
       d._cachedBodyHtml=res.html||('<pre style="white-space:pre-wrap;">'+_escHtml(res.plain||'')+'</pre>');
       _ri(d._cachedBodyHtml);return;
     }
-    if(m.type==='eml'&&d.fileId&&typeof gdriveToken!=='undefined'&&gdriveToken){
+    if(m.type==='eml'&&d.fileId&&((typeof gdriveToken!=='undefined'&&gdriveToken)||(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB))){
       if(typeof _emMailBodyCache!=='undefined'&&_emMailBodyCache[d.fileId]){const c=_emMailBodyCache[d.fileId];_ri(c.bodyHtml||('<pre>'+_escHtml(c.bodyText||'')+'</pre>'));return;}
-      const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(d.fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
-      if(!r.ok)throw new Error('Drive '+r.status);
-      const text=await r.text();
+      // b894: über den Dokumente-Trichter statt direkt zu Drive – der kennt den
+      // Notbetriebs-Weg (Helfer per Dateiname) UND den Normalweg (Cache+Drive)
+      const text=await _pamDokCachedText(d.fileId);
       if(typeof _parseEmlText==='function'){
         const info=_parseEmlText(text);
         let h=info.bodyHtml||'';
         if(h&&info.cidMap){const ce=Object.entries(info.cidMap).sort(function(a,b){return b[0].length-a[0].length;});ce.forEach(function(e){const re=new RegExp(e[0].replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'g');h=h.replace(re,e[1].replace(/\$/g,'$$$$'));});}
         if(typeof _emMailBodyCache!=='undefined')_emMailBodyCache[d.fileId]={bodyHtml:h,bodyText:info.bodyText||''};
         _ri(h||('<pre>'+_escHtml(info.bodyText||'(kein Inhalt)')+'</pre>'));return;
+      }
+    }
+    // b894: Verlaufseintrag ohne Live-Zugang – gibt es die abgelegte Zwillings-Mail (.eml)?
+    // (Die legt _saveThreadMailsAsEml beim Verlauf-Laden an; die Liste blendet sie nur aus.)
+    if(m.type==='ms'||m.type==='gmail'){
+      const _kennung=d.messageId||d.internetMessageId||'';
+      const zw=_kennung?((task.emailOriginals||[]).find(function(o){return o&&o.fileId&&o.messageId===_kennung;})):null;
+      if(zw&&((typeof gdriveToken!=='undefined'&&gdriveToken)||(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB))){
+        return _pepLoadPreview({type:'eml',data:zw,idx:(task.emailOriginals||[]).indexOf(zw)},task,previewEl);
+      }
+      if(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB){
+        if(bodyEl)bodyEl.innerHTML='<div style="padding:20px;font-size:13px;color:var(--text2);line-height:1.6;">🔌 <b>Notbetrieb:</b> Ohne Internet sind nur abgelegte Mails (.eml / 👁 PDF) lesbar – dieser Verlaufseintrag braucht Outlook/Gmail.'+(d.preview?'<br><br><b>Kurzvorschau:</b><br>'+_escHtml(d.preview):'')+'</div>';
+        return;
       }
     }
     if(bodyEl)bodyEl.innerHTML='<div style="padding:20px;color:var(--text2);font-size:13px;">⚠ Keine Verbindung oder kein Inhalt.</div>';
