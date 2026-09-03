@@ -9852,7 +9852,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-03 · #897'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-03-b897) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-03 · #898'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-03-b898) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -52113,7 +52113,10 @@ function _ztlPwSchreiben(wert){
   var w=String(wert==null?'':wert);
   try{if(typeof localStorage!=='undefined')localStorage.setItem(ZETTEL_PW_KEY,w);}catch(e){}
   try{if(typeof pamSettings!=='undefined'&&pamSettings)pamSettings.zettelPw=w;}catch(e){}
-  try{if(typeof settingsSaveToDrive==='function')settingsSaveToDrive();}catch(e){}
+  // b898: Päckchen mit dem EINEN Feld, das dieser Weg anfasst. Vorher schrieb er das
+  // ganze Objekt zurück und löschte damit Ordner und Briefkopf eines anderen Rechners.
+  // Ein leerer String ist ein gültiger Wert („Sichtschutz aus", b819) und muss ankommen.
+  try{if(typeof settingsSaveToDrive==='function')settingsSaveToDrive({zettelPw:w});}catch(e){}
 }
 function _ztlPwSetzen(pw){_ztlPwSchreiben(_ztlPwHash(pw));}
 // Klick auf den dritten Reiter. Beim ersten Mal wird das Kennwort festgelegt.
@@ -52533,7 +52536,55 @@ function settingsApply(){
   DEFAULT_FOLDER_OBJEKTE=pamSettings.ordnerObjekte||'';
 }
 
-async function settingsSaveToDrive(){
+// b898: Liest den AKTUELLEN Stand der Einstellungsdatei und gibt ihn NUR zurück.
+// Rührt pamSettings nicht an und ruft settingsApply() nicht – genau darin liegt der
+// Unterschied zu settingsRead(). Deren Object.assign würde, vor dem Speichern
+// eingesetzt, den eben im Dialog geänderten Wert mit dem Drive-Stand überschreiben:
+// der Klick auf „Speichern" wäre wirkungslos. Rückgabe {ok:false} heißt „Stand nicht
+// prüfbar" – dann wird bewusst NICHT geschrieben (Franks Entscheidung 03.09.).
+async function _settingsFrischLesen(){
+  if(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB){
+    try{
+      const r=await fetch('/api/datei?name='+SETTINGS_FILE_NAME,{cache:'no-store'});
+      if(r.status===404)return{ok:true,daten:{}}; // noch keine Datei – nichts zu verlieren
+      if(!r.ok)return{ok:false};
+      const d=await r.json();
+      return{ok:true,daten:(d&&typeof d==='object')?d:{}};
+    }catch(e){return{ok:false};}
+  }
+  if(!settingsFileId)return{ok:true,daten:{}};  // wird gleich neu angelegt – nichts zu verlieren
+  if(!gdriveTokenValid())return{ok:false};
+  try{
+    const r=await fetch('https://www.googleapis.com/drive/v3/files/'+settingsFileId+'?alt=media&_='+Date.now(),
+      {headers:{Authorization:'Bearer '+gdriveToken,'Cache-Control':'no-cache'},cache:'no-store'});
+    if(!r.ok)return{ok:false};
+    const d=await r.json();
+    return{ok:true,daten:(d&&typeof d==='object')?d:{}};
+  }catch(e){return{ok:false};}
+}
+
+// b898 (Befund M4, Paket 7): „geaendert" ist ein Päckchen mit GENAU den Feldern, die
+// der aufrufende Weg angefasst hat. Bis b897 schrieb jeder Weg das ganze pamSettings-
+// Objekt aus dem Arbeitsspeicher zurück – und der stammt vom Start der App, weil die
+// Datei nur EINMAL gelesen wird (settingsInit). Wer zuletzt speicherte, warf die Felder
+// des anderen Rechners weg: der ⚙-Dialog das zettelPw, der Kennwort-Weg Ordner und
+// Briefkopf (beide Richtungen am 03.09. mit ausgeführtem Code belegt).
+// Reihenfolge im Object.assign ist der ganze Punkt: frischer Stand UNTEN, Päckchen OBEN.
+async function settingsSaveToDrive(geaendert){
+  const _pk=(geaendert&&typeof geaendert==='object')?geaendert:null;
+  if(_pk){
+    const _frisch=await _settingsFrischLesen();
+    if(!_frisch.ok){
+      showToast('⚠ Einstellungen nicht gespeichert – der gespeicherte Stand ist gerade nicht prüfbar. Bitte gleich nochmal versuchen.','error',7000);
+      return false;
+    }
+    pamSettings=Object.assign({},_frisch.daten,_pk);
+    try{settingsApply();}catch(e){console.warn('[Einstellungen] Anwenden:',e);}
+  }else{
+    // Kein Päckchen = alter Weg. Die Dauerwache in test_b898 schlägt an, wenn ein
+    // neuer Aufrufer ohne Päckchen dazukommt.
+    console.warn('[Einstellungen] Speichern ohne Päckchen – Felder anderer Rechner können verlorengehen');
+  }
   // b886: Notbetrieb – über den Helfer auf diesen PC schreiben
   if(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB){
     const _nbInhalt=JSON.stringify(Object.assign({},pamSettings,{lastUpdated:new Date().toISOString()}),null,2);
@@ -52731,7 +52782,16 @@ async function savePamSettings(){
   pamSettings.firma={name:get('setFirmaName'),strasse:get('setFirmaStrasse'),plz:get('setFirmaPlz'),
     ort:get('setFirmaOrt'),tel:get('setFirmaTel'),mail:get('setFirmaMail')};
   settingsApply();
-  const ok=await settingsSaveToDrive();
+  // b898: GENAU die Felder, die dieser Dialog anfasst – zettelPw gehört bewusst NICHT
+  // dazu (das setzt nur der Zettel-Weg). Alles Nicht-Genannte bleibt so, wie es in der
+  // Datei steht, auch wenn ein anderer Rechner es inzwischen geändert hat.
+  const _geaendert={
+    ordnerBaustelle:pamSettings.ordnerBaustelle, ordnerEmail:pamSettings.ordnerEmail,
+    ordnerNotiz:pamSettings.ordnerNotiz, ordnerSchnellnotiz:pamSettings.ordnerSchnellnotiz,
+    ordnerObjekte:pamSettings.ordnerObjekte, hvKuerzel:pamSettings.hvKuerzel,
+    firma:pamSettings.firma
+  };
+  const ok=await settingsSaveToDrive(_geaendert);
   if(btn){btn.disabled=false;btn.textContent='Speichern';}
   if(ok){showToast('✓ Einstellungen gespeichert – gelten auf allen Rechnern','success',4000);closePamSettings();}
 }
