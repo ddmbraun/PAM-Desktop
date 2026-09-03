@@ -9852,7 +9852,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-02 · #895'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-02-b895) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-03 · #896'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-03-b896) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -9951,6 +9951,13 @@ function _nbFotoNamenBauen(){
           (l.eintraege||[]).forEach(function(e2){(e2.dateien||[]).forEach(function(d){nimm(d.id,d.name,hin,kunde);});});
         });
         (t.pruefberichte||[]).forEach(function(b2){(b2.fotos||[]).forEach(function(f){nimm(f.driveId,f.name,hin,kunde);nimm(f.editedDriveId,f.editedName||f.name,hin,kunde);});});
+        // b896: Dachplan-Pin-Fotos — tragen historisch KEINEN Namen; der
+        // Rückkehr-Lauf trägt ihn online nach, dann greifen sie auch hier
+        function _nbPins(p){
+          (p&&p.fotos?p.fotos:[]).forEach(function(f){nimm(f.driveId,f.name,hin,kunde);nimm(f.editedDriveId,f.editedName||f.name,hin,kunde);});
+          (p&&p.plan&&p.plan.pins?p.plan.pins:[]).forEach(_nbPins);
+        }
+        (t.dachplan&&t.dachplan.pins?t.dachplan.pins:[]).forEach(_nbPins);
       });
     });
   }catch(e){}
@@ -10060,6 +10067,36 @@ async function _nbRueckkehrLauf(){
       showToast('⏳ '+wartet+' Foto(s) noch nicht in Drive gefunden – Google lädt vielleicht noch hoch. Läuft „Drive für Desktop" am Büro-PC? Nächster Versuch beim nächsten Start.','info',9000);
     }
   }
+  // b896: Dachplan-Pin-Fotos ohne Namen — den Drive-Namen einmalig nachtragen,
+  // damit sie im Notbetrieb über die Namens-Tabelle auffindbar werden
+  // (gemessen 03.09.: 45 Stück in 5 Tasks; Pin-Einträge speicherten nie einen Namen).
+  try{
+    const ohneName=[];
+    Object.keys(typeof boards==='object'&&boards?boards:{}).forEach(function(bn){
+      (Array.isArray(boards[bn])?boards[bn]:[]).forEach(function(t){
+        function _rkPins(p){
+          (p&&p.fotos?p.fotos:[]).forEach(function(f){if(f&&f.driveId&&!f.name)ohneName.push(f);});
+          (p&&p.plan&&p.plan.pins?p.plan.pins:[]).forEach(_rkPins);
+        }
+        (t&&t.dachplan&&t.dachplan.pins?t.dachplan.pins:[]).forEach(_rkPins);
+      });
+    });
+    if(ohneName.length){
+      let nachgetragen=0;
+      for(const f of ohneName.slice(0,120)){
+        try{
+          const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(f.driveId)+'?fields=name',{headers:{Authorization:'Bearer '+gdriveToken}});
+          if(!r.ok)continue;
+          const d=await r.json();
+          if(d&&d.name){f.name=d.name;nachgetragen++;}
+        }catch(e){}
+      }
+      if(nachgetragen){
+        try{scheduleSave();}catch(e){}
+        showToast('✓ '+nachgetragen+' Dachplan-Foto-Namen nachgetragen (für den Notbetrieb)','success',6000);
+      }
+    }
+  }catch(e){}
   // Konfliktkopien der Kerndateien melden (Franks eigene Sicherungen "_alt_" zählen NICHT)
   try{
     if(typeof workspaceFolderId!=='undefined'&&workspaceFolderId){
@@ -33506,10 +33543,11 @@ function _pamMailAnhangChipsHtml(tk,messageId){
     if(p&&p.url&&[p.messageId,p.gmailMessageId,p.msMessageId].indexOf(messageId)>=0)chips.push('<button type="button" onclick="event.stopPropagation();_pamMailPdfOeffnen(\''+_sq(p.fileId||'')+'\',\''+_sq(p.url)+'\')" style="padding:2px 8px;border-radius:5px;border:1px solid #f5c6c6;background:#fdf0f0;color:#922b21;font-size:10px;font-weight:700;cursor:pointer;" title="PDF-Lesekopie dieser Mail">👁 PDF</button>');
   });
   (tk.attachments||[]).forEach(function(a){
-    if(a&&a.messageId===messageId)chips.push('<button type="button"'+(a.fileId?' data-hvid="'+esc(a.fileId)+'" data-hvtitel="'+esc(a.name||'')+'"':'')+' onclick="event.stopPropagation();window.open(\''+_sq(a.url)+'\',\'_blank\')" style="padding:2px 8px;border-radius:5px;border:1px solid var(--border,#e5e7eb);background:var(--bg1,#fff);color:var(--text1,#111);font-size:10px;cursor:pointer;">📎 '+esc((a.name||'Datei').substring(0,32))+'</button>');
+    // b896: über die b894-Weiche – im Notbetrieb lokale Blob-Ansicht statt Drive-Webseite
+    if(a&&a.messageId===messageId)chips.push('<button type="button"'+(a.fileId?' data-hvid="'+esc(a.fileId)+'" data-hvtitel="'+esc(a.name||'')+'"':'')+' onclick="event.stopPropagation();_pamMailPdfOeffnen(\''+_sq(a.fileId||'')+'\',\''+_sq(a.url)+'\')" style="padding:2px 8px;border-radius:5px;border:1px solid var(--border,#e5e7eb);background:var(--bg1,#fff);color:var(--text1,#111);font-size:10px;cursor:pointer;">📎 '+esc((a.name||'Datei').substring(0,32))+'</button>');
   });
   (tk.fotos||[]).forEach(function(f){
-    if(f&&f.messageId===messageId&&f.driveId)chips.push('<button type="button" data-hvid="'+esc(f.driveId)+'" data-hvtitel="'+esc(f.name||'')+'" onclick="event.stopPropagation();window.open(\'https://drive.google.com/file/d/'+_sq(f.driveId)+'/view\',\'_blank\')" style="padding:2px 8px;border-radius:5px;border:1px solid #B7DFBF;background:#E6F4EA;color:#15803D;font-size:10px;cursor:pointer;">🖼 '+esc((f.name||'Bild').substring(0,32))+'</button>');
+    if(f&&f.messageId===messageId&&f.driveId)chips.push('<button type="button" data-hvid="'+esc(f.driveId)+'" data-hvtitel="'+esc(f.name||'')+'" onclick="event.stopPropagation();_pamMailPdfOeffnen(\''+_sq(f.driveId)+'\',\'https://drive.google.com/file/d/'+_sq(f.driveId)+'/view\')" style="padding:2px 8px;border-radius:5px;border:1px solid #B7DFBF;background:#E6F4EA;color:#15803D;font-size:10px;cursor:pointer;">🖼 '+esc((f.name||'Bild').substring(0,32))+'</button>');
   });
   if(!chips.length)return'';
   return '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:5px;">'+chips.join('')+'</div>';
