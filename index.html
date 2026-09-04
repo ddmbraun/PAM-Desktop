@@ -7927,6 +7927,9 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
 .kalw-bl.over{border-color:var(--accent);}
 .kalw-oz{display:flex;gap:6px;flex-wrap:wrap;padding:6px;margin-bottom:10px;background:var(--bg3);border-radius:8px;}
 .kalw-scroll{overflow-x:auto;padding-bottom:6px;}
+/* b907: Rueckfallwert fuer Mo-Sa. Die gueltige Spaltenzahl setzt _kalRenderWeek als
+   style-Angabe aus KALW_DAYS - hier NICHT von Hand nachziehen, sonst laufen beide
+   Zahlen wieder auseinander (genau das liess Termine unter dem falschen Tag stehen). */
 .kalw-grid{display:grid;grid-template-columns:46px repeat(6,minmax(112px,1fr));gap:2px;min-width:730px;}
 .kalw-hd{font-size:11px;font-weight:600;text-align:center;padding:5px 0;color:var(--text2);border-radius:4px;}
 .kalw-hd.today{background:var(--accent);color:#fff;}
@@ -9858,7 +9861,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-04 · #906'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-04-b906) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-04 · #908'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-04-b908) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -20067,7 +20070,13 @@ function _kalRenderWeek(){
                        : '<span class="kalw-empty">Nichts offen — alle Außentermine sind verplant.</span>';
   h+='</div>';
 
-  h+='<div class="kalw-scroll"><div class="kalw-grid"><div></div>';
+  // b907: Spaltenzahl kommt aus KALW_DAYS, nicht mehr fest aus dem Stylesheet. Bei Mo-So
+  // hatte das feste Raster eine Tagesspalte zu wenig; die Zellen rutschten dann Zeile fuer
+  // Zeile weiter, ein Termin erschien unter einem spaeteren Tag und das Ziehen traf dadurch
+  // ein falsches Datum (das dann auch so nach Outlook ging). Breite mitgerechnet: Zeitspalte
+  // + je Tag eine Spalte + je Spaltenzwischenraum der Abstand.
+  const _kalwGridStyle='grid-template-columns:46px repeat('+KALW_DAYS+',minmax(112px,1fr));min-width:'+(46+KALW_DAYS*114)+'px;';
+  h+='<div class="kalw-scroll"><div class="kalw-grid" style="'+_kalwGridStyle+'"><div></div>';
   days.forEach((x,i)=>{
     const iso=_kalIso(x);
     h+='<div class="kalw-hd'+(iso===todayIso?' today':'')+'">'+WD[i]+' '+fmt(x)+'</div>';
@@ -20172,9 +20181,19 @@ async function _kalwApply(key,iso,hr,mins){
   renderKalender(true);
   if(isNew||!prev||prev.date!==t.date||prev.von!==t.von) _kalwShowUndo(tid,i,prev,isNew);
 
-  if(!msToken){ showToast('✓ '+_kalDe(iso)+' '+t.von+'–'+t.bis+' — Outlook nicht verbunden, kein Push','warning',5000); return; }
-  try{ await _msAutoPushTermine(task); showToast('✓ '+_kalDe(iso)+' '+t.von+'–'+t.bis+' · nach Outlook','info',3000); }
-  catch(e){ console.warn('[KALW] push',e); }
+  // b908: Die Erfolgsmeldung haengt jetzt am Ergebnis. Vorher stand hier ein blindes
+  // "nach Outlook" hinter dem await - _msAutoPushTermine faengt aber jeden Fehler selbst ab
+  // und wirft nichts weiter, das catch daneben lief also NIE. Wer den Termin verschob, las
+  // "nach Outlook", auch wenn dort nichts ankam.
+  const _zeit=_kalDe(iso)+' '+t.von+'–'+t.bis;
+  if(!msToken){ showToast('✓ '+_zeit+' — Outlook nicht verbunden, kein Push','warning',5000); return; }
+  let _b=null;
+  try{ _b=await _msAutoPushTermine(task); }
+  catch(e){ console.warn('[KALW] push',e); showToast('⚠ '+_zeit+' — Outlook nicht erreicht: '+((e&&e.message)||e),'warning',7000); return; }
+  if(_b&&_b.gepusht>0)            showToast('✓ '+_zeit+' · nach Outlook','info',3000);
+  else if(_b&&_b.fehler>0)        { /* _msAutoPushTermine hat den Grund schon gemeldet */ }
+  else if(_b&&_b.unvollstaendig>0)showToast('✓ '+_zeit+' — noch NICHT in Outlook: dem Termin fehlt eine Bezeichnung','warning',7000);
+  else                            showToast('✓ '+_zeit+' — nicht nach Outlook geschrieben (nichts zu senden)','warning',6000);
 }
 
 /* ── ↩ Rückgängig nach Verschieben/Einplanen (Fehlklick-Schutz, Paket 1 b483) ──
@@ -20681,7 +20700,12 @@ async function _kalSyncStatus(manual){
         const _baseLoc=(t._pushedLocation!=null)?t._pushedLocation:(((task&&task.adresse)||'').trim());
         const _outSubj=(ev.subject||'').trim();
         const _outLoc=(ev.location&&ev.location.displayName||'').trim();
-        const _metaChg=(!!_outSubj&&_outSubj!==(_baseSubj||'').trim())||(_outLoc!==(_baseLoc||'').trim());
+        // b908: Termine, die vor b908 geschrieben wurden, tragen in Outlook noch den doppelten
+        // Betreff (Auftragstitel zweimal). Ohne gemerkten Stand (_pushedSubject) wuerde der
+        // Vergleich sie jetzt ALLE als "in Outlook geaendert" melden, obwohl dort niemand war.
+        // Deshalb gilt auch die alte Schreibweise als unveraendert.
+        const _altSubj=_msTerminSubject(task,t,true).trim();
+        const _metaChg=(!!_outSubj&&_outSubj!==(_baseSubj||'').trim()&&_outSubj!==_altSubj)||(_outLoc!==(_baseLoc||'').trim());
         if(_metaChg){ if(!t.outlookMetaChanged||t.outlookSubject!==_outSubj||t.outlookLocation!==_outLoc){ t.outlookMetaChanged=true; t.outlookSubject=_outSubj; t.outlookLocation=_outLoc; changed=true; metaCount++; } else { metaCount++; } }
         else if(t.outlookMetaChanged){ t.outlookMetaChanged=false; delete t.outlookSubject; delete t.outlookLocation; changed=true; }
         // Phase 4 – externe Zeitänderung aus Outlook übernehmen
@@ -20720,20 +20744,27 @@ async function _kalSyncStatus(manual){
 // ══════════════════════════════════════════════════════
 function _normTime(s){ s=(s||'').trim(); const m=/^(\d{1,2}):(\d{2})/.exec(s); return m?m[1].padStart(2,'0')+':'+m[2]:s; }
 function _addMinToHHMM(hhmm,min){ const m=/^(\d{1,2}):(\d{2})$/.exec(hhmm||''); if(!m)return hhmm; let tot=(+m[1])*60+(+m[2])+min; tot=((tot%1440)+1440)%1440; return String(Math.floor(tot/60)).padStart(2,'0')+':'+String(tot%60).padStart(2,'0'); }
-function _msTerminSubject(task,t){
+// b908: alteArt=true liefert den Betreff in der Schreibweise VOR b908 (Beschreibung immer
+// angehaengt). Wird nur vom Abgleich gebraucht, um Alttermine wiederzuerkennen - siehe dort.
+function _msTerminSubject(task,t,alteArt){
   // Frei vergebener Name (✏ Name im Wochenraster) schlägt das automatische Muster
   const eigen=((t&&t.betreff)||'').trim();
   if(eigen)return eigen;
+  const _n=x=>String(x||'').replace(/\s+/g,'').toLowerCase();
   const ks=_kalKostenstelle(task);
   const title=((task&&task.title)||'').trim();
   const bez=((t&&t.beschreibung)||'').trim();
   let core=title;
   if(ks){
-    const _n=x=>x.replace(/\s+/g,'').toLowerCase();
     if(!(title && _n(title).startsWith(_n(ks)))) core=ks+(title?' '+title:'');
   }
   let s='🔷 '+(core||'Außentermin');
-  if(bez)s+=' – '+bez;
+  // b908: Die Beschreibung nur anhaengen, wenn sie nicht dasselbe sagt wie der Kern. Das
+  // Wochenraster fuellt eine leere Beschreibung mit dem Auftragstitel (_kalwApply) - dadurch
+  // stand der Titel im Outlook-Betreff zweimal. Bewusst eng geprueft (ganzer Text gleich),
+  // damit keine echte Beschreibung verschluckt wird, die nur ein Wort mit dem Titel teilt.
+  const doppelt=(_n(bez)===_n(title)||_n(bez)===_n(core));
+  if(bez && (alteArt || !doppelt)) s+=' – '+bez;
   return s.trim();
 }
 function _msTerminComplete(t){ return !!(t && t.date && t.von && (((t.beschreibung||'').trim())||((t.betreff||'').trim()))); }
@@ -20844,18 +20875,25 @@ async function _msPushTermin(task,t){
   return true;
 }
 // Auto-Push: nach dem Speichern eines Tasks – nur als _pamDirty markierte, vollständige Termine
+// b908: liefert eine Bilanz {gepusht, fehler, unvollstaendig, ohneToken}. Vorher gab die
+// Funktion nichts zurueck UND fing jeden Fehler selbst ab - der Aufrufer im Wochenraster
+// konnte gar nicht erkennen, ob etwas angekommen ist, und meldete blind Erfolg.
 async function _msAutoPushTermine(task){
-  if(!msToken||!task||!Array.isArray(task.ausserhausTermine))return;
+  const bilanz={gepusht:0,fehler:0,unvollstaendig:0,ohneToken:false};
+  if(!msToken){ bilanz.ohneToken=true; return bilanz; }
+  if(!task||!Array.isArray(task.ausserhausTermine))return bilanz;
   const openId=(document.getElementById('taskId')||{}).value||'';
   let changed=false;
   for(let i=0;i<task.ausserhausTermine.length;i++){
     const t=task.ausserhausTermine[i];
     if(!t||!t._pamDirty||t._pamPushing)continue;
-    if(!_msTerminComplete(t))continue;
+    // Unvollstaendig heisst: Datum, Uhrzeit oder Bezeichnung fehlt. Das wurde bisher still
+    // uebersprungen - jetzt zaehlt es, damit der Aufrufer es sagen kann.
+    if(!_msTerminComplete(t)){ bilanz.unvollstaendig++; continue; }
     t._pamPushing=true;
     try{
       await _msPushTermin(task,t);
-      t._pamDirty=false; changed=true;
+      t._pamDirty=false; changed=true; bilanz.gepusht++;
       // in offene Arbeitskopie spiegeln (per Index)
       if(openId===task.id && Array.isArray(taskAusserhausTermine) && taskAusserhausTermine[i]){
         taskAusserhausTermine[i].outlookEventId=t.outlookEventId;
@@ -20863,6 +20901,7 @@ async function _msAutoPushTermine(task){
         taskAusserhausTermine[i]._pamDirty=false;
       }
     }catch(e){
+      bilanz.fehler++;
       console.warn('[KAL] Auto-Push fehlgeschlagen:',e);
       showToast('⚠ Outlook: Termin nicht übernommen – '+(e.message||e),'warning',5000);
     }finally{ t._pamPushing=false; }
@@ -20872,6 +20911,7 @@ async function _msAutoPushTermine(task){
     if(document.getElementById('ausserhausTermineList'))renderAusserhausTermine();
     if(currentView==='kalender')renderKalender(true);
   }
+  return bilanz;
 }
 // Manueller Knopf (📆) – schreibt genau diesen Termin sofort nach Outlook (auch Bestand)
 function openOutlookTermin(i){
