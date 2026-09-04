@@ -9875,7 +9875,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-04 · #909'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-04-b909) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-04 · #910'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-04-b910) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -20759,21 +20759,49 @@ function _kalRemoveTermin(taskId,idx){
   renderKalender(true);
   showToast('Termin-Eintrag entfernt','info',2500);
 }
+// b910: Zeitraum des Outlook-Abgleichs an EINER Stelle. Vorher standen die Tage mitten in
+// der Abfrage – und niemand sah, dass ein Termin von vorletzter Woche gar nicht gefragt wird.
+// Gut ein Jahr in beide Richtungen; die Seitengrenze deckt 250 × 12 = 3000 Termine ab.
+const KAL_SYNC_TAGE_ZURUECK=400, KAL_SYNC_TAGE_VOR=400, KAL_SYNC_SEITEN_MAX=12;
 async function _kalSyncStatus(manual){
   if(_kalSyncing||!msToken)return;
   _kalSyncing=true; _kalLastSync=Date.now();
   try{
     const today=new Date(); today.setHours(0,0,0,0);
-    const from=new Date(today); from.setDate(from.getDate()-2);
-    const to=new Date(today);   to.setDate(to.getDate()+31);
-    const url='https://graph.microsoft.com/v1.0/me/calendarView?startDateTime='+from.toISOString()+'&endDateTime='+to.toISOString()+'&$top=250&$select=id,subject,location,start,end,lastModifiedDateTime,webLink';
-    const _kalFetch=()=>fetch(url,{headers:{Authorization:'Bearer '+msToken,Prefer:'outlook.timezone="Europe/Berlin"'}});
-    let r=await _kalFetch();
-    // Token abgelaufen → einmal erneuern und erneut versuchen
-    if(r.status===401){ try{ if(typeof _msRefreshToken==='function' && await _msRefreshToken()){ r=await _kalFetch(); } }catch(_){}}
-    if(!r.ok){console.warn('[KAL] calendarView HTTP',r.status); if(manual)showToast('⚠ Outlook-Abgleich fehlgeschlagen (HTTP '+r.status+')','error',5000); return;}
-    const data=await r.json();
-    const evMap=new Map(); (data.value||[]).forEach(e=>evMap.set(e.id,e));
+    // b910: Der Zeitraum reichte von vorgestern bis in 31 Tage. Alles ausserhalb fand der
+    // Abgleich nicht in der Antwort - und hielt es deshalb fuer "in Outlook geloescht",
+    // obwohl der Termin dort steht. Franks Befund vom 04.09.: ein Termin vom 26.08. stand
+    // faelschlich unter "⚠ geloescht". Jetzt gut ein Jahr in beide Richtungen.
+    const from=new Date(today); from.setDate(from.getDate()-KAL_SYNC_TAGE_ZURUECK);
+    const to=new Date(today);   to.setDate(to.getDate()+KAL_SYNC_TAGE_VOR);
+    const vonIso=_kalIso(from), bisIso=_kalIso(to);
+    const basis='https://graph.microsoft.com/v1.0/me/calendarView?startDateTime='+from.toISOString()+'&endDateTime='+to.toISOString()+'&$top=250&$select=id,subject,location,start,end,lastModifiedDateTime,webLink';
+    // b910: Blaettern. Ein groesserer Zeitraum passt nicht mehr auf eine Seite - ohne
+    // Blaettern waere die Erweiterung eine VERSCHLIMMERUNG: alles ab dem 251. Termin
+    // haette als geloescht gegolten. Bricht das Blaettern ab, ist die Liste unvollstaendig
+    // und es wird unten GAR NICHTS als geloescht gemeldet.
+    const evMap=new Map();
+    let vollstaendig=true, url=basis, seiten=0;
+    while(url && seiten<KAL_SYNC_SEITEN_MAX){
+      const _kalFetch=()=>fetch(url,{headers:{Authorization:'Bearer '+msToken,Prefer:'outlook.timezone="Europe/Berlin"'}});
+      let r=await _kalFetch();
+      // Token abgelaufen → einmal erneuern und erneut versuchen
+      if(r.status===401){ try{ if(typeof _msRefreshToken==='function' && await _msRefreshToken()){ r=await _kalFetch(); } }catch(_){}}
+      if(!r.ok){
+        console.warn('[KAL] calendarView HTTP',r.status);
+        if(manual)showToast('⚠ Outlook-Abgleich fehlgeschlagen (HTTP '+r.status+')','error',5000);
+        if(seiten===0)return;            // gar nichts bekommen → nichts tun
+        // Mittendrin abgebrochen → keine Loeschungen melden. Doppelt gesichert: `url` traegt
+        // hier noch den nextLink der vorigen Seite, deshalb greift auch die Wache unterhalb
+        // der Schleife. Beide stehen mit Absicht da – faellt eine weg, haelt die andere.
+        vollstaendig=false; break;
+      }
+      const data=await r.json();
+      (data.value||[]).forEach(e=>evMap.set(e.id,e));
+      url=data['@odata.nextLink']||'';
+      seiten++;
+    }
+    if(url){ vollstaendig=false; console.warn('[KAL] Abgleich: mehr Termine als '+KAL_SYNC_SEITEN_MAX+' Seiten – Loeschungen werden nicht gemeldet'); }
     const openId=(document.getElementById('taskId')||{}).value||'';
     let changed=false, pulled=0, metaCount=0;
     Object.values(boards||{}).forEach(tasks=>(tasks||[]).forEach(task=>{
@@ -20781,7 +20809,16 @@ async function _kalSyncStatus(manual){
         if(!t||!t.outlookEventId)return;
         const ev=evMap.get(t.outlookEventId);
         // Löschung erkennen (Phase 5)
-        if(!ev){ if(!t.outlookDeleted){t.outlookDeleted=true;changed=true;} return; }
+        if(!ev){
+          // b910: „Nicht in der Antwort" heisst NICHT „geloescht". Es heisst nur, dass der
+          // Termin nicht abgefragt wurde. Beurteilt wird deshalb ausschliesslich, was im
+          // abgefragten Zeitraum liegt - und nur, wenn die Liste vollstaendig geladen wurde.
+          if(!vollstaendig)return;
+          const d=((t.date||t.datum)||'').trim();
+          if(!d || d<vonIso || d>bisIso)return;
+          if(!t.outlookDeleted){t.outlookDeleted=true;changed=true;}
+          return;
+        }
         if(t.outlookDeleted){t.outlookDeleted=false;changed=true;}
         // webLink für „📆 In Outlook öffnen" merken
         if(ev.webLink && t.outlookWebLink!==ev.webLink){ t.outlookWebLink=ev.webLink; changed=true; }
