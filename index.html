@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com https://ssl.gstatic.com; connect-src 'self' blob: https://*.googleapis.com https://accounts.google.com https://www.googleapis.com https://oauth2.googleapis.com https://lh3.googleusercontent.com https://*.googleusercontent.com https://login.microsoftonline.com https://graph.microsoft.com https://europe-west1-ptp-workboard.cloudfunctions.net https://photon.komoot.io https://nominatim.openstreetmap.org; img-src 'self' data: blob: https: https://*.googleusercontent.com https://drive.google.com https://lh3.googleusercontent.com; style-src 'self' 'unsafe-inline' https://ssl.gstatic.com; frame-src 'self' https://accounts.google.com https://drive.google.com https://login.microsoftonline.com https://login.live.com https://*.msftauth.net https://*.msauth.net blob:; worker-src blob: 'self';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data: blob:; script-src 'self' 'unsafe-inline' https://accounts.google.com https://ssl.gstatic.com; connect-src 'self' blob: https://*.googleapis.com https://accounts.google.com https://www.googleapis.com https://oauth2.googleapis.com https://lh3.googleusercontent.com https://*.googleusercontent.com https://login.microsoftonline.com https://graph.microsoft.com https://europe-west1-ptp-workboard.cloudfunctions.net https://photon.komoot.io https://nominatim.openstreetmap.org; img-src 'self' data: blob: https: https://*.googleusercontent.com https://drive.google.com https://lh3.googleusercontent.com; style-src 'self' 'unsafe-inline' https://ssl.gstatic.com; frame-src 'self' https://accounts.google.com https://drive.google.com https://login.microsoftonline.com https://login.live.com https://*.msftauth.net https://*.msauth.net blob:; worker-src blob: 'self';">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PAM Workboard</title>
 <link rel="manifest" href="manifest.json">
@@ -8142,6 +8142,12 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
     <span style="font-size:10px;color:var(--text2);">(inkl. Aufgaben + Freie Termine)</span>
   </span>
 </div>
+<!-- b900: Trefferzeile. Sagt bei gesetztem Filter, in WELCHEN Spalten die Treffer liegen.
+     Grund: das Board scrollt waagerecht und startet mit eingeklappten Spalten (b632) –
+     Treffer in einer schmalen oder rechts ausserhalb liegenden Spalte waren nicht zu
+     finden. Wird ausschliesslich von renderKanban() befuellt; jede andere Ansicht
+     leert und versteckt sie wieder (_pamfTrefferAus). -->
+<div id="pamfTrefferZeile" style="display:none;padding:5px 16px 7px;background:var(--bg2);border-bottom:1px solid var(--border);align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;"></div>
 <!-- AUFTRAG ANLEGEN DROP-ZONES -->
 <div class="drop-zone-row"><div id="auftragDropBar"
   ondragenter="event.preventDefault();this.classList.add('adz-hover')"
@@ -9852,7 +9858,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-03 · #898'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-03-b898) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-03 · #901'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-03-b901) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -19528,6 +19534,11 @@ function renderKanban(){
   // Auch Statuses anzeigen, die in den Tasks vorkommen aber nicht in den Spalten stehen
   const taskOnlyStatuses=[...new Set((boards[currentBoard]||[]).map(t=>t.status).filter(s=>s&&!curStatuses.includes(s)))];
   const displayStatuses=[...curStatuses,...taskOnlyStatuses];
+  // b900: EINMAL je Zeichnung feststellen, ob ueberhaupt gefiltert wird. Stand bis b882
+  // innerhalb der Spaltenschleife und wurde je Spalte neu berechnet; jetzt brauchen es
+  // auch das Aufklappen der Treffer-Spalten und die Trefferzeile – eine Quelle, nicht drei.
+  const _fAktiv=(typeof _pamFIrgendeinFilter==='function')&&_pamFIrgendeinFilter();
+  _pamfTrefferZeile(_fAktiv,tasks,displayStatuses);
   let html='<div class="kanban">';
   // Alle-Spalte ganz links einfügen wenn aktiv
   if(_alleColVisible) html += _renderAlleCol();
@@ -19560,7 +19571,13 @@ function renderKanban(){
   }
   displayStatuses.forEach((s,i)=>{
     let col=tasks.filter(t=>t.status===s);
-    const isCollapsed=!!collapsedCols[s];
+    // b900: Liegt bei gesetztem Filter etwas in dieser Spalte, klappt sie von selbst auf.
+    // Ohne das steckt der Treffer in einer 36 px schmalen Leiste mit senkrechtem Titel –
+    // die leuchtende Zahl aus b882 nuetzt nichts, wenn man die Leiste gar nicht sieht.
+    // ⛔ collapsedCols wird dabei NICHT veraendert: der gemerkte Spaltenzustand
+    // (_zulSpalte, localStorage) darf sich durchs Filtern nicht verstellen. Das Aufklappen
+    // ist rein optisch – Filter weg, Board wieder genau wie vorher.
+    const isCollapsed=!!collapsedCols[s] && !(_fAktiv && col.length>0);
     // Sortierung anwenden
     const cs=_colSort[s];
     if(cs){
@@ -19579,7 +19596,8 @@ function renderKanban(){
     };
     // b882: Bei gesetztem Filter sagt die Spalte selbst, ob hier etwas liegt.
     // ⛔ Nur wenn wirklich gefiltert wird – ohne Filter ist eine leere Spalte normal.
-    const _fAktiv=(typeof _pamFIrgendeinFilter==='function')&&_pamFIrgendeinFilter();
+    // b900: _fAktiv kommt jetzt von oberhalb der Schleife (eine Quelle fuer alle drei
+    // Verwendungen: blasse Spalte, leuchtende Zahl, Aufklappen + Trefferzeile).
     const _leerKl=(_fAktiv&&!col.length)?' pamf-leer':'';
     const _zahlKl=(_fAktiv&&col.length)?' pamf-treffer':'';
     const _zahlTip=_fAktiv?` title="${col.length} Treffer in dieser Spalte – gezählt wird, was der Filter übrig lässt"`:'';
@@ -22956,12 +22974,73 @@ function _pamFIrgendeinFilter(){
       ||_pamFFaellig||searchQuery||(filters&&(filters.archiv||filters.spaeterBearbeiten)));
   }catch(e){return false;}
 }
+// b900: Trefferzeile – beantwortet die Frage „der Filter sagt 2, aber WO sind die zwei?".
+// Das Board scrollt waagerecht und startet mit eingeklappten Spalten (b632); ein Treffer
+// in einer schmalen oder rechts ausserhalb liegenden Spalte war schlicht nicht zu finden.
+// ⛔ Nur fuers Kanban: in Liste und Tabelle steht ohnehin alles untereinander.
+// Wird aus renderKanban() gerufen – NACH updateFilterDropdowns(), das sie vorher versteckt.
+function _pamfTrefferZeile(aktiv,tasks,statuses){
+  try{
+    var el=document.getElementById('pamfTrefferZeile');
+    if(!el)return;
+    var v=(typeof currentView!=='undefined')?currentView:'kanban';
+    if(!aktiv||v!=='kanban'){el.style.display='none';el.innerHTML='';return;}
+    var liste=tasks||[],teile=[],summe=0,ohne=0;
+    (statuses||[]).forEach(function(s){
+      var n=0;
+      for(var i=0;i<liste.length;i++) if(liste[i].status===s) n++;
+      if(!n)return;
+      summe+=n;
+      teile.push('<button onclick="_pamfSpringeZuSpalte(this.getAttribute(\'data-sp\'))" data-sp="'+esc(s)+'"'
+        +' title="Zu dieser Spalte springen – die erste Karte wird hervorgehoben"'
+        +' style="cursor:pointer;border:1px solid var(--accent);border-radius:6px;background:var(--bg3);'
+        +'color:var(--accent);font-size:11px;font-weight:600;padding:2px 8px;line-height:1.6;">'
+        +esc(s)+' <b>'+n+'</b></button>');
+    });
+    for(var j=0;j<liste.length;j++) if(!liste[j].status) ohne++;
+    if(ohne) teile.push('<span style="font-size:11px;color:var(--text2);border:1px dashed var(--border);'
+      +'border-radius:6px;padding:2px 8px;">ohne Spalte <b>'+ohne+'</b></span>');
+    var ges=summe+ohne;
+    el.innerHTML = ges
+      ? '<span style="color:var(--text2);">🔍 '+ges+' Treffer im Board:</span>'+teile.join('')
+      : '<span style="color:var(--text2);">🔍 Keine Karte auf diesem Board passt zum Filter.</span>';
+    el.style.display='flex';
+  }catch(e){console.warn('[PAMF] Trefferzeile:',e);}
+}
+// b900: Klick aus der Trefferzeile – waagerecht zur Spalte scrollen, dann die erste Karte
+// hervorheben. ⚡ Wiederverwendet _pamBPScrollAndHighlight (b624), das die globale Suche
+// und die Board-Uebersicht schon nutzen – kein zweiter Weg fuer dieselbe Sache.
+// Die Spalte wird ueber data-status gesucht statt per querySelector-Text: so koennen
+// Anfuehrungszeichen im Spaltennamen die Suche nicht zerlegen.
+function _pamfSpringeZuSpalte(status){
+  try{
+    var body=null;
+    document.querySelectorAll('.kanban-col-body[data-status]').forEach(function(b){
+      if(b.getAttribute('data-status')===status) body=b;
+    });
+    if(!body)return;
+    var col=body.closest('.kanban-col');
+    if(col&&col.scrollIntoView) col.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'});
+    var card=body.querySelector('.task-card[data-id]');
+    if(!card)return;
+    var id=card.getAttribute('data-id');
+    // Erst scrollen lassen, dann hervorheben – sonst misst scrollIntoView die alte Lage.
+    setTimeout(function(){
+      if(typeof _pamBPScrollAndHighlight==='function') _pamBPScrollAndHighlight(id);
+    },320);
+  }catch(e){console.warn('[PAMF] Sprung:',e);}
+}
 function _pamFLeisteAnpassen(){
   try{
     var v=(typeof currentView!=='undefined')?currentView:'kanban';
     // ⚠ Nur verstecken, NICHT zurücksetzen: die Einstellung gilt im Kanban weiter,
     // genau so, wie sie dort gesetzt wurde.
     document.body.classList.toggle('pamf-ohnefilter',PAMF_ANSICHTEN_MIT_FILTER.indexOf(v)<0);
+    // b900: Trefferzeile bei jedem Zeichnen zuerst wegnehmen. renderKanban() setzt sie
+    // gleich danach neu – jede andere Ansicht laesst sie damit verschwinden, ohne dass
+    // jeder Ansichtswechsel einzeln daran denken muss.
+    var tz=document.getElementById('pamfTrefferZeile');
+    if(tz&&v!=='kanban'){tz.style.display='none';tz.innerHTML='';}
   }catch(e){console.warn('[PAMF] Leiste:',e);}
 }
 function updateFilterDropdowns(){
@@ -35345,9 +35424,9 @@ async function _msOpenMailOverlay(taskId,idx){
           let plainText='';
           try{
             if(data.body?.contentType==='html'){
-              const tmp=document.createElement('div');
-              tmp.innerHTML=data.body.content||'';
-              plainText=tmp.innerText||tmp.textContent||'';
+              // b901: DOMParser statt innerHTML in ein loses div – parst inert, lädt keine Bilder, führt nichts aus
+              const tmp=new DOMParser().parseFromString(data.body.content||'','text/html').body;
+              plainText=(tmp&&tmp.textContent)||'';
             } else {
               plainText=data.body?.content||m.preview||'';
             }
@@ -38252,6 +38331,35 @@ async function _createGoogleKontaktFromPreview(){
     if(!resp.ok){const e=await resp.json();throw new Error(e.error&&e.error.message||resp.status);}
     const created=await resp.json();
     const personRN=created.resourceName||'';
+    /* b899: Der eben angelegte Kontakt muss dem Merkzettel sofort bekannt sein.
+       Sonst prüft der nächste Anlege-Dialog im selben Seitenaufruf gegen den
+       Abzug von vorhin, hält den Kontakt für unbekannt, und man legt ihn ein
+       zweites Mal an. Genau so ist am 01.09.2026 eine echte zweite Karte in
+       Google entstanden; nach einem Neuladen der Seite warnte PAM richtig.
+       ⛔ NUR nachtragen, wenn der Merkzettel schon gefüllt ist. Aus einem noch
+       leeren Merkzettel eine Liste mit einem einzigen Eintrag zu machen hieße:
+       PAM behauptet, drüben nachgesehen zu haben, und beurteilt daraufhin auch
+       alle übrigen Adressen - eine Aussage über etwas, das nie stattgefunden
+       hat. Ist noch nichts geladen, wird beim nächsten Öffnen ohnehin geholt.
+       ⛔ Der Name kommt aus Googles Antwort, nicht aus dem Eingabefeld: beim
+       Anlegen wandert die Straße mit in den Nachnamen (so gewollt), und der
+       Merkzettel soll zeigen, was drüben wirklich steht - nicht, was hier
+       eingetippt wurde. Sonst verhielte sich PAM vor und nach einem Neuladen
+       verschieden, und das wäre nur eine andere Art von Unwahrheit.
+       ⛔ Bleibt im Arbeitsspeicher - wie der ganze Abgleich seit b871.
+       ⛔ Ein Fehler hier darf das Anlegen nie umstoßen: der Kontakt steht dann
+       schon drüben, die Erfolgsmeldung muss kommen. */
+    try{
+      if(Array.isArray(_gkAlle)){
+        _gkAlle.push({
+          name:((created.names||[])[0]||{}).displayName||name,
+          firma:hausverwaltung||'',
+          tels:tel?[tel]:[],
+          mails:email?[email]:[]
+        });
+        _gkIdxBauen();
+      }
+    }catch(eMerk){console.warn('[GK] Merkzettel:',eMerk);}
     let labelOK=false;
     if(_labelRN&&personRN){
       try{
@@ -42816,6 +42924,7 @@ async function _openEmailOrigInlinePreview(item){
     const blobUrl=URL.createObjectURL(blob);
     loader.remove();
     const fr=document.createElement('iframe');
+    fr.sandbox='allow-same-origin allow-popups allow-popups-to-escape-sandbox'; // b901: kein Skript aus fremder Mail
     fr.src=blobUrl;
     fr.style.cssText='width:90vw;max-width:860px;height:86vh;border:none;border-radius:8px;background:#fff;box-shadow:0 8px 32px rgba(0,0,0,.4);';
     // Bug-Fix: Blob-URL erst nach kurzem Delay freigeben – onload kann vor vollständigem Render feuern
@@ -43108,11 +43217,13 @@ function _pamDokPrevImg(src){
   p.style.cssText='flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:auto;padding:12px;';
   p.innerHTML='<img src="'+src+'" alt="" style="max-width:100%;max-height:100%;object-fit:contain;border-radius:6px;">';
 }
-function _pamDokPrevFrame(src){
+function _pamDokPrevFrame(src,sandkasten){
   const p=document.getElementById('_pamDokPrev');if(!p)return;
   p.style.cssText='flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;';
   p.innerHTML='';
   const fr=document.createElement('iframe');
+  // b901: HTML-Dokumente aus Drive nur im Sandkasten (gleiche Herkunft wie PAM); PDFs rufen ohne Schalter – Chromium zeigt PDFs in sandboxten Rahmen nicht
+  if(sandkasten)fr.sandbox='allow-same-origin allow-popups allow-popups-to-escape-sandbox';
   fr.style.cssText='flex:1;width:100%;border:none;background:#fff;';
   fr.src=src;
   p.appendChild(fr);
@@ -43178,14 +43289,14 @@ async function _pamDokPrevDriveImg(fileId){
 }
 async function _pamDokPrevHtml(fileId){
   const ck='html|'+fileId;
-  if(_pamDokCache.has(ck)){_pamDokPrevFrame(_pamDokCache.get(ck));return;}
+  if(_pamDokCache.has(ck)){_pamDokPrevFrame(_pamDokCache.get(ck),true);return;}
   try{
     _pamDokPrevBusy('⏳ Lädt…');
     const html=await _pamDokCachedText(fileId);
     if(!document.getElementById('_pamDokOverlay'))return;
     const u=URL.createObjectURL(new Blob([html],{type:'text/html'}));
     _pamDokBlobs.push(u);_pamDokCache.set(ck,u);
-    _pamDokPrevFrame(u);
+    _pamDokPrevFrame(u,true);
   }catch(ex){_pamDokPrevInfo('<div style="padding:20px;color:var(--red);font-size:12px;">⚠ '+esc(ex.message)+'</div>');}
 }
 // .eml lesbar darstellen – gleiche Aufbereitung wie in der Datei-Galerie (CID-Bilder als Blobs)
@@ -43194,6 +43305,7 @@ function _pamDokPrevEmlShow(hdrHtml,blobUrl){
   p.style.cssText='flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;';
   p.innerHTML=hdrHtml;
   const fr=document.createElement('iframe');
+  fr.sandbox='allow-same-origin allow-popups allow-popups-to-escape-sandbox'; // b901: kein Skript aus fremder Mail
   fr.style.cssText='flex:1;width:100%;border:none;background:#fff;';
   fr.src=blobUrl;
   p.appendChild(fr);
@@ -47585,7 +47697,7 @@ async function _pepLoadPreview(m,task,previewEl){
   if(!bodyEl)return;
   const _ri=function(h){
     if(_pepToken!==myTok)return;
-    const fr=document.createElement('iframe');fr.style.cssText='flex:1;width:100%;border:none;min-height:0;height:100%;';
+    const fr=document.createElement('iframe');fr.style.cssText='flex:1;width:100%;border:none;min-height:0;height:100%;';fr.sandbox='allow-same-origin allow-popups allow-popups-to-escape-sandbox'; // b901
     const blob=new Blob(['<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,Helvetica,sans-serif;font-size:13px;margin:14px 20px;line-height:1.6;color:#222;}a{color:#1a73e8;}img{max-width:100%;}</style></head><body>'+h.replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'')+'</body></html>'],{type:'text/html'});
     const bu=URL.createObjectURL(blob);fr.src=bu;fr.onload=function(){setTimeout(function(){URL.revokeObjectURL(bu);},2000);};
     bodyEl.innerHTML='';bodyEl.style.cssText='flex:1;overflow:hidden;display:flex;flex-direction:column;';bodyEl.appendChild(fr);
@@ -48876,6 +48988,7 @@ async function _emVorschauDokument(d){
       kopf.innerHTML='<div style="font-weight:700;font-size:13px;color:var(--text1);margin-bottom:4px;">'+e2(info.subject||'(kein Betreff)')+'</div>'
         +'<div style="font-size:11px;color:var(--text2);">Von '+e2(info.sender||'')+(info.date?' · '+e2(info.date.toLocaleString('de-DE')):'')+'</div>';
       const fr2=document.createElement('iframe');
+      fr2.sandbox='allow-same-origin allow-popups allow-popups-to-escape-sandbox'; // b901: kein Skript aus fremder Mail
       fr2.src=mu;fr2.style.cssText='flex:1;width:100%;border:none;background:#fff;';
       koerper.style.flexDirection='column';
       koerper.appendChild(kopf);koerper.appendChild(fr2);
@@ -48892,6 +49005,8 @@ async function _emVorschauDokument(d){
     koerper.appendChild(im);
   }else{
     const fr=document.createElement('iframe');
+    // b901: HTML-/SVG-Anhaenge nur im Sandkasten (gleiche Herkunft wie PAM); PDFs bleiben frei, sonst zeigt Chromium sie nicht
+    if(/\.(html?|xhtml|svg|xml|mht|mhtml)$/.test(nl))fr.sandbox='allow-same-origin allow-popups allow-popups-to-escape-sandbox';
     fr.src=src;fr.style.cssText='flex:1;width:100%;border:none;';
     koerper.appendChild(fr);
   }
@@ -49101,7 +49216,7 @@ async function _emOpenMail(idx,mails){
     const bc=document.getElementById('emBodyContainer');
     if(d._cachedBodyHtml){
       if(_myToken!==_emOpenMailToken)return;
-      const fr=document.createElement('iframe');fr.style.cssText='flex:1;width:100%;border:none;min-height:0;';
+      const fr=document.createElement('iframe');fr.style.cssText='flex:1;width:100%;border:none;min-height:0;';fr.sandbox='allow-same-origin allow-popups allow-popups-to-escape-sandbox'; // b901
       const bu=URL.createObjectURL(new Blob(['<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}</style></head><body>'+d._cachedBodyHtml.replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'')+'</body></html>'],{type:'text/html'}));
       fr.src=bu;let _rv=false;fr.onload=function(){if(!_rv){_rv=true;URL.revokeObjectURL(bu);}};setTimeout(function(){if(!_rv){_rv=true;URL.revokeObjectURL(bu);}},30000);
       if(bc){bc.innerHTML='';bc.appendChild(fr);}
@@ -49116,7 +49231,7 @@ async function _emOpenMail(idx,mails){
           const data=await r.json();d._cachedBodyHtml=(data.body&&data.body.content)||'';
           if(_myToken!==_emOpenMailToken)return;
           const html=(data.body&&data.body.contentType==='html')?d._cachedBodyHtml:'<pre style="white-space:pre-wrap;font-size:13px;">'+_escHtml((data.body&&data.body.content)||d.preview||'')+'</pre>';
-          const fr=document.createElement('iframe');fr.style.cssText='flex:1;width:100%;border:none;min-height:0;';
+          const fr=document.createElement('iframe');fr.style.cssText='flex:1;width:100%;border:none;min-height:0;';fr.sandbox='allow-same-origin allow-popups allow-popups-to-escape-sandbox'; // b901
           const bu=URL.createObjectURL(new Blob(['<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}</style></head><body>'+html.replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'')+'</body></html>'],{type:'text/html'}));
           fr.src=bu;let _rv=false;fr.onload=function(){if(!_rv){_rv=true;URL.revokeObjectURL(bu);}};setTimeout(function(){if(!_rv){_rv=true;URL.revokeObjectURL(bu);}},30000);
           if(bc){bc.innerHTML='';bc.appendChild(fr);}
@@ -49127,7 +49242,7 @@ async function _emOpenMail(idx,mails){
           const mb=await r.json();const res={html:'',plain:''};_gmExtractBody(mb.payload,res);
           if(_myToken!==_emOpenMailToken)return;
           const html=(res.html||'<pre style="white-space:pre-wrap;font-size:13px;">'+_escHtml(res.plain||d.preview||'(kein Inhalt)')+'</pre>').replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'');
-          const fr=document.createElement('iframe');fr.style.cssText='flex:1;width:100%;border:none;min-height:0;';
+          const fr=document.createElement('iframe');fr.style.cssText='flex:1;width:100%;border:none;min-height:0;';fr.sandbox='allow-same-origin allow-popups allow-popups-to-escape-sandbox'; // b901
           const bu=URL.createObjectURL(new Blob(['<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}</style></head><body>'+html+'</body></html>'],{type:'text/html'}));
           fr.src=bu;let _rv=false;fr.onload=function(){if(!_rv){_rv=true;URL.revokeObjectURL(bu);}};setTimeout(function(){if(!_rv){_rv=true;URL.revokeObjectURL(bu);}},30000);
           if(bc){bc.innerHTML='';bc.appendChild(fr);}
@@ -49232,7 +49347,7 @@ async function _emOpenMail(idx,mails){
   const bodyContainer=document.getElementById('emBodyContainer');
   if(bodyHtml){
     const cleanBody=bodyHtml.replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<link[^>]+rel=["']?stylesheet["']?[^>]*>/gi,'');
-    const iframe=document.createElement('iframe');iframe.style.cssText='flex:1;width:100%;border:none;min-height:0;';
+    const iframe=document.createElement('iframe');iframe.style.cssText='flex:1;width:100%;border:none;min-height:0;';iframe.sandbox='allow-same-origin allow-popups allow-popups-to-escape-sandbox'; // b901
     const fullHtml='<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,Helvetica,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}a{color:#1a73e8;}img{max-width:100%;}@media print{body > *:not(#pamUebersichtOverlay){display:none!important;}#pamUebersichtOverlay{display:block!important;position:static!important;background:none!important;padding:0!important;overflow:visible!important;}#pamUebersichtBox{box-shadow:none!important;border:none!important;}#pamUebersichtTopbar button{display:none!important;}@page{margin:12mm;size:A4;}}</style></head><body>'+cleanBody+'</body></html>';
     const blobUrl=URL.createObjectURL(new Blob([fullHtml],{type:'text/html'}));
     iframe.src=blobUrl;
@@ -49435,6 +49550,7 @@ async function _emZeigeEineMail(tk,m,ziel){
     koerper.style.cssText='flex:1;min-height:0;overflow:hidden;display:flex;';
     if(istHtml){
       const fr=document.createElement('iframe');
+      fr.sandbox='allow-same-origin allow-popups allow-popups-to-escape-sandbox'; // b901: kein Skript aus fremder Mail
       fr.style.cssText='flex:1;width:100%;border:none;';
       const blob=new Blob(['<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,Helvetica,sans-serif;font-size:13px;margin:12px 16px;line-height:1.6;color:#222;}a{color:#1a73e8;}img{max-width:100%;}</style></head><body>'+String(inhalt).replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'')+'</body></html>'],{type:'text/html'});
       const bu=URL.createObjectURL(blob);
