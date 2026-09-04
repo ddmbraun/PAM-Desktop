@@ -7951,9 +7951,16 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
 .kalw-cell{height:44px;background:var(--bg3);border-radius:4px;position:relative;}
 .kalw-cell.over{outline:1px dashed var(--accent);}
 .kalw-cell.pick{cursor:copy;}
-.kalw-card{position:absolute;left:2px;right:2px;border-radius:4px;padding:2px 5px;font-size:10px;line-height:1.25;overflow:hidden;cursor:grab;z-index:2;background:#E6F1FB;color:#0C447C;border-left:3px solid #378ADD;}
+/* b911: box-sizing ist Pflicht, seit die Breite je Spur gesetzt wird. Ohne sie meint `width`
+   nur den Inhalt – Innenabstand und der linke Balken kommen obendrauf, und zwei Karten
+   nebeneinander ueberlappen sich um genau diese Zugabe (im Browser gemessen: 9 px). */
+.kalw-card{position:absolute;left:2px;right:2px;box-sizing:border-box;border-radius:4px;padding:2px 5px;font-size:10px;line-height:1.25;overflow:hidden;cursor:grab;z-index:2;background:#E6F1FB;color:#0C447C;border-left:3px solid #378ADD;}
 .kalw-card.nosync{border-left-color:#9ca3af;}
 .kalw-card.conf{background:#FCEBEB;color:#A32D2D;border-left-color:#E24B4A;}
+/* b911: Der linke Balken zeigt den Outlook-Zustand, der Hintergrund die Ueberschneidung.
+   Ohne diese Zeile gewann die rote Ueberschneidungsfarbe (steht spaeter, gleiche Staerke)
+   und verdeckte, dass ein Termin gar nicht in Outlook steht. */
+.kalw-card.conf.nosync{border-left-color:#9ca3af;}
 .kalw-card.sel{outline:2px solid var(--accent);}
 .kalw-card b{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .kalw-anf{position:absolute;left:2px;right:2px;border-radius:4px 4px 0 0;z-index:1;border:1px dashed #94a3b8;background:repeating-linear-gradient(45deg,rgba(148,163,184,.30) 0 4px,transparent 4px 8px);box-sizing:border-box;padding:1px 4px;font-size:9px;line-height:1.1;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -9875,7 +9882,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-04 · #910'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-04-b910) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-04 · #911'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-04-b911) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -20064,6 +20071,27 @@ function _kalwCollect(){
     l.forEach(r=>{ r._s=_kalMin(r.von)-_kalFahrt(r.t); r._e=_kalMin(r.von)+_kalDauer(r.t)+_kalFahrtR(r.t); });
     l.sort((a,b)=>a._s-b._s);
     for(let i=1;i<l.length;i++) if(l[i]._s < l[i-1]._e){ l[i].conf=true; l[i-1].conf=true; }
+    // b911: Spuren nebeneinander. Bisher lagen alle Karten eines Tages auf derselben Breite
+    // uebereinander - der obere verdeckte den unteren VOLLSTAENDIG. Die rote Warnung sagte
+    // dann „hier ueberschneidet sich etwas", zeigte aber nicht womit (Befund Frank 04.09.).
+    // Jede Karte bekommt eine Spur; zusammenhaengende Ketten teilen sich die Tagesbreite.
+    let kette=[], kEnde=-1;
+    const kettGeschlossen=()=>{
+      if(!kette.length)return;
+      let n=1; kette.forEach(x=>{ if(x.spur+1>n)n=x.spur+1; });
+      kette.forEach(x=>{ x.spuren=n; });
+      kette=[];
+    };
+    l.forEach(r=>{
+      if(kette.length && r._s>=kEnde){ kettGeschlossen(); kEnde=-1; }
+      const belegt={};
+      kette.forEach(x=>{ if(x._e>r._s) belegt[x.spur]=1; });
+      let sp=0; while(belegt[sp]) sp++;
+      r.spur=sp; r.spuren=1;
+      kette.push(r);
+      if(r._e>kEnde) kEnde=r._e;
+    });
+    kettGeschlossen();
   });
 
   return {mon:mon, grid:G, backlog:backlog, ohneZeit:O};
@@ -20086,20 +20114,24 @@ function _kalwCard(r,hr){
   const dur=_kalDauer(r.t), fH=_kalFahrt(r.t), fR=_kalFahrtR(r.t), fx=_kalFahrtText(r.t);
   const hgt=Math.max(20, dur/60*KALW_ROW-2);
   const lbl=r.bez||r.title||'(ohne Bezeichnung)';
+  // b911: Waagerechte Lage aus der Spur. Bei einer einzigen Spur bleibt es beim alten Bild
+  // (2 px Rand links und rechts). `right:auto` ist noetig, weil das Stylesheet right:2px setzt.
+  const _spN=Math.max(1,r.spuren||1), _spI=Math.min(r.spur||0,_spN-1);
+  const _quer='left:calc('+(100*_spI/_spN)+'% + 2px);width:calc('+(100/_spN)+'% - 4px);right:auto;';
   let s='';
   if(fH>0){
-    s+='<div class="kalw-anf" style="top:'+(top-fH/60*KALW_ROW).toFixed(1)+'px;height:'+(fH/60*KALW_ROW).toFixed(1)
+    s+='<div class="kalw-anf" style="'+_quer+'top:'+(top-fH/60*KALW_ROW).toFixed(1)+'px;height:'+(fH/60*KALW_ROW).toFixed(1)
       +'px" title="'+_escHtml('Hinfahrt '+fH+' min'+(fx?' · '+fx:''))+'">'+esc(fx)+'</div>';
   }
   if(fR>0){
-    s+='<div class="kalw-anf nach" style="top:'+(top+dur/60*KALW_ROW).toFixed(1)+'px;height:'+(fR/60*KALW_ROW).toFixed(1)
+    s+='<div class="kalw-anf nach" style="'+_quer+'top:'+(top+dur/60*KALW_ROW).toFixed(1)+'px;height:'+(fR/60*KALW_ROW).toFixed(1)
       +'px" title="'+_escHtml('Rückfahrt '+fR+' min'+(fx?' · '+fx:''))+'">'+esc(fx)+'</div>';
   }
   const cls='kalw-card'+(r.conf?' conf':'')+(r.sync?'':' nosync')+((_kalPick===key)?' sel':'');
   const tip=(r.ks?r.ks+' · ':'')+lbl+' – '+r.title+' | '+_normTime(r.von)+(r.bis?'–'+_normTime(r.bis):'')
     +((fH||fR)?(' | Fahrt '+(fH===fR?fH+' min je Richtung':fH+' min hin / '+fR+' min zurück')+(fx?' ('+fx+')':'')):'')
     +(r.conf?' | ⚠ Überschneidung':'')+(r.sync?'':' | ● nicht in Outlook');
-  s+='<div class="'+cls+'" draggable="true" style="top:'+top.toFixed(1)+'px;height:'+hgt.toFixed(1)+'px"'
+  s+='<div class="'+cls+'" draggable="true" style="'+_quer+'top:'+top.toFixed(1)+'px;height:'+hgt.toFixed(1)+'px"'
     + ' ondragstart="_kalwDragStart(event,\''+_escHtml(key)+'\')"'
     + ' onclick="event.stopPropagation();_kalwPick(\''+_escHtml(key)+'\')"'
     + ' ondblclick="event.stopPropagation();_kalOpenTask(\''+_escHtml(r.taskId)+'\')"'
