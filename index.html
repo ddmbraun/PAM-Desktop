@@ -9858,7 +9858,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-04 · #902'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-04-b902) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-04 · #903'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-04-b903) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -15270,6 +15270,39 @@ function _mergeListeGerichtet(remoteList,localList,snapList,kennung){
 function _mergeFotosGerichtet(remoteList,localList,snapList){
   return _mergeListeGerichtet(remoteList,localList,snapList,_fotoKennung);
 }
+// b903 (Befund Frank 04.09.2026, Betriebsprobe zu b902): Listen-Regel für das OFFENE Fenster (Block 1).
+// Block 1 vereinigte fotos/attachments/pruefberichte/checkliste/kontakte blind – ein am Handy entferntes
+// Foto kam aus der eigenen Liste zurück, sobald der PC mit offenem Fenster speicherte. b771 hatte nur
+// Block 1b (kein Fenster) gerichtet gemacht. Regel hier, mit dem Fenster-Schnappschuss (_taskModalSnapshot):
+//   · kein Schnappschuss oder keine Remote-Karte → vereinigen wie bisher (im Zweifel behalten)
+//   · Liste hier seit dem Öffnen unverändert → Remote-Liste gilt (dort Entferntes bleibt weg)
+//   · Liste hier geändert → eigene Liste ist Basis, MINUS was beim Öffnen da war und drüben fehlt
+//     (= drüben entfernt), PLUS was drüben neu ist (beim Öffnen noch nicht da).
+// ⛔ Anders als _mergeListeGerichtet (1b) wird hier drüben Entferntes auch dann entfernt, wenn die eigene
+//    Liste an ANDERER Stelle geändert wurde – sonst reicht ein Umsortieren, und das Foto ist wieder da.
+function _mergeListeFenster(remoteTask,lt,snap,feld,kennung,unionKey){
+  const rl=remoteTask?remoteTask[feld]:undefined;
+  const ll=lt?lt[feld]:undefined;
+  if(!snap||!remoteTask)return _mergeListByKey(rl,ll,unionKey||kennung);
+  const sl=snap[feld];
+  if(JSON.stringify(ll)===JSON.stringify(sl))return rl;
+  const rem=Array.isArray(rl)?rl:[],loc=Array.isArray(ll)?ll:[],sn=Array.isArray(sl)?sl:[];
+  const remKeys=new Set(rem.map(kennung).filter(Boolean));
+  const snKeys=new Set(sn.map(kennung).filter(Boolean));
+  const out=[];const schonDa=new Set();
+  for(const x of loc){
+    const k=kennung(x);
+    if(k&&snKeys.has(k)&&!remKeys.has(k))continue;   // war beim Öffnen da, drüben jetzt weg → dort entfernt
+    if(k&&schonDa.has(k))continue;
+    if(k)schonDa.add(k);out.push(x);
+  }
+  for(const x of rem){
+    const k=kennung(x);
+    if(!k||schonDa.has(k)||snKeys.has(k))continue;   // drüben neu (beim Öffnen noch nicht da)
+    schonDa.add(k);out.push(x);
+  }
+  return out;
+}
 // b788 (Stufe 2, Befund Frank 25.08.2026): Die beiden Archiv-Faecher zusammenfuehren.
 // Bis b787 kam das Archiv beim Abgleich AUSSCHLIESSLICH aus der Cloud – der Nachtrag-Schritt
 // ueberspringt alle _-Faecher. b787 hat verhindert, dass es dabei ABGERAEUMT wird; hier wird
@@ -15600,13 +15633,15 @@ async function gdriveSaveData() {
                   mergedTask.notizVerlauf=_mergeNotizen(remoteTask&&remoteTask.notizVerlauf,lt.notizVerlauf);
                   mergedTask.zeitEntries=_mergeListByKey(remoteTask&&remoteTask.zeitEntries,lt.zeitEntries,e=>((e.date||'')+'|'+(e.von||'')+'|'+(e.bis||'')+'|'+(e.beschreibung||'')));
                   mergedTask.ausserhausTermine=_mergeListByKey(remoteTask&&remoteTask.ausserhausTermine,lt.ausserhausTermine,e=>((e.date||'')+'|'+(e.von||'')+'|'+(e.bis||'')+'|'+(e.beschreibung||'')));
-                  mergedTask.fotos=_mergeListByKey(remoteTask&&remoteTask.fotos,lt.fotos,f=>(f.id||f.driveId||f.path||f.name||''));
-                  mergedTask.attachments=_mergeListByKey(remoteTask&&remoteTask.attachments,lt.attachments,f=>((f.name||'')+'|'+(f.size||0)));
+                  // b903: fotos/attachments/pruefberichte/checkliste/kontakte über die Fenster-Regel (siehe _mergeListeFenster):
+                  // unverändert → Handy-Stand; geändert → gerichtet mit dem Schnappschuss. Vorher blinde Vereinigung –
+                  // ein am Handy entferntes Foto kam zurück (Betriebsprobe Frank 04.09.).
+                  mergedTask.fotos=_mergeListeFenster(remoteTask,lt,_snap,'fotos',_fotoKennung);
+                  mergedTask.attachments=_mergeListeFenster(remoteTask,lt,_snap,'attachments',_LISTEN_KENNUNG.attachments,f=>((f.name||'')+'|'+(f.size||0)));
                   mergedTask.timeEntries=_mergeListByKey(remoteTask&&remoteTask.timeEntries,lt.timeEntries,e=>String(e.start||''));
-                  mergedTask.pruefberichte=_mergeListByKey(remoteTask&&remoteTask.pruefberichte,lt.pruefberichte,b=>(b.id||((b.titel||'')+'|'+(b.datum||''))));
-                  // Fix: checkliste und kontakte mergen statt überschreiben
-                  mergedTask.checkliste=_mergeListByKey(remoteTask&&remoteTask.checkliste,lt.checkliste,c=>((c.text||'')+'|'+(c.done?'1':'0')));
-                  mergedTask.kontakte=_mergeListByKey(remoteTask&&remoteTask.kontakte,lt.kontakte,k=>((k.rolle||'')+'|'+(k.name||'')+'|'+(k.tel||'')));
+                  mergedTask.pruefberichte=_mergeListeFenster(remoteTask,lt,_snap,'pruefberichte',_LISTEN_KENNUNG.pruefberichte);
+                  mergedTask.checkliste=_mergeListeFenster(remoteTask,lt,_snap,'checkliste',_LISTEN_KENNUNG.checkliste,c=>((c.text||'')+'|'+(c.done?'1':'0')));
+                  mergedTask.kontakte=_mergeListeFenster(remoteTask,lt,_snap,'kontakte',_LISTEN_KENNUNG.kontakte,k=>((k.rolle||'')+'|'+(k.name||'')+'|'+(k.tel||'')));
                   // b722: Dachplan – NUR wenn er hier seit dem Öffnen wirklich geändert
                   // wurde (dann hat die Snapshot-Schleife oben die lokale Fassung gesetzt,
                   // erkennbar an der Referenz), wird mit dem Remote-Stand vereinigt statt
