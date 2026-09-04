@@ -9858,7 +9858,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-04 · #903'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-04-b903) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-04 · #904'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-04-b904) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -10167,6 +10167,7 @@ var _ztlBlatt3Auf=false; // b818: entsperrt? BEWUSST nirgends gespeichert - nach
 var ZETTEL_WEG_TAGE=14;
 var zettelFileId=null;
 var _ztlSyncTimer=null,_ztlSyncLaeuft=false;
+var _ztlSyncStand={zeit:0,fehler:'',fehlZeit:0}; // b904: letzter gelungener Abgleich / letzter Fehler – der Kasten zeigt es an
 var _ztlZeilen=[];
 try{if(typeof localStorage!=='undefined'){var _zLade=JSON.parse(localStorage.getItem(ZETTEL_LS_KEY)||'null');if(_zLade&&Array.isArray(_zLade.zeilen))_ztlZeilen=_zLade.zeilen;}}catch(e){}
 var _ztlEditId=null; // b804: Zeile, die gerade bearbeitet wird (null = keine)
@@ -12188,9 +12189,9 @@ function _tuRgPflichtToggle(id){
   const l=_tuFinde(id); if(!l)return;
   if(l.rgPflicht){
     let offen=0;
-    try{((l.eintraege)||[]).forEach(function(e){if(_tuRgEintragOffen(l,e))offen++;});}catch(err){console.warn('[TU] offene zählen:',err);}
+    try{((l.eintraege)||[]).forEach(function(e){if(_tuRgEintragOffen(l,e))offen++;});}catch(err){console.warn('[TU] offene zählen:',err);offen=-1;} // b904: Zählfehler nicht als „nichts offen" ausgeben
     if(!confirm('Für „'+(l.name||'')+'" keine Rechnung mehr erwarten?\n\n'
-      +(offen?('⚠ Hier '+(offen===1?'fehlt noch 1 Rechnung':'fehlen noch '+offen+' Rechnungen')+'. Sie '
+      +(offen<0?'⚠ Die offenen Rechnungen konnten gerade nicht gezählt werden – im Zweifel erst nachsehen.\n\n':offen?('⚠ Hier '+(offen===1?'fehlt noch 1 Rechnung':'fehlen noch '+offen+' Rechnungen')+'. Sie '
               +(offen===1?'wird':'werden')+' dann nicht mehr angemahnt.\n\n'):'')
       +'Bereits vermerkte Rechnungen bleiben gespeichert – sie werden nur nicht mehr angezeigt.\n'
       +'Zurückschalten bringt alles wieder.'))return;
@@ -14264,7 +14265,6 @@ async function gdriveTokenCallback(resp) {
   console.log('[Drive] Token erhalten, expires_in=', resp.expires_in);
   _driveSetStatus('✓ Angemeldet – lade Datei…', false);
   gdriveToken = resp.access_token;
-  _autoReconnectAttempts = 0;    // Zähler zurücksetzen nach erfolgreichem Token
   _autoInitSilentInProgress = false; // Init-Flag zurücksetzen
   clearTimeout(_gaveUpResetTimer); _silentRefreshGaveUp = false; // Nach erfolgreichem Login: Timer + Flag zurücksetzen
   gdriveTokenExpires = Date.now() + (Number(resp.expires_in || 3600) - 60) * 1000;
@@ -14437,9 +14437,7 @@ let _silentRefreshInProgress=false;
 let _silentRefreshStartedAt=0;
 let _silentRefreshPrevCallback=null; // Sichert den Callback vor einem stillen Refresh
 let _autoInitSilentInProgress=false; // Automatischer Init-Versuch läuft
-let _autoReconnectAttempts=0;   // Zählt automatische Verbindungsversuche
 let _silentRefreshGaveUp=false; // Nach immediate_failed: keine weiteren Auto-Versuche
-const _AUTO_RECONNECT_MAX=2;    // Maximal 2 stille Versuche, dann aufhören
 let _bannerDismissedUntil=0;    // Unterdrücke Banner-Auto-Einblendungen bis zu diesem Timestamp
 let _gaveUpResetTimer=null;     // Timer für automatisches GaveUp-Reset nach 15 Min
 
@@ -14478,48 +14476,7 @@ function _scheduleTokenRefresh(){
   console.info('[PTP] Nächster Token-Refresh in',Math.round(delay/60000),'Min geplant');
 }
 
-function _silentTokenRefresh(onSuccess, onFail){
-  if(!gdriveTokenClient||!gdriveToken)return;
-  // GaveUp-Guard: nach immediate_failed oder popup_closed (silent) keine weiteren Versuche
-  // bis _setGaveUp() abläuft (15 Min). Gilt für ALLE Aufrufer – Timer, Intervall, Visibility.
-  if(_silentRefreshGaveUp){
-    if(typeof onFail==='function') onFail();
-    return;
-  }
-  // Feststeck-Schutz: nach 20 Sek. Flag zurücksetzen
-  if(_silentRefreshInProgress){
-    if(Date.now()-_silentRefreshStartedAt<20000)return;
-    console.warn('[PTP] _silentRefreshInProgress zurückgesetzt (Timeout)');
-    _silentRefreshInProgress=false;
-  }
-  _silentRefreshInProgress=true;
-  _silentRefreshStartedAt=Date.now();
-  const prev=gdriveTokenClient.callback;
-  _silentRefreshPrevCallback=prev; // Modul-Level Sicherung für error_callback
-  gdriveTokenClient.callback=(r)=>{
-    gdriveTokenClient.callback=prev;
-    _silentRefreshPrevCallback=null;
-    _silentRefreshInProgress=false;
-    if(r&&r.access_token){
-      gdriveToken=r.access_token;
-      gdriveTokenExpires=Date.now()+(Number(r.expires_in||3600)-60)*1000;
-      try{localStorage.setItem(PC_TOKEN_KEY,JSON.stringify({token:gdriveToken,exp:gdriveTokenExpires}));}catch(e){}
-      console.info('[PTP] Token automatisch erneuert ✓');
-      _hideDriveWarnBanner();
-      if(typeof onSuccess==='function')onSuccess();
-    } else {
-      // Stille Erneuerung fehlgeschlagen → Auto-Retry in 15 Min (verhindert Popup-Flash)
-      _setGaveUp();
-      if(typeof onFail==='function') onFail();
-    }
-  };
-  try{gdriveTokenClient.requestAccessToken({prompt:'none'});}catch(e){
-    gdriveTokenClient.callback=prev;
-    _silentRefreshInProgress=false;
-    _setGaveUp();
-    if(typeof onFail==='function') onFail();
-  }
-}
+// b904: _silentTokenRefresh entfernt – toter Code (Befund 03.09., nie aufgerufen)
 
 // Jede Minute prüfen: wie lange noch?
 // < 10 Min: Banner sofort zeigen + stille Erneuerung versuchen (klappt sie, verschwindet Banner)
@@ -14690,12 +14647,6 @@ function _handleDrive401(){
   try{_desktopFotoBlobInflight.clear();}catch(e){}
   // Hydration-Flags zurücksetzen, damit nach erneutem Login Fotos neu geladen werden
   try{document.querySelectorAll('#fotoListDesktop img[data-foto-id]').forEach(img=>{img.dataset.hydrated='';});}catch(e){}
-  // Maximale Versuche prüfen
-  if(_autoReconnectAttempts>=_AUTO_RECONNECT_MAX){
-    updateFileStatus('unsaved','⚠ Drive-Verbindung abgelaufen','☁️ Drive-Button drücken zum Neu-Verbinden');
-    if(Date.now() >= _bannerDismissedUntil) _showDriveWarnBanner(0);
-    return;
-  }
   // Erst Cloud-Refresh versuchen (kein Nutzereingriff nötig)
   _renewTokenViaCloud().then(ok => {
     if(ok) return;
@@ -16053,6 +16004,22 @@ function skipFileSelection(){
 }
 function closeStartModal(){document.getElementById('startModal').classList.remove('open');try{_restoreCardSize();}catch(e){}}
 // Lokales Backup wiederherstellen (Notfall-Funktion wenn Drive nicht erreichbar)
+// b904: Ohne Google-Dienste (kein Internet, Google gestört) stand PAM 12 s lang leer da und sagte nur
+// „Seite neu laden" – die vorhandene lokale Sicherung war von dort nicht erreichbar (Befund B Nr. 7 vom 03.09.).
+// Jetzt ein Band mit drei Wegen: erneut versuchen · lokale Sicherung ansehen · Notbetrieb (Ordner 32).
+function _pamOhneNetzBand(){
+  if(document.getElementById('_pamOhneNetzBand'))return;
+  const bk=(typeof _getLocalBackup==='function')?_getLocalBackup():null;
+  const stand=(bk&&bk.ts)?new Date(bk.ts).toLocaleString('de-DE',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
+  const b=document.createElement('div');
+  b.id='_pamOhneNetzBand';
+  b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:99998;background:#7f1d1d;color:#fff;padding:10px 16px;font-size:13px;display:flex;flex-wrap:wrap;align-items:center;gap:10px;box-shadow:0 2px 10px rgba(0,0,0,.35);';
+  b.innerHTML='<span style="flex:1;min-width:220px;">⚠ <b>Google-Dienste nicht erreichbar.</b> Kein Internet? Ohne Netz hilft der <b>PAM-Notbetrieb</b> (Ordner 32, Doppelklick auf „PAM-Notbetrieb starten").</span>'
+    +'<button type="button" onclick="location.reload()" style="padding:6px 12px;border-radius:6px;border:none;background:#fff;color:#7f1d1d;font-weight:700;cursor:pointer;">🔄 Erneut versuchen</button>'
+    +(bk?'<button type="button" onclick="restoreLocalBackup();var _b=document.getElementById(\'_pamOhneNetzBand\');if(_b)_b.remove();" style="padding:6px 12px;border-radius:6px;border:1px solid #fff;background:transparent;color:#fff;font-weight:700;cursor:pointer;">💾 Lokale Sicherung ansehen'+(stand?' (Stand '+stand+')':'')+'</button>':'<span style="opacity:.8;">Keine lokale Sicherung auf diesem Rechner.</span>')
+    +'<button type="button" onclick="this.parentElement.remove()" title="Band schließen" style="padding:4px 8px;border-radius:6px;border:none;background:transparent;color:#fff;cursor:pointer;font-size:16px;">✕</button>';
+  document.body.appendChild(b);
+}
 function restoreLocalBackup(){
   const bk=_getLocalBackup();
   if(!bk||!bk.data){alert('Kein lokales Backup gefunden.');return;}
@@ -16104,6 +16071,7 @@ document.addEventListener('DOMContentLoaded',()=>{
       } else {
         _driveSetStatus('⚠ Google-Dienst lädt nicht – bitte Seite neu laden','error');
         showToast('⚠ Google-Dienste nicht erreichbar – bitte Seite neu laden','error',9000);
+        try{_pamOhneNetzBand();}catch(e){console.warn('[b904] Band:',e);} // b904: Weg zur lokalen Sicherung statt nur „neu laden"
       }
     };
     setTimeout(_check,3000);
@@ -21769,7 +21737,7 @@ function _btbBerichtHtml(){
   // wie in die Bildschirmansicht.
   const fotos=_btbFotosFuerBericht();
   let _bpins=[]; // b525: Dachplan-Pins gehören in die volle Doku · b744: beide Ebenen
-  try{const _t=findTaskById(gT('taskId'));if(_t)_bpins=_dpAllePins(_t);}catch(e){}
+  try{const _t=findTaskById(gT('taskId'));if(_t)_bpins=_dpAllePins(_t);}catch(e){console.warn('[b904] Bericht Pins:',e);showToast('⚠ Dachplan-Pins konnten für den Bericht nicht gelesen werden – sie fehlen im Ausdruck','warning',6000);}
   const pins=_bpins.map((x,i)=>({p:x.p,nr:x.nr,eltern:x.eltern,i,d:_btbParseTs(x.p.ts)}));
   const days={};
   const add=(key,kind,item)=>{if(!days[key])days[key]={notiz:[],foto:[],pin:[]};days[key][kind].push(item);};
@@ -26972,7 +26940,7 @@ async function _wpOpenFoto(bericht,startIdx){
       try{
         const url=await _fetchDesktopFotoBlob(f.editedDriveId||f.driveId); // b763: bemalte Fassung zuerst
         if(url){
-          cnt.innerHTML='<img src="'+url+'" alt="" id="deskLbImg" style="transition:transform .1s ease;max-width:100%;max-height:80vh;object-fit:contain;">';
+          cnt.innerHTML='<img src="'+esc(url)+'" alt="" id="deskLbImg" style="transition:transform .1s ease;max-width:100%;max-height:80vh;object-fit:contain;">';
           _lbZoomReset();setTimeout(_initLbZoom,50);
         }
       }catch(e){cnt.innerHTML='<div style="color:#fff;padding:20px">Foto konnte nicht geladen werden</div>';}
@@ -27002,7 +26970,7 @@ function _wpFotoPickerForItem(bericht,it,onChangeCb){
   box.onclick=e=>e.stopPropagation();
   const hdr=document.createElement('div');
   hdr.style.cssText='font-size:14px;font-weight:700;color:var(--text);display:flex;justify-content:space-between;align-items:center;';
-  hdr.innerHTML='📷 Foto verknüpfen mit: <b style="color:#c0392b;font-size:12px;">'+it.text+'</b>';
+  hdr.innerHTML='📷 Foto verknüpfen mit: <b style="color:#c0392b;font-size:12px;">'+esc(it.text)+'</b>';
   const closeX=document.createElement('button');closeX.type='button';closeX.textContent='✕';
   closeX.style.cssText='background:transparent;border:none;color:var(--text2);font-size:16px;cursor:pointer;';
   closeX.onclick=()=>ov.remove();
@@ -28662,7 +28630,7 @@ async function _fsMail(blob,name){
       const erg=await _pamOutlookEntwurf(token,{to:wahl.to,subj:wahl.subj,body:wahl.body,
         anhaenge:[{name:name,contentType:blob.type||'application/octet-stream',contentBytes:b64}]});
       if(!erg.fehl.length){
-        _pamShowDraftToast(erg.link,'✅ Entwurf mit '+name+' liegt in Outlook unter <b>Entwürfe</b>');
+        _pamShowDraftToast(erg.link,'✅ Entwurf mit '+esc(name)+' liegt in Outlook unter <b>Entwürfe</b>');
         showToast('✓ Entwurf angelegt – es wurde nichts verschickt','success',6000);
         return;
       }
@@ -37329,7 +37297,7 @@ async function _pamDokEntwurf(i){
     if(erg.fehl.length){
       showToast('⚠ '+name+' ging nicht an den Entwurf ('+erg.fehl.join(', ')+') – bitte über ⬇ herunterladen und von Hand anhängen','warning',11000);return;
     }
-    _pamShowDraftToast(erg.link,'✅ Entwurf mit '+name+' liegt in Outlook unter <b>Entwürfe</b>');
+    _pamShowDraftToast(erg.link,'✅ Entwurf mit '+esc(name)+' liegt in Outlook unter <b>Entwürfe</b>');
     showToast('✓ Entwurf angelegt – es wurde nichts verschickt','success',6000);
   }catch(e){
     console.warn('[DokEntwurf] Entwurf:',e);
@@ -37999,74 +37967,7 @@ function _parseNameGK(fullName){
   if(p.length===1)return{first:'',last:p[0]};
   return{first:p.slice(0,-1).join(' '),last:p[p.length-1]};
 }
-async function _createGoogleKontakt(kontaktDiv){
-  if(!gdriveToken){showToast('⚠ Bitte zuerst Google Drive verbinden','warning',4000);return;}
-  const name=(kontaktDiv.querySelector('.k-name')||{}).value||'';
-  const tel=(kontaktDiv.querySelector('.k-tel')||{}).value||'';
-  const email=(kontaktDiv.querySelector('.k-email')||{}).value||'';
-  if(!name&&!tel&&!email){showToast('⚠ Kein Kontakt-Name oder Telefon vorhanden','warning',3000);return;}
-  // Task-Felder lesen
-  const adresse=(document.getElementById('tAdr')||{value:''}).value||'';
-  const hausverwaltung=(document.getElementById('tHV')||{value:''}).value||'';
-  const repNr=(document.getElementById('taskRepNr')||{value:''}).value||''; // b559: hieß fälschlich tRepNr → Rep.-Nr. kam nie an
-  const taskTitle=(document.getElementById('taskTitleInput')||{value:''}).value||'';
-  const adr=_parseAdresseGK(adresse);
-  const nm=_parseNameGK(name);
-  // Nachname-Feld: "Nachname, Straße Hausnr."
-  const familyName=nm.last+(adr.streetName?(', '+adr.streetName+(adr.houseNr?' '+adr.houseNr:'')):'');
-  const body={};
-  // Namen
-  if(name){body.names=[{givenName:nm.first||name,familyName:familyName,displayName:name}];}
-  // Telefon
-  if(tel){body.phoneNumbers=[{value:tel,type:'work'}];}
-  // E-Mail
-  if(email){body.emailAddresses=[{value:email,type:'work'}];}
-  // Adresse
-  if(adr.street){body.addresses=[{streetAddress:adr.street,postalCode:adr.plz,city:adr.city,countryCode:'DE',type:'work'}];}
-  // Firma
-  if(hausverwaltung){body.organizations=[{name:hausverwaltung,type:'work'}];}
-  // Notiz
-  const note=[taskTitle,repNr?'Rep.'+repNr:''].filter(Boolean).join(' · ');
-  if(note){body.biographies=[{value:note,contentType:'TEXT_PLAIN'}];}
-  try{
-    showToast('👤 Kontakt wird angelegt…','info',4000);
-    const pamGroup=await _getOrCreatePamGroup();
-    if(pamGroup){body.memberships=[{contactGroupMembership:{contactGroupResourceName:pamGroup}}];}
-    const resp=await fetch('https://people.googleapis.com/v1/people:createContact',{
-      method:'POST',
-      headers:{'Authorization':'Bearer '+gdriveToken,'Content-Type':'application/json'},
-      body:JSON.stringify(body)
-    });
-    if(resp.status===403){
-      // Token-Cache leeren, damit Re-Auth alle Scopes neu anfordert
-      try{localStorage.removeItem('pam_gdrive_token_v1');}catch(e){}
-      gdriveToken=null; gdriveTokenExpires=0;
-      showToast('⚠ Kontakte-Berechtigung fehlt – Login wird neu gestartet…','error',8000);
-      setTimeout(()=>{
-        try{
-          if(gdriveTokenClient){
-            gdriveTokenClient.requestAccessToken({prompt:'consent'});
-          } else {
-            showToast('⚠ Bitte Drive-Button drücken und neu anmelden (Kontakte-Scope)','error',8000);
-          }
-        }catch(e){
-          showToast('⚠ Bitte Drive-Button drücken und neu anmelden (Kontakte-Scope)','error',8000);
-        }
-      },500);
-      return;
-    }
-    if(!resp.ok){const e=await resp.json();throw new Error(e.error&&e.error.message||resp.status);}
-    const data=await resp.json();
-    const url='https://contacts.google.com/person/'+((data.resourceName||'').replace('people/',''));
-    showToast('✅ Kontakt angelegt: '+name,'success',5000);
-    // Button als gespeichert markieren
-    const btn=kontaktDiv.querySelector('.gk-create-btn');
-    if(btn){btn.textContent='✅';btn.disabled=true;btn.style.background='#16a34a';}
-  }catch(e){
-    showToast('⚠ Kontakt anlegen fehlgeschlagen: '+e.message,'error',6000);
-    console.warn('[GK]',e);
-  }
-}
+// b904: _createGoogleKontakt entfernt – toter Code (Befund 03.09., nie aufgerufen)
 // ── Google Kontakt: "PAM"-Label sicherstellen ──
 let _gkGroupsCache=null;
 async function _loadContactGroups(){
@@ -46165,7 +46066,7 @@ async function _objImpAnlegen(){
       createdAt:new Date().toISOString()};
     boards[board].push(t);n++;
   });
-  try{_auftragSpalteSicher(board);}catch(e){}
+  try{_auftragSpalteSicher(board);}catch(e){console.warn('[b904] Auftrags-Spalte:',e);showToast('⚠ Die Auftrags-Spalte am neuen Objekt-Board konnte nicht gesichert werden – bitte im Board prüfen','warning',7000);}
   /* b851: VOR dem Speichern der Boards - so liegt bei einem Fehler im Adressbuch
      wenigstens noch nichts halb Gespeichertes herum. Der Rückgabewert wandert in die
      Erfolgsmeldung, damit Frank sieht, was nebenbei gepflegt wurde. */
@@ -47780,8 +47681,10 @@ async function _pepLoadPreview(m,task,previewEl){
     if(m.type==='ms'&&d.id&&typeof msToken!=='undefined'&&msToken){
       const r=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+d.id+'?$select=body',{headers:{Authorization:'Bearer '+msToken}});
       if(!r.ok)throw new Error('Graph '+r.status);
-      const data=await r.json();d._cachedBodyHtml=data.body&&data.body.content||'';
-      _ri(data.body&&data.body.contentType==='html'?d._cachedBodyHtml:'<pre style="white-space:pre-wrap;">'+_escHtml(d._cachedBodyHtml)+'</pre>');return;
+      const data=await r.json();
+      // b904: Text-Mails MIT dem <pre>-Mantel merken – beim zweiten Öffnen kam der rohe Text sonst ohne Zeilenumbrüche (Befund Frank 04.09.)
+      d._cachedBodyHtml=(data.body&&data.body.contentType==='html')?((data.body&&data.body.content)||''):'<pre style="white-space:pre-wrap;">'+_escHtml((data.body&&data.body.content)||'')+'</pre>';
+      _ri(d._cachedBodyHtml);return;
     }
     if(m.type==='gmail'&&d.id&&typeof gmailToken!=='undefined'&&gmailToken){
       const r=await fetch('https://www.googleapis.com/gmail/v1/users/me/messages/'+d.id+'?format=full',{headers:{Authorization:'Bearer '+gmailToken}});
@@ -49300,9 +49203,11 @@ async function _emOpenMail(idx,mails){
         if(typeof _msPickRefresh==='function'){try{await _msPickRefresh(_emCurrentTask);}catch(e){}}
         const r=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+d.id+'?$select=body',{headers:{Authorization:'Bearer '+_msPickToken(_emCurrentTask)}});
         if(r.ok){
-          const data=await r.json();d._cachedBodyHtml=(data.body&&data.body.content)||'';
+          const data=await r.json();
+          // b904: wie in der Mail-Vorschau – Text-Mails mit <pre>-Mantel merken, sonst beim zweiten Öffnen ohne Umbrüche
+          d._cachedBodyHtml=(data.body&&data.body.contentType==='html')?((data.body&&data.body.content)||''):'<pre style="white-space:pre-wrap;font-size:13px;">'+_escHtml((data.body&&data.body.content)||d.preview||'')+'</pre>';
           if(_myToken!==_emOpenMailToken)return;
-          const html=(data.body&&data.body.contentType==='html')?d._cachedBodyHtml:'<pre style="white-space:pre-wrap;font-size:13px;">'+_escHtml((data.body&&data.body.content)||d.preview||'')+'</pre>';
+          const html=d._cachedBodyHtml;
           const fr=document.createElement('iframe');fr.style.cssText='flex:1;width:100%;border:none;min-height:0;';fr.sandbox='allow-same-origin allow-popups allow-popups-to-escape-sandbox'; // b901
           const bu=URL.createObjectURL(new Blob(['<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font-family:Arial,sans-serif;font-size:13px;margin:14px 18px;line-height:1.55;color:#222;}</style></head><body>'+html.replace(/<base[^>]*>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'')+'</body></html>'],{type:'text/html'}));
           fr.src=bu;let _rv=false;fr.onload=function(){if(!_rv){_rv=true;URL.revokeObjectURL(bu);}};setTimeout(function(){if(!_rv){_rv=true;URL.revokeObjectURL(bu);}},30000);
@@ -52470,6 +52375,7 @@ function _ztlKastenHtml(){
       +'<span style="font-size:14px;">📝</span>'
       +'<span style="font-size:14px;font-weight:700;color:var(--text);">Zettel</span>'
       +(offen?'<span style="font-size:12px;font-weight:600;color:#7F77DD;">'+offen+' offen</span>':'<span style="font-size:12px;color:var(--text2);">nichts offen</span>')
+      +((typeof _ztlSyncStandHtml==='function')?_ztlSyncStandHtml():'')
       +'</span>'
       +'<span onclick="_ztlKachelAuf()" title="Punkt anhängen, ohne aufzuklappen" style="width:26px;height:26px;border-radius:7px;border:1px solid var(--border);background:#7F77DD;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;cursor:pointer;flex-shrink:0;">+</span>'
       +'</div>';
@@ -52503,6 +52409,7 @@ function _ztlKastenHtml(){
     +'<span style="font-size:14px;">📝</span>'
     +'<span style="font-size:14px;font-weight:700;color:var(--text);">Zettel</span>'
     +(offen?'<span style="font-size:12px;font-weight:600;color:#7F77DD;">'+offen+' offen</span>':'<span style="font-size:12px;color:var(--text2);">nichts offen</span>')
+      +((typeof _ztlSyncStandHtml==='function')?_ztlSyncStandHtml():'')
     +'</div>';
   // b811: am Rechner zwei Reiter, am Handy stattdessen beide Listen mit einer Trennzeile.
   const zeigen=(typeof _ztlAnzeigeZeilen==='function')?_ztlAnzeigeZeilen():sicht;
@@ -52571,8 +52478,32 @@ function _ztlKastenHtml(){
   return h+'</div>';
 }
 function _ztlSyncBald(){clearTimeout(_ztlSyncTimer);_ztlSyncTimer=setTimeout(function(){_ztlSync();},2000);}
+// b904: Der Zettel-Abgleich meldet sich – vorher verschwand jeder Fehler still in der Konsole, und der
+// Zettel am Handy wusste dann etwas anderes als der am Rechner (Befund B Nr. 14 vom 03.09.).
+function _ztlSyncGut(){
+  if(typeof _ztlSyncStand==='undefined')return;
+  _ztlSyncStand.zeit=Date.now();
+  if(_ztlSyncStand.fehler){_ztlSyncStand.fehler='';try{_ztlZeichne();}catch(e){}}
+}
+function _ztlSyncSchlecht(e){
+  if(typeof _ztlSyncStand==='undefined')return;
+  const m=String((e&&e.message)||e||'?');
+  _ztlSyncStand.fehler=m;_ztlSyncStand.fehlZeit=Date.now();
+  console.warn('[Zettel] Abgleich:',m);
+  try{_ztlZeichne();}catch(_e){}
+}
+function _ztlSyncStandHtml(){
+  if(typeof _ztlSyncStand==='undefined'||!_ztlSyncStand)return'';
+  const hm=function(t){try{return new Date(t).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});}catch(e){return'';}};
+  if(_ztlSyncStand.fehler)return '<span title="'+_ztlAttr('Abgleich fehlgeschlagen: '+_ztlSyncStand.fehler+(_ztlSyncStand.zeit?' – zuletzt gelungen '+hm(_ztlSyncStand.zeit):''))+'" style="font-size:11px;font-weight:600;color:#c0392b;white-space:nowrap;">⚠ nicht abgeglichen'+(_ztlSyncStand.zeit?' seit '+hm(_ztlSyncStand.zeit):'')+'</span>';
+  if(_ztlSyncStand.zeit)return '<span title="Zuletzt abgeglichen" style="font-size:11px;color:var(--text2);white-space:nowrap;">☁ '+hm(_ztlSyncStand.zeit)+'</span>';
+  return'';
+}
 async function _ztlSync(){
   if(_ztlSyncLaeuft)return;
+  // typeof-Wache: ausschneidende Suiten (b802/b886) kennen die Melder nicht – dann stumm wie vor b904, nie abstürzen
+  const _ztlGut=(typeof _ztlSyncGut==='function')?_ztlSyncGut:function(){};
+  const _ztlSchlecht=(typeof _ztlSyncSchlecht==='function')?_ztlSyncSchlecht:function(e){console.warn('[Zettel] Abgleich:',e);};
   // b886: Notbetrieb – Zettel über den Helfer lesen/mergen/schreiben (gleiche
   // Merge-Logik wie bei Drive). Schreibt NUR, wenn das Lesen sauber war (ok
   // oder ehrliches 404) – nie blind überschreiben.
@@ -52583,15 +52514,17 @@ async function _ztlSync(){
       const r=await fetch('/api/datei?name='+ZETTEL_FILE_NAME,{cache:'no-store'});
       if(r.ok){const d=await r.json();if(d&&Array.isArray(d.zeilen)){fern=d.zeilen;fernRoh=JSON.stringify(fern);}leseOk=true;}
       else if(r.status===404){leseOk=true;}
-      if(!leseOk)return;
+      if(!leseOk){_ztlSchlecht('Helfer HTTP '+r.status);return;}
       const vorher=JSON.stringify(_ztlZeilen);
       _ztlZeilen=_ztlMerge(_ztlZeilen,fern,_ztlJetzt());
       const nachher=JSON.stringify(_ztlZeilen);
       if(nachher!==vorher){_ztlSpeichereLokal();_ztlZeichne();}
-      if(nachher===fernRoh)return;
+      if(nachher===fernRoh){_ztlGut();return;}
       const content=JSON.stringify({version:1,zeilen:_ztlZeilen,lastUpdated:_ztlJetzt()});
-      await fetch('/api/datei?name='+ZETTEL_FILE_NAME,{method:'POST',headers:{'Content-Type':'application/json'},body:content});
-    }catch(e){console.warn('[Zettel] Notbetrieb-Abgleich:',e);}
+      const w=await fetch('/api/datei?name='+ZETTEL_FILE_NAME,{method:'POST',headers:{'Content-Type':'application/json'},body:content});
+      if(!w.ok)throw new Error('Helfer HTTP '+w.status);
+      _ztlGut();
+    }catch(e){_ztlSchlecht(e);}
     finally{_ztlSyncLaeuft=false;}
     return;
   }
@@ -52604,8 +52537,8 @@ async function _ztlSync(){
       const q=encodeURIComponent("name='"+ZETTEL_FILE_NAME+"' and trashed=false");
       const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,modifiedTime)&orderBy=modifiedTime desc&pageSize=5',
         {headers:{Authorization:'Bearer '+gdriveToken}});
-      if(r.status===401){if(typeof _handleDrive401==='function')_handleDrive401();return;}
-      if(!r.ok)return;
+      if(r.status===401){if(typeof _handleDrive401==='function')_handleDrive401();_ztlSchlecht('Anmeldung abgelaufen');return;}
+      if(!r.ok){_ztlSchlecht('Drive HTTP '+r.status);return;}
       const d=await r.json();
       if(d.files&&d.files.length)zettelFileId=d.files[0].id;
     }
@@ -52614,16 +52547,20 @@ async function _ztlSync(){
       const r=await fetch('https://www.googleapis.com/drive/v3/files/'+zettelFileId+'?alt=media&_='+Date.now(),
         {headers:{Authorization:'Bearer '+gdriveToken,'Cache-Control':'no-cache'},cache:'no-store'});
       if(r.ok){const d=await r.json();if(d&&Array.isArray(d.zeilen)){fern=d.zeilen;fernRoh=JSON.stringify(fern);}}
+      // b904: Lesen gescheitert → NICHT blind den eigenen Stand drüberschreiben (vorher lief es mit leerer Fernliste weiter)
+      else{_ztlSchlecht('Lesen HTTP '+r.status);return;}
     }
     const vorher=JSON.stringify(_ztlZeilen);
     _ztlZeilen=_ztlMerge(_ztlZeilen,fern,_ztlJetzt());
     const nachher=JSON.stringify(_ztlZeilen);
     if(nachher!==vorher){_ztlSpeichereLokal();_ztlZeichne();}
-    if(zettelFileId&&nachher===fernRoh)return;
+    if(zettelFileId&&nachher===fernRoh){_ztlGut();return;}
     const content=JSON.stringify({version:1,zeilen:_ztlZeilen,lastUpdated:_ztlJetzt()});
     if(zettelFileId){
-      await fetch('https://www.googleapis.com/upload/drive/v3/files/'+zettelFileId+'?uploadType=media',
+      const w=await fetch('https://www.googleapis.com/upload/drive/v3/files/'+zettelFileId+'?uploadType=media',
         {method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},body:content});
+      if(!w.ok)throw new Error('Schreiben HTTP '+w.status);
+      _ztlGut();
     }else{
       const b='zt_'+Date.now();
       const meta={name:ZETTEL_FILE_NAME,mimeType:'application/json'};
@@ -52632,9 +52569,10 @@ async function _ztlSync(){
         +'\r\n--'+b+'\r\nContent-Type: application/json\r\n\r\n'+content+'\r\n--'+b+'--';
       const r=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',
         {method:'POST',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'multipart/related; boundary='+b},body});
-      if(r.ok){const f=await r.json();zettelFileId=f.id;}
+      if(r.ok){const f=await r.json();zettelFileId=f.id;_ztlGut();}
+      else throw new Error('Anlegen HTTP '+r.status);
     }
-  }catch(e){console.warn('[Zettel] Abgleich:',e);}
+  }catch(e){_ztlSchlecht(e);}
   finally{_ztlSyncLaeuft=false;}
 }
 // ── ZETTEL-TIMER – ab hier nichts in Prüfsuiten ausführen ──
@@ -56402,7 +56340,7 @@ async function _fdkEntwurf(t,bytes,fname,mime,sag){
       if(sag)sag('⚠ Entwurf ohne Anhang – bitte herunterladen und von Hand anhängen.');
       return;
     }
-    _pamShowDraftToast(erg.link,'✅ Entwurf mit '+fname+' liegt in Outlook unter <b>Entwürfe</b>');
+    _pamShowDraftToast(erg.link,'✅ Entwurf mit '+esc(fname)+' liegt in Outlook unter <b>Entwürfe</b>');
     showToast('✓ Entwurf angelegt – es wurde nichts verschickt','success',6000);
     if(sag)sag('✓ Entwurf liegt in Outlook unter „Entwürfe".');
   }catch(e){
