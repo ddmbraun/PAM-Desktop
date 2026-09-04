@@ -7927,6 +7927,20 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
 .kalw-bl.over{border-color:var(--accent);}
 .kalw-oz{display:flex;gap:6px;flex-wrap:wrap;padding:6px;margin-bottom:10px;background:var(--bg3);border-radius:8px;}
 .kalw-scroll{overflow-x:auto;padding-bottom:6px;}
+/* b909: Monatskalender zum Wochenspringen. Steht als eigener Block ueber dem Raster und
+   bricht bei schmalem Fenster nicht um - er ist schmal genug fuer 560 px. */
+.kalw-mon{display:inline-block;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:6px 8px;margin:0 0 8px 0;user-select:none;}
+.kalw-mon-kopf{display:flex;align-items:center;gap:6px;margin-bottom:4px;}
+.kalw-mon-titel{font-size:12px;font-weight:600;color:var(--text);flex:1;text-align:center;}
+.kalw-mon-nav{border:1px solid var(--border);background:var(--bg3);color:var(--text2);border-radius:4px;cursor:pointer;font-size:11px;line-height:1;padding:2px 6px;}
+.kalw-mon-nav:hover{background:var(--accent);color:#fff;}
+.kalw-mon-gitter{display:grid;grid-template-columns:repeat(7,22px);gap:2px;}
+.kalw-mon-wd{font-size:9px;color:var(--text2);text-align:center;font-weight:600;}
+.kalw-mon-leer{height:20px;}
+.kalw-mon-tag{height:20px;border:0;background:transparent;color:var(--text);font-size:10px;border-radius:4px;cursor:pointer;padding:0;}
+.kalw-mon-tag:hover{background:var(--bg3);}
+.kalw-mon-tag.inwoche{background:var(--accent);color:#fff;font-weight:700;}
+.kalw-mon-tag.heute{outline:2px solid var(--accent);outline-offset:-2px;font-weight:700;}
 /* b907: Rueckfallwert fuer Mo-Sa. Die gueltige Spaltenzahl setzt _kalRenderWeek als
    style-Angabe aus KALW_DAYS - hier NICHT von Hand nachziehen, sonst laufen beide
    Zahlen wieder auseinander (genau das liess Termine unter dem falschen Tag stehen). */
@@ -9861,7 +9875,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-04 · #908'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-04-b908) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-04 · #909'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-04-b909) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -19841,6 +19855,10 @@ function _kalRow(x){
   // K1: nur „↗ Task" bleibt dauerhaft sichtbar – alle weiteren Aktionen wandern ins ⋯-Menü
   const menu=[];
   if(x.outlookEventId&&!x.deletedInOutlook)menu.push('<button onclick="_kalOpenOutlook(\''+id+'\','+x.idx+')" title="Diesen Termin in Outlook öffnen">📆 In Outlook öffnen</button>');
+  // b909: Termin ohne Outlook-Eintrag direkt von hier nachtragen. Vorher führte der einzige
+  // Weg über Auftrag öffnen → Termine & Zeiterfassung → ⋯ → 📆 Outlook; im Kalender stand
+  // zwar „● nicht sync", aber kein Knopf, der etwas dagegen tun konnte.
+  if(!x.outlookEventId)menu.push('<button class="kal-menu-ok" onclick="_kalPushJetzt(\''+id+'\','+x.idx+')" title="Diesen Termin jetzt nach Outlook schreiben">📆 Jetzt nach Outlook schreiben</button>');
   if(x.deletedInOutlook){
     menu.push('<button class="kal-menu-ok" onclick="_kalKeepDeleted(\''+id+'\','+x.idx+')" title="Termin in PAM behalten (Outlook-Verknüpfung lösen)">✓ Behalten (Verknüpfung lösen)</button>');
     menu.push('<button class="kal-menu-danger" onclick="_kalRemoveTermin(\''+id+'\','+x.idx+')" title="Termin-Eintrag endgültig aus PAM entfernen">🗑 Endgültig entfernen</button>');
@@ -19906,7 +19924,56 @@ let _kalView=(function(){try{return localStorage.getItem('pam_kal_view')||'liste
 let _kalWeekOff=0, _kalPick=null, _kalDragKey=null;
 
 function _kalSetView(v){_kalView=(v==='woche')?'woche':'liste';try{localStorage.setItem('pam_kal_view',_kalView);}catch(e){}_kalPick=null;renderKalender(true);}
-function _kalWeekNav(d){ if(d===0)_kalWeekOff=0; else _kalWeekOff+=d; _kalPick=null; renderKalender(true); }
+function _kalWeekNav(d){ if(d===0)_kalWeekOff=0; else _kalWeekOff+=d; _kalPick=null; _kalwMonatOff=0; renderKalender(true); }
+
+// ── b909: Kleiner Monatskalender neben dem Wochenraster (Wunsch Frank, wie in Outlook) ──
+// Zum Wochenwechsel gab es bisher nur ‹ › und „Heute" – eine Woche in vier Monaten war
+// ein Dutzend Klicks. Der Monatsblock folgt der gezeigten Woche; ↑ ↓ blättern ihn allein.
+let _kalwMonatOff=0;   // Monatsversatz gegenüber dem Monat der gezeigten Woche
+let _kalwMonatAn=(function(){try{return localStorage.getItem('pam_kalw_monat')!=='0';}catch(e){return true;}})();
+function _kalwMonatToggle(){
+  _kalwMonatAn=!_kalwMonatAn; _kalwMonatOff=0;
+  try{localStorage.setItem('pam_kalw_monat',_kalwMonatAn?'1':'0');}catch(e){}
+  renderKalender(true);
+}
+function _kalwMonatNav(d){ _kalwMonatOff+=d; renderKalender(true); }
+// Montag der Woche, in der dieses Datum liegt
+function _kalwMontagVon(d){ const m=new Date(d); m.setHours(0,0,0,0); m.setDate(m.getDate()-((m.getDay()+6)%7)); return m; }
+// Klick auf einen Tag: dessen Woche zeigen. _kalWeekOff zählt Wochen ab der laufenden Woche.
+function _kalwSpringZu(iso){
+  const ziel=_kalwMontagVon(new Date(iso+'T00:00:00'));
+  const jetzt=_kalwMontagVon(new Date());
+  // Über die Zeitumstellung ist eine Woche nicht exakt 168 h – runden fängt die Stunde ab.
+  _kalWeekOff=Math.round((ziel.getTime()-jetzt.getTime())/604800000);
+  _kalwMonatOff=0; _kalPick=null;
+  renderKalender(true);
+}
+function _kalwMonatHtml(mon){
+  if(!_kalwMonatAn)return '';
+  const MN=['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+  const anker=new Date(mon.getFullYear(),mon.getMonth()+_kalwMonatOff,1);
+  const jahr=anker.getFullYear(), monat=anker.getMonth();
+  const vorlauf=(new Date(jahr,monat,1).getDay()+6)%7;      // Mo=0
+  const heuteIso=_kalIso(new Date());
+  // Die im Raster gezeigten Tage hervorheben
+  const inWoche={};
+  for(let i=0;i<KALW_DAYS;i++){ const d=new Date(mon); d.setDate(d.getDate()+i); inWoche[_kalIso(d)]=1; }
+  let h='<div class="kalw-mon">'
+    + '<div class="kalw-mon-kopf">'
+    +   '<button class="kalw-mon-nav" onclick="_kalwMonatNav(-1)" title="Voriger Monat">↑</button>'
+    +   '<span class="kalw-mon-titel">'+jahr+' '+MN[monat]+'</span>'
+    +   '<button class="kalw-mon-nav" onclick="_kalwMonatNav(1)" title="Nächster Monat">↓</button>'
+    + '</div><div class="kalw-mon-gitter">';
+  ['M','D','M','D','F','S','S'].forEach(function(w){ h+='<div class="kalw-mon-wd">'+w+'</div>'; });
+  for(let i=0;i<vorlauf;i++) h+='<div class="kalw-mon-leer"></div>';
+  const tage=new Date(jahr,monat+1,0).getDate();
+  for(let tag=1;tag<=tage;tag++){
+    const d=new Date(jahr,monat,tag), iso=_kalIso(d);
+    const cls='kalw-mon-tag'+(inWoche[iso]?' inwoche':'')+(iso===heuteIso?' heute':'');
+    h+='<button class="'+cls+'" onclick="_kalwSpringZu(\''+iso+'\')" title="Woche vom '+_kalDe(iso)+' zeigen">'+tag+'</button>';
+  }
+  return h+'</div></div>';
+}
 
 function _kalIso(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function _kalDe(iso){return iso?iso.split('-').reverse().join('.'):'';}
@@ -20059,8 +20126,12 @@ function _kalRenderWeek(){
     + '<button class="kal-btn" onclick="_kalwSetFahrt()" title="Hin-/Rückfahrtzeit für den markierten Termin setzen – wird vor bzw. nach dem Termin geblockt">🚗 Fahrt</button>'
     + '<button class="kal-btn" onclick="_kalwSetDauer()" title="Dauer des markierten Termins ändern (Ende = Beginn + Dauer)">⏱ Dauer</button>'
     + '<button class="kal-btn" onclick="_kalwUnplanPick()" title="Markierten Termin zurück in die Ungeplant-Leiste nehmen (löscht nach Rückfrage auch den Outlook-Eintrag)">↩ Ungeplant</button>'
+    + '<button class="kal-btn'+((typeof _kalwMonatAn!=='undefined'&&_kalwMonatAn)?' active':'')+'" onclick="_kalwMonatToggle()" title="Monatskalender zum Springen ein- oder ausblenden">📅 Monat</button>'  // b909
     + '<button class="kal-btn" onclick="_kalwCfgDialog()" title="Rasterzeiten einstellen: erste/letzte Stunde, Sonntag anzeigen">⚙</button>'
     + '</div>';
+  // b909: Monatsblock. typeof-Wache, weil test_b907 diese Funktion allein ausschneidet und
+  // mit Attrappen ausfuehrt - dort gibt es _kalwMonatHtml nicht (b805-Lehre).
+  h+=(typeof _kalwMonatHtml==='function')?_kalwMonatHtml(mon):'';
 
   h+='<div class="kalw-lbl">Ungeplant ('+D.backlog.length+')'
     + (_kalPick?' — jetzt Zielfeld antippen':' — ins Raster ziehen, oder antippen und Zielfeld antippen')+'</div>';
@@ -20645,6 +20716,25 @@ async function _kalDeleteTermin(taskId,idx){
   try{autoSave();}catch(e){console.warn('[KAL]',e);}
   renderKalender(true);
   showToast('🗑 Termin gelöscht','success',3000);
+}
+// b909: Einzelnen Termin aus der Kalenderansicht nach Outlook schreiben („● nicht sync").
+// Bewusst NICHT über _msAutoPushTermine: die schreibt nur, was _pamDirty trägt, und genau
+// dieser Merker fehlt hier (der Termin kam z. B. vom Handy, das Outlook gar nicht kennt).
+async function _kalPushJetzt(taskId,idx){
+  const task=(typeof findTaskById==='function')?findTaskById(taskId):null;
+  const t=(task&&Array.isArray(task.ausserhausTermine))?task.ausserhausTermine[idx]:null;
+  if(!t){ showToast('⚠ Termin nicht gefunden','warning',4000); return; }
+  if(!msToken){ showToast('⚠ Outlook nicht verbunden – bitte 📨 Outlook in der Leiste klicken','warning',5000); return; }
+  if(!_msTerminComplete(t)){ showToast('⚠ Der Termin braucht Datum, Uhrzeit und eine Bezeichnung','warning',6000); return; }
+  showToast('⏳ Schreibe Termin nach Outlook…','info',3000);
+  try{
+    await _msPushTermin(task,t);
+    t._pamDirty=false;
+    try{ const openId=(document.getElementById('taskId')||{}).value||''; if(openId===task.id && Array.isArray(taskAusserhausTermine) && taskAusserhausTermine[idx]){ taskAusserhausTermine[idx].outlookEventId=t.outlookEventId; taskAusserhausTermine[idx]._pamDirty=false; if(document.getElementById('ausserhausTermineList'))renderAusserhausTermine(); } }catch(e){}
+    try{autoSave();}catch(e){console.warn('[KAL]',e);}
+    renderKalender(true);
+    showToast('✅ In Outlook: '+_msTerminSubject(task,t),'success',4500);
+  }catch(e){ showToast('⚠ Outlook: '+((e&&e.message)||e),'error',6000); }
 }
 function _kalOpenTask(id){ if(typeof openEditTaskModal==='function')openEditTaskModal(id); }
 // Phase 5 – „in Outlook gelöscht": behalten (Verknüpfung lösen) oder endgültig entfernen
