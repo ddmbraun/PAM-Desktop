@@ -7911,6 +7911,8 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
 .kal-status-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;background:var(--kal-status,#9ca3af);cursor:help;}
 .kal-badge-del{font-size:11px;font-weight:700;color:#E24B4A;white-space:nowrap;flex-shrink:0;}
 .kal-badge-meta{font-size:10px;font-weight:700;color:#0078d4;white-space:nowrap;cursor:help;}
+/* b914: Kennzeichen für Termine aus dem Archiv – bewusst gedeckt, nicht alarmierend. */
+.kal-badge-archiv{font-size:10px;font-weight:700;color:#92400e;background:#FEF3C7;border-radius:4px;padding:0 5px;white-space:nowrap;cursor:help;}
 .kal-menu-wrap{position:relative;flex-shrink:0;}
 .kal-menu-btn{letter-spacing:2px;padding:5px 9px;}
 .kal-menu{display:none;position:absolute;right:0;top:calc(100% + 4px);background:var(--bg2);border:1px solid var(--border);border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,0.25);z-index:900;min-width:215px;padding:4px 0;overflow:hidden;}
@@ -9882,7 +9884,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-04 · #913'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-04-b913) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-04 · #914'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-04-b914) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -19809,6 +19811,8 @@ function render(){
 // Outlook (info@, msToken) wird nur zum Abgleich des Sync-Status gelesen.
 // ══════════════════════════════════════════════════════
 let _kalShowHidden=false, _kalSyncing=false, _kalLastSync=0, _kalStatusFilter='alle', _kalDateFilter='';
+let _kalZeigeArchiv=false;   // b914: Termine archivierter Aufträge mit in die Liste nehmen
+function _kalToggleArchiv(){ _kalZeigeArchiv=!_kalZeigeArchiv; renderKalender(true); }
 // Filterleiste nach dem Muster „Globale Suche" (Wunsch Frank): Projekt, Freitext, Zeitraum
 let _kalBoardFilter='', _kalSearch='', _kalRange='std', _kalSearchTimer=null;
 function _kalKostenstelle(task){
@@ -19836,20 +19840,37 @@ function _kalCollectTermine(){
     from=new Date(today); from.setDate(from.getDate()-1);
     to=new Date(today);   to.setDate(to.getDate()+30);
   }
+  // b914: EIN Sammelweg für beide Quellen (Board und Archiv) – sonst laufen sie auseinander.
+  const _sammle=(task)=>{
+    if(!task||!Array.isArray(task.ausserhausTermine))return;
+    task.ausserhausTermine.forEach((t,i)=>{
+      const ds=(t&&(t.date||t.datum))||''; if(!ds)return;
+      const d=new Date(ds+'T00:00:00'); if(isNaN(d.getTime()))return;
+      if(d<from||d>to)return;
+      out.push({taskId:task.id,idx:i,d:d,date:ds,von:t.von||'',bis:t.bis||'',fahrt:_kalFahrt(t),fahrtR:_kalFahrtR(t),
+        beschreibung:t.beschreibung||'',kostenstelle:_kalKostenstelle(task),title:task.title||'',
+        outlookEventId:t.outlookEventId||'',outlookWebLink:t.outlookWebLink||'',outlookMetaChanged:!!t.outlookMetaChanged,outlookSubject:t.outlookSubject||'',outlookLocation:t.outlookLocation||'',hidden:!!t.hiddenInPam,deletedInOutlook:!!t.outlookDeleted,
+        archiviert:!!(task&&task.archiviert)});
+    });
+  };
   Object.entries(boards||{}).forEach(([bn,tasks])=>{
     if(_kalBoardFilter&&bn!==_kalBoardFilter)return;
     (tasks||[]).forEach(task=>{
-      if(!task||task.archiviert||!Array.isArray(task.ausserhausTermine))return;
-      task.ausserhausTermine.forEach((t,i)=>{
-        const ds=(t&&(t.date||t.datum))||''; if(!ds)return;
-        const d=new Date(ds+'T00:00:00'); if(isNaN(d.getTime()))return;
-        if(d<from||d>to)return;
-        out.push({taskId:task.id,idx:i,d:d,date:ds,von:t.von||'',bis:t.bis||'',fahrt:_kalFahrt(t),fahrtR:_kalFahrtR(t),
-          beschreibung:t.beschreibung||'',kostenstelle:_kalKostenstelle(task),title:task.title||'',
-          outlookEventId:t.outlookEventId||'',outlookWebLink:t.outlookWebLink||'',outlookMetaChanged:!!t.outlookMetaChanged,outlookSubject:t.outlookSubject||'',outlookLocation:t.outlookLocation||'',hidden:!!t.hiddenInPam,deletedInOutlook:!!t.outlookDeleted});
-      });
+      if(!task||task.archiviert)return;
+      _sammle(task);
     });
   });
+  // b914: Termine archivierter Aufträge dazunehmen, wenn der Schalter an ist.
+  // ⛔ Ein Flag zu übergehen hätte NICHT gereicht: `archiveTask` schneidet den Auftrag mit
+  // splice aus `boards` heraus und legt ihn in `archivedTasks` – im Board ist er gar nicht
+  // mehr. Deshalb wird hier eine zweite Quelle gelesen. Franks Befund: der Rücksprung aus
+  // einem Outlook-Termin meldete „Task ist archiviert", während der Kalender ihn nicht kannte.
+  if(_kalZeigeArchiv && typeof archivedTasks!=='undefined' && Array.isArray(archivedTasks)){
+    archivedTasks.forEach(task=>{
+      if(_kalBoardFilter && ((task&&task._archivProjekt)||'')!==_kalBoardFilter)return;
+      _sammle(task);
+    });
+  }
   out.sort((a,b)=>a.d-b.d || (a.von||'').localeCompare(b.von||''));
   return out;
 }
@@ -19864,6 +19885,8 @@ function _kalRow(x){
   const id=_escHtml(x.taskId);
   const ks=x.kostenstelle?'<span class="kal-kst-chip">'+esc(x.kostenstelle)+'</span>':'';
   const metaBadge=x.outlookMetaChanged?(' <span class="kal-badge-meta" title="In Outlook geändert — '+_escHtml(x.outlookSubject||'')+(x.outlookLocation?(' | Ort: '+_escHtml(x.outlookLocation)):'')+'">ℹ Outlook geändert</span>'):'';
+  // b914: Archivierte deutlich kennzeichnen – sonst sehen sie aus wie laufende Aufträge.
+  const archivBadge=x.archiviert?(' <span class="kal-badge-archiv" title="Der Auftrag liegt im Archiv. Der Termin steht weiter in Outlook.">📦 archiviert</span>'):'';
   // K1: nur „↗ Task" bleibt dauerhaft sichtbar – alle weiteren Aktionen wandern ins ⋯-Menü
   const menu=[];
   if(x.outlookEventId&&!x.deletedInOutlook)menu.push('<button onclick="_kalOpenOutlook(\''+id+'\','+x.idx+')" title="Diesen Termin in Outlook öffnen">📆 In Outlook öffnen</button>');
@@ -19881,7 +19904,7 @@ function _kalRow(x){
     + '<div class="kal-card-time">'+(x.von?esc(x.von):'—')+(x.bis?'<small>bis '+esc(x.bis)+'</small>':'')+'</div>'
     + '<div class="kal-card-main pam-clamp2" onclick="event.stopPropagation();this.classList.toggle(\'pam-clamp-open\')" title="'+_escHtml((x.beschreibung||'(ohne Bezeichnung)')+' – '+(x.title||''))+'">'
     +   ks+'<span class="kal-card-bez">'+esc(x.beschreibung||'(ohne Bezeichnung)')+'</span>'
-    +   '<span class="kal-card-task"> – '+esc(x.title)+'</span>'+metaBadge
+    +   '<span class="kal-card-task"> – '+esc(x.title)+'</span>'+metaBadge+archivBadge
     + '</div>'
     + (x.deletedInOutlook
         ?'<span class="kal-badge-del" title="Der verknüpfte Outlook-Termin existiert nicht mehr – Aktionen im ⋯-Menü">⚠ in Outlook gelöscht</span>'
@@ -20677,6 +20700,7 @@ function renderKalender(skipSync){
     + '<input type="date" id="kalDateInp" class="kal-date-input" value="'+_escHtml(_kalDateFilter)+'" onchange="_kalSetDateFilter(this.value)">'  // b913: Kennung, damit der Cursor zurueckgegeben werden kann
     + (_kalDateFilter?'<button class="kal-chip active" onclick="_kalSetDateFilter(\'\')" title="Datumsfilter löschen">× Datum</button>':'')
     + '<span class="kal-spacer"></span>'
+    + '<button class="kal-chip'+(_kalZeigeArchiv?' active':'')+'" onclick="_kalToggleArchiv()" title="Auch Termine von Aufträgen zeigen, die im Archiv liegen. Sie stehen weiter in Outlook, tauchen aber sonst im Kalender nicht auf.">📦 Archivierte</button>'  // b914
     + '<button class="kal-chip'+(_kalShowHidden?' active':'')+'" onclick="_kalToggleHidden()" title="Ausgeblendete Termine als eigene Liste unten anzeigen">👁 Ausgeblendete'+(hiddenCount?' ('+hiddenCount+')':'')+'</button>'
     + '</div>';
   // ── Wochenraster: eigene Datenbasis + eigene Navigation, Liste bleibt unberührt ──
