@@ -9858,7 +9858,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-03 · #901'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-03-b901) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-04 · #902'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-04-b902) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -13759,9 +13759,30 @@ function _saveLocalBackup(){
   // wenn das Ablegen wirklich geklappt hat (Speicher voll = false).
   try{
     const snap={ts:new Date().toISOString(),data:buildSaveObject()};
-    localStorage.setItem(PC_BACKUP_KEY,JSON.stringify(snap));
+    const _txt=JSON.stringify(snap);
+    // b902: Vorwarnung, BEVOR der Browser-Speicher (ca. 5 MB je Adresse, geteilt mit den Schwester-Apps) voll ist
+    if(_txt.length>3500000&&typeof _pamBackupWarnung==='function')_pamBackupWarnung('fast',_txt.length);
+    localStorage.setItem(PC_BACKUP_KEY,_txt);
     return true;
-  }catch(e){console.warn('[PTP] Backup fehlgeschlagen:',e);return false;}
+  }catch(e){
+    console.warn('[PTP] Backup fehlgeschlagen:',e);
+    // b902: Speicher voll darf nicht mehr still bleiben (Befund M2 vom 26.08.) – bis hier wertete nur
+    // gdriveSaveData den Rückgabewert aus, der 60-s-Takt und elf weitere Aufrufer nie.
+    if(e&&(e.name==='QuotaExceededError'||/quota|exceeded/i.test(String(e.message||'')))&&typeof _pamBackupWarnung==='function')_pamBackupWarnung('voll');
+    return false;
+  }
+}
+// b902: Speicher-Warnung – „voll" höchstens einmal je Stunde, „fast voll" einmal je Tag, nie stumm.
+let _pamBackupWarnZeit={fast:0,voll:0};
+function _pamBackupWarnung(art,len){
+  const jetzt=Date.now();const abstand=art==='voll'?3600000:86400000;
+  if(jetzt-(_pamBackupWarnZeit[art]||0)<abstand)return false;
+  _pamBackupWarnZeit[art]=jetzt;
+  const txt=art==='voll'
+    ?'⚠ Browser-Speicher voll – die lokale Sicherung schlägt fehl. Speichern nach Drive läuft weiter, aber ohne Netz gäbe es keinen lokalen Stand. Bitte melden.'
+    :'⚠ Die lokale Sicherung ist '+(Math.round((len||0)/100000)/10)+' MB groß – der Browser-Speicher (ca. 5 MB) wird knapp.';
+  try{if(typeof showToast==='function')showToast(txt,art==='voll'?'error':'warning',9000);}catch(e){}
+  return true;
 }
 function _getLocalBackup(){
   try{const s=localStorage.getItem(PC_BACKUP_KEY);return s?JSON.parse(s):null;}catch(e){return null;}
@@ -15114,6 +15135,16 @@ async function pollWorkboardFile(){
     }
     _pamRemotePollPending=false;
     _pamHandyHinweis(false);   // b771: es wird jetzt geladen – das Band hat seinen Zweck erfüllt
+    // b902: Wartet eine eigene Änderung noch auf ihren Speicherlauf (1-s-Puffer von scheduleSave) oder
+    // läuft er gerade, wird NICHT blind der Drive-Stand geladen – das warf die letzte Sekunde Arbeit weg
+    // (Haken, Ziehen, Kalender ohne offenes Fenster). Stattdessen sofort speichern: gdriveSaveData prüft
+    // selbst gegen den neueren Drive-Stand und führt zusammen; der nächste Abgleich sieht dann keinen Unterschied.
+    if(gdriveSaving)return;
+    if(_savePending){
+      clearTimeout(autoSaveTimer);autoSaveTimer=null;
+      try{await autoSave();try{pushToSync();}catch(e){}}catch(e){console.warn('[b902] Speichern vor Abgleich:',e);}
+      return;
+    }
     // Datei hat sich geändert — neu laden
     const r=await fetch('https://www.googleapis.com/drive/v3/files/'+gdriveFileId+'?alt=media&_='+Date.now(),
       {headers:{Authorization:'Bearer '+gdriveToken,'Cache-Control':'no-cache'},cache:'no-store'});
@@ -15672,6 +15703,10 @@ async function gdriveSaveData() {
               for(const lt of v){
                 if(!lt||!lt.id)continue;
                 if(!remoteIds.has(lt.id)){
+                  // b902: Lag die Karte beim letzten Abgleich schon hier (Momentaufnahme b662) und fehlt sie
+                  // drüben jetzt in Board UND Archiv, hat das andere Gerät sie gelöscht – nicht als „lokal
+                  // neu" zurückholen. Hochwandern darf nur, was wirklich hier neu ist (nicht in der Aufnahme).
+                  if(_pamDriveSnapshot&&_pamDriveSnapshot.has(lt.id))continue;
                   // nur einfügen falls noch nicht drin (z.B. durch Modal-Regel)
                   let exists=false;
                   for(const rk of Object.keys(merged)){
@@ -15717,6 +15752,7 @@ async function gdriveSaveData() {
                 for(const lt of v){
                   if(!lt||!lt.id||_drin.has(lt.id))continue;
                   if(_pamDeletedIds.has(lt.id))continue;  // absichtlich geloescht → nicht zurueckholen
+                  if(_pamDriveSnapshot&&_pamDriveSnapshot.has(lt.id)&&!remoteIds.has(lt.id))continue; // b902: drüben gelöscht (war hier, fehlt dort in Board UND Archiv)
                   if(!merged[k])merged[k]=[];
                   merged[k].push(lt);_drin.add(lt.id);_gerettet++;
                 }
@@ -23435,6 +23471,7 @@ function deleteTaskPermanent(taskId,evt){
     const idx=(boards[bk]||[]).findIndex(t=>t.id===taskId);
     if(idx>=0){
       boards[bk].splice(idx,1);
+      _pamMarkTaskDeleted(taskId); // b902: wie deleteTask (#366) – sonst holt der Konflikt-Abgleich (Remote als Basis) die Karte zurück
       render();autoSave();
       showToast('🗑 Task gelöscht','success',2500);
       return;
@@ -23636,7 +23673,7 @@ function _executeMerge(){
   const rMaster=ms==='A'?rA:rB;
   const rOther=ms==='A'?rB:rA;
 
-  const allFieldKeys=['title','desc','hausverwaltung','adresse','schadensbild','owner','status','ampel','repNr','kundenNr','source','emailSender','aktivitaet','due','anfrageEingangDatum','auftragVomDatum','ausführungsdatum','ausfuehrungstermin','ortstermin','gdrive','gdriveOrdner','nas','emailOrdner','sbPdfOrdner'];
+  const allFieldKeys=['objektId','objektName','title','desc','hausverwaltung','adresse','schadensbild','owner','status','ampel','repNr','kundenNr','source','emailSender','aktivitaet','due','anfrageEingangDatum','auftragVomDatum','ausführungsdatum','ausfuehrungstermin','ortstermin','gdrive','gdriveOrdner','nas','emailOrdner','sbPdfOrdner'];
 
   const merged=JSON.parse(JSON.stringify(masterTask));
 
@@ -53002,9 +53039,15 @@ async function syncRead(initial=false){
 async function syncWrite(){
   if(!syncFileId||!gdriveToken)return;
   try{
-    await fetch('https://www.googleapis.com/upload/drive/v3/files/'+syncFileId+'?uploadType=media',
+    const r=await fetch('https://www.googleapis.com/upload/drive/v3/files/'+syncFileId+'?uploadType=media',
       {method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},body:JSON.stringify(syncData,null,2)});
-  }catch(e){console.warn('syncWrite:',e);}
+    // b902: Antwort prüfen (Befund M5 vom 26.08.) – ein verschluckter Fehler ließ die Termindatei still veralten.
+    if(!r.ok){
+      console.warn('syncWrite: HTTP',r.status);
+      if(r.status===401&&typeof _handleDrive401==='function')_handleDrive401();
+      else if(typeof showToast==='function')showToast('⚠ Termindatei nicht gespeichert (HTTP '+r.status+') – wird beim nächsten Speichern erneut versucht','warning',6000);
+    }
+  }catch(e){console.warn('syncWrite:',e);if(typeof showToast==='function')showToast('⚠ Termindatei nicht gespeichert (Netz) – wird beim nächsten Speichern erneut versucht','warning',6000);}
 }
 function startSyncPolling(){
   if(syncPollingId)clearInterval(syncPollingId);
