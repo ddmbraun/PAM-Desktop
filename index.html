@@ -9858,7 +9858,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-04 · #904'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-04-b904) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-04 · #905'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-04-b905) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -10159,6 +10159,7 @@ var ZETTEL_ZU_KEY='pam_zettel_zu';
 var ZETTEL_ZU_VORGABE='0'; // '0' = Kasten startet offen (Handy: '1' = zugeklappt)
 var ZETTEL_BLATT_KEY='pam_zettel_blatt';
 var ZETTEL_REITER='1'; // '1' = zwei Reiter Jetzt/Spaeter (Handy: '0' = beide Listen untereinander)
+var ZETTEL_BREITE_ZIEHBAR='1'; // b905: '1' = Griff am rechten Rand, Breite ziehbar und gemerkt (Handy: '0' = voll breit, kein Griff)
 var _ztlKachelNeu=false; // b811: Eingabefeld an der zugeklappten Kachel offen? (hier oben, nicht beim Rest - b803-Lehre)
 var ZETTEL_PW_KEY='pam_zettel_pw';
 var ZETTEL_BLATT3='1'; // '1' = drittes Blatt (nur Rechner); Handy '0' = gibt es dort nicht
@@ -52087,6 +52088,7 @@ function _ztlToggleZu(){
 function _ztlZeichne(){
   if(typeof document==='undefined')return;
   if(typeof _ztlDragAktiv!=='undefined'&&_ztlDragAktiv)return; // b804: laufenden Zieh-Vorgang nicht abreißen (b664-Lehre: Neuzeichnen veraltet die gegriffene Zeile)
+  if(typeof _ztlBreiteZieht!=='undefined'&&_ztlBreiteZieht)return; // b905: dasselbe beim Breite-Ziehen am Griff
   const el=document.getElementById('ztlKasten');
   if(el)el.outerHTML=_ztlKastenHtml();
 }
@@ -52403,7 +52405,12 @@ function _ztlKastenHtml(){
     }
     return r+'</li>';
   };
-  let h=kastenAuf+'style="max-width:520px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid #7F77DD;border-radius:0 10px 10px 0;margin-bottom:12px;overflow:hidden;">'
+  // b905: Breite kommt aus _ztlBreite() (am PC gemerkt, ziehbar am Griff rechts); am Handy Standardbreite ohne Griff.
+  const breite=(typeof _ztlBreite==='function')?_ztlBreite():520;
+  const griff=(typeof ZETTEL_BREITE_ZIEHBAR!=='undefined'&&ZETTEL_BREITE_ZIEHBAR==='1')
+    ?'<div onpointerdown="_ztlBreiteZiehStart(event)" ondblclick="_ztlBreiteReset()" title="Breite ziehen · Doppelklick = Standardbreite" style="position:absolute;top:0;right:0;width:9px;height:100%;cursor:ew-resize;touch-action:none;z-index:2;"></div>'
+    :'';
+  let h=kastenAuf+'style="max-width:'+breite+'px;position:relative;background:var(--bg2);border:1px solid var(--border);border-left:3px solid #7F77DD;border-radius:0 10px 10px 0;margin-bottom:12px;overflow:hidden;">'+griff
     +'<div onclick="_ztlToggleZu()" style="display:flex;align-items:center;gap:8px;padding:9px 12px;cursor:pointer;user-select:none;">'
     +'<span style="font-size:12px;color:var(--text2);">▼</span>'
     +'<span style="font-size:14px;">📝</span>'
@@ -52478,6 +52485,37 @@ function _ztlKastenHtml(){
   return h+'</div>';
 }
 function _ztlSyncBald(){clearTimeout(_ztlSyncTimer);_ztlSyncTimer=setTimeout(function(){_ztlSync();},2000);}
+// b905: Zettel-Breite (Frank 04.09.: „kann ich den breiter machen, zum Ziehen?"). Gemerkt im Browser unter
+// pam_zettel_breite (360–2400 px), Standard 520. Ziehen am Griff rechts mit Zeiger-Fang (setPointerCapture, b823-Lehre);
+// während des Ziehens zeichnet _ztlZeichne nicht neu (sonst verliert der Griff die Hand, b664-Lehre).
+function _ztlBreite(){
+  try{const v=parseInt((typeof localStorage!=='undefined'&&localStorage.getItem('pam_zettel_breite'))||'',10);if(v>=360&&v<=2400)return v;}catch(e){}
+  return 520;
+}
+var _ztlBreiteZieht=false;
+function _ztlBreiteZiehStart(ev){
+  const el=(typeof document!=='undefined')?document.getElementById('ztlKasten'):null;const grip=ev&&ev.currentTarget;
+  if(!el||!grip)return;
+  if(ev.preventDefault)ev.preventDefault();
+  const startX=ev.clientX,startW=el.getBoundingClientRect().width;
+  _ztlBreiteZieht=true;
+  try{grip.setPointerCapture(ev.pointerId);}catch(e){}
+  const move=function(e){const w=Math.max(360,Math.min(2400,Math.round(startW+(e.clientX-startX))));el.style.maxWidth=w+'px';};
+  const up=function(){
+    grip.removeEventListener('pointermove',move);grip.removeEventListener('pointerup',up);grip.removeEventListener('pointercancel',up);
+    try{grip.releasePointerCapture(ev.pointerId);}catch(e){}
+    _ztlBreiteZieht=false;
+    const w=parseInt(el.style.maxWidth,10);
+    if(w>=360){try{localStorage.setItem('pam_zettel_breite',String(w));}catch(e){}}
+    try{_ztlZeichne();}catch(e){}
+  };
+  grip.addEventListener('pointermove',move);grip.addEventListener('pointerup',up);grip.addEventListener('pointercancel',up);
+}
+function _ztlBreiteReset(){
+  try{localStorage.removeItem('pam_zettel_breite');}catch(e){}
+  const el=(typeof document!=='undefined')?document.getElementById('ztlKasten'):null;
+  if(el)el.style.maxWidth='520px';
+}
 // b904: Der Zettel-Abgleich meldet sich – vorher verschwand jeder Fehler still in der Konsole, und der
 // Zettel am Handy wusste dann etwas anderes als der am Rechner (Befund B Nr. 14 vom 03.09.).
 function _ztlSyncGut(){
@@ -52495,9 +52533,10 @@ function _ztlSyncSchlecht(e){
 function _ztlSyncStandHtml(){
   if(typeof _ztlSyncStand==='undefined'||!_ztlSyncStand)return'';
   const hm=function(t){try{return new Date(t).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});}catch(e){return'';}};
-  if(_ztlSyncStand.fehler)return '<span title="'+_ztlAttr('Abgleich fehlgeschlagen: '+_ztlSyncStand.fehler+(_ztlSyncStand.zeit?' – zuletzt gelungen '+hm(_ztlSyncStand.zeit):''))+'" style="font-size:11px;font-weight:600;color:#c0392b;white-space:nowrap;">⚠ nicht abgeglichen'+(_ztlSyncStand.zeit?' seit '+hm(_ztlSyncStand.zeit):'')+'</span>';
-  if(_ztlSyncStand.zeit)return '<span title="Zuletzt abgeglichen" style="font-size:11px;color:var(--text2);white-space:nowrap;">☁ '+hm(_ztlSyncStand.zeit)+'</span>';
-  return'';
+  // b905 (Frank 04.09.): in Worten statt nur Symbol – am Handy gibt es kein Zeigen mit der Maus, der Text muss reichen.
+  if(_ztlSyncStand.fehler)return '<span title="'+_ztlAttr('Abgleich fehlgeschlagen: '+_ztlSyncStand.fehler+(_ztlSyncStand.zeit?' – zuletzt gelungen '+hm(_ztlSyncStand.zeit):''))+'" style="font-size:11px;font-weight:600;color:#c0392b;">⚠ nicht abgeglichen'+(_ztlSyncStand.zeit?' seit '+hm(_ztlSyncStand.zeit):'')+' – Handy und PC können abweichen</span>';
+  if(_ztlSyncStand.zeit)return '<span title="Zeitpunkt, seit dem Handy und PC denselben Zettel haben" style="font-size:11px;color:var(--text2);white-space:nowrap;">☁ abgeglichen '+hm(_ztlSyncStand.zeit)+'</span>';
+  return '<span title="Der Abgleich mit Drive läuft nach dem Start von selbst" style="font-size:11px;color:var(--text2);white-space:nowrap;">☁ noch nicht abgeglichen</span>';
 }
 async function _ztlSync(){
   if(_ztlSyncLaeuft)return;
