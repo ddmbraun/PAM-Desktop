@@ -8196,6 +8196,9 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
        links daneben bleibt unverändert – beide enden in derselben Strecke. -->
   <button type="button" id="olHolenBtn" class="adz-file-btn" onclick="_outlookHolen()"
     title="Mails aus den zugeordneten Outlook-Ordnern holen (einstellen unter ⚙ Einstellungen)">📥 Outlook</button>
+  <!-- b921: Verlauf der letzten Läufe - was wurde wohin geholt (bleibt auch Tage später) -->
+  <button type="button" id="olLaeufeBtn" class="adz-file-btn" onclick="_olLaeufeZeigen()"
+    title="Die letzten Läufe: welche Mail wurde wohin geholt">🕘 Letzte Läufe</button>
 </div><div id="pdfAuftragDropBar"
   ondragenter="event.preventDefault();this.classList.add('adz-hover')"
   ondragover="event.preventDefault();this.classList.add('adz-hover');event.dataTransfer.dropEffect='copy'"
@@ -9907,7 +9910,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-06 · #920'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-06-b920) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-06 · #921'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-06-b921) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -34123,11 +34126,37 @@ async function _olMailAlsDatei(msgId,betreff){
 // Kennzeichnen und wegräumen. ⛔ Reihenfolge: erst das Häkchen, dann das
 // Verschieben — nach /move hat die Mail eine NEUE id, ein PATCH danach liefe
 // auf die alte und schlüge still fehl.
-async function _olWegraeumen(msgId,zielId){
+// b921: Kategorien für die weggeräumte Mail — „PAM" (Franks farbige) und „→ <Ziel>". Vorhandene
+// Kategorien bleiben, ein älteres „→ …" (Mail schon einmal geholt) wird ersetzt. Der Zieltext ist
+// auf 60 Zeichen gekürzt; Outlook zeigt ihn ohne Farbe, weil PAM die Kategorienliste nicht
+// anlegen darf (dafür fehlt ein Recht, das nicht neu beantragt werden soll).
+function _olKategorien(vorhanden,zielText){
+  const out=(Array.isArray(vorhanden)?vorhanden:[]).filter(function(k){return k&&k!=='PAM'&&!/^→ /.test(String(k));});
+  out.unshift('PAM');
+  const z=String(zielText||'').replace(/\s+/g,' ').trim().slice(0,60);
+  if(z)out.push('→ '+z);
+  return out;
+}
+
+// Ziel in Franks Worten für Kategorie und Verlauf: neue Karte → „Board · Spalte", sonst der
+// Titel des Vorgangs, an dem die Mail hängt.
+function _olZielText(f){
+  const z=f&&f.ziel;if(!z)return '';
+  if(f.art==='neu')return [z.board||'',z.status||''].filter(Boolean).join(' · ');
+  return String(z.title||'');
+}
+
+async function _olWegraeumen(msgId,zielId,zielText){
+  // b921: erst lesen, dann ergänzen — PATCH ersetzt die Kategorienliste, sie soll nicht schrumpfen.
+  let kats=[];
+  try{
+    const rk=await _olFetch('/me/messages/'+encodeURIComponent(msgId)+'?$select=categories');
+    if(rk.ok){const dk=await rk.json();kats=Array.isArray(dk.categories)?dk.categories.slice():[];}
+  }catch(e){console.warn('[b921] Kategorien lesen:',e);}
   try{
     await _olFetch('/me/messages/'+encodeURIComponent(msgId),
       {method:'PATCH',headers:{'Content-Type':'application/json'},
-       body:JSON.stringify({flag:{flagStatus:'complete'}})});
+       body:JSON.stringify({flag:{flagStatus:'complete'},categories:_olKategorien(kats,zielText)})});
   }catch(e){console.warn('[b918] Kennzeichnen:',e);}
   if(!zielId)return true;
   try{
@@ -34173,6 +34202,77 @@ async function _olImportStill(info,datei,board,spalte){
   }
 }
 
+// ── b921: Ergebnisfenster und Verlauf ────────────────────────────────────
+// Frank am 06.09.: „Wenn PAM eine Mail an einen Auftrag hängt, erfahre ich das nur sechs
+// Sekunden lang — zwei Tage später weiß ich nicht mehr, wo sie ist." Deshalb: ein Fenster,
+// das bis „Schließen" steht, und ein Verlauf der letzten Läufe in pam_settings.json.
+const OL_PROTOKOLL_MAX=20;
+
+function _olZeitText(iso){
+  try{const d=new Date(iso);if(isNaN(d))return String(iso||'');
+    return d.toLocaleDateString('de-DE')+', '+d.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
+  }catch(e){return String(iso||'');}
+}
+
+// Speichert einen Lauf vorn im Verlauf (neuester zuerst, höchstens OL_PROTOKOLL_MAX) und
+// schreibt ihn als b898-Päckchen nach Drive — Zuordnung und Zielordner bleiben unangetastet.
+async function _olLaufMerken(lauf){
+  try{
+    const oh=Object.assign({zuordnung:[],erledigtId:'',erledigtName:''},(typeof pamSettings!=='undefined'&&pamSettings&&pamSettings.outlookHolen)||{});
+    const alt=Array.isArray(oh.protokoll)?oh.protokoll:[];
+    oh.protokoll=[lauf].concat(alt).slice(0,OL_PROTOKOLL_MAX);
+    pamSettings.outlookHolen=oh;
+    if(typeof settingsSaveToDrive==='function')await settingsSaveToDrive({outlookHolen:oh});
+  }catch(e){console.warn('[b921] Verlauf speichern:',e);}
+}
+
+// Das Fenster. `laeufe` = Liste von {zeit, zeilen:[{betreff,art,zielId,zielTitel,zielBoard,zielSpalte}]}.
+// Bleibt stehen, bis Frank „Schließen" drückt. „öffnen" schließt es und springt zur Karte.
+function _olErgebnisFenster(laeufe,titel){
+  const ex=document.getElementById('_olErgebnis');if(ex)ex.remove();
+  const ov=document.createElement('div');ov.id='_olErgebnis';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99999;display:flex;align-items:center;justify-content:center;';
+  const box=document.createElement('div');
+  box.style.cssText='background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:12px;padding:20px 24px;min-width:420px;max-width:760px;width:92%;max-height:86vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.5);';
+  const ART={neu:'➕ neue Karte',angehaengt:'📎 angehängt',doppelt:'✓ schon vorhanden',liegen:'⚠ liegen geblieben'};
+  let h='<div style="font-size:16px;font-weight:700;margin-bottom:6px;">'+esc(titel||'📥 Aus Outlook geholt')+'</div>';
+  h+='<div style="overflow-y:auto;flex:1;min-height:0;">';
+  (Array.isArray(laeufe)?laeufe:[]).forEach(function(l){
+    const z=Array.isArray(l&&l.zeilen)?l.zeilen:[];
+    const n={};z.forEach(function(x){n[x.art]=(n[x.art]||0)+1;});
+    const zus=[n.neu?n.neu+' neu':'',n.angehaengt?n.angehaengt+' angehängt':'',n.doppelt?n.doppelt+' vorhanden':'',n.liegen?n.liegen+' liegen geblieben':''].filter(Boolean).join(' · ');
+    h+='<div style="font-size:12px;font-weight:700;color:var(--text2);margin:10px 0 4px;">'+esc(_olZeitText(l&&l.zeit))+' — '+z.length+(z.length===1?' Mail':' Mails')+(zus?' · '+zus:'')+'</div>';
+    if(!z.length)h+='<div style="font-size:12px;color:var(--text2);padding:2px 0 6px;">Nichts zu holen – die Ordner waren leer.</div>';
+    z.forEach(function(x){
+      // Protokoll, kein Live-Stand: Gibt es die Karte nicht mehr (gelöscht oder archiviert), wird
+      // die Zeile grau und bekommt keinen öffnen-Knopf. Eine VERSCHOBENE Karte findet findTaskById
+      // in jedem Board — sie bleibt normal und „öffnen" springt dorthin. Frank fragte genau danach.
+      const weg=!!(x.zielId&&typeof findTaskById==='function'&&!findTaskById(x.zielId));
+      const ziel=x.art==='liegen'?'bleibt in Outlook liegen':(weg?'nicht mehr im Board (gelöscht oder archiviert)':(x.art==='neu'?[x.zielBoard||'',x.zielSpalte||''].filter(Boolean).join(' · '):(x.zielTitel||'')));
+      h+='<div style="display:flex;gap:8px;align-items:center;padding:5px 0;border-top:1px solid var(--border);font-size:12px;'+(weg?'opacity:.55;':'')+'">'
+        +'<div style="flex:2;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(x.betreff||'')+'">'+esc(x.betreff||'')+'</div>'
+        +'<div style="flex:0 0 140px;">'+(ART[x.art]||esc(x.art||''))+'</div>'
+        +'<div style="flex:2;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text2);" title="'+esc(ziel)+'">'+esc(ziel)+'</div>'
+        +((x.zielId&&!weg)?'<button type="button" class="_olOeffnen" data-id="'+esc(x.zielId)+'" style="padding:3px 9px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;font-size:11px;">öffnen</button>':'<span style="display:inline-block;width:56px;"></span>')
+        +'</div>';
+    });
+  });
+  h+='</div><div style="display:flex;justify-content:flex-end;margin-top:12px;"><button type="button" id="_olErgebnisZu" style="padding:7px 18px;border-radius:7px;border:none;background:var(--accent);color:#fff;font-size:13px;font-weight:600;cursor:pointer;">Schließen</button></div>';
+  box.innerHTML=h;ov.appendChild(box);document.body.appendChild(ov);
+  const zu=document.getElementById('_olErgebnisZu');if(zu)zu.onclick=function(){ov.remove();};
+  box.querySelectorAll('._olOeffnen').forEach(function(b){
+    b.onclick=function(){const id=b.getAttribute('data-id');ov.remove();try{openEditTaskModal(id);}catch(e){console.warn('[b921] öffnen:',e);}};
+  });
+  return ov;
+}
+
+// Knopf „🕘 Letzte Läufe": derselbe Kasten mit dem gespeicherten Verlauf, neuester Lauf oben.
+function _olLaeufeZeigen(){
+  const p=(typeof pamSettings!=='undefined'&&pamSettings&&pamSettings.outlookHolen&&Array.isArray(pamSettings.outlookHolen.protokoll))?pamSettings.outlookHolen.protokoll:[];
+  if(!p.length){showToast('Noch kein Lauf gespeichert – erst einmal 📥 Outlook drücken','info',4000);return;}
+  _olErgebnisFenster(p,'🕘 Letzte Läufe');
+}
+
 // ── Der Knopf „📥 Aus Outlook holen" ───────────────────────────────────
 async function _outlookHolen(){
   if(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB){
@@ -34195,6 +34295,7 @@ async function _outlookHolen(){
   let neu=0, doppelt=0, angehaengt=0, fehler=0, liegen=0;
   const betreffTreffer=[];
   const fertig=[];   // b920: importierte Mails — weggeräumt wird erst nach dem Lauf, mit Nachweis
+  const laufZeilen=[];   // b921: eine Zeile je Mail fürs Ergebnisfenster und den Verlauf
   try{
     for(const z of zu){
       let r;
@@ -34225,6 +34326,7 @@ async function _outlookHolen(){
         }catch(e){
           fehler++;liegen++;
           console.warn('[b918] Mail „'+(m.subject||'')+'" nicht lesbar:',e);
+          laufZeilen.push({betreff:m.subject||'',art:'liegen'});   // b921
           continue;   // ⛔ NICHT wegräumen – was nicht ankam, bleibt sichtbar liegen
         }
         // Gleiche Reihenfolge wie beim Ziehen (#369): Doppel, dann Konversation.
@@ -34254,10 +34356,11 @@ async function _outlookHolen(){
           _auftragPending=null;
           fehler++;liegen++;
           console.warn('[b918] Import „'+(info.subject||'')+'":',e);
+          laufZeilen.push({betreff:info.subject||'',art:'liegen'});   // b921
           continue;   // ⛔ auch hier: liegen lassen, nicht wegräumen
         }
         // b920: NICHT hier wegräumen — erst nach dem Lauf, nach Speichern und Nachweis (unten).
-        fertig.push({id:m.id,info:info,art:art});
+        fertig.push({id:m.id,info:info,art:art,treffer:treffer});   // b921: treffer fürs Ziel ohne Kennung
       }
     }
   }catch(e){
@@ -34272,23 +34375,35 @@ async function _outlookHolen(){
     try{await _saveJetzt();}catch(e){console.warn('[b920] Abschluss-Speichern:',e);}
     for(const f of fertig){
       let drin=false;
+      // b921: das Ziel merken — beim Nachweis ist der Task ohnehin in der Hand.
+      f.ziel=null;
       if(!f.info.messageId){
         drin=true;   // ohne Kennung ist kein Nachweis möglich — dann zählt der fehlerfreie Import (wie b918/b919)
+        if(f.treffer&&f.treffer.task)f.ziel={id:f.treffer.task.id,title:f.treffer.task.title,board:f.treffer.board,status:f.treffer.task.status};
       }else{
-        try{const t=_findTaskForEmlInfo(f.info);drin=!!(t&&t.match==='duplicate');}catch(e){}
+        try{const t=_findTaskForEmlInfo(f.info);drin=!!(t&&t.match==='duplicate');
+          if(t&&t.task)f.ziel={id:t.task.id,title:t.task.title,board:t.board,status:t.task.status};}catch(e){}
       }
       if(!drin){
         liegen++;fehler++;
         console.warn('[b920] Nicht in PAM angekommen – bleibt in Outlook liegen:',f.info.subject);
+        laufZeilen.push({betreff:f.info.subject||'',art:'liegen'});   // b921
         continue;
       }
       if(f.art==='neu')neu++;else if(f.art==='angehaengt')angehaengt++;else if(f.art==='doppelt')doppelt++;
-      const weg=await _olWegraeumen(f.id,cfg.erledigtId);
+      const weg=await _olWegraeumen(f.id,cfg.erledigtId,_olZielText(f));   // b921: Ziel als Kategorie
       if(!weg)liegen++;
+      laufZeilen.push({betreff:f.info.subject||'',art:f.art,zielId:f.ziel?f.ziel.id:'',zielTitel:f.ziel?String(f.ziel.title||''):'',zielBoard:f.ziel?String(f.ziel.board||''):'',zielSpalte:f.ziel?String(f.ziel.status||''):''});   // b921
     }
   }
   _olStillName=null;   // b919: Sicherheitsnetz — nach dem Lauf fragt der Ziehweg wieder
   if(btn){btn.disabled=false;btn.textContent=btn.dataset.alt||'📥 Outlook';}
+  // b921: Fenster und Verlauf — nur wenn überhaupt etwas passiert ist (leerer Lauf bleibt ein Toast).
+  if(laufZeilen.length){
+    const lauf={zeit:new Date().toISOString(),zeilen:laufZeilen};
+    try{await _olLaufMerken(lauf);}catch(e){console.warn('[b921] Verlauf:',e);}
+    try{_olErgebnisFenster([lauf]);}catch(e){console.warn('[b921] Fenster:',e);}
+  }
   // Ergebnis in Franks Worten, nicht in nackten Zahlen.
   const teile=[];
   if(neu)teile.push(neu+(neu===1?' neue Karte':' neue Karten'));
@@ -53737,7 +53852,8 @@ async function savePamSettings(){
   pamSettings.ordnerObjekte  =get('setOrdnerObjekte'); // b624 // b566: nur fürs Handy
   pamSettings.hvKuerzel      =_hvKuerzelEinsammeln();  // b748
   // b918: Zuordnung + Zielordner zusammen – sie gehören fachlich in ein Feld.
-  pamSettings.outlookHolen   =Object.assign({zuordnung:_olZuordnungEinsammeln()},_olErledigtEinsammeln());
+  // b921: der Verlauf (protokoll) gehört nicht zum Dialog — er muss beim Speichern erhalten bleiben.
+  pamSettings.outlookHolen   =Object.assign({zuordnung:_olZuordnungEinsammeln()},_olErledigtEinsammeln(),{protokoll:(pamSettings.outlookHolen&&Array.isArray(pamSettings.outlookHolen.protokoll))?pamSettings.outlookHolen.protokoll:[]});
   // b777: Briefkopf für die Deckblätter
   pamSettings.firma={name:get('setFirmaName'),strasse:get('setFirmaStrasse'),plz:get('setFirmaPlz'),
     ort:get('setFirmaOrt'),tel:get('setFirmaTel'),mail:get('setFirmaMail')};
