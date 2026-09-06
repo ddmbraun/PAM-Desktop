@@ -9884,7 +9884,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-04 · #914'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-04-b914) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-06 · #915'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-06-b915) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -34277,7 +34277,7 @@ function _pamAbsenderAusKontakten(ziel){
       const name=k.name||'';
       const email=k.email||'';
       const tel=k.tel||'';
-      const rolleLabel={ag:'AG',mieter:'Mieter',eigentuemer:'Eigentümer',hausverwaltung:'HV',privatkunde:'Privat',sonstiges:'Sonst.'};
+      const rolleLabel={ag:'AG',mieter:'Mieter',eigentuemer:'Eigentümer',hausverwaltung:'HV',privatkunde:'Privat',subunternehmer:'Sub',sonstiges:'Sonst.'};
       const badge=rolleLabel[k.rolle]||k.rolle;
       const senderVal=name&&email?'"'+name+'" <'+email+'>':email||(name&&tel?name:'');
       return '<button data-idx="'+i+'" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;text-align:left;font-size:12px;">'
@@ -38240,6 +38240,14 @@ async function _getOrCreateGroup(name){
   }catch(e){console.warn('[GK] createGroup:',e);return null;}
 }
 // ── Google Kontakt Vorschau-Dialog ──
+/* b915: Rollennamen im Klartext fuer die Google-Notiz - ohne Bildzeichen, weil sie
+   drueben als Fliesstext im Feld „Notizen“ landen. ⛔ Bewusst KEINE Rueckfallliste
+   nach dem Muster von ADR_ROLLEN: test_b842 zaehlt genau sechs davon, eine siebte
+   machte die Pruefung rot. Eigene Rollen aus „✏ Andere…“ stehen woertlich in der
+   Notiz - sie fehlen hier und werden unten durchgereicht.
+   ⛔ „sonstiges“ ergibt bewusst LEER: „Sonstiges · Dachsanierung“ waere in Google
+   eine Zeile Text, die nichts sagt. */
+const _GK_ROLLE_TEXT={ag:'Auftraggeber',mieter:'Mieter',eigentuemer:'Eigentümer',hausverwaltung:'Hausverwaltung',privatkunde:'Privatkunde',subunternehmer:'Subunternehmer',sonstiges:''};
 let _gkPreviewDiv=null;
 /* ── b871: Steht dieser Mensch schon in den Google-Kontakten? ────────────────
    PAM redete mit Google bisher nur in EINE Richtung: es legte Kontakte an und
@@ -38443,11 +38451,36 @@ function _showGKPreview(kontaktDiv){
   const fullName=(kontaktDiv.querySelector('.k-name')||{value:''}).value||'';
   const tel=(kontaktDiv.querySelector('.k-tel')||{value:''}).value||'';
   const email=(kontaktDiv.querySelector('.k-email')||{value:''}).value||'';
-  const adresse=(document.getElementById('tAdr')||{value:''}).value||'';
-  const hausverwaltung=(document.getElementById('tHV')||{value:''}).value||'';
+  const tel2=(kontaktDiv.querySelector('.k-tel2')||{value:''}).value||'';
+  /* b915: Die Rolle entscheidet ab hier, was vorbelegt wird. Freitext aus
+     „✏ Andere…“ wird wie in _adrBookAddFromKontakt aufgeloest. */
+  let _rolle=(kontaktDiv.querySelector('.k-rolle')||{value:''}).value||'';
+  if(_rolle==='_custom_')_rolle=((kontaktDiv.querySelector('.k-rolle-custom')||{value:''}).value||'').trim()||'sonstiges';
+  /* b915 (Frank, 06.09.2026): Hier stand die OBJEKTadresse (tAdr). Bei einer
+     Hausverwaltung faellt das nicht auf, bei einem Subunternehmer schon: der
+     Gerüstbauer bekam die Schadenstelle als seine eigene Anschrift. Der Kontakt
+     hat seit b678 eigene Adressfelder (📍) - die haben Vorrang.
+     ⛔ Der Rueckfall auf tAdr BLEIBT: bei Mieter und Eigentuemer ist die
+     Objektadresse meist wirklich ihre Anschrift, und ein leeres Feld waere
+     schlechter als ein fast immer richtiges. Zusammenbau wortgleich zu
+     _kAdrText - absichtlich hier ausgeschrieben statt gerufen, damit die
+     Pruefsuiten diese Funktion ohne Umgebung ausfuehren koennen (b842). */
+  const _kS=((kontaktDiv.querySelector('.k-strasse')||{value:''}).value||'').trim();
+  const _kP=((kontaktDiv.querySelector('.k-plz')||{value:''}).value||'').trim();
+  const _kO=((kontaktDiv.querySelector('.k-ort')||{value:''}).value||'').trim();
+  const _kAdr=[_kS,[_kP,_kO].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  const adresse=_kAdr||(document.getElementById('tAdr')||{value:''}).value||'';
+  /* b915: Firma nur noch bei AG und Hausverwaltung aus tHV. Vorher stand beim
+     Subunternehmer die Hausverwaltung als seine Firma in Google - falsch und
+     schwer zu bemerken. Eintippen geht im Fenster weiter. */
+  const hausverwaltung=(_rolle==='ag'||_rolle==='hausverwaltung')?((document.getElementById('tHV')||{value:''}).value||''):'';
   const repNr=(document.getElementById('taskRepNr')||{value:''}).value||''; // b559: hieß fälschlich tRepNr → Rep.-Nr. kam nie an
   const taskTitle=(document.getElementById('taskTitleInput')||{value:''}).value||'';
-  const note=[taskTitle,repNr?'Rep.'+repNr:''].filter(Boolean).join(' · ');
+  /* b915: Rolle vorne in die Notiz - in Google stand bisher nirgends, ob das ein
+     Mieter oder ein Subunternehmer war. Das Label „PAM“ bleibt davon unberuehrt:
+     das wird nach dem Anlegen ueber contactGroups gesetzt, ein anderer Weg. */
+  const _rolleTxt=(_GK_ROLLE_TEXT[_rolle]!==undefined)?_GK_ROLLE_TEXT[_rolle]:_rolle;
+  const note=[_rolleTxt,taskTitle,repNr?'Rep.'+repNr:''].filter(Boolean).join(' · ');
   const ex=document.getElementById('gk-preview-modal');if(ex)ex.remove();
   const esc=s=>(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
   const fs='width:100%;padding:5px 7px;font-size:12px;box-sizing:border-box;border:1px solid #d1d5db;border-radius:4px;margin-top:2px;';
@@ -38464,6 +38497,7 @@ function _showGKPreview(kontaktDiv){
     +'<div style="display:flex;flex-direction:column;gap:8px;">'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+row('gkp-vorname','Vorname','text',nm.first)+row('gkp-nachname','Nachname','text',nm.last)+'</div>'+rolleSelect
     +row('gkp-tel','Telefon','tel',tel)
+    +row('gkp-tel2','Telefon 2','tel',tel2)
     +row('gkp-email','E-Mail','email',email)
     +row('gkp-adr','Adresse','text',adresse)
     +row('gkp-hv','Firma / Hausverwaltung','text',hausverwaltung)
@@ -38480,10 +38514,9 @@ function _showGKPreview(kontaktDiv){
      ⛔ Der Anlegen-Knopf bleibt in JEDEM Fall bedienbar: die Zeile warnt,
      sie entscheidet nicht. Auch wenn die Pruefung scheitert, muss der
      Kontakt anlegbar bleiben - sonst nimmt ein Netzaussetzer die Funktion. */
-  var _tel2=(kontaktDiv.querySelector('.k-tel2')||{value:''}).value||'';
   _gkAlleLaden().then(function(){
     var el=document.getElementById('gkp-dub'); if(!el)return;
-    var t=_gkFinde(fullName,tel,_tel2,email);
+    var t=_gkFinde(fullName,tel,tel2,email);
     if(t){
       el.style.background='#fef3c7'; el.style.color='#92400e';
       el.innerHTML='⚠ <b>Steht schon in Google:</b> '+esc(t.person.name||'(ohne Name)')
@@ -38513,19 +38546,27 @@ async function _createGoogleKontaktFromPreview(){
   const g=id=>(document.getElementById(id)||{value:''}).value||'';
   const vorname=g('gkp-vorname'),nachname=g('gkp-nachname');
   const name=[vorname,nachname].filter(Boolean).join(' ');
-  const tel=g('gkp-tel'),email=g('gkp-email');
+  const tel=g('gkp-tel'),tel2=g('gkp-tel2'),email=g('gkp-email');
   const adresse=g('gkp-adr'),hausverwaltung=g('gkp-hv'),note=g('gkp-note');
   // Label VOR Modal-Entfernung lesen
   const _labelEl=document.getElementById('gkp-label');
   const _labelRN=_labelEl?_labelEl.value:'';
   const _labelName=_labelEl&&_labelEl.options[_labelEl.selectedIndex]?_labelEl.options[_labelEl.selectedIndex].text:'';
   const m=document.getElementById('gk-preview-modal');if(m)m.remove();
-  if(!name&&!tel&&!email){showToast('⚠ Kein Name oder Telefon vorhanden','warning',3000);_gkPreviewDiv=null;return;}
+  if(!name&&!tel&&!tel2&&!email){showToast('⚠ Kein Name oder Telefon vorhanden','warning',3000);_gkPreviewDiv=null;return;}
   const adr=_parseAdresseGK(adresse);
   const familyName=nachname+(adr.streetName?(', '+adr.streetName+(adr.houseNr?' '+adr.houseNr:'')):'');
   const body={};
   if(name){body.names=[{givenName:vorname||name,familyName:familyName||nachname,displayName:name}];}
-  if(tel){body.phoneNumbers=[{value:tel,type:'work'}];}
+  /* b915 (Frank, 06.09.2026): Tel. 2 wurde bisher gelesen, aber NUR fuer die
+     Dublettenpruefung - in Google kam nur die erste Nummer an. Beim Handwerker
+     ist die zweite meist das Handy, also die wichtigere.
+     ⛔ type:'mobile' fuer die zweite: sonst zeigt Google zwei Nummern, die
+     beide „Arbeit“ heissen, und auf dem Telefon sind sie nicht zu unterscheiden. */
+  const _tels=[];
+  if(tel)_tels.push({value:tel,type:'work'});
+  if(tel2)_tels.push({value:tel2,type:'mobile'});
+  if(_tels.length)body.phoneNumbers=_tels;
   if(email){body.emailAddresses=[{value:email,type:'work'}];}
   if(adr.street){body.addresses=[{streetAddress:adr.street,postalCode:adr.plz,city:adr.city,countryCode:'DE',type:'work'}];}
   if(hausverwaltung){body.organizations=[{name:hausverwaltung,type:'work'}];}
@@ -38570,7 +38611,7 @@ async function _createGoogleKontaktFromPreview(){
         _gkAlle.push({
           name:((created.names||[])[0]||{}).displayName||name,
           firma:hausverwaltung||'',
-          tels:tel?[tel]:[],
+          tels:[tel,tel2].filter(Boolean), // b915: sonst warnt der Merkzettel nicht ueber die 2. Nummer
           mails:email?[email]:[]
         });
         _gkIdxBauen();
@@ -38665,8 +38706,8 @@ function _adrDublettenZaehlung(){
    Datenbestand seit langem: das VBS setzt sie beim Anlegen eines Auftrags.
    ⛔ Der Rückfall `🏷 <Wert>` bleibt - eigene Rollen (Freitext, „✏️ Andere…") sollen
    weiter angezeigt werden und nicht stillschweigend zu „Sonstiges" werden. */
-const ADR_ROLLEN=['ag','mieter','eigentuemer','hausverwaltung','privatkunde','sonstiges'];
-function _adrRoleLabel(r){const m={ag:'👔 AG',mieter:'🏠 Mieter',eigentuemer:'👤 Eigentümer',hausverwaltung:'🏢 Hausverwaltung',privatkunde:'🧍 Privatkunde',sonstiges:'👥 Sonstiges'};return m[r]||('🏷 '+(r||'Sonstiges'));}
+const ADR_ROLLEN=['ag','mieter','eigentuemer','hausverwaltung','privatkunde','subunternehmer','sonstiges'];
+function _adrRoleLabel(r){const m={ag:'👔 AG',mieter:'🏠 Mieter',eigentuemer:'👤 Eigentümer',hausverwaltung:'🏢 Hausverwaltung',privatkunde:'🧍 Privatkunde',subunternehmer:'🔨 Subunternehmer',sonstiges:'👥 Sonstiges'};return m[r]||('🏷 '+(r||'Sonstiges'));}
 
 async function _adrBookLoad(){
   if(_adrBookLoaded)return _adrBook;
@@ -38813,7 +38854,7 @@ function _adrOpenSaveDialog(d){
     +(function(){
        const jetzt=String(d.rolle||'sonstiges');
        // ⛔ typeof-Wache, siehe addKontaktPTP. Rückfall muss ADR_ROLLEN entsprechen.
-       const opts=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','privatkunde','sonstiges'];
+       const opts=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','privatkunde','subunternehmer','sonstiges'];
        if(opts.indexOf(jetzt)<0)opts.push(jetzt);
        /* ⚠ Das `esc` dieser Funktion laesst `<` stehen - fuer die festen Feldwerte
           reichte das, fuer einen selbst eingetippten Rollennamen nicht. */
@@ -39433,7 +39474,7 @@ function _mfImpDialog(){
   const liste=window._mfImpListe||[];
   const neu=liste.filter(function(k){return !k._da;}).length;
   const da=liste.length-neu;
-  const rollen=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','privatkunde','sonstiges'];
+  const rollen=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','privatkunde','subunternehmer','sonstiges'];
   const rollOpts=rollen.map(function(r){
     return '<option value="'+r+'"'+(r==='sonstiges'?' selected':'')+'>'+esc(_adrRoleLabel(r))+'</option>';
   }).join('');
@@ -39560,7 +39601,7 @@ function _adrRolleZaehlung(){
 /* Die Reihenfolge folgt ADR_ROLLEN; eigene Rollen hängen hinten an. */
 function _adrRolleFilterReihe(){
   const z=_adrRolleZaehlung();
-  const rollen=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','privatkunde','sonstiges'];
+  const rollen=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','privatkunde','subunternehmer','sonstiges'];
   Object.keys(z).forEach(function(r){ if(rollen.indexOf(r)<0)rollen.push(r); });
   return rollen.filter(function(r){ return (z[r]||0)>0; });
 }
@@ -39572,7 +39613,7 @@ function _adrRolleFilterReihe(){
    alle Möglichkeiten stehen, auch die noch unbenutzten. */
 function _adrRolleFilterAlle(){
   const z=_adrRolleZaehlung();
-  const rollen=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','privatkunde','sonstiges'];
+  const rollen=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','privatkunde','subunternehmer','sonstiges'];
   Object.keys(z).forEach(function(r){ if(rollen.indexOf(r)<0)rollen.push(r); });
   return rollen;
 }
@@ -40312,7 +40353,7 @@ function _raObjektAnschriftFragen(taskRa,objRa){
 
 function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2,adr){
   const c=document.getElementById('tKontakteContainer');if(!c)return;
-  const rolleLabel={ag:'👔 AG Kontakt',mieter:'🏠 Mieter',eigentuemer:'👤 Eigentümer',hausverwaltung:'🏢 Hausverwaltung',privatkunde:'🧍 Privatkunde',sonstiges:'👥 Sonstiges'};
+  const rolleLabel={ag:'👔 AG Kontakt',mieter:'🏠 Mieter',eigentuemer:'👤 Eigentümer',hausverwaltung:'🏢 Hausverwaltung',privatkunde:'🧍 Privatkunde',subunternehmer:'🔨 Subunternehmer',sonstiges:'👥 Sonstiges'};
   name=name||'';tel=tel||'';email=email||'';tel2=tel2||'';
   adr=adr||{};
   const aStr=(adr.strasse||'').toString(),aPlz=(adr.plz||'').toString(),aOrt=(adr.ort||'').toString();
@@ -40327,7 +40368,7 @@ function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2,adr){
      nicht wieder auseinanderlaufen. */
   // ⛔ typeof-Wache wie in _dfbPickItem: Prüfsuiten führen diese Funktion ohne
   // Umgebung aus. Der Rückfall MUSS mit ADR_ROLLEN übereinstimmen - test_b842 wacht.
-  const rolleOpts=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','privatkunde','sonstiges'];
+  const rolleOpts=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','privatkunde','subunternehmer','sonstiges'];
   const isCustom=rolle&&!rolleOpts.includes(rolle);
   const selVal=isCustom?'_custom_':rolle;
   div.innerHTML='<div class="kontakt-entry-header">'
@@ -49834,8 +49875,8 @@ function _emBuildKontaktRow(k,i){
      Falsches, solange niemand am Auswahlfeld drehte; wer drehte, hatte danach
      wirklich „ag" drin. */
   // ⛔ typeof-Wache, siehe addKontaktPTP. Rückfall muss ADR_ROLLEN entsprechen.
-  var rolleOpts=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','privatkunde','sonstiges'];
-  var rolleLabel={ag:'👔 AG Kontakt',mieter:'🏠 Mieter',eigentuemer:'👤 Eigentümer',hausverwaltung:'🏢 Hausverwaltung',privatkunde:'🧍 Privatkunde',sonstiges:'👥 Sonstiges'};
+  var rolleOpts=(typeof ADR_ROLLEN!=='undefined')?ADR_ROLLEN.slice():['ag','mieter','eigentuemer','hausverwaltung','privatkunde','subunternehmer','sonstiges'];
+  var rolleLabel={ag:'👔 AG Kontakt',mieter:'🏠 Mieter',eigentuemer:'👤 Eigentümer',hausverwaltung:'🏢 Hausverwaltung',privatkunde:'🧍 Privatkunde',subunternehmer:'🔨 Subunternehmer',sonstiges:'👥 Sonstiges'};
   /* b842: Eine Rolle, die in keiner Option vorkommt (eigener Freitext aus dem
      Task-Fenster), bekommt eine eigene Zeile statt still auf die erste zu fallen.
      Angezeigt wird der rohe Wert - das ist die Wahrheit, und beim Speichern geht
