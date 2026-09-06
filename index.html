@@ -9912,7 +9912,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-06 · #922'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-06-b922) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-06 · #923'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-06-b923) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -48463,6 +48463,45 @@ function _pamMailHideSetzen(taskId,m,hidden){
   return done;
 }
 
+// b923: Suchfeld oben in der Mail-Liste des Verlauf-Fensters. Auftragskarten oeffnen kein E-Mail-Fenster
+// (das gibt es nur fuer E-Mail-Boards, b922) — „📬 Öffnen" und die Zusammenfassungszeile fuehren hierher.
+// Tippen zeichnet das Fenster entprellt neu (wie der Ausblenden-Knopf), Fokus und Cursor bleiben stehen.
+let _pepSuchtext='', _pepSuchTaskId='', _pepSuchTimer=null;
+function _pepSucheEinbauen(list,ov,taskOverride,zeigeAusgeblendete,gesamt,treffer){
+  if(!gesamt&&!_pepSuchtext)return;   // ohne Mails gibt es nichts zu suchen
+  const wrap=document.createElement('div');
+  wrap.className='pep-suche';
+  wrap.style.cssText='position:sticky;top:0;z-index:1;padding:6px 8px;border-bottom:1px solid var(--border);background:var(--bg2);flex-shrink:0;';
+  const inp=document.createElement('input');
+  inp.type='text';inp.id='pepSuche';inp.value=_pepSuchtext;
+  inp.placeholder='🔍 In dieser Karte suchen – Betreff, Absender, Datum …';
+  inp.style.cssText='width:100%;box-sizing:border-box;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;';
+  const neuZeichnen=function(){
+    const pos=inp.selectionStart;
+    ov.remove();
+    _openPamEmailPreview(0,taskOverride,zeigeAusgeblendete);
+    const neu=document.getElementById('pepSuche');
+    if(neu){neu.focus();try{if(pos!=null)neu.setSelectionRange(pos,pos);}catch(e){}}
+  };
+  inp.addEventListener('input',function(){
+    _pepSuchtext=String(inp.value||'');
+    clearTimeout(_pepSuchTimer);
+    _pepSuchTimer=setTimeout(neuZeichnen,180);
+  });
+  inp.addEventListener('keydown',function(e){
+    // Escape mit Text: nur die Suche leeren, das Fenster bleibt. Ohne Text schliesst Escape wie bisher das Fenster.
+    if(e.key==='Escape'&&inp.value){e.stopPropagation();inp.value='';_pepSuchtext='';clearTimeout(_pepSuchTimer);neuZeichnen();}
+  });
+  wrap.appendChild(inp);
+  if(_pepSuchtext){
+    const hinweis=document.createElement('div');
+    hinweis.className='pep-suche-treffer';
+    hinweis.style.cssText='font-size:10px;color:var(--text2);margin-top:3px;';
+    hinweis.textContent=treffer+' von '+gesamt+' Nachricht'+(gesamt!==1?'en':'');
+    wrap.appendChild(hinweis);
+  }
+  list.appendChild(wrap);
+}
 function _openPamEmailPreview(startIdx,taskOverride,zeigeAusgeblendete){
   const taskId=(document.getElementById('taskId')||{}).value||'';
   const task=taskOverride||(taskId?findTaskById(taskId):null);
@@ -48490,6 +48529,12 @@ function _openPamEmailPreview(startIdx,taskOverride,zeigeAusgeblendete){
     mails.push({type:'eml',idx:i,data:m,ts:m&&m.date?new Date(m.date).getTime():0});
   });
   mails.sort(function(a,b){return(b.ts||0)-(a.ts||0);});
+  // b923: Suche — der Suchtext gehoert zur Karte (andere Karte: leer). Gefiltert wird mit
+  // _emMailTrifft (b922); die Liste wird umgefuellt statt neu zugewiesen, weil `mails` const ist.
+  if(_pepSuchTaskId!==task.id){_pepSuchTaskId=task.id;_pepSuchtext='';}
+  const _pq=String(_pepSuchtext||'').toLowerCase().trim();
+  const _pepGesamt=mails.length;
+  if(_pq){const _g=mails.filter(function(m){return _emMailTrifft(m,_pq);});mails.splice(0,mails.length);_g.forEach(function(x){mails.push(x);});}
   const ov=document.createElement('div');ov.className='pep-overlay';ov.id=GID;
   ov.addEventListener('click',function(e){if(e.target===ov)ov.remove();});
   const box=document.createElement('div');box.className='pep-box';
@@ -48512,8 +48557,12 @@ function _openPamEmailPreview(startIdx,taskOverride,zeigeAusgeblendete){
   const resizer=document.createElement('div');resizer.className='pep-resizer';
   const preview=document.createElement('div');preview.className='pep-preview';
   preview.innerHTML='<div class="em-empty-pane"><span style="font-size:32px;opacity:.3;">📩</span><div style="font-size:13px;color:var(--text2);">E-Mail aus der Liste wählen</div></div>';
+  _pepSucheEinbauen(list,ov,taskOverride,zeigeAusgeblendete,_pepGesamt,mails.length);   // b923
   if(!mails.length){
-    list.innerHTML='<div style="padding:20px;text-align:center;color:var(--text2);font-size:12px;">Noch keine E-Mails.<br>Outlook/Gmail laden oder .eml ablegen.</div>';
+    // b923: als Element angehaengt (innerHTML+= wuerde die Suchfeld-Ereignisse zerstoeren)
+    const _leer=document.createElement('div');_leer.style.cssText='padding:20px;text-align:center;color:var(--text2);font-size:12px;';
+    _leer.innerHTML=_pq?'Keine Mail passt zu „'+_escHtml(_pq)+'"':'Noch keine E-Mails.<br>Outlook/Gmail laden oder .eml ablegen.';
+    list.appendChild(_leer);
   } else {
     mails.forEach(function(m,i){
       const d=m.data;
