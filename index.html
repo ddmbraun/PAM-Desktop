@@ -9902,7 +9902,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-06 · #918'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-06-b918) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-06 · #919'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-06-b919) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -34036,6 +34036,35 @@ async function _msTPSelectMail(taskId,idx){
 const OL_MAX_PRO_LAUF=25;   // Sicherheitsnetz gegen einen versehentlich vollen Ordner
 const OL_TIEFE_MAX=4;       // Unterordner-Ebenen beim Auflisten
 
+// b919: Steht hier ein Name, nimmt _promptFolderName ihn OHNE zu fragen. _outlookHolen
+// setzt ihn je Mail und räumt ihn im finally IMMER wieder ab — bliebe er stehen, fragte
+// auch der Ziehweg nie mehr nach dem Ordnernamen. Frank am 06.09.: beim Holen kein
+// Fenster, der Name soll Betreff und Absenderadresse tragen.
+let _olStillName=null;
+
+// Zieht die reine Adresse aus einer From-Zeile: "Name" <adresse> → adresse. Ohne @-Zeichen → leer.
+// (Keine Beispieladresse hier - index.html wird ausgeliefert, test_b658 wacht darueber.)
+function _olAbsenderAdresse(sender){
+  const s=String(sender||'');
+  const m=s.match(/<([^>]+)>/);
+  // \u0022 = das Anfuehrungszeichen. Als Escape geschrieben, damit der Klammerzaehler in
+  // _pruefung\schneide() das Zeichen nicht als String-Anfang liest und ueber das Ende der
+  // Funktion hinausschneidet (gemessen beim Bau von b919: 32 Zeilen zu viel).
+  const a=(m?m[1]:s).trim().replace(/^[\u0022']+|[\u0022']+$/g,'');
+  return /@/.test(a)?a.toLowerCase():'';
+}
+
+// Vorschlag für Ordner- UND Kartenname beim Holen: „Betreff – adresse". Bereinigt wie
+// _safeFolderName in _auftragConfirm (gleiche Zeichen, gleiche 80er-Grenze) plus die
+// b560-Regel gegen Endpunkt/Endleerzeichen, damit Drive den Namen nicht abweist.
+function _olVorschlagName(info){
+  const betreff=String((info&&info.subject)||'').replace(/\s+/g,' ').trim()||'E-Mail';
+  const adr=_olAbsenderAdresse(info&&info.sender);
+  const roh=adr?(betreff+' – '+adr):betreff;
+  // \u0022 = " — gleiche Zeichenliste wie _safeFolderName, nur schneide-sicher (siehe oben).
+  return roh.replace(/[\\/:*?\u0022<>|]/g,'-').substring(0,80).replace(/[. ]+$/,'')||'E-Mail';
+}
+
 function _olEinstellung(){
   const s=(typeof pamSettings!=='undefined'&&pamSettings&&pamSettings.outlookHolen)||{};
   return {zuordnung:Array.isArray(s.zuordnung)?s.zuordnung:[],
@@ -34153,6 +34182,9 @@ async function _outlookHolen(){
     showToast('⚠ Noch kein Outlook-Ordner zugeordnet – ⚙ Einstellungen → „📥 Aus Outlook holen"','warning',8000);
     return;
   }
+  // b919: Ohne Zielordner wird nur gekennzeichnet. Das soll Frank SEHEN, nicht raten —
+  // beim ersten Lauf am 06.09. blieb die Mail liegen, und niemand sagte ihm warum.
+  if(!cfg.erledigtId)showToast('ℹ Kein Zielordner eingestellt – die Mails bleiben in Outlook liegen und bekommen nur das Erledigt-Häkchen (⚙ Einstellungen → „Nach dem Holen verschieben nach")','info',9000);
   const btn=document.getElementById('olHolenBtn');
   if(btn){btn.disabled=true;btn.dataset.alt=btn.textContent;btn.textContent='⏳';}
   let neu=0, doppelt=0, angehaengt=0, fehler=0, liegen=0;
@@ -34200,7 +34232,11 @@ async function _outlookHolen(){
             angehaengt++;
           }else{
             if(treffer&&treffer.task)betreffTreffer.push({betreff:info.subject||'',task:treffer.task.title||''});
-            await _olImportStill(info,datei,z.board,z.spalte);
+            // b919: Name je Mail festlegen, importieren, im finally abräumen — sonst
+            // hinge der Name der VORIGEN Mail an der nächsten, falls der Import wirft.
+            _olStillName=_olVorschlagName(info);
+            try{await _olImportStill(info,datei,z.board,z.spalte);}
+            finally{_olStillName=null;}
             neu++;
           }
         }catch(e){
@@ -34215,6 +34251,7 @@ async function _outlookHolen(){
   }catch(e){
     showToast('⚠ Abgebrochen: '+e.message,'error',8000);
   }
+  _olStillName=null;   // b919: Sicherheitsnetz — nach dem Lauf fragt der Ziehweg wieder
   if(btn){btn.disabled=false;btn.textContent=btn.dataset.alt||'📥 Outlook';}
   // Ergebnis in Franks Worten, nicht in nackten Zahlen.
   const teile=[];
@@ -36992,6 +37029,9 @@ function _b855ObjektFragen(rat){
 }
 
 function _promptFolderName(suggested,parentUrl,nasBasis,kurzModus){
+  // b919: Holweg — der Name steht fest, kein Fenster. typeof-Prüfung, damit ein
+  // Ausschnitt dieser Funktion auch ohne die Variable läuft (Prüfdateien).
+  if(typeof _olStillName!=='undefined'&&_olStillName!=null)return Promise.resolve(String(_olStillName));
   _fnpLastParentUrl=parentUrl||'';
   _fnpLastTitel='';
   return new Promise(function(resolve){
