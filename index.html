@@ -2510,7 +2510,12 @@ async function _auftragConfirm(){
   // ── SCHRITT 3: Speichern und Modal öffnen (jetzt mit vollständigen E-Mail-Daten) ──
   await autoSave();
   if(typeof showToast==='function')showToast('✅ Auftrag angelegt: '+newTask.title,'success',4000);
-  setTimeout(function(){openEditTaskModal(newTask.id);},150);
+  // b920: Beim Holen (Schalter _olStillName gesetzt) KEIN Bearbeiten-Fenster. Es speichert beim
+  // Öffnen (_emScheduleSave → scheduleAutoSave → gdriveSaveData) und liefe mit dem Import der
+  // nächsten Mail um die Wette — zwei gdriveSaveData ohne Sperre. Der Schnappschuss nahm die
+  // neue Karte auf, Drive hatte sie nicht, der Abgleich warf sie als „drüben gelöscht" raus.
+  // Am 06.09.2026 kostete das zwei von drei Karten. Beim Ziehen bleibt das Fenster.
+  if(typeof _olStillName==='undefined'||_olStillName==null)setTimeout(function(){openEditTaskModal(newTask.id);},150);
   // Kein _autoCreateTaskFolder hier nötig – Ordnerstruktur wurde bereits in SCHRITT 1.5 angelegt
 }
 
@@ -9902,7 +9907,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-06 · #919'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-06-b919) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-06 · #920'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-06-b920) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -34189,6 +34194,7 @@ async function _outlookHolen(){
   if(btn){btn.disabled=true;btn.dataset.alt=btn.textContent;btn.textContent='⏳';}
   let neu=0, doppelt=0, angehaengt=0, fehler=0, liegen=0;
   const betreffTreffer=[];
+  const fertig=[];   // b920: importierte Mails — weggeräumt wird erst nach dem Lauf, mit Nachweis
   try{
     for(const z of zu){
       let r;
@@ -34222,14 +34228,19 @@ async function _outlookHolen(){
           continue;   // ⛔ NICHT wegräumen – was nicht ankam, bleibt sichtbar liegen
         }
         // Gleiche Reihenfolge wie beim Ziehen (#369): Doppel, dann Konversation.
+        // b920: Wie beim Ziehen liegt die Mail in _auftragPending, BEVOR die Konversation geprüft
+        // wird. _auftragAddToTask holt sie sich von dort und kehrt OHNE sie still zurück (Zeile
+        // 31-32 der Funktion) — b918/b919 setzten es nur auf dem Weg zur neuen Karte.
+        _auftragPending={info:info,rawFile:datei};
         let treffer=null;
         try{treffer=_findTaskForEmlInfo(info);}catch(e){console.warn('[b918] Konversation:',e);}
+        let art='';
         try{
           if(treffer&&treffer.match==='duplicate'){
-            doppelt++;
+            _auftragPending=null; art='doppelt';
           }else if(treffer&&treffer.match==='id'){
             await _auftragAddToTask(treffer.task,treffer.board,'email');
-            angehaengt++;
+            art='angehaengt';
           }else{
             if(treffer&&treffer.task)betreffTreffer.push({betreff:info.subject||'',task:treffer.task.title||''});
             // b919: Name je Mail festlegen, importieren, im finally abräumen — sonst
@@ -34237,19 +34248,44 @@ async function _outlookHolen(){
             _olStillName=_olVorschlagName(info);
             try{await _olImportStill(info,datei,z.board,z.spalte);}
             finally{_olStillName=null;}
-            neu++;
+            art='neu';
           }
         }catch(e){
+          _auftragPending=null;
           fehler++;liegen++;
           console.warn('[b918] Import „'+(info.subject||'')+'":',e);
           continue;   // ⛔ auch hier: liegen lassen, nicht wegräumen
         }
-        const weg=await _olWegraeumen(m.id,cfg.erledigtId);
-        if(!weg)liegen++;
+        // b920: NICHT hier wegräumen — erst nach dem Lauf, nach Speichern und Nachweis (unten).
+        fertig.push({id:m.id,info:info,art:art});
       }
     }
   }catch(e){
     showToast('⚠ Abgebrochen: '+e.message,'error',8000);
+  }
+  // b920: Wegräumen erst JETZT — nach einem abschließenden Speichern, und nur was nachweislich in
+  // PAM steht. Am 06.09.2026 wanderten drei Mails nach „erledigt", zwei ohne Karte. Der Nachweis
+  // über _findTaskForEmlInfo (muss die Mail jetzt als „duplicate" finden) fängt JEDEN Weg, auf dem
+  // eine Karte still verloren geht — auch die, die noch niemand gesehen hat. Was nicht auffindbar
+  // ist, bleibt in Outlook liegen; Frank sieht es an der Ordnerzahl und an „liegen geblieben".
+  if(fertig.length){
+    try{await _saveJetzt();}catch(e){console.warn('[b920] Abschluss-Speichern:',e);}
+    for(const f of fertig){
+      let drin=false;
+      if(!f.info.messageId){
+        drin=true;   // ohne Kennung ist kein Nachweis möglich — dann zählt der fehlerfreie Import (wie b918/b919)
+      }else{
+        try{const t=_findTaskForEmlInfo(f.info);drin=!!(t&&t.match==='duplicate');}catch(e){}
+      }
+      if(!drin){
+        liegen++;fehler++;
+        console.warn('[b920] Nicht in PAM angekommen – bleibt in Outlook liegen:',f.info.subject);
+        continue;
+      }
+      if(f.art==='neu')neu++;else if(f.art==='angehaengt')angehaengt++;else if(f.art==='doppelt')doppelt++;
+      const weg=await _olWegraeumen(f.id,cfg.erledigtId);
+      if(!weg)liegen++;
+    }
   }
   _olStillName=null;   // b919: Sicherheitsnetz — nach dem Lauf fragt der Ziehweg wieder
   if(btn){btn.disabled=false;btn.textContent=btn.dataset.alt||'📥 Outlook';}
