@@ -7498,6 +7498,11 @@ input.em-topbar-title:focus{box-shadow:none;}
 .em-anh-bild img{width:100%;height:100%;object-fit:cover;display:block;}
 .em-anh-nam{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .em-anh-auge{flex-shrink:0;color:var(--text2);font-size:calc(12px * var(--modal-scale,1));}
+/* b928: Umbenennen und Kopieren je Datei. Blass, bis die Maus auf der Zeile steht — sie sollen
+   nicht mit dem Dateinamen um Aufmerksamkeit streiten. */
+.em-anh-tool{flex-shrink:0;color:var(--text2);opacity:.35;padding:0 3px;border-radius:4px;font-size:calc(12px * var(--modal-scale,1));transition:opacity .15s,background .15s;}
+.em-anh-zeile:hover .em-anh-tool{opacity:.85;}
+.em-anh-tool:hover{opacity:1;background:var(--bg2);}
 .em-anh-box{border:1px solid var(--bg3);border-radius:7px;overflow-x:hidden;overflow-y:auto;max-height:calc(280px * var(--modal-scale,1));margin-bottom:7px;}
 .em-feld-lbl{display:block;font-size:calc(10px * var(--modal-scale,1));font-weight:600;color:var(--text2);letter-spacing:.4px;text-transform:uppercase;margin-bottom:2px;}
 .em-field-label{font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;}
@@ -9920,7 +9925,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-07 · #927'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-07-b927) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-07 · #928'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-07-b928) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -51415,6 +51420,20 @@ function _emRenderAttachPanel(allFiles){
       var nam=document.createElement('span');
       nam.className='em-anh-nam';nam.textContent=f.name;
       btn.appendChild(nam);
+      // b928: Umbenennen und Kopieren – nur für Dokumente und Fotos. Original-Mails und Lesekopien
+      // gehören zu ihrer Nachricht und wandern nicht einzeln. Der Klick darf die Vorschau nicht
+      // mitauslösen, deshalb stopPropagation.
+      if(!_emAnhIstMail(f)&&!f.lesekopie&&_emAnhFileId(f)){
+        var _nam=nam;
+        var stift=document.createElement('span');
+        stift.className='em-anh-tool';stift.textContent='✎';stift.title='Namen der Datei ändern';
+        stift.onclick=function(e){e.stopPropagation();_emDateiUmbenennen(f,_nam,btn);};
+        btn.appendChild(stift);
+        var kopie=document.createElement('span');
+        kopie.className='em-anh-tool';kopie.textContent='⧉';kopie.title='Kopie in einen anderen Task legen (das Original bleibt hier)';
+        kopie.onclick=function(e){e.stopPropagation();_emDateiKopieren(f);};
+        btn.appendChild(kopie);
+      }
       var auge=document.createElement('span');
       auge.className='em-anh-auge';auge.textContent='👁';
       btn.appendChild(auge);
@@ -51432,6 +51451,79 @@ function _emRenderAttachPanel(allFiles){
       box.appendChild(btn);
     });
     body.appendChild(box);
+  });
+}
+// ── b928: Eine einzelne Datei umbenennen oder als Kopie an eine andere Karte legen ──────
+// Frank am 07.09.2026: „Aber ich möchte nur ein PDF verschieben, nicht alle — sind ja alle
+// Angebote da drin." In der Sammelkarte liegen alle Angebote eines Lieferanten; wird eines davon
+// zum Auftrag, soll GENAU dieses PDF hinüber. Er hat sich für die Kopie entschieden: das Original
+// bleibt in der Sammelkarte und damit die Angebotshistorie vollständig.
+// ⛔ Google Drive lässt eine Datei seit 2020 nur noch in EINEM Ordner liegen. „An beiden Karten"
+// geht deshalb nur als echte Kopie (files/copy), nicht als zweiter Elternordner.
+function _emDateiUmbenennen(f,namEl,zeileEl){
+  var id=_emAnhFileId(f);
+  if(!id){showToast('Diese Datei liegt nicht in Drive – Umbenennen geht nicht','warning',5000);return;}
+  if(typeof gdriveToken==='undefined'||!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden (oben rechts: ☁️ Google Drive)','error',6000);return;}
+  var alt=String(f.name||'');
+  var neu=prompt('Neuer Name für diese Datei:\n\n(Die Endung – .pdf, .jpg – bitte mit eintippen.)',alt);
+  if(neu===null)return;
+  neu=String(neu).replace(/[\\/:*?\u0022<>|]/g,'-').trim();
+  if(!neu||neu===alt)return;
+  showToast('⏳ Datei wird umbenannt…','info',3000);
+  _tuDriveUmbenennen(id,neu).then(function(erg){
+    if(!erg){showToast('⚠ Umbenennen hat nicht geklappt – der Name bleibt wie er war','error',7000);return;}
+    // Den Namen dort nachziehen, wo die Datei in der Karte wirklich steht. Die Kennung liegt je
+    // nach Herkunft in fileId oder driveId — deshalb beide prüfen.
+    var t=(typeof _emCurrentTask!=='undefined')?_emCurrentTask:null, n=0;
+    ['attachments','fotos','emailPdfs','emailOriginals'].forEach(function(feld){
+      ((t&&t[feld])||[]).forEach(function(e){
+        if(e&&(e.fileId===id||e.driveId===id||e.editedDriveId===id)){e.name=erg;n++;}
+      });
+    });
+    f.name=erg;
+    // Nur die eine Zeile im Fenster nachziehen — kein Neuzeichnen des Kastens (b854 zählt die Aufrufer).
+    if(namEl)namEl.textContent=erg;
+    if(zeileEl)zeileEl.title=erg;
+    if(n&&typeof _emScheduleSave==='function')_emScheduleSave();
+    showToast(n?('✏ Neuer Name: '+erg):('✏ In Drive umbenannt: '+erg+' – in der Karte war kein Eintrag zu ändern'),n?'success':'warning',n?4000:7000);
+  });
+}
+function _emDateiKopieren(f){
+  var id=_emAnhFileId(f);
+  if(!id){showToast('Diese Datei liegt nicht in Drive – Kopieren geht nicht','warning',5000);return;}
+  if(typeof gdriveToken==='undefined'||!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden (oben rechts: ☁️ Google Drive)','error',6000);return;}
+  if(typeof _emShowBoardTaskPicker!=='function'){showToast('Auswahl nicht verfügbar','error');return;}
+  _emShowBoardTaskPicker('Kopie von „'+(f.name||'Datei')+'" ablegen in',function(ziel){
+    var zt=ziel&&ziel.task;
+    if(!zt||!zt.id)return;
+    if(typeof _emCurrentTask!=='undefined'&&_emCurrentTask&&zt.id===_emCurrentTask.id){
+      showToast('Das ist dieselbe Karte – nichts kopiert','info',4000);return;}
+    // ⛔ Immer mit der ECHTEN Karte aus dem Board rechnen, nicht mit dem, was die Auswahl liefert:
+    // die Ordner-Felder hängen am echten Objekt, und dort wird die Kopie später eingetragen.
+    var echt=(typeof findTaskById==='function'&&findTaskById(zt.id))||zt;
+    // Bilder in den Bilder-Ordner, alles andere zu den Dokumenten (b600-Weiche).
+    var ziele=(typeof _pamAnhangZiele==='function')?_pamAnhangZiele(echt,''):{bild:'',dok:''};
+    var fid=f.isImg?(ziele.bild||ziele.dok):(ziele.dok||ziele.bild);
+    if(!fid){showToast('⚠ „'+(zt.title||'Diese Karte')+'" hat keinen Drive-Ordner – es wurde nichts kopiert','error',8000);return;}
+    showToast('⏳ Kopie wird angelegt…','info',3000);
+    fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(id)+'/copy?fields=id,name,webViewLink',
+      {method:'POST',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},
+       body:JSON.stringify({name:f.name||'Datei',parents:[fid]})})
+    .then(function(r){if(!r.ok)throw new Error('Drive antwortet mit '+r.status);return r.json();})
+    .then(function(neu){
+      var quelle=(typeof _emCurrentTask!=='undefined'&&_emCurrentTask&&_emCurrentTask.title)||'';
+      var eintrag={name:neu.name||f.name||'Datei',fileId:neu.id,
+        url:neu.webViewLink||('https://drive.google.com/file/d/'+neu.id+'/view'),
+        uploadedAt:new Date().toLocaleDateString('de-DE'),kopieAus:quelle};
+      if(f.isImg){echt.fotos=echt.fotos||[];echt.fotos.push(Object.assign({driveId:neu.id,mimeType:f.mime||'image/jpeg'},eintrag));}
+      else{echt.attachments=echt.attachments||[];echt.attachments.push(eintrag);}
+      echt.notizVerlauf=echt.notizVerlauf||[];
+      echt.notizVerlauf.unshift({ts:new Date().toISOString(),text:'📄 Kopie erhalten: '+(neu.name||f.name)+(quelle?(' (aus „'+quelle+'")'):'')});
+      try{if(typeof autoSave==='function')autoSave();}catch(e){console.warn('[b928] Speichern:',e);}
+      try{if(typeof render==='function')render();}catch(e){}
+      showToast('📄 Kopie liegt jetzt in „'+(zt.title||'')+'" – das Original bleibt hier','success',6000);
+    })
+    .catch(function(e){console.warn('[b928] Kopie:',e);showToast('⚠ Kopie hat nicht geklappt: '+e.message,'error',8000);});
   });
 }
 function _emOpenEmlGallery(){
