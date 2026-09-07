@@ -9935,7 +9935,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-07 · #930'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-07-b930) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-07 · #932'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-07-b932) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -10978,6 +10978,14 @@ let _pamDriveSnapshot = null;
 // b788: Nummern, die beim letzten Abgleich im Archiv lagen. null = noch nicht ermittelt →
 // dann wird beim Zusammenfuehren NICHTS aussortiert (im Zweifel behalten, nie wegwerfen).
 let _pamArchivSnapshot = null;
+// b931: die fuenf Felder der BOARD-EINRICHTUNG (Spalten, Board-Typen, Handy-Sichtbarkeit,
+// Handy-Filter, Board-Reihenfolge). EINE Liste fuer Momentaufnahme UND Abgleich – zwei
+// getrennte Listen waeren die naechste stille Falle: ein hier ergaenztes Feld haette drueben
+// gefehlt und waere ungeprueft durchgelaufen.
+const _PAM_META_KEYS = ['_boardStatuses','_boardTypes','_mobileBoards','_mobileStatusFilter','_boardOrder'];
+// b931: Wie die Board-Einrichtung beim letzten Abgleich aussah. null = noch nicht ermittelt →
+// dann gilt beim Zusammenfuehren wieder b643 (lokal gewinnt), also der Stand bis b930.
+let _pamMetaSnapshot = null;
 function _pamSnapshotSetzen(){
   try{
     const st = buildSaveObject();
@@ -10996,7 +11004,16 @@ function _pamSnapshotSetzen(){
     //    b664-Lehre meint. Diese Map steht fuer sich und wird NUR fuers Archiv gelesen.
     _pamArchivSnapshot = new Set((Array.isArray(st._archivedTasks)?st._archivedTasks:[])
       .map(t=>t&&t.id).filter(Boolean));
-  }catch(e){ _pamDriveSnapshot = null; _pamArchivSnapshot = null; console.warn('[b662] Momentaufnahme:', e); }
+    // b931: DRITTE Aufnahme – die Board-Einrichtung. Sie beantwortet beim Zusammenfuehren die
+    // Frage, die man sonst nicht beantworten kann: habe ICH die Spalten hier veraendert, oder
+    // steht drueben etwas Neues? Ohne sie muesste man raten, und Raten hiess bis b930: der
+    // eigene Stand gewinnt immer – auch ein stundenalter.
+    // ⛔ BEWUSST EIGENSTAENDIG neben Karten- und Archiv-Aufnahme (b788-Lehre): sie wird NUR
+    //    vom Metadaten-Block gelesen und kann die beiden anderen Abgleiche nicht beruehren.
+    const _meta = {};
+    for(const mk of _PAM_META_KEYS){ if(st[mk]!==undefined && st[mk]!==null) _meta[mk]=JSON.stringify(st[mk]); }
+    _pamMetaSnapshot = _meta;
+  }catch(e){ _pamDriveSnapshot = null; _pamArchivSnapshot = null; _pamMetaSnapshot = null; console.warn('[b662] Momentaufnahme:', e); }
 }
 
 function _pamStandHash(s){
@@ -15085,6 +15102,24 @@ const _PAM_TIPP_FENSTER=3000;
 // Task-Fenster offen ist – und das liegt darüber. Frank am 23.08.2026: „Beim PC habe ich
 // diesen Hinweis noch nie gesehen." Deshalb zusätzlich ein Band, das über dem Fenster
 // liegt. pointer-events:none, damit es nichts anklickbar verdeckt.
+// b931 (Befund Frank 07.09.2026: „Warum kommt die Meldung vom Handy, ich habe kein Handy
+// offen?"): Das Wort „Handy" stand hier fest im Text – aus der Zeit, als das Handy der einzige
+// andere Schreiber war. Der Abgleich prueft an dieser Stelle aber nur den ZEITSTEMPEL der
+// Datei, nie den Schreiber. Laptop und PC schreiben in dieselbe Datei, also beschriftete jeder
+// die Aenderung des anderen als „Handy" – die Meldung log ueber ihre Herkunft.
+// Jetzt sagt das Band, was es weiss: es liegt eine fremde Aenderung vor, und die gezeigte
+// Ansicht ist von <Uhrzeit>. Der Zeitpunkt kommt aus workboardLastModified – dem Stand, den
+// dieses Fenster nachweislich haelt. Solange das Band steht, laedt der Poll bewusst nicht
+// nach, der Wert bleibt also stehen und stimmt.
+// ⛔ Die Herkunft (`_lastWriter` in der Datei) waere zwar bekannt – dafuer muesste der Poll
+//    aber die ganze Datei holen statt nur den Zeitstempel. Ein ehrlicher Text kostet nichts.
+function _pamHandyHinweisText(){
+  try{
+    if(!workboardLastModified)return '↻ Ein anderes Gerät hat gespeichert – die Änderungen kommen an, sobald dieses Fenster zu ist';
+    const t=new Date(workboardLastModified).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
+    return '⚠ Diese Ansicht ist vom Stand '+t+' – inzwischen hat ein anderes Gerät gespeichert';
+  }catch(e){return '↻ Ein anderes Gerät hat gespeichert – die Änderungen kommen an, sobald dieses Fenster zu ist';}
+}
 function _pamHandyHinweis(anzeigen){
   try{
     let el=document.getElementById('pamHandyHinweisBand');
@@ -15092,13 +15127,61 @@ function _pamHandyHinweis(anzeigen){
     if(el)return;
     el=document.createElement('div');
     el.id='pamHandyHinweisBand';
+    // b931: aus dem einzeiligen Band mit Auslassungspunkten ist eine Zeile mit Knopf geworden –
+    // deshalb flex statt nowrap/ellipsis, damit auf schmalen Laptops (b929/b930) umbrochen statt
+    // abgeschnitten wird. pointer-events:none bleibt am BAND (es soll nichts verdecken); nur der
+    // Knopf selbst holt sich die Klicks zurueck.
     el.style.cssText='position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:99994;'+
       'background:#f59e0b;color:#1f2937;font-size:13px;font-weight:600;padding:7px 16px;'+
       'border-radius:0 0 10px 10px;box-shadow:0 2px 10px rgba(0,0,0,0.35);pointer-events:none;'+
-      'max-width:92vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-    el.textContent='↻ Änderungen vom Handy liegen bereit – sie kommen an, sobald dieses Fenster zu ist';
+      'max-width:92vw;display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;';
+    const _txt=document.createElement('span');
+    _txt.textContent=_pamHandyHinweisText();
+    el.appendChild(_txt);
+    const _btn=document.createElement('button');
+    _btn.id='pamHinweisNeuLadenBtn';
+    _btn.type='button';
+    _btn.textContent='Speichern und neu laden';
+    _btn.style.cssText='pointer-events:auto;cursor:pointer;border:1px solid #92400e;background:#fff;'+
+      'color:#92400e;font-size:12px;font-weight:700;padding:3px 10px;border-radius:6px;white-space:nowrap;';
+    _btn.onclick=_pamAnsichtNeuLaden;
+    el.appendChild(_btn);
     document.body.appendChild(el);
   }catch(e){console.warn('[b771] Hinweisband:',e);}
+}
+// b931: Knopf am Band – ERST sichern, DANN neu laden. Ein blankes location.reload() waere hier
+// gefaehrlich: beforeunload stoesst zwar einen Save an, der Upload laeuft aber asynchron und
+// beim Neuladen nicht zwingend fertig – die letzte Aenderung haenge dann nur noch im
+// localStorage-Notnagel. Deshalb _saveJetzt() (ohne den 1-s-Puffer) abwarten und NUR bei
+// bestaetigtem Speichern neu laden. Klappt es nicht, bleibt das Fenster stehen und sagt es;
+// Neuladen waere dort der sichere Weg, Arbeit zu verlieren.
+// ⛔ _taskModalDirty wird erst UNMITTELBAR vor dem Neuladen zurueckgesetzt, nie vorher: bei einem
+//    gescheiterten Save bliebe das Fenster sonst als „sauber" stehen, obwohl es das nicht ist.
+//    Zuruecksetzen erspart beim Neuladen nur den ueberfluessigen „Seite verlassen?"-Dialog.
+async function _pamAnsichtNeuLaden(){
+  const btn=document.getElementById('pamHinweisNeuLadenBtn');
+  const _zurueck=function(){ if(btn){btn.disabled=false;btn.textContent='Speichern und neu laden';} };
+  try{
+    if(btn){btn.disabled=true;btn.textContent='Speichere…';}
+    // Offenes Kartenfenster: Feldinhalte zuerst nach boards[] uebernehmen – dieselbe
+    // Reihenfolge wie in beforeunload, sonst faende der Save die Eingaben gar nicht vor.
+    if(typeof _taskModalDirty!=='undefined'&&_taskModalDirty&&typeof saveTaskData==='function'){
+      try{clearTimeout(autoSaveTimer);}catch(e){}
+      saveTaskData();
+    }
+    if(typeof _saveJetzt==='function')await _saveJetzt();
+    if(typeof _savePending!=='undefined'&&_savePending){
+      _zurueck();
+      if(typeof showToast==='function')showToast('⚠ Speichern hat nicht geklappt – bitte NICHT neu laden, sonst geht die letzte Änderung verloren.','error',10000);
+      return;
+    }
+    try{_taskModalDirty=false;}catch(e){}
+    location.reload();
+  }catch(e){
+    console.warn('[b931] Neu laden:',e);
+    _zurueck();
+    if(typeof showToast==='function')showToast('⚠ Speichern hat nicht geklappt – bitte NICHT neu laden.','error',10000);
+  }
 }
 // b789: Waechter – nimmt das Band zurueck, sobald es nichts mehr zu melden hat.
 // Befund Frank 25.08.2026: „Die Aufforderung ist nicht weggegangen." Bis b788 wurde das Band
@@ -15155,7 +15238,7 @@ async function pollWorkboardFile(){
       if(_typing||_modalOpen){
         if(!_pamRemotePollPending){
           _pamRemotePollPending=true;
-          try{const ind=document.getElementById('fileMsg');if(ind)ind.textContent='↻ Änderungen vom Handy liegen vor…';}catch(e){}
+          try{const ind=document.getElementById('fileMsg');if(ind)ind.textContent='↻ Änderungen von einem anderen Gerät liegen vor…';}catch(e){} // b931: siehe _pamHandyHinweisText – hier ist der Schreiber ebenso wenig bekannt
         }
         _pamHandyHinweis(true);   // b771: außerhalb des if – sonst käme das Band nach einem
                                   // zwischenzeitlichen Ausblenden nicht wieder
@@ -15191,7 +15274,7 @@ async function pollWorkboardFile(){
     _pamSnapshotSetzen(); // b662: ab hier ist jede Karte deckungsgleich mit Drive
     try{
       const ind=document.getElementById('fileMsg');
-      if(ind)ind.textContent='↻ Aktualisiert vom Handy '+new Date().toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
+      if(ind)ind.textContent='↻ Aktualisiert '+new Date().toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}); // b931: ohne „vom Handy" – der Schreiber ist an dieser Stelle nicht bekannt
     }catch(e){console.warn('[PAM]',e);}
   }catch(e){console.warn('[PAM]',e);}
 }
@@ -15618,12 +15701,36 @@ async function gdriveSaveData() {
               if(!k.startsWith('_')||k==='_statuses'||Array.isArray(v))continue;
               if(v&&typeof v==='object')merged[k]={...v};
             }
-            // PC ist Autorität für Board-Konfiguration → lokale Metadaten haben Vorrang
-            const _metaKeys=['_boardStatuses','_boardTypes','_mobileBoards','_mobileStatusFilter','_boardOrder']; // b643: Reihenfolge wie die übrigen Board-Einstellungen behandeln
+            // ── b931: Board-Einrichtung nach derselben Regel wie die Karten ─────────────────
+            // Bis b930 stand hier „PC ist Autoritaet fuer Board-Konfiguration": die eigene
+            // Fassung gewann IMMER, ungeprueft. Fuer PC gegen Handy war das richtig – am Handy
+            // wird die Board-Einrichtung nicht verstellt, es konnte nichts verlorengehen.
+            // Zwei RECHNER sind aber beide „der PC". Dann stempelt der, der zuletzt speichert,
+            // seine womoeglich stundenalte Einrichtung ueber die des anderen.
+            // Befund Frank 07.09.2026: Laptop und PC gleichzeitig offen, am Laptop eine Spalte
+            // angelegt, das vergessene PC-Fenster speichert (60-s-Takt, sobald dort einmal etwas
+            // angefasst wurde) – Spalte weg, ohne Meldung, ohne Nachfrage.
+            // Jetzt gilt die Karten-Regel von b662: nur was sich HIER seit dem letzten Abgleich
+            // wirklich geaendert hat, gewinnt lokal. Unveraendertes nimmt den Stand der
+            // Gegenseite – nur so kommt deren Aenderung ueberhaupt an.
+            // ⛔ Kein Zweig darf etwas wegwerfen. Die vier Faelle:
+            //    1. hier nichts vorhanden          → Remote bleibt stehen (wie bisher)
+            //    2. hier unveraendert, drueben da  → Remote gewinnt          ← DAS ist der Fix
+            //    3. hier unveraendert, drueben NICHT da → eigener Stand bleibt. buildSaveObject
+            //       schreibt die ersten vier Felder nur, wenn sie nicht leer sind; ein Schreiber,
+            //       der sie nicht kennt, wuerde sie sonst still loeschen.
+            //    4. hier geaendert                 → lokal gewinnt (die Aenderung ist echt)
+            // ⛔ Fehlt die Momentaufnahme (null – z.B. allererster Abgleich), verhaelt sich der
+            //    Block exakt wie b643: lokal gewinnt. Im Zweifel die eigene Einrichtung behalten.
+            const _metaKeys=_PAM_META_KEYS; // b931: eine gemeinsame Liste mit der Momentaufnahme
             for(const mk of _metaKeys){
-              if(localState[mk]!==undefined&&localState[mk]!==null){
-                merged[mk]=Array.isArray(localState[mk])?localState[mk].slice():{...localState[mk]};
-              }
+              const _lok=localState[mk];
+              if(_lok===undefined||_lok===null)continue;                       // Fall 1
+              const _lokTxt=JSON.stringify(_lok);
+              const _snapTxt=_pamMetaSnapshot?_pamMetaSnapshot[mk]:undefined;
+              if(_pamMetaSnapshot&&_lokTxt===_snapTxt
+                 &&Object.prototype.hasOwnProperty.call(remote,mk))continue;    // Fall 2
+              merged[mk]=Array.isArray(_lok)?_lok.slice():{..._lok};            // Fall 3 + 4
             }
             // b788 (Stufe 2): Archiv GERICHTET zusammenfuehren statt die Cloud gewinnen zu lassen.
             // ⛔ Muss NACH der Schleife oben stehen: _archivedTasks ist ein Array und wurde dort
@@ -26203,6 +26310,13 @@ function _renderDokuGruppen(){
       // die Dateien liegen in Unterordnern, und deren Namen stehen nur als Anzeigetext da.
       // `_pamDrivePfad` läuft die echte Elternkette hoch und nimmt den Dateinamen mit.
       html+='<button type="button" onclick="event.stopPropagation();_pamDokPfad('+it.i+')" style="flex-shrink:0;font-size:10px;padding:1px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text1);cursor:pointer;" title="Windows-Pfad dieser Datei kopieren – Windows-Taste+R, Strg+V, Enter">💻</button>';
+      // b932: ✎ umbenennen und ⧉ Kopie brauchen eine Datei in Drive – ein Alt-Eintrag ohne
+      // fileId bekommt sie nicht, sonst liefe der Klick ins Leere. Das ✕ steht immer da.
+      if(a.fileId){
+        html+='<button type="button" onclick="event.stopPropagation();_pamDokUmbenennen('+it.i+')" style="flex-shrink:0;font-size:10px;padding:1px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text1);cursor:pointer;" title="Namen der Datei ändern – auch in Google Drive">✎</button>';
+        html+='<button type="button" onclick="event.stopPropagation();_pamDokKopie('+it.i+')" style="flex-shrink:0;font-size:10px;padding:1px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text1);cursor:pointer;" title="Kopie an eine andere Karte legen – das Original bleibt hier">⧉</button>';
+      }
+      html+='<button type="button" onclick="event.stopPropagation();_pamDokEntfernen('+it.i+')" style="flex-shrink:0;font-size:10px;padding:1px 6px;border:1px solid var(--red);border-radius:4px;background:var(--bg2);color:var(--red);cursor:pointer;" title="Aus dieser Karte entfernen – die Datei bleibt in Google Drive">✕</button>';
       html+='</div>';
     });
     html+='</div>';
@@ -38328,6 +38442,56 @@ async function downloadAttach(i){
     return;
   }
   showToast('⚠ Keine Datei verfügbar','error');
+}
+// ══ b932: ✎ ⧉ ✕ an der Dateizeile der Dokumente-Sektion (Frank am 07.09.2026) ══════════════
+// Sein Befund am Bild der Dokumente-Karte: "wie kann ich hier löschen und den text ändern –
+// sind die Änderungen vom E-Mail-Board hier auch nicht?" Nachgemessen und bestätigt: die
+// Werkzeuge aus b928 hängen an em-anh-zeile in _emRenderAttachPanel, und diese Sektion
+// (emAttachSection) liegt im emailTaskModal. Das öffnet PAM nur für Karten auf einem
+// E-Mail-Board (_isEmailBoard) – an einem Auftrag oder Objekt gab es sie nicht.
+//
+// ⛔ Drei Fallen, die genau hier hängen:
+// 1) taskAttachments ist eine TIEFE KOPIE des Tasks (b592). Ohne scheduleTaskFieldSave →
+//    saveTaskData steht die Änderung beim nächsten Öffnen wieder auf dem alten Stand.
+// 2) _emCurrentTask ist hier null (nur das E-Mail-Fenster setzt es). Liste und Quell-Task
+//    gehen deshalb ausdrücklich mit hinein – siehe opt bei _emDateiUmbenennen.
+// 3) it.i ist der Index in taskAttachments, nicht die Nummer innerhalb der Ordnergruppe.
+//    Nach dem Entfernen verschiebt er sich – renderAttachList zeichnet darum alles neu.
+function _pamDokDatei(i){
+  var a=(typeof taskAttachments!=='undefined'&&taskAttachments)?taskAttachments[i]:null;
+  if(!a)return null;
+  var n=String(a.name||a.filename||'').toLowerCase();
+  return {name:a.name||a.filename||'Anhang',driveId:a.fileId||a.driveId||'',
+    isImg:!!n.match(/\.(jpe?g|png|gif|webp|heic)$/),
+    mime:a.type||'',data:a};
+}
+function _pamDokUmbenennen(i){
+  var f=_pamDokDatei(i);
+  if(!f){showToast('Zu dieser Zeile gibt es keine Datei mehr – bitte 🔄 Aktualisieren drücken','warning',5000);return;}
+  _emDateiUmbenennen(f,null,null,{
+    listen:[taskAttachments,(typeof taskFotos!=='undefined')?taskFotos:[]],
+    speichern:function(){if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();},
+    danach:function(){if(typeof renderAttachList==='function')renderAttachList();}
+  });
+}
+function _pamDokKopie(i){
+  var f=_pamDokDatei(i);
+  if(!f){showToast('Zu dieser Zeile gibt es keine Datei mehr – bitte 🔄 Aktualisieren drücken','warning',5000);return;}
+  // ⛔ Ohne Quell-Task fehlte die Sperre "dieselbe Karte" und die Herkunftszeile im Verlauf.
+  var tid=(document.getElementById('taskId')||{}).value||'';
+  var t=(tid&&typeof findTaskById==='function')?findTaskById(tid):null;
+  if(!t){showToast('⚠ Diese Karte ist noch nicht gespeichert – bitte erst speichern, dann kopieren','warning',6000);return;}
+  _emDateiKopieren(f,t);
+}
+function _pamDokEntfernen(i){
+  var a=(typeof taskAttachments!=='undefined'&&taskAttachments)?taskAttachments[i]:null;
+  if(!a){showToast('Zu dieser Zeile gibt es keine Datei mehr – bitte 🔄 Aktualisieren drücken','warning',5000);return;}
+  var nm=a.name||a.filename||'Diese Datei';
+  // Rückfrage: das ✕ steht dauerhaft sichtbar in der Zeile, ein Fehlklick ist sonst zu leicht.
+  if(!confirm(nm+'\n\naus dieser Karte entfernen?\n\n⚠ Die Datei bleibt in Google Drive liegen – nur der Eintrag in der Karte verschwindet.'))return;
+  removeAttach(i);
+  if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
+  showToast('✕ Aus der Karte entfernt – in Drive liegt die Datei weiter','info',5000);
 }
 function removeAttach(i){taskAttachments.splice(i,1);renderAttachList();}
 
@@ -51470,7 +51634,17 @@ function _emRenderAttachPanel(allFiles){
 // bleibt in der Sammelkarte und damit die Angebotshistorie vollständig.
 // ⛔ Google Drive lässt eine Datei seit 2020 nur noch in EINEM Ordner liegen. „An beiden Karten"
 // geht deshalb nur als echte Kopie (files/copy), nicht als zweiter Elternordner.
-function _emDateiUmbenennen(f,namEl,zeileEl){
+// b932: Beide Funktionen tragen jetzt ZWEI Fenster – den Anhänge-Kasten im E-Mail-Fenster und
+// die Dokumente-Sektion der normalen Karte. Sie bleiben die EINE Logik (b852-Lehre); was sich je
+// Fenster unterscheidet, kommt als Parameter herein und ist ohne ihn exakt das Verhalten von b928:
+//   opt.listen    – die Arrays, in denen der neue Name nachgezogen wird (ohne: die vier Felder
+//                   der E-Mail-Arbeitskopie _emCurrentTask)
+//   opt.speichern – wie gespeichert wird (ohne: _emScheduleSave)
+//   opt.danach    – was danach aufzufrischen ist, z. B. die Liste neu zeichnen
+// ⛔ _emCurrentTask ist NUR im E-Mail-Fenster gesetzt und beim Schließen wieder null. Ohne
+// opt.listen würde in der normalen Karte deshalb gar nichts nachgezogen – lautlos.
+function _emDateiUmbenennen(f,namEl,zeileEl,opt){
+  opt=opt||{};
   var id=_emAnhFileId(f);
   if(!id){showToast('Diese Datei liegt nicht in Drive – Umbenennen geht nicht','warning',5000);return;}
   if(typeof gdriveToken==='undefined'||!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden (oben rechts: ☁️ Google Drive)','error',6000);return;}
@@ -51484,9 +51658,14 @@ function _emDateiUmbenennen(f,namEl,zeileEl){
     if(!erg){showToast('⚠ Umbenennen hat nicht geklappt – der Name bleibt wie er war','error',7000);return;}
     // Den Namen dort nachziehen, wo die Datei in der Karte wirklich steht. Die Kennung liegt je
     // nach Herkunft in fileId oder driveId — deshalb beide prüfen.
-    var t=(typeof _emCurrentTask!=='undefined')?_emCurrentTask:null, n=0;
-    ['attachments','fotos','emailPdfs','emailOriginals'].forEach(function(feld){
-      ((t&&t[feld])||[]).forEach(function(e){
+    var listen=opt.listen;
+    if(!listen){
+      var t=(typeof _emCurrentTask!=='undefined')?_emCurrentTask:null;
+      listen=['attachments','fotos','emailPdfs','emailOriginals'].map(function(feld){return (t&&t[feld])||[];});
+    }
+    var n=0;
+    listen.forEach(function(arr){
+      (arr||[]).forEach(function(e){
         if(e&&(e.fileId===id||e.driveId===id||e.editedDriveId===id)){e.name=erg;n++;}
       });
     });
@@ -51494,11 +51673,18 @@ function _emDateiUmbenennen(f,namEl,zeileEl){
     // Nur die eine Zeile im Fenster nachziehen — kein Neuzeichnen des Kastens (b854 zählt die Aufrufer).
     if(namEl)namEl.textContent=erg;
     if(zeileEl)zeileEl.title=erg;
-    if(n&&typeof _emScheduleSave==='function')_emScheduleSave();
+    if(n){
+      var sp=opt.speichern||((typeof _emScheduleSave==='function')?_emScheduleSave:null);
+      if(sp)sp();
+    }
+    if(typeof opt.danach==='function')opt.danach(erg,n);
     showToast(n?('✏ Neuer Name: '+erg):('✏ In Drive umbenannt: '+erg+' – in der Karte war kein Eintrag zu ändern'),n?'success':'warning',n?4000:7000);
   });
 }
-function _emDateiKopieren(f){
+// b932: quellTask sagt, WOHER die Kopie kommt – für den Vergleich "dieselbe Karte" und für die
+// Herkunftszeile im Verlauf des Ziels. Ohne Angabe gilt _emCurrentTask wie in b928.
+function _emDateiKopieren(f,quellTask){
+  var _quell=quellTask||((typeof _emCurrentTask!=='undefined')?_emCurrentTask:null);
   var id=_emAnhFileId(f);
   if(!id){showToast('Diese Datei liegt nicht in Drive – Kopieren geht nicht','warning',5000);return;}
   if(typeof gdriveToken==='undefined'||!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden (oben rechts: ☁️ Google Drive)','error',6000);return;}
@@ -51506,7 +51692,7 @@ function _emDateiKopieren(f){
   _emShowBoardTaskPicker('Kopie von „'+(f.name||'Datei')+'" ablegen in',function(ziel){
     var zt=ziel&&ziel.task;
     if(!zt||!zt.id)return;
-    if(typeof _emCurrentTask!=='undefined'&&_emCurrentTask&&zt.id===_emCurrentTask.id){
+    if(_quell&&zt.id===_quell.id){
       showToast('Das ist dieselbe Karte – nichts kopiert','info',4000);return;}
     // ⛔ Immer mit der ECHTEN Karte aus dem Board rechnen, nicht mit dem, was die Auswahl liefert:
     // die Ordner-Felder hängen am echten Objekt, und dort wird die Kopie später eingetragen.
@@ -51521,7 +51707,7 @@ function _emDateiKopieren(f){
        body:JSON.stringify({name:f.name||'Datei',parents:[fid]})})
     .then(function(r){if(!r.ok)throw new Error('Drive antwortet mit '+r.status);return r.json();})
     .then(function(neu){
-      var quelle=(typeof _emCurrentTask!=='undefined'&&_emCurrentTask&&_emCurrentTask.title)||'';
+      var quelle=(_quell&&_quell.title)||'';
       var eintrag={name:neu.name||f.name||'Datei',fileId:neu.id,
         url:neu.webViewLink||('https://drive.google.com/file/d/'+neu.id+'/view'),
         uploadedAt:new Date().toLocaleDateString('de-DE'),kopieAus:quelle};
