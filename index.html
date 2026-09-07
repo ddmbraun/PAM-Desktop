@@ -9915,7 +9915,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-07 · #925'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-07-b925) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-07 · #926'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-07-b926) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -34338,6 +34338,13 @@ function _emDateienZurSuche(t){
 }
 
 let _emMailSuchtext='', _emMailSuchTaskId='', _emMailSuchTimer=null;
+// b926: Suche zurücksetzen – über denselben Weg wie das Tippen, damit es nur EINE Zeichenlogik gibt.
+// Das Feld wird sofort geleert, damit es sich für Frank sofort leer anfühlt; gezeichnet wird nach 180 ms.
+function _emMailSucheLeeren(){
+  const inp=document.getElementById('emMailSuche');
+  if(inp){inp.value='';try{inp.focus();}catch(e){}}
+  _emMailSucheGeaendert('');
+}
 function _emMailSucheGeaendert(v){
   const _vorher=String(_emMailSuchtext||'').trim();
   _emMailSuchtext=String(v||'');
@@ -35017,6 +35024,17 @@ function _pamAbsenderAusKontakten(ziel){
 // Konzept PAM_EMAIL_ANZEIGE_KONZEPT_2026-08-01.md, Abschnitt 2: Zeile = nur
 // Richtungs-Marke (Eingang blau/Gesendet grün), Absender, Datum, Büroklammer;
 // Ursprungsmail OBEN, Antworten chronologisch darunter; keine Aktionsknöpfe je Zeile.
+// b926: Zwei Verlaufszeilen meinen DIESELBE Mail, wenn ihre unveränderliche Kennung gleich ist —
+// `internetMessageId` vergibt der Mailserver, sie überlebt jedes Verschieben. Die Outlook-eigene `id`
+// taugt dafür NICHT: `_olWegraeumen` schiebt die Mail nach „09 erledigt", und dabei vergibt Outlook eine
+// NEUE id (steht so im Kommentar dort). Genau daran stand Franks Nageleisen-Mail am 07.09.2026 zweimal
+// in der Sammelkarte, und der Zähler sagte „3 Nachrichten" bei zwei echten Mails.
+function _pamMailKennung(m){return String((m&&(m.internetMessageId||m.messageId))||'').replace(/^<|>$/g,'');}
+function _pamGleicheMail(a,b){
+  const ka=_pamMailKennung(a),kb=_pamMailKennung(b);
+  if(ka&&kb)return ka===kb;                       // beide haben die echte Kennung: sie entscheidet
+  return !!(a&&b&&a.id&&b.id&&a.id===b.id);       // sonst bleibt nur die Outlook-id (wie bisher)
+}
 function _pamMailAnhangZahl(tk,messageId){
   if(!messageId)return 0;
   let n=0;
@@ -35032,8 +35050,12 @@ function _pamVerlaufListeHtml(tk,tkId,filterFn){ // b922: filterFn (optional) si
   const thrSZ=new Set();
   _thrSichtbarV.forEach(function(m){const k=_szk(m.subject||m.betreff||'',m.date);if(k)thrSZ.add(k);});
   const alle=[];
-  (tk.gmailThreadMessages||[]).forEach(function(m,i){if(_pamMailHidden(tk,m))return;alle.push({src:'gmail',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:m.threadId||tk.gmailThreadId||'_gm'});});
-  (tk.msThreadMessages||[]).forEach(function(m,i){if(_pamMailHidden(tk,m))return;alle.push({src:'ms',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:m.conversationId||tk.msConversationId||'_ms'});});
+  // b926: Dieselbe Mail steht nur EINMAL in der Liste. `idx` bleibt der echte Platz im Feld —
+  // daran hängt das Öffnen der Mail (_msOpenMailOverlay), es darf sich nicht verschieben.
+  const _gesehen=new Set();
+  const _neu=function(m){const k=_pamMailKennung(m);if(!k)return true;if(_gesehen.has(k))return false;_gesehen.add(k);return true;};
+  (tk.gmailThreadMessages||[]).forEach(function(m,i){if(_pamMailHidden(tk,m))return;if(!_neu(m))return;alle.push({src:'gmail',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:m.threadId||tk.gmailThreadId||'_gm'});});
+  (tk.msThreadMessages||[]).forEach(function(m,i){if(_pamMailHidden(tk,m))return;if(!_neu(m))return;alle.push({src:'ms',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:m.conversationId||tk.msConversationId||'_ms'});});
   (tk.emailOriginals||[]).forEach(function(m,i){
     if(m.messageId&&thrIds.has(m.messageId))return;                                    // K6: eindeutig per Message-ID
     if(!m.messageId){const k=_szk(m.subject||m.name||'',m.date);if(k&&thrSZ.has(k))return;} // Ersatz: Betreff+Minute
@@ -35061,8 +35083,11 @@ function _pamVerlaufListeHtml(tk,tkId,filterFn){ // b922: filterFn (optional) si
     if(!groups.has(key))groups.set(key,{subject:subj,mails:[]});
     groups.get(key).mails.push(m);
   });
-  // Gruppen-Kopf nur bei MEHREREN Vorgängen – bei einem steht der Betreff schon im Fenster-Kopf
-  const showHeader=groups.size>1;
+  // b926: Frank am 07.09.2026 („alle Fäden zu"): JEDER Vorgang bekommt seinen Kopf – auch wenn es nur
+  // einen gibt – und alle starten zugeklappt. Bei hundert Angeboten war die Liste sonst endlos. Läuft eine
+  // Suche (filterFn), stehen alle Fäden offen: sonst versteckte die Liste genau den gesuchten Treffer.
+  const showHeader=groups.size>0;
+  const _suchLauf=(typeof filterFn==='function');
   if(!window._pamThreadOpen)window._pamThreadOpen={};
   function _fmt(ts){if(!ts)return'';const d=new Date(ts);const now=new Date();if(d.toDateString()===now.toDateString())return('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);return('0'+d.getDate()).slice(-2)+'.'+('0'+(d.getMonth()+1)).slice(-2)+'.'+String(d.getFullYear()).slice(2);}
   const sorted=[...groups.entries()].sort(function(a,b){
@@ -35070,13 +35095,12 @@ function _pamVerlaufListeHtml(tk,tkId,filterFn){ // b922: filterFn (optional) si
     const lb=Math.max.apply(null,b[1].mails.map(function(m){return m._ts||0;}));
     return lb-la;
   });
-  if(showHeader&&!Object.keys(window._pamThreadOpen).length&&sorted.length)window._pamThreadOpen[sorted[0][0]]=true;
   const _sqId=String(tkId).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
   const _sqV=function(s){return String(s||'').replace(/"/g,'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");};
   let html='';
   sorted.forEach(function(ent){
     const key=ent[0],grp=ent[1];
-    const isOpen=!showHeader||!!window._pamThreadOpen[key];
+    const isOpen=_suchLauf||!!window._pamThreadOpen[key];   // b926: zu, bis geklickt wird – bei Suche offen
     const lastTs=Math.max.apply(null,grp.mails.map(function(m){return m._ts||0;}));
     if(showHeader){
       html+='<div style="border:2px solid #0284c7;border-radius:6px;margin:5px 8px;overflow:hidden;"><div onclick="_pamToggleThread(\''+_sqV(key)+'\')" style="padding:7px 10px;background:rgba(224,242,254,0.15);display:flex;align-items:flex-start;gap:6px;cursor:pointer;user-select:none;">';
@@ -48535,8 +48559,12 @@ function _openPamEmailPreview(startIdx,taskOverride,zeigeAusgeblendete){
   // b636: ausgeblendete Verlaufszeilen fliegen raus – im Zeige-Modus werden sie
   // gedimmt mitgelistet (hid-Flag am Eintrag), _hidN zählt sie für die Fußzeile.
   let _hidN=0;
-  (task.msThreadMessages||[]).forEach(function(m,i){const _h=_pamMailHidden(task,m);if(_h)_hidN++;if(_h&&!zeigeAusgeblendete)return;mails.push({type:'ms',idx:i,data:m,hid:_h,ts:m.date?new Date(m.date).getTime():0});});
-  (task.gmailThreadMessages||[]).forEach(function(m,i){const _h=_pamMailHidden(task,m);if(_h)_hidN++;if(_h&&!zeigeAusgeblendete)return;mails.push({type:'gmail',idx:i,data:m,hid:_h,ts:m.date?new Date(m.date).getTime():0});});
+  // b926: dieselbe Mail nur einmal in der Liste (Kennung vom Mailserver). `idx` bleibt der echte
+  // Platz im Feld – daran hängt das Öffnen der Mail. Die b636-Regel steht davor und bleibt zuerst.
+  const _pepGesehen=new Set();
+  const _pepNeu=function(m){const k=_pamMailKennung(m);if(!k)return true;if(_pepGesehen.has(k))return false;_pepGesehen.add(k);return true;};
+  (task.msThreadMessages||[]).forEach(function(m,i){const _h=_pamMailHidden(task,m);if(_h)_hidN++;if(_h&&!zeigeAusgeblendete)return;if(!_pepNeu(m))return;mails.push({type:'ms',idx:i,data:m,hid:_h,ts:m.date?new Date(m.date).getTime():0});});
+  (task.gmailThreadMessages||[]).forEach(function(m,i){const _h=_pamMailHidden(task,m);if(_h)_hidN++;if(_h&&!zeigeAusgeblendete)return;if(!_pepNeu(m))return;mails.push({type:'gmail',idx:i,data:m,hid:_h,ts:m.date?new Date(m.date).getTime():0});});
   // b554 (K6 wie in der Liste): abgelegte Originale nur zeigen, wenn sie nicht schon im
   // nachgeladenen Verlauf stecken – Message-ID zuerst, Ersatzschlüssel Betreff+Minute
   // b636: die Ablage-Entdopplung rechnet nur mit SICHTBAREN Verlaufszeilen – blendet man
@@ -48860,6 +48888,7 @@ function openEmailTaskModal(task,board){
     // b852: EINE Quelle fuer diese Liste - _emOpenMail nutzt sie als Rueckfall,
     // damit beide Stellen nicht auseinanderlaufen.
     _emAnhZustandBeimOeffnen();   // b925: je Karte frisch – Original-E-Mails/Lesekopien zu, Kasten offen
+    window._pamThreadOpen={};     // b926: und die Gesprächsfäden fangen zugeklappt an
     _emRenderAttachPanel(_b852KartenDateien(task));
   })();
   if(_emKeyHandler){document.removeEventListener('keydown',_emKeyHandler);_emKeyHandler=null;}
@@ -49835,8 +49864,11 @@ function _renderEmailMailList(){
   _thrSichtbarEm.forEach(function(m){const k=_szk(m.subject||m.betreff||'',m.date);if(k)thrSZ.add(k);}); // b636
   // ── Mail-Liste aufbauen + deduplizieren ──
   const allM=[];
-  (t.gmailThreadMessages||[]).forEach(function(m,i){if(_pamMailHidden(t,m))return;allM.push({src:'gmail',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:m.threadId||t.gmailThreadId||'_gm'});}); // b636: ausgeblendete Zeilen überspringen
-  (t.msThreadMessages||[]).forEach(function(m,i){if(_pamMailHidden(t,m))return;allM.push({src:'ms',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:m.conversationId||t.msConversationId||'_ms'});});
+  // b926: dieselbe Mail zählt einmal – sonst stand „E-Mails · 3 Nachrichten" über zwei echten Mails.
+  const _gesehenZ=new Set();
+  const _neuZ=function(m){const k=_pamMailKennung(m);if(!k)return true;if(_gesehenZ.has(k))return false;_gesehenZ.add(k);return true;};
+  (t.gmailThreadMessages||[]).forEach(function(m,i){if(_pamMailHidden(t,m))return;if(!_neuZ(m))return;allM.push({src:'gmail',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:m.threadId||t.gmailThreadId||'_gm'});}); // b636: ausgeblendete Zeilen überspringen
+  (t.msThreadMessages||[]).forEach(function(m,i){if(_pamMailHidden(t,m))return;if(!_neuZ(m))return;allM.push({src:'ms',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:m.conversationId||t.msConversationId||'_ms'});});
   (t.emailOriginals||[]).forEach(function(m,i){if(m.messageId&&thrIds.has(m.messageId))return;if(!m.messageId){const k=_szk(m.subject||m.name||'',m.date);if(k&&thrSZ.has(k))return;}allM.push({src:'original',idx:i,data:m,_ts:m.date?new Date(m.date).getTime():0,convId:'_orig'});});
   allM.sort(function(a,b){return(b._ts||0)-(a._ts||0);});
   const _totalCnt=allM.length;
@@ -49868,8 +49900,10 @@ function _renderEmailMailList(){
   // Der Suchtext gehoert zur Karte: wechselt die Karte, faengt die Suche leer an.
   if(_emMailSuchTaskId!==t.id){_emMailSuchTaskId=t.id;_emMailSuchtext='';}
   const _such=document.createElement('div');
-  _such.style.cssText='padding:6px 8px;border-bottom:1px solid var(--border);flex-shrink:0;';
-  _such.innerHTML='<input type="text" id="emMailSuche" value="'+esc(_emMailSuchtext)+'" placeholder="🔍 In dieser Karte suchen – Betreff, Absender, Datum, Datei …" oninput="_emMailSucheGeaendert(this.value)" autocomplete="off" style="width:100%;box-sizing:border-box;padding:6px 9px;border-radius:6px;border:1.5px solid #378ADD;background:var(--bg);color:var(--text);font-size:calc(12px * var(--modal-scale,1));">';
+  // b926: Frank am 07.09.2026: „Wie kann ich die Suche zurücksetzen?" – ✕ rechts im Feld und Escape.
+  _such.style.cssText='padding:6px 8px;border-bottom:1px solid var(--border);flex-shrink:0;position:relative;';
+  _such.innerHTML='<input type="text" id="emMailSuche" value="'+esc(_emMailSuchtext)+'" placeholder="🔍 In dieser Karte suchen – Betreff, Absender, Datum, Datei …" oninput="_emMailSucheGeaendert(this.value)" onkeydown="if(event.key===\'Escape\'&&this.value){event.stopPropagation();event.preventDefault();_emMailSucheLeeren();}" autocomplete="off" style="width:100%;box-sizing:border-box;padding:6px 26px 6px 9px;border-radius:6px;border:1.5px solid #378ADD;background:var(--bg);color:var(--text);font-size:calc(12px * var(--modal-scale,1));">'
+    +(_emMailSuchtext?'<button type="button" id="emMailSucheX" onclick="_emMailSucheLeeren()" title="Suche zurücksetzen (oder Escape drücken)" style="position:absolute;right:15px;top:50%;transform:translateY(-50%);width:18px;height:18px;padding:0;line-height:1;border:none;border-radius:50%;background:var(--bg3);color:var(--text2);cursor:pointer;font-size:calc(11px * var(--modal-scale,1));">✕</button>':'');
   el.appendChild(_such);
   // 4. Thread-Liste (scrollbar)
   const _listDiv=document.createElement('div');
@@ -51557,7 +51591,14 @@ function _emUpdateHeaderBadges(){
   var _hb=document.getElementById('emHeaderBadges');
   if(!_hb||!_emCurrentTask)return;
   var t=_emCurrentTask;
-  var _emSicht=[].concat(t.gmailThreadMessages||[],t.msThreadMessages||[]).filter(function(m){return !_pamMailHidden(t,m);});
+  // b926: dieselbe Mail zählt EINMAL – sonst sagte das Symbol „3“, während die Liste darunter
+  // zwei Nachrichten zeigte (gemessen im Browser am 07.09.2026). Ausgeblendete bleiben draußen (b636).
+  var _emGesehen=new Set();
+  var _emSicht=[].concat(t.gmailThreadMessages||[],t.msThreadMessages||[]).filter(function(m){
+    if(_pamMailHidden(t,m))return false;
+    var _k=_pamMailKennung(m);if(!_k)return true;
+    if(_emGesehen.has(_k))return false;_emGesehen.add(_k);return true;
+  });
   var _emThrIds=new Set(_emSicht.map(function(m){return m.messageId||m.internetMessageId||'';}).filter(Boolean));
   var _ec=_emSicht.length+(t.emailOriginals||[]).filter(function(e){return !(e.messageId&&_emThrIds.has(e.messageId));}).length;
   var _ac=(t.attachments||[]).length;
@@ -52122,12 +52163,12 @@ function _emInAuftragEinglieder(){
         });
         if(!tt.gmailThreadMessages)tt.gmailThreadMessages=[];
         (src.gmailThreadMessages||[]).forEach(function(m){
-          if(!tt.gmailThreadMessages.some(function(x){return x.id&&x.id===m.id;}))
+          if(!tt.gmailThreadMessages.some(function(x){return _pamGleicheMail(x,m);}))   // b926: Kennung statt Outlook-id
             tt.gmailThreadMessages.push(m);
         });
         if(!tt.msThreadMessages)tt.msThreadMessages=[];
         (src.msThreadMessages||[]).forEach(function(m){
-          if(!tt.msThreadMessages.some(function(x){return x.id&&x.id===m.id;}))
+          if(!tt.msThreadMessages.some(function(x){return _pamGleicheMail(x,m);}))   // b926: Kennung statt Outlook-id
             tt.msThreadMessages.push(m);
         });
         if(!tt.attachments)tt.attachments=[];
