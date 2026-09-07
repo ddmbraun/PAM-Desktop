@@ -9935,7 +9935,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-07 · #933'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-07-b933) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-07 · #934'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-07-b934) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -11014,6 +11014,60 @@ function _pamSnapshotSetzen(){
     for(const mk of _PAM_META_KEYS){ if(st[mk]!==undefined && st[mk]!==null) _meta[mk]=JSON.stringify(st[mk]); }
     _pamMetaSnapshot = _meta;
   }catch(e){ _pamDriveSnapshot = null; _pamArchivSnapshot = null; _pamMetaSnapshot = null; console.warn('[b662] Momentaufnahme:', e); }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// b934 – ARBEITET GERADE EIN ZWEITER RECHNER MIT? (Stufe 1)
+//
+// Frank am 07.09.2026, nach b931: „Was ist die Zweitfensterwarnung über Drive?"
+// Ausgangslage: Die Warnung aus b639 lebt von einem Lebenszeichen im localStorage –
+// das ist pro Browser und pro RECHNER. Laptop und PC haben zwei getrennte Zettel und
+// koennen sich damit grundsaetzlich nicht sehen. Genau Franks Lage fiel durch.
+//
+// Stufe 1 kommt ohne neuen Dauerschreiber und ohne neue Datei aus: In `workboard.json`
+// steht seit b729 ohnehin ein Stempel `_lastWriter` – wer zuletzt geschrieben hat. Er
+// wurde brav abgelegt und NIE gelesen. Bis b933 trugen beide Rechner dort `geraet:'PC'`
+// und waren nicht auseinanderzuhalten; jetzt kommt die vorhandene Geraetekennung mit.
+//
+// ⛔ Gemessen wird die Frische an der EIGENEN Uhr (`bemerkt`), nicht am Zeitstempel im
+//    Stempel. Der kommt vom anderen Rechner: geht dessen Uhr 20 Minuten vor, stuende die
+//    Warnung sonst dauerhaft; geht sie nach, kaeme sie nie. „Wir haben vor X Minuten einen
+//    Stand geladen, den ein anderer Rechner geschrieben hat" ist unabhaengig davon wahr.
+// ⛔ NUR Desktop gegen Desktop. Ein Handy ist kein zweites PAM-Fenster – seine Aenderungen
+//    behandelt das Band aus b931. Ohne diese Schranke waere jede Handy-Nutzung ein Fehlalarm.
+// ⛔ Kein Stempel oder keine Kennung (alter Stand, fremder Schreiber) → NICHTS behaupten.
+//    Schweigen ist hier richtig; eine geratene Warnung waere schlimmer als keine.
+//
+// ⚠ Was Stufe 1 NICHT sieht: ein Fenster, das drueben nur offen steht und nichts schreibt.
+//   Das ist Absicht und kein Loch – ein unberuehrtes Fenster kann nichts ueberschreiben
+//   (gemessen bei b931). Gefaehrlich ist das Fenster, das speichert, und genau das stempelt.
+//   Wer auch das nur offene Fenster melden will, braucht Stufe 2 (eigene Lebenszeichen-Datei).
+// ══════════════════════════════════════════════════════════════════════════
+// b934: EINE Quelle fuer die Geraetekennung. DEVICE_ID steht in einem SPAETEREN Skriptblock
+// als buildSaveObject – zur Laufzeit ist sie da, ein Zugriff davor wuerfe aber ReferenceError
+// (zeitliche Totzone). Deshalb gekapselt: im Zweifel leer, dann warnt Stufe 1 eben nicht,
+// statt den Speicherweg zu zerlegen.
+function _pamGeraeteId(){ try{ return DEVICE_ID||''; }catch(e){ return ''; } }
+let _pamFremderSchreiber=null;          // {kennung, bemerkt} – zuletzt gesehener ANDERER Rechner
+// b934: Wie lange ein bemerkter Fremdschreiber als „arbeitet gerade mit" gilt. Fuenf Minuten
+// sind ein Kompromiss: das gefaehrliche Fenster stempelt im 60-Sekunden-Takt, meldet sich also
+// laufend nach; laenger stehenzubleiben hiesse, der Balken haengt nach dem Schliessen drueben
+// unnoetig lange (Franks Befund vom 25.08.: „Die Aufforderung ist nicht weggegangen").
+const _PAM_FREMD_FRISCH_MS=300000;
+function _pamFremdenSchreiberMerken(data){
+  try{
+    const w=data&&data._lastWriter;
+    if(!w||!w.geraeteId)return;                 // alter Stand oder Schreiber ohne Kennung
+    if(w.app!=='Desktop')return;                // Handy: siehe b931, hier bewusst still
+    const eigen=_pamGeraeteId();
+    if(!eigen||w.geraeteId===eigen)return;      // wir selbst
+    _pamFremderSchreiber={kennung:w.geraeteId,bemerkt:Date.now()};
+  }catch(e){console.warn('[b934] Fremdschreiber:',e);}
+}
+function _pamFremderRechnerAktiv(){
+  try{
+    return !!(_pamFremderSchreiber&&(Date.now()-_pamFremderSchreiber.bemerkt)<_PAM_FREMD_FRISCH_MS);
+  }catch(e){return false;}
 }
 
 function _pamStandHash(s){
@@ -16275,6 +16329,11 @@ function getBoardStatuses(board){
   return(boardStatuses[b]&&boardStatuses[b].length)?boardStatuses[b]:statuses;
 }
 function loadFromObject(data){
+  // b934: Wer hat den Stand geschrieben, den wir hier hereinbekommen? Ein anderer Rechner?
+  // ⛔ Bewusst HIER und nicht im Poll – aus demselben Grund wie der b664-Block darunter:
+  //    an dieser Stelle laufen ALLE Wege durch (Poll, Konflikt-Abgleich, Datei, Backup,
+  //    Import, Start). Ein Aufruf je Ladeweg waere die naechste vergessene Stelle.
+  try{_pamFremdenSchreiberMerken(data);}catch(e){console.warn('[b934]',e);}
   // b664: Hier wird boards komplett neu aufgebaut. _kalPick (angetippte Karte, Tablet)
   // und _kalDragKey zeigen aber auf „Auftrag + Platz in der Liste" – nach dem Neuaufbau
   // ist der Platz nicht mehr derselbe, der Antipp-Weg würde danach einen fremden Termin
@@ -16665,7 +16724,7 @@ function buildSaveObject(){
   if(Object.keys(mobileStatusFilter).length)out._mobileStatusFilter={...mobileStatusFilter};
   if(Object.keys(boardTypes).length)out._boardTypes={...boardTypes};
   out._boardOrder=Object.keys(boards); // b643: Reihenfolge als eigenes Merkfeld – das Handy (v182) reicht es durch, Laden sortiert danach
-  out._lastWriter={app:'Desktop',version:PAM_BUILD,geraet:'PC',zeit:new Date().toISOString()}; // b729: Schreib-Kennzeichen (Geisterschreiber-Lehre 21.08.) – Mobil v220 stempelt genauso, gleiche Position
+  out._lastWriter={app:'Desktop',version:PAM_BUILD,geraet:'PC',geraeteId:_pamGeraeteId(),zeit:new Date().toISOString()}; // b729: Schreib-Kennzeichen (Geisterschreiber-Lehre 21.08.) – Mobil v220 stempelt genauso, gleiche Position · b934: geraeteId dazu, sonst sind zwei PCs nicht auseinanderzuhalten (beide tragen geraet:'PC')
   for(const[k,v]of Object.entries(boards))out[k]=v;
   return out;
 }
@@ -45540,14 +45599,29 @@ function _hbLesen(){try{const v=JSON.parse(localStorage.getItem(_HB_KEY)||'null'
 function _hbFremdeInstanzLebt(){const v=_hbLesen();return !!(v&&v.id!==_pamInstanzId&&(Date.now()-v.ts)<_HB_FRISCH_MS);}
 function _hbSchreiben(){try{localStorage.setItem(_HB_KEY,JSON.stringify({id:_pamInstanzId,ts:Date.now()}));}catch(e){}}
 
+// b934: Zwei Ursachen, zwei Wahrheiten – und der Balken darf nur die sagen, die zutrifft.
+// Der fremde RECHNER ist die wichtigere Meldung: die localStorage-Warnung aus b639 sieht ihn
+// grundsaetzlich nicht (sie endet am eigenen Browser), und der Text „in einem weiteren Fenster"
+// waere dort schlicht falsch – Frank haette am PC nach einem zweiten Fenster gesucht, das es
+// gar nicht gibt. Dieselbe Lehre wie beim Hinweisband in b931.
+function _zweiFensterBannerText(){
+  try{
+    if(typeof _pamFremderRechnerAktiv==='function'&&_pamFremderRechnerAktiv())
+      return '⚠ Ein anderer Rechner arbeitet gerade auch in PAM – bitte nur an einem, sonst springen Sortierungen hin und her';
+  }catch(e){}
+  return '⚠ PAM ist in einem weiteren Fenster geöffnet – bitte nur eines verwenden, sonst überschreiben sich Sortierungen gegenseitig';
+}
 function _zweiFensterBanner(an){
   let b=document.getElementById('_zweiFensterBanner');
   if(!an){if(b){b.remove();_zweiFensterBannerNachziehen(false);}return;}
-  if(b)return;
+  // b934: Steht der Balken schon, aber die Ursache hat gewechselt (erst zweites Fenster hier,
+  // dann zusaetzlich ein fremder Rechner), muss der Text nachgezogen werden. Bis b933 wurde er
+  // einmal gesetzt und nie wieder angefasst – er haette dann dauerhaft das Falsche behauptet.
+  if(b){const _t=_zweiFensterBannerText();if(b.textContent!==_t)b.textContent=_t;return;}
   b=document.createElement('div');
   b.id='_zweiFensterBanner';
   b.style.cssText='position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:99998;background:#B54708;color:#fff;padding:6px 16px;border-radius:0 0 10px 10px;font-size:12.5px;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,.3);max-width:94%;text-align:center;';
-  b.textContent='⚠ PAM ist in einem weiteren Fenster geöffnet – bitte nur eines verwenden, sonst überschreiben sich Sortierungen gegenseitig';
+  b.textContent=_zweiFensterBannerText();
   try{document.body.appendChild(b);_zweiFensterBannerNachziehen(true);}catch(e){}
 }
 // b719: Dieser Balken kommt im 20-Sekunden-Takt, der Dubletten-Balken nur beim Laden.
@@ -45563,7 +45637,12 @@ function _hbStart(){
   const tick=function(){
     // erst LESEN und bewerten (fremde Instanz?), DANN den eigenen Stempel
     // schreiben – umgekehrt sähe jede Instanz immer nur sich selbst
-    _zweiFensterBanner(_hbFremdeInstanzLebt());
+    // b934: ZWEITE Quelle dazu – ein anderer RECHNER, erkannt am Schreib-Stempel in
+    // workboard.json. Der Herzschlag oben endet am eigenen Browser und kann ihn nicht sehen.
+    // ⛔ ODER, nicht ersetzen: beide Lagen gibt es unabhaengig voneinander, und die eine
+    //    darf die andere nicht abschalten. Den Takt (20 s) uebernimmt Stufe 1 einfach mit –
+    //    ein eigener Zeitgeber waere ein zweiter Weg zum selben Balken (b664-Lehre).
+    _zweiFensterBanner(_hbFremdeInstanzLebt()||_pamFremderRechnerAktiv());
     _hbSchreiben();
   };
   tick();
