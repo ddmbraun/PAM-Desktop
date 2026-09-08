@@ -10072,7 +10072,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-08 · #962'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-08-b962) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-08 · #963'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-08-b963) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -35616,7 +35616,7 @@ async function _pamEmailAntwortenMitVerlauf(){
    sonst zeigt PAM eine alte Fassung weiter und die neuen Spalten bleiben leer.
    Genau das war im Betrieb zu sehen: "woher" war ueberall leer, weil die
    gespeicherte Fassung noch von der Bauart davor stammte. */
-const AB_BAUART=5; /* b962: Einträge vereint, Warnzeilen, Bezeichnung/Wert-Zeilen, ohneText */
+const AB_BAUART=6; /* b963: alle Beteiligten in der Tabelle - Schreiber und Genannte */
 let _abLetzte=null;
 const AB_OLLAMA='http://localhost:11434';
 const AB_MODELL='qwen2.5:7b';
@@ -35648,7 +35648,11 @@ function _abDomain(adr){const m=String(adr||'').match(/@([\w.\-]+)$/);return m?m
    Domain-Regel las @t-online als Privatperson, obwohl „GmbH" danebensteht. */
 function _abAdr(s){const m=String(s||'').match(/[\w.\-+]+@[\w.\-]+\.[a-z]{2,}/i);return m?m[0]:'';}
 function _abName(s){
-  const n=String(s||'').replace(/<[^>]*>/g,'').replace(/[\w.\-+]+@[\w.\-]+\.[a-z]{2,}/gi,'').replace(/["'<>]/g,'').trim().replace(/[,;]$/,'');
+  /* b963: Outlook schreibt in den Weiterleitungskopf „Name [mailto:adresse]". Bis b962 blieb
+     davon „Name [mailto:" im Namen stehen und stand so in der Ansprechpartner-Tabelle. */
+  const n=String(s||'').replace(/\[\s*mailto\s*:[^\]]*\]?/gi,'').replace(/<[^>]*>/g,'')
+    .replace(/[\w.\-+]+@[\w.\-]+\.[a-z]{2,}/gi,'').replace(/["'<>\[\]]/g,'')
+    .replace(/\s{2,}/g,' ').trim().replace(/[,;:]+$/,'').trim();
   return n||_abAdr(s).split('@')[0].replace(/[._]/g,' ');
 }
 /* `hv` = die Hausverwaltung, die auf der Karte steht (task.hausverwaltung, b952).
@@ -36306,6 +36310,42 @@ function _abMeldung(schritte){
   return kurz.length>240?(kurz.substring(0,238).replace(/\s+\S*$/,'')+'…'):kurz;
 }
 
+/* b963: Personen, die in der Mail GENANNT werden, aber keine Telefonnummer haben.
+   ⛔ Gemessen am 08.09.2026 über alle 28 Karten mit Text: in der Tabelle standen 38 Personen,
+   während 11 Schreiber und 4 im Text genannte Mieter oder Eigentümer fehlten. Bis b962 kam nur
+   in die Tabelle, wer eine Rufnummer im Text hatte – der Satz „die Mieter … in der Wohnung vom
+   … Weg 15 haben das Problem" lieferte niemanden. Frank: „dass ich oben alle Ansprechpartner
+   sehe, alle die in der E-Mail drin stehen".
+   Erkannt wird ein Rollenwort mit folgenden Namen, auch mehrere: „… und …", „…/…", „…, …". */
+const AB_GEN_ROLLE=/(?:Mieter(?:in|s|n|innen)?|Untermieter(?:in)?|Eigent(?:ü|ue)mer(?:in|s|n)?|Vermieter(?:in)?|Hausmeister(?:in)?|Hausw(?:a|ä)rt(?:in)?|Bewohner(?:in)?|Ansprechpartner(?:in)?|Melder(?:in)?|Nachbar(?:in|n)?)/;
+const AB_GEN_ANREDE='(?:Herrn?|Frau|Fam(?:ilie|\\.))';
+const AB_GEN_WORT='[A-ZÄÖÜ][a-zäöüß]{2,}(?:-[A-ZÄÖÜ][a-zäöüß]+)?';
+/* Ohne Anrede ist ein grossgeschriebenes Wort hinter dem Rollenwort oft KEIN Name
+   („Mieter Wohnung 3", „Eigentuemer Erdgeschoss"). Diese Woerter zaehlen nie. */
+const AB_GEN_KEINNAME=/^(?:Wohnung(?:en)?|Haus|H(?:ä|ae)user|Objekt|Geb(?:ä|ae)ude|Nummer|Nr|Tel|Telefon|Handy|Mobil|Kontakt|Name|Info|Adresse|Anschrift|Etage|Stock|Stockwerk|Erdgeschoss|Obergeschoss|Dachgeschoss|Keller|Souterrain|Partei(?:en)?|Familie|Herr|Frau|Person(?:en)?|Seite|Links|Rechts|Mitte|Vorne|Hinten|Oben|Unten|Und|Oder|Der|Die|Das|Den|Dem|Im|In|Am|Vom|Zum|Bei|Mit|Ist|Sind|Hat|Haben|Wird|Werden|Vor|Ort)$/i;
+function _abGenannte(text){
+  const raus=[];
+  /* Das Komma gehört dazu: „mit dem Mieter, Herr … einen Termin" kam sonst nicht an. */
+  const re=new RegExp('(' + AB_GEN_ROLLE.source + ')\\s*[:,]?\\s+((?:' + AB_GEN_ANREDE + '\\s+)?' + AB_GEN_WORT +
+    '(?:\\s*(?:/|und|&|,)\\s*(?:' + AB_GEN_ANREDE + '\\s+)?' + AB_GEN_WORT + '){0,3})','g');
+  let m;
+  while((m=re.exec(text))){
+    const rolle=/mieter/i.test(m[1])&&!/vermieter/i.test(m[1])?'Mieter'
+      :/eigent|vermieter/i.test(m[1])?'Eigentümer'
+      :/hausmeister|hausw/i.test(m[1])?'Hausmeister':'';
+    String(m[2]).split(/\s*(?:\/|\bund\b|&|,)\s*/).forEach(t=>{
+      const teil=t.trim();
+      if(!teil)return;
+      const mitAnrede=new RegExp('^('+AB_GEN_ANREDE+')\\s+('+AB_GEN_WORT+')$').exec(teil);
+      let name='';
+      if(mitAnrede)name=mitAnrede[1].replace(/^Herrn$/,'Herr')+' '+mitAnrede[2];
+      else if(new RegExp('^'+AB_GEN_WORT+'$').test(teil)&&!AB_GEN_KEINNAME.test(teil))name=teil;
+      if(name)raus.push({name:name,rolle:rolle,genannt:true});
+    });
+  }
+  return raus;
+}
+
 function _abEsc(s){const d=document.createElement('div');d.textContent=String(s==null?'':s);return d.innerHTML;}
 
 async function _abBauen(task,vonHand){
@@ -36380,11 +36420,34 @@ async function _abBauen(task,vonHand){
         '\n'+kurz.substring(0,2500)+'\n\n';
     });
   });
+  /* b963: Wer hat in diesem Vorgang selbst geschrieben? Jeder von ihnen gehört in die Tabelle –
+     bis b962 stand dort nur der Auftraggeber, und 11 Schreiber fehlten (gemessen). Automaten
+     ohne Rückantwort bleiben draußen, unsere eigenen Leute ohnehin. */
+  const AB_AUTOMAT=/^(?:no-?reply|noreply|donotreply|do-?not-?reply|mailer-daemon|postmaster|newsletter|info@|service@)/i;
+  const schreiber=[];
+  schritte.forEach(s=>{
+    if(s.unser)return;
+    const name=String(s.wer||'').trim();
+    if(name.length<3||AB_AUTOMAT.test(name))return;
+    if(_abIstEigenerName(name,eigeneNamen))return;
+    schreiber.push({name:name,rolle:s.rolle||'',woher:s.wann||'',schrieb:true});
+  });
+  /* Und wer wird im Text genannt, ohne selbst zu schreiben und ohne Rufnummer? */
+  const genannte=[];
+  schritte.forEach(s=>{
+    _abGenannte(s.text).forEach(p=>{
+      if(_abIstEigenerName(p.name,eigeneNamen))return;
+      genannte.push({name:p.name,rolle:p.rolle,woher:s.wann||''});
+    });
+  });
   const sorte=_abSorte(mails,ganzerText.length,hv);
   const ag=_abAuftraggeber(mails,hv);
   const daten={bauart:AB_BAUART,hv:hv,stand:new Date().toISOString(),anzahl:mails.length,
     neueste:mails.length?String(mails[mails.length-1].date||''):'',
     sorte:sorte,schritte:schritte,
+    /* b963: drei Quellen für die Tabelle – Rufnummern im Text, wer geschrieben hat,
+       wer genannt wird. Zusammengeführt wird erst in _abAllePersonen. */
+    schreiber:schreiber,genannte:genannte,
     kontakte:kontakteMuster.filter(p=>!_abIstEigenerName(p.name,eigeneNamen)),
     absender:ag?(ag.mail.absName||ag.mail.adresse):'',
     absAdr:ag?ag.mail.adresse:'',
@@ -36415,48 +36478,79 @@ async function _abBauen(task,vonHand){
    ⛔ Beim Prüfen an echten Karten aufgefallen: vorher galt „nimm die Muster-Treffer
    NUR, wenn sonst nichts da ist" – fand eine Quelle eine Person, fielen alle anderen
    weg. In echten Vorgaengen stehen Mieter UND Eigentuemer in den Mails, angezeigt wurde
-   eine. Jetzt werden beide Listen vereinigt, Doppelte über die Telefonnummer raus. */
+   eine. Jetzt werden beide Listen vereinigt, Doppelte über die Telefonnummer raus.
+   b963: dazu kommen ALLE, die geschrieben haben, und alle, die im Text genannt werden.
+   Die Reihenfolge beantwortet Franks Frage „wen rufe ich an?": Auftraggeber, dann die
+   Leute vor Ort, dann die übrigen Schreiber, zuletzt Nummern ohne Namen. */
 function _abAllePersonen(d){
-  const raus=[],gesehen=new Set();
-  const rein=p=>{
+  /* ⛔ Beide Helfer stehen INNERHALB der Funktion. Die Prüfsuite von b957 schneidet
+     _abAllePersonen einzeln aus und führt sie aus – draußen definierte Helfer fehlten dort
+     und die Suite stürzte ab („_abSchluessel is not defined"). Sie hat den Fehler beim
+     ersten Lauf gefangen; wer neue Helfer braucht, legt sie hier hinein. */
+  const _abSchluessel=name=>String(name||'').toLowerCase().replace(/^(herrn?|frau|familie|fam\.)\s+/,'').replace(/[^a-zäöüß0-9]+/g,' ').trim();
+  const _abVorOrt=rolle=>/mieter|eigent|hausmeister|bewohner/i.test(String(rolle||''));
+  const raus=[];
+  /* Zwei Eintraege sind dieselbe Person, wenn die Rufnummer gleich ist oder der Name
+     ineinander steckt (bloßer Nachname und derselbe Name mit Anrede davor). Der längere
+     Name gewinnt. ⛔ Hier stand zuerst ein Beispiel mit Anrede – die Wächter test_b646 und
+     test_b658 lehnen das ab, auch bei erfundenen Namen, weil sie die FORM prüfen. */
+  const finde=(nr,schl)=>{
+    if(nr){const t=raus.find(x=>x.nr===nr);if(t)return t;}
+    if(!schl)return null;
+    return raus.find(x=>x.schl&&(x.schl===schl||
+      (x.schl.length>3&&schl.length>3&&(x.schl.indexOf(schl)>=0||schl.indexOf(x.schl)>=0))))||null;
+  };
+  const rein=(p,rang)=>{
     if(!p)return;
     const nr=String(p.telefon||p.nr||'').replace(/\D/g,'');
     const name=String(p.name||'').trim();
     if(!nr&&!name)return;
-    const schluessel=nr||('n:'+name.toLowerCase());
-    const alt=gesehen.get?null:null;
-    if(gesehen.has(schluessel)){
-      /* Doppelt: den Eintrag mit mehr Angaben behalten. */
-      const vorh=raus.find(x=>x._k===schluessel);
-      if(vorh){
-        if(!vorh.name&&name)vorh.name=name;
-        if(!vorh.rolle&&p.rolle)vorh.rolle=p.rolle;
-        if(!vorh.woher&&p.woher)vorh.woher=p.woher;
-      }
+    const schl=_abSchluessel(name);
+    const vorh=finde(nr,schl);
+    if(vorh){
+      if(name.length>String(vorh.name).length)vorh.name=name;
+      if(!vorh.telefon&&(p.telefon||p.nr)){vorh.telefon=(p.telefon||p.nr);vorh.nr=nr;}
+      if(!vorh.rolle&&p.rolle)vorh.rolle=p.rolle;
+      if(!vorh.woher&&p.woher)vorh.woher=p.woher;
+      if(p.schrieb)vorh.schrieb=true;
+      if(vorh.schl.length<schl.length)vorh.schl=schl;
+      if(rang<vorh.rang)vorh.rang=rang;
       return;
     }
-    gesehen.add(schluessel);
-    raus.push({_k:schluessel,name:name,telefon:(p.telefon||p.nr||''),rolle:p.rolle||'',woher:p.woher||''});
+    raus.push({_k:nr||('n:'+schl),schl:schl,nr:nr,name:name,telefon:(p.telefon||p.nr||''),
+      rolle:p.rolle||'',woher:p.woher||'',schrieb:!!p.schrieb,rang:rang});
   };
   const ki=d.ki||{};
-  if(Array.isArray(ki.vor_ort))ki.vor_ort.forEach(rein);
-  else if(ki.vor_ort)rein(ki.vor_ort);
-  (d.kontakte||[]).forEach(rein);
+  /* Zuerst die mit Rufnummer – sie sind die belastbarsten. */
+  if(Array.isArray(ki.vor_ort))ki.vor_ort.forEach(p=>rein(p,1));
+  else if(ki.vor_ort)rein(ki.vor_ort,1);
+  (d.kontakte||[]).forEach(p=>rein(p,_abVorOrt(p.rolle)?1:2));
+  (d.genannte||[]).forEach(p=>rein(p,1));
+  (d.schreiber||[]).forEach(p=>rein(p,_abVorOrt(p.rolle)?1:2));
   /* Der Auftraggeber steht immer oben in der Tabelle. */
   const auf=(ki.auftraggeber)||{};
   const agName=[auf.name,auf.firma].filter(Boolean).join(' · ')||d.absender||'';
   const agTel=auf.telefon||d.absTel||'';
   if(agName||agTel){
-    const nr=String(agTel).replace(/\D/g,'');
-    const idx=raus.findIndex(x=>nr&&x._k===nr);
-    if(idx>=0)raus.splice(idx,1);
     /* 'Firma' sagt nichts. Steht die Rolle nicht fest, ist 'Auftraggeber' die
        ehrlichere Auskunft - er hat den Vorgang schliesslich ausgeloest. */
     let agRolle=d.rolle||auf.rolle||'';
     if(!agRolle||agRolle==='Firma')agRolle='Auftraggeber';
-    raus.unshift({_k:'ag',name:agName,telefon:agTel,rolle:agRolle,woher:d.absWann||''});
+    const nr=String(agTel).replace(/\D/g,''),schl=_abSchluessel(agName);
+    const vorh=finde(nr,schl);
+    if(vorh){
+      if(agName.length>String(vorh.name).length)vorh.name=agName;
+      if(!vorh.telefon&&agTel){vorh.telefon=agTel;vorh.nr=nr;}
+      vorh.rolle=agRolle;vorh.rang=0;
+      if(!vorh.woher&&d.absWann)vorh.woher=d.absWann;
+    }else{
+      raus.push({_k:'ag',schl:schl,nr:nr,name:agName,telefon:agTel,rolle:agRolle,
+        woher:d.absWann||'',schrieb:true,rang:0});
+    }
   }
-  return raus;
+  /* Namenlose Nummern ganz nach unten – sie sagen am wenigsten. */
+  raus.forEach(p=>{if(!p.name)p.rang=3;});
+  return raus.map((p,i)=>{p._i=i;return p;}).sort((a,b)=>(a.rang-b.rang)||(a._i-b._i));
 }
 
 function _abFarbe(rolle){
@@ -36541,7 +36635,7 @@ function _abRendern(d){
     }else{
       let h='<table style="width:100%;border-collapse:collapse;font-size:14px;">'+
         '<thead><tr>'+
-        ['Name','Rolle','Telefon','woher'].map((t,i)=>'<th style="text-align:left;padding:7px 10px;background:var(--bg3);color:var(--text);font-size:12px;font-weight:700;letter-spacing:.4px;border-bottom:1px solid var(--border);'+(i===3?'width:88px;':'')+'">'+t+'</th>').join('')+
+        ['Name','Rolle','Telefon','woher'].map((t,i)=>'<th style="text-align:left;padding:7px 10px;background:var(--bg3);color:var(--text);font-size:12px;font-weight:700;letter-spacing:.4px;border-bottom:1px solid var(--border);'+(i===3?'width:104px;':'')+'">'+t+'</th>').join('')+
         '</tr></thead><tbody>';
       personen.forEach(p=>{
         const f=_abFarbe(p.rolle);
@@ -36549,7 +36643,9 @@ function _abRendern(d){
           '<td style="padding:9px 10px;border-bottom:1px solid var(--border);font-weight:600;color:var(--text);">'+(_abEsc(p.name)||'<span style="color:var(--text2);font-style:italic;font-weight:400;">ohne Namen</span>')+'</td>'+
           '<td style="padding:7px 9px;border-bottom:1px solid var(--border);">'+(p.rolle?'<span style="background:'+f[0]+';color:'+f[1]+';font-size:11px;font-weight:700;letter-spacing:.4px;padding:4px 8px;border-radius:4px;white-space:nowrap;">'+_abEsc(String(p.rolle).toUpperCase())+'</span>':'')+'</td>'+
           '<td style="padding:7px 9px;border-bottom:1px solid var(--border);white-space:nowrap;">'+(p.telefon?'<a href="tel:'+_abEsc(String(p.telefon).replace(/[^\d+]/g,''))+'" style="color:var(--accent,#378ADD);text-decoration:none;font-weight:600;">'+_abEsc(p.telefon)+'</a>':'<span style="color:var(--text2);">—</span>')+'</td>'+
-          '<td style="padding:9px 10px;border-bottom:1px solid var(--border);color:var(--text2);font-size:13px;white-space:nowrap;">'+_abEsc(p.woher||'')+'</td>'+
+          /* b963: Das Briefsymbol sagt, woher die Person kommt – hat sie selbst geschrieben,
+             oder wird sie in einer Mail nur genannt? */
+          '<td style="padding:9px 10px;border-bottom:1px solid var(--border);color:var(--text2);font-size:13px;white-space:nowrap;" title="'+(p.schrieb?'hat selbst geschrieben':'wird in einer Nachricht genannt')+'">'+(p.schrieb?'✉ ':'')+_abEsc(p.woher||'')+'</td>'+
         '</tr>';
       });
       tab.innerHTML=h+'</tbody></table>';
@@ -36568,6 +36664,7 @@ function _abRendern(d){
     if(personen.length){
       e+=personen.slice(0,4).map(p=>{const f=_abFarbe(p.rolle);
         return '<div style="display:flex;gap:7px;align-items:baseline;flex-wrap:wrap;margin-top:4px;">'+
+          (p.schrieb?'<span style="color:var(--text2);" title="hat selbst geschrieben">✉</span>':'')+
           '<b>'+(_abEsc(p.name)||'<span style="font-weight:400;color:var(--text2);">ohne Namen</span>')+'</b>'+
           (p.rolle?'<span style="background:'+f[0]+';color:'+f[1]+';font-size:10px;font-weight:700;letter-spacing:.4px;padding:3px 6px;border-radius:4px;">'+_abEsc(String(p.rolle).toUpperCase())+'</span>':'')+
           (p.telefon?'<a href="tel:'+_abEsc(String(p.telefon).replace(/[^\d+]/g,''))+'" style="color:var(--accent,#378ADD);text-decoration:none;font-weight:600;">'+_abEsc(p.telefon)+'</a>':'')+
@@ -36629,6 +36726,11 @@ async function _abStart(task,vonHand){
   if(alt){_abRendern(alt);}                       // alten Stand zeigen, während der neue entsteht
   const hdr=document.getElementById('abHdrInfo');
   if(hdr){hdr.textContent=vonHand?'wird neu gelesen …':(alt?(alt.ohneText?'wird erneut gelesen …':('⟳ '+Math.max(0,mails.length-alt.anzahl)+' neue – wird gelesen …')):'wird gelesen …');}
+  /* b963: Auch im E-Mail-Eingangsfenster sagen, dass gerade gelesen wird. Bis b962 blieb der
+     Kasten dort still unsichtbar, solange PAM den Mailtext bei Outlook holte – Frank sah beim
+     ersten Öffnen einer Karte nichts und fragte, warum der Kasten „nicht überall" sei. */
+  const emBoxL=document.getElementById('emAufEinenBlick'),emInhL=document.getElementById('emAbInhalt');
+  if(emBoxL&&emInhL&&!alt){emInhL.innerHTML='<div style="color:var(--text2);">wird gelesen …</div>';emBoxL.style.display='';}
   const standEl=document.getElementById('abPopStand');if(standEl)standEl.textContent='wird gelesen …';
   sect.style.display='';
   const merkId=task.id;
