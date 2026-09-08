@@ -9995,7 +9995,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-08 · #947'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-08-b947) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-08 · #948'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-08-b948) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -14845,6 +14845,19 @@ window.addEventListener('beforeunload',(e)=>{
     if(!taskId) return; // Neuer unsaved Task → wird beim Schließen gespeichert
     clearTimeout(autoSaveTimer);
     saveTaskData();  // RAM → boards[]
+    // b948: ⛔ _taskModalDirty bleibt bewusst STEHEN – closeModal() und deleteTask() haengen
+    // daran, ob ueberhaupt gespeichert wird; ein Zuruecksetzen hier koennte Arbeit kosten.
+    // Stattdessen wird der INHALT verglichen: _letzterStandHash ist der Stand, der
+    // nachweislich in Drive liegt (gesetzt nach jedem bestaetigten Save). Ist er unveraendert,
+    // gibt es nichts hochzuladen. Bis b947 lief dieser Takt weiter, solange das Fenster offen
+    // war – jede Minute die ganze Datei nach Drive, auch ohne eine einzige Aenderung. Das war
+    // der Dauerschreiber, den andere Rechner als „fremde Aenderung" gemeldet bekamen.
+    // ⛔ Im Zweifel wird GESPEICHERT, nie uebersprungen: ohne Vergleichswert, bei laufendem
+    //    oder wartendem Save und bei jedem Fehler faellt es auf den alten Weg zurueck.
+    try{
+      if(_letzterStandHash && !_savePending && !gdriveSaving
+         && _pamStandHash(JSON.stringify(buildSaveObject(),null,2))===_letzterStandHash) return;
+    }catch(e){console.warn("[b948] Stand-Vergleich:",e);}
     scheduleSave();  // boards[] → Drive
   }, 60000); // alle 60 Sekunden
 })();
@@ -15335,7 +15348,16 @@ async function pollWorkboardFile(){
     }
     const meta=await mr.json();
     if(!workboardLastModified){workboardLastModified=meta.modifiedTime;return;}
-    if(meta.modifiedTime===workboardLastModified)return;
+    if(meta.modifiedTime===workboardLastModified){
+      // b948: Deckungsgleich mit Drive – ein noch stehender Hinweis ist ab hier gegenstandslos.
+      // Bis b947 stieg der Poll hier aus, OHNE den Merker zu raeumen; der Waechter
+      // (_pamHandyHinweisPruefen) laesst das Band aber genau so lange stehen, wie der Merker
+      // steht. Ein einziger Fehlalarm blieb dadurch bis zum Schliessen der Karte kleben.
+      // ⛔ Sicher, weil modifiedTime sich nicht von selbst zurueckdreht: Gleichstand heisst,
+      //    der fremde Stand wurde geladen oder im Pre-Save-Merge zusammengefuehrt.
+      if(_pamRemotePollPending){_pamRemotePollPending=false;_pamHandyHinweis(false);}
+      return;
+    }
     // Fix #366: Während User tippt oder ein Modal offen ist, nicht neu laden –
     // aber Änderung MERKEN und Hinweis zeigen (vorher wurden Handy-Änderungen
     // stillschweigend ignoriert, solange ein Modal offen war).
@@ -15352,6 +15374,16 @@ async function pollWorkboardFile(){
         &&(Date.now()-_pamLetzterTastendruck)<_PAM_TIPP_FENSTER;
       const _modalOpen=!!document.querySelector('.modal-overlay.open');
       if(_typing||_modalOpen){
+        // b948: Zuerst die Frage, die bis hierher NIE gestellt wurde: ist der Unterschied
+        // ueberhaupt fremd? Der Check auf den eigenen Speicherlauf (gdriveSaving/_savePending)
+        // stand bis b947 ERST HINTER diesem Zweig – bei offenem Fenster wurde er also nie
+        // erreicht. Faellt ein Poll in den eigenen Upload, ist die Drive-Zeit schon neu,
+        // workboardLastModified aber noch alt: das Fenster meldete seinen EIGENEN Speicher-
+        // vorgang als fremdes Geraet. gdriveSaving wird erst im finally von gdriveSaveData
+        // zurueckgesetzt, deckt das Zeitfenster also lueckenlos ab.
+        // ⛔ Nur AUSSTEIGEN, nicht speichern: der b902-Zweig weiter unten (bei geschlossenem
+        //    Fenster speichern statt blind laden) bleibt unberuehrt. Der naechste Poll misst neu.
+        if(gdriveSaving||_savePending)return;
         if(!_pamRemotePollPending){
           _pamRemotePollPending=true;
           try{const ind=document.getElementById('fileMsg');if(ind)ind.textContent='↻ Änderungen von einem anderen Gerät liegen vor…';}catch(e){} // b931: siehe _pamHandyHinweisText – hier ist der Schreiber ebenso wenig bekannt
@@ -16129,6 +16161,19 @@ async function gdriveSaveData() {
       try{
         const meta=await r.json();
         if(meta&&meta.modifiedTime)workboardLastModified=meta.modifiedTime;
+        else{
+          // b948 (Fangnetz, NICHT gemessen – abgesichert, weil der Schaden gross waere):
+          // Der Zeitstempel kommt hier aus `fields=modifiedTime` der Resumable-INIT-Anfrage;
+          // zurueckgegeben wird aber die Antwort des zweiten Schrittes (PUT an die Session-URL).
+          // Traegt die das Feld nicht, bliebe workboardLastModified auf dem ALTEN Wert stehen –
+          // und dann meldet der Poll ab sofort JEDEN eigenen Speicherlauf als fremdes Geraet,
+          // dauerhaft. Einmal gezielt nachholen kostet einen Aufruf und nur im Ausfall.
+          try{
+            const _mtR=await fetch("https://www.googleapis.com/drive/v3/files/"+gdriveFileId+"?fields=modifiedTime&_="+Date.now(),
+              {headers:{Authorization:"Bearer "+gdriveToken},cache:"no-store"});
+            if(_mtR.ok){const _mt=await _mtR.json();if(_mt&&_mt.modifiedTime)workboardLastModified=_mt.modifiedTime;}
+          }catch(_e){console.warn("[b948] Zeitstempel nachholen:",_e);}
+        }
         const newETag=r.headers.get('ETag')||r.headers.get('etag');
         if(newETag)gdriveETag=newETag;
       }catch(e){console.warn('[PAM]',e);}
