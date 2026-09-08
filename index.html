@@ -9930,6 +9930,8 @@ function _pamGuestSubmit(){
 <!-- GLOBALE SUCHE OVERLAY -->
 <div id="pamGSOverlay" style="display:none;position:fixed;inset:0;z-index:10500;pointer-events:none;">
   <div id="pamGSBox" style="pointer-events:auto;position:absolute;top:80px;left:50%;transform:translateX(-50%);background:var(--bg);border:1px solid var(--border);border-radius:12px;width:640px;min-width:340px;min-height:200px;max-width:98vw;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,.4);resize:both;overflow:auto;">
+    <div id="pamGSGriffL" onpointerdown="_pamGSZiehStart(event,'l')" ondblclick="_pamGSGroesseReset()" title="Breite ziehen · Doppelklick = Standardbreite" style="position:absolute;left:0;top:0;bottom:0;width:9px;cursor:ew-resize;z-index:4;"></div>
+    <div id="pamGSGriffR" onpointerdown="_pamGSZiehStart(event,'r')" ondblclick="_pamGSGroesseReset()" title="Breite ziehen · Doppelklick = Standardbreite" style="position:absolute;right:0;top:0;bottom:18px;width:9px;cursor:ew-resize;z-index:4;"></div>
     <div id="pamGSHeader" style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:6px;flex-shrink:0;cursor:grab;user-select:none;">
       <div style="display:flex;align-items:center;gap:8px;">
         <span style="font-size:13px;font-weight:700;color:var(--text);flex:1;">🔍 Globale Suche – alle Boards</span>
@@ -10002,7 +10004,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-08 · #950'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-08-b950) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-08 · #951'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-08-b951) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -50437,6 +50439,8 @@ function _pamOpenGlobalSearch(){
   if(!ov) return;
   ov.style.display = 'block';
   _pamGSInitDrag();
+  _pamGSGroesseAnwenden();   // b951: zuletzt gezogene Breite/Höhe wiederherstellen
+  _pamGSObserverAnbauen();   // b951: auch die per Ecke gezogene Größe mitbekommen
   _pamGSPopulateBoards();
   _pamGSPopulateStatuses();
   _pamGSPopulateTermine();
@@ -50572,6 +50576,128 @@ function _pamGSInitDrag(){
     document.addEventListener('mousemove',onMove);
     document.addEventListener('mouseup',onUp);
   });
+}
+
+/* ── b951: Globale Suche – an den Seiten breiter ziehen, Maß wird gemerkt ────
+   Frank am 08.09.2026: „Wir haben doch das umgestellt, dass sich das Fenster nicht
+   nur an der unteren Ecke auseinanderziehen kann, sondern auch an der Seite, und
+   dass es die Breite zuletzt speichert. Oder haben wir das noch nicht?"
+   Gemessen: das Suchfenster hatte BEIDES nicht. Es gab nur `resize:both` – den
+   eingebauten Anfasser des Browsers in der unteren rechten Ecke – und keinen
+   einzigen Speicherbefehl. Beim Schließen wurde nur die LAGE zurückgesetzt, nicht
+   die Größe; dadurch WIRKTE die Breite gemerkt, bis die Seite neu geladen wurde.
+   Vorbild: Zettel-Breite (b905) für den Seitengriff, Adressbuch (b872) fürs Merken.
+
+   ⛔ Gemerkt wird `box.style.width`, NICHT die gemessene Breite. Wird das
+      Browserfenster kleiner, deckelt `max-width:98vw` nur die ANZEIGE – der Wert in
+      `style.width` bleibt stehen. Würde hier die gemessene Breite gemerkt, über-
+      schriebe ein Blick am Laptop still das am großen Bildschirm eingestellte Maß.
+   ⛔ Deshalb wird beim Laden auch NICHT auf die Bildschirmgröße gekappt: das erledigen
+      `max-width:98vw` und `max-height:92vh` am Kasten von selbst. Die Grenzen hier
+      fangen nur kaputte Speicherwerte ab.
+   ⛔ Ziehen IMMER mit `setPointerCapture` (b823) – sonst reißt der Zeiger ab, sobald
+      er beim schnellen Ziehen den 9px schmalen Griff verlässt. */
+var _PAM_GS_KEY='pam_gs_groesse_v1';
+var _PAM_GS_STD_B=640;                      // gleich dem width: im style des Kastens
+var _PAM_GS_MIN_B=340, _PAM_GS_MAX_B=4000;  // min-width:340px steht am Kasten
+var _PAM_GS_MIN_H=200, _PAM_GS_MAX_H=3000;  // min-height:200px steht am Kasten
+var _pamGSResetBis=0;
+
+function _pamGSGroesseLaden(){
+  try{
+    const o=JSON.parse(localStorage.getItem(_PAM_GS_KEY)||'null');
+    if(!o||!(o.b>0))return null;
+    return o;
+  }catch(e){ return null; }
+}
+function _pamGSGroesseMerken(){
+  if(Date.now()<_pamGSResetBis)return;      // gerade auf Standard gesetzt – nicht gleich wieder merken
+  const box=document.getElementById('pamGSBox');
+  if(!box)return;
+  const b=parseInt(box.style.width,10);
+  if(!(b>=_PAM_GS_MIN_B))return;            // nichts Sinnvolles gesetzt -> nichts merken
+  const h=parseInt(box.style.height,10);
+  const o={b:b};
+  if(h>=_PAM_GS_MIN_H)o.h=h;
+  try{ localStorage.setItem(_PAM_GS_KEY,JSON.stringify(o)); }catch(e){}
+}
+function _pamGSGroesseAnwenden(){
+  const box=document.getElementById('pamGSBox');
+  if(!box)return;
+  const g=_pamGSGroesseLaden();
+  if(!g)return;                             // nie gezogen -> bleibt alles wie bisher
+  box.style.width=Math.min(Math.max(g.b,_PAM_GS_MIN_B),_PAM_GS_MAX_B)+'px';
+  if(g.h>0) box.style.height=Math.min(Math.max(g.h,_PAM_GS_MIN_H),_PAM_GS_MAX_H)+'px';
+}
+function _pamGSGroesseReset(){
+  _pamGSResetBis=Date.now()+700;
+  const box=document.getElementById('pamGSBox');
+  if(box){
+    box.style.width=_PAM_GS_STD_B+'px';
+    box.style.height='';
+    box.style.left='50%'; box.style.top='80px'; box.style.transform='translateX(-50%)';
+  }
+  try{ localStorage.removeItem(_PAM_GS_KEY); }catch(e){}
+}
+var _pamGSZieht=false;
+function _pamGSZiehStart(ev,seite){
+  const box=document.getElementById('pamGSBox');
+  const griff=ev&&ev.currentTarget;
+  if(!box||!griff)return;
+  if(ev.preventDefault)ev.preventDefault();
+  /* Aus der Mittellage (left:50% + transform:translateX(-50%)) auf feste Pixel
+     umstellen – sonst springt der Kasten beim ersten Ziehen um die halbe Breite.
+     Gleicher Schritt wie beim Verschieben am Kopf (_pamGSInitDrag). */
+  const r=box.getBoundingClientRect();
+  box.style.left=r.left+'px'; box.style.top=r.top+'px'; box.style.transform='none';
+  /* ⛔ Gerechnet wird mit der INNEN-Breite (getComputedStyle), nicht mit der gemessenen.
+     Der Kasten hat 1px Rahmen links und rechts: getBoundingClientRect meldet 642, wo
+     style.width 640 sagt. Nimmt man die gemessene Breite als Startwert, wächst das
+     Fenster bei JEDEM Ziehen still um diese 2px. Gemessen in der Browserprobe b951 -
+     die Node-Prüfung allein hätte das nie gesehen, sie kennt kein Layout. */
+  const cs=(typeof getComputedStyle==='function')?getComputedStyle(box):null;
+  const startB=(cs&&parseFloat(cs.width))||r.width;
+  const startX=ev.clientX, startL=r.left;
+  _pamGSZieht=true;
+  try{griff.setPointerCapture(ev.pointerId);}catch(e){}
+  const move=function(e){
+    const dx=e.clientX-startX;
+    let b=(seite==='l')?(startB-dx):(startB+dx);
+    b=Math.max(_PAM_GS_MIN_B,Math.min(_PAM_GS_MAX_B,Math.round(b)));
+    box.style.width=b+'px';
+    /* Links wächst der Kasten nach LINKS: die linke Kante wandert um genau das mit,
+       was an Breite dazukommt. Ohne diese Zeile bliebe links stehen und es sähe aus
+       wie Ziehen an der rechten Seite. */
+    if(seite==='l') box.style.left=Math.round(startL+(startB-b))+'px';
+  };
+  const up=function(){
+    griff.removeEventListener('pointermove',move);
+    griff.removeEventListener('pointerup',up);
+    griff.removeEventListener('pointercancel',up);
+    try{griff.releasePointerCapture(ev.pointerId);}catch(e){}
+    _pamGSZieht=false;
+    _pamGSGroesseMerken();
+    try{ _pamFixLageKlammern(box); }catch(e){}  // über den Rand gezogen? zurückholen (b891/b904)
+  };
+  griff.addEventListener('pointermove',move);
+  griff.addEventListener('pointerup',up);
+  griff.addEventListener('pointercancel',up);
+}
+/* Der eingebaute Ecken-Anfasser (resize:both) löst KEIN Ereignis aus – er setzt
+   style.width/height still. Ein ResizeObserver ist der einzige Weg, ihn mitzubekommen;
+   damit merkt sich das Fenster auch die per Ecke gezogene Größe. 400ms Ruhe, damit
+   nicht bei jedem Pixel geschrieben wird. */
+var _pamGSMerkT=null, _pamGSObs=null;
+function _pamGSObserverAnbauen(){
+  const box=document.getElementById('pamGSBox');
+  if(!box||_pamGSObs||typeof ResizeObserver==='undefined')return;
+  _pamGSObs=new ResizeObserver(function(){
+    const ov=document.getElementById('pamGSOverlay');
+    if(!ov||ov.style.display==='none')return; // Fenster zu -> nichts merken
+    clearTimeout(_pamGSMerkT);
+    _pamGSMerkT=setTimeout(_pamGSGroesseMerken,400);
+  });
+  try{_pamGSObs.observe(box);}catch(e){}
 }
 
 function _pamGSPopulateBoards(){
