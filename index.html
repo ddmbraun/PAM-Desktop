@@ -10072,7 +10072,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-08 · #961'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-08-b961) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-08 · #962'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-08-b962) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -35616,7 +35616,7 @@ async function _pamEmailAntwortenMitVerlauf(){
    sonst zeigt PAM eine alte Fassung weiter und die neuen Spalten bleiben leer.
    Genau das war im Betrieb zu sehen: "woher" war ueberall leer, weil die
    gespeicherte Fassung noch von der Bauart davor stammte. */
-const AB_BAUART=4; /* b961: Rolle je Abschnitt, neue Meldungs-Rangfolge, neue Adressmuster */
+const AB_BAUART=5; /* b962: Einträge vereint, Warnzeilen, Bezeichnung/Wert-Zeilen, ohneText */
 let _abLetzte=null;
 const AB_OLLAMA='http://localhost:11434';
 const AB_MODELL='qwen2.5:7b';
@@ -35702,7 +35702,17 @@ const AB_ABBRUCH=[
   /^\s*Sitz der Gesellschaft/i,
   /^\s*(Amtsgericht|Handelsregister|HRB|USt-?IdNr|Steuernummer|Gerichtsstand)\b/i,
   /^\s*(P\.?S\.?:? ?)?(Bitte )?[Dd]enken Sie an die Umwelt/i,
+];
+/* b962: Outlooks Warnzeilen („Sie erhalten nicht häufig E-Mails von …", „Erfahren Sie, warum das
+   wichtig ist") stehen OBEN in einer Mail, nicht unten beim Kleingedruckten. Bis b961 stand die
+   erste in AB_ABBRUCH – damit fiel bei jeder Mail eines neuen Absenders ALLES nach der Warnzeile
+   weg. An einer echten Karte: von einer weitergeleiteten Portal-Meldung (59 Zeilen mit Mieter,
+   Telefon, Objekt, Beschreibung) blieben 0 Zeichen. Jetzt werden diese Zeilen übersprungen. */
+const AB_UEBERSPRINGEN=[
   /^\s*Sie erhalten nicht h(ä|ae)ufig E-?Mails von/i,
+  /^\s*Erfahren Sie, warum (das|dies) wichtig ist/i,
+  /^\s*You don'?t often get e-?mail from/i,
+  /^\s*Learn why this is important/i,
 ];
 /* b961: Grußformeln allgemeiner. Vorher fehlten „Liebe Grüße", „Mit freundlichem Gruß",
    „Freundlich grüßt", „Vielen Dank und viele Grüße", „Gruß", „Kind regards" – dann blieben
@@ -35785,6 +35795,7 @@ function _abStufeSaeubern(zeilen){
   const raus=[];let gez=null;
   for(let i=0;i<zeilen.length;i++){
     const z=zeilen[i];
+    if(AB_UEBERSPRINGEN.some(re=>re.test(z)))continue;
     if(AB_ABBRUCH.some(re=>re.test(z)))break;
     if(AB_GRUSS.test(z)){const n=(zeilen[i+1]||'').trim();if(n&&n.length<45&&!/[.!?]/.test(n))gez=n;break;}
     if(AB_ANREDE.test(z))continue;
@@ -35860,6 +35871,10 @@ function _abKontakte(text,eigeneNr){
         if(letzte)name=(((letzte[2]||(/^(?:Herrn?|Frau)$/.test(letzte[1])?letzte[1]+' ':'')).replace(/^Herrn/,'Herr'))+letzte[3]).trim();
       }
     }
+    /* b962: Portal-Meldungen („Neue Anfrage … wurde Ihnen zugewiesen") sind Bezeichnung/Wert-Zeilen:
+       „Von" und darunter der Name, „Telefon" und darunter die Nummer. Steht kein Name direkt vor der
+       Nummer, zählt die Zeile „Von" / „Gemeldet von" / „Name" derselben Stufe. */
+    if(!name){const lab=text.match(/^[ \t]*(?:Von|Gemeldet von|Name|Melder(?:in)?|Absender(?:in)?|Kontakt(?:person)?|Ansprechpartner(?:in)?)[ \t]*(?::[ \t]*|\n\s*)([A-ZÄÖÜ][\wäöüß\-]+(?:\s+[A-ZÄÖÜ][\wäöüß\-]+)?)/m);if(lab)name=lab[1].trim();}
     const rolle=/(?<!ver)mieter/i.test(davor)?'Mieter':/Eigent/i.test(davor)?'Eigentümer':/Hausmeister/i.test(davor)?'Hausmeister':'';
     raus.push({name:name,nr:nr,rolle:rolle});
   }
@@ -35881,9 +35896,17 @@ async function _abMailsHolen(task,tiefLaden){
     bodyHtml:m.bodyHtml||m._cachedBodyHtml||m._resolvedBody||'',bodyText:m.bodyText||'',preview:m.preview||''});
   const thread=[...(task.gmailThreadMessages||[]).map(map),...(task.msThreadMessages||[]).map(map)];
   const eml=[...(task.emailOriginals||[])].map(map);
-  const gesehen=new Set(),liste=[];
+  /* b962: Dieselbe Mail liegt oft zweimal vor – als Outlook-Kopie (mit `id`, ohne Datei) und als
+     EML-Original (mit `fileId`), beide mit derselben Nachrichten-Kennung. Bis b961 gewann der erste
+     Eintrag und der zweite fiel weg – samt seiner Datei. Konnte Outlook den Text nicht liefern, blieb
+     die Kurzfassung leer, obwohl die EML-Datei da war (an einer echten Karte aufgefallen: „Auf einen
+     Blick" fehlte im E-Mail-Fenster). Jetzt werden die Einträge VEREINT: Datei, Outlook-Kennung,
+     Text und Vorschau ergänzen sich. */
+  const gesehen=new Map(),liste=[];
   [...thread,...eml].forEach(m=>{const k=m.messageId||(m.subject+'|'+(m.date||''));
-    if(gesehen.has(k))return;gesehen.add(k);liste.push(m);});
+    const schon=gesehen.get(k);
+    if(schon){['id','fileId','bodyHtml','bodyText','preview','absName','adresse','sender','direction'].forEach(f=>{if(!schon[f]&&m[f])schon[f]=m[f];});return;}
+    gesehen.set(k,m);liste.push(m);});
   liste.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
   if(!tiefLaden)return liste;
   for(const m of liste){
@@ -35900,6 +35923,9 @@ async function _abMailsHolen(task,tiefLaden){
         if(rb.ok){const db=await rb.json();m.bodyHtml=(db.body&&db.body.content)||'';}
       }catch(e){console.warn('[b955] Graph-Body:',e);}
     }
+    /* b962: Letzte Reserve – die Outlook-Vorschau (rund 120 Zeichen). Besser als gar nichts, zählt
+       aber nicht als gelesener Text (nurVorschau): beim nächsten Öffnen wird es wieder versucht. */
+    if(!m.bodyHtml&&!m.bodyText&&m.preview){const v=_abVorschauText(m.preview);if(v){m.bodyText=v;m.nurVorschau=true;}}
     if(m.bodyHtml&&typeof _fixMojibake==='function')m.bodyHtml=_fixMojibake(m.bodyHtml);
   }
   return liste;
@@ -36036,19 +36062,31 @@ function _abSorte(mails,verlaufLaenge,hv){
    Rechtsbelehrung. */
 function _abAgTelefon(m){
   try{
+    /* b962: Aus einer blossen Vorschau nie – dort steht keine Signatur, und die einzige Nummer
+       darin ist womöglich die des Mieters. Genau das war an einer echten Karte zu sehen: die
+       Verwaltung „hatte" die Handynummer der Mieterin, und die Mieterin fiel aus der Tabelle. */
+    if(m&&m.nurVorschau)return '';
     const roh=_abHtmlZuText((m&&(m.bodyHtml||m.bodyText))||'');
     if(!roh)return '';
     const oben=roh.split(/Der Inhalt dieser E-?Mail|Diese E-?Mail enth/i)[0];
     const eigen=_abEigeneNr();
     const passt=nr=>{const z=String(nr).replace(/\D/g,'');
       return z.length>=9&&z.length<=15&&!(eigen&&z.indexOf(eigen)===0);};
-    for(const z of oben.split('\n')){
-      if(!/^\s*(fon|tel|telefon|durchwahl)\b/i.test(z))continue;
+    const zeilen=oben.split('\n');
+    /* 1. Eine Zeile, die sich selbst als Telefon ausweist. */
+    for(const z of zeilen){
+      if(!/^\s*(fon|tel|telefon|durchwahl|mobil|handy)\b/i.test(z))continue;
       const t=z.match(AB_NR);
       if(t&&passt(t[0]))return t[0].trim();
     }
-    const alle=(oben.match(AB_NR)||[]).filter(passt);
-    return alle.length?alle[alle.length-1].trim():'';
+    /* 2. Sonst nur aus der SIGNATUR – also hinter der Grussformel. Nummern aus dem Text davor
+          gehoeren meist jemand anderem (Mieter, Hausmeister). */
+    let ab=-1;
+    for(let i=0;i<zeilen.length;i++){if(AB_GRUSS.test(zeilen[i])){ab=i;break;}}
+    if(ab<0)return '';
+    const sig=zeilen.slice(ab+1).join('\n');
+    const alle=(sig.match(AB_NR)||[]).filter(passt);
+    return alle.length?alle[0].trim():'';
   }catch(e){return '';}
 }
 
@@ -36128,7 +36166,7 @@ function _abIstEigenerName(name,eigeneNamen){
    Deshalb werden alle Abschnitte verglichen: Floskel-Anfaenge und Signatur-Bloecke
    nach hinten, dann der laengste echte Text. Das ist keine Zusammenfassung, sondern
    ein Zitat - es kann nichts erfinden, weil es woertlich aus der Mail stammt. */
-const AB_HOHL=/^(bitte (auch )?(hier )?(mal )?(nach)?(schauen|sehen|pr(ü|ue)fen)|k(ö|oe)nnt?en sie|k(ö|oe)nnen sie|w(ü|ue)rden sie|siehe (unten|anbei|beigef)|anbei|wie (telefonisch |bereits )?besprochen|zu beigef(ü|ue)gt|hier sprudelt|bitte um|danke|vielen dank|melde mich|zur kenntnis|zur weiterleitung|weitergeleitet|fyi|folgende datei(en)? (ist|sind)|im anhang|als anlage|in der anlage|sie erhalten (anbei|im anhang|beigef)|hiermit (beauftragen|erteilen|best(ä|ae)tigen) wir|hiermit erhalten sie|(diese|die) (e-?mail|nachricht) wurde automatisch|automatisch (erstellt|generiert|erzeugt|versandt))\b/i;
+const AB_HOHL=/^(bitte (auch )?(hier )?(mal )?(nach)?(schauen|sehen|pr(ü|ue)fen)|k(ö|oe)nnt?en sie|k(ö|oe)nnen sie|w(ü|ue)rden sie|siehe (unten|anbei|beigef)|anbei|wie (telefonisch |bereits )?besprochen|zu beigef(ü|ue)gt|hier sprudelt|bitte um|danke|vielen dank|melde mich|zur kenntnis|zur weiterleitung|weitergeleitet|fyi|folgende datei(en)? (ist|sind)|im anhang|als anlage|in der anlage|sie erhalten (anbei|im anhang|beigef)|hiermit (beauftragen|erteilen|best(ä|ae)tigen) wir|hiermit erhalten sie|(diese|die) (e-?mail|nachricht) wurde automatisch|automatisch (erstellt|generiert|erzeugt|versandt)|neue anfrage|sie haben eine neue (anfrage|nachricht|meldung|aufgabe)|wurde ihnen zugewiesen|neue meldung|neues ticket)\b/i;
 
 /* Sieht der Text aus wie eine Signatur? Name, Anschrift, Nummer untereinander -
    viele kurze Zeilen, kaum Satzzeichen, kein Verb. An einer echten Karte
@@ -36162,18 +36200,90 @@ function _abMeldRang(st){
   const r=AB_MELD_RANG[st.rolle||''];
   return (r===undefined)?2:r;
 }
+/* b962: Die Outlook-Vorschau ist EINE Zeile von rund 120 Zeichen – Anrede, Text, Grußformel und
+   Signaturanfang zusammengequetscht („Zur Info. … Mit freundlichen Grüßen Kathrin … Bitte beachten
+   Sie unsere neuen Telefonzeiten"). Ungesäubert stand so etwas unter „Worum geht's". Deshalb: Anrede
+   vorn weg, ab der Grußformel weg, und was dann zu kurz ist, zählt nicht. */
+function _abVorschauText(p){
+  let v=(typeof _msCleanPreview==='function')?_msCleanPreview(p):String(p||'');
+  v=v.replace(/^\s*(?:hallo|guten (?:tag|morgen|abend)|sehr geehrte[rs]?|liebe[rs]?|moin)\b[^,:!]{0,60}[,:!]\s*/i,'');
+  v=v.replace(/\s*(?:mit freundlichen gr(?:ü|ue)(?:ß|ss)en|freundliche gr(?:ü|ue)(?:ß|ss)e|viele gr(?:ü|ue)(?:ß|ss)e|beste gr(?:ü|ue)(?:ß|ss)e|mit besten gr(?:ü|ue)(?:ß|ss)en|liebe gr(?:ü|ue)(?:ß|ss)e|mit freundlichem gru(?:ß|ss)|mfg)\b[\s\S]*$/i,'').trim();
+  return v.length>=15?v:'';
+}
+/* b962: Der Text der Meldung soll zum Objekt der Karte passen. An einer echten Karte hing eine
+   Mail über ein ANDERES Haus im selben Verlauf und wurde als früheste Nachricht zur Meldung.
+   Verglichen werden nur Buchstaben, ohne Punkte, Striche und Leerzeichen („Fr.-Muster-Str." und
+   „Fr. Muster Str" sind dasselbe). */
+function _abTextSchluessel(s){return String(s||'').toLowerCase().replace(/ß/g,'ss').replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/[^a-z]/g,'');}
+/* Zurueckgestuft wird NUR eine Nachricht, die ein ANDERES Haus nennt. Eine Nachricht ohne
+   Anschrift bleibt neutral – sonst gewann an einer echten Karte die Zeile mit den Kontaktdaten
+   („… der Mieterin Muster, Beispielgasse 1 (…)“) gegen die eigentliche Schadensbeschreibung, nur
+   weil sie die Strasse erwaehnt. */
+function _abObjektTreffer(text,objKey){
+  if(!objKey)return 1;
+  const re=new RegExp(AB_STR.source,'g');let m,gefunden=0;
+  while((m=re.exec(String(text||'')))){gefunden++;const k=_abTextSchluessel(m[1]);if(k&&(k.indexOf(objKey)>=0||objKey.indexOf(k)>=0))return 1;}
+  return gefunden?0:1;
+}
+function _abObjektSchluessel(titel){
+  const adr=_abAdresse(titel||'');
+  if(!adr)return '';
+  const k=_abTextSchluessel(adr.replace(/[\s,]+\d[\d\s\-–\/]*[a-zA-Z]?$/,''));
+  return k.length>=6?k:'';
+}
+/* b962: Portal-Meldungen tragen den eigentlichen Inhalt hinter einer Bezeichnung („Beschreibung",
+   „Schadensmeldung" …), meist auf den Zeilen darunter bis zur nächsten Bezeichnung. Gibt es so eine
+   Stelle, ist SIE die Meldung – nicht der Kopfsatz „Sie haben eine neue Anfrage (#33) erhalten".
+   ⛔ Erst am echten Portal-Text aufgefallen: „Anliegen" steht VOR „Beschreibung" und trägt nur den
+   Titel („Dachrinne läuft über") – der wurde genommen und als Signatur aussortiert. Deshalb
+   zuerst die Beschreibungs-Bezeichnungen, dann erst Anliegen/Problem, und ein Wert zählt nur, wenn
+   er wie ein Satz aussieht (Satzzeichen oder mindestens 40 Zeichen). */
+const AB_BESCHR_LABEL1=/^[ \t]*(?:Beschreibung|Schadensbeschreibung|Schadenbeschreibung|Schadensmeldung|Schadenmeldung|Meldung|Mangelbeschreibung|Problembeschreibung|Nachricht|Bemerkung(?:en)?|Kommentar|Details?)[ \t]*:?[ \t]*(.*)$/i;
+const AB_BESCHR_LABEL2=/^[ \t]*(?:Problem|Mangel|Anliegen|Betreff)[ \t]*:?[ \t]*(.*)$/i;
+function _abIstLabelZeile(z){
+  const t=String(z||'').trim();
+  if(!t||t.length>32)return false;
+  if(/[.!?]/.test(t.replace(/\(optional\)/i,'')))return false;
+  return t.split(/\s+/).length<=3;
+}
+function _abWertSatz(t){t=String(t||'').trim();return (t.length>=20&&(/[.!?]/.test(t)||t.length>=40))?t:'';}
+function _abBeschreibung(txt){
+  const zeilen=String(txt||'').split('\n');
+  for(const LABEL of [AB_BESCHR_LABEL1,AB_BESCHR_LABEL2]){
+    for(let i=0;i<zeilen.length;i++){
+      const m=LABEL.exec(zeilen[i]);
+      if(!m)continue;
+      const inline=_abWertSatz(m[1]);
+      if(inline)return inline;
+      if(m[1]&&m[1].trim())continue;
+      const teile=[];
+      for(let j=i+1;j<zeilen.length;j++){
+        const z=zeilen[j].trim();
+        if(!z){if(teile.length)break;continue;}
+        if(teile.length&&_abIstLabelZeile(z))break;
+        teile.push(z);
+      }
+      const t=_abWertSatz(teile.join(' '));
+      if(t)return t;
+    }
+  }
+  return '';
+}
 function _abMeldung(schritte){
   const gut=[];
   (schritte||[]).forEach((st,i)=>{
-    const txt=String(st.text||'').trim();
+    const roh=String(st.text||'').trim();
+    const besch=_abBeschreibung(roh);
+    const txt=besch||roh;
     /* ⛔ Erst stand hier 40 - dann fiel "Im Bad tropft es von der Decke." (31 Zeichen)
        heraus, und uebrig blieb ein Signatur-Block. Kurze Meldungen sind oft die
        klarsten. */
     if(txt.length<25)return;
     const ersteZeile=(txt.split('\n').find(z=>z.trim().length>15)||'').trim();
     gut.push({txt:txt,
-      hohl:AB_HOHL.test(ersteZeile)?1:0,
+      hohl:(!besch&&AB_HOHL.test(ersteZeile))?1:0,
       sig:_abIstSignatur(txt)?1:0,
+      objekt:(st.objTreffer===undefined)?1:(st.objTreffer?1:0),
       rang:_abMeldRang(st),
       ord:(st.ord===undefined)?i:st.ord,
       laenge:txt.length});
@@ -36184,9 +36294,13 @@ function _abMeldung(schritte){
      Adressblock unter "Worum geht's". */
   const echte=gut.filter(x=>!x.sig);
   if(!echte.length)return '';
-  echte.sort((a,b)=>(a.hohl-b.hohl)||(a.rang-b.rang)||(a.ord-b.ord)||(b.laenge-a.laenge));
-  /* Zwei Saetze reichen - der ganze Text steht ja im Verlauf darunter. */
-  const roh=echte[0].txt.replace(/\s+/g,' ').trim();
+  /* Reihenfolge: Floskel nach hinten, Text zum Objekt der Karte nach vorn, dann Rolle,
+     dann die frueheste Nachricht. */
+  echte.sort((a,b)=>(a.hohl-b.hohl)||(b.objekt-a.objekt)||(a.rang-b.rang)||(a.ord-b.ord)||(b.laenge-a.laenge));
+  /* Zwei Saetze reichen - der ganze Text steht ja im Verlauf darunter. Die Anrede vorn
+     („Hallo Herr …,") sagt nichts und faellt weg. */
+  const roh=echte[0].txt.replace(/\s+/g,' ').trim()
+    .replace(/^(?:hallo|guten (?:tag|morgen|abend)|sehr geehrte[rs]?|liebe[rs]?|moin)\b[^,:!]{0,60}[,:!]\s*/i,'');
   const saetze=roh.split(/(?<=[.!?])\s+/).slice(0,2).join(' ');
   const kurz=(saetze||roh);
   return kurz.length>240?(kurz.substring(0,238).replace(/\s+\S*$/,'')+'…'):kurz;
@@ -36218,6 +36332,7 @@ async function _abBauen(task,vonHand){
      („Von: Muster, Sabine“) und keine Adresse – an einer echten Karte verlor dadurch die
      Meldung der Verwaltung gegen eine spätere Nachfrage. Wer als direkter Absender eine
      Rolle hat, behält sie auch im weitergeleiteten Teil. */
+  const objKey=_abObjektSchluessel(task&&task.title);
   const nameKey=n=>String(n||'').toLowerCase().split(/[^a-zäöüß]+/).filter(w=>w.length>=3).sort().join(' ');
   const rolleNachName={};
   mails.forEach(m=>{if(!m.adresse||!m.absName)return;const k=nameKey(m.absName);if(!k||rolleNachName[k])return;
@@ -36257,7 +36372,8 @@ async function _abBauen(task,vonHand){
         if(!stUnser&&!stRolle)stRolle=stAdr?_abRolle(stAdr,wer,hv,(st.kopf&&st.kopf.betreff)||m.subject):((hv&&_abPasstZu(hv,'',wer))?'Hausverwaltung':'');
         if(stUnser)stRolle='wir selbst';
       }
-      schritte.push({wann:wann,wer:wer,gez:s.gez,text:kurz,fwd:!eigen,rolle:stRolle,unser:stUnser,ord:mi*100+Math.max(0,99-si)});
+      schritte.push({wann:wann,wer:wer,gez:s.gez,text:kurz,fwd:!eigen,rolle:stRolle,unser:stUnser,ord:mi*100+Math.max(0,99-si),
+        objTreffer:_abObjektTreffer(kurz,objKey)});
       lfd++;
       ganzerText+='### NACHRICHT '+lfd+'\nVON: '+(eigen?m.sender:((st.kopf&&st.kopf.von)||wer))+
         '\nBETREFF: '+((st.kopf&&st.kopf.betreff)||m.subject||'')+'\nDATUM: '+(wann||m.date||'')+
@@ -36281,7 +36397,11 @@ async function _abBauen(task,vonHand){
        Telefonnummer raus – die Nummer steht schon bei „Vor Ort". */
     betreff:(mails[0]&&mails[0].subject||'').replace(/^\s*(?:(?:WG|AW|FW|RE|FWD|Aw|Re|Fwd)\s*:\s*)+/gi,'')
       .replace(AB_NR,' ').replace(/\s{2,}/g,' ').replace(/[\s,;:\-–]+$/,'').trim(),
-    ki:null,kiVersucht:false};
+    ki:null,kiVersucht:false,
+    /* b962: Kein einziger Mailtext lesbar (Outlook/Drive nicht erreichbar)? Dann gilt der Kasten
+       nicht als fertig – beim nächsten Öffnen wird es erneut versucht, und statt zu verstecken
+       wird es gesagt (_abOhneTextZeigen). Die Outlook-Vorschau allein zählt nicht als Text. */
+    ohneText:!mails.some(m=>(m.bodyHtml||(m.bodyText&&!m.nurVorschau)))};
   /* ⛔ Die lokale KI wird NICHT mehr gefragt. Frank am 08.09.2026: „Wenn wir die KI
      nicht brauchen, dann lassen wir das raus." Der Grund war handfest und gemessen:
      das Modell (4,4 GB) passt bei normaler Arbeit weder auf die Grafikkarte
@@ -36350,11 +36470,28 @@ function _abFarbe(rolle){
   return ['#e6e9f2','#4a5468'];
 }
 
+/* b962: Kein Mailtext lesbar – sagen statt verstecken. Vorher blieb der Kasten bei „leer" unsichtbar,
+   und damit war auch der Knopf „nochmal lesen" unerreichbar: ein leerer Kasten blieb für immer leer.
+   An einer echten Karte aus dem E-Mail-Eingang aufgefallen. */
+function _abOhneTextZeigen(d){
+  const sect=document.getElementById('tAufEinenBlickSect'),hdr=document.getElementById('abHdrInfo');
+  if(sect)sect.style.display='';
+  if(hdr)hdr.textContent='⚠ Mailtext konnte nicht gelesen werden – öffnen und „nochmal lesen"';
+  const hinweis='Der Text der '+(d.anzahl===1?'Nachricht':(d.anzahl+' Nachrichten'))+' konnte nicht gelesen werden – Outlook oder Drive waren nicht erreichbar. PAM versucht es beim nächsten Öffnen von selbst wieder; „⟳ nochmal lesen" versucht es sofort.';
+  const kopf=document.getElementById('abPopKopf');
+  if(kopf)kopf.innerHTML='<div style="color:var(--text2);line-height:1.5;">'+_abEsc(hinweis)+'</div>';
+  const tab=document.getElementById('abPopTabelle');if(tab)tab.innerHTML='';
+  const vz=document.getElementById('abPopVerlaufZeile');if(vz)vz.style.display='none';
+  const standEl=document.getElementById('abPopStand');
+  if(standEl){let w='';try{const dt=new Date(d.stand);if(!isNaN(dt))w=dt.toLocaleDateString('de-DE')+', '+dt.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});}catch(e){}standEl.textContent=w?('Stand '+w):'';}
+  const emBox=document.getElementById('emAufEinenBlick'),emInh=document.getElementById('emAbInhalt');
+  if(emBox&&emInh){emInh.innerHTML='<div style="color:var(--text2);line-height:1.45;">⚠ '+_abEsc(hinweis)+'</div>';emBox.style.display='';}
+}
 function _abRendern(d){
   const sect=document.getElementById('tAufEinenBlickSect');
   const hdr=document.getElementById('abHdrInfo');
   if(!sect)return;
-  if(!d||d.sorte==='leer'){sect.style.display='none';return;}
+  if(!d||d.sorte==='leer'){sect.style.display='none';if(d&&d.ohneText&&d.anzahl>0){_abLetzte=d;_abOhneTextZeigen(d);}return;}
   _abLetzte=d;
 
   const personen=_abAllePersonen(d);
@@ -36368,6 +36505,7 @@ function _abRendern(d){
   if(hdr){
     const teile=[];
     if(d.absender)teile.push(d.absender);
+    if(d.ohneText)teile.push('⚠ Text nicht gelesen');
     /* In der einen Zeile auf der Karte ist der Betreff besser aufgehoben: er ist
        kurz. Die ausfuehrliche Meldung steht im Fenster. */
     const kurzThema=d.betreff||thema;
@@ -36383,7 +36521,9 @@ function _abRendern(d){
   if(kopf){
     const zeile=(k,v)=>v?('<div style="display:flex;gap:10px;margin-bottom:4px;"><span style="flex:0 0 90px;color:var(--text2);font-weight:600;">'+k+'</span><span style="flex:1;min-width:0;font-weight:600;">'+_abEsc(v)+'</span></div>'):'';
     kopf.innerHTML=zeile('Objekt',objekt)+zeile("Worum geht's",thema)+zeile('Stand',ki.stand||'')+
-      zeile('Nachrichten',d.anzahl?(d.anzahl+(d.anzahl===1?' Nachricht':' Nachrichten')):'');
+      zeile('Nachrichten',d.anzahl?(d.anzahl+(d.anzahl===1?' Nachricht':' Nachrichten')):'')+
+      /* b962: auch bei sichtbarem Kasten sagen, wenn der Mailtext fehlt (Verwaltung bekannt, Text nicht lesbar). */
+      (d.ohneText?'<div style="color:var(--text2);margin-top:6px;">⚠ Der Mailtext konnte nicht gelesen werden – „⟳ nochmal lesen" versucht es erneut.</div>':'');
   }
   /* b961: Der Kasten sagt, von wann er ist – ein still veralteter Kasten wäre schlimmer
      als gar keiner. So stand es im Plan, gebaut war es bis b960 nicht. */
@@ -36434,6 +36574,7 @@ function _abRendern(d){
         '</div>';}).join('');
       if(personen.length>4)e+='<div style="color:var(--text2);font-size:11.5px;margin-top:4px;">und '+(personen.length-4)+' weitere – siehe Fenster</div>';
     }
+    if(d.ohneText)e+='<div style="color:var(--text2);margin-top:4px;">⚠ Mailtext konnte nicht gelesen werden – im Fenster „nochmal lesen".</div>';
     emInh.innerHTML=e;
     emBox.style.display=e?'':'none';
   }
@@ -36483,11 +36624,11 @@ async function _abStart(task,vonHand){
      nachgetragen - beim Anlegen eines Auftrags erbt die Karte sie vom Objekt -, muss
      der Kasten neu gebaut werden, sonst steht dort weiter "AUFTRAGGEBER". */
   const hvJetzt=String((task&&task.hausverwaltung)||'').trim();
-  const passt=alt&&alt.bauart===AB_BAUART&&alt.anzahl===mails.length&&alt.neueste===neueste&&(alt.hv||'')===hvJetzt;
+  const passt=alt&&alt.bauart===AB_BAUART&&alt.anzahl===mails.length&&alt.neueste===neueste&&(alt.hv||'')===hvJetzt&&!alt.ohneText;
   if(passt&&!vonHand){_abRendern(alt);return;}
   if(alt){_abRendern(alt);}                       // alten Stand zeigen, während der neue entsteht
   const hdr=document.getElementById('abHdrInfo');
-  if(hdr){hdr.textContent=vonHand?'wird neu gelesen …':(alt?('⟳ '+Math.max(0,mails.length-alt.anzahl)+' neue – wird gelesen …'):'wird gelesen …');}
+  if(hdr){hdr.textContent=vonHand?'wird neu gelesen …':(alt?(alt.ohneText?'wird erneut gelesen …':('⟳ '+Math.max(0,mails.length-alt.anzahl)+' neue – wird gelesen …')):'wird gelesen …');}
   const standEl=document.getElementById('abPopStand');if(standEl)standEl.textContent='wird gelesen …';
   sect.style.display='';
   const merkId=task.id;
