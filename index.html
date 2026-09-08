@@ -8836,7 +8836,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
              Öffnen der Karte von selbst (_abStart), NICHT auf Knopfdruck.
              ⛔ Der Abschnitt versteckt sich selbst (display:none), solange nichts
              Brauchbares drinsteht – ein Kasten mit fünf leeren Zeilen wäre schlimmer
-             als gar keiner (Frank am 08.09.2026 zur Melle-Angebotsmail). -->
+             als gar keiner (Frank am 08.09.2026 zur Angebotsmail eines Lieferanten). -->
         <div class="mv2-section mv2-r-card collapsible open" id="tAufEinenBlickSect" style="display:none;">
           <div class="mv2-section-label mv2-rhdr-purple" onclick="_toggleMv2Sect('tAufEinenBlickSect',event)" style="cursor:pointer;"><span style="flex-shrink:0;white-space:nowrap;">📋 Auf einen Blick</span><span id="abHdrInfo" style="margin-left:8px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:400;color:var(--text2);font-size:calc(11px * var(--modal-scale,1));text-transform:none;"></span><span id="abNeuBtn" onclick="event.stopPropagation();_abNeuLesen();" title="Noch einmal auslesen" style="margin-left:auto;margin-right:6px;cursor:pointer;color:var(--text2);font-size:calc(13px * var(--modal-scale,1));font-weight:400;">⟳</span><span class="mv2-coll-arrow">›</span></div>
           <div class="mv2-r-card-body">
@@ -35577,18 +35577,29 @@ async function _pamEmailAntwortenMitVerlauf(){
 const AB_OLLAMA='http://localhost:11434';
 const AB_MODELL='qwen2.5:7b';
 
-/* Wer ist der Absender? Die Domain verrät es – im Test an 27 Mails zu 100 %.
-   Frank kann die Liste später erweitern; unbekannte Firmen landen auf 'Firma'. */
-const AB_ROLLEN=[
-  [/ddmbraun\.de|ddmbraun@/i,'wir selbst'],
-  [/alkenbrecher\.info|tyroller-immobilien\.de/i,'Hausverwaltung'],
-  [/wbg-badlangensalza\.de/i,'Genossenschaft'],
-  [/devk\.de|allianz|provinzial|vhv\.|gothaer|@wgv|ergo\./i,'Versicherung'],
-  [/melle-gallhoefer|stark-deutschland|rotofrank|kiloutou|feuer-pt|schirrmacher|feilmeier|roof\.academy|dachdecker-nordhausen|bauking|zambelli/i,'Lieferant'],
-  [/gmx\.|t-online\.|freenet\.|web\.de|gmail\.|googlemail\.|bluewin\.|outlook\.|hotmail\.|posteo\.|mailbox\.org|icloud\./i,'Privatperson'],
-];
+/* Wer ist der Absender?
+   ⛔ HIER STEHEN KEINE KUNDEN- ODER LIEFERANTENNAMEN. `index.html` wird öffentlich
+   über GitHub Pages ausgeliefert – beim Bau von b955 stand hier zuerst eine Liste
+   mit echten Verwaltungs- und Lieferantendomains, und **neun Prüfsuiten** haben das
+   abgefangen (test_b658, b747, b748, b759, b822, b823, b826, b839, test_historie).
+   Dieselbe Falle wie Franks Rufnummer, nur eine Nummer größer.
+
+   Was hier stehen darf: allgemeine Freemail-Anbieter – die gehören niemandem.
+   Alles Kundenspezifische kommt aus den DATEN:
+     · `task.hausverwaltung` (seit b952 auf der Karte)
+     · die gelernte Liste in `pamAbRollen` (localStorage), die Frank selbst pflegt */
+const AB_FREEMAIL=/@(gmx|t-online|freenet|web|gmail|googlemail|bluewin|outlook|hotmail|posteo|mailbox|icloud|yahoo|aol|me|live|msn)\.[a-z.]{2,6}$/i;
+const AB_FIRMENKUERZEL=/\b(GmbH|GbR|mbH|KG|AG|e\.?G\.?|OHG|UG|SE|Ltd)\b/;
+/* Betreffzeilen, an denen man Lieferantenpost erkennt – ohne einen Namen zu nennen. */
+const AB_LIEFERPOST=/\b(Angebot|Rechnung|Lieferschein|Auftragsbest(ä|ae)tigung|Bestellung|Gutschrift|Preisliste|Versandbest)/i;
+
+function _abGelernteRollen(){
+  try{const r=JSON.parse(localStorage.getItem('pamAbRollen')||'{}');return (r&&typeof r==='object')?r:{};}
+  catch(e){return {};}
+}
+function _abDomain(adr){const m=String(adr||'').match(/@([\w.\-]+)$/);return m?m[1].toLowerCase():'';}
 /* ⛔ Beim Bau an echten Karten aufgefallen: EML-Originale tragen keine getrennte
-   Adresse, sondern `"B&E Gerüstbau GmbH" <bue-geruestbau@t-online.de>` in einem
+   Adresse, sondern `"B&E Gerüstbau GmbH" <einer Freemail-Adresse>` in einem
    Stück. Ungetrennt landete der ganze String als Name im Kasten – und die
    Domain-Regel las @t-online als Privatperson, obwohl „GmbH" danebensteht. */
 function _abAdr(s){const m=String(s||'').match(/[\w.\-+]+@[\w.\-]+\.[a-z]{2,}/i);return m?m[0]:'';}
@@ -35596,11 +35607,45 @@ function _abName(s){
   const n=String(s||'').replace(/<[^>]*>/g,'').replace(/[\w.\-+]+@[\w.\-]+\.[a-z]{2,}/gi,'').replace(/["'<>]/g,'').trim().replace(/[,;]$/,'');
   return n||_abAdr(s).split('@')[0].replace(/[._]/g,' ');
 }
-function _abRolle(adr,name){
-  /* Eine Firma bleibt eine Firma, auch wenn sie bei t-online ist. */
-  if(name&&/\b(GmbH|GbR|mbH|KG|AG|e\.?G\.?|OHG|UG)\b/.test(name)&&!/ddmbraun/i.test(adr||''))return 'Firma';
-  for(const p of AB_ROLLEN)if(p[0].test(adr||''))return p[1];
-  return adr?'Firma':'';
+/* `hv` = die Hausverwaltung, die auf der Karte steht (task.hausverwaltung, b952).
+   `betreff` hilft, Lieferantenpost zu erkennen, ohne einen Namen zu kennen. */
+function _abRolle(adr,name,hv,betreff){
+  const a=String(adr||'');
+  if(!a)return '';
+  const eigen=_abEigeneDomain();
+  if(eigen&&_abDomain(a)===eigen)return 'wir selbst';
+  /* Steht auf der Karte eine Hausverwaltung und passt der Absender dazu, ist die
+     Sache klar – ganz ohne Namensliste im Quelltext. */
+  if(hv&&_abPasstZu(hv,a,name))return 'Hausverwaltung';
+  const gelernt=_abGelernteRollen()[_abDomain(a)];
+  if(gelernt)return gelernt;
+  /* Eine Firma bleibt eine Firma, auch wenn sie bei einem Freemail-Anbieter ist. */
+  if(name&&AB_FIRMENKUERZEL.test(name))
+    return (betreff&&AB_LIEFERPOST.test(betreff))?'Lieferant':'Firma';
+  if(AB_FREEMAIL.test(a))return 'Privatperson';
+  if(betreff&&AB_LIEFERPOST.test(betreff))return 'Lieferant';
+  return 'Firma';
+}
+function _abEigeneDomain(){
+  try{
+    const f=(typeof _pamFirma==='function')?_pamFirma():null;
+    const d=_abDomain((f&&f.mail)||'');
+    if(d)return d;
+  }catch(e){}
+  try{
+    const s=(typeof _pamAbsenderAdresse==='function')?_pamAbsenderAdresse():'';
+    return _abDomain(s);
+  }catch(e){}
+  return '';
+}
+/* Passt der Verwaltungsname von der Karte zur Absender-Adresse?
+   Verglichen wird das längste Wort des Verwaltungsnamens mit Domain und Absender. */
+function _abPasstZu(hv,adr,name){
+  const worte=String(hv||'').toLowerCase().split(/[^a-zäöüß0-9]+/).filter(w=>w.length>=5&&
+    !/^(haus|immobilien|verwaltung|hausverwaltung|immobilienverwaltung|gmbh|wohnungs|genossenschaft)$/.test(w));
+  if(!worte.length)return false;
+  const heu=(_abDomain(adr)+' '+String(name||'')).toLowerCase();
+  return worte.some(w=>heu.indexOf(w)>=0);
 }
 
 /* Ab diesen Zeilen ist der Rest der Mail nur noch Kleingedrucktes. */
@@ -35653,7 +35698,7 @@ function _abGlaetten(t){
 }
 /* Eine weitergeleitete Mail in ihre Stufen zerlegen.
    ⛔ Beim Prüfen an echten Karten aufgefallen: erst wurde bei der Zeile „Von:"
-   einfach abgeschnitten – dabei steht bei Alkenbrecher fast immer GENAU DORT das
+   einfach abgeschnitten – dabei steht bei weitergeleiteter Post fast immer GENAU DORT das
    Wichtige. Oben schreibt die Verwaltung „bitte hier mal schauen", darunter, im
    weitergeleiteten Teil, meldet sich der Mieter mit Namen und Telefonnummer.
    Abgeschnitten blieb von so einer Mail ein Halbsatz übrig. */
@@ -35759,7 +35804,7 @@ async function _abMailsHolen(task,tiefLaden){
   const map=m=>({id:m.id||'',messageId:m.messageId||m.internetMessageId||'',subject:m.subject||'',
     date:m.date,fileId:m.fileId||'',
     sender:m.fromName?('"'+m.fromName+'" <'+(m.from||'')+'>'):(m.from||m.sender||''),
-    adresse:_abAdr(m.from||m.sender||''),
+    adresse:_abAdr(m.from||m.sender||''),direction:m.direction||'',
     absName:(m.fromName||_abName(m.sender||m.from||'')),
     bodyHtml:m.bodyHtml||m._cachedBodyHtml||m._resolvedBody||'',bodyText:m.bodyText||'',preview:m.preview||''});
   const thread=[...(task.gmailThreadMessages||[]).map(map),...(task.msThreadMessages||[]).map(map)];
@@ -35820,24 +35865,36 @@ async function _abKi(text){
 }
 
 /* Steht in dieser Karte überhaupt genug für einen Kasten? */
+/* Wer sind WIR? ⛔ Ohne Namen im Quelltext. Zwei Wege, beide aus den Daten:
+   1. `direction==='ausgang'` – was wir selbst verschickt haben.
+   2. die Domain aus den Firmen-Einstellungen (`_pamFirma`).
+   Aus den ausgehenden Mails wird die eigene Domain gelernt, dann greift sie auch
+   bei eingegangenen Mails, in denen wir zitiert werden. */
+function _abEigeneDomains(mails){
+  const raus=new Set();
+  const e=_abEigeneDomain(); if(e)raus.add(e);
+  (mails||[]).forEach(m=>{if(m.direction==='ausgang'&&m.adresse)raus.add(_abDomain(m.adresse));});
+  return raus;
+}
 function _abFremde(mails){
-  return (mails||[]).filter(m=>m.adresse&&!/ddmbraun/i.test(m.adresse));
+  const eigen=_abEigeneDomains(mails);
+  return (mails||[]).filter(m=>m.adresse&&m.direction!=='ausgang'&&!eigen.has(_abDomain(m.adresse)));
 }
 /* Wer ist der Auftraggeber? ⛔ Nicht einfach „der erste fremde Absender": in der
    Karte „Hermann-von-Salza-Str." schreibt der Gerüstbauer zuerst, Auftraggeber ist
    aber die Genossenschaft. Wer den Auftrag gibt, hat Vorrang vor dem, wer zufällig
    zuerst geschrieben hat. */
 const AB_AG_RANG={'Hausverwaltung':1,'Genossenschaft':1,'Versicherung':2,'Privatperson':3,'Firma':4,'Lieferant':5};
-function _abAuftraggeber(mails){
+function _abAuftraggeber(mails,hv){
   const f=_abFremde(mails);
   if(!f.length)return null;
   let beste=null,besterRang=99;
   for(const m of f){
-    const r=_abRolle(m.adresse,m.absName);
+    const r=_abRolle(m.adresse,m.absName,hv,m.subject);
     const rang=AB_AG_RANG[r]||6;
     if(rang<besterRang){besterRang=rang;beste={mail:m,rolle:r};}
   }
-  return beste||{mail:f[0],rolle:_abRolle(f[0].adresse,f[0].absName)};
+  return beste||{mail:f[0],rolle:_abRolle(f[0].adresse,f[0].absName,hv,f[0].subject)};
 }
 /* ⛔ Beim Prüfen an echten Karten aufgefallen: „irgendeine Mail kommt von einem
    Lieferanten" reicht NICHT als Kennzeichen. In der Karte „Hermann-von-Salza-Str."
@@ -35845,8 +35902,8 @@ function _abAuftraggeber(mails){
    dadurch zur Lieferantenpost erklärt und verlor ihren Verlauf.
    Lieferantenpost ist eine Karte nur, wenn NIEMAND von der Auftraggeberseite
    darin vorkommt. */
-function _abSorte(mails,verlaufLaenge){
-  const rollen=_abFremde(mails).map(m=>_abRolle(m.adresse,m.absName));
+function _abSorte(mails,verlaufLaenge,hv){
+  const rollen=_abFremde(mails).map(m=>_abRolle(m.adresse,m.absName,hv,m.subject));
   if(!rollen.length)return verlaufLaenge>200?'schaden':'leer';
   if(rollen.some(r=>r==='Hausverwaltung'||r==='Genossenschaft'||r==='Privatperson'||r==='Versicherung'))return 'schaden';
   if(rollen.every(r=>r==='Lieferant'))return 'lieferant';
@@ -35865,14 +35922,14 @@ async function _abBauen(task,vonHand){
     const roh=_abHtmlZuText(m.bodyHtml||m.bodyText||'');
     if(!roh)return;
     /* Jede Weiterleitungsstufe wird ein eigener Schritt – der weitergeleitete
-       Teil ist bei Alkenbrecher meist der wichtigere (dort steht der Mieter). */
+       Teil ist bei weitergeleiteter Post meist der wichtigere (dort steht der Mieter). */
     _abStufen(roh).forEach((st,si)=>{
       const s=_abStufeSaeubern(st.zeilen);
       const kurz=_abOhneWdh(s.text,gesehen);
       if(!kurz)return;
       _abKontakte(kurz).forEach(p=>kontakteMuster.push(p));
       const eigen=(si===0&&!st.kopf);
-      /* Im Weiterleitungskopf steht oft nur `schirb@freenet.de` – dann ist die
+      /* Im Weiterleitungskopf steht oft nur `einer Freemail-Adresse` – dann ist die
          Unterschrift unter dem Text („Beate Schirrmeister") der bessere Name. */
       let wer=eigen?(m.absName||_abName(m.sender||'')):_abName((st.kopf&&st.kopf.von)||'');
       if(!eigen&&s.gez&&(!wer||!/\s/.test(wer)&&!/^[A-ZÄÖÜ]/.test(wer)))wer=s.gez;
@@ -35886,8 +35943,9 @@ async function _abBauen(task,vonHand){
         '\n'+kurz.substring(0,2500)+'\n\n';
     });
   });
-  const sorte=_abSorte(mails,ganzerText.length);
-  const ag=_abAuftraggeber(mails);
+  const hv=String((task&&task.hausverwaltung)||'').trim();
+  const sorte=_abSorte(mails,ganzerText.length,hv);
+  const ag=_abAuftraggeber(mails,hv);
   const daten={stand:new Date().toISOString(),anzahl:mails.length,
     neueste:mails.length?String(mails[mails.length-1].date||''):'',
     sorte:sorte,schritte:schritte,kontakte:kontakteMuster,
@@ -35948,7 +36006,7 @@ function _abRendern(d){
   /* Der Verlauf hängt an der Textmenge, NICHT an der Sorte.
      ⛔ Erst war es an `sorte==='schaden'` gehängt – dann verlor eine Karte ihren
      Verlauf, sobald ein Lieferant darin mitschrieb. Umgekehrt bleibt bei einer
-     Melle-Angebotsmail ohnehin nur ein Satz übrig, und der lohnt den Aufklapper
+     Angebotsmail eines Lieferanten ohnehin nur ein Satz übrig, und der lohnt den Aufklapper
      nicht: darum die Schwelle über die tatsächliche Länge. */
   const echte=(d.schritte||[]).filter(s=>s.text);
   const textMenge=echte.reduce((s,x)=>s+x.text.length,0);
