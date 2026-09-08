@@ -9355,18 +9355,21 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
      nicht so machen, dass ich das ausklappe, wie so ein Popup?" Auf der Karte bleibt
      deshalb nur eine Zeile; alles Weitere steht hier drin. Gleiche Bauform wie
      „Ordner & Links", damit es sich anfühlt wie der Rest von PAM. -->
-<div class="sect-popup" id="abPopup" style="width:720px;">
+<!-- Frank am 08.09.2026: "zu grau in grau - entweder Hintergrund weiss oder Text
+     groesser". Beides: --bg ist im hellen Thema weiss, im dunklen dunkel, also
+     bleibt es themengerecht. Schrift durchgehend eine Stufe groesser. -->
+<div class="sect-popup" id="abPopup" style="width:760px;background:var(--bg);">
   <div class="sect-popup-header" id="_popAbDrag">
     <span class="sect-popup-title">📋 Auf einen Blick</span>
     <button type="button" class="sect-popup-close" onclick="_closeSectPopup('abPopup')" title="Schließen">✕</button>
   </div>
   <div class="sect-popup-body">
-    <div id="abPopKopf" style="font-size:13px;margin-bottom:14px;"></div>
-    <div style="font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--text2);margin-bottom:6px;">ANSPRECHPARTNER</div>
+    <div id="abPopKopf" style="font-size:14.5px;line-height:1.65;margin-bottom:16px;color:var(--text);"></div>
+    <div style="font-size:12px;font-weight:700;letter-spacing:.6px;color:var(--text);margin-bottom:8px;">ANSPRECHPARTNER</div>
     <div id="abPopTabelle" style="overflow-x:auto;"></div>
     <div id="abPopVerlaufZeile" style="display:none;margin-top:16px;padding-top:12px;border-top:1px solid var(--border);">
-      <span onclick="_abVerlaufUmschalten()" style="cursor:pointer;color:var(--text2);font-weight:700;font-size:12px;display:inline-flex;align-items:center;gap:7px;"><span id="abVerlaufPfeil">▸</span><span id="abVerlaufLabel">Ganzer Verlauf</span><span style="font-weight:400;">— ohne Floskeln und Wiederholungen</span></span>
-      <div id="abVerlauf" style="display:none;margin-top:12px;font-size:12.5px;"></div>
+      <span onclick="_abVerlaufUmschalten()" style="cursor:pointer;color:var(--text);font-weight:700;font-size:13.5px;display:inline-flex;align-items:center;gap:7px;"><span id="abVerlaufPfeil">▸</span><span id="abVerlaufLabel">Ganzer Verlauf</span><span style="font-weight:400;">— ohne Floskeln und Wiederholungen</span></span>
+      <div id="abVerlauf" style="display:none;margin-top:12px;font-size:14px;line-height:1.6;color:var(--text);"></div>
     </div>
   </div>
 </div>
@@ -10048,7 +10051,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-08 · #957'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-08-b957) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-08 · #958'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-08-b958) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -35588,6 +35591,11 @@ async function _pamEmailAntwortenMitVerlauf(){
       still veralteter Kasten wäre schlimmer als gar keiner.
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/* Bauart der gespeicherten Kurzfassung. Hochzaehlen, sobald sich Felder aendern -
+   sonst zeigt PAM eine alte Fassung weiter und die neuen Spalten bleiben leer.
+   Genau das war im Betrieb zu sehen: "woher" war ueberall leer, weil die
+   gespeicherte Fassung noch von der Bauart davor stammte. */
+const AB_BAUART=2;
 let _abLetzte=null;
 const AB_OLLAMA='http://localhost:11434';
 const AB_MODELL='qwen2.5:7b';
@@ -36027,6 +36035,18 @@ function _abObjekt(mails,schritte){
   return lage?(adr+' · '+lage):adr;
 }
 
+function _abIstUnser(m,eigenAdr,eigenDom){
+  if(!m||!m.adresse)return false;
+  if(m.direction==='ausgang')return true;
+  if(eigenAdr.has(String(m.adresse).toLowerCase()))return true;
+  return !AB_FREEMAIL.test(m.adresse)&&eigenDom.has(_abDomain(m.adresse));
+}
+/* Ein Name gilt als unserer, sobald ein Bestandteil passt - "Max Muster" und
+   "M. Muster" sollen beide greifen. */
+function _abIstEigenerName(name,eigeneNamen){
+  if(!name||!eigeneNamen||!eigeneNamen.size)return false;
+  return String(name).split(/\s+/).some(w=>w.length>3&&eigeneNamen.has(w.toLowerCase()));
+}
 function _abEsc(s){const d=document.createElement('div');d.textContent=String(s==null?'':s);return d.innerHTML;}
 
 async function _abBauen(task,vonHand){
@@ -36034,6 +36054,20 @@ async function _abBauen(task,vonHand){
   if(!mails.length)return null;
   const gesehen=new Set(),schritte=[],kontakteMuster=[];
   let ganzerText='';
+  /* ⛔ Im Betrieb aufgefallen: der eigene Name stand mit Handynummer in der
+     Ansprechpartner-Tabelle - er kommt aus unseren eigenen Mails ("Ansprechpartner:
+     <Name> <Nummer>"). Die eigene Firmennummer war gefiltert, der eigene NAME nicht. */
+  const eigeneNamen=new Set();
+  try{const f=(typeof _pamFirma==='function')?_pamFirma():null;
+    String((f&&f.name)||'').split(/[^A-Za-z\u00C4\u00D6\u00DC\u00E4\u00F6\u00FC\u00DF-]+/)
+      .filter(w=>w.length>3&&!/^(GmbH|GbR|mbH|Dachdeckermeister|Zimmermeister)$/i.test(w))
+      .forEach(w=>eigeneNamen.add(w.toLowerCase()));}catch(e){}
+  const eigenAdr=_abEigeneAdressen(),eigenDom=_abEigeneDomains(mails);
+  mails.forEach(m=>{
+    const unser=(m.direction==='ausgang')||eigenAdr.has(String(m.adresse).toLowerCase())||
+                (!AB_FREEMAIL.test(m.adresse)&&eigenDom.has(_abDomain(m.adresse)));
+    if(unser){if(m.absName)String(m.absName).split(/\s+/).forEach(w=>{if(w.length>3)eigeneNamen.add(w.toLowerCase());});}
+  });
   let lfd=0;
   mails.forEach(m=>{
     const roh=_abHtmlZuText(m.bodyHtml||m.bodyText||'');
@@ -36054,6 +36088,8 @@ async function _abBauen(task,vonHand){
                       :String((st.kopf&&st.kopf.datum)||'').replace(/^\w+,\s*/,'').substring(0,22);
       /* Die Kontakte tragen das Datum ihrer Nachricht mit - die Spalte "woher"
          beantwortet Franks Frage "ich weiss nicht, wann". */
+      if(eigen&&s.gez&&_abIstUnser(m,eigenAdr,eigenDom))
+        String(s.gez).split(/\s+/).forEach(w=>{if(w.length>3)eigeneNamen.add(w.toLowerCase());});
       _abKontakte(kurz).forEach(p=>{p.woher=wann;kontakteMuster.push(p);});
       schritte.push({wann:wann,wer:wer,gez:s.gez,text:kurz,fwd:!eigen});
       lfd++;
@@ -36065,9 +36101,10 @@ async function _abBauen(task,vonHand){
   const hv=String((task&&task.hausverwaltung)||'').trim();
   const sorte=_abSorte(mails,ganzerText.length,hv);
   const ag=_abAuftraggeber(mails,hv);
-  const daten={stand:new Date().toISOString(),anzahl:mails.length,
+  const daten={bauart:AB_BAUART,stand:new Date().toISOString(),anzahl:mails.length,
     neueste:mails.length?String(mails[mails.length-1].date||''):'',
-    sorte:sorte,schritte:schritte,kontakte:kontakteMuster,
+    sorte:sorte,schritte:schritte,
+    kontakte:kontakteMuster.filter(p=>!_abIstEigenerName(p.name,eigeneNamen)),
     absender:ag?(ag.mail.absName||ag.mail.adresse):'',
     absAdr:ag?ag.mail.adresse:'',
     absTel:ag?_abAgTelefon(ag.mail,schritte):'',
@@ -36181,19 +36218,19 @@ function _abRendern(d){
   const tab=document.getElementById('abPopTabelle');
   if(tab){
     if(!personen.length){
-      tab.innerHTML='<div style="color:var(--text2);font-style:italic;font-size:12.5px;padding:8px 0;">In den Nachrichten steht keine Telefonnummer und kein Name.</div>';
+      tab.innerHTML='<div style="color:var(--text2);font-style:italic;font-size:14px;padding:10px 0;">In den Nachrichten steht keine Telefonnummer und kein Name.</div>';
     }else{
-      let h='<table style="width:100%;border-collapse:collapse;font-size:12.5px;">'+
+      let h='<table style="width:100%;border-collapse:collapse;font-size:14px;">'+
         '<thead><tr>'+
-        ['Name','Rolle','Telefon','woher'].map((t,i)=>'<th style="text-align:left;padding:6px 9px;background:var(--bg3);color:var(--text2);font-size:11px;font-weight:700;letter-spacing:.4px;border-bottom:1px solid var(--border);'+(i===3?'width:88px;':'')+'">'+t+'</th>').join('')+
+        ['Name','Rolle','Telefon','woher'].map((t,i)=>'<th style="text-align:left;padding:7px 10px;background:var(--bg3);color:var(--text);font-size:12px;font-weight:700;letter-spacing:.4px;border-bottom:1px solid var(--border);'+(i===3?'width:88px;':'')+'">'+t+'</th>').join('')+
         '</tr></thead><tbody>';
       personen.forEach(p=>{
         const f=_abFarbe(p.rolle);
         h+='<tr>'+
-          '<td style="padding:7px 9px;border-bottom:1px solid var(--border);font-weight:600;">'+(_abEsc(p.name)||'<span style="color:var(--text2);font-style:italic;font-weight:400;">ohne Namen</span>')+'</td>'+
-          '<td style="padding:7px 9px;border-bottom:1px solid var(--border);">'+(p.rolle?'<span style="background:'+f[0]+';color:'+f[1]+';font-size:9.5px;font-weight:700;letter-spacing:.4px;padding:3px 6px;border-radius:4px;white-space:nowrap;">'+_abEsc(String(p.rolle).toUpperCase())+'</span>':'')+'</td>'+
+          '<td style="padding:9px 10px;border-bottom:1px solid var(--border);font-weight:600;color:var(--text);">'+(_abEsc(p.name)||'<span style="color:var(--text2);font-style:italic;font-weight:400;">ohne Namen</span>')+'</td>'+
+          '<td style="padding:7px 9px;border-bottom:1px solid var(--border);">'+(p.rolle?'<span style="background:'+f[0]+';color:'+f[1]+';font-size:11px;font-weight:700;letter-spacing:.4px;padding:4px 8px;border-radius:4px;white-space:nowrap;">'+_abEsc(String(p.rolle).toUpperCase())+'</span>':'')+'</td>'+
           '<td style="padding:7px 9px;border-bottom:1px solid var(--border);white-space:nowrap;">'+(p.telefon?'<a href="tel:'+_abEsc(String(p.telefon).replace(/[^\d+]/g,''))+'" style="color:var(--accent,#378ADD);text-decoration:none;font-weight:600;">'+_abEsc(p.telefon)+'</a>':'<span style="color:var(--text2);">—</span>')+'</td>'+
-          '<td style="padding:7px 9px;border-bottom:1px solid var(--border);color:var(--text2);font-size:11.5px;white-space:nowrap;">'+_abEsc(p.woher||'')+'</td>'+
+          '<td style="padding:9px 10px;border-bottom:1px solid var(--border);color:var(--text2);font-size:13px;white-space:nowrap;">'+_abEsc(p.woher||'')+'</td>'+
         '</tr>';
       });
       tab.innerHTML=h+'</tbody></table>';
@@ -36210,7 +36247,7 @@ function _abRendern(d){
     const v=document.getElementById('abVerlauf');
     if(v)v.innerHTML=echte.map(s=>
       '<div style="border-left:2px solid var(--border);padding-left:11px;margin-bottom:11px;">'+
-      '<div style="color:var(--text2);font-size:11px;margin-bottom:3px;">'+
+      '<div style="color:var(--text2);font-size:12.5px;margin-bottom:4px;">'+
       (s.fwd?'<span title="weitergeleitet">↳ </span>':'')+
       _abEsc(s.wann)+' · <b>'+_abEsc(s.wer)+'</b>'+
       (s.gez&&s.gez!==s.wer?' <span style="font-weight:400;">(gez. '+_abEsc(s.gez)+')</span>':'')+'</div>'+
@@ -36242,7 +36279,7 @@ async function _abStart(task,vonHand){
   const neueste=mails.length?String(mails[mails.length-1].date||''):'';
   /* Veraltet? Anzahl und Datum der neuesten Nachricht verraten es – beides steht
      ohnehin da, das kostet nichts. */
-  const passt=alt&&alt.anzahl===mails.length&&alt.neueste===neueste;
+  const passt=alt&&alt.bauart===AB_BAUART&&alt.anzahl===mails.length&&alt.neueste===neueste;
   if(passt&&!vonHand){_abRendern(alt);return;}
   if(alt){_abRendern(alt);}                       // alten Stand zeigen, während der neue entsteht
   const hdr=document.getElementById('abHdrInfo');
