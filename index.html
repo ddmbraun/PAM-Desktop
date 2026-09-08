@@ -10072,7 +10072,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-08 · #963'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-08-b963) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-08 · #964'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-08-b964) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -36581,6 +36581,107 @@ function _abOhneTextZeigen(d){
   const emBox=document.getElementById('emAufEinenBlick'),emInh=document.getElementById('emAbInhalt');
   if(emBox&&emInh){emInh.innerHTML='<div style="color:var(--text2);line-height:1.45;">⚠ '+_abEsc(hinweis)+'</div>';emBox.style.display='';}
 }
+/* b964: Aus der Ansprechpartner-Tabelle heraus einen Kontakt anlegen.
+   Frank am 08.09.2026: „Wie kann ich das zu meinen Kontakten hinzufügen?" Bis b963 musste er
+   Name und Nummer von Hand abtippen. Gemessen: 48 Personen in den Tabellen, 13 davon standen
+   noch in keiner Kontaktliste.
+   ⛔ Der Kasten wird aus ZWEI Fenstern geöffnet, und die Kontakte liegen dort verschieden:
+   in der Auftragskarte als Zeilen im Formular (addKontaktPTP), im E-Mail-Eingangsfenster als
+   Liste am Task (_emCurrentTask.kontakte). Beide Wege werden bedient.
+   Weiter geht es dann wie gewohnt aus der Kontaktzeile: grüner Knopf ins Adressbuch,
+   blauer Knopf zu den Google-Kontakten. */
+const AB_KONTAKT_ROLLE={'Hausverwaltung':'hausverwaltung','Genossenschaft':'hausverwaltung',
+  'Auftraggeber':'ag','Mieter':'mieter','Eigentümer':'eigentuemer','Eigentuemer':'eigentuemer',
+  'Privatperson':'privatkunde','Lieferant':'subunternehmer','Hausmeister':'Hausmeister',
+  'Versicherung':'Versicherung','Firma':'sonstiges'};
+function _abKontaktRolle(r){return AB_KONTAKT_ROLLE[String(r||'').trim()]||'sonstiges';}
+/* Wohin gehört der Kontakt? Die Auftragskarte hat Vorrang, solange sie offen ist. */
+function _abKontaktZiel(){
+  try{
+    const tm=document.getElementById('taskModal');
+    if(tm&&tm.classList.contains('open')&&document.getElementById('tKontakteContainer'))return 'karte';
+  }catch(e){}
+  try{if(typeof _emCurrentTask!=='undefined'&&_emCurrentTask)return 'mail';}catch(e){}
+  return '';
+}
+function _abKontaktListe(){
+  const ziel=_abKontaktZiel();
+  try{
+    if(ziel==='karte'&&typeof getKontaktePTP==='function')return getKontaktePTP()||[];
+    if(ziel==='mail'&&typeof _emCurrentTask!=='undefined'&&_emCurrentTask)return _emCurrentTask.kontakte||[];
+  }catch(e){}
+  return [];
+}
+/* Steht die Person schon drin? Gleiche Rufnummer oder gleicher Name reicht - die Anrede
+   davor zählt nicht mit, „Muster" und derselbe Name mit Anrede sind dieselbe Person. */
+function _abKontaktDa(name,tel,liste){
+  const norm=s=>String(s||'').toLowerCase().replace(/^(herrn?|frau|familie|fam\.)\s+/,'').replace(/\s+/g,' ').trim();
+  const nr=s=>String(s||'').replace(/[^0-9]/g,'');
+  const n=norm(name),t=nr(tel);
+  if(!n&&!t)return true;                       /* nichts Verwertbares - dann auch nichts anlegen */
+  return (liste||_abKontaktListe()).some(k=>{
+    const kn=norm(k.name),kt=nr(k.tel),kt2=nr(k.tel2);
+    if(t&&t.length>5&&(kt===t||kt2===t))return true;
+    if(n&&kn&&(kn===n||(kn.length>3&&n.length>3&&(kn.indexOf(n)>=0||n.indexOf(kn)>=0))))return true;
+    return false;
+  });
+}
+/* Eine Person übernehmen. `still` unterdrückt Meldung und Neuzeichnen - dafür sorgt der
+   Aufrufer, wenn er mehrere auf einmal übernimmt. */
+function _abZuKontakt(i,still){
+  const d=_abLetzte;if(!d)return false;
+  const p=_abAllePersonen(d)[i];
+  if(!p||(!p.name&&!p.telefon))return false;
+  const ziel=_abKontaktZiel();
+  if(!ziel){if(typeof showToast==='function')showToast('Kein Fenster offen, in das der Kontakt gehört.','warning',3000);return false;}
+  if(_abKontaktDa(p.name,p.telefon)){if(!still&&typeof showToast==='function')showToast('Steht schon in den Kontakten.','info',2500);return false;}
+  const rolle=_abKontaktRolle(p.rolle);
+  if(ziel==='karte'){
+    if(typeof addKontaktPTP!=='function')return false;
+    addKontaktPTP(rolle,p.name,p.telefon||'','',false,'',{},false);
+    if(typeof updateKontaktePTPTitle==='function')updateKontaktePTPTitle();
+    if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
+  }else{
+    if(!Array.isArray(_emCurrentTask.kontakte))_emCurrentTask.kontakte=[];
+    _emCurrentTask.kontakte.push({rolle:rolle,name:p.name||'',tel:p.telefon||'',tel2:'',email:'',
+      anrufKontakt:false,wohntImObjekt:false});
+    if(typeof _emRenderKontakte==='function')_emRenderKontakte();
+    const b=document.getElementById('emKontakteBody');if(b)b.style.display='';
+    const a=document.getElementById('emKontakteArrow');if(a)a.style.transform='';
+    if(typeof _emScheduleSave==='function')_emScheduleSave();
+  }
+  if(!still){
+    if(typeof showToast==='function')showToast('👤 '+(p.name||p.telefon)+' zu den Kontakten hinzugefügt','success',2500);
+    _abRendern(d);                              /* Häkchen statt Pluszeichen zeigen */
+  }
+  return true;
+}
+function _abAlleZuKontakten(){
+  const d=_abLetzte;if(!d)return;
+  const n=_abAllePersonen(d).length;
+  let neu=0;
+  /* ⛔ Rückwärts durchgehen: addKontaktPTP hängt eine Zeile an, und _abKontaktDa liest die
+     Liste bei jedem Schritt frisch - so zählt jeder gerade angelegte Kontakt sofort mit. */
+  for(let i=0;i<n;i++){if(_abZuKontakt(i,true))neu++;}
+  if(typeof showToast==='function')
+    showToast(neu?('👤 '+neu+(neu===1?' Kontakt':' Kontakte')+' hinzugefügt'):'Alle standen schon in den Kontakten.',neu?'success':'info',2800);
+  _abRendern(d);
+}
+/* b964: Der Knopf je Zeile. Steht die Person schon in den Kontakten, ist es ein Haken
+   ohne Funktion - so sieht man auf einen Blick, wen man noch nicht hat. */
+function _abZeilenKnopf(p,i){
+  if(!p.name&&!p.telefon)return '';
+  if(_abKontaktDa(p.name,p.telefon))
+    return '<span style="color:var(--green,#15803d);font-size:14px;" title="steht schon in den Kontakten">✓</span>';
+  return '<button type="button" onclick="_abZuKontakt('+i+')" title="zu den Kontakten hinzufügen" '+
+    'style="font-size:12px;font-weight:700;line-height:1;padding:4px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--accent,#378ADD);cursor:pointer;">+</button>';
+}
+function _abKopfKnopf(personen){
+  const offen=(personen||[]).filter(p=>(p.name||p.telefon)&&!_abKontaktDa(p.name,p.telefon)).length;
+  if(offen<2)return '';
+  return '<button type="button" onclick="_abAlleZuKontakten()" title="alle '+offen+' noch fehlenden Personen zu den Kontakten hinzufügen" '+
+    'style="font-size:11px;font-weight:700;padding:3px 7px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--accent,#378ADD);cursor:pointer;white-space:nowrap;">+ alle</button>';
+}
 function _abRendern(d){
   const sect=document.getElementById('tAufEinenBlickSect');
   const hdr=document.getElementById('abHdrInfo');
@@ -36635,7 +36736,7 @@ function _abRendern(d){
     }else{
       let h='<table style="width:100%;border-collapse:collapse;font-size:14px;">'+
         '<thead><tr>'+
-        ['Name','Rolle','Telefon','woher'].map((t,i)=>'<th style="text-align:left;padding:7px 10px;background:var(--bg3);color:var(--text);font-size:12px;font-weight:700;letter-spacing:.4px;border-bottom:1px solid var(--border);'+(i===3?'width:104px;':'')+'">'+t+'</th>').join('')+
+        ['Name','Rolle','Telefon','woher',''].map((t,i)=>'<th style="text-align:left;padding:7px 10px;background:var(--bg3);color:var(--text);font-size:12px;font-weight:700;letter-spacing:.4px;border-bottom:1px solid var(--border);'+(i===3?'width:104px;':'')+(i===4?'width:64px;text-align:center;':'')+'">'+(i===4?_abKopfKnopf(personen):t)+'</th>').join('')+
         '</tr></thead><tbody>';
       personen.forEach(p=>{
         const f=_abFarbe(p.rolle);
@@ -36646,6 +36747,7 @@ function _abRendern(d){
           /* b963: Das Briefsymbol sagt, woher die Person kommt – hat sie selbst geschrieben,
              oder wird sie in einer Mail nur genannt? */
           '<td style="padding:9px 10px;border-bottom:1px solid var(--border);color:var(--text2);font-size:13px;white-space:nowrap;" title="'+(p.schrieb?'hat selbst geschrieben':'wird in einer Nachricht genannt')+'">'+(p.schrieb?'✉ ':'')+_abEsc(p.woher||'')+'</td>'+
+          '<td style="padding:7px 6px;border-bottom:1px solid var(--border);text-align:center;">'+_abZeilenKnopf(p,i)+'</td>'+
         '</tr>';
       });
       tab.innerHTML=h+'</tbody></table>';
