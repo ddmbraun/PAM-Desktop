@@ -9934,7 +9934,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-08 · #944'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-08-b944) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-08 · #945'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-08-b945) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -25393,7 +25393,9 @@ async function handleFotoUploadToDrive(e){
     showToast('⬆ '+file.name+' wird hochgeladen…','info');
     try{
       // b944: Der Fotoordner liegt oft tief – hier wird am haeufigsten gekuerzt.
-      const _b944=(typeof _pamNamePassend==='function')?await _pamNamePassend(folderId,file.name):{name:file.name,gekuerzt:false,passt:true,unbekannt:true};
+      // b945: istBild=true – bei zehn Fotos will niemand zehnmal gefragt werden.
+      let _b944=(typeof _pamNamePassend==='function')?await _pamNamePassend(folderId,file.name):{name:file.name,gekuerzt:false,passt:true,unbekannt:true};
+      if(typeof _pamNameFragen==='function')_b944=_pamNameFragen(_b944,file.name,true);
       if((_b944.gekuerzt||!_b944.passt)&&typeof _pamNameGekuerztMelden==='function')_pamNameGekuerztMelden(_b944,file.name);
       const body=new FormData();
       body.append('metadata',new Blob([JSON.stringify({name:_b944.name,parents:[folderId]})],{type:'application/json'}));
@@ -26140,7 +26142,8 @@ async function handleFileAttach(e){
         showToast('⏳ Video „'+file.name+'" → Fotos/Videos…','info',4000);
         try{
           // b944: auch hier der Laengen-Check – der Foto-Ordner ist derselbe wie oben.
-          const _b944v=(typeof _pamNamePassend==='function')?await _pamNamePassend(_vFolder,file.name):{name:file.name,gekuerzt:false,passt:true,unbekannt:true};
+          let _b944v=(typeof _pamNamePassend==='function')?await _pamNamePassend(_vFolder,file.name):{name:file.name,gekuerzt:false,passt:true,unbekannt:true};
+          if(typeof _pamNameFragen==='function')_b944v=_pamNameFragen(_b944v,file.name,true);
           if((_b944v.gekuerzt||!_b944v.passt)&&typeof _pamNameGekuerztMelden==='function')_pamNameGekuerztMelden(_b944v,file.name);
           const _fd=new FormData();
           _fd.append('metadata',new Blob([JSON.stringify({name:_b944v.name,parents:[_vFolder]})],{type:'application/json'}));
@@ -32210,6 +32213,9 @@ async function _pamDokPfadKopieren(){
 // die man gerade braucht.
 var PAM_PFAD_WORD = 218;   // Office öffnet darüber nicht mehr
 var PAM_PFAD_WIN  = 260;   // klassische Windows-Grenze
+// b945: Bleibt weniger als das uebrig, ist kein sprechender Name mehr moeglich
+// („Alkenbr. HV.PDF"). Dann wird nicht mehr still gekuerzt, sondern gefragt.
+var PAM_NAME_MINDEST = 40;
 
 // Trennt "…\Ordner\Datei.docx" in Ordner und Namen. Rückwärts gesucht, weil
 // Ordnernamen hier selbst Punkte und Kommas enthalten koennen (z. B. "Musterweg 1, 1a,b,c").
@@ -32229,9 +32235,12 @@ function _pamNameBudget(ordnerPfad){
   return PAM_PFAD_WORD - (String(ordnerPfad||'').length + 1);
 }
 
-// Kürzt einen Dateinamen auf ein Zeichenbudget. Die Endung bleibt IMMER stehen —
-// ohne sie wüsste Windows nicht mehr, dass es ein Word-Dokument ist, und der
-// Doppelklick führt ins Leere. Lieber ein kurzer Rumpf als eine tote Datei.
+// b945: Gekürzt wird ab jetzt von VORNE weg — der hintere Teil bleibt stehen.
+// Grund (Frank am 08.09.2026): aus „Alkenbr. HV_Kranichf. 88c;StandrohrRe.Nr_ 2026_…"
+// wurde „Alkenbr. HV.PDF". Der Anfang trägt hier nur den Auftraggeber; Adresse,
+// Auftragsnummer und Inhalt stehen HINTEN. Verschickt man so eine Datei, weiß der
+// Empfänger nicht mehr, worum es geht — und man selbst später auch nicht.
+// Geschnitten wird an den Trennzeichen des Namens, damit keine Wortreste entstehen.
 function _pamNameKuerzen(name, budget){
   var s = String(name||'');
   if(!s) return s;
@@ -32240,11 +32249,17 @@ function _pamNameKuerzen(name, budget){
   var endung = (p > 0 && s.length - p <= 6) ? s.slice(p) : '';
   var rumpf  = endung ? s.slice(0, p) : s;
   var platz  = budget - endung.length;
-  // Budget kleiner als die Endung selbst: hier ist mit Kürzen nichts mehr zu retten,
-  // der Ordner liegt zu tief. Original zurückgeben, der Aufrufer meldet es.
+  // Budget kleiner als die Endung selbst: hier ist nichts mehr zu retten, der Ordner
+  // liegt zu tief. Original zurückgeben, der Aufrufer meldet es.
   if(platz < 1) return s;
-  var kurz = rumpf.slice(0, platz).replace(/[ _.\-]+$/,'');
-  return kurz ? (kurz + endung) : s;
+  // Von hinten ganze Stücke einsammeln, solange sie passen.
+  var stuecke = rumpf.split(/([_;\s]+)/).filter(function(x){return x!=='';});
+  var hinten = '', i = stuecke.length - 1;
+  while(i >= 0 && (stuecke[i] + hinten).length <= platz){ hinten = stuecke[i] + hinten; i--; }
+  hinten = hinten.replace(/^[\s_;.\-]+/, '').replace(/[\s_;.\-]+$/, '');
+  // Passt nicht einmal ein ganzes Stück: dann eben die letzten Zeichen.
+  if(!hinten) hinten = rumpf.slice(rumpf.length - platz).replace(/^[\s_;.\-]+/, '');
+  return hinten ? (hinten + endung) : s;
 }
 
 // Passt einen Namen an einen Ordner an. Gibt zurück, was daraus wurde und ob
@@ -32256,7 +32271,9 @@ function _pamNameFuerOrdner(ordnerPfad, name){
     name: neu,
     gekuerzt: neu !== String(name||''),
     passt: (String(ordnerPfad||'').length + 1 + neu.length) <= PAM_PFAD_WORD,
-    budget: budget
+    budget: budget,
+    // b945: zu wenig Platz fuer einen brauchbaren Namen – hier muss gefragt werden
+    fragen: budget < PAM_NAME_MINDEST
   };
 }
 // b944: Vorbeugen statt reparieren – der Name wird schon BEIM ANLEGEN passend gemacht.
@@ -32283,6 +32300,18 @@ async function _pamNamePassend(fid,name){
   e.unbekannt=false;
   return e;
 }
+// b945: Bleibt kein brauchbarer Name uebrig, wird gefragt statt geraten. Nur der
+// Benutzer weiss, welcher Teil des Namens der wichtige ist.
+// ⛔ istBild=true laesst Fotos und Videos still durchlaufen.
+function _pamNameFragen(erg,alt,istBild){
+  if(!erg||erg.unbekannt||!erg.gekuerzt)return erg;
+  if(istBild||!erg.fragen)return erg;
+  var w=prompt('„'+alt+'"\n\npasst nicht in diesen Ordner – hier ist Platz für nur '+erg.budget+' Zeichen (mit Endung).\nDer Vorschlag behält das Ende, dort stehen meist Auftrag und Inhalt.\n\nWie soll die Datei heißen?',erg.name);
+  if(w===null)return erg;
+  w=String(w).replace(/[\\/:*?\u0022<>|]/g,'-').trim();
+  if(!w)return erg;
+  return {name:w,gekuerzt:w!==String(alt),passt:w.length<=erg.budget,budget:erg.budget,fragen:false,unbekannt:false};
+}
 // Sagt dem Benutzer, was mit dem Namen passiert ist. Stillschweigend umbenennen wäre
 // eine böse Überraschung – man sucht später eine Datei, die anders heißt.
 function _pamNameGekuerztMelden(erg,alt){
@@ -32293,6 +32322,24 @@ function _pamNameGekuerztMelden(erg,alt){
     // Hochgeladen wird trotzdem: eine Datei zurückzuhalten wäre stiller Verlust.
     showToast('⚠ „'+(erg.name||alt)+'" liegt in einem sehr tiefen Ordner – am Rechner kommt Word nicht an die Datei heran. In Drive ist sie da, im Browser lässt sie sich öffnen.','warning',11000);
   }
+}
+// b945: Text und Farbe der Zeichenzahl – an ZWEI Stellen gebraucht: beim Aufbau des
+// Fensters und nach dem Kürzen. Vorher stand die Zahl nur im Aufbau; nach dem Kürzen
+// blieb „267 Zeichen" stehen, obwohl es 218 waren (Frank am 08.09.2026 gesehen).
+function _pamLaengeZeile(pfad){
+  var n=String(pfad||'').length, st=_pamPfadStufe(pfad);
+  return {text:n+' Zeichen'+(st==='ok'?' – passt (Word arbeitet bis 218)':''),
+          farbe:st==='win'?'#E24B4A':(st==='word'?'#b45309':'var(--text2)')};
+}
+// b945: Die Tastenfolge steht jetzt IM Fenster – sie war sonst jedes Mal zu erfragen.
+function _pamTastenHilfe(){
+  var k='display:inline-block;padding:1px 5px;margin:0 1px;border:1px solid var(--border);border-radius:4px;background:var(--bg3);font-family:monospace;font-size:11px;';
+  function T(){var a=[];for(var i=0;i<arguments.length;i++)a.push('<span style="'+k+'">'+arguments[i]+'</span>');return a.join('+');}
+  var pfeil=' <span style="color:var(--text2);">dann</span> ';
+  return '<div style="margin-top:8px;display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center;font-size:11.5px;">'
+    +'<span style="color:var(--text2);">In <b>Word</b>:</span><span>'+T('Strg','O')+pfeil+T('Strg','V')+pfeil+T('Enter')+'</span>'
+    +'<span style="color:var(--text2);">Im <b>Explorer</b>:</span><span>'+T('Win','E')+pfeil+T('Strg','L')+pfeil+T('Strg','V')+pfeil+T('Enter')+'</span>'
+    +'</div>';
 }
 // b943: Nach dem Kürzen den neuen Namen dort eintragen, wo die Datei in der Karte steht.
 // Die Kennung liegt je nach Herkunft in fileId, driveId oder editedDriveId – alle drei prüfen.
@@ -32339,11 +32386,11 @@ function _pamPfadFenster(pfad,kopiert,geteilt,opt){
   }
   bx.innerHTML='<div style="font-size:15px;font-weight:700;margin-bottom:6px;">📁 Ordner am Rechner</div>'
     +'<div style="font-size:12px;color:var(--text2);margin-bottom:10px;">'
-      +(kopiert?'Der Pfad liegt in der Zwischenablage. In Word <b>Datei → Öffnen</b> oder im Explorer oben in die Adresszeile einfügen (Strg+V) und Enter.'
+      +(kopiert?'Der Pfad liegt in der Zwischenablage.'+_pamTastenHilfe()
                :'Die Zwischenablage ließ sich nicht beschreiben – Pfad bitte von Hand markieren und kopieren.')
     +'</div>'
     +'<input type="text" id="_pamPfadFeld" readonly value="'+esc(pfad)+'" style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;padding:9px 10px;font-family:monospace;">'
-    +'<div style="font-size:11px;color:'+farbe+';margin-top:5px;">'+laenge+' Zeichen'+(stufe==='ok'?' – passt (Word arbeitet bis 218)':'')+'</div>'
+    +'<div id="_pamPfadLaenge" style="font-size:11px;color:'+_pamLaengeZeile(pfad).farbe+';margin-top:5px;">'+_pamLaengeZeile(pfad).text+'</div>'
     +warn
     +(geteilt?'<div style="font-size:12px;color:#b45309;margin-top:8px;">⚠ Dieser Ordner liegt in einer <b>Geteilten Ablage</b>. Dort beginnt der Pfad am Rechner mit <b>G:\\Geteilte Ablagen\\…</b> – der obere Teil oben stimmt dann nicht.</div>':'')
     +'<div style="font-size:11px;color:var(--text2);margin-top:8px;">In Word bearbeiten und mit <b>Strg+S</b> speichern – Drive lädt die Datei von selbst wieder hoch. Es bleibt dieselbe Datei, nichts muss zurückgespeichert werden.</div>'
@@ -32368,10 +32415,18 @@ function _pamPfadFenster(pfad,kopiert,geteilt,opt){
 // direkt in Word gehen können, ohne das Fenster nochmal aufzurufen.
 function _pamPfadKuerzen(pfad,opt,bx,feld,knopf){
   const teile=_pamPfadTeile(pfad);
-  const erg=_pamNameFuerOrdner(teile.ordner,teile.name);
+  // b945: let, nicht const – nach der Rueckfrage wird erg neu gesetzt.
+  let erg=_pamNameFuerOrdner(teile.ordner,teile.name);
   if(!erg.gekuerzt){showToast('Der Name ist schon kurz genug','info',3000);return;}
   if(typeof gdriveToken==='undefined'||!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden (oben rechts: ☁️ Google Drive)','error',6000);return;}
-  if(!confirm('Die Datei wird in Google Drive umbenannt:\n\nalt:  '+teile.name+'\nneu:  '+erg.name+'\n\nDanach ist der Pfad '+(teile.ordner.length+1+erg.name.length)+' statt '+String(pfad).length+' Zeichen lang und Word kann sie öffnen und speichern.\n\nEs bleibt dieselbe Datei, nichts geht verloren.'))return;
+  // b945: Nicht mehr zuschlagen – fragen. Nur Frank weiß, welcher Teil des Namens
+  // der wichtige ist; ein Vorschlag vom Rechner ist nur ein Startpunkt.
+  var _wunsch=prompt('Wie soll die Datei heißen?\n\nIn diesem Ordner ist Platz für '+erg.budget+' Zeichen (mit Endung).\nDer Vorschlag behält das Ende – dort stehen meist Auftrag und Inhalt.\n\nalt: '+teile.name,erg.name);
+  if(_wunsch===null)return;
+  _wunsch=String(_wunsch).replace(/[\\/:*?\u0022<>|]/g,'-').trim();
+  if(!_wunsch||_wunsch===teile.name)return;
+  if(_wunsch.length>erg.budget&&!confirm('„'+_wunsch+'" ist '+_wunsch.length+' Zeichen lang – '+(_wunsch.length-erg.budget)+' zu viel.\n\nWord wird die Datei dann weiterhin nicht öffnen können.\n\nTrotzdem so nennen?'))return;
+  erg={name:_wunsch,gekuerzt:true,passt:(teile.ordner.length+1+_wunsch.length)<=PAM_PFAD_WORD,budget:erg.budget};
   knopf.disabled=true;knopf.textContent='⏳ wird umbenannt…';
   _tuDriveUmbenennen(opt.fileId,erg.name).then(function(neu){
     if(!neu){showToast('⚠ Umbenennen hat nicht geklappt – der Name bleibt wie er war','error',7000);knopf.disabled=false;knopf.textContent='✂ Namen kürzen und kopieren';return;}
@@ -32382,7 +32437,11 @@ function _pamPfadKuerzen(pfad,opt,bx,feld,knopf){
     feld.value=neuerPfad;
     try{navigator.clipboard.writeText(neuerPfad);}catch(e){}
     knopf.remove();
-    showToast('✂ Gekürzt auf '+neu+' – neuer Pfad kopiert, Word kann die Datei jetzt öffnen','success',7000);
+    // b945: DIE ZAHL MITZIEHEN. Ohne das stand hier weiter die alte Länge und sagte
+    // das Gegenteil von dem, was gerade passiert ist.
+    const lz=bx.querySelector('#_pamPfadLaenge');
+    if(lz){const z=_pamLaengeZeile(neuerPfad);lz.textContent=z.text;lz.style.color=z.farbe;}
+    showToast('✂ Jetzt „'+neu+'" – neuer Pfad kopiert ('+neuerPfad.length+' Zeichen)','success',7000);
     const w=bx.querySelector('#_pamPfadWarn');if(w)w.remove();
   });
 }
@@ -44085,7 +44144,8 @@ function openEmailPdfPreview(fileId,name){
 async function _driveUploadGeneric(buf,fname,mimeType,fid){
   // b944: Name passend machen, BEVOR er nach Drive geht – danach hiesse die Datei
   // in Drive anders als in der Karte.
-  const _b944=(typeof _pamNamePassend==='function')?await _pamNamePassend(fid,fname):{name:fname,gekuerzt:false,passt:true,unbekannt:true};
+  let _b944=(typeof _pamNamePassend==='function')?await _pamNamePassend(fid,fname):{name:fname,gekuerzt:false,passt:true,unbekannt:true};
+  if(typeof _pamNameFragen==='function')_b944=_pamNameFragen(_b944,fname,false);
   if((_b944.gekuerzt||!_b944.passt)&&typeof _pamNameGekuerztMelden==='function')_pamNameGekuerztMelden(_b944,fname);
   fname=_b944.name;
   const fb=new Uint8Array(buf);
@@ -52449,6 +52509,8 @@ async function _emDateiKopieAnlegen(f,echt,fid,quelle){
   // b944: Das Ziel ist eine ANDERE Karte – deren Ordner kann tiefer liegen als der
   // der Quelle. Ohne Pruefung waere die Kopie am Rechner nicht zu oeffnen.
   var _b944=(typeof _pamNamePassend==='function')?await _pamNamePassend(fid,f.name||'Datei'):{name:f.name||'Datei',gekuerzt:false,passt:true,unbekannt:true};
+  // b945: Bilder laufen still durch, Dokumente werden erfragt.
+  if(typeof _pamNameFragen==='function')_b944=_pamNameFragen(_b944,f.name||'Datei',!!f.isImg);
   if((_b944.gekuerzt||!_b944.passt)&&typeof _pamNameGekuerztMelden==='function')_pamNameGekuerztMelden(_b944,f.name||'Datei');
   return fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(id)+'/copy?fields=id,name,webViewLink,thumbnailLink',
     {method:'POST',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},
