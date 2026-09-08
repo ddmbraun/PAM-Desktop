@@ -10066,7 +10066,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-08 · #959'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-08-b959) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-08 · #960'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-08-b960) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -35610,7 +35610,7 @@ async function _pamEmailAntwortenMitVerlauf(){
    sonst zeigt PAM eine alte Fassung weiter und die neuen Spalten bleiben leer.
    Genau das war im Betrieb zu sehen: "woher" war ueberall leer, weil die
    gespeicherte Fassung noch von der Bauart davor stammte. */
-const AB_BAUART=2;
+const AB_BAUART=3;
 let _abLetzte=null;
 const AB_OLLAMA='http://localhost:11434';
 const AB_MODELL='qwen2.5:7b';
@@ -35963,9 +35963,9 @@ function _abFremde(mails){
   });
 }
 /* Wer ist der Auftraggeber? ⛔ Nicht einfach „der erste fremde Absender": in der
-   Karte „Hermann-von-Salza-Str." schreibt der Gerüstbauer zuerst, Auftraggeber ist
-   aber die Genossenschaft. Wer den Auftrag gibt, hat Vorrang vor dem, wer zufällig
-   zuerst geschrieben hat. */
+   Praxis schreibt oft ein Gerüstbauer oder Lieferant zuerst, Auftraggeber ist aber
+   die Verwaltung. Wer den Auftrag gibt, hat Vorrang vor dem, wer zufällig zuerst
+   geschrieben hat. */
 const AB_AG_RANG={'Hausverwaltung':1,'Genossenschaft':1,'Versicherung':2,'Privatperson':3,'Firma':4,'Lieferant':5};
 function _abAuftraggeber(mails,hv){
   const f=_abFremde(mails);
@@ -35979,7 +35979,7 @@ function _abAuftraggeber(mails,hv){
   return beste||{mail:f[0],rolle:_abRolle(f[0].adresse,f[0].absName,hv,f[0].subject)};
 }
 /* ⛔ Beim Prüfen an echten Karten aufgefallen: „irgendeine Mail kommt von einem
-   Lieferanten" reicht NICHT als Kennzeichen. In der Karte „Hermann-von-Salza-Str."
+   Lieferanten" reicht NICHT als Kennzeichen. In einer echten Karte
    schreibt ein Gerüstbauer mitten in einem Schadensvorgang – die Karte wurde
    dadurch zur Lieferantenpost erklärt und verlor ihren Verlauf.
    Lieferantenpost ist eine Karte nur, wenn NIEMAND von der Auftraggeberseite
@@ -36062,6 +36062,65 @@ function _abIstEigenerName(name,eigeneNamen){
   if(!name||!eigeneNamen||!eigeneNamen.size)return false;
   return String(name).split(/\s+/).some(w=>w.length>3&&eigeneNamen.has(w.toLowerCase()));
 }
+/* Die eigentliche Meldung - das, was jemand wirklich geschrieben hat.
+
+   ⛔ Beim Messen an echten Karten fiel der erste Versuch durch: "nimm den ersten
+   Abschnitt" lieferte "bitte auch hier schauen, was zu tun ist. Danke!" - den
+   Weiterleitungssatz der Verwaltung, genauso nichtssagend wie der Betreff. Der
+   Inhalt steht eine Stufe TIEFER, beim Melder.
+
+   Deshalb werden alle Abschnitte verglichen: Floskel-Anfaenge und Signatur-Bloecke
+   nach hinten, dann der laengste echte Text. Das ist keine Zusammenfassung, sondern
+   ein Zitat - es kann nichts erfinden, weil es woertlich aus der Mail stammt. */
+const AB_HOHL=/^(bitte (auch )?(hier )?(mal )?(nach)?(schauen|sehen|pr(ü|ue)fen)|k(ö|oe)nnt?en sie|k(ö|oe)nnen sie|w(ü|ue)rden sie|siehe (unten|anbei|beigef)|anbei|wie (telefonisch |bereits )?besprochen|zu beigef(ü|ue)gt|hier sprudelt|bitte um|danke|vielen dank|melde mich|zur kenntnis|zur weiterleitung|weitergeleitet|fyi)\b/i;
+
+/* Sieht der Text aus wie eine Signatur? Name, Anschrift, Nummer untereinander -
+   viele kurze Zeilen, kaum Satzzeichen, kein Verb. An einer echten Karte
+   aufgefallen, wo sonst "<Name> <Strasse> phone +49 ..." als Meldung dastand. */
+function _abIstSignatur(text){
+  const z=String(text||'').split('\n').map(x=>x.trim()).filter(Boolean);
+  if(!z.length)return false;
+  const kurze=z.filter(x=>x.length<45).length;
+  const satzzeichen=(text.match(/[.!?]/g)||[]).length;
+  const woerter=String(text||'').split(/\s+/).filter(Boolean).length;
+  /* ⛔ Eine EINZELNE Zeile ist nie eine Signatur, auch wenn sie kurz ist:
+     "Im Bad tropft es von der Decke." wurde sonst aussortiert und uebrig blieb
+     der Adressblock. Ein Signaturblock hat immer mehrere Zeilen. */
+  const mehrzeilig=z.length>=3;
+  return (mehrzeilig&&kurze/z.length>0.8&&satzzeichen<2)||(woerter<6&&satzzeichen<1);
+}
+
+function _abMeldung(schritte){
+  const gut=[];
+  (schritte||[]).forEach(st=>{
+    const txt=String(st.text||'').trim();
+    /* ⛔ Erst stand hier 40 - dann fiel "Im Bad tropft es von der Decke." (31 Zeichen)
+       heraus, und uebrig blieb ein Signatur-Block. Kurze Meldungen sind oft die
+       klarsten. */
+    if(txt.length<25)return;
+    const ersteZeile=(txt.split('\n').find(z=>z.trim().length>15)||'').trim();
+    gut.push({txt:txt,
+      hohl:AB_HOHL.test(ersteZeile)?1:0,
+      sig:_abIstSignatur(txt)?1:0,
+      fremd:st.fwd?0:1,            /* der weitergeleitete Teil ist meist der Kern */
+      laenge:txt.length});
+  });
+  if(!gut.length)return '';
+  /* Eine Signatur ist NIE eine Meldung - sie wird ausgeschlossen, nicht nur nach
+     hinten sortiert. Bleibt danach nichts uebrig, ist das ehrlicher als ein
+     Adressblock unter "Worum geht's". */
+  const echte=gut.filter(x=>!x.sig);
+  const liste=echte.length?echte:[];
+  if(!liste.length)return '';
+  liste.sort((a,b)=>(a.hohl-b.hohl)||(b.laenge-a.laenge));
+  gut.length=0;gut.push.apply(gut,liste);
+  /* Zwei Saetze reichen - der ganze Text steht ja im Verlauf darunter. */
+  const roh=gut[0].txt.replace(/\s+/g,' ').trim();
+  const saetze=roh.split(/(?<=[.!?])\s+/).slice(0,2).join(' ');
+  const kurz=(saetze||roh);
+  return kurz.length>240?(kurz.substring(0,238).replace(/\s+\S*$/,'')+'…'):kurz;
+}
+
 function _abEsc(s){const d=document.createElement('div');d.textContent=String(s==null?'':s);return d.innerHTML;}
 
 async function _abBauen(task,vonHand){
@@ -36126,6 +36185,7 @@ async function _abBauen(task,vonHand){
     absWann:ag&&ag.mail.date?new Date(ag.mail.date).toLocaleDateString('de-DE'):'',
     rolle:ag?ag.rolle:'',
     objekt:_abObjekt(mails,schritte),
+    meldung:_abMeldung(schritte),
     /* Ohne KI ist der Betreff der Ersatz für „worum geht's". Vorspann und
        Telefonnummer raus – die Nummer steht schon bei „Vor Ort". */
     betreff:(mails[0]&&mails[0].subject||'').replace(/^\s*(?:(?:WG|AW|FW|RE|FWD|Aw|Re|Fwd)\s*:\s*)+/gi,'')
@@ -36209,13 +36269,18 @@ function _abRendern(d){
   const personen=_abAllePersonen(d);
   const ki=d.ki||{},ob=ki.objekt||{};
   const objekt=[ob.strasse,ob.ort,ob.lage].filter(Boolean).join(' · ')||d.objekt||'';
-  const thema=ki.worum_geht_es||d.betreff||'';
+  /* Die Meldung schlaegt die Betreffzeile: sie sagt, worum es wirklich geht.
+     Den Betreff sieht man ohnehin im Fenstertitel und in der Mail selbst. */
+  const thema=ki.worum_geht_es||d.meldung||d.betreff||'';
 
   /* ── Die eine Zeile auf der Karte ── */
   if(hdr){
     const teile=[];
     if(d.absender)teile.push(d.absender);
-    if(thema)teile.push(thema.length>44?thema.substring(0,44)+'…':thema);
+    /* In der einen Zeile auf der Karte ist der Betreff besser aufgehoben: er ist
+       kurz. Die ausfuehrliche Meldung steht im Fenster. */
+    const kurzThema=d.betreff||thema;
+    if(kurzThema)teile.push(kurzThema.length>44?kurzThema.substring(0,44)+'…':kurzThema);
     const n=personen.length;
     if(n)teile.push(n===1?'1 Ansprechpartner':(n+' Ansprechpartner'));
     hdr.textContent=teile.join(' · ');
