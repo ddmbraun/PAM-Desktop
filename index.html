@@ -8831,6 +8831,23 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
           </div>
         </div>
 
+        <!-- 📋 Auf einen Blick (b955) – steht ÜBER „Objekt", weil man beim Öffnen zuerst
+             wissen will: worum geht es und wen rufe ich an. Der Inhalt entsteht beim
+             Öffnen der Karte von selbst (_abStart), NICHT auf Knopfdruck.
+             ⛔ Der Abschnitt versteckt sich selbst (display:none), solange nichts
+             Brauchbares drinsteht – ein Kasten mit fünf leeren Zeilen wäre schlimmer
+             als gar keiner (Frank am 08.09.2026 zur Melle-Angebotsmail). -->
+        <div class="mv2-section mv2-r-card collapsible open" id="tAufEinenBlickSect" style="display:none;">
+          <div class="mv2-section-label mv2-rhdr-purple" onclick="_toggleMv2Sect('tAufEinenBlickSect',event)" style="cursor:pointer;"><span style="flex-shrink:0;white-space:nowrap;">📋 Auf einen Blick</span><span id="abHdrInfo" style="margin-left:8px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:400;color:var(--text2);font-size:calc(11px * var(--modal-scale,1));text-transform:none;"></span><span id="abNeuBtn" onclick="event.stopPropagation();_abNeuLesen();" title="Noch einmal auslesen" style="margin-left:auto;margin-right:6px;cursor:pointer;color:var(--text2);font-size:calc(13px * var(--modal-scale,1));font-weight:400;">⟳</span><span class="mv2-coll-arrow">›</span></div>
+          <div class="mv2-r-card-body">
+            <div id="abFelder" style="font-size:calc(12px * var(--modal-scale,1));"></div>
+            <div id="abVerlaufZeile" style="display:none;border-top:1px dashed var(--border);margin-top:8px;padding-top:7px;">
+              <span onclick="_abVerlaufUmschalten()" style="cursor:pointer;color:var(--text2);font-weight:600;font-size:calc(11px * var(--modal-scale,1));display:inline-flex;align-items:center;gap:6px;"><span id="abVerlaufPfeil">▸</span><span id="abVerlaufLabel">Ganzer Verlauf</span></span>
+              <div id="abVerlauf" style="display:none;margin-top:8px;"></div>
+            </div>
+          </div>
+        </div>
+
         <!-- 📍 Objekt (b553 Punkt 8: von links nach rechts, Position 3) -->
         <div class="mv2-section mv2-r-card baustelle-only collapsible open" id="tObjektSect">
           <!-- b876: Der Abschnitt ist beim Öffnen zugeklappt. Ohne diese Zeile sah man
@@ -10017,7 +10034,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-08 · #954'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-08-b954) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-08 · #955'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-08-b955) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -13720,6 +13737,11 @@ function saveTaskData(){
     // wurden dadurch bei JEDEM Speichern im großen Fenster gelöscht
     emNotiz:existingTask?.emNotiz||'',
     emailSenderName:existingTask?.emailSenderName||'',
+    /* b955: „Auf einen Blick" mit hinübernehmen. ⛔ Steht das Feld hier NICHT, wird
+       die Kurzfassung bei jedem Speichern im großen Fenster gelöscht und müsste
+       jedes Mal neu gerechnet werden – dieselbe Falle wie bei b543 (F2) zwei
+       Zeilen darüber. */
+    _aufEinenBlick:existingTask?._aufEinenBlick||null,
     freierTermin:existingTask?.freierTermin?JSON.parse(JSON.stringify(existingTask.freierTermin)):null,
     emailUrl:existingTask?.emailUrl||'',
     msMessageId:(()=>{const _t=findTaskById(document.getElementById('taskId')?.value);return _t?(_t.msMessageId||''):'';})(),
@@ -35528,6 +35550,478 @@ async function _pamEmailAntwortenMitVerlauf(){
   }
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   b955 · „Auf einen Blick" – Kurzfassung + gesäuberter Verlauf über der Karte
+   ───────────────────────────────────────────────────────────────────────────
+   Zwei Teile, bewusst getrennt:
+
+   1. MUSTER (_abSaeubern, _abKontakte, _abRolle) – reines Suchen und Streichen,
+      kostet 0 Sekunden, braucht KEINE KI und läuft darum auf Laptop und Handy
+      genauso. Gemessen am 08.09.2026 an 3 echten Vorgängen: von 40.348 Zeichen
+      bleiben 2.952 übrig (7 %), ohne dass eine Angabe verloren geht.
+
+   2. KI (_abKi) – die lokale Ollama-Instanz auf PC-FBRAUN-01, angesprochen über
+      http://localhost:11434. ⛔ Der Mailtext verlässt das Gerät NICHT.
+      Sie füllt nur, was die Muster nicht sicher können: wer vor Ort ist und wie
+      der Stand ist. Ist sie nicht da, bleibt der Kasten trotzdem brauchbar –
+      keine Fehlermeldung, keine Wartezeit.
+
+   ⛔ Läuft beim ÖFFNEN einer Karte von selbst, aber immer nur für die EINE
+      offene Karte – nie über alle. Ergebnis wird in task._aufEinenBlick
+      gespeichert und wandert damit zu Laptop und Handy, die selbst keine KI
+      haben.
+   ⛔ Veraltet-Erkennung über Anzahl der Nachrichten + Datum der neuesten. Ein
+      still veralteter Kasten wäre schlimmer als gar keiner.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const AB_OLLAMA='http://localhost:11434';
+const AB_MODELL='qwen2.5:7b';
+
+/* Wer ist der Absender? Die Domain verrät es – im Test an 27 Mails zu 100 %.
+   Frank kann die Liste später erweitern; unbekannte Firmen landen auf 'Firma'. */
+const AB_ROLLEN=[
+  [/ddmbraun\.de|ddmbraun@/i,'wir selbst'],
+  [/alkenbrecher\.info|tyroller-immobilien\.de/i,'Hausverwaltung'],
+  [/wbg-badlangensalza\.de/i,'Genossenschaft'],
+  [/devk\.de|allianz|provinzial|vhv\.|gothaer|@wgv|ergo\./i,'Versicherung'],
+  [/melle-gallhoefer|stark-deutschland|rotofrank|kiloutou|feuer-pt|schirrmacher|feilmeier|roof\.academy|dachdecker-nordhausen|bauking|zambelli/i,'Lieferant'],
+  [/gmx\.|t-online\.|freenet\.|web\.de|gmail\.|googlemail\.|bluewin\.|outlook\.|hotmail\.|posteo\.|mailbox\.org|icloud\./i,'Privatperson'],
+];
+/* ⛔ Beim Bau an echten Karten aufgefallen: EML-Originale tragen keine getrennte
+   Adresse, sondern `"B&E Gerüstbau GmbH" <bue-geruestbau@t-online.de>` in einem
+   Stück. Ungetrennt landete der ganze String als Name im Kasten – und die
+   Domain-Regel las @t-online als Privatperson, obwohl „GmbH" danebensteht. */
+function _abAdr(s){const m=String(s||'').match(/[\w.\-+]+@[\w.\-]+\.[a-z]{2,}/i);return m?m[0]:'';}
+function _abName(s){
+  const n=String(s||'').replace(/<[^>]*>/g,'').replace(/[\w.\-+]+@[\w.\-]+\.[a-z]{2,}/gi,'').replace(/["'<>]/g,'').trim().replace(/[,;]$/,'');
+  return n||_abAdr(s).split('@')[0].replace(/[._]/g,' ');
+}
+function _abRolle(adr,name){
+  /* Eine Firma bleibt eine Firma, auch wenn sie bei t-online ist. */
+  if(name&&/\b(GmbH|GbR|mbH|KG|AG|e\.?G\.?|OHG|UG)\b/.test(name)&&!/ddmbraun/i.test(adr||''))return 'Firma';
+  for(const p of AB_ROLLEN)if(p[0].test(adr||''))return p[1];
+  return adr?'Firma':'';
+}
+
+/* Ab diesen Zeilen ist der Rest der Mail nur noch Kleingedrucktes. */
+const AB_ABBRUCH=[
+  /^\s*Der Inhalt dieser E-?Mail ist ausschlie(ß|ss)lich/i,
+  /^\s*Diese E-?Mail (kann )?(enth(ä|ae)lt|ist)\s+(vertrauliche|ausschlie)/i,
+  /^\s*Bitte beachten Sie unsere (neuen )?(Telefonzeiten|Sprechzeiten)/i,
+  /^\s*Au(ß|ss)erhalb unserer Telefonzeiten/i,
+  /^\s*This (e-?mail|message) (is|may)/i,
+  /^\s*Sitz der Gesellschaft/i,
+  /^\s*(Amtsgericht|Handelsregister|HRB|USt-?IdNr|Steuernummer|Gerichtsstand)\b/i,
+  /^\s*(P\.?S\.?:? ?)?(Bitte )?[Dd]enken Sie an die Umwelt/i,
+  /^\s*Sie erhalten nicht h(ä|ae)ufig E-?Mails von/i,
+];
+const AB_GRUSS=/^\s*(mit freundlichen gr(ü|ue)(ß|ss)en|freundliche gr(ü|ue)(ß|ss)e\/?[a-z ]*|viele gr(ü|ue)(ß|ss)e|beste gr(ü|ue)(ß|ss)e|mit besten gr(ü|ue)(ß|ss)en|sch(ö|oe)ne gr(ü|ue)(ß|ss)e|herzliche gr(ü|ue)(ß|ss)e|mfg|lg|vg)\b[\s,.!\/a-z]*$/i;
+const AB_ANREDE=/^\s*(hallo|guten (tag|morgen|abend)|sehr geehrte[rs]?|liebe[rs]?|moin|servus)\b[^\n]{0,60}[,:]?\s*$/i;
+const AB_SIGTRENN=/^\s*(--+|__+)\s*$/;
+const AB_SIGZEILE=new RegExp([
+  '^\\s*(mail|e-?mail|fon|tel|telefon|telefax|fax|mobil|handy|web|www|internet|homepage)\\s*[:.]',
+  '^\\s*(Gesch(ä|ae)ftsf(ü|ue)hrer|Prokurist|Inhaber)\\b',
+  '^\\s*(Gepr(ü|ue)fter\\s+)?Betriebswirt\\b',
+  '^\\s*Ihr(e)? Ansprechpartner(in)?\\s*:',
+  '^\\s*\\d{5}\\s+[A-ZÄÖÜ]',
+  '^\\s*[A-ZÄÖÜ][\\wäöüß.\\-]*(stra(ß|ss)e|str\\.|weg|platz|allee|ring)\\s+\\d{1,4}\\s*[a-zA-Z]?\\s*$',
+  '^\\s*(https?://|www\\.)',
+  '^\\s*[\\w.\\-+]+@[\\w.\\-]+\\.[a-z]{2,}\\s*$',
+  '^\\s*(Photovoltaik-Manager|ZVDH|zertifiziert)',
+  '^\\s*(Anlage|Anlagen|Anhang)\\s*:?\\s*$',
+  '^\\s*.{3,55}(GmbH|GbR|mbH|KG|AG|e\\.?G\\.?)\\s*$',
+  '^\\s*(Dachdeckermeister|Zimmermeister|Klempnermeister)\\b.{0,45}$',
+  '^\\s*Bachelor Professional\\b',
+  '^\\s*(Vertriebsmitarbeiter|Au(ß|ss)endienst|Niederlassung)\\b',
+].join('|'),'i');
+const AB_FWDSTART=/^\s*-*\s*(Urspr(ü|ue)ngliche Nachricht|Weitergeleitete Nachricht|Original Message)\s*-*\s*$/i;
+
+function _abHtmlZuText(h){
+  return String(h||'')
+    .replace(/<style[\s\S]*?<\/style>/gi,'').replace(/<script[\s\S]*?<\/script>/gi,'')
+    .replace(/<br\s*\/?>/gi,'\n').replace(/<\/(p|div|tr|li|h\d)>/gi,'\n').replace(/<[^>]+>/g,'')
+    .replace(/&nbsp;/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>')
+    .replace(/&quot;/g,'"').replace(/&#39;/g,"'")
+    .replace(/&auml;/g,'ä').replace(/&ouml;/g,'ö').replace(/&uuml;/g,'ü')
+    .replace(/&Auml;/g,'Ä').replace(/&Ouml;/g,'Ö').replace(/&Uuml;/g,'Ü').replace(/&szlig;/g,'ß')
+    .replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
+}
+/* Outlook macht aus jedem Absatz ein <div> – dann ist jede zweite Zeile leer. */
+function _abGlaetten(t){
+  const z=t.split('\n');const leer=z.filter(x=>!x.trim()).length;
+  return (z.length>6&&leer/z.length>0.4)?z.filter(x=>x.trim()).join('\n'):t;
+}
+/* Eine weitergeleitete Mail in ihre Stufen zerlegen.
+   ⛔ Beim Prüfen an echten Karten aufgefallen: erst wurde bei der Zeile „Von:"
+   einfach abgeschnitten – dabei steht bei Alkenbrecher fast immer GENAU DORT das
+   Wichtige. Oben schreibt die Verwaltung „bitte hier mal schauen", darunter, im
+   weitergeleiteten Teil, meldet sich der Mieter mit Namen und Telefonnummer.
+   Abgeschnitten blieb von so einer Mail ein Halbsatz übrig. */
+function _abStufen(text){
+  const zeilen=_abGlaetten(String(text||'')).split('\n').map(z=>z.replace(/^\s*>+\s?/,'').replace(/\s+$/,''));
+  const stufen=[];let akt=[],kopf=null;
+  const schluss=()=>{if(akt.length)stufen.push({kopf:kopf,zeilen:akt});akt=[];};
+  for(let i=0;i<zeilen.length;i++){
+    const z=zeilen[i];
+    if(AB_FWDSTART.test(z)){schluss();kopf=null;continue;}
+    if(/^\s*Von\s*:\s*\S/i.test(z)){
+      schluss();
+      kopf={von:z.replace(/^\s*Von\s*:\s*/i,'').trim(),datum:'',betreff:''};
+      /* Die drei Kopfzeilen darunter mitnehmen und überspringen. */
+      for(let j=i+1;j<Math.min(i+6,zeilen.length);j++){
+        const k=zeilen[j];
+        if(/^\s*(Gesendet|Datum|Sent)\s*:/i.test(k)){kopf.datum=k.replace(/^[^:]*:\s*/,'').trim();i=j;}
+        else if(/^\s*Betreff\s*:/i.test(k)){kopf.betreff=k.replace(/^[^:]*:\s*/,'').trim();i=j;}
+        else if(/^\s*(An|Cc|To)\s*:/i.test(k)){i=j;}
+        else break;
+      }
+      continue;
+    }
+    akt.push(z);
+  }
+  schluss();
+  return stufen;
+}
+/* Eine einzelne Stufe von Floskeln befreien. */
+function _abSaeubern(text){
+  const zeilen=_abGlaetten(String(text||'')).split('\n').map(z=>z.replace(/^\s*>+\s?/,'').replace(/\s+$/,''));
+  return _abStufeSaeubern(zeilen);
+}
+function _abStufeSaeubern(zeilen){
+  const raus=[];let gez=null;
+  for(let i=0;i<zeilen.length;i++){
+    const z=zeilen[i];
+    if(AB_ABBRUCH.some(re=>re.test(z)))break;
+    if(AB_GRUSS.test(z)){const n=(zeilen[i+1]||'').trim();if(n&&n.length<45&&!/[.!?]/.test(n))gez=n;break;}
+    if(AB_ANREDE.test(z))continue;
+    if(AB_SIGTRENN.test(z))break;
+    if(AB_SIGZEILE.test(z))continue;
+    raus.push(z);
+  }
+  return {text:raus.join('\n').replace(/\n{3,}/g,'\n\n').trim(),gez:gez};
+}
+/* Was in einer früheren Mail schon stand, muss nicht noch einmal dastehen. */
+function _abOhneWdh(text,gesehen){
+  const neu=[];
+  for(const z of String(text||'').split('\n')){
+    const k=z.trim().toLowerCase().replace(/\s+/g,' ');
+    if(k.length>25&&gesehen.has(k))continue;
+    if(k.length>25)gesehen.add(k);
+    neu.push(z);
+  }
+  return neu.join('\n').replace(/\n{3,}/g,'\n\n').trim();
+}
+
+/* Name und Telefonnummer als PAAR – nicht getrennt einsammeln.
+   ⛔ Genau hier lagen die Muster am 08.09.2026 falsch: standen zwei Personen in
+   der Mail, klebten sie den ersten Namen an die erste Nummer. Deshalb wird nur
+   der Text UNMITTELBAR VOR der Nummer nach einem Namen abgesucht. */
+const AB_NR=/((?:\+49[\s\/-]?|0)\d{2,5}[\s\/\-]?\d{3,9}(?:[\s\/-]?\d{1,6})?)/g;
+/* Die eigene Rufnummer aus den Einstellungen holen – als Ansprechpartner „vor Ort"
+   wäre sie Unsinn.
+   ⛔ NIEMALS die Nummer hier hineinschreiben: index.html wird öffentlich über
+   GitHub Pages ausgeliefert. Beim Bau von b955 stand sie zuerst fest im Code,
+   `test_b777` hat es abgefangen – dieselbe Falle, die dort schon dokumentiert ist. */
+function _abEigeneNr(){
+  try{
+    const f=(typeof _pamFirma==='function')?_pamFirma():null;
+    const roh=String((f&&f.tel)||'').replace(/\D/g,'');
+    if(roh.length>=6)return roh.substring(0,6);
+  }catch(e){}
+  return '';
+}
+function _abKontakte(text,eigeneNr){
+  const raus=[];let m;AB_NR.lastIndex=0;
+  const eigen=(eigeneNr===undefined)?_abEigeneNr():eigeneNr;
+  while((m=AB_NR.exec(text))){
+    const nr=m[1].trim(),ziffern=nr.replace(/\D/g,'');
+    if(ziffern.length<9||ziffern.length>15)continue;
+    if(eigen&&ziffern.indexOf(eigen)===0)continue;
+    const davor=text.substring(Math.max(0,m.index-90),m.index);
+    let name='';
+    const t=davor.match(/(?:Herr|Frau|Mieter(?:in)?|Eigent(?:ü|ue)mer(?:in)?|Kontakt|Hausmeister|Ansprechpartner(?:in)?)\s*:?\s*((?:Herr|Frau)\s+)?([A-ZÄÖÜ][\wäöüß\-]+(?:\s+[A-ZÄÖÜ][\wäöüß\-]+)?)\s*[,:]?\s*$/);
+    if(t)name=((t[1]||'')+t[2]).trim();
+    else{const g=davor.match(/([A-ZÄÖÜ][\wäöüß\-]{2,}(?:\s+[A-ZÄÖÜ][\wäöüß\-]{2,})?)\s*[,:]?\s*$/);
+         if(g&&!/^(Der|Die|Das|Und|Tel|Mobil|Handy|Fon|Fax)$/i.test(g[1]))name=g[1].trim();}
+    const rolle=/Mieter/i.test(davor)?'Mieter':/Eigent/i.test(davor)?'Eigentümer':/Hausmeister/i.test(davor)?'Hausmeister':'';
+    raus.push({name:name,nr:nr,rolle:rolle});
+  }
+  const gesehen=new Set();
+  return raus.filter(p=>{const k=p.nr.replace(/\D/g,'');if(gesehen.has(k))return false;gesehen.add(k);return true;});
+}
+
+/* Alle Mails der Karte einsammeln und die Texte auflösen.
+   ⛔ Genau derselbe Weg wie _pamEmailAntwortenMitVerlauf: erst was gespeichert
+   ist, dann Drive (EML), dann Outlook (Graph). „Nicht im Zwischenspeicher"
+   heißt NICHT „nicht da" – am 08.09.2026 stand deshalb hier zunächst eine
+   falsche Messung, Frank hat widersprochen und recht behalten. */
+async function _abMailsHolen(task,tiefLaden){
+  const map=m=>({id:m.id||'',messageId:m.messageId||m.internetMessageId||'',subject:m.subject||'',
+    date:m.date,fileId:m.fileId||'',
+    sender:m.fromName?('"'+m.fromName+'" <'+(m.from||'')+'>'):(m.from||m.sender||''),
+    adresse:_abAdr(m.from||m.sender||''),
+    absName:(m.fromName||_abName(m.sender||m.from||'')),
+    bodyHtml:m.bodyHtml||m._cachedBodyHtml||m._resolvedBody||'',bodyText:m.bodyText||'',preview:m.preview||''});
+  const thread=[...(task.gmailThreadMessages||[]).map(map),...(task.msThreadMessages||[]).map(map)];
+  const eml=[...(task.emailOriginals||[])].map(map);
+  const gesehen=new Set(),liste=[];
+  [...thread,...eml].forEach(m=>{const k=m.messageId||(m.subject+'|'+(m.date||''));
+    if(gesehen.has(k))return;gesehen.add(k);liste.push(m);});
+  liste.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
+  if(!tiefLaden)return liste;
+  for(const m of liste){
+    if(m.bodyHtml||m.bodyText)continue;
+    if(m.fileId&&typeof gdriveToken!=='undefined'&&gdriveToken){
+      try{
+        const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(m.fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
+        if(r.ok){const p=_parseEmlText(_smartDecodeEmlBuffer(await r.arrayBuffer()));m.bodyHtml=p.bodyHtml||p.bodyText||'';}
+      }catch(e){console.warn('[b955] EML laden:',e);}
+    }
+    if(!m.bodyHtml&&m.id&&typeof msToken!=='undefined'&&(msToken||msToken2)){
+      try{
+        const rb=await _msGetMsgDual(task,'https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(m.id)+'?$select=body',true);
+        if(rb.ok){const db=await rb.json();m.bodyHtml=(db.body&&db.body.content)||'';}
+      }catch(e){console.warn('[b955] Graph-Body:',e);}
+    }
+    if(m.bodyHtml&&typeof _fixMojibake==='function')m.bodyHtml=_fixMojibake(m.bodyHtml);
+  }
+  return liste;
+}
+
+/* Die lokale KI. ⛔ localhost – der Text verlässt den Rechner nicht.
+   Fehlt Ollama, kommt still null zurück; der Kasten bleibt trotzdem brauchbar. */
+async function _abKi(text){
+  const anweisung='Du liest den E-Mail-Verlauf eines Vorgangs bei einem Dachdecker-Betrieb. Meist meldet '+
+   'eine Hausverwaltung einen Schaden, den ein Mieter bei ihr gemeldet hat. Die wichtige Angabe steht '+
+   'NICHT immer in der ersten Nachricht.\n\nGib NUR dieses JSON zurueck, alle Felder als Text:\n'+
+   '{"auftraggeber":{"name":"","firma":"","telefon":"","rolle":""},'+
+   '"vor_ort":[{"name":"","telefon":"","rolle":""}],'+
+   '"objekt":{"strasse":"","ort":"","lage":""},"worum_geht_es":"","stand":""}\n\n'+
+   'Fuer "rolle" beim Auftraggeber genau EINES dieser Woerter einsetzen: '+
+   'Hausverwaltung / Genossenschaft / Eigentuemer / Lieferant / Versicherung / Privatperson / unbekannt\n'+
+   'Fuer "rolle" bei vor_ort genau EINES: Mieter / Eigentuemer / Hausmeister / unbekannt\n'+
+   'In "vor_ort" gehoeren ALLE Personen vor Ort, oft sind es zwei (Mieter und Eigentuemer).\n'+
+   'Regeln: Nichts erfinden - was nicht dasteht, bleibt leer. "worum_geht_es" hoechstens 12 Woerter. '+
+   '"stand" hoechstens 15 Woerter: was ist zuletzt passiert. Die Firma "Braun GmbH" / '+
+   '"Dachdeckermeister Braun" ist der Empfaenger selbst - niemals Auftraggeber oder Ansprechpartner.';
+  try{
+    const steuer=new AbortController();
+    const uhr=setTimeout(()=>steuer.abort(),90000);
+    const r=await fetch(AB_OLLAMA+'/api/chat',{method:'POST',signal:steuer.signal,
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({model:AB_MODELL,stream:false,format:'json',
+        options:{temperature:0,num_ctx:16384},
+        messages:[{role:'system',content:anweisung},{role:'user',content:String(text||'').substring(0,24000)}]})});
+    clearTimeout(uhr);
+    if(!r.ok)return null;
+    const j=await r.json();
+    return JSON.parse(j.message.content);
+  }catch(e){console.warn('[b955] Ollama nicht erreichbar:',e&&e.message);return null;}
+}
+
+/* Steht in dieser Karte überhaupt genug für einen Kasten? */
+function _abFremde(mails){
+  return (mails||[]).filter(m=>m.adresse&&!/ddmbraun/i.test(m.adresse));
+}
+/* Wer ist der Auftraggeber? ⛔ Nicht einfach „der erste fremde Absender": in der
+   Karte „Hermann-von-Salza-Str." schreibt der Gerüstbauer zuerst, Auftraggeber ist
+   aber die Genossenschaft. Wer den Auftrag gibt, hat Vorrang vor dem, wer zufällig
+   zuerst geschrieben hat. */
+const AB_AG_RANG={'Hausverwaltung':1,'Genossenschaft':1,'Versicherung':2,'Privatperson':3,'Firma':4,'Lieferant':5};
+function _abAuftraggeber(mails){
+  const f=_abFremde(mails);
+  if(!f.length)return null;
+  let beste=null,besterRang=99;
+  for(const m of f){
+    const r=_abRolle(m.adresse,m.absName);
+    const rang=AB_AG_RANG[r]||6;
+    if(rang<besterRang){besterRang=rang;beste={mail:m,rolle:r};}
+  }
+  return beste||{mail:f[0],rolle:_abRolle(f[0].adresse,f[0].absName)};
+}
+/* ⛔ Beim Prüfen an echten Karten aufgefallen: „irgendeine Mail kommt von einem
+   Lieferanten" reicht NICHT als Kennzeichen. In der Karte „Hermann-von-Salza-Str."
+   schreibt ein Gerüstbauer mitten in einem Schadensvorgang – die Karte wurde
+   dadurch zur Lieferantenpost erklärt und verlor ihren Verlauf.
+   Lieferantenpost ist eine Karte nur, wenn NIEMAND von der Auftraggeberseite
+   darin vorkommt. */
+function _abSorte(mails,verlaufLaenge){
+  const rollen=_abFremde(mails).map(m=>_abRolle(m.adresse,m.absName));
+  if(!rollen.length)return verlaufLaenge>200?'schaden':'leer';
+  if(rollen.some(r=>r==='Hausverwaltung'||r==='Genossenschaft'||r==='Privatperson'||r==='Versicherung'))return 'schaden';
+  if(rollen.every(r=>r==='Lieferant'))return 'lieferant';
+  return verlaufLaenge>200?'schaden':'leer';
+}
+
+function _abEsc(s){const d=document.createElement('div');d.textContent=String(s==null?'':s);return d.innerHTML;}
+
+async function _abBauen(task,vonHand){
+  const mails=await _abMailsHolen(task,true);
+  if(!mails.length)return null;
+  const gesehen=new Set(),schritte=[],kontakteMuster=[];
+  let ganzerText='';
+  let lfd=0;
+  mails.forEach(m=>{
+    const roh=_abHtmlZuText(m.bodyHtml||m.bodyText||'');
+    if(!roh)return;
+    /* Jede Weiterleitungsstufe wird ein eigener Schritt – der weitergeleitete
+       Teil ist bei Alkenbrecher meist der wichtigere (dort steht der Mieter). */
+    _abStufen(roh).forEach((st,si)=>{
+      const s=_abStufeSaeubern(st.zeilen);
+      const kurz=_abOhneWdh(s.text,gesehen);
+      if(!kurz)return;
+      _abKontakte(kurz).forEach(p=>kontakteMuster.push(p));
+      const eigen=(si===0&&!st.kopf);
+      /* Im Weiterleitungskopf steht oft nur `schirb@freenet.de` – dann ist die
+         Unterschrift unter dem Text („Beate Schirrmeister") der bessere Name. */
+      let wer=eigen?(m.absName||_abName(m.sender||'')):_abName((st.kopf&&st.kopf.von)||'');
+      if(!eigen&&s.gez&&(!wer||!/\s/.test(wer)&&!/^[A-ZÄÖÜ]/.test(wer)))wer=s.gez;
+      if(!wer)wer=s.gez||'';
+      const wann=eigen?(m.date?new Date(m.date).toLocaleDateString('de-DE'):'')
+                      :String((st.kopf&&st.kopf.datum)||'').replace(/^\w+,\s*/,'').substring(0,22);
+      schritte.push({wann:wann,wer:wer,gez:s.gez,text:kurz,fwd:!eigen});
+      lfd++;
+      ganzerText+='### NACHRICHT '+lfd+'\nVON: '+(eigen?m.sender:((st.kopf&&st.kopf.von)||wer))+
+        '\nBETREFF: '+((st.kopf&&st.kopf.betreff)||m.subject||'')+'\nDATUM: '+(wann||m.date||'')+
+        '\n'+kurz.substring(0,2500)+'\n\n';
+    });
+  });
+  const sorte=_abSorte(mails,ganzerText.length);
+  const ag=_abAuftraggeber(mails);
+  const daten={stand:new Date().toISOString(),anzahl:mails.length,
+    neueste:mails.length?String(mails[mails.length-1].date||''):'',
+    sorte:sorte,schritte:schritte,kontakte:kontakteMuster,
+    absender:ag?(ag.mail.absName||ag.mail.adresse):'',
+    absAdr:ag?ag.mail.adresse:'',
+    rolle:ag?ag.rolle:'',
+    /* Ohne KI ist der Betreff der Ersatz für „worum geht's". Vorspann und
+       Telefonnummer raus – die Nummer steht schon bei „Vor Ort". */
+    betreff:(mails[0]&&mails[0].subject||'').replace(/^\s*(?:(?:WG|AW|FW|RE|FWD|Aw|Re|Fwd)\s*:\s*)+/gi,'')
+      .replace(AB_NR,' ').replace(/\s{2,}/g,' ').replace(/[\s,;:\-–]+$/,'').trim(),
+    ki:null,kiVersucht:false};
+  if(sorte!=='leer'&&ganzerText.length>200){
+    daten.kiVersucht=true;
+    daten.ki=await _abKi(ganzerText);
+  }
+  return daten;
+}
+
+function _abRendern(d){
+  const sect=document.getElementById('tAufEinenBlickSect');
+  const felder=document.getElementById('abFelder');
+  const vz=document.getElementById('abVerlaufZeile');
+  if(!sect||!felder)return;
+  if(!d||d.sorte==='leer'){sect.style.display='none';return;}
+  const ki=d.ki||{},auf=ki.auftraggeber||{},ob=ki.objekt||{};
+  const zeile=(kopf,inhalt)=>inhalt?('<div style="display:flex;gap:10px;margin-bottom:4px;align-items:baseline;">'+
+    '<span style="flex:0 0 92px;color:var(--text2);font-weight:600;">'+kopf+'</span>'+
+    '<span style="flex:1;min-width:0;">'+inhalt+'</span></div>'):'';
+  const marke=(t,bg,fg)=>'<span style="background:'+bg+';color:'+fg+';font-size:9.5px;font-weight:700;letter-spacing:.4px;padding:2px 5px;border-radius:4px;margin-left:5px;">'+_abEsc(t)+'</span>';
+  const tel=n=>'<a href="tel:'+_abEsc(String(n).replace(/[^\d+]/g,''))+'" style="color:var(--accent,#378ADD);text-decoration:none;">'+_abEsc(n)+'</a>';
+  let h='';
+
+  if(d.sorte==='lieferant'){
+    h+=zeile('Lieferant',_abEsc([auf.firma,auf.name].filter(Boolean).join(' · ')||d.absender)+marke('LIEFERANT','#fde9d5','#8a4a06'));
+    h+=zeile('Betreff',_abEsc(d.betreff));
+    if(auf.telefon)h+=zeile('Telefon',tel(auf.telefon));
+  }else{
+    const agName=[auf.name,auf.firma].filter(Boolean).join(' · ')||d.absender;
+    const agRolle=auf.rolle&&auf.rolle.length<25?auf.rolle:d.rolle;
+    h+=zeile('Auftraggeber',_abEsc(agName)+(agRolle?marke(agRolle.toUpperCase(),'#dbe6ff','#17408f'):'')+
+      (auf.telefon?'<br>'+tel(auf.telefon):''));
+    /* Vor Ort: erst die KI-Liste, sonst die Paare aus den Mustern. */
+    let vor=[];
+    if(Array.isArray(ki.vor_ort))vor=ki.vor_ort.filter(p=>p&&(p.name||p.telefon));
+    else if(ki.vor_ort&&(ki.vor_ort.name||ki.vor_ort.telefon))vor=[ki.vor_ort];
+    if(!vor.length)vor=(d.kontakte||[]).map(p=>({name:p.name,telefon:p.nr,rolle:p.rolle}));
+    if(vor.length){
+      h+=zeile('Vor Ort',vor.map(p=>_abEsc(p.name||'')+
+        (p.rolle&&p.rolle.length<20?marke(String(p.rolle).toUpperCase(),'#ffe6cc','#8a4a06'):'')+
+        (p.telefon?' '+tel(p.telefon):'')).join('<br>'));
+    }
+    h+=zeile('Objekt',_abEsc([ob.strasse,ob.ort,ob.lage].filter(Boolean).join(' · ')));
+    h+=zeile("Worum geht's",_abEsc(ki.worum_geht_es||d.betreff));
+    h+=zeile('Stand',_abEsc(ki.stand||''));
+  }
+  felder.innerHTML=h;
+
+  /* Der Verlauf hängt an der Textmenge, NICHT an der Sorte.
+     ⛔ Erst war es an `sorte==='schaden'` gehängt – dann verlor eine Karte ihren
+     Verlauf, sobald ein Lieferant darin mitschrieb. Umgekehrt bleibt bei einer
+     Melle-Angebotsmail ohnehin nur ein Satz übrig, und der lohnt den Aufklapper
+     nicht: darum die Schwelle über die tatsächliche Länge. */
+  const echte=(d.schritte||[]).filter(s=>s.text);
+  const textMenge=echte.reduce((s,x)=>s+x.text.length,0);
+  if(echte.length&&textMenge>150){
+    vz.style.display='';
+    document.getElementById('abVerlaufLabel').textContent='Ganzer Verlauf ('+echte.length+')';
+    document.getElementById('abVerlauf').innerHTML=echte.map(s=>
+      '<div style="border-left:2px solid var(--border);padding-left:10px;margin-bottom:10px;">'+
+      '<div style="color:var(--text2);font-size:calc(10.5px * var(--modal-scale,1));margin-bottom:2px;">'+
+      _abEsc(s.wann)+' · <b>'+_abEsc(s.wer)+'</b>'+(s.gez&&s.gez!==s.wer?' <span style="font-weight:400;">(gez. '+_abEsc(s.gez)+')</span>':'')+'</div>'+
+      '<div>'+_abEsc(s.text).replace(/\n/g,'<br>')+'</div></div>').join('');
+  }else{vz.style.display='none';}
+
+  const hdr=document.getElementById('abHdrInfo');
+  if(hdr){
+    let t='';
+    if(d.kiVersucht&&!d.ki)t='Kurzfassung fehlt – lokale KI nicht erreichbar';
+    else if(d.stand)t='Stand '+new Date(d.stand).toLocaleDateString('de-DE');
+    hdr.textContent=t;
+  }
+  sect.style.display='';
+  /* ⛔ `collapseAllTaskSections()` klappt beim Öffnen ALLE Abschnitte zu. Dieser
+     hier muss offen bleiben – sonst sieht man von der Kurzfassung nur die
+     Überschrift, und der ganze Sinn (ohne Klicken sehen, worum es geht) wäre weg. */
+  sect.classList.add('open');
+}
+
+function _abVerlaufUmschalten(){
+  const v=document.getElementById('abVerlauf'),p=document.getElementById('abVerlaufPfeil');
+  if(!v)return;
+  const zu=v.style.display==='none';
+  v.style.display=zu?'':'none';
+  if(p)p.textContent=zu?'▾':'▸';
+}
+
+/* Beim Öffnen der Karte. ⛔ Immer nur DIESE Karte – nie über alle laufen. */
+async function _abStart(task,vonHand){
+  const sect=document.getElementById('tAufEinenBlickSect');
+  if(!sect)return;
+  if(!task){sect.style.display='none';return;}
+  const alt=task._aufEinenBlick||null;
+  const mails=await _abMailsHolen(task,false);
+  if(!mails.length){sect.style.display='none';return;}
+  const neueste=mails.length?String(mails[mails.length-1].date||''):'';
+  /* Veraltet? Anzahl und Datum der neuesten Nachricht verraten es – beides steht
+     ohnehin da, das kostet nichts. */
+  const passt=alt&&alt.anzahl===mails.length&&alt.neueste===neueste;
+  if(passt&&!vonHand){_abRendern(alt);return;}
+  if(alt){_abRendern(alt);}                       // alten Stand zeigen, während der neue entsteht
+  const hdr=document.getElementById('abHdrInfo');
+  if(hdr){hdr.textContent=alt?('⟳ '+Math.max(0,mails.length-alt.anzahl)+' neue – wird gelesen …'):'wird gelesen …';}
+  sect.style.display='';
+  const merkId=task.id;
+  try{
+    const neu=await _abBauen(task,vonHand);
+    /* Zwischendurch kann eine andere Karte offen sein – dann nichts überschreiben. */
+    const jetzt=findTaskById((document.getElementById('taskId')||{}).value||'');
+    if(!neu){if(hdr)hdr.textContent='';if(!alt)sect.style.display='none';return;}
+    task._aufEinenBlick=neu;
+    if(jetzt&&jetzt.id===merkId)_abRendern(neu);
+    if(typeof autoSave==='function')setTimeout(function(){try{autoSave();}catch(e){}},1500);
+  }catch(e){
+    console.warn('[b955] Auf einen Blick:',e);
+    if(hdr)hdr.textContent=alt?'Stand '+new Date(alt.stand).toLocaleDateString('de-DE'):'';
+    if(!alt)sect.style.display='none';
+  }
+}
+function _abNeuLesen(){
+  const t=findTaskById((document.getElementById('taskId')||{}).value||_pamActiveTaskId||'');
+  if(!t){showToast('Kein Task gefunden.','warning',2500);return;}
+  _abStart(t,true);
+}
+
 // ── Absender-Popup: Toggle / Schließen ──
 // ── E-Mail-Liste Aufklappfeld ──
 function _pamToggleEmailList(){
@@ -46146,6 +46640,16 @@ function openModal(){
   // Gespeicherte Modal-Größe anwenden
   if(typeof applyStoredModalSize==='function')applyStoredModalSize();
   if(typeof _applyStoredModalSize2==='function')_applyStoredModalSize2();
+  /* b955: „Auf einen Blick" füllen. Verzögert, weil #taskId erst nach openModal()
+     gesetzt wird – ohne die Pause griffe findTaskById ins Leere.
+     ⛔ Immer nur die EINE offene Karte, nie über alle Karten laufen. */
+  setTimeout(function(){
+    try{
+      const _abT=findTaskById((document.getElementById('taskId')||{}).value||'');
+      if(_abT&&typeof _abStart==='function')_abStart(_abT,false);
+      else{const _s=document.getElementById('tAufEinenBlickSect');if(_s)_s.style.display='none';}
+    }catch(e){console.warn('[b955] Start:',e);}
+  },120);
 }
 function closeModal(){
   clearTimeout(autoSaveTimer); // Ausstehenden Auto-Save-Timer stoppen (verhindert Überschreiben beim Tab-Wechsel)
