@@ -9361,6 +9361,12 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
 <div class="sect-popup" id="abPopup" style="width:760px;background:var(--bg);">
   <div class="sect-popup-header" id="_popAbDrag">
     <span class="sect-popup-title">📋 Auf einen Blick</span>
+    <!-- b961: „Stand …" und der Knopf zum Neu-Lesen. _abNeuLesen gab es seit b955, angebunden
+         war es nirgends – ein falsch gebauter Kasten blieb, bis eine neue Mail kam. -->
+    <span style="display:flex;align-items:center;gap:10px;margin-left:auto;margin-right:10px;">
+      <span id="abPopStand" style="font-size:12px;color:var(--text2);white-space:nowrap;"></span>
+      <button type="button" onclick="_abNeuLesen()" title="Kurzfassung aus den Nachrichten neu aufbauen" style="font-size:12px;padding:3px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer;white-space:nowrap;">⟳ nochmal lesen</button>
+    </span>
     <button type="button" class="sect-popup-close" onclick="_closeSectPopup('abPopup')" title="Schließen">✕</button>
   </div>
   <div class="sect-popup-body">
@@ -10066,7 +10072,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-08 · #960'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-08-b960) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-08 · #961'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-08-b961) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -35610,7 +35616,7 @@ async function _pamEmailAntwortenMitVerlauf(){
    sonst zeigt PAM eine alte Fassung weiter und die neuen Spalten bleiben leer.
    Genau das war im Betrieb zu sehen: "woher" war ueberall leer, weil die
    gespeicherte Fassung noch von der Bauart davor stammte. */
-const AB_BAUART=3;
+const AB_BAUART=4; /* b961: Rolle je Abschnitt, neue Meldungs-Rangfolge, neue Adressmuster */
 let _abLetzte=null;
 const AB_OLLAMA='http://localhost:11434';
 const AB_MODELL='qwen2.5:7b';
@@ -35698,7 +35704,12 @@ const AB_ABBRUCH=[
   /^\s*(P\.?S\.?:? ?)?(Bitte )?[Dd]enken Sie an die Umwelt/i,
   /^\s*Sie erhalten nicht h(ä|ae)ufig E-?Mails von/i,
 ];
-const AB_GRUSS=/^\s*(mit freundlichen gr(ü|ue)(ß|ss)en|freundliche gr(ü|ue)(ß|ss)e\/?[a-z ]*|viele gr(ü|ue)(ß|ss)e|beste gr(ü|ue)(ß|ss)e|mit besten gr(ü|ue)(ß|ss)en|sch(ö|oe)ne gr(ü|ue)(ß|ss)e|herzliche gr(ü|ue)(ß|ss)e|mfg|lg|vg)\b[\s,.!\/a-z]*$/i;
+/* b961: Grußformeln allgemeiner. Vorher fehlten „Liebe Grüße", „Mit freundlichem Gruß",
+   „Freundlich grüßt", „Vielen Dank und viele Grüße", „Gruß", „Kind regards" – dann blieben
+   Gruß und Name im Verlauf stehen. Der Nachsatz hinter der Formel ist auf 60 Zeichen
+   begrenzt; ein nacktes „Gruß"/„Grüße" darf nur Satzzeichen hinter sich haben, damit ein
+   echter Satz („Grüße bitte auch an …") nicht als Schlussformel durchgeht. */
+const AB_GRUSS=/^\s*(?:(?:vielen dank|besten dank|danke)\s*(?:und|&|,)?\s*)?(?:(?:(?:mit\s+)?(?:freundlichen?|freundlichem|besten?|vielen?|lieben?|herzlichen?|sch(?:ö|oe)nen?|sonnigen?|kollegialen)\s+gr(?:ü|ue|u)(?:ß|ss)(?:e|en)?|freundlich gr(?:ü|ue)(?:ß|ss)t|herzlichst|mfg|lg|vg|(?:kind|best|warm)\s+regards|regards)(?![a-zäöüß])[\s,.!\/a-z]{0,60}|gr(?:ü|ue|u)(?:ß|ss)(?:e|en)?[\s,.!]*)$/i;
 const AB_ANREDE=/^\s*(hallo|guten (tag|morgen|abend)|sehr geehrte[rs]?|liebe[rs]?|moin|servus)\b[^\n]{0,60}[,:]?\s*$/i;
 const AB_SIGTRENN=/^\s*(--+|__+)\s*$/;
 const AB_SIGZEILE=new RegExp([
@@ -35823,13 +35834,33 @@ function _abKontakte(text,eigeneNr){
     /* ⛔ Deutsche Rufnummern beginnen mit 0 oder +49. "049 174 307254" aus einem
        Fließtext ist keine - an einer echten Karte aufgefallen. */
     if(!/^(\+49|0)/.test(nr.replace(/\s/g,''))||/^0[04-9]{2}/.test(ziffern))continue;
-    const davor=text.substring(Math.max(0,m.index-90),m.index);
+    let davor=text.substring(Math.max(0,m.index-90),m.index);
+    /* b961: Was zwischen Name und Nummer steht, wird vorher weggenommen – Klammer, „Tel.",
+       „Telefon:", „Handy", „Mobil", und eine erste Nummer samt Strichpunkt („(03601/… ;
+       0152/…)"). Vorher standen 4 von 20 Ansprechpartnern ohne Namen in der Tabelle, weil
+       „Mieterin Muster (0176 …)" oder „Muster, Tel. 0176 …" das Muster brachen. */
+    const TELWORT=/[\s(,;:\/]*(?:(?:Tel(?:efon(?:nummer)?)?|Handy(?:nummer)?|Mobil(?:nummer)?|Fon|Rufnummer|Nr|Nummer)\.?\s*:?\s*)?[\s(,;:\/]*$/i;
+    davor=davor.replace(TELWORT,'');
+    davor=davor.replace(/(?:[\s;,]*(?:\+49[\s\/-]?|0)\d[\d\s\/\-]{6,}\d)+[\s(,;:\/]*$/,'').replace(TELWORT,'');
     let name='';
-    const t=davor.match(/(?:Herr|Frau|Mieter(?:in)?|Eigent(?:ü|ue)mer(?:in)?|Kontakt|Hausmeister|Ansprechpartner(?:in)?)\s*:?\s*((?:Herr|Frau)\s+)?([A-ZÄÖÜ][\wäöüß\-]+(?:\s+[A-ZÄÖÜ][\wäöüß\-]+)?)\s*[,:]?\s*$/);
-    if(t)name=((t[1]||'')+t[2]).trim();
-    else{const g=davor.match(/([A-ZÄÖÜ][\wäöüß\-]{2,}(?:\s+[A-ZÄÖÜ][\wäöüß\-]{2,})?)\s*[,:]?\s*$/);
-         if(g&&!/^(Der|Die|Das|Und|Tel|Mobil|Handy|Fon|Fax)$/i.test(g[1]))name=g[1].trim();}
-    const rolle=/Mieter/i.test(davor)?'Mieter':/Eigent/i.test(davor)?'Eigentümer':/Hausmeister/i.test(davor)?'Hausmeister':'';
+    const LAGE='(?:\\s+(?:EG|OG|DG|KG|UG)\\b)?';
+    const t=davor.match(new RegExp('(Herrn?|Frau|Fam(?:ilie|\\.)|Mieter(?:in)?|Eigent(?:ü|ue)mer(?:in)?|Kontakt|Hausmeister(?:in)?|Ansprechpartner(?:in)?|Bewohner(?:in)?)\\s*:?\\s*((?:Herrn?|Frau)\\s+)?([A-ZÄÖÜ][\\wäöüß\\-]+(?:\\s+(?!(?:EG|OG|DG|KG|UG)\\b)[A-ZÄÖÜ][\\wäöüß\\-]+)?)'+LAGE+'\\s*[,:;]?\\s*$'));
+    if(t){
+      const anrede=(t[2]||(/^(?:Herrn?|Frau)$/.test(t[1])?t[1]+' ':'')).replace(/^Herrn/,'Herr');
+      name=(anrede+t[3]).trim();
+    }else{
+      const g=davor.match(new RegExp('([A-ZÄÖÜ][\\wäöüß\\-]{2,}(?:\\s+(?!(?:EG|OG|DG|KG|UG)\\b)[A-ZÄÖÜ][\\wäöüß\\-]{2,})?)'+LAGE+'\\s*[,:;]?\\s*$'));
+      if(g&&!/^(Der|Die|Das|Und|Tel|Mobil|Handy|Fon|Fax|Nr|R(?:ü|ue)ckfragen|Kontakt|Erreichbar|Telefon|Unter)$/i.test(g[1]))name=g[1].trim();
+      else{
+        /* Steht die Person weiter vorn in derselben Zeile („… der Mieterin Muster,
+           Beispielstr. 1 (03601/…; 0152/…)"), zählt die letzte Nennung mit Rollenwort. */
+        const zeile=davor.substring(davor.lastIndexOf('\n')+1);
+        const re=/(Herrn?|Frau|Mieter(?:in)?|Eigent(?:ü|ue)mer(?:in)?|Hausmeister(?:in)?|Bewohner(?:in)?)\s+((?:Herrn?|Frau)\s+)?([A-ZÄÖÜ][\wäöüß\-]{2,})/g;
+        let l,letzte=null;while((l=re.exec(zeile)))letzte=l;
+        if(letzte)name=(((letzte[2]||(/^(?:Herrn?|Frau)$/.test(letzte[1])?letzte[1]+' ':'')).replace(/^Herrn/,'Herr'))+letzte[3]).trim();
+      }
+    }
+    const rolle=/(?<!ver)mieter/i.test(davor)?'Mieter':/Eigent/i.test(davor)?'Eigentümer':/Hausmeister/i.test(davor)?'Hausmeister':'';
     raus.push({name:name,nr:nr,rolle:rolle});
   }
   const gesehen=new Set();
@@ -35907,10 +35938,16 @@ async function _abKi(text){
 
 /* Steht in dieser Karte überhaupt genug für einen Kasten? */
 /* Wer sind WIR? ⛔ Ohne Namen im Quelltext. Zwei Wege, beide aus den Daten:
-   1. `direction==='ausgang'` – was wir selbst verschickt haben.
+   1. `direction` „gesendet“ – was wir selbst verschickt haben (b961; bis dahin stand hier
+      „ausgang“, das PAM nie schreibt).
    2. die Domain aus den Firmen-Einstellungen (`_pamFirma`).
    Aus den ausgehenden Mails wird die eigene Domain gelernt, dann greift sie auch
    bei eingegangenen Mails, in denen wir zitiert werden. */
+/* b961: PAM schreibt als Richtung „gesendet" und „eingang". Geprüft wurde hier bis b960 auf
+   „ausgang", das in keiner einzigen Karte vorkommt (gemessen: 15 × gesendet, 51 × eingang,
+   0 × ausgang). Die Erkennung eigener Mails hing damit allein an der Firmenadresse und den
+   Outlook-Konten – ohne verbundenes Konto galt die eigene Freemail-Adresse als fremd. */
+function _abIstAusgang(m){const d=String((m&&m.direction)||'').toLowerCase();return d==='gesendet'||d==='ausgang';}
 function _abEigeneDomains(mails){
   const raus=new Set();
   const e=_abEigeneDomain(); if(e)raus.add(e);
@@ -35927,7 +35964,7 @@ function _abEigeneDomains(mails){
       if(dom)raus.add(dom);
     });
   }catch(e2){}
-  (mails||[]).forEach(m=>{if(m.direction==='ausgang'&&m.adresse)raus.add(_abDomain(m.adresse));});
+  (mails||[]).forEach(m=>{if(_abIstAusgang(m)&&m.adresse)raus.add(_abDomain(m.adresse));});
   /* Und die eigenen Adressen selbst - eine t-online-Adresse teilt sich die Domain
      mit fremden Privatleuten, da hilft die Domain allein nicht. */
   return raus;
@@ -35954,7 +35991,7 @@ function _abFremde(mails){
   const eigenAdr=_abEigeneAdressen();
   return (mails||[]).filter(function(m){
     if(!m.adresse)return false;
-    if(m.direction==='ausgang')return false;
+    if(_abIstAusgang(m))return false;
     if(eigenAdr.has(String(m.adresse).toLowerCase()))return false;   // genau unsere Adresse
     /* Bei Freemail-Anbietern zaehlt nur die genaue Adresse - die Domain teilen wir
        uns dort mit allen anderen. */
@@ -36022,9 +36059,28 @@ function _abAgTelefon(m){
       nicht aber "…-Strasse" mit grossem S.
    2. Ein Problemwort davor wandert sonst mit in den Strassennamen –
       aus "Fallrohr <Strassenname> 1" wurde der Strassenname "Fallrohr …". */
-const AB_STR=/((?:(?:Vor dem|Vor der|Am|An der|Auf dem|Zum|Zur)\s+)?[A-ZÄÖÜ][\wäöüßA-ZÄÖÜ.\-]*(?:[ \-][A-ZÄÖÜ][\wäöüß.\-]*){0,3}?(?:stra(?:ß|ss)e|str\.|str\b|weg|platz|allee|ring|gasse|damm|ufer|see|berg|feld|hof|park|garten|graben|markt|tor))[\s,]+(\d{1,4}\s?[a-zA-Z]?)(?![\wäöüß])/i;
-const AB_PROBLEMWORT=/^(?:Fallrohr|Dachrinnen?\w*|Rinne|Dach\w*|Balkon\w*|Wasserschaden|Feuchtigkeit|Leck\w*|Regenwasser\w*|M(?:ä|ae)ngel\w*|Schaden|Reparatur|Undicht\w*|Verstopf\w*|Sturmschaden|Notdienst|Angebot|Rechnung|Auftrag|Anfrage|Wartung|Reinigung|Mieterin|Mieter|BVH|WEG)\b[\s:,\-]*/i;
-const AB_LAGE=/(?<![a-zA-ZäöüßÄÖÜ])(\d{1,2}\.?\s?(?:OG|Obergeschoss)|EG|DG|Dachgeschoss|KG|UG|Souterrain|Keller)(?![\wäöüß])\.?\s*(links|rechts|mitte)?/;
+/* b961: Zwei Formen, die vorher NICHT gefunden wurden – gemessen an echten Karten:
+   · das Straßenwort steht getrennt („Berliner Straße", „Neue Straße", „Am Markt",
+     „Musterhausener Weg") – das alte Muster verlangte, dass es am Namen klebt;
+   · „Straße des Friedens", „Platz der Einheit".
+   Und eine, die zu VIEL fand: bis zu drei beliebige Wörter vor dem Straßenwort wanderten
+   mit in die Objekt-Zeile – in einem Fall ein Mietername. Vor dem Namen sind jetzt nur noch
+   die bekannten Vorsilben (Am, Vor dem, …) und Eigenschaftswörter (Große, Alte, Neue …)
+   erlaubt; Groß/Klein ist nur beim Straßenwort selbst egal („…-Strasse", „…straße"). */
+const AB_STR_VOR='(?:(?:Vor dem|Vor der|Am|An der|An den|Auf dem|Auf der|Zum|Zur|Im|In der|Unter den|Hinter dem|Hinter der)\\s+)';
+const AB_STR_ADJ='(?:(?:Gro(?:ß|ss)e[rn]?|Kleine[rn]?|Alte[rn]?|Neue[rn]?|Lange[rn]?|Obere[rn]?|Untere[rn]?|Hintere[rn]?|Vordere[rn]?|Breite[rn]?|Hohe[rn]?|Gr(?:ü|ue)ne[rn]?|Innere[rn]?|(?:Ä|Ae)u(?:ß|ss)ere[rn]?)\\s+)?';
+const AB_STR_ENDE='(?:[Ss]tra(?:ß|ss)e|[Ss]tr\\.|[Ss]tr\\b|[Ww]eg|[Pp]latz|[Aa]llee|[Rr]ing|[Gg]asse|[Dd]amm|[Uu]fer|[Ss]ee|[Bb]erg|[Ff]eld|[Hh]of|[Pp]ark|[Gg]arten|[Gg]raben|[Mm]arkt|[Tt]or)';
+const AB_STR_KEINNAME='(?!(?:Der|Die|Das|Den|Dem|Des|Ein|Eine[mnrs]?|Diese[mnrs]?|Und|Oder|Mit|Ohne|Nach|Bei|F(?:ü|ue)r|Von|Auf|In|An|Zu|Am|Im)\\s)';
+const AB_STR=new RegExp('('+AB_STR_VOR+'?'+AB_STR_ADJ+'(?:'
+  +'[A-ZÄÖÜ][\\wäöüß.\\-]*?'+AB_STR_ENDE                                            /* Musterstr. · Bahnhofstraße · Juri-Muster-Ring */
+  +'|'+AB_STR_KEINNAME+'[A-ZÄÖÜ][\\wäöüß.\\-]+\\s+'+AB_STR_ENDE                     /* Berliner Straße · Musterhausener Weg */
+  +'|(?:Stra(?:ß|ss)e|Platz|Weg|Allee|Ring)\\s+(?:des|der)\\s+[A-ZÄÖÜ][\\wäöüß\\-]+(?:\\s+[A-ZÄÖÜ][\\wäöüß\\-]+)?'   /* Straße des Friedens */
+  +'|'+AB_STR_VOR+AB_STR_ENDE                                                       /* Am Markt · Zum Hof */
+  +'))[\\s,]+(\\d{1,4}(?:\\s?[a-zA-Z]\\b|\\s?[-–/]\\s?\\d{1,4})?)(?![\\wäöüß])');
+const AB_PROBLEMWORT=/^(?:Fallrohr|Dachrinnen?\w*|Rinne|Regensammler|Regenrinne|Regenfallrohr|Dach\w*|Balkon\w*|Wasserschaden|Wasserfleck|Feuchtigkeit|Feuchte\w*|Schimmel\w*|Leck\w*|Regenwasser\w*|M(?:ä|ae)ngel\w*|Schaden|Reparatur|Undicht\w*|Verstopf\w*|Sturmschaden|Notdienst|Angebot|Rechnung|Auftrag|Anfrage|Wartung|Reinigung|Mieterin|Mieter|Eigent(?:ü|ue)mer(?:in)?|Hausmeister|Objekt|Lage|BVH|WEG)\b[\s:,\-]*/i;
+/* b961: „GmbH & Co. KG" oder „Beispiel UG" im Betreff sind keine Lage im Haus – KG und UG
+   zählen nur noch, wenn davor kein Firmenkürzel und kein großgeschriebenes Wort steht. */
+const AB_LAGE=/(?<![a-zA-ZäöüßÄÖÜ])(?:(?:\d{1,2}\.?\s?(?:OG|Obergeschoss)|EG|DG|Dachgeschoss|Souterrain|Keller)|(?<!(?:Co\.?|&|[A-ZÄÖÜ][\wäöüß\-]+)\s)(?:KG|UG))(?![\wäöüß])\.?\s*(links|rechts|mitte)?/;
 
 function _abAdresse(text){
   const m=String(text||'').match(AB_STR);
@@ -36052,7 +36108,7 @@ function _abObjekt(mails,schritte){
 
 function _abIstUnser(m,eigenAdr,eigenDom){
   if(!m||!m.adresse)return false;
-  if(m.direction==='ausgang')return true;
+  if(_abIstAusgang(m))return true;
   if(eigenAdr.has(String(m.adresse).toLowerCase()))return true;
   return !AB_FREEMAIL.test(m.adresse)&&eigenDom.has(_abDomain(m.adresse));
 }
@@ -36072,7 +36128,7 @@ function _abIstEigenerName(name,eigeneNamen){
    Deshalb werden alle Abschnitte verglichen: Floskel-Anfaenge und Signatur-Bloecke
    nach hinten, dann der laengste echte Text. Das ist keine Zusammenfassung, sondern
    ein Zitat - es kann nichts erfinden, weil es woertlich aus der Mail stammt. */
-const AB_HOHL=/^(bitte (auch )?(hier )?(mal )?(nach)?(schauen|sehen|pr(ü|ue)fen)|k(ö|oe)nnt?en sie|k(ö|oe)nnen sie|w(ü|ue)rden sie|siehe (unten|anbei|beigef)|anbei|wie (telefonisch |bereits )?besprochen|zu beigef(ü|ue)gt|hier sprudelt|bitte um|danke|vielen dank|melde mich|zur kenntnis|zur weiterleitung|weitergeleitet|fyi)\b/i;
+const AB_HOHL=/^(bitte (auch )?(hier )?(mal )?(nach)?(schauen|sehen|pr(ü|ue)fen)|k(ö|oe)nnt?en sie|k(ö|oe)nnen sie|w(ü|ue)rden sie|siehe (unten|anbei|beigef)|anbei|wie (telefonisch |bereits )?besprochen|zu beigef(ü|ue)gt|hier sprudelt|bitte um|danke|vielen dank|melde mich|zur kenntnis|zur weiterleitung|weitergeleitet|fyi|folgende datei(en)? (ist|sind)|im anhang|als anlage|in der anlage|sie erhalten (anbei|im anhang|beigef)|hiermit (beauftragen|erteilen|best(ä|ae)tigen) wir|hiermit erhalten sie|(diese|die) (e-?mail|nachricht) wurde automatisch|automatisch (erstellt|generiert|erzeugt|versandt))\b/i;
 
 /* Sieht der Text aus wie eine Signatur? Name, Anschrift, Nummer untereinander -
    viele kurze Zeilen, kaum Satzzeichen, kein Verb. An einer echten Karte
@@ -36090,9 +36146,25 @@ function _abIstSignatur(text){
   return (mehrzeilig&&kurze/z.length>0.8&&satzzeichen<2)||(woerter<6&&satzzeichen<1);
 }
 
+/* b961: Rangfolge nach der ROLLE des Schreibers.
+   ⛔ Im Betrieb aufgefallen: auf der aktivsten Karte stand unter „Worum geht's" der
+   Begleittext einer Lieferanten-Angebotsmail („Folgende Datei ist der E-Mail als Anlage
+   beigefügt …"), weil er der längste Abschnitt war. Die Meldung der Verwaltung lag auf
+   Platz 3, unsere eigene Auftragsbestätigung auf Platz 2. Lieferanten- und eigene Mails
+   sind oft die längsten – Länge allein taugt nicht.
+   Jetzt: Floskel-Anfänge nach hinten, dann die Rolle (Verwaltung, Genossenschaft,
+   Versicherung, Privatperson vor Firma vor Lieferant vor uns selbst), bei gleicher Rolle
+   die FRÜHESTE Nachricht – die Meldung steht am Anfang eines Vorgangs. Kurzfassungen
+   ohne Rollenangabe (vor b961) laufen weiter: unbekannte Rolle zählt als Mitte. */
+const AB_MELD_RANG={'Hausverwaltung':1,'Genossenschaft':1,'Versicherung':1,'Privatperson':1,'':2,'Firma':3,'Lieferant':4};
+function _abMeldRang(st){
+  if(st.unser||st.rolle==='wir selbst')return 5;
+  const r=AB_MELD_RANG[st.rolle||''];
+  return (r===undefined)?2:r;
+}
 function _abMeldung(schritte){
   const gut=[];
-  (schritte||[]).forEach(st=>{
+  (schritte||[]).forEach((st,i)=>{
     const txt=String(st.text||'').trim();
     /* ⛔ Erst stand hier 40 - dann fiel "Im Bad tropft es von der Decke." (31 Zeichen)
        heraus, und uebrig blieb ein Signatur-Block. Kurze Meldungen sind oft die
@@ -36102,7 +36174,8 @@ function _abMeldung(schritte){
     gut.push({txt:txt,
       hohl:AB_HOHL.test(ersteZeile)?1:0,
       sig:_abIstSignatur(txt)?1:0,
-      fremd:st.fwd?0:1,            /* der weitergeleitete Teil ist meist der Kern */
+      rang:_abMeldRang(st),
+      ord:(st.ord===undefined)?i:st.ord,
       laenge:txt.length});
   });
   if(!gut.length)return '';
@@ -36110,12 +36183,10 @@ function _abMeldung(schritte){
      hinten sortiert. Bleibt danach nichts uebrig, ist das ehrlicher als ein
      Adressblock unter "Worum geht's". */
   const echte=gut.filter(x=>!x.sig);
-  const liste=echte.length?echte:[];
-  if(!liste.length)return '';
-  liste.sort((a,b)=>(a.hohl-b.hohl)||(b.laenge-a.laenge));
-  gut.length=0;gut.push.apply(gut,liste);
+  if(!echte.length)return '';
+  echte.sort((a,b)=>(a.hohl-b.hohl)||(a.rang-b.rang)||(a.ord-b.ord)||(b.laenge-a.laenge));
   /* Zwei Saetze reichen - der ganze Text steht ja im Verlauf darunter. */
-  const roh=gut[0].txt.replace(/\s+/g,' ').trim();
+  const roh=echte[0].txt.replace(/\s+/g,' ').trim();
   const saetze=roh.split(/(?<=[.!?])\s+/).slice(0,2).join(' ');
   const kurz=(saetze||roh);
   return kurz.length>240?(kurz.substring(0,238).replace(/\s+\S*$/,'')+'…'):kurz;
@@ -36138,12 +36209,21 @@ async function _abBauen(task,vonHand){
       .forEach(w=>eigeneNamen.add(w.toLowerCase()));}catch(e){}
   const eigenAdr=_abEigeneAdressen(),eigenDom=_abEigeneDomains(mails);
   mails.forEach(m=>{
-    const unser=(m.direction==='ausgang')||eigenAdr.has(String(m.adresse).toLowerCase())||
+    const unser=(_abIstAusgang(m))||eigenAdr.has(String(m.adresse).toLowerCase())||
                 (!AB_FREEMAIL.test(m.adresse)&&eigenDom.has(_abDomain(m.adresse)));
     if(unser){if(m.absName)String(m.absName).split(/\s+/).forEach(w=>{if(w.length>3)eigeneNamen.add(w.toLowerCase());});}
   });
+  const hv=String((task&&task.hausverwaltung)||'').trim();
+  /* b961: Rolle je Absender-NAME merken. Weitergeleitete Stufen tragen oft nur den Namen
+     („Von: Muster, Sabine“) und keine Adresse – an einer echten Karte verlor dadurch die
+     Meldung der Verwaltung gegen eine spätere Nachfrage. Wer als direkter Absender eine
+     Rolle hat, behält sie auch im weitergeleiteten Teil. */
+  const nameKey=n=>String(n||'').toLowerCase().split(/[^a-zäöüß]+/).filter(w=>w.length>=3).sort().join(' ');
+  const rolleNachName={};
+  mails.forEach(m=>{if(!m.adresse||!m.absName)return;const k=nameKey(m.absName);if(!k||rolleNachName[k])return;
+    rolleNachName[k]=_abIstUnser(m,eigenAdr,eigenDom)?'wir selbst':_abRolle(m.adresse,m.absName,hv,m.subject);});
   let lfd=0;
-  mails.forEach(m=>{
+  mails.forEach((m,mi)=>{
     const roh=_abHtmlZuText(m.bodyHtml||m.bodyText||'');
     if(!roh)return;
     /* Jede Weiterleitungsstufe wird ein eigener Schritt – der weitergeleitete
@@ -36165,14 +36245,25 @@ async function _abBauen(task,vonHand){
       if(eigen&&s.gez&&_abIstUnser(m,eigenAdr,eigenDom))
         String(s.gez).split(/\s+/).forEach(w=>{if(w.length>3)eigeneNamen.add(w.toLowerCase());});
       _abKontakte(kurz).forEach(p=>{p.woher=wann;kontakteMuster.push(p);});
-      schritte.push({wann:wann,wer:wer,gez:s.gez,text:kurz,fwd:!eigen});
+      /* b961: Rolle und Herkunft je Abschnitt – daran hängt, welcher Abschnitt als Meldung
+         unter „Worum geht's" steht (siehe _abMeldung). Bei weitergeleiteten Stufen kommt die
+         Adresse aus der „Von:"-Zeile; fehlt sie, entscheidet der Name gegen die Verwaltung
+         auf der Karte. */
+      let stAdr=eigen?m.adresse:_abAdr((st.kopf&&st.kopf.von)||''),stRolle='',stUnser=false;
+      if(eigen){stUnser=_abIstUnser(m,eigenAdr,eigenDom)||(!m.adresse&&_abIstEigenerName(m.absName,eigeneNamen));stRolle=stUnser?'wir selbst':_abRolle(stAdr,m.absName,hv,m.subject);}
+      else{
+        stUnser=!!stAdr&&(eigenAdr.has(stAdr.toLowerCase())||(!AB_FREEMAIL.test(stAdr)&&eigenDom.has(_abDomain(stAdr))));
+        if(!stUnser&&!stAdr){const geerbt=rolleNachName[nameKey(wer)]||rolleNachName[nameKey(s.gez)]||'';if(geerbt==='wir selbst')stUnser=true;else stRolle=geerbt;}
+        if(!stUnser&&!stRolle)stRolle=stAdr?_abRolle(stAdr,wer,hv,(st.kopf&&st.kopf.betreff)||m.subject):((hv&&_abPasstZu(hv,'',wer))?'Hausverwaltung':'');
+        if(stUnser)stRolle='wir selbst';
+      }
+      schritte.push({wann:wann,wer:wer,gez:s.gez,text:kurz,fwd:!eigen,rolle:stRolle,unser:stUnser,ord:mi*100+Math.max(0,99-si)});
       lfd++;
       ganzerText+='### NACHRICHT '+lfd+'\nVON: '+(eigen?m.sender:((st.kopf&&st.kopf.von)||wer))+
         '\nBETREFF: '+((st.kopf&&st.kopf.betreff)||m.subject||'')+'\nDATUM: '+(wann||m.date||'')+
         '\n'+kurz.substring(0,2500)+'\n\n';
     });
   });
-  const hv=String((task&&task.hausverwaltung)||'').trim();
   const sorte=_abSorte(mails,ganzerText.length,hv);
   const ag=_abAuftraggeber(mails,hv);
   const daten={bauart:AB_BAUART,hv:hv,stand:new Date().toISOString(),anzahl:mails.length,
@@ -36294,6 +36385,14 @@ function _abRendern(d){
     kopf.innerHTML=zeile('Objekt',objekt)+zeile("Worum geht's",thema)+zeile('Stand',ki.stand||'')+
       zeile('Nachrichten',d.anzahl?(d.anzahl+(d.anzahl===1?' Nachricht':' Nachrichten')):'');
   }
+  /* b961: Der Kasten sagt, von wann er ist – ein still veralteter Kasten wäre schlimmer
+     als gar keiner. So stand es im Plan, gebaut war es bis b960 nicht. */
+  const standEl=document.getElementById('abPopStand');
+  if(standEl){
+    let w='';
+    try{const dt=new Date(d.stand);if(!isNaN(dt))w=dt.toLocaleDateString('de-DE')+', '+dt.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});}catch(e){}
+    standEl.textContent=w?('Stand '+w):'';
+  }
 
   const tab=document.getElementById('abPopTabelle');
   if(tab){
@@ -36388,20 +36487,22 @@ async function _abStart(task,vonHand){
   if(passt&&!vonHand){_abRendern(alt);return;}
   if(alt){_abRendern(alt);}                       // alten Stand zeigen, während der neue entsteht
   const hdr=document.getElementById('abHdrInfo');
-  if(hdr){hdr.textContent=alt?('⟳ '+Math.max(0,mails.length-alt.anzahl)+' neue – wird gelesen …'):'wird gelesen …';}
+  if(hdr){hdr.textContent=vonHand?'wird neu gelesen …':(alt?('⟳ '+Math.max(0,mails.length-alt.anzahl)+' neue – wird gelesen …'):'wird gelesen …');}
+  const standEl=document.getElementById('abPopStand');if(standEl)standEl.textContent='wird gelesen …';
   sect.style.display='';
   const merkId=task.id;
   try{
     const neu=await _abBauen(task,vonHand);
     /* Zwischendurch kann eine andere Karte offen sein – dann nichts überschreiben. */
     const jetzt=findTaskById((document.getElementById('taskId')||{}).value||'');
-    if(!neu){if(hdr)hdr.textContent='';if(!alt)sect.style.display='none';return;}
+    if(!neu){if(hdr)hdr.textContent='';if(standEl)standEl.textContent='';if(!alt)sect.style.display='none';return;}
     task._aufEinenBlick=neu;
     if(jetzt&&jetzt.id===merkId)_abRendern(neu);
     if(typeof autoSave==='function')setTimeout(function(){try{autoSave();}catch(e){}},1500);
   }catch(e){
     console.warn('[b955] Auf einen Blick:',e);
     if(hdr)hdr.textContent=alt?'Stand '+new Date(alt.stand).toLocaleDateString('de-DE'):'';
+    if(standEl)standEl.textContent=alt?('Stand '+new Date(alt.stand).toLocaleDateString('de-DE')):'';
     if(!alt)sect.style.display='none';
   }
 }
