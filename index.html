@@ -9959,6 +9959,9 @@ function _pamGuestSubmit(){
         <button id="pamGSBtnBesi" onclick="_pamGSToggleAkt('besichtigung')" style="font-size:11px;padding:2px 10px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;">📍 Besichtigung</button>
         <button id="pamGSBtnPlanen" onclick="_pamGSToggleAkt('planen')" style="font-size:11px;padding:2px 10px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;">📋 Auftrag planen</button>
         <button id="pamGSBtnErteilt" onclick="_pamGSToggleAkt('erteilt')" style="font-size:11px;padding:2px 10px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;">📋 Auftrag erteilt</button>
+        <!-- b949: rechnet sich aus zwei Feldern aus, statt an einem Haken zu hängen –
+             Auftrag erteilt, aber kein Ausführungstermin. Siehe _pamTerminFehlt. -->
+        <button id="pamGSBtnTerminFehlt" onclick="_pamGSToggleAkt('terminfehlt')" style="font-size:11px;padding:2px 10px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;">📅 Termin fehlt</button>
         <!-- b863: fünfter Filter. Anders als „📋 Auftrag erteilt" (das prüft ein
              gesetztes DATUM) hängt dieser am Haken – und geht beim Archivieren weg. -->
         <button id="pamGSBtnAusf" onclick="_pamGSToggleAkt('ausfuehrung')" style="font-size:11px;padding:2px 10px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;">🔨 In Ausführung</button>
@@ -9995,7 +9998,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-08 · #948'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-08-b948) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-08 · #949'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-08-b949) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -10428,6 +10431,25 @@ let _pamFSpalte='';
 // hätte es still gelöscht (b869). Für den Filter zählt darum „Datum gesetzt".
 // Werte: '' | 'anruf' | 'besicht' | 'planen' | 'erteilt' | 'ausfuehrung'
 let _pamFStatus='';
+// b949: Dieser Zustand wird NICHT angekreuzt, sondern gerechnet: Auftrag erteilt (Datum
+// steht), aber nie ein Ausführungstermin eingetragen. Er kann darum nicht vergessen
+// werden und verschwindet von selbst, sobald der Termin da ist.
+// ⛔ EINE Funktion für Filter, Zähler, Karte UND globale Suche (b879-Lehre) – vier
+//    Kopien wären die Stelle, an der die Zahl in der Klammer und das Kästchen auf der
+//    Karte auseinanderlaufen.
+// ⛔ Ein ABGEHAKTER Ausführungstermin zählt ebenfalls als eingeplant. Sonst käme ein
+//    fertig ausgeführter Auftrag nach dem Haken ✓ zurück in die Liste „Termin fehlt".
+// ⛔ Die zwei Altfelder zählen mit: ihr Eingabefeld ist zwar unsichtbar geschaltet,
+//    in älteren Aufträgen steht der Termin aber genau dort.
+function _pamTerminFehlt(x){
+  if(!x||!x.auftragVomDatum)return false;
+  if(x.ausfuehrungstermin||x['ausführungsdatum'])return false;
+  var a=(x.aufgaben||[]);
+  for(var i=0;i<a.length;i++){
+    if(a[i]&&a[i].typ==='Ausführungstermin'&&a[i].datum)return false;
+  }
+  return true;
+}
 // Ein Eintrag je Zustand: Wert · Beschriftung · wie man ihn an der Karte erkennt.
 // ⛔ EINE Tabelle für Filtern UND Zählen – zwei Listen wären die Stelle, an der die
 // Zahl in der Klammer und die Anzeige auseinanderlaufen (b879-Lehre).
@@ -10436,6 +10458,7 @@ const PAMF_STATUS=[
   ['besicht',    '📍 Besichtigung offen', function(x){return !!(x&&x.besichtigungOffen);}],
   ['planen',     '📋 Auftrag planen',     function(x){return !!(x&&x.auftragPlanen);}],
   ['erteilt',    '📋 Auftrag erteilt',    function(x){return !!(x&&x.auftragVomDatum);}],
+  ['terminfehlt','📅 Termin fehlt',       _pamTerminFehlt],
   ['ausfuehrung','🔨 In Ausführung',      function(x){return !!(x&&x.inAusfuehrung);}]
 ];
 function _pamFStatusTrifft(x){
@@ -17125,8 +17148,11 @@ function taskCardHTML(task){
   // b864 (Wunsch Frank): am Brett sah man dem Auftrag nicht an, ob er laeuft – der Haken
   // aus b863 war nur im Fenster und in der Liste zu sehen. Gleiche Bauart wie die zwei
   // Kaestchen-Badges darueber (gefuellt, weisse Schrift), gleiche Farbe wie das Kaestchen.
+  // b949: gefüllt wie „In Ausführung“ – es soll auffallen, dass hier noch etwas fehlt.
+  // Steht bewusst NEBEN „📋 Erteilt“: erst das Datum, dann der fehlende Termin.
+  const _terminFehltBadge=(typeof _pamTerminFehlt==='function'&&_pamTerminFehlt(task))?`<span style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:#993C1D;color:#fff;white-space:nowrap;" title="Auftrag ist erteilt, aber noch kein Ausführungstermin eingetragen">📅 Termin fehlt</span>`:'';
   const _ausfBadge=task.inAusfuehrung?`<span style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:#0F6E56;color:#fff;white-space:nowrap;">🔨 In Ausführung</span>`:'';
-  const _statusChips=[_planenBadge,_ausfBadge,_anrufOffenBadge,_besichtigungOffenBadge].filter(Boolean).join(''); // b489: immer sichtbare Status-Knoepfe (pam-neu); b864: Ausführung dazu
+  const _statusChips=[_planenBadge,_terminFehltBadge,_ausfBadge,_anrufOffenBadge,_besichtigungOffenBadge].filter(Boolean).join(''); // b489: immer sichtbare Status-Knoepfe (pam-neu); b864: Ausführung dazu
   const _linksBadge=hasLinks?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:#E6F1FB;color:#185FA5;border:1px solid #B5D4F4;white-space:nowrap;cursor:pointer;" title="Link öffnen" onclick="event.stopPropagation();_openTaskLink('${esc(task.id)}')">🔗 Links ${(task.links||[]).length}</span>`:'';
   const _zeitBadge=_gesamtMins>0?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:#FAEEDA;color:#854F0B;border:1px solid #FAC775;white-space:nowrap;">⏱ ${_fmtBadge(_gesamtMins)}</span>`:'';
   const _bauBadge=bauTotal>0?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;color:#e67e22;background:rgba(230,126,34,.12);border:1px solid rgba(230,126,34,.3);white-space:nowrap;">🔄 ${bauTotal}</span>`:'';
@@ -50612,6 +50638,8 @@ function _pamGSUpdateAktBtns(){
   if(bB){bB.style.background=_pamGSAktFilter==='besichtigung'?'#854F0B':'var(--bg3)';bB.style.color=_pamGSAktFilter==='besichtigung'?'#fff':'var(--text2)';bB.style.borderColor=_pamGSAktFilter==='besichtigung'?'#854F0B':'var(--border)';}
   if(bP){bP.style.background=_pamGSAktFilter==='planen'?'#FFB74D':'var(--bg3)';bP.style.color=_pamGSAktFilter==='planen'?'#5c3d05':'var(--text2)';bP.style.borderColor=_pamGSAktFilter==='planen'?'#FFB74D':'var(--border)';}
   if(bE){bE.style.background=_pamGSAktFilter==='erteilt'?'#7F77DD':'var(--bg3)';bE.style.color=_pamGSAktFilter==='erteilt'?'#fff':'var(--text2)';bE.style.borderColor=_pamGSAktFilter==='erteilt'?'#7F77DD':'var(--border)';}
+  const bT=document.getElementById('pamGSBtnTerminFehlt'); // b949
+  if(bT){bT.style.background=_pamGSAktFilter==='terminfehlt'?'#993C1D':'var(--bg3)';bT.style.color=_pamGSAktFilter==='terminfehlt'?'#fff':'var(--text2)';bT.style.borderColor=_pamGSAktFilter==='terminfehlt'?'#993C1D':'var(--border)';}
   const bF=document.getElementById('pamGSBtnAusf'); // b863
   if(bF){bF.style.background=_pamGSAktFilter==='ausfuehrung'?'#0F6E56':'var(--bg3)';bF.style.color=_pamGSAktFilter==='ausfuehrung'?'#fff':'var(--text2)';bF.style.borderColor=_pamGSAktFilter==='ausfuehrung'?'#0F6E56':'var(--border)';}
 }
@@ -50647,6 +50675,7 @@ function _pamGSRender(){
     if(_pamGSAktFilter==='besichtigung' && !t.besichtigungOffen) return false;
     if(_pamGSAktFilter==='planen' && !t.auftragPlanen) return false;
     if(_pamGSAktFilter==='erteilt' && !t.auftragVomDatum) return false;
+    if(_pamGSAktFilter==='terminfehlt' && !_pamTerminFehlt(t)) return false; // b949
     if(_pamGSAktFilter==='ausfuehrung' && !t.inAusfuehrung) return false; // b863
     if(q){
       // b710-Nachbesserung: NICHT mehr der ganze Suchtext als EIN Stück (Straßenname +
