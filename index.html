@@ -10086,7 +10086,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-09 · #974'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-09-b974) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-09 · #975'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-09-b975) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -10485,6 +10485,9 @@ function _isNotizBoard(board){return (boardTypes[board||currentBoard]||'baustell
 let currentView = 'heute';
 // Fix #290: früh deklarieren – render() beim Init wirft sonst ReferenceError
 let currentBoard = '';
+// b975: in welches Board saveTaskData zuletzt geschrieben hat. NICHT dasselbe wie
+// currentBoard (= was gerade angezeigt wird) – siehe Kommentar in saveTaskData.
+let _pamGespeichertInBoard = '';
 let boards = {};
 let boardTypes = {};
 let boardStatuses = {};
@@ -13869,6 +13872,13 @@ function saveTaskData(){
      weil sie in `data` enthalten sind (als '' bzw. []). */
   const _b717Merge=(alt)=>(alt&&typeof alt==='object')?Object.assign({},alt,data):data;
   if(!boards[currentBoard])boards[currentBoard]=[];
+  /* b975: WO gespeichert wurde – getrennt von dem, was Frank gerade ANSIEHT.
+     Bis b974 setzte der Fund in einem fremden Board `currentBoard=bk`; direkt danach
+     laeuft render(), also zog der Autospeicher (1-s-Timer) die Anzeige ungefragt in ein
+     anderes Board (Befund Frank 09.09.: „ich habe E-Mail offen und komme zu WBG-Auftraege").
+     ⛔ Der Merker MUSS bleiben: _doMoveTask, das Duplizieren und _pamZuAuftragAusTask
+     brauchen das Board, in dem die Karte wirklich liegt – ohne das entstuenden Dubletten. */
+  _pamGespeichertInBoard=currentBoard;
   if(id){
     let idx=boards[currentBoard].findIndex(t=>t.id===id);
     if(idx>=0){
@@ -13878,7 +13888,7 @@ function saveTaskData(){
       let _savedInBoard=false;
       for(const bk of Object.keys(boards)){
         const i=(boards[bk]||[]).findIndex(t=>t.id===id);
-        if(i>=0){boards[bk][i]=_b717Merge(boards[bk][i]);currentBoard=bk;_savedInBoard=true;break;}
+        if(i>=0){boards[bk][i]=_b717Merge(boards[bk][i]);_pamGespeichertInBoard=bk;_savedInBoard=true;break;}
       }
       // b764: Liegt die Karte im ARCHIV, gehört die Änderung DORTHIN – nicht als zweite
       // Karte ins Board. `archiviert`/`archiviertAm` stehen in `data` schon richtig, weil
@@ -13912,7 +13922,7 @@ function saveTaskData(){
     // mitbefüllen, was Frank ausdrücklich nicht wollte (dafür gibt's den 🔗-Knopf).
     if(data.gdriveOrdner)_pamLinkDateiAnlegen(data.id,data.gdriveOrdner,false);
   }
-  _spalteMerken(currentBoard,data.status); // b632: gespeicherte Spalte (auch nach Wechsel im Auswahlfeld) = zuletzt bearbeitet
+  _spalteMerken(_pamGespeichertInBoard||currentBoard,data.status); // b632: gespeicherte Spalte (auch nach Wechsel im Auswahlfeld) = zuletzt bearbeitet · b975: dort merken, wo die Karte liegt
   render();
   // b637: NEUER Task → sofort speichern statt 1 s warten. Beim Fall 260096 waren
   // Outlook-Termin und Drive-Ordner längst da, der Task selbst hing noch im Debounce,
@@ -39530,7 +39540,7 @@ function _pamZuAuftragAusTask(){
   if(typeof saveTaskData==='function')saveTaskData();
   const t=typeof findTaskById==='function'?findTaskById(id):null;
   if(!t){showToast('Task nicht gefunden','error');return;}
-  _pamTaskZuAuftrag(t,currentBoard);
+  _pamTaskZuAuftrag(t,_pamGespeichertInBoard||currentBoard); // b975: das Board, in dem die Karte liegt
 }
 
 // ── Auto-Ordner: vollständige Auftragsstruktur anlegen wenn neuer Task einen Titel bekommt ──
@@ -56212,11 +56222,12 @@ function duplicateTask(){
   copy.id=generateId();
   copy.createdAt=new Date().toISOString(); // b620: die Kopie entsteht JETZT – sonst erbt sie das Datum des Originals
   copy.title=(orig.title||'')+'  (Kopie)';
-  if(!boards[currentBoard])boards[currentBoard]=[];
+  const _kb=_pamGespeichertInBoard||currentBoard; // b975: Kopie gehört zum Board des Originals
+  if(!boards[_kb])boards[_kb]=[];
   // Kopie direkt nach Original einfügen
-  const idx=boards[currentBoard].findIndex(t=>t.id===id);
-  if(idx>=0) boards[currentBoard].splice(idx+1,0,copy);
-  else boards[currentBoard].push(copy);
+  const idx=boards[_kb].findIndex(t=>t.id===id);
+  if(idx>=0) boards[_kb].splice(idx+1,0,copy);
+  else boards[_kb].push(copy);
   render();autoSave();
   showToast('✓ Task dupliziert – Kopie geöffnet','success',2500);
   // Kopie direkt öffnen
@@ -56267,7 +56278,8 @@ function _doMoveTask(id,targetBoard,targetStatus){
     targetStatus = targetStatuses&&targetStatuses.length ? targetStatuses[0] : undefined;
   }
   saveTaskData();
-  boards[currentBoard]=boards[currentBoard].filter(t=>t.id!==id);
+  const _qb=_pamGespeichertInBoard||currentBoard; // b975: aus dem QUELLboard entfernen, nicht aus dem angezeigten
+  boards[_qb]=boards[_qb].filter(t=>t.id!==id);
   const updTask=JSON.parse(JSON.stringify(task));
   if(targetStatus) updTask.status=targetStatus;
   boards[targetBoard].push(updTask);
