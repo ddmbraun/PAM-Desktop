@@ -9105,6 +9105,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
           <button onclick="exportTaskZipRestore();_closeMehrMenu()">📋 Sichern (ZIP – PAM Restore)</button>
           <button onclick="exportTaskZipNotfall();_closeMehrMenu()">🆘 Notfallarchiv (ZIP + alle Dateien)</button>
           <label class="mv2-mehr-item">↩ Wiederherstellen<input type="file" accept=".zip" style="display:none" onchange="importTaskFromZip(this.files[0]);this.value='';_closeMehrMenu();" autocomplete="off"></label>
+          <button onclick="_pamAnhaengeNachholen();_closeMehrMenu()" title="Die abgelegten E-Mails dieser Karte noch einmal öffnen und Anhänge holen, die noch fehlen – Bilder zu den Bildern, alles andere zu den Dokumenten">📎 Anhänge aus Mails nachholen</button>
           <button id="modalSaveSize" onclick="_saveModalDefault();_closeMehrMenu()">💾 Position & Größe speichern</button>
           <button id="abschlussBtn" onclick="createAbschlussakte();_closeMehrMenu()" style="display:none;">📁 Abschlussakte (PDF→Drive)</button>
           <button id="abschlussHtmlBtn" onclick="createAbschlussHtml();_closeMehrMenu()" style="display:none;">🌐 Abschlussakte (HTML)</button>
@@ -10096,7 +10097,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-09 · #982'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-09-b982) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-09 · #983'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-09-b983) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -33238,6 +33239,136 @@ async function _gmSaveThreadPdfs(task,threadMsgs){
   return saved;
 }
 
+// ══ b983: Anhänge aus einer abgelegten Mail holen ══════════════════════════
+// ⛔ WARUM ES DAS GIBT: Es gibt fünf Wege, wie eine Mail an eine Karte kommt. DREI packen
+// die Anhänge aus (_auftragConfirm beim Ziehen, _auftragAddToTask beim Anhängen,
+// _emUploadEmlForModal), ZWEI nicht: _saveThreadMailsAsEml (Verlauf laden) und
+// _emInAuftragEinglieder. Gemessen am 09.09.2026 an Franks Bestand: 20 von 49 Karten mit
+// abgelegten Mails hatten NULL Dateien daraus — darunter ein 5,8-MB-Video, das Frank
+// vermisst hat. Die Mail lag da, das Video steckte ungeöffnet darin.
+//
+// Diese Funktion ist der gemeinsame Auspacker für den Verlaufsweg (b983 Teil A) und für
+// den Nachhol-Knopf (Teil B). Sie ist bewusst EIN Ort: die Regeln (Signaturbilder unter
+// 50 KB weg, Inline-Bilder weg, Bilder zu den Fotos, Rest zu den Dokumenten) dürfen nicht
+// in einer sechsten Kopie auseinanderlaufen.
+//
+// Rückgabe {bilder,dateien,fehler}. Wirft nicht — ein kaputter Anhang darf den Verlauf
+// nicht aufhalten.
+async function _pamAnhaengeAusEmlText(task,emlText,mid,rueckfallFid){
+  const raus={bilder:0,dateien:0,fehler:0};
+  if(!task||!emlText||!gdriveToken)return raus;
+  let info=null;
+  try{info=_parseEmlText(emlText);}catch(e){console.warn('[b983] EML nicht lesbar:',e);raus.fehler++;return raus;}
+  // ⛔ Franks Einwand am 09.09.2026: „beim normalen Reinziehen geht das ja schon." Er hatte
+  // recht — und ich hatte es falsch gemessen. _parseEmlText legt eine EINGEBETTETE Mail
+  // (Weiterleitung mit .eml im Anhang) NICHT unter attachments ab, sondern rekursiv unter
+  // `embedded` (Zeile ~971, bis Tiefe 6), jede mit eigenen attachments. Wer nur attachments
+  // liest, sieht dort nichts und hält den Fall für kaputt. Deshalb hier beide Ebenen —
+  // sonst holte der Verlaufsweg aus einer weitergeleiteten Mail gar nichts.
+  const atts=[];
+  (function sammle(k,tiefe){
+    if(!k||tiefe>6)return;
+    (k.attachments||[]).forEach(function(a){if(a)atts.push(a);});
+    (k.embedded||[]).forEach(function(e){if(e&&e.parsed)sammle(e.parsed,tiefe+1);});
+  })(info,0);
+  if(!atts.length)return raus;
+  const ziele=_pamAnhangZiele(task,rueckfallFid);
+  // ⛔ Doppel-Schutz: Was schon einmal aus DIESER Mail geholt wurde, wird nicht erneut
+  // hochgeladen. Ohne das legte der Nachhol-Knopf bei jedem Druck neue Kopien in Drive an.
+  // Fotos trugen bis b982 keine messageId — deshalb wird zusätzlich der Dateiname verglichen.
+  const schonDa=new Set();
+  (task.attachments||[]).forEach(function(a){if(a){if(a.messageId&&a.messageId===mid&&a.name)schonDa.add(String(a.name));}});
+  (task.fotos||[]).forEach(function(f){if(f&&f.name&&(f.messageId===mid||f.fromEmail))schonDa.add(String(f.name));});
+  const today=new Date().toLocaleDateString('de-DE');
+  for(const att of atts){
+    try{
+      if(att._isCidInline)continue;   // Fix #314: Signatur-/Inline-Bilder nicht ablegen
+      const isImg=/\.(jpg|jpeg|png|gif|webp|heic|heif|avif|bmp|tiff?)$/i.test(att.name)||(att.mimeType||'').startsWith('image/');
+      // Fix #369: Logos und Signaturbilder unter 50 KB überspringen. ⛔ Gilt NUR für Bilder —
+      // ein kurzes Video oder eine kleine PDF darf nicht an derselben Schwelle hängenbleiben.
+      if(isImg&&att.b64&&att.b64.length*0.75<_MIN_EMAIL_IMG_BYTES)continue;
+      const anhName=isImg?att.name:_olAnhangName(info,att.name);   // b922: Dokumente sprechend benannt
+      if(schonDa.has(String(anhName))||schonDa.has(String(att.name)))continue;
+      const binStr=atob(att.b64||'');
+      if(!binStr.length)continue;
+      const bytes=new Uint8Array(binStr.length);
+      for(let k=0;k<binStr.length;k++)bytes[k]=binStr.charCodeAt(k);
+      const zielFid=isImg?(ziele.bild||rueckfallFid):(ziele.dok||rueckfallFid);
+      const res=await _driveUploadGeneric(bytes.buffer,anhName,att.mimeType,zielFid);
+      if(!res||!res.id){raus.fehler++;continue;}
+      if(isImg){
+        if(!task.fotos)task.fotos=[];
+        // b983: messageId auch am Foto — daran erkennt der Nachhol-Knopf beim nächsten Mal,
+        // dass dieses Bild aus dieser Mail schon da ist.
+        task.fotos.push({driveId:res.id,name:att.name,mimeType:att.mimeType||'image/jpeg',caption:'',thumbnailLink:res.thumbnailLink||'',fromEmail:true,messageId:mid||''});
+        raus.bilder++;
+      }else{
+        if(!task.attachments)task.attachments=[];
+        task.attachments.push({name:anhName,fileId:res.id,url:'https://drive.google.com/file/d/'+res.id+'/view',uploadedAt:today,fromEmail:true,messageId:mid||''});
+        raus.dateien++;
+      }
+      schonDa.add(String(anhName));
+    }catch(e){raus.fehler++;console.warn('[b983] Anhang „'+(att&&att.name||'')+'":',e);}
+  }
+  return raus;
+}
+
+// ══ b983 Teil B: „📎 Anhänge aus Mails nachholen" (⋯-Menü der Karte) ═══════
+// Teil A wirkt nur auf Mails, die NEU in den Verlauf kommen. Die Altlast bleibt: gemessen
+// am 09.09.2026 hatten 20 von 49 Karten mit abgelegten Mails NULL Dateien daraus.
+// Dieser Knopf holt sie nach — bewusst je Karte auf Knopfdruck und nicht als stiller
+// Massenlauf über den ganzen Bestand: Frank entscheidet, wo es sich lohnt.
+async function _pamAnhaengeNachholen(){
+  if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden','error',5000);return;}
+  const task=findTaskById((document.getElementById('taskId')||{}).value||'');
+  if(!task){showToast('⚠ Kein Vorgang geöffnet','error',3000);return;}
+  const mails=(task.emailOriginals||[]).filter(function(e){return e&&e.fileId&&!e.anhGeholt;});
+  if(!mails.length){
+    showToast('ℹ Hier gibt es nichts nachzuholen – alle abgelegten Mails wurden bereits ausgepackt','info',5000);
+    return;
+  }
+  // Zielordner wie im Verlaufsweg ermitteln (erprobt seit #491) – nicht neu erfinden.
+  const folderUrl=(document.getElementById('tEmailOrdner')?.value||document.getElementById('tGDOrdner')?.value||'').trim();
+  const _fbFid=_ezFolderId(folderUrl);
+  let fid='';
+  try{fid=(await _getOrCreateEmailFid(task,_fbFid))||_fbFid||'';}catch(e){fid=_fbFid||'';}
+  let bilder=0,dateien=0,fehler=0,gelesen=0;
+  if(typeof _mpFortschrittZeigen==='function')try{_mpFortschrittZeigen(mails.length,'📎 Anhänge werden nachgeholt…');}catch(e){}
+  for(const e of mails){
+    try{
+      if(typeof _mpFortschrittText==='function')try{_mpFortschrittText('„'+String(e.subject||e.name||'').substring(0,60)+'" wird gelesen…');}catch(_x){}
+      // Die abgelegte .eml aus Drive zurückholen. alt=media liefert den Rohinhalt —
+      // derselbe Weg, den die Dachplan-Bilder schon nehmen.
+      const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(e.fileId)+'?alt=media',
+        {headers:{Authorization:'Bearer '+gdriveToken}});
+      if(!r.ok){fehler++;console.warn('[b983] Drive HTTP '+r.status+' für '+(e.name||''));continue;}
+      const buf=await r.arrayBuffer();
+      const txt=_smartDecodeEmlBuffer(buf);
+      const erg=await _pamAnhaengeAusEmlText(task,txt,e.messageId||'',fid);
+      bilder+=erg.bilder;dateien+=erg.dateien;fehler+=erg.fehler;
+      gelesen++;
+      // ⛔ Marke NUR setzen, wenn die Mail wirklich gelesen wurde. Bei einem Drive-Fehler
+      // bleibt sie offen, sonst wäre sie nach einem einzigen Netzhänger für immer erledigt.
+      e.anhGeholt=true;
+      if(typeof _mpFortschrittSchritt==='function')try{_mpFortschrittSchritt();}catch(_x){}
+    }catch(err){fehler++;console.warn('[b983] Nachholen „'+(e.name||'')+'":',err);}
+  }
+  if(typeof _mpFortschrittSchliessen==='function')try{_mpFortschrittSchliessen();}catch(e){}
+  if(bilder||dateien){
+    const t=[];
+    if(bilder)t.push('🖼 '+bilder+' Bild'+(bilder!==1?'er':'')+' → Bilder');
+    if(dateien)t.push('📁 '+dateien+' Datei'+(dateien!==1?'en':'')+' → Dokumente');
+    showToast('📎 Nachgeholt aus '+gelesen+' Mail'+(gelesen!==1?'s':'')+': '+t.join('  ·  '),'success',7000);
+  }else{
+    showToast('ℹ '+gelesen+' Mail'+(gelesen!==1?'s':'')+' gelesen – es hingen keine Anhänge daran'+(fehler?' ('+fehler+' Fehler)':''),'info',6000);
+  }
+  if(fehler)showToast('⚠ '+fehler+' Mail/Anhang konnte nicht gelesen werden – siehe Konsole','warning',6000);
+  try{renderEmailSection();}catch(e){}
+  if(typeof _dokSyncOrdner==='function'){try{_dokSyncOrdner();}catch(e){}}
+  if(typeof _fotoSyncOrdner==='function'){try{_fotoSyncOrdner();}catch(e){}}
+  scheduleTaskFieldSave();
+}
+
 // ── Alle Thread-Mails als .eml in Google Drive speichern (Gmail + Outlook) ──
 // tokenType='outlook' → echtes MIME-Original via Graph /$value; sonst synthetisches EML als Fallback
 async function _saveThreadMailsAsEml(task,threadMsgs,tokenType){
@@ -33255,6 +33386,7 @@ async function _saveThreadMailsAsEml(task,threadMsgs,tokenType){
   const toSave=threadMsgs.filter(m=>{const mid=m.messageId||m.internetMessageId||'';return mid&&!knownMsgIds.has(mid);});
   if(!toSave.length)return 0;
   let _emlSaved=0;
+  let _b983Bilder=0,_b983Dateien=0,_b983Fehler=0;   // b983: was aus den Mails geholt wurde
   for(const m of toSave){
     try{
       const mid=m.messageId||m.internetMessageId||''; // einheitliche ID für diese Mail
@@ -33296,6 +33428,10 @@ async function _saveThreadMailsAsEml(task,threadMsgs,tokenType){
           }else{console.warn('[GM] format=raw HTTP '+rRaw.status+' – Fallback auf synthetisches EML');}
         }catch(eRaw){console.warn('[GM] format=raw Fehler – Fallback auf synthetisches EML:',eRaw);}
       }
+      // b983: Kam bis hierher ein ECHTES Original (Graph /$value bzw. Gmail format=raw)?
+      // Nur darin stecken Anhänge. Das synthetische EML unten wird aus Betreff und Text
+      // zusammengebaut — dort zu suchen wäre vergeudete Rechenzeit und ergäbe nie etwas.
+      const _b983Echt=!!buf;
       // ── Fallback: synthetisches EML aus Metadaten + Body ──
       if(!buf){
         const bodyHtml=m.bodyHtml||m.body||'';
@@ -33329,6 +33465,22 @@ async function _saveThreadMailsAsEml(task,threadMsgs,tokenType){
         // Globales Array synchron halten wenn regular-Modal offen
         if(typeof taskEmailOriginals!=='undefined'&&taskEmailOriginals!==task.emailOriginals){if(!taskEmailOriginals)taskEmailOriginals=[];if(!taskEmailOriginals.some(e=>e.messageId===mid))taskEmailOriginals.push(entry);}
         _emlSaved++;
+        // ⛔⛔ b983 Teil A – die eigentliche Reparatur. Bis b982 endete der Verlaufsweg HIER:
+        // die Mail lag als Datei in Drive, ihre Anhänge blieben ungeöffnet darin stecken.
+        // Genau so verschwand Franks 5,8-MB-Video am 09.09.2026 lautlos.
+        // Das Original liegt in buf bereits vor — es wird nur noch gelesen, nicht neu geholt.
+        if(_b983Echt){
+          try{
+            const _txt=_smartDecodeEmlBuffer(buf);
+            const _erg=await _pamAnhaengeAusEmlText(task,_txt,mid,fid);
+            // Marke am Eintrag: der Nachhol-Knopf (Teil B) überspringt, was hier schon lief.
+            entry.anhGeholt=true;
+            if(_erg.bilder||_erg.dateien){
+              _b983Bilder+=_erg.bilder;_b983Dateien+=_erg.dateien;
+            }
+            if(_erg.fehler)_b983Fehler+=_erg.fehler;
+          }catch(e){console.warn('[b983] Anhänge aus Verlaufsmail:',e);_b983Fehler++;}
+        }
       }
     }catch(e){console.warn('[PAM] Thread-EML speichern fehlgeschlagen:',e);}
   }
@@ -33336,6 +33488,16 @@ async function _saveThreadMailsAsEml(task,threadMsgs,tokenType){
   const _dsort=(a,b)=>new Date(b.date||0)-new Date(a.date||0);
   if(task.emailOriginals)task.emailOriginals.sort(_dsort);
   if(taskEmailOriginals)taskEmailOriginals.sort(_dsort);
+  // b983: Frank soll SEHEN, dass etwas dazugekommen ist — sonst sucht er wieder in den
+  // Fotos nach einem Video, das still bei den Dokumenten gelandet ist.
+  if(_b983Bilder||_b983Dateien){
+    const _t=[];
+    if(_b983Bilder)_t.push('🖼 '+_b983Bilder+' Bild'+(_b983Bilder!==1?'er':'')+' → Bilder');
+    if(_b983Dateien)_t.push('📁 '+_b983Dateien+' Datei'+(_b983Dateien!==1?'en':'')+' → Dokumente');
+    showToast('📎 Aus dem Mail-Verlauf geholt: '+_t.join('  ·  '),'success',6000);
+    if(typeof _dokSyncOrdner==='function'){try{_dokSyncOrdner();}catch(e){}}
+  }
+  if(_b983Fehler)showToast('⚠ '+_b983Fehler+' Anhang/Anhänge aus dem Verlauf konnten nicht gespeichert werden (siehe Konsole)','warning',6000);
   renderEmailSection();
   scheduleTaskFieldSave();
   return _emlSaved;
