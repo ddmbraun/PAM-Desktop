@@ -10097,7 +10097,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-09 · #983'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-09-b983) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-09 · #984'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-09-b984) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -33284,23 +33284,35 @@ async function _pamAnhaengeAusEmlText(task,emlText,mid,rueckfallFid){
     try{
       if(att._isCidInline)continue;   // Fix #314: Signatur-/Inline-Bilder nicht ablegen
       const isImg=/\.(jpg|jpeg|png|gif|webp|heic|heif|avif|bmp|tiff?)$/i.test(att.name)||(att.mimeType||'').startsWith('image/');
+      // ⛔ Fix #457: „Videos gehören in Fotos/Videos, nicht zu Dateianhängen." Die anderen vier
+      // Wege legen ein Video erst bei den Dokumenten ab; _migrateVideoAttachmentsToFotos()
+      // räumt es beim nächsten Öffnen der Karte um — verschiebt dabei aber nur den EINTRAG,
+      // die Datei bleibt im Dokumente-Ordner in Drive liegen. Hier wird gleich richtig
+      // abgelegt: Video in den Foto-Ordner und direkt in task.fotos. Kein Umweg, kein
+      // falscher Drive-Ordner, und die Meldung an Frank stimmt sofort.
+      // (Frank am 09.09.2026: „auch bei den normalen Auftragsfotos?" — ja, dort landen
+      //  Videos seit jeher, handleFotoUploadToDrive schiebt sie in taskFotos.)
+      const isVid=(typeof _isVideo==='function')&&_isVideo(att.mimeType,att.name);
+      const zuFotos=isImg||isVid;
       // Fix #369: Logos und Signaturbilder unter 50 KB überspringen. ⛔ Gilt NUR für Bilder —
       // ein kurzes Video oder eine kleine PDF darf nicht an derselben Schwelle hängenbleiben.
       if(isImg&&att.b64&&att.b64.length*0.75<_MIN_EMAIL_IMG_BYTES)continue;
-      const anhName=isImg?att.name:_olAnhangName(info,att.name);   // b922: Dokumente sprechend benannt
+      // b922: Dokumente sprechend benannt. Bilder UND Videos behalten ihren Namen — sie
+      // landen in der Galerie, wo Vorschau und Zeitstempel zählen, nicht der Absender.
+      const anhName=zuFotos?att.name:_olAnhangName(info,att.name);
       if(schonDa.has(String(anhName))||schonDa.has(String(att.name)))continue;
       const binStr=atob(att.b64||'');
       if(!binStr.length)continue;
       const bytes=new Uint8Array(binStr.length);
       for(let k=0;k<binStr.length;k++)bytes[k]=binStr.charCodeAt(k);
-      const zielFid=isImg?(ziele.bild||rueckfallFid):(ziele.dok||rueckfallFid);
+      const zielFid=zuFotos?(ziele.bild||rueckfallFid):(ziele.dok||rueckfallFid);
       const res=await _driveUploadGeneric(bytes.buffer,anhName,att.mimeType,zielFid);
       if(!res||!res.id){raus.fehler++;continue;}
-      if(isImg){
+      if(zuFotos){
         if(!task.fotos)task.fotos=[];
         // b983: messageId auch am Foto — daran erkennt der Nachhol-Knopf beim nächsten Mal,
         // dass dieses Bild aus dieser Mail schon da ist.
-        task.fotos.push({driveId:res.id,name:att.name,mimeType:att.mimeType||'image/jpeg',caption:'',thumbnailLink:res.thumbnailLink||'',fromEmail:true,messageId:mid||''});
+        task.fotos.push({driveId:res.id,name:att.name,mimeType:att.mimeType||(isVid?'video/mp4':'image/jpeg'),caption:'',thumbnailLink:res.thumbnailLink||'',fromEmail:true,messageId:mid||''});
         raus.bilder++;
       }else{
         if(!task.attachments)task.attachments=[];
@@ -33356,7 +33368,7 @@ async function _pamAnhaengeNachholen(){
   if(typeof _mpFortschrittSchliessen==='function')try{_mpFortschrittSchliessen();}catch(e){}
   if(bilder||dateien){
     const t=[];
-    if(bilder)t.push('🖼 '+bilder+' Bild'+(bilder!==1?'er':'')+' → Bilder');
+    if(bilder)t.push('🖼 '+bilder+' bei Bilder/Videos');
     if(dateien)t.push('📁 '+dateien+' Datei'+(dateien!==1?'en':'')+' → Dokumente');
     showToast('📎 Nachgeholt aus '+gelesen+' Mail'+(gelesen!==1?'s':'')+': '+t.join('  ·  '),'success',7000);
   }else{
@@ -33492,7 +33504,7 @@ async function _saveThreadMailsAsEml(task,threadMsgs,tokenType){
   // Fotos nach einem Video, das still bei den Dokumenten gelandet ist.
   if(_b983Bilder||_b983Dateien){
     const _t=[];
-    if(_b983Bilder)_t.push('🖼 '+_b983Bilder+' Bild'+(_b983Bilder!==1?'er':'')+' → Bilder');
+    if(_b983Bilder)_t.push('🖼 '+_b983Bilder+' bei Bilder/Videos');
     if(_b983Dateien)_t.push('📁 '+_b983Dateien+' Datei'+(_b983Dateien!==1?'en':'')+' → Dokumente');
     showToast('📎 Aus dem Mail-Verlauf geholt: '+_t.join('  ·  '),'success',6000);
     if(typeof _dokSyncOrdner==='function'){try{_dokSyncOrdner();}catch(e){}}
