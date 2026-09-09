@@ -10086,7 +10086,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-09 · #975'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-09-b975) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-09 · #976'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-09-b976) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -10488,6 +10488,8 @@ let currentBoard = '';
 // b975: in welches Board saveTaskData zuletzt geschrieben hat. NICHT dasselbe wie
 // currentBoard (= was gerade angezeigt wird) – siehe Kommentar in saveTaskData.
 let _pamGespeichertInBoard = '';
+// b976: für WELCHES Board die Spaltenverwaltung geöffnet wurde – siehe saveColumns.
+let _b976ColBoard = '';
 let boards = {};
 let boardTypes = {};
 let boardStatuses = {};
@@ -56302,6 +56304,7 @@ function _toggleTopbarCollapse(){
 
 // ── COLUMN MANAGER ──
 function openColManager(){
+  _b976ColBoard=currentBoard; // b976: festhalten, wofür die Verwaltung geöffnet wurde
   editStatuses=[...getBoardStatuses()];
   editStatusesAlt=[...editStatuses]; // b643: Ur-Namen merken – Übertippen wird beim Speichern als Umbenennen erkannt
   renderColList();
@@ -56311,7 +56314,7 @@ function openColManager(){
   if(h)h.textContent='✎ Spalten: '+currentBoard;
   document.getElementById('colModal').classList.add('open');
 }
-function closeColManager(){document.getElementById('colModal').classList.remove('open');}
+function closeColManager(){_b976ColBoard='';document.getElementById('colModal').classList.remove('open');} // b976: Merker räumen, sonst wirkt er veraltet nach
 function renderColList(){
   document.getElementById('colList').innerHTML=editStatuses.map((s,i)=>`
     <div class="col-row">
@@ -56356,20 +56359,33 @@ function saveColumns(){
   // Vorher galt der neue Name als neue Spalte, und die Karten der alten fielen
   // kommentarlos in die erste Spalte (so wanderten die 12 Flachdächer nach „Gutachten").
   // Als Namens-KARTE angewandt, damit auch ein Namens-Tausch zweier Spalten sauber geht.
+  /* ⛔ b976: Geschrieben wird in das Board, für das die Verwaltung GEÖFFNET wurde – nicht
+     in das gerade angezeigte. Bis b975 stand hier 4x `currentBoard`, einmal beim Öffnen
+     gelesen und einmal beim Speichern. Wechselte das Board dazwischen (Karte aus einem
+     fremden Board geöffnet, Deep-Link, Auftrag-Anlegen), bekam das FALSCHE Board die
+     Spaltenliste – und das Auffangnetz unten schob dort alle Karten auf Spalte 1.
+     Am 09.09.2026 real passiert: Frank legte im E-Mail-Board „O2" an, AHV-Aufträge bekam
+     dessen Spalten und alle 5 Karten den Status „01 PE-Aufträge". */
+  /* ⛔ `typeof`-Prüfung mit Absicht: fehlt der Merker (alter Cache, Teilausführung), muss
+     saveColumns weiterlaufen statt abzustürzen – sonst liessen sich Spalten GAR NICHT
+     mehr speichern. Aufgefallen, weil test_b643 die Funktion ohne den Merker ausführt. */
+  const _zbM=(typeof _b976ColBoard==='undefined')?'':_b976ColBoard;
+  const _zb=(_zbM&&boards[_zbM])?_zbM:currentBoard;
+  if(_zb!==currentBoard)showToast('✎ Spalten von „'+_zb+'" gespeichert (dort wurde die Verwaltung geöffnet)','info',6000);
   let umbenannt=0;
   const _ren={};
   editStatuses.forEach((neu,i)=>{const alt=editStatusesAlt[i];if(alt&&alt!==neu)_ren[alt]=neu;});
   if(Object.keys(_ren).length){
-    (boards[currentBoard]||[]).forEach(t=>{if(t&&_ren[t.status]!==undefined){t.status=_ren[t.status];umbenannt++;}});
+    (boards[_zb]||[]).forEach(t=>{if(t&&_ren[t.status]!==undefined){t.status=_ren[t.status];umbenannt++;}});
     // Mobil-Spaltenfilter dieses Boards mit umbenennen, sonst fällt die Spalte dort still raus
-    if(Array.isArray(mobileStatusFilter[currentBoard]))
-      mobileStatusFilter[currentBoard]=mobileStatusFilter[currentBoard].map(s=>_ren[s]!==undefined?_ren[s]:s);
+    if(Array.isArray(mobileStatusFilter[_zb]))
+      mobileStatusFilter[_zb]=mobileStatusFilter[_zb].map(s=>_ren[s]!==undefined?_ren[s]:s);
   }
   const first=editStatuses[0];
   // Auffangnetz wie gehabt: Karten, deren Spalte es wirklich nicht mehr gibt → erste Spalte (nur dieses Board)
-  (boards[currentBoard]||[]).forEach(t=>{if(!editStatuses.includes(t.status))t.status=first;});
+  (boards[_zb]||[]).forEach(t=>{if(!editStatuses.includes(t.status))t.status=first;});
   // Spalten nur für dieses Board speichern
-  boardStatuses[currentBoard]=[...editStatuses];
+  boardStatuses[_zb]=[...editStatuses];
   if(umbenannt)showToast('✎ Spalte umbenannt – '+umbenannt+' Karte'+(umbenannt===1?'':'n')+' mitgenommen','success');
   closeColManager();render();autoSave();
 }
