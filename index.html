@@ -10097,7 +10097,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-09 · #984'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-09-b984) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-09 · #985'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-09-b985) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -33254,6 +33254,48 @@ async function _gmSaveThreadPdfs(task,threadMsgs){
 //
 // Rückgabe {bilder,dateien,fehler}. Wirft nicht — ein kaputter Anhang darf den Verlauf
 // nicht aufhalten.
+// ⛔⛔ b985 – REPARATUR zu b984, im Betrieb aufgefallen.
+// Bei GEÖFFNETER Karte führt PAM zwei Listen nebeneinander: die Karte selbst (task.fotos,
+// task.attachments, task.emailOriginals) und eine Arbeitskopie im Fenster (taskFotos,
+// taskAttachments, taskEmailOriginals). Beim Speichern gewinnt die ARBEITSKOPIE:
+//     fotos:       JSON.parse(JSON.stringify(taskFotos)),
+//     attachments: JSON.parse(JSON.stringify(taskAttachments)),
+// Wer nur in die Karte schreibt, dessen Eintrag ist beim nächsten Speichern spurlos weg.
+// Genau das passierte am 09.09.2026 mit b984: Franks Video lag richtig in Drive, aber
+// Merkung (anhGeholt) und messageId verschwanden — was er sah, hatte hinterher der
+// Drive-Ordner-Abgleich neu eingetragen (erkennbar an den Feldern `ordner` und `size`).
+// _saveThreadMailsAsEml macht es seit jeher richtig (39 Fundstellen taskEmailOriginals).
+//
+// ⛔ Anders als dort wird hier zusätzlich geprüft, ob WIRKLICH DIESE Karte offen ist. Das
+// Vorbild vergleicht nur, ob die Arrays verschieden sind — steht dabei eine ANDERE Karte
+// offen, landete der Eintrag in deren Arbeitskopie und damit in der falschen Karte.
+function _pamKarteIstOffen(task){
+  try{
+    const offen=(document.getElementById('taskId')||{}).value||'';
+    return !!(offen&&task&&task.id&&String(offen)===String(task.id));
+  }catch(e){return false;}
+}
+// Legt den Eintrag in BEIDE Listen — als dasselbe Objekt, nicht als Kopie. Nur so wirkt ein
+// späteres eintrag.xyz=... (etwa anhGeholt) auch in der Arbeitskopie.
+function _pamFotoEintragen(task,eintrag){
+  if(!task.fotos)task.fotos=[];
+  task.fotos.push(eintrag);
+  if(_pamKarteIstOffen(task)&&typeof taskFotos!=='undefined'&&Array.isArray(taskFotos)&&taskFotos!==task.fotos)taskFotos.push(eintrag);
+}
+function _pamDateiEintragen(task,eintrag){
+  if(!task.attachments)task.attachments=[];
+  task.attachments.push(eintrag);
+  if(_pamKarteIstOffen(task)&&typeof taskAttachments!=='undefined'&&Array.isArray(taskAttachments)&&taskAttachments!==task.attachments)taskAttachments.push(eintrag);
+}
+// Was liegt schon an der Karte? ⛔ BEIDE Listen lesen: bei offener Karte kann die
+// Arbeitskopie Einträge führen, die in task.* (noch) fehlen. Wer nur task.* liest, hält ein
+// vorhandenes Video für neu und lädt es ein zweites Mal nach Drive hoch.
+function _pamBeideListen(task,feld,glob){
+  const a=(task&&task[feld])||[];
+  const b=(_pamKarteIstOffen(task)&&Array.isArray(glob)&&glob!==task[feld])?glob:[];
+  return a.concat(b);
+}
+
 async function _pamAnhaengeAusEmlText(task,emlText,mid,rueckfallFid){
   const raus={bilder:0,dateien:0,fehler:0};
   if(!task||!emlText||!gdriveToken)return raus;
@@ -33276,9 +33318,17 @@ async function _pamAnhaengeAusEmlText(task,emlText,mid,rueckfallFid){
   // ⛔ Doppel-Schutz: Was schon einmal aus DIESER Mail geholt wurde, wird nicht erneut
   // hochgeladen. Ohne das legte der Nachhol-Knopf bei jedem Druck neue Kopien in Drive an.
   // Fotos trugen bis b982 keine messageId — deshalb wird zusätzlich der Dateiname verglichen.
+  // b985: aus BEIDEN Listen, sonst greift der Schutz bei offener Karte ins Leere.
   const schonDa=new Set();
-  (task.attachments||[]).forEach(function(a){if(a){if(a.messageId&&a.messageId===mid&&a.name)schonDa.add(String(a.name));}});
-  (task.fotos||[]).forEach(function(f){if(f&&f.name&&(f.messageId===mid||f.fromEmail))schonDa.add(String(f.name));});
+  _pamBeideListen(task,'attachments',typeof taskAttachments!=='undefined'?taskAttachments:null)
+    .forEach(function(a){if(a&&a.name){if((a.messageId&&a.messageId===mid)||a.fromEmail)schonDa.add(String(a.name));}});
+  _pamBeideListen(task,'fotos',typeof taskFotos!=='undefined'?taskFotos:null)
+    .forEach(function(f){if(f&&f.name&&(f.messageId===mid||f.fromEmail))schonDa.add(String(f.name));});
+  // ⛔ Zusätzlich der reine Name: der Drive-Ordner-Abgleich legt Einträge OHNE fromEmail und
+  // OHNE messageId an (Felder `ordner`/`size`). Nach einem solchen Abgleich sähe der Schutz
+  // oben nichts — und der nächste Druck auf den Knopf lüde das Video ein zweites Mal hoch.
+  _pamBeideListen(task,'fotos',typeof taskFotos!=='undefined'?taskFotos:null)
+    .forEach(function(f){if(f&&f.name)schonDa.add(String(f.name));});
   const today=new Date().toLocaleDateString('de-DE');
   for(const att of atts){
     try{
@@ -33309,14 +33359,13 @@ async function _pamAnhaengeAusEmlText(task,emlText,mid,rueckfallFid){
       const res=await _driveUploadGeneric(bytes.buffer,anhName,att.mimeType,zielFid);
       if(!res||!res.id){raus.fehler++;continue;}
       if(zuFotos){
-        if(!task.fotos)task.fotos=[];
         // b983: messageId auch am Foto — daran erkennt der Nachhol-Knopf beim nächsten Mal,
         // dass dieses Bild aus dieser Mail schon da ist.
-        task.fotos.push({driveId:res.id,name:att.name,mimeType:att.mimeType||(isVid?'video/mp4':'image/jpeg'),caption:'',thumbnailLink:res.thumbnailLink||'',fromEmail:true,messageId:mid||''});
+        // b985: über _pamFotoEintragen, damit der Eintrag auch in der Arbeitskopie landet.
+        _pamFotoEintragen(task,{driveId:res.id,name:att.name,mimeType:att.mimeType||(isVid?'video/mp4':'image/jpeg'),caption:'',thumbnailLink:res.thumbnailLink||'',fromEmail:true,messageId:mid||''});
         raus.bilder++;
       }else{
-        if(!task.attachments)task.attachments=[];
-        task.attachments.push({name:anhName,fileId:res.id,url:'https://drive.google.com/file/d/'+res.id+'/view',uploadedAt:today,fromEmail:true,messageId:mid||''});
+        _pamDateiEintragen(task,{name:anhName,fileId:res.id,url:'https://drive.google.com/file/d/'+res.id+'/view',uploadedAt:today,fromEmail:true,messageId:mid||''});
         raus.dateien++;
       }
       schonDa.add(String(anhName));
@@ -33334,7 +33383,11 @@ async function _pamAnhaengeNachholen(){
   if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden','error',5000);return;}
   const task=findTaskById((document.getElementById('taskId')||{}).value||'');
   if(!task){showToast('⚠ Kein Vorgang geöffnet','error',3000);return;}
-  const mails=(task.emailOriginals||[]).filter(function(e){return e&&e.fileId&&!e.anhGeholt;});
+  // b985: Bei offener Karte ist die ARBEITSKOPIE maßgeblich — sie ist das, was beim Speichern
+  // in die Karte geschrieben wird. Aus ihr wird gelesen und in ihr wird markiert.
+  const _eoQuelle=(_pamKarteIstOffen(task)&&typeof taskEmailOriginals!=='undefined'&&Array.isArray(taskEmailOriginals)&&taskEmailOriginals.length)
+    ?taskEmailOriginals:(task.emailOriginals||[]);
+  const mails=_eoQuelle.filter(function(e){return e&&e.fileId&&!e.anhGeholt;});
   if(!mails.length){
     showToast('ℹ Hier gibt es nichts nachzuholen – alle abgelegten Mails wurden bereits ausgepackt','info',5000);
     return;
@@ -33362,6 +33415,15 @@ async function _pamAnhaengeNachholen(){
       // ⛔ Marke NUR setzen, wenn die Mail wirklich gelesen wurde. Bei einem Drive-Fehler
       // bleibt sie offen, sonst wäre sie nach einem einzigen Netzhänger für immer erledigt.
       e.anhGeholt=true;
+      // b985: dieselbe Mail in der ANDEREN Liste ebenfalls markieren. Sonst überschreibt das
+      // Speichern die Merkung wieder — genau daran scheiterte b984 im Betrieb.
+      [task.emailOriginals,(typeof taskEmailOriginals!=='undefined'?taskEmailOriginals:null)]
+        .forEach(function(liste){
+          if(!Array.isArray(liste)||liste===_eoQuelle)return;
+          liste.forEach(function(x){
+            if(x&&x!==e&&(x.fileId===e.fileId||(e.messageId&&x.messageId===e.messageId)))x.anhGeholt=true;
+          });
+        });
       if(typeof _mpFortschrittSchritt==='function')try{_mpFortschrittSchritt();}catch(_x){}
     }catch(err){fehler++;console.warn('[b983] Nachholen „'+(e.name||'')+'":',err);}
   }
