@@ -10074,7 +10074,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-09 · #970'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-09-b970) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-09 · #971'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-09-b971) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -38940,17 +38940,21 @@ async function _createDriveAuftragStruktur(folderName,parentFid){
   // erlaubt sie, Windows nicht; die NAS-Spiegelung scheitert sonst an dem Ordner.
   const safeName=((folderName||'Auftrag').replace(/[\\/:*?"<>|]/g,'-').substring(0,100).replace(/[. ]+$/,''))||'Auftrag';
   const mainId  =await _driveCreateFolder(safeName,parentFid);
-  // b534: Master-Struktur, 9 Ordner, alle ohne Nummern-Präfix.
+  // b534: Master-Struktur, alle ohne Nummern-Präfix.
   // Bilder / Dokumente / Posteingang sind Pflichtnamen: GM legt Bilder+Dokumente zwingend an
   // (nicht abschaltbar), und _autoFillProjectSubfolders sucht nach genau diesen Namen.
   // Deshalb bekommen auch Auftrag und Gutachten keine Nummern – einheitlich ohne.
+  // ⛔ b971: `Verlegeanleitung` ist raus (Festlegung FB 09.09.2026). Er war der
+  // TIEFSTE Ordner der Struktur und kostete jeden Ordnernamen 17 Zeichen, stand aber
+  // fast immer leer. Wer ihn braucht, legt ihn von Hand an. Dieselbe Streichung
+  // steht in `_usbOrdnerStruktur` und im NAS-Zweig – die Struktur ist dreifach
+  // gepflegt, alle drei müssen gleich bleiben.
   await _driveCreateFolder('Auftrag',mainId);
   const gutId   =await _driveCreateFolder('Gutachten',mainId);
   await _driveCreateFolder('Entwurf',gutId);
   await _driveCreateFolder('Final',gutId);
   const foto2Id =await _driveCreateFolder('Bilder',mainId);
   const dok1Id  =await _driveCreateFolder('Dokumente',mainId);
-  await _driveCreateFolder('Verlegeanleitung',dok1Id);
   await _driveCreateFolder('Dokumente AG',dok1Id);
   const emailId =await _driveCreateFolder('Posteingang',mainId);
   const base='https://drive.google.com/drive/folders/';
@@ -39238,10 +39242,14 @@ async function _pamTaskZuAuftrag(task,vonBoard){
   // Jetzt entstehen beide aus derselben Eingabe und können nicht mehr abweichen.
   // Ohne Objekt-Ziel (normaler Auftrag) bleibt der Dialog unverändert.
   const _kmObj=(_objZiel&&_objZiel.obj)?_objZiel.obj:null;
+  // b971: `pruefen` und `betreff` kamen dazu – der Dialog sperrt damit den
+  // Anlegen-Knopf, statt still zu kürzen, und bietet den Mailbetreff an.
   const _km=_kmObj?{
     kurz:_b652KurzAusTitel(task,_kmObj),
     bauOrdner:function(k){return _b652OrdnerAusKurz(k,task,_kmObj);},
-    bauTitel :function(k){return _objAuftragTitel(_kmObj,k);}
+    bauTitel :function(k){return _objAuftragTitel(_kmObj,k);},
+    pruefen  :function(k){return _b652OrdnerPruefen(k,task,_kmObj);},
+    betreff  :String((task&&task.msEmailSubject)||'').trim()
   }:null;
   const name=await _promptFolderName(_startName,_startEltern,_nasBasis,_km);
   if(!name)return;
@@ -39568,6 +39576,7 @@ function _promptFolderName(suggested,parentUrl,nasBasis,kurzModus){
     const label=kmAn?'Kurztext:':'Ordnername:';
     const vorschau=kmAn
       ?'<div id="_fnpVorschau" style="font-size:11px;color:var(--text2);margin-top:7px;line-height:1.6;padding:6px 9px;border-radius:6px;background:var(--bg3);"></div>'
+       +'<div id="_fnpBetreff" style="font-size:11px;color:var(--text2);margin-top:5px;line-height:1.5;"></div>'
       :'';
     box.innerHTML='<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:10px;">'+kopf+'</div>'
       +'<div style="font-size:12px;color:var(--text2);margin-bottom:6px;">'+label+'</div>'
@@ -39583,8 +39592,11 @@ function _promptFolderName(suggested,parentUrl,nasBasis,kurzModus){
     const inp=document.getElementById('_fnpInput');
     setTimeout(function(){inp.focus();inp.select();},60);
     // b652: Längenwächter – rechnet den TIEFSTEN Pfad aus, der später entstehen kann
-    // (…\<Ordner>\Dokumente\Verlegeanleitung\<Datei>) und zeigt, wie viel für den
-    // Dateinamen übrig bleibt. Gleiche Logik wie der VBS-Wächter am NAS.
+    // (…\<Ordner>\Dokumente\<Datei>) und zeigt, wie viel für den Dateinamen übrig
+    // bleibt. Gleiche Logik wie der VBS-Wächter am NAS.
+    // ⚠ b971: Das VBS rechnet weiter mit 27 (`LW_TIEFSTER_SUB`) statt mit 10. Das ist
+    // Absicht: es ist damit vorsichtiger als nötig, aber nie zu großzügig. Bewusst
+    // NICHT angeglichen (Festlegung FB 09.09.2026 – eine Datei weniger anfassen).
     // b668: Der fertige Ordnername – im Kurztext-Modus ist das NICHT der Feldinhalt.
     // Vorschau und Längenwächter müssen beide damit rechnen, sonst zeigt der Wächter
     // eine zu kurze Länge an und der Pfad reißt später doch die 260-Zeichen-Grenze.
@@ -39592,21 +39604,71 @@ function _promptFolderName(suggested,parentUrl,nasBasis,kurzModus){
       const roh=(inp.value||'').trim();
       return kmAn?String(kurzModus.bauOrdner(roh)||''):roh;
     };
+    // b971: Solange der Name nicht passt, bleibt „Anlegen" gesperrt. Bis b970 wurde
+    // still abgeschnitten – aus einer 34 Zeichen langen Beschreibung wurde im Ordner
+    // ein abgehacktes Bruchstück, und niemand konnte später sehen, worum es ging.
+    let _fnpZuViel=0;
+    const _fnpOkStand=function(an,grund){
+      const btn=document.getElementById('_fnpOk');
+      if(!btn)return;
+      btn.disabled=!an;
+      btn.style.opacity=an?'1':'.45';
+      btn.style.cursor=an?'pointer':'not-allowed';
+      btn.title=an?'':String(grund||'');
+    };
     if(kmAn){
       const _vorUpd=function(){
         const vEl=document.getElementById('_fnpVorschau');if(!vEl)return;
         const roh=(inp.value||'').trim();
-        if(!roh){vEl.innerHTML='<span style="color:#a04000;">Bitte einen Kurztext eingeben.</span>';return;}
-        vEl.innerHTML='<div>Ordner wird: <b style="color:var(--text);">'+esc(_fnpOrdnerJetzt())+'</b></div>'
-                     +'<div>Karte heißt: <b style="color:var(--text);">'+esc(String(kurzModus.bauTitel(roh)||''))+'</b></div>';
+        if(!roh){
+          _fnpZuViel=0;
+          vEl.innerHTML='<span style="color:#a04000;">Bitte einen Kurztext eingeben.</span>';
+          _fnpOkStand(false,'Bitte einen Kurztext eingeben');
+          return;
+        }
+        const p=(typeof kurzModus.pruefen==='function')?kurzModus.pruefen(roh):null;
+        let zeile;
+        if(p&&p.zuViel>0){
+          // Der GANZE Name, und was wegfiele durchgestrichen und blass daneben.
+          zeile='<div style="font-size:13px;color:var(--text);word-break:break-all;line-height:1.5;">'
+               +esc(p.roh.substring(0,p.max))
+               +'<span style="opacity:.45;text-decoration:line-through;">'+esc(p.roh.substring(p.max))+'</span></div>'
+               +'<div style="color:#8B1A10;font-weight:700;margin-top:4px;">⚠ '+p.zuViel+' Zeichen zu viel – bitte kürzen</div>';
+        }else{
+          zeile='<div style="font-size:13px;color:var(--text);word-break:break-all;line-height:1.5;">'+esc(_fnpOrdnerJetzt())+'</div>'
+               +(p?'<div style="color:#1E6B3A;margin-top:4px;">✓ passt · noch '+(p.max-p.roh.length)+' Zeichen frei</div>':'');
+        }
+        vEl.innerHTML='<div style="margin-bottom:3px;">Ordner wird:</div>'+zeile
+                     +'<div style="margin-top:7px;">Karte heißt: <b style="color:var(--text);">'+esc(String(kurzModus.bauTitel(roh)||''))+'</b></div>';
+        _fnpZuViel=p?p.zuViel:0;
+        _fnpOkStand(_fnpZuViel===0,_fnpZuViel+' Zeichen zu viel');
       };
       inp.addEventListener('input',_vorUpd);_vorUpd();
+      // b971: Kommt die Karte aus einer E-Mail, steht im Betreff oft schon der
+      // bessere Kurztext. Nur ANGEBOTEN, nie gesetzt – „AW: WG: Ihre Anfrage" wäre
+      // ein schlechter Ordnername, und die Entscheidung gehört dem Menschen.
+      const _bet=String((kurzModus&&kurzModus.betreff)||'').trim();
+      const _bEl=document.getElementById('_fnpBetreff');
+      if(_bet&&_bEl){
+        _bEl.innerHTML='Betreff der Mail übernehmen: <a href="#" id="_fnpBetreffLink" style="color:var(--accent);font-weight:600;text-decoration:none;">„'+esc(_bet)+'"</a>';
+        const _lnk=document.getElementById('_fnpBetreffLink');
+        if(_lnk)_lnk.onclick=function(e){
+          e.preventDefault();
+          inp.value=_bet;inp.focus();
+          try{inp.dispatchEvent(new Event('input'));}catch(_e){_vorUpd();}
+        };
+      }
     }
     if(nasBasis){
       const _lenUpd=function(){
         const el=document.getElementById('_fnpLenRow');if(!el)return;
         const basis=String(nasBasis).replace(/[\\/]+$/,'');
-        const voll=basis.length+1+_fnpOrdnerJetzt().length+B652_UNTERORDNER_TIEF;
+        // b971: mit dem UNGEKÜRZTEN Namen rechnen. Vorher nahm der Wächter den schon
+        // abgeschnittenen und meldete deshalb grün, während Text still verschwand –
+        // am 09.09.2026 an einer echten Karte gemessen: „✓ 213 von 259 Zeichen",
+        // und 68 Zeichen waren weg.
+        const _pl=(kmAn&&typeof kurzModus.pruefen==='function')?kurzModus.pruefen((inp.value||'').trim()):null;
+        const voll=basis.length+1+(_pl?_pl.roh.length:_fnpOrdnerJetzt().length)+B652_UNTERORDNER_TIEF;
         const platz=259-voll-1;
         const eng=platz<B652_DATEINAME_RESERVE;
         el.style.background=eng?'#FDECEA':'#EAF7EE';
@@ -39645,9 +39707,11 @@ function _promptFolderName(suggested,parentUrl,nasBasis,kurzModus){
       }
       ov.remove();resolve(val);
     }
-    document.getElementById('_fnpOk').onclick=function(){const v=(inp.value||'').trim();if(v)_done(v);else inp.focus();};
+    // b971: „_fnpZuViel" ist die eine Bremse – Knopf UND Eingabetaste fragen sie ab.
+    // Zwei Türen, eine Wache: sonst käme man mit Enter an der Sperre vorbei.
+    document.getElementById('_fnpOk').onclick=function(){const v=(inp.value||'').trim();if(v&&!_fnpZuViel)_done(v);else inp.focus();};
     document.getElementById('_fnpCancel').onclick=function(){_done(null);};
-    inp.addEventListener('keydown',function(e){if(e.key==='Enter'){const v=(inp.value||'').trim();if(v)_done(v);}else if(e.key==='Escape')_done(null);});
+    inp.addEventListener('keydown',function(e){if(e.key==='Enter'){const v=(inp.value||'').trim();if(v&&!_fnpZuViel)_done(v);}else if(e.key==='Escape')_done(null);});
     ov.addEventListener('click',function(e){
       // b564: solange der Ordner-Browser offen ist, gilt ein Außen-Klick NICHT als Abbrechen
       const _dfb=document.getElementById('driveFolderBrowserOverlay');
@@ -48385,11 +48449,18 @@ function _objTitelVorspann(obj){
 function _objAuftragTitel(obj,kurz){
   const vorspann=_objTitelVorspann(obj);
   if(!vorspann)return kurz;
-  const flach=s=>String(s||'').toLowerCase().replace(/ß/g,'ss').replace(/[^a-z0-9äöü]/g,'');
+  const flach=s=>(typeof _pamFlach==='function')?_pamFlach(s)
+    :String(s||'').toLowerCase().replace(/ß/g,'ss').replace(/[^a-z0-9äöü]/g,'');
   const ohneKs=String(obj.title||'').replace(/\s*\(\d+\)\s*$/,'').trim();
   // Frank schreibt die Adresse manchmal selbst mit („Musterstraße 34, 34a Loch im
   // Dach") – dann nicht doppeln.
   if(ohneKs&&flach(kurz).includes(flach(ohneKs)))return kurz;
+  // b971: Dieselbe Wache noch einmal, aber OHNE die Hausnummern. Sie verfehlte genau
+  // den Fall, in dem EIN Haus des Objekts genannt wird: Objekt „… Str. 5, 6, 7, 8",
+  // getippt „… Str. 8". Für die alte Wache waren das zwei verschiedene Anschriften –
+  // die Straße stand danach zweimal im Titel (gemessen am 09.09.2026 an einer Karte).
+  const strasse=(typeof _pamStrasseAusObjekt==='function')?_pamStrasseAusObjekt(obj):'';
+  if(strasse&&flach(strasse).length>=4&&flach(kurz).includes(flach(strasse)))return kurz;
   return vorspann+B654_TRENNER+kurz;
 }
 async function _objektNeuerAuftrag(objektId){
@@ -50526,15 +50597,84 @@ async function _b652ObjektZiel(task){
 }
 // Kurzer Ordnername „JJJJ-MM-TT_Kurztext". Kunde und Adresse stehen schon im Pfad;
 // der lange VBS-Name würde im Objektordner die 260-Zeichen-Grenze von Windows
-// sprengen. Gemessen 13.08.: längster Objektpfad 155 Zeichen, tiefster Unterordner
-// \Dokumente\Verlegeanleitung = 27 – mit einem 72-Zeichen-Namen blieben 5 Zeichen
-// für den Dateinamen übrig.
-const B652_UNTERORDNER_TIEF=27;   // \Dokumente\Verlegeanleitung
+// sprengen. Gemessen 13.08.: längster Objektpfad 155 Zeichen.
+// b971: `Verlegeanleitung` wird nicht mehr mit angelegt (Festlegung FB 09.09.2026).
+// Tiefster Unterordner ist damit `\Dokumente` = 10 statt 27 – das sind 17 Zeichen
+// mehr für JEDEN Ordnernamen. Beim längsten Objektpfad wächst der Platz für die
+// Beschreibung dadurch von 19 auf 36 Zeichen.
+// ⛔ Legt jemand `Verlegeanleitung` später von Hand an, stimmt diese Rechnung für
+// diesen einen Ordner nicht mehr. Dafür misst das Fenster „📁 Ordner am Rechner"
+// (b943) beim Speichern den ECHTEN Pfad und warnt – die Grenze ist also weiter bewacht.
+const B652_UNTERORDNER_TIEF=10;   // \Dokumente
 const B652_DATEINAME_RESERVE=45;  // _ezClean kürzt Dateinamen auf 40 Zeichen (b392)
 function _b652MaxOrdnerLaenge(nasBasis){
   const b=String(nasBasis||'').replace(/[\\/]+$/,'');
   if(!b)return 90;
   return 259-b.length-1-B652_UNTERORDNER_TIEF-1-B652_DATEINAME_RESERVE;
+}
+// ── b971: Vorspann wiedererkennen ────────────────────────────────────────────
+// Bis b970 wurde er NIE wiedererkannt. Gemessen über alle 30 Karten mit
+// Objektbezug: null Treffer. Drei Gründe, jeder für sich harmlos aussehend –
+// Bindestriche im Straßennamen („Muster-Weg-Straße" gegen „Muster Weg Straße"),
+// das Kürzel mal mit Leerzeichen mal mit Bindestrich, und ein ganz
+// fehlender Trenner („… 34, 34a, 34b USB ergänzen"). Folge: der vorgeschlagene
+// Ordnername begann IMMER mit der Anschrift und fraß das ganze Pfadbudget auf.
+// Verglichen wird deshalb „flach": ohne Satzzeichen, ohne Groß/klein, und
+// „Straße"/„Strasse"/„Str." gelten als dasselbe.
+function _pamFlach(s){
+  return String(s==null?'':s).toLowerCase()
+    .replace(/ß/g,'ss')
+    .replace(/stra(?:ss|s)e/g,'str')
+    .replace(/[^a-z0-9äöü]/g,'');
+}
+// Straßenname des Objekts – Kostenstelle und Hausnummern weg.
+function _pamStrasseAusObjekt(obj){
+  const s=String((obj&&obj.title)||'').replace(/\s*\(\d+\)\s*$/,'').trim();
+  return s.replace(/[\s,]+\d[\d\s,.\-–/a-zA-Z]*$/,'').trim();
+}
+// Trägt einen Ortsvorspann vorne ab: Kürzel, Straße, Hausnummern, Trenner.
+// Bis zu drei Runden – die Anschrift stand in einer Karte DOPPELT vorn, einmal
+// als Vorspann vom Objekt und einmal von Hand getippt mit anderer Hausnummer.
+// ⛔ Erst ab vier Zeichen flachem Vergleich, damit ein Zufallstreffer nichts frisst.
+function _pamOrtVornWeg(text,obj){
+  let t=String(text||'').trim();
+  if(!obj||!t)return t;
+  const strasse=_pamStrasseAusObjekt(obj);
+  const kuerzel=(typeof _objKuerzelAusNas==='function')?_objKuerzelAusNas(obj.nas):'';
+  const kandidaten=[];
+  if(kuerzel&&strasse)kandidaten.push(kuerzel+' '+strasse);
+  if(strasse)kandidaten.push(strasse);
+  if(kuerzel)kandidaten.push(kuerzel);
+  for(let runde=0;runde<3;runde++){
+    let weg=false;
+    for(let c=0;c<kandidaten.length&&!weg;c++){
+      const ziel=_pamFlach(kandidaten[c]);
+      if(ziel.length<4||!_pamFlach(t).startsWith(ziel))continue;
+      for(let i=1;i<=t.length;i++){
+        if(_pamFlach(t.slice(0,i))!==ziel)continue;
+        // ⛔ Nur an einer WORTGRENZE schneiden. „Musterstr" ist flach dasselbe wie
+        // „Musterstraße" – ohne diese Bedingung schnitt es mitten im Wort und der
+        // Rest hieß „aße 5, 6, 7, 8 – …". Auch das hat die Prüfung gefunden.
+        if(i<t.length&&/[A-Za-zÄÖÜäöüß0-9]/.test(t[i]))continue;
+        let rest=t.slice(i);
+        // ⛔ Zuerst die Reste des abgeschnittenen Wortes: „Str." endet flach auf „str",
+        // der Punkt bleibt sonst stehen und der Rest hieße „. 5, 6, 7, 8 – …".
+        // Von der Prüfung gefunden, nicht im Betrieb – im Bestand heißt fast jede
+        // Straße so.
+        rest=rest.replace(/^[.\s,]+/,'');
+        // Hausnummern: „5, 6, 7, 8" · „34a" · „10 a" (mit Leerzeichen, kommt vor).
+        // ⛔ Der Buchstabe zählt nur als Hausnummern-Zusatz, wenn danach eine Wortgrenze
+        // kommt. Ohne diese Bedingung fraß „8 Spechtloch" das S und ließ „pechtloch"
+        // übrig – gefunden im Vergleichslauf über die echten Karten, nicht im Kopf.
+        rest=rest.replace(/^\d+(?:\s*[a-zA-Z]\b)?(?:[\s,\-–/]+\d+(?:\s*[a-zA-Z]\b)?)*/,'');
+        rest=rest.replace(/^\s*[–—\-:,.]\s*/,'').trim();
+        if(rest){t=rest;weg=true;}
+        break;
+      }
+    }
+    if(!weg)break;
+  }
+  return t||String(text||'').trim();
 }
 function _b652OrdnerVorschlag(task,obj){
   const roh=String((task&&task.createdAt)||'').substring(0,10);
@@ -50549,16 +50689,28 @@ function _b652OrdnerVorschlag(task,obj){
   return _b652OrdnerAusKurz(_b652KurzAusTitel(task,obj),task,obj);
 }
 // b668: Den Kurztext aus dem Kartentitel herausschälen – den Vorspann abziehen.
+// b971: erst der genaue Vorspann wie bisher, danach flach (Kürzel, Straße,
+// Hausnummern, Trenner). Beides nacheinander, weil der genaue Weg schneller ist
+// und der flache nur greift, wenn der genaue danebenlag.
 function _b652KurzAusTitel(task,obj){
   let kurz=String((task&&task.title)||'Auftrag').trim();
-  const vorspann=_objTitelVorspann(obj);
-  if(vorspann&&kurz.startsWith(vorspann+B654_TRENNER))kurz=kurz.slice((vorspann+B654_TRENNER).length).trim()||'Auftrag';
-  return kurz;
+  const vorspann=(typeof _objTitelVorspann==='function')?_objTitelVorspann(obj):'';
+  if(vorspann&&kurz.startsWith(vorspann+B654_TRENNER))kurz=kurz.slice((vorspann+B654_TRENNER).length).trim()||kurz;
+  if(typeof _pamOrtVornWeg==='function')kurz=_pamOrtVornWeg(kurz,obj);
+  return kurz||'Auftrag';
 }
 // b668: Aus einem beliebigen Kurztext den Ordnernamen bauen – Datum davor, verbotene
 // Zeichen raus, auf das Pfadbudget des Objekts gekürzt. Genau die Regel von b652,
 // nur eben mit frei wählbarem Kurztext statt dem aus dem Titel.
-function _b652OrdnerAusKurz(kurz,task,obj){
+// b971: `ohneKuerzung` kam dazu – der Dialog braucht denselben Namen einmal
+// UNGEKÜRZT, um sagen zu können, wie viel zu viel ist. Bewusst als Schalter an
+// DIESER Funktion und nicht als zweite Funktion daneben: ein Rückfall über
+// `typeof` hätte in den ausgeschnittenen Prüfumgebungen still einen anderen Namen
+// geliefert (beim Bauen genau so passiert, drei fremde Suiten wurden rot).
+// ⛔ Die Kürzung bleibt als NOTBREMSE für Aufrufer ohne Fenster (Vorschlag,
+// USB-Lauf). Über den Dialog kommt kein zu langer Name mehr hier an – dort ist
+// der Anlegen-Knopf gesperrt, bis es passt.
+function _b652OrdnerAusKurz(kurz,task,obj,ohneKuerzung){
   const roh=String((task&&task.createdAt)||'').substring(0,10);
   const datum=/^\d{4}-\d{2}-\d{2}$/.test(roh)?roh:_tzHeuteIso();
   // Leerer Kurztext ergäbe sonst „2026-08-11_" – ein Ordner, der auf einem Unterstrich
@@ -50566,9 +50718,17 @@ function _b652OrdnerAusKurz(kurz,task,obj){
   // einen direkten Aufruf schon. Beim Prüfen von b668 aufgefallen.
   const _k=String(kurz||'').trim()||'Auftrag';
   let name=(datum+'_'+_k).replace(/[\\/:*?"<>|]/g,'-').replace(/[. ]+$/,'');
+  if(ohneKuerzung)return name||'Auftrag';
   const max=_b652MaxOrdnerLaenge(obj&&obj.nas);
   if(max>12&&name.length>max)name=name.substring(0,max).replace(/[. ]+$/,'');
   return name||'Auftrag';
+}
+// b971: Passt der Name noch? Rückgabe {roh,name,max,zuViel} – EINE Stelle, damit
+// Vorschau, Längenwächter und der Anlegen-Knopf nicht drei Meinungen haben.
+function _b652OrdnerPruefen(kurz,task,obj){
+  const roh =_b652OrdnerAusKurz(kurz,task,obj,true);
+  const max =_b652MaxOrdnerLaenge(obj&&obj.nas);
+  return {roh:roh,name:_b652OrdnerAusKurz(kurz,task,obj),max:max,zuViel:Math.max(0,roh.length-max)};
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -50604,8 +50764,7 @@ async function _usbOrdnerStruktur(name,parentFid){
   await _driveGetOrCreateFolder('Final',gutId);
   const fotoId =await _driveGetOrCreateFolder('Bilder',mainId);
   const dokId  =await _driveGetOrCreateFolder('Dokumente',mainId);
-  await _driveGetOrCreateFolder('Verlegeanleitung',dokId);
-  await _driveGetOrCreateFolder('Dokumente AG',dokId);
+  await _driveGetOrCreateFolder('Dokumente AG',dokId); // b971: Verlegeanleitung raus, s. _createDriveAuftragStruktur
   const emailId=await _driveGetOrCreateFolder('Posteingang',mainId);
   const base='https://drive.google.com/drive/folders/';
   return{mainId:mainId,mainUrl:base+mainId,fotoUrl:base+fotoId,dokUrl:base+dokId,emailUrl:base+emailId};
@@ -51026,14 +51185,14 @@ async function _vbsCreateDriveStruktur(ordnerName,nasParent,nasGrand,nasPath){
     const _nasSynced=(mainId!==null);
     if(!mainId)mainId=await _driveCreateFolder(safeName,parentFid);
     const _mkSub=_nasSynced?_driveGetOrCreateFolder:_driveCreateFolder;
-    // b534: Master-Struktur, 9 Ordner ohne Nummern – identisch zu _createDriveAuftragStruktur
+    // b534: Master-Struktur ohne Nummern – identisch zu _createDriveAuftragStruktur
+    // b971: Verlegeanleitung raus, dort steht die Begründung.
     await _mkSub('Auftrag',mainId);
     const gutId  =await _mkSub('Gutachten',mainId);
     await _mkSub('Entwurf',gutId);
     await _mkSub('Final',gutId);
     const foto2Id=await _mkSub('Bilder',mainId);
     const dok1Id =await _mkSub('Dokumente',mainId);
-    await _mkSub('Verlegeanleitung',dok1Id);
     await _mkSub('Dokumente AG',dok1Id);
     const emailId=await _mkSub('Posteingang',mainId);
     const _b='https://drive.google.com/drive/folders/';
