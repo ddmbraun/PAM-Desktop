@@ -10074,7 +10074,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-09 · #968'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-09-b968) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-09 · #969'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-09-b969) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -35618,7 +35618,7 @@ async function _pamEmailAntwortenMitVerlauf(){
    sonst zeigt PAM eine alte Fassung weiter und die neuen Spalten bleiben leer.
    Genau das war im Betrieb zu sehen: "woher" war ueberall leer, weil die
    gespeicherte Fassung noch von der Bauart davor stammte. */
-const AB_BAUART=7; /* b966: Klammer-Vorwahl und die Anrede „Hr." - beides aendert die Tabelle */
+const AB_BAUART=8; /* b969: Text aus PDF-Anhaengen kommt in den Verlauf */
 let _abLetzte=null;
 const AB_OLLAMA='http://localhost:11434';
 const AB_MODELL='qwen2.5:7b';
@@ -35821,6 +35821,72 @@ function _abOhneWdh(text,gesehen){
     neu.push(z);
   }
   return neu.join('\n').replace(/\n{3,}/g,'\n\n').trim();
+}
+
+/* b969: Den Text aus einem PDF-Anhang holen – über Google Drive, ohne zusätzliche Bibliothek.
+   ⛔ Warum nicht pdf.js: PAMs Sicherheitsregel lässt Skripte nur von Google zu, die Bibliothek
+   müsste also fest eingebaut werden. Gemessen am 09.09.2026: 1,7 MB auf eine 5,2-MB-Datei, ein
+   Drittel mehr – und eingescannte Papiere könnte sie trotzdem nicht lesen.
+   Drive kann beides: Es wandelt das PDF beim Kopieren in ein Dokument um und macht dabei
+   Texterkennung. An einem echten Anhang geprüft (ein eingescanntes Angebot): der Text kam
+   vollständig heraus.
+   ⛔ Die Kopie wird IMMER wieder gelöscht – auch wenn zwischendrin etwas schiefgeht. Sie hat in
+   Franks Drive nichts verloren.
+   ⛔ Es geht nichts Neues an Google: die Anhänge liegen ohnehin schon in seinem Drive. */
+const AB_ANH_MAX=3;          /* höchstens drei Anhänge je Karte – sonst dauert das Öffnen zu lang */
+const AB_ANH_ZEICHEN=2500;   /* je Anhang; der Rest ist erfahrungsgemäß Kleingedrucktes */
+async function _abAnhangText(fileId){
+  if(!fileId)return '';
+  if(typeof gdriveToken==='undefined'||!gdriveToken)return '';
+  let kopieId='';
+  try{
+    const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'/copy',{
+      method:'POST',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},
+      body:JSON.stringify({name:'_pam_textkopie_'+Date.now(),mimeType:'application/vnd.google-apps.document'})});
+    if(!r.ok)return '';
+    const j=await r.json();
+    kopieId=(j&&j.id)||'';
+    if(!kopieId)return '';
+    const e=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(kopieId)+'/export?mimeType=text/plain',
+      {headers:{Authorization:'Bearer '+gdriveToken}});
+    return e.ok?(await e.text()):'';
+  }catch(err){console.warn('[b969] Anhang lesen:',err&&err.message);return '';}
+  finally{
+    if(kopieId){try{await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(kopieId),
+      {method:'DELETE',headers:{Authorization:'Bearer '+gdriveToken}});}catch(e2){console.warn('[b969] Textkopie aufräumen:',e2&&e2.message);}}
+  }
+}
+/* Ab diesen Zeilen ist in einem Angebot oder Auftrag nur noch Kleingedrucktes. */
+const AB_ANH_ABBRUCH=[
+  /^\s*Widerrufs(recht|belehrung)/i,
+  /^\s*(Bankkonten|Bankverbindung)\b/i,
+  /^\s*(Registergericht|Amtsgericht|HRB|USt\.?-?IdNr|Steuernummer|Gerichtsstand)\b/i,
+  /^\s*Es gelten die (Bestimmungen|Allgemeinen)/i,
+  /^\s*(Allgemeine Gesch(ä|ae)ftsbedingungen|AGB)\b/i,
+  /^\s*Zur Kenntnis genommen/i,
+  /^\s*Der Inhalt dieser (E-?Mail|Nachricht)/i,
+];
+/* Zeilen, die in jedem Formular stehen und nichts über den Vorgang sagen. */
+const AB_ANH_ZEILE=new RegExp([
+  '^\\s*Seite\\s+\\d+\\s*(von|/)\\s*\\d+',
+  '^\\s*(IBAN|BIC|Tel\\.?|Telefon|Telefax|Fax|E-?Mail|Web|Internet)\\s*[:.]',
+  '^\\s*\\d{5}\\s+[A-ZÄÖÜ]',
+  '^\\s*[•\\-–—.\\s]*$',
+  '^\\s*(Belegdatum|Angebot(s)?-?Nr|Kunden\\s*-?\\s*Nr|Rechnungs-?Nr|Auftrags-?Nr)\\b',
+  '^\\s*(Mit freundlichen|Geschäftsführer|Gesch(ä|ae)ftsf(ü|ue)hrer)\\b',
+].join('|'),'i');
+function _abAnhangSaeubern(roh){
+  const zeilen=String(roh||'').replace(/\r/g,'').split('\n');
+  const raus=[];
+  for(const z of zeilen){
+    if(AB_ANH_ABBRUCH.some(re=>re.test(z)))break;
+    if(AB_ANH_ZEILE.test(z))continue;
+    const t=z.trim();
+    if(!t)continue;
+    raus.push(t);
+  }
+  const txt=raus.join('\n').replace(/\n{3,}/g,'\n\n').trim();
+  return txt.length>AB_ANH_ZEICHEN?(txt.substring(0,AB_ANH_ZEICHEN-1).replace(/\s+\S*$/,'')+'…'):txt;
 }
 
 /* Name und Telefonnummer als PAAR – nicht getrennt einsammeln.
@@ -36468,6 +36534,39 @@ async function _abBauen(task,vonHand){
       genannte.push({name:p.name,rolle:p.rolle,woher:s.wann||''});
     });
   });
+  /* b969: Der Inhalt steckt bei zwei Dritteln der Karten nicht in der Mail, sondern im Anhang –
+     gemessen am 09.09.2026: von 42 Karten mit Mails hatten 28 keinen Mailtext, 27 davon einen
+     PDF-Anhang. Franks Frage dazu: „Es liest ja nur die E-Mails aus, keine Dokumente die da
+     angehängt sind." Genau so war es.
+     ⛔ Nur `attachments` – die echten Anhänge der Absender. `emailPdfs` sind Lesekopien, die PAM
+     selbst aus den Mails erzeugt; deren Text steht ohnehin schon im Verlauf.
+     ⛔ Schon gelesene Anhänge werden aus der vorigen Kurzfassung übernommen, nicht neu geholt.
+     Das Umwandeln dauert Sekunden und soll nur einmal je Datei passieren. */
+  const anhaenge=[];
+  {
+    const altAnh=(task&&task._aufEinenBlick&&task._aufEinenBlick.anhaenge)||[];
+    const pdfs=(task&&task.attachments||[]).filter(a=>a&&a.fileId&&/\.pdf$/i.test(String(a.name||'')));
+    for(const a of pdfs){
+      if(anhaenge.length>=AB_ANH_MAX)break;
+      const schon=altAnh.find(x=>x&&x.fileId===a.fileId);
+      const text=schon?String(schon.text||''):_abAnhangSaeubern(await _abAnhangText(a.fileId));
+      anhaenge.push({fileId:a.fileId,name:String(a.name||''),text:text});
+      if(!text)continue;
+      lfd++;
+      schritte.push({wann:String(a.uploadedAt||''),wer:'📎 '+String(a.name||'Anhang'),gez:null,text:text,
+        fwd:false,rolle:'',unser:false,ord:9000+anhaenge.length,objTreffer:_abObjektTreffer(text,objKey),anhang:true});
+      ganzerText+='### ANHANG '+anhaenge.length+'\nDATEI: '+String(a.name||'')+'\n'+text.substring(0,2500)+'\n\n';
+      /* ⛔ Der eigentliche Gewinn: In den Auftragsformularen der Verwaltungen stehen Mieter und
+         Rufnummer, in der Mail selbst steht nichts. Ohne diese zwei Zeilen käme der Text zwar in
+         den Verlauf, die Tabelle bliebe aber leer – der Fehler stand beim ersten Lauf genau so da. */
+      const wannA=String(a.uploadedAt||'');
+      _abKontakte(text).forEach(p=>{p.woher=wannA;kontakteMuster.push(p);});
+      _abGenannte(text).forEach(p=>{
+        if(_abIstEigenerName(p.name,eigeneNamen))return;
+        genannte.push({name:p.name,rolle:p.rolle,woher:wannA});
+      });
+    }
+  }
   const sorte=_abSorte(mails,ganzerText.length,hv);
   const ag=_abAuftraggeber(mails,hv);
   const daten={bauart:AB_BAUART,hv:hv,stand:new Date().toISOString(),anzahl:mails.length,
@@ -36475,7 +36574,7 @@ async function _abBauen(task,vonHand){
     sorte:sorte,schritte:schritte,
     /* b963: drei Quellen für die Tabelle – Rufnummern im Text, wer geschrieben hat,
        wer genannt wird. Zusammengeführt wird erst in _abAllePersonen. */
-    schreiber:schreiber,genannte:genannte,
+    schreiber:schreiber,genannte:genannte,anhaenge:anhaenge,
     kontakte:kontakteMuster.filter(p=>!_abIstEigenerName(p.name,eigeneNamen)),
     absender:ag?(ag.mail.absName||ag.mail.adresse):'',
     absAdr:ag?ag.mail.adresse:'',
@@ -36492,7 +36591,7 @@ async function _abBauen(task,vonHand){
     /* b962: Kein einziger Mailtext lesbar (Outlook/Drive nicht erreichbar)? Dann gilt der Kasten
        nicht als fertig – beim nächsten Öffnen wird es erneut versucht, und statt zu verstecken
        wird es gesagt (_abOhneTextZeigen). Die Outlook-Vorschau allein zählt nicht als Text. */
-    ohneText:!mails.some(m=>(m.bodyHtml||(m.bodyText&&!m.nurVorschau)))};
+    ohneText:!mails.some(m=>(m.bodyHtml||(m.bodyText&&!m.nurVorschau)))&&!anhaenge.some(a=>a.text)};
   /* ⛔ Die lokale KI wird NICHT mehr gefragt. Frank am 08.09.2026: „Wenn wir die KI
      nicht brauchen, dann lassen wir das raus." Der Grund war handfest und gemessen:
      das Modell (4,4 GB) passt bei normaler Arbeit weder auf die Grafikkarte
@@ -36822,8 +36921,8 @@ function _abRendern(d){
     if(v)v.innerHTML=echte.map(s=>
       '<div style="border-left:2px solid var(--border);padding-left:11px;margin-bottom:11px;">'+
       '<div style="color:var(--text2);font-size:12.5px;margin-bottom:4px;">'+
-      (s.fwd?'<span title="weitergeleitet">↳ </span>':'')+
-      _abEsc(s.wann)+' · <b>'+_abEsc(s.wer)+'</b>'+
+      (s.anhang?'<span title="aus einem angehängten PDF gelesen">📎 </span>':(s.fwd?'<span title="weitergeleitet">↳ </span>':''))+
+      _abEsc(s.wann)+(s.wann?' · ':'')+'<b>'+_abEsc(String(s.wer||'').replace(/^📎\s*/,''))+'</b>'+
       (s.gez&&s.gez!==s.wer?' <span style="font-weight:400;">(gez. '+_abEsc(s.gez)+')</span>':'')+'</div>'+
       '<div>'+_abEsc(s.text).replace(/\n/g,'<br>')+'</div></div>').join('');
   }else if(vz){vz.style.display='none';}
