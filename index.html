@@ -9327,6 +9327,18 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
       </div>
     </div>
 
+    <!-- b973: Steht NICHT auf dem Deckblatt. Sagt „Auf einen Blick" nur, was außerdem uns
+         gehört – sonst landet die eigene Zweitadresse als fremder Ansprechpartner in der
+         Tabelle, samt einer Rufnummer, die jemand anderem gehört. -->
+    <div style="border-top:1px solid var(--border);margin-top:16px;padding-top:14px;">
+      <div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;">👤 Das sind auch wir</div>
+      <div style="font-size:11px;color:var(--text2);margin-bottom:8px;">Weitere eigene Adressen und Rufnummern &ndash; zum Beispiel die private, von der du Post weiterleitest. <b>Auf einen Blick</b> führt uns damit nicht mehr als Ansprechpartner auf. Steht <b>nicht</b> auf dem Deckblatt. Mehrere mit Komma trennen.</div>
+      <div style="display:grid;grid-template-columns:1fr;gap:6px;">
+        <label style="font-size:11px;color:var(--text2);">Weitere eigene E-Mail-Adressen<input type="text" id="setFirmaMails" placeholder="zweite@example.org, dritte@example.org" style="width:100%;box-sizing:border-box;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;"></label>
+        <label style="font-size:11px;color:var(--text2);">Weitere eigene Rufnummern<input type="text" id="setFirmaTels" placeholder="Handy, Zweitanschluss &ndash; mit Komma trennen" style="width:100%;box-sizing:border-box;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;"></label>
+      </div>
+    </div>
+
 
       <!-- b918: Outlook-Ordner ↔ Board/Spalte. Frank sortiert beim Verschieben in
            Outlook (geht auch vom Handy), PAM holt es später ab. -->
@@ -10074,7 +10086,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-09 · #972'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-09-b972) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-09 · #973'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-09-b973) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -35618,7 +35630,7 @@ async function _pamEmailAntwortenMitVerlauf(){
    sonst zeigt PAM eine alte Fassung weiter und die neuen Spalten bleiben leer.
    Genau das war im Betrieb zu sehen: "woher" war ueberall leer, weil die
    gespeicherte Fassung noch von der Bauart davor stammte. */
-const AB_BAUART=10; /* b970: Objekt aus dem Kartentitel, Briefkopf im Anhang weg */
+const AB_BAUART=11; /* b970: Objekt aus dem Kartentitel, Briefkopf im Anhang weg */
 let _abLetzte=null;
 const AB_OLLAMA='http://localhost:11434';
 const AB_MODELL='qwen2.5:7b';
@@ -35976,6 +35988,33 @@ function _abEigeneNr(){
   }catch(e){}
   return '';
 }
+/* Vorwahl vereinheitlichen: „+49 172 …" und „0172 …" sind dieselbe Nummer. */
+function _abNrNorm(s){
+  return String(s||'').replace(/^\s*(?:\+49|0049)\s*/,'0').replace(/\D/g,'');
+}
+/* b973: Weitere eigene Rufnummern aus ⚙ Einstellungen („Das sind auch wir") – zum Beispiel
+   das Handy. Der Anlass: es stand mit Namen und noch einmal ohne in der Ansprechpartner-Tabelle.
+   ⛔ Diese werden VOLL verglichen, nicht als Präfix wie die Firmennummer. Bei der Firmennummer
+   sind sechs Ziffern richtig, weil nur die Durchwahl dahinter variiert. Bei einer Handynummer
+   wären sechs Ziffern die Netzvorwahl plus zwei – das träfe fremde Handys gleich mit. */
+function _abWeitereNrn(){
+  const raus=[];
+  try{
+    const f=(typeof _pamFirma==='function')?_pamFirma():null;
+    if(typeof _pamListe==='function')_pamListe(f&&f.tels).forEach(x=>{
+      const z=_abNrNorm(x); if(z.length>=7)raus.push(z);
+    });
+  }catch(e){}
+  return raus;
+}
+/* Gehört diese Nummer uns? `eigen` ist der Präfix der Firmennummer – oder '' in Prüfungen
+   und überall dort, wo ausdrücklich keine eigene Nummer gelten soll. */
+function _abIstUnsereNr(roh,eigen){
+  const z=_abNrNorm(roh);
+  if(!z)return false;
+  if(eigen&&z.indexOf(eigen)===0)return true;
+  return _abWeitereNrn().some(w=>w===z);
+}
 /* b972: ⛔ Das Datum aus dem Weiterleitungskopf wurde hart auf 22 Zeichen geschnitten – aus
    „4. September 2026 15:55" wurde in der Tabelle „4. September 2026 15:5". Zum fünften Mal eine
    fest eingetippte Zahl, die nicht zu den echten Werten passt. Jetzt wird an der Uhrzeit
@@ -35992,7 +36031,8 @@ function _abKontakte(text,eigeneNr){
   while((m=AB_NR.exec(text))){
     const nr=m[1].trim(),ziffern=nr.replace(/\D/g,'');
     if(ziffern.length<9||ziffern.length>15)continue;
-    if(eigen&&ziffern.indexOf(eigen)===0)continue;
+    /* b973: auch die weiteren eigenen Nummern aus den Einstellungen. */
+    if(_abIstUnsereNr(nr,eigen))continue;
     /* ⛔ Deutsche Rufnummern beginnen mit 0 oder +49. "049 174 307254" aus einem
        Fließtext ist keine - an einer echten Karte aufgefallen. */
     if(!/^\(?(\+49|0)/.test(nr.replace(/\s/g,''))||/^0[04-9]{2}/.test(ziffern))continue;
@@ -36158,6 +36198,13 @@ function _abEigeneAdressen(){
   try{
     const f=(typeof _pamFirma==='function')?_pamFirma():null;
     const m=String((f&&f.mail)||'').toLowerCase(); if(m)raus.add(m);
+    /* b973: ⛔ Die Domain hilft hier nicht – eine t-online-Adresse teilt sie sich mit fremden
+       Privatleuten. Deshalb ein eigenes Feld in ⚙ Einstellungen („Das sind auch wir").
+       Der Anlass: Frank leitet Post von seiner Zweitadresse weiter, PAM hielt ihn für einen
+       fremden Ansprechpartner und ordnete ihm die Rufnummer aus der Signatur des ECHTEN
+       Absenders zu. Gemessen: 8 von 9 Absender-Rufnummern stammen aus Weiterleitungen. */
+    if(typeof _pamListe==='function')
+      _pamListe(f&&f.mails).forEach(a=>{const x=a.toLowerCase();if(x.indexOf('@')>0)raus.add(x);});
   }catch(e){}
   try{
     ['1','2'].forEach(function(slot){
@@ -36229,7 +36276,7 @@ function _abAgTelefon(m){
     const oben=roh.split(/Der Inhalt dieser E-?Mail|Diese E-?Mail enth/i)[0];
     const eigen=_abEigeneNr();
     const passt=nr=>{const z=String(nr).replace(/\D/g,'');
-      return z.length>=9&&z.length<=15&&!(eigen&&z.indexOf(eigen)===0);};
+      return z.length>=9&&z.length<=15&&!_abIstUnsereNr(nr,eigen);};
     const zeilen=oben.split('\n');
     /* ⛔ b966: NUR in der Signatur suchen, also hinter der Grussformel. Bis b965 galt schon die
        erste Zeile im ganzen Text, die mit „Tel." beginnt - an einer echten Karte stand dort
@@ -36748,6 +36795,10 @@ function _abAllePersonen(d){
      ersten Lauf gefangen; wer neue Helfer braucht, legt sie hier hinein. */
   const _abSchluessel=name=>String(name||'').toLowerCase().replace(/^(herrn?|frau|familie|fam\.)\s+/,'').replace(/[^a-zäöüß0-9]+/g,' ').trim();
   const _abVorOrt=rolle=>/mieter|eigent|hausmeister|bewohner/i.test(String(rolle||''));
+  /* b973: Eine nackte E-Mail-Adresse ist kein Name. Sie stand als Name in der Tabelle, wenn die
+     Mail keinen Klarnamen mitbrachte – die Zeile las sich dann wie eine Person, die so heißt.
+     Die Adresse geht nicht verloren: sie wandert ins `mail`-Feld und steht am Briefsymbol. */
+  const _abIstAdresse=n=>/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(String(n||'').trim());
   const raus=[];
   /* Zwei Eintraege sind dieselbe Person, wenn die Rufnummer gleich ist oder der Name
      ineinander steckt (bloßer Nachname und derselbe Name mit Anrede davor). Der längere
@@ -36762,12 +36813,16 @@ function _abAllePersonen(d){
   const rein=(p,rang)=>{
     if(!p)return;
     const nr=String(p.telefon||p.nr||'').replace(/\D/g,'');
-    const name=String(p.name||'').trim();
-    if(!nr&&!name)return;
+    let name=String(p.name||'').trim();
+    let mail=String(p.mail||p.email||p.adresse||'').trim();
+    /* b973: Steht eine Adresse an der Stelle des Namens, ist sie die Adresse – nicht der Name. */
+    if(_abIstAdresse(name)){if(!mail)mail=name;name='';}
+    if(!nr&&!name&&!mail)return;
     const schl=_abSchluessel(name);
-    const vorh=finde(nr,schl);
+    const vorh=finde(nr,schl)||(!schl&&mail?raus.find(x=>x.mail&&x.mail.toLowerCase()===mail.toLowerCase()):null);
     if(vorh){
       if(name.length>String(vorh.name).length)vorh.name=name;
+      if(!vorh.mail&&mail)vorh.mail=mail;
       if(!vorh.telefon&&(p.telefon||p.nr)){vorh.telefon=(p.telefon||p.nr);vorh.nr=nr;}
       if(!vorh.rolle&&p.rolle)vorh.rolle=p.rolle;
       if(!vorh.woher&&p.woher)vorh.woher=p.woher;
@@ -36776,8 +36831,8 @@ function _abAllePersonen(d){
       if(rang<vorh.rang)vorh.rang=rang;
       return;
     }
-    raus.push({_k:nr||('n:'+schl),schl:schl,nr:nr,name:name,telefon:(p.telefon||p.nr||''),
-      rolle:p.rolle||'',woher:p.woher||'',schrieb:!!p.schrieb,rang:rang});
+    raus.push({_k:nr||('n:'+schl)||('m:'+mail.toLowerCase()),schl:schl,nr:nr,name:name,mail:mail,
+      telefon:(p.telefon||p.nr||''),rolle:p.rolle||'',woher:p.woher||'',schrieb:!!p.schrieb,rang:rang});
   };
   const ki=d.ki||{};
   /* Zuerst die mit Rufnummer – sie sind die belastbarsten. */
@@ -36897,12 +36952,14 @@ function _abZuKontakt(i,still){
   const rolle=_abKontaktRolle(p.rolle);
   if(ziel==='karte'){
     if(typeof addKontaktPTP!=='function')return false;
-    addKontaktPTP(rolle,p.name,p.telefon||'','',false,'',{},false);
+    /* b973: die Adresse mitgeben – sonst geht sie verloren, wenn kein Klarname da ist.
+       ⛔ Das VIERTE Argument ist die E-Mail; das siebte ist die Anschrift (Straße/PLZ/Ort). */
+    addKontaktPTP(rolle,p.name,p.telefon||'',p.mail||'',false,'',{},false);
     if(typeof updateKontaktePTPTitle==='function')updateKontaktePTPTitle();
     if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
   }else{
     if(!Array.isArray(_emCurrentTask.kontakte))_emCurrentTask.kontakte=[];
-    _emCurrentTask.kontakte.push({rolle:rolle,name:p.name||'',tel:p.telefon||'',tel2:'',email:'',
+    _emCurrentTask.kontakte.push({rolle:rolle,name:p.name||'',tel:p.telefon||'',tel2:'',email:p.mail||'',
       anrufKontakt:false,wohntImObjekt:false});
     if(typeof _emRenderKontakte==='function')_emRenderKontakte();
     const b=document.getElementById('emKontakteBody');if(b)b.style.display='';
@@ -37006,7 +37063,7 @@ function _abRendern(d){
       personen.forEach((p,i)=>{
         const f=_abFarbe(p.rolle);
         h+='<tr>'+
-          '<td style="padding:9px 10px;border-bottom:1px solid var(--border);font-weight:600;color:var(--text);">'+(_abEsc(p.name)||'<span style="color:var(--text2);font-style:italic;font-weight:400;">ohne Namen</span>')+'</td>'+
+          '<td style="padding:9px 10px;border-bottom:1px solid var(--border);font-weight:600;color:var(--text);">'+(_abEsc(p.name)||(p.mail?'<span style="color:var(--text2);font-weight:400;font-size:12px;" title="nur die E-Mail-Adresse bekannt">'+_abEsc(p.mail)+'</span>':'<span style="color:var(--text2);font-style:italic;font-weight:400;">ohne Namen</span>'))+'</td>'+
           '<td style="padding:7px 9px;border-bottom:1px solid var(--border);">'+(p.rolle?'<span style="background:'+f[0]+';color:'+f[1]+';font-size:11px;font-weight:700;letter-spacing:.4px;padding:4px 8px;border-radius:4px;white-space:nowrap;">'+_abEsc(String(p.rolle).toUpperCase())+'</span>':'')+'</td>'+
           '<td style="padding:7px 9px;border-bottom:1px solid var(--border);white-space:nowrap;">'+(p.telefon?'<a href="tel:'+_abEsc(String(p.telefon).replace(/[^\d+]/g,''))+'" style="color:var(--accent,#378ADD);text-decoration:none;font-weight:600;">'+_abEsc(p.telefon)+'</a>':'<span style="color:var(--text2);">—</span>')+'</td>'+
           /* b963: Das Briefsymbol sagt, woher die Person kommt – hat sie selbst geschrieben,
@@ -57284,7 +57341,15 @@ let pamSettings={version:1,ordnerBaustelle:'',ordnerEmail:'',ordnerNotiz:'',ordn
 // angeschlagen, als die Straße hier stand; der Wächter wurde NICHT aufgeweicht (Lehre b773).
 // Alles Weitere trägt Frank einmal in ⚙ Einstellungen ein, es liegt dann in
 // pam_settings.json auf Drive. Ohne Drive entsteht ohnehin kein Foto-PDF.
-const PAM_FIRMA_VORGABE={name:'Dachdeckermeister Braun GmbH',strasse:'',plz:'',ort:'',tel:'',mail:''};
+// b973: `mails` und `tels` gehören NICHT auf den Briefkopf – sie sagen PAM nur, welche Adressen
+// und Rufnummern außerdem uns gehören. Ohne sie hält „Auf einen Blick" eine eigene Zweitadresse
+// für einen fremden Ansprechpartner und führt uns selbst in der Tabelle.
+const PAM_FIRMA_VORGABE={name:'Dachdeckermeister Braun GmbH',strasse:'',plz:'',ort:'',tel:'',mail:'',mails:'',tels:''};
+/* Aus einem Feld mit mehreren Einträgen (Komma, Semikolon oder Zeilenumbruch) eine saubere
+   Liste machen. Leere Felder ergeben eine leere Liste – nie einen Eintrag aus Leerzeichen. */
+function _pamListe(roh){
+  return String(roh||'').split(/[,;\n\r]+/).map(x=>x.trim()).filter(Boolean);
+}
 function _pamFirma(){
   const s=(typeof pamSettings!=='undefined'&&pamSettings&&pamSettings.firma)||{};
   const f={};
@@ -57531,6 +57596,8 @@ async function openPamSettings(){
   const _fa=(pamSettings&&pamSettings.firma)||{};
   set('setFirmaName',_fa.name);set('setFirmaStrasse',_fa.strasse);set('setFirmaPlz',_fa.plz);
   set('setFirmaOrt',_fa.ort);set('setFirmaTel',_fa.tel);set('setFirmaMail',_fa.mail);
+  /* b973: die beiden Felder aus 'Das sind auch wir'. */
+  set('setFirmaMails',_fa.mails);set('setFirmaTels',_fa.tels);
   const hint=document.getElementById('pamSettingsHint');
   if(hint)hint.innerHTML=gdriveTokenValid()
     ?'Die Namen entsprechen den Board-Typen aus dem Filter „Alle Typen“. Bestehende Tasks behalten ihren Ordner.'
@@ -57593,7 +57660,8 @@ async function savePamSettings(){
   pamSettings.outlookHolen   =Object.assign({zuordnung:_olZuordnungEinsammeln()},_olErledigtEinsammeln(),{protokoll:(pamSettings.outlookHolen&&Array.isArray(pamSettings.outlookHolen.protokoll))?pamSettings.outlookHolen.protokoll:[]});
   // b777: Briefkopf für die Deckblätter
   pamSettings.firma={name:get('setFirmaName'),strasse:get('setFirmaStrasse'),plz:get('setFirmaPlz'),
-    ort:get('setFirmaOrt'),tel:get('setFirmaTel'),mail:get('setFirmaMail')};
+    ort:get('setFirmaOrt'),tel:get('setFirmaTel'),mail:get('setFirmaMail'),
+    mails:get('setFirmaMails'),tels:get('setFirmaTels')};
   settingsApply();
   // b898: GENAU die Felder, die dieser Dialog anfasst – zettelPw gehört bewusst NICHT
   // dazu (das setzt nur der Zettel-Weg). Alles Nicht-Genannte bleibt so, wie es in der
