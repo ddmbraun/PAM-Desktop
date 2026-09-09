@@ -10074,7 +10074,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-09 · #971'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-09-b971) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-09 · #972'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-09-b972) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -35618,7 +35618,7 @@ async function _pamEmailAntwortenMitVerlauf(){
    sonst zeigt PAM eine alte Fassung weiter und die neuen Spalten bleiben leer.
    Genau das war im Betrieb zu sehen: "woher" war ueberall leer, weil die
    gespeicherte Fassung noch von der Bauart davor stammte. */
-const AB_BAUART=9; /* b970: Objekt aus dem Kartentitel, Briefkopf im Anhang weg */
+const AB_BAUART=10; /* b970: Objekt aus dem Kartentitel, Briefkopf im Anhang weg */
 let _abLetzte=null;
 const AB_OLLAMA='http://localhost:11434';
 const AB_MODELL='qwen2.5:7b';
@@ -35875,10 +35875,31 @@ const AB_ANH_ABBRUCH=[
 const AB_ANH_KOPFENDE=/^\s*(Auftrag|Angebot|Rechnung|Bestellung|Lieferschein|Schadensmeldung|Mängelmeldung|Mangelmeldung|Betreff|Gegenstand)\b\s*:?\s*$/i;
 /* Zeilen des Briefkopfs, die auch nach der Überschrift noch auftauchen. */
 const AB_ANH_KOPFZEILE=/^\s*(An|Anschrift|Empf(ä|ae)nger|Absender|Nummer|Kunden-?Nr|Auftraggeber|Datum|Belegdatum|Seite)\s*:?\s*/i;
+/* b972: Nicht jedes Formular hat eine Überschrift auf eigener Zeile. Ein Anschreiben hat statt
+   dessen eine ANREDE – und die ist ein ebenso sicherer Anfang des Inhalts. An einer echten Karte
+   aufgefallen, deren Anhang mit „Hausverwaltung … GmbH … Auftragsnummer … E-Mail …" begann und
+   erst bei „Sehr geehrte Damen und Herren," inhaltlich wurde. */
+const AB_ANH_ANREDE=/^\s*(Sehr geehrte|Sehr geehrter|Guten Tag|Guten Morgen|Hallo|Liebe[rs]?\s+[A-ZÄÖÜ])/i;
+/* b972: Im Briefkopf steht oft die EINZIGE Nennung des Objekts („… Objekt 2690 Musterstr. 1 …").
+   Die darf der Schnitt nicht mitnehmen – sonst bleibt als Adresse nur die des Absenders übrig. */
+const AB_ANH_OBJEKTZEILE=/(?:^|\s)(Objekt|Bauvorhaben|Liegenschaft|Baustelle)\b/i;
+/* Die Bezeichnung steht allein auf der Zeile – der Wert kommt eine Zeile tiefer. */
+const AB_ANH_NURBEZ=/^\s*(Objekt|Bauvorhaben|Liegenschaft|Baustelle)\b\s*:?\s*$/i;
 function _abAnhangKopfWeg(zeilen){
   /* Die Überschrift muss weit oben stehen – sonst wäre „Auftrag" mitten im Text ein Fehlschnitt. */
   for(let i=0;i<Math.min(14,zeilen.length);i++){
-    if(AB_ANH_KOPFENDE.test(zeilen[i]))return zeilen.slice(i+1);
+    if(!AB_ANH_KOPFENDE.test(zeilen[i])&&!AB_ANH_ANREDE.test(zeilen[i]))continue;
+    /* Was aus dem Kopf das Objekt nennt, wird gerettet und vorangestellt.
+       ⛔ „Objekt:" steht in vielen Formularen ALLEIN auf der Zeile, die Anschrift eine Zeile
+       tiefer. Dann muss die Folgezeile mit – sonst rettet man die Bezeichnung ohne den Wert
+       (test_b969 hat genau das gefangen). */
+    const gerettet=[];
+    for(let k=0;k<i;k++){
+      if(!AB_ANH_OBJEKTZEILE.test(zeilen[k]))continue;
+      gerettet.push(zeilen[k]);
+      if(AB_ANH_NURBEZ.test(zeilen[k])&&k+1<i&&String(zeilen[k+1]).trim())gerettet.push(zeilen[++k]);
+    }
+    return gerettet.concat(zeilen.slice(i+1));
   }
   return zeilen;
 }
@@ -35955,6 +35976,16 @@ function _abEigeneNr(){
   }catch(e){}
   return '';
 }
+/* b972: ⛔ Das Datum aus dem Weiterleitungskopf wurde hart auf 22 Zeichen geschnitten – aus
+   „4. September 2026 15:55" wurde in der Tabelle „4. September 2026 15:5". Zum fünften Mal eine
+   fest eingetippte Zahl, die nicht zu den echten Werten passt. Jetzt wird an der Uhrzeit
+   getrennt, und nur wenn gar keine da ist, an der letzten Wortgrenze. */
+function _abKopfDatum(roh){
+  const t=String(roh||'').replace(/^\w+,\s*/,'').trim();
+  const m=t.match(/^(.{4,30}?)\s+(\d{1,2}:\d{2})(?::\d{2})?(?!\d)/);
+  if(m)return m[1].trim()+' '+m[2];
+  return t.length>30?t.substring(0,30).replace(/\s+\S*$/,''):t;
+}
 function _abKontakte(text,eigeneNr){
   const raus=[];let m;AB_NR.lastIndex=0;
   const eigen=(eigeneNr===undefined)?_abEigeneNr():eigeneNr;
@@ -35981,7 +36012,14 @@ function _abKontakte(text,eigeneNr){
       name=(anrede+t[4]).trim();
     }else{
       const g=davor.match(new RegExp('([A-ZÄÖÜ][\\wäöüß\\-]{2,}(?:\\s+(?!(?:EG|OG|DG|KG|UG)\\b)[A-ZÄÖÜ][\\wäöüß\\-]{2,})?)'+LAGE+'\\s*[,:;]?\\s*$'));
-      if(g&&!/^(Der|Die|Das|Und|Tel|Mobil|Handy|Fon|Fax|Nr|R(?:ü|ue)ckfragen|Kontakt|Erreichbar|Telefon|Unter)$/i.test(g[1]))name=g[1].trim();
+      /* b972: ⛔ Steht direkt davor eine Postleitzahl, ist das ein ORT, kein Mensch. An einer
+         echten Karte stand „… Musterstr. 20 99999 Beispielstadt Mobil: 0123 …" – und in der
+         Tabelle der Ortsname als Ansprechpartner.
+         ⛔ Die Prüfung muss eng sein: zwei Rufnummern untereinander endeten sonst ebenfalls auf
+         fünf Ziffern und nahmen einen echten Namen weg – test_b955 hat das gefangen. Deshalb:
+         keine Ziffer vor der Postleitzahl, und kein Zeilenumbruch dahinter. */
+      const ortNachPlz=!!g&&/(?:^|[^\d])\d{5}[ \t]*$/.test(davor.substring(0,g.index));
+      if(g&&!ortNachPlz&&!/^(Der|Die|Das|Und|Tel|Mobil|Handy|Fon|Fax|Nr|R(?:ü|ue)ckfragen|Kontakt|Erreichbar|Telefon|Unter)$/i.test(g[1]))name=g[1].trim();
       else{
         /* Steht die Person weiter vorn in derselben Zeile („… der Mieterin Muster,
            Beispielstr. 1 (03601/…; 0152/…)"), zählt die letzte Nennung mit Rollenwort. */
@@ -36256,8 +36294,28 @@ function _abAdresse(text){
    ⛔ Der Anlass: In einem Auftragsformular stand oben der Briefkopf der Genossenschaft, und
    PAM nahm deren Hausanschrift als Objekt. Ein Brieftext ist nie so verlässlich wie der Titel,
    den Frank selbst geschrieben hat. */
+/* b972: Eine Zeile, die das Objekt ausdrücklich benennt („Objekt: Musterstr. 1"), ist eine
+   viel bessere Quelle als irgendeine Adresse irgendwo im Text – dort steht sonst die Anschrift
+   des Absenders. Sie kommt gleich hinter dem Kartentitel, den Frank selbst vergeben hat.
+   ⛔ Das Muster steht ABSICHTLICH hier und nicht im Anhang-Block: sonst stürzt jede Prüfung ab,
+   die nur den Objekt-Block ausschneidet und ausführt (genau so ist test_b970 aufgelaufen). */
+const AB_OBJ_WORT=/(?:^|\s)(Objekt|Bauvorhaben|Liegenschaft|Baustelle)\b/i;
+function _abObjektAusZeile(schritte){
+  for(const s of (schritte||[])){
+    const zeilen=String(s&&s.text||'').split('\n');
+    for(let i=0;i<zeilen.length;i++){
+      if(!AB_OBJ_WORT.test(zeilen[i]))continue;
+      const nach=zeilen[i].replace(/^[\s\S]*?(Objekt|Bauvorhaben|Liegenschaft|Baustelle)\b[\s:.\-]*/i,'');
+      /* Steht die Bezeichnung allein, zählt die Zeile darunter. */
+      const a=_abAdresse(nach)||(nach.trim()?'':_abAdresse(zeilen[i+1]||''));
+      if(a)return a;
+    }
+  }
+  return '';
+}
 function _abObjekt(mails,schritte,titel){
   let adr=_abAdresse(titel||'');
+  if(!adr)adr=_abObjektAusZeile(schritte);
   if(!adr)for(const m of (mails||[])){adr=_abAdresse(m.subject||'');if(adr)break;}
   if(!adr)for(const s of (schritte||[])){adr=_abAdresse(s.text||'');if(adr)break;}
   if(!adr)return '';
@@ -36377,6 +36435,31 @@ function _abIstLabelZeile(z){
   return t.split(/\s+/).length<=3;
 }
 function _abWertSatz(t){t=String(t||'').trim();return (t.length>=20&&(/[.!?]/.test(t)||t.length>=40))?t:'';}
+/* b972: Formulare setzen ihre Spaltenköpfe nebeneinander in EINE Zeile – „Leistung Beschreibung".
+   Was hinter dem erkannten Wort steht, ist dort kein Wert, sondern die nächste Überschrift.
+   ⛔ An einer echten Karte aufgefallen: die Zeile wurde als „Label mit Wert" gelesen und
+   übersprungen, obwohl die Meldung direkt darunter stand. */
+function _abNurBezeichnungen(rest){
+  let t=String(rest||'').trim();
+  if(!t)return false;
+  for(let schutz=0;schutz<6&&t;schutz++){
+    const m=AB_BESCHR_LABEL1.exec(t)||AB_BESCHR_LABEL2.exec(t);
+    if(!m)return false;
+    const weiter=String(m[1]||'').trim();
+    if(weiter===t)return false;
+    t=weiter;
+  }
+  return !t;
+}
+/* b972: Eine Zeile, die selbst eine Überschrift ist, darf nicht als Inhalt der Überschrift
+   darüber eingesammelt werden. Sicher erkennbar am Doppelpunkt am Ende oder daran, dass die
+   Zeile nur aus bekannten Bezeichnungen besteht. */
+function _abZwischenUeberschrift(z){
+  const t=String(z||'').trim();
+  if(!t)return false;
+  if(/:\s*$/.test(t)&&t.length<=40)return true;
+  return _abNurBezeichnungen(t);
+}
 function _abBeschreibung(txt){
   const zeilen=String(txt||'').split('\n');
   for(const LABEL of [AB_BESCHR_LABEL1,AB_BESCHR_LABEL2]){
@@ -36385,12 +36468,16 @@ function _abBeschreibung(txt){
       if(!m)continue;
       const inline=_abWertSatz(m[1]);
       if(inline)return inline;
-      if(m[1]&&m[1].trim())continue;
+      /* b972: nur überspringen, wenn hinter der Bezeichnung wirklich etwas Eigenes steht –
+         nicht bei einem Spaltenkopf aus lauter Bezeichnungen. */
+      if(m[1]&&m[1].trim()&&!_abNurBezeichnungen(m[1]))continue;
       const teile=[];
       for(let j=i+1;j<zeilen.length;j++){
         const z=zeilen[j].trim();
         if(!z){if(teile.length)break;continue;}
         if(teile.length&&_abIstLabelZeile(z))break;
+        /* b972: Zwischenüberschriften vor dem ersten Inhalt überspringen statt einsammeln. */
+        if(!teile.length&&_abZwischenUeberschrift(z))continue;
         teile.push(z);
       }
       const t=_abWertSatz(teile.join(' '));
@@ -36528,7 +36615,7 @@ async function _abBauen(task,vonHand){
       if(!eigen&&s.gez&&(!wer||!/\s/.test(wer)&&!/^[A-ZÄÖÜ]/.test(wer)))wer=s.gez;
       if(!wer)wer=s.gez||'';
       const wann=eigen?(m.date?new Date(m.date).toLocaleDateString('de-DE'):'')
-                      :String((st.kopf&&st.kopf.datum)||'').replace(/^\w+,\s*/,'').substring(0,22);
+                      :_abKopfDatum((st.kopf&&st.kopf.datum)||'');
       /* Die Kontakte tragen das Datum ihrer Nachricht mit - die Spalte "woher"
          beantwortet Franks Frage "ich weiss nicht, wann". */
       if(eigen&&s.gez&&_abIstUnser(m,eigenAdr,eigenDom))
@@ -36589,7 +36676,12 @@ async function _abBauen(task,vonHand){
     for(const a of pdfs){
       if(anhaenge.length>=AB_ANH_MAX)break;
       const schon=altAnh.find(x=>x&&x.fileId===a.fileId);
-      const text=schon?String(schon.text||''):_abAnhangSaeubern(await _abAnhangText(a.fileId));
+      /* b972: ⛔ Der gespeicherte Text stammt aus dem Bau, der ihn zuerst gelesen hat – er kennt
+         die Säuberungsregeln SPÄTERER Bauten nicht. Deshalb noch einmal durchschicken: das kostet
+         keinen Drive-Zugriff, und die Säuberung ist nachweislich idempotent (ein zweiter Lauf
+         ändert nichts mehr). Ohne das wäre der Briefkopf-Schnitt aus b970 auf keiner Karte
+         angekommen, deren Anhang schon einmal gelesen worden war. */
+      const text=schon?_abAnhangSaeubern(String(schon.text||'')):_abAnhangSaeubern(await _abAnhangText(a.fileId));
       anhaenge.push({fileId:a.fileId,name:String(a.name||''),text:text});
       if(!text)continue;
       lfd++;
