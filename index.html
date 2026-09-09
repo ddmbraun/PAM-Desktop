@@ -10074,7 +10074,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-09 · #969'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-09-b969) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-09 · #970'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-09-b970) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -35618,7 +35618,7 @@ async function _pamEmailAntwortenMitVerlauf(){
    sonst zeigt PAM eine alte Fassung weiter und die neuen Spalten bleiben leer.
    Genau das war im Betrieb zu sehen: "woher" war ueberall leer, weil die
    gespeicherte Fassung noch von der Bauart davor stammte. */
-const AB_BAUART=8; /* b969: Text aus PDF-Anhaengen kommt in den Verlauf */
+const AB_BAUART=9; /* b970: Objekt aus dem Kartentitel, Briefkopf im Anhang weg */
 let _abLetzte=null;
 const AB_OLLAMA='http://localhost:11434';
 const AB_MODELL='qwen2.5:7b';
@@ -35867,6 +35867,21 @@ const AB_ANH_ABBRUCH=[
   /^\s*Der Inhalt dieser (E-?Mail|Nachricht)/i,
 ];
 /* Zeilen, die in jedem Formular stehen und nichts über den Vorgang sagen. */
+/* b970: Der Briefkopf eines Formulars sagt nichts über den Vorgang – er nennt den Absender,
+   uns als Empfänger und eine Auftragsnummer. Steht in den ersten Zeilen eine Überschrift wie
+   „Auftrag" oder „Angebot", beginnt der Inhalt dort; alles davor ist Kopf.
+   ⛔ An einer echten Karte aufgefallen: PAM nahm die Hausanschrift der Genossenschaft aus dem
+   Briefkopf als Objekt des Vorgangs. */
+const AB_ANH_KOPFENDE=/^\s*(Auftrag|Angebot|Rechnung|Bestellung|Lieferschein|Schadensmeldung|Mängelmeldung|Mangelmeldung|Betreff|Gegenstand)\b\s*:?\s*$/i;
+/* Zeilen des Briefkopfs, die auch nach der Überschrift noch auftauchen. */
+const AB_ANH_KOPFZEILE=/^\s*(An|Anschrift|Empf(ä|ae)nger|Absender|Nummer|Kunden-?Nr|Auftraggeber|Datum|Belegdatum|Seite)\s*:?\s*/i;
+function _abAnhangKopfWeg(zeilen){
+  /* Die Überschrift muss weit oben stehen – sonst wäre „Auftrag" mitten im Text ein Fehlschnitt. */
+  for(let i=0;i<Math.min(14,zeilen.length);i++){
+    if(AB_ANH_KOPFENDE.test(zeilen[i]))return zeilen.slice(i+1);
+  }
+  return zeilen;
+}
 const AB_ANH_ZEILE=new RegExp([
   '^\\s*Seite\\s+\\d+\\s*(von|/)\\s*\\d+',
   '^\\s*(IBAN|BIC|Tel\\.?|Telefon|Telefax|Fax|E-?Mail|Web|Internet)\\s*[:.]',
@@ -35874,13 +35889,24 @@ const AB_ANH_ZEILE=new RegExp([
   '^\\s*[•\\-–—.\\s]*$',
   '^\\s*(Belegdatum|Angebot(s)?-?Nr|Kunden\\s*-?\\s*Nr|Rechnungs-?Nr|Auftrags-?Nr)\\b',
   '^\\s*(Mit freundlichen|Geschäftsführer|Gesch(ä|ae)ftsf(ü|ue)hrer)\\b',
+  /* b970: Zeilen des Briefkopfs, die nach der Überschrift stehen bleiben. */
+  '^\\s*(An|Anschrift|Empf(ä|ae)nger|Absender|Nummer|Auftraggeber|Datum)\\s*:',
+  /* b970: „Datum 08.09.2026 Auftraggeber" steht ohne Doppelpunkt im Kopf. Nur wenn wirklich
+     ein Datum folgt – „Datum der Besichtigung war offen" bleibt Inhalt. */
+  '^\\s*Datum\\s+\\d{1,2}\\.\\d{1,2}\\.\\d{2,4}',
+  '^\\s*(Dieses Dokument wurde maschinell|Bearbeitungsvermerk)',
 ].join('|'),'i');
 function _abAnhangSaeubern(roh){
-  const zeilen=String(roh||'').replace(/\r/g,'').split('\n');
+  const alle=String(roh||'').replace(/\r/g,'').split('\n');
+  const zeilen=_abAnhangKopfWeg(alle);
   const raus=[];
+  let eigenStr='';
+  try{const f=(typeof _pamFirma==='function')?_pamFirma():null;eigenStr=String((f&&f.strasse)||'').trim().split(/\s+/)[0]||'';}catch(e){}
   for(const z of zeilen){
     if(AB_ANH_ABBRUCH.some(re=>re.test(z)))break;
     if(AB_ANH_ZEILE.test(z))continue;
+    /* b970: die eigene Anschrift steht in jedem Auftrag als Empfänger und sagt nichts. */
+    if(eigenStr&&eigenStr.length>3&&z.indexOf(eigenStr)>=0)continue;
     const t=z.trim();
     if(!t)continue;
     raus.push(t);
@@ -36225,9 +36251,14 @@ function _abAdresse(text){
   if(!str||/^(GmbH|eG|KG|AG)$/i.test(str))return '';
   return (str+' '+m[2].trim()).replace(/\s+/g,' ');
 }
-function _abObjekt(mails,schritte){
-  let adr='';
-  for(const m of (mails||[])){adr=_abAdresse(m.subject||'');if(adr)break;}
+/* b970: Der KARTENTITEL zuerst. Frank vergibt ihn selbst, dort steht das Objekt richtig –
+   gemessen: bei 23 von 42 Karten mit Mails enthält er eine erkennbare Anschrift.
+   ⛔ Der Anlass: In einem Auftragsformular stand oben der Briefkopf der Genossenschaft, und
+   PAM nahm deren Hausanschrift als Objekt. Ein Brieftext ist nie so verlässlich wie der Titel,
+   den Frank selbst geschrieben hat. */
+function _abObjekt(mails,schritte,titel){
+  let adr=_abAdresse(titel||'');
+  if(!adr)for(const m of (mails||[])){adr=_abAdresse(m.subject||'');if(adr)break;}
   if(!adr)for(const s of (schritte||[])){adr=_abAdresse(s.text||'');if(adr)break;}
   if(!adr)return '';
   /* Die eigene Firmenanschrift ist nie das Objekt. */
@@ -36237,7 +36268,8 @@ function _abObjekt(mails,schritte){
     if(eigen&&adr.toLowerCase().indexOf(eigen.toLowerCase().split(/\s+/)[0].toLowerCase())===0)return '';
   }catch(e){}
   let lage='';
-  for(const m of (mails||[])){const l=String(m.subject||'').match(AB_LAGE);if(l){lage=l[0].replace(/\s+/g,' ').trim();break;}}
+  for(const q of [String(titel||'')]){const l=q.match(AB_LAGE);if(l){lage=l[0].replace(/\s+/g,' ').trim();break;}}
+  if(!lage)for(const m of (mails||[])){const l=String(m.subject||'').match(AB_LAGE);if(l){lage=l[0].replace(/\s+/g,' ').trim();break;}}
   if(!lage)for(const s of (schritte||[])){const l=String(s.text||'').match(AB_LAGE);if(l){lage=l[0].replace(/\s+/g,' ').trim();break;}}
   return lage?(adr+' · '+lage):adr;
 }
@@ -36336,7 +36368,7 @@ function _abObjektSchluessel(titel){
    Titel („Dachrinne läuft über") – der wurde genommen und als Signatur aussortiert. Deshalb
    zuerst die Beschreibungs-Bezeichnungen, dann erst Anliegen/Problem, und ein Wert zählt nur, wenn
    er wie ein Satz aussieht (Satzzeichen oder mindestens 40 Zeichen). */
-const AB_BESCHR_LABEL1=/^[ \t]*(?:Beschreibung|Schadensbeschreibung|Schadenbeschreibung|Schadensmeldung|Schadenmeldung|Meldung|Mangelbeschreibung|Problembeschreibung|Nachricht|Bemerkung(?:en)?|Kommentar|Details?)[ \t]*:?[ \t]*(.*)$/i;
+const AB_BESCHR_LABEL1=/^[ \t]*(?:Beschreibung|Schadensbeschreibung|Schadenbeschreibung|Schadensmeldung|Schadenmeldung|Meldung|Mangelbeschreibung|Problembeschreibung|Nachricht|Bemerkung(?:en)?|Kommentar|Details?|Durchzuf(?:ü|ue)hrende Arbeiten(?: bzw\.? Reparaturen)?|Leistung(?:en)?)[ \t]*:?[ \t]*(.*)$/i;
 const AB_BESCHR_LABEL2=/^[ \t]*(?:Problem|Mangel|Anliegen|Betreff)[ \t]*:?[ \t]*(.*)$/i;
 function _abIstLabelZeile(z){
   const t=String(z||'').trim();
@@ -36379,7 +36411,11 @@ function _abMeldung(schritte){
     if(txt.length<25)return;
     const ersteZeile=(txt.split('\n').find(z=>z.trim().length>15)||'').trim();
     gut.push({txt:txt,
-      hohl:(!besch&&AB_HOHL.test(ersteZeile))?1:0,
+      besch:besch?1:0,
+      /* b970: Die Floskel-Prüfung gilt jetzt AUCH für eine ausgewiesene Beschreibung. In b962
+         war sie dort ausgesetzt – steht unter „Beschreibung" aber nur „bitte hier mal schauen",
+         ist das genauso nichtssagend. Geprüft wird die erste Zeile von dem, was am Ende zählt. */
+      hohl:AB_HOHL.test(ersteZeile)?1:0,
       sig:_abIstSignatur(txt)?1:0,
       objekt:(st.objTreffer===undefined)?1:(st.objTreffer?1:0),
       rang:_abMeldRang(st),
@@ -36394,7 +36430,11 @@ function _abMeldung(schritte){
   if(!echte.length)return '';
   /* Reihenfolge: Floskel nach hinten, Text zum Objekt der Karte nach vorn, dann Rolle,
      dann die frueheste Nachricht. */
-  echte.sort((a,b)=>(a.hohl-b.hohl)||(b.objekt-a.objekt)||(a.rang-b.rang)||(a.ord-b.ord)||(b.laenge-a.laenge));
+  /* b970: Eine ausgewiesene Beschreibung („Beschreibung: …", „Durchzuführende Arbeiten: …")
+     steht vor allem anderen Text, sobald sie nicht von einem fremden Objekt handelt. Anlass:
+     Im Formular stand die eigentliche Meldung, in der Mail nur „ACHTUNG! Spezielle Mieter!" –
+     und die Mail gewann, weil sie von der Hausverwaltung kam. */
+  echte.sort((a,b)=>(a.hohl-b.hohl)||(b.objekt-a.objekt)||(b.besch-a.besch)||(a.rang-b.rang)||(a.ord-b.ord)||(b.laenge-a.laenge));
   /* Zwei Saetze reichen - der ganze Text steht ja im Verlauf darunter. Die Anrede vorn
      („Hallo Herr …,") sagt nichts und faellt weg. */
   const roh=echte[0].txt.replace(/\s+/g,' ').trim()
@@ -36581,7 +36621,7 @@ async function _abBauen(task,vonHand){
     absTel:ag?_abAgTelefon(ag.mail,schritte):'',
     absWann:ag&&ag.mail.date?new Date(ag.mail.date).toLocaleDateString('de-DE'):'',
     rolle:ag?ag.rolle:'',
-    objekt:_abObjekt(mails,schritte),
+    objekt:_abObjekt(mails,schritte,task&&task.title),
     meldung:_abMeldung(schritte),
     /* Ohne KI ist der Betreff der Ersatz für „worum geht's". Vorspann und
        Telefonnummer raus – die Nummer steht schon bei „Vor Ort". */
