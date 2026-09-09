@@ -9344,13 +9344,20 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
            Outlook (geht auch vom Handy), PAM holt es später ab. -->
       <div style="height:1px;background:var(--border);margin:16px 0 14px;"></div>
       <div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;">📥 Aus Outlook holen</div>
-      <div style="font-size:11px;color:var(--text2);margin-bottom:8px;">Jeder Outlook-Ordner landet in einem Board und einer Spalte – oder mit <b>→ Sammelkarte</b> direkt an einer Karte (z.&nbsp;B. „Melle Gallhöfer – Angebote"). Der Knopf <b>📥 Outlook</b> neben der Einzieh-Leiste holt sie dann alle auf einmal.</div>
+      <div style="font-size:11px;color:var(--text2);margin-bottom:8px;">Jeder Outlook-Ordner landet in einem Board und einer Spalte – oder mit <b>→ Sammelkarte</b> direkt an einer Karte (z.&nbsp;B. „Melle Gallhöfer – Angebote"). Der Knopf <b>📥 Outlook</b> neben der Einzieh-Leiste holt sie dann alle auf einmal. Die Ordner dürfen aus <b>beiden Postfächern</b> kommen – jeder Ordner steht mit seinem Postfach davor in der Liste, das Konto ergibt sich daraus von selbst.</div>
       <button type="button" id="olLadenBtn" onclick="_olOrdnerLaden()" style="margin-bottom:8px;padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;font-size:12px;">🔄 Ordner aus Outlook laden</button>
       <div id="setOlZuordnung"></div>
       <button type="button" onclick="_olZeileAnhaengen()" style="margin-top:6px;padding:4px 10px;border-radius:6px;border:1px dashed var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;font-size:11px;">+ Ordner zuordnen</button>
       <div style="margin-top:12px;">
-        <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:3px;">Nach dem Holen verschieben nach</label>
+        <label id="setOlErledigtLbl" style="font-size:12px;color:var(--text2);display:block;margin-bottom:3px;">Nach dem Holen verschieben nach</label>
         <select id="setOlErledigt" style="width:100%;padding:6px 9px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;"></select>
+      </div>
+      <!-- b982: zweites Postfach. Eigenes Feld, weil eine Outlook-Ordnerkennung nur im
+           eigenen Postfach gilt. _olZweitesZeigen() blendet den Block aus, solange das
+           zweite Konto weder verbunden noch irgendwo zugeordnet ist. -->
+      <div id="setOlErledigt2Box" style="margin-top:10px;display:none;">
+        <label id="setOlErledigt2Lbl" style="font-size:12px;color:var(--text2);display:block;margin-bottom:3px;">Nach dem Holen verschieben nach – zweites Postfach</label>
+        <select id="setOlErledigt2" style="width:100%;padding:6px 9px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;"></select>
       </div>
       <div style="font-size:10px;color:var(--text2);margin-top:5px;line-height:1.5;">Die geholte Mail bekommt Outlooks Erledigt-Häkchen und wandert dorthin – die Eingangsordner bleiben leer, so ist sichtbar was noch offen ist. Ohne Zielordner bleibt sie liegen und bekommt nur das Häkchen. <b>Gelöscht wird nie.</b></div>
     <div id="pamSettingsHint" style="font-size:11px;color:var(--text2);margin-top:10px;line-height:1.5;"></div>
@@ -10089,7 +10096,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-09 · #981'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-09-b981) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-09 · #982'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-09-b982) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -34924,37 +34931,68 @@ function _olVorschlagName(info){
 
 function _olEinstellung(){
   const s=(typeof pamSettings!=='undefined'&&pamSettings&&pamSettings.outlookHolen)||{};
+  // b982: erledigtId2/-Name2 = Wegräum-Ordner im ZWEITEN Postfach. Eine Ordner-Kennung gilt
+  // nur in ihrem eigenen Postfach, ein gemeinsames Feld für beide Konten kann es nicht geben.
   return {zuordnung:Array.isArray(s.zuordnung)?s.zuordnung:[],
-          erledigtId:s.erledigtId||'', erledigtName:s.erledigtName||''};
+          erledigtId:s.erledigtId||'', erledigtName:s.erledigtName||'',
+          erledigtId2:s.erledigtId2||'', erledigtName2:s.erledigtName2||''};
 }
 
-// Graph-Aufruf mit Konto 1. Bei 401/403 EINMAL das Dauer-Ticket erneuern und
-// neu versuchen — dieselbe Logik wie _msGetMsgDual, nur ohne Konto-2-Zweig:
-// die Ordner liegen laut Frank ausschließlich in info@ddmbraun.de.
-async function _olFetch(pfad,opts,_zweiterVersuch){
-  if(!msToken)throw new Error('Outlook (Konto 1) nicht verbunden');
+// ── b982: Postfach-Helfer ──────────────────────────────────────────────
+// Alles, was hier '1' oder '2' heißt, meint denselben Slot wie msToken/msToken2.
+// Unbekanntes wird zu '1' — Altzeilen aus b918..b981 tragen kein Konto und
+// müssen weiter im ersten Postfach landen.
+function _olKonto(k){return String(k)==='2'?'2':'1';}
+function _olToken(k){return _olKonto(k)==='2'?(typeof msToken2!=='undefined'?msToken2:null):(typeof msToken!=='undefined'?msToken:null);}
+// Kurzform fürs Anzeigen: 'info' / 'f.braun'. Die echte Adresse steht in msUserEmail(2),
+// die Rückfallnamen greifen nur, solange das Postfach noch nicht verbunden ist.
+function _olKontoName(k){
+  const e=_olKonto(k)==='2'?(typeof msUserEmail2!=='undefined'?msUserEmail2:'')
+                           :(typeof msUserEmail!=='undefined'?msUserEmail:'');
+  return String(e||'').split('@')[0]||(_olKonto(k)==='2'?'f.braun':'info');
+}
+
+// b982: Graph-Aufruf mit dem Postfach, das die Zuordnungszeile nennt.
+// Bis b981 stand hier fest Konto 1, begründet mit „die Ordner liegen laut Frank
+// ausschließlich in info@ddmbraun.de" — seit 09.09.2026 holt PAM auch aus dem zweiten.
+// ⛔ KEIN Ausweichen auf das jeweils andere Konto (anders als _msGetMsgDual, das genau
+// das tut): dort geht es um eine MAIL, die in beiden Postfächern liegen kann. Hier geht
+// es um eine ORDNER-Kennung, und die gilt nur in ihrem eigenen Postfach. Ein zweiter
+// Versuch im falschen Postfach träfe im besten Fall nichts — im schlimmsten einen
+// fremden Ordner, und die Mails wanderten wortlos in die falsche Ablage.
+async function _olFetch(pfad,opts,konto,_zweiterVersuch){
+  const k=_olKonto(konto);
+  const tok=_olToken(k);
+  if(!tok)throw new Error('Outlook ('+_olKontoName(k)+') nicht verbunden');
   const o=Object.assign({},opts||{});
-  o.headers=Object.assign({},o.headers||{},{Authorization:'Bearer '+msToken});
+  o.headers=Object.assign({},o.headers||{},{Authorization:'Bearer '+tok});
   const r=await fetch('https://graph.microsoft.com/v1.0'+pfad,o);
   if((r.status===401||r.status===403)&&!_zweiterVersuch){
     let frisch=false;
-    try{if(typeof _msRefreshToken==='function')frisch=await _msRefreshToken();}catch(e){}
-    if(frisch)return _olFetch(pfad,opts,true);
+    try{
+      if(k==='2'){if(typeof _msRefreshToken2==='function')frisch=await _msRefreshToken2();}
+      else{if(typeof _msRefreshToken==='function')frisch=await _msRefreshToken();}
+    }catch(e){}
+    if(frisch)return _olFetch(pfad,opts,k,true);
   }
   return r;
 }
 
 // Alle Mailordner flach, mit lesbarem Pfad ("PAM \\ 01 PE-Aufträge").
-async function _olOrdnerFlach(){
+// b982: je Postfach, und jeder Eintrag trägt sein Konto mit. Daraus leitet die
+// Zuordnungszeile später ab, welches Postfach sie meint — Frank wählt nur den
+// Ordner, das Konto ergibt sich. So kann Ordner und Konto nicht auseinanderfallen.
+async function _olOrdnerFlach(konto){
+  const k=_olKonto(konto);
   const raus=[];
   async function lauf(pfad,vorsatz,tiefe){
     if(tiefe>OL_TIEFE_MAX)return;
-    const r=await _olFetch(pfad+'?$select=id,displayName,childFolderCount&$top=100');
+    const r=await _olFetch(pfad+'?$select=id,displayName,childFolderCount&$top=100',null,k);
     if(!r.ok)return;
     const d=await r.json();
     for(const f of (d.value||[])){
       const name=vorsatz?(vorsatz+' \\ '+f.displayName):f.displayName;
-      raus.push({id:f.id,name:name});
+      raus.push({id:f.id,name:name,konto:k});
       if(f.childFolderCount>0)
         await lauf('/me/mailFolders/'+encodeURIComponent(f.id)+'/childFolders',name,tiefe+1);
     }
@@ -34964,8 +35002,8 @@ async function _olOrdnerFlach(){
 }
 
 // Eine Mail als .eml-File — derselbe Lesepfad wie beim Ziehen einer Datei.
-async function _olMailAlsDatei(msgId,betreff){
-  const r=await _olFetch('/me/messages/'+encodeURIComponent(msgId)+'/$value');
+async function _olMailAlsDatei(msgId,betreff,konto){
+  const r=await _olFetch('/me/messages/'+encodeURIComponent(msgId)+'/$value',null,konto);
   if(!r.ok)throw new Error('MIME-Abruf fehlgeschlagen (HTTP '+r.status+')');
   const blob=await r.blob();
   const roh=String(betreff||'E-Mail').replace(/[\\/:*?"<>|\r\n]+/g,'_').trim();
@@ -34995,23 +35033,27 @@ function _olZielText(f){
   return String(z.title||'');
 }
 
-async function _olWegraeumen(msgId,zielId,zielText){
+// b982: konto = das Postfach, aus dem die Mail geholt wurde. Häkchen, Kategorie und
+// Verschieben müssen ALLE DREI dorthin — die Nachrichten-Kennung gibt es im anderen
+// Postfach nicht, und zielId erst recht nicht.
+async function _olWegraeumen(msgId,zielId,zielText,konto){
+  const k=_olKonto(konto);
   // b921: erst lesen, dann ergänzen — PATCH ersetzt die Kategorienliste, sie soll nicht schrumpfen.
   let kats=[];
   try{
-    const rk=await _olFetch('/me/messages/'+encodeURIComponent(msgId)+'?$select=categories');
+    const rk=await _olFetch('/me/messages/'+encodeURIComponent(msgId)+'?$select=categories',null,k);
     if(rk.ok){const dk=await rk.json();kats=Array.isArray(dk.categories)?dk.categories.slice():[];}
   }catch(e){console.warn('[b921] Kategorien lesen:',e);}
   try{
     await _olFetch('/me/messages/'+encodeURIComponent(msgId),
       {method:'PATCH',headers:{'Content-Type':'application/json'},
-       body:JSON.stringify({flag:{flagStatus:'complete'},categories:_olKategorien(kats,zielText)})});
+       body:JSON.stringify({flag:{flagStatus:'complete'},categories:_olKategorien(kats,zielText)})},k);
   }catch(e){console.warn('[b918] Kennzeichnen:',e);}
   if(!zielId)return true;
   try{
     const r=await _olFetch('/me/messages/'+encodeURIComponent(msgId)+'/move',
       {method:'POST',headers:{'Content-Type':'application/json'},
-       body:JSON.stringify({destinationId:zielId})});
+       body:JSON.stringify({destinationId:zielId})},k);
     return r.ok;
   }catch(e){console.warn('[b918] Verschieben:',e);return false;}
 }
@@ -35067,7 +35109,7 @@ function _olZeitText(iso){
 // schreibt ihn als b898-Päckchen nach Drive — Zuordnung und Zielordner bleiben unangetastet.
 async function _olLaufMerken(lauf){
   try{
-    const oh=Object.assign({zuordnung:[],erledigtId:'',erledigtName:''},(typeof pamSettings!=='undefined'&&pamSettings&&pamSettings.outlookHolen)||{});
+    const oh=Object.assign({zuordnung:[],erledigtId:'',erledigtName:'',erledigtId2:'',erledigtName2:''},(typeof pamSettings!=='undefined'&&pamSettings&&pamSettings.outlookHolen)||{});   // b982: zweites Postfach
     const alt=Array.isArray(oh.protokoll)?oh.protokoll:[];
     oh.protokoll=[lauf].concat(alt).slice(0,OL_PROTOKOLL_MAX);
     pamSettings.outlookHolen=oh;
@@ -35252,16 +35294,36 @@ async function _outlookHolen(){
     showToast('Aus Outlook holen braucht Internet – im Notbetrieb nicht verfügbar','warning',5000);return;
   }
   if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden (oben rechts: ☁️ Google Drive)','error',5000);return;}
-  if(!msToken){showToast('⚠ Bitte zuerst Outlook verbinden (Konto 1 – info@ddmbraun.de)','error',6000);return;}
+  // b982: Ist GAR KEIN Postfach verbunden, hat der Rest keinen Zweck — und diese Meldung ist
+  // konkreter als das „Noch kein Outlook-Ordner zugeordnet" weiter unten, das sonst käme und
+  // Frank auf die falsche Fährte schickte. Der genaue Wächter je Postfach folgt hinter der
+  // Zuordnung, weil erst dort feststeht, welche Postfächer dieser Lauf überhaupt braucht.
+  if(!_olToken('1')&&!_olToken('2')){showToast('⚠ Bitte zuerst Outlook verbinden – der 📨-Knopf oben in der Leiste','error',6000);return;}
   const cfg=_olEinstellung();
   const zu=cfg.zuordnung.filter(function(z){return z&&z.ordnerId&&(z.board||z.zielTaskId);});   // b922: Sammelkarte statt Board erlaubt
   if(!zu.length){
     showToast('⚠ Noch kein Outlook-Ordner zugeordnet – ⚙ Einstellungen → „📥 Aus Outlook holen"','warning',8000);
     return;
   }
+  // b982: Der Postfach-Wächter steht bewusst HINTER der Zuordnung — vorher weiß niemand,
+  // welche Postfächer dieser Lauf überhaupt braucht. Bis b981 stand hier stur „Konto 1
+  // nicht verbunden", selbst wenn Konto 1 verbunden war und nur das zweite fehlte.
+  const _olGebraucht=[];
+  zu.forEach(function(z){const k=_olKonto(z.konto);if(_olGebraucht.indexOf(k)<0)_olGebraucht.push(k);});
+  const _olFehlt=_olGebraucht.filter(function(k){return !_olToken(k);});
+  if(_olFehlt.length){
+    showToast('⚠ Bitte zuerst Outlook verbinden ('+_olFehlt.map(_olKontoName).join(' und ')+') – der 📨-Knopf oben in der Leiste','error',7000);
+    return;
+  }
   // b919: Ohne Zielordner wird nur gekennzeichnet. Das soll Frank SEHEN, nicht raten —
   // beim ersten Lauf am 06.09. blieb die Mail liegen, und niemand sagte ihm warum.
-  if(!cfg.erledigtId)showToast('ℹ Kein Zielordner eingestellt – die Mails bleiben in Outlook liegen und bekommen nur das Erledigt-Häkchen (⚙ Einstellungen → „Nach dem Holen verschieben nach")','info',9000);
+  // b982: je Postfach geprüft und benannt. Ein gemeinsamer Hinweis wäre falsch: der
+  // Zielordner kann für das eine Postfach gesetzt sein und für das andere fehlen.
+  const _olOhneZiel=_olGebraucht.filter(function(k){return !(k==='2'?cfg.erledigtId2:cfg.erledigtId);});
+  // ⛔ Das Postfach steht VORNE, nicht mitten im Satz: test_b919 verlangt „Kein Zielordner
+  // eingestellt … Einstellungen" als durchgehenden Text. Ein eingeschobenes +postfach+
+  // zerreißt ihn — und mit ihm den Hinweis, wo Frank das einstellt. Die Prüfung hat recht.
+  if(_olOhneZiel.length)showToast('ℹ '+_olOhneZiel.map(_olKontoName).join(' und ')+': Kein Zielordner eingestellt – diese Mails bleiben in Outlook liegen und bekommen nur das Erledigt-Häkchen (⚙ Einstellungen → „Nach dem Holen verschieben nach")','info',9000);
   const btn=document.getElementById('olHolenBtn');
   if(btn){btn.disabled=true;btn.dataset.alt=btn.textContent;btn.textContent='⏳';}
   let neu=0, doppelt=0, angehaengt=0, fehler=0, liegen=0;
@@ -35270,10 +35332,11 @@ async function _outlookHolen(){
   const laufZeilen=[];   // b921: eine Zeile je Mail fürs Ergebnisfenster und den Verlauf
   try{
     for(const z of zu){
+      const zKonto=_olKonto(z.konto);   // b982: das Postfach dieser Zeile — gilt für Abruf, Lesen und Wegräumen
       let r;
       try{
         r=await _olFetch('/me/mailFolders/'+encodeURIComponent(z.ordnerId)+
-          '/messages?$select=id,subject,receivedDateTime&$orderby=receivedDateTime asc&$top='+OL_MAX_PRO_LAUF);
+          '/messages?$select=id,subject,receivedDateTime&$orderby=receivedDateTime asc&$top='+OL_MAX_PRO_LAUF,null,zKonto);
       }catch(e){fehler++;console.warn('[b918] Ordner '+(z.ordnerName||'')+':',e);continue;}
       if(!r.ok){
         fehler++;
@@ -35285,7 +35348,7 @@ async function _outlookHolen(){
       for(const m of mails){
         let datei=null,info=null;
         try{
-          datei=await _olMailAlsDatei(m.id,m.subject);
+          datei=await _olMailAlsDatei(m.id,m.subject,zKonto);   // b982
           const text=await new Promise(function(res,rej){
             const fr=new FileReader();
             fr.onload=function(e){res(e.target.result);};
@@ -35340,7 +35403,11 @@ async function _outlookHolen(){
           continue;   // ⛔ auch hier: liegen lassen, nicht wegräumen
         }
         // b920: NICHT hier wegräumen — erst nach dem Lauf, nach Speichern und Nachweis (unten).
-        fertig.push({id:m.id,info:info,art:art,treffer:treffer});   // b921: treffer fürs Ziel ohne Kennung
+        // b982: das Konto MUSS mit in die Liste. Weggeräumt wird erst nach dem ganzen Lauf
+        // (b920, unten) — dort gibt es die Schleifenvariable z nicht mehr. Ohne diese Zeile
+        // liefe das Wegräumen jeder Mail auf Konto 1: die Mails aus dem zweiten Postfach
+        // blieben unmarkiert liegen und würden beim nächsten Lauf erneut geholt.
+        fertig.push({id:m.id,info:info,art:art,treffer:treffer,konto:zKonto});   // b921: treffer fürs Ziel ohne Kennung
       }
     }
   }catch(e){
@@ -35371,7 +35438,10 @@ async function _outlookHolen(){
         continue;
       }
       if(f.art==='neu')neu++;else if(f.art==='angehaengt')angehaengt++;else if(f.art==='doppelt')doppelt++;
-      const weg=await _olWegraeumen(f.id,cfg.erledigtId,_olZielText(f));   // b921: Ziel als Kategorie
+      // b982: Wegräum-Ordner aus DEMSELBEN Postfach, aus dem die Mail kam. cfg.erledigtId
+      // gilt nur in Konto 1 — im zweiten Postfach gibt es diese Ordner-Kennung nicht.
+      const fKonto=_olKonto(f.konto);
+      const weg=await _olWegraeumen(f.id,(fKonto==='2'?cfg.erledigtId2:cfg.erledigtId),_olZielText(f),fKonto);   // b921: Ziel als Kategorie
       if(!weg)liegen++;
       laufZeilen.push({betreff:f.info.subject||'',art:f.art,zielId:f.ziel?f.ziel.id:'',zielTitel:f.ziel?String(f.ziel.title||''):'',zielBoard:f.ziel?String(f.ziel.board||''):'',zielSpalte:f.ziel?String(f.ziel.status||''):''});   // b921
     }
@@ -35406,13 +35476,29 @@ async function _outlookHolen(){
 // stillschweigend löschen. Dieselbe Lehre wie bei _hvKuerzelZeichnen (b748).
 let _olOrdnerCache=[];
 
-function _olOrdnerOptionen(gewaehltId,gewaehltName,leerText){
+// b982: Stehen Ordner aus MEHREREN Postfächern in der Liste, bekommt jeder sein Postfach
+// vorangestellt. Ohne das stünden zwei gleichnamige „PAM \\ 01 PE-Aufträge" untereinander
+// und niemand sähe, welcher welcher ist. Bei nur einem Postfach bleibt die Liste
+// unverändert wie bis b981 — Frank soll nichts Neues sehen, was ihm nichts nützt.
+function _olMehrPostfaecher(){
+  const s={};_olOrdnerCache.forEach(function(o){s[_olKonto(o.konto)]=1;});
+  return Object.keys(s).length>1;
+}
+function _olOrdnerAnzeige(o){
+  return _olMehrPostfaecher()?(_olKontoName(o.konto)+' · '+String(o.name||'')):String(o.name||'');
+}
+// nurKonto: nur Ordner dieses Postfachs zeigen. Die beiden Wegräum-Felder brauchen das —
+// ein Ordner aus dem falschen Postfach wäre dort eine Kennung, die es dort nicht gibt.
+function _olOrdnerOptionen(gewaehltId,gewaehltName,leerText,nurKonto){
+  const liste=nurKonto?_olOrdnerCache.filter(function(o){return _olKonto(o.konto)===_olKonto(nurKonto);}):_olOrdnerCache;
   let h='<option value="">'+(leerText||'— bitte wählen —')+'</option>';
-  const bekannt=_olOrdnerCache.some(function(o){return o.id===gewaehltId;});
+  const bekannt=liste.some(function(o){return o.id===gewaehltId;});
   if(gewaehltId&&!bekannt)
     h+='<option value="'+esc(gewaehltId)+'" selected>'+esc(gewaehltName||'(gespeicherter Ordner)')+'</option>';
-  _olOrdnerCache.forEach(function(o){
-    h+='<option value="'+esc(o.id)+'"'+(o.id===gewaehltId?' selected':'')+'>'+esc(o.name)+'</option>';
+  liste.forEach(function(o){
+    // data-konto: daran liest _olZuordnungEinsammeln das Postfach ab. So kann der gewählte
+    // Ordner gar nicht vom gespeicherten Konto abweichen — beides kommt aus einer Hand.
+    h+='<option value="'+esc(o.id)+'"'+(o.id===gewaehltId?' selected':'')+' data-konto="'+esc(_olKonto(o.konto))+'">'+esc(_olOrdnerAnzeige(o))+'</option>';
   });
   return h;
 }
@@ -35435,6 +35521,9 @@ function _olZeileHtml(z){
     // b922: statt Board · Spalte kann ein Ordner direkt an eine Sammelkarte gehen.
     '<button type="button" class="ol-zielBtn" onclick="_olZeileZielWaehlen(this)" title="Mails aus diesem Ordner direkt an eine Karte haengen (z. B. Sammelkarte je Lieferant)" style="'+stil+'flex:0 0 auto;white-space:nowrap;">'+(z.zielTaskId?'→ '+esc(z.zielTitel||'Karte'):'→ Sammelkarte')+'</button>'+
     '<input type="hidden" class="ol-zielId" value="'+esc(z.zielTaskId||'')+'"><span class="ol-zielTitel" style="display:none;">'+esc(z.zielTitel||'')+'</span>'+
+    // b982: gespeichertes Postfach der Zeile. Es zählt nur, solange die Ordnerliste noch
+    // nicht geladen ist — sobald sie steht, gewinnt das data-konto des gewählten Ordners.
+    '<input type="hidden" class="ol-konto" value="'+esc(_olKonto(z.konto))+'">'+
     '<button type="button" onclick="this.closest(\'.ol-zeile\').remove()" title="Zeile entfernen" style="padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;font-size:11px;">✕</button>'+
   '</div>';
 }
@@ -35462,7 +35551,28 @@ function _olZuordnungZeichnen(){
     ?cfg.zuordnung.map(_olZeileHtml).join('')
     :'<div style="font-size:11px;color:var(--text2);padding:4px 0;">Noch nichts zugeordnet. Erst „🔄 Ordner aus Outlook laden", dann „+ Ordner zuordnen".</div>';
   const erl=document.getElementById('setOlErledigt');
-  if(erl)erl.innerHTML=_olOrdnerOptionen(cfg.erledigtId,cfg.erledigtName,'— nicht verschieben, nur kennzeichnen —');
+  if(erl)erl.innerHTML=_olOrdnerOptionen(cfg.erledigtId,cfg.erledigtName,'— nicht verschieben, nur kennzeichnen —','1');
+  // b982: zweites Postfach — eigenes Feld, eigene Ordnerliste.
+  const erl2=document.getElementById('setOlErledigt2');
+  if(erl2)erl2.innerHTML=_olOrdnerOptionen(cfg.erledigtId2,cfg.erledigtName2,'— nicht verschieben, nur kennzeichnen —','2');
+  _olZweitesZeigen();
+}
+
+// b982: Das zweite Wegräum-Feld erscheint nur, wenn es etwas zu entscheiden gibt — also
+// wenn das zweite Postfach verbunden ist, schon ein Ordner dafür gewählt wurde oder eine
+// Zuordnungszeile darauf zeigt. Sonst stünde bei Frank ein Feld herum, das er nie braucht.
+function _olZweitesZeigen(){
+  const box=document.getElementById('setOlErledigt2Box');
+  if(!box)return;
+  const cfg=_olEinstellung();
+  const noetig=!!_olToken('2')||!!cfg.erledigtId2||cfg.zuordnung.some(function(z){return _olKonto(z&&z.konto)==='2';});
+  box.style.display=noetig?'':'none';
+  // Solange es nur ein Postfach gibt, bleibt die Beschriftung wie bis b981. Erst wenn
+  // wirklich zwei da sind, wird dazugesagt, welches Feld welches Postfach meint.
+  const lbl=document.getElementById('setOlErledigtLbl');
+  if(lbl)lbl.textContent=noetig?('Nach dem Holen verschieben nach – '+_olKontoName('1')):'Nach dem Holen verschieben nach';
+  const lbl2=document.getElementById('setOlErledigt2Lbl');
+  if(lbl2)lbl2.textContent='Nach dem Holen verschieben nach – '+_olKontoName('2');
 }
 
 function _olZeileAnhaengen(){
@@ -35485,36 +35595,72 @@ function _olZuordnungEinsammeln(){
     const zielId=((z.querySelector('.ol-zielId')||{}).value)||'';   // b922
     const zielTitel=((z.querySelector('.ol-zielTitel')||{}).textContent)||'';
     if(!id||(!board&&!zielId))return;
-    const name=(o&&o.options[o.selectedIndex])?o.options[o.selectedIndex].textContent:'';
-    raus.push({ordnerId:id,ordnerName:name,board:board,spalte:s?(s.value||''):'',zielTaskId:zielId,zielTitel:zielTitel});
+    const opt=(o&&o.selectedIndex>=0)?o.options[o.selectedIndex]:null;
+    const name=opt?opt.textContent:'';
+    // b982: Postfach am gewählten Ordner ablesen. Nur wenn dort keins steht (Ordnerliste
+    // noch nicht geladen — dann ist die einzige Option die gespeicherte), gilt der
+    // Merker der Zeile. ⛔ Nie umgekehrt: sonst behielte eine Zeile ihr altes Postfach,
+    // wenn Frank den Ordner auf das andere umstellt.
+    // typeof-Absicherung wie in b637/b866/b886: nicht jede Option, die hier ankommt, ist
+    // ein echtes <option> mit getAttribute (die Prüfattrappen von b918/b922 sind es nicht).
+    const kAttr=(opt&&typeof opt.getAttribute==='function')?(opt.getAttribute('data-konto')||''):'';
+    const kHid=((z.querySelector('.ol-konto')||{}).value)||'';
+    raus.push({ordnerId:id,ordnerName:name,board:board,spalte:s?(s.value||''):'',zielTaskId:zielId,zielTitel:zielTitel,konto:_olKonto(kAttr||kHid)});
   });
   return raus;
 }
 
+// b982: zwei Felder statt einem — je Postfach eins.
+// ⛔ Fehlt ein Feld im DOM, wird der GESPEICHERTE Wert zurückgegeben, nicht leer.
+// Sonst löschte ein Speichern die Einstellung des zweiten Postfachs stillschweigend,
+// solange sein Feld ausgeblendet ist. Dieselbe Lehre wie bei _hvKuerzelZeichnen (b748)
+// und bei der Zuordnungsliste ein Stück weiter oben.
 function _olErledigtEinsammeln(){
-  const el=document.getElementById('setOlErledigt');
-  if(!el)return {erledigtId:'',erledigtName:''};
-  const id=el.value||'';
-  const name=(id&&el.options[el.selectedIndex])?el.options[el.selectedIndex].textContent:'';
-  return {erledigtId:id,erledigtName:name};
+  const alt=(typeof pamSettings!=='undefined'&&pamSettings&&pamSettings.outlookHolen)||{};
+  const lies=function(elId,altId,altName){
+    const el=document.getElementById(elId);
+    if(!el)return {id:altId||'',name:altName||''};
+    const id=el.value||'';
+    const name=(id&&el.selectedIndex>=0&&el.options[el.selectedIndex])?el.options[el.selectedIndex].textContent:'';
+    return {id:id,name:name};
+  };
+  const a=lies('setOlErledigt',alt.erledigtId,alt.erledigtName);
+  const b=lies('setOlErledigt2',alt.erledigtId2,alt.erledigtName2);
+  return {erledigtId:a.id,erledigtName:a.name,erledigtId2:b.id,erledigtName2:b.name};
 }
 
 // Holt die Ordnerliste aus Outlook und füllt ALLE Auswahlfelder neu – die
 // bereits gewählten Werte bleiben dabei stehen.
 async function _olOrdnerLaden(){
   const btn=document.getElementById('olLadenBtn');
-  if(!msToken){showToast('⚠ Bitte zuerst Outlook verbinden (Konto 1 – info@ddmbraun.de)','error',6000);return;}
+  if(!_olToken('1')&&!_olToken('2')){showToast('⚠ Bitte zuerst Outlook verbinden – der 📨-Knopf oben in der Leiste','error',6000);return;}
   if(btn){btn.disabled=true;btn.textContent='⏳ Ordner werden geholt…';}
   try{
-    _olOrdnerCache=await _olOrdnerFlach();
+    // b982: aus JEDEM verbundenen Postfach. Ein nicht verbundenes wird übersprungen statt
+    // den ganzen Vorgang abzubrechen — sonst käme Frank an die Ordner des einen nicht mehr
+    // heran, nur weil das andere gerade abgemeldet ist.
+    const gesammelt=[];const schiefKonten=[];let okKonten=0;
+    for(const k of ['1','2']){
+      if(!_olToken(k))continue;
+      try{const teil=await _olOrdnerFlach(k);gesammelt.push.apply(gesammelt,teil);okKonten++;}
+      catch(e){schiefKonten.push(_olKontoName(k));console.warn('[b982] Ordner '+_olKontoName(k)+':',e);}
+    }
+    // ⛔ Den Cache nur ersetzen, wenn mindestens ein Postfach wirklich geantwortet hat.
+    // Sonst stünde nach einem Netzfehler eine leere Liste da, und ein Speichern
+    // danach hätte Franks Zuordnung auf die gespeicherten Rückfall-Optionen eingedampft.
+    if(okKonten)_olOrdnerCache=gesammelt;
     // Erst die aktuellen Zeilen sichern, dann mit voller Ordnerliste neu zeichnen.
     const jetzt=_olZuordnungEinsammeln();
     const erl=_olErledigtEinsammeln();
     const box=document.getElementById('setOlZuordnung');
     if(box&&jetzt.length)box.innerHTML=jetzt.map(_olZeileHtml).join('');
     const eSel=document.getElementById('setOlErledigt');
-    if(eSel)eSel.innerHTML=_olOrdnerOptionen(erl.erledigtId,erl.erledigtName,'— nicht verschieben, nur kennzeichnen —');
-    showToast('✅ '+_olOrdnerCache.length+' Outlook-Ordner geladen','success',4000);
+    if(eSel)eSel.innerHTML=_olOrdnerOptionen(erl.erledigtId,erl.erledigtName,'— nicht verschieben, nur kennzeichnen —','1');
+    const eSel2=document.getElementById('setOlErledigt2');
+    if(eSel2)eSel2.innerHTML=_olOrdnerOptionen(erl.erledigtId2,erl.erledigtName2,'— nicht verschieben, nur kennzeichnen —','2');
+    _olZweitesZeigen();
+    if(!okKonten)showToast('⚠ Ordner konnten nicht geladen werden ('+schiefKonten.join(', ')+') – siehe Konsole','error',7000);
+    else showToast('✅ '+_olOrdnerCache.length+' Outlook-Ordner aus '+okKonten+(okKonten===1?' Postfach':' Postfächern')+' geladen'+(schiefKonten.length?' · ⚠ '+schiefKonten.join(', ')+' ging nicht':''),schiefKonten.length?'warning':'success',schiefKonten.length?7000:4000);
   }catch(e){
     showToast('⚠ Ordner konnten nicht geladen werden: '+e.message,'error',7000);
   }
@@ -57824,7 +57970,7 @@ let settingsFileId=null;
 // b748: hvKuerzel = { "<Ordner unter 01_Hausverwaltungen>": "<Kürzel>" }. Leer als
 // Ausgangswert – ohne Drive-Verbindung bleibt es leer, und dann verhält sich der
 // Titel-Vorspann wie vor b747 (alte Automatik). Bewusst so, siehe test_b747 Abschnitt 4.
-let pamSettings={version:1,ordnerBaustelle:'',ordnerEmail:'',ordnerNotiz:'',ordnerSchnellnotiz:'',hvKuerzel:{},outlookHolen:{zuordnung:[],erledigtId:'',erledigtName:''}}; // b566: ordnerSchnellnotiz liest nur die Handy-App (ab v149)
+let pamSettings={version:1,ordnerBaustelle:'',ordnerEmail:'',ordnerNotiz:'',ordnerSchnellnotiz:'',hvKuerzel:{},outlookHolen:{zuordnung:[],erledigtId:'',erledigtName:'',erledigtId2:'',erledigtName2:''}}; // b566: ordnerSchnellnotiz liest nur die Handy-App (ab v149) | b982: erledigt*2 = zweites Postfach
 // b777: Briefkopf des PDF-Deckblatts. Die Vorgabe ist wörtlich das, was in Franks
 // Word-Vorlagen steht (29_Word-Vorlagen, header2.xml) – dadurch sieht das PDF aus wie
 // seine Word-Dokumente.
