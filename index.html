@@ -10097,7 +10097,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-09 · #985'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-09-b985) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-10 · #986'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-10-b986) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -37426,7 +37426,10 @@ function _abOhneTextZeigen(d){
   const standEl=document.getElementById('abPopStand');
   if(standEl){let w='';try{const dt=new Date(d.stand);if(!isNaN(dt))w=dt.toLocaleDateString('de-DE')+', '+dt.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});}catch(e){}standEl.textContent=w?('Stand '+w):'';}
   const emBox=document.getElementById('emAufEinenBlick'),emInh=document.getElementById('emAbInhalt');
-  if(emBox&&emInh){emInh.innerHTML='<div style="color:var(--text2);line-height:1.45;">⚠ '+_abEsc(hinweis)+'</div>';emBox.style.display='';}
+  /* b986: derselbe Sicherheitsgurt wie in _abRendern – nur in den Kasten schreiben, wenn im
+     E-Mail-Fenster auch DIESE Karte offen ist. */
+  const emPasst=!d.fuerKarte||(typeof _emCurrentTask!=='undefined'&&_emCurrentTask&&_emCurrentTask.id===d.fuerKarte);
+  if(emBox&&emInh&&emPasst){emInh.innerHTML='<div style="color:var(--text2);line-height:1.45;">⚠ '+_abEsc(hinweis)+'</div>';emBox.style.display='';}
 }
 /* b964: Aus der Ansprechpartner-Tabelle heraus einen Kontakt anlegen.
    Frank am 08.09.2026: „Wie kann ich das zu meinen Kontakten hinzufügen?" Bis b963 musste er
@@ -37535,7 +37538,10 @@ function _abRendern(d){
   const sect=document.getElementById('tAufEinenBlickSect');
   const hdr=document.getElementById('abHdrInfo');
   if(!sect)return;
-  if(!d||d.sorte==='leer'){sect.style.display='none';if(d&&d.ohneText&&d.anzahl>0){_abLetzte=d;_abOhneTextZeigen(d);}return;}
+  /* ⛔ b986: _abLetzte LEEREN, wenn es nichts zu zeigen gibt. An dieser Merkstelle hängen
+     „Alles ansehen →", „📄 In die Dokumente" und „+ zu den Kontakten". Bis b985 blieb dort
+     die VORIGE Karte stehen – die Knöpfe hätten deren Personen in die neue Karte getragen. */
+  if(!d||d.sorte==='leer'){sect.style.display='none';_abLetzte=null;if(d&&d.ohneText&&d.anzahl>0){_abLetzte=d;_abOhneTextZeigen(d);}return;}
   _abLetzte=d;
 
   const personen=_abAllePersonen(d);
@@ -37610,9 +37616,14 @@ function _abRendern(d){
   }
 
   /* Derselbe Inhalt, kompakt, im E-Mail-Eingangsfenster. Dort ist die Spalte schmal -
-     also keine Tabelle, sondern Zeilen; die volle Tabelle steht im Fenster daneben. */
+     also keine Tabelle, sondern Zeilen; die volle Tabelle steht im Fenster daneben.
+     ⛔ b986: Diesen Kasten gibt es nur EINMAL, alle Karten teilen ihn sich. Trägt die
+     Kurzfassung eine Kartennummer (seit b986) und ist im E-Mail-Fenster eine ANDERE Karte
+     offen, bleibt er unberührt. Ältere gespeicherte Kurzfassungen haben das Feld nicht -
+     die werden wie bisher gezeigt, damit sich nichts still ändert. */
   const emBox=document.getElementById('emAufEinenBlick'),emInh=document.getElementById('emAbInhalt');
-  if(emBox&&emInh){
+  const emPasst=!d.fuerKarte||(typeof _emCurrentTask!=='undefined'&&_emCurrentTask&&_emCurrentTask.id===d.fuerKarte);
+  if(emBox&&emInh&&emPasst){
     let e='';
     const ez=(k,v)=>v?('<div style="display:flex;gap:8px;margin-bottom:3px;"><span style="flex:0 0 74px;color:var(--text2);font-weight:600;">'+k+'</span><span style="flex:1;min-width:0;">'+v+'</span></div>'):'';
     if(objekt)e+=ez('Objekt',_abEsc(objekt));
@@ -37924,14 +37935,34 @@ function _abVerlaufUmschalten(){
   if(p)p.textContent=zu?'▾':'▸';
 }
 
+/* b986: Ist DIESE Karte gerade in einem Fenster zu sehen?
+   ⛔ Der Kasten „Auf einen Blick" im E-Mail-Fenster gibt es nur EINMAL im ganzen Programm –
+   alle Karten teilen ihn sich. Bis b985 wurde nur das Feld #taskId der Auftragskarte gefragt;
+   das E-Mail-Fenster kam in der Frage nicht vor. Beide Fenster müssen gefragt werden, sonst
+   schreibt eine Karte in das Fenster einer anderen (gemessen am 10.09.2026).
+   Die Erkennung ist dieselbe wie in _abKontaktZiel: Klasse „open" am Fenster, dazu die
+   Kartennummer – in der Auftragskarte aus dem Feld, im E-Mail-Fenster aus der Arbeitskopie. */
+function _abIstNochOffen(id){
+  if(!id)return false;
+  try{
+    const tm=document.getElementById('taskModal');
+    if(tm&&tm.classList.contains('open')&&((document.getElementById('taskId')||{}).value||'')===id)return true;
+  }catch(e){}
+  try{
+    const em=document.getElementById('emailTaskModal');
+    if(em&&em.classList.contains('open')&&typeof _emCurrentTask!=='undefined'&&_emCurrentTask&&_emCurrentTask.id===id)return true;
+  }catch(e){}
+  return false;
+}
+
 /* Beim Öffnen der Karte. ⛔ Immer nur DIESE Karte – nie über alle laufen. */
 async function _abStart(task,vonHand){
   const sect=document.getElementById('tAufEinenBlickSect');
   if(!sect)return;
-  if(!task){sect.style.display='none';return;}
+  if(!task){sect.style.display='none';_abLetzte=null;return;}   /* b986: siehe _abRendern */
   const alt=task._aufEinenBlick||null;
   const mails=await _abMailsHolen(task,false);
-  if(!mails.length){sect.style.display='none';return;}
+  if(!mails.length){sect.style.display='none';_abLetzte=null;return;}   /* b986 */
   const neueste=mails.length?String(mails[mails.length-1].date||''):'';
   /* Veraltet? Anzahl und Datum der neuesten Nachricht verraten es – beides steht
      ohnehin da, das kostet nichts. */
@@ -37940,32 +37971,50 @@ async function _abStart(task,vonHand){
      der Kasten neu gebaut werden, sonst steht dort weiter "AUFTRAGGEBER". */
   const hvJetzt=String((task&&task.hausverwaltung)||'').trim();
   const passt=alt&&alt.bauart===AB_BAUART&&alt.anzahl===mails.length&&alt.neueste===neueste&&(alt.hv||'')===hvJetzt&&!alt.ohneText;
+  /* b986: Nach dem ersten Warten kann ein ANDERES Fenster offen sein – dann gehört der
+     Bildschirm nicht mehr dieser Karte. Gerechnet und gespeichert wird trotzdem weiter,
+     nur die Anzeige unterbleibt. Betrifft auch das schlichte „wird gelesen …": es hätte
+     sonst die fertige Kurzfassung der anderen Karte überschrieben. */
+  const zeigen=(typeof _abIstNochOffen!=='function')||_abIstNochOffen(task.id);
   /* ⛔ b967: Beide Aufrufe abgesichert. Vorher stand hier ein nackter Aufruf – und als
      _abRendern durch einen Programmfehler abbrach (der fehlende Zähler, siehe oben), riss er
      _abStart mit: kein Neuaufbau, kein „wird gelesen …", der Knopf schien tot. Ein Fehler
      beim ANZEIGEN darf das ARBEITEN nie blockieren; der alte Stand ist nur Beiwerk. */
-  if(passt&&!vonHand){try{_abRendern(alt);}catch(e){console.warn('[b967] Anzeige:',e);}return;}
-  if(alt){try{_abRendern(alt);}catch(e){console.warn('[b967] Anzeige (alter Stand):',e);}}
+  if(passt&&!vonHand){if(zeigen){try{_abRendern(alt);}catch(e){console.warn('[b967] Anzeige:',e);}}return;}
+  if(alt&&zeigen){try{_abRendern(alt);}catch(e){console.warn('[b967] Anzeige (alter Stand):',e);}}
   const hdr=document.getElementById('abHdrInfo');
-  if(hdr){hdr.textContent=vonHand?'wird neu gelesen …':(alt?(alt.ohneText?'wird erneut gelesen …':('⟳ '+Math.max(0,mails.length-alt.anzahl)+' neue – wird gelesen …')):'wird gelesen …');}
+  if(hdr&&zeigen){hdr.textContent=vonHand?'wird neu gelesen …':(alt?(alt.ohneText?'wird erneut gelesen …':('⟳ '+Math.max(0,mails.length-alt.anzahl)+' neue – wird gelesen …')):'wird gelesen …');}
   /* b963: Auch im E-Mail-Eingangsfenster sagen, dass gerade gelesen wird. Bis b962 blieb der
      Kasten dort still unsichtbar, solange PAM den Mailtext bei Outlook holte – Frank sah beim
      ersten Öffnen einer Karte nichts und fragte, warum der Kasten „nicht überall" sei. */
   const emBoxL=document.getElementById('emAufEinenBlick'),emInhL=document.getElementById('emAbInhalt');
-  if(emBoxL&&emInhL&&!alt){emInhL.innerHTML='<div style="color:var(--text2);">wird gelesen …</div>';emBoxL.style.display='';}
-  const standEl=document.getElementById('abPopStand');if(standEl)standEl.textContent='wird gelesen …';
-  sect.style.display='';
+  if(emBoxL&&emInhL&&!alt&&zeigen){emInhL.innerHTML='<div style="color:var(--text2);">wird gelesen …</div>';emBoxL.style.display='';}
+  const standEl=document.getElementById('abPopStand');if(standEl&&zeigen)standEl.textContent='wird gelesen …';
+  if(zeigen)sect.style.display='';
   const merkId=task.id;
   try{
     const neu=await _abBauen(task,vonHand);
-    /* Zwischendurch kann eine andere Karte offen sein – dann nichts überschreiben. */
-    const jetzt=findTaskById((document.getElementById('taskId')||{}).value||'');
-    if(!neu){if(hdr)hdr.textContent='';if(standEl)standEl.textContent='';if(!alt)sect.style.display='none';return;}
+    /* ⛔ b986: Zwischendurch kann eine ANDERE Karte offen sein – dann nichts überschreiben.
+       Bis b985 stand hier findTaskById(#taskId), also nur die Auftragskarte. Daraus wurden
+       ZWEI Fehler auf einmal:
+       1. War nur das E-Mail-Fenster offen, ist #taskId leer – das frisch Gelesene wurde NIE
+          angezeigt. Der Kasten blieb auf „wird gelesen …" stehen, bis die Karte erneut
+          geöffnet wurde (gespeichert war es längst).
+       2. Stand in #taskId noch die vorige Karte, schrieb ihr spätes Ergebnis in das inzwischen
+          geöffnete Fenster einer anderen Mail.
+       ⛔ typeof-Absicherung wie bei b948/b977: Prüfsuiten schneiden _abStart einzeln aus und
+       führen es aus; ein draußen definierter Helfer fehlt dort. */
+    const nochOffen=(typeof _abIstNochOffen==='function')?_abIstNochOffen(merkId):true;
+    if(!neu){if(nochOffen){if(hdr)hdr.textContent='';if(standEl)standEl.textContent='';if(!alt)sect.style.display='none';}return;}
+    /* Die Kurzfassung merkt sich, zu WELCHER Karte sie gehört – der Zeichner prüft das noch
+       einmal, bevor er in den gemeinsamen Kasten schreibt. */
+    neu.fuerKarte=merkId;
     task._aufEinenBlick=neu;
-    if(jetzt&&jetzt.id===merkId)_abRendern(neu);
+    if(nochOffen)_abRendern(neu);
     if(typeof autoSave==='function')setTimeout(function(){try{autoSave();}catch(e){}},1500);
   }catch(e){
     console.warn('[b955] Auf einen Blick:',e);
+    if((typeof _abIstNochOffen==='function')&&!_abIstNochOffen(merkId))return;
     if(hdr)hdr.textContent=alt?'Stand '+new Date(alt.stand).toLocaleDateString('de-DE'):'';
     if(standEl)standEl.textContent=alt?('Stand '+new Date(alt.stand).toLocaleDateString('de-DE')):'';
     if(!alt)sect.style.display='none';
@@ -48694,7 +48743,7 @@ function openModal(){
     try{
       const _abT=findTaskById((document.getElementById('taskId')||{}).value||'');
       if(_abT&&typeof _abStart==='function')_abStart(_abT,false);
-      else{const _s=document.getElementById('tAufEinenBlickSect');if(_s)_s.style.display='none';}
+      else{const _s=document.getElementById('tAufEinenBlickSect');if(_s)_s.style.display='none';try{_abLetzte=null;}catch(e2){}} /* b986 */
     }catch(e){console.warn('[b955] Start:',e);}
   },120);
 }
@@ -52821,6 +52870,14 @@ function openEmailTaskModal(task,board){
   try{
     const _emAbBox=document.getElementById('emAufEinenBlick');
     if(_emAbBox)_emAbBox.style.display='none';
+    /* b986: NICHT nur verstecken – auch leeren. Bis b985 blieb der Text der vorigen Karte
+       im Kasten stehen; er war nur unsichtbar und konnte jederzeit wieder auftauchen.
+       Dieselbe Vorsorge trifft closeEmailTaskModal seit jeher für drei andere Stellen. */
+    const _emAbInh=document.getElementById('emAbInhalt');
+    if(_emAbInh)_emAbInh.innerHTML='';
+    /* Auch die Merkstelle für die Knöpfe („Alles ansehen", „In die Dokumente",
+       „zu den Kontakten") gehört der neuen Karte – siehe _abLetzte. */
+    try{_abLetzte=null;}catch(e2){}
     if(task&&typeof _abStart==='function')_abStart(task,false);
   }catch(e){console.warn('[b959] Auf einen Blick im E-Mail-Fenster:',e);}
   // Absender-Name
@@ -53970,6 +54027,11 @@ function closeEmailTaskModal(){
   // #361: kein _pamCollapseAllCols() – Spalten bleiben beim Schließen offen
   // DOM leeren damit kein alter Inhalt beim nächsten Öffnen aufblitzt
   const _emML=document.getElementById('emVerlaufBox');if(_emML)_emML.innerHTML=''; // b816
+  /* b986: „Auf einen Blick" gehört in diese Liste – der Kasten wird von allen Karten
+     benutzt. Bis b985 blieb sein Inhalt beim Schließen stehen. */
+  const _emABI=document.getElementById('emAbInhalt');if(_emABI)_emABI.innerHTML='';
+  const _emABB=document.getElementById('emAufEinenBlick');if(_emABB)_emABB.style.display='none';
+  try{_abLetzte=null;}catch(e){}
   const _emRP=document.getElementById('emReadingPane');
   if(_emRP){_emRP.innerHTML='<div class="em-empty-pane" id="emReadingPlaceholder"><span style="font-size:28px;opacity:.3;">📧</span><div style="margin-top:8px;font-size:12px;color:var(--text2);">E-Mail auswählen</div></div><div id="emReadingContent" style="height:100%;display:flex;flex-direction:column;overflow:hidden;"></div>';}
   _emMailBodyCache={};
