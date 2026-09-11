@@ -10128,7 +10128,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-11 · #988'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-11-b988) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-11 · #989'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-11-b989) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -37322,6 +37322,50 @@ function _abGenannte(text){
 
 function _abEsc(s){const d=document.createElement('div');d.textContent=String(s==null?'':s);return d.innerHTML;}
 
+/* b989: Newsletter und Werbepost erkennen.
+   Frank am 11.09.2026 (Variante A): ein weitergeleiteter Fach-Newsletter bekam eine
+   Objektadresse – es war die Verlagsanschrift aus dem Impressum ganz unten –, der
+   Weiterleiter stand als „Privatperson“ in der Tabelle, und rund 32.600 Zeichen Werbetext
+   lagen gespeichert in der Karte (15 % aller Kurzfassungen zusammen).
+   Gemessen über alle 31 Kurzfassungen: der Newsletter trug drei Anzeichen, keine der 30
+   echten Karten mehr als eins.
+   ⛔ Ein Abmelde-Hinweis ist PFLICHT. Jeder Newsletter muss ihn tragen; eine Firmensignatur
+   mit „Impressum | Datenschutz | Newsletter“ trägt ihn nicht – die hätte sonst schon zwei.
+   ⛔ Was von einer Verwaltung, Genossenschaft oder Versicherung kommt, zählt NIE: deren
+   Portal-Benachrichtigungen („Neue Anfrage … wurde Ihnen zugewiesen“) können Abmelde-Link und
+   Impressum haben und sind trotzdem Aufträge. Lieber einen Newsletter übersehen als einen
+   Auftrag verstecken.
+   ⛔ Nur die MAILS zählen, nicht die PDF-Anhänge – und die Werbung muss den Großteil des
+   Textes ausmachen (60 %), sonst macht ein beigelegter Werbeabschnitt einen ganzen Vorgang
+   zur Werbung.
+   ⛔ „Impressum“ darf NIE als Ende der Mail gelten (AB_ABBRUCH): in einer echten Anfrage steht
+   es in Nachricht 2 von 7, danach kommen 57 % des Verlaufs.
+   Die Muster stehen IN der Funktion – Prüfsuiten schneiden sie einzeln aus (Lehre aus b972). */
+function _abWerbung(schritte){
+  const ABMELDEN=/\b(?:abmelden|abmeldung|abbestellen|abbestellung|unsubscribe)\b/i;
+  const WEITERE=[
+    ['Wort „Newsletter“',/\bnewsletter\b/i],
+    ['Impressum',/\bimpressum\b/i],
+    ['„im Browser ansehen“',/(?:im|in ihrem)\s+browser\s+(?:an)?(?:sehen|anzeigen|(?:ö|oe)ffnen)|webversion|online-?version|view\s+(?:it\s+)?in\s+(?:your\s+)?browser|nicht\s+(?:richtig|korrekt)\s+angezeigt/i]
+  ];
+  const NIE=/hausverwaltung|genossenschaft|versicherung/i;
+  const mail=(schritte||[]).filter(s=>s&&!s.anhang&&String(s.text||'').trim());
+  const gesamt=mail.reduce((n,s)=>n+String(s.text).length,0);
+  let werbeLaenge=0;
+  const gefunden=[];
+  mail.forEach(s=>{
+    if(NIE.test(String(s.rolle||'')))return;
+    const txt=String(s.text||'');
+    if(!ABMELDEN.test(txt))return;
+    const dazu=WEITERE.filter(w=>w[1].test(txt+'\n'+String(s.wer||''))).map(w=>w[0]);
+    if(!dazu.length)return;
+    werbeLaenge+=txt.length;
+    ['Abmelde-Hinweis'].concat(dazu).forEach(n=>{if(gefunden.indexOf(n)<0)gefunden.push(n);});
+  });
+  const ja=gesamt>0&&werbeLaenge>=gesamt*0.6;
+  return {ja:ja,anzeichen:ja?gefunden:[]};
+}
+
 async function _abBauen(task,vonHand){
   const mails=await _abMailsHolen(task,true);
   if(!mails.length)return null;
@@ -37483,6 +37527,16 @@ async function _abBauen(task,vonHand){
      (1,3 GB frei) noch in den Arbeitsspeicher (4,1 GB frei) - Chrome, Outlook, Word,
      Excel und Teams belegen sie. Alles im Kasten kommt jetzt aus Mustern: sofort,
      auf jedem Geraet, ohne Wartezeit. _abKi bleibt als Baustein liegen. */
+  /* b989: Newsletter/Werbung – kein Objekt, keine Ansprechpartner, und der lange Werbetext
+     wird NICHT gespeichert (er steht in der Mail selbst und wanderte sonst bei jedem Speichern
+     auf Laptop und Handy mit). Die Anhänge bleiben stehen, damit ein zweites Lesen keinen
+     Drive-Zugriff kostet. ⛔ typeof wie bei b948/b977: Prüfsuiten schneiden _abBauen einzeln aus. */
+  const werbung=(typeof _abWerbung==='function')?_abWerbung(schritte):{ja:false,anzeichen:[]};
+  if(werbung.ja){
+    daten.sorte='werbung';daten.werbung=werbung.anzeichen;
+    daten.schritte=[];daten.kontakte=[];daten.genannte=[];daten.schreiber=[];
+    daten.objekt='';daten.meldung='';daten.absTel='';daten.rolle='';
+  }
   return daten;
 }
 
@@ -37495,6 +37549,9 @@ async function _abBauen(task,vonHand){
    Die Reihenfolge beantwortet Franks Frage „wen rufe ich an?": Auftraggeber, dann die
    Leute vor Ort, dann die übrigen Schreiber, zuletzt Nummern ohne Namen. */
 function _abAllePersonen(d){
+  /* b989: Newsletter/Werbung hat keine Ansprechpartner – sonst stünde der Absender als
+     „Auftraggeber“ in Tabelle, Dokument und „+ zu den Kontakten“. */
+  if(d&&d.sorte==='werbung')return [];
   /* ⛔ Beide Helfer stehen INNERHALB der Funktion. Die Prüfsuite von b957 schneidet
      _abAllePersonen einzeln aus und führt sie aus – draußen definierte Helfer fehlten dort
      und die Suite stürzte ab („_abSchluessel is not defined"). Sie hat den Fehler beim
@@ -37718,6 +37775,8 @@ function _abRendern(d){
   _abLetzte=d;
 
   const personen=_abAllePersonen(d);
+  /* b989: Newsletter/Werbung – der Kasten sagt es, statt ein Objekt zu erfinden. */
+  const werbung=d.sorte==='werbung';
   const ki=d.ki||{},ob=ki.objekt||{};
   const objekt=[ob.strasse,ob.ort,ob.lage].filter(Boolean).join(' · ')||d.objekt||'';
   /* Die Meldung schlaegt die Betreffzeile: sie sagt, worum es wirklich geht.
@@ -37727,6 +37786,7 @@ function _abRendern(d){
   /* ── Die eine Zeile auf der Karte ── */
   if(hdr){
     const teile=[];
+    if(werbung)teile.push('📰 Newsletter / Werbung');
     if(d.absender)teile.push(d.absender);
     if(d.ohneText)teile.push('⚠ Text nicht gelesen');
     /* In der einen Zeile auf der Karte ist der Betreff besser aufgehoben: er ist
@@ -37743,8 +37803,10 @@ function _abRendern(d){
   const kopf=document.getElementById('abPopKopf');
   if(kopf){
     const zeile=(k,v)=>v?('<div style="display:flex;gap:10px;margin-bottom:4px;"><span style="flex:0 0 90px;color:var(--text2);font-weight:600;">'+k+'</span><span style="flex:1;min-width:0;font-weight:600;">'+_abEsc(v)+'</span></div>'):'';
-    kopf.innerHTML=zeile('Objekt',objekt)+zeile("Worum geht's",thema)+zeile('Stand',ki.stand||'')+
+    kopf.innerHTML=(werbung?zeile('Art','📰 Newsletter / Werbung – kein Auftrag')+zeile('Von',d.absender||''):'')+
+      zeile('Objekt',objekt)+zeile("Worum geht's",thema)+zeile('Stand',ki.stand||'')+
       zeile('Nachrichten',d.anzahl?(d.anzahl+(d.anzahl===1?' Nachricht':' Nachrichten')):'')+
+      (werbung?'<div style="color:var(--text2);margin-top:6px;">Erkannt an: '+_abEsc((d.werbung||[]).join(' · '))+'. Kein Objekt und keine Ansprechpartner – der Text steht in der Mail selbst.</div>':'')+
       /* b962: auch bei sichtbarem Kasten sagen, wenn der Mailtext fehlt (Verwaltung bekannt, Text nicht lesbar). */
       (d.ohneText?'<div style="color:var(--text2);margin-top:6px;">⚠ Der Mailtext konnte nicht gelesen werden – „⟳ nochmal lesen" versucht es erneut.</div>':'');
   }
@@ -37760,7 +37822,8 @@ function _abRendern(d){
   const tab=document.getElementById('abPopTabelle');
   if(tab){
     if(!personen.length){
-      tab.innerHTML='<div style="color:var(--text2);font-style:italic;font-size:14px;padding:10px 0;">In den Nachrichten steht keine Telefonnummer und kein Name.</div>';
+      tab.innerHTML='<div style="color:var(--text2);font-style:italic;font-size:14px;padding:10px 0;">'+
+        (werbung?'Newsletter / Werbung – hier gibt es keine Ansprechpartner.':'In den Nachrichten steht keine Telefonnummer und kein Name.')+'</div>';
     }else{
       let h='<table style="width:100%;border-collapse:collapse;font-size:14px;">'+
         '<thead><tr>'+
@@ -37799,6 +37862,7 @@ function _abRendern(d){
   if(emBox&&emInh&&emPasst){
     let e='';
     const ez=(k,v)=>v?('<div style="display:flex;gap:8px;margin-bottom:3px;"><span style="flex:0 0 74px;color:var(--text2);font-weight:600;">'+k+'</span><span style="flex:1;min-width:0;">'+v+'</span></div>'):'';
+    if(werbung)e+=ez('Art','📰 Newsletter / Werbung – kein Auftrag');
     if(objekt)e+=ez('Objekt',_abEsc(objekt));
     if(thema)e+=ez("Worum",_abEsc(thema));
     if(ki.stand)e+=ez('Stand',_abEsc(ki.stand));
@@ -37865,8 +37929,10 @@ function _abDokHtml(d,titel){
   h+='<h1>'+e(titel||'Auf einen Blick')+'</h1>';
   h+='<div class="meta">Auf einen Blick · Stand '+e(_abStandText(d))+
      (d.anzahl?' · '+d.anzahl+(d.anzahl===1?' Nachricht':' Nachrichten'):'')+'</div>';
-  if(objekt||meldung){
+  const werbung=d.sorte==='werbung';   /* b989 */
+  if(werbung||objekt||meldung){
     h+='<dl>';
+    if(werbung)h+='<dt>Art</dt><dd>Newsletter / Werbung – kein Auftrag</dd>'+(d.betreff?'<dt>Betreff</dt><dd>'+e(d.betreff)+'</dd>':'');
     if(objekt)h+='<dt>Objekt</dt><dd>'+e(objekt)+'</dd>';
     if(meldung)h+='<dt>Worum geht’s</dt><dd>'+e(meldung).replace(/\n/g,'<br>')+'</dd>';
     h+='</dl>';
@@ -37904,6 +37970,7 @@ function _abDokText(d,titel){
   zeilen.push(String(titel||'Auf einen Blick'));
   zeilen.push('Stand '+_abStandText(d)+(d.anzahl?' · '+d.anzahl+' Nachricht(en)':''));
   zeilen.push('');
+  if(d.sorte==='werbung')zeilen.push('Art:          Newsletter / Werbung – kein Auftrag'+(d.betreff?'\nBetreff:      '+d.betreff:''));   /* b989 */
   if(objekt)zeilen.push('Objekt:       '+objekt);
   if(meldung)zeilen.push('Worum geht’s: '+String(meldung).replace(/\n/g,' '));
   if(personen.length){
@@ -38183,7 +38250,11 @@ async function _abStart(task,vonHand){
        einmal, bevor er in den gemeinsamen Kasten schreibt. */
     neu.fuerKarte=merkId;
     task._aufEinenBlick=neu;
-    if(nochOffen)_abRendern(neu);
+    /* ⛔ b989: Ein Fehler beim ANZEIGEN darf das SICHERN nicht verhindern – dieselbe Regel wie
+       b967 weiter oben. Bis b988 stand dieser Aufruf nackt da: warf er, sprang alles in den
+       catch-Zweig, und das autoSave darunter wurde nie angestoßen. Die fertige Kurzfassung lag
+       dann nur im Arbeitsspeicher, bis zufällig etwas anderes speicherte. */
+    if(nochOffen){try{_abRendern(neu);}catch(e){console.warn('[b989] Anzeige:',e);}}
     if(typeof autoSave==='function')setTimeout(function(){try{autoSave();}catch(e){}},1500);
   }catch(e){
     console.warn('[b955] Auf einen Blick:',e);
