@@ -10209,7 +10209,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-13 · #1003'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-13-b1003) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-13 · #1004'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-13-b1004) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -62622,9 +62622,30 @@ function _fdkDateiname(t,art){
   const tit=String(roh).replace(/[^a-zA-Z0-9äöüÄÖÜß \-_]/g,'_').replace(/_+/g,'_').replace(/\s+/g,' ').trim().replace(/[ _]+$/,'').slice(0,80)||'Auftrag';
   const d=new Date();
   const iso=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  // b1004: Uhrzeit (HHMM) dazu – sonst hiessen alle Fassungen eines Tages gleich, und
+  // „Pfad kopieren" oeffnete in Word immer die aelteste. Bewusst ohne Sekunden: in engen
+  // Ordnern kuerzt b945 VORNE, und vorne steht die Auftragsnummer.
+  const hm=String(d.getHours()).padStart(2,'0')+String(d.getMinutes()).padStart(2,'0');
   // Ohne zweiten Wert bleibt es beim bisherigen Namen – alle alten Aufrufe stimmen weiter.
-  if(art==='formular')return tit+'_Formular_'+iso+'.docx';
-  return tit+'_Fotodokumentation_'+iso+'.docx';
+  if(art==='formular')return tit+'_Formular_'+iso+'_'+hm+'.docx';
+  return tit+'_Fotodokumentation_'+iso+'_'+hm+'.docx';
+}
+// b1004: Liegt im Zielordner schon eine Datei mit diesem Namen (zweimal in derselben Minute
+// erzeugt), wird „-2", „-3" … angehaengt. Geprueft wird der Name NACH dem Passend-Kuerzen
+// (b944) – so heisst die Datei hinterher in Drive. Drive-Fehler: Name bleibt, nichts bricht ab.
+async function _fdkNameFrei(fid,fname){
+  const m=String(fname||'').match(/^(.*?)(\.[^.]+)?$/);
+  const stamm=m[1],endung=m[2]||'';
+  for(let n=1;n<=20;n++){
+    const kand=n===1?String(fname):(stamm+'-'+n+endung);
+    let wirklich=kand;
+    try{if(typeof _pamNamePassend==='function'){const e=await _pamNamePassend(fid,kand);if(e&&e.name)wirklich=e.name;}}catch(e){}
+    const q="'"+fid+"' in parents and name='"+wirklich.replace(/\\/g,'\\\\').replace(/'/g,"\\'")+"' and trashed=false";
+    let treffer;
+    try{treffer=await _dokDriveListe(q);}catch(e){return kand;}
+    if(!treffer||!treffer.length)return kand;
+  }
+  return stamm+'-'+Date.now()+endung;
 }
 
 /* ── Bilder für das Dokument: aus Drive holen, verkleinern (1600 px längste Kante),
@@ -63716,6 +63737,8 @@ async function _fdkErstellen(ziel){
       bytes=_fdkPdfBauen(bilder,{proSeite:proSeite,startNr:startNr}).output('arraybuffer');
       fname=_fdkDateiname(t).replace(/\.docx$/i,'.pdf');mime='application/pdf';
     }
+    // b1004: gleichnamige Fassung im Zielordner? Dann „-2" usw. – sonst oeffnet „Pfad kopieren" die falsche.
+    if(S.ordnerId&&gdriveTokenValid())fname=await _fdkNameFrei(S.ordnerId,fname);
     // b782: ordnerId mitmerken - „In Word öffnen" braucht den Ordner für den Pfad.
     S.ergebnis={bytes:bytes,fname:fname,mime:mime,ordnerId:'',abgelegt:false};
     let ablage='';
@@ -63723,7 +63746,9 @@ async function _fdkErstellen(ziel){
     if(S.ordnerId&&gdriveTokenValid()){
       sag('⏳ Ablage im '+wohin+'…');
       try{
-        await _driveUploadGeneric(bytes,fname,mime,S.ordnerId);
+        // b1004: b944 kann den Namen beim Hochladen kuerzen – gemerkt wird, wie die Datei in Drive heisst.
+        const _up=await _driveUploadGeneric(bytes,fname,mime,S.ordnerId);
+        if(_up&&_up.name){fname=_up.name;S.ergebnis.fname=fname;}
         S.ergebnis.ordnerId=S.ordnerId;S.ergebnis.abgelegt=true;
         ablage='✓ im '+wohin+' abgelegt'+(S.ordnerArt==='dokumente'?' – erscheint in der Dokumentliste':' (kein Dokumente-Ordner am Auftrag)');
         // b735: Dokumentliste nur auffrischen, wenn die Datei auch dort liegt
