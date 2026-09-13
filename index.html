@@ -10197,7 +10197,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-13 · #997'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-13-b997) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-13 · #998'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-13-b998) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -54165,32 +54165,115 @@ function _pamWahlSammle(){
   out.sort(function(x,y){return x.w.ts<y.w.ts?1:(x.w.ts>y.w.ts?-1:0);});
   return out;
 }
-// Reiter „Gewählt". Die Zeile öffnet die Karte (hier steht kein tel:-Link, ein Fehlklick wählt nicht).
-// Archivierte Karten ohne Klick – das Auftragsfenster taugt für sie nicht (b954).
+// ── b998: Reiter „Gewählt" nach KARTE gruppiert + Ausblenden ─────────────────
+/* ⛔ Ausblenden LÖSCHT NICHTS: die Karte merkt sich nur anrufWahlenAusgeblendetBis = Zeit der
+      neuesten Wahl beim Ausblenden. Ein echtes Entfernen käme über die Vereinigung beim
+      Schreibkonflikt (b996) vom anderen Gerät zurück; ein einfaches Feld gewinnt dort normal.
+   ⛔ Zeit der neuesten Wahl, NICHT „jetzt": eine Wahl, die ein anderes Gerät zwischendurch
+      schreibt, bleibt sichtbar.
+   ⛔ Nur die Liste: der Kontakte-Kasten der Karte zeigt weiter alle Zeiten (zur Kontrolle).
+   ⛔ Die Zeilen öffnen nichts, nur der Knopf „Karte öffnen" (wie im Reiter Offen). Kein tel:-Link.
+   Reihenfolge: Karte mit der neuesten Wahl oben, Archiv am Ende. */
+let _pamWahlOffen={};
+let _pamWahlAusgeblendeteZeigen=false;
+function _pamWahlSichtbar(t,w){
+  const bis=t&&t.anrufWahlenAusgeblendetBis;
+  return !bis||String((w&&w.ts)||'')>String(bis);
+}
+function _pamWahlGruppen(alleZeigen){
+  const nachId={},reihe=[];
+  _pamWahlSammle().forEach(function(r){
+    const aus=!_pamWahlSichtbar(r.t,r.w);
+    if(aus&&!alleZeigen)return;
+    let g=nachId[r.t.id];
+    if(!g){g=nachId[r.t.id]={t:r.t,board:r.board,archiv:r.archiv,wahlen:[],neueste:'',ausgeblendet:0};reihe.push(g);}
+    g.wahlen.push({w:r.w,aus:aus});
+    if(aus)g.ausgeblendet++;
+    if(String(r.w.ts)>g.neueste)g.neueste=String(r.w.ts);
+  });
+  // selbst sortieren – nicht auf die Reihenfolge von _pamWahlSammle verlassen
+  reihe.forEach(function(g){g.wahlen.sort(function(x,y){return x.w.ts<y.w.ts?1:(x.w.ts>y.w.ts?-1:0);});});
+  reihe.sort(function(a,b){
+    if(a.archiv!==b.archiv)return a.archiv?1:-1;
+    return a.neueste<b.neueste?1:(a.neueste>b.neueste?-1:0);
+  });
+  return reihe;
+}
+function _pamWahlAusblenden(taskId){
+  const t=_pamWahlKarte(taskId); if(!t)return false;
+  const liste=_pamWahlenListe(t); if(!liste.length)return false;
+  t.anrufWahlenAusgeblendetBis=liste[0].ts;
+  if(typeof autoSave==='function')autoSave();
+  _pamAnrufRender();
+  if(typeof showToast==='function')showToast('✓ Ausgeblendet: '+(t.title||'(kein Titel)')+' – in der Karte stehen alle Zeiten weiter','success',3500);
+  return true;
+}
+function _pamWahlEinblenden(taskId){
+  const t=_pamWahlKarte(taskId); if(!t||!t.anrufWahlenAusgeblendetBis)return false;
+  t.anrufWahlenAusgeblendetBis='';
+  if(typeof autoSave==='function')autoSave();
+  _pamAnrufRender();
+  return true;
+}
+function _pamWahlAufklappen(taskId){
+  _pamWahlOffen[taskId]=!_pamWahlOffen[taskId];
+  _pamAnrufRender();
+}
+function _pamWahlAusgeblendeteUmschalten(){
+  _pamWahlAusgeblendeteZeigen=!_pamWahlAusgeblendeteZeigen;
+  _pamAnrufRender();
+}
 function _pamWahlRender(el,cnt){
-  const liste=_pamWahlSammle();
-  if(cnt)cnt.textContent=liste.length===1?'1 Wahl':liste.length+' Wahlen';
-  if(!liste.length){
+  const zeigAlle=(typeof _pamWahlAusgeblendeteZeigen!=='undefined')&&!!_pamWahlAusgeblendeteZeigen;
+  const offen=(typeof _pamWahlOffen!=='undefined'&&_pamWahlOffen)?_pamWahlOffen:{};
+  const alle=_pamWahlGruppen(true);
+  const gruppen=zeigAlle?alle:_pamWahlGruppen(false);
+  let n=0;
+  gruppen.forEach(function(g){g.wahlen.forEach(function(x){if(!x.aus)n++;});});
+  if(cnt)cnt.textContent=n===1?'1 Wahl':n+' Wahlen';
+  if(!alle.length){
     el.innerHTML='<div style="padding:22px 14px;color:var(--text2);font-size:13px;line-height:1.6;">'
       +'Noch keine Nummer aus PAM gewählt.<br><br>'
-      +'Ab jetzt steht hier jede Wahl mit Datum und Uhrzeit, die neueste oben – aus dieser Liste, aus dem Kontakte-Kasten einer Karte oder vom 📞 im Kartenkopf.'
+      +'Ab jetzt steht hier jede Wahl mit Datum und Uhrzeit, je Karte – aus dieser Liste, aus dem Kontakte-Kasten einer Karte oder vom 📞 im Kartenkopf.'
       +'</div>';
     return;
   }
   const sicher=function(s){return String(s).split('\\').join('\\\\').split("'").join("\\'");};
-  const MAX=300;
+  const knopf='font-size:11px;padding:3px 10px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;';
+  const versteckt=alle.filter(function(g){return g.ausgeblendet>0;}).length;
   let html='';
-  liste.slice(0,MAX).forEach(function(r){
-    const t=r.t,w=r.w;
-    const klick=r.archiv?'':' onclick="_pamAnrufKarte(\''+sicher(String(t.id))+'\')" title="Karte öffnen"';
-    html+='<div class="pam-wahl-zeile"'+klick+' style="display:flex;gap:12px;align-items:baseline;border-bottom:1px solid var(--border);padding:7px 10px;'+(r.archiv?'':'cursor:pointer;')+'">'
-      +'<div style="font-size:13px;font-weight:700;color:var(--text);white-space:nowrap;min-width:122px;">'+esc(_pamWahlZeit(w.ts,false))+'</div>'
-      +'<div style="flex:1;min-width:0;">'
-      +'<div style="font-size:12px;color:var(--text);">📞 '+(w.name?esc(w.name)+' · ':'')+'<b>'+esc(w.nr||'')+'</b></div>'
-      +'<div style="font-size:11px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+(r.archiv?'📦 im Archiv · ':esc(r.board)+' · ')+esc(t.title||'(kein Titel)')+'</div>'
+  if(versteckt){
+    html+='<div class="pam-wahl-leiste" style="display:flex;align-items:center;gap:8px;padding:6px 10px;font-size:11px;color:var(--text2);border-bottom:1px solid var(--border);">'
+      +'<span style="flex:1;">'+(versteckt===1?'1 Karte':versteckt+' Karten')+' mit ausgeblendeten Wahlen</span>'
+      +'<button onclick="_pamWahlAusgeblendeteUmschalten()" style="'+knopf+'">'+(zeigAlle?'Ausgeblendete verbergen':'Ausgeblendete zeigen')+'</button>'
+      +'</div>';
+  }
+  if(!gruppen.length){
+    el.innerHTML=html+'<div style="padding:22px 14px;color:var(--text2);font-size:13px;line-height:1.6;">Alles ausgeblendet. In den Karten stehen die Zeiten weiter unter dem Kontakt.</div>';
+    return;
+  }
+  const MAXK=150;
+  gruppen.slice(0,MAXK).forEach(function(g){
+    const t=g.t,sid=sicher(String(t.id));
+    const sichtbar=g.wahlen.filter(function(x){return !x.aus;}).length;
+    const zeig=offen[t.id]?g.wahlen:g.wahlen.slice(0,3);
+    html+='<div class="pam-wahl-karte" style="border-bottom:1px solid var(--border);padding:8px 10px;'+(sichtbar?'':'opacity:.55;')+'">'
+      +'<div style="font-size:11px;color:var(--text2);">'+(g.archiv?'📦 im Archiv':esc(g.board)+(t.status?' · '+esc(t.status):''))+'</div>'
+      +'<div style="font-size:13px;font-weight:600;color:var(--text);margin:2px 0 5px;">'+esc(t.title||'(kein Titel)')+'</div>';
+    zeig.forEach(function(x){
+      html+='<div class="pam-wahl-zeile" style="display:flex;gap:12px;align-items:baseline;font-size:12px;padding:1px 0;'+(x.aus?'color:var(--text2);':'color:var(--text);')+'">'
+        +'<span style="font-weight:600;white-space:nowrap;min-width:112px;">'+esc(_pamWahlZeit(x.w.ts,false))+'</span>'
+        +'<span>📞 '+(x.w.name?esc(x.w.name)+' · ':'')+'<b>'+esc(x.w.nr||'')+'</b>'+(x.aus?' <span style="font-size:10px;">(ausgeblendet)</span>':'')+'</span>'
+        +'</div>';
+    });
+    if(g.wahlen.length>3)html+='<div style="font-size:11px;margin-top:2px;"><span class="pam-wahl-mehr" onclick="_pamWahlAufklappen(\''+sid+'\')" style="color:#1a56c4;cursor:pointer;">'+(offen[t.id]?'weniger':'+ '+(g.wahlen.length-3)+' weitere')+'</span></div>';
+    html+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">'
+      +(g.archiv?'':'<button onclick="_pamAnrufKarte(\''+sid+'\')" title="Öffnet die Karte" style="'+knopf+'">📂 Karte öffnen</button>')
+      +(sichtbar?'<button onclick="_pamWahlAusblenden(\''+sid+'\')" title="Nimmt die bisherigen Wahlen dieser Karte aus der Liste. In der Karte bleiben alle Zeiten stehen." style="'+knopf+'">✓ Ausblenden</button>':'')
+      +(g.ausgeblendet?'<button onclick="_pamWahlEinblenden(\''+sid+'\')" title="Holt die ausgeblendeten Wahlen zurück in die Liste" style="'+knopf+'">↺ Wieder zeigen</button>':'')
       +'</div></div>';
   });
-  if(liste.length>MAX)html+='<div style="padding:8px 10px;font-size:11px;color:var(--text2);">… '+(liste.length-MAX)+' ältere Wahlen nicht angezeigt</div>';
+  if(gruppen.length>MAXK)html+='<div style="padding:8px 10px;font-size:11px;color:var(--text2);">… '+(gruppen.length-MAXK)+' weitere Karten nicht angezeigt</div>';
   el.innerHTML=html;
 }
 
