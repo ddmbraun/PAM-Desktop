@@ -10203,7 +10203,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-13 · #1000'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-13-b1000) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-13 · #1001'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-13-b1001) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -60712,7 +60712,7 @@ window.Dachplan=(function(){
     q('#dpStat').querySelectorAll('button').forEach(b=>b.onclick=()=>{const p=cur();if(!p)return;p.status=b.dataset.s;markStat(p);renderPins();save();});
     q('#dpTitle').oninput=e=>{const p=cur();if(p){p.title=e.target.value;save();}};
     q('#dpNote').oninput=e=>{const p=cur();if(p){p.note=e.target.value;save();}};
-    q('#dpPhotoBtn').onclick=()=>q('#dpPhotoInput').click();
+    q('#dpPhotoBtn').onclick=()=>_dpFotoQuelleWahl(); /* b1001: Rechner ODER Fotos der Karte */
     q('#dpPhotoInput').onchange=e=>{addPhotos([...e.target.files]);e.target.value='';};
     q('#dpBericht').onclick=()=>{if(t)_dpBerichtOeffnen(t.id);}; // b731
     q('#dpUeber').onclick=ueberStart;q('#dpUeberOk').onclick=ueberSpeichern;q('#dpUeberAb').onclick=ueberEnde; // b770
@@ -60728,7 +60728,8 @@ window.Dachplan=(function(){
       // ⛔ Zwei Schrägstriche, kein Blockkommentar – siehe b764/b770.
       if(!dp.weg||typeof dp.weg!=='object')dp.weg={};
       dp.weg[p.id]=new Date().toISOString();
-      dp.pins=dp.pins.filter(x=>x.id!==p.id);sel=null;closeSheet();renderPins();save();};
+      const _zk=(typeof _dpPinFotosZurKarte==='function')?_dpPinFotosZurKarte(p):0; /* b1001: Fotos von der Karte gehen zurück, statt mit dem Pin zu verschwinden */
+      dp.pins=dp.pins.filter(x=>x.id!==p.id);sel=null;closeSheet();renderPins();save();if(_zk)say(_zk+' Foto'+(_zk!==1?'s':'')+' zurück an die Karte');};
     q('#dpPhotoX').onclick=()=>E.photo.classList.add('dp-hidden');
     q('#dpPhotoText').onclick=()=>{if(window._dpPhotoFo)dpFotoText(window._dpPhotoFo);}; // b482
     /* b756: derselbe große Maler wie bei Auftragsfotos (T, ①, ✋, 🗑). Ist das Pin-Foto
@@ -61154,12 +61155,162 @@ window.Dachplan=(function(){
     if(fo.key)p.fweg['k:'+fo.key]=ts;
     if(fo.driveId)p.fweg['d:'+fo.driveId]=ts;
   }
+  /* ══ b1001: Fotos der KARTE an den Pin nehmen – ohne neues Hochladen ══
+     Frank 13.09.2026: „warum kann ich dann nur fotos aus einer datei anfügen und nicht aus Fotos in pam?"
+     Bis b1000 öffnete „📷 Foto hinzufügen" nur die Dateiauswahl des Rechners.
+     Entscheidung Frank (Möglichkeit A): das Foto steht danach nur EINMAL da – als Pin-Foto.
+     Deshalb WANDERT der Eintrag von der Karte an den Pin; die Datei bleibt im Drive-Ordner,
+     nichts wird kopiert. Merker `ausKarte`: wird das Foto am Pin wieder abgenommen
+     (×, Pin löschen, Reset), kommt es an die Karte zurück, statt still zu verschwinden.
+     ⛔ Beide Stellen ändern: Arbeitskopie `taskFotos` UND die Karte in `boards`.
+        saveTaskData schreibt `fotos` aus der Arbeitskopie – wer nur die Karte ändert,
+        hat das Foto nach einer Sekunde wieder dort (und damit doppelt).
+     ⛔ Die Karte frisch holen (getTask), nicht `t`: saveTaskData legt seit b717 ein NEUES
+        Kartenobjekt an; `t` ist danach eine alte Hülle (nur `dachplan` teilen sich beide).
+     ⛔ fweg (b809) ist dauerhaft und wird zwischen den Geräten vereinigt. Ein am selben Pin
+        abgenommenes Foto fiele beim nächsten Abgleich dort wieder heraus – deshalb ist es
+        für DIESEN Pin gesperrt, und das Fenster sagt warum. */
+  function _dpKarte(){const g=getTask();return (g&&t&&String(g.id)===String(t.id))?g:t;}
+  function _dpKarteOffen(){
+    try{
+      const m=document.getElementById('taskModal');
+      const k=_dpKarte();
+      return !!(m&&m.classList.contains('open')&&k&&String((document.getElementById('taskId')||{}).value||'')===String(k.id)
+        &&typeof taskFotos!=='undefined'&&Array.isArray(taskFotos));
+    }catch(e){return false;}
+  }
+  function _dpIstVideo(f){try{return typeof _isVideo==='function'&&!!_isVideo(f.mimeType,f.name);}catch(e){return false;}}
+  function _dpKartenFotos(){
+    const k=_dpKarte();
+    const liste=_dpKarteOffen()?taskFotos:((k&&k.fotos)||[]);
+    return liste.filter(f=>f&&f.driveId&&!_dpIstVideo(f));
+  }
+  function _dpFotoAmPinGesperrt(p,f){return !!(p&&f&&f.driveId&&p.fweg&&p.fweg['d:'+f.driveId]);}
+  function _dpKartenListenAnfassen(tun){
+    const offen=_dpKarteOffen();const k=_dpKarte();
+    if(offen)tun(taskFotos);
+    if(k){if(!Array.isArray(k.fotos))k.fotos=[];tun(k.fotos);}
+    return offen;
+  }
+  function _dpKartenFensterNachziehen(){
+    try{if(typeof _fotoSelPurge==='function')_fotoSelPurge();}catch(e){}
+    try{if(typeof renderFotoListDesktop==='function')renderFotoListDesktop();}catch(e){}
+    try{if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();}catch(e){}
+  }
+  function _dpKartenFotosAnPin(p,ids){
+    if(!p||!Array.isArray(ids)||!ids.length)return 0;
+    if(!Array.isArray(p.fotos))p.fotos=[];
+    const quelle=_dpKartenFotos();
+    let n=0;
+    ids.forEach(function(roh){
+      const id=String(roh||'');if(!id)return;
+      const f=quelle.find(x=>String(x.driveId)===id);
+      if(!f||_dpFotoAmPinGesperrt(p,f))return;
+      if(p.fotos.some(x=>x&&String(x.driveId||'')===id))return;
+      p.fotos.push(Object.assign(JSON.parse(JSON.stringify(f)),{ausKarte:true}));
+      _dpKartenListenAnfassen(function(L){for(let j=L.length-1;j>=0;j--){if(L[j]&&String(L[j].driveId||'')===id)L.splice(j,1);}});
+      n++;
+    });
+    if(n&&_dpKarteOffen())_dpKartenFensterNachziehen();
+    return n;
+  }
+  function _dpFotoZurKarte(fo){
+    if(!fo||!fo.ausKarte||!fo.driveId)return false;
+    const id=String(fo.driveId);
+    const zurueck=JSON.parse(JSON.stringify(fo));delete zurueck.ausKarte;
+    const offen=_dpKartenListenAnfassen(function(L){if(!L.some(x=>x&&String(x.driveId||'')===id))L.push(JSON.parse(JSON.stringify(zurueck)));});
+    if(offen)_dpKartenFensterNachziehen();
+    return true;
+  }
+  function _dpPinFotosZurKarte(p){
+    if(!p)return 0;
+    let n=0;
+    (p.fotos||[]).forEach(fo=>{if(_dpFotoZurKarte(fo))n++;});
+    ((p.plan&&p.plan.pins)||[]).forEach(sp=>{((sp&&sp.fotos)||[]).forEach(fo=>{if(_dpFotoZurKarte(fo))n++;});});
+    return n;
+  }
+  function _dpFotoQuelleWahl(){
+    const p=cur();if(!p)return;
+    const alt=document.getElementById('dpFotoQuelle');if(alt)alt.remove();
+    const n=_dpKartenFotos().length;
+    const ov=document.createElement('div');ov.id='dpFotoQuelle';
+    ov.style.cssText='position:fixed;inset:0;z-index:100060;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px;';
+    ov.innerHTML='<div style="background:#171a21;border:1px solid #2a2f3a;border-radius:14px;padding:16px;width:100%;max-width:400px;display:flex;flex-direction:column;gap:10px;color:#e7eaf0;">'
+      +'<b style="font-size:15px;">📷 Foto an Pin '+esc(String(_tpNr(p)))+'</b>'
+      +'<button type="button" class="dpb primary" id="dpFqRechner" style="width:100%">💻 Vom Rechner hochladen</button>'
+      +'<button type="button" class="dpb" id="dpFqKarte" style="width:100%'+(n?'':';opacity:.45;cursor:default')+'"'+(n?'':' disabled')+'>🗂 Aus den Fotos dieser Karte'+(n?' ('+n+')':'')+'</button>'
+      +(n?'':'<div style="font-size:12px;color:#9aa3b2;">Diese Karte hat keine eigenen Fotos mit Drive-Datei.</div>')
+      +'<button type="button" class="dpb" id="dpFqAbbr" style="width:100%">Abbrechen</button>'
+      +'</div>';
+    document.body.appendChild(ov);
+    ov.onclick=e=>{if(e.target===ov)ov.remove();};
+    ov.querySelector('#dpFqAbbr').onclick=()=>ov.remove();
+    ov.querySelector('#dpFqRechner').onclick=()=>{ov.remove();const inp=E.screen&&E.screen.querySelector('#dpPhotoInput');if(inp)inp.click();};
+    ov.querySelector('#dpFqKarte').onclick=()=>{if(!n)return;ov.remove();_dpKartenFotoWahl();};
+  }
+  function _dpKartenFotoWahl(){
+    const p=cur();if(!p){say('Bitte zuerst einen Pin wählen');return;}
+    const fotos=_dpKartenFotos();
+    if(!fotos.length){say('Diese Karte hat keine eigenen Fotos');return;}
+    const alt=document.getElementById('dpKartenFotoWahl');if(alt)alt.remove();
+    const gewaehlt=new Set();
+    const ov=document.createElement('div');ov.id='dpKartenFotoWahl';
+    ov.style.cssText='position:fixed;inset:0;z-index:100060;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;padding:20px;';
+    const box=document.createElement('div');
+    box.style.cssText='background:#171a21;border:1px solid #2a2f3a;border-radius:14px;padding:16px;width:100%;max-width:760px;max-height:88vh;display:flex;flex-direction:column;gap:10px;color:#e7eaf0;';
+    box.innerHTML='<b style="font-size:15px;">🗂 Fotos dieser Karte → Pin '+esc(String(_tpNr(p)))+'</b>'
+      +'<div style="font-size:12px;color:#9aa3b2;line-height:1.45;">Anklicken = auswählen. Das Foto <b style="color:#e7eaf0;">wandert an den Pin</b> und steht danach nur noch dort – die Datei bleibt im Drive-Ordner. Nimmst du es am Pin wieder ab, kommt es an die Karte zurück.</div>'
+      +'<div id="dpKfwGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;overflow-y:auto;min-height:0;flex:1;"></div>'
+      +'<div style="display:flex;align-items:center;gap:8px;"><span id="dpKfwZahl" style="flex:1;font-size:12px;color:#9aa3b2;">Nichts ausgewählt</span>'
+      +'<button type="button" class="dpb" id="dpKfwAbbr">Abbrechen</button>'
+      +'<button type="button" class="dpb primary" id="dpKfwOk" disabled style="opacity:.45">✓ An den Pin</button></div>';
+    ov.appendChild(box);document.body.appendChild(ov);
+    const grid=box.querySelector('#dpKfwGrid'),zahl=box.querySelector('#dpKfwZahl'),ok=box.querySelector('#dpKfwOk');
+    const stand=()=>{const k=gewaehlt.size;zahl.textContent=k?(k+' Foto'+(k!==1?'s':'')+' ausgewählt'):'Nichts ausgewählt';ok.disabled=!k;ok.style.opacity=k?'':'.45';ok.textContent=k?('✓ '+k+' an den Pin'):'✓ An den Pin';};
+    fotos.forEach(function(f){
+      const id=String(f.driveId);
+      const gesperrt=_dpFotoAmPinGesperrt(p,f);
+      const c=document.createElement('div');
+      c.className='dpKfwKachel';c.dataset.id=id;
+      c.style.cssText='position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;background:#0d0f14;border:3px solid #2a2f3a;cursor:'+(gesperrt?'not-allowed':'pointer')+';'+(gesperrt?'opacity:.4;':'');
+      const img=document.createElement('img');img.alt='';
+      img.style.cssText='width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;';
+      const bid=_dpFotoId(f);
+      const sofort=(bid&&typeof _desktopFotoBlobCache!=='undefined'&&_desktopFotoBlobCache.get(bid))||(!f.editedDriveId&&f.thumbnailLink)||'';
+      const nachladen=()=>{try{if(typeof _pamLadeSchlange==='function'&&typeof loadDesktopFotoThumb==='function')_pamLadeSchlange(()=>loadDesktopFotoThumb(img,bid));}catch(e){}};
+      if(sofort){img.src=sofort;img.onerror=()=>{img.onerror=null;nachladen();};}else nachladen();
+      c.appendChild(img);
+      const txt=document.createElement('span');
+      txt.textContent=gesperrt?'war schon an diesem Pin':(f.caption||f.name||'');
+      txt.style.cssText='position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.62);color:#fff;font-size:10px;line-height:1.3;padding:2px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;';
+      if(txt.textContent)c.appendChild(txt);
+      const h=document.createElement('b');h.textContent='✓';
+      h.style.cssText='position:absolute;top:4px;right:4px;width:22px;height:22px;border-radius:50%;background:#3b82f6;color:#fff;display:none;align-items:center;justify-content:center;font-size:13px;pointer-events:none;';
+      c.appendChild(h);
+      if(gesperrt){
+        c.title='Dieses Foto wurde an Pin '+_tpNr(p)+' schon einmal abgenommen. Die anderen Geräte haben sich das gemerkt – hier käme es beim nächsten Abgleich wieder heraus. An einen anderen Pin geht es.';
+      }else{
+        c.onclick=()=>{if(gewaehlt.has(id))gewaehlt.delete(id);else gewaehlt.add(id);const an=gewaehlt.has(id);c.style.borderColor=an?'#3b82f6':'#2a2f3a';h.style.display=an?'flex':'none';stand();};
+      }
+      grid.appendChild(c);
+    });
+    ov.onclick=e=>{if(e.target===ov)ov.remove();};
+    box.querySelector('#dpKfwAbbr').onclick=()=>ov.remove();
+    ok.onclick=()=>{
+      if(!gewaehlt.size)return;
+      const n=_dpKartenFotosAnPin(p,[...gewaehlt]);
+      ov.remove();
+      if(!n){say('Nichts übernommen – die Fotos sind nicht mehr an der Karte');return;}
+      drawThumbs(p);save();
+      say(n+' Foto'+(n!==1?'s':'')+' an Pin '+_tpNr(p)+' – in der Fotoliste der Karte '+(n!==1?'stehen sie':'steht es')+' jetzt als Pin-Foto');
+    };
+  }
   function drawThumbs(p){const box=E.thumbs;box.innerHTML='';(p.fotos||[]).forEach((fo,i)=>{const d=document.createElement('div');d.className='dpThumb';
     if(_dpFotoId(fo)){d.dataset.hvid=_dpFotoId(fo);d.dataset.hvtitel=fo.caption||('Foto '+(i+1));} // b572 (Punkt 5): Hover zeigt die Miniatur groß
     const img=document.createElement('img');
     const sofort=_dpFotoSofort(fo);
     if(sofort)img.src=sofort;else if(_dpFotoId(fo))_pamLadeSchlange(()=>loadDesktopFotoThumb(img,_dpFotoId(fo)));
-    img.onclick=()=>showPhoto(fo);const del=document.createElement('b');del.textContent='×';del.onclick=ev=>{ev.stopPropagation();_fotoWeg(p,fo);p.fotos.splice(i,1);drawThumbs(p);save();};d.appendChild(img);d.appendChild(del);
+    img.onclick=()=>showPhoto(fo);const del=document.createElement('b');del.textContent='×';del.onclick=ev=>{ev.stopPropagation();_fotoWeg(p,fo);p.fotos.splice(i,1);const _zk=_dpFotoZurKarte(fo);drawThumbs(p);save();if(_zk)say('Foto zurück an die Karte');}; /* b1001 */d.appendChild(img);d.appendChild(del);
     if(fo.caption){const c=document.createElement('span');c.textContent=fo.caption;c.style.cssText='position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.62);color:#fff;font-size:10px;line-height:1.3;padding:2px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;';d.appendChild(c);} // b482: Foto-Text als Balken (kommt u.a. vom Tablet)
     box.appendChild(d);});}
   async function showPhoto(fo){window._dpPhotoFo=fo; /* b482: für 📝-Text-Knopf merken */
@@ -61525,11 +61676,12 @@ window.Dachplan=(function(){
     // b723: dp.imgKey MIT nullen – das Feld gehört dem Handy (Gerätespeicher-Verweis),
     // aber es steht im geteilten Task. Blieb es stehen, zeigte das Handy nach einem
     // PC-Reset das alte Basisbild weiter, mit Ersatzmaßen 1000×750 (Befund 4, 20.08.).
+    const _zk=(dp.pins||[]).reduce((n,p)=>n+_dpPinFotosZurKarte(p),0); /* b1001: Karten-Fotos an den Pins gehen an die Karte zurück */
     dp.pins=[];dp.nextNr=1;dp.cal=null;dp.imgKey=null;dp.imgDriveId=null;dp.imgW=null;dp.imgH=null;dp.imgC=null;dp.imgZ=null;dp.center=null;dp.zoom=null;dp.ovDriveId=null;dp.ovTs=null;dp.ovW=null;dp.ovH=null;dp.base='map';
     sel=null;calStep=0;
     try{if(imgLayer&&imap){imap.removeLayer(imgLayer);imgLayer=null;}}catch(_){}
     Object.keys(markers).forEach(k=>{try{if(map)map.removeLayer(markers[k]);}catch(_){}try{if(imap)imap.removeLayer(markers[k]);}catch(_){}delete markers[k];});
-    closeSheet();setBase('map');save();say('Dachplan zurückgesetzt');
+    closeSheet();setBase('map');save();say('Dachplan zurückgesetzt'+(_zk?(' · '+_zk+' Foto'+(_zk!==1?'s':'')+' zurück an die Karte'):''));
   }
   function close(){_tpStack=null;try{_tpBarSync();}catch(_){} // b742: sonst hängt beim nächsten Öffnen der alte Teilplan-Zustand
     _verschiebePin=null;/* b718: sonst wäre der Pin beim nächsten Öffnen noch beweglich */try{liveStop();}catch(_){}
