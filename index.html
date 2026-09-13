@@ -6783,6 +6783,31 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 .tz-sub-summe:not(:empty){flex:0 0 auto;color:var(--green);font-size:calc(11px * var(--modal-scale,1));font-weight:700;letter-spacing:0;white-space:nowrap;}
 .tz-sub-arrow{flex:0 0 auto;font-size:calc(13px * var(--modal-scale,1));line-height:1;color:var(--text2);transition:transform .2s;}
 .tz-sub-block.offen .tz-sub-arrow{transform:rotate(90deg);}
+/* ══ b995: Art und Herkunft an der Zeitzeile ═══════════════════════════════════
+   Das Auswahlfeld sitzt in der ZWEITEN Reihe neben der Beschreibung – solange Platz
+   ist, kostet das keine Hoehe. Wird das Fenster schmal, bricht es von allein um. */
+.tz-art{flex:0 0 auto;max-width:132px;border:1px solid var(--border);border-radius:5px;
+        background:var(--bg);color:var(--text1);font-size:calc(11px * var(--modal-scale,1));
+        padding:3px 5px;cursor:pointer;}
+/* ⛔ Gemessen 12.09.2026: nur border-style zu setzen laesst den Rand auf "medium"
+   (3 px) springen – die Zeile wurde dadurch 6 px hoeher als die anderen. Breite und
+   Farbe muessen mit. */
+.tz-art.ohne{color:var(--text2);border:1px dashed var(--border);}
+.tz-quelle{flex:0 0 auto;font-size:calc(13px * var(--modal-scale,1));opacity:.42;cursor:default;
+           user-select:none;}
+.tz-art-row{display:flex;flex-wrap:wrap;gap:5px;align-items:center;justify-content:flex-end;
+            padding:6px 10px 0;}
+.tz-art-pille{font-size:calc(11px * var(--modal-scale,1));font-weight:700;padding:2px 8px;
+              border-radius:11px;border:1px solid;white-space:nowrap;font-variant-numeric:tabular-nums;}
+.art-arbeit{background:rgba(39,174,96,.12);color:#166B3C;border-color:rgba(39,174,96,.45);}
+.art-fahrt{background:rgba(24,95,165,.12);color:#14507F;border-color:rgba(24,95,165,.45);}
+.art-ruesten{background:rgba(186,117,23,.12);color:#7A4C08;border-color:rgba(186,117,23,.45);}
+.art-buero{background:rgba(90,90,122,.12);color:#44445E;border-color:rgba(90,90,122,.45);}
+.art-ohne{background:none;color:var(--text2);border-color:var(--border);border-style:dashed;}
+body.dark .art-arbeit{color:#7FD8A4;}
+body.dark .art-fahrt{color:#8FBDEA;}
+body.dark .art-ruesten{color:#E8B872;}
+body.dark .art-buero{color:#B8B8CC;}
 /* ══ b993: die drei Unterbereiche bekommen eine eigene Farbe ═══════════════════
    Seit b596 sehen die Listen absichtlich GLEICH aus (damals der Wunsch). Genau das
    macht es jetzt schwer, beim Blick in die Sektion zu erkennen, in welchem Topf man
@@ -8730,6 +8755,8 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
             <div class="termin-head"><span>Datum</span><span>Von &ndash; Bis</span><span>Dauer</span></div>
             <div id="zeiterfassungList"></div>
             <button class="add-row-btn" onclick="addZeitEntry()">+ Zeit hinzufügen</button>
+            <!-- b995: Aufteilung nach Art, direkt ueber der Gesamtzeile -->
+            <div class="tz-art-row" id="zeitArtRow" style="display:none"></div>
             <div class="termin-gesamt" id="zeitGesamtRow">Gesamt 0 min</div>
             </div>
           </div>
@@ -10166,7 +10193,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-12 · #994'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-12-b994) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-12 · #995'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-12-b995) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -23317,9 +23344,52 @@ function _openGcalZeitPC(i){
   const url=_gcalUrl(e);
   if(url)window.open(url,'_blank');
 }
+// ══ b995: ART und HERKUNFT je Zeitzeile ══════════════════════════════════════
+// Franks Anliegen: die Baustellenzeit vom Handy soll nicht zwischen den von Hand
+// getippten Buerozeiten stehen. Bis b994 war das unmoeglich - alle sechs Schreibwege
+// legten nur {date,von,bis,beschreibung} an, keine Zeile wusste, woher sie kam.
+//
+// ART  = WAS getan wurde. Das ist die Trennung, die zaehlt (so machen es 123erfasst,
+//        clockin, ToolTime: Arbeit/Fahrt/Ruestzeit). Frei aenderbar an jeder Zeile.
+// QUELLE = WOHER die Zeile kam (Handy-Uhr, Stoppuhr, von Hand). Setzt PAM selbst,
+//        steht nur blass daneben und ist NICHT aenderbar - sie ist eine Tatsache.
+//
+// ⛔ Wert und Anzeige sind getrennt (Lehre b992): gespeichert wird 'arbeit', angezeigt
+//    '🔨 Arbeit'. Wer den Anzeigetext aendert, darf den gespeicherten Wert nicht treffen.
+// ⛔ Alte Zeilen haben KEINE Art. Sie bekommen auch keine angedichtet - sie zeigen '—',
+//    bis Frank selbst eine waehlt. Raten waere schlimmer als nichts.
+const ZEIT_ARTEN=[
+  {wert:'arbeit',sym:'🔨',text:'Arbeit'},
+  {wert:'fahrt', sym:'🚗',text:'Fahrt'},
+  {wert:'ruesten',sym:'📦',text:'Rüsten'},
+  {wert:'buero', sym:'📋',text:'Büro'}
+];
+const ZEIT_QUELLEN={handy:{sym:'📱',text:'von der Uhr-Leiste am Handy'},
+                    uhr:{sym:'⏱',text:'von der Stoppuhr'},
+                    hand:{sym:'✍',text:'von Hand eingetragen'}};
+function _zeitArt(wert){return ZEIT_ARTEN.find(a=>a.wert===wert)||null;}
+function _zeitArtText(wert){const a=_zeitArt(wert);return a?(a.sym+' '+a.text):'—';}
+// Summe je Art, fuer die Zeile unter der Liste. Zeilen ohne Art laufen unter 'ohne'.
+function _zeitArtSummen(liste){
+  const s={};
+  (liste||[]).forEach(function(e){
+    if(!e)return;
+    const m=parseMinutes(e.von,e.bis); if(!m)return;
+    const k=_zeitArt(e.art)?e.art:'ohne';
+    s[k]=(s[k]||0)+m;
+  });
+  return s;
+}
+function syncZeitArt(i,wert){
+  if(!taskZeitEntries[i])return;
+  taskZeitEntries[i].art=wert||'';
+  renderZeiterfassung();          // Aufteilung unten mitziehen
+  scheduleTaskFieldSave();
+}
 function addZeitEntry(date='',von='',bis='',beschreibung=''){
   if(typeof _tzSubOeffnen==='function')_tzSubOeffnen('tZeitSect'); // b599
-  taskZeitEntries.push({date,von,bis,beschreibung});
+  // b995: von Hand angelegt – Herkunft ✍, Art leer (Frank waehlt sie selbst)
+  taskZeitEntries.push({date,von,bis,beschreibung,art:'',quelle:'hand'});
   renderZeiterfassung();
   scheduleTaskFieldSave();
 }
@@ -23378,6 +23448,17 @@ function renderZeitGesamt(){
   // darin steckten aber schon die Außerhaus-Termine (die direkt darüber ihre eigene
   // „Gesamt"-Zeile haben) und die Bau-Doku-Zeiten. Das sah aus wie zwei getrennte Summen.
   const _fmtMin=min=>{const h=Math.floor(min/60),m=min%60;return (h>0?h+'h ':'')+m+' min';};
+  // b995: Aufteilung nach Art – erst die Zeile, die Frank wirklich sucht („wie viel
+  // davon war Baustelle"), darunter wie bisher die Summen der Toepfe.
+  const _artS=_zeitArtSummen(taskZeitEntries);
+  const _artEl=document.getElementById('zeitArtRow');
+  if(_artEl){
+    const teile=ZEIT_ARTEN.filter(a=>_artS[a.wert]).map(a=>
+      '<span class="tz-art-pille art-'+a.wert+'">'+a.sym+' '+_fmtMin(_artS[a.wert])+'</span>');
+    if(_artS.ohne)teile.push('<span class="tz-art-pille art-ohne" title="Zeilen, an denen noch keine Art gewählt ist">— '+_fmtMin(_artS.ohne)+'</span>');
+    _artEl.innerHTML=teile.join('');
+    _artEl.style.display=teile.length?'flex':'none';
+  }
   let html='<span style="color:var(--text2);">Außerhaus '+_fmtMin(totalAusserhaus)+'</span>'
           +'<span style="color:var(--text2);opacity:.5;">·</span>'
           +'<span style="color:var(--text2);">Manuell '+_fmtMin(totalManuell)+'</span>';
@@ -23537,6 +23618,14 @@ function renderZeiterfassung(){
   </div>
   <div class="tz-line2">
     <input type="text" value="${esc(e.beschreibung||'')}" placeholder="Beschreibung" oninput="syncZeitEntry(${i},'beschreibung',this.value)" onchange="syncZeitEntry(${i},'beschreibung',this.value)" autocomplete="off">
+    <!-- b995: die Art steht in DIESER Reihe, nicht in einer dritten. Gemessen kostet das
+         0 px Hoehe, solange Platz ist; eine eigene Reihe haette 268 px gekostet.
+         value = gespeicherter Wert, Text = Anzeige (Lehre b992). -->
+    <select class="tz-art${e.art?'':' ohne'}" onchange="syncZeitArt(${i},this.value)" title="Was wurde in dieser Zeit getan?">
+      <option value=""${e.art?'':' selected'}>— Art</option>
+      ${ZEIT_ARTEN.map(a=>'<option value="'+a.wert+'"'+(e.art===a.wert?' selected':'')+'>'+a.sym+' '+a.text+'</option>').join('')}
+    </select>
+    ${e.quelle&&ZEIT_QUELLEN[e.quelle]?'<span class="tz-quelle" title="'+esc(ZEIT_QUELLEN[e.quelle].text)+'">'+ZEIT_QUELLEN[e.quelle].sym+'</span>':''}
     <button class="termin-row-btn" onclick="_tzToggleMore(event)" title="Weitere Aktionen: Kalender, Löschen" style="letter-spacing:1px;">⋯</button>
   </div>
   <div class="tz-more">
@@ -42532,7 +42621,9 @@ function stopTimer(){
       const datum=_tzHeuteIso(s); // b607: Kalendertag des Starts in Ortszeit (UTC schob eine Nacht-Stoppuhr auf den Vortag)
       const von=String(s.getHours()).padStart(2,'0')+':'+String(s.getMinutes()).padStart(2,'0');
       const bis=String(e.getHours()).padStart(2,'0')+':'+String(e.getMinutes()).padStart(2,'0');
-      const entry={date:datum,von,bis,beschreibung:running.beschreibung||'Stoppuhr'};
+      // b995: die Stoppuhr laeuft waehrend der Arbeit – Art 'arbeit', Herkunft ⏱.
+      // Beides ist an der Zeile aenderbar; nur die Herkunft bleibt stehen.
+      const entry={date:datum,von,bis,beschreibung:running.beschreibung||'Stoppuhr',art:'arbeit',quelle:'uhr'};
       const openId=document.getElementById('taskId')&&document.getElementById('taskId').value;
       // Always write directly to task.zeitEntries so pushToSync can read it
       if(!task.zeitEntries)task.zeitEntries=[];
