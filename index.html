@@ -10203,7 +10203,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-13 · #1001'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-13-b1001) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-13 · #1002'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-13-b1002) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -16054,6 +16054,13 @@ function _dachplanKonfliktMerge(remoteDp,localDp){
     }
     return out;
   };
+  // 🔴 b1002 (Frank 13.09.: „die Pinnummer wie kann ich die ändern"): Nummer von Hand und
+  // „Neu durchnummerieren" stempeln `nrTs`. Die JÜNGERE Nummerierung gewinnt – wie base/layer.
+  // Ohne diese Regel holte ein Gerät mit altem Stand die alte Nummer zurück (lokal gewinnt),
+  // und `nextNr` sprang wieder auf das alte Maximum. Ohne Stempel auf beiden Seiten: wie bisher.
+  // ⛔ Zwei Schrägstriche, kein Blockkommentar – siehe b764/b770.
+  const _nrR=String(remoteDp.nrTs||''),_nrL=String(localDp.nrTs||'');
+  const _nrRemoteNeuer=_nrR>_nrL,_nrLokalNeuer=_nrL>_nrR;
   const rPins=Array.isArray(remoteDp.pins)?remoteDp.pins:[];
   const lPins=Array.isArray(localDp.pins)?localDp.pins:[];
   const out=[];const seen=new Set();
@@ -16064,6 +16071,7 @@ function _dachplanKonfliktMerge(remoteDp,localDp){
     const lp=lPins.find(x=>x&&String(x.id)===String(rp.id));
     if(!lp){out.push(rp);continue;}
     const mp=Object.assign({},rp,lp);
+    if(_nrRemoteNeuer&&rp.nr!=null)mp.nr=rp.nr; // b1002: sonst gewänne die lokale (alte) Nummer
     // b809: Foto-Löschliste beider Seiten vereinigen. ⛔ MUSS nach dem Object.assign
     // stehen - das heißt "lokal gewinnt" und würfe die Foto-Löschungen des anderen
     // Geräts sonst still weg. Dieselbe Falle wie bei m.weg in b808.
@@ -16083,7 +16091,26 @@ function _dachplanKonfliktMerge(remoteDp,localDp){
   m.pins=out;
   if(Object.keys(_wegAlle).length)m.weg=_wegAlle; // b808: die Liste selbst muss den Merge überleben
   let maxNr=0;for(const p of out){const n=Number(p&&p.nr);if(isFinite(n)&&n>maxNr)maxNr=n;}
-  m.nextNr=Math.max(Number(remoteDp.nextNr)||1,Number(localDp.nextNr)||1,maxNr+1);
+  if(_nrRemoteNeuer||_nrLokalNeuer){
+    // b1002: Pins, die nur die Seite mit der ÄLTEREN Nummerierung kennt (dort unterwegs neu
+    // gesetzt), behalten ihre Nummer – außer sie ist in der neuen Nummerierung schon vergeben.
+    // Dann bekommen SIE die nächste freie, nie der umnummerierte Pin.
+    const _nurAlt=new Set();
+    // ⛔ Laufvariable bewusst `y`, nicht rp/lp: test_b808 (9a) baut die beiden Loesch-Filter der
+    // Schleifen oben per Textsuche aus und prueft, dass danach keiner mehr im Code steht.
+    if(_nrLokalNeuer)for(const y of rPins){if(y&&y.id!=null&&!_istWeg(y.id)&&!lPins.some(x=>x&&String(x.id)===String(y.id)))_nurAlt.add(y);}
+    if(_nrRemoteNeuer)for(const y of lPins){if(y&&y.id!=null&&!_istWeg(y.id)&&!seen.has(String(y.id)))_nurAlt.add(y);}
+    const _belegt=new Set();
+    out.forEach(p=>{if(p&&!_nurAlt.has(p))_belegt.add(String(p.nr));});
+    for(let i=0;i<out.length;i++){
+      const p=out[i];if(!p||!_nurAlt.has(p))continue;
+      if(_belegt.has(String(p.nr))){maxNr++;out[i]=Object.assign({},p,{nr:maxNr});}
+      _belegt.add(String(out[i].nr));
+    }
+    m.nrTs=_nrRemoteNeuer?_nrR:_nrL;
+    // Der Zähler der älteren Seite zählt nicht mehr – er stammt aus der alten Nummerierung.
+    m.nextNr=Math.max(Number((_nrRemoteNeuer?remoteDp:localDp).nextNr)||1,maxNr+1);
+  }else m.nextNr=Math.max(Number(remoteDp.nextNr)||1,Number(localDp.nextNr)||1,maxNr+1);
   return m;
 }
 
@@ -60671,6 +60698,7 @@ window.Dachplan=(function(){
         +'<button data-s="gelb" style="background:#f5a623">Prüfen</button>'
         +'<button data-s="gruen" style="background:#30a46c">OK</button></div>'
       +'<div class="dpf">Titel</div><input id="dpTitle" placeholder="z. B. Ziegel gerissen, First">'
+      +'<div class="dpf">Nummer</div><div id="dpNrZeile" style="display:flex;gap:8px;align-items:center"><input id="dpNr" type="number" min="1" max="9999" step="1" inputmode="numeric" style="width:96px;flex:0 0 96px"><button class="dpb" id="dpNrOk" title="Diese Nummer für den Pin übernehmen (oder Enter)">✓ Nummer übernehmen</button></div>' // b1002
       +'<div class="dpf">Notiz</div><textarea id="dpNote" rows="3" placeholder="Beschreibung, Maß, Empfehlung…"></textarea>'
       +'<div class="dpf">Fotos</div><button class="dpb primary" id="dpPhotoBtn" style="width:100%">📷 Foto hinzufügen</button>'
       +'<input type="file" id="dpPhotoInput" accept="image/*" multiple style="display:none"><div class="dpThumbs" id="dpThumbs"></div>'
@@ -60711,6 +60739,12 @@ window.Dachplan=(function(){
     q('#dpFilter').onclick=()=>{filter=filter==='alle'?'schaden':'alle';q('#dpFilter').textContent=filter==='alle'?'Alle':'Nur Schaden';renderPins();};
     q('#dpStat').querySelectorAll('button').forEach(b=>b.onclick=()=>{const p=cur();if(!p)return;p.status=b.dataset.s;markStat(p);renderPins();save();});
     q('#dpTitle').oninput=e=>{const p=cur();if(p){p.title=e.target.value;save();}};
+    // b1002: Nummer erst mit „✓" oder Enter – nicht je Tastendruck, sonst hieße der Pin beim Tippen von „12" kurz 1.
+    q('#dpNrOk').onclick=()=>_dpNrAusFeld();
+    q('#dpNr').addEventListener('keydown',ev=>{if(ev.key==='Enter'){ev.preventDefault();_dpNrAusFeld();}});
+    // b1002/v285 (Browser-Gegenprobe 13.09.): Klick ins Feld MARKIERT die alte Nummer. Sonst hängt das Tippen
+    // an – aus „26" und „1" wurde „261", und das ist eine gültige Nummer, PAM hätte sie still übernommen.
+    q('#dpNr').addEventListener('focus',ev=>{try{ev.target.select();}catch(_){}});
     q('#dpNote').oninput=e=>{const p=cur();if(p){p.note=e.target.value;save();}};
     q('#dpPhotoBtn').onclick=()=>_dpFotoQuelleWahl(); /* b1001: Rechner ODER Fotos der Karte */
     q('#dpPhotoInput').onchange=e=>{addPhotos([...e.target.files]);e.target.value='';};
@@ -60937,6 +60971,7 @@ window.Dachplan=(function(){
   function setCoord(p){E.sheet.querySelector('#dpCoord').textContent=(p.lat!=null&&p.lng!=null)?(Number(p.lat).toFixed(6)+', '+Number(p.lng).toFixed(6)):('Bild-Position '+Math.round((p.nx||0)*100)+'% / '+Math.round((p.ny||0)*100)+'%');}
   function openSheet(p){E.sheet.querySelector('#dpSheetTitle').textContent='Pin '+_tpNr(p)+' · '+(LBL[p.status]||''); // b742: Gliederungsnummer
     E.sheet.querySelector('#dpTitle').value=p.title||'';E.sheet.querySelector('#dpNote').value=p.note||'';
+    {const _nf=E.sheet.querySelector('#dpNr');if(_nf)_nf.value=(p.nr!=null?String(p.nr):'');} // b1002
     /* b742: Im Teilbereich selbst gibt es den Knopf nicht – Teilpläne werden bewusst
        NICHT geschachtelt (eine Ebene; alles andere wäre die Unübersichtlichkeit, die
        Frank vermeiden wollte). Sonst sagt die Beschriftung, was dahinterliegt. */
@@ -60946,6 +60981,59 @@ window.Dachplan=(function(){
         tb.textContent=_tpHatPlan(p)?('🔍 Teilplan öffnen'+(n?(' ('+n+' Pin'+(n!==1?'s':'')+')'):'')):'🔍 Teilbereich als Plan';}
     }}catch(_){}
     setCoord(p);markStat(p);drawThumbs(p);E.sheet.classList.add('show');}
+  /* ══ b1002: Pin-NUMMER ändern. Frank 13.09.2026: „Die Pinnummer wie kann ich die ändern …
+     jetzt ist es halt Nummer 26 – als einzelner Pin". Bis b1001 zählte `dp.nextNr` nur hoch,
+     Löschen senkte ihn nie, und einen Weg zum Ändern gab es nicht.
+     · _dpNrSetzen: eine Nummer von Hand. Schon vergeben → Hinweis, NICHTS wird überschrieben.
+     · _dpNeuNummerieren: alle Pins DIESER Ebene 1, 2, 3 … in ihrer bisherigen Reihenfolge.
+     Beide stempeln `nrTs` und setzen `nextNr` auf höchste Nummer + 1. Den Stempel braucht
+     _dachplanKonfliktMerge: die jüngere Nummerierung gewinnt, sonst holte das andere Gerät die
+     alte Nummer zurück (am Handy dieselbe Regel, PAM Mobil v285).
+     Im Teilbereich zeigt `dp` auf p.plan – beides wirkt dann nur dort. ══ */
+  function _dpNrStempel(){
+    dp.nrTs=new Date().toISOString();
+    let mx=0;(dp.pins||[]).forEach(p=>{const n=Number(p&&p.nr);if(isFinite(n)&&n>mx)mx=n;});
+    dp.nextNr=mx+1;
+  }
+  function _dpUeberAlt(){return dp.ovDriveId?' – 🖼 Übersicht neu speichern, dort steht noch die alte Nummer':'';}
+  function _dpNrSetzen(p,wert){
+    if(!p)return false;
+    const roh=String(wert==null?'':wert).trim();
+    const n=Number(roh);
+    if(!roh||!Number.isInteger(n)||n<1||n>9999){say('Bitte eine ganze Zahl ab 1 eintragen');return false;}
+    if(Number(p.nr)===n)return false;
+    const belegt=(dp.pins||[]).find(x=>x&&x!==p&&Number(x.nr)===n);
+    if(belegt){say('Nummer '+n+' hat schon ein anderer Pin'+(belegt.title?(' („'+String(belegt.title).trim()+'")'):'')+' – den erst umnummerieren oder in ☰ Liste „🔢 Neu durchnummerieren"');return false;}
+    const alt=p.nr;
+    p.nr=n;_dpNrStempel();renderPins();save();
+    say('Pin '+alt+' hat jetzt die Nummer '+n+_dpUeberAlt());
+    return true;
+  }
+  function _dpNrAusFeld(){
+    const p=cur();if(!p)return;
+    const f=E.sheet.querySelector('#dpNr');if(!f)return;
+    if(_dpNrSetzen(p,f.value))openSheet(p);
+    else f.value=(p.nr!=null?String(p.nr):'');
+  }
+  function _dpNeuNummerieren(){
+    const arr=(dp.pins||[]).map((p,i)=>({p:p,i:i})).filter(x=>x.p)
+      .sort((a,b)=>((Number(a.p.nr)||0)-(Number(b.p.nr)||0))||(a.i-b.i)).map(x=>x.p);
+    if(!arr.length){say('Keine Pins vorhanden');return false;}
+    const plan=arr.map((p,i)=>({p:p,alt:p.nr,neu:i+1})).filter(x=>Number(x.alt)!==x.neu);
+    if(!plan.length){say('Die Pins tragen schon die Nummern 1 bis '+arr.length);return false;}
+    const bildModus=dp.base==='bild';
+    const unsichtbar=arr.filter(p=>bildModus?(p.nx==null):(p.lat==null)).length;
+    const liste=plan.slice(0,15).map(x=>x.alt+' → '+x.neu).join(', ')+(plan.length>15?', …':'');
+    const txt='Pins neu durchnummerieren?\n\n'+liste
+      +(unsichtbar?('\n\n⚠ '+unsichtbar+' davon '+(unsichtbar===1?'ist':'sind')+' in dieser Ansicht nicht zu sehen ('+(bildModus?'Pins auf der Karte':'Pins auf dem eigenen Bild')+') – sie werden mitgezählt.'):'')
+      +(dp.ovDriveId?'\n\nDie gespeicherte 🖼 Übersicht zeigt danach noch die alten Nummern – bitte neu speichern.':'');
+    if(!confirm(txt))return false;
+    plan.forEach(x=>{x.p.nr=x.neu;});
+    _dpNrStempel();renderPins();save();
+    const s=cur();if(s&&E.sheet.classList.contains('show'))openSheet(s);
+    say('Pins neu nummeriert: 1 bis '+arr.length+_dpUeberAlt());
+    return true;
+  }
   function closeSheet(){E.sheet.classList.remove('show');}
   // b718: Fenster über „Schließen" zu → ein laufendes Verschieben wird abgebrochen,
   // der Pin bleibt an seiner alten Stelle. (closeSheet allein tut das NICHT – das ruft
@@ -61349,7 +61437,7 @@ window.Dachplan=(function(){
   /* ---- Liste / Suche / Standort ---- */
   function openList(){
     const panel=E.screen.querySelector('#dpListPanel');const arr=(dp.pins||[]).slice().sort((a,b)=>a.nr-b.nr);
-    let h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><b>Pins ('+arr.length+')</b><button class="dpb" id="dpListClose">Schließen</button></div>';
+    let h='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px"><b>Pins ('+arr.length+')</b><span style="display:flex;gap:6px">'+(arr.length?'<button class="dpb" id="dpListNeuNr" title="Alle Pins dieser Ebene 1, 2, 3 … in ihrer bisherigen Reihenfolge – PAM fragt vorher nach">🔢 Neu durchnummerieren</button>':'')+'<button class="dpb" id="dpListClose">Schließen</button></span></div>'; // b1002
     if(!arr.length)h+='<div style="color:#9aa3b2;line-height:1.5">Noch keine Pins. „➕ Pin" aktivieren und auf die Karte klicken.</div>';
     // b482: Titel → sonst Notiz als Hauptzeile; Notiz zusätzlich als zweite Zeile (wie Mobil v116 – Notizen waren in der Liste unsichtbar)
     arr.forEach(p=>{const _e=s=>String(s||'').replace(/</g,'&lt;');
@@ -61365,6 +61453,7 @@ window.Dachplan=(function(){
       h+='<div class="dpLi"'+hv+' data-id="'+p.id+'"><div class="b" style="background:'+COL[p.status||'rot']+'">'+p.nr+'</div><div class="tx"><b>'+ti+'</b>'+sub+'<span>'+(LBL[p.status]||'')+' · '+((p.fotos||[]).length)+' Foto(s)'+_tm+'</span></div></div>';});
     panel.innerHTML=h;panel.classList.remove('dp-hidden');
     panel.querySelector('#dpListClose').onclick=()=>panel.classList.add('dp-hidden');
+    {const _nb=panel.querySelector('#dpListNeuNr');if(_nb)_nb.onclick=()=>{if(_dpNeuNummerieren())openList();};} // b1002
     panel.querySelectorAll('.dpLi').forEach(row=>{row.onclick=()=>{const p=dp.pins.find(x=>x.id===row.dataset.id);if(!p)return;panel.classList.add('dp-hidden');sel=p.id;try{if(dp.base==='bild'&&imap&&p.nx!=null)imap.setView(frToLatLng(p.nx,p.ny),Math.max(imap.getZoom()||0,1));else if(map&&p.lat!=null)map.setView([p.lat,p.lng],Math.max(map.getZoom()||19,19));}catch(_){}openSheet(p);};});
   }
   let adrM=null; // b527: 🏠-Marker auf der gefundenen Adresse (reine Anzeige, kein Pin)
@@ -62018,6 +62107,7 @@ async function _fdkLeeresDocx(JZ){
    b739: Platzhalter werden von oben nach unten mit den Fotos in Dokument-Reihenfolge
    gefüllt, „{Foto N}" holt gezielt das N-te; die Dachplan-Übersicht (plan) und alle
    übrigen Fotos kommen als Block hinten. Die Nummern folgen der Stelle im Dokument.
+   b1002: die Übersicht nimmt seitdem die ERSTE „{Foto}"-Zeile, wenn es eine gibt.
    Läuft im Browser (window.JSZip) und in Node. opt.ergebnis meldet, was passiert ist. */
 async function _fdkDocxBauen(startBuf,bilder,opt){
   opt=opt||{};
@@ -62066,9 +62156,15 @@ async function _fdkDocxBauen(startBuf,bilder,opt){
     const fotos=liste.filter(b=>!b.plan);
     const marker=_fdkPlatzhalterFinden(docXml);
     const ersatz=[];let lauf=0;
+    // b1002 (Frank 13.09.: „warum ist das Übersichtsbild nicht als erstes da?"): die Dachplan-
+    // Übersicht nimmt die ERSTE {Foto}-Zeile. Vorher kam sie hinter alle Platzhalter-Fotos
+    // (2-Fotos-Vorlage: Abb. 3), obwohl die Vorschau im Fenster sie als Abb. 1 zählt.
+    // „{Foto N}" meint weiter das N-te FOTO – die Übersicht zählt dort nicht mit.
+    const planBild=liste.find(b=>b.plan)||null;
     for(const mk of marker){
       let b=null;
-      if(mk.n){if(mk.n>=1&&mk.n<=fotos.length&&!verbraucht.has(fotos[mk.n-1]))b=fotos[mk.n-1];}
+      if(planBild&&!mk.n&&!verbraucht.has(planBild))b=planBild;
+      else if(mk.n){if(mk.n>=1&&mk.n<=fotos.length&&!verbraucht.has(fotos[mk.n-1]))b=fotos[mk.n-1];}
       else{while(lauf<fotos.length&&verbraucht.has(fotos[lauf]))lauf++;if(lauf<fotos.length)b=fotos[lauf];}
       if(!b){ersatz.push({start:mk.start,ende:mk.ende,xml:''});leer++;continue;}   // kein Foto mehr: Zeile entfernen
       verbraucht.add(b);
@@ -62383,6 +62479,7 @@ function _fdkOeffnen(vorauswahl){
         +'<div id="fdkSbHinweis" class="fdk-sb-hinweis"></div>'
         +'<label style="margin-top:8px;"><input type="radio" name="fdkStartArt" value="datei"> Word-Datei von Festplatte / NAS</label>'
         +'<input type="file" id="fdkStartDatei" accept=".docx" style="font-size:11px;max-width:100%;" onchange="if(this.files&&this.files[0]){document.querySelector(\'input[name=fdkStartArt][value=datei]\').checked=true;}">'
+        +'<div id="fdkVorlageHinweis" class="fdk-sb-hinweis" style="display:none;color:#d97706;"></div>' // b1002
         +'<h4>Abbildungen</h4>'
         +'<label>Erste Abbildungsnummer<input type="number" id="fdkStartNr" min="1" max="9999" value="1" oninput="_fdkListeZeichnen()"></label>'
         +'<label>Fotos je Seite<select id="fdkProSeite"><option value="2" selected>2 Fotos je Seite</option><option value="1">1 Foto je Seite (groß)</option></select></label>'
@@ -62390,7 +62487,7 @@ function _fdkOeffnen(vorauswahl){
         +'<label><input type="checkbox" id="fdkKasten"> Einheitliches 4:3-Kästchen – mittig zuschneiden, Ränder gehen verloren (hochkant bleibt 3:4)</label>'
         +(planMoeglich?'<label><input type="checkbox" id="fdkPlan" checked onchange="_fdkListeZeichnen()"> 🗺 Dachplan-Übersicht als Bild voranstellen</label>':'<div style="font-size:11px;color:var(--text2);">🗺 Dachplan-Übersicht: im Dachplan erst „🖼 Übersicht“ speichern (oder ein eigenes Bild laden).</div>')
         +'<div class="fdk-hinweis">Unter jedem Foto steht „Abb. N: Text" aus PAM – Haken abwählen, wenn du den Text lieber selbst in Word schreibst.<br>'
-        +'<b>Platzhalter:</b> Schreib im Startdokument eine eigene Zeile <b>{Foto}</b> dort, wo ein Foto hin soll – PAM füllt sie von oben nach unten aus dem Dokument rechts; <b>{Foto 3}</b> holt gezielt das dritte. Übrige Fotos kommen als Block hinten.<br>'
+        +'<b>Platzhalter:</b> Schreib im Startdokument eine eigene Zeile <b>{Foto}</b> dort, wo ein Foto hin soll – PAM füllt sie von oben nach unten aus dem Dokument rechts; <b>{Foto 3}</b> holt gezielt das dritte. Die 🗺 Dachplan-Übersicht nimmt die erste <b>{Foto}</b>-Zeile. Übrige Fotos kommen als Block hinten.<br>'
         +'Ergebnis = <b>neue Datei</b> im Dokumente-Ordner des Auftrags (+ Herunterladen; ohne Dokumente-Ordner: im Projektordner), Startdokument und Vorlage bleiben unverändert. Kopf-/Fußzeile und Seitenzahlen laufen aus deinem Dokument weiter.</div>'
         +'</div>'
       +'</div>'
@@ -62422,6 +62519,10 @@ function _fdkOeffnen(vorauswahl){
   bx.querySelectorAll('input[name="fdkStartArt"],#fdkStartSel,#fdkStartDatei').forEach(function(el){
     el.addEventListener('change',function(){setTimeout(_fdkKnoepfeLage,0);});
   });
+  // b1002: dieselben drei Auslöser prüfen die gewählte Vorlage auf eine Startseite.
+  bx.querySelectorAll('input[name="fdkStartArt"],#fdkStartSel,#fdkStartDatei').forEach(function(el){
+    el.addEventListener('change',function(){setTimeout(_fdkVorlagePruefen,0);});
+  });
   // b793: gemerkte Einstellungen in die Felder zurueckschreiben.
   if(t.fdkStand){
     const st=t.fdkStand;
@@ -62434,6 +62535,52 @@ function _fdkOeffnen(vorauswahl){
   _fdkListeZeichnen();
   _fdkStartListeLaden();
   if(!liste.length){const st=document.getElementById('fdkStatus');if(st)st.textContent='Noch keine Fotos mit Drive-Datei am Auftrag – Bilder aus dem Explorer auf eine Fläche ziehen.';}
+}
+/* b1002: Hat die gewählte Vorlage überhaupt eine Startseite? Frank wählte am 13.09.2026
+   „Fotodoku-Vorlage_2-Fotos-je-Seite.docx" und wunderte sich, dass vorne nichts kam – die Vorlage
+   hat nur Kopf-/Fußzeile und zwei {Foto}-Zeilen. Gezählt wird der sichtbare Text im TEXTKÖRPER
+   (word/document.xml) ohne {Platzhalter}; Kopf-/Fußzeile zählen nicht, die stehen auf jeder
+   Seite. Unter _fdkStartseiteMin Zeichen → Hinweis. Nur ein Hinweis, Erstellen bleibt möglich.
+   ⛔ Name bewusst NICHT _FDK_…: test_b734 zählt genau die fünf alten _FDK_-Konstanten.
+   ⛔ `lauf`: wer schnell umwählt, darf nicht den Hinweis der vorigen Datei sehen. */
+const _fdkStartseiteMin=20;
+let _fdkVorlageLauf=0;
+function _fdkVorlageTextLaenge(docXml){
+  const txt=(String(docXml||'').match(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g)||[]).map(x=>x.replace(/<[^>]+>/g,'')).join(' ');
+  return txt.replace(/\{[^{}]*\}/g,' ').replace(/[\s ]+/g,' ').trim().length;
+}
+async function _fdkVorlagePruefen(){
+  const h=document.getElementById('fdkVorlageHinweis');
+  if(!h||!_fdkState)return;
+  const lauf=++_fdkVorlageLauf;
+  h.style.display='none';h.innerHTML='';
+  const art=(document.querySelector('input[name="fdkStartArt"]:checked')||{}).value||'ohne';
+  try{
+    let buf=null;
+    if(art==='drive'){
+      const fid=(document.getElementById('fdkStartSel')||{}).value||'';
+      if(!fid||!gdriveToken)return;
+      const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fid)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
+      if(!r.ok)return;
+      buf=await r.arrayBuffer();
+    }else if(art==='datei'){
+      const inp=document.getElementById('fdkStartDatei');
+      const f=inp&&inp.files&&inp.files[0];
+      if(!f||!/\.docx$/i.test(f.name))return;
+      buf=await f.arrayBuffer();
+    }else return;
+    const JZ=(typeof JSZip!=='undefined')?JSZip:null;
+    if(!JZ||lauf!==_fdkVorlageLauf)return;
+    const zip=await JZ.loadAsync(buf);
+    const part=zip.file('word/document.xml');
+    if(!part)return;
+    const n=_fdkVorlageTextLaenge(await part.async('string'));
+    if(lauf!==_fdkVorlageLauf||!_fdkState)return;
+    if(n<_fdkStartseiteMin){
+      h.innerHTML='⚠ Diese Vorlage hat <b>keine Startseite</b> – nur Kopf-/Fußzeile und Fotoseiten. Für ein Anschreiben oder einen Kopfblock vorne: <b>Stellungnahme-Vorlage</b> oder <b>Fotodoku-Vorlage_mit-Kopfblock</b>.';
+      h.style.display='';
+    }
+  }catch(e){console.warn('[FDK] Vorlage prüfen:',e);}
 }
 function _fdkStandMerken(){
   // b793: Auswahl, Reihenfolge und Einstellungen ueberleben das Schliessen am Auftrag.
@@ -62579,7 +62726,7 @@ function _fdkKachelHtml(e,art,nr){
     +(malbar?'<button type="button" class="fdk-kmal" data-mal="'+esc(e.key)+'" title="Malen und beschriften – Pfeil, Text, Nummer">✏️</button>':'')
     +(art==='dok'?'<button type="button" class="fdk-kx" data-x="'+esc(e.key)+'" title="aus dem Dokument nehmen">✕</button>':(drin?'<span class="fdk-check">✓</span>':''))+'</div>'
     +badge
-    +'<div class="fdk-ktxt">'+esc(e.caption||e.name||'')+'</div>'
+    +'<div class="fdk-ktxt">'+esc((typeof _fdkKachelText==='function')?_fdkKachelText(e):(e.caption||e.name||''))+'</div>' // b1002
     +'</div>';
 }
 function _fdkBilderNachladen(box){
@@ -62696,6 +62843,22 @@ function _fdkNummern(){
 
 function _fdkSichtbar(e,filter){return !filter||filter==='alle'||e.quelle===filter;}
 
+/* b1002: Titel des Dachplan-Pins. Frank 13.09.2026 wollte den Pin im Dachplan „umbenennen" – der
+   Titel stand bisher nirgends in der Fotodokumentation. Er gilt nur als ERSATZ: Hat das Foto
+   einen eigenen Text (caption), gewinnt der. Die Notiz zählt bewusst nicht (oft mehrere Sätze). */
+function _fdkPinTitel(e){
+  if(!e||e.quelle!=='dachplan')return '';
+  const p=e.pinRef;
+  return String((p&&p.title)||'').replace(/\s+/g,' ').trim();
+}
+/* b1002: Textzeile unter der Kachel – ein Pin-Foto ohne eigenen Text zeigt „Pin 26 · Titel". */
+function _fdkKachelText(e){
+  if(!e)return '';
+  if(e.caption)return e.caption;
+  const ti=_fdkPinTitel(e);
+  if(ti)return 'Pin '+((e.pinNr!=null&&e.pinNr!=='')?e.pinNr:'?')+' · '+ti;
+  return e.name||'';
+}
 function _fdkEtikett(e){
   if(e.quelle==='dachplan')return '🗺 Pin '+(e.pinNr||'?');
   if(e.quelle==='leistung')return String(e.gruppe||'🔁 Leistung');
@@ -63161,7 +63324,7 @@ async function _fdkErstellen(ziel){
     for(const e of (nurFelder?[]:auswahl)){
       n++;sag('⏳ Foto '+n+' von '+auswahl.length+' wird geholt…');
       const b=await _fdkFotoBytes(e.driveId,kasten);
-      if(b){b.text=beschriftung?(e.caption||''):'';b.ts=e.ts||'';bilder.push(b);}else fehl.push(e.caption||e.name||e.driveId);
+      if(b){b.text=beschriftung?(e.caption||''):'';if(beschriftung&&!b.text)b.text=_fdkPinTitel(e);b.ts=e.ts||'';bilder.push(b);}else fehl.push(e.caption||e.name||e.driveId); // b1002: Pin-Titel als Ersatz
     }
     if(!bilder.length&&!nurFelder)throw new Error('Kein Foto ließ sich laden.');
     const startNr=parseInt((document.getElementById('fdkStartNr')||{}).value,10)||1;
