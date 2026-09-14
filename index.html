@@ -6848,6 +6848,9 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
 .ortpc-passt button{flex-shrink:0;border:1px solid var(--border);background:transparent;color:var(--text2);border-radius:5px;padding:2px 8px;cursor:pointer;}
 .ortpc-treffer{background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:5px 9px;margin-bottom:5px;cursor:pointer;font-size:12.5px;color:var(--text);}
 .ortpc-treffer:hover{border-color:var(--accent);}
+/* b1013: Löschen rot, im ✎-Fenster links */
+.tagpc-weg{color:var(--red);border-color:var(--red);}
+.ortpc-weg{color:var(--red);border-color:var(--red);margin-right:auto;}
 /* b1011: Standort vom Handy an der Zeitzeile (b1012: ✎ ändert im eigenen Fenster, auch am PC) */
 .tz-ort{display:flex;flex-direction:column;gap:2px;padding:1px 2px 0;font-size:calc(12px * var(--modal-scale,1));color:var(--text2);line-height:1.35;}
 .tz-ort-z{overflow-wrap:anywhere;}
@@ -10274,6 +10277,7 @@ function _pamGuestSubmit(){
     <input type="text" id="ortPcSuche" class="ortpc-feld" placeholder="andere Karte suchen …" autocomplete="off" oninput="_ortPcSucheZeichnen()" style="margin-top:8px;">
     <div id="ortPcSucheListe"></div>
     <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;">
+      <button type="button" class="ortpc-knopf ortpc-weg" onclick="_ortPcEntfernen()" title="Standort entfernen – die Zeit bleibt">🗑 Standort entfernen</button>
       <button type="button" class="ortpc-knopf" onclick="_ortPcZu()">Abbrechen</button>
       <button type="button" class="ortpc-knopf" onclick="_ortPcSpeichern()" style="background:#3b6d11;border-color:#3b6d11;color:#fff;font-weight:700;">Speichern</button>
     </div>
@@ -10337,7 +10341,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-14 · #1012'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-14-b1012) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-14 · #1013'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-14-b1013) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -16194,6 +16198,24 @@ function _zeitZeilenGerichtet(remoteList,localList,snapList){
     return r;
   });
 }
+// ── v289 / b1013: LÖSCHVERMERKE für Uhr-Zeitzeilen ──────────────────────────────────────────────────
+// Karte: zeitGeloescht=[{u:uhrStart,t:Zeit}]. Beim Speicherkonflikt vereinigen beide Geräte die Vermerke und nehmen
+// die Zeilen heraus – sonst holte das Zusammenführen eine gelöschte Zeile vom anderen Gerät zurück.
+// ⛔ NUR Zeilen mit uhrStart (eindeutig). Eine von Hand eingetippte Zeile hat keine Kennung – ein Vermerk über
+//    Datum/Von/Bis könnte eine später gleich eingetippte Zeile fressen (Verlust wäre schlimmer als ein Wiedergänger).
+function _zeitGeloeschtMerge(a,b){return _mergeListByKey(a,b,function(g){return (g&&g.u!=null)?('u'+g.u):'';});}
+function _zeitOhneGeloeschte(liste,grab){
+  if(!Array.isArray(liste)||!Array.isArray(grab)||!grab.length)return liste;
+  const weg={};
+  grab.forEach(function(g){if(g&&g.u!=null)weg['u'+g.u]=1;});
+  return liste.filter(function(z){return !(z&&z.uhrStart!=null&&weg['u'+z.uhrStart]);});
+}
+function _zeitGrabstein(t,z){
+  if(!t||!z||z.uhrStart==null)return false;
+  if(!Array.isArray(t.zeitGeloescht))t.zeitGeloescht=[];
+  if(!t.zeitGeloescht.some(function(g){return g&&g.u===z.uhrStart;}))t.zeitGeloescht.push({u:z.uhrStart,t:Date.now()});
+  return true;
+}
 function _mergeFotosGerichtet(remoteList,localList,snapList){
   return _mergeListeGerichtet(remoteList,localList,snapList,_fotoKennung);
 }
@@ -16613,6 +16635,8 @@ async function gdriveSaveData() {
                   if(Array.isArray(lt.anrufWahlen)||(remoteTask&&Array.isArray(remoteTask.anrufWahlen)))mergedTask.anrufWahlen=_mergeListByKey(remoteTask&&remoteTask.anrufWahlen,lt.anrufWahlen,_pamWahlKennung);
                   // b1012: beim selben Eintrag gewinnt der jünger geänderte Standort (bis b1011 immer die Drive-Fassung)
                   mergedTask.zeitEntries=(typeof _zeitZeilenMerge==='function')?_zeitZeilenMerge(remoteTask&&remoteTask.zeitEntries,lt.zeitEntries):_mergeListByKey(remoteTask&&remoteTask.zeitEntries,lt.zeitEntries,e=>((e.date||'')+'|'+(e.von||'')+'|'+(e.bis||'')+'|'+(e.beschreibung||'')));
+                  // b1013: Löschvermerke beider Seiten vereinigen, gelöschte Uhr-Zeilen herausnehmen
+                  if(typeof _zeitGeloeschtMerge==='function'&&(Array.isArray(lt.zeitGeloescht)||(remoteTask&&Array.isArray(remoteTask.zeitGeloescht)))){mergedTask.zeitGeloescht=_zeitGeloeschtMerge(remoteTask&&remoteTask.zeitGeloescht,lt.zeitGeloescht);mergedTask.zeitEntries=_zeitOhneGeloeschte(mergedTask.zeitEntries,mergedTask.zeitGeloescht);}
                   mergedTask.ausserhausTermine=_mergeListByKey(remoteTask&&remoteTask.ausserhausTermine,lt.ausserhausTermine,e=>((e.date||'')+'|'+(e.von||'')+'|'+(e.bis||'')+'|'+(e.beschreibung||'')));
                   // b903: fotos/attachments/pruefberichte/checkliste/kontakte über die Fenster-Regel (siehe _mergeListeFenster):
                   // unverändert → Handy-Stand; geändert → gerichtet mit dem Schnappschuss. Vorher blinde Vereinigung –
@@ -16696,11 +16720,15 @@ async function gdriveSaveData() {
                         else if(_LISTEN_KENNUNG[f]&&Array.isArray(lt[f])){
                           mt[f]=_mergeListeGerichtet(rt[f],lt[f],_snapObj[f],_LISTEN_KENNUNG[f]);
                         }
+                        // b1013: Löschvermerke vereinigen (werden nur angehängt – nichts kann zurückkommen)
+                        else if(f==='zeitGeloescht'&&Array.isArray(lt[f])&&typeof _zeitGeloeschtMerge==='function'){mt[f]=_zeitGeloeschtMerge(rt[f],lt[f]);}
                         // b1012: Zeitzeilen gerichtet + jüngerer Standort gewinnt (sonst warf ein ✎ aus „Mein Tag“ gleichzeitige Handy-Zeilen weg)
                         else if(f==='zeitEntries'&&Array.isArray(lt[f])&&typeof _zeitZeilenGerichtet==='function'){mt[f]=_zeitZeilenGerichtet(rt[f],lt[f],_snapObj[f]);}
                         else mt[f]=lt[f];
                       }
                     }
+                    // b1013: Uhr-Zeilen mit Löschvermerk herausnehmen (auch wenn nur drüben gelöscht wurde)
+                    if(Array.isArray(mt.zeitGeloescht)&&typeof _zeitOhneGeloeschte==='function')mt.zeitEntries=_zeitOhneGeloeschte(mt.zeitEntries,mt.zeitGeloescht);
                     // ⚠ Lokal GELÖSCHTE Felder mitnehmen. Ohne das käme z.B. der
                     // entfernte Handy-Standort zurück (b654 löscht lat/lon/standortErfasst)
                     // oder ein abgewählter Haken, der über `delete` verschwindet (b660).
@@ -23769,7 +23797,8 @@ function addZeitEntry(date='',von='',bis='',beschreibung=''){
   renderZeiterfassung();
   scheduleTaskFieldSave();
 }
-function removeZeitEntry(i){taskZeitEntries.splice(i,1);renderZeiterfassung();scheduleTaskFieldSave();}
+// b1013: Uhr-Zeilen bekommen beim Löschen einen Löschvermerk an der Karte (sonst holt ein Speicherkonflikt sie zurück)
+function removeZeitEntry(i){const _weg=taskZeitEntries[i];taskZeitEntries.splice(i,1);try{if(_weg&&_weg.uhrStart!=null&&typeof _zeitGrabstein==='function'){const _id=((document.getElementById('taskId')||{}).value)||'';const _t=_id?(findTaskById(_id)||(Array.isArray(archivedTasks)?archivedTasks.find(x=>x&&x.id===_id):null)):null;if(_t)_zeitGrabstein(_t,_weg);}}catch(e){}renderZeiterfassung();scheduleTaskFieldSave();}
 function syncZeitEntry(i,field,val){if(taskZeitEntries[i]){taskZeitEntries[i][field]=val;renderZeitGesamt();_updateHdrZeitBadge();_updateMapsBtn();if(field==='von'||field==='bis')_tzDauerRefresh('z',i,taskZeitEntries[i].von,taskZeitEntries[i].bis);/* b596 */scheduleTaskFieldSave();}}
 // ── b596: Helfer für die Termin-/Zeit-Kärtchen ───────────────────────────────
 // Dauer je Zeile als „1:45 h" (die Summen unten bleiben im gewohnten „1h 45 min").
@@ -23959,7 +23988,7 @@ function _zeitOrtHtml(e,i){
       +'<button type="button" class="tz-ort-btn" onclick="_pamTagOeffnen(\''+tag+'\')" title="Diesen Tag auf der Karte zeigen (Mein Tag)">🗺</button>';
   };
   const teil=function(o,wort,feld){
-    if(!o)return '';
+    if(!o||o.entfernt)return ''; // b1013: von Hand entfernt
     const lat=Number(o.lat),lon=Number(o.lon);
     if(o.fehler||o.lat==null||o.lon==null||!isFinite(lat)||!isFinite(lon))
       return '<div class="tz-ort-z tz-ort-ohne">📍 '+wort+': ohne Standort'+(o.fehler?' ('+_e(o.fehler)+')':'')+'</div>';
@@ -23973,7 +24002,8 @@ function _zeitOrtHtml(e,i){
     if(o.passtZu&&o.passtZu.id)h+='<div class="tz-ort-klein tz-ort-einr tz-ort-passt">↳ passt zu: '+_e(o.passtZu.titel||'')+'</div>';
     return h;
   };
-  return '<div class="tz-ort" title="Standort vom Handy – ändern mit ✎ (am PC oder am Handy)">'+teil(e.ortStart,'Start','ortStart')+teil(e.ortStopp,'Stopp','ortStopp')+'</div>';
+  const inhalt=teil(e.ortStart,'Start','ortStart')+teil(e.ortStopp,'Stopp','ortStopp');
+  return inhalt?'<div class="tz-ort" title="Standort vom Handy – ändern mit ✎ (am PC oder am Handy)">'+inhalt+'</div>':'';
 }
 function renderZeiterfassung(){
   const el=document.getElementById('zeiterfassungList');
@@ -55429,7 +55459,7 @@ function _tagPunkte(tagIso){
     liste.forEach(function(z){
       if(!z)return;
       ['ortStart','ortStopp'].forEach(function(f){
-        const o=z[f];if(!o||!o.zeit)return;
+        const o=z[f];if(!o||!o.zeit||o.entfernt)return; // b1013: entfernt
         const ms=Date.parse(o.zeit);
         if(!isFinite(ms)||_tagLokal(ms)!==tagIso)return;
         raus.push({ms:ms,feld:f,art:(f==='ortStart'?'Start':'Stopp'),o:o,z:z,t:t,board:q.board,arch:q.arch,
@@ -55446,6 +55476,7 @@ function _tagKnoepfe(p,idx){
   let h='<button type="button" class="tagpc-chip" onclick="event.stopPropagation();_tagKarteOeffnen('+idx+')">📄 Karte</button>';
   if(!p.arch&&p.mitOrt)h+='<button type="button" class="tagpc-chip" onclick="event.stopPropagation();_tagBearbeiten('+idx+')">✎ Adresse</button>';
   if(p.mitOrt)h+='<a class="tagpc-chip" href="'+esc('https://www.google.com/maps/search/?api=1&query='+parseFloat(p.o.lat)+','+parseFloat(p.o.lon))+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">↗ Google</a>';
+  if(!p.arch)h+='<button type="button" class="tagpc-chip tagpc-weg" onclick="event.stopPropagation();_tagZeileLoeschen('+idx+')" title="Ganze Zeitzeile löschen – Zeit und Standort">🗑 Zeile</button>'; // b1013
   return '<div class="tagpc-knoepfe">'+h+'</div>';
 }
 function _tagListeHtml(punkte){
@@ -55601,7 +55632,7 @@ function _ortPcAusZeile(i,feld){
   _ortPcOeffnen(id,z,feld);
 }
 function _ortPcOeffnen(taskId,z,feld){
-  const o=z&&z[feld];if(!o||o.fehler)return; // ohne Messung gibt es nichts anzupassen
+  const o=z&&z[feld];if(!o||o.fehler||o.entfernt)return; // ohne Messung gibt es nichts anzupassen (b1013: auch nicht entfernt)
   const andere=(feld==='ortStart')?'ortStopp':'ortStart';
   const oa=z[andere];
   _ortPc={taskId:taskId,uhrStart:(z.uhrStart!=null?z.uhrStart:null),key:_ortPcKey(z),feld:feld,andere:andere,
@@ -55691,7 +55722,7 @@ function _ortPcSpeichern(){
   if(beide)felder.push(st.andere);
   const jetzt=Date.now();
   felder.forEach(function(fe){
-    const o=f.z[fe];if(!o||o.fehler)return;
+    const o=f.z[fe];if(!o||o.fehler||o.entfernt)return;
     // ⛔ Kopie: lat/lon/acc/zeit/adresseGemessen bleiben wie gemessen – nur Text und Zuordnung ändern sich
     const neu=Object.assign({},o);
     neu.adresse=adr;
@@ -55706,6 +55737,46 @@ function _ortPcSpeichern(){
   else{try{autoSave();}catch(e){console.warn('[b1012] speichern',e);}}
   try{_tagNeuZeichnen();}catch(e){}
   try{showToast('📍 Standort angepasst','success');}catch(e){}
+}
+// ── b1013: 🗑 Standort entfernen / 🗑 Zeitzeile löschen (Frank 14.09.2026: „wenn es doppelt ist oder nicht passt
+// einfach wieder löschen“, Auswahl A und B). Standort -> Vermerk {entfernt, zeit, geaendert}; Uhr-Zeile -> Löschvermerk.
+function _ortPcEntfernen(){
+  const st=_ortPc;if(!st)return;
+  if(typeof confirm==='function'&&!confirm('Standort entfernen?\n\nDie Zeit bleibt stehen.'))return;
+  const f=_ortPcZeileFinden(st);
+  if(!f){try{showToast('Zeitzeile nicht mehr gefunden','error');}catch(e){}_ortPcZu();return;}
+  const haken=document.getElementById('ortPcBeideZeile');
+  const auchAndere=!!((document.getElementById('ortPcBeide')||{}).checked)&&!!haken&&haken.style.display!=='none';
+  const felder=auchAndere?[st.feld,st.andere]:[st.feld];
+  const stempel=Date.now();
+  felder.forEach(function(fe){const o=f.z[fe];if(!o||o.entfernt)return;f.z[fe]={entfernt:true,zeit:o.zeit||'',geaendert:stempel};});
+  _ortPcZu();
+  if(f.imFenster){try{renderZeiterfassung();}catch(e){}try{scheduleTaskFieldSave();}catch(e){}}
+  else{try{autoSave();}catch(e){console.warn('[b1013] entfernen',e);}}
+  try{_tagNeuZeichnen();}catch(e){}
+  try{showToast('🗑 Standort entfernt','success');}catch(e){}
+}
+function _tagZeileLoeschen(idx){
+  const p=_tagAktuell[idx];if(!p||p.arch||!p.t)return;
+  const z=p.z;
+  const was=(z.date?String(z.date).split('-').reverse().join('.'):'')+' '+(z.von||'')+'–'+(z.bis||'')+(z.beschreibung?' „'+z.beschreibung+'“':'');
+  if(typeof confirm==='function'&&!confirm('Zeitzeile '+was+' an „'+(p.t.title||'')+'“ löschen?\n\nZeit UND Standort sind danach weg.'))return;
+  const t=findTaskById(p.t.id);if(!t)return;
+  const gleiche=function(x){return !!x&&(z.uhrStart!=null?x.uhrStart===z.uhrStart:_ortPcKey(x)===_ortPcKey(z));};
+  const offen=_tagOffeneKarteId();
+  if(offen&&offen===t.id&&typeof taskZeitEntries!=='undefined'&&Array.isArray(taskZeitEntries)){
+    // offene Karte: über den Weg der Zeiterfassung (Arbeitskopie + Löschvermerk + Fenster speichert)
+    const i=taskZeitEntries.findIndex(gleiche);if(i<0)return;
+    removeZeitEntry(i);
+  }else{
+    const L=Array.isArray(t.zeitEntries)?t.zeitEntries:[];
+    const i=L.findIndex(gleiche);if(i<0)return;
+    const weg=L.splice(i,1)[0];
+    if(typeof _zeitGrabstein==='function')_zeitGrabstein(t,weg);
+    try{autoSave();}catch(e){console.warn('[b1013] löschen',e);}
+  }
+  try{_tagNeuZeichnen();}catch(e){}
+  try{showToast('🗑 Zeitzeile gelöscht','success');}catch(e){}
 }
 function _pamZeitOeffnen(){
   const ov=document.getElementById('pamZeitOverlay');
