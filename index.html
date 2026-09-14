@@ -10165,6 +10165,17 @@ function _pamGuestSubmit(){
       <span id="pamAnrufCount" style="font-size:11px;color:var(--text2);"></span>
       <button onclick="_pamCloseAnrufListe()" style="background:transparent;border:none;color:var(--text2);font-size:16px;cursor:pointer;padding:0 4px;flex-shrink:0;">✕</button>
     </div>
+    <!-- b1008: Suche gilt in beiden Reitern, die Fälligkeit (Termin „📞 Anruf bis“) nur in „Offen“. Bauart wie „⏱ Zeiten“. -->
+    <div id="pamAnrufFilterZeile" style="padding:8px 14px;border-bottom:1px solid var(--border);display:flex;gap:7px;align-items:center;flex-wrap:wrap;flex-shrink:0;">
+      <input id="pamAnrufSuche" type="text" placeholder="🔍 Suchen – Name, Titel, Nummer …" oninput="_pamAnrufRender()" autocomplete="off" style="flex:1;min-width:150px;padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;">
+      <select id="pamAnrufFaellig" onchange="_pamAnrufRender()" title="Nach dem Termin 📞 Anruf bis der Karte. Karten ohne diesen Termin stehen nur bei „alle“." style="padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;">
+        <option value="">Fällig: alle</option>
+        <option value="ueber">überfällig</option>
+        <option value="heute">bis heute</option>
+        <option value="woche">bis Ende der Woche</option>
+      </select>
+      <button onclick="_pamAnrufFilterLeeren()" title="Suche und Auswahl zurücksetzen" style="font-size:12px;padding:4px 9px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;">✕</button>
+    </div>
     <div style="display:flex;gap:4px;padding:6px 14px 0;border-bottom:1px solid var(--border);flex-shrink:0;">
       <button id="pamAnrufReiterOffen" onclick="_pamAnrufReiterWahl('offen')" title="Karten mit dem Häkchen 📞 Anruf" style="font-size:12px;padding:5px 12px;border:1px solid var(--border);border-bottom:none;border-radius:6px 6px 0 0;cursor:pointer;background:var(--bg3);color:var(--text);font-weight:700;">📞 Offen</button>
       <button id="pamAnrufReiterGewaehlt" onclick="_pamAnrufReiterWahl('gewaehlt')" title="Jede in PAM gewählte Nummer mit Datum und Uhrzeit, die neueste oben" style="font-size:12px;padding:5px 12px;border:1px solid var(--border);border-bottom:none;border-radius:6px 6px 0 0;cursor:pointer;background:transparent;color:var(--text2);font-weight:400;">🕘 Gewählt</button>
@@ -10209,7 +10220,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-14 · #1007'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-14-b1007) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-14 · #1008'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-14-b1008) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -54257,6 +54268,10 @@ function _pamAnrufSammle(){
     });
   });
   out.sort(function(a,b){
+    // b1008: Karten mit Termin „📞 Anruf bis“ zuerst, das früheste Datum oben. Ohne Termin wie bisher Board, dann Titel.
+    const _f=(typeof _pamAnrufFaellig==='function')?_pamAnrufFaellig:function(){return '';};
+    const ad=_f(a.t),bd=_f(b.t);
+    if(ad!==bd){if(!ad)return 1;if(!bd)return -1;return ad<bd?-1:1;}
     const ab=(a.board||'').toLowerCase(),bb=(b.board||'').toLowerCase();
     if(ab!==bb)return ab<bb?-1:1;
     const at=(a.t.title||'').toLowerCase(),btl=(b.t.title||'').toLowerCase();
@@ -54312,8 +54327,13 @@ function _pamAnrufBtnUpdate(){
 function _pamOpenAnrufListe(){
   const ov=document.getElementById('pamAnrufOverlay');
   if(!ov)return;
+  // b1008: Suche und Auswahl leer – ein alter Begriff würde sonst unsichtbar Karten verstecken (Lehre b988)
+  const s=document.getElementById('pamAnrufSuche'),f=document.getElementById('pamAnrufFaellig');
+  if(s)s.value='';
+  if(f)f.value='';
   ov.style.display='block';
   _pamAnrufRender();
+  try{if(s&&typeof s.focus==='function')s.focus();}catch(e){}
 }
 function _pamCloseAnrufListe(){
   const ov=document.getElementById('pamAnrufOverlay');
@@ -54353,6 +54373,78 @@ function _pamAnrufKopieren(nr){
   }catch(e){}
   alt();
 }
+// ══ b1008: SUCHE UND FÄLLIGKEIT IN DER ANRUFLISTE ═══════════════════════════
+/* Wunsch Frank 14.09.2026: nach Namen suchen wie in den anderen Fenstern, und sehen, wann der Anruf fällig ist.
+   ⛔ In die Liste kommt eine Karte weiter NUR über den Haken 📞 Anruf. Der Termin
+      „📞 Anruf bis“ (in Notiz-Boards heißt er „Anruf“) liefert nur das Datum.
+   ⛔ Datum = frühester NICHT erledigter Anruf-Termin. Erledigte zählen nicht.
+   ⛔ Suche und Auswahl filtern nur das Fenster – die Zahl am Knopf zählt weiter alle Karten mit Haken.
+   ⛔ Beim Öffnen ist beides leer: ein alter, unsichtbarer Suchbegriff darf keine Karten verstecken (b988).
+   ⛔ Heute kommt aus _tzHeuteIso (Ortszeit). toISOString wäre vor 2 Uhr nachts noch der Vortag. */
+function _pamAnrufIso(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function _pamAnrufHeute(){
+  try{if(typeof _tzHeuteIso==='function')return _tzHeuteIso();}catch(e){}
+  return _pamAnrufIso(new Date());
+}
+function _pamAnrufFaellig(t){
+  let best='';
+  ((t&&Array.isArray(t.aufgaben))?t.aufgaben:[]).forEach(function(a){
+    if(!a||a.erledigt)return;
+    if(a.typ!=='Anruf bis'&&a.typ!=='Anruf')return;
+    const d=String(a.datum||'');
+    if(d.length!==10||d.charAt(4)!=='-'||d.charAt(7)!=='-'||isNaN(Number(d.split('-').join(''))))return;
+    if(!best||d<best)best=d;
+  });
+  return best;
+}
+// Sonntag der laufenden Woche (Montag bis Sonntag), in Ortszeit
+function _pamAnrufWochenEnde(heuteIso){
+  const p=String(heuteIso||'').split('-');
+  if(p.length!==3)return '';
+  const d=new Date(+p[0],+p[1]-1,+p[2]);
+  if(isNaN(d.getTime()))return '';
+  d.setDate(d.getDate()+((7-d.getDay())%7));
+  return _pamAnrufIso(d);
+}
+function _pamAnrufFaelligPasst(datum,wahl,heute){
+  if(wahl!=='ueber'&&wahl!=='heute'&&wahl!=='woche')return true; // „alle“ oder unbekannt: nichts verstecken
+  if(!datum)return false;
+  if(wahl==='ueber')return datum<heute;
+  if(wahl==='heute')return datum<=heute;
+  return datum<=_pamAnrufWochenEnde(heute);
+}
+function _pamAnrufSuchNorm(s){return String(s||'').toLowerCase().split('ß').join('ss').replace(/\s+/g,' ').trim();}
+function _pamAnrufFilterWerte(){
+  const s=document.getElementById('pamAnrufSuche'),f=document.getElementById('pamAnrufFaellig');
+  return {q:String((s&&s.value)||''),faellig:String((f&&f.value)||'')};
+}
+// Sucht in Titel, Adresse, Board, Spalte, Namen und Rollen der Ansprechpartner, Namen aus den Mails und
+// (über zusatz, Reiter Gewählt) in Name und Nummer der Wahlen. Mehrere Wörter: jedes muss vorkommen.
+// Nur Ziffern: Leerzeichen, Striche und Klammern in der gespeicherten Nummer zählen nicht.
+function _pamAnrufPasst(t,board,q,zusatz){
+  q=_pamAnrufSuchNorm(q);
+  if(!q)return true;
+  const rolle=function(r){return (typeof _pamAnrufRolle==='function')?_pamAnrufRolle(r):String(r||'');};
+  const liste=function(x){return Array.isArray(x)?x:[];};
+  const teile=[t&&t.title,t&&t.adresse,board,t&&t.status],nrn=[];
+  liste(t&&t.kontakte).forEach(function(k){if(!k)return;teile.push(k.name,rolle(k.rolle));nrn.push(k.tel,k.tel2);});
+  liste(((t&&t._aufEinenBlick)||{}).kontakte).forEach(function(p){if(!p)return;teile.push(p.name,p.rolle);nrn.push(p.nr);});
+  liste(zusatz).forEach(function(z){if(!z)return;teile.push(z.name);nrn.push(z.nr);});
+  const text=_pamAnrufSuchNorm(teile.concat(nrn).filter(Boolean).join(' | '));
+  const ziffern=q.replace(/[^0-9]/g,'');
+  if(ziffern.length>=2&&!/[a-zäöü]/.test(q)){
+    const alle=nrn.map(function(n){return String(n||'').replace(/[^0-9]/g,'');}).filter(Boolean);
+    if(alle.some(function(n){return n.indexOf(ziffern)>=0;}))return true;
+  }
+  return q.split(' ').every(function(w){return text.indexOf(w)>=0;});
+}
+function _pamAnrufFilterLeeren(){
+  const s=document.getElementById('pamAnrufSuche'),f=document.getElementById('pamAnrufFaellig');
+  if(s)s.value='';
+  if(f)f.value='';
+  _pamAnrufRender();
+  try{if(s&&typeof s.focus==='function')s.focus();}catch(e){}
+}
 function _pamAnrufRender(){
   const el=document.getElementById('pamAnrufList');
   const cnt=document.getElementById('pamAnrufCount');
@@ -54360,15 +54452,35 @@ function _pamAnrufRender(){
   // b996: zwei Reiter „Offen" / „Gewählt". typeof, weil Suiten _pamAnrufRender allein ausführen.
   const _gew=(typeof _pamAnrufReiter!=='undefined'&&_pamAnrufReiter==='gewaehlt'&&typeof _pamWahlRender==='function');
   if(typeof _pamAnrufReiterKnoepfe==='function')_pamAnrufReiterKnoepfe(_gew);
+  const _fSel=document.getElementById('pamAnrufFaellig'); // b1008: Fälligkeit gibt es nur im Reiter Offen
+  if(_fSel&&_fSel.style)_fSel.style.display=_gew?'none':'';
   if(_gew){_pamWahlRender(el,cnt);return;}
-  const liste=_pamAnrufSammle();
-  if(cnt)cnt.textContent=liste.length===1?'1 Karte':liste.length+' Karten';
-  if(!liste.length){
+  const alleKarten=_pamAnrufSammle();
+  // b1008: Suche und Fälligkeit filtern nur das Fenster, nicht die Zahl am Knopf
+  const _fw=(typeof _pamAnrufFilterWerte==='function')?_pamAnrufFilterWerte():{q:'',faellig:''};
+  const _heute=(typeof _pamAnrufHeute==='function')?_pamAnrufHeute():'';
+  const _mitFaellig=(typeof _pamAnrufFaellig==='function');
+  const liste=alleKarten.filter(function(item){
+    if(typeof _pamAnrufPasst==='function'&&!_pamAnrufPasst(item.t,item.board,_fw.q))return false;
+    if(_fw.faellig&&_mitFaellig&&typeof _pamAnrufFaelligPasst==='function'&&!_pamAnrufFaelligPasst(_pamAnrufFaellig(item.t),_fw.faellig,_heute))return false;
+    return true;
+  });
+  const _filterAn=!!(String(_fw.q||'').trim()||_fw.faellig);
+  const _gesamtWort=alleKarten.length===1?'1 Karte':alleKarten.length+' Karten';
+  if(cnt)cnt.textContent=(_filterAn&&alleKarten.length)?liste.length+' von '+_gesamtWort:_gesamtWort;
+  if(!alleKarten.length){
     el.innerHTML='<div style="padding:22px 14px;color:var(--text2);font-size:13px;line-height:1.6;">'
       +'Keine Karte trägt das Häkchen „📞 Anruf".<br><br>'
       +'<span style="color:var(--text);">So setzt du es:</span> Auftrag öffnen → oben im Fensterkopf Haken bei '
       +'<b>📞 Anruf</b>, neben „📍 Besichtigung" und „🔨 In Ausführung".<br><br>'
       +'Sobald der Haken sitzt, steht die Karte hier – mit allen Ansprechpartnern, die eine Nummer haben.'
+      +'</div>';
+    return;
+  }
+  if(!liste.length){
+    el.innerHTML='<div style="padding:22px 14px;color:var(--text2);font-size:13px;line-height:1.6;">'
+      +'Keine Karte passt zu dieser Suche oder Auswahl.<br><br>'
+      +'<button onclick="_pamAnrufFilterLeeren()" style="font-size:12px;padding:4px 12px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;">✕ Suche zurücksetzen</button>'
       +'</div>';
     return;
   }
@@ -54379,6 +54491,14 @@ function _pamAnrufRender(){
     const safeId=sicher(String(t.id));
     const nrn=_pamAnrufNummern(t);
     const ausMails=nrn.quelle==='mails';
+    // b1008: Datum aus dem Termin „📞 Anruf bis“ – rot überfällig, orange heute
+    const _fd=_mitFaellig?_pamAnrufFaellig(t):'';
+    let _faelligChip='';
+    if(_fd){
+      const _ueber=!!_heute&&_fd<_heute,_istHeute=_fd===_heute;
+      const _fs=_ueber?'background:#FCEBEB;color:#A32D2D;':(_istHeute?'background:#FAEEDA;color:#854F0B;':'background:var(--bg3);color:var(--text2);');
+      _faelligChip=' <span class="pam-anruf-faellig" style="margin-left:6px;padding:1px 7px;border-radius:4px;font-weight:600;'+_fs+'">📞 bis '+esc(typeof _tzDatumKurz==='function'?_tzDatumKurz(_fd):_fd)+(_ueber?' · überfällig':(_istHeute?' · heute':''))+'</span>';
+    }
     let pillen='';
     nrn.liste.forEach(function(e){
       const text=[e.name,e.rolle].filter(Boolean).join(' · ');
@@ -54398,7 +54518,7 @@ function _pamAnrufRender(){
       pillen='<span style="font-size:12px;color:#A32D2D;">Keine Telefonnummer hinterlegt, weder im Kontakte-Kasten noch in den Mails.</span>';
     }
     html+='<div class="pam-anruf-zeile" style="border-bottom:1px solid var(--border);padding:8px 10px;">'
-      +'<div style="font-size:11px;color:var(--text2);">'+esc(item.board)+(t.status?' · '+esc(t.status):'')+'</div>'
+      +'<div style="font-size:11px;color:var(--text2);">'+esc(item.board)+(t.status?' · '+esc(t.status):'')+_faelligChip+'</div>'
       +'<div style="font-size:13px;font-weight:600;color:var(--text);margin:2px 0 6px;">'+esc(t.title||'(kein Titel)')+'</div>'
       +(ausMails?'<div style="font-size:11px;color:var(--text2);margin-bottom:4px;">Im Kontakte-Kasten steht keine Nummer. Aus den Mails gelesen, ungeprüft:</div>':'')
       +'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">'+pillen+'</div>'
@@ -54623,12 +54743,20 @@ function _pamWahlAusgeblendeteUmschalten(){
 function _pamWahlRender(el,cnt){
   const zeigAlle=(typeof _pamWahlAusgeblendeteZeigen!=='undefined')&&!!_pamWahlAusgeblendeteZeigen;
   const offen=(typeof _pamWahlOffen!=='undefined'&&_pamWahlOffen)?_pamWahlOffen:{};
-  const alle=_pamWahlGruppen(true);
-  const gruppen=zeigAlle?alle:_pamWahlGruppen(false);
+  const alleRoh=_pamWahlGruppen(true);
+  // b1008: das Suchfeld gilt auch hier (Name, Titel, Nummer – auch die gewählte)
+  const _q=(typeof _pamAnrufFilterWerte==='function')?String(_pamAnrufFilterWerte().q||''):'';
+  const _passt=function(g){return !_q.trim()||typeof _pamAnrufPasst!=='function'||_pamAnrufPasst(g.t,g.board,_q,g.wahlen.map(function(x){return x.w;}));};
+  const alle=alleRoh.filter(_passt);
+  const gruppenRoh=zeigAlle?alleRoh:_pamWahlGruppen(false);
+  const gruppen=gruppenRoh.filter(_passt);
   let n=0;
   gruppen.forEach(function(g){g.wahlen.forEach(function(x){if(!x.aus)n++;});});
-  if(cnt)cnt.textContent=n===1?'1 Wahl':n+' Wahlen';
-  if(!alle.length){
+  let nRoh=0;
+  gruppenRoh.forEach(function(g){g.wahlen.forEach(function(x){if(!x.aus)nRoh++;});});
+  const _wort=function(z){return z===1?'1 Wahl':z+' Wahlen';};
+  if(cnt)cnt.textContent=_q.trim()?n+' von '+_wort(nRoh):_wort(n);
+  if(!alleRoh.length){
     el.innerHTML='<div style="padding:22px 14px;color:var(--text2);font-size:13px;line-height:1.6;">'
       +'Noch keine Nummer aus PAM gewählt.<br><br>'
       +'Ab jetzt steht hier jede Wahl mit Datum und Uhrzeit, je Karte – aus dieser Liste, aus dem Kontakte-Kasten einer Karte oder vom 📞 im Kartenkopf.'
@@ -54646,7 +54774,7 @@ function _pamWahlRender(el,cnt){
       +'</div>';
   }
   if(!gruppen.length){
-    el.innerHTML=html+'<div style="padding:22px 14px;color:var(--text2);font-size:13px;line-height:1.6;">Alles ausgeblendet. In den Karten stehen die Zeiten weiter unter dem Kontakt.</div>';
+    el.innerHTML=html+'<div style="padding:22px 14px;color:var(--text2);font-size:13px;line-height:1.6;">'+((_q.trim()&&gruppenRoh.length)?'Keine gewählte Nummer passt zu dieser Suche.':'Alles ausgeblendet. In den Karten stehen die Zeiten weiter unter dem Kontakt.')+'</div>';
     return;
   }
   const MAXK=150;
