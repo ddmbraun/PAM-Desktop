@@ -6793,6 +6793,15 @@ body.light .task-tag{background:rgba(58,100,220,0.12);color:#2a52cc;border-color
    (3 px) springen – die Zeile wurde dadurch 6 px hoeher als die anderen. Breite und
    Farbe muessen mit. */
 .tz-art.ohne{color:var(--text2);border:1px dashed var(--border);}
+/* b1009: Frage „Haken In Ausführung setzen / rausnehmen?" unter der Statuszeile – leer unsichtbar */
+.tz-ausf-frage:empty{display:none;}
+.tz-ausf-frage{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin:6px 10px 0;padding:6px 10px;
+               border:1px solid #0F6E56;border-left-width:4px;border-radius:7px;background:rgba(15,110,86,.08);
+               color:var(--text);font-size:calc(12px * var(--modal-scale,1));}
+.tz-ausf-frage .tz-af-text{flex:1 1 auto;min-width:0;}
+.tz-ausf-frage button{flex:0 0 auto;font-size:calc(11px * var(--modal-scale,1));font-weight:600;padding:3px 10px;
+                      border-radius:5px;border:1px solid var(--border);background:var(--bg);color:var(--text1);cursor:pointer;}
+.tz-ausf-frage button.tz-af-ja{background:#0F6E56;border-color:#0F6E56;color:#fff;}
 .tz-quelle{flex:0 0 auto;font-size:calc(13px * var(--modal-scale,1));opacity:.42;cursor:default;
            user-select:none;}
 .tz-art-row{display:flex;flex-wrap:wrap;gap:5px;align-items:center;justify-content:flex-end;
@@ -8667,6 +8676,8 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
                Stellen gleich aussehen und dieselben Zahlen zeigen. -->
           <div class="tz-status" id="tzStatusRow"></div>
           <div class="tz-odliste" id="tzOdListe"></div>
+          <!-- b1009: hier fragt PAM, ob der Haken „🔨 In Ausführung" gesetzt / rausgenommen werden soll -->
+          <div class="tz-ausf-frage" id="tzAusfFrage"></div>
           <!-- b553 (Punkt 6): Inhalte der rechten „Termine"-Karte hierher – Termine gibt es nur noch einmal -->
           <!-- b869: AUSGEBLENDET, nicht entfernt (Wunsch Frank 01.09.2026 – die fünf
                Kästchen stehen jetzt oben in der Kopfleiste, hier sollen sie weg).
@@ -10220,7 +10231,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-14 · #1008'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-14-b1008) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-14 · #1009'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-14-b1009) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -10684,6 +10695,13 @@ function _pamAusfTerminDatum(x){
     if(!a[i]||a[i].typ!=='Ausführungstermin'||!a[i].datum||a[i].erledigt)continue;
     if(!beste||a[i].datum<beste)beste=a[i].datum;
   }
+  // b1009: ein OFFENER Außerhaus-Termin der Art „🔨 Ausführung" zählt wie die Zeile „Ausführung am".
+  var h=(x.ausserhausTermine||[]);
+  for(var j=0;j<h.length;j++){
+    var hd=h[j]&&(h[j].date||h[j].datum);
+    if(!hd||h[j].art!=='ausfuehrung'||h[j].erledigt)continue;
+    if(!beste||hd<beste)beste=hd;
+  }
   if(!beste){
     var alt=x.ausfuehrungstermin||x['ausführungsdatum']||'';
     if(alt)beste=alt;
@@ -10697,7 +10715,34 @@ function _pamTerminFehlt(x){
   for(var i=0;i<a.length;i++){
     if(a[i]&&a[i].typ==='Ausführungstermin'&&a[i].datum)return false;
   }
+  // b1009: Außerhaus-Termin der Art „🔨 Ausführung" = eingeplant (abgehakt zählt mit, wie oben).
+  // ⛔ Besichtigung, Ortstermin, sonstiges und Termine OHNE Art zählen NICHT – Frank, 14.09.2026:
+  //    „Es kann ja auch ein Außer-Haus-Termin sein, wenn ich eine Besichtigung mache."
+  var h=(x.ausserhausTermine||[]);
+  for(var j=0;j<h.length;j++){
+    if(h[j]&&h[j].art==='ausfuehrung'&&(h[j].date||h[j].datum))return false;
+  }
   return true;
+}
+// ══ b1009: ART am Außerhaus-Termin ═══════════════════════════════════════════
+// Bis b1008 wusste ein Außerhaus-Termin nicht, WAS er ist (nur Datum, Von, Bis, Text).
+// ⛔ Wert und Anzeige getrennt (Lehre b992): gespeichert 'ausfuehrung', angezeigt '🔨 Ausführung'.
+// ⛔ Alte Termine haben keine Art und bekommen keine angedichtet – am Text raten war
+//    gemessen bei jedem dritten Termin unsicher. Ohne Art zählt ein Termin nie als Ausführung.
+const AUSSER_ARTEN=[
+  {wert:'ausfuehrung', sym:'🔨',text:'Ausführung'},
+  {wert:'besichtigung',sym:'👁',text:'Besichtigung'},
+  {wert:'ortstermin',  sym:'📍',text:'Ortstermin'},
+  {wert:'sonst',       sym:'•', text:'sonstiges'}
+];
+// Offener Außerhaus-Termin der Art Ausführung an genau diesem Tag (für „Ausführung heute").
+function _pamAusfAusserhausAm(x,tag){
+  if(!x||!tag)return false;
+  var h=(x.ausserhausTermine||[]);
+  for(var j=0;j<h.length;j++){
+    if(h[j]&&h[j].art==='ausfuehrung'&&!h[j].erledigt&&(h[j].date||h[j].datum)===tag)return true;
+  }
+  return false;
 }
 // Ein Eintrag je Zustand: Wert · Beschriftung · wie man ihn an der Karte erkennt.
 // ⛔ EINE Tabelle für Filtern UND Zählen – zwei Listen wären die Stelle, an der die
@@ -11137,12 +11182,14 @@ function removeAufgabe(id){
 function changeAufgabeTyp(id,val){
   const a=taskAufgaben.find(a=>a.id===id);if(a){a.typ=val;}
   renderAufgabenList();_updateMapsBtn();scheduleTaskFieldSave();
+  if(a&&a.typ==='Ausführungstermin'&&a.datum&&typeof _ausfHakenFrage==='function')_ausfHakenFrage('eingeplant'); // b1009
 }
 function changeAufgabeDatum(id,val){
   const a=taskAufgaben.find(a=>a.id===id);if(a){a.datum=val;}
   _updateMapsBtn();
   if(typeof _tzStatusRender==='function')_tzStatusRender(); // b598: Statuszeile mitziehen (die Liste wird hier bewusst nicht neu gebaut)
   scheduleTaskFieldSave();
+  if(a&&a.typ==='Ausführungstermin'&&typeof _ausfHakenFrage==='function')_ausfHakenFrage('eingeplant'); // b1009
 }
 // b712: wie erledigtFreierTermin() weiter unten – gleicher Haken, gleicher Bautagebuch-Eintrag
 function erledigtAufgabe(id){
@@ -11158,6 +11205,7 @@ function erledigtAufgabe(id){
   }
   renderAufgabenList();_updateMapsBtn();
   scheduleTaskFieldSave();
+  if(a.typ==='Ausführungstermin'&&typeof _ausfHakenFrage==='function')_ausfHakenFrage(a.erledigt?'erledigt':'eingeplant'); // b1009
 }
 // ── FREIE TERMINE ──
 let _freiTermIdCnt=1;
@@ -11849,6 +11897,7 @@ function _hdrAktChange(which){
   const nach=paar[2];
   if(nach&&typeof window[nach]==='function')window[nach]();
   scheduleTaskFieldSave();
+  if(typeof _ausfFrageZeichnen==='function')_ausfFrageZeichnen(); // b1009: Haken von Hand → Frage erledigt sich
 }
 // Synct Termine-Checkboxen → Kopfzeilen-Checkboxen
 function _syncHdrAktCb(){
@@ -11857,6 +11906,76 @@ function _syncHdrAktCb(){
     const t=document.getElementById(_HDR_AKT_CB[k][1]);
     if(h&&t)h.checked=t.checked;
   }
+  if(typeof _ausfFrageZeichnen==='function')_ausfFrageZeichnen(); // b1009
+}
+// ══ b1009: Hilfe beim Haken „🔨 In Ausführung" ═══════════════════════════════
+// Haken („läuft") und Datum („wann") bleiben getrennt (b863). PAM schaltet NICHT selbst um,
+// sondern FRAGT unter der Statuszeile von „Termine & Zeiterfassung":
+//   Ausführung eingeplant (Zeile „Ausführung am" oder Außerhaus-Termin 🔨) → „setzen?"
+//   letzte offene Ausführung abgehakt                                     → „rausnehmen?"
+// „Nein" gilt für diese Karte, bis PAM neu geladen wird. Eine stehende Frage prüft sich bei
+// jedem Zeichnen selbst und verschwindet, sobald sie nicht mehr passt (Haken von Hand gesetzt,
+// Termin gelöscht, andere Karte). ⛔ Nie am Objekt – dort gibt es den Haken nicht (b999).
+let _ausfFrage=null;          // {id, art:'setzen'|'loesen'}
+const _ausfFrageNein={};      // 'id|art' → true
+function _ausfOffenImFenster(){
+  var a=(typeof taskAufgaben!=='undefined'&&taskAufgaben)||[];
+  for(var i=0;i<a.length;i++){if(a[i]&&a[i].typ==='Ausführungstermin'&&a[i].datum&&!a[i].erledigt)return true;}
+  var h=(typeof taskAusserhausTermine!=='undefined'&&taskAusserhausTermine)||[];
+  for(var j=0;j<h.length;j++){if(h[j]&&h[j].art==='ausfuehrung'&&(h[j].date||h[j].datum)&&!h[j].erledigt)return true;}
+  return false;
+}
+function _ausfFensterId(){
+  var box=document.getElementById('taskModalBox');
+  if(box&&box.classList&&box.classList.contains('ptp-immo-mode'))return '';
+  var f=document.getElementById('taskId');
+  return (f&&f.value)||'';
+}
+function _ausfHakenFrage(anlass){
+  var cb=document.getElementById('taskInAusfuehrungCb');
+  var id=_ausfFensterId();
+  var art=null;
+  if(cb&&id){
+    var offen=_ausfOffenImFenster();
+    if(anlass==='eingeplant'&&!cb.checked&&offen)art='setzen';
+    else if(anlass==='erledigt'&&cb.checked&&!offen)art='loesen';
+    if(art&&_ausfFrageNein[id+'|'+art])art=null;
+  }
+  if(art)_ausfFrage={id:id,art:art};
+  _ausfFrageZeichnen();
+}
+function _ausfFrageZeichnen(){
+  var el=document.getElementById('tzAusfFrage');
+  var f=_ausfFrage;
+  if(f){
+    var cb=document.getElementById('taskInAusfuehrungCb');
+    var offen=_ausfOffenImFenster();
+    var gilt=!!cb&&f.id===_ausfFensterId()&&(f.art==='setzen'?(!cb.checked&&offen):(cb.checked&&!offen));
+    if(!gilt){_ausfFrage=f=null;}
+  }
+  if(!el)return;
+  if(!f){el.innerHTML='';return;}
+  el.innerHTML=(f.art==='setzen'
+    ?'<span class="tz-af-text">🔨 Ausführung eingeplant – Haken <b>„In Ausführung“</b> setzen?</span>'
+     +'<button type="button" class="tz-af-ja" onclick="_ausfFrageAntwort(true)">Ja, setzen</button>'
+    :'<span class="tz-af-text">✓ Keine offene Ausführung mehr – Haken <b>„In Ausführung“</b> rausnehmen?</span>'
+     +'<button type="button" class="tz-af-ja" onclick="_ausfFrageAntwort(true)">Ja, rausnehmen</button>')
+    +'<button type="button" class="tz-af-nein" onclick="_ausfFrageAntwort(false)">Nein</button>';
+}
+function _ausfFrageAntwort(ja){
+  var f=_ausfFrage;_ausfFrage=null;
+  if(f){
+    if(ja){
+      var cb=document.getElementById('taskInAusfuehrungCb');
+      if(cb){cb.checked=(f.art==='setzen');if(typeof _syncHdrAktCb==='function')_syncHdrAktCb();scheduleTaskFieldSave();}
+    }else _ausfFrageNein[f.id+'|'+f.art]=true;
+  }
+  _ausfFrageZeichnen();
+}
+// Beim Öffnen einer Karte: keine Frage von der vorigen Karte mitnehmen.
+function _ausfFrageZuruecksetzen(){
+  _ausfFrage=null;
+  var el=document.getElementById('tzAusfFrage');if(el)el.innerHTML='';
 }
 // ── b869: das fünfte Kästchen „📋 Auftrag erteilt" ──────────────────────────────
 // Es steht NICHT in _HDR_AKT_CB, weil es kein Gegenstück in der Termine-Zeile hat und
@@ -19750,7 +19869,8 @@ function _pamHeuteRaster(listeAll, today, typFilter, terminFilter, postListe){
     // b528b (Befund Frank, Kachel-Chip „Ausführung heute 0"): wie in renderHeute zählen
     // jetzt BEIDE Wege – Altfeld UND Aufgabe vom Typ „Ausführungstermin" mit Datum heute.
     var hasAusf=t.ausfuehrungstermin===today
-      ||(t.aufgaben||[]).some(function(a){return a.typ==='Ausführungstermin'&&a.datum===today&&!a.erledigt;});
+      ||(t.aufgaben||[]).some(function(a){return a.typ==='Ausführungstermin'&&a.datum===today&&!a.erledigt;})
+      ||(typeof _pamAusfAusserhausAm==='function'&&_pamAusfAusserhausAm(t,today)); // b1009: Außerhaus-Termin 🔨
     if(hasOd)grouped.overdue.push(item);
     else if(hasAusf)grouped.ausf.push(item);
     else grouped.heute.push(item);
@@ -19902,7 +20022,8 @@ function renderHeute(){
       // b528 (Frage Frank): „Ausführung heute" prüfte NUR das Altfeld ausfuehrungstermin –
       // der neue Weg (Aufgabe vom Typ „Ausführungstermin") fehlte. Jetzt zählen beide.
       if(t.ausfuehrungstermin===today
-        ||(t.aufgaben||[]).some(function(a){return a.typ==='Ausführungstermin'&&a.datum===today&&!a.erledigt;}))
+        ||(t.aufgaben||[]).some(function(a){return a.typ==='Ausführungstermin'&&a.datum===today&&!a.erledigt;})
+        ||(typeof _pamAusfAusserhausAm==='function'&&_pamAusfAusserhausAm(t,today))) // b1009: Außerhaus-Termin 🔨
         ausfuehrungHeute.push({t:t,board:boardName});
       var _getFT=function(x){var a=x.freieTermine&&x.freieTermine.length?x.freieTermine:(x.freierTermin&&x.freierTermin.datum?[x.freierTermin]:[]);return a;};
       var _allDates=[];
@@ -22298,6 +22419,7 @@ function erledigtAusserhausTermin(i){
   }
   renderAusserhausTermine();
   scheduleTaskFieldSave();
+  if(t.art==='ausfuehrung'&&typeof _ausfHakenFrage==='function')_ausfHakenFrage(t.erledigt?'erledigt':'eingeplant'); // b1009
 }
 // b664: Der 🗑-Knopf warf den Termin nur aus der Liste – der Outlook-Eintrag samt Hin-
 // und Rückfahrt blieb für immer stehen, und mit dem Eintrag war auch die Outlook-Nummer
@@ -22338,7 +22460,28 @@ async function removeAusserhausTermin(i){
   renderAusserhausTermine();
   scheduleTaskFieldSave();
 }
-function syncAusserhausTermin(i,field,val){if(taskAusserhausTermine[i]){taskAusserhausTermine[i][field]=val;if(['date','von','bis','beschreibung'].includes(field))taskAusserhausTermine[i]._pamDirty=true;if(field==='von'||field==='bis'){renderTermineGesamt();_updateHdrZeitBadge();_tzDauerRefresh('a',i,taskAusserhausTermine[i].von,taskAusserhausTermine[i].bis);/* b596 */}if(field==='date'||field==='beschreibung'){if(typeof _tzStatusRender==='function')_tzStatusRender();/* b598 */}scheduleTaskFieldSave();}}
+function syncAusserhausTermin(i,field,val){if(taskAusserhausTermine[i]){taskAusserhausTermine[i][field]=val;if(['date','von','bis','beschreibung'].includes(field))taskAusserhausTermine[i]._pamDirty=true;if(field==='von'||field==='bis'){renderTermineGesamt();_updateHdrZeitBadge();_tzDauerRefresh('a',i,taskAusserhausTermine[i].von,taskAusserhausTermine[i].bis);/* b596 */}if(field==='date'||field==='beschreibung'){if(typeof _tzStatusRender==='function')_tzStatusRender();/* b598 */}scheduleTaskFieldSave();if(field==='date'&&val&&taskAusserhausTermine[i].art==='ausfuehrung'&&typeof _ausfHakenFrage==='function')_ausfHakenFrage('eingeplant');/* b1009 */}}
+// b1009: Auswahlfeld „Art" am Außerhaus-Termin. Jede Option mit value (Falle b992); eine
+// unbekannte gespeicherte Art erscheint sichtbar als „(unbekannt: …)" statt still auf die
+// erste Option zu fallen (Falle b968).
+function _ahArtSelect(t,i){
+  const art=(t&&t.art)||'';
+  const bekannt=AUSSER_ARTEN.some(a=>a.wert===art);
+  let opts='<option value=""'+(art?'':' selected')+'>— Art</option>';
+  if(art&&!bekannt)opts+='<option value="'+esc(art)+'" selected>(unbekannt: '+esc(art)+')</option>';
+  AUSSER_ARTEN.forEach(a=>{opts+='<option value="'+a.wert+'"'+(a.wert===art?' selected':'')+'>'+a.sym+' '+a.text+'</option>';});
+  return '<select class="tz-art'+(art?'':' ohne')+'" onchange="_ahArtAendern('+i+',this.value);this.classList.toggle(\'ohne\',!this.value)"'
+    +' title="Was ist dieser Termin? Nur „🔨 Ausführung“ zählt als Ausführungstermin (Termin fehlt, Ausführung heute, Handy-Liste).">'+opts+'</select>';
+}
+// ⛔ Setzt KEIN _pamDirty: die Art geht nicht nach Outlook, Umstellen löst keinen Outlook-Abgleich aus.
+function _ahArtAendern(i,val){
+  const t=taskAusserhausTermine[i];if(!t)return;
+  if(AUSSER_ARTEN.some(a=>a.wert===val))t.art=val;
+  else if(!val)delete t.art; // unbekannte Art bleibt stehen, bis Frank eine bekannte wählt
+  if(typeof _tzStatusRender==='function')_tzStatusRender();
+  scheduleTaskFieldSave();
+  if(val==='ausfuehrung'&&typeof _ausfHakenFrage==='function')_ausfHakenFrage('eingeplant');
+}
 function openGcalTermin(i){
   const t=taskAusserhausTermine[i];
   const title=encodeURIComponent(document.getElementById('taskTitleInput').value.trim()||'Außerhaus-Termin');
@@ -23328,6 +23471,7 @@ function renderAusserhausTermine(){
         <span class="tz-dauer${dauer?'':' leer'}" id="tzD_a_${i}">${_tzDauerText(dauer)}</span>
       </div>
       <div class="tz-line2">
+        ${typeof _ahArtSelect==='function'?_ahArtSelect(t,i):''}
         <input type="text" value="${esc(t.beschreibung||'')}" placeholder="Beschreibung" oninput="syncAusserhausTermin(${i},'beschreibung',this.value)" autocomplete="off">
         <button class="termin-row-btn tz-ok${t.erledigt?' an':''}" onclick="erledigtAusserhausTermin(${i})" title="${t.erledigt?'Erledigt-Haken wieder wegnehmen':'Als erledigt markieren + Eintrag im Bautagebuch'}">${t.erledigt?'✓':'○'}</button>
         <button class="termin-row-btn" onclick="_tzToggleMore(event)" title="Weitere Aktionen: Kalender, Fahrzeit, Löschen" style="letter-spacing:1px;">⋯</button>
@@ -23601,6 +23745,7 @@ function _tzStatusRender(){
   setz('tTermSubSumme',summen.ausserhaus>0?fmt(summen.ausserhaus):'');
   setz('tZeitSubZahl',(taskZeitEntries||[]).length?String(taskZeitEntries.length):'');
   setz('tZeitSubSumme',summen.manuell>0?fmt(summen.manuell):'');
+  if(typeof _ausfFrageZeichnen==='function')_ausfFrageZeichnen(); // b1009: stehende Frage prüft sich selbst
 }
 // ── b599: Klapp-Blöcke der drei Unterbereiche ───────────────────────────────
 // Standard beim Öffnen eines Auftrags: alle ZU (Wunsch Frank). Der Zustand gilt nur für den
@@ -54018,7 +54163,9 @@ function _pamBPRender(){
       const _da=a.due||'',_db=b.due||'';return _da>_db?1:_da<_db?-1:0;
     }
     if(_pamBPSortField==='ausf'){
-      const av=a.ausfuehrungstermin||''; const bv=b.ausfuehrungstermin||'';
+      // b1009: las nur das stillgelegte Altfeld (in keiner Karte gefüllt) – der Knopf bewirkte nichts
+      const _ad=(typeof _pamAusfTerminDatum==='function');
+      const av=_ad?_pamAusfTerminDatum(a):(a.ausfuehrungstermin||''); const bv=_ad?_pamAusfTerminDatum(b):(b.ausfuehrungstermin||'');
       if(av&&!bv)return -1; if(!av&&bv)return 1;
       return av>bv?1:av<bv?-1:0;
     }
@@ -55514,8 +55661,10 @@ function _pamGetSortedBoardTasks(boardName, currentId){
       const _da=a.due||'',_db=b.due||'';return _da<_db?-1:_da>_db?1:0;
     }
     if(field === 'ausf'){
-      const av = a.ausfuehrungstermin || '';
-      const bv = b.ausfuehrungstermin || '';
+      // b1009: wie oben – Datum aus _pamAusfTerminDatum statt aus dem leeren Altfeld
+      const _ad = (typeof _pamAusfTerminDatum === 'function');
+      const av = _ad ? _pamAusfTerminDatum(a) : (a.ausfuehrungstermin || '');
+      const bv = _ad ? _pamAusfTerminDatum(b) : (b.ausfuehrungstermin || '');
       if(av && !bv) return -1;
       if(!av && bv) return 1;
       return av < bv ? -1 : av > bv ? 1 : 0;
@@ -55547,7 +55696,8 @@ function _pamBuildBoardTaskListHTML(boardName, currentId){
     const isOverdue = t.due && t.due < today;
     const isToday = t.due && t.due === today;
     const dueTxt = t.due ? (function(){const p=t.due.split('-');return p[2]+'.'+p[1]+'.'+p[0].slice(2);})() : '';
-    const ausfTxt = t.ausfuehrungstermin ? (function(){const p=t.ausfuehrungstermin.split('-');return p[2]+'.'+p[1]+'.';})() : '';
+    const _ausfD = (typeof _pamAusfTerminDatum === 'function') ? _pamAusfTerminDatum(t) : (t.ausfuehrungstermin || ''); // b1009
+    const ausfTxt = _ausfD ? (function(){const p=_ausfD.split('-');return p[2]+'.'+p[1]+'.';})() : '';
     const ampelColor = ({'rot':'#E24B4A','gelb':'#EF9F27','grün':'#4CAF50'})[_getAmpel(t)] || 'var(--border)';
     const dotStyle = 'width:8px;height:8px;border-radius:50%;background:'+ampelColor+';flex-shrink:0;';
     const rowBg = isCurrent ? 'background:rgba(var(--accent-rgb,108,99,255),.10);' : '';
@@ -58455,6 +58605,7 @@ function openEditTaskModal(id){
   try{
   _pamDokGrpReset(); // b575: Ordner-Klappzustand gilt nur für den gerade offenen Auftrag
   if(typeof _tzSubReset==='function')_tzSubReset(); // b599: Termin-Unterbereiche starten zugeklappt
+  if(typeof _ausfFrageZuruecksetzen==='function')_ausfFrageZuruecksetzen(); // b1009: keine Frage der vorigen Karte
   // In allen Boards suchen, nicht nur im aktiven (Task könnte verschoben worden sein)
   let task=null,taskBoard=null;
   for(const bk of Object.keys(boards)){const f=(boards[bk]||[]).find(t=>t.id===id);if(f){task=f;taskBoard=bk;break;}}
