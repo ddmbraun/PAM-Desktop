@@ -10209,7 +10209,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-13 · #1005'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-13-b1005) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-14 · #1006'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-14-b1006) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -25745,6 +25745,10 @@ function _sbAlleWaehlen(){
 // (Wunsch Frank: ein Ordner) – ein Video stünde dann in beiden Sektionen, weil die
 // Foto-Sektion 'video/' mitliest und der Dokumente-Filter es nicht ausschloss.
 const _DOK_DATEI_FILTER=" in parents and trashed=false and not mimeType contains 'image/' and not mimeType contains 'video/' and not mimeType='application/vnd.google-apps.folder'";
+// b1006: Zwischendateien von Word nie als Dokument uebernehmen – „~$Name.docx" (Sperrdatei, solange
+// das Dokument offen ist) und „~WRL1234.tmp" (Sicherung beim Speichern). Word raeumt beide beim
+// Schliessen weg; liest PAM sie vorher ein, bleibt ein toter Eintrag in der Karte.
+function _dokIstZwischendatei(name){const n=String(name||'');return /^~\$/.test(n)||/^~.*\.tmp$/i.test(n);}
 
 // Holt ALLE Treffer – mit Seitenwechsel, damit bei über 200 Dateien nichts still wegfällt.
 async function _dokDriveListe(q){
@@ -25916,9 +25920,10 @@ async function _dokSyncOrdner(){
     let wurzelName='';
     try{wurzelName=await _mpOrdnerName(rootId);}catch(e){}
     const fund=[];
-    wurzelDateien.forEach(function(f){fund.push({f:f,ordner:wurzelName});});
+    // b1006: Word-Zwischendateien (~$…, ~WRL….tmp) ueberspringen – siehe _dokIstZwischendatei.
+    wurzelDateien.forEach(function(f){if(typeof _dokIstZwischendatei==='function'&&_dokIstZwischendatei(f.name))return;fund.push({f:f,ordner:wurzelName});});
     unterListen.forEach(function(liste,i){
-      liste.forEach(function(f){fund.push({f:f,ordner:unterOrdner[i].name});});
+      liste.forEach(function(f){if(typeof _dokIstZwischendatei==='function'&&_dokIstZwischendatei(f.name))return;fund.push({f:f,ordner:unterOrdner[i].name});});
     });
 
     let neu=0,aufgefrischt=0;const neueOrdner=new Set();
@@ -63623,13 +63628,14 @@ async function _fdkStartListeLaden(){
       const dateien=[];
       for(const fid of g.wurzeln){
         const erste=await _dokDriveListe("'"+fid+"' in parents and trashed=false and (mimeType='"+_FDK_MIME_DOCX+"' or mimeType='application/vnd.google-apps.folder')");
-        erste.filter(f=>f.mimeType===_FDK_MIME_DOCX).forEach(f=>{if(!gesehen.has(f.id)){gesehen.add(f.id);dateien.push({id:f.id,name:f.name});}});
+        // b1006: keine Word-Zwischendateien (~$…, ~WRL….tmp) in der Auswahl – Drive fuehrt sie als Word-Datei.
+        erste.filter(f=>f.mimeType===_FDK_MIME_DOCX&&!(typeof _dokIstZwischendatei==='function'&&_dokIstZwischendatei(f.name))).forEach(f=>{if(!gesehen.has(f.id)){gesehen.add(f.id);dateien.push({id:f.id,name:f.name});}});
         const unter=erste.filter(f=>f.mimeType==='application/vnd.google-apps.folder').slice(0,20);
         for(const u of unter){
           if(gesehen.has('o:'+u.id))continue;gesehen.add('o:'+u.id);
           try{
             const l=await _dokDriveListe("'"+u.id+"' in parents and trashed=false and mimeType='"+_FDK_MIME_DOCX+"'");
-            l.forEach(f=>{if(!gesehen.has(f.id)){gesehen.add(f.id);dateien.push({id:f.id,name:u.name+' / '+f.name});}});
+            l.filter(f=>!(typeof _dokIstZwischendatei==='function'&&_dokIstZwischendatei(f.name))).forEach(f=>{if(!gesehen.has(f.id)){gesehen.add(f.id);dateien.push({id:f.id,name:u.name+' / '+f.name});}});
           }catch(e){console.warn('[FDK] Unterordner:',u.name,e);}
         }
       }
