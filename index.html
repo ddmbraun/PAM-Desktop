@@ -10344,7 +10344,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-15 · #1016'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-15-b1016) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-18 · #1017'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-18-b1017) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -65169,6 +65169,37 @@ async function _fdkStartListeLaden(){
 /* ── Erstellen: Startdokument holen → Bilder holen → Word bauen → ablegen ── */
 // b774: ziel = 'word' (wie bisher, Vorgabe) | 'pdf' | 'entwurf'. Gesammelt wird für alle
 // drei gleich; nur die Ausgabe unterscheidet sich.
+// b1017: Zweiter Anlauf fuer die Dokumentliste. Drive meldet den Upload als fertig, fuehrt die
+// Datei in files.list aber manchmal erst Sekunden spaeter - der Abgleich, der direkt danach
+// startet, sieht sie nicht und meldet „alles aktuell“. Der Karteneintrag fehlte dann ganz
+// (gemessen 18.09.2026: die erste Fotodoku stand erst nach einem zweiten Lauf in der Karte,
+// zusammen mit drei aelteren Dateien, die seit Tagen niemand abgeglichen hatte).
+// ⛔ Der zweite Lauf darf NICHT blind starten: _dokSyncOrdner liest das Feld „tDokOrdner“ des
+// GEOEFFNETEN Formulars und schreibt in taskAttachments der GEOEFFNETEN Karte. Ist inzwischen
+// eine andere Karte offen, landeten die Dokumente in der falschen (derselbe Fehler wie b976).
+// Deshalb vier Bedingungen, sonst passiert nichts:
+//   1. dieselbe Karte ist noch offen   2. derselbe Dokumente-Ordner steht noch im Feld
+//   3. Drive ist noch verbunden        4. der Eintrag fehlt wirklich noch
+// Punkt 4 spart im Normalfall den zweiten Lauf samt Hinweisband - er kostet nur, wenn er
+// auch gebraucht wird.
+const _fdkNachtragMs = 8000;
+async function _fdkNachtragAbgleich(ersterLauf,taskId,ordnerId,fileId){
+  try{
+    // Erst den ersten Abgleich zu Ende laufen lassen, sonst tragen zwei gleichzeitige Laeufe
+    // dieselbe Datei doppelt ein (beide lesen taskAttachments, bevor der andere geschrieben hat).
+    if(ersterLauf&&typeof ersterLauf.then==='function'){try{await ersterLauf;}catch(e){}}
+    await new Promise(function(f){setTimeout(f,_fdkNachtragMs);});
+    if(!fileId||!ordnerId)return;
+    if(typeof gdriveTokenValid!=='function'||!gdriveTokenValid())return;
+    const offen=(document.getElementById('taskId')||{}).value||'';
+    if(!offen||offen!==taskId)return;
+    const url=(document.getElementById('tDokOrdner')||{}).value||'';
+    if(typeof _ezFolderId!=='function'||_ezFolderId(url)!==ordnerId)return;
+    const drin=(taskAttachments||[]).some(function(a){return a&&a.fileId===fileId;});
+    if(drin)return;
+    if(typeof _dokSyncOrdner==='function')await _dokSyncOrdner();
+  }catch(e){console.warn('[FDK] Nachtrag:',e);}
+}
 async function _fdkErstellen(ziel){
   ziel=ziel||'word';
   const S=_fdkState;if(!S)return;
@@ -65279,10 +65310,16 @@ async function _fdkErstellen(ziel){
         // b1004: b944 kann den Namen beim Hochladen kuerzen – gemerkt wird, wie die Datei in Drive heisst.
         const _up=await _driveUploadGeneric(bytes,fname,mime,S.ordnerId);
         if(_up&&_up.name){fname=_up.name;S.ergebnis.fname=fname;}
+        if(_up&&_up.id)S.ergebnis.fileId=_up.id; // b1017: Kennung fuer den zweiten Abgleich
         S.ergebnis.ordnerId=S.ordnerId;S.ergebnis.abgelegt=true;
         ablage='✓ im '+wohin+' abgelegt'+(S.ordnerArt==='dokumente'?' – erscheint in der Dokumentliste':' (kein Dokumente-Ordner am Auftrag)');
         // b735: Dokumentliste nur auffrischen, wenn die Datei auch dort liegt
-        if(S.ordnerArt==='dokumente'){try{if(typeof _dokSyncOrdner==='function')_dokSyncOrdner();}catch(e){}}
+        if(S.ordnerArt==='dokumente'){
+          let _lauf=null;
+          try{if(typeof _dokSyncOrdner==='function')_lauf=_dokSyncOrdner();}catch(e){}
+          // b1017: zweiter Anlauf, falls Drive die frische Datei noch nicht auflistet
+          if(typeof _fdkNachtragAbgleich==='function')_fdkNachtragAbgleich(_lauf,S.taskId,S.ordnerId,(_up&&_up.id)||'');
+        }
       }catch(e){console.warn('[FDK] Ablage:',e);ablage='⚠ Ablage in Drive fehlgeschlagen – bitte herunterladen';}
     }else ablage='ℹ kein Drive-Ordner am Auftrag – bitte herunterladen';
     const erg=bau.ergebnis||{};
