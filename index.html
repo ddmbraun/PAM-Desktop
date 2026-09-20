@@ -10344,7 +10344,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-18 · #1017'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-18-b1017) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-20 · #1018'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-20-b1018) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -46073,6 +46073,9 @@ function _gmAkteFindContacts(book,akte){
 let _gmAkteDaten=null;          // { "26-012": {sache,objekt,objektZeile,auftraggeber,…} }
 let _gmAkteDatenLoaded=false;
 let _gmAkteDatenZeit=0;   // b676: siehe _GM_CACHE_MS weiter oben
+let _gmAkteStand='';        // b1018: Zeitstempel "stand" aus der Datei
+let _gmAkteZiel='';         // b1018: Pfad "ziel" – wohin das Skript geschrieben hat
+let _gmAkteDateiFehlt=false;// b1018: gar keine Datei in Drive gefunden
 
 async function _gmAkteDatenLoad(){
   if(_gmAkteDatenLoaded&&(Date.now()-_gmAkteDatenZeit)<_GM_CACHE_MS)return _gmAkteDaten;
@@ -46087,10 +46090,87 @@ async function _gmAkteDatenLoad(){
     if(!fr.ok)throw new Error('HTTP '+fr.status);
     let js={};try{js=await fr.json();}catch(e){js={};}
     _gmAkteDaten=(js&&js.akten)?js.akten:{};
-  }else{ _gmAkteDaten={}; }
+    _gmAkteStand=(js&&js.stand)?String(js.stand):'';   // b1018
+    _gmAkteZiel=(js&&js.ziel)?String(js.ziel):'';      // b1018
+    _gmAkteDateiFehlt=false;                           // b1018
+  }else{ _gmAkteDaten={}; _gmAkteStand=''; _gmAkteZiel=''; _gmAkteDateiFehlt=true; }
   _gmAkteDatenLoaded=true;_gmAkteDatenZeit=Date.now();
   return _gmAkteDaten;
 }
+
+// ── b1018: Waechter fuer den GM-Abgleich ───────────────────────────────────────
+// Die Datei pam-akte-daten.json traegt seit 20.09.2026 zwei Angaben: "stand" (wann
+// zuletzt aufgefrischt) und "ziel" (wohin das Skript geschrieben hat). Beides lag
+// brach – PAM nahm sich nur die Akten heraus. Steht der Abgleich, sieht PAM voellig
+// normal aus und zeigt stillschweigend alte Akten. Das Protokoll neben dem Skript
+// liest niemand (Frank, 20.09.2026: "Aber das Protokoll lese ich ja nicht").
+const _GM_WACHT_MAX_STD = 3;          // so alt darf der Stand im Buerobetrieb werden
+const _GM_WACHT_VON_STD = 8;          // geprueft wird nur zwischen 8 und 19 Uhr:
+const _GM_WACHT_BIS_STD = 19;         // nachts laeuft die Aufgabe gar nicht
+const _GM_WACHT_TAKT_MS = 30 * 60 * 1000;
+// Pfadmuster der NAS-Seite. Dorthin darf nicht geschrieben werden: die Freigaben
+// werden per Synology Cloud Sync nach Drive gespiegelt, und bei gleichzeitiger
+// Aenderung gewinnt still die Drive-Seite – ohne Konfliktkopie (gemessen 20.09.2026).
+const _GM_WACHT_NAS = ['nas-ddbraun', 'h:\\', 'k:\\', 'q:\\', 's:\\', 't:\\', 'z:\\'];
+let _gmWachtAus = false;              // fuer diese Sitzung weggeklickt
+
+function _gmWachtBandWeg(){
+  const el = document.getElementById('gmWachtBand');
+  if (el && el.parentNode) el.parentNode.removeChild(el);
+}
+function _gmWachtBand(text){
+  _gmWachtBandWeg();
+  if (_gmWachtAus) return;
+  const b = document.createElement('div');
+  b.id = 'gmWachtBand';
+  b.style.cssText = 'background:#92400e;color:#fff;padding:8px 14px;font-size:14px;line-height:1.5;text-align:center;';
+  b.innerHTML = '<b>⚠ GM-Abgleich</b> ' + text +
+    ' <button id="gmWachtZu" style="margin-left:10px;padding:2px 10px;border-radius:6px;border:1px solid #fff;background:transparent;color:#fff;cursor:pointer;">ausblenden</button>';
+  b.addEventListener('click', function(ev){          // kein nacktes onclick (b861-Regel)
+    if (ev && ev.target && ev.target.id === 'gmWachtZu') { _gmWachtAus = true; _gmWachtBandWeg(); }
+  });
+  document.body.insertBefore(b, document.body.firstChild);
+}
+// Liefert den Bandtext oder '' wenn alles in Ordnung ist. Ohne DOM, damit pruefbar.
+function _gmWachtBefund(standIso, ziel, dateiFehlt, jetzt){
+  jetzt = jetzt || new Date();
+  const std = jetzt.getHours();
+  if (std < _GM_WACHT_VON_STD || std >= _GM_WACHT_BIS_STD) return '';
+  if (dateiFehlt) return 'PAM findet die Datei mit den GM-Akten nicht (pam-akte-daten.json). Laeuft die Aufgabe „GM-Daten auffrischen"?';
+  if (ziel) {
+    const z = String(ziel).toLowerCase();
+    for (let i = 0; i < _GM_WACHT_NAS.length; i++) {
+      if (z.indexOf(_GM_WACHT_NAS[i]) >= 0)
+        return 'Die Akten wurden auf die NAS-Seite geschrieben (' + ziel + '). Das ist der falsche Weg – dort kann der Drive-Stand still ueberschrieben werden.';
+    }
+  }
+  if (!standIso) return '';
+  const d = new Date(standIso);
+  if (isNaN(d.getTime())) return '';
+  const stunden = (jetzt.getTime() - d.getTime()) / 3600000;
+  if (stunden <= _GM_WACHT_MAX_STD) return '';
+  const wann = d.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return 'steht seit ' + wann + ' (' + Math.floor(stunden) + ' Std.). PAM zeigt dir bis auf Weiteres die alten Akten aus dem GutachtenManager. Laeuft Google Drive?';
+}
+async function _gmWachtPruefen(){
+  if (_gmWachtAus) return;
+  try { await _gmAkteDatenLoad(); } catch(e) { return; }   // kein Token/kein Netz: spaeter wieder
+  const text = _gmWachtBefund(_gmAkteStand, _gmAkteZiel, _gmAkteDateiFehlt, new Date());
+  if (text) _gmWachtBand(text); else _gmWachtBandWeg();
+}
+function _gmWachtStart(){
+  let versuche = 0;
+  const warte = setInterval(function(){
+    versuche++;
+    if (typeof gdriveToken !== 'undefined' && gdriveToken) {
+      clearInterval(warte);
+      _gmWachtPruefen();
+      setInterval(_gmWachtPruefen, _GM_WACHT_TAKT_MS);
+    } else if (versuche > 60) { clearInterval(warte); }    // nach 10 Minuten aufgeben
+  }, 10000);
+}
+if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', _gmWachtStart); } else { _gmWachtStart(); }
+
 
 // „Objekt – Sache". Fehlt eines von beiden, steht das andere allein.
 // Gekappt, damit die Karte lesbar bleibt; abgeschnitten wird an einer Wortgrenze.
