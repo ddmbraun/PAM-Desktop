@@ -10344,7 +10344,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-20 · #1018'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-20-b1018) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-20 · #1019'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-20-b1019) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -51019,6 +51019,28 @@ function _hbStart(){
 window.addEventListener('storage',function(ev){
   if(!ev||!ev.key||ev.newValue===null)return;
   if(window._pamUebergabe||_pamIstPopupOderGast())return;
+  // b1019: Deep-Link ?task= aus einem zweiten Fenster übernehmen – bis b1018 galt die
+  // Übergabe nur für VBS-Aufträge, ein Kartenlink (z.B. aus dem Anruf-Monitor) riss
+  // deshalb ein ZWEITES PAM-Fenster auf. Zwei Fenster überschreiben sich gegenseitig.
+  if(ev.key==='pam_deeplink_task'){
+    let _d=null;try{_d=JSON.parse(ev.newValue||'null');}catch(e){}
+    if(!_d||!_d.id)return;
+    if(Date.now()-(_d.ts||0)>60000)return;   // Altlast aus einer früheren Sitzung
+    try{localStorage.setItem(_HB_QUITTUNG_KEY,JSON.stringify({ts:Date.now(),id:_pamInstanzId}));}catch(e){}
+    try{localStorage.removeItem('pam_deeplink_task');}catch(e){}
+    // ⛔ Nicht in ein offenes Modal hineinöffnen – openEditTaskModal würde eine
+    //    gerade bearbeitete Karte überfahren (dieselbe Lehre wie _vbsDialogSobaldFrei).
+    const _oeffne=function(){
+      try{
+        if(document.querySelector('.modal-overlay.open')){setTimeout(_oeffne,1500);return;}
+        window._pamPendingTaskId=_d.id;
+        if(typeof _pamTryOpenPendingTask==='function')_pamTryOpenPendingTask();
+        window.focus();
+      }catch(e){console.warn('[KAL] Deep-Link übernehmen:',e);}
+    };
+    _oeffne();
+    return;
+  }
   if(ev.key!=='pam_vbs_new_auftrag'&&ev.key!=='pam_vbs_new_immo')return;
   try{localStorage.setItem(_HB_QUITTUNG_KEY,JSON.stringify({ts:Date.now(),id:_pamInstanzId}));}catch(e){}
   _vbsDialogSobaldFrei(ev.key);
@@ -51040,14 +51062,33 @@ function _vbsDialogSobaldFrei(key){
 // ── Frisch per VBS geöffnetes Fenster: an die laufende Instanz übergeben ──
 (function _pamInstanzUebergabe(){
   try{
-    if(!window._pamVbsStartTyp)return;   // kein VBS-Start → ganz normale Instanz
+    // b1019: auch ein Deep-Link ?task= wird übergeben, nicht nur ein VBS-Auftrag.
+    // Ohne das öffnete ein Kartenlink (Anruf-Monitor, Mail, Notiz) ein zweites
+    // PAM-Fenster neben dem laufenden – und zwei Fenster überschreiben sich.
+    if(!window._pamVbsStartTyp){
+      let _dl='';
+      try{_dl=new URLSearchParams(window.location.search).get('task')||'';}catch(e){}
+      if(!_dl)return;                    // weder VBS-Start noch Kartenlink → normale Instanz
+      // Auf dem Handy leitet gdriveInit ohnehin zur mobilen PAM um – hier nichts tun.
+      if(/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent||''))return;
+      window._pamDeepLinkTask=_dl;
+    }
     if(_pamIstPopupOderGast())return;
     if(!_hbFremdeInstanzLebt())return;   // keine andere Instanz → Ablauf wie bisher
     window._pamUebergabe=true;           // gdriveInit bootet dieses Fenster dann NICHT
+    // Beim VBS liegen die Daten schon im localStorage (der Block oben hat sie
+    // abgelegt); der Kartenlink muss seine Kennung selbst hinterlegen.
+    if(window._pamDeepLinkTask){
+      try{localStorage.setItem('pam_deeplink_task',JSON.stringify({id:window._pamDeepLinkTask,ts:Date.now()}));}catch(e){}
+    }
     const ov=document.createElement('div');
     ov.id='_uebergabeOverlay';
     ov.style.cssText='position:fixed;inset:0;z-index:100000;background:var(--bg,#fff);display:flex;align-items:center;justify-content:center;text-align:center;padding:30px;';
-    ov.innerHTML='<div style="max-width:430px;font-size:15px;line-height:1.8;color:var(--text,#111);"><div style="font-size:40px;">📨</div><b>Auftrag wird an das bereits offene PAM-Fenster übergeben…</b><div id="_uebergabeStatus" style="font-size:12.5px;color:var(--text2,#666);margin-top:10px;">Warte auf Bestätigung…</div></div>';
+    // b1019: derselbe Ablauf für Auftrag und Kartenlink, nur der Text ist ein anderer
+    const _uebTitel=window._pamDeepLinkTask
+      ? 'Karte wird im bereits offenen PAM-Fenster geöffnet…'
+      : 'Auftrag wird an das bereits offene PAM-Fenster übergeben…';
+    ov.innerHTML='<div style="max-width:430px;font-size:15px;line-height:1.8;color:var(--text,#111);"><div style="font-size:40px;">📨</div><b>'+_uebTitel+'</b><div id="_uebergabeStatus" style="font-size:12.5px;color:var(--text2,#666);margin-top:10px;">Warte auf Bestätigung…</div></div>';
     const anhaengen=function(){try{document.body.appendChild(ov);}catch(e){setTimeout(anhaengen,100);}};
     anhaengen();
     let fertig=false;
@@ -51071,6 +51112,10 @@ function _vbsDialogSobaldFrei(key){
       // Heartbeat stammt von einem Absturz). Frisch neu laden – die URL ist schon
       // bereinigt, die VBS-Daten liegen im localStorage → dieser Tab bootet dann
       // selbst ganz normal und zeigt den Dialog nach dem Drive-Load.
+      // b1019: Beim Kartenlink steht ?task= noch in der URL – nach dem Neuladen
+      // öffnet der normale Weg die Karte. Der hinterlegte Merker muss dann weg,
+      // sonst springt ein später geöffnetes Fenster noch einmal darauf.
+      try{if(window._pamDeepLinkTask)localStorage.removeItem('pam_deeplink_task');}catch(e){}
       window._pamUebergabe=false;
       window.location.reload();
     },5000);
