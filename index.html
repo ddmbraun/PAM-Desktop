@@ -10344,7 +10344,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-21 · #1020'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-21-b1020) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-21 · #1021'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-21-b1021) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -64020,6 +64020,82 @@ function _fdkPlatzhalterFinden(docXml){
   }
   return out;
 }
+/* ── b1021: Foto UNTER DEN ABSATZ ziehen ───────────────────────────────────────────
+   Frank 21.09.2026: „es muss so sein, dass das Bild unter dem Text ist – wie bekomme ich das
+   richtige Bild zum richtigen Abschnitt?" {Foto}-Zeilen samt Reihenfolge waren zu umständlich.
+   Ist ein Startdokument gewählt, zeigt die Mitte des Fensters jetzt seine Absätze; ein Foto wird
+   einfach unter den passenden Absatz gezogen (_fdkGutachtenZeichnen).
+   _fdkGliederung liefert dafür die Bausteine DIREKT im Textkörper, in Dokumentreihenfolge:
+   Absätze mit Text, Tabellen (als EIN Baustein), {Foto}-Zeilen (nur zur Anzeige, kein Ziel).
+   Nicht angeboten: leere Absätze, Zeilen des Inhaltsverzeichnisses (Formatvorlage Verzeichnis…/
+   TOC…), Absätze mit Abschnittswechsel. Rückgabe [{i, art:'titel'|'text'|'tabelle'|'foto', text,
+   fp, k, n, start, ende}]; `ende` = Stelle direkt HINTER dem Baustein, dort wird eingefügt.
+   fp = Fingerabdruck (Art + Textanfang), k = laufende Nummer gleicher Abdrücke. Damit findet eine
+   Zuordnung ihren Absatz wieder, auch wenn das Gutachten inzwischen in Word ergänzt wurde – und
+   unterscheidet gleiche Texte (der GM setzt z. B. #FragenOhneAntworten zweimal ein). */
+function _fdkGliederung(docXml,stylesXml){
+  const xml=String(docXml||''),out=[];
+  const b0=xml.indexOf('<w:body');if(b0<0)return out;
+  const von=xml.indexOf('>',b0)+1,bis=xml.lastIndexOf('</w:body>');if(bis<von)return out;
+  // Überschriften: Formatvorlagen mit Gliederungsebene (z. B. „Überschrift 1" = berschrift1)
+  const titelStile=new Set();
+  String(stylesXml||'').replace(/<w:style\b[^>]*\bw:styleId="([^"]+)"[^>]*>([\s\S]*?)<\/w:style>/g,function(m,id,inh){if(/<w:outlineLvl w:val="[0-8]"/.test(inh))titelStile.add(id);return m;});
+  const ent=s=>s.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&amp;/g,'&');
+  const textVon=s=>{
+    const teile=[];
+    s.replace(/<w:txbxContent\b[\s\S]*?<\/w:txbxContent>/g,'').split('</w:p>').forEach(abs=>{
+      // Tabulator und Zeilenumbruch im Absatz (Anschrift „Herrn⏎Name⏎Straße") = Leerzeichen
+      const t=ent((abs.match(/<w:t(?:\s[^>]*)?>[^<]*<\/w:t>|<w:tab\/>|<w:br\b[^>]*\/>|<w:cr\/>/g)||[]).map(x=>/^<w:(tab|br|cr)\b/.test(x)?' ':x.replace(/<[^>]+>/g,'')).join('')).replace(/\s+/g,' ').trim();
+      if(t)teile.push(t);
+    });
+    return teile.join(' · ');
+  };
+  const re=/<(\/?)([A-Za-z][\w.-]*(?::[\w.-]+)?)(?:\s[^>]*?)?(\/?)>/g;
+  re.lastIndex=von;
+  let tiefe=0,start=-1,name='',m;
+  const zaehl=new Map();
+  while((m=re.exec(xml))&&m.index<bis){
+    if(m[3])continue;                                   // leeres Element (<w:p/>, Lesezeichen …)
+    if(!m[1]){if(tiefe===0){start=m.index;name=m[2];}tiefe++;continue;}
+    tiefe--;
+    if(tiefe!==0)continue;
+    const ende=m.index+m[0].length,teil=xml.substring(start,ende);
+    let art='',text='',n=0;
+    if(name==='w:p'){
+      if(teil.indexOf('<w:sectPr')>=0)continue;
+      const stil=(teil.match(/<w:pStyle w:val="([^"]*)"/)||[])[1]||'';
+      if(/^(verzeichnis|toc|inhaltsverzeichnis)/i.test(stil))continue;
+      text=textVon(teil);
+      if(!text)continue;
+      const mk=text.match(/^\{\s*foto\s*(\d+)?\s*\}$/i);
+      if(mk&&teil.indexOf('<w:drawing')<0){art='foto';n=mk[1]?parseInt(mk[1],10):0;}
+      else art=(titelStile.has(stil)||/<w:outlineLvl w:val="[0-8]"/.test(teil))?'titel':'text';
+    }else if(name==='w:tbl'){
+      art='tabelle';text=textVon(teil)||'Tabelle';
+    }else if(name==='w:sdt'){
+      if(/Table of Contents|TOC \\/.test(teil))continue;   // Inhaltsverzeichnis als Inhaltssteuerelement
+      text=textVon(teil);if(!text)continue;art='text';
+    }else continue;
+    const fp=art+':'+text.substring(0,60);
+    const k=zaehl.get(fp)||0;zaehl.set(fp,k+1);
+    out.push({i:out.length,art:art,text:text.length>160?text.substring(0,157).trim()+' …':text,fp:fp,k:k,n:n,start:start,ende:ende});
+  }
+  return out;
+}
+/* b1021: Wo steht der Absatz einer gemerkten Zuordnung {i, fp, k} heute? Zuerst derselbe
+   Fingerabdruck mit derselben laufenden Nummer, dann die alte Stelle, sonst der nächstgelegene
+   gleiche Absatz. -1 = nicht mehr da – das Foto kommt dann hinten in den Anhang. */
+function _fdkPlatzFinden(gl,p){
+  if(!Array.isArray(gl)||!p||!p.fp)return -1;
+  const kand=gl.filter(x=>x.art!=='foto'&&x.fp===p.fp);
+  if(!kand.length)return -1;
+  const gleich=kand.find(x=>x.k===(parseInt(p.k,10)||0));
+  if(gleich)return gleich.i;
+  const i=parseInt(p.i,10);
+  if(gl[i]&&gl[i].art!=='foto'&&gl[i].fp===p.fp)return i;
+  let best=kand[0];kand.forEach(x=>{if(Math.abs(x.i-i)<Math.abs(best.i-i))best=x;});
+  return best.i;
+}
 /* ── b759: Textplatzhalter ({Objekt}, {Datum}, …) ────────────────────────────────
    NICHT zu verwechseln mit _fdkPlatzhalterFinden – das kann ausschließlich {Foto} und
    ersetzt GANZE ABSÄTZE durch ein Bild. Hier geht es um Text mitten in der Zeile.
@@ -64136,11 +64212,28 @@ async function _fdkDocxBauen(startBuf,bilder,opt){
     return {rId:rId,docPrId:dpMax+1000+k,name:'Abb. '+nr,cx:s.cx,cy:s.cy};
   };
   // ── Platzhalter {Foto} / {Foto N} im Startdokument ─────────────────────────────
-  const verbraucht=new Set();let platz=0,leer=0;
+  const verbraucht=new Set();let platz=0,leer=0,imText=0,verloren=0;
+  // b1021: Fotos, die Frank im Fenster UNTER EINEN ABSATZ gezogen hat (b.nach={i,fp,k}). Aufgelöst
+  // wird gegen die Gliederung DIESES Dokuments (Fingerabdruck, _fdkPlatzFinden). Steht der Absatz
+  // nicht mehr da, kommt das Foto wie bisher hinten in den Block (gezählt in `verloren`).
+  // Ohne b.nach läuft alles wie vor b1021 – gleiche Reihenfolge, gleiche Nummern, gleiches XML.
+  const nach=new Map();
+  if(startBuf&&liste.some(b=>b&&b.nach&&!b.plan)){
+    let stylesXml='';
+    try{const sp=zip.file('word/styles.xml');if(sp)stylesXml=await sp.async('string');}catch(e){}
+    const gl=_fdkGliederung(docXml,stylesXml);
+    liste.forEach(b=>{
+      if(!b||!b.nach||b.plan)return;
+      const gi=_fdkPlatzFinden(gl,b.nach);
+      if(gi<0){verloren++;return;}
+      nach.set(b,gl[gi]);verbraucht.add(b);
+    });
+  }
+  const stellen=[];   // b1021: alle Einfügestellen im Text {pos, rang, start, ende, b, tabelle}
   if(startBuf&&opt.platzhalter!==false){
-    const fotos=liste.filter(b=>!b.plan);
+    const fotos=liste.filter(b=>!b.plan&&!nach.has(b));
     const marker=_fdkPlatzhalterFinden(docXml);
-    const ersatz=[];let lauf=0;
+    let lauf=0;
     // b1002 (Frank 13.09.: „warum ist das Übersichtsbild nicht als erstes da?"): die Dachplan-
     // Übersicht nimmt die ERSTE {Foto}-Zeile. Vorher kam sie hinter alle Platzhalter-Fotos
     // (2-Fotos-Vorlage: Abb. 3), obwohl die Vorschau im Fenster sie als Abb. 1 zählt.
@@ -64151,15 +64244,27 @@ async function _fdkDocxBauen(startBuf,bilder,opt){
       if(planBild&&!mk.n&&!verbraucht.has(planBild))b=planBild;
       else if(mk.n){if(mk.n>=1&&mk.n<=fotos.length&&!verbraucht.has(fotos[mk.n-1]))b=fotos[mk.n-1];}
       else{while(lauf<fotos.length&&verbraucht.has(fotos[lauf]))lauf++;if(lauf<fotos.length)b=fotos[lauf];}
-      if(!b){ersatz.push({start:mk.start,ende:mk.ende,xml:''});leer++;continue;}   // kein Foto mehr: Zeile entfernen
+      if(!b){stellen.push({pos:mk.start,rang:1,start:mk.start,ende:mk.ende,b:null});leer++;continue;}   // kein Foto mehr: Zeile entfernen
       verbraucht.add(b);
-      const bild=reg(b);
-      ersatz.push({start:mk.start,ende:mk.ende,xml:_fdkBlockXml(bild,nr,m,b.text)+_FDK_P_LEER});
-      nr++;platz++;
+      stellen.push({pos:mk.start,rang:1,start:mk.start,ende:mk.ende,b:b});
+      platz++;
     }
-    // von hinten nach vorn ersetzen, damit die gemerkten Stellen gültig bleiben
-    ersatz.sort((a,b)=>b.start-a.start).forEach(e=>{docXml=docXml.substring(0,e.start)+e.xml+docXml.substring(e.ende);});
   }
+  // b1021: Fotos unter ihrem Absatz. rang 0: stößt die Stelle direkt an eine {Foto}-Zeile, kommt
+  // das Foto des Absatzes zuerst. Nach einer Tabelle ein Leerabsatz davor, sonst verschmilzt
+  // Word die beiden Tabellen.
+  nach.forEach((it,b)=>{stellen.push({pos:it.ende,rang:0,start:it.ende,ende:it.ende,b:b,tabelle:it.art==='tabelle'});imText++;});
+  // Nummern in Dokumentreihenfolge; mehrere Fotos unter demselben Absatz in der Reihenfolge der Liste
+  const _ix=b=>liste.indexOf(b);
+  stellen.sort((a,c)=>a.pos-c.pos||a.rang-c.rang||_ix(a.b)-_ix(c.b));
+  stellen.forEach(s=>{
+    if(!s.b){s.xml='';return;}
+    const bild=reg(s.b);
+    s.xml=(s.tabelle?_FDK_P_LEER:'')+_fdkBlockXml(bild,nr,m,s.b.text)+_FDK_P_LEER;
+    nr++;
+  });
+  // von hinten nach vorn ersetzen, damit die gemerkten Stellen gültig bleiben
+  stellen.slice().reverse().forEach(s=>{docXml=docXml.substring(0,s.start)+s.xml+docXml.substring(s.ende);});
   // ── Übrige Fotos (und die Dachplan-Übersicht) als Block hinten ──────────────────
   const rest=liste.filter(b=>!verbraucht.has(b));
   let xml='';
@@ -64206,7 +64311,7 @@ async function _fdkDocxBauen(startBuf,bilder,opt){
   zip.file('word/document.xml',docXml);
   zip.file(relsPfad,rels);
   zip.file('[Content_Types].xml',ct);
-  opt.ergebnis={platzhalter:platz,leer:leer,hinten:rest.length,proSeite:proSeite,felder:feldZahl};
+  opt.ergebnis={platzhalter:platz,leer:leer,hinten:rest.length,proSeite:proSeite,felder:feldZahl,imText:imText,verloren:verloren};
   return await zip.generateAsync({type:'uint8array',compression:'DEFLATE',compressionOptions:{level:6},mimeType:_FDK_MIME_DOCX});
 }
 
@@ -64475,6 +64580,15 @@ function _fdkOeffnen(vorauswahl){
     _fdkState.dok=t.fdkStand.dok.map(String).filter(function(k){return da.has(k);});
     _fdkState.filter=t.fdkStand.filter||'alle';
   }
+  // b1021: Zuordnung „unter diesen Absatz". Gilt je Startdokument (platzDoc) und wird erst
+  // wirksam, wenn genau dieses Dokument wieder gewählt ist – die Gliederung liefert
+  // _fdkVorlagePruefen. Nur für Fotos, die gerade im Dokument liegen.
+  _fdkState.gl=null;_fdkState.platz={};_fdkState.platzDoc='';_fdkState.platzJe={};
+  if(t.fdkStand&&t.fdkStand.platz&&typeof t.fdkStand.platz==='object'){
+    const _imDok=new Set(_fdkState.dok);
+    Object.keys(t.fdkStand.platz).forEach(function(k){const p=t.fdkStand.platz[k];if(_imDok.has(k)&&p&&p.fp)_fdkState.platz[k]={i:parseInt(p.i,10)||0,fp:String(p.fp),k:parseInt(p.k,10)||0};});
+    _fdkState.platzDoc=String(t.fdkStand.platzDoc||'');
+  }
   _fdkStyle();
   const alt=document.getElementById('fdkOverlay');if(alt)alt.remove();
   const ov=document.createElement('div');ov.id='fdkOverlay';
@@ -64520,7 +64634,8 @@ function _fdkOeffnen(vorauswahl){
         +'<label><input type="checkbox" id="fdkBeschriftung" checked> Beschriftung aus PAM unter das Foto („Abb. N: Text")</label>'
         +'<label><input type="checkbox" id="fdkKasten"> Einheitliches 4:3-Kästchen – mittig zuschneiden, Ränder gehen verloren (hochkant bleibt 3:4)</label>'
         +(planMoeglich?'<label><input type="checkbox" id="fdkPlan" checked onchange="_fdkListeZeichnen()"> 🗺 Dachplan-Übersicht als Bild voranstellen</label>':'<div style="font-size:11px;color:var(--text2);">🗺 Dachplan-Übersicht: im Dachplan erst „🖼 Übersicht“ speichern (oder ein eigenes Bild laden).</div>')
-        +'<div class="fdk-hinweis">Unter jedem Foto steht „Abb. N: Text" aus PAM – Haken abwählen, wenn du den Text lieber selbst in Word schreibst.<br>'
+        +'<div class="fdk-hinweis"><b>Foto unter einen Absatz:</b> Word-Datei oben wählen – dann zeigt die Mitte ihre Absätze. Foto einfach unter den passenden Absatz ziehen; was keinem Absatz gehört, kommt hinten ans Dokument.<br>'
+        +'Unter jedem Foto steht „Abb. N: Text" aus PAM – Haken abwählen, wenn du den Text lieber selbst in Word schreibst.<br>'
         +'<b>Platzhalter:</b> Schreib im Startdokument eine eigene Zeile <b>{Foto}</b> dort, wo ein Foto hin soll – PAM füllt sie von oben nach unten aus dem Dokument rechts; <b>{Foto 3}</b> holt gezielt das dritte. Die 🗺 Dachplan-Übersicht nimmt die erste <b>{Foto}</b>-Zeile. Übrige Fotos kommen als Block hinten.<br>'
         +'Ergebnis = <b>neue Datei</b> im Dokumente-Ordner des Auftrags (+ Herunterladen; ohne Dokumente-Ordner: im Projektordner), Startdokument und Vorlage bleiben unverändert. Kopf-/Fußzeile und Seitenzahlen laufen aus deinem Dokument weiter.</div>'
         +'</div>'
@@ -64589,6 +64704,7 @@ async function _fdkVorlagePruefen(){
   const lauf=++_fdkVorlageLauf;
   h.style.display='none';h.innerHTML='';
   const art=(document.querySelector('input[name="fdkStartArt"]:checked')||{}).value||'ohne';
+  if(typeof _fdkGliederungSetzen==='function')_fdkGliederungSetzen(null);   // b1021: alte Gliederung weg, bis die neue Datei gelesen ist
   try{
     let buf=null;
     if(art==='drive'){
@@ -64614,7 +64730,55 @@ async function _fdkVorlagePruefen(){
       h.innerHTML='⚠ Diese Vorlage hat <b>keine Startseite</b> – nur Kopf-/Fußzeile und Fotoseiten. Für ein Anschreiben oder einen Kopfblock vorne: <b>Stellungnahme-Vorlage</b> oder <b>Fotodoku-Vorlage_mit-Kopfblock</b>.';
       h.style.display='';
     }
+    // b1021: Absätze für „Foto unter den Absatz ziehen" (eigener Wächter über lauf)
+    if(typeof _fdkGliederungLaden==='function')await _fdkGliederungLaden(zip,art,lauf);
   }catch(e){console.warn('[FDK] Vorlage prüfen:',e);}
+}
+/* b1021: Gliederung der gewählten Word-Datei lesen und anzeigen. Kennung = Drive-Datei bzw.
+   Name + Größe der Datei von der Festplatte – daran hängt die gemerkte Zuordnung. */
+async function _fdkGliederungLaden(zip,art,lauf){
+  const S=_fdkState;if(!S||!zip)return;
+  const dp=zip.file('word/document.xml');if(!dp)return;
+  const docXml=await dp.async('string');
+  let stylesXml='';const sp=zip.file('word/styles.xml');if(sp)stylesXml=await sp.async('string');
+  if(lauf!==_fdkVorlageLauf||_fdkState!==S)return;          // inzwischen umgewählt oder Fenster zu
+  let kennung='',name='';
+  if(art==='drive'){
+    const sel=document.getElementById('fdkStartSel');
+    kennung='d:'+((sel&&sel.value)||'');
+    const o=sel&&sel.selectedIndex>=0?sel.options[sel.selectedIndex]:null;name=o?o.text:'';
+  }else if(art==='datei'){
+    const inp=document.getElementById('fdkStartDatei');const f=inp&&inp.files&&inp.files[0];
+    kennung='f:'+(f?(f.name+':'+f.size):'');name=f?f.name:'';
+  }else return;
+  _fdkGliederungSetzen(_fdkGliederung(docXml,stylesXml),kennung,name);
+}
+/* b1021: gl = Gliederung (oder null = keine Absatz-Ansicht). Zuordnungen werden je Startdokument
+   getrennt gehalten – wer umwählt und zurückkommt, findet sie wieder – und beim Laden auf die
+   frische Gliederung umgerechnet (der Absatz kann sich verschoben haben). Hat die Datei keinen
+   Text (nur {Foto}-Zeilen, z. B. die Fotodoku-Vorlage), bleibt die bisherige Ansicht. */
+function _fdkGliederungSetzen(gl,kennung,name){
+  const S=_fdkState;if(!S)return;
+  const hatText=Array.isArray(gl)&&gl.some(function(x){return x.art!=='foto';});
+  if(!hatText){if(S.gl){S.gl=null;_fdkListeZeichnen();}return;}
+  if(!S.platzJe)S.platzJe={};
+  kennung=String(kennung||'');
+  if(S.platzDoc!==kennung){
+    if(S.platzDoc)S.platzJe[S.platzDoc]=S.platz||{};
+    S.platz=S.platzJe[kennung]||(S.platzDoc?{}:(S.platz||{}));
+    S.platzDoc=kennung;
+  }
+  if(!S.platz)S.platz={};
+  S.gl={items:gl,kennung:kennung,name:String(name||'')};
+  let weg=0;
+  Object.keys(S.platz).forEach(function(k){
+    if(S.dok.indexOf(k)<0){delete S.platz[k];return;}
+    const gi=_fdkPlatzFinden(gl,S.platz[k]);
+    if(gi<0){delete S.platz[k];weg++;return;}
+    S.platz[k]={i:gi,fp:gl[gi].fp,k:gl[gi].k};
+  });
+  if(weg)showToast('ℹ Bei '+weg+' Foto'+(weg!==1?'s':'')+' steht der Absatz nicht mehr im Dokument – '+(weg!==1?'sie liegen':'es liegt')+' jetzt im Anhang','info',7000);
+  _fdkListeZeichnen();
 }
 function _fdkStandMerken(){
   // b793: Auswahl, Reihenfolge und Einstellungen ueberleben das Schliessen am Auftrag.
@@ -64624,6 +64788,9 @@ function _fdkStandMerken(){
   const h=function(id){const el=document.getElementById(id);return !!(el&&el.checked);};
   t.fdkStand={dok:(S.dok||[]).slice(),startNr:w('fdkStartNr'),proSeite:w('fdkProSeite'),
     beschriftung:h('fdkBeschriftung'),kasten:h('fdkKasten'),plan:h('fdkPlan'),filter:S.filter||'alle'};
+  // b1021: Zuordnung „unter diesen Absatz" – nur für Fotos, die noch im Dokument liegen
+  const _pl={};if(S.platz)Object.keys(S.platz).forEach(function(k){if((S.dok||[]).indexOf(k)>=0)_pl[k]=S.platz[k];});
+  t.fdkStand.platz=_pl;t.fdkStand.platzDoc=S.platzDoc||'';
   if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
 }
 function _fdkSchliessen(){_fdkStandMerken();const ov=document.getElementById('fdkOverlay');if(ov)ov.remove();_fdkState=null;_fdkDragIdx=-1;}
@@ -64737,6 +64904,7 @@ function _fdkFlaecheVerdrahten(box,art){
     if(dateien){_fdkDateienAbgelegt(ev.dataTransfer,art==='dok');return;}
     const d=_fdkState.drag;_fdkDragEnd();
     if(!d)return;
+    if(_fdkState.platz&&_fdkState.platz[d.key]){delete _fdkState.platz[d.key];_fdkListeZeichnen();}   // b1021: auf die Fläche gelegt = kein Absatz mehr
     if(art==='dok'){if(d.quelle==='vorrat')_fdkDokEinfuegen(d.key);else _fdkDokVerschiebe(_fdkState.dok.indexOf(d.key),_fdkState.dok.length-1);}
     else if(d.quelle==='dok')_fdkDokEntfernen(d.key);
   });
@@ -64787,6 +64955,7 @@ function _fdkVorratZeichnen(box){
   _fdkBilderNachladen(box);
 }
 function _fdkDokZeichnen(box){
+  if(_fdkState&&_fdkState.gl&&typeof _fdkGutachtenZeichnen==='function'){_fdkGutachtenZeichnen(box);return;}   // b1021: Absatz-Ansicht
   const S=_fdkState;const nummern=_fdkNummern();
   const eintraege=_fdkAuswahl();
   if(!eintraege.length){box.innerHTML='<div class="fdk-leer">Fotos hierher ziehen<br><small>oder links doppelklicken · „Alle →" nimmt alle sichtbaren</small></div>';return;}
@@ -64807,6 +64976,137 @@ function _fdkDokZeichnen(box){
   });
   _fdkBilderNachladen(box);
 }
+/* b1021: Mitte des Fensters, wenn ein Startdokument gewählt ist – das Dokument als Liste seiner
+   Absätze. Foto auf einen Absatz ziehen = es steht im Word DIREKT DARUNTER. Fotos ohne Absatz
+   liegen unten im „Anhang" und kommen wie bisher gesammelt hinten ans Dokument. Die Kacheln
+   bedienen sich wie in der flachen Ansicht (Klick = Vorschau, Doppelklick = groß, ✏️, ✕).
+   Dateien aus dem Explorer gehen weiter an die Fläche (Hochladen, landet im Anhang). */
+function _fdkGutachtenZeichnen(box){
+  const S=_fdkState;if(!S||!S.gl||!box)return;
+  _fdkStyleGl();
+  const nummern=_fdkNummern();
+  const unter=new Map(),anhang=[];
+  _fdkAuswahl().forEach(function(e){
+    const p=S.platz&&S.platz[e.key];const it=p?S.gl.items[p.i]:null;
+    if(it&&it.art!=='foto'){if(!unter.has(it.i))unter.set(it.i,[]);unter.get(it.i).push(e);}else anhang.push(e);
+  });
+  let h='<div class="fdk-gl-kopf">📄 <b>'+esc(S.gl.name||'Startdokument')+'</b><br>Foto auf den passenden <b>Absatz</b> ziehen – im Word steht es direkt darunter. Was keinem Absatz gehört, liegt unten im <b>Anhang</b> und kommt hinten ans Dokument.</div>';
+  S.gl.items.forEach(function(it){
+    if(it.art==='foto'){h+='<div class="fdk-gl-zeile foto">📷 Zeile {Foto'+(it.n?' '+it.n:'')+'} – hier setzt PAM ein Foto aus dem Anhang ein</div>';return;}
+    const fotos=unter.get(it.i)||[];
+    h+='<div class="fdk-gl-zeile '+it.art+(fotos.length?' belegt':'')+'" data-gl="'+it.i+'"><div class="fdk-gl-text">'+esc(it.text)+'</div>'
+      +(fotos.length?'<div class="fdk-gl-fotos">'+fotos.map(function(e){return _fdkKachelHtml(e,'dok',nummern.get(e.key));}).join('')+'</div>':'')
+      +'</div>';
+  });
+  h+='<div class="fdk-gl-anhang"><div class="fdk-gl-anhang-titel">📎 Anhang – kommt hinten ans Dokument ('+anhang.length+')</div>'
+    +(anhang.length?'<div class="fdk-grid">'+anhang.map(function(e){return _fdkKachelHtml(e,'dok',nummern.get(e.key));}).join('')+'</div>'
+      :'<div class="fdk-gl-leer">Fotos hierher ziehen – oder links doppelklicken</div>')+'</div>';
+  const oben=box.scrollTop;
+  box.innerHTML=h;
+  box.scrollTop=oben;   // beim Neuzeichnen nicht nach oben springen
+  // Ziel verdrahten: nur internes Ziehen. Dateien aus dem Explorer laufen durch zur Fläche.
+  const ziel=function(el,ablegen){
+    el.ondragover=function(ev){if(!_fdkInternesZiehen())return;ev.preventDefault();ev.stopPropagation();try{ev.dataTransfer.dropEffect='move';}catch(e){}box.classList.remove('ziel');el.classList.add('ziel');};
+    el.ondragleave=function(ev){if(!el.contains(ev.relatedTarget))el.classList.remove('ziel');};
+    el.ondrop=function(ev){if(!_fdkInternesZiehen())return;ev.preventDefault();ev.stopPropagation();el.classList.remove('ziel');const d=_fdkState&&_fdkState.drag;_fdkDragEnd();if(d)ablegen(d.key);};
+  };
+  box.querySelectorAll('.fdk-gl-zeile[data-gl]').forEach(function(z){const i=parseInt(z.dataset.gl,10);ziel(z,function(key){_fdkPlatzSetzen(key,i);});});
+  const an=box.querySelector('.fdk-gl-anhang');if(an)ziel(an,_fdkPlatzLoesen);
+  box.querySelectorAll('.fdk-kachel').forEach(function(k){
+    const key=k.dataset.key,imAnhang=!!k.closest('.fdk-gl-anhang');
+    k.onclick=function(ev){if(ev.target&&ev.target.classList&&ev.target.classList.contains('fdk-kx'))return;_fdkVorschau(key);};
+    k.ondblclick=function(ev){ev.preventDefault();_fdkGrossAnsicht(key);};
+    k.ondragstart=function(ev){ev.stopPropagation();_fdkDragStart(ev,'dok',key);};
+    k.ondragend=_fdkDragEnd;
+    if(imAnhang){   // im Anhang: vor/hinter eine andere Kachel = Reihenfolge wie bisher
+      k.ondragover=function(ev){if(_fdkInternesZiehen())ev.stopPropagation();_fdkTileDragOver(ev,k);};
+      k.ondragleave=function(){k.classList.remove('ins-vor','ins-nach');};
+      k.ondrop=function(ev){_fdkAnhangTileDrop(ev,k,_fdkState?_fdkState.dok.indexOf(key):-1);};
+    }
+    const x=k.querySelector('.fdk-kx');if(x)x.onclick=function(ev){ev.stopPropagation();_fdkDokEntfernen(x.dataset.x);};
+    const m=k.querySelector('.fdk-kmal');
+    if(m){m.onclick=function(ev){ev.stopPropagation();_fdkMalen(m.dataset.mal);};m.ondblclick=function(ev){ev.stopPropagation();ev.preventDefault();};}
+  });
+  _fdkBilderNachladen(box);
+}
+/* b1021: Foto unter Absatz i legen (aus dem Vorrat, dem Anhang oder von einem anderen Absatz).
+   Es rückt ans Ende der Liste – unter demselben Absatz steht das zuletzt gezogene unten. */
+function _fdkPlatzSetzen(key,i){
+  const S=_fdkState;if(!S||!S.gl||!key)return false;
+  const it=S.gl.items[i];if(!it||it.art==='foto')return false;
+  if(!S.liste.some(function(e){return e.key===key;}))return false;
+  const j=S.dok.indexOf(key);if(j>=0)S.dok.splice(j,1);
+  S.dok.push(key);
+  if(!S.platz)S.platz={};
+  S.platz[key]={i:it.i,fp:it.fp,k:it.k};
+  _fdkListeZeichnen();return true;
+}
+/* b1021: Foto ohne Absatz = in den Anhang (ans Ende); aus dem Vorrat kommt es neu dazu. */
+function _fdkPlatzLoesen(key){
+  const S=_fdkState;if(!S||!key)return;
+  if(S.platz)delete S.platz[key];
+  const j=S.dok.indexOf(key);
+  if(j>=0)S.dok.splice(j,1);else if(!S.liste.some(function(e){return e.key===key;}))return;
+  S.dok.push(key);
+  _fdkListeZeichnen();
+}
+/* b1021: Kachel im Anhang als Ziel – Reihenfolge wie bisher (_fdkDokTileDrop), dazu fällt eine
+   Absatz-Zuordnung des gezogenen Fotos weg. */
+function _fdkAnhangTileDrop(ev,el,i){
+  if(!_fdkInternesZiehen())return;
+  const S=_fdkState;const d=S&&S.drag;
+  if(d&&S.platz)delete S.platz[d.key];
+  if(i<0){ev.preventDefault();ev.stopPropagation();_fdkDragEnd();if(d)_fdkPlatzLoesen(d.key);return;}
+  _fdkDokTileDrop(ev,el,i);
+  _fdkListeZeichnen();
+}
+/* b1021: Nummern so, wie sie im Word stehen werden – in Dokumentreihenfolge: {Foto}-Zeilen an
+   ihrer Stelle, Fotos unter ihrem Absatz, danach der Anhang (dort zuerst die Dachplan-Übersicht).
+   Dieselben Regeln wie _fdkDocxBauen: die Übersicht nimmt die erste {Foto}-Zeile ohne Nummer,
+   {Foto N} holt das N-te Foto des Anhangs. */
+function _fdkNummernGutachten(S,startNr){
+  const m=new Map();if(!S||!S.gl)return m;
+  let nr=startNr>0?startNr:1;
+  const plan=!!(S.planMoeglich&&((document.getElementById('fdkPlan')||{}).checked));
+  const dok=S.dok.filter(function(k){return S.liste.some(function(e){return e.key===k;});});
+  const unterI=function(k){const p=S.platz&&S.platz[k];const it=p?S.gl.items[p.i]:null;return (it&&it.art!=='foto')?it.i:-1;};
+  const frei=dok.filter(function(k){return unterI(k)<0;});
+  const benutzt=new Set();let planDa=false,lauf=0;
+  S.gl.items.forEach(function(it){
+    if(it.art==='foto'){
+      if(plan&&!planDa&&!it.n){planDa=true;nr++;return;}
+      let k=null;
+      if(it.n){const c=frei[it.n-1];if(c&&!benutzt.has(c))k=c;}
+      else{while(lauf<frei.length&&benutzt.has(frei[lauf]))lauf++;if(lauf<frei.length)k=frei[lauf];}
+      if(k){benutzt.add(k);m.set(k,nr++);}
+      return;
+    }
+    dok.forEach(function(k){if(unterI(k)===it.i)m.set(k,nr++);});
+  });
+  if(plan&&!planDa)nr++;
+  frei.forEach(function(k){if(!benutzt.has(k))m.set(k,nr++);});
+  return m;
+}
+function _fdkStyleGl(){
+  if(document.getElementById('fdkStyleGl'))return;
+  const s=document.createElement('style');s.id='fdkStyleGl';
+  s.textContent='.fdk-gl-kopf{font-size:11px;color:var(--text2);line-height:1.5;padding:4px 6px 8px;}.fdk-gl-kopf b{color:var(--text);}'
+    +'.fdk-gl-zeile{position:relative;border:2px solid transparent;border-radius:8px;padding:4px 8px;margin:1px 0;}'
+    +'.fdk-gl-zeile[data-gl]:hover{background:var(--bg3);}'
+    +'.fdk-gl-text{font-size:12px;line-height:1.45;color:var(--text);word-break:break-word;}'
+    +'.fdk-gl-zeile.titel{margin-top:8px;}.fdk-gl-zeile.titel .fdk-gl-text{font-weight:700;font-size:13px;}'
+    +'.fdk-gl-zeile.tabelle .fdk-gl-text{font-style:italic;color:var(--text2);}'
+    +'.fdk-gl-zeile.foto{font-size:11px;color:var(--text2);background:var(--bg3);}'
+    +'.fdk-gl-zeile.belegt{background:rgba(108,99,255,.06);}'
+    +'.fdk-gl-fotos{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}.fdk-gl-fotos .fdk-kachel{width:140px;}'
+    +'.fdk-gl-zeile.ziel{border-color:var(--accent);background:rgba(108,99,255,.12);}'
+    +'.fdk-gl-zeile.ziel::after{content:"⬇ Foto kommt unter diesen Absatz";position:absolute;right:8px;bottom:0;transform:translateY(50%);font-size:11px;font-weight:700;color:#fff;background:var(--accent);padding:2px 8px;border-radius:8px;z-index:2;pointer-events:none;}'
+    +'.fdk-gl-anhang{margin-top:14px;border:2px dashed var(--border);border-radius:10px;padding:6px;}'
+    +'.fdk-gl-anhang.ziel{border-color:var(--accent);background:rgba(108,99,255,.08);}'
+    +'.fdk-gl-anhang-titel{font-size:12px;font-weight:700;color:var(--text);padding:2px 4px 6px;}'
+    +'.fdk-gl-leer{padding:14px;text-align:center;font-size:12px;color:var(--text2);}';
+  document.head.appendChild(s);
+}
 /* Dokument-Reihenfolge bearbeiten – jede Änderung zeichnet beide Flächen neu */
 function _fdkDokEinfuegen(key,pos){
   const S=_fdkState;if(!S||!key)return false;
@@ -64815,10 +65115,10 @@ function _fdkDokEinfuegen(key,pos){
   if(typeof pos==='number'&&pos>=0&&pos<S.dok.length)S.dok.splice(pos,0,key);else S.dok.push(key);
   _fdkListeZeichnen();return true;
 }
-function _fdkDokEntfernen(key){const S=_fdkState;if(!S)return;const i=S.dok.indexOf(key);if(i<0)return;S.dok.splice(i,1);_fdkListeZeichnen();}
+function _fdkDokEntfernen(key){const S=_fdkState;if(!S)return;const i=S.dok.indexOf(key);if(i<0)return;S.dok.splice(i,1);if(S.platz)delete S.platz[key];_fdkListeZeichnen();}
 function _fdkDokVerschiebe(von,nach){const S=_fdkState;if(!S)return;const L=S.dok;if(von<0||von>=L.length||nach<0||nach>=L.length||von===nach)return;const k=L.splice(von,1)[0];L.splice(nach,0,k);_fdkListeZeichnen();}
 function _fdkAlleRein(){const S=_fdkState;if(!S)return;S.liste.filter(e=>_fdkSichtbar(e,S.filter)&&S.dok.indexOf(e.key)<0).forEach(e=>S.dok.push(e.key));_fdkListeZeichnen();}
-function _fdkAlleRaus(){const S=_fdkState;if(!S)return;S.dok=[];_fdkListeZeichnen();}
+function _fdkAlleRaus(){const S=_fdkState;if(!S)return;S.dok=[];if(S.platz)S.platz={};_fdkListeZeichnen();}
 function _fdkTileDragOver(ev,el){
   if(!_fdkInternesZiehen())return;       // Dateien aus dem Explorer: übernimmt die Fläche
   ev.preventDefault();try{ev.dataTransfer.dropEffect='move';}catch(e){}
@@ -64870,6 +65170,7 @@ function _fdkStammblattEintragen(){
 function _fdkNummern(){
   const S=_fdkState;const m=new Map();if(!S)return m;
   let nr=parseInt((document.getElementById('fdkStartNr')||{}).value,10);if(!(nr>0))nr=1;
+  if(S.gl&&typeof _fdkNummernGutachten==='function')return _fdkNummernGutachten(S,nr);   // b1021: Reihenfolge wie im Word
   if(S.planMoeglich&&((document.getElementById('fdkPlan')||{}).checked))nr++;
   S.dok.forEach(k=>{if(S.liste.some(e=>e.key===k)){m.set(k,nr);nr++;}});
   return m;
@@ -65096,6 +65397,7 @@ function _fdkZurueckAusMalen(altKey){
        in den Vorrat – die Abbildungsnummer wäre weg. */
     e.key=neu;e.driveId=neu;e.thumb='';
     const i=S.dok.indexOf(altKey);if(i>=0)S.dok[i]=neu;
+    if(S.platz&&S.platz[altKey]){S.platz[neu]=S.platz[altKey];delete S.platz[altKey];}   // b1021: bleibt unter seinem Absatz
     if(S.vorschauKey===altKey)S.vorschauKey=neu;
     showToast('✓ Bemalte Fassung übernommen','success');
   }
@@ -65210,6 +65512,8 @@ function _fdkLeihErgebnis(e,meta,legende){
     if(S.dok.indexOf(meta.id)<0)S.dok[i]=meta.id;
     else S.dok.splice(i,1);
   }
+  // b1021: … und unter demselben Absatz wie der Beleg
+  if(S.platz&&S.platz[e.key]){if(i>=0)S.platz[meta.id]=S.platz[e.key];delete S.platz[e.key];}
   S.vorschauKey=meta.id;
   _fdkListeZeichnen();
   showToast('✓ Als Auftragsfoto abgelegt – der Wartungsnachweis bleibt unberührt','success',6000);
@@ -65391,6 +65695,7 @@ async function _fdkErstellen(ziel){
       n++;sag('⏳ Foto '+n+' von '+auswahl.length+' wird geholt…');
       const b=await _fdkFotoBytes(e.driveId,kasten);
       if(b){b.text=beschriftung?(e.caption||''):'';if(beschriftung&&!b.text)b.text=_fdkPinTitel(e);b.ts=e.ts||'';bilder.push(b);}else fehl.push(e.caption||e.name||e.driveId); // b1002: Pin-Titel als Ersatz
+      if(b&&S.gl&&S.platz&&S.platz[e.key])b.nach=S.platz[e.key];   // b1021: unter diesen Absatz (eigene Zeile – test_b1002 führt die Zeile davor einzeln aus)
     }
     if(!bilder.length&&!nurFelder)throw new Error('Kein Foto ließ sich laden.');
     const startNr=parseInt((document.getElementById('fdkStartNr')||{}).value,10)||1;
@@ -65453,7 +65758,8 @@ async function _fdkErstellen(ziel){
       }catch(e){console.warn('[FDK] Ablage:',e);ablage='⚠ Ablage in Drive fehlgeschlagen – bitte herunterladen';}
     }else ablage='ℹ kein Drive-Ordner am Auftrag – bitte herunterladen';
     const erg=bau.ergebnis||{};
-    const platzText=(erg.platzhalter?(' · '+erg.platzhalter+' Platzhalter gefüllt'):'')+(erg.leer?(' · '+erg.leer+' Platzhalter ohne Foto entfernt'):'')+(erg.felder?(' · '+erg.felder+(erg.felder===1?' Feld':' Felder')+' eingesetzt'):'');
+    const platzText=(erg.platzhalter?(' · '+erg.platzhalter+' Platzhalter gefüllt'):'')+(erg.leer?(' · '+erg.leer+' Platzhalter ohne Foto entfernt'):'')+(erg.felder?(' · '+erg.felder+(erg.felder===1?' Feld':' Felder')+' eingesetzt'):'')
+      +(erg.imText?(' · '+erg.imText+' unter '+(erg.imText===1?'seinem Absatz':'ihren Absätzen')):'')+(erg.verloren?(' · ⚠ '+erg.verloren+' ohne Absatz hinten angehängt'):'');   // b1021
     // b778: beim Formular gibt es keine Abbildungen zu melden – dort zählt, was gefüllt wurde.
     sag(nurFelder
       ? ('✓ Fertig: Formular ohne Fotos'+(erg.felder?(' · '+erg.felder+(erg.felder===1?' Feld':' Felder')+' eingesetzt'):' · ⚠ kein Feld gefüllt – stehen die Platzhalter richtig in der Vorlage?')+' · '+ablage)
@@ -65474,6 +65780,8 @@ async function _fdkErstellen(ziel){
     }
     showToast((nurFelder?'📄 Formular erstellt: ':'📚 Fotodokumentation erstellt: ')+fname,'success',5000);
     if(fehl.length)showToast('⚠ Nicht geladen: '+fehl.slice(0,5).join(', ')+(fehl.length>5?' …':''),'warning',8000);
+    // b1021: Absatz im Dokument nicht mehr gefunden (Datei inzwischen geändert) – nicht still schlucken
+    if(erg.verloren)showToast('⚠ Bei '+erg.verloren+' Foto'+(erg.verloren!==1?'s':'')+' stand der Absatz nicht mehr im Dokument – hinten angehängt','warning',9000);
     // b774: Entwurf gleich hinterher – die Datei liegt schon fertig in S.ergebnis.
     if(ziel==='entwurf')await _fdkEntwurf(t,bytes,fname,mime,sag);
   }catch(e){
