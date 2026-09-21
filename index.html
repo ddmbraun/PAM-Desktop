@@ -10344,7 +10344,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-21 · #1023'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-21-b1023) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-21 · #1024'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-21-b1024) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -63922,7 +63922,9 @@ window.Dachplan=(function(){
 const _FDK_MIME_DOCX='application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const _FDK_NS={wp:'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing',a:'http://schemas.openxmlformats.org/drawingml/2006/main',pic:'http://schemas.openxmlformats.org/drawingml/2006/picture',r:'http://schemas.openxmlformats.org/officeDocument/2006/relationships'};
 const _FDK_COL={rot:'#e5484d',gelb:'#f5a623',gruen:'#30a46c'};
-const _FDK_P_LEER='<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="140" w:lineRule="exact"/><w:rPr><w:sz w:val="2"/></w:rPr></w:pPr></w:p>';
+// b1024: Abstandszeile hinter jedem Foto-Kasten OHNE feste Zeilenhöhe und mit 8-Punkt-Schrift. Bis b1023 war sie auf
+// 7 Punkt festgenagelt mit 1-Punkt-Schrift – tippte Frank hinein, wurde der Text gequetscht oder unsichtbar (Probelauf 21.09.).
+const _FDK_P_LEER='<w:p><w:pPr><w:spacing w:before="0" w:after="0"/><w:rPr><w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr></w:pPr></w:p>';
 const _FDK_P_UMBRUCH='<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/><w:rPr><w:sz w:val="2"/></w:rPr></w:pPr><w:r><w:rPr><w:sz w:val="2"/></w:rPr><w:br w:type="page"/></w:r></w:p>';
 let _fdkState=null;
 let _fdkDragIdx=-1;
@@ -64185,6 +64187,20 @@ function _fdkAbbNummerSetzen(xml,nr){
   if(ok)neu=neu.replace(/(<(?:wp:docPr|pic:cNvPr)\b[^>]*\bname=")Abb\. \d+(")/g,function(g,a,z){return a+'Abb. '+nr+z;});
   return {xml:ok?neu:String(xml||''),ok:ok};
 }
+/* b1024: Zeilen heilen, die Frank in die alte 7-Punkt-Abstandszeile getippt hat (b1023 setzte hinter jeden Kasten einen
+   Absatz mit w:line="140" exact und 1-Punkt-Schrift; Word quetscht getippten Text darin – „jopojopj" sah aus wie „lobolobi",
+   „llllll" war mit 1 Punkt unsichtbar, gemessen 21.09.2026). Nur Absätze MIT Text: feste Zeilenhöhe weg, 1-Punkt-Größe weg
+   (eigene Größen wie Franks 16 Punkt bleiben). Leere Abstandszeilen bleiben, wie sie sind. */
+function _fdkEngeZeilenHeilen(xml){
+  let n=0;
+  const neu=String(xml||'').replace(/<w:p(?=[\s>])(?:[^>\/]|\/(?!>))*>(?:(?!<\/w:p>)[\s\S])*?<\/w:p>/g,function(p){
+    if(!/<w:spacing\b[^>]*\bw:line="140"[^>]*\bw:lineRule="exact"/.test(p)&&!/<w:spacing\b[^>]*\bw:lineRule="exact"[^>]*\bw:line="140"/.test(p))return p;
+    if(!/<w:t(?=[\s>])/.test(p))return p;
+    n++;
+    return p.replace(/<w:spacing\b[^>]*\/>/,'<w:spacing w:before="0" w:after="0"/>').replace(/<w:szCs w:val="2"\s*\/>/g,'').replace(/<w:sz w:val="2"\s*\/>/g,'').replace(/<w:rPr>\s*<\/w:rPr>/g,'');
+  });
+  return {xml:neu,n:n};
+}
 /* Merkmal „von PAM erstellt" lesen: Wert von PAM_FotoDoku („t:<Karten-Kennung>") oder ''. */
 function _fdkArbeitLesen(customXml){
   const m=String(customXml||'').match(/<property\b[^>]*\bname="PAM_FotoDoku"[^>]*>\s*<vt:lpwstr>([^<]*)<\/vt:lpwstr>/);
@@ -64231,7 +64247,7 @@ async function _fdkArbeitUmbauen(P){
   const gl=_fdkGliederung(docXml,stylesXml);
   const kaesten=_fdkKaestenZuordnen(gl,docXml);
   const byId=new Map();kaesten.forEach(function(k){if(k.hatBild&&!byId.has(k.id))byId.set(k.id,k);});
-  const erg={imText:0,verloren:0,neu:0,verschoben:0,entfernt:0,geblieben:0,fremd:0,leerWeg:0,nummerFehlt:0,nachladen:[],hinten:0,platzhalter:0,leer:0,docXml:docXml,nr:nr};
+  const erg={imText:0,verloren:0,neu:0,verschoben:0,entfernt:0,geblieben:0,fremd:0,leerWeg:0,nummerFehlt:0,nachladen:[],hinten:0,platzhalter:0,leer:0,geheilt:0,docXml:docXml,nr:nr};
   // 1) je Foto: vorhandener Kasten + Ziel (Absatz-Index oder -1 = Anhang)
   const ziel=new Map(),kastenVon=new Map(),belegt=new Set();
   liste.forEach(function(b){
@@ -64330,6 +64346,8 @@ async function _fdkArbeitUmbauen(P){
   edits.sort(function(a,b){return (b.start-a.start)||(b.ende-a.ende)||(b.rang-a.rang);});
   for(let i=1;i<edits.length;i++){if(edits[i].ende>edits[i-1].start&&edits[i].ende!==edits[i].start)throw new Error('Arbeitsdatei: Umbau-Stellen überlappen');}
   edits.forEach(function(e){docXml=docXml.substring(0,e.start)+e.xml+docXml.substring(e.ende);});
+  // b1024: in alte Abstandszeilen getippter Text wird lesbar gemacht
+  if(typeof _fdkEngeZeilenHeilen==='function'){const heil=_fdkEngeZeilenHeilen(docXml);docXml=heil.xml;erg.geheilt=heil.n;}
   // 5) Nummern in Dokumentreihenfolge – auch fremde Kästen und die Übersicht zählen mit
   const gl2=_fdkGliederung(docXml,stylesXml);
   const nummern=[];
@@ -64561,7 +64579,7 @@ async function _fdkDocxBauen(startBuf,bilder,opt){
   // b1023: Merkmal „von PAM erstellt" – nur damit darf PAM später in diese Datei zurückschreiben
   if(opt.taskId&&typeof _fdkArbeitSchreiben==='function')await _fdkArbeitSchreiben(zip,'t:'+opt.taskId);
   opt.ergebnis={platzhalter:platz,leer:leer,hinten:(ra?ra.hinten:rest.length),proSeite:proSeite,felder:feldZahl,imText:imText,verloren:verloren,
-    arbeit:ra?{neu:ra.neu,verschoben:ra.verschoben,entfernt:ra.entfernt,geblieben:ra.geblieben,fremd:ra.fremd,leerWeg:ra.leerWeg,nummerFehlt:ra.nummerFehlt,nachladen:ra.nachladen}:null};
+    arbeit:ra?{neu:ra.neu,verschoben:ra.verschoben,entfernt:ra.entfernt,geblieben:ra.geblieben,fremd:ra.fremd,leerWeg:ra.leerWeg,nummerFehlt:ra.nummerFehlt,nachladen:ra.nachladen,geheilt:ra.geheilt||0}:null};
   return await zip.generateAsync({type:'uint8array',compression:'DEFLATE',compressionOptions:{level:6},mimeType:_FDK_MIME_DOCX});
 }
 
@@ -65054,7 +65072,7 @@ function _fdkArbeitErkennen(S,gl,arbeit){
   if(!S||!S.gl||!Array.isArray(gl))return;
   const kaesten=(typeof _fdkKaestenZuordnen==='function')?_fdkKaestenZuordnen(gl,(arbeit&&arbeit.docXml)||''):[];
   const eigentum=String((arbeit&&arbeit.eigentum)||'');
-  S.gl.arbeit=null;S.gl.inDatei={};S.gl.planInDatei=false;
+  S.gl.arbeit=null;S.gl.inDatei={};S.gl.planInDatei=false;S.gl.wordText={};   // b1024: wordText = Bildtext aus Word je Foto
   if(!kaesten.length&&!eigentum){
     // GM-Gutachten gewählt, obwohl im Ordner schon eine Arbeitsdatei liegt? Dann sagen, was passiert.
     const ad=(S.startListe||[]).filter(function(x){return x.arbeit;});
@@ -65063,7 +65081,7 @@ function _fdkArbeitErkennen(S,gl,arbeit){
     return;
   }
   const byIds=new Map();S.liste.forEach(function(e){_fdkIds(e).forEach(function(id){if(!byIds.has(id))byIds.set(id,e);});});
-  const dok=[],platz={},inDatei={};let fremd=0,imAnhang=0,unterAbsatz=0;
+  const dok=[],platz={},inDatei={},wordText={};let fremd=0,imAnhang=0,unterAbsatz=0;
   kaesten.forEach(function(k){
     k.fremd=false;
     if(!k.hatBild)return;                                   // Bild in Word gelöscht, Rahmen blieb – Erstellen räumt ihn weg
@@ -65071,11 +65089,12 @@ function _fdkArbeitErkennen(S,gl,arbeit){
     const e=byIds.get(k.id);
     if(!e||dok.indexOf(e.key)>=0){k.fremd=true;fremd++;return;}
     dok.push(e.key);inDatei[e.key]=k.id;
+    wordText[e.key]=String(k.text||'').replace(/^Abb\.\s*\d+\s*:?\s*/,'').trim();   // b1024: „Abb. 3: Dach von oben" → „Dach von oben"
     if(k.unter>=0){const it=gl[k.unter];platz[e.key]={i:it.i,fp:it.fp,k:it.k};unterAbsatz++;}else imAnhang++;
   });
   const kannSchreiben=!!(eigentum&&arbeit&&arbeit.art==='drive'&&arbeit.fileId);
   S.gl.arbeit={eigentum:eigentum,kannSchreiben:kannSchreiben,fileId:(arbeit&&arbeit.fileId)||'',ordnerId:(arbeit&&arbeit.ordnerId)||'',name:S.gl.name,kaesten:kaesten.length};
-  S.gl.inDatei=inDatei;
+  S.gl.inDatei=inDatei;S.gl.wordText=wordText;
   if(kaesten.length){
     S.dok=dok;S.platz=platz;
     const pl=document.getElementById('fdkPlan');if(pl&&S.gl.planInDatei)pl.checked=true;
@@ -65220,9 +65239,13 @@ function _fdkKachelHtml(e,art,nr){
   const src=_fdkBildQuelle(e);
   const drin=art==='vorrat'&&_fdkState.dok.indexOf(e.key)>=0;
   let badge;
-  if(art==='dok')badge='<div class="fdk-knr">Abb. '+nr+'</div>';
-  if(art==='dok'&&_fdkState.gl&&_fdkState.gl.inDatei&&_fdkState.gl.inDatei[e.key])badge=badge.replace('</div>',' · in Datei</div>');   // b1023: liegt schon als Kasten in der Arbeitsdatei
-  else badge=drin?'<div class="fdk-knr grau">✓ im Dokument (Abb. '+nr+')</div>':'<div class="fdk-knr grau">'+esc(_fdkDatum(e.ts)||' ')+'</div>';
+  if(art==='dok'){
+    badge='<div class="fdk-knr">Abb. '+nr+'</div>';
+    if(_fdkState.gl&&_fdkState.gl.inDatei&&_fdkState.gl.inDatei[e.key])badge=badge.replace('</div>',' · in Datei</div>');   // b1023: liegt schon als Kasten in der Arbeitsdatei
+    // ⛔ b1024: bis b1023 hing das „else" unten am „in Datei"-if – neue Fotos in der Absatz-Ansicht zeigten „✓ im Dokument (Abb. N)" statt „Abb. N"
+  }else badge=drin?'<div class="fdk-knr grau">✓ im Dokument (Abb. '+nr+')</div>':'<div class="fdk-knr grau">'+esc(_fdkDatum(e.ts)||' ')+'</div>';
+  // b1024: liegt das Foto in der Arbeitsdatei, steht unter der Kachel der Bildtext aus WORD (dort ändert Frank ihn), nicht der PAM-Text
+  const _wt=(art==='dok'&&_fdkState.gl&&_fdkState.gl.wordText&&Object.prototype.hasOwnProperty.call(_fdkState.gl.wordText,e.key))?String(_fdkState.gl.wordText[e.key]||''):null;
   /* b751/b752: Das ✏️ steht an allen drei Fotoarten – sie werden nur unterschiedlich
      abgelegt (siehe _fdkMalen). 🔁 Leistungsfotos hatten in b751 bewusst keins, weil sie
      blosse Drive-Verweise in der Turnus-Liste sind und kein Feld fuer eine bearbeitete
@@ -65236,7 +65259,7 @@ function _fdkKachelHtml(e,art,nr){
     +(malbar?'<button type="button" class="fdk-kmal" data-mal="'+esc(e.key)+'" title="Malen und beschriften – Pfeil, Text, Nummer">✏️</button>':'')
     +(art==='dok'?'<button type="button" class="fdk-kx" data-x="'+esc(e.key)+'" title="aus dem Dokument nehmen">✕</button>':(drin?'<span class="fdk-check">✓</span>':''))+'</div>'
     +badge
-    +'<div class="fdk-ktxt">'+esc((typeof _fdkKachelText==='function')?_fdkKachelText(e):(e.caption||e.name||''))+'</div>' // b1002
+    +'<div class="fdk-ktxt">'+esc((_wt!==null)?(_wt||'– kein Bildtext in Word –'):((typeof _fdkKachelText==='function')?_fdkKachelText(e):(e.caption||e.name||'')))+'</div>' // b1002; b1024: in der Arbeitsdatei zählt der Bildtext aus Word
     +'</div>';
 }
 function _fdkBilderNachladen(box){
@@ -65566,6 +65589,8 @@ async function _fdkVorschau(key){
   txt.innerHTML='<b>'+esc(teile.text||e.name||'Foto')+'</b>'+(nr?' · <b style="color:var(--accent)">Abb. '+nr+'</b>':' · nicht im Dokument')
     +'<br>'+esc(_fdkEtikett(e))+(e.ts?' · '+esc(_fdkDatum(e.ts)):'')
     +(teile.zeilen.length?'<div class="fdk-vlegende">'+teile.zeilen.map(function(z){return '<div>'+esc(z)+'</div>';}).join('')+'</div>':'');
+  // b1024: liegt das Foto schon als Kasten in der Arbeitsdatei, gilt der Bildtext aus Word – dort ändern
+  if(S.gl&&S.gl.inDatei&&S.gl.inDatei[key]){const _w=(S.gl.wordText&&S.gl.wordText[key])||'';txt.innerHTML+='<div style="font-size:11px;color:#d97706;margin-top:4px;">📝 In der Arbeitsdatei steht „Abb. '+(nr||'?')+': '+esc(_w)+'“ – den Bildtext dort in Word ändern. Der PAM-Text unten kommt nur bei neuen Fotos ins Word.</div>';}
   // b793: Beschreibung direkt hier aendern - ohne den Umweg uebers Auftragsfenster.
   // Leistungs-Fotos sind Belege des Wartungsnachweises und bleiben nur lesbar (b752-Linie).
   const ed=document.getElementById('fdkVorschauEdit'),ef=document.getElementById('fdkVorschauEditFeld');
@@ -66032,6 +66057,24 @@ async function _fdkDriveHochladen(bytes,mime,fileId,neu){
   return await r.json();
 }
 async function _fdkDriveUeberschreiben(fileId,bytes,mime){return _fdkDriveHochladen(bytes,mime,fileId,null);}
+/* b1024: Die eben angelegte Arbeitsdatei sofort in die Auswahl stellen und als Startdokument wählen. Bis b1023 stand sie
+   erst nach Schließen/Öffnen des Fensters in der Liste (Probelauf 21.09.); ein zweites „Erstellen" hätte eine weitere
+   Datei angelegt. Mit der Wahl läuft _fdkVorlagePruefen → das Fenster zeigt die Datei als 📝 Arbeitsdatei. */
+function _fdkNeueArbeitsdateiWaehlen(id,name,ordnerId){
+  const S=_fdkState,sel=document.getElementById('fdkStartSel');if(!S||!sel||!id)return false;
+  if(!Array.isArray(S.startListe))S.startListe=[];
+  if(!S.startListe.some(function(x){return x.id===id;}))S.startListe.push({id:id,name:String(name||''),anzeige:String(name||''),ordnerId:ordnerId||'',arbeit:true});
+  if(!Array.from(sel.options).some(function(o){return o.value===id;})){
+    let og=Array.from(sel.querySelectorAll('optgroup')).find(function(g){return String(g.label||'').indexOf('Auftragsordner')>=0;});
+    if(!og){og=document.createElement('optgroup');og.label='📁 Auftragsordner';sel.appendChild(og);}
+    const o=document.createElement('option');o.value=id;o.textContent='📝 '+String(name||'');og.appendChild(o);
+  }
+  const r=document.querySelector('input[name="fdkStartArt"][value="drive"]');if(r)r.checked=true;
+  sel.value=id;
+  if(typeof _fdkKnoepfeLage==='function')_fdkKnoepfeLage();
+  if(typeof _fdkVorlagePruefen==='function')_fdkVorlagePruefen();
+  return true;
+}
 async function _fdkErstellen(ziel){
   ziel=ziel||'word';
   const S=_fdkState;if(!S)return;
@@ -66185,6 +66228,8 @@ async function _fdkErstellen(ziel){
         const _up=await _driveUploadGeneric(bytes,fname,mime,S.ordnerId);
         if(_up&&_up.name){fname=_up.name;S.ergebnis.fname=fname;}
         if(_up&&_up.id)S.ergebnis.fileId=_up.id; // b1017: Kennung fuer den zweiten Abgleich
+        // b1024: die neue Arbeitsdatei sofort wählbar und gewählt – ein zweites „Erstellen" schreibt dann zurück statt eine weitere Datei anzulegen
+        if(ziel==='word'&&!nurFelder&&_up&&_up.id&&typeof _fdkNeueArbeitsdateiWaehlen==='function')_fdkNeueArbeitsdateiWaehlen(_up.id,fname,S.ordnerId);
         S.ergebnis.ordnerId=S.ordnerId;S.ergebnis.abgelegt=true;
         ablage='✓ im '+wohin+' abgelegt'+(S.ordnerArt==='dokumente'?' – erscheint in der Dokumentliste':' (kein Dokumente-Ordner am Auftrag)');
         // b735: Dokumentliste nur auffrischen, wenn die Datei auch dort liegt
@@ -66200,7 +66245,7 @@ async function _fdkErstellen(ziel){
     const platzText=(erg.platzhalter?(' · '+erg.platzhalter+' Platzhalter gefüllt'):'')+(erg.leer?(' · '+erg.leer+' Platzhalter ohne Foto entfernt'):'')+(erg.felder?(' · '+erg.felder+(erg.felder===1?' Feld':' Felder')+' eingesetzt'):'')
       +(erg.imText?(' · '+erg.imText+' unter '+(erg.imText===1?'seinem Absatz':'ihren Absätzen')):'')+(erg.verloren?(' · ⚠ '+erg.verloren+' ohne Absatz hinten angehängt'):'');   // b1021
     const ea=erg.arbeit||null;   // b1023: was der Umbau der Arbeitsdatei getan hat
-    const umbauText=ea?(' · '+ea.neu+' neu · '+ea.verschoben+' verschoben · '+ea.entfernt+' entfernt · '+ea.geblieben+' unverändert'+(ea.fremd?' · '+ea.fremd+' fremde bleiben':'')+(ea.leerWeg?' · '+ea.leerWeg+' leere Kästen weggeräumt':'')+(ea.nummerFehlt?' · ⚠ '+ea.nummerFehlt+' Bildtext ohne „Abb. N“ – Nummer dort nicht gesetzt':'')):'';
+    const umbauText=ea?(' · '+ea.neu+' neu · '+ea.verschoben+' verschoben · '+ea.entfernt+' entfernt · '+ea.geblieben+' unverändert'+(ea.fremd?' · '+ea.fremd+' fremde bleiben':'')+(ea.leerWeg?' · '+ea.leerWeg+' leere Kästen weggeräumt':'')+(ea.geheilt?' · '+ea.geheilt+' gequetschte Zeile'+(ea.geheilt!==1?'n':'')+' gerichtet':'')+(ea.nummerFehlt?' · ⚠ '+ea.nummerFehlt+' Bildtext ohne „Abb. N“ – Nummer dort nicht gesetzt':'')):'';   // b1024: geheilt
     // b778: beim Formular gibt es keine Abbildungen zu melden – dort zählt, was gefüllt wurde.
     sag(nurFelder
       ? ('✓ Fertig: Formular ohne Fotos'+(erg.felder?(' · '+erg.felder+(erg.felder===1?' Feld':' Felder')+' eingesetzt'):' · ⚠ kein Feld gefüllt – stehen die Platzhalter richtig in der Vorlage?')+' · '+ablage)
