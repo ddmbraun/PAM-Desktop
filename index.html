@@ -10344,7 +10344,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-21 · #1024'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-21-b1024) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-29 · #1028'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-29-b1028) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -15376,6 +15376,43 @@ document.addEventListener('visibilitychange', () => {
 // Verhindert dass startSyncPolling() einen zweiten visibilitychange-Handler registriert
 window._ptpVisHooked = true;
 
+// b1025: Klick auf den Hörer zeigte wieder „App verlassen?" (Befund Frank 21.09.2026).
+// Chrome hält einen tel:-Link für ein Verlassen der Seite und ruft beforeunload. Der Handler
+// darunter warnt, solange _taskModalDirty gesetzt ist – und das bleibt nach JEDER Änderung in
+// der offenen Karte an, bis sie geschlossen wird (b997 hatte nur das Speichern IM Klick aus dem
+// Weg geräumt). Deshalb merkt sich PAM den Klick auf einen Telefon-Link: in der CAPTURE-Phase,
+// also vor jedem onclick der Links (einige rufen stopPropagation) und vor der Navigation.
+// beforeunload verbraucht den Merker genau EINMAL und warnt dann nicht; die Sicherung davor
+// (Karte übernehmen, lokales Backup) läuft trotzdem. Wer danach wirklich schließt, wird wieder
+// gewarnt. ⛔ Nur Telefon-Links – Mail- und Web-Links bleiben, wie sie sind.
+let _pamTelKlickZeit=0;
+let _pamTelKlickVerbrauchtUm=0; // b1026: wann der Hauptwächter zuletzt einen Hörer-Klick verbraucht hat
+function _pamIstTelLink(el){
+  const a=(el&&el.closest)?el.closest('a[href]'):null;
+  return !!a&&/^\s*(tel|callto|sip):/i.test(a.getAttribute('href')||'');
+}
+function _pamTelKlickVerbrauchen(){
+  const d=Date.now()-_pamTelKlickZeit;
+  const frisch=_pamTelKlickZeit>0&&d>=0&&d<1000;
+  if(frisch)_pamTelKlickVerbrauchtUm=Date.now(); // b1026: für den Herzschlag-Horcher
+  _pamTelKlickZeit=0;
+  return frisch;
+}
+// b1026: Kam der LAUFENDE Verlassen-Aufruf von einem Hörer-Klick? Fragt, OHNE zu verbrauchen –
+// für den zweiten beforeunload-Horcher (Herzschlag der Ein-Fenster-Sperre, _hbStart). Wahr, wenn
+// der Merker noch frisch ist ODER der Hauptwächter ihn IM SELBEN Aufruf eben als Hörer-Klick
+// verbraucht hat. So ist egal, welcher der beiden Horcher zuerst läuft.
+// ⛔ Für den zweiten Fall nur 0,1 s: Beide Horcher laufen direkt nacheinander, der Stempel wird ganz
+// am Ende des Hauptwächters gesetzt. Mit 1 s blieb der Herzschlag in der Browserprobe liegen, wenn
+// direkt danach WIRKLICH geschlossen wurde.
+function _pamTelKlickEben(){
+  const t=Date.now(), d1=t-_pamTelKlickZeit, d2=t-_pamTelKlickVerbrauchtUm;
+  return (_pamTelKlickZeit>0&&d1>=0&&d1<1000)||(_pamTelKlickVerbrauchtUm>0&&d2>=0&&d2<100);
+}
+document.addEventListener('click',function(e){
+  try{if(_pamIstTelLink(e.target))_pamTelKlickZeit=Date.now();}catch(ex){}
+},true);
+
 // Fix #366: Sicherung beim Schließen des Fensters/Tabs.
 // Vorher gab es KEINEN beforeunload-Handler – wer innerhalb des 1s-Auto-Save-Debounce
 // schloss, verlor die letzte Änderung. Jetzt: Modal-Felder → boards[] übernehmen,
@@ -15406,6 +15443,9 @@ window.addEventListener('beforeunload',(e)=>{
   if(_savePending&&!_unsaved&&!gdriveSaving&&_letzterStandHash){
     try{if(_pamStandHash(JSON.stringify(buildSaveObject(),null,2))===_letzterStandHash)_savePending=false;}catch(ex){}
   }
+  // b1025: Kommt dieser Aufruf von einem Klick auf einen Telefon-Link, verlässt niemand PAM –
+  // nicht warnen. Die Sicherung oben ist dann schon gelaufen.
+  if(typeof _pamTelKlickVerbrauchen==='function'&&_pamTelKlickVerbrauchen())return;
   if(_unsaved||gdriveSaving||_savePending){e.preventDefault();e.returnValue='';}
 });
 
@@ -27218,8 +27258,9 @@ function _pamPasstFilter(x,filter){
 }
 
 // Baut das Auswahlmenü über der Liste. mitMedien=true ergänzt „nur Fotos"/„nur Videos".
-// Der 🔄-Knopf frischt die Zuordnung auf – nötig, weil die Herkunft beim Einlesen gemerkt
+// Der 🏷-Knopf frischt die Zuordnung auf – nötig, weil die Herkunft beim Einlesen gemerkt
 // und nicht laufend geprüft wird (Verschieben in Drive ändert den Filter sonst nicht mit).
+// b1028: in der Foto-Leiste steht statt dessen „🔄 Abgleichen“ (tut das Auffrischen mit); 🏷 dort im Menü „📂 Ordner ▾“.
 function _pamFilterMenu(listenId,barId,arr,filterWert,changeFn,mitMedien){
   const cont=document.getElementById(listenId);
   if(!cont)return;
@@ -27251,9 +27292,17 @@ function _pamFilterMenu(listenId,barId,arr,filterWert,changeFn,mitMedien){
       +'style="font-size:11px;padding:3px 7px;border-radius:6px;border:1px solid var(--border);'
       +'background:var(--bg3);color:var(--text2);max-width:230px;">'+opt+'</select>';
   }
-  html+='<button type="button" onclick="_pamOrdnerAuffrischen()" title="Zuordnung auffrischen – liest für jede Datei neu aus Drive, in welchem Ordner sie liegt" '
-    +'style="font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid var(--border);'
-    +'background:var(--bg3);color:var(--text2);cursor:pointer;">🔄</button>';
+  // b1028: zwei Wirkungen, zwei Gesichter – 🔄 holt etwas (Abgleichen, Akzentfarbe), 🏷 ordnet nur (grau).
+  // Vorher stand hier ein nacktes 🔄 fürs reine Auffrischen; Frank hielt es für „Abgleichen“ (27.09., Laptop).
+  if(listenId==='fotoListDesktop'){
+    html+='<button type="button" onclick="_fotoSyncOrdner()" title="Abgleichen – liest den Foto-Ordner samt Unterordnern, trägt neue Fotos nach und frischt die Zuordnung auf" '
+      +'style="font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid var(--accent);'
+      +'background:var(--bg3);color:var(--accent);font-weight:700;cursor:pointer;white-space:nowrap;">🔄 Abgleichen</button>';
+  }else{
+    html+='<button type="button" onclick="_pamOrdnerAuffrischen()" title="Nur Zuordnung auffrischen – liest für jede Datei neu aus Drive, in welchem Ordner sie liegt. Holt nichts Neues." '
+      +'style="font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid var(--border);'
+      +'background:var(--bg3);color:var(--text2);cursor:pointer;white-space:nowrap;">🏷 Zuordnung</button>';
+  }
   bar.innerHTML=html;
   const sel=bar.querySelector('select');
   if(sel)sel.value=filterWert||'';
@@ -43706,6 +43755,7 @@ function _pamFotoOrdnerEintraege(){
   return [
     {sym:'↗',text:'Foto-Ordner in Google Drive öffnen',titel:'Den Foto-Ordner dieser Karte im Browser öffnen',tu:function(){tDriveOeffnen();}},
     {sym:'🔄',text:'Ordner abgleichen',titel:'Bilder-Ordner samt Unterordnern abgleichen – trägt Neues nach und frischt die Ordner-Zuordnung auf',tu:function(){_fotoSyncOrdner();}},
+    {sym:'🏷',text:'Nur Zuordnung auffrischen',titel:'Liest für jedes Foto neu aus Drive, in welchem Ordner es liegt – auch für Fotos außerhalb des Foto-Ordners. Holt nichts Neues.',tu:function(){_pamOrdnerAuffrischen();}}, // b1028
     {sym:'⚙',text:'Ordner-Link ändern',titel:'Zum Feld „Foto-Ordner" unter „Ordner & Links" springen',trenner:true,tu:function(){_pamFotoOrdnerEinstellen();}}
   ];
 }
@@ -51012,6 +51062,10 @@ function _hbStart(){
     // eigenen Heartbeat aufräumen: nach normalem Schließen nimmt die nächste
     // Übergabe sofort wieder den Normalweg (nur nach Absturz bleibt der
     // Stempel bis zu 90 s stehen – dafür gibt es den Reload-Fallback unten)
+    // b1026: NICHT bei einem Klick auf einen Hörer – Chrome ruft beforeunload auch für tel:-Links,
+    // PAM bleibt dabei aber offen. Bis b1025 fehlte der Stempel danach bis zum nächsten Takt (20 s);
+    // in dieser Lücke hätte eine VBS-Übergabe oder ein zweites Fenster „keine Instanz" gesehen.
+    if(typeof _pamTelKlickEben==='function'&&_pamTelKlickEben())return;
     try{const v=_hbLesen();if(v&&v.id===_pamInstanzId)localStorage.removeItem(_HB_KEY);}catch(e){}
   });
 }
@@ -64453,7 +64507,8 @@ async function _fdkDocxBauen(startBuf,bilder,opt){
   // Kennungen eindeutig halten: über dem höchsten Bestand weiterzählen
   let rMax=0;(rels.match(/Id="rId(\d+)"/g)||[]).forEach(s=>{const n=parseInt(s.replace(/\D/g,''),10);if(n>rMax)rMax=n;});
   let dpMax=0;(docXml.match(/<wp:docPr\b[^>]*\bid="(\d+)"/g)||[]).forEach(s=>{const r=s.match(/\bid="(\d+)"/);const n=r?parseInt(r[1],10):0;if(n>dpMax)dpMax=n;});
-  if(!/Extension="jpe?g"/i.test(ct))ct=ct.split('</Types>').join('<Default Extension="jpg" ContentType="image/jpeg"/></Types>');
+  // b1027: NUR "jpg" zählt – ein vorhandenes "jpeg" (GM-Logo image1.jpeg) deckt unsere fdk_N.jpg nicht ab, Word meldet sonst „beschädigt“
+  if(!/Extension="jpg"/i.test(ct))ct=ct.split('</Types>').join('<Default Extension="jpg" ContentType="image/jpeg"/></Types>');
   let nr=parseInt(opt.startNr,10);if(!(nr>0))nr=1;
   // b1023: opt.arbeit = in die Arbeitsdatei zurückschreiben; Fotos mit vorhanden:true kommen ohne Bilddaten
   const arbeit=!!(startBuf&&opt.arbeit&&typeof _fdkArbeitUmbauen==='function');
