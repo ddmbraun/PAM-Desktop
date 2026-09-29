@@ -10344,7 +10344,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-29 · #1029'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-29-b1029) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-29 · #1031'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-29-b1031) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -27394,6 +27394,100 @@ async function _pamOrdnerAuffrischen(){
   showToast('✓ Zuordnung aufgefrischt – '+geaendert+' geändert'+(fehler?', '+fehler+' nicht lesbar':''),'success',5000);
 }
 
+// ══ b1031: 🧹 Foto-Einträge ohne Datei aufräumen ══
+// Anlass: Übergabeliste Laptop 27.09. – 32 tote Verweise an 26-010 gingen nur einzeln (⋯ → ✕, je mit Rückfrage) oder per
+// Konsolen-Skript. Der Abgleich trägt nur Neues ein und entfernt nie (bewusst). Hier: jedes Foto der Karte in Drive
+// nachfragen, Liste zeigen, nach EINEM Klick nur die Verweise entfernen. In Drive wird nichts gelöscht.
+// ⛔ Tot ist nur, was Drive ausdrücklich nicht kennt (404). Netzfehler, abgelaufene Anmeldung, fehlendes Recht = „unklar“
+//    → bleibt. Bemaltes Foto (editedDriveId + driveId): tot nur, wenn BEIDE Dateien fehlen.
+// ⛔ Nur taskFotos. Dachplan-Pin- und Protokoll-Fotos haben eigene Orte und bleiben unberührt.
+function _pamToteKey(f){return (f&&f.editedDriveId||'')+'|'+(f&&f.driveId||'');}
+function _pamToteEinstufen(zustaende){
+  const z=(zustaende||[]).filter(Boolean);
+  if(!z.length||z.indexOf('da')>=0)return 'da';
+  if(z.indexOf('unklar')>=0)return 'unklar';
+  if(z.indexOf('papierkorb')>=0)return 'papierkorb';
+  return 'weg';
+}
+async function _pamToteStatus(id){
+  try{
+    const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(id)+'?fields=id,trashed&supportsAllDrives=true',{headers:{Authorization:'Bearer '+gdriveToken}});
+    if(r.status===404)return 'weg';
+    if(!r.ok)return 'unklar';
+    const j=await r.json().catch(()=>null);
+    if(!j||!j.id)return 'unklar';
+    return j.trashed?'papierkorb':'da';
+  }catch(e){return 'unklar';}
+}
+async function _pamFotosOhneDateiPruefen(){
+  if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden','error',5000);return;}
+  const taskId=(document.getElementById('taskId')||{}).value||'';
+  const liste=(taskFotos||[]).filter(f=>f&&(f.driveId||f.editedDriveId));
+  if(!liste.length){showToast('Keine Drive-Fotos an dieser Karte','info',3000);return;}
+  _mpFortschrittZeigen(liste.length,'🧹 Fotos werden in Drive nachgesehen…');
+  const erg={weg:[],papierkorb:[],unklar:0,da:0};
+  const STUECK=6;   // einige gleichzeitig – 32 Fotos einzeln hintereinander dauerten spürbar
+  for(let i=0;i<liste.length;i+=STUECK){
+    await Promise.all(liste.slice(i,i+STUECK).map(async function(f){
+      const ids=[f.editedDriveId,f.driveId].filter(function(x,k,a){return x&&a.indexOf(x)===k;});
+      const zu=await Promise.all(ids.map(_pamToteStatus));
+      const art=_pamToteEinstufen(zu);
+      if(art==='weg'||art==='papierkorb')erg[art].push(f);else erg[art]++;
+      _mpFortschrittSchritt(String(f.name||'').substring(0,70));
+    }));
+  }
+  _mpFortschrittSchliessen();
+  if(!erg.weg.length&&!erg.papierkorb.length){
+    showToast('✓ Alle '+erg.da+' Fotos sind in Drive vorhanden'+(erg.unklar?' – '+erg.unklar+' ließen sich gerade nicht prüfen, bitte später nochmal':''),erg.unklar?'info':'success',6000);
+    return;
+  }
+  _pamToteFenster(erg,taskId);
+}
+function _pamToteFenster(erg,taskId){
+  const alt=document.getElementById('_pamToteOverlay');if(alt)alt.remove();
+  const zeile=function(f,an){
+    return '<label style="display:flex;align-items:center;gap:8px;padding:5px 4px;border-bottom:1px solid var(--border);cursor:pointer;">'
+      +'<input type="checkbox" class="_ptTot" data-key="'+esc(_pamToteKey(f))+'"'+(an?' checked':'')+' style="width:15px;height:15px;flex-shrink:0;" autocomplete="off">'
+      +'<span style="font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(f.name||'')+'">'+esc(f.name||'(ohne Namen)')+'</span>'
+      +(f.ordner?'<span style="font-size:10px;color:var(--text2);flex-shrink:0;">'+esc(f.ordner)+'</span>':'')+'</label>';
+  };
+  const kopf=function(t,hinweis){return '<div style="font-weight:700;font-size:12px;margin:10px 0 2px;">'+t+'</div><div style="font-size:11px;color:var(--text2);margin-bottom:4px;">'+hinweis+'</div>';};
+  let inhalt='';
+  if(erg.weg.length)inhalt+=kopf('🗑 Datei gelöscht ('+erg.weg.length+')','Google Drive kennt diese Dateien nicht mehr.')+erg.weg.map(function(f){return zeile(f,true);}).join('');
+  if(erg.papierkorb.length)inhalt+=kopf('♻ Im Drive-Papierkorb ('+erg.papierkorb.length+')','Lassen sich in Drive noch zurückholen – darum nicht vorab angehakt.')+erg.papierkorb.map(function(f){return zeile(f,false);}).join('');
+  if(erg.unklar)inhalt+='<div style="font-size:11px;color:var(--text2);margin-top:10px;">ℹ '+erg.unklar+' Foto'+(erg.unklar===1?'':'s')+' ließ'+(erg.unklar===1?'':'en')+' sich gerade nicht prüfen – die bleiben. Bitte später nochmal.</div>';
+  const ov=document.createElement('div');
+  ov.id='_pamToteOverlay';
+  ov.dataset.taskId=taskId||'';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:4000;display:flex;align-items:center;justify-content:center;';
+  ov.innerHTML='<div style="background:var(--bg2);border-radius:14px;width:min(560px,94vw);max-height:80vh;display:flex;flex-direction:column;overflow:hidden;">'
+    +'<div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);flex-shrink:0;">'
+    +'<span style="font-weight:700;font-size:14px;flex:1;">🧹 Einträge ohne Datei</span>'
+    +'<button onclick="document.getElementById(\'_pamToteOverlay\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text2);">✕</button></div>'
+    +'<div style="padding:6px 14px 10px;flex:1;overflow-y:auto;">'+inhalt+'</div>'
+    +'<div style="font-size:11px;color:var(--text2);padding:0 14px 8px;">Entfernt wird nur der Eintrag auf der Karte. In Google Drive wird nichts gelöscht.</div>'
+    +'<div style="display:flex;justify-content:flex-end;gap:8px;padding:10px 14px;border-top:1px solid var(--border);flex-shrink:0;">'
+    +'<button onclick="document.getElementById(\'_pamToteOverlay\').remove()" style="padding:7px 16px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;">Abbrechen</button>'
+    +'<button onclick="_pamToteEntfernen()" style="padding:7px 16px;border-radius:6px;border:none;background:#c0392b;color:#fff;font-weight:700;cursor:pointer;">Angehakte entfernen</button>'
+    +'</div></div>';
+  document.body.appendChild(ov);
+}
+function _pamToteEntfernen(){
+  const ov=document.getElementById('_pamToteOverlay');if(!ov)return;
+  const keys=new Set(Array.from(ov.querySelectorAll('input._ptTot')).filter(function(c){return c.checked;}).map(function(c){return c.getAttribute('data-key');}));
+  const taskId=ov.dataset.taskId||'';
+  ov.remove();
+  if(!keys.size){showToast('Nichts angehakt – nichts entfernt','info',3000);return;}
+  // ⛔ Zwischen Prüfen und Klick kann eine andere Karte geöffnet worden sein – dann NICHT deren Fotos anfassen
+  if(((document.getElementById('taskId')||{}).value||'')!==taskId){showToast('⚠ Inzwischen ist eine andere Karte offen – nichts entfernt','error',6000);return;}
+  let raus=0;
+  for(let i=(taskFotos||[]).length-1;i>=0;i--){if(keys.has(_pamToteKey(taskFotos[i]))){taskFotos.splice(i,1);raus++;}}   // an Ort und Stelle: andere Stellen halten dieselbe Liste
+  if(typeof _fotoSelPurge==='function')_fotoSelPurge();
+  renderFotoListDesktop();
+  scheduleTaskFieldSave();
+  showToast('🧹 '+raus+' Eintr'+(raus===1?'ag':'äge')+' ohne Datei entfernt – in Drive wurde nichts gelöscht','success',5000);
+}
+
 function _setFotoOrdnerFilter(v){_fotoOrdnerFilter=v||'';renderFotoListDesktop();}
 function _setAttOrdnerFilter(v){_attOrdnerFilter=v||'';renderAttachList();}
 
@@ -27426,10 +27520,65 @@ function _migrateVideoAttachmentsToFotos(){
   }
   return moved;
 }
+// ══ b1030: ZIP beim Hineinziehen auspacken ══
+// Wunsch Frank 29.09. (Laptop: „1Ortstermin.zip" landete als EINE Datei unter Dokumente). Beide Türen fragen hier vorher:
+// Dokumente (handleFileAttach) und Fotos (_handleFotoDrop). Nur wenn Fotos/Videos drin sind, wird gefragt.
+// Ja = Fotos einzeln zu den Fotos, Videos + andere Dateien einzeln durch die Dokumente-Tür (die schickt Videos selbst
+// zu den Fotos), die ZIP selbst wird NICHT hochgeladen. Nein = die ZIP bleibt, was sie war.
+// Weg aus dem Mail-Import (b603) übernommen: JSZip ist in index.html eingebettet (window.JSZip).
+const _PAM_ZIP_MAX=500*1024*1024;   // der Browser muss die ganze ZIP in den Arbeitsspeicher laden
+function _pamIstZip(f){return !!f&&(/\.zip$/i.test(f.name||'')||/^application\/(x-)?zip(-compressed)?$/i.test(f.type||''));}
+function _pamZipMuell(pfad){
+  const n=String(pfad||''),k=n.split('/').pop();
+  return !k||/(^|\/)__MACOSX\//.test(n)||/^\._/.test(k)||/^(thumbs\.db|desktop\.ini|\.ds_store)$/i.test(k);
+}
+async function _pamZipVorab(files){
+  const erg={rest:[],bilder:[],andere:[],abgelehnt:0};
+  for(const f of files){
+    if(!_pamIstZip(f)){erg.rest.push(f);continue;}
+    if(f.size>_PAM_ZIP_MAX){showToast('⚠ „'+f.name+'" ist größer als 500 MB – wird nicht ausgepackt. Bitte im Explorer entpacken und die Fotos hineinziehen.','error',9000);erg.rest.push(f);continue;}
+    if(!window.JSZip){erg.rest.push(f);continue;}
+    const fotos=[],videos=[],sonst=[];
+    try{
+      const zip=await window.JSZip.loadAsync(await f.arrayBuffer());   // Bytes statt Blob: JSZip liest Blobs nur über FileReader
+      zip.forEach(function(pfad,e){
+        if(e.dir||_pamZipMuell(pfad))return;
+        const kurz=String(e.name||'').split('/').pop();
+        const typ=(typeof _mpMimeAusName==='function'?_mpMimeAusName(kurz):'')||'';
+        if(typ.indexOf('image/')===0||IMAGE_EXTS.test(kurz))fotos.push({e:e,kurz:kurz,typ:typ||'image/jpeg'});
+        else if(typeof _isVideo==='function'&&_isVideo(typ,kurz))videos.push({e:e,kurz:kurz,typ:typ});
+        else sonst.push({e:e,kurz:kurz,typ:typ});
+      });
+    }catch(err){showToast('⚠ „'+f.name+'" ließ sich nicht öffnen – wird als Datei behandelt','error',6000);erg.rest.push(f);continue;}
+    if(!fotos.length&&!videos.length){erg.rest.push(f);continue;}
+    const teile=[];
+    if(fotos.length)teile.push(fotos.length+' Foto'+(fotos.length===1?'':'s'));
+    if(videos.length)teile.push(videos.length+' Video'+(videos.length===1?'':'s'));
+    if(sonst.length)teile.push(sonst.length+' andere Datei'+(sonst.length===1?'':'en'));
+    if(!confirm('„'+f.name+'" enthält '+teile.join(', ')+'.\n\nAuspacken?\n\nOK = Fotos und Videos zu den Fotos'+(sonst.length?', andere Dateien zu Dokumente':'')+' (die ZIP selbst wird nicht hochgeladen)\nAbbrechen = nicht auspacken')){
+      erg.rest.push(f);erg.abgelehnt++;continue;
+    }
+    showToast('⏳ „'+f.name+'" wird ausgepackt…','info',4000);
+    const alsDatei=async function(x){
+      const d=x.e.date&&!isNaN(x.e.date)?x.e.date.getTime():Date.now();   // Dateidatum aus der ZIP bleibt → Foto-Datum stimmt
+      return new File([await x.e.async('uint8array')],x.kurz,{type:x.typ||'application/octet-stream',lastModified:d});
+    };
+    for(const x of fotos)erg.bilder.push(await alsDatei(x));
+    for(const x of videos.concat(sonst))erg.andere.push(await alsDatei(x));
+  }
+  return erg;
+}
 async function handleFileAttach(e){
-  const files=[...e.target.files];
+  let files=[...e.target.files];
   if(!files.length)return;
   e.target.value='';
+  // b1030: ZIP mit Fotos → auf Wunsch auspacken; die Fotos gehen durch die Foto-Tür, der Rest bleibt hier
+  if(typeof _pamZipVorab==='function'&&files.some(_pamIstZip)){
+    const z=await _pamZipVorab(files);
+    if(z.bilder.length&&typeof _handleFotoDrop==='function')await _handleFotoDrop({files:z.bilder});
+    files=z.rest.concat(z.andere);
+    if(!files.length)return;
+  }
 
   // b600: Dokumente gehören in den Dokumente-Ordner. Bis b599 lud diese Zone in die
   // Akten-WURZEL (tGDOrdner) – und „🔄 Aus Ordner einlesen" (_dokSyncOrdner) durchsucht nur
@@ -43758,6 +43907,7 @@ function _pamFotoOrdnerEintraege(){
     {sym:'↗',text:'Foto-Ordner in Google Drive öffnen',titel:'Den Foto-Ordner dieser Karte im Browser öffnen',tu:function(){tDriveOeffnen();}},
     {sym:'🔄',text:'Ordner abgleichen',titel:'Bilder-Ordner samt Unterordnern abgleichen – trägt Neues nach und frischt die Ordner-Zuordnung auf',tu:function(){_fotoSyncOrdner();}},
     {sym:'🏷',text:'Nur Zuordnung auffrischen',titel:'Liest für jedes Foto neu aus Drive, in welchem Ordner es liegt – auch für Fotos außerhalb des Foto-Ordners. Holt nichts Neues.',tu:function(){_pamOrdnerAuffrischen();}}, // b1028
+    {sym:'🧹',text:'Einträge ohne Datei aufräumen',titel:'Sieht für jedes Foto dieser Karte in Google Drive nach, ob die Datei noch da ist, zeigt die gelöschten und entfernt nach einem Klick nur deren Einträge. In Drive wird nichts gelöscht.',tu:function(){_pamFotosOhneDateiPruefen();}}, // b1031
     {sym:'⚙',text:'Ordner-Link ändern',titel:'Zum Feld „Foto-Ordner" unter „Ordner & Links" springen',trenner:true,tu:function(){_pamFotoOrdnerEinstellen();}}
   ];
 }
@@ -48583,7 +48733,18 @@ function _openAttachThumbnailGrid(){
 
 // ── Foto Drag & Drop Handler ─────────────────────────────────────────────────
 async function _handleFotoDrop(dt){
-  const files=[...dt.files].filter(f=>f.type.startsWith('image/')||IMAGE_EXTS.test(f.name));
+  let alle=[...dt.files];
+  // b1030: ZIP mit Fotos → auf Wunsch auspacken; Videos + andere Dateien gehen durch die Dokumente-Tür
+  if(typeof _pamZipVorab==='function'&&alle.some(_pamIstZip)){
+    const z=await _pamZipVorab(alle);
+    if(z.andere.length&&typeof handleFileAttach==='function')await handleFileAttach({target:{files:z.andere,value:''},preventDefault:()=>{}});
+    alle=z.rest.filter(f=>!_pamIstZip(f)).concat(z.bilder);
+    if(!alle.length){
+      if(!z.abgelehnt&&!z.andere.length)showToast('⚠ In der ZIP sind keine Fotos – ZIP-Dateien ohne Fotos bitte bei Dokumente ablegen','error',5000);
+      return;
+    }
+  }
+  const files=alle.filter(f=>f.type.startsWith('image/')||IMAGE_EXTS.test(f.name));
   if(!files.length){showToast('⚠ Nur Bilddateien hier ablegen','error',3000);return;}
   // b887: Notbetrieb – Datei über den Helfer auf diesen PC, Google lädt später selbst hoch
   if(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB){await _nbFotoDateienAblegen(files);return;}
