@@ -10344,7 +10344,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-29 · #1028'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-29-b1028) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-29 · #1029'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-29-b1029) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -10653,6 +10653,8 @@ var ZETTEL_BLATT3='1'; // '1' = drittes Blatt (nur Rechner); Handy '0' = gibt es
 var ZETTEL_BLATT3_NAME='Privat';
 var _ztlBlatt3Auf=false; // b818: entsperrt? BEWUSST nirgends gespeichert - nach Neustart wieder zu
 var ZETTEL_WEG_TAGE=14;
+var ZETTEL_ANH_ORDNER='Zettel-Anhänge'; // b1029/v302: Drive-Ordner der Zettel-Anhänge (neben pam_zettel.json)
+var _ztlAnhOrdnerId=null,_ztlAnhLaeuft={},_ztlAnhWegVersucht={}; // b1029/v302: Ordner-Kennung · laufende Uploads je Zeile · Papierkorb-Versuche dieser Sitzung
 var zettelFileId=null;
 var _ztlSyncTimer=null,_ztlSyncLaeuft=false;
 var _ztlSyncStand={zeit:0,fehler:'',fehlZeit:0}; // b904: letzter gelungener Abgleich / letzter Fehler – der Kasten zeigt es an
@@ -60796,7 +60798,7 @@ function _ztlMerge(a,b,jetztIso){
   });
   const grenze=new Date(new Date(jetztIso||_ztlJetzt()).getTime()-ZETTEL_WEG_TAGE*864e5).toISOString();
   return Object.keys(map).map(function(k){return map[k];})
-    .filter(function(z){return !(z.weg&&String(z.weg)<grenze);})
+    .filter(function(z){return !(z.weg&&String(z.weg)<grenze&&!(Array.isArray(z.anh)&&z.anh.length));}) // b1029: mit Anhängen erst, wenn _ztlAnhAbgelaufen die Dateien in den Papierkorb gelegt hat
     .sort(function(x,y){
       var px=(typeof x.pos==='number')?x.pos:(Date.parse(x.ang||'')||0);
       var py=(typeof y.pos==='number')?y.pos:(Date.parse(y.ang||'')||0);
@@ -61128,7 +61130,7 @@ function _ztlKastenHtml(){
   try{if(typeof document!=='undefined'){const f=document.getElementById('ztlEditFeld');if(f)editWert=f.value;}}catch(e){}
   // Die Kasten-Kennung steht bewusst nur EINMAL im Quelltext (ID-Prüfer, Punkt 4) – alle
   // Zweige bauen auf demselben Anfang auf, zur Laufzeit existiert immer nur einer.
-  const kastenAuf='<div id="ztlKasten" ';
+  const kastenAuf='<div id="ztlKasten" ondragover="_ztlAnhKastenUeber(event)" ondrop="_ztlAnhKastenDrop(event)" '; // b1029: daneben fallende Datei nicht vom Browser öffnen lassen
   const kachelRahmen='style="display:inline-flex;align-items:center;gap:7px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid #7F77DD;border-radius:0 8px 8px 0;padding:8px 14px;margin-bottom:12px;user-select:none;">';
   if(zu){
     // b804: zugeklappt nur noch eine KLEINE Kachel statt der Zeile über die volle Breite.
@@ -61159,7 +61161,9 @@ function _ztlKastenHtml(){
   const zeile=function(z,i){
     const ds=_ztlDatumText(z.ang,jetztIso);
     const bv=_ztlBlattVon(z);
-    let r='<li data-ztlid="'+_ztlAttr(z.id)+'" data-ztlbl="'+bv+'" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);">'
+    const anhDarf=(bv!=='p'&&typeof _ztlAnhDrop==='function'); // b1029: Privat-Blatt bekommt keine Anhänge
+    const anhH=(typeof _ztlAnhHtml==='function')?_ztlAnhHtml(z):'';
+    let r='<li data-ztlid="'+_ztlAttr(z.id)+'" data-ztlbl="'+bv+'"'+(anhDarf?' ondragover="_ztlAnhDragUeber(event)" ondragleave="_ztlAnhDragWeg(event)" ondrop="_ztlAnhDrop(event,\''+_ztlAttr(z.id)+'\')"':'')+' style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);">'
       +'<span style="font-size:12px;color:var(--text2);min-width:20px;text-align:right;flex-shrink:0;">'+(i+1)+'.</span>'
       +'<span onclick="_ztlHaken(\''+_ztlAttr(z.id)+'\')" title="'+(z.erl?'Haken wegnehmen':'als erledigt abhaken')+'" style="width:24px;height:24px;border:2px solid '+(z.erl?'#639922':'var(--text2)')+';border-radius:6px;background:'+(z.erl?'#EAF3DE':'transparent')+';color:#3B6D11;display:inline-flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;cursor:pointer;flex-shrink:0;">'+(z.erl?'✓':'')+'</span>';
     if(editId===z.id){
@@ -61169,8 +61173,11 @@ function _ztlKastenHtml(){
         +' style="flex:1;min-width:0;padding:6px 8px;border-radius:7px;border:1px solid #7F77DD;background:var(--bg3);color:var(--text);font-size:14px;">'
         +'<span onclick="_ztlEditSichern(\''+_ztlAttr(z.id)+'\')" title="Änderung speichern" style="width:28px;height:28px;border-radius:7px;background:#639922;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;cursor:pointer;flex-shrink:0;">✓</span>';
     }else{
-      r+='<span ondblclick="_ztlEditStart(\''+_ztlAttr(z.id)+'\')" style="flex:1;min-width:0;font-size:14px;line-height:1.35;color:var(--text);word-break:break-word;'+(z.erl?'text-decoration:line-through;opacity:.55;':'')+'">'+_ztlEsc(z.text)+'</span>'
+      r+=(anhH?'<span style="flex:1;min-width:0;display:flex;flex-direction:column;">':'') // b1029: Anhänge unter dem Text
+        +'<span ondblclick="_ztlEditStart(\''+_ztlAttr(z.id)+'\')" style="flex:1;min-width:0;font-size:14px;line-height:1.35;color:var(--text);word-break:break-word;'+(z.erl?'text-decoration:line-through;opacity:.55;':'')+'">'+_ztlEsc(z.text)+'</span>'
+        +(anhH?anhH+'</span>':'')
         +(ds?'<span title="angelegt" style="font-size:11px;color:var(--text2);flex-shrink:0;white-space:nowrap;">'+_ztlEsc(ds)+'</span>':'')
+        +(anhDarf?'<span onclick="_ztlAnhWaehlen(\''+_ztlAttr(z.id)+'\')" title="Datei anhängen (Bild, PDF …) – oder die Datei auf die Zeile ziehen" style="width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;color:var(--text2);cursor:pointer;flex-shrink:0;">📎</span>':'') // b1029
         +'<span onclick="_ztlEditStart(\''+_ztlAttr(z.id)+'\')" title="Text ändern" style="width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;color:var(--text2);cursor:pointer;flex-shrink:0;">✏️</span>'
         +(reiter?('<span onclick="_ztlSchieben(\''+_ztlAttr(z.id)+'\')" title="'+((bv==='s'||bv==='p')?'zurück zu Jetzt':'nach Später schieben')+'" style="width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;color:#7F77DD;cursor:pointer;flex-shrink:0;font-size:15px;font-weight:700;">'+((bv==='s'||bv==='p')?'←':'→')+'</span>'):'')
         +(sucht
@@ -61250,11 +61257,13 @@ function _ztlKastenHtml(){
     }else{
       h+='<div style="font-size:13px;color:var(--text2);padding:4px 0 2px;">'+(sucht?('Kein Punkt passt zu „'+_ztlEsc(suche.trim())+'“.'):'Noch nichts notiert.')+'</div>'; // b906
     }
-    h+='<div style="display:flex;gap:7px;margin-top:9px;align-items:center;">'
+    const neuAnh=(!(reiter&&blatt==='p')&&typeof _ztlAnhDrop==='function'); // b1029: Datei auf Feld oder + ziehen = neuer Punkt (nicht auf dem Privat-Blatt)
+    h+='<div'+(neuAnh?' ondragover="_ztlAnhDragUeber(event)" ondragleave="_ztlAnhDragWeg(event)" ondrop="_ztlAnhDrop(event,\'\')"':'')+' style="display:flex;gap:7px;margin-top:9px;align-items:center;border-radius:8px;">'
       +'<input id="ztlNeu" type="text" value="'+_ztlAttr(wert)+'" placeholder="Neuen Punkt eintippen oder diktieren…" autocomplete="off"'
       +' onkeydown="if(event.key===\'Enter\')_ztlNeuAusFeld()"'
       +' style="flex:1;min-width:0;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:14px;">'
       +'<button onclick="_ztlNeuAusFeld()" title="Punkt anhängen" style="flex-shrink:0;width:38px;height:36px;border-radius:8px;border:1px solid var(--border);background:#7F77DD;color:#fff;font-size:17px;font-weight:700;cursor:pointer;">+</button>'
+      +(neuAnh?'<button onclick="_ztlAnhWaehlen(\'\')" title="Datei als neuen Punkt anhängen (Text aus dem Feld, sonst der Dateiname) – oder die Datei hierher ziehen" style="flex-shrink:0;width:38px;height:36px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:16px;cursor:pointer;">📎</button>':'') // b1029
       +'</div>';
     const erledigte=zeigenAlle.length-zeigenAlle.filter(function(z){return !z.erl;}).length; // b906: zeigenAlle – der Knopf raeumt das ganze Blatt
     const knoepfe=[];
@@ -61405,6 +61414,7 @@ async function _ztlSync(){
     }
     const vorher=JSON.stringify(_ztlZeilen);
     _ztlZeilen=_ztlMerge(_ztlZeilen,fern,_ztlJetzt());
+    if(typeof _ztlAnhAbgelaufen==='function'&&await _ztlAnhAbgelaufen(_ztlJetzt()))_ztlZeilen=_ztlMerge(_ztlZeilen,[],_ztlJetzt()); // b1029: erst die Dateien in den Papierkorb, dann darf die Zeile fallen
     const nachher=JSON.stringify(_ztlZeilen);
     if(nachher!==vorher){_ztlSpeichereLokal();_ztlZeichne();}
     if(zettelFileId&&nachher===fernRoh){_ztlGut();return;}
@@ -61427,6 +61437,257 @@ async function _ztlSync(){
     }
   }catch(e){_ztlSchlecht(e);}
   finally{_ztlSyncLaeuft=false;}
+}
+// b1029/v302: Zettel-Anhänge (Frank 29.09.: „einen Zettel vom Kunden, den ich eingescannt hab, als JPG oder PDF
+// anfügen"). Die DATEI liegt in Drive im Ordner „Zettel-Anhänge" (neben pam_zettel.json), an der Zeile steht nur der
+// Verweis z.anh=[{id,name,mime,size,am}]. Nie Dateiinhalt in pam_zettel.json oder im Browser-Speicher – der ist am PC
+// schon voll, und der Abgleich PC↔Handy bliebe klein. Wege: Datei auf eine Zeile ziehen (hängt dort an), auf das
+// Eingabefeld/+ ziehen (neuer Punkt), 📎 an der Zeile bzw. neben dem + (Datei aussuchen, am Handy auch Kamera).
+// Löschen (Franks Wahl 29.09.): ✕ am Anhang → sofort in den Drive-PAPIERKORB (30 Tage zurückholbar). Aufgeräumte
+// Zeilen behalten ihre Datei, bis die Zeile nach ZETTEL_WEG_TAGE endgültig herausfällt – dann Papierkorb.
+// Dafür hält _ztlMerge eine abgelaufene Zeile fest, solange sie noch Anhänge trägt (erst Datei weg, dann Zeile weg).
+// ⛔ Privat-Blatt: KEINE neuen Anhänge – der Scan läge offen in Drive, das Kennwort verdeckt nur den Bildschirm.
+// ⛔ Nie endgültig löschen – nur trashed:true. Derselbe Baustein steht zeichengleich am Handy (test_b1029).
+function _ztlMeldung(text,art){
+  try{
+    if(typeof showToast==='function'){showToast(text,art||'info',6000);return;}
+    if(typeof toast==='function'){toast(text,art||'',6000);return;}
+  }catch(e){}
+  try{console.log('[Zettel]',text);}catch(e){}
+}
+function _ztlAnhListe(z){return (z&&Array.isArray(z.anh))?z.anh.filter(function(a){return !!(a&&typeof a.id==='string'&&a.id);}):[];}
+function _ztlAnhDarf(z){return _ztlBlattVon(z)!=='p';}
+function _ztlAnhTokenOk(){
+  if(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB)return false; // Notbetrieb hat kein Drive
+  return (typeof gdriveTokenValid==='function')?!!gdriveTokenValid():!!(typeof gdriveToken!=='undefined'&&gdriveToken);
+}
+function _ztlAnhIcon(a){
+  var m=String((a&&a.mime)||''),n=String((a&&a.name)||'');
+  if(/^image\//i.test(m)||/\.(jpe?g|png|gif|webp|heic|bmp|tiff?)$/i.test(n))return '🖼';
+  if(/pdf/i.test(m)||/\.pdf$/i.test(n))return '📄';
+  return '📎';
+}
+// Ordner „Zettel-Anhänge" suchen, sonst anlegen – im selben Drive-Ordner wie pam_zettel.json (workspaceFolderId).
+async function _ztlAnhOrdner(){
+  if(typeof _ztlAnhOrdnerId!=='undefined'&&_ztlAnhOrdnerId)return _ztlAnhOrdnerId;
+  var par=(typeof workspaceFolderId!=='undefined'&&workspaceFolderId)?workspaceFolderId:'';
+  var q="name='"+ZETTEL_ANH_ORDNER+"' and mimeType='application/vnd.google-apps.folder' and trashed=false"+(par?" and '"+par+"' in parents":'');
+  var r=await fetch('https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q)+'&fields=files(id)&pageSize=5',{headers:{Authorization:'Bearer '+gdriveToken}});
+  if(r.status===401){if(typeof _handleDrive401==='function')_handleDrive401();throw new Error('Anmeldung abgelaufen');}
+  if(!r.ok)throw new Error('Ordner suchen HTTP '+r.status);
+  var d=await r.json();
+  if(d&&d.files&&d.files.length){_ztlAnhOrdnerId=d.files[0].id;return _ztlAnhOrdnerId;}
+  var meta={name:ZETTEL_ANH_ORDNER,mimeType:'application/vnd.google-apps.folder'};
+  if(par)meta.parents=[par];
+  var c=await fetch('https://www.googleapis.com/drive/v3/files?fields=id',{method:'POST',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},body:JSON.stringify(meta)});
+  if(!c.ok)throw new Error('Ordner anlegen HTTP '+c.status);
+  var f=await c.json();
+  if(!f||!f.id)throw new Error('Ordner ohne Kennung');
+  _ztlAnhOrdnerId=f.id;
+  return f.id;
+}
+// Dateiname für Drive: ohne Zeichen, die Windows im gespiegelten Laufwerk G: nicht mag; höchstens 100 Zeichen,
+// die Endung bleibt erhalten (Pfadlängen-Lehre b943).
+function _ztlAnhName(n){
+  var s=String(n||'Anhang').replace(/[\\\/:*?"<>|]+/g,'_').replace(/\s+/g,' ').trim()||'Anhang';
+  if(s.length<=100)return s;
+  var p=s.lastIndexOf('.');
+  var end=(p>0&&s.length-p<=8)?s.slice(p):'';
+  return s.slice(0,100-end.length)+end;
+}
+async function _ztlAnhHochladen(file){
+  var ord=await _ztlAnhOrdner();
+  var name=_ztlAnhName(file&&file.name);
+  var fd=new FormData();
+  fd.append('metadata',new Blob([JSON.stringify({name:name,parents:[ord]})],{type:'application/json'}));
+  fd.append('file',file,name);
+  var r=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType',{method:'POST',headers:{Authorization:'Bearer '+gdriveToken},body:fd});
+  if(r.status===401){if(typeof _handleDrive401==='function')_handleDrive401();throw new Error('Anmeldung abgelaufen');}
+  if(!r.ok)throw new Error('Hochladen HTTP '+r.status);
+  var m=await r.json();
+  if(!m||!m.id)throw new Error('Drive gab keine Kennung zurück');
+  return {id:m.id,name:m.name||name,mime:m.mimeType||(file&&file.type)||'',size:(file&&file.size)||0,am:_ztlJetzt()};
+}
+// Datei in den Drive-Papierkorb. Antwort: 'ok' · 'weg' (gibt es schon nicht mehr) · sonst der Fehler als Text.
+async function _ztlAnhPapierkorb(fileId){
+  if(!_ztlAnhTokenOk())return 'keine Drive-Verbindung';
+  try{
+    var r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=id,trashed',{method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},body:JSON.stringify({trashed:true})});
+    if(r.ok)return 'ok';
+    if(r.status===404)return 'weg';
+    if(r.status===401&&typeof _handleDrive401==='function')_handleDrive401();
+    return 'HTTP '+r.status;
+  }catch(e){return String((e&&e.message)||e);}
+}
+// Dateien an eine bestehende Zeile hängen. Die Zeile wird nach JEDEM Hochladen neu gesucht – ein Abgleich
+// dazwischen kann _ztlZeilen durch neue Objekte ersetzt haben.
+async function _ztlAnhDazu(id,files){
+  var liste=Array.prototype.slice.call(files||[]).filter(function(f){return !!f;});
+  if(!liste.length)return 0;
+  var finde=function(){return _ztlZeilen.find(function(x){return _ztlGueltig(x)&&x.id===id;});};
+  var z=finde();
+  if(!z)return 0;
+  if(!_ztlAnhDarf(z)){_ztlMeldung('Auf dem Privat-Blatt gibt es keine Anhänge – die Datei läge offen in Drive.','error');return 0;}
+  if(!_ztlAnhTokenOk()){_ztlMeldung('📎 Anhänge gehen nur mit Drive-Verbindung – bitte erst bei Google anmelden.','error');return 0;}
+  _ztlAnhLaeuft[id]=(_ztlAnhLaeuft[id]||0)+liste.length;
+  _ztlZeichne();
+  var n=0;
+  for(var i=0;i<liste.length;i++){
+    var f=liste[i];
+    try{
+      var e=await _ztlAnhHochladen(f);
+      z=finde();
+      if(!z){_ztlMeldung('⚠ „'+e.name+'" liegt in Drive (Ordner '+ZETTEL_ANH_ORDNER+'), aber der Punkt ist inzwischen weg.','error');}
+      else{
+        z.anh=_ztlAnhListe(z).concat([e]);z.ts=_ztlJetzt();
+        _ztlSpeichereLokal();n++;
+      }
+    }catch(err){_ztlMeldung('⚠ „'+((f&&f.name)||'Datei')+'" nicht angehängt: '+((err&&err.message)||err),'error');}
+    _ztlAnhLaeuft[id]=(_ztlAnhLaeuft[id]||1)-1;
+    if(_ztlAnhLaeuft[id]<=0)delete _ztlAnhLaeuft[id];
+    _ztlZeichne();
+  }
+  if(n){_ztlSyncBald();_ztlMeldung('📎 '+(n===1?'Datei':n+' Dateien')+' angehängt','success');}
+  return n;
+}
+// Dateien als NEUEN Punkt: Text = was im Eingabefeld steht, sonst der Dateiname.
+async function _ztlAnhNeuPunkt(files){
+  var liste=Array.prototype.slice.call(files||[]).filter(function(f){return !!f;});
+  if(!liste.length)return;
+  var bl=(ZETTEL_REITER==='1')?_ztlBlatt():'j';
+  if(bl==='p'){_ztlMeldung('Auf dem Privat-Blatt gibt es keine Anhänge – die Datei läge offen in Drive.','error');return;}
+  if(!_ztlAnhTokenOk()){_ztlMeldung('📎 Anhänge gehen nur mit Drive-Verbindung – bitte erst bei Google anmelden.','error');return;}
+  var f=(typeof document!=='undefined')?document.getElementById('ztlNeu'):null;
+  var t=f?String(f.value||'').trim():'';
+  if(!t)t=String((liste[0]&&liste[0].name)||'Anhang')+(liste.length>1?' (+'+(liste.length-1)+')':'');
+  if(f)f.value='';
+  if(typeof _ztlSuche!=='undefined'&&_ztlSuche)_ztlSuche='';
+  // _ztlNeu gibt nur true/false zurück (test_b802) – die neue Zeile ist die, deren Kennung vorher nicht da war.
+  var vorher={};
+  _ztlZeilen.forEach(function(z){if(z&&typeof z.id==='string')vorher[z.id]=1;});
+  if(!_ztlNeu(t,bl)){if(f)f.value=t;return;}
+  var neu=_ztlZeilen.find(function(z){return _ztlGueltig(z)&&!vorher[z.id];});
+  if(!neu)return;
+  await _ztlAnhDazu(neu.id,liste);
+}
+// Datei aussuchen. id = Zeile; leer = neuer Punkt. Ein einziges verstecktes Feld, das wiederverwendet wird.
+function _ztlAnhWaehlen(id){
+  if(typeof document==='undefined')return;
+  var inp=document.getElementById('ztlAnhFeld');
+  if(!inp){
+    inp=document.createElement('input');
+    inp.type='file';inp.multiple=true;inp.id='ztlAnhFeld';inp.style.display='none';
+    inp.onchange=function(){
+      var fs=Array.prototype.slice.call(inp.files||[]);
+      var ziel=inp.getAttribute('data-ziel')||'';
+      inp.value='';
+      if(!fs.length)return;
+      if(ziel)_ztlAnhDazu(ziel,fs);else _ztlAnhNeuPunkt(fs);
+    };
+    document.body.appendChild(inp);
+  }
+  inp.setAttribute('data-ziel',id||'');
+  inp.click();
+}
+function _ztlAnhHatDateien(ev){
+  try{var t=ev&&ev.dataTransfer&&ev.dataTransfer.types;if(!t)return false;for(var i=0;i<t.length;i++){if(t[i]==='Files')return true;}}catch(e){}
+  return false;
+}
+function _ztlAnhMarke(el,an){
+  if(!el||!el.style)return;
+  el.style.outline=an?'2px dashed #7F77DD':'';
+  el.style.outlineOffset=an?'-2px':'';
+  el.style.background=an?'rgba(127,119,221,0.12)':'';
+}
+function _ztlAnhDragUeber(ev){
+  if(!_ztlAnhHatDateien(ev))return;
+  ev.preventDefault();ev.stopPropagation();
+  try{ev.dataTransfer.dropEffect='copy';}catch(e){}
+  _ztlAnhMarke(ev.currentTarget,true);
+}
+function _ztlAnhDragWeg(ev){
+  var el=ev&&ev.currentTarget;
+  if(!el)return;
+  if(ev.relatedTarget&&el.contains&&el.contains(ev.relatedTarget))return;
+  _ztlAnhMarke(el,false);
+}
+function _ztlAnhDrop(ev,id){
+  if(!_ztlAnhHatDateien(ev))return;
+  ev.preventDefault();ev.stopPropagation();
+  _ztlAnhMarke(ev.currentTarget,false);
+  var fs=Array.prototype.slice.call((ev.dataTransfer&&ev.dataTransfer.files)||[]);
+  if(!fs.length)return;
+  if(id)_ztlAnhDazu(id,fs);else _ztlAnhNeuPunkt(fs);
+}
+// Fangnetz für den ganzen Kasten: eine Datei, die daneben fällt (Kopf, Reiter, Privat-Zeile), öffnet sonst der
+// Browser selbst – PAM wäre weg. Hier wird sie nur abgefangen und erklärt.
+function _ztlAnhKastenUeber(ev){
+  if(!_ztlAnhHatDateien(ev))return;
+  ev.preventDefault();
+  try{ev.dataTransfer.dropEffect='none';}catch(e){}
+}
+function _ztlAnhKastenDrop(ev){
+  if(!_ztlAnhHatDateien(ev))return;
+  ev.preventDefault();
+  _ztlMeldung('Datei auf eine Zeile ziehen (hängt dort an) oder auf das Eingabefeld (neuer Punkt).','info');
+}
+function _ztlAnhOeffnen(fileId){
+  if(!fileId||typeof window==='undefined'||typeof window.open!=='function')return;
+  window.open('https://drive.google.com/file/d/'+encodeURIComponent(fileId)+'/view','_blank');
+}
+// ✕ am Anhang: erst vom Punkt nehmen (reist über ts ans andere Gerät), dann die Datei in den Papierkorb.
+async function _ztlAnhWeg(zid,aid){
+  var z=_ztlZeilen.find(function(x){return _ztlGueltig(x)&&x.id===zid;});
+  if(!z)return;
+  var a=_ztlAnhListe(z).find(function(x){return x.id===aid;});
+  if(!a)return;
+  if(typeof confirm==='function'&&!confirm('Anhang „'+a.name+'" vom Punkt nehmen?\n\nDie Datei kommt in den Drive-Papierkorb und ist dort noch 30 Tage zurückholbar.'))return;
+  z.anh=_ztlAnhListe(z).filter(function(x){return x.id!==aid;});z.ts=_ztlJetzt();
+  _ztlSpeichereLokal();_ztlZeichne();_ztlSyncBald();
+  var r=await _ztlAnhPapierkorb(aid);
+  if(r==='ok'||r==='weg')_ztlMeldung('🗑 „'+a.name+'" liegt im Drive-Papierkorb','success');
+  else _ztlMeldung('Anhang vom Punkt genommen. Die Datei liegt aber noch im Drive-Ordner „'+ZETTEL_ANH_ORDNER+'" ('+r+').','info');
+}
+// Beim Abgleich: Zeilen, deren weg-Stempel älter als ZETTEL_WEG_TAGE ist und die noch Anhänge tragen – Dateien in
+// den Papierkorb, danach die Anhänge von der Zeile. Erst dann lässt _ztlMerge die Zeile fallen. Scheitert der
+// Papierkorb (keine Verbindung, keine Rechte), bleibt der Verweis und es wird im nächsten Start erneut versucht –
+// in einer Sitzung aber nur EINMAL je Datei (der Abgleich läuft jede Minute).
+async function _ztlAnhAbgelaufen(jetztIso){
+  if(!_ztlAnhTokenOk())return false;
+  var grenze=new Date(new Date(jetztIso||_ztlJetzt()).getTime()-ZETTEL_WEG_TAGE*864e5).toISOString();
+  var geaendert=false;
+  var zeilen=_ztlZeilen.slice();
+  for(var i=0;i<zeilen.length;i++){
+    var z=zeilen[i];
+    if(!_ztlGueltig(z)||!z.weg||String(z.weg)>=grenze||!Array.isArray(z.anh)||!z.anh.length)continue;
+    var bleiben=[];
+    for(var k=0;k<z.anh.length;k++){
+      var a=z.anh[k];
+      if(!a||typeof a.id!=='string'||!a.id)continue; // kaputter Verweis: fällt einfach weg
+      if(_ztlAnhWegVersucht[a.id]){bleiben.push(a);continue;}
+      var r=await _ztlAnhPapierkorb(a.id);
+      if(r==='ok'||r==='weg')continue;
+      _ztlAnhWegVersucht[a.id]=1;bleiben.push(a);
+    }
+    if(bleiben.length!==z.anh.length){z.anh=bleiben;z.ts=_ztlJetzt();geaendert=true;}
+  }
+  if(geaendert)_ztlSpeichereLokal();
+  return geaendert;
+}
+// Die Anhang-Zeile unter dem Text einer Zeile (leer, wenn nichts dranhängt und nichts hochlädt).
+function _ztlAnhHtml(z){
+  var l=_ztlAnhListe(z);
+  var lauf=(typeof _ztlAnhLaeuft!=='undefined'&&_ztlAnhLaeuft&&_ztlAnhLaeuft[z.id])||0;
+  if(!l.length&&!lauf)return '';
+  var h='<span style="display:flex;flex-wrap:wrap;gap:4px;margin-top:3px;">';
+  l.forEach(function(a){
+    h+='<span style="display:inline-flex;align-items:center;max-width:100%;border:1px solid var(--border);border-radius:6px;background:var(--bg3);font-size:12px;overflow:hidden;">'
+      +'<span onclick="_ztlAnhOeffnen(\''+_ztlAttr(a.id)+'\')" title="'+_ztlAttr('Öffnen: '+a.name)+'" style="padding:2px 7px;cursor:pointer;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px;">'+_ztlAnhIcon(a)+' '+_ztlEsc(a.name)+'</span>'
+      +'<span onclick="_ztlAnhWeg(\''+_ztlAttr(z.id)+'\',\''+_ztlAttr(a.id)+'\')" title="Anhang wegnehmen (Datei kommt in den Drive-Papierkorb)" style="padding:2px 6px;cursor:pointer;color:var(--text2);border-left:1px solid var(--border);flex-shrink:0;">✕</span>'
+      +'</span>';
+  });
+  if(lauf)h+='<span style="font-size:12px;color:#7F77DD;padding:2px 0;">⏳ lädt hoch…</span>';
+  return h+'</span>';
 }
 // ── ZETTEL-TIMER – ab hier nichts in Prüfsuiten ausführen ──
 if(typeof setInterval==='function'&&typeof document!=='undefined'){
