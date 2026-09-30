@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F2c';
+const PAM_FORMULARE_VERSION='F3';
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
    Befund Frank 14.09.2026: ein Formular wie das Wartungsprotokoll, aber mit Messwerten – am
    Tablet vor Ort ausfüllen, als PDF abheften. Werte werden eingetippt; das Einlesen der
@@ -675,7 +675,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
   function _neuBauen(){
     const sc=body.scrollTop;
     body.innerHTML='';
-    if(bericht.fassung==='begehung'&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_teilKopfBg(),_bgBlock('raeume',_teilRaeumeBg,'Raumklima'),_bgBlock('stellen',_teilStellenBg,'Messstellen'),_bgBlock('fest',_teilChecklistenBg,'Feststellungen vor Ort'),_bgBlock('angaben',_teilAngabenBg,'Angaben der Nutzer (nicht selbst festgestellt)'),_bgBlock('fazit',_teilZusammenfassungBg,'Zusammenfassung der Feststellungen'),_bgBlock('fotos',_teilFotos,'Fotos')); // F2b: zuklappbar, Leiste oben
+    if(bericht.fassung==='begehung'&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_teilKopfBg(),_bgBlock('raeume',_teilRaeumeBg,'Raumklima'),_bgBlock('stellen',_teilStellenBg,'Messstellen'),_bgBlock('skizze',_teilSkizzeBg,'Raumskizze'),_bgBlock('fest',_teilChecklistenBg,'Feststellungen vor Ort'),_bgBlock('angaben',_teilAngabenBg,'Angaben der Nutzer (nicht selbst festgestellt)'),_bgBlock('fazit',_teilZusammenfassungBg,'Zusammenfassung der Feststellungen'),_bgBlock('fotos',_teilFotos,'Fotos')); // F2b: zuklappbar, Leiste oben
     else{
       body.append(_teilErgebnis(),_teilKopf(),_teilRaeume(),_teilStellen(),_teilChecklisten(),_teilBewertung(),_teilFotos()); // v294: Ergebnis oben
       if(typeof _teilUmwandeln==='function'&&body.firstChild&&typeof body.insertBefore==='function')body.insertBefore(_teilUmwandeln(),body.firstChild); // F2a: Hinweis zum Umwandeln ganz oben
@@ -1057,7 +1057,12 @@ function _openFeuchteprotokollMobil(existingIdx,art){
   /* ── F2b: Bedienung – jeder Abschnitt lässt sich zuklappen, oben eine Leiste zum Springen ──────────────
      Gemerkt wird je GERÄT im Browser-Speicher (wie bei den Feststellungs-Abschnitten), NICHT am Protokoll – sonst käme es
      aufs andere Gerät mit. Das PDF zeigt immer alles. Standard: alles aufgeklappt. */
-  function _bgZu(k){return _fsZuLesen(bericht.id).indexOf('b:'+k)>=0;}
+  function _bgZu(k){const l=_fsZuLesen(bericht.id);return k==='skizze'?l.indexOf('a:skizze')<0:l.indexOf('b:'+k)>=0;}
+  function _bgZuMehrere(keys,zu){ // Schlüssel: „b:…“ = zu; nur die Raumskizze ist Standard zu und merkt sich das Aufklappen als „a:skizze“
+    const norm=keys.filter(k=>k!=='skizze').map(k=>'b:'+k);
+    if(norm.length)_fsZuMehrere(bericht.id,norm,zu);
+    if(keys.indexOf('skizze')>=0)_fsZuMehrere(bericht.id,['a:skizze'],!zu);
+  }
   function _bgNurDieser(){try{return localStorage.getItem('pam_fs_nurDieser')==='1';}catch(e){return false;}}
   // Kurzfassung, die neben einem zugeklappten Abschnitt steht – nur Zahlen und Stichworte, keine Wertung
   function _bgKurz(k){
@@ -1077,6 +1082,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
       (bericht.sektionen||[]).forEach(s=>((s&&s.items)||[]).forEach(i=>{if(i.typ==='notiz')return;if(i.frei||i.status==='ok'||i.status==='mangel')da++;else offen++;}));
       return [da?da+' erfasst':'',offen?offen+' offen':''].filter(Boolean).join(' · ')||'keine Punkte';
     }
+    if(k==='skizze'){const n=(bericht.raeume||[]).filter(q=>q&&q.skizze&&q.skizze.an).length;return n?plural(n,'Skizze','Skizzen'):'noch keine Skizze';}
     if(k==='angaben'){const a=bericht.angaben||[];return a.filter(x=>x&&String(x.text||'').trim()).length+' von '+a.length+' beantwortet';}
     if(k==='fazit')return String(bericht.bemerkung||'').trim()?'ausgefüllt':'noch leer';
     if(k==='fotos'){const f=bericht.fotos||[];return f.length?plural(f.length,'Foto','Fotos')+' ('+f.filter(x=>x&&x.inReport).length+' im PDF)':'noch kein Foto';}
@@ -1096,7 +1102,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     if(zu){const kurz=document.createElement('span');kurz.setAttribute('data-fs-blockkurz',k);kurz.textContent=_bgKurz(k);
       kurz.style.cssText='font-size:12px;font-weight:600;color:var(--text2);white-space:nowrap;flex-shrink:0;';kopf.appendChild(kurz);}
     kopf.onclick=()=>{
-      _fsZuSetzen(bericht.id,'b:'+k,!zu);_neuBauen();
+      _bgZuMehrere([k],!zu);_neuBauen();
       const el=body.querySelector('[data-fs-block="'+k+'"]');if(el){try{el.scrollIntoView({block:'nearest'});}catch(e){}}
     };
     w.appendChild(kopf);
@@ -1108,9 +1114,9 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     return w;
   }
   function _bgSpringe(k){ // Leiste: Abschnitt aufklappen und hinscrollen; mit „Nur dieser" gehen alle anderen zu
-    const alle=FS_BG_BLOECKE.map(b=>'b:'+b.k);
-    if(_bgNurDieser())_fsZuMehrere(bericht.id,alle.filter(x=>x!=='b:'+k),true);
-    _fsZuMehrere(bericht.id,['b:'+k],false);
+    const alle=FS_BG_BLOECKE.map(b=>b.k);
+    if(_bgNurDieser())_bgZuMehrere(alle.filter(x=>x!==k),true);
+    _bgZuMehrere([k],false);
     _neuBauen();
     const el=body.querySelector('[data-fs-block="'+k+'"]');if(el){try{el.scrollIntoView({block:'start'});}catch(e){}}
   }
@@ -1126,7 +1132,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
         +'border:2px solid '+(an?FS_FARBE:'var(--border)')+';background:'+(an?'rgba(31,95,139,.18)':'transparent')+';color:var(--text);font-weight:'+(an?'700':'600')+';';
       b.onclick=fn;return b;
     };
-    w.appendChild(mk(offene?'▸ Alles zu':'▾ Alles auf',false,()=>{_fsZuMehrere(bericht.id,alle.map(k=>'b:'+k),!!offene);_neuBauen();},['data-fs-alles','1']));
+    w.appendChild(mk(offene?'▸ Alles zu':'▾ Alles auf',false,()=>{_bgZuMehrere(alle,!!offene);_neuBauen();},['data-fs-alles','1']));
     w.appendChild(mk(nur?'✓ Nur dieser':'Nur dieser',nur,()=>{try{localStorage.setItem('pam_fs_nurDieser',nur?'0':'1');}catch(e){}_neuBauen();},['data-fs-nur','1']));
     FS_BG_BLOECKE.forEach(b=>w.appendChild(mk(b.c,false,()=>_bgSpringe(b.k),['data-fs-sprung',b.k])));
     return w;
@@ -1398,6 +1404,59 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     testoBtn.style.cssText=S_KNOPF+'display:block;width:calc(100% - 20px);margin:0 10px 14px;border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);';
     testoBtn.onclick=()=>_fsTestoEinlesen(bericht,t,_neuBauen);
     w.appendChild(testoBtn);
+    return w;
+  }
+
+  /* ── F3: Raumskizze – eigener Abschnitt (Standard: zugeklappt, damit das Formular übersichtlich bleibt) ─────────────── */
+  let _bgSkizzeIdx=0; // welcher Raum im Abschnitt gezeigt wird – nur Anzeige, wird nicht im Protokoll gespeichert
+  function _teilSkizzeBg(){
+    const w=document.createElement('div');
+    w.appendChild(_kopfZeile('Raumskizze'));
+    w.appendChild(_bgInfo('PAM zeichnet den Raum von oben mit den Wänden W1–W4, Tür, Fenster und deinen Messstellen. Nicht maßstäblich. Im PDF steht die Skizze nur, wenn du sie für den Raum anlegst.'));
+    if(!bericht.raeume.length){w.appendChild(_bgInfo('Erst bei „Raumklima" einen Raum anlegen.'));return w;}
+    if(_bgSkizzeIdx>=bericht.raeume.length)_bgSkizzeIdx=0;
+    const chips=document.createElement('div');chips.style.cssText='display:flex;flex-wrap:wrap;gap:6px;padding:6px 14px;';
+    bericht.raeume.forEach((q,qi)=>chips.appendChild(_chip((String(q.name||'').trim()||('Raum '+(qi+1)))+((q.skizze&&q.skizze.an)?' ✓':''),qi===_bgSkizzeIdx,()=>{_bgSkizzeIdx=qi;_neuBauen();})));
+    w.appendChild(chips);
+    const r=bericht.raeume[_bgSkizzeIdx];
+    if(!r.skizze||!r.skizze.an){
+      const neu=document.createElement('button');neu.type='button';neu.setAttribute('data-fs-skizze-neu','1');
+      neu.textContent='＋ Skizze für '+(String(r.name||'').trim()||'diesen Raum')+' anlegen';
+      neu.style.cssText=S_KNOPF+'display:block;width:calc(100% - 28px);margin:6px 14px 12px;min-height:44px;border:1.5px dashed '+FS_FARBE+';background:rgba(31,95,139,.08);color:var(--text);';
+      neu.onclick=()=>{r.skizze={an:true,l:'',b:'',dreh:0};_fsBgWaendeVier(r);scheduleSave();_neuBauen();};
+      w.appendChild(neu);
+      return w;
+    }
+    const sk=r.skizze;
+    const vorschau=document.createElement('img');vorschau.setAttribute('data-fs-skizze-bild','1');vorschau.alt='Raumskizze';
+    vorschau.style.cssText='display:block;width:calc(100% - 28px);max-width:560px;margin:6px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;';
+    const neuZeichnen=()=>{const u=_fsBgSkizzeBild(bericht,r);if(u)vorschau.src=u;};
+    const masse=document.createElement('div');masse.style.cssText='display:grid;grid-template-columns:repeat(2,minmax(0,1fr)) auto;gap:6px;padding:0 14px;align-items:end;';
+    const dreh=document.createElement('button');dreh.type='button';dreh.setAttribute('data-fs-skizze-dreh','1');dreh.textContent='↻ Drehen';
+    dreh.style.cssText=S_KNOPF+'min-height:44px;border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);';
+    dreh.onclick=()=>{sk.dreh=((parseInt(sk.dreh,10)||0)+1)%4;scheduleSave();neuZeichnen();};
+    masse.append(_bgLabelFeld('Länge W1/W3 (m)',_inp(sk.l,'z. B. 4,5',v=>{sk.l=v;neuZeichnen();},true)),_bgLabelFeld('Breite W2/W4 (m)',_inp(sk.b,'z. B. 3,2',v=>{sk.b=v;neuZeichnen();},true)),dreh);
+    w.appendChild(masse);
+    w.appendChild(vorschau);
+    neuZeichnen();
+    w.appendChild(_bgInfo('Blau = Fenster, Bogen = Tür. Die Punkte sind deine Messstellen (Nummern wie im PDF); sie zeigen die Wand, nicht die genaue Stelle und Höhe. „Drehen" legt fest, welche Wand unten liegt.'));
+    const zeilen=document.createElement('div');zeilen.style.cssText='padding:2px 14px;';
+    for(let i=1;i<=4;i++){
+      const wd=(r.waende||[]).find(q=>q&&q.k==='W'+i);
+      if(!wd)continue;
+      const row=document.createElement('div');row.setAttribute('data-fs-skizze-wand','W'+i);row.style.cssText='display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0;';
+      const l=document.createElement('span');l.style.cssText='flex:1 1 120px;min-width:0;font-size:14px;font-weight:700;color:var(--text);';l.textContent='W'+i+(String(wd.art||'').trim()?' – '+String(wd.art).trim():'');
+      row.append(l,_chip('Tür',!!wd.tuer,()=>{wd.tuer=!wd.tuer;scheduleSave();_neuBauen();}),_chip('Fenster',!!wd.fenster,()=>{wd.fenster=!wd.fenster;scheduleSave();_neuBauen();}));
+      zeilen.appendChild(row);
+    }
+    w.appendChild(zeilen);
+    const weg=document.createElement('button');weg.type='button';weg.textContent='✕ Skizze für diesen Raum entfernen';
+    weg.style.cssText=S_KNOPF+'display:block;width:calc(100% - 28px);margin:8px 14px 12px;border:1px solid var(--border);background:transparent;color:var(--text2);';
+    weg.onclick=()=>{
+      if(!confirm('Skizze für „'+(String(r.name||'').trim()||'diesen Raum')+'" entfernen? Wände, Türen und Fenster bleiben erhalten, sie steht dann nicht mehr im PDF.'))return;
+      r.skizze=null;scheduleSave();_neuBauen();
+    };
+    w.appendChild(weg);
     return w;
   }
 
@@ -1888,7 +1947,7 @@ const FS_BG_TITEL='Begehungsprotokoll';
 const FS_BG_UMFANG='Dieses Protokoll hält den vorgefundenen Zustand und die Messwerte zum Zeitpunkt der Begehung fest. Eine Bewertung der Ursachen und Empfehlungen zur Beseitigung sind nicht Gegenstand dieses Protokolls.';
 const FS_BG_ROLLEN=['Nutzer','Mieter Nachbarkeller','Vertreter Auftraggeber','Aufgenommen von','Sonstige'];
 // F2b: die zuklappbaren Abschnitte des Begehungsprotokolls (k = Schlüssel, t = Überschrift, c = Kurzname in der Sprungleiste)
-const FS_BG_BLOECKE=[{k:'auftrag',t:'Auftrag und Umfang',c:'Auftrag'},{k:'termin',t:'Ortstermin',c:'Termin'},{k:'geraete',t:'Messgeräte',c:'Geräte'},{k:'raeume',t:'Raumklima',c:'Raumklima'},{k:'stellen',t:'Messstellen',c:'Messstellen'},{k:'fest',t:'Feststellungen vor Ort',c:'Feststellungen'},{k:'angaben',t:'Angaben der Nutzer (nicht selbst festgestellt)',c:'Angaben'},{k:'fazit',t:'Zusammenfassung der Feststellungen',c:'Zusammenfassung'},{k:'fotos',t:'Fotos',c:'Fotos'}];
+const FS_BG_BLOECKE=[{k:'auftrag',t:'Auftrag und Umfang',c:'Auftrag'},{k:'termin',t:'Ortstermin',c:'Termin'},{k:'geraete',t:'Messgeräte',c:'Geräte'},{k:'raeume',t:'Raumklima',c:'Raumklima'},{k:'stellen',t:'Messstellen',c:'Messstellen'},{k:'skizze',t:'Raumskizze',c:'Skizze'},{k:'fest',t:'Feststellungen vor Ort',c:'Feststellungen'},{k:'angaben',t:'Angaben der Nutzer (nicht selbst festgestellt)',c:'Angaben'},{k:'fazit',t:'Zusammenfassung der Feststellungen',c:'Zusammenfassung'},{k:'fotos',t:'Fotos',c:'Fotos'}];
 const FS_BG_GERAETE={
   luft:'testo 605i – Lufttemperatur und relative Luftfeuchte',
   oberflaeche:'testo 805i – Oberflächentemperatur, berührungslos (Infrarot)',
@@ -2157,6 +2216,117 @@ function _fsBgFotoZuordnung(b,f){
   }));
   return teile.join(' · ');
 }
+/* ══ F3: RAUMSKIZZE – PAM zeichnet den Raum von oben ═══════════════════════════════════════════════════════
+   Rechteck-Raum mit den Wänden W1–W4 (Art steht dabei), Tür und Fenster je Wand und den Messstellen als nummerierte Punkte an ihrer Wand
+   (Variante „von selbst": die Punkte sitzen gruppiert in der Mitte der Wand – von oben sieht man keine Höhe, die Skizze zeigt nur die WAND).
+   Nicht maßstäblich. Ein Zeichner (_fsBgSkizzeZeichnen) für die Vorschau am Gerät UND das Bild im PDF – beide sehen gleich aus.
+   Daten: raum.skizze {an:true, l:'4,5' (Länge = Wände W1/W3, m), b:'3,2' (Breite = Wände W2/W4, m), dreh:0…3}, Wand {tuer:true, fenster:true}.
+   Drehung 0: W1 liegt unten, dann im Uhrzeigersinn W2 links, W3 oben, W4 rechts; jede Drehung schiebt alle um eine Seite im Uhrzeigersinn weiter.
+   ⛔ Nur Bezeichnungen und Programm in dieser öffentlichen Datei. */
+const FS_BG_SKIZZE_W=900,FS_BG_SKIZZE_H=640;
+const FS_BG_SEITEN=['unten','links','oben','rechts'];
+function _fsBgSkizzeMasse(r){
+  const zahl=v=>{const n=_fsZahl(v);return (n!==null&&n>0)?n:null;};
+  const sk=(r&&r.skizze)||{};
+  return {l:zahl(sk.l),b:zahl(sk.b),dreh:(((parseInt(sk.dreh,10)||0)%4)+4)%4};
+}
+function _fsBgSkizzeKuerzen(s,n){s=String(s||'').trim();return s.length>n?s.slice(0,n-1)+'…':s;}
+// Lage des Raums auf der Zeichenfläche: Seitenverhältnis aus Länge × Breite (ohne Maße 4 : 3), bei ungerader Drehung vertauscht
+function _fsBgSkizzeGeometrie(r){
+  const W=FS_BG_SKIZZE_W,H=FS_BG_SKIZZE_H,m=_fsBgSkizzeMasse(r);
+  const L=m.l||4,B=m.b||3,quer=m.dreh%2===0;
+  const rw=quer?L:B,rh=quer?B:L;
+  const ratio=Math.max(0.4,Math.min(2.5,rw/rh));
+  const maxW=W-340,maxH=H-240;
+  let w=maxW,h=w/ratio;
+  if(h>maxH){h=maxH;w=h*ratio;}
+  return {W,H,x0:(W-w)/2,y0:(H-h)/2,w,h,m};
+}
+// Strecke auf einer Seite (t0…t1 = Anteil entlang der Wand) samt Richtung nach innen
+function _fsBgSkizzeSeite(geo,seite,t0,t1){
+  const x0=geo.x0,y0=geo.y0,w=geo.w,h=geo.h;
+  if(seite==='unten')return {ax:x0+t0*w,ay:y0+h,bx:x0+t1*w,by:y0+h,nx:0,ny:-1};
+  if(seite==='oben')return {ax:x0+t0*w,ay:y0,bx:x0+t1*w,by:y0,nx:0,ny:1};
+  if(seite==='links')return {ax:x0,ay:y0+h-t0*h,bx:x0,by:y0+h-t1*h,nx:1,ny:0};
+  return {ax:x0+w,ay:y0+t0*h,bx:x0+w,by:y0+t1*h,nx:-1,ny:0};
+}
+// Zeichnet die Skizze auf einen 2D-Zeichenbereich g (Canvas oder Nachbau). Nutzt nur einfache Aufrufe.
+function _fsBgSkizzeZeichnen(g,b,r){
+  const geo=_fsBgSkizzeGeometrie(r),W=geo.W,H=geo.H,x0=geo.x0,y0=geo.y0,w=geo.w,h=geo.h,m=geo.m;
+  g.fillStyle='#ffffff';g.fillRect(0,0,W,H);
+  g.fillStyle='#eef4f9';g.fillRect(x0,y0,w,h);
+  g.textBaseline='middle';g.lineCap='square';
+  g.fillStyle='#1c1c1e';g.font='bold 30px sans-serif';g.textAlign='left';
+  g.fillText(String((r&&r.name)||'Raum'),24,32);
+  const waende=(r&&Array.isArray(r.waende))?r.waende:[];
+  for(let i=0;i<4;i++){
+    const k='W'+(i+1),wd=waende.find(q=>q&&q.k===k)||null,seite=FS_BG_SEITEN[(i+m.dreh)%4];
+    const art=wd?String(wd.art||'').trim():'';
+    const aussen=/au(ß|ss)en/i.test(art),dick=aussen?18:10;
+    const s=_fsBgSkizzeSeite(geo,seite,0,1);
+    g.strokeStyle=aussen?'#1f5f8b':'#555555';g.lineWidth=dick;
+    g.beginPath();g.moveTo(s.ax,s.ay);g.lineTo(s.bx,s.by);g.stroke();
+    if(wd&&wd.fenster){ // Fenster: heller Streifen mit dunkler Mittellinie
+      const f=_fsBgSkizzeSeite(geo,seite,0.15,0.45);
+      g.strokeStyle='#9fd6ff';g.lineWidth=dick+2;g.beginPath();g.moveTo(f.ax,f.ay);g.lineTo(f.bx,f.by);g.stroke();
+      g.strokeStyle='#1f5f8b';g.lineWidth=3;g.beginPath();g.moveTo(f.ax,f.ay);g.lineTo(f.bx,f.by);g.stroke();
+    }
+    if(wd&&wd.tuer){ // Tür: Lücke in der Wand, Türblatt und Schwenkbogen nach innen
+      const d=_fsBgSkizzeSeite(geo,seite,0.6,0.85);
+      g.strokeStyle='#ffffff';g.lineWidth=dick+2;g.beginPath();g.moveTo(d.ax,d.ay);g.lineTo(d.bx,d.by);g.stroke();
+      const len=Math.hypot(d.bx-d.ax,d.by-d.ay);
+      g.strokeStyle='#8a5a2b';g.lineWidth=3;
+      g.beginPath();g.moveTo(d.ax,d.ay);g.lineTo(d.ax+d.nx*len,d.ay+d.ny*len);g.stroke();
+      const angD=Math.atan2(d.by-d.ay,d.bx-d.ax),angN=Math.atan2(d.ny,d.nx),kreuz=(d.bx-d.ax)*d.ny-(d.by-d.ay)*d.nx;
+      g.beginPath();g.arc(d.ax,d.ay,len,angD,angN,kreuz<0);g.stroke();
+    }
+    // Beschriftung außen: Name der Wand, Art, Länge
+    const lm=(i%2===0)?m.l:m.b,mtxt=lm?String(Math.round(lm*100)/100).replace('.',',')+' m':'';
+    g.fillStyle='#1c1c1e';
+    if(seite==='unten'||seite==='oben'){
+      g.textAlign='center';g.font='bold 28px sans-serif';
+      g.fillText(k+(art?' '+_fsBgSkizzeKuerzen(art,24):'')+(mtxt?' · '+mtxt:''),x0+w/2,seite==='unten'?y0+h+40:y0-40);
+    }else{
+      const links=seite==='links',tx=links?x0-22:x0+w+22,my=y0+h/2;
+      g.textAlign=links?'right':'left';
+      g.font='bold 32px sans-serif';g.fillText(k,tx,my-32);
+      g.font='24px sans-serif';
+      if(art)g.fillText(_fsBgSkizzeKuerzen(art,12),tx,my);
+      if(mtxt)g.fillText(mtxt,tx,my+(art?30:0));
+    }
+  }
+  // Messstellen als nummerierte Punkte an ihrer Wand (Nummern wie in der PDF-Tabelle; Vergleichsstelle R grau)
+  const gruppen={};
+  _fsBgStellenSortiert(b).forEach(x=>{
+    const st=x.st;
+    if(st&&r&&st.raum===r.name&&/^W[1-4]$/.test(String(st.wand||'')))(gruppen[st.wand]=gruppen[st.wand]||[]).push(x);
+  });
+  Object.keys(gruppen).forEach(k=>{
+    const i=+k.slice(1)-1,seite=FS_BG_SEITEN[(i+m.dreh)%4],liste=gruppen[k];
+    const rr=26,abst=2*rr+8,s=_fsBgSkizzeSeite(geo,seite,0,1);
+    const len=Math.hypot(s.bx-s.ax,s.by-s.ay),proZeile=Math.max(1,Math.floor((len*0.8)/abst));
+    const mx=(s.ax+s.bx)/2,my=(s.ay+s.by)/2,dx=(s.bx-s.ax)/len,dy=(s.by-s.ay)/len;
+    liste.forEach((x,n)=>{
+      const zeile=Math.floor(n/proZeile),anz=Math.min(proZeile,liste.length-zeile*proZeile),pos=n-zeile*proZeile;
+      const off=(pos-(anz-1)/2)*abst,tief=rr+22+zeile*abst;
+      const px=mx+dx*off+s.nx*tief,py=my+dy*off+s.ny*tief;
+      g.fillStyle=x.st.referenz?'#6b6b6b':'#1f5f8b';
+      g.beginPath();g.arc(px,py,rr,0,Math.PI*2);g.fill();
+      g.fillStyle='#ffffff';g.font='bold 28px sans-serif';g.textAlign='center';
+      g.fillText(String(x.nr),px,py+1);
+    });
+  });
+}
+// Bild der Skizze als data:-Adresse (JPEG) – null, wenn kein Zeichenbereich verfügbar ist
+function _fsBgSkizzeBild(b,r){
+  try{
+    const cv=document.createElement('canvas');cv.width=FS_BG_SKIZZE_W;cv.height=FS_BG_SKIZZE_H;
+    const g=cv.getContext('2d');
+    if(!g)return null;
+    _fsBgSkizzeZeichnen(g,b,r);
+    return cv.toDataURL('image/jpeg',0.92); // JPEG: ein PNG läge in jsPDF unkomprimiert im PDF (mehrere MB je Skizze)
+  }catch(e){console.warn('[Feuchte] Skizze:',e);return null;}
+}
 function _fsBgSektionKurz(sek){
   let da=0,offen=0;
   ((sek&&sek.items)||[]).forEach(it=>{
@@ -2327,7 +2497,8 @@ async function _fsMobPdfBg(bericht,task){
       const luft=(bericht.raeume||[]).filter(r=>r&&(_fsZahl(r.t)!==null||_fsZahl(r.rf)!==null||String(r.bedingung||'').trim()));
       const stellen=_fsBgStellenSortiert(bericht);
       const hatWaende=(bericht.raeume||[]).some(r=>r&&(((r.waende||[]).length)||((r.fotoRefs||[]).length)));
-      if(luft.length||stellen.length||hatWaende){
+      const hatSkizze=(bericht.raeume||[]).some(r=>r&&r.skizze&&r.skizze.an);
+      if(luft.length||stellen.length||hatWaende||hatSkizze){
         abschnitt('Messwerte');
         if(luft.length){
           unterTitel('Raumluft');
@@ -2350,6 +2521,19 @@ async function _fsMobPdfBg(bericht,task){
             n++;
           });
           if(n)y+=3;
+        }
+        { // F3: Skizze je Raum – nur wenn für den Raum angelegt
+          for(const r of (bericht.raeume||[])){
+            if(!r||!r.skizze||!r.skizze.an)continue;
+            const url=_fsBgSkizzeBild(bericht,r);
+            if(!url)continue;
+            const sw=120,sh=sw*FS_BG_SKIZZE_H/FS_BG_SKIZZE_W;
+            if(y+sh+16>285){doc.addPage();y=M;}
+            unterTitel('Skizze '+(hat(r.name)?String(r.name).trim():'Raum'));
+            try{doc.addImage(url,'JPEG',M,y,sw,sh);}catch(e){console.warn('[Feuchte] Skizze:',e);}
+            y+=sh+2;
+            absatz('Nicht maßstäblich. Blau = Fenster, Bogen = Tür. Die Nummern sind die der Messstellen-Tabelle; ein Punkt zeigt die Wand, nicht die genaue Stelle und Höhe.',{groesse:7.5,farbe:[100,100,100],abstand:4});
+          }
         }
         if(stellen.length){
           unterTitel('Messstellen');
