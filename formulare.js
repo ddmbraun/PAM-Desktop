@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F3';
+const PAM_FORMULARE_VERSION='F3a';
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
    Befund Frank 14.09.2026: ein Formular wie das Wartungsprotokoll, aber mit Messwerten – am
    Tablet vor Ort ausfüllen, als PDF abheften. Werte werden eingetippt; das Einlesen der
@@ -1206,7 +1206,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
   function _teilRaeumeBg(){
     const w=document.createElement('div');
     w.appendChild(_kopfZeile('Raumklima'));
-    w.appendChild(_bgInfo('Je Raum: Temperatur, Luftfeuchte, Uhrzeit und Bedingungen (z. B. Heizlüfter in Betrieb). Darunter die Wände W1, W2 … – bei der Messstelle wählst du die Wand aus.'));
+    w.appendChild(_bgInfo('Je Raum: Temperatur, Luftfeuchte, Uhrzeit und Bedingungen (z. B. Heizlüfter in Betrieb). Ein neuer Raum hat gleich W1 (Außenwand) und W2–W4 (Innenwand) – ändere nur die Art, die abweicht. Bei der Messstelle wählst du die Wand aus.'));
     if(bericht.raeume.length){
       const kz=document.createElement('div');kz.style.cssText=S_RAUMGRID+'padding:6px 14px 0;font-size:12px;color:var(--text2);';
       ['Raum','°C','% rF','Taupunkt',''].forEach(x=>{const s=document.createElement('span');s.textContent=x;kz.appendChild(s);});
@@ -1243,7 +1243,26 @@ function _openFeuchteprotokollMobil(existingIdx,art){
         const wr=document.createElement('div');wr.setAttribute('data-fs-wand',(r.name||'')+'|'+wd.k);
         wr.style.cssText='display:grid;grid-template-columns:54px minmax(0,1fr) 40px;gap:6px;align-items:center;padding:3px 14px;';
         const kk=document.createElement('span');kk.textContent=wd.k;kk.style.cssText='font-size:14px;font-weight:700;color:var(--text);';
-        const aI=_inp(wd.art,'Art, z. B. Außenwand',v=>{wd.art=v;},false);aI.onchange=()=>{scheduleSave();_neuBauen();};
+        let aI;
+        if(/^W\d+$/.test(wd.k)){ // F3a: Art als Auswahl; unbekannte (frühere Freitext-)Werte bleiben als eigener Eintrag stehen
+          const cur=String(wd.art||'').trim();
+          aI=document.createElement('select');aI.style.cssText=S_INP;aI.setAttribute('data-fs-wandart',(r.name||'')+'|'+wd.k);
+          const arten=FS_BG_WANDARTEN.slice();if(cur&&arten.indexOf(cur)<0)arten.push(cur);
+          const o0=document.createElement('option');o0.value='';o0.textContent='– Art –';aI.appendChild(o0);
+          arten.forEach(a=>{const o=document.createElement('option');o.value=a;o.textContent=a;aI.appendChild(o);});
+          const oa=document.createElement('option');oa.value='__andere';oa.textContent='Andere …';aI.appendChild(oa);
+          aI.value=cur;
+          aI.onchange=()=>{
+            if(aI.value==='__andere'){
+              const n=prompt('Art der Wand:',(cur&&FS_BG_WANDARTEN.indexOf(cur)<0)?cur:'');
+              if(n===null||!n.trim()){aI.value=cur;return;}
+              wd.art=n.trim();
+            }else wd.art=aI.value;
+            scheduleSave();_neuBauen();
+          };
+        }else{ // Boden / Decke: Material frei
+          aI=_inp(wd.art,wd.k==='Boden'?'Material, z. B. Estrich':'Material, z. B. Betondecke',v=>{wd.art=v;},false);aI.onchange=()=>{scheduleSave();_neuBauen();};
+        }
         const fl=_fsFotoLeiste(bericht,{text:(r.name||'Raum')+', '+wd.k,fotoRefs:wd.fotoRefs},'Fotos zu '+wd.k,true);fl.style.marginTop='0';
         const wx=_bgXKnopf(wd.k+' entfernen',()=>{
           if(!confirm(wd.k+' entfernen? Die Zuordnung der Messstellen und Fotos zu dieser Wand geht verloren (die Fotos selbst bleiben).'))return;
@@ -1267,13 +1286,13 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     const chips=document.createElement('div');chips.style.cssText='display:flex;flex-wrap:wrap;gap:6px;padding:8px 14px 12px;';
     const vorhanden=bericht.raeume.map(r=>r.name);
     const fehlendeWohnung=FS_WOHNUNG.filter(n=>vorhanden.indexOf(n)<0);
-    if(!_fsIstKeller(bericht)&&fehlendeWohnung.length>1)chips.appendChild(_chip('＋ Wohnung ('+fehlendeWohnung.length+' Räume)',false,()=>{fehlendeWohnung.forEach(n=>bericht.raeume.push(_fsBgRaumNeu(n)));scheduleSave();_neuBauen();}));
+    if(!_fsIstKeller(bericht)&&fehlendeWohnung.length>1)chips.appendChild(_chip('＋ Wohnung ('+fehlendeWohnung.length+' Räume)',false,()=>{fehlendeWohnung.forEach(n=>bericht.raeume.push(_fsBgRaumMitWaenden(n)));scheduleSave();_neuBauen();}));
     _fsRaumVorschlaege(bericht).filter(n=>vorhanden.indexOf(n)<0).forEach(n=>{
-      chips.appendChild(_chip('＋ '+n,false,()=>{bericht.raeume.push(_fsBgRaumNeu(n));scheduleSave();_neuBauen();}));
+      chips.appendChild(_chip('＋ '+n,false,()=>{bericht.raeume.push(_fsBgRaumMitWaenden(n));scheduleSave();_neuBauen();}));
     });
     chips.appendChild(_chip('＋ anderer Raum',false,()=>{
       const n=prompt('Name des Raums:');
-      if(n&&n.trim()){bericht.raeume.push(_fsBgRaumNeu(n.trim()));scheduleSave();_neuBauen();}
+      if(n&&n.trim()){bericht.raeume.push(_fsBgRaumMitWaenden(n.trim()));scheduleSave();_neuBauen();}
     }));
     w.appendChild(chips);
     return w;
@@ -2095,12 +2114,26 @@ function _fsBgZeitText(k){
    ⛔ Nur Bezeichnungen und Programm in dieser öffentlichen Datei. Texte fürs PDF: nur Zeichen der PDF-Schrift. */
 function _fsBgRaumNeu(name){return {name:String(name||''),t:'',rf:'',zeit:'',bedingung:'',waende:[],fotoRefs:[]};}
 function _fsBgRaum(b,name){return ((b&&b.raeume)||[]).find(r=>r&&r.name&&r.name===name)||null;}
-// W1…W4 anlegen (nur fehlende)
+/* F3a: Wandart als Auswahl (letzter Punkt „Andere …" = Freitext, bestehende Freitexte bleiben stehen).
+   Neue Wände sind vorbelegt: W1 Außenwand, W2–W4 Innenwand – Frank ändert nur noch die Abweichung. */
+const FS_BG_WANDARTEN=['Außenwand','Innenwand','Nachbarwand','Treppenhauswand'];
+function _fsBgWandStandard(k){return k==='W1'?'Außenwand':((k==='W2'||k==='W3'||k==='W4')?'Innenwand':'');}
+// W1…W4 anlegen (nur fehlende, mit Vorbelegung der Art)
 function _fsBgWaendeVier(r){
   if(!r)return r;
   if(!Array.isArray(r.waende))r.waende=[];
-  for(let i=1;i<=4;i++){const k='W'+i;if(!r.waende.some(w=>w&&w.k===k))r.waende.push({k,art:'',fotoRefs:[]});}
+  for(let i=1;i<=4;i++){const k='W'+i;if(!r.waende.some(w=>w&&w.k===k))r.waende.push({k,art:_fsBgWandStandard(k),fotoRefs:[]});}
   return r;
+}
+// neuer Raum gleich mit seinen vier Wänden
+function _fsBgRaumMitWaenden(name){return _fsBgWaendeVier(_fsBgRaumNeu(name));}
+// Raum „benutzt": eigene Werte, Fotos, Skizze oder eine Messstelle – nur dann steht er (mit seinen Wänden) im PDF
+function _fsBgRaumBenutzt(b,r){
+  if(!r)return false;
+  if(_fsZahl(r.t)!==null||_fsZahl(r.rf)!==null||String(r.bedingung||'').trim())return true;
+  if((Array.isArray(r.fotoRefs)&&r.fotoRefs.length)||(Array.isArray(r.waende)&&r.waende.some(q=>q&&Array.isArray(q.fotoRefs)&&q.fotoRefs.length)))return true;
+  if(r.skizze&&r.skizze.an)return true;
+  return !!(r.name&&((b&&b.stellen)||[]).some(s=>s&&s.raum===r.name&&_fsBgStelleGefuellt(s)));
 }
 // nächste freie Wand-Nummer
 function _fsBgWandNeu(r){
@@ -2496,7 +2529,7 @@ async function _fsMobPdfBg(bericht,task){
     {
       const luft=(bericht.raeume||[]).filter(r=>r&&(_fsZahl(r.t)!==null||_fsZahl(r.rf)!==null||String(r.bedingung||'').trim()));
       const stellen=_fsBgStellenSortiert(bericht);
-      const hatWaende=(bericht.raeume||[]).some(r=>r&&(((r.waende||[]).length)||((r.fotoRefs||[]).length)));
+      const hatWaende=(bericht.raeume||[]).some(r=>_fsBgRaumBenutzt(bericht,r)); // F3a: vorbelegte Wände allein zählen nicht
       const hatSkizze=(bericht.raeume||[]).some(r=>r&&r.skizze&&r.skizze.an);
       if(luft.length||stellen.length||hatWaende||hatSkizze){
         abschnitt('Messwerte');
@@ -2512,7 +2545,7 @@ async function _fsMobPdfBg(bericht,task){
         { // F2c: Wände und Fotos je Raum
           let n=0;
           (bericht.raeume||[]).forEach(r=>{
-            if(!r)return;
+            if(!r||!_fsBgRaumBenutzt(bericht,r))return;
             const ws=(Array.isArray(r.waende)?r.waende:[]).filter(q=>q&&q.k);
             const rf=fotoHinweis(r.fotoRefs);
             if(!ws.length&&!rf)return;
