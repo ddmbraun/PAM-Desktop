@@ -10344,7 +10344,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-29 · #1032'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-29-b1032) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-30 · #1033'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-30-b1033) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -15460,6 +15460,10 @@ window.addEventListener('beforeunload',(e)=>{
     if(!_taskModalDirty) return; // Nichts geändert → kein Drive-Upload nötig
     const taskId = (document.getElementById('taskId')||{}).value||'';
     if(!taskId) return; // Neuer unsaved Task → wird beim Schließen gespeichert
+    // b1033: VOR saveTaskData merken, ob schon ein Save ansteht – saveTaskData stößt selbst scheduleSave an
+    // (setzt _savePending), deshalb griff der b948-Vergleich unten bis b1032 NIE: 2 volle Uploads je Minute,
+    // solange eine einmal geänderte Karte offen war (gemessen 30.09.2026, 11:50–12:35).
+    const _b1033SchonAnstehend=_savePending;
     clearTimeout(autoSaveTimer);
     saveTaskData();  // RAM → boards[]
     // b948: ⛔ _taskModalDirty bleibt bewusst STEHEN – closeModal() und deleteTask() haengen
@@ -15472,6 +15476,12 @@ window.addEventListener('beforeunload',(e)=>{
     // ⛔ Im Zweifel wird GESPEICHERT, nie uebersprungen: ohne Vergleichswert, bei laufendem
     //    oder wartendem Save und bei jedem Fehler faellt es auf den alten Weg zurueck.
     try{
+      // b1033: Inhalt gleich dem Drive-Stand und vorher stand nichts an → den von saveTaskData angestoßenen Save
+      // zurücknehmen. Danach greift die b948-Zeile darunter wie gedacht (sie bleibt wörtlich stehen).
+      if(_letzterStandHash && !_b1033SchonAnstehend && !gdriveSaving
+         && _pamStandHash(JSON.stringify(buildSaveObject(),null,2))===_letzterStandHash){
+        clearTimeout(autoSaveTimer);autoSaveTimer=null;_savePending=false;
+      }
       if(_letzterStandHash && !_savePending && !gdriveSaving
          && _pamStandHash(JSON.stringify(buildSaveObject(),null,2))===_letzterStandHash) return;
     }catch(e){console.warn("[b948] Stand-Vergleich:",e);}
@@ -16264,6 +16274,83 @@ function _zeitGrabstein(t,z){
 function _mergeFotosGerichtet(remoteList,localList,snapList){
   return _mergeListeGerichtet(remoteList,localList,snapList,_fotoKennung);
 }
+// b1033/v306 (Befund 30.09.2026, Test „Testakte Wasser“: am Tablet Getipptes kam nie in der Datei an): FORMULARE
+// (pruefberichte) je Eintrag zusammenführen. Jedes Gerät stempelt beim Speichern `geaendert` an jedes Formular, das
+// sich seit dem letzten Abgleich HIER geändert hat (_pbStempeln). Beim Zusammenführen gewinnt je Formular die JÜNGER
+// gestempelte Fassung (_pbJuengerGewinnt) – vorher gewann am PC die Fassung vom Öffnen des Fensters, am Handy immer die
+// aus der Datei. Gelöschte Formulare tragen einen Löschvermerk in `pruefberichteGeloescht` ({id,t}), wie zeitGeloescht.
+// ⛔ Die fünf _pb-Funktionen stehen ZEICHENGLEICH in PAM Desktop und PAM Mobil (test_b1033 / test_v306 vergleichen).
+function _pbGeloeschtMerge(a,b){return _mergeListByKey(a,b,function(g){return (g&&g.id!=null)?('p'+g.id):'';});}
+function _pbOhneGeloeschte(liste,grab){
+  if(!Array.isArray(liste)||!Array.isArray(grab)||!grab.length)return liste;
+  const weg={};
+  grab.forEach(function(g){if(g&&g.id!=null)weg['p'+g.id]=1;});
+  return liste.filter(function(b){return !(b&&b.id!=null&&weg['p'+b.id]);});
+}
+function _pbGrabstein(t,b){
+  if(!t||!b||b.id==null)return false;
+  if(!Array.isArray(t.pruefberichteGeloescht))t.pruefberichteGeloescht=[];
+  if(!t.pruefberichteGeloescht.some(function(g){return g&&String(g.id)===String(b.id);}))t.pruefberichteGeloescht.push({id:b.id,t:Date.now()});
+  return true;
+}
+function _pbJuengerGewinnt(ergebnis,remoteList,localList){
+  if(!Array.isArray(ergebnis))return ergebnis;
+  const z=function(b){const n=Number(b&&b.geaendert);return isFinite(n)?n:0;};
+  const juengste={};
+  [remoteList,localList].forEach(function(l){(Array.isArray(l)?l:[]).forEach(function(b){if(b&&b.id!=null){const k='p'+b.id;if(!juengste[k]||z(b)>z(juengste[k]))juengste[k]=b;}});});
+  return ergebnis.map(function(b){if(!b||b.id==null)return b;const j=juengste['p'+b.id];return (j&&z(j)>z(b))?j:b;});
+}
+function _pbStempeln(t,basisTask,jetzt,ser){
+  if(!t||!Array.isArray(t.pruefberichte)||!t.pruefberichte.length)return 0;
+  const s=ser||function(o){return JSON.stringify(o);};
+  const alt={};
+  ((basisTask&&Array.isArray(basisTask.pruefberichte))?basisTask.pruefberichte:[]).forEach(function(b){if(b&&b.id!=null)alt['p'+b.id]=b;});
+  const ohne=function(b){const c=Object.assign({},b);delete c.geaendert;return s(c);};
+  let n=0;
+  t.pruefberichte.forEach(function(b){
+    if(!b||b.id==null)return;
+    const a=alt['p'+b.id];
+    if(a?ohne(a)===ohne(b):!!b.geaendert)return;   // seit dem Abgleich unverändert · neu, aber schon gestempelt
+    b.geaendert=jetzt;n++;
+  });
+  return n;
+}
+// b1033: 3-Wege-Regel je Formular (nur PC): was HIER seit dem letzten Abgleich unverändert ist (gleich der Momentaufnahme
+// _pamDriveSnapshot), nimmt die Fassung von drüben. Greift auch OHNE Zeitstempel (Handy bis v305) – sonst hielte der PC
+// bei Gleichstand (beide ungestempelt) seine alte Fassung fest. Ohne Momentaufnahme: nichts ändern.
+function _pbUnveraendertNimmDrueben(ergebnis,remoteList,localList,basisList){
+  if(!Array.isArray(ergebnis)||!Array.isArray(basisList))return ergebnis;
+  const nach=function(l){const m={};(Array.isArray(l)?l:[]).forEach(function(b){if(b&&b.id!=null)m['p'+b.id]=b;});return m;};
+  const R=nach(remoteList),L=nach(localList),B=nach(basisList);
+  return ergebnis.map(function(b){
+    if(!b||b.id==null)return b;
+    const k='p'+b.id;
+    if(L[k]&&R[k]&&B[k]&&JSON.stringify(L[k])===JSON.stringify(B[k])&&JSON.stringify(R[k])!==JSON.stringify(B[k]))return R[k];
+    return b;
+  });
+}
+function _pbBasisListe(taskId){
+  if(!_pamDriveSnapshot||!taskId)return null;
+  const s=_pamDriveSnapshot.get(taskId);if(!s)return null;
+  try{const o=JSON.parse(s);return Array.isArray(o.pruefberichte)?o.pruefberichte:[];}catch(e){return null;}
+}
+// b1033: vor jedem Speichern die Formulare stempeln, die sich seit dem letzten Drive-Abgleich HIER geändert haben.
+// Grundlage ist die Momentaufnahme _pamDriveSnapshot (b662). Ohne sie (noch kein Abgleich) wird nichts gestempelt –
+// dann gilt beim Zusammenführen die bisherige Regel.
+function _pbAlleStempeln(){
+  if(!_pamDriveSnapshot||typeof boards!=='object'||!boards)return 0;
+  const jetzt=Date.now();let n=0;
+  for(const v of Object.values(boards)){
+    if(!Array.isArray(v))continue;
+    for(const t of v){
+      if(!t||!t.id||!Array.isArray(t.pruefberichte)||!t.pruefberichte.length)continue;
+      const s=_pamDriveSnapshot.get(t.id);let bt=null;
+      if(s){try{bt=JSON.parse(s);}catch(e){bt=null;}}
+      n+=_pbStempeln(t,bt,jetzt);
+    }
+  }
+  return n;
+}
 // b903 (Befund Frank 04.09.2026, Betriebsprobe zu b902): Listen-Regel für das OFFENE Fenster (Block 1).
 // Block 1 vereinigte fotos/attachments/pruefberichte/checkliste/kontakte blind – ein am Handy entferntes
 // Foto kam aus der eigenen Liste zurück, sobald der PC mit offenem Fenster speicherte. b771 hatte nur
@@ -16560,6 +16647,10 @@ async function gdriveSaveData() {
   }
   gdriveSaving = true;
   try {
+    // b1033: Formulare mit Änderungen seit dem letzten Abgleich stempeln (_pbStempeln) – VOR dem Konflikt-Check,
+    // damit beim Zusammenführen feststeht, welche Fassung jünger ist.
+    try{if(typeof _pbAlleStempeln==='function')_pbAlleStempeln();}catch(e){console.warn('[b1033] Formular-Stempel:',e);}
+    let _b1033Abgeglichen=false; // b1033: wird true, sobald unten ein fremder Stand zusammengeführt wurde
     // ── Konflikt-Check: hat das Handy (oder ein anderer Client) inzwischen geschrieben? ──
     try{
       const mr=await fetch('https://www.googleapis.com/drive/v3/files/'+gdriveFileId+'?fields=modifiedTime&_='+Date.now(),
@@ -16690,6 +16781,14 @@ async function gdriveSaveData() {
                   mergedTask.attachments=_mergeListeFenster(remoteTask,lt,_snap,'attachments',_LISTEN_KENNUNG.attachments,f=>((f.name||'')+'|'+(f.size||0)));
                   mergedTask.timeEntries=_mergeListByKey(remoteTask&&remoteTask.timeEntries,lt.timeEntries,e=>String(e.start||''));
                   mergedTask.pruefberichte=_mergeListeFenster(remoteTask,lt,_snap,'pruefberichte',_LISTEN_KENNUNG.pruefberichte);
+                  // b1033: je Formular gewinnt die jünger geänderte Fassung – vorher hielt das offene Fenster seinen Stand fest
+                  // (Liste „seit dem Öffnen geändert" → lokal gewinnt, jede Tablet-Eingabe danach wurde zurückgeschrieben).
+                  // typeof wie bei _zeitZeilenMerge: Prüfsuiten führen diesen Block ausgeschnitten aus (test_b656).
+                  if(typeof _pbJuengerGewinnt==='function'){
+                    mergedTask.pruefberichte=_pbUnveraendertNimmDrueben(mergedTask.pruefberichte,remoteTask&&remoteTask.pruefberichte,lt.pruefberichte,_pbBasisListe(modalTaskId));
+                    mergedTask.pruefberichte=_pbJuengerGewinnt(mergedTask.pruefberichte,remoteTask&&remoteTask.pruefberichte,lt.pruefberichte);
+                    if(Array.isArray(lt.pruefberichteGeloescht)||(remoteTask&&Array.isArray(remoteTask.pruefberichteGeloescht))){mergedTask.pruefberichteGeloescht=_pbGeloeschtMerge(remoteTask&&remoteTask.pruefberichteGeloescht,lt.pruefberichteGeloescht);mergedTask.pruefberichte=_pbOhneGeloeschte(mergedTask.pruefberichte,mergedTask.pruefberichteGeloescht);}
+                  }
                   mergedTask.checkliste=_mergeListeFenster(remoteTask,lt,_snap,'checkliste',_LISTEN_KENNUNG.checkliste,c=>((c.text||'')+'|'+(c.done?'1':'0')));
                   mergedTask.kontakte=_mergeListeFenster(remoteTask,lt,_snap,'kontakte',_LISTEN_KENNUNG.kontakte,k=>((k.rolle||'')+'|'+(k.name||'')+'|'+(k.tel||'')));
                   // b722: Dachplan – NUR wenn er hier seit dem Öffnen wirklich geändert
@@ -16780,6 +16879,13 @@ async function gdriveSaveData() {
                     for(const f of Object.keys(_snapObj)){
                       if(f==='id')continue;
                       if(!(f in lt))delete mt[f];
+                    }
+                    // b1033: Formulare – je Eintrag gewinnt die jünger geänderte Fassung (vorher: war die Liste hier irgendwo
+                    // anders, blieb jede hiesige Fassung stehen); Löschvermerke beider Seiten vereinigen und anwenden.
+                    if(typeof _pbJuengerGewinnt==='function'){
+                      if(Array.isArray(mt.pruefberichte))mt.pruefberichte=_pbUnveraendertNimmDrueben(mt.pruefberichte,rt.pruefberichte,lt.pruefberichte,_snapObj.pruefberichte);
+                      if(Array.isArray(mt.pruefberichte))mt.pruefberichte=_pbJuengerGewinnt(mt.pruefberichte,rt.pruefberichte,lt.pruefberichte);
+                      if(Array.isArray(lt.pruefberichteGeloescht)||Array.isArray(rt.pruefberichteGeloescht)){mt.pruefberichteGeloescht=_pbGeloeschtMerge(rt.pruefberichteGeloescht,lt.pruefberichteGeloescht);if(Array.isArray(mt.pruefberichte))mt.pruefberichte=_pbOhneGeloeschte(mt.pruefberichte,mt.pruefberichteGeloescht);}
                     }
                     mt.notizVerlauf=_mergeNotizen(rt.notizVerlauf,lt.notizVerlauf);
                     merged[rk][idx]=mt;
@@ -16908,6 +17014,7 @@ async function gdriveSaveData() {
               }
             }
             if(_frETagPC)gdriveETag=_frETagPC; // b729 (Loch A): ERST JETZT übernehmen – das Zusammenführen ist vollständig durch
+            _b1033Abgeglichen=true; // b1033: zusammengeführt → der Upload unten läuft auf jeden Fall
           }
         }
       }
@@ -16922,6 +17029,17 @@ async function gdriveSaveData() {
     }
 
     const content = JSON.stringify(buildSaveObject(), null, 2);
+    // b1033 (Befund 30.09.2026, Mitschrift aus Franks Konsole 13:00–13:03): Nichts geändert seit dem letzten
+    // bestätigten Speichern und nichts von drüben zusammengeführt → NICHT hochladen. Ohne diese Weiche drehte sich
+    // ein Kreislauf endlos: _saveNochmal (b638, finally unten) stößt scheduleSave an, dessen pushToSync (#375) ruft
+    // 2 s später autoSave – das trifft den noch laufenden Upload (2,5 MB) und setzt wieder _saveNochmal. Ergebnis:
+    // alle 4–25 s die ganze Datei, jedes Mal mit Zusammenführen, auch ohne offene Karte – dabei gingen die Eingaben
+    // am Tablet verloren. ⛔ Im Zweifel speichern: ohne Vergleichswert (null) oder nach einem Zusammenführen läuft
+    // der Upload wie bisher.
+    if(!_b1033Abgeglichen&&_letzterStandHash&&_pamStandHash(content)===_letzterStandHash){
+      _savePending=false;_saveNetzAufraeumen();
+      return;
+    }
     // Resumable Upload (Two-Step: Session-Init + Byte-Transfer)
     const r = await _driveResumableUpdate(gdriveToken, gdriveFileId, content, 'application/json', gdriveETag);
     if (r.status === 412) {
@@ -28333,6 +28451,7 @@ function _formularPdfInDrive(doc,name,t){
 function _pruefDesktopDelete(idx){
   const t=findTaskById((document.getElementById('taskId')||{}).value||'');if(!t||!t.pruefberichte)return;
   if(!confirm('Gesamten Prüfbericht löschen? (Alle Daten und Checkpunkte)'))return;
+  if(typeof _pbGrabstein==='function')_pbGrabstein(t,t.pruefberichte[idx]); // b1033: Löschvermerk – sonst holt der Abgleich das Formular vom anderen Gerät zurück
   t.pruefberichte.splice(idx,1);
   scheduleTaskFieldSave();
   renderPruefberichteDesktop();
@@ -29104,6 +29223,7 @@ async function _wpPdf(idx){
 function _wpDelete(idx){
   const t=findTaskById((document.getElementById('taskId')||{}).value||'');if(!t||!t.pruefberichte)return;
   if(!confirm('Wartungsprotokoll löschen?'))return;
+  if(typeof _pbGrabstein==='function')_pbGrabstein(t,t.pruefberichte[idx]); // b1033: Löschvermerk (wie _pruefDesktopDelete)
   t.pruefberichte.splice(idx,1);scheduleTaskFieldSave();renderPruefberichteDesktop();
 }
 /* ══════════════════════════════════════════════════════════════════════════ */
