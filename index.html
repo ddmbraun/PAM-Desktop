@@ -10352,7 +10352,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-09-30 · #1035'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-30-b1035) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-09-30 · #1036'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-09-30-b1036) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -16359,6 +16359,89 @@ function _pbAlleStempeln(){
   }
   return n;
 }
+// b1036 (Nachmessung 30.09.2026 zu b1033): die LISTEN fotos / attachments / checkliste / kontakte je EINTRAG dreiseitig
+// zusammenführen. Bis b1035 galt: die hiesige Liste ist die Basis, von drüben kommt nur Neues dazu. Folge: ein am Handy
+// GEÄNDERTER Eintrag (Haken, Telefonnummer, Bildunterschrift, Anhangname) ging verloren, sobald der PC dieselbe Liste
+// angefasst hatte, und ein am Handy GELÖSCHTER Eintrag kam zurück (Block 1b). Jetzt vergleicht die Funktion drei Stände –
+// hier, drüben und den letzten gemeinsamen Stand (Momentaufnahme des letzten Abgleichs, b662):
+//   · hier unverändert, drüben geändert        → drüben gilt
+//   · hier geändert, drüben unverändert         → hier gilt
+//   · beide geändert                             → hier gilt (wie bisher)
+//   · beim Abgleich da, hier unverändert, drüben weg  → weg (dort entfernt)
+//   · beim Abgleich da, hier geändert, drüben weg     → bleibt (im Zweifel behalten)
+//   · beim Abgleich da, hier weg                       → bleibt weg (hier entfernt)
+//   · neu (nicht im Abgleich): hier → bleibt, drüben → kommt dazu
+// Ist der letzte gemeinsame Stand keine Liste, kommt null zurück – der Aufrufer bleibt beim bisherigen Weg.
+// Einträge ohne Kennung bleiben, wie sie sind (was man nicht erkennt, wirft man nicht weg).
+// ⛔ _lz3Gleich und _liste3Wege stehen ZEICHENGLEICH in PAM Desktop und PAM Mobil (test_b1036 / test_v308 vergleichen).
+function _lz3Gleich(a,b,ers){
+  const s=function(x){return JSON.stringify(x,function(k,w){
+    if(ers)w=ers.call(this,k,w);
+    if(w&&typeof w==='object'&&!Array.isArray(w)){const o={};Object.keys(w).sort().forEach(function(n){o[n]=w[n];});return o;}
+    return w;});};
+  return s(a)===s(b);
+}
+function _liste3Wege(remoteList,localList,basisList,kennung,ers,uebernehmen){
+  if(!Array.isArray(basisList)||!Array.isArray(remoteList)||!Array.isArray(localList))return null;
+  const nach=function(l){const m=new Map();l.forEach(function(x){const k=kennung(x||{});if(k&&!m.has(k))m.set(k,x);});return m;};
+  const R=nach(remoteList),B=nach(basisList);
+  const nimm=uebernehmen||function(x,r){return r;};
+  const out=[];const schonDa=new Set();
+  localList.forEach(function(x){
+    const k=kennung(x||{});
+    if(!k){out.push(x);return;}
+    schonDa.add(k);
+    const r=R.get(k),b=B.get(k);
+    if(b===undefined){out.push(x);return;}                                   // neu hier
+    const hierGleich=_lz3Gleich(x,b,ers);
+    if(r===undefined){if(!hierGleich)out.push(x);return;}                    // drüben entfernt: hier unverändert → weg
+    if(hierGleich&&!_lz3Gleich(r,b,ers)){out.push(nimm(x,r));return;}       // nur drüben geändert
+    out.push(x);
+  });
+  remoteList.forEach(function(x){
+    const k=kennung(x||{});
+    if(!k||schonDa.has(k)||B.has(k))return;                                  // schon hier · beim Abgleich da und hier entfernt
+    schonDa.add(k);out.push(x);
+  });
+  return out;
+}
+// b1036: die Kennungen sind dieselben wie beim bisherigen Zusammenführen (_LISTEN_KENNUNG, b772; Fotos: _fotoKennung).
+// Ändert sich ein Kennungsfeld (Text, Name), ist das für die Funktion „alt entfernt + neu dazu" – auch das geht ohne Verlust.
+function _listeDrei(feld,remoteList,localList,basisList){
+  const kf=(feld==='fotos')?_fotoKennung:_LISTEN_KENNUNG[feld];
+  return kf?_liste3Wege(remoteList,localList,basisList,kf):null;
+}
+// b1036: die Momentaufnahme einer Karte (Text → Objekt); null = kein Abgleich bekannt → bisheriger Weg.
+function _listenBasisTask(taskId){
+  if(typeof _pamDriveSnapshot==='undefined'||!_pamDriveSnapshot||!taskId)return null;
+  const s=_pamDriveSnapshot.get(taskId);if(!s)return null;
+  try{return JSON.parse(s);}catch(e){return null;}
+}
+// b1036: Basis ist die Momentaufnahme dieser Karte; ein Feld, das dort fehlt, war damals eine leere Liste.
+function _listeDreiSnap(feld,remoteList,localList,snapObj){
+  if(!snapObj||typeof snapObj!=='object')return null;
+  return _listeDrei(feld,remoteList,localList,Array.isArray(snapObj[feld])?snapObj[feld]:[]);
+}
+// b1036 Block 1 (Karte am PC OFFEN): die vier Listen im schon zusammengeführten mergedTask durch die dreiseitige Fassung ersetzen.
+// Ohne Momentaufnahme dieser Karte, ohne Remote-Karte oder ohne Liste auf einer Seite bleibt mergedTask, wie es ist.
+function _listeDreiAnwenden(taskId,remoteTask,lt,mergedTask){
+  const bT=_listenBasisTask(taskId);
+  if(!bT||!remoteTask||!lt||!mergedTask)return;
+  ['fotos','attachments','checkliste','kontakte'].forEach(function(f){
+    const n=_listeDreiSnap(f,remoteTask[f],lt[f],bT);
+    if(n)mergedTask[f]=n;
+  });
+}
+// b1036 Block 1b (Karte am PC NICHT offen, hier aber geändert): nur die Listen, die hier seit dem Abgleich geändert wurden –
+// sind sie unverändert, gilt ohnehin der Stand von drüben (mt ist dort schon der Remote-Stand).
+function _listeDreiNachtragen(rt,lt,mt,snapObj){
+  if(!rt||!lt||!mt||!snapObj)return;
+  ['fotos','attachments','checkliste','kontakte'].forEach(function(f){
+    if(JSON.stringify(lt[f])===JSON.stringify(snapObj[f]))return;
+    const n=_listeDreiSnap(f,rt[f],lt[f],snapObj);
+    if(n)mt[f]=n;
+  });
+}
 // b903 (Befund Frank 04.09.2026, Betriebsprobe zu b902): Listen-Regel für das OFFENE Fenster (Block 1).
 // Block 1 vereinigte fotos/attachments/pruefberichte/checkliste/kontakte blind – ein am Handy entferntes
 // Foto kam aus der eigenen Liste zurück, sobald der PC mit offenem Fenster speicherte. b771 hatte nur
@@ -16800,6 +16883,8 @@ async function gdriveSaveData() {
                   }
                   mergedTask.checkliste=_mergeListeFenster(remoteTask,lt,_snap,'checkliste',_LISTEN_KENNUNG.checkliste,c=>((c.text||'')+'|'+(c.done?'1':'0')));
                   mergedTask.kontakte=_mergeListeFenster(remoteTask,lt,_snap,'kontakte',_LISTEN_KENNUNG.kontakte,k=>((k.rolle||'')+'|'+(k.name||'')+'|'+(k.tel||'')));
+                  // b1036: die vier Listen je Eintrag dreiseitig (siehe _listeDreiAnwenden); typeof: Prüfsuiten führen diesen Block ausgeschnitten aus
+                  if(typeof _listeDreiAnwenden==='function')_listeDreiAnwenden(modalTaskId,remoteTask,lt,mergedTask);
                   // b722: Dachplan – NUR wenn er hier seit dem Öffnen wirklich geändert
                   // wurde (dann hat die Snapshot-Schleife oben die lokale Fassung gesetzt,
                   // erkennbar an der Referenz), wird mit dem Remote-Stand vereinigt statt
@@ -16880,6 +16965,8 @@ async function gdriveSaveData() {
                         else mt[f]=lt[f];
                       }
                     }
+                    // b1036: die vier Listen je Eintrag dreiseitig (siehe _listeDreiNachtragen) – am Handy Gelöschtes kommt nicht zurück
+                    if(typeof _listeDreiNachtragen==='function')_listeDreiNachtragen(rt,lt,mt,_snapObj);
                     // b1013: Uhr-Zeilen mit Löschvermerk herausnehmen (auch wenn nur drüben gelöscht wurde)
                     if(Array.isArray(mt.zeitGeloescht)&&typeof _zeitOhneGeloeschte==='function')mt.zeitEntries=_zeitOhneGeloeschte(mt.zeitEntries,mt.zeitGeloescht);
                     // ⚠ Lokal GELÖSCHTE Felder mitnehmen. Ohne das käme z.B. der
