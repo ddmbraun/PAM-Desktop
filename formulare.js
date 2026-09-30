@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F2a';
+const PAM_FORMULARE_VERSION='F2b';
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
    Befund Frank 14.09.2026: ein Formular wie das Wartungsprotokoll, aber mit Messwerten – am
    Tablet vor Ort ausfüllen, als PDF abheften. Werte werden eingetippt; das Einlesen der
@@ -213,6 +213,16 @@ function _fsPdfName(bericht,zeit){
 const FS_ZU_KEY='pam_fs_zu';
 function _fsZuLesen(id){
   try{const m=JSON.parse(localStorage.getItem(FS_ZU_KEY)||'{}');return Array.isArray(m[id])?m[id]:[];}catch(e){return [];}
+}
+// F2b: mehrere Schlüssel auf einmal zu (zu=true) oder auf (zu=false) – „Alles zu/auf“, „Nur dieser“
+function _fsZuMehrere(id,keys,zu){
+  try{
+    const m=JSON.parse(localStorage.getItem(FS_ZU_KEY)||'{}');
+    let l=(Array.isArray(m[id])?m[id]:[]).filter(i=>keys.indexOf(i)<0);
+    if(zu)l=l.concat(keys);
+    if(l.length)m[id]=l;else delete m[id];
+    localStorage.setItem(FS_ZU_KEY,JSON.stringify(m));
+  }catch(e){}
 }
 function _fsZuSetzen(id,idx,zu){
   try{
@@ -665,7 +675,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
   function _neuBauen(){
     const sc=body.scrollTop;
     body.innerHTML='';
-    if(bericht.fassung==='begehung'&&typeof _teilKopfBg==='function')body.append(_teilKopfBg(),_teilRaeume(),_teilStellen(),_teilChecklistenBg(),_teilAngabenBg(),_teilZusammenfassungBg(),_teilFotos()); // F2a
+    if(bericht.fassung==='begehung'&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_teilKopfBg(),_bgBlock('raeume',_teilRaeume,'Raumklima'),_bgBlock('stellen',_teilStellen,'Messstellen'),_bgBlock('fest',_teilChecklistenBg,'Feststellungen vor Ort'),_bgBlock('angaben',_teilAngabenBg,'Angaben der Nutzer (nicht selbst festgestellt)'),_bgBlock('fazit',_teilZusammenfassungBg,'Zusammenfassung der Feststellungen'),_bgBlock('fotos',_teilFotos,'Fotos')); // F2b: zuklappbar, Leiste oben
     else{
       body.append(_teilErgebnis(),_teilKopf(),_teilRaeume(),_teilStellen(),_teilChecklisten(),_teilBewertung(),_teilFotos()); // v294: Ergebnis oben
       if(typeof _teilUmwandeln==='function'&&body.firstChild&&typeof body.insertBefore==='function')body.insertBefore(_teilUmwandeln(),body.firstChild); // F2a: Hinweis zum Umwandeln ganz oben
@@ -1044,24 +1054,112 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     return w;
   }
 
-  function _teilKopfBg(){
-    const holeWetter=_fsWetterHolen; // gleicher Ablauf wie im alten Kopf – Knopf, kein automatisches Holen
+  /* ── F2b: Bedienung – jeder Abschnitt lässt sich zuklappen, oben eine Leiste zum Springen ──────────────
+     Gemerkt wird je GERÄT im Browser-Speicher (wie bei den Feststellungs-Abschnitten), NICHT am Protokoll – sonst käme es
+     aufs andere Gerät mit. Das PDF zeigt immer alles. Standard: alles aufgeklappt. */
+  function _bgZu(k){return _fsZuLesen(bericht.id).indexOf('b:'+k)>=0;}
+  function _bgNurDieser(){try{return localStorage.getItem('pam_fs_nurDieser')==='1';}catch(e){return false;}}
+  // Kurzfassung, die neben einem zugeklappten Abschnitt steht – nur Zahlen und Stichworte, keine Wertung
+  function _bgKurz(k){
+    const kf=bericht.kopf||{};
+    const gef=arr=>arr.filter(x=>String(kf[x]||'').trim()).length;
+    const plural=(n,e,m)=>n+' '+(n===1?e:m);
+    if(k==='auftrag')return gef(['auftraggeber','objektAdresse','auftragNr','nutzer','anlass'])+' von 5 ausgefüllt';
+    if(k==='termin'){
+      const n=(bericht.anwesende||[]).filter(p=>p&&String(p.name||'').trim()).length;
+      return [_fsBgZeitText(kf),n?plural(n,'Person','Personen'):''].filter(Boolean).join(' · ')||'noch leer';
+    }
+    if(k==='geraete'){const n=gef(['geraetLuft','geraetOberflaeche','geraetBauteil']);return n?plural(n,'Gerät','Geräte'):'noch leer';}
+    if(k==='raeume'){const n=(bericht.raeume||[]).length;return n?plural(n,'Raum','Räume'):'noch kein Raum';}
+    if(k==='stellen'){const n=(bericht.stellen||[]).length;return n?plural(n,'Stelle','Stellen'):'noch keine Stelle';}
+    if(k==='fest'){
+      let da=0,offen=0;
+      (bericht.sektionen||[]).forEach(s=>((s&&s.items)||[]).forEach(i=>{if(i.typ==='notiz')return;if(i.frei||i.status==='ok'||i.status==='mangel')da++;else offen++;}));
+      return [da?da+' erfasst':'',offen?offen+' offen':''].filter(Boolean).join(' · ')||'keine Punkte';
+    }
+    if(k==='angaben'){const a=bericht.angaben||[];return a.filter(x=>x&&String(x.text||'').trim()).length+' von '+a.length+' beantwortet';}
+    if(k==='fazit')return String(bericht.bemerkung||'').trim()?'ausgefüllt':'noch leer';
+    if(k==='fotos'){const f=bericht.fotos||[];return f.length?plural(f.length,'Foto','Fotos')+' ('+f.filter(x=>x&&x.inReport).length+' im PDF)':'noch kein Foto';}
+    return '';
+  }
+  // Ein Abschnitt mit Pfeil in der Überschrift. bauFn baut den Inhalt (erst wenn aufgeklappt); hat der Inhalt schon eine eigene
+  // Überschrift (kopfText), wird sie entfernt – die Überschrift ist jetzt der Pfeil-Knopf.
+  function _bgBlock(k,bauFn,kopfText){
+    const def=FS_BG_BLOECKE.find(b=>b.k===k)||{t:k};
+    const zu=_bgZu(k);
+    const w=document.createElement('div');w.setAttribute('data-fs-block',k);w.style.scrollMarginTop='56px';
+    const kopf=document.createElement('button');kopf.type='button';kopf.setAttribute('data-fs-blockkopf',k);kopf.setAttribute('aria-expanded',zu?'false':'true');
+    kopf.style.cssText=S_HDR+'display:flex;align-items:center;gap:8px;width:100%;text-align:left;cursor:pointer;font-family:inherit;border-right:none;';
+    const pfeil=document.createElement('span');pfeil.textContent=zu?'▸':'▾';pfeil.style.cssText='width:16px;flex-shrink:0;';
+    const kt=document.createElement('span');kt.textContent=def.t;kt.style.cssText='flex:1;min-width:0;';
+    kopf.append(pfeil,kt);
+    if(zu){const kurz=document.createElement('span');kurz.setAttribute('data-fs-blockkurz',k);kurz.textContent=_bgKurz(k);
+      kurz.style.cssText='font-size:12px;font-weight:600;color:var(--text2);white-space:nowrap;flex-shrink:0;';kopf.appendChild(kurz);}
+    kopf.onclick=()=>{
+      _fsZuSetzen(bericht.id,'b:'+k,!zu);_neuBauen();
+      const el=body.querySelector('[data-fs-block="'+k+'"]');if(el){try{el.scrollIntoView({block:'nearest'});}catch(e){}}
+    };
+    w.appendChild(kopf);
+    if(!zu){
+      const inhalt=bauFn();
+      if(kopfText&&inhalt.firstChild&&inhalt.firstChild.textContent===kopfText)inhalt.removeChild(inhalt.firstChild);
+      w.appendChild(inhalt);
+    }
+    return w;
+  }
+  function _bgSpringe(k){ // Leiste: Abschnitt aufklappen und hinscrollen; mit „Nur dieser" gehen alle anderen zu
+    const alle=FS_BG_BLOECKE.map(b=>'b:'+b.k);
+    if(_bgNurDieser())_fsZuMehrere(bericht.id,alle.filter(x=>x!=='b:'+k),true);
+    _fsZuMehrere(bericht.id,['b:'+k],false);
+    _neuBauen();
+    const el=body.querySelector('[data-fs-block="'+k+'"]');if(el){try{el.scrollIntoView({block:'start'});}catch(e){}}
+  }
+  function _teilLeiste(){
+    const w=document.createElement('div');w.setAttribute('data-fs-leiste','1');
+    w.style.cssText='position:sticky;top:0;z-index:6;background:var(--bg);border-bottom:1px solid var(--border);padding:6px 10px;display:flex;gap:6px;align-items:center;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch;';
+    const alle=FS_BG_BLOECKE.map(b=>b.k);
+    const offene=alle.filter(k=>!_bgZu(k)).length;
+    const nur=_bgNurDieser();
+    const mk=(txt,an,fn,attr)=>{
+      const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute(attr[0],attr[1]);
+      b.style.cssText='flex:0 0 auto;padding:6px 12px;min-height:40px;border-radius:18px;font-size:13px;cursor:pointer;font-family:inherit;'
+        +'border:2px solid '+(an?FS_FARBE:'var(--border)')+';background:'+(an?'rgba(31,95,139,.18)':'transparent')+';color:var(--text);font-weight:'+(an?'700':'600')+';';
+      b.onclick=fn;return b;
+    };
+    w.appendChild(mk(offene?'▸ Alles zu':'▾ Alles auf',false,()=>{_fsZuMehrere(bericht.id,alle.map(k=>'b:'+k),!!offene);_neuBauen();},['data-fs-alles','1']));
+    w.appendChild(mk(nur?'✓ Nur dieser':'Nur dieser',nur,()=>{try{localStorage.setItem('pam_fs_nurDieser',nur?'0':'1');}catch(e){}_neuBauen();},['data-fs-nur','1']));
+    FS_BG_BLOECKE.forEach(b=>w.appendChild(mk(b.c,false,()=>_bgSpringe(b.k),['data-fs-sprung',b.k])));
+    return w;
+  }
+
+  // Inhalt „Auftrag und Umfang" (ohne eigene Überschrift – die ist der Pfeil-Knopf)
+  function _teilAuftragBg(){
     const w=document.createElement('div');
     const hilfen=document.createElement('div');hilfen.style.cssText='display:flex;flex-wrap:wrap;gap:8px;padding:8px 14px;';
     const hk=(txt,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.style.cssText=S_KNOPF+'min-height:44px;border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);';b.onclick=fn;return b;};
-    hilfen.append(
-      hk('↻ aus Karte',()=>{const n=_fsKopfErgaenzen(bericht,t);scheduleSave();_neuBauen();toast(n?'✓ '+n+(n===1?' Feld':' Felder')+' aus der Karte übernommen':'ℹ Nichts zu übernehmen – Felder schon gefüllt oder keine Angaben an der Karte','info',3500);}),
-      hk('🌤 Wetter holen',()=>holeWetter(bericht,_neuBauen)));
-    w.append(_kopfZeile('Auftrag und Umfang'),hilfen,
+    hilfen.append(hk('↻ aus Karte',()=>{const n=_fsKopfErgaenzen(bericht,t);scheduleSave();_neuBauen();toast(n?'✓ '+n+(n===1?' Feld':' Felder')+' aus der Karte übernommen':'ℹ Nichts zu übernehmen – Felder schon gefüllt oder keine Angaben an der Karte','info',3500);}));
+    w.append(hilfen,
       _feld('Auftraggeber','auftraggeber','aus der Karte'),
       _feld('Objekt','objektAdresse','aus der Karte'),
       _feld('Auftrag-Nr.','auftragNr',''),
       _feld('Nutzer / Mieter','nutzer',''),
-      _feld('Anlass','anlass','z. B. Meldung des Mieters über …'),
-      _kopfZeile('Ortstermin'),
+      _feld('Anlass','anlass','z. B. Meldung des Mieters über …'));
+    return w;
+  }
+  // Inhalt „Ortstermin": Beginn/Ende, Anwesende, Wetter, Aufgenommen von
+  function _teilTerminBg(){
+    const holeWetter=_fsWetterHolen; // gleicher Ablauf wie im alten Kopf – Knopf, kein automatisches Holen
+    const w=document.createElement('div');
+    const hilfen=document.createElement('div');hilfen.style.cssText='display:flex;flex-wrap:wrap;gap:8px;padding:8px 14px;';
+    const wb=document.createElement('button');wb.type='button';wb.textContent='🌤 Wetter holen';
+    wb.style.cssText=S_KNOPF+'min-height:44px;border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);';
+    wb.onclick=()=>holeWetter(bericht,_neuBauen);
+    hilfen.appendChild(wb);
+    w.append(
       _feld('Beginn','beginn','hh:mm'),
       _feld('Ende','ende','hh:mm'),
       _teilAnwesende(),
+      hilfen,
       _feld('Wetter','wetter','z. B. bewölkt'),
       _feld('Letzter Regen','letzterRegen','Tag, wie stark'),
       _feld('Außen °C','aussenT','z. B. 12,5',true),
@@ -1071,15 +1169,25 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     w.appendChild(td);
     const q=_fsBgWetterQuelle(bericht.kopf);
     if(q)w.appendChild(_bgInfo(q.replace(/^Angabe des Wetterdienstes /,'Quelle: ')));
-    w.append(_kopfZeile('Messgeräte'),
+    const prRow=_feld('Aufgenommen von','pruefer','Name – das Gerät merkt ihn sich');
+    const prIn=prRow.querySelector?prRow.querySelector('input'):null;
+    if(prIn)prIn.onchange=()=>_neuBauen(); // nach dem Tippen: Schnellwahl „＋ Name (Aufgenommen von)" bei den Anwesenden anbieten
+    w.appendChild(prRow);
+    return w;
+  }
+  function _teilGeraeteBg(){
+    const w=document.createElement('div');
+    w.append(
       _geraetFeld('Luft','geraetLuft',FS_BG_GERAETE.luft,'testo 605i'),
       _geraetFeld('Oberfläche','geraetOberflaeche',FS_BG_GERAETE.oberflaeche,'testo 805i'),
       _geraetFeld('Bauteil','geraetBauteil',FS_BG_GERAETE.bauteil,'Trotec BM31WP'));
     if(String(bericht.kopf.messgeraete||'').trim())w.appendChild(_bgInfo('Bisher als Text eingetragen: '+String(bericht.kopf.messgeraete).trim()));
-    const prRow=_feld('Name','pruefer','Name – das Gerät merkt ihn sich');
-    const prIn=prRow.querySelector?prRow.querySelector('input'):null;
-    if(prIn)prIn.onchange=()=>_neuBauen(); // nach dem Tippen: Schnellwahl „＋ Name (Aufgenommen von)" bei den Anwesenden anbieten
-    w.append(_kopfZeile('Aufgenommen von'),prRow);
+    return w;
+  }
+  // Kopf des Begehungsprotokolls = drei Abschnitte (Auftrag und Umfang · Ortstermin · Messgeräte)
+  function _teilKopfBg(){
+    const w=document.createElement('div');
+    w.append(_bgBlock('auftrag',_teilAuftragBg),_bgBlock('termin',_teilTerminBg),_bgBlock('geraete',_teilGeraeteBg));
     return w;
   }
 
@@ -1569,6 +1677,8 @@ async function _fsMobPdf(bericht,task){
 const FS_BG_TITEL='Begehungsprotokoll';
 const FS_BG_UMFANG='Dieses Protokoll hält den vorgefundenen Zustand und die Messwerte zum Zeitpunkt der Begehung fest. Eine Bewertung der Ursachen und Empfehlungen zur Beseitigung sind nicht Gegenstand dieses Protokolls.';
 const FS_BG_ROLLEN=['Nutzer','Mieter Nachbarkeller','Vertreter Auftraggeber','Aufgenommen von','Sonstige'];
+// F2b: die zuklappbaren Abschnitte des Begehungsprotokolls (k = Schlüssel, t = Überschrift, c = Kurzname in der Sprungleiste)
+const FS_BG_BLOECKE=[{k:'auftrag',t:'Auftrag und Umfang',c:'Auftrag'},{k:'termin',t:'Ortstermin',c:'Termin'},{k:'geraete',t:'Messgeräte',c:'Geräte'},{k:'raeume',t:'Raumklima',c:'Raumklima'},{k:'stellen',t:'Messstellen',c:'Messstellen'},{k:'fest',t:'Feststellungen vor Ort',c:'Feststellungen'},{k:'angaben',t:'Angaben der Nutzer (nicht selbst festgestellt)',c:'Angaben'},{k:'fazit',t:'Zusammenfassung der Feststellungen',c:'Zusammenfassung'},{k:'fotos',t:'Fotos',c:'Fotos'}];
 const FS_BG_GERAETE={
   luft:'testo 605i – Lufttemperatur und relative Luftfeuchte',
   oberflaeche:'testo 805i – Oberflächentemperatur, berührungslos (Infrarot)',
