@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F1';
+const PAM_FORMULARE_VERSION='F2a';
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
    Befund Frank 14.09.2026: ein Formular wie das Wartungsprotokoll, aber mit Messwerten – am
    Tablet vor Ort ausfüllen, als PDF abheften. Werte werden eingetippt; das Einlesen der
@@ -107,7 +107,10 @@ const FS_KELLER_BEWERTUNGEN=[
 function _fsIstKeller(b){return !!b&&b.art==='keller';}
 function _fsBewertungenFuer(b){return _fsIstKeller(b)?FS_KELLER_BEWERTUNGEN:FS_BEWERTUNGEN;}
 function _fsRaumVorschlaege(b){return _fsIstKeller(b)?FS_KELLER_RAEUME:FS_RAUM_VORSCHLAEGE;}
-function _fsTitel(b){return _fsIstKeller(b)?FS_KELLER_TITEL:'Feuchte- und Schimmelprotokoll';}
+function _fsTitel(b){
+  if(b&&b.fassung==='begehung')return 'Begehungsprotokoll'+(b.art==='keller'?' Keller':' Wohnung'); // F2a (bewusst ohne Hilfsnamen: alte Prüfungen schneiden diese Funktion einzeln aus)
+  return _fsIstKeller(b)?FS_KELLER_TITEL:'Feuchte- und Schimmelprotokoll';
+}
 
 function _fsZahl(v){
   if(v===null||v===undefined)return null;
@@ -188,12 +191,18 @@ function _fsVervollstaendigen(b){
   b.stellen.forEach(st=>{if(!Array.isArray(st.befund))st.befund=[];if(!Array.isArray(st.fotoRefs))st.fotoRefs=[];if(st.text===undefined)st.text='';});
   if(typeof b.bemerkung!=='string')b.bemerkung='';
   if(typeof b.empfehlungen!=='string')b.empfehlungen='';
+  if(b.fassung==='begehung'){ // F2a: neue Felder des Begehungsprotokolls – Altbestand ohne „fassung" bleibt unberührt
+    ['anlass','beginn','ende','geraetLuft','geraetOberflaeche','geraetBauteil'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';});
+    if(!Array.isArray(b.anwesende))b.anwesende=[];
+    if(!Array.isArray(b.angaben))b.angaben=[];
+  }
   return b;
 }
 function _fsPdfName(bericht,zeit){
   const d=String((bericht&&bericht.datum)||'').split('.');
   const datum=(d.length===3&&d[2])?(('0'+d[0]).slice(-2)+'-'+('0'+d[1]).slice(-2)+'-'+d[2]):'';
   const uhr=(zeit instanceof Date&&isFinite(zeit.getTime()))?'_'+('0'+zeit.getHours()).slice(-2)+('0'+zeit.getMinutes()).slice(-2):''; // v294
+  if(bericht&&bericht.fassung==='begehung')return 'Begehung'+(bericht.art==='keller'?'_Keller':'_Wohnung')+(datum?'_'+datum:'')+uhr+'.pdf'; // F2a: kurzer Name (Pfadlänge)
   return 'Feuchteprotokoll'+(bericht&&bericht.art==='keller'?'_Keller':'')+(datum?'_'+datum:'')+uhr+'.pdf';
 }
 
@@ -263,8 +272,24 @@ const FS_HILFE=[
     '„PDF erstellen" – das PDF landet im Ordner der Karte, „📂 Öffnen" zeigt es sofort.'
   ]]
 ];
-function _fsHilfeZeigen(){
+// F2a: im Begehungsprotokoll gelten andere Hinweise zum Abhaken und zum Abschluss (keine Ursache, keine Empfehlung)
+const FS_HILFE_BG={
+  'Abhaken':[
+    'Tippe den Satz an, der stimmt. Er steht später wörtlich im PDF. Was du offen lässt, steht nicht im PDF.',
+    'Bei Bedarf eine Anmerkung dazu (Ort, Größe …): Sie wird in den Satz eingebaut.',
+    'Überschrift eines Abschnitts antippen oder „▲ Abschnitt einklappen" am Ende – dann bleibt nur eine Zeile mit der Kurzfassung.',
+    'Etwas, das nicht in der Liste steht: „＋ Freier Eintrag" – dein eigener Satz kommt ins PDF.'
+  ],
+  'Abschluss':[
+    'Was Mieter oder Nutzer gesagt haben, gehört unter „Angaben der Nutzer" – mit dem Namen, von wem es stammt.',
+    'Zusammenfassung: nur das Festgestellte, eine Momentaufnahme. Keine Ursache, keine Empfehlung.',
+    '„PDF erstellen" – das PDF landet im Ordner der Karte, „📂 Öffnen" zeigt es sofort. Nur Fotos mit grünem Haken kommen hinein.'
+  ]
+};
+function _fsHilfeZeigen(b){
   const alt=document.getElementById('_fsHilfe');if(alt){alt.remove();return;}
+  if(!b){try{b=(document.getElementById('_fsMobOverlay')||{})._fsBericht;}catch(e){b=null;}} // F2a: das offene Protokoll (Knopf ruft ohne Angabe auf)
+  const bg=!!b&&b.fassung==='begehung'&&typeof FS_HILFE_BG!=='undefined';
   const ov=document.createElement('div');ov.id='_fsHilfe';
   ov.style.cssText='position:fixed;inset:0;z-index:99999;background:var(--bg);display:flex;flex-direction:column;';
   const kopf=document.createElement('div');
@@ -276,7 +301,8 @@ function _fsHilfeZeigen(){
   kopf.append(zu,t);
   const inhalt=document.createElement('div');
   inhalt.style.cssText='flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:4px 16px 40px;';
-  FS_HILFE.forEach(([titel,zeilen])=>{
+  FS_HILFE.forEach(([titel,zeilen0])=>{
+    const zeilen=(bg&&FS_HILFE_BG[titel])?FS_HILFE_BG[titel]:zeilen0; // F2a
     const h=document.createElement('div');h.textContent=titel;
     h.style.cssText='font-size:15px;font-weight:700;color:var(--text);margin:16px 0 6px;padding-left:8px;border-left:4px solid '+FS_FARBE+';';
     const ol=document.createElement('ol');ol.style.cssText='margin:0;padding-left:22px;';
@@ -442,6 +468,23 @@ function _fsWetterAuswerten(d){
   }
   return {wetter,aussenT:temp===null?'':_fsEins(temp),aussenRf:rh===null?'':_fsEins(rh),letzterRegen};
 }
+// F2a: Wert der Stunde, in der der Termin begann (Open-Meteo „hourly") – reine Funktion. datum „30.09.2026", beginn „08:14" (ab :30 zählt die nächste volle Stunde).
+// Gibt ein Objekt in der Form von „current" zurück (passt für _fsWetterAuswerten) oder null, wenn die Stunde nicht in den Daten steht.
+function _fsWetterStunde(d,datum,beginn){
+  const h=d&&d.hourly;
+  if(!h||!Array.isArray(h.time))return null;
+  const dm=/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(String(datum||'').trim()),bm=/^(\d{1,2}):(\d{2})$/.exec(String(beginn||'').trim());
+  if(!dm||!bm)return null;
+  const p=n=>('0'+n).slice(-2);
+  let std=+bm[1]+(+bm[2]>=30?1:0);
+  const tag=new Date(+dm[3],+dm[2]-1,+dm[1]);
+  if(std>=24){std-=24;tag.setDate(tag.getDate()+1);}
+  const key=tag.getFullYear()+'-'+p(tag.getMonth()+1)+'-'+p(tag.getDate())+'T'+p(std)+':00';
+  const i=h.time.indexOf(key);
+  if(i<0)return null;
+  const wert=a=>(Array.isArray(a)&&typeof a[i]==='number'&&isFinite(a[i]))?a[i]:undefined;
+  return {time:key,temperature_2m:wert(h.temperature_2m),relative_humidity_2m:wert(h.relative_humidity_2m),weather_code:wert(h.weather_code),stunde:p(std)+':00'};
+}
 function _fsWetterHolen(bericht,neuBauen){
   if(!navigator.geolocation){toast('📍 Standort nicht verfügbar','error');return;}
   toast('🌤 Standort und Wetter werden geholt …','info',3000);
@@ -451,12 +494,23 @@ function _fsWetterHolen(bericht,neuBauen){
       const r=await fetch('https://api.open-meteo.com/v1/forecast?latitude='+lat+'&longitude='+lon
         +'&current=temperature_2m,relative_humidity_2m,weather_code&daily=precipitation_sum&past_days=7&forecast_days=1&timezone=auto');
       if(!r.ok)throw new Error('HTTP '+r.status);
-      const w=_fsWetterAuswerten(await r.json());
+      let daten=await r.json();
+      let stunde=null; // F2a: Begehungsprotokoll mit Beginn-Uhrzeit: Wert der Stunde des Termins statt „jetzt" (passt zu den Messungen)
+      if(bericht.fassung==='begehung'&&typeof _fsWetterStunde==='function'&&/^\d{1,2}:\d{2}$/.test(String(bericht.kopf.beginn||'').trim())){
+        try{
+          const rs=await fetch('https://api.open-meteo.com/v1/forecast?latitude='+lat+'&longitude='+lon+'&hourly=temperature_2m,relative_humidity_2m,weather_code&past_days=7&forecast_days=1&timezone=auto');
+          if(rs.ok)stunde=_fsWetterStunde(await rs.json(),bericht.datum,bericht.kopf.beginn);
+        }catch(e){console.warn('[Feuchte] Wetter zur Beginn-Zeit:',e);}
+        if(stunde)daten=Object.assign({},daten,{current:stunde});
+      }
+      const w=_fsWetterAuswerten(daten);
       if(w.wetter)bericht.kopf.wetter=w.wetter;
       if(w.aussenT)bericht.kopf.aussenT=w.aussenT;
       if(w.aussenRf)bericht.kopf.aussenRf=w.aussenRf;
       if(w.letzterRegen)bericht.kopf.letzterRegen=w.letzterRegen;
       bericht.kopf.wetterQuelle='Open-Meteo '+new Date().toLocaleString('de-DE',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+      bericht.kopf.wetterAbruf=new Date().toISOString(); // F2a: Abrufzeit für die Quellenangabe im PDF
+      bericht.kopf.wetterStunde=stunde?stunde.stunde:''; // F2a: „08:00" = Stundenwert zur Beginn-Zeit, leer = aktueller Wert zum Abruf
       scheduleSave();
       try{neuBauen();}catch(e){console.warn('[Feuchte] neu aufbauen:',e);}
       toast('✓ '+[w.wetter,w.aussenT?w.aussenT+' °C':'',w.aussenRf?w.aussenRf+' %':''].filter(Boolean).join(' · '),'success',4000);
@@ -548,6 +602,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     bericht=t.pruefberichte[existingIdx];
   }else{
     bericht=_fsNeuerBericht(t,art);
+    if(typeof _fsBgUmstellen==='function')_fsBgUmstellen(bericht); // F2a: neue Protokolle starten als Begehungsprotokoll
     t.pruefberichte.push(bericht);
     scheduleSave();
   }
@@ -557,6 +612,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
   if(typeof _pbOffenMerken==='function')_pbOffenMerken(t,bericht,GID,function(){_neuBauen();}); // v306: nach Neuladen/Zusammenführen an den frischen Stand hängen, bei jüngerer Fassung von drüben neu zeichnen
   const ov=document.createElement('div');ov.id=GID;
   ov.style.cssText='position:fixed;inset:0;z-index:99998;display:flex;flex-direction:column;background:var(--bg);';
+  ov._fsBericht=bericht; // F2a: „📘 So geht's" liest daraus, welches Protokoll offen ist
 
   const S_INP='width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:16px;color:var(--text);font-family:inherit;min-width:0;';
   const S_HDR='padding:10px 14px;font-size:13px;font-weight:700;color:var(--text);background:var(--bg2);border-top:1px solid var(--border);border-bottom:1px solid var(--border);border-left:4px solid '+FS_FARBE+';';
@@ -597,7 +653,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     const row=document.createElement('div');
     row.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 14px;border-top:1px solid var(--border);';
     const l=document.createElement('span');l.style.cssText='font-size:13px;color:var(--text2);width:112px;flex-shrink:0;';l.textContent=label;
-    const i=_inp(bericht.kopf[key],ph,v=>{bericht.kopf[key]=v;if(key==='aussenT'||key==='aussenRf')_fsWerteNeu();},zahl);
+    const i=_inp(bericht.kopf[key],ph,v=>{bericht.kopf[key]=v;if(key==='aussenT'||key==='aussenRf')_fsWerteNeu();if(key==='pruefer'&&bericht.fassung==='begehung'&&typeof _fsBgMerkName==='function')_fsBgMerkName(v);},zahl);
     row.append(l,i);return row;
   }
   function _chip(label,an,fn){
@@ -609,14 +665,18 @@ function _openFeuchteprotokollMobil(existingIdx,art){
   function _neuBauen(){
     const sc=body.scrollTop;
     body.innerHTML='';
-    body.append(_teilErgebnis(),_teilKopf(),_teilRaeume(),_teilStellen(),_teilChecklisten(),_teilBewertung(),_teilFotos()); // v294: Ergebnis oben
+    if(bericht.fassung==='begehung'&&typeof _teilKopfBg==='function')body.append(_teilKopfBg(),_teilRaeume(),_teilStellen(),_teilChecklistenBg(),_teilAngabenBg(),_teilZusammenfassungBg(),_teilFotos()); // F2a
+    else{
+      body.append(_teilErgebnis(),_teilKopf(),_teilRaeume(),_teilStellen(),_teilChecklisten(),_teilBewertung(),_teilFotos()); // v294: Ergebnis oben
+      if(typeof _teilUmwandeln==='function'&&body.firstChild&&typeof body.insertBefore==='function')body.insertBefore(_teilUmwandeln(),body.firstChild); // F2a: Hinweis zum Umwandeln ganz oben
+    }
     body.scrollTop=sc;
     _fsWerteNeu();
   }
   function _fsStats(){
     const w=bericht.stellen.map(st=>_fsStelleWerte(bericht,st));
     const rot=w.filter(x=>x.ampel==='rot').length;
-    statsEl.textContent=bericht.stellen.length+(bericht.stellen.length===1?' Stelle':' Stellen')+(rot?' · '+rot+' rot':'');
+    statsEl.textContent=bericht.stellen.length+(bericht.stellen.length===1?' Stelle':' Stellen')+((rot&&bericht.fassung!=='begehung')?' · '+rot+' rot':''); // F2a: keine Ampelzählung im Begehungsprotokoll
   }
   function _fsWerteNeu(){
     const a=body.querySelector('[data-fs-aussen]');
@@ -628,6 +688,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     });
     body.querySelectorAll('[data-fs-stelle]').forEach(el=>{
       const st=bericht.stellen[+el.getAttribute('data-fs-stelle')];
+      if(st&&bericht.fassung==='begehung'&&typeof _fsWerteZeileBg==='function'){_fsWerteZeileBg(el,_fsStelleWerte(bericht,st),st);return;} // F2a
       if(st)_fsWerteZeile(el,_fsStelleWerte(bericht,st),st);
     });
     const eg=body.querySelector('[data-fs-ergebnis]');if(eg)_fsErgebnisZeigen(eg,bericht); // v294
@@ -888,6 +949,262 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     return w;
   }
 
+  /* ── F2a: Begehungsprotokoll – Formularteile ─────────────────────────────────────────────────────
+     Neutral gehalten: Die Knöpfe zeigen die Sätze, die später im PDF stehen – ohne Ampelfarbe, ohne „auffällig". */
+  function _bgTextFeld(wert,ph,onIn,zeilen){
+    const a=document.createElement('textarea');a.rows=zeilen||3;a.value=wert||'';a.placeholder=ph||'';
+    a.style.cssText=S_INP+'resize:vertical;';
+    a.oninput=()=>{onIn(a.value);scheduleSave();};
+    return a;
+  }
+  function _bgXKnopf(titel,fn){
+    const x=document.createElement('button');x.type='button';x.textContent='✕';x.title=titel;x.setAttribute('aria-label',titel);
+    x.style.cssText='width:40px;height:40px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--red);font-size:15px;cursor:pointer;flex-shrink:0;';
+    x.onclick=fn;return x;
+  }
+  function _bgInfo(text){
+    const d=document.createElement('div');d.style.cssText='padding:6px 14px;font-size:12px;color:var(--text2);line-height:1.45;';d.textContent=text;return d;
+  }
+  function _bgNamenListe(){ // „Name (Rolle)" aller eingetragenen Anwesenden
+    return (bericht.anwesende||[]).filter(p=>p&&String(p.name||'').trim())
+      .map(p=>String(p.name).trim()+(String(p.rolle||'').trim()?' ('+String(p.rolle).trim()+')':''));
+  }
+
+  // Altes Protokoll: Hinweis mit Knopf zum Umwandeln (nichts geschieht ohne Rückfrage)
+  function _teilUmwandeln(){
+    const w=document.createElement('div');w.setAttribute('data-fs-umwandeln','1');
+    w.style.cssText='margin:10px;padding:10px 12px;border-radius:10px;background:var(--bg2);border:1px solid var(--border);border-left:6px solid var(--orange);font-size:13px;color:var(--text);line-height:1.45;';
+    const tx=document.createElement('div');
+    tx.textContent='Das ist noch das alte Feuchte- und Schimmelprotokoll. Das neue Begehungsprotokoll hält nur Feststellungen fest: keine Ampel, keine Ursache, keine Empfehlung.';
+    const b=document.createElement('button');b.type='button';b.textContent='🔄 In Begehungsprotokoll umwandeln';b.setAttribute('data-fs-umwandeln-knopf','1');
+    b.style.cssText=S_KNOPF+'margin-top:8px;min-height:44px;border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);';
+    b.onclick=()=>{
+      if(!confirm('In Begehungsprotokoll umwandeln?\n\nAlle Eingaben, Fotos und Messwerte bleiben erhalten. Im PDF stehen künftig nur Feststellungen: Ampel, Ergebnis, Taupunkt-Werte, Ursache und Empfehlungen entfallen (sie bleiben in den Daten). Einige Punkte müssen neu beantwortet werden.'))return;
+      const r=_fsZuBegehung(bericht);
+      scheduleSave();
+      hdrT.textContent='💧 '+_fsTitel(bericht);
+      _neuBauen();
+      toast(r.gewandelt?'✓ Umgewandelt'+(r.neu.length?' – '+r.neu.length+(r.neu.length===1?' Punkt':' Punkte')+' bitte neu beantworten':''):'ℹ Schon ein Begehungsprotokoll','success',5000);
+    };
+    w.append(tx,b);return w;
+  }
+
+  function _geraetFeld(label,key,vorschlag,chipText){
+    const w=document.createElement('div');
+    w.appendChild(_feld(label,key,'z. B. '+chipText));
+    if(!String(bericht.kopf[key]||'').trim()){
+      const c=document.createElement('div');c.style.cssText='display:flex;flex-wrap:wrap;gap:6px;padding:0 14px 8px 136px;';
+      c.appendChild(_chip('＋ '+chipText,false,()=>{bericht.kopf[key]=vorschlag;scheduleSave();_neuBauen();}));
+      w.appendChild(c);
+    }
+    return w;
+  }
+
+  function _teilAnwesende(){
+    const w=document.createElement('div');w.setAttribute('data-fs-anwesende','1');
+    w.style.cssText='padding:6px 14px 8px;border-top:1px solid var(--border);';
+    const kopf=document.createElement('div');kopf.style.cssText='font-size:13px;color:var(--text2);margin-bottom:6px;';kopf.textContent='Anwesend – Name und Rolle';
+    w.appendChild(kopf);
+    const altText=String(bericht.kopf.anwesend||'').trim();
+    if(!bericht.anwesende.length&&altText){
+      const h=document.createElement('div');h.style.cssText='font-size:12px;color:var(--text2);margin-bottom:6px;padding-left:8px;border-left:3px solid var(--orange);line-height:1.45;';
+      h.textContent='Bisher als Text eingetragen: '+altText+' – bitte unten als Personen anlegen.';
+      w.appendChild(h);
+    }
+    bericht.anwesende.forEach((p,pi)=>{
+      const row=document.createElement('div');row.style.cssText='display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) 40px;gap:6px;margin-bottom:6px;align-items:center;';
+      const n=_inp(p.name,'Name',v=>{p.name=v;},false);n.setAttribute('data-fs-person',String(pi));
+      const sel=document.createElement('select');sel.style.cssText=S_INP;
+      const o0=document.createElement('option');o0.value='';o0.textContent='– Rolle –';sel.appendChild(o0);
+      const rollen=FS_BG_ROLLEN.slice();if(p.rolle&&rollen.indexOf(p.rolle)<0)rollen.push(p.rolle);
+      rollen.forEach(r=>{const o=document.createElement('option');o.value=r;o.textContent=r;sel.appendChild(o);});
+      sel.value=p.rolle||'';
+      sel.onchange=()=>{p.rolle=sel.value;scheduleSave();_neuBauen();};
+      const x=_bgXKnopf('Person entfernen',()=>{if(String(p.name||'').trim()&&!confirm('„'+String(p.name).trim()+'" entfernen?'))return;bericht.anwesende.splice(pi,1);scheduleSave();_neuBauen();});
+      row.append(n,sel,x);w.appendChild(row);
+    });
+    const chips=document.createElement('div');chips.style.cssText='display:flex;flex-wrap:wrap;gap:6px;padding-top:2px;';
+    chips.appendChild(_chip('＋ Person',false,()=>{
+      bericht.anwesende.push({name:'',rolle:''});scheduleSave();_neuBauen();
+      const neu=body.querySelector('[data-fs-person="'+(bericht.anwesende.length-1)+'"]');
+      if(neu){try{neu.scrollIntoView({block:'center'});}catch(e){}neu.focus();}
+    }));
+    const schon=new Set(bericht.anwesende.map(p=>String(p.name||'').trim().toLowerCase()));
+    const ich=String(bericht.kopf.pruefer||'').trim();
+    if(ich&&!schon.has(ich.toLowerCase()))chips.appendChild(_chip('＋ '+ich+' (Aufgenommen von)',false,()=>{bericht.anwesende.push({name:ich,rolle:'Aufgenommen von'});scheduleSave();_neuBauen();}));
+    let n=0;
+    (Array.isArray(t.kontakte)?t.kontakte:[]).forEach(kx=>{
+      const nm=_fsKontaktName(kx);
+      if(!nm||schon.has(nm.toLowerCase())||n>=8)return;
+      n++;
+      const rolle=kx.rolle==='mieter'?'Nutzer':(['ag','privatkunde','eigentuemer','hausverwaltung'].indexOf(kx.rolle)>=0?'Vertreter Auftraggeber':'');
+      chips.appendChild(_chip('＋ '+nm,false,()=>{bericht.anwesende.push({name:nm,rolle});scheduleSave();_neuBauen();}));
+    });
+    w.appendChild(chips);
+    return w;
+  }
+
+  function _teilKopfBg(){
+    const holeWetter=_fsWetterHolen; // gleicher Ablauf wie im alten Kopf – Knopf, kein automatisches Holen
+    const w=document.createElement('div');
+    const hilfen=document.createElement('div');hilfen.style.cssText='display:flex;flex-wrap:wrap;gap:8px;padding:8px 14px;';
+    const hk=(txt,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.style.cssText=S_KNOPF+'min-height:44px;border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);';b.onclick=fn;return b;};
+    hilfen.append(
+      hk('↻ aus Karte',()=>{const n=_fsKopfErgaenzen(bericht,t);scheduleSave();_neuBauen();toast(n?'✓ '+n+(n===1?' Feld':' Felder')+' aus der Karte übernommen':'ℹ Nichts zu übernehmen – Felder schon gefüllt oder keine Angaben an der Karte','info',3500);}),
+      hk('🌤 Wetter holen',()=>holeWetter(bericht,_neuBauen)));
+    w.append(_kopfZeile('Auftrag und Umfang'),hilfen,
+      _feld('Auftraggeber','auftraggeber','aus der Karte'),
+      _feld('Objekt','objektAdresse','aus der Karte'),
+      _feld('Auftrag-Nr.','auftragNr',''),
+      _feld('Nutzer / Mieter','nutzer',''),
+      _feld('Anlass','anlass','z. B. Meldung des Mieters über …'),
+      _kopfZeile('Ortstermin'),
+      _feld('Beginn','beginn','hh:mm'),
+      _feld('Ende','ende','hh:mm'),
+      _teilAnwesende(),
+      _feld('Wetter','wetter','z. B. bewölkt'),
+      _feld('Letzter Regen','letzterRegen','Tag, wie stark'),
+      _feld('Außen °C','aussenT','z. B. 12,5',true),
+      _feld('Außen % rF','aussenRf','z. B. 80',true));
+    const td=document.createElement('div');td.setAttribute('data-fs-aussen','1');
+    td.style.cssText='padding:0 14px 6px 136px;font-size:13px;color:var(--text2);';
+    w.appendChild(td);
+    const q=_fsBgWetterQuelle(bericht.kopf);
+    if(q)w.appendChild(_bgInfo(q.replace(/^Angabe des Wetterdienstes /,'Quelle: ')));
+    w.append(_kopfZeile('Messgeräte'),
+      _geraetFeld('Luft','geraetLuft',FS_BG_GERAETE.luft,'testo 605i'),
+      _geraetFeld('Oberfläche','geraetOberflaeche',FS_BG_GERAETE.oberflaeche,'testo 805i'),
+      _geraetFeld('Bauteil','geraetBauteil',FS_BG_GERAETE.bauteil,'Trotec BM31WP'));
+    if(String(bericht.kopf.messgeraete||'').trim())w.appendChild(_bgInfo('Bisher als Text eingetragen: '+String(bericht.kopf.messgeraete).trim()));
+    const prRow=_feld('Name','pruefer','Name – das Gerät merkt ihn sich');
+    const prIn=prRow.querySelector?prRow.querySelector('input'):null;
+    if(prIn)prIn.onchange=()=>_neuBauen(); // nach dem Tippen: Schnellwahl „＋ Name (Aufgenommen von)" bei den Anwesenden anbieten
+    w.append(_kopfZeile('Aufgenommen von'),prRow);
+    return w;
+  }
+
+  // Eine Zeile der Feststellungen: Frage als Überschrift, darunter die zwei Sätze als Knöpfe
+  function _bgPunktZeile(sek,it){
+    const row=document.createElement('div');row.style.cssText='padding:10px 14px;border-bottom:1px solid var(--border);';
+    row.setAttribute('data-fs-punkt',it.k||'frei');
+    if(it.frei){ // eigener Satz
+      const top=document.createElement('div');top.style.cssText='display:flex;align-items:center;gap:8px;';
+      const tx=_inp(it.text,'Feststellung als Satz',v=>{it.text=v;},false);
+      top.append(tx,_bgXKnopf('Eintrag entfernen',()=>{if(String(it.text||'').trim()&&!confirm('Eintrag entfernen?'))return;const ix=sek.items.indexOf(it);if(ix>=0)sek.items.splice(ix,1);scheduleSave();_neuBauen();}));
+      const nz=document.createElement('div');nz.style.cssText='display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:6px;';
+      const n=_inp(it.notiz,'Anmerkung …',v=>{it.notiz=v;},false);n.style.flex='1 1 180px';n.style.minWidth='0';
+      const fl=_fsFotoLeiste(bericht,it,'Foto zu diesem Punkt',true);fl.style.marginTop='0';fl.style.flex='0 1 auto';
+      nz.append(n,fl);row.append(top,nz);
+      return row;
+    }
+    if(it.typ==='notiz'){ // nur ein Textfeld, erscheint erst, wenn der Punkt davor „festgestellt" ist
+      const ab=sek.items.find(x=>x&&x.k===it.abh);
+      if(!ab||ab.status!=='mangel'){row.style.display='none';return row;}
+      const l=document.createElement('div');l.style.cssText='font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px;';l.textContent=it.text||'';
+      row.append(l,_inp(it.notiz,it.h||'Angabe …',v=>{it.notiz=v;},false));
+      return row;
+    }
+    const st=it.status||'offen';
+    const q=document.createElement('div');q.style.cssText='font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px;';q.textContent=it.text||'';
+    if(it.neuAnsehen&&st==='offen'){
+      const hw=document.createElement('span');hw.setAttribute('data-fs-neuansehen','1');hw.textContent='  · bitte neu beantworten';hw.style.cssText='font-weight:600;font-size:12px;color:var(--orange);';q.appendChild(hw);
+    }
+    const knr=document.createElement('div');knr.style.cssText='display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;';
+    const kurz=it.mo||String(it.m||'').split(': {}').join('').split(' {}').join('');
+    [['ok',it.ok],['mangel',kurz]].forEach(([k,text])=>{
+      if(!text)return;
+      const an=st===k;
+      const b=document.createElement('button');b.type='button';b.textContent=text;b.setAttribute('data-fs-satz',k);
+      b.style.cssText='padding:8px 8px;min-height:44px;border-radius:8px;font-size:13px;line-height:1.35;text-align:left;cursor:pointer;font-family:inherit;'
+        +'border:2px solid '+(an?FS_FARBE:'var(--border)')+';background:'+(an?'rgba(31,95,139,.18)':'transparent')+';color:var(--text);font-weight:'+(an?'700':'400')+';';
+      b.onclick=()=>{it.status=an?'offen':k;scheduleSave();_neuBauen();};
+      knr.appendChild(b);
+    });
+    row.append(q,knr);
+    if(st!=='offen'||String(it.notiz||'').trim()||(Array.isArray(it.fotoRefs)&&it.fotoRefs.length)){
+      const nz=document.createElement('div');nz.style.cssText='display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:6px;';
+      const n=_inp(it.notiz,(st==='mangel'&&it.h)?it.h+' …':'Anmerkung …',v=>{it.notiz=v;},false);n.style.flex='1 1 180px';n.style.minWidth='0';
+      const fl=_fsFotoLeiste(bericht,it,'Foto zu diesem Punkt',true);fl.style.marginTop='0';fl.style.flex='0 1 auto';
+      nz.append(n,fl);row.appendChild(nz);
+    }
+    return row;
+  }
+
+  function _teilChecklistenBg(){
+    const w=document.createElement('div');
+    w.appendChild(_kopfZeile('Feststellungen vor Ort'));
+    w.appendChild(_bgInfo('Tippe den Satz an, der stimmt. Was du offen lässt, steht nicht im PDF.'));
+    const zuListe=_fsZuLesen(bericht.id);
+    const umschalten=(si,zu)=>{
+      _fsZuSetzen(bericht.id,si,zu);_neuBauen();
+      if(zu){const kk=body.querySelector('[data-fs-sek="'+si+'"]');if(kk){try{kk.scrollIntoView({block:'start'});}catch(e){}}}
+    };
+    bericht.sektionen.forEach((sek,si)=>{
+      if(!Array.isArray(sek.items))sek.items=[];
+      const zu=zuListe.indexOf(si)>=0;
+      const kopf=document.createElement('button');kopf.type='button';kopf.setAttribute('data-fs-sek',String(si));
+      kopf.setAttribute('aria-expanded',zu?'false':'true');
+      kopf.style.cssText=S_HDR+'display:flex;align-items:center;gap:8px;width:100%;text-align:left;cursor:pointer;font-family:inherit;border-right:none;';
+      const pfeil=document.createElement('span');pfeil.textContent=zu?'▸':'▾';pfeil.style.cssText='width:16px;flex-shrink:0;';
+      const kt=document.createElement('span');kt.textContent=sek.titel||'';kt.style.cssText='flex:1;min-width:0;';
+      kopf.append(pfeil,kt);
+      if(zu){const kurz=document.createElement('span');kurz.setAttribute('data-fs-sekkurz',String(si));kurz.textContent=_fsBgSektionKurz(sek);
+        kurz.style.cssText='font-size:12px;font-weight:600;color:var(--text2);white-space:nowrap;flex-shrink:0;';kopf.appendChild(kurz);}
+      kopf.onclick=()=>umschalten(si,!zu);
+      w.appendChild(kopf);
+      if(zu)return;
+      sek.items.forEach(it=>w.appendChild(_bgPunktZeile(sek,it)));
+      const frei=document.createElement('button');frei.type='button';frei.textContent='＋ Freier Eintrag';
+      frei.style.cssText=S_KNOPF+'display:block;width:calc(100% - 28px);margin:8px 14px;border:1px dashed var(--border);background:transparent;color:var(--text2);';
+      frei.onclick=()=>{const tx=prompt('Feststellung als ganzer Satz:');if(tx&&tx.trim()){sek.items.push({frei:true,text:tx.trim(),notiz:'',status:'mangel',fotoRefs:[]});scheduleSave();_neuBauen();}};
+      w.appendChild(frei);
+      const ein=document.createElement('button');ein.type='button';ein.textContent='▲ Abschnitt einklappen';ein.setAttribute('data-fs-einklappen',String(si));
+      ein.style.cssText=S_KNOPF+'display:block;width:calc(100% - 28px);margin:0 14px 12px;border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);';
+      ein.onclick=()=>umschalten(si,true);
+      w.appendChild(ein);
+    });
+    return w;
+  }
+
+  function _teilAngabenBg(){
+    const w=document.createElement('div');w.setAttribute('data-fs-angaben','1');
+    w.appendChild(_kopfZeile('Angaben der Nutzer (nicht selbst festgestellt)'));
+    w.appendChild(_bgInfo('Was Mieter oder Nutzer gesagt haben. Im PDF steht „Laut …". Fragen ohne Eintrag erscheinen nicht.'));
+    const namen=_bgNamenListe();
+    bericht.angaben.forEach((a,ai)=>{
+      const row=document.createElement('div');row.style.cssText='padding:10px 14px;border-bottom:1px solid var(--border);';
+      row.setAttribute('data-fs-angabe',a.k||String(ai));
+      const top=document.createElement('div');top.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:6px;';
+      const q=document.createElement('div');q.style.cssText='flex:1;min-width:0;font-size:14px;font-weight:600;color:var(--text);';q.textContent=a.q||'';
+      top.appendChild(q);
+      if(a.frei)top.appendChild(_bgXKnopf('Angabe entfernen',()=>{if(String(a.text||'').trim()&&!confirm('Angabe entfernen?'))return;bericht.angaben.splice(ai,1);scheduleSave();_neuBauen();}));
+      row.append(top,_bgTextFeld(a.text,'Was wurde gesagt …',v=>{a.text=v;},2));
+      const opts=namen.slice();if(a.von&&opts.indexOf(a.von)<0)opts.push(a.von);
+      if(opts.length){
+        const c=document.createElement('div');c.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;align-items:center;';
+        const l=document.createElement('span');l.style.cssText='font-size:12px;color:var(--text2);';l.textContent='Laut:';c.appendChild(l);
+        opts.forEach(nm=>c.appendChild(_chip(nm,a.von===nm,()=>{a.von=(a.von===nm)?'':nm;scheduleSave();_neuBauen();})));
+        row.appendChild(c);
+      }
+      w.appendChild(row);
+    });
+    const add=document.createElement('button');add.type='button';add.textContent='＋ Weitere Angabe';
+    add.style.cssText=S_KNOPF+'display:block;width:calc(100% - 28px);margin:8px 14px 12px;border:1px dashed var(--border);background:transparent;color:var(--text2);';
+    add.onclick=()=>{const q=prompt('Wozu? (Frage oder Thema der Angabe)');if(q&&q.trim()){bericht.angaben.push({k:'frei'+Date.now(),q:q.trim(),text:'',von:'',frei:true});scheduleSave();_neuBauen();}};
+    w.appendChild(add);
+    return w;
+  }
+
+  function _teilZusammenfassungBg(){
+    const w=document.createElement('div');
+    w.appendChild(_kopfZeile('Zusammenfassung der Feststellungen'));
+    w.appendChild(_bgInfo('Nur das Festgestellte, in eigenen Worten – eine Momentaufnahme. Keine Ursache, keine Empfehlung.'));
+    const box=document.createElement('div');box.style.cssText='padding:0 14px 14px;';
+    box.appendChild(_bgTextFeld(bericht.bemerkung,'Zum Zeitpunkt der Begehung …',v=>{bericht.bemerkung=v;},5));
+    w.appendChild(box);
+    return w;
+  }
+
   _neuBauen();
 
   /* Fußleiste */
@@ -954,6 +1271,32 @@ function _fsWerteZeile(el,w,st){
   });
 }
 
+// F2a: Rechenzeile unter einer Messstelle im Begehungsprotokoll – nur kleine graue Zahlen zur Anzeige am Gerät, nie im PDF.
+// Keine Ampelfarbe, kein Klartext, keine Schlussfolgerung. Orange nur als Merkhilfe für Fehlendes aus der testo-Messung.
+function _fsWerteZeileBg(el,w,st){
+  el.innerHTML='';
+  const z=document.createElement('div');z.style.cssText='font-size:12px;color:var(--text2);line-height:1.5;';
+  if(!w.raumGefunden){
+    z.textContent='Sobald ein Raum mit Temperatur und Luftfeuchte gewählt ist, steht hier Taupunkt und Oberflächenfeuchte (nur Anzeige, nicht im PDF).';
+  }else{
+    const teile=['Taupunkt '+_fsEins(w.td)+' °C'];
+    if(w.abstand!==null)teile.push('Abstand '+_fsEins(w.abstand)+' K');
+    if(w.ofRf!==null)teile.push('Oberflächenfeuchte '+Math.round(w.ofRf)+' %');
+    z.textContent=teile.join(' · ')+' (nur Anzeige, nicht im PDF)';
+  }
+  el.appendChild(z);
+  if(st&&st.testo){
+    const d=document.createElement('div');d.style.cssText='font-size:12px;color:var(--text2);';
+    d.textContent=_fsTestoInfoText(st,w);el.appendChild(d);
+    (Array.isArray(st.testo.warnungen)?st.testo.warnungen:[]).forEach(h=>{
+      if(typeof h!=='string'||!h)return;
+      const m=document.createElement('div');m.setAttribute('data-fs-merkhilfe','1');
+      m.style.cssText='font-size:12px;font-weight:600;color:var(--text);margin-top:4px;padding-left:8px;border-left:4px solid var(--orange);';
+      m.textContent='Merkhilfe: '+h;el.appendChild(m);
+    });
+  }
+}
+
 // Foto fürs PDF, verkleinert und ohne Aufnahmedaten (_shrNeuKodieren).
 // ⛔ Eine data:-Adresse NICHT per fetch lesen – das scheiterte in der Browser-Gegenprobe („Failed to fetch").
 //   Sonst derselbe EINE Weg wie beim Teilen (_shrBytes: Gerätespeicher, blob:, Drive mit Zwischenspeicher).
@@ -968,6 +1311,7 @@ async function _fsFotoFuerPdf(f){
 }
 
 async function _fsMobPdf(bericht,task){
+  if(bericht&&bericht.fassung==='begehung'&&typeof _fsMobPdfBg==='function')return _fsMobPdfBg(bericht,task); // F2a: Begehungsprotokoll hat ein eigenes PDF
   if(!window.jspdf){toast('PDF-Bibliothek lädt noch …','error');return null;}
   try{
     _fsVervollstaendigen(bericht);
@@ -1197,6 +1541,487 @@ async function _fsMobPdf(bericht,task){
     toast('✓ PDF erstellt – mit „📂 Öffnen" ansehen','success',4000);
     const inDrive=await _fsPdfNachDrive(blob,name,bericht,task);
     if(!inDrive){ // ohne Drive bleibt nur das Gerät: dann wie bisher herunterladen
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');a.href=url;a.download=name;
+      document.body.appendChild(a);a.click();a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),5000);
+    }
+    return blob;
+  }catch(e){
+    console.error('[Feuchte] PDF:',e);
+    try{setSaveInd('','');}catch(_e){}
+    toast('PDF-Fehler: '+e.message,'error');
+    return null;
+  }
+}
+
+/* ══ F2a: BEGEHUNGSPROTOKOLL – nur Feststellungen (Frank 30.09.2026) ═══════════════════════════════════════
+   Neue Fassung des Formulars: fassung:'begehung'. Das Protokoll hält NUR fest, was vor Ort gesehen, gemessen und gesagt
+   wurde – keine Ampel, keine Ursache, keine Empfehlung. Das alte Feuchte- und Schimmelprotokoll (ohne „fassung") bleibt
+   unverändert; umgewandelt wird es nur auf Knopfdruck im Protokoll selbst (_fsZuBegehung), nichts wird still umgeschrieben.
+   · Abhakpunkte: links der Satz „nicht festgestellt" (bisher ✓ = status 'ok'), rechts der Satz „festgestellt" (bisher ⚠ = 'mangel').
+     Was angetippt wird, steht wörtlich im PDF. m = Vorlage mit {} für die Notiz, mo = Satz ohne Notiz, h = Hinweis im Notizfeld.
+   · Die Sätze werden beim Anlegen ins Protokoll KOPIERT – spätere Änderungen hier gelten nur für neue Protokolle.
+   · alt = Wortlaut des bisherigen Punktes (zum Umwandeln), neu = ein altes ✓/⚠ lässt sich hier NICHT übertragen (neu beantworten),
+     zuAngabe = die alte Notiz wandert in diese Nutzerangabe. typ 'notiz' = nur ein Textfeld, erscheint, wenn der Punkt abh rechts gewählt ist.
+   · Was nicht angetippt oder ausgefüllt ist, steht nicht im PDF – auch keine Sammelzeile „nicht erfasst".
+   ⛔ Datei ist öffentlich: nur Sätze und Programm, nie Namen. Texte, die ins PDF gehen: nur Zeichen der PDF-Schrift (kein ⚠ ● ≥ ²). */
+const FS_BG_TITEL='Begehungsprotokoll';
+const FS_BG_UMFANG='Dieses Protokoll hält den vorgefundenen Zustand und die Messwerte zum Zeitpunkt der Begehung fest. Eine Bewertung der Ursachen und Empfehlungen zur Beseitigung sind nicht Gegenstand dieses Protokolls.';
+const FS_BG_ROLLEN=['Nutzer','Mieter Nachbarkeller','Vertreter Auftraggeber','Aufgenommen von','Sonstige'];
+const FS_BG_GERAETE={
+  luft:'testo 605i – Lufttemperatur und relative Luftfeuchte',
+  oberflaeche:'testo 805i – Oberflächentemperatur, berührungslos (Infrarot)',
+  bauteil:'Trotec BM31WP – kapazitive Messung, Anzeige in Digits (Vergleichswerte des Geräts, keine Masse-%)'
+};
+const FS_BG_KELLER=[
+  {titel:'Befund im Keller',items:[
+    {k:'K1.1',q:'Zugang zum Keller',ok:'Der Zugang zum Keller führt nicht durch einen Wohnraum.',m:'Der Zugang zum Keller führt durch einen Wohnraum.',alt:'Zugang zum Keller nur über Treppenhaus oder Hof (kein Wohnraum)'},
+    {k:'K1.2',q:'Schimmel an Gegenständen oder Wänden',ok:'An Wänden und Gegenständen war kein Schimmel sichtbar.',m:'Schimmel sichtbar an: {}.',mo:'Schimmel sichtbar.',h:'Ort',alt:'Schimmel an Gegenständen oder Wänden (wo?)'},
+    {k:'K1.3',typ:'notiz',abh:'K1.2',q:'Fläche der Schimmelstelle',m:'Ungefähre Fläche der Schimmelstelle: {}.',h:'Zahl und Einheit, z. B. 400 cm²',alt:'Schimmelfläche: unter 20 cm² / bis 0,5 m² / über 0,5 m²'},
+    {k:'K1.4',q:'Bereiche hinter Regalen, Schränken und Verkleidungen',ok:'Die Bereiche hinter Regalen, Schränken und Verkleidungen wurden eingesehen.',m:'Die Bereiche hinter Regalen, Schränken und Verkleidungen waren nicht einsehbar: {}.',mo:'Die Bereiche hinter Regalen, Schränken und Verkleidungen waren nicht einsehbar.',h:'was',alt:'Hinter Regalen, Schränken und Verkleidungen nachgesehen'},
+    {k:'K1.5',q:'Wasser oder Pfützen am Boden',ok:'Kein Wasser und keine Pfützen am Boden.',m:'Wasser oder Pfützen am Boden: {}.',mo:'Wasser oder Pfützen am Boden.',h:'wo',alt:'Wasser oder Pfützen am Boden'},
+    {k:'K1.6',q:'Salzausblühungen, abplatzender Putz oder Farbe',ok:'Keine Salzausblühungen, kein abplatzender Putz und keine abplatzende Farbe.',m:'Festgestellt: {}.',mo:'Salzausblühungen, abplatzender Putz oder abplatzende Farbe festgestellt.',h:'Salzausblühungen / Putz / Farbe – wo',alt:'Salzausblühungen, abplatzender Putz oder Farbe'},
+    {k:'K1.7',q:'Feuchterand an der Wand',ok:'Kein Feuchterand an den Wänden erkennbar.',m:'Feuchterand an der Wand: {}.',mo:'Feuchterand an der Wand erkennbar.',h:'wo, Höhe über Boden in cm',alt:'Feuchterand an der Wand (Höhe über Boden notieren)'},
+    {k:'K1.8',q:'Geruch',ok:'Kein muffiger Geruch wahrgenommen.',m:'Muffiger Geruch wahrgenommen.',alt:'Muffiger Geruch'}
+  ]},
+  {titel:'Wand und Boden innen',items:[
+    {k:'K2.1',q:'Wand grenzt an Erdreich',ok:'Die Wand grenzt nicht an Erdreich.',m:'Die Wand grenzt an Erdreich.',alt:'Wand grenzt an Erdreich (Außenwand)',neu:true},
+    {k:'K2.2',q:'Innendämmung, Vorsatzschale oder Verkleidung',ok:'Keine Innendämmung, Vorsatzschale oder Verkleidung an der Wand.',m:'An der Wand ist vorhanden: {}.',mo:'An der Wand ist eine Innendämmung, Vorsatzschale oder Verkleidung vorhanden.',h:'Art',alt:'Innendämmung, Vorsatzschale oder Verkleidung an der Wand',neu:true},
+    {k:'K2.3',q:'Rohr- und Leitungsdurchführungen',ok:'Rohr- und Leitungsdurchführungen waren trocken.',m:'Rohr- und Leitungsdurchführungen waren feucht oder nass: {}.',mo:'Rohr- und Leitungsdurchführungen waren feucht oder nass.',h:'wo',alt:'Rohr- und Leitungsdurchführungen trocken'},
+    {k:'K2.4',q:'Übergang Wand / Boden',ok:'Am Übergang Wand/Boden waren keine Feuchte, Risse oder offenen Fugen erkennbar.',m:'Am Übergang Wand/Boden festgestellt: {}.',mo:'Am Übergang Wand/Boden wurden Feuchte, Risse oder offene Fugen festgestellt.',h:'Feuchte / Risse / Fugen – wo',alt:'Übergang Wand / Boden: Feuchte, Risse, Fugen'},
+    {k:'K2.5',q:'Wasser- und Abwasserleitungen im Raum',ok:'Wasser- und Abwasserleitungen im Raum waren trocken.',m:'An Wasser- oder Abwasserleitungen festgestellt: {}.',mo:'An Wasser- oder Abwasserleitungen wurde Feuchte festgestellt.',h:'Feuchte / Tropfwasser – wo',alt:'Wasser- und Abwasserleitungen im Raum trocken'},
+    {k:'K2.6',q:'Bodenablauf, Rückstauklappe, Hebeanlage',ok:'Im Raum ist kein Bodenablauf, keine Rückstauklappe und keine Hebeanlage vorhanden.',m:'Im Raum ist vorhanden: {}.',mo:'Im Raum ist ein Bodenablauf, eine Rückstauklappe oder eine Hebeanlage vorhanden.',h:'Bodenablauf / Rückstauklappe / Hebeanlage',alt:'Bodenablauf, Rückstauklappe oder Hebeanlage vorhanden und gewartet',neu:true,zuAngabe:'K5.5'}
+  ]},
+  {titel:'Außen am Haus',items:[
+    {k:'K3.1',q:'Fallrohre und Regenwasseranschluss',ok:'An Fallrohren und Regenwasseranschluss waren keine Schäden erkennbar.',m:'An Fallrohren oder Regenwasseranschluss festgestellt: {}.',mo:'An Fallrohren oder Regenwasseranschluss wurde ein Schaden festgestellt.',h:'Schaden – wo',alt:'Fallrohre und Regenwasseranschluss in Ordnung'},
+    {k:'K3.2',q:'Gelände und Pflaster',ok:'Gelände und Pflaster fallen vom Haus weg ab.',m:'Gelände oder Pflaster fällt zum Haus hin ab oder liegt eben: {}.',mo:'Gelände oder Pflaster fällt zum Haus hin ab oder liegt eben.',h:'wo',alt:'Gelände / Pflaster fällt vom Haus weg ab'},
+    {k:'K3.3',q:'Kellerfenster und Lichtschacht',ok:'Am Kellerfenster und am Lichtschacht war keine Undichtigkeit erkennbar.',m:'Am Kellerfenster oder Lichtschacht festgestellt: {}.',mo:'Am Kellerfenster oder Lichtschacht wurde eine Undichtigkeit festgestellt.',h:'Undichtigkeit / Wasserstand – wo',alt:'Kellerfenster / Lichtschacht dicht, Lichtschacht entwässert'},
+    {k:'K3.4',q:'Sockel',ok:'Am Sockel waren keine Risse, Putzschäden oder Feuchteflecken erkennbar.',m:'Am Sockel festgestellt: {}.',mo:'Am Sockel wurden Risse, Putzschäden oder Feuchteflecken festgestellt.',h:'Risse / Putzschäden / Feuchteflecken – wo',alt:'Sockel: Risse, Putzschäden oder Feuchteflecken'},
+    {k:'K3.5',q:'Erde, Bewuchs und Spritzwasser an der Hauswand',ok:'Es lagen keine Erde und kein Bewuchs direkt an der Hauswand.',m:'An der Hauswand vorgefunden: {}.',mo:'An der Hauswand wurden Erde, Bewuchs oder ein Spritzwasserbereich vorgefunden.',h:'Erde / Bewuchs / Spritzwasser – wo',alt:'Spritzwasser, Bewuchs oder Erde direkt an der Hauswand'},
+    {k:'K3.6',q:'Drainage / Kontrollschacht',ok:'Ein Drainage- oder Kontrollschacht war nicht erkennbar.',m:'Kontrollschacht vorhanden, Wasserstand: {}.',mo:'Ein Kontrollschacht ist vorhanden.',h:'Wasserstand',alt:'Drainage / Kontrollschacht vorhanden, Wasserstand',neu:true}
+  ]},
+  {titel:'Lüftung und Nutzung',items:[
+    {k:'K4.1',q:'Kellerfenster',ok:'Das Kellerfenster war zum Zeitpunkt der Begehung geschlossen.',m:'Das Kellerfenster war zum Zeitpunkt der Begehung geöffnet.',alt:'Kellerfenster im Sommer offen (warme Luft schlägt sich an kalten Wänden nieder)',neu:true,zuAngabe:'K5.4'},
+    {k:'K4.2',q:'Gegenstände an der Außenwand, Kartons auf dem Boden',ok:'Keine Gegenstände standen direkt an der Außenwand, und es standen keine Kartons auf dem Boden.',m:'Es stehen Gegenstände direkt an der Außenwand bzw. Kartons auf dem Boden: {}.',mo:'Es stehen Gegenstände direkt an der Außenwand bzw. Kartons auf dem Boden.',h:'was, wo',alt:'Gegenstände direkt an der Außenwand oder in Kartons auf dem Boden'},
+    {k:'K4.3',q:'Weitere Feuchtequellen',ok:'Keine weiteren Feuchtequellen vorgefunden (Luftentfeuchter, Pflanzen, Brennholz).',m:'Vorgefunden: {}.',mo:'Weitere Feuchtequellen vorgefunden.',h:'Luftentfeuchter / Pflanzen / Brennholz / …',alt:'Weitere Feuchtequellen (Luftentfeuchter, Pflanzen, Brennholz)'},
+    {k:'K4.4',q:'Angrenzende Keller',ok:'Die angrenzenden Keller wurden besichtigt. Dort waren optisch keine Auffälligkeiten zu sehen.',m:'In den angrenzenden Kellern war Gleiches festzustellen: {}.',mo:'In den angrenzenden Kellern war Gleiches festzustellen.',h:'was',alt:'Nachbarkeller ebenso betroffen'},
+    {k:'K4.5',q:'Wäsche im Keller',ok:'Zum Zeitpunkt der Begehung hing keine Wäsche zum Trocknen im Keller.',m:'Zum Zeitpunkt der Begehung hing Wäsche zum Trocknen im Keller.',alt:'Wäsche wird im Keller getrocknet',neu:true,zuAngabe:'K5.6'}
+  ]}
+];
+const FS_BG_KELLER_ANGABEN=[
+  {k:'K5.1',q:'Seit wann? Nur nach Regen, nur im Sommer oder immer?',alt:'Seit wann? Nur nach Regen, nur im Sommer oder immer?'},
+  {k:'K5.2',q:'Frühere Wasserschäden, Hochwasser, bisherige Maßnahmen',alt:'Frühere Wasserschäden, Hochwasser, bisherige Maßnahmen'},
+  {k:'K5.3',q:'Was hat sich zuletzt geändert?',alt:'Was hat sich zuletzt geändert?'},
+  {k:'K5.4',q:'Kellerfenster: wann ist es offen oder geschlossen?'},
+  {k:'K5.5',q:'Bodenablauf, Rückstauklappe, Hebeanlage: Wartung?'},
+  {k:'K5.6',q:'Wird im Keller gewöhnlich Wäsche getrocknet?'}
+];
+const FS_BG_WOHNUNG=[
+  {titel:'Befund in den Räumen',items:[
+    {k:'W1.1',q:'Schimmel',ok:'In den besichtigten Räumen war kein Schimmel sichtbar.',m:'Schimmel sichtbar: {}.',mo:'Schimmel sichtbar.',h:'Raum, Lage, ungefähre Fläche',alt:'Schimmel sichtbar (Lage und Größe notieren)'},
+    {k:'W1.2',q:'Fenster und Dichtungen',ok:'Die Fenster waren nicht beschlagen, die Dichtungen ohne Verfärbung.',m:'Fenster beschlagen bzw. Dichtungen verfärbt: {}.',mo:'Fenster beschlagen bzw. Dichtungen verfärbt.',h:'welche',alt:'Fenster beschlagen / Dichtungen verfärbt'},
+    {k:'W1.3',q:'Möbel an Außenwänden',ok:'Möbel standen nicht dicht an Außenwänden.',m:'Möbel stehen dicht an Außenwänden: {}.',mo:'Möbel stehen dicht an Außenwänden.',h:'Raum, Wand, Abstand',alt:'Möbel dicht an Außenwänden'},
+    {k:'W1.4',q:'Abluft Küche und Bad',ok:'An der Abluft in Küche und Bad war ein Luftzug wahrnehmbar.',m:'An der Abluft in {} war kein Luftzug wahrnehmbar.',mo:'An der Abluft in Küche oder Bad war kein Luftzug wahrnehmbar.',h:'Küche / Bad',alt:'Abluft Küche und Bad zieht'},
+    {k:'W1.5',q:'Wäsche in der Wohnung',ok:'Zum Zeitpunkt der Begehung hing keine Wäsche zum Trocknen in der Wohnung.',m:'Zum Zeitpunkt der Begehung hing Wäsche zum Trocknen in der Wohnung: {}.',mo:'Zum Zeitpunkt der Begehung hing Wäsche zum Trocknen in der Wohnung.',h:'Raum',alt:'Wäsche wird in der Wohnung getrocknet',neu:true,zuAngabe:'W3.4'}
+  ]},
+  {titel:'Dach, Dachboden, Hohlraum',items:[
+    {k:'W2.1',q:'Dämmung bis an den Rand',ok:'Die Dämmung reichte bis an den Rand.',m:'Die Dämmung reichte nicht bis an den Rand: {}.',mo:'Die Dämmung reichte nicht bis an den Rand.',h:'wo',alt:'Dämmung vollständig bis an den Rand'},
+    {k:'W2.2',q:'Dämmung',ok:'Die Dämmung war trocken.',m:'Die Dämmung war feucht oder nass: {}.',mo:'Die Dämmung war feucht oder nass.',h:'wo',alt:'Dämmung trocken'},
+    {k:'W2.3',q:'Unterseite von Dach bzw. Decke',ok:'An der Unterseite von Dach bzw. Decke waren keine Wasserspuren erkennbar.',m:'An der Unterseite von Dach bzw. Decke erkennbar: {}.',mo:'An der Unterseite von Dach bzw. Decke waren Wasserspuren erkennbar.',h:'Wasserspuren – wo',alt:'Unterseite Dach bzw. Decke ohne Wasserspuren'},
+    {k:'W2.4',q:'Abdichtung und Eindeckung',ok:'An Abdichtung und Eindeckung waren keine Schäden erkennbar.',m:'An Abdichtung oder Eindeckung festgestellt: {}.',mo:'An Abdichtung oder Eindeckung wurde ein Schaden festgestellt.',h:'Schaden – wo',alt:'Abdichtung / Eindeckung ohne Schäden'},
+    {k:'W2.5',q:'Anschlüsse, Durchdringungen, Dachrand',ok:'An Anschlüssen, Durchdringungen und Dachrand waren keine Undichtigkeiten erkennbar.',m:'Festgestellt an Anschlüssen, Durchdringungen oder Dachrand: {}.',mo:'An Anschlüssen, Durchdringungen oder Dachrand wurde eine Undichtigkeit festgestellt.',h:'was, wo',alt:'Anschlüsse, Durchdringungen, Dachrand dicht'},
+    {k:'W2.6',q:'Entwässerung',ok:'An der Entwässerung war keine Verstopfung erkennbar.',m:'An der Entwässerung festgestellt: {}.',mo:'An der Entwässerung wurde eine Einschränkung festgestellt.',h:'Laub / Verstopfung / Stauwasser – wo',alt:'Entwässerung frei'}
+  ]}
+];
+const FS_BG_WOHNUNG_ANGABEN=[
+  {k:'W3.1',q:'Seit wann? Nur nach Regen oder immer?',alt:'Seit wann? Nur nach Regen oder immer?'},
+  {k:'W3.2',q:'Was hat sich zuletzt geändert (Personen, Sanierung, Heizung)?',alt:'Was hat sich zuletzt geändert (Personen, Sanierung, Heizung)?'},
+  {k:'W3.3',q:'Wie wird gelüftet und geheizt?',alt:'Wie wird gelüftet und geheizt?'},
+  {k:'W3.4',q:'Wird in der Wohnung gewöhnlich Wäsche getrocknet?'}
+];
+const FS_BG_MERK_KEY='pam_fs_aufgenommen';
+function _fsIstBegehung(b){return !!b&&b.fassung==='begehung';}
+// „Aufgenommen von": einmal getippt, das Gerät merkt es sich (NICHT in dieser öffentlichen Datei)
+function _fsBgMerkName(neu){
+  try{
+    if(typeof neu==='string'){const v=neu.trim();if(v)localStorage.setItem(FS_BG_MERK_KEY,v);return v;}
+    return String(localStorage.getItem(FS_BG_MERK_KEY)||'');
+  }catch(e){return '';}
+}
+function _fsBgItem(d){
+  const it={k:d.k,text:d.q,ok:d.ok||'',m:d.m||'',mo:d.mo||'',h:d.h||'',status:'offen',notiz:'',fotoRefs:[]};
+  if(d.typ){it.typ=d.typ;it.abh=d.abh||'';}
+  return it;
+}
+function _fsBgAngabe(d){return {k:d.k,q:d.q,text:'',von:''};}
+function _fsBgNeuerBericht(t,art){return _fsBgUmstellen(_fsNeuerBericht(t,art));}
+// Ein frisch angelegtes (leeres) Protokoll auf die Fassung „Begehungsprotokoll" umstellen
+function _fsBgUmstellen(b){
+  const keller=b.art==='keller';
+  b.fassung='begehung';
+  b.titel=FS_BG_TITEL+(keller?' Keller':' Wohnung');
+  Object.assign(b.kopf,{anlass:'',beginn:'',ende:'',geraetLuft:'',geraetOberflaeche:'',geraetBauteil:'',pruefer:_fsBgMerkName()});
+  b.anwesende=[];
+  b.sektionen=(keller?FS_BG_KELLER:FS_BG_WOHNUNG).map(s=>({titel:s.titel,items:s.items.map(_fsBgItem)}));
+  b.angaben=(keller?FS_BG_KELLER_ANGABEN:FS_BG_WOHNUNG_ANGABEN).map(_fsBgAngabe);
+  return b;
+}
+// Satz am Ende sauber schließen
+function _fsBgPunkt(s){
+  s=String(s||'').trim();
+  if(!s)return '';
+  return /[.!?:]$/.test(s)?s:s+'.';
+}
+// Der Satz, der für einen Punkt ins PDF kommt – leer, wenn nichts angetippt/ausgefüllt wurde.
+// sek = Abschnitt des Punktes (für typ 'notiz': der Punkt abh muss rechts gewählt sein)
+function _fsBgSatz(it,sek){
+  if(!it)return '';
+  const nz=String(it.notiz||'').trim().replace(/[.\s]+$/,'');
+  if(it.frei){
+    const tx=String(it.text||'').trim().replace(/[.\s]+$/,'');
+    if(!tx)return '';
+    return _fsBgPunkt(tx+(nz?': '+nz:''));
+  }
+  if(it.typ==='notiz'){
+    const ab=((sek&&sek.items)||[]).find(x=>x&&x.k===it.abh);
+    if(!ab||ab.status!=='mangel'||!nz)return '';
+    return (it.m||'{}').split('{}').join(nz);
+  }
+  const mitNotiz=(satz)=>{const s=String(satz||'').trim();if(!s)return '';return nz?s+' '+_fsBgPunkt(nz):s;};
+  if(it.status==='ok')return mitNotiz(it.ok);
+  if(it.status==='mangel'){
+    const m=String(it.m||'');
+    if(m.indexOf('{}')>=0)return nz?m.split('{}').join(nz):String(it.mo||m.split(': {}').join('').split(' {}').join('')).trim();
+    return mitNotiz(m);
+  }
+  return '';
+}
+// Anwesende als Text: „Name (Rolle) · Name (Rolle)"; ohne Liste der alte Freitext
+function _fsBgAnwesendText(b){
+  const l=(b&&Array.isArray(b.anwesende))?b.anwesende.filter(p=>p&&String(p.name||'').trim()):[];
+  if(l.length)return l.map(p=>String(p.name).trim()+(String(p.rolle||'').trim()?' ('+String(p.rolle).trim()+')':'')).join(' · ');
+  return String((b&&b.kopf&&b.kopf.anwesend)||'').trim();
+}
+function _fsBgZeitText(k){
+  const a=String((k&&k.beginn)||'').trim(),e=String((k&&k.ende)||'').trim();
+  if(a&&e)return a+' bis '+e+' Uhr';
+  if(a)return 'ab '+a+' Uhr';
+  if(e)return 'bis '+e+' Uhr';
+  return '';
+}
+// Uhrzeit einer Messstelle (testo-Messung) als hh:mm, sonst leer
+function _fsBgStellenZeit(st){
+  const z=st&&st.testo&&st.testo.zeit;
+  if(!z)return '';
+  const t=_fsZeitText(z);
+  return t?t.slice(11,16):'';
+}
+function _fsBgStelleGefuellt(st){
+  if(!st)return false;
+  return !!(String(st.text||'').trim()||_fsZahl(st.ts)!==null||_fsZahl(st.mf)!==null||_fsZahl(st.luftT)!==null||_fsZahl(st.luftRf)!==null
+    ||String(st.notiz||'').trim()||(Array.isArray(st.befund)&&st.befund.length)||(Array.isArray(st.fotoRefs)&&st.fotoRefs.length));
+}
+// Messstellen für das PDF: nur ausgefüllte, nach Uhrzeit sortiert (ohne Uhrzeit hinten, dort bleibt die Reihenfolge)
+function _fsBgStellenSortiert(b){
+  const l=((b&&b.stellen)||[]).map((st,i)=>({st,i,z:_fsBgStellenZeit(st)})).filter(x=>_fsBgStelleGefuellt(x.st));
+  return l.slice().sort((a,c)=>{
+    if(a.z&&c.z)return a.z<c.z?-1:a.z>c.z?1:a.i-c.i;
+    if(a.z)return -1;
+    if(c.z)return 1;
+    return a.i-c.i;
+  });
+}
+function _fsBgSektionKurz(sek){
+  let da=0,offen=0;
+  ((sek&&sek.items)||[]).forEach(it=>{
+    if(it.typ==='notiz')return;
+    if(it.frei||it.status==='ok'||it.status==='mangel')da++;else offen++;
+  });
+  return [da?da+' erfasst':'',offen?offen+' offen':''].filter(Boolean).join(' · ')||'keine Punkte';
+}
+// Altes Protokoll → Begehungsprotokoll. Nichts geht verloren: Eingaben, Fotos, Messwerte bleiben, Ursache und Empfehlungen bleiben in den
+// Daten (stehen nur nicht mehr im PDF). Punkte, bei denen ein altes ✓/⚠ nicht übertragbar ist, bekommen „neuAnsehen".
+// Gibt {gewandelt, neu:[Kennungen]} zurück. Wiederholen ist harmlos (zweiter Aufruf tut nichts).
+function _fsZuBegehung(b){
+  if(!b||b.fassung==='begehung')return {gewandelt:false,neu:[]};
+  _fsVervollstaendigen(b);
+  const keller=_fsIstKeller(b);
+  const defs=keller?FS_BG_KELLER:FS_BG_WOHNUNG,angDefs=keller?FS_BG_KELLER_ANGABEN:FS_BG_WOHNUNG_ANGABEN;
+  const alt=[];
+  (b.sektionen||[]).forEach(s=>((s&&s.items)||[]).forEach(it=>{if(it)alt.push(it);}));
+  const benutzt=new Set();
+  const finde=text=>{const it=alt.find(x=>x.text===text&&!benutzt.has(x));if(it)benutzt.add(it);return it||null;};
+  const neu=[],angaben=angDefs.map(_fsBgAngabe);
+  const angabe=k=>angaben.find(a=>a.k===k);
+  const sektionen=defs.map(s=>({titel:s.titel,items:s.items.map(d=>{
+    const n=_fsBgItem(d);
+    const a=d.alt?finde(d.alt):null;
+    if(!a)return n;
+    const nz=String(a.notiz||'');
+    const fr=Array.isArray(a.fotoRefs)?a.fotoRefs.slice():[];
+    n.fotoRefs=fr;
+    if(d.zuAngabe&&angabe(d.zuAngabe)){angabe(d.zuAngabe).text=nz;} // die alte Notiz war eine Angabe des Nutzers
+    else n.notiz=nz;
+    if(d.typ)return n;
+    if(a.status!=='ok'&&a.status!=='mangel')return n;
+    if(d.neu){n.neuAnsehen=true;neu.push(d.k);}
+    else n.status=a.status;
+    return n;
+  })}));
+  angDefs.forEach(d=>{
+    const a=d.alt?finde(d.alt):null;
+    if(a&&String(a.notiz||'').trim())angabe(d.k).text=String(a.notiz);
+  });
+  const uebrig=alt.filter(x=>!benutzt.has(x)&&(x.status==='ok'||x.status==='mangel'||String(x.notiz||'').trim()||(Array.isArray(x.fotoRefs)&&x.fotoRefs.length)));
+  if(uebrig.length){
+    sektionen.push({titel:'Weitere Feststellungen',items:uebrig.map(x=>({frei:true,text:String(x.text||''),notiz:String(x.notiz||''),status:'mangel',fotoRefs:Array.isArray(x.fotoRefs)?x.fotoRefs.slice():[],neuAnsehen:true}))});
+    neu.push('frei');
+  }
+  b.sektionen=sektionen;
+  b.angaben=angaben;
+  b.fassung='begehung';
+  b.titel=FS_BG_TITEL+(keller?' Keller':' Wohnung');
+  b.umgewandeltAm=new Date().toISOString();
+  _fsVervollstaendigen(b);
+  return {gewandelt:true,neu};
+}
+
+// Quelle der Wetterangabe fürs PDF – ohne Quelle (von Hand eingetragen) bleibt die Zeile leer
+function _fsBgWetterQuelle(k){
+  const q=String((k&&k.wetterQuelle)||'').trim();
+  if(!q)return '';
+  const d=new Date((k&&k.wetterAbruf)||'');
+  if(isFinite(d.getTime())){
+    const p=n=>('0'+n).slice(-2);
+    const stunde=String((k&&k.wetterStunde)||'').trim();
+    return 'Angabe des Wetterdienstes Open-Meteo'+(stunde?' (Wert der Stunde '+stunde+' Uhr)':'')+', abgerufen am '+p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear()+' um '+p(d.getHours())+':'+p(d.getMinutes())+' Uhr – nicht vor Ort gemessen.';
+  }
+  return 'Angabe des Wetterdienstes ('+q+') – nicht vor Ort gemessen.';
+}
+
+// PDF des Begehungsprotokolls: nur Ausgefülltes, nur Feststellungen. Kein Ergebnis-Kasten, keine Ampel, keine Rechenwerte,
+// keine Ursache, keine Empfehlung, keine Sammelzeile „nicht erfasst". Abschnitte ohne Inhalt fehlen, die Nummern laufen durch.
+async function _fsMobPdfBg(bericht,task){
+  if(!window.jspdf){toast('PDF-Bibliothek lädt noch …','error');return null;}
+  try{
+    _fsVervollstaendigen(bericht);
+    const {jsPDF}=window.jspdf;
+    const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+    const W=210,M=14,farbe=[31,95,139];let y=M;
+    const k=bericht.kopf;
+    const keller=_fsIstKeller(bericht);
+    const hat=v=>!(v===null||v===undefined||String(v).trim()==='');
+    const zahlText=(v,einheit)=>{const n=_fsZahl(v);return n===null?'–':_fsEins(n)+(einheit?' '+einheit:'');};
+    let nr=0;
+    const abschnitt=titel=>{
+      if(y>262){doc.addPage();y=M;}
+      nr++;
+      doc.setFillColor(227,237,245);doc.rect(M,y,W-2*M,7,'F');
+      doc.setFontSize(9);doc.setFont('helvetica','bold');doc.setTextColor(...farbe);
+      doc.text(nr+' · '+titel,M+2,y+5);y+=9;
+    };
+    const unterTitel=text=>{
+      if(y>268){doc.addPage();y=M;}
+      doc.setFont('helvetica','bold');doc.setFontSize(8.5);doc.setTextColor(40,40,40);
+      doc.text(text,M,y+3);y+=6;
+    };
+    const absatz=(text,opt)=>{
+      opt=opt||{};
+      const gr=opt.groesse||9,ein=opt.einzug||0,c=opt.farbe||[0,0,0],lh=4.3*gr/9;
+      doc.setFont('helvetica',opt.fett?'bold':'normal');doc.setFontSize(gr);doc.setTextColor(c[0],c[1],c[2]);
+      const zeilen=doc.splitTextToSize(String(text),W-2*M-ein);
+      if(y+zeilen.length*lh+2>285){doc.addPage();y=M;}
+      doc.text(zeilen,M+ein,y+3);
+      y+=zeilen.length*lh+(opt.abstand===undefined?2:opt.abstand);
+    };
+    const tabelle2=rows=>{
+      if(!rows.length)return;
+      doc.autoTable({startY:y,theme:'grid',margin:{left:M,right:M},bodyStyles:{fontSize:8.5,minCellHeight:6},
+        columnStyles:{0:{fontStyle:'bold',cellWidth:34,fillColor:[245,245,245]},1:{cellWidth:148}},body:rows});
+      y=doc.lastAutoTable.finalY+4;
+    };
+
+    // Kopf
+    doc.setFillColor(...farbe);doc.rect(0,0,W,32,'F');
+    doc.setTextColor(255,255,255);doc.setFontSize(16);doc.setFont('helvetica','bold');
+    doc.text(FS_BG_TITEL,M,12);
+    doc.setFontSize(9);doc.setFont('helvetica','normal');
+    doc.text('Feststellungen vor Ort – Feuchte '+(keller?'im Keller':'in der Wohnung'),M,18);
+    const objekt=String(k.objektAdresse||(task&&task.adresse)||'').trim();
+    if(objekt)doc.text(doc.splitTextToSize('Objekt: '+objekt,W-2*M)[0],M,24);
+    doc.text('Datum: '+(hat(bericht.datum)?bericht.datum:'–')+(k.auftragNr?' · Auftrag: '+k.auftragNr:''),M,29.5);
+    y=38;
+
+    const fotoList=(bericht.fotos||[]).filter(f=>f&&f.inReport);
+    const fotoNr=ref=>{const i=fotoList.findIndex(f=>_fsRefPasst(f,ref));return i<0?0:i+1;};
+    const fotoHinweis=refs=>{const n=(Array.isArray(refs)?refs:[]).map(fotoNr).filter(Boolean).filter((x,i,a)=>a.indexOf(x)===i);return n.length?' (Foto '+n.join(', ')+')':'';};
+
+    // 1 · Auftrag und Umfang
+    abschnitt('Auftrag und Umfang');
+    {
+      const rows=[];
+      if(hat(k.auftraggeber))rows.push(['Auftraggeber',String(k.auftraggeber).trim()]);
+      if(objekt)rows.push(['Objekt',objekt]);
+      if(hat(k.nutzer))rows.push(['Nutzer',String(k.nutzer).trim()]);
+      if(hat(k.anlass))rows.push(['Anlass',String(k.anlass).trim()]);
+      tabelle2(rows);
+      absatz('Umfang: '+FS_BG_UMFANG,{groesse:8.5,farbe:[70,70,70],abstand:5});
+    }
+
+    // 2 · Ortstermin
+    {
+      const rows=[];
+      if(hat(bericht.datum))rows.push(['Datum',String(bericht.datum)]);
+      const zt=_fsBgZeitText(k);if(zt)rows.push(['Beginn / Ende',zt]);
+      const aw=_fsBgAnwesendText(bericht);if(aw)rows.push(['Anwesend',aw]);
+      const wt=[];
+      if(hat(k.wetter))wt.push(String(k.wetter).trim());
+      const aT=_fsZahl(k.aussenT),aF=_fsZahl(k.aussenRf);
+      if(aT!==null||aF!==null)wt.push('außen '+(aT!==null?_fsEins(aT)+' °C':'–')+(aF!==null?' / '+_fsEins(aF)+' % r. F.':''));
+      if(hat(k.letzterRegen))wt.push('letzter Regen '+String(k.letzterRegen).trim());
+      if(wt.length){
+        const q=_fsBgWetterQuelle(k);
+        rows.push(['Wetter',wt.join(', ')+(q?'\n'+q:'')]);
+      }
+      if(rows.length){abschnitt('Ortstermin');tabelle2(rows);}
+    }
+
+    // 3 · Messgeräte
+    {
+      const rows=[];
+      if(hat(k.geraetLuft))rows.push(['Luft',String(k.geraetLuft).trim()]);
+      if(hat(k.geraetOberflaeche))rows.push(['Oberfläche',String(k.geraetOberflaeche).trim()]);
+      if(hat(k.geraetBauteil))rows.push(['Bauteil',String(k.geraetBauteil).trim()]);
+      if(!rows.length&&hat(k.messgeraete))rows.push(['Messgeräte',String(k.messgeraete).trim()]); // altes Freitext-Feld
+      if(rows.length){abschnitt('Messgeräte');tabelle2(rows);}
+    }
+
+    // 4 · Messwerte
+    {
+      const luft=(bericht.raeume||[]).filter(r=>r&&(_fsZahl(r.t)!==null||_fsZahl(r.rf)!==null));
+      const stellen=_fsBgStellenSortiert(bericht);
+      if(luft.length||stellen.length){
+        abschnitt('Messwerte');
+        if(luft.length){
+          unterTitel('Raumluft');
+          doc.autoTable({startY:y,theme:'grid',margin:{left:M,right:M},
+            head:[['Raum','Lufttemperatur','Luftfeuchte']],
+            body:luft.map(r=>[hat(r.name)?String(r.name).trim():'–',zahlText(r.t,'°C'),zahlText(r.rf,'% r. F.')]),
+            headStyles:{fillColor:farbe,fontSize:8},bodyStyles:{fontSize:8.5,minCellHeight:6},
+            columnStyles:{0:{cellWidth:90},1:{cellWidth:46,halign:'right'},2:{cellWidth:46,halign:'right'}}});
+          y=doc.lastAutoTable.finalY+5;
+        }
+        if(stellen.length){
+          unterTitel('Messstellen');
+          doc.autoTable({startY:y,theme:'grid',margin:{left:M,right:M},
+            head:[['Nr','Messstelle (Raum – Ort)','Uhrzeit','Luft\n°C','Luft\n% r. F.','Oberfläche\n°C','Bauteil\nDigits','Beobachtung','Foto']],
+            body:stellen.map(x=>{
+              const st=x.st;
+              const ort=[String(st.raum||'').trim(),String(st.text||'').trim()].filter(Boolean).join(' – ');
+              const bef=(Array.isArray(st.befund)&&st.befund.length)?'Befund: '+st.befund.join(', '):'';
+              const beob=[bef,String(st.notiz||'').trim()].filter(Boolean).join('\n');
+              const fn=(Array.isArray(st.fotoRefs)?st.fotoRefs:[]).map(fotoNr).filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i);
+              return [String(x.i+1),ort||'–',x.z||'–',_fsZahl(st.luftT)===null?'–':_fsEins(_fsZahl(st.luftT)),_fsZahl(st.luftRf)===null?'–':_fsEins(_fsZahl(st.luftRf)),
+                _fsZahl(st.ts)===null?'–':_fsEins(_fsZahl(st.ts)),_fsZahl(st.mf)===null?'–':_fsEins(_fsZahl(st.mf)),beob||'–',fn.join(', ')||'–'];
+            }),
+            headStyles:{fillColor:farbe,fontSize:7,fontStyle:'bold'},bodyStyles:{fontSize:7.5,minCellHeight:6},
+            columnStyles:{0:{cellWidth:8,halign:'center'},1:{cellWidth:46},2:{cellWidth:13,halign:'center'},3:{cellWidth:13,halign:'right'},4:{cellWidth:15,halign:'right'},
+              5:{cellWidth:19,halign:'right'},6:{cellWidth:16,halign:'right'},7:{cellWidth:40},8:{cellWidth:12,halign:'center'}}});
+          y=doc.lastAutoTable.finalY+3;
+          const vgl=[];
+          (bericht.stellen||[]).forEach(st=>{const v=_fsZahl(st&&st.mfVergleich);if(v!==null){const s=_fsEins(v);if(vgl.indexOf(s)<0)vgl.push(s);}});
+          if(vgl.length)absatz('Vergleichsstelle (trockene Stelle): '+vgl.join(' / ')+' Digits.',{groesse:8,farbe:[70,70,70],abstand:1});
+          absatz('Einzelmessungen zum Zeitpunkt der Begehung (Momentaufnahme). Bauteilfeuchte in Digits: Vergleichswerte des Geräts, keine Masse-%.',{groesse:7.5,farbe:[100,100,100],abstand:5});
+        }
+      }
+    }
+
+    // 5 · Feststellungen vor Ort
+    {
+      const gruppen=[];
+      (bericht.sektionen||[]).forEach(sek=>{
+        const zeilen=[];
+        ((sek&&sek.items)||[]).forEach(it=>{const s=_fsBgSatz(it,sek);if(s)zeilen.push(s+fotoHinweis(it.fotoRefs));});
+        if(zeilen.length)gruppen.push({titel:String(sek.titel||'').replace(/^\d+\s*·\s*/,''),zeilen});
+      });
+      if(gruppen.length){
+        abschnitt('Feststellungen vor Ort');
+        gruppen.forEach(g=>{
+          unterTitel(g.titel);
+          g.zeilen.forEach(z=>absatz('- '+z,{einzug:3,abstand:1.5}));
+          y+=2;
+        });
+        y+=2;
+      }
+    }
+
+    // 6 · Angaben der Nutzer
+    {
+      const an=(bericht.angaben||[]).filter(a=>a&&hat(a.text));
+      if(an.length){
+        abschnitt('Angaben der Nutzer (nicht selbst festgestellt)');
+        an.forEach(a=>{
+          if(hat(a.q))absatz(String(a.q).trim(),{groesse:8,farbe:[100,100,100],abstand:0.5});
+          absatz('Laut '+(hat(a.von)?String(a.von).trim():'Nutzer')+': '+String(a.text).trim(),{einzug:3,abstand:3});
+        });
+        y+=2;
+      }
+    }
+
+    // 7 · Zusammenfassung der Feststellungen
+    if(hat(bericht.bemerkung)){
+      abschnitt('Zusammenfassung der Feststellungen');
+      absatz(String(bericht.bemerkung).trim(),{abstand:5});
+    }
+
+    // 8 · Fotos
+    if(fotoList.length){
+      const iW=85,iH=115;let col=0,erste=true,zeileH=0;
+      for(let fi=0;fi<fotoList.length;fi++){
+        const f=fotoList[fi];
+        setSaveInd('saving','PDF: Foto '+(fi+1)+'/'+fotoList.length+' …');
+        const d=await _fsFotoFuerPdf(f);
+        if(!d)continue;
+        if(col===0){
+          if(erste){if(y+9+iH+10>285){doc.addPage();y=M;}abschnitt('Fotos');erste=false;}
+          if(y+iH+10>285){doc.addPage();y=M;}
+          zeileH=0;
+        }
+        const x=col===0?M:M+iW+12;
+        let w=iW,h=iW*d.h/d.w;if(h>iH){h=iH;w=iH*d.w/d.h;}
+        try{doc.addImage(d.dataUrl,'JPEG',x,y,w,h);}catch(e){console.warn('[Feuchte] Bild:',e);}
+        const zu=_fsFotoZuordnung(bericht,f);
+        doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(90,90,90);
+        doc.text(doc.splitTextToSize('Foto '+(fi+1)+(zu?' – '+zu:''),iW)[0],x,y+h+3.5);
+        zeileH=Math.max(zeileH,h);
+        if(col===1)y+=zeileH+9;
+        col=(col+1)%2;
+      }
+      if(col===1)y+=zeileH+9;
+      setSaveInd('saved','');
+    }
+
+    // Unterschrift
+    if(y+24>285){doc.addPage();y=M;}
+    y+=12;
+    doc.setDrawColor(120,120,120);doc.line(M,y+8,M+70,y+8);doc.line(W-M-70,y+8,W-M,y+8);
+    doc.setFontSize(7.5);doc.setTextColor(90,90,90);doc.setFont('helvetica','normal');
+    doc.text('Ort, Datum',M,y+12);doc.text('Unterschrift'+(hat(k.pruefer)?' ('+String(k.pruefer).trim()+')':''),W-M-70,y+12);
+
+    const pages=doc.internal.getNumberOfPages();
+    for(let p=1;p<=pages;p++){
+      doc.setPage(p);doc.setFontSize(8);doc.setTextColor(150,150,150);
+      doc.text('Seite '+p+' von '+pages,W/2,292,{align:'center'});
+      doc.text('sv-fb.de',W-M,292,{align:'right'});
+    }
+
+    const blob=doc.output('blob');
+    _fsPdfBlobs[bericht.id]=blob;
+    const name=_fsPdfName(bericht,new Date());
+    toast('✓ PDF erstellt – mit „📂 Öffnen" ansehen','success',4000);
+    const inDrive=await _fsPdfNachDrive(blob,name,bericht,task);
+    if(!inDrive){
       const url=URL.createObjectURL(blob);
       const a=document.createElement('a');a.href=url;a.download=name;
       document.body.appendChild(a);a.click();a.remove();
