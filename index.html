@@ -69,7 +69,7 @@ async function _clearCacheAndReload(){
 try{var _cs=+(localStorage.getItem('pam_card_scale')||100);document.documentElement.style.setProperty('--card-scale',(_cs/100).toFixed(2));}catch(e){}
 </script>
 <script src="https://accounts.google.com/gsi/client" defer onload="typeof gdriveInit==='function'?gdriveInit():(window._gsiPending=true)" onerror="window._gsiLoadError=true;window._gsiPending=false;typeof _driveSetStatus==='function'&&_driveSetStatus('⚠ Google-Dienst nicht erreichbar – Netzwerk oder Adblocker prüfen',false)"></script>
-<script src="formulare.js?v=F7" charset="utf-8"></script>
+<script src="formulare.js?v=F8" charset="utf-8"></script>
 <script>
 // ── EMAIL DROP-ZONE – Inline-Handler am Element, kein addEventListener nötig ──
 
@@ -10352,7 +10352,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-01 · #1046'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-01-b1046) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-01 · #1048'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-01-b1048) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -14516,6 +14516,30 @@ const _MIN_EMAIL_IMG_BYTES = 50 * 1024; // Fix #369: 25→50 KB – Logos/Signat
 // email-Scope: erlaubt /oauth2/v3/userinfo (für login_hint-Speicherung), kein extra Consent nötig.
 const GDRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.metadata https://www.googleapis.com/auth/drive.metadata.readonly email https://www.googleapis.com/auth/contacts';
 const GMAIL_SCOPE  = 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send';
+// b1048: OAuth-state als Zufallswert. Vorher stand dort nur 'drive'/'gmail'/'ms1'/'ms2' –
+// ein untergeschobener Link ?code=…&state=drive hätte PAM mit einem fremden Konto angemeldet.
+// Jetzt: art + '.' + 128 Bit Zufall; gemerkt in localStorage (überlebt den Weg zu Google und
+// zurück auch dann, wenn die Rückkehr in einem anderen Tab landet), 15 Min gültig, einmal benutzbar.
+const OAUTH_STATE_KEY = 'pam_oauth_state_v1';
+function _oauthStateNeu(art){
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  let z = '';
+  for (let i = 0; i < b.length; i++) z += (b[i] < 16 ? '0' : '') + b[i].toString(16);
+  const s = art + '.' + z;
+  try { localStorage.setItem(OAUTH_STATE_KEY, JSON.stringify({ s: s, t: Date.now() })); } catch(e) {}
+  return s;
+}
+// Liefert die Art ('drive'|'gmail'|'ms1'|'ms2') bei gültigem state, sonst '' – und löscht den Merker immer.
+function _oauthStatePruefen(zurueck){
+  let rec = null;
+  try { rec = JSON.parse(localStorage.getItem(OAUTH_STATE_KEY) || 'null'); } catch(e) {}
+  try { localStorage.removeItem(OAUTH_STATE_KEY); } catch(e) {}
+  if (!rec || typeof rec.s !== 'string' || typeof zurueck !== 'string' || !zurueck) return '';
+  if (rec.s !== zurueck) return '';
+  if (!(Date.now() - rec.t < 15 * 60 * 1000)) return '';
+  const art = zurueck.split('.')[0];
+  return (art === 'drive' || art === 'gmail' || art === 'ms1' || art === 'ms2') ? art : '';
+}
 let gmailToken=null;let gmailTokenClient=null;let gmailUserEmail=null;
 const WORKSPACE_FOLDER_NAME     = 'PAM-Workboard Daten';
 const WORKSPACE_FOLDER_NAME_OLD = 'PTP-BAU Daten';        // Fallback: alter Ordnername
@@ -14795,9 +14819,14 @@ function gdriveInit() {
   const _query = new URLSearchParams(window.location.search);
   const _authCode = _query.get('code');
   if (_authCode) {
-    const _oauthState = _query.get('state') || '';
+    // b1048: state muss zu dem passen, was dieser Browser beim Login-Start gemerkt hat.
+    const _oauthState = _oauthStatePruefen(_query.get('state') || '');
     window.history.replaceState({}, '', window.location.pathname);
-    if (_oauthState === 'ms1' || _oauthState === 'ms2') {
+    if (!_oauthState) {
+      // Fremder oder abgelaufener Rücksprung: Code verwerfen, normal weiter starten (kein return).
+      console.warn('[OAuth] Rücksprung mit ungültigem state – Code verworfen.');
+      showToast('⚠ Anmeldung abgelehnt (ungültige Rückmeldung). Bitte neu anmelden.', 'error', 8000);
+    } else if (_oauthState === 'ms1' || _oauthState === 'ms2') {
       // b486: Outlook-Rückkehr (Code-Flow) – Tausch läuft im Hintergrund über die
       // Cloud Function, Drive-Init danach ganz normal fortsetzen (kein return!)
       _exchangeMsCodeForToken(_authCode, _oauthState === 'ms2' ? '2' : '1');
@@ -14810,7 +14839,7 @@ function gdriveInit() {
       // laufenden Code-Tausch abbrechen und den Gmail-Refresh-Token verlieren.
       _exchangeGmailCodeForToken(_authCode).finally(() => { gdriveInit(); });
       return;
-    } else {
+    } else if (_oauthState === 'drive') {
       // b625: Dasselbe für die Drive-Rückkehr – ohne diesen Nachlauf fehlten in
       // der Seitenladung nach dem Login der TokenClient (damit lief der
       // Minuten-Wächter die ganze Sitzung leer, siehe `if(!gdriveTokenClient)return;`)
@@ -14821,42 +14850,13 @@ function gdriveInit() {
     }
   }
 
-  // ── Redirect-Rückkehr: Token aus URL-Hash nach Google-Login lesen (Legacy Implicit Flow) ──
-  const _hash = window.location.hash;
-  if (_hash && _hash.includes('access_token')) {
-    const _hp = new URLSearchParams(_hash.substring(1));
-    const _ht = _hp.get('access_token');
-    const _he = _hp.get('expires_in');
-    if (_ht) {
-      window.history.replaceState({}, '', window.location.pathname);
-      // Prüfen ob es ein Gmail-Redirect oder ein Drive-Redirect war
-      let _lastAction = '';
-      try { _lastAction = localStorage.getItem('pam_gdrive_last_action') || ''; } catch(e) {}
-      if (_lastAction === 'gmail_auth') {
-        // Gmail-Token verarbeiten – NICHT als Drive-Token behandeln
-        try { localStorage.removeItem('pam_gdrive_last_action'); } catch(e) {}
-        gmailToken = _ht;
-        fetch('https://www.googleapis.com/oauth2/v1/userinfo', {headers:{Authorization:'Bearer '+_ht}})
-          .then(r=>r.json()).then(d=>{
-            gmailUserEmail = d.email || '';
-            _gmUpdateBtn();
-            showToast('✅ Gmail verbunden: '+gmailUserEmail,'success',3000);
-            try{localStorage.setItem('pam_gmail_token_v1',JSON.stringify({token:gmailToken,email:gmailUserEmail,expires:Date.now()+3500000}));}catch(e){}
-          }).catch(()=>{ _gmUpdateBtn(); showToast('✅ Gmail verbunden','success',2000); });
-        // Weiter mit normaler gdriveInit (GIS-Client initialisieren) – kein return
-      } else {
-        // Drive-Token verarbeiten
-        gdriveToken = _ht;
-        gdriveTokenExpires = Date.now() + (Number(_he || 3600) - 60) * 1000;
-        try { localStorage.setItem(PC_TOKEN_KEY, JSON.stringify({token: gdriveToken, exp: gdriveTokenExpires})); } catch(e) {}
-        gdriveTokenCallback({access_token: _ht, expires_in: _he || 3600});
-        // b625: Auch dieser (alte) Rückkehr-Weg sprang ohne TokenClient und ohne
-        // Gmail-Wiederherstellung ab – gdriveInit ohne Auto-Connect nachziehen.
-        // Der Hash ist durch replaceState weg, der Zweig greift nicht erneut.
-        _gdInitOhneAutoConnect = true; gdriveInit();
-        return;
-      }
-    }
+  // b1048: Der alte Rückweg über #access_token in der Adresszeile (Implicit Flow) ist entfernt –
+  // er prüfte keinen state, und der Schlüssel stand im Browserverlauf. Es gibt nur noch den
+  // Code-Flow mit geprüftem state. Ein fremder #access_token wird NICHT benutzt, nur aus der
+  // Adresszeile genommen.
+  if (window.location.hash && window.location.hash.includes('access_token')) {
+    window.history.replaceState({}, '', window.location.pathname + window.location.search);
+    console.warn('[OAuth] Schlüssel in der Adresszeile ignoriert (alter Rückweg abgeschafft).');
   }
   console.log('[Drive] gdriveInit aufgerufen, window.google=', !!window.google);
   if (!window.google || !window.google.accounts) {
@@ -15224,7 +15224,10 @@ function _renewDriveOtherAccount(){
   _silentRefreshInProgress=false;
   try { localStorage.setItem('pam_gdrive_last_action','reconnect'); } catch(e) {}
   const _hint2=localStorage.getItem('pam_user_email_v1')||'';
-  const _p2=new URLSearchParams({client_id:GDRIVE_CLIENT_ID,redirect_uri:window.location.origin+window.location.pathname.replace(/index\.html$/i,''),response_type:'token',scope:GDRIVE_SCOPE,include_granted_scopes:'true',prompt:'select_account'});
+  // b1048: Code-Flow statt Implicit Flow (response_type:'token' ist abgeschafft). select_account
+  // zeigt die Kontoauswahl, consent sorgt dafür, dass Google einen Refresh-Token mitgibt.
+  _saveLocalBackup();
+  const _p2=new URLSearchParams({client_id:GDRIVE_CLIENT_ID,redirect_uri:window.location.origin+window.location.pathname.replace(/index\.html$/i,''),response_type:'code',access_type:'offline',scope:GDRIVE_SCOPE,include_granted_scopes:'true',prompt:'select_account consent',state:_oauthStateNeu('drive')});
   if(_hint2)_p2.set('login_hint',_hint2);
   window.location.href='https://accounts.google.com/o/oauth2/v2/auth?'+_p2;
 }
@@ -15548,7 +15551,7 @@ function gdriveRequestToken(action) {
     access_type:            'offline',     // Refresh Token anfordern
     scope:                  GDRIVE_SCOPE,
     include_granted_scopes: 'true',
-    state:                  'drive',       // Unterscheidet Drive- von Gmail-Redirect
+    state:                  _oauthStateNeu('drive'), // b1048: Zufallswert, wird beim Rücksprung geprüft
   });
   // Fix #367: prompt=consent nur erzwingen, wenn noch KEIN Refresh-Token vorhanden ist
   // (Google gibt den Refresh-Token nur mit consent aus). Wird der Token ungültig
@@ -34740,7 +34743,7 @@ function gmailRequestToken(){
     prompt:                'consent',  // Erzwingt Refresh Token bei jedem Login
     scope:                 GMAIL_SCOPE,
     include_granted_scopes:'true',
-    state:                 'gmail',    // Unterscheidet Gmail- von Drive-Redirect
+    state:                 _oauthStateNeu('gmail'), // b1048: Zufallswert, wird beim Rücksprung geprüft
   });
   if(hint){params.set('login_hint',hint);}
   window.location.href='https://accounts.google.com/o/oauth2/v2/auth?'+params;
@@ -35578,7 +35581,7 @@ async function _msStartLogin(slot){
       redirect_uri:MS_REDIRECT,
       response_mode:'query',
       scope:MS_SCOPES.join(' ')+' offline_access openid profile',
-      state:slot==='2'?'ms2':'ms1',
+      state:_oauthStateNeu(slot==='2'?'ms2':'ms1'), // b1048: Zufallswert, wird beim Rücksprung geprüft
       code_challenge:challenge,
       code_challenge_method:'S256',
       login_hint:slot==='2'?'f.braun@ddmbraun.de':'info@ddmbraun.de'

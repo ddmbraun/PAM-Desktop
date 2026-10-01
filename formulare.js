@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F7';
+const PAM_FORMULARE_VERSION='F8';
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
    Befund Frank 14.09.2026: ein Formular wie das Wartungsprotokoll, aber mit Messwerten – am
    Tablet vor Ort ausfüllen, als PDF abheften. Werte werden eingetippt; das Einlesen der
@@ -290,7 +290,7 @@ const FS_HILFE_BG={
     'Bei „Räume“ den Raum anlegen (z. B. „＋ Kellerraum“), antippen und bei „Klima“ Temperatur und Luftfeuchte eintragen – der Taupunkt steht dann daneben.'
   ],
   'Messstellen benennen':[ // F4: Messplan statt Namen vergeben
-    'Erst Räume, Wände (Art) und Wandfotos anlegen: bei „Räume“ antippst du einen Raum, im Raum stehen Klima, Wände, Skizze und Messplan. Beim „Messplan“ stehen je Wand die Höhen (Standard 10, 50, 100 cm), leer = diese Wand wird nicht gemessen.',
+    'Erst Räume, Wände (Art) und Wandfotos anlegen: bei „Räume“ antippst du einen Raum, im Raum stehen Klima, Wände, Skizze und Messplan. Beim „Messplan“ schaltest du je Wand „wird gemessen“ oder „wird nicht gemessen“ und trägst die Höhen ein (Standard 10, 50, 100 cm).',
     'Dann in der Reihenfolge des Messplans messen: Raum für Raum, W1 bis W4, an jeder Wand von der ersten bis zur letzten Höhe – jedes Mal gleich. Jede Messung einzeln in testo speichern und exportieren (siehe oben).',
     'Danach „📋 Messungen nach Messplan zuordnen“: PAM legt die Messungen nach ihrer Uhrzeit der Reihe nach auf die Plan-Zeilen. Du prüfst mit dem Wandfoto, nimmst mit „✕ Messung weglassen“ eine überzählige heraus, markierst eine ausgelassene Stelle mit „↷ Hier nicht gemessen“ und übernimmst.',
     'Trotec-Werte trägst du bei der Messstelle von Hand unter „Bauteil (Digits)“ ein.',
@@ -1456,7 +1456,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     const ks=document.createElement('span');ks.setAttribute('data-fs-planstand','1');ks.textContent=plan.length?erl+' von '+plan.length+' zugeordnet':'';
     ks.style.cssText='font-size:12px;font-weight:600;color:var(--text2);';
     kopf.append(kt,ks);box.appendChild(kopf);
-    const info=_bgInfo('Miss immer in dieser Reihenfolge: Raum für Raum, W1 bis W4, an jeder Wand von der ersten bis zur letzten Höhe. Höhen ändern: hier eintragen; leer = diese Wand wird nicht gemessen. Die Reihenfolge über alle Räume steht in der „Messliste“.');
+    const info=_bgInfo('Miss immer in dieser Reihenfolge: Raum für Raum, W1 bis W4, an jeder Wand von der ersten bis zur letzten Höhe. Eine Wand, die du nicht misst, schaltest du ab – sie fehlt dann in der Messliste, ihre Höhen bleiben gespeichert. Höhen ändern: Zahlen eintragen (z. B. 10, 50, 100). Die Reihenfolge über alle Räume steht in der „Messliste“.');
     info.style.padding='6px 0';box.appendChild(info);
     if(!name){
       const leer=_bgInfo('Dieser Raum braucht einen Namen (Reiter „Klima“), sonst steht er nicht im Messplan.');
@@ -1467,23 +1467,36 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     plan.forEach(p=>{const k=p.wand;const z=bereich[k]||(bereich[k]={von:p.nr,bis:p.nr,n:0,erl:0});z.bis=p.nr;z.n++;if(_fsBgPlanErledigt(bericht,p))z.erl++;});
     if(name&&ws.length){ // ganzen Raum in einem Zug aus dem Plan nehmen oder mit den Standardhöhen zurückholen
       const raumAus=ws.every(q=>!_fsBgWandHoehen(q).length);
-      const rb=_chip(raumAus?'↺ Standardhöhen':'Raum nicht messen',false,()=>{_fsBgRaumMessenSetzen(r,raumAus);scheduleSave();_neuBauen();});
+      const rb=_chip(raumAus?'↺ Raum messen':'Raum nicht messen',false,()=>{_fsBgRaumMessenSetzen(r,raumAus);scheduleSave();_neuBauen();});
       rb.setAttribute('data-fs-planraumschalter',name);
       const rz=document.createElement('div');rz.style.cssText='margin:2px 0 4px;';rz.appendChild(rb);box.appendChild(rz);
     }
     ws.forEach(wd=>{
-      const z=bereich[wd.k];
-      const row=document.createElement('div');row.setAttribute('data-fs-planwand',name+'|'+wd.k);
-      row.style.cssText='display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;margin:4px 0;';
+      const z=bereich[wd.k],an=_fsBgWandHoehen(wd).length>0; // F8: an = die Wand steht im Messplan
+      const row=document.createElement('div');row.setAttribute('data-fs-planwand',name+'|'+wd.k);row.setAttribute('data-fs-planan',an?'1':'0');
+      row.style.cssText='display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;margin:6px 0;padding:6px 8px;border-radius:10px;border:1.5px solid '+(an?'var(--border)':'transparent')+';'+(an?'':'opacity:.65;');
       const lab=document.createElement('span');lab.style.cssText='flex:1 1 130px;min-width:0;font-size:14px;font-weight:700;color:var(--text);';
       lab.textContent=wd.k+(String(wd.art||'').trim()?' – '+String(wd.art).trim():'');
-      const hi=_inp(typeof wd.hoehen==='string'?wd.hoehen:FS_BG_HOEHEN_STANDARD,'leer = nicht messen',v=>{wd.hoehen=v;},false);
-      hi.setAttribute('data-fs-planhoehe',name+'|'+wd.k);hi.setAttribute('aria-label','Höhen in cm an '+wd.k+' – leer = nicht messen');
-      hi.style.flex='1 1 150px';hi.style.width='auto';hi.style.minHeight='44px';
-      hi.onchange=()=>{scheduleSave();_neuBauen();};
-      const st=document.createElement('span');st.style.cssText='flex:0 0 auto;min-width:88px;font-size:12px;font-weight:600;color:var(--text2);text-align:right;';
-      st.textContent=z?('Nr '+z.von+(z.bis>z.von?'–'+z.bis:'')+(z.erl?' · '+z.erl+'/'+z.n+' ✓':'')):'nicht gemessen';
-      row.append(lab,hi,st);box.appendChild(row);
+      const sw=document.createElement('button');sw.type='button';sw.setAttribute('data-fs-wandschalter',name+'|'+wd.k);
+      sw.textContent=an?'✓ wird gemessen':'✕ wird nicht gemessen';
+      sw.style.cssText=S_KNOPF+'flex:0 0 auto;min-height:44px;border:2px solid '+(an?FS_FARBE:'var(--border)')+';background:'+(an?'rgba(31,95,139,.18)':'transparent')+';color:var(--text);';
+      sw.onclick=()=>{_fsBgWandMessenSetzen(wd,!an);scheduleSave();_neuBauen();};
+      row.append(lab,sw);
+      if(an){
+        const hi=_inp(typeof wd.hoehen==='string'?wd.hoehen:FS_BG_HOEHEN_STANDARD,'z. B. 10, 50, 100',v=>{wd.hoehen=v;},false);
+        hi.setAttribute('data-fs-planhoehe',name+'|'+wd.k);hi.setAttribute('aria-label','Höhen in cm an '+wd.k);
+        hi.style.flex='1 1 150px';hi.style.width='auto';hi.style.minHeight='44px';
+        hi.onchange=()=>{scheduleSave();_neuBauen();};
+        const st=document.createElement('span');st.style.cssText='flex:0 0 auto;min-width:88px;font-size:12px;font-weight:600;color:var(--text2);text-align:right;';
+        st.textContent=z?('Nr '+z.von+(z.bis>z.von?'–'+z.bis:'')+(z.erl?' · '+z.erl+'/'+z.n+' ✓':'')):'';
+        row.append(hi,st);
+      }else{ // abgeschaltet: grau und eingeklappt, die Höhen bleiben gespeichert
+        const gesp=_fsBgHoehenListe(typeof wd.hoehen==='string'?wd.hoehen:FS_BG_HOEHEN_STANDARD).join(', ');
+        const g=document.createElement('span');g.style.cssText='flex:1 1 100%;font-size:12px;color:var(--text2);';
+        g.textContent=gesp?('Höhen '+gesp+' cm bleiben gespeichert – beim Einschalten gelten sie wieder.'):('Beim Einschalten gelten wieder '+FS_BG_HOEHEN_STANDARD+' cm.');
+        row.appendChild(g);
+      }
+      box.appendChild(row);
     });
     w.appendChild(box);
     if(name){ // Messstellen gehören über den Raumnamen zum Raum – ohne Namen gibt es keine
@@ -2439,7 +2452,19 @@ function _fsBgHoehenListe(s){
   return out;
 }
 // Höhen einer Wand: die eingetragene Liste; fehlt sie ganz, gilt der Standard; leer = diese Wand wird nicht gemessen
-function _fsBgWandHoehen(wd){return _fsBgHoehenListe((wd&&typeof wd.hoehen==='string')?wd.hoehen:FS_BG_HOEHEN_STANDARD);}
+function _fsBgWandHoehen(wd){
+  if(wd&&wd.nichtMessen)return []; // F8: abgeschaltete Wand – ihre Höhen bleiben gespeichert, sie steht aber nicht im Messplan
+  return _fsBgHoehenListe((wd&&typeof wd.hoehen==='string')?wd.hoehen:FS_BG_HOEHEN_STANDARD);
+}
+// F8: Wand ein- oder ausschalten. Aus = Kennzeichen nichtMessen (die Höhen bleiben); an = Kennzeichen weg, und eine früher leer gemachte Höhenliste bekommt wieder den Standard
+function _fsBgWandMessenSetzen(wd,messen){
+  if(!wd)return false;
+  if(messen){
+    delete wd.nichtMessen;
+    if(typeof wd.hoehen==='string'&&!_fsBgHoehenListe(wd.hoehen).length)delete wd.hoehen;
+  }else wd.nichtMessen=true;
+  return true;
+}
 // Messplan: Räume in der Reihenfolge des Protokolls, je Raum W1…Wn (nach Zahl, also W2 vor W10), je Wand die Höhen. Boden, Decke und Räume ohne Namen gehören nicht dazu.
 function _fsBgMessplan(b){
   const plan=[];
@@ -2451,9 +2476,9 @@ function _fsBgMessplan(b){
   plan.forEach((p,i)=>{p.nr=i+1;});
   return plan;
 }
-// Ganzen Raum aus dem Messplan nehmen (messen=false: alle Wände W… bekommen eine leere Höhenliste) oder zurückholen (messen=true: die eigene Liste entfällt, es gilt wieder der Standard)
+// Ganzen Raum aus dem Messplan nehmen (messen=false: alle Wände W… werden abgeschaltet) oder zurückholen (messen=true: alle wieder an; die eigenen Höhen bleiben in beiden Fällen)
 function _fsBgRaumMessenSetzen(r,messen){
-  ((r&&Array.isArray(r.waende))?r.waende:[]).forEach(w=>{if(w&&/^W\d+$/.test(String(w.k||''))){if(messen)delete w.hoehen;else w.hoehen='';}});
+  ((r&&Array.isArray(r.waende))?r.waende:[]).forEach(w=>{if(w&&/^W\d+$/.test(String(w.k||'')))_fsBgWandMessenSetzen(w,!!messen);});
   return r;
 }
 // Plan-Zeile „erledigt“: es gibt schon eine Messstelle mit diesem Raum, dieser Wand und dieser Höhe (testo-Messung oder ausgefüllt) – Vergleichsstellen zählen nicht
@@ -2506,7 +2531,7 @@ function _fsBgAblauf(){
     {k:'tablet',titel:'AM TABLET – zuerst, alles Vorbereitende',zeilen:[
       '1 · Räume anlegen (bei „Räume“ mit „＋ Raum“).',
       '2 · Im Raum bei „Wände“ prüfen (Außenwand oder Innenwand) und Wandfotos anhängen.',
-      '3 · Im Raum bei „Messplan“ prüfen: Höhen je Wand, und Räume, die du nicht misst, mit „Raum nicht messen“ herausnehmen.',
+      '3 · Im Raum bei „Messplan“ prüfen: Höhen je Wand; Wände, die du nicht misst, abschalten („wird nicht gemessen“), ganze Räume mit „Raum nicht messen“.',
       'Danach das Tablet weglegen – am Plan ändert sich nichts mehr.']},
     {k:'handy',titel:'AM HANDY – nur messen',zeilen:[
       '4 · Mit testo und Trotec in der Reihenfolge der Messliste messen. Jede testo-Messung einzeln speichern und teilen. Die „📋 Messliste“ zeigt dir, was als Nächstes dran ist.']},
