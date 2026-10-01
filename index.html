@@ -10352,7 +10352,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-01 · #1052'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-01-b1052) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-01 · #1053'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-01-b1053) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -37809,14 +37809,17 @@ function _pamNotwegHinweis(){
 }
 // Entwurf als NEUE Mail im Postfach der Karte. Rückgabe 'ok' oder 'fehler' – beides heißt
 // für den Aufrufer „erledigt": es wird KEIN Windows-Mailfenster mehr geöffnet.
-async function _pamAntwortEntwurf(task,an,betreff,text,hinweis){
+async function _pamAntwortEntwurf(task,an,betreff,text,hinweis,anhaenge){
   try{
     if(!await _msPickRefresh(task)){showToast('⚠ Outlook-Anmeldung abgelaufen – bitte oben 📨 neu verbinden. Es wurde nichts verschickt.','error',7000);return 'fehler';}
     const tok=_msPickToken(task);
     if(!tok){showToast('⚠ Outlook ist nicht verbunden – bitte oben 📨 verbinden. Es wurde nichts verschickt.','error',7000);return 'fehler';}
     showToast('📧 Entwurf wird angelegt…','info',3000);
-    const erg=await _pamOutlookEntwurf(tok,{to:an||'',subj:betreff||'',body:text||''});
+    const opt={to:an||'',subj:betreff||'',body:text||''};
+    if(anhaenge&&anhaenge.length)opt.anhaenge=anhaenge;   // b1053: nur wenn welche gewählt sind – sonst wie bisher
+    const erg=await _pamOutlookEntwurf(tok,opt);
     _pamShowDraftToast(erg.link,hinweis||'✅ Antwort-Entwurf (als neue Mail) liegt in Outlook unter <b>Entwürfe</b>');
+    if(erg.fehl&&erg.fehl.length)showToast('⚠ Nicht angehängt (bitte in Outlook selbst anhängen): '+erg.fehl.join(', '),'warning',12000);
     return 'ok';
   }catch(e){
     console.warn('[b1015] Entwurf:',e);
@@ -37990,11 +37993,36 @@ function _mvTextHtml(text){
   return String(text||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\r?\n/g,'<br>');
 }
 // Entwurf mit Vorlagentext. Rückgabe true = Entwurf liegt in Outlook.
-async function _mvEntwurf(task,ziel,text){
+// b1053: gewählte Dokumente der Karte aus Drive holen und als Outlook-Anhang vorbereiten.
+// Bilder werden hier nie angeboten/mitgeschickt (b862: GPS/Kamera-Daten müssten erst entfernt werden).
+// Was nicht geht (Drive nicht verbunden, Download scheitert, über 3 MB), kommt in `fehl` – nie still weglassen.
+function _mvIstBild(name){return /\.(jpe?g|png|gif|webp|hei[cf]|bmp|tiff?)$/i.test(String(name||''));}
+async function _mvAnhaengeLaden(docs){
+  const liste=[],fehl=[];
+  for(const d of (docs||[])){
+    const nm=(d&&d.name)||'Anhang';
+    if(!d||!d.fileId||_mvIstBild(nm)){fehl.push(nm);continue;}
+    if(typeof gdriveTokenValid!=='function'||!gdriveTokenValid()){fehl.push(nm+' (Drive nicht verbunden)');continue;}
+    try{
+      const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(d.fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
+      if(!r.ok){fehl.push(nm+' (Drive HTTP '+r.status+')');continue;}
+      const ab=await (await r.blob()).arrayBuffer();
+      if(ab.byteLength>_PAM_ANH_MAX){fehl.push(nm+' ('+(ab.byteLength/1048576).toFixed(1)+' MB – zu groß für den Entwurf)');continue;}
+      liste.push({'@odata.type':'#microsoft.graph.fileAttachment',name:nm,contentType:/\.pdf$/i.test(nm)?'application/pdf':'application/octet-stream',contentBytes:_fsB64(ab)});
+    }catch(e){console.warn('[b1053] Anhang:',nm,e);fehl.push(nm);}
+  }
+  return{liste:liste,fehl:fehl};
+}
+async function _mvEntwurf(task,ziel,text,betreffEigen,anhDocs){
   if(!_pamOutlookVerbunden(task)){showToast('⚠ Outlook ist in PAM nicht verbunden – bitte oben 📨 verbinden. Es wurde nichts angelegt.','error',7000);return false;}
   const neuHinweis='✅ Entwurf mit Vorlage (als neue Mail) liegt in Outlook unter <b>Entwürfe</b>';
+  const eigen=String(betreffEigen||'').trim();   // b1053: leer = Betreff wie bisher (AW:/RE:)
+  let anh={liste:[],fehl:[]};
+  if(anhDocs&&anhDocs.length){showToast('📎 Dokumente werden geholt…','info',4000);anh=await _mvAnhaengeLaden(anhDocs);}
   if(!ziel||ziel.art!=='antwort'||!ziel.msg||!ziel.msg.id){
-    return (await _pamAntwortEntwurf(task,ziel&&ziel.an,_pamAwBetreff(ziel&&ziel.betreff),text,neuHinweis))==='ok';
+    const okNeu=(await _pamAntwortEntwurf(task,ziel&&ziel.an,eigen||_pamAwBetreff(ziel&&ziel.betreff),text,neuHinweis,anh.liste))==='ok';
+    if(okNeu&&anh.fehl.length)showToast('⚠ Nicht angehängt (bitte in Outlook selbst anhängen): '+anh.fehl.join(', '),'warning',12000);
+    return okNeu;
   }
   let draft=null;
   try{
@@ -38004,6 +38032,15 @@ async function _mvEntwurf(task,ziel,text){
     const r1=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(ziel.msg.id)+'/createReply',{method:'POST',headers:H,body:JSON.stringify({})});
     if(!r1.ok)throw new Error('createReply HTTP '+r1.status);
     draft=await r1.json();
+    // b1053: gewählte Dokumente an den Entwurf hängen (Fehler werden gesammelt, brechen den Entwurf nicht ab)
+    const fehlA=anh.fehl.slice();
+    for(const a of anh.liste){
+      try{
+        const ra=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(draft.id)+'/attachments',{method:'POST',headers:H,body:JSON.stringify(a)});
+        if(!ra.ok){console.warn('[b1053] Anhang HTTP',ra.status,a.name);fehlA.push(a.name);}
+      }catch(eA){console.warn('[b1053] Anhang:',a.name,eA);fehlA.push(a.name);}
+    }
+    if(fehlA.length)showToast('⚠ Nicht angehängt (bitte in Outlook selbst anhängen): '+fehlA.join(', '),'warning',12000);
     // Text OBEN einsetzen, das Zitat der Originalmail (von Outlook gebaut) bleibt darunter
     const alt=(draft&&draft.body&&draft.body.content)||'';
     const istHtml=!(draft&&draft.body)||String(draft.body.contentType||'').toLowerCase()==='html';
@@ -38012,7 +38049,7 @@ async function _mvEntwurf(task,ziel,text){
     if(istHtml){const m=/<body[^>]*>/i.exec(alt);neu=m?(alt.slice(0,m.index+m[0].length)+oben+alt.slice(m.index+m[0].length)):(oben+alt);}
     else neu=oben+_mvTextHtml(alt);
     const link=draft.webLink||('https://outlook.office.com/mail/drafts/id/'+draft.id);
-    const r2=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(draft.id),{method:'PATCH',headers:H,body:JSON.stringify({body:{contentType:'html',content:neu}})});
+    const r2=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(draft.id),{method:'PATCH',headers:H,body:JSON.stringify(eigen?{subject:eigen,body:{contentType:'html',content:neu}}:{body:{contentType:'html',content:neu}})});
     if(!r2.ok){
       try{if(navigator.clipboard&&navigator.clipboard.writeText)await navigator.clipboard.writeText(text);}catch(e){}
       _pamShowDraftToast(link,'⚠ Entwurf liegt in Outlook, aber OHNE deinen Text – er ist kopiert, bitte mit Strg+V einfügen');
@@ -38024,8 +38061,8 @@ async function _mvEntwurf(task,ziel,text){
     console.warn('[b1015] Vorlage createReply:',e);
     if(draft)return false; // Entwurf entstand, dann brach es ab – nicht noch einen zweiten anlegen
     // Outlook findet die Originalmail nicht (anderes Postfach, gelöscht …) → neue Mail an denselben Absender
-    return (await _pamAntwortEntwurf(task,ziel.an,_pamAwBetreff(ziel.betreff),text,
-      '✅ Entwurf mit Vorlage (als neue Mail – die Originalmail war in Outlook nicht erreichbar) liegt unter <b>Entwürfe</b>'))==='ok';
+    return (await _pamAntwortEntwurf(task,ziel.an,eigen||_pamAwBetreff(ziel.betreff),text,
+      '✅ Entwurf mit Vorlage (als neue Mail – die Originalmail war in Outlook nicht erreichbar) liegt unter <b>Entwürfe</b>',anh.liste))==='ok';
   }
 }
 
@@ -38046,7 +38083,7 @@ function _mvOeffnen(which){
     }
   }catch(e){}
   const st={task:task,werte:_mvWerte(task,kontakte),ziel:_mvZiel(task),liste:[],grund:'',laedt:true,
-    modus:'antwort',wahl:'',gefuellt:'',taWert:'',edit:null,editSauber:true};
+    modus:'antwort',wahl:'',gefuellt:'',taWert:'',betrGef:'',betrWert:'',anh:{},edit:null,editSauber:true};
   const alt=document.getElementById('_mvOverlay');if(alt)alt.remove();
   const ov=document.createElement('div');
   ov.id='_mvOverlay';
@@ -38064,11 +38101,12 @@ function _mvOeffnen(which){
   function waehle(id){
     const v=st.liste.find(function(x){return x.id===id;});
     st.wahl=v?v.id:'';st.gefuellt=v?_mvFuellen(v.text,st.werte):'';st.taWert=st.gefuellt;
+    st.betrGef=v?_mvFuellen(v.betreff||'',st.werte):'';st.betrWert=st.betrGef;   // b1053: Betreff der Vorlage (leer = wie bisher)
     try{if(v)localStorage.setItem('pam_mv_letzte',v.id);}catch(e){}
   }
   function sauberOderFragen(){
     if(st.modus==='verwalten')return !(st.edit&&!st.editSauber)||confirm('Die Änderungen an der Vorlage sind nicht gespeichert. Verwerfen?');
-    return st.taWert===st.gefuellt||confirm('Dein geänderter Text geht verloren. Trotzdem?');
+    return (st.taWert===st.gefuellt&&st.betrWert===st.betrGef)||confirm('Dein geänderter Text geht verloren. Trotzdem?');
   }
   function weg(){ov.remove();document.removeEventListener('keydown',taste,true);}
   function zu(){if(sauberOderFragen())weg();}
@@ -38115,17 +38153,39 @@ function _mvOeffnen(which){
     links.appendChild(knopf('⚙ Vorlagen verwalten',KN+'margin-top:8px;',function(){
       if(!sauberOderFragen())return;
       const v=st.liste.find(function(x){return x.id===st.wahl;});
-      st.modus='verwalten';st.edit=v?{id:v.id,name:v.name,text:v.text,neu:false}:null;st.editSauber=true;
-      st.taWert=st.gefuellt;zeichne();
+      st.modus='verwalten';st.edit=v?{id:v.id,name:v.name,text:v.text,betreff:v.betreff||'',neu:false}:null;st.editSauber=true;
+      st.taWert=st.gefuellt;st.betrWert=st.betrGef;zeichne();
     }));
     rumpf.appendChild(links);
     const rechts=el('div','flex:1 1 340px;display:flex;flex-direction:column;gap:6px;min-width:0;');
     const v=st.liste.find(function(x){return x.id===st.wahl;});
+    // b1053: Betreff – leer lassen = wie bisher (Antwort-Betreff „RE:/AW: …")
+    const inB=document.createElement('input');inB.type='text';inB.value=st.betrWert||'';
+    inB.placeholder='Betreff leer lassen = Antwort-Betreff wie bisher';
+    inB.style.cssText=FELD+'padding:7px 9px;font-size:13px;';
+    inB.addEventListener('input',function(){st.betrWert=inB.value;});
+    rechts.appendChild(el('div','font-size:11px;font-weight:700;color:var(--text2);','Betreff'));
+    rechts.appendChild(inB);
     const ta=document.createElement('textarea');
     ta.style.cssText=FELD+'min-height:260px;flex:1;resize:vertical;font:13px/1.5 Calibri,Arial,sans-serif;';
     ta.value=st.taWert||'';
     ta.addEventListener('input',function(){st.taWert=ta.value;});
     rechts.appendChild(ta);
+    // b1053: Dokumente der Karte zum Anhängen auswählen (nur Dateien mit Drive-Kennung, keine Bilder)
+    let dokListe=[];
+    try{dokListe=(_pamDokIndex(st.task).docs||[]).filter(function(d){return d&&d.kind==='attach'&&d.fileId&&!_mvIstBild(d.name);});}catch(eD){dokListe=[];}
+    if(dokListe.length){
+      rechts.appendChild(el('div','font-size:11px;font-weight:700;color:var(--text2);margin-top:4px;','📎 Anhang – Dokumente dieser Karte (Haken setzen, PAM hängt sie an den Entwurf)'));
+      const kasten=el('div','border:1px solid var(--border);border-radius:8px;padding:6px 10px;max-height:120px;overflow:auto;font-size:12px;line-height:1.7;');
+      dokListe.forEach(function(d){
+        const zl=document.createElement('label');zl.style.cssText='display:flex;gap:7px;align-items:center;cursor:pointer;';
+        const cb=document.createElement('input');cb.type='checkbox';cb.checked=!!st.anh[d.fileId];
+        cb.addEventListener('change',function(){if(cb.checked)st.anh[d.fileId]={fileId:d.fileId,name:d.name};else delete st.anh[d.fileId];});
+        zl.appendChild(cb);zl.appendChild(el('span','',d.name));kasten.appendChild(zl);
+      });
+      rechts.appendChild(kasten);
+      rechts.appendChild(el('div','font-size:11px;color:var(--text2);','Je Datei bis ca. 3 MB. Größeres und Bilder hängst du in Outlook selbst an – PAM sagt dir, was nicht mitging.'));
+    }
     if(v){
       const benutzt=[];
       (String(v.text).match(/\{[^{}]+\}/g)||[]).forEach(function(p){const k=p.slice(1,-1).trim();if(benutzt.indexOf(k)<0&&_mvWert(st.werte,k)!==null)benutzt.push(k);});
@@ -38151,7 +38211,7 @@ function _mvOeffnen(which){
     const los=knopf('📧 Entwurf in Outlook anlegen',KN_HAUPT,async function(){
       if(!String(st.taWert||'').trim()){showToast('Der Text ist leer.','warning',3000);return;}
       los.disabled=true;los.style.opacity='.6';
-      const ok=await _mvEntwurf(st.task,st.ziel,st.taWert);
+      const ok=await _mvEntwurf(st.task,st.ziel,st.taWert,st.betrWert,Object.keys(st.anh).map(function(k){return st.anh[k];}));
       if(ok)weg();else{los.disabled=false;los.style.opacity='';}
     });
     if(!verb||!v){los.disabled=true;los.style.opacity='.5';los.style.cursor='not-allowed';}
@@ -38162,11 +38222,11 @@ function _mvOeffnen(which){
     const rumpf=el('div','display:flex;flex-wrap:wrap;gap:14px;padding:12px 16px;overflow:auto;flex:1;min-height:0;');
     const links=listeLinks(st.edit&&!st.edit.neu?st.edit.id:'',function(v){
       if(!sauberOderFragen())return;
-      st.edit={id:v.id,name:v.name,text:v.text,neu:false};st.editSauber=true;zeichne();
+      st.edit={id:v.id,name:v.name,text:v.text,betreff:v.betreff||'',neu:false};st.editSauber=true;zeichne();
     });
     links.appendChild(knopf('＋ Neue Vorlage',KN+'margin-top:8px;'+(st.edit&&st.edit.neu?KN_AKTIV:''),function(){
       if(!sauberOderFragen())return;
-      st.edit={id:'mv_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,6),name:'',
+      st.edit={id:'mv_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,6),name:'',betreff:'',
         text:'Sehr geehrte Damen und Herren,\n\n\n\nMit freundlichen Grüßen\n{Firma}',neu:true};
       st.editSauber=false;zeichne();
     }));
@@ -38178,6 +38238,10 @@ function _mvOeffnen(which){
       const inN=document.createElement('input');inN.type='text';inN.value=st.edit.name;inN.placeholder='Name, z. B. Termin bestätigt';
       inN.style.cssText=FELD+'padding:7px 9px;font-size:13px;';
       inN.addEventListener('input',function(){st.edit.name=inN.value;st.editSauber=false;});
+      const inBt=document.createElement('input');inBt.type='text';inBt.value=st.edit.betreff||'';
+      inBt.placeholder='leer = Antwort-Betreff wie bisher, z. B. Stellungnahme Keller – {Adresse}';
+      inBt.style.cssText=FELD+'padding:7px 9px;font-size:13px;';
+      inBt.addEventListener('input',function(){st.edit.betreff=inBt.value;st.editSauber=false;});
       const ta=document.createElement('textarea');ta.value=st.edit.text;
       ta.style.cssText=FELD+'min-height:230px;resize:vertical;font:13px/1.5 Calibri,Arial,sans-serif;';
       ta.addEventListener('input',function(){st.edit.text=ta.value;st.editSauber=false;});
@@ -38194,7 +38258,7 @@ function _mvOeffnen(which){
       const hilfe=el('div','font-size:11.5px;color:var(--text2);line-height:1.55;padding:8px 10px;border-radius:7px;border:1px dashed var(--border);');
       hilfe.innerHTML='<b>So füllt PAM die Stellen:</b> {Mieter} = Kontakt mit Haken 📞 Anruf, sonst der erste Mieter · {Wohnung} und {Ticket} sucht PAM im Betreff der Mails · {Adresse}, {Verwaltung} und {Auftragsnummer} kommen aus der Karte · {Datum} = heute · {Firma} aus ⚙ Einstellungen.'
         +'<br><b>Eckige Klammern:</b> Was in [ ] steht, fällt ganz weg, wenn PAM einen Wert darin nicht findet – z. B. <code>[, Wohnung {Wohnung}]</code>.';
-      rechts.append(el('div','font-size:11px;font-weight:700;color:var(--text2);','Name'),inN,el('div','font-size:11px;font-weight:700;color:var(--text2);','Text'),ta,reihe,hilfe);
+      rechts.append(el('div','font-size:11px;font-weight:700;color:var(--text2);','Name'),inN,el('div','font-size:11px;font-weight:700;color:var(--text2);','Betreff (freiwillig – die {Platzhalter} gehen auch hier)'),inBt,el('div','font-size:11px;font-weight:700;color:var(--text2);','Text'),ta,reihe,hilfe);
     }
     rumpf.appendChild(rechts);
     box.appendChild(rumpf);
@@ -38206,7 +38270,7 @@ function _mvOeffnen(which){
         const bisher=st.liste.find(function(x){return x.id===st.edit.id;})||st.edit;
         lo.disabled=true;
         const jetzt=new Date().toISOString();
-        const erg=await _mvSpeichern({id:bisher.id,name:bisher.name,text:bisher.text,ts:jetzt,weg:jetzt});
+        const erg=await _mvSpeichern({id:bisher.id,name:bisher.name,text:bisher.text,betreff:bisher.betreff||'',ts:jetzt,weg:jetzt});
         lo.disabled=false;
         if(!erg.ok){showToast('⚠ '+erg.grund,'error',8000);return;}
         st.liste=_mvSichtbar(erg.liste);st.grund='';st.edit=null;st.editSauber=true;
@@ -38220,11 +38284,12 @@ function _mvOeffnen(which){
         if(!name){showToast('Bitte einen Namen eintragen.','warning',3000);return;}
         if(!text.trim()){showToast('Der Text ist leer.','warning',3000);return;}
         sp.disabled=true;sp.style.opacity='.6';
-        const erg=await _mvSpeichern({id:st.edit.id,name:name,text:text,ts:new Date().toISOString(),weg:null});
+        const betreffV=String(st.edit.betreff||'').trim();
+        const erg=await _mvSpeichern({id:st.edit.id,name:name,text:text,betreff:betreffV,ts:new Date().toISOString(),weg:null});
         sp.disabled=false;sp.style.opacity='';
         if(!erg.ok){showToast('⚠ '+erg.grund,'error',8000);return;}
         st.liste=_mvSichtbar(erg.liste);st.grund='';
-        st.edit={id:st.edit.id,name:name,text:text,neu:false};st.editSauber=true;
+        st.edit={id:st.edit.id,name:name,text:text,betreff:betreffV,neu:false};st.editSauber=true;
         waehle(st.edit.id);
         showToast('✓ Vorlage gespeichert – gilt auf beiden Rechnern','success',3000);zeichne();
       });
