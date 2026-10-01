@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F3a';
+const PAM_FORMULARE_VERSION='F4';
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
    Befund Frank 14.09.2026: ein Formular wie das Wartungsprotokoll, aber mit Messwerten – am
    Tablet vor Ort ausfüllen, als PDF abheften. Werte werden eingetippt; das Einlesen der
@@ -284,6 +284,13 @@ const FS_HILFE=[
 ];
 // F2a: im Begehungsprotokoll gelten andere Hinweise zum Abhaken und zum Abschluss (keine Ursache, keine Empfehlung)
 const FS_HILFE_BG={
+  'Messstellen benennen':[ // F4: Messplan statt Namen vergeben
+    'Erst Räume, Wände (Art) und Wandfotos anlegen. Bei „Messstellen“ steht oben der Messplan: je Wand die Höhen (Standard 10, 50, 100 cm), leer = diese Wand wird nicht gemessen.',
+    'Dann in der Reihenfolge des Messplans messen: Raum für Raum, W1 bis W4, an jeder Wand von der ersten bis zur letzten Höhe – jedes Mal gleich. Jede Messung einzeln in testo speichern und exportieren (siehe oben).',
+    'Danach „📋 Messungen nach Messplan zuordnen“: PAM legt die Messungen nach ihrer Uhrzeit der Reihe nach auf die Plan-Zeilen. Du prüfst mit dem Wandfoto, nimmst mit „✕ Messung weglassen“ eine überzählige heraus, markierst eine ausgelassene Stelle mit „↷ Hier nicht gemessen“ und übernimmst.',
+    'Trotec-Werte trägst du bei der Messstelle von Hand unter „Bauteil (Digits)“ ein.',
+    'An jeder Wand „📷 Fotos zu W…“ bei Raumklima: ganze Wand mit Zollstock.'
+  ],
   'Abhaken':[
     'Tippe den Satz an, der stimmt. Er steht später wörtlich im PDF. Was du offen lässt, steht nicht im PDF.',
     'Bei Bedarf eine Anmerkung dazu (Ort, Größe …): Sie wird in den Satz eingebaut.',
@@ -1298,12 +1305,82 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     return w;
   }
 
+  /* ── F4: Messplan – Höhen je Wand, feste Reihenfolge, Merkzettel „So misst du“, Knopf zum Zuordnen ──────────────────── */
+  let _bgRegelnOffen=false; // Merkzettel offen – nur Anzeige, wird nicht im Protokoll gespeichert
+  function _teilMessplanBg(){
+    const w=document.createElement('div');w.setAttribute('data-fs-messplan','1');
+    w.style.cssText='margin:8px 10px;padding:10px;border:1px solid var(--border);border-left:5px solid '+FS_FARBE+';border-radius:10px;background:var(--bg2);';
+    const plan=_fsBgMessplan(bericht);
+    const erl=plan.filter(p=>_fsBgPlanErledigt(bericht,p)).length;
+    const kopf=document.createElement('div');kopf.style.cssText='display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;';
+    const kt=document.createElement('span');kt.textContent='📋 Messplan';kt.style.cssText='font-size:15px;font-weight:700;color:var(--text);flex:1;';
+    const ks=document.createElement('span');ks.setAttribute('data-fs-planstand','1');ks.textContent=plan.length?erl+' von '+plan.length+' zugeordnet':'';
+    ks.style.cssText='font-size:12px;font-weight:600;color:var(--text2);';
+    kopf.append(kt,ks);w.appendChild(kopf);
+    const info=_bgInfo('Miss immer in dieser Reihenfolge: Raum für Raum, W1 bis W4, an jeder Wand von der ersten bis zur letzten Höhe. PAM ordnet die testo-Messungen danach den Wänden zu. Höhen ändern: hier eintragen; leer = diese Wand wird nicht gemessen.');
+    info.style.padding='6px 0';w.appendChild(info);
+
+    const regeln=document.createElement('details');regeln.setAttribute('data-fs-messregeln','1');
+    if(_bgRegelnOffen)regeln.open=true;
+    regeln.addEventListener('toggle',()=>{_bgRegelnOffen=!!regeln.open;});
+    const sm=document.createElement('summary');sm.textContent='ℹ So misst du (Merkzettel)';
+    sm.style.cssText='min-height:44px;display:flex;align-items:center;font-size:14px;font-weight:700;color:var(--text);cursor:pointer;';
+    regeln.appendChild(sm);
+    const ol=document.createElement('ol');ol.style.cssText='margin:4px 0 8px;padding-left:22px;font-size:13px;line-height:1.5;color:var(--text);';
+    _fsBgMessregeln().forEach(x=>{const li=document.createElement('li');li.style.margin='0 0 6px';li.textContent=x;ol.appendChild(li);});
+    regeln.appendChild(ol);w.appendChild(regeln);
+
+    if(!plan.length){
+      const leer=_bgInfo('Noch kein Messplan – lege bei „Raumklima“ Räume mit Wänden an (ein neuer Raum hat gleich W1 bis W4). Ein Raum braucht einen Namen.');
+      leer.style.padding='6px 0';w.appendChild(leer);
+    }
+    const bereich={};
+    plan.forEach(p=>{const k=p.raum+'|'+p.wand;const z=bereich[k]||(bereich[k]={von:p.nr,bis:p.nr,n:0,erl:0});z.bis=p.nr;z.n++;if(_fsBgPlanErledigt(bericht,p))z.erl++;});
+    (bericht.raeume||[]).forEach(r=>{
+      if(!r)return;
+      const ws=(Array.isArray(r.waende)?r.waende:[]).filter(q=>q&&/^W\d+$/.test(String(q.k||''))).sort((a,c)=>(+String(a.k).slice(1))-(+String(c.k).slice(1)));
+      if(!ws.length)return;
+      const name=String(r.name||'').trim();
+      const rkz=document.createElement('div');rkz.style.cssText='display:flex;align-items:center;gap:8px;margin:8px 0 2px;';
+      const rk=document.createElement('div');rk.setAttribute('data-fs-planraum',name);
+      rk.style.cssText='flex:1;min-width:0;font-size:13px;font-weight:700;color:var(--text);';
+      rk.textContent=name||'Raum ohne Namen – steht nicht im Messplan';
+      rkz.appendChild(rk);
+      if(name){ // ganzen Raum in einem Zug aus dem Plan nehmen oder mit den Standardhöhen zurückholen
+        const raumAus=ws.every(q=>!_fsBgWandHoehen(q).length);
+        const rb=_chip(raumAus?'↺ Standardhöhen':'Raum nicht messen',false,()=>{_fsBgRaumMessenSetzen(r,raumAus);scheduleSave();_neuBauen();});
+        rb.setAttribute('data-fs-planraumschalter',name);rkz.appendChild(rb);
+      }
+      w.appendChild(rkz);
+      ws.forEach(wd=>{
+        const z=bereich[name+'|'+wd.k];
+        const row=document.createElement('div');row.setAttribute('data-fs-planwand',name+'|'+wd.k);
+        row.style.cssText='display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;margin:4px 0;';
+        const lab=document.createElement('span');lab.style.cssText='flex:1 1 130px;min-width:0;font-size:14px;font-weight:700;color:var(--text);';
+        lab.textContent=wd.k+(String(wd.art||'').trim()?' – '+String(wd.art).trim():'');
+        const hi=_inp(typeof wd.hoehen==='string'?wd.hoehen:FS_BG_HOEHEN_STANDARD,'leer = nicht messen',v=>{wd.hoehen=v;},false);
+        hi.setAttribute('data-fs-planhoehe',name+'|'+wd.k);hi.setAttribute('aria-label','Höhen in cm an '+wd.k+' – leer = nicht messen');
+        hi.style.flex='1 1 150px';hi.style.width='auto';hi.style.minHeight='44px';
+        hi.onchange=()=>{scheduleSave();_neuBauen();};
+        const st=document.createElement('span');st.style.cssText='flex:0 0 auto;min-width:88px;font-size:12px;font-weight:600;color:var(--text2);text-align:right;';
+        st.textContent=z?('Nr '+z.von+(z.bis>z.von?'–'+z.bis:'')+(z.erl?' · '+z.erl+'/'+z.n+' ✓':'')):'nicht gemessen';
+        row.append(lab,hi,st);w.appendChild(row);
+      });
+    });
+    const zu=document.createElement('button');zu.type='button';zu.setAttribute('data-fs-planzuordnen','1');zu.textContent='📋 Messungen nach Messplan zuordnen';
+    zu.style.cssText=S_KNOPF+'display:block;width:100%;margin:10px 0 0;min-height:48px;border:1.5px solid '+FS_FARBE+';background:rgba(31,95,139,.12);color:var(--text);';
+    zu.onclick=()=>{if(typeof _fsTestoPlanZuordnen==='function')_fsTestoPlanZuordnen(bericht,t,_neuBauen);};
+    w.appendChild(zu);
+    return w;
+  }
+
   function _teilStellenBg(){
     const w=document.createElement('div');
     w.appendChild(_kopfZeile('Messstellen'));
     const info=document.createElement('div');info.style.cssText='padding:6px 14px 2px;font-size:12px;color:var(--text2);';
     info.textContent='Raum und Wand wählen, Höhe in cm, Uhrzeit. Oberfläche mit dem Infrarot-Thermometer, Bauteilfeuchte in Digits. Jede Höhe an einer Wand ist eine eigene Stelle.';
     w.appendChild(info);
+    w.appendChild(_teilMessplanBg()); // F4
     const raumNamen=bericht.raeume.map(r=>r.name).filter(Boolean);
     const druck=_fsBgStellenSortiert(bericht);
     bericht.stellen.forEach((st,si)=>{
@@ -2224,6 +2301,81 @@ function _fsBgZusammenfuehren(b,quelleIdx,zielIdx){
   b.stellen.splice(quelleIdx,1);
   return true;
 }
+/* ══ F4: MESSPLAN – feste Reihenfolge der Messungen; danach ordnet PAM die testo-Messungen zu ═══════════════════════
+   Ablauf: Räume, Wände und Wandfotos werden am Tablet VORHER angelegt, gemessen wird danach mit dem Handy (testo, Trotec). Damit Messung und
+   Wand wieder zusammenfinden, wird in einer festen Reihenfolge gemessen: Räume wie im Protokoll, je Raum W1…Wn, je Wand die Höhen von der
+   ersten bis zur letzten. Der Messplan wird aus Räumen, Wänden und Höhen BERECHNET – es gibt keine eigenen Plan-Zeilen im Protokoll, und
+   nichts davon kommt ins PDF. Gespeichert ist nur die Höhenliste je Wand: wand.hoehen (Text, z. B. „10, 50, 100“); fehlt sie, gilt der
+   Standard, leer = diese Wand wird nicht gemessen. Zugeordnet wird nach der Uhrzeit der testo-Messung: die n-te Messung gehört zur n-ten
+   offenen Plan-Zeile – als VORSCHLAG, Frank kontrolliert und bestätigt (Uhren von Tablet und Handy müssen nicht übereinstimmen).
+   ⛔ Nur Programm und Bezeichnungen in dieser öffentlichen Datei. */
+const FS_BG_HOEHEN_STANDARD='10, 50, 100';
+// „10, 50 / 100 cm“ → ['10','50','100'] – Reihenfolge wie eingetragen, doppelte entfallen; Komma, Semikolon, Schrägstrich und Leerzeichen trennen
+function _fsBgHoehenListe(s){
+  const out=[];
+  String(s===undefined||s===null?'':s).replace(/cm/gi,' ').split(/[\s;,\/]+/).forEach(x=>{
+    if(!/^\d+(\.\d+)?$/.test(x))return;
+    const n=String(parseFloat(x));
+    if(out.indexOf(n)<0)out.push(n);
+  });
+  return out;
+}
+// Höhen einer Wand: die eingetragene Liste; fehlt sie ganz, gilt der Standard; leer = diese Wand wird nicht gemessen
+function _fsBgWandHoehen(wd){return _fsBgHoehenListe((wd&&typeof wd.hoehen==='string')?wd.hoehen:FS_BG_HOEHEN_STANDARD);}
+// Messplan: Räume in der Reihenfolge des Protokolls, je Raum W1…Wn (nach Zahl, also W2 vor W10), je Wand die Höhen. Boden, Decke und Räume ohne Namen gehören nicht dazu.
+function _fsBgMessplan(b){
+  const plan=[];
+  ((b&&b.raeume)||[]).forEach(r=>{
+    if(!r||!String(r.name||'').trim())return;
+    const ws=(Array.isArray(r.waende)?r.waende:[]).filter(w=>w&&/^W\d+$/.test(String(w.k||''))).sort((a,c)=>(+String(a.k).slice(1))-(+String(c.k).slice(1)));
+    ws.forEach(w=>_fsBgWandHoehen(w).forEach(h=>plan.push({nr:0,raum:r.name,wand:w.k,hoehe:h,art:String(w.art||'').trim(),fotoRefs:Array.isArray(w.fotoRefs)?w.fotoRefs:[]})));
+  });
+  plan.forEach((p,i)=>{p.nr=i+1;});
+  return plan;
+}
+// Ganzen Raum aus dem Messplan nehmen (messen=false: alle Wände W… bekommen eine leere Höhenliste) oder zurückholen (messen=true: die eigene Liste entfällt, es gilt wieder der Standard)
+function _fsBgRaumMessenSetzen(r,messen){
+  ((r&&Array.isArray(r.waende))?r.waende:[]).forEach(w=>{if(w&&/^W\d+$/.test(String(w.k||''))){if(messen)delete w.hoehen;else w.hoehen='';}});
+  return r;
+}
+// Plan-Zeile „erledigt“: es gibt schon eine Messstelle mit diesem Raum, dieser Wand und dieser Höhe (testo-Messung oder ausgefüllt) – Vergleichsstellen zählen nicht
+function _fsBgPlanErledigt(b,p){
+  const h=parseFloat(p&&p.hoehe);
+  if(!p||!isFinite(h))return false;
+  return ((b&&b.stellen)||[]).some(s=>s&&!s.referenz&&s.raum===p.raum&&s.wand===p.wand&&parseFloat(String(s.hoehe||'').replace(',','.'))===h&&(s.testo||_fsBgStelleGefuellt(s)));
+}
+// Eine testo-Messung mit dieser Messzeit (Millisekunden) ist im Protokoll schon eingelesen – fängt doppelt geteilte Dateien („… (1).tjf“), die unter anderem Namen liegen
+function _fsTestoZeitSchonDa(b,zeit){
+  return !!zeit&&((b&&b.stellen)||[]).some(s=>s&&s.testo&&s.testo.zeit===zeit);
+}
+// Vorschlag nach Reihenfolge: die n-te Messung (nach Zeit sortiert) gehört zur n-ten offenen Plan-Zeile. Reine Funktion.
+function _fsBgPlanVorschlag(planOffen,messungen){
+  const p=Array.isArray(planOffen)?planOffen:[],m=Array.isArray(messungen)?messungen:[],n=Math.min(p.length,m.length);
+  const paare=[];for(let i=0;i<n;i++)paare.push({plan:p[i],m:m[i]});
+  return {paare:paare,ohnePlan:m.slice(n),ohneMessung:p.slice(n)};
+}
+// Doppelt geteilte Dateien heißen „… (1).tjf“: beim Zusammenfassen gleicher Messzeiten soll die Datei ohne Nummer gewinnen (sie landet als Kopie im Auftragsordner). Reihenfolge sonst unverändert.
+function _fsTestoOriginaleZuerst(liste){
+  const kopie=f=>/ \(\d+\)\.\w+$/.test(String((f&&f.name)||''))?1:0;
+  return (Array.isArray(liste)?liste:[]).slice().sort((a,b)=>kopie(a)-kopie(b));
+}
+// Messstelle aus einer zugeordneten testo-Messung: Raum, Wand und Höhe aus dem Messplan, Uhrzeit = Messzeit, kein „Ort im Raum“-Text
+function _fsBgStelleAusPlan(m,p){
+  const st=_fsStelleAusTesto(m,p.raum),z=m.zeit?_fsZeitText(m.zeit):'';
+  st.text='';st.wand=p.wand;st.hoehe=p.hoehe;st.referenz=false;st.zeit=z?z.slice(11,16):'';
+  return st;
+}
+// Merkzettel „So misst du“ – steht im Formular beim Messplan (Text erst beim Aufruf gebaut, weil er den testo-Exportweg nennt)
+function _fsBgMessregeln(){
+  return [
+    'Immer in der Reihenfolge des Messplans messen: Raum für Raum, W1 bis W4, an jeder Wand von der ersten bis zur letzten Höhe – jedes Mal gleich.',
+    'Erst Räume, Wände, Höhen und Wandfotos anlegen, dann messen. Ändert sich der Plan nach dem Messen, stimmt die Zuordnung nicht mehr.',
+    'Jede Messung einzeln speichern. '+(typeof FS_TESTO_JSON_WEG==='string'?FS_TESTO_JSON_WEG:''),
+    'Nichts überspringen. Hast du eine Stelle ausgelassen oder eine Messung doppelt gespeichert, merk dir die Nummer – du korrigierst es später in der Kontrollliste („Hier nicht gemessen“ oder „Messung weglassen“).',
+    'Trotec-Werte trägst du bei der Messstelle von Hand ein (Bauteil, Digits). Ein Trotec-Import kommt später.',
+    'Danach hier „📋 Messungen nach Messplan zuordnen“ antippen: PAM schlägt die Wände der Reihe nach vor, du prüfst mit dem Wandfoto und übernimmst.'
+  ];
+}
 // Bildunterschrift im PDF: wozu gehört das Foto – Raum, Wand, Messstelle (mit der gedruckten Nummer), Feststellung
 function _fsBgFotoZuordnung(b,f){
   const teile=[];
@@ -3133,4 +3285,241 @@ async function _fsTestoEinlesen(bericht,t,neuBauen){
       +(ziel?(kopiert?' · Kopie im Auftragsordner':''):' · ⚠ kein Drive-Ordner an der Karte – keine Kopie beim Auftrag')
       +(fehler?' · '+fehler+' Fehler':''),fehler?'error':'success',6000);
   };
+}
+
+/* ── F4: Messungen nach Messplan zuordnen – Kontrollliste ─────────────────────────────────────────────────────────
+   Liest die testo-Messungen aus „testo-Eingang“ (nur die noch nicht eingelesenen, die seit dem Anlegen des Protokolls ins Drive kamen –
+   „Ältere laden“ holt auch die davor; doppelt geteilte Dateien mit gleicher Messzeit zählen einmal), sortiert sie nach Messzeit und legt sie der
+   Reihe nach auf die offenen Plan-Zeilen. ⛔ Nichts wird eingetragen, bevor Frank in der Kontrollliste bestätigt. „Messung weglassen“ und
+   „Hier nicht gemessen“ rücken die Reihenfolge zurecht. Ablauf je Messung wie beim Einlesen (Messbild mit Messpunkt, Kopie in den Auftragsordner);
+   das Raumklima des Raums wird dabei NICHT aus der ersten Wandmessung gefüllt. Nur am Tablet (braucht Gerätespeicher und Upload-Warteschlange). */
+async function _fsTestoPlanZuordnen(bericht,t,neuBauen){
+  if(typeof _mobPhotoSave!=='function'||typeof _uploadMitGeduld!=='function'){toast('📋 Messungen bitte am Tablet zuordnen','info',5000);return;}
+  if(!(typeof tokenValid==='function'&&tokenValid())){toast('Drive nicht verbunden – zum Einlesen bitte mit Empfang anmelden','error',5000);return;}
+  if(!_fsBgMessplan(bericht).length){toast('Erst den Messplan anlegen: Räume mit Wänden bei „Raumklima“, Höhen je Wand bei „Messstellen“','info',6000);return;}
+  const KNOPF='padding:9px 12px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:600;font-family:inherit;';
+  const GID='_fsTestoPlanSheet';const alt=document.getElementById(GID);if(alt)alt.remove();
+  const ov=document.createElement('div');ov.id=GID;
+  ov.style.cssText='position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;';
+  const box=document.createElement('div');
+  box.style.cssText='background:var(--bg);color:var(--text);border-radius:16px 16px 0 0;width:100%;max-height:92vh;display:flex;flex-direction:column;';
+  box.onclick=e=>e.stopPropagation();
+  const kopf=document.createElement('div');kopf.style.cssText='display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border);';
+  const ti=document.createElement('div');ti.style.cssText='flex:1;font-size:17px;font-weight:700;';ti.textContent='📋 Messungen nach Messplan';
+  const zu=document.createElement('button');zu.type='button';zu.textContent='✕';
+  zu.style.cssText='width:44px;height:44px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);font-size:18px;cursor:pointer;';
+  zu.onclick=()=>ov.remove();
+  kopf.append(ti,zu);
+  const inhalt=document.createElement('div');inhalt.style.cssText='flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:10px 14px;';
+  const fuss=document.createElement('div');fuss.style.cssText='padding:10px 14px 14px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;';
+  box.append(kopf,inhalt,fuss);ov.appendChild(box);document.body.appendChild(ov);
+  const info=txt=>{inhalt.innerHTML='';const d=document.createElement('div');d.style.cssText='font-size:15px;color:var(--text);padding:12px 0;line-height:1.5;';d.textContent=txt;inhalt.appendChild(d);fuss.innerHTML='';};
+
+  let messungen=[],nurCsv=[],doppelt=0,unlesbar=[],abgeschnitten=false,aeltere=false,mitBild=true;
+  const weg=new Set(),aus=new Set(); // weg: Messungen (Nummer in messungen), die nicht verwendet werden; aus: Plan-Zeilen, an denen nicht gemessen wurde
+  const schluessel=p=>p.raum+'|'+p.wand+'|'+p.hoehe;
+  const zeitHMS=ms=>{const s=ms?_fsZeitText(ms):'';return s?s.slice(11):'';};
+  const fmt=(x,e)=>x===null||x===undefined?'–':_fsEins(x)+e;
+
+  const laden=async alle=>{
+    info('Suche den Ordner „'+FS_TESTO_ORDNER+'“ in Google Drive …');
+    let ordnerId=null,dateien=[];
+    try{
+      ordnerId=await _fsTestoOrdnerId();
+      if(!ordnerId){info('Ordner „'+FS_TESTO_ORDNER+'“ nicht gefunden. Bitte in Google Drive unter 00_App-Daten anlegen und die testo-Dateien dorthin teilen.');return false;}
+      dateien=await _fsTestoListe(ordnerId);
+    }catch(e){console.warn('[testo] Liste:',e);info('Google Drive nicht erreichbar ('+(e.message||e)+'). Bitte mit Empfang erneut versuchen.');return false;}
+    const start=Date.parse(bericht.createdAt||'');
+    const seit=(!alle&&isFinite(start))?start:0;
+    const jsons=dateien.filter(f=>/\.(tjf|json)$/i.test(f.name||'')&&(!seit||!f.createdTime||Date.parse(f.createdTime)>=seit));
+    const bilder=dateien.filter(f=>/\.(jpe?g|png)$/i.test(f.name||''));
+    nurCsv=_fsTestoNurCsv(dateien).filter(c=>{ // nur testo-Namen mit Datum (Trotec-Dateien heißen anders); mit Zeitgrenze wie oben
+      const d=/(\d{4})-(\d{2})-(\d{2})-(\d{2})-(\d{2})/.exec(c.datei);
+      if(!d)return false;
+      return !seit||new Date(+d[1],+d[2]-1,+d[3],+d[4],+d[5]).getTime()>=seit-60000;
+    });
+    info('Lese '+jsons.length+' Messung'+(jsons.length===1?'':'en')+' …');
+    const bildNamen=bilder.map(b=>b.name),gelesen=[],gesehen=new Set();
+    doppelt=0;unlesbar=[];abgeschnitten=jsons.length>80;
+    for(const f of _fsTestoOriginaleZuerst(jsons.slice(0,80))){
+      try{
+        const text=await _fsDriveText(f.id);
+        const m=_fsTestoLesen(text,bildNamen);
+        if(!m.ok){unlesbar.push(f.name);continue;}
+        m.datei=f.name;m.dateiId=f.id;m.text=text;
+        m.bildDatei=bilder.find(b=>b.name===m.bild)||null;
+        if(_fsTestoSchonDa(bericht,f.name)||_fsTestoZeitSchonDa(bericht,m.zeit))continue; // schon in diesem Protokoll
+        if(_fsTestoEingelesenIn(typeof _alleTaskListen==='function'?_alleTaskListen():[],f.name))continue; // schon an einer Karte eingelesen
+        if(m.zeit){if(gesehen.has(m.zeit)){doppelt++;continue;}gesehen.add(m.zeit);}
+        gelesen.push(m);
+      }catch(e){unlesbar.push(f.name);}
+    }
+    gelesen.sort((a,b)=>(a.zeit||0)-(b.zeit||0));
+    gelesen.forEach((m,i)=>{m._i=i;});
+    messungen=gelesen;weg.clear();
+    return true;
+  };
+
+  const warnung=(txt,stark)=>{
+    const d=document.createElement('div');
+    d.style.cssText='font-size:14px;font-weight:600;color:var(--text);margin:0 0 10px;padding:10px 12px;border-radius:8px;background:var(--bg2);border-left:5px solid '+(stark?'var(--orange)':FS_FARBE)+';line-height:1.45;';
+    d.textContent=txt;inhalt.appendChild(d);return d;
+  };
+  const knopfStil=(rand)=>KNOPF+'flex:1 1 140px;min-height:44px;border:1.5px solid '+rand+';background:transparent;color:var(--text);';
+  const messText=m=>zeitHMS(m.zeit)+' · Luft '+fmt(m.luftT,' °C')+' / '+fmt(m.luftRf,' %')+' · Oberfläche '+fmt(m.ts,' °C')+' · '+(m.bildDatei?'📷 Foto':'ohne Foto');
+
+  const zeige=()=>{
+    inhalt.innerHTML='';fuss.innerHTML='';
+    const plan=_fsBgMessplan(bericht).filter(p=>!_fsBgPlanErledigt(bericht,p));
+    const aktiv=plan.filter(p=>!aus.has(schluessel(p)));
+    const ms=messungen.filter(m=>!weg.has(m._i));
+    const v=_fsBgPlanVorschlag(aktiv,ms);
+    const paarVon=new Map();v.paare.forEach(pr=>paarVon.set(schluessel(pr.plan),pr.m));
+
+    const h=document.createElement('div');h.style.cssText='font-size:14px;color:var(--text);margin:0 0 10px;line-height:1.5;';
+    h.textContent=ms.length+' Messung'+(ms.length===1?'':'en')+' (nach Uhrzeit sortiert) · '+plan.length+' offene Plan-Zeile'+(plan.length===1?'':'n')
+      +'. Die Messungen liegen der Reihe nach auf den Plan-Zeilen. Prüfe jede Zeile – eingetragen wird erst, wenn du unten „Übernehmen“ antippst.';
+    inhalt.appendChild(h);
+    if(nurCsv.length)warnung('⚠ '+(nurCsv.length===1?'1 Messung liegt':nurCsv.length+' Messungen liegen')+' nur als CSV vor und '+(nurCsv.length===1?'fehlt':'fehlen')+' deshalb hier – die Reihenfolge stimmt dann nicht: '
+      +nurCsv.slice(0,6).map(c=>c.text).join(' · ')+(nurCsv.length>6?' …':'')+'. '+FS_TESTO_JSON_WEG,true);
+    if(unlesbar.length)warnung('⚠ '+(unlesbar.length===1?'1 Datei':unlesbar.length+' Dateien')+' im Ordner '+(unlesbar.length===1?'ist':'sind')+' keine lesbare testo-Messung und '+(unlesbar.length===1?'fehlt':'fehlen')+' hier: '+unlesbar.slice(0,4).join(' · ')+(unlesbar.length>4?' …':''),true);
+    if(abgeschnitten)warnung('⚠ Im Ordner liegen mehr als 80 Messungen – gezeigt werden nur die neuesten 80.',true);
+    if(doppelt)warnung('ℹ '+doppelt+' doppelt geteilte Datei'+(doppelt===1?'':'en')+' (gleiche Messzeit) zählt'+(doppelt===1?'':'en')+' nur einmal.',false);
+    if(!plan.length)warnung('Alle Plan-Zeilen sind schon zugeordnet. Neue Wände oder Höhen legst du oben im Messplan an.',false);
+    if(v.ohnePlan.length)warnung('⚠ '+v.ohnePlan.length+' Messung'+(v.ohnePlan.length===1?'':'en')+' mehr als Plan-Zeilen (unten grau) – sie werden nicht übernommen. Hast du eine Messung doppelt gespeichert, lass sie oben bei der Zeile weg.',true);
+    if(v.ohneMessung.length&&ms.length)warnung('ℹ '+v.ohneMessung.length+' Plan-Zeile'+(v.ohneMessung.length===1?'':'n')+' noch ohne Messung – weiter messen und später noch einmal zuordnen.',false);
+    if(!ms.length&&plan.length)warnung('Keine neuen testo-Messungen im Ordner'+(aeltere?'.':' seit dem Anlegen dieses Protokolls. Liegen sie schon länger dort, unten „Ältere Messungen laden“ antippen.'),false);
+
+    plan.forEach(p=>{
+      const k=schluessel(p),istAus=aus.has(k),m=paarVon.get(k)||null;
+      const row=document.createElement('div');row.setAttribute('data-fs-planzeile',String(p.nr));
+      row.style.cssText='margin:0 0 8px;padding:10px 12px;border-radius:10px;border:2px solid '+(m?FS_FARBE:'var(--border)')+';background:'+(m?'rgba(31,95,139,.10)':'var(--bg2)')+';'+((istAus||!m)?'opacity:.75;':'');
+      const top=document.createElement('div');top.style.cssText='display:flex;align-items:center;gap:10px;';
+      const nr=document.createElement('span');nr.textContent=String(p.nr);
+      nr.style.cssText='min-width:30px;height:30px;border-radius:15px;background:'+FS_FARBE+';color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex-shrink:0;padding:0 4px;box-sizing:border-box;';
+      const ort=document.createElement('div');ort.style.cssText='flex:1;min-width:0;font-size:16px;font-weight:700;line-height:1.3;';
+      ort.textContent=p.raum+' – '+p.wand+(p.art?' ('+p.art+')':'')+', '+p.hoehe+' cm';
+      top.append(nr,ort);
+      const fi=(bericht.fotos||[]).findIndex(f=>(p.fotoRefs||[]).some(r=>_fsRefPasst(f,r)));
+      if(fi>=0){const img=document.createElement('img');img.alt='Foto dieser Wand';img.style.cssText='width:56px;height:56px;object-fit:cover;border-radius:8px;flex-shrink:0;background:var(--bg3);';_fsMiniaturQuelle(bericht.fotos[fi],img);top.appendChild(img);}
+      row.appendChild(top);
+      if(m){
+        const z=document.createElement('div');z.setAttribute('data-fs-planmessung',String(p.nr));z.style.cssText='font-size:14px;margin-top:6px;line-height:1.4;';z.textContent=messText(m);row.appendChild(z);
+        (m.warnungen||[]).forEach(hw=>{const d=document.createElement('div');d.style.cssText='font-size:13px;font-weight:700;margin-top:4px;padding-left:8px;border-left:4px solid var(--orange);';d.textContent='⚠ '+hw;row.appendChild(d);});
+        const br=document.createElement('div');br.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;';
+        const bw=document.createElement('button');bw.type='button';bw.textContent='✕ Messung weglassen';bw.setAttribute('data-fs-planweg',String(p.nr));bw.style.cssText=knopfStil('var(--border)');
+        bw.onclick=()=>{weg.add(m._i);zeige();};
+        const bn=document.createElement('button');bn.type='button';bn.textContent='↷ Hier nicht gemessen';bn.setAttribute('data-fs-planaus',String(p.nr));bn.style.cssText=knopfStil('var(--border)');
+        bn.onclick=()=>{aus.add(k);zeige();};
+        br.append(bw,bn);row.appendChild(br);
+      }else if(istAus){
+        const z=document.createElement('div');z.style.cssText='font-size:14px;margin-top:6px;';z.textContent='Hier nicht gemessen – übersprungen';row.appendChild(z);
+        const bz=document.createElement('button');bz.type='button';bz.textContent='↶ Doch gemessen';bz.setAttribute('data-fs-planzurueck',String(p.nr));bz.style.cssText=knopfStil('var(--border)')+'margin-top:8px;';
+        bz.onclick=()=>{aus.delete(k);zeige();};
+        row.appendChild(bz);
+      }else{
+        const z=document.createElement('div');z.style.cssText='font-size:14px;margin-top:6px;';z.textContent='noch keine Messung';row.appendChild(z);
+      }
+      inhalt.appendChild(row);
+    });
+    v.ohnePlan.forEach(m=>{
+      const row=document.createElement('div');row.style.cssText='margin:0 0 8px;padding:10px 12px;border-radius:10px;border:2px dashed var(--border);background:var(--bg2);opacity:.75;font-size:14px;line-height:1.4;';
+      row.textContent='Keine Plan-Zeile mehr, wird nicht übernommen: '+messText(m);inhalt.appendChild(row);
+    });
+    if(weg.size){
+      const b=document.createElement('button');b.type='button';b.textContent='↶ '+weg.size+' weggelassene Messung'+(weg.size===1?'':'en')+' zurückholen';b.style.cssText=knopfStil('var(--border)')+'width:100%;margin:0 0 8px;';
+      b.onclick=()=>{weg.clear();zeige();};inhalt.appendChild(b);
+    }
+    if(!aeltere&&isFinite(Date.parse(bericht.createdAt||''))){
+      const b=document.createElement('button');b.type='button';b.textContent='Ältere Messungen laden (vor dem Anlegen dieses Protokolls)';b.setAttribute('data-fs-planaeltere','1');b.style.cssText=knopfStil('var(--border)')+'width:100%;margin:0 0 8px;';
+      b.onclick=async()=>{aeltere=true;if(await laden(true))zeige();};inhalt.appendChild(b);
+    }
+
+    if(v.paare.some(pr=>pr.m.bildDatei)){
+      const lab=document.createElement('label');lab.style.cssText='display:flex;align-items:center;gap:10px;font-size:14px;min-height:44px;';
+      const cb=document.createElement('input');cb.type='checkbox';cb.checked=mitBild;cb.style.cssText='width:22px;height:22px;flex-shrink:0;';
+      cb.onchange=()=>{mitBild=cb.checked;};
+      const tx=document.createElement('span');tx.textContent='Messbild mit Messpunkt erstellen (jedes Foto antippen)';
+      lab.append(cb,tx);fuss.appendChild(lab);
+    }
+    const knopf=document.createElement('button');knopf.type='button';knopf.setAttribute('data-fs-planuebernehmen','1');
+    knopf.style.cssText='min-height:52px;border-radius:10px;border:none;background:'+FS_FARBE+';color:#fff;font-size:16px;font-weight:700;font-family:inherit;cursor:pointer;';
+    knopf.disabled=!v.paare.length;knopf.style.opacity=v.paare.length?'1':'.45';
+    knopf.textContent=v.paare.length?('✓ '+v.paare.length+' Messung'+(v.paare.length===1?'':'en')+' übernehmen'):'Nichts zu übernehmen';
+    knopf.onclick=()=>uebernehmen(v.paare,knopf);
+    fuss.appendChild(knopf);
+  };
+
+  const uebernehmen=async(paare,knopf)=>{
+    if(!paare.length)return;
+    knopf.disabled=true;
+    const ziel=_extractFolderIdMob((t&&t.dokOrdner)||'')||_extractFolderIdMob((t&&t.gdrive)||'')||_extractFolderIdMob((t&&t.gdriveOrdner)||'');
+    let n=0,bildN=0,kopiert=0,fehler=0;
+    for(const pr of paare){
+      const m=pr.m,p=pr.plan;
+      knopf.textContent='⏳ '+(n+fehler+1)+' von '+paare.length+' …';
+      try{
+        const st=_fsBgStelleAusPlan(m,p);
+        bericht.stellen.push(st);
+        scheduleSave();
+        n++;
+        const nr=bericht.stellen.length;
+        if(m.bildDatei&&mitBild){
+          try{
+            const blob=await _fsDriveBlob(m.bildDatei.id);
+            m.bildBlob=blob;
+            const bu=URL.createObjectURL(blob);
+            ov.style.display='none';
+            const punkt=await _fsMesspunktWaehlen(bu,'Stelle '+nr+' · '+_fsBgOrt(bericht,st));
+            ov.style.display='flex';
+            URL.revokeObjectURL(bu);
+            const du=await _fsMessbildErstellen(blob,_fsStelleWerte(bericht,st),punkt,(m.zeit?_fsZeitText(m.zeit)+' · ':'')+'Stelle '+nr);
+            if(du){
+              const localKey='photo_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+              const name='Messbild_'+(m.zeit?_fsZeitText(m.zeit).slice(11).split(':').join(''):String(Date.now()))+'.jpg';
+              const fo={name:name,inReport:true,localUrl:du,localKey:localKey,driveId:null,_uploading:false};
+              // ⛔ Gerätespeicher NICHT abwarten (siehe _fsTestoEinlesen) – er ist nur die Reserve, falls der Upload unten scheitert.
+              _mobPhotoSave(localKey,du,{taskId:t.id,name:name}).catch(e=>console.warn('[testo] Gerätespeicher:',e));
+              bericht.fotos.push(fo);
+              st.fotoRefs.push(localKey);
+              st.testo.punkt=punkt||null;
+              bildN++;
+              scheduleSave();
+              const fotoOrdner=_extractFolderIdMob((t&&t.gdrive)||'')||_extractFolderIdMob((t&&t.gdriveOrdner)||'');
+              if(fotoOrdner){
+                try{
+                  const bb=_dataUrlToBlob(du);
+                  const r=await _uploadMitGeduld(signal=>{
+                    const form=new FormData();
+                    form.append('metadata',new Blob([JSON.stringify({name:name,parents:[fotoOrdner],mimeType:'image/jpeg'})],{type:'application/json'}));
+                    form.append('file',bb);
+                    return fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{method:'POST',headers:{Authorization:'Bearer '+gdriveToken},body:form,signal:signal});
+                  },{bytes:bb.size,name:name,folderId:fotoOrdner});
+                  const j=await r.json();
+                  if(j&&j.id){fo.driveId=j.id;scheduleSave();}
+                }catch(e){console.warn('[testo] Messbild-Upload:',e);}
+              }
+            }else st.testo.warnungen.push('Messbild konnte nicht erstellt werden');
+          }catch(e){console.warn('[testo] Messbild:',e);ov.style.display='flex';st.testo.warnungen.push('Messbild konnte nicht erstellt werden');}
+        }
+        if(ziel){ // KOPIE in den Auftragsordner (Umhängen fremder Dateien verweigert Google)
+          try{const kid=await _fsDriveKopieHochladen(m.text,m.datei,'application/json',ziel);if(kid){st.testo.kopieId=kid;kopiert++;}}catch(e){console.warn('[testo] Kopie Datei:',e);}
+          if(m.bildDatei){
+            try{const bb=m.bildBlob||await _fsDriveBlob(m.bildDatei.id);const fid=await _fsDriveKopieHochladen(bb,m.bildDatei.name,'image/jpeg',ziel);if(fid){st.testo.fotoKopieId=fid;kopiert++;}}catch(e){console.warn('[testo] Kopie Foto:',e);}
+          }
+          scheduleSave();
+        }
+      }catch(e){fehler++;console.warn('[testo] Zuordnen:',e);}
+    }
+    scheduleSave();
+    ov.remove();
+    try{neuBauen();}catch(e){console.warn('[testo] neu aufbauen:',e);}
+    if(bericht.fotos.some(f=>f&&f.localKey&&!f.driveId)&&typeof _mobRetryPendingUploads==='function'){try{_mobRetryPendingUploads();}catch(e){console.warn('[testo] Upload:',e);}}
+    toast('✓ '+n+' Messung'+(n===1?'':'en')+' nach Messplan zugeordnet'
+      +(bildN?' · '+bildN+' Messbild'+(bildN===1?'':'er'):'')
+      +(ziel?(kopiert?' · Kopie im Auftragsordner':''):' · ⚠ kein Drive-Ordner an der Karte – keine Kopie beim Auftrag')
+      +(fehler?' · '+fehler+' Fehler':''),fehler?'error':'success',6000);
+  };
+
+  if(await laden(false))zeige();
 }
