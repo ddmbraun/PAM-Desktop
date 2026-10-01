@@ -10352,7 +10352,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-01 · #1053'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-01-b1053) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-01 · #1054'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-01-b1054) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -37831,7 +37831,7 @@ async function _pamAntwortEntwurf(task,an,betreff,text,hinweis,anhaenge){
 // ── Vorlagen: Datei, Abgleich, Füllen ─────────────────────────────────────────
 var MAILVORLAGEN_DATEI='pam_mailvorlagen.json';
 var _mvDateiId=null;
-var MV_PLATZHALTER=['Mieter','Adresse','Wohnung','Ticket','Verwaltung','Auftragsnummer','Datum','Firma'];
+var MV_PLATZHALTER=['Mieter','Adresse','Wohnung','Ticket','Verwaltung','Auftragsnummer','Datum','Firma','Titel','Dokument'];
 var MV_VORGABE=[{id:'mv_mieter_nicht_erreicht',name:'Mieter nicht erreicht',ts:'2026-09-14T00:00:00.000Z',weg:null,
   text:'Sehr geehrte Damen und Herren,\n\nzu Ihrem Auftrag[ {Adresse}][, Wohnung {Wohnung}][ (Ticket {Ticket})] konnten wir die Mietpartei[ ({Mieter})] leider nicht erreichen, deshalb kam kein Termin zustande.\n\nBitte klären Sie den Termin direkt mit der Mietpartei und geben Sie uns dann Bescheid. Wir melden uns anschließend für die Ausführung.\n\nMit freundlichen Grüßen\n{Firma}'}];
 function _mvGueltig(v){return !!(v&&typeof v==='object'&&typeof v.id==='string'&&v.id&&typeof v.name==='string'&&typeof v.text==='string');}
@@ -37942,7 +37942,9 @@ function _mvWerte(task,kontakte){
     Verwaltung:String(t.hausverwaltung||'').trim(),
     Auftragsnummer:(String(t.title||'').match(/^\s*(\d{5,7})(?!\d)/)||[])[1]||'',
     Datum:_mvHeute(),
-    Firma:String(firma||'').trim()
+    Firma:String(firma||'').trim(),
+    Titel:String(t.title||'').trim(),   // b1054: Kartentitel
+    Dokument:''                          // b1054: füllt erst das Antworten-Fenster (zuerst angehakter Anhang, ohne Endung)
   };
 }
 function _mvWert(w,k){
@@ -38098,10 +38100,20 @@ function _mvOeffnen(which){
   const FELD='width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--bg3,var(--bg2));color:var(--text1);';
   function el(tag,stil,text){const e=document.createElement(tag);if(stil)e.style.cssText=stil;if(text!=null)e.textContent=text;return e;}
   function knopf(txt,stil,fn,titel){const b=document.createElement('button');b.type='button';b.textContent=txt;b.style.cssText=stil;if(titel)b.title=titel;b.addEventListener('click',fn);return b;}
+  // b1054: {Dokument} = Name des ZUERST angehakten Anhangs ohne Endung (leer, solange nichts angehakt ist)
+  function dokName(){const k=Object.keys(st.anh)[0];return k?String(st.anh[k].name||'').replace(/\.[A-Za-z0-9]{1,5}$/,''):'';}
+  function werteJetzt(){return Object.assign({},st.werte,{Dokument:dokName()});}
+  // nach einem Haken: Text und Betreff neu füllen – aber nur, wo Frank nichts von Hand geändert hat
+  function fuelleNeu(){
+    const v=st.liste.find(function(x){return x.id===st.wahl;});if(!v)return;
+    const w=werteJetzt(),nT=_mvFuellen(v.text,w),nB=_mvFuellen(v.betreff||'',w);
+    if(st.taWert===st.gefuellt)st.taWert=nT;st.gefuellt=nT;
+    if(st.betrWert===st.betrGef)st.betrWert=nB;st.betrGef=nB;
+  }
   function waehle(id){
     const v=st.liste.find(function(x){return x.id===id;});
-    st.wahl=v?v.id:'';st.gefuellt=v?_mvFuellen(v.text,st.werte):'';st.taWert=st.gefuellt;
-    st.betrGef=v?_mvFuellen(v.betreff||'',st.werte):'';st.betrWert=st.betrGef;   // b1053: Betreff der Vorlage (leer = wie bisher)
+    st.wahl=v?v.id:'';st.gefuellt=v?_mvFuellen(v.text,werteJetzt()):'';st.taWert=st.gefuellt;
+    st.betrGef=v?_mvFuellen(v.betreff||'',werteJetzt()):'';st.betrWert=st.betrGef;   // b1053: Betreff der Vorlage (leer = wie bisher)
     try{if(v)localStorage.setItem('pam_mv_letzte',v.id);}catch(e){}
   }
   function sauberOderFragen(){
@@ -38180,7 +38192,12 @@ function _mvOeffnen(which){
       dokListe.forEach(function(d){
         const zl=document.createElement('label');zl.style.cssText='display:flex;gap:7px;align-items:center;cursor:pointer;';
         const cb=document.createElement('input');cb.type='checkbox';cb.checked=!!st.anh[d.fileId];
-        cb.addEventListener('change',function(){if(cb.checked)st.anh[d.fileId]={fileId:d.fileId,name:d.name};else delete st.anh[d.fileId];});
+        cb.addEventListener('change',function(){
+          if(cb.checked)st.anh[d.fileId]={fileId:d.fileId,name:d.name};else delete st.anh[d.fileId];
+          // b1054: benutzt die Vorlage {Dokument}, ziehen Betreff/Text und die Hinweiszeile mit
+          const vv=st.liste.find(function(x){return x.id===st.wahl;});
+          if(vv&&/\{\s*Dokument\s*\}/i.test(String(vv.text||'')+' '+String(vv.betreff||''))){fuelleNeu();zeichne();}
+        });
         zl.appendChild(cb);zl.appendChild(el('span','',d.name));kasten.appendChild(zl);
       });
       rechts.appendChild(kasten);
@@ -38188,11 +38205,12 @@ function _mvOeffnen(which){
     }
     if(v){
       const benutzt=[];
-      (String(v.text).match(/\{[^{}]+\}/g)||[]).forEach(function(p){const k=p.slice(1,-1).trim();if(benutzt.indexOf(k)<0&&_mvWert(st.werte,k)!==null)benutzt.push(k);});
+      const wj=werteJetzt(),vAlles=String(v.text||'')+' '+String(v.betreff||'');   // b1054: Betreff zählt mit, {Dokument} auch
+      (vAlles.match(/\{[^{}]+\}/g)||[]).forEach(function(p){const k=p.slice(1,-1).trim();if(benutzt.indexOf(k)<0&&_mvWert(wj,k)!==null)benutzt.push(k);});
       const chips=el('div','display:flex;flex-wrap:wrap;gap:5px;font-size:11px;');
-      benutzt.forEach(function(k){const w=_mvWert(st.werte,k);chips.appendChild(el('span','padding:2px 8px;border-radius:10px;border:1px solid var(--border);'+(w?'':'background:rgba(230,126,34,.2);'),k+': '+(w||'nicht gefunden')));});
+      benutzt.forEach(function(k){const w=_mvWert(wj,k);chips.appendChild(el('span','padding:2px 8px;border-radius:10px;border:1px solid var(--border);'+(w?'':'background:rgba(230,126,34,.2);'),k+': '+(w||'nicht gefunden')));});
       rechts.appendChild(chips);
-      const fehlt=_mvFehlend(v.text,st.werte);
+      const fehlt=_mvFehlend(vAlles,wj);
       rechts.appendChild(el('div','font-size:12px;color:var(--text2);',fehlt.length
         ?('Nicht gefunden: '+fehlt.join(', ')+' – steht darum nicht im Text. Bei Bedarf oben ergänzen.')
         :'Alles gefunden – bitte trotzdem kurz lesen.'));
@@ -38211,7 +38229,8 @@ function _mvOeffnen(which){
     const los=knopf('📧 Entwurf in Outlook anlegen',KN_HAUPT,async function(){
       if(!String(st.taWert||'').trim()){showToast('Der Text ist leer.','warning',3000);return;}
       los.disabled=true;los.style.opacity='.6';
-      const ok=await _mvEntwurf(st.task,st.ziel,st.taWert,st.betrWert,Object.keys(st.anh).map(function(k){return st.anh[k];}));
+      // b1054: auch ein im Fenster selbst getippter {Platzhalter} im Betreff wird gefüllt (b1053 ließ ihn wörtlich stehen)
+      const ok=await _mvEntwurf(st.task,st.ziel,st.taWert,_mvFuellen(st.betrWert,werteJetzt()),Object.keys(st.anh).map(function(k){return st.anh[k];}));
       if(ok)weg();else{los.disabled=false;los.style.opacity='';}
     });
     if(!verb||!v){los.disabled=true;los.style.opacity='.5';los.style.cursor='not-allowed';}
@@ -38247,16 +38266,21 @@ function _mvOeffnen(which){
       ta.addEventListener('input',function(){st.edit.text=ta.value;st.editSauber=false;});
       const reihe=el('div','display:flex;flex-wrap:wrap;gap:5px;align-items:center;');
       reihe.appendChild(el('span','font-size:11px;color:var(--text2);margin-right:2px;','Einsetzen:'));
+      // b1054: die Knöpfe setzen in das Feld, das du zuletzt angeklickt hast (Betreff ODER Text)
+      let ziel=ta;
+      inBt.addEventListener('focus',function(){ziel=inBt;});
+      ta.addEventListener('focus',function(){ziel=ta;});
       MV_PLATZHALTER.forEach(function(k){
         reihe.appendChild(knopf('{'+k+'}',KN+'padding:3px 8px;font-size:11px;',function(){
-          const a=(typeof ta.selectionStart==='number')?ta.selectionStart:ta.value.length;
-          const b=(typeof ta.selectionEnd==='number')?ta.selectionEnd:a;
-          ta.setRangeText('{'+k+'}',a,b,'end');ta.focus();
-          st.edit.text=ta.value;st.editSauber=false;
-        },'Setzt die Stelle an den Cursor – beim Antworten füllt PAM sie aus der Karte'));
+          const f=ziel;
+          const a=(typeof f.selectionStart==='number')?f.selectionStart:f.value.length;
+          const b=(typeof f.selectionEnd==='number')?f.selectionEnd:a;
+          f.setRangeText('{'+k+'}',a,b,'end');f.focus();
+          st.edit.text=ta.value;st.edit.betreff=inBt.value;st.editSauber=false;
+        },'Setzt die Stelle an den Cursor (in Betreff oder Text, je nachdem, wo du zuletzt warst) – beim Antworten füllt PAM sie aus der Karte'));
       });
       const hilfe=el('div','font-size:11.5px;color:var(--text2);line-height:1.55;padding:8px 10px;border-radius:7px;border:1px dashed var(--border);');
-      hilfe.innerHTML='<b>So füllt PAM die Stellen:</b> {Mieter} = Kontakt mit Haken 📞 Anruf, sonst der erste Mieter · {Wohnung} und {Ticket} sucht PAM im Betreff der Mails · {Adresse}, {Verwaltung} und {Auftragsnummer} kommen aus der Karte · {Datum} = heute · {Firma} aus ⚙ Einstellungen.'
+      hilfe.innerHTML='<b>So füllt PAM die Stellen:</b> {Mieter} = Kontakt mit Haken 📞 Anruf, sonst der erste Mieter · {Wohnung} und {Ticket} sucht PAM im Betreff der Mails · {Adresse}, {Verwaltung} und {Auftragsnummer} kommen aus der Karte · {Datum} = heute · {Firma} aus ⚙ Einstellungen · {Titel} = Titel der Karte · {Dokument} = Name des zuerst angehakten Anhangs ohne Endung (erst beim Antworten, nach dem Haken).'
         +'<br><b>Eckige Klammern:</b> Was in [ ] steht, fällt ganz weg, wenn PAM einen Wert darin nicht findet – z. B. <code>[, Wohnung {Wohnung}]</code>.';
       rechts.append(el('div','font-size:11px;font-weight:700;color:var(--text2);','Name'),inN,el('div','font-size:11px;font-weight:700;color:var(--text2);','Betreff (freiwillig – die {Platzhalter} gehen auch hier)'),inBt,el('div','font-size:11px;font-weight:700;color:var(--text2);','Text'),ta,reihe,hilfe);
     }
