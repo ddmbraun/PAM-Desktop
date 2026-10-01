@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F4a';
+const PAM_FORMULARE_VERSION='F5';
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
    Befund Frank 14.09.2026: ein Formular wie das Wartungsprotokoll, aber mit Messwerten – am
    Tablet vor Ort ausfüllen, als PDF abheften. Werte werden eingetippt; das Einlesen der
@@ -1347,6 +1347,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
       const leer=_bgInfo('Noch kein Messplan – lege bei „Raumklima“ Räume mit Wänden an (ein neuer Raum hat gleich W1 bis W4). Ein Raum braucht einen Namen.');
       leer.style.padding='6px 0';w.appendChild(leer);
     }
+    const zuMapP=_fsBgRaumZuLesen(FS_BG_PLANZU_KEY,bericht.id);
     const bereich={};
     plan.forEach(p=>{const k=p.raum+'|'+p.wand;const z=bereich[k]||(bereich[k]={von:p.nr,bis:p.nr,n:0,erl:0});z.bis=p.nr;z.n++;if(_fsBgPlanErledigt(bericht,p))z.erl++;});
     (bericht.raeume||[]).forEach(r=>{
@@ -1354,17 +1355,21 @@ function _openFeuchteprotokollMobil(existingIdx,art){
       const ws=(Array.isArray(r.waende)?r.waende:[]).filter(q=>q&&/^W\d+$/.test(String(q.k||''))).sort((a,c)=>(+String(a.k).slice(1))-(+String(c.k).slice(1)));
       if(!ws.length)return;
       const name=String(r.name||'').trim();
+      let offenP=name?_fsBgRaumOffen(zuMapP,name,true):true; // F5: Räume einzeln zuklappen, gemerkt je Gerät (Standard: alles offen)
       const rkz=document.createElement('div');rkz.style.cssText='display:flex;align-items:center;gap:8px;margin:8px 0 2px;';
-      const rk=document.createElement('div');rk.setAttribute('data-fs-planraum',name);
-      rk.style.cssText='flex:1;min-width:0;font-size:13px;font-weight:700;color:var(--text);';
-      rk.textContent=name||'Raum ohne Namen – steht nicht im Messplan';
+      const rk=document.createElement(name?'button':'div');if(name)rk.type='button';rk.setAttribute('data-fs-planraum',name);
+      rk.style.cssText='flex:1;min-width:0;font-size:14px;font-weight:700;color:var(--text);'+(name?'text-align:left;min-height:44px;background:transparent;border:none;padding:0;cursor:pointer;font-family:inherit;':'');
+      const rkText=()=>name?((offenP?'▾ ':'▸ ')+name):'Raum ohne Namen – steht nicht im Messplan';
+      rk.textContent=rkText();
+      const cont=document.createElement('div');cont.style.display=offenP?'':'none';
+      if(name)rk.onclick=()=>{offenP=!offenP;cont.style.display=offenP?'':'none';rk.textContent=rkText();_fsBgRaumZuSetzen(FS_BG_PLANZU_KEY,bericht.id,name,offenP?null:1);};
       rkz.appendChild(rk);
       if(name){ // ganzen Raum in einem Zug aus dem Plan nehmen oder mit den Standardhöhen zurückholen
         const raumAus=ws.every(q=>!_fsBgWandHoehen(q).length);
         const rb=_chip(raumAus?'↺ Standardhöhen':'Raum nicht messen',false,()=>{_fsBgRaumMessenSetzen(r,raumAus);scheduleSave();_neuBauen();});
         rb.setAttribute('data-fs-planraumschalter',name);rkz.appendChild(rb);
       }
-      w.appendChild(rkz);
+      w.appendChild(rkz);w.appendChild(cont);
       ws.forEach(wd=>{
         const z=bereich[name+'|'+wd.k];
         const row=document.createElement('div');row.setAttribute('data-fs-planwand',name+'|'+wd.k);
@@ -1377,7 +1382,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
         hi.onchange=()=>{scheduleSave();_neuBauen();};
         const st=document.createElement('span');st.style.cssText='flex:0 0 auto;min-width:88px;font-size:12px;font-weight:600;color:var(--text2);text-align:right;';
         st.textContent=z?('Nr '+z.von+(z.bis>z.von?'–'+z.bis:'')+(z.erl?' · '+z.erl+'/'+z.n+' ✓':'')):'nicht gemessen';
-        row.append(lab,hi,st);w.appendChild(row);
+        row.append(lab,hi,st);cont.appendChild(row);
       });
     });
     const zu=document.createElement('button');zu.type='button';zu.setAttribute('data-fs-planzuordnen','1');zu.textContent='📋 Messungen nach Messplan zuordnen';
@@ -1544,11 +1549,21 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     const masse=document.createElement('div');masse.style.cssText='display:grid;grid-template-columns:repeat(2,minmax(0,1fr)) auto;gap:6px;padding:0 14px;align-items:end;';
     const dreh=document.createElement('button');dreh.type='button';dreh.setAttribute('data-fs-skizze-dreh','1');dreh.textContent='↻ Drehen';
     dreh.style.cssText=S_KNOPF+'min-height:44px;border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);';
-    dreh.onclick=()=>{sk.dreh=((parseInt(sk.dreh,10)||0)+1)%4;scheduleSave();neuZeichnen();};
+    dreh.onclick=()=>{
+      if(_fsBgStricheAnzahl(sk)&&!confirm('Die von Hand eingezeichneten Striche drehen nicht mit. Trotzdem drehen?'))return; // F5
+      sk.dreh=((parseInt(sk.dreh,10)||0)+1)%4;scheduleSave();neuZeichnen();
+    };
     masse.append(_bgLabelFeld('Länge W1/W3 (m)',_inp(sk.l,'z. B. 4,5',v=>{sk.l=v;neuZeichnen();},true)),_bgLabelFeld('Breite W2/W4 (m)',_inp(sk.b,'z. B. 3,2',v=>{sk.b=v;neuZeichnen();},true)),dreh);
     w.appendChild(masse);
     w.appendChild(vorschau);
     neuZeichnen();
+    const ez=document.createElement('button');ez.type='button';ez.setAttribute('data-fs-skizze-zeichnen','1');
+    const nStr=(sk.striche||[]).length;
+    ez.textContent='✏ Einzeichnen – Tür, Fenster, Möbel … mit Finger oder Stift'+(nStr?' ('+nStr+' Strich'+(nStr===1?'':'e')+')':'');
+    ez.style.cssText=S_KNOPF+'display:block;width:calc(100% - 28px);margin:6px 14px 2px;min-height:48px;border:1.5px solid '+FS_FARBE+';background:rgba(31,95,139,.10);color:var(--text);text-align:left;';
+    ez.onclick=()=>_fsBgEinzeichnenZeigen(bericht,r,()=>{_neuBauen();}); // F5: danach neu aufbauen, damit Bild und Strichzahl stimmen
+    w.appendChild(ez);
+    w.appendChild(_bgInfo('Zeichne erst, wenn Länge, Breite und Drehung stimmen – die Striche bleiben an ihrer Stelle im Bild und drehen nicht mit. Sie kommen auch ins PDF.'));
     w.appendChild(_bgInfo('Blau = Fenster, Bogen = Tür. Die Punkte sind deine Messstellen (Nummern wie im PDF); sie zeigen die Wand, nicht die genaue Stelle und Höhe. „Drehen" legt fest, welche Wand unten liegt.'));
     const zeilen=document.createElement('div');zeilen.style.cssText='padding:2px 14px;';
     for(let i=1;i<=4;i++){
@@ -1563,7 +1578,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     const weg=document.createElement('button');weg.type='button';weg.textContent='✕ Skizze für diesen Raum entfernen';
     weg.style.cssText=S_KNOPF+'display:block;width:calc(100% - 28px);margin:8px 14px 12px;border:1px solid var(--border);background:transparent;color:var(--text2);';
     weg.onclick=()=>{
-      if(!confirm('Skizze für „'+(String(r.name||'').trim()||'diesen Raum')+'" entfernen? Wände, Türen und Fenster bleiben erhalten, sie steht dann nicht mehr im PDF.'))return;
+      if(!confirm('Skizze für „'+(String(r.name||'').trim()||'diesen Raum')+'" entfernen? Wände, Türen und Fenster bleiben erhalten, sie steht dann nicht mehr im PDF.'+(_fsBgStricheAnzahl(sk)?' Die von Hand eingezeichneten Striche gehen verloren.':'')))return;
       r.skizze=null;scheduleSave();_neuBauen();
     };
     w.appendChild(weg);
@@ -2427,6 +2442,25 @@ function _fsBgMessStand(b,marker){
   const naechste=zeilen.find(z=>!z.fertig)||null;
   return {zeilen:zeilen,naechste:naechste?naechste.p:null,gesamt:plan.length,fertig:zeilen.filter(z=>z.fertig).length};
 }
+/* ── F5: Räume einzeln zuklappen (Messliste und Messplan) – gemerkt je GERÄT, nicht im Protokoll ───────────────────
+   Je Protokoll eine Tabelle {Raumname: 1 = zu, 0 = ausdrücklich auf}; ohne Eintrag gilt der Standard (Messliste: nur der Raum mit „Als Nächstes“
+   ist offen, Messplan: alles offen). */
+const FS_BG_RAUMZU_KEY='pam_fs_raumzu';  // Messliste
+const FS_BG_PLANZU_KEY='pam_fs_planzu';  // Messplan im Formular
+function _fsBgRaumZuLesen(key,id){
+  try{const m=JSON.parse(localStorage.getItem(key)||'{}');const r=m&&m[id];return (r&&typeof r==='object')?r:{};}catch(e){return {};}
+}
+// wert: 1 = zu, 0 = ausdrücklich auf, null = zurück auf den Standard
+function _fsBgRaumZuSetzen(key,id,raum,wert){
+  let m={};
+  try{m=JSON.parse(localStorage.getItem(key)||'{}')||{};}catch(e){m={};}
+  if(typeof m!=='object')m={};
+  const r=(m[id]&&typeof m[id]==='object')?m[id]:{};
+  if(wert===null||wert===undefined)delete r[raum];else r[raum]=wert?1:0;
+  if(Object.keys(r).length)m[id]=r;else delete m[id];
+  try{localStorage.setItem(key,JSON.stringify(m));return true;}catch(e){return false;}
+}
+function _fsBgRaumOffen(map,raum,standard){const v=map&&map[raum];return v===1?false:(v===0?true:!!standard);}
 // Das Fenster. tab0: 'liste' (Messliste, auch am Handy) oder 'ablauf' (So misst du). Zweiter Aufruf schließt es wieder.
 function _fsBgMessfensterZeigen(b,tab0){
   const alt=document.getElementById('_fsMessfenster');if(alt){alt.remove();return;}
@@ -2487,23 +2521,64 @@ function _fsBgMessfensterZeigen(b,tab0){
       kl('Zurück am Tablet: „📋 Messungen nach Messplan zuordnen“ antippen.','font-size:18px;line-height:1.5;margin-top:6px;');
     }
     inhalt.appendChild(karte);
-    let letzterRaum=null;
-    st.zeilen.forEach(z=>{
-      if(z.p.raum!==letzterRaum){
-        letzterRaum=z.p.raum;
-        const rh=document.createElement('div');rh.textContent=z.p.raum;rh.style.cssText='font-size:20px;font-weight:700;margin:14px 0 6px;';inhalt.appendChild(rh);
+    // F5: Räume einzeln zuklappen (Standard: nur der Raum mit „Als Nächstes“ ist offen; gemerkt je Gerät); im offenen Raum die Skizze mit der nächsten Wand
+    const raumNamen=[];st.zeilen.forEach(z=>{if(raumNamen.indexOf(z.p.raum)<0)raumNamen.push(z.p.raum);});
+    const zuMap=_fsBgRaumZuLesen(FS_BG_RAUMZU_KEY,b.id);
+    const KLEIN='flex:1;min-height:48px;font-size:16px;font-weight:700;border:2px solid var(--border);background:transparent;color:var(--text);';
+    if(raumNamen.length>1){
+      const ak=document.createElement('div');ak.style.cssText='display:flex;gap:8px;margin:0 0 4px;';
+      ak.append(
+        knopf('▸ Alle zu',KLEIN,()=>{raumNamen.forEach(n=>_fsBgRaumZuSetzen(FS_BG_RAUMZU_KEY,b.id,n,1));zeige();},['data-fs-mf-allezu','1']),
+        knopf('▾ Alle auf',KLEIN,()=>{raumNamen.forEach(n=>_fsBgRaumZuSetzen(FS_BG_RAUMZU_KEY,b.id,n,0));zeige();},['data-fs-mf-alleauf','1']));
+      inhalt.appendChild(ak);
+    }
+    raumNamen.forEach(rn=>{
+      const zl=st.zeilen.filter(z=>z.p.raum===rn);
+      const offen=_fsBgRaumOffen(zuMap,rn,!!st.naechste&&st.naechste.raum===rn);
+      const rh=knopf('','display:flex;align-items:center;gap:10px;width:100%;box-sizing:border-box;min-height:56px;padding:8px 12px;margin:12px 0 6px;font-size:20px;font-weight:700;text-align:left;color:var(--text);border:2px solid var(--border);background:var(--bg2);',
+        ()=>{_fsBgRaumZuSetzen(FS_BG_RAUMZU_KEY,b.id,rn,offen?1:0);zeige();},['data-fs-mf-raum',rn]);
+      rh.setAttribute('aria-expanded',offen?'true':'false');
+      const pf=document.createElement('span');pf.textContent=offen?'▾':'▸';pf.style.cssText='width:20px;flex-shrink:0;';
+      const nm=document.createElement('span');nm.textContent=rn;nm.style.cssText='flex:1;min-width:0;';
+      const zn=document.createElement('span');zn.textContent=zl.filter(z=>z.fertig).length+' von '+zl.length;zn.style.cssText='font-size:16px;font-weight:600;color:var(--text2);flex-shrink:0;';
+      rh.append(pf,nm,zn);inhalt.appendChild(rh);
+      if(!offen)return;
+      const ro=(b.raeume||[]).find(q=>q&&q.name===rn);
+      if(ro){ // Skizze des Raums; hat er keine angelegt, eine einfache Vorlage (nur Rechteck mit W1–W4, kommt nicht ins PDF)
+        const hat=!!(ro.skizze&&ro.skizze.an);
+        const rz=hat?ro:Object.assign({},ro,{skizze:{an:true,l:'',b:'',dreh:0}});
+        const url=_fsBgSkizzeBild(b,rz,{hl:(st.naechste&&st.naechste.raum===rn)?st.naechste.wand:''});
+        if(url){
+          const im=document.createElement('img');im.alt='Skizze '+rn;im.setAttribute('data-fs-mf-skizze',rn);im.src=url;
+          im.style.cssText='display:block;width:100%;max-width:560px;margin:0 0 6px;border:1px solid var(--border);border-radius:10px;background:#fff;';
+          inhalt.appendChild(im);
+          const nt=document.createElement('div');nt.style.cssText='font-size:14px;line-height:1.4;color:var(--text2);margin:0 0 10px;';
+          nt.textContent=hat?'Orange = die nächste Wand.':'Vorlage – für diesen Raum ist keine Skizze angelegt (kommt nicht ins PDF). Orange = die nächste Wand.';
+          inhalt.appendChild(nt);
+        }
       }
-      const istNaechste=st.naechste&&st.naechste.nr===z.p.nr;
-      const row=knopf('', 'display:flex;align-items:center;gap:12px;width:100%;box-sizing:border-box;min-height:60px;padding:10px 14px;margin:0 0 8px;font-size:20px;text-align:left;color:var(--text);'
-        +'border:'+(istNaechste?'3px':'2px')+' solid '+(istNaechste?FS_FARBE:'var(--border)')+';background:'+(istNaechste?'rgba(31,95,139,.18)':'var(--bg2)')+';'+(z.fertig?'opacity:.55;':''),
-        ()=>{const jetzt=_fsBgMessstandLesen(b.id);_fsBgMessstandSetzen(b.id,jetzt===z.p.nr?z.p.nr-1:z.p.nr);zeige();},['data-fs-mf-zeile',String(z.p.nr)]);
-      const nr=document.createElement('span');nr.textContent=String(z.p.nr);nr.style.cssText='min-width:40px;font-weight:700;';
-      const tx=document.createElement('span');tx.textContent=z.p.wand+(z.p.art?' '+z.p.art:'')+' · '+z.p.hoehe+' cm';tx.style.cssText='flex:1;min-width:0;';
-      const hk=document.createElement('span');hk.textContent=z.fertig?'✓':'';hk.style.cssText='font-weight:700;font-size:24px;';
-      row.append(nr,tx,hk);inhalt.appendChild(row);
+      zl.forEach(z=>{
+        const istNaechste=st.naechste&&st.naechste.nr===z.p.nr;
+        const row=knopf('', 'display:flex;align-items:center;gap:12px;width:100%;box-sizing:border-box;min-height:60px;padding:10px 14px;margin:0 0 8px;font-size:20px;text-align:left;color:var(--text);'
+          +'border:'+(istNaechste?'3px':'2px')+' solid '+(istNaechste?FS_FARBE:'var(--border)')+';background:'+(istNaechste?'rgba(31,95,139,.18)':'var(--bg2)')+';'+(z.fertig?'opacity:.55;':''),
+          ()=>{const jetzt=_fsBgMessstandLesen(b.id);_fsBgMessstandSetzen(b.id,jetzt===z.p.nr?z.p.nr-1:z.p.nr);zeige();},['data-fs-mf-zeile',String(z.p.nr)]);
+        const nr=document.createElement('span');nr.textContent=String(z.p.nr);nr.style.cssText='min-width:40px;font-weight:700;';
+        const tx=document.createElement('span');tx.textContent=z.p.wand+(z.p.art?' '+z.p.art:'')+' · '+z.p.hoehe+' cm';tx.style.cssText='flex:1;min-width:0;';
+        const hk=document.createElement('span');hk.textContent=z.fertig?'✓':'';hk.style.cssText='font-weight:700;font-size:24px;';
+        row.append(nr,tx,hk);inhalt.appendChild(row);
+      });
     });
     const weiter=knopf('✓ Gemessen, weiter','flex:2;min-height:64px;font-size:20px;font-weight:700;border:none;background:'+FS_FARBE+';color:#fff;'+(st.naechste?'':'opacity:.45;'),
-      ()=>{if(st.naechste){_fsBgMessstandSetzen(b.id,st.naechste.nr);zeige();}},['data-fs-mf-weiter','1']);
+      ()=>{
+        if(!st.naechste)return;
+        const vorher=st.naechste.raum;
+        _fsBgMessstandSetzen(b.id,st.naechste.nr);
+        const nach=_fsBgMessStand(b,_fsBgMessstandLesen(b.id)).naechste;
+        if(nach&&nach.raum!==vorher){ // in den nächsten Raum gewechselt: der neue geht auf, der alte zu (Standard)
+          _fsBgRaumZuSetzen(FS_BG_RAUMZU_KEY,b.id,vorher,null);_fsBgRaumZuSetzen(FS_BG_RAUMZU_KEY,b.id,nach.raum,null);
+        }
+        zeige();
+      },['data-fs-mf-weiter','1']);
     weiter.disabled=!st.naechste;
     const vonVorn=knopf('↺ von vorn','flex:1;min-height:64px;font-size:17px;font-weight:700;border:2px solid var(--border);background:transparent;color:var(--text);',
       ()=>{if(confirm('Die Markierung „gemessen“ auf diesem Gerät zurücksetzen?')){_fsBgMessstandSetzen(b.id,0);zeige();}},['data-fs-mf-vonvorn','1']);
@@ -2572,7 +2647,7 @@ function _fsBgSkizzeSeite(geo,seite,t0,t1){
   return {ax:x0+w,ay:y0+t0*h,bx:x0+w,by:y0+t1*h,nx:-1,ny:0};
 }
 // Zeichnet die Skizze auf einen 2D-Zeichenbereich g (Canvas oder Nachbau). Nutzt nur einfache Aufrufe.
-function _fsBgSkizzeZeichnen(g,b,r){
+function _fsBgSkizzeZeichnen(g,b,r,opt){
   const geo=_fsBgSkizzeGeometrie(r),W=geo.W,H=geo.H,x0=geo.x0,y0=geo.y0,w=geo.w,h=geo.h,m=geo.m;
   g.fillStyle='#ffffff';g.fillRect(0,0,W,H);
   g.fillStyle='#eef4f9';g.fillRect(x0,y0,w,h);
@@ -2616,6 +2691,11 @@ function _fsBgSkizzeZeichnen(g,b,r){
       if(mtxt)g.fillText(mtxt,tx,my+(art?30:0));
     }
   }
+  if(opt&&/^W[1-4]$/.test(String(opt.hl||''))){ // F5: nächste Wand der Messliste – orangefarbenes Band an der INNENSEITE der Wand (nur Anzeige am Gerät, nie im PDF)
+    const hi=+String(opt.hl).slice(1)-1,sh=_fsBgSkizzeSeite(geo,FS_BG_SEITEN[(hi+m.dreh)%4],0,1);
+    g.strokeStyle='#f59e0b';g.lineWidth=16;
+    g.beginPath();g.moveTo(sh.ax+sh.nx*20,sh.ay+sh.ny*20);g.lineTo(sh.bx+sh.nx*20,sh.by+sh.ny*20);g.stroke();
+  }
   // Messstellen als nummerierte Punkte an ihrer Wand (Nummern wie in der PDF-Tabelle; Vergleichsstelle R grau)
   const gruppen={};
   _fsBgStellenSortiert(b).forEach(x=>{
@@ -2637,16 +2717,151 @@ function _fsBgSkizzeZeichnen(g,b,r){
       g.fillText(String(x.nr),px,py+1);
     });
   });
+  _fsBgStricheZeichnen(g,r); // F5: von Hand Eingezeichnetes ganz obenauf
 }
-// Bild der Skizze als data:-Adresse (JPEG) – null, wenn kein Zeichenbereich verfügbar ist
-function _fsBgSkizzeBild(b,r){
+/* ── F5: Freihand einzeichnen (Tür, Fenster, Möbel … mit Finger oder Stift) ──────────────────────────────────────────
+   Frank (01.10.2026): „Ich zeichne das einfach per Hand ein.“ Die Striche liegen beim Raum: raum.skizze.striche = [{f:Farbe, p:[[x,y],…]}], x/y als
+   Anteil (0…1) der Zeichenfläche 900×640; sie erscheinen in der Skizze im Formular, in der Messliste und im PDF (derselbe Zeichner), drehen aber NICHT
+   mit, wenn die Skizze gedreht wird. ⛔ Obergrenze an Punkten, damit das Protokoll nicht wächst. */
+const FS_BG_STRICH_FARBEN=['#1c1c1e','#d62828','#1a7a3c'];
+const FS_BG_STRICH_NAMEN=['schwarz','rot','grün'];
+const FS_BG_STRICHE_MAX=4000;
+function _fsBgStricheAnzahl(sk){return ((sk&&Array.isArray(sk.striche))?sk.striche:[]).reduce((a,s)=>a+((s&&Array.isArray(s.p))?s.p.length:0),0);}
+// Pixel-Punkte der 900×640-Fläche → Anteile 0…1 (3 Stellen), Punkte näher als 3 px am vorigen entfallen, Unbrauchbares entfällt
+function _fsBgStrichVereinfachen(pts){
+  const out=[];let lx=null,ly=null;
+  (Array.isArray(pts)?pts:[]).forEach(p=>{
+    if(!Array.isArray(p))return;
+    const x=+p[0],y=+p[1];
+    if(!isFinite(x)||!isFinite(y))return;
+    if(lx!==null&&Math.hypot(x-lx,y-ly)<3)return;
+    lx=x;ly=y;
+    out.push([Math.round(Math.max(0,Math.min(1,x/FS_BG_SKIZZE_W))*1000)/1000,Math.round(Math.max(0,Math.min(1,y/FS_BG_SKIZZE_H))*1000)/1000]);
+  });
+  return out;
+}
+// Strich anfügen; false, wenn nichts übrig bleibt oder die Obergrenze überschritten würde
+function _fsBgStrichDazu(sk,farbe,pts){
+  if(!sk)return false;
+  const p=_fsBgStrichVereinfachen(pts);
+  if(!p.length)return false;
+  if(!Array.isArray(sk.striche))sk.striche=[];
+  if(_fsBgStricheAnzahl(sk)+p.length>FS_BG_STRICHE_MAX)return false;
+  sk.striche.push({f:FS_BG_STRICH_FARBEN.indexOf(farbe)>=0?farbe:FS_BG_STRICH_FARBEN[0],p:p});
+  return true;
+}
+function _fsBgStrichZurueck(sk){if(sk&&Array.isArray(sk.striche)&&sk.striche.length){sk.striche.pop();return true;}return false;}
+function _fsBgStricheLoeschen(sk){if(sk)sk.striche=[];return sk;}
+// Striche auf den Zeichenbereich g (gleiche Fläche wie die Skizze); ein einzelner Punkt wird ein Tupfer
+function _fsBgStricheZeichnen(g,r){
+  const sk=(r&&r.skizze)||{},W=FS_BG_SKIZZE_W,H=FS_BG_SKIZZE_H;
+  (Array.isArray(sk.striche)?sk.striche:[]).forEach(s=>{
+    const p=((s&&Array.isArray(s.p))?s.p:[]).filter(q=>Array.isArray(q)&&isFinite(+q[0])&&isFinite(+q[1]));
+    if(!p.length)return;
+    g.strokeStyle=FS_BG_STRICH_FARBEN.indexOf(s.f)>=0?s.f:FS_BG_STRICH_FARBEN[0];g.lineWidth=5;g.lineCap='round';g.lineJoin='round';
+    g.beginPath();g.moveTo(p[0][0]*W,p[0][1]*H);
+    if(p.length===1)g.lineTo(p[0][0]*W+0.1,p[0][1]*H);
+    else for(let i=1;i<p.length;i++)g.lineTo(p[i][0]*W,p[i][1]*H);
+    g.stroke();
+  });
+}
+// Bild der Skizze als data:-Adresse (JPEG) – null, wenn kein Zeichenbereich verfügbar ist. opt.hl = Wand, die orange hervorgehoben wird (nur Anzeige)
+function _fsBgSkizzeBild(b,r,opt){
   try{
     const cv=document.createElement('canvas');cv.width=FS_BG_SKIZZE_W;cv.height=FS_BG_SKIZZE_H;
     const g=cv.getContext('2d');
     if(!g)return null;
-    _fsBgSkizzeZeichnen(g,b,r);
+    _fsBgSkizzeZeichnen(g,b,r,opt);
     return cv.toDataURL('image/jpeg',0.92); // JPEG: ein PNG läge in jsPDF unkomprimiert im PDF (mehrere MB je Skizze)
   }catch(e){console.warn('[Feuchte] Skizze:',e);return null;}
+}
+// Das Zeichenfenster: die Skizze groß, darauf mit Finger oder Stift zeichnen. Zweiter Aufruf schließt es. fertig() wird beim Schließen gerufen.
+function _fsBgEinzeichnenZeigen(b,r,fertig){
+  const sk=r&&r.skizze;
+  if(!sk||!sk.an)return;
+  const alt=document.getElementById('_fsEinzeichnen');if(alt){alt.remove();return;}
+  const W=FS_BG_SKIZZE_W,H=FS_BG_SKIZZE_H;
+  const unterlage=_fsBgSkizzeBild(b,Object.assign({},r,{skizze:Object.assign({},sk,{striche:[]})})); // die Zeichnung ohne Striche, die Striche kommen live darüber
+  if(!unterlage){toast('Einzeichnen geht hier nicht (kein Zeichenbereich)','error',4000);return;}
+  const ov=document.createElement('div');ov.id='_fsEinzeichnen';
+  ov.style.cssText='position:fixed;inset:0;z-index:99999;background:var(--bg);color:var(--text);display:flex;flex-direction:column;';
+  const kopf=document.createElement('div');kopf.style.cssText='background:'+FS_FARBE+';padding:10px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0;';
+  const zu=document.createElement('button');zu.type='button';zu.textContent='←';zu.setAttribute('aria-label','Einzeichnen beenden');zu.setAttribute('data-fs-ez-zu','1');
+  zu.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:44px;height:44px;border-radius:8px;font-size:20px;cursor:pointer;flex-shrink:0;';
+  const ti=document.createElement('div');ti.style.cssText='font-size:16px;font-weight:700;color:#fff;flex:1;min-width:0;';ti.textContent='✏ Einzeichnen – '+(String(r.name||'').trim()||'Raum');
+  kopf.append(zu,ti);
+  const leiste=document.createElement('div');leiste.style.cssText='display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border);flex-shrink:0;';
+  const feld=document.createElement('div');feld.style.cssText='flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px;background:var(--bg3);';
+  const cv=document.createElement('canvas');cv.width=W;cv.height=H;cv.setAttribute('data-fs-ez-flaeche','1');
+  cv.style.cssText='display:block;max-width:100%;max-height:100%;width:auto;height:auto;background:#fff;border:1px solid var(--border);touch-action:none;cursor:crosshair;';
+  feld.appendChild(cv);
+  const fuss=document.createElement('div');fuss.style.cssText='flex-shrink:0;padding:10px 14px 14px;border-top:1px solid var(--border);';
+  const fb=document.createElement('button');fb.type='button';fb.textContent='✓ Fertig';fb.setAttribute('data-fs-ez-fertig','1');
+  fb.style.cssText='width:100%;min-height:56px;border-radius:12px;border:none;background:'+FS_FARBE+';color:#fff;font-size:18px;font-weight:700;font-family:inherit;cursor:pointer;';
+  fuss.appendChild(fb);
+  ov.append(kopf,leiste,feld,fuss);
+  const g=cv.getContext('2d');
+  const bild=new Image();let bildDa=false;
+  let farbe=FS_BG_STRICH_FARBEN[0],aktiv=null,stiftGesehen=false;
+  const neu=()=>{
+    g.fillStyle='#ffffff';g.fillRect(0,0,W,H);
+    if(bildDa)g.drawImage(bild,0,0,W,H);
+    _fsBgStricheZeichnen(g,r);
+  };
+  bild.onload=()=>{bildDa=true;neu();};
+  bild.src=unterlage;
+  const knopf=(txt,stil,fn,attr)=>{
+    const x=document.createElement('button');x.type='button';x.textContent=txt;x.style.cssText='font-family:inherit;cursor:pointer;border-radius:10px;min-height:48px;padding:6px 12px;font-size:15px;font-weight:700;color:var(--text);'+stil;
+    if(attr)x.setAttribute(attr[0],attr[1]);
+    x.onclick=fn;return x;
+  };
+  const leisteBauen=()=>{
+    leiste.innerHTML='';
+    FS_BG_STRICH_FARBEN.forEach((f,i)=>{
+      const an=f===farbe;
+      const k=knopf(FS_BG_STRICH_NAMEN[i],'border:3px solid '+(an?FS_FARBE:'var(--border)')+';background:transparent;border-left:14px solid '+f+';',()=>{farbe=f;leisteBauen();},['data-fs-ez-farbe',String(i)]);
+      leiste.appendChild(k);
+    });
+    leiste.appendChild(knopf('↶ Rückgängig','border:2px solid var(--border);background:transparent;',()=>{if(_fsBgStrichZurueck(sk)){scheduleSave();neu();leisteBauen();}},['data-fs-ez-zurueck','1']));
+    leiste.appendChild(knopf('Alles löschen','border:2px solid var(--border);background:transparent;color:var(--red);',()=>{
+      if(!_fsBgStricheAnzahl(sk))return;
+      if(!confirm('Alle eingezeichneten Striche in diesem Raum löschen?'))return;
+      _fsBgStricheLoeschen(sk);scheduleSave();neu();leisteBauen();
+    },['data-fs-ez-loeschen','1']));
+    const z=document.createElement('span');z.setAttribute('data-fs-ez-zaehler','1');z.style.cssText='font-size:13px;color:var(--text2);';
+    z.textContent=((sk.striche||[]).length)+' Strich'+((sk.striche||[]).length===1?'':'e');
+    leiste.appendChild(z);
+  };
+  const pos=e=>{const rc=cv.getBoundingClientRect();return [(e.clientX-rc.left)/rc.width*W,(e.clientY-rc.top)/rc.height*H];};
+  cv.addEventListener('pointerdown',e=>{
+    if(e.pointerType==='pen')stiftGesehen=true;
+    if(e.pointerType==='touch'&&stiftGesehen)return; // mit Stift: Handballen und Finger zählen nicht
+    e.preventDefault();
+    try{cv.setPointerCapture(e.pointerId);}catch(x){}
+    aktiv={id:e.pointerId,pts:[pos(e)]};
+  });
+  cv.addEventListener('pointermove',e=>{
+    if(!aktiv||e.pointerId!==aktiv.id)return;
+    e.preventDefault();
+    const p=pos(e),q=aktiv.pts[aktiv.pts.length-1];
+    aktiv.pts.push(p);
+    g.strokeStyle=farbe;g.lineWidth=5;g.lineCap='round';g.lineJoin='round';
+    g.beginPath();g.moveTo(q[0],q[1]);g.lineTo(p[0],p[1]);g.stroke(); // Livespur; das gespeicherte Bild entsteht beim Loslassen
+  });
+  const ende=e=>{
+    if(!aktiv||e.pointerId!==aktiv.id)return;
+    const a=aktiv;aktiv=null;
+    const ok=_fsBgStrichDazu(sk,farbe,a.pts);
+    if(ok)scheduleSave();
+    else if(a.pts.length)toast('Genug eingezeichnet – bitte einen Strich zurücknehmen oder alles löschen','info',3500);
+    neu();leisteBauen();
+  };
+  cv.addEventListener('pointerup',ende);
+  cv.addEventListener('pointercancel',ende);
+  const schliessen=()=>{ov.remove();if(typeof fertig==='function'){try{fertig();}catch(x){console.warn('[Feuchte] Einzeichnen:',x);}}};
+  zu.onclick=schliessen;fb.onclick=schliessen;
+  leisteBauen();
+  document.body.appendChild(ov);
 }
 function _fsBgSektionKurz(sek){
   let da=0,offen=0;
