@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F4';
+const PAM_FORMULARE_VERSION='F4a';
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
    Befund Frank 14.09.2026: ein Formular wie das Wartungsprotokoll, aber mit Messwerten – am
    Tablet vor Ort ausfüllen, als PDF abheften. Werte werden eingetippt; das Einlesen der
@@ -1139,6 +1139,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
         +'border:2px solid '+(an?FS_FARBE:'var(--border)')+';background:'+(an?'rgba(31,95,139,.18)':'transparent')+';color:var(--text);font-weight:'+(an?'700':'600')+';';
       b.onclick=fn;return b;
     };
+    w.appendChild(mk('📋 Messliste',false,()=>_fsBgMessfensterZeigen(bericht,'liste'),['data-fs-messliste','1'])); // F4a: ganz vorn, auch am Handy
     w.appendChild(mk(offene?'▸ Alles zu':'▾ Alles auf',false,()=>{_bgZuMehrere(alle,!!offene);_neuBauen();},['data-fs-alles','1']));
     w.appendChild(mk(nur?'✓ Nur dieser':'Nur dieser',nur,()=>{try{localStorage.setItem('pam_fs_nurDieser',nur?'0':'1');}catch(e){}_neuBauen();},['data-fs-nur','1']));
     FS_BG_BLOECKE.forEach(b=>w.appendChild(mk(b.c,false,()=>_bgSpringe(b.k),['data-fs-sprung',b.k])));
@@ -1214,6 +1215,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     const w=document.createElement('div');
     w.appendChild(_kopfZeile('Raumklima'));
     w.appendChild(_bgInfo('Je Raum: Temperatur, Luftfeuchte, Uhrzeit und Bedingungen (z. B. Heizlüfter in Betrieb). Ein neuer Raum hat gleich W1 (Außenwand) und W2–W4 (Innenwand) – ändere nur die Art, die abweicht. Bei der Messstelle wählst du die Wand aus.'));
+    w.appendChild(_bgSchrittHinweis('Am Tablet zuerst – Schritt 1 und 2 von 5','Räume anlegen, Wände prüfen und Wandfotos anhängen. Danach geht es bei „Messstellen“ mit dem Messplan weiter (Schritt 3). Gemessen wird später am Handy.')); // F4a
     if(bericht.raeume.length){
       const kz=document.createElement('div');kz.style.cssText=S_RAUMGRID+'padding:6px 14px 0;font-size:12px;color:var(--text2);';
       ['Raum','°C','% rF','Taupunkt',''].forEach(x=>{const s=document.createElement('span');s.textContent=x;kz.appendChild(s);});
@@ -1306,7 +1308,17 @@ function _openFeuchteprotokollMobil(existingIdx,art){
   }
 
   /* ── F4: Messplan – Höhen je Wand, feste Reihenfolge, Merkzettel „So misst du“, Knopf zum Zuordnen ──────────────────── */
-  let _bgRegelnOffen=false; // Merkzettel offen – nur Anzeige, wird nicht im Protokoll gespeichert
+  // F4a: kurzer Hinweis, in welchem Schritt man gerade ist (Ablauf: Tablet vorbereiten · Handy messen · Tablet zuordnen) mit Knopf zum großen Fenster
+  function _bgSchrittHinweis(titel,text){
+    const d=document.createElement('div');d.setAttribute('data-fs-schritthinweis',titel);
+    d.style.cssText='margin:8px 10px;padding:10px 12px;border-radius:10px;border-left:5px solid '+FS_FARBE+';background:rgba(31,95,139,.10);';
+    const t1=document.createElement('div');t1.textContent=titel;t1.style.cssText='font-size:14px;font-weight:700;color:var(--text);';
+    const t2=document.createElement('div');t2.textContent=text;t2.style.cssText='font-size:14px;line-height:1.5;color:var(--text);margin-top:2px;';
+    const kb=document.createElement('button');kb.type='button';kb.textContent='ℹ So misst du';kb.setAttribute('data-fs-hinweisknopf','1');
+    kb.style.cssText=S_KNOPF+'margin-top:8px;min-height:44px;border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);';
+    kb.onclick=()=>_fsBgMessfensterZeigen(bericht,'ablauf');
+    d.append(t1,t2,kb);return d;
+  }
   function _teilMessplanBg(){
     const w=document.createElement('div');w.setAttribute('data-fs-messplan','1');
     w.style.cssText='margin:8px 10px;padding:10px;border:1px solid var(--border);border-left:5px solid '+FS_FARBE+';border-radius:10px;background:var(--bg2);';
@@ -1320,15 +1332,16 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     const info=_bgInfo('Miss immer in dieser Reihenfolge: Raum für Raum, W1 bis W4, an jeder Wand von der ersten bis zur letzten Höhe. PAM ordnet die testo-Messungen danach den Wänden zu. Höhen ändern: hier eintragen; leer = diese Wand wird nicht gemessen.');
     info.style.padding='6px 0';w.appendChild(info);
 
-    const regeln=document.createElement('details');regeln.setAttribute('data-fs-messregeln','1');
-    if(_bgRegelnOffen)regeln.open=true;
-    regeln.addEventListener('toggle',()=>{_bgRegelnOffen=!!regeln.open;});
-    const sm=document.createElement('summary');sm.textContent='ℹ So misst du (Merkzettel)';
-    sm.style.cssText='min-height:44px;display:flex;align-items:center;font-size:14px;font-weight:700;color:var(--text);cursor:pointer;';
-    regeln.appendChild(sm);
-    const ol=document.createElement('ol');ol.style.cssText='margin:4px 0 8px;padding-left:22px;font-size:13px;line-height:1.5;color:var(--text);';
-    _fsBgMessregeln().forEach(x=>{const li=document.createElement('li');li.style.margin='0 0 6px';li.textContent=x;ol.appendChild(li);});
-    regeln.appendChild(ol);w.appendChild(regeln);
+    const regeln=document.createElement('button');regeln.type='button';regeln.setAttribute('data-fs-messregeln','1'); // F4a: großes Fenster statt kleiner Schrift im Formular
+    regeln.textContent='ℹ So misst du – Ablauf und Merkpunkte (großes Fenster)';
+    regeln.style.cssText=S_KNOPF+'display:block;width:100%;margin:2px 0 8px;min-height:48px;border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);text-align:left;';
+    regeln.onclick=()=>_fsBgMessfensterZeigen(bericht,'ablauf');
+    w.appendChild(regeln);
+    const liste=document.createElement('button');liste.type='button';liste.setAttribute('data-fs-messlistenknopf','1');
+    liste.textContent='📋 Messliste – was kommt als Nächstes (großes Fenster)';
+    liste.style.cssText=S_KNOPF+'display:block;width:100%;margin:0 0 8px;min-height:48px;border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);text-align:left;';
+    liste.onclick=()=>_fsBgMessfensterZeigen(bericht,'liste');
+    w.appendChild(liste);
 
     if(!plan.length){
       const leer=_bgInfo('Noch kein Messplan – lege bei „Raumklima“ Räume mit Wänden an (ein neuer Raum hat gleich W1 bis W4). Ein Raum braucht einen Namen.');
@@ -1380,6 +1393,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     const info=document.createElement('div');info.style.cssText='padding:6px 14px 2px;font-size:12px;color:var(--text2);';
     info.textContent='Raum und Wand wählen, Höhe in cm, Uhrzeit. Oberfläche mit dem Infrarot-Thermometer, Bauteilfeuchte in Digits. Jede Höhe an einer Wand ist eine eigene Stelle.';
     w.appendChild(info);
+    w.appendChild(_bgSchrittHinweis('Schritt 3 und 5 von 5','Hier prüfst du den Messplan (Schritt 3). Gemessen wird danach am Handy (Schritt 4). Zurück am Tablet ordnest du die Messungen hier zu (Schritt 5).')); // F4a
     w.appendChild(_teilMessplanBg()); // F4
     const raumNamen=bericht.raeume.map(r=>r.name).filter(Boolean);
     const druck=_fsBgStellenSortiert(bericht);
@@ -2369,12 +2383,134 @@ function _fsBgStelleAusPlan(m,p){
 function _fsBgMessregeln(){
   return [
     'Immer in der Reihenfolge des Messplans messen: Raum für Raum, W1 bis W4, an jeder Wand von der ersten bis zur letzten Höhe – jedes Mal gleich.',
-    'Erst Räume, Wände, Höhen und Wandfotos anlegen, dann messen. Ändert sich der Plan nach dem Messen, stimmt die Zuordnung nicht mehr.',
+    'Erst am Tablet Räume, Wände, Höhen und Wandfotos anlegen, dann am Handy messen. Ändert sich der Plan nach dem Messen, stimmt die Zuordnung nicht mehr.',
     'Jede Messung einzeln speichern. '+(typeof FS_TESTO_JSON_WEG==='string'?FS_TESTO_JSON_WEG:''),
     'Nichts überspringen. Hast du eine Stelle ausgelassen oder eine Messung doppelt gespeichert, merk dir die Nummer – du korrigierst es später in der Kontrollliste („Hier nicht gemessen“ oder „Messung weglassen“).',
     'Trotec-Werte trägst du bei der Messstelle von Hand ein (Bauteil, Digits). Ein Trotec-Import kommt später.',
-    'Danach hier „📋 Messungen nach Messplan zuordnen“ antippen: PAM schlägt die Wände der Reihe nach vor, du prüfst mit dem Wandfoto und übernimmst.'
+    'Danach am Tablet bei „Messstellen“ „📋 Messungen nach Messplan zuordnen“ antippen: PAM schlägt die Wände der Reihe nach vor, du prüfst mit dem Wandfoto und übernimmst.'
   ];
+}
+/* ══ F4a: GROSSES FENSTER „Messliste und Ablauf“ ═══════════════════════════════════════════════════════════════════
+   Frank (01.10.2026): Alles am Tablet kommt ZUERST, gemessen wird NUR am Handy (testo, Trotec), danach zurück ans Tablet. Am Handy öffnet er
+   dasselbe Protokoll und sieht die Messliste in großer Schrift: oben „Als Nächstes“, darunter alle Nummern. „Gemessen bis hier“ ist nur eine
+   Gedächtnisstütze, gilt nur auf DIESEM Gerät (localStorage) und steht NICHT im Protokoll – Handy und Tablet kommen sich nicht in die Quere.
+   ⛔ Nur Programm und Bezeichnungen in dieser öffentlichen Datei. */
+const FS_BG_MESSSTAND_KEY='pam_fs_messstand';
+// Der Ablauf in drei Blöcken: am Tablet vorbereiten · am Handy messen · zurück am Tablet zuordnen
+function _fsBgAblauf(){
+  return [
+    {k:'tablet',titel:'AM TABLET – zuerst, alles Vorbereitende',zeilen:[
+      '1 · Räume anlegen (bei „Raumklima“).',
+      '2 · Wände prüfen (Außenwand oder Innenwand) und Wandfotos anhängen (bei „Raumklima“).',
+      '3 · Messplan prüfen (bei „Messstellen“): Höhen je Wand, und Räume, die du nicht misst, mit „Raum nicht messen“ herausnehmen.',
+      'Danach das Tablet weglegen – am Plan ändert sich nichts mehr.']},
+    {k:'handy',titel:'AM HANDY – nur messen',zeilen:[
+      '4 · Mit testo und Trotec in der Reihenfolge der Messliste messen. Jede testo-Messung einzeln speichern und teilen. Die „📋 Messliste“ zeigt dir, was als Nächstes dran ist.']},
+    {k:'zurueck',titel:'ZURÜCK AM TABLET',zeilen:[
+      '5 · „📋 Messungen nach Messplan zuordnen“ antippen, kontrollieren, übernehmen. Die Trotec-Werte trägst du dabei von Hand bei den Messstellen ein.']}
+  ];
+}
+// zuletzt gemessene Nummer auf DIESEM Gerät (je Protokoll); 0 = noch nichts
+function _fsBgMessstandLesen(id){
+  try{const m=JSON.parse(localStorage.getItem(FS_BG_MESSSTAND_KEY)||'{}');const n=parseInt(m&&m[id],10);return isFinite(n)&&n>0?n:0;}catch(e){return 0;}
+}
+function _fsBgMessstandSetzen(id,n){
+  let m={};
+  try{m=JSON.parse(localStorage.getItem(FS_BG_MESSSTAND_KEY)||'{}')||{};}catch(e){m={};} // kaputter Speicher: neu anfangen statt für immer zu klemmen
+  if(typeof m!=='object')m={};
+  try{if(n>0)m[id]=n;else delete m[id];localStorage.setItem(FS_BG_MESSSTAND_KEY,JSON.stringify(m));return true;}catch(e){return false;}
+}
+// Stand der Messliste: je Zeile „fertig“ (bis zur Markierung gemessen ODER schon einer Messstelle zugeordnet) und die nächste offene Zeile. Reine Funktion.
+function _fsBgMessStand(b,marker){
+  const plan=_fsBgMessplan(b),m=parseInt(marker,10)||0;
+  const zeilen=plan.map(p=>({p:p,fertig:p.nr<=m||_fsBgPlanErledigt(b,p)}));
+  const naechste=zeilen.find(z=>!z.fertig)||null;
+  return {zeilen:zeilen,naechste:naechste?naechste.p:null,gesamt:plan.length,fertig:zeilen.filter(z=>z.fertig).length};
+}
+// Das Fenster. tab0: 'liste' (Messliste, auch am Handy) oder 'ablauf' (So misst du). Zweiter Aufruf schließt es wieder.
+function _fsBgMessfensterZeigen(b,tab0){
+  const alt=document.getElementById('_fsMessfenster');if(alt){alt.remove();return;}
+  let tab=(tab0==='ablauf')?'ablauf':'liste';
+  const ov=document.createElement('div');ov.id='_fsMessfenster';
+  ov.style.cssText='position:fixed;inset:0;z-index:99999;background:var(--bg);color:var(--text);display:flex;flex-direction:column;';
+  const kopf=document.createElement('div');kopf.style.cssText='background:'+FS_FARBE+';padding:12px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0;';
+  const zu=document.createElement('button');zu.type='button';zu.textContent='←';zu.setAttribute('aria-label','Fenster schließen');zu.setAttribute('data-fs-mf-zu','1');
+  zu.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:44px;height:44px;border-radius:8px;font-size:20px;cursor:pointer;flex-shrink:0;';
+  zu.onclick=()=>ov.remove();
+  const ti=document.createElement('div');ti.style.cssText='font-size:17px;font-weight:700;color:#fff;';ti.textContent='📋 Messliste und Ablauf';
+  kopf.append(zu,ti);
+  const reiter=document.createElement('div');reiter.style.cssText='display:flex;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border);flex-shrink:0;';
+  const inhalt=document.createElement('div');inhalt.style.cssText='flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:8px 16px 24px;';
+  const fuss=document.createElement('div');fuss.style.cssText='flex-shrink:0;display:flex;gap:10px;padding:10px 14px 14px;border-top:1px solid var(--border);';
+  ov.append(kopf,reiter,inhalt,fuss);
+  const knopf=(txt,stil,fn,attr)=>{
+    const x=document.createElement('button');x.type='button';x.textContent=txt;x.style.cssText='font-family:inherit;cursor:pointer;border-radius:12px;'+stil;
+    if(attr)x.setAttribute(attr[0],attr[1]);
+    x.onclick=fn;return x;
+  };
+  const zeige=()=>{
+    reiter.innerHTML='';inhalt.innerHTML='';fuss.innerHTML='';
+    [['liste','📋 Messliste'],['ablauf','ℹ So misst du']].forEach(([k,txt])=>{
+      const an=tab===k;
+      reiter.appendChild(knopf(txt,'flex:1;min-height:52px;font-size:17px;font-weight:700;color:var(--text);border:2px solid '+(an?FS_FARBE:'var(--border)')+';background:'+(an?'rgba(31,95,139,.22)':'transparent')+';',()=>{tab=k;zeige();},['data-fs-mf-reiter',k]));
+    });
+    if(tab==='ablauf'){
+      _fsBgAblauf().forEach(bl=>{
+        const h=document.createElement('div');h.setAttribute('data-fs-mf-block',bl.k);h.textContent=bl.titel;
+        h.style.cssText='font-size:19px;font-weight:700;margin:20px 0 8px;padding-left:10px;border-left:6px solid '+FS_FARBE+';';
+        inhalt.appendChild(h);
+        bl.zeilen.forEach(z=>{const d=document.createElement('div');d.textContent=z;d.style.cssText='font-size:18px;line-height:1.5;margin:0 0 8px;';inhalt.appendChild(d);});
+      });
+      const mh=document.createElement('div');mh.textContent='Merkpunkte';mh.style.cssText='font-size:19px;font-weight:700;margin:24px 0 8px;padding-left:10px;border-left:6px solid '+FS_FARBE+';';
+      inhalt.appendChild(mh);
+      const ol=document.createElement('ol');ol.style.cssText='margin:0;padding-left:26px;';
+      _fsBgMessregeln().forEach(x=>{const li=document.createElement('li');li.textContent=x;li.style.cssText='font-size:17px;line-height:1.5;margin:0 0 10px;';ol.appendChild(li);});
+      inhalt.appendChild(ol);
+      return;
+    }
+    const st=_fsBgMessStand(b,_fsBgMessstandLesen(b.id));
+    const karte=document.createElement('div');karte.setAttribute('data-fs-mf-naechste','1');
+    karte.style.cssText='margin:8px 0 16px;padding:16px;border-radius:14px;border:3px solid '+FS_FARBE+';background:rgba(31,95,139,.14);';
+    const kl=(txt,css)=>{const d=document.createElement('div');d.textContent=txt;d.style.cssText=css;karte.appendChild(d);};
+    if(!st.gesamt){
+      kl('Noch kein Messplan','font-size:22px;font-weight:700;');
+      kl('Am Tablet bei „Raumklima“ Räume mit Wänden anlegen, dann bei „Messstellen“ den Messplan prüfen.','font-size:17px;line-height:1.5;margin-top:6px;');
+    }else if(st.naechste){
+      const p=st.naechste;
+      kl('Als Nächstes','font-size:16px;color:var(--text2);');
+      kl('Nr '+p.nr,'font-size:40px;font-weight:700;line-height:1.1;');
+      kl(p.raum,'font-size:26px;font-weight:700;margin-top:4px;');
+      kl(p.wand+(p.art?' '+p.art:'')+' · '+p.hoehe+' cm','font-size:24px;font-weight:700;');
+      kl(st.fertig+' von '+st.gesamt+' gemessen','font-size:16px;color:var(--text2);margin-top:8px;');
+    }else{
+      kl('Alles gemessen ✓','font-size:26px;font-weight:700;');
+      kl('Zurück am Tablet: „📋 Messungen nach Messplan zuordnen“ antippen.','font-size:18px;line-height:1.5;margin-top:6px;');
+    }
+    inhalt.appendChild(karte);
+    let letzterRaum=null;
+    st.zeilen.forEach(z=>{
+      if(z.p.raum!==letzterRaum){
+        letzterRaum=z.p.raum;
+        const rh=document.createElement('div');rh.textContent=z.p.raum;rh.style.cssText='font-size:20px;font-weight:700;margin:14px 0 6px;';inhalt.appendChild(rh);
+      }
+      const istNaechste=st.naechste&&st.naechste.nr===z.p.nr;
+      const row=knopf('', 'display:flex;align-items:center;gap:12px;width:100%;box-sizing:border-box;min-height:60px;padding:10px 14px;margin:0 0 8px;font-size:20px;text-align:left;color:var(--text);'
+        +'border:'+(istNaechste?'3px':'2px')+' solid '+(istNaechste?FS_FARBE:'var(--border)')+';background:'+(istNaechste?'rgba(31,95,139,.18)':'var(--bg2)')+';'+(z.fertig?'opacity:.55;':''),
+        ()=>{const jetzt=_fsBgMessstandLesen(b.id);_fsBgMessstandSetzen(b.id,jetzt===z.p.nr?z.p.nr-1:z.p.nr);zeige();},['data-fs-mf-zeile',String(z.p.nr)]);
+      const nr=document.createElement('span');nr.textContent=String(z.p.nr);nr.style.cssText='min-width:40px;font-weight:700;';
+      const tx=document.createElement('span');tx.textContent=z.p.wand+(z.p.art?' '+z.p.art:'')+' · '+z.p.hoehe+' cm';tx.style.cssText='flex:1;min-width:0;';
+      const hk=document.createElement('span');hk.textContent=z.fertig?'✓':'';hk.style.cssText='font-weight:700;font-size:24px;';
+      row.append(nr,tx,hk);inhalt.appendChild(row);
+    });
+    const weiter=knopf('✓ Gemessen, weiter','flex:2;min-height:64px;font-size:20px;font-weight:700;border:none;background:'+FS_FARBE+';color:#fff;'+(st.naechste?'':'opacity:.45;'),
+      ()=>{if(st.naechste){_fsBgMessstandSetzen(b.id,st.naechste.nr);zeige();}},['data-fs-mf-weiter','1']);
+    weiter.disabled=!st.naechste;
+    const vonVorn=knopf('↺ von vorn','flex:1;min-height:64px;font-size:17px;font-weight:700;border:2px solid var(--border);background:transparent;color:var(--text);',
+      ()=>{if(confirm('Die Markierung „gemessen“ auf diesem Gerät zurücksetzen?')){_fsBgMessstandSetzen(b.id,0);zeige();}},['data-fs-mf-vonvorn','1']);
+    fuss.append(weiter,vonVorn);
+  };
+  zeige();
+  document.body.appendChild(ov);
 }
 // Bildunterschrift im PDF: wozu gehört das Foto – Raum, Wand, Messstelle (mit der gedruckten Nummer), Feststellung
 function _fsBgFotoZuordnung(b,f){
