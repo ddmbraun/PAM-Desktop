@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F16';
+const PAM_FORMULARE_VERSION='F17';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
@@ -199,7 +199,7 @@ function _fsVervollstaendigen(b){
     ['anlass','beginn','ende','geraetLuft','geraetOberflaeche','geraetBauteil'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';});
     if(!Array.isArray(b.anwesende))b.anwesende=[];
     if(!Array.isArray(b.angaben))b.angaben=[];
-    if(b.art==='vorab')['versicherung','schadennr','zugang','ansprechpartner'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';}); // F16
+    if(b.art==='vorab')['versicherung','schadennr','zugang','ansprechpartner','besuchBei','lage'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';}); // F16
   }
   return b;
 }
@@ -215,7 +215,10 @@ function _fsPdfName(bericht,zeit){
     const slug=String((bericht.kopf&&bericht.kopf.objektAdresse)||'').split(',')[0].replace(/[^a-zA-Z0-9]/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,'').slice(0,30);
     return 'Wartungsprotokoll'+(slug?'_'+slug:'')+(datum?'_'+datum:'')+uhr+'.pdf';
   }
-  if(bericht&&bericht.fassung==='begehung'&&bericht.art==='vorab')return 'Vorabbesichtigung'+(datum?'_'+datum:'')+uhr+'.pdf'; // F16
+  if(bericht&&bericht.fassung==='begehung'&&bericht.art==='vorab'){ // F16, F17: mit der Rolle, bei wem es war (Eigentuemer, Mieter, …)
+    const rolle=String((bericht.kopf&&bericht.kopf.besuchBei)||'').split(':')[0].replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/Ä/g,'Ae').replace(/Ö/g,'Oe').replace(/Ü/g,'Ue').replace(/ß/g,'ss').replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,16);
+    return 'Vorabbesichtigung'+(rolle?'_'+rolle:'')+(datum?'_'+datum:'')+uhr+'.pdf';
+  }
   if(bericht&&bericht.fassung==='begehung')return 'Begehung'+(bericht.art==='keller'?'_Keller':'_Wohnung')+(datum?'_'+datum:'')+uhr+'.pdf'; // F2a: kurzer Name (Pfadlänge)
   return 'Feuchteprotokoll'+(bericht&&bericht.art==='keller'?'_Keller':'')+(datum?'_'+datum:'')+uhr+'.pdf';
 }
@@ -378,7 +381,7 @@ function _fsKopfAusKarte(t){
 function _fsKopfErgaenzen(bericht,t){
   if(!bericht||!bericht.kopf)return 0;
   const v=_fsKopfAusKarte(t);let n=0;
-  if(bericht.art==='vorab'&&typeof _fsVbAnlassAusKarte==='function'){const a=_fsVbAnlassAusKarte(t);if(a)v.anlass=a;} // F16: Anlass = Beschreibung der Karte (Vorschlag)
+  if(bericht.art==='vorab'&&typeof _fsVbAnlassAusKarte==='function'){const a=_fsVbAnlassAusKarte(t);if(a)v.anlass=a;delete v.nutzer;} // F17: Nutzer nur über „Besichtigung bei“ // F16: Anlass = Beschreibung der Karte (Vorschlag)
   Object.keys(v).forEach(key=>{if(v[key]&&!String(bericht.kopf[key]||'').trim()){bericht.kopf[key]=v[key];n++;}});
   return n;
 }
@@ -1111,7 +1114,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     const kf=bericht.kopf||{};
     const gef=arr=>arr.filter(x=>String(kf[x]||'').trim()).length;
     const plural=(n,e,m)=>n+' '+(n===1?e:m);
-    if(k==='auftrag')return _fsIstVorab(bericht)?gef(['auftraggeber','objektAdresse','auftragNr','nutzer','anlass','versicherung','schadennr','zugang','ansprechpartner'])+' von 9 ausgefüllt':gef(['auftraggeber','objektAdresse','auftragNr','nutzer','anlass'])+' von 5 ausgefüllt';
+    if(k==='auftrag')return _fsIstVorab(bericht)?gef(['auftraggeber','objektAdresse','auftragNr','nutzer','anlass','versicherung','schadennr','zugang','ansprechpartner','besuchBei','lage'])+' von 11 ausgefüllt':gef(['auftraggeber','objektAdresse','auftragNr','nutzer','anlass'])+' von 5 ausgefüllt';
     if(k==='termin'){
       const n=(bericht.anwesende||[]).filter(p=>p&&String(p.name||'').trim()).length;
       return [_fsBgZeitText(kf),n?plural(n,'Person','Personen'):''].filter(Boolean).join(' · ')||'noch leer';
@@ -1193,6 +1196,26 @@ function _openFeuchteprotokollMobil(existingIdx,art){
       _feld('Auftrag-Nr.','auftragNr',''),
       _feld('Nutzer / Mieter','nutzer',''),
       _feld('Anlass','anlass','z. B. Meldung des Mieters über …'));
+    if(_fsIstVorab(bericht)){ // F17: Besichtigung bei … (Kontakte der Karte), Lage, Datum und Uhrzeit mit „Jetzt“-Knöpfen
+      const bei=document.createElement('div');bei.setAttribute('data-fs-besuchbei','1');bei.style.cssText='padding:6px 14px 8px;border-top:1px solid var(--border);';
+      const bl=document.createElement('div');bl.style.cssText='font-size:13px;color:var(--text2);margin-bottom:6px;';bl.textContent='Besichtigung bei – wähle den Kontakt für diesen Besuch';bei.appendChild(bl);
+      const chips=document.createElement('div');chips.style.cssText='display:flex;flex-wrap:wrap;gap:6px;';
+      _fsVbKontakte(t).forEach(k=>{chips.appendChild(_chip(k.text,bericht.kopf.besuchBei===k.text,()=>{
+        const an=bericht.kopf.besuchBei===k.text;
+        bericht.kopf.besuchBei=an?'':k.text;bericht.kopf.nutzer=an?'':k.name;bericht.kopf.ansprechpartner=an?'':k.kontakt;
+        scheduleSave();_neuBauen();}));});
+      if(!chips.childNodes.length)chips.appendChild(_bgInfo('Die Karte hat keine Kontakte mit Namen – trage Nutzer und Ansprechpartner von Hand ein.'));
+      bei.appendChild(chips);
+      const zeitKn=document.createElement('div');zeitKn.style.cssText='display:flex;flex-wrap:wrap;gap:8px;padding:8px 14px;';
+      const zk=(txt,fn,attr)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute(attr,'1');b.style.cssText=S_KNOPF+'min-height:44px;border:1.5px solid '+FS_FARBE+';background:rgba(31,95,139,.12);color:var(--text);';b.onclick=fn;return b;};
+      zeitKn.append(
+        zk('📍 Ich bin jetzt hier (Datum + Uhrzeit)',()=>{const j=_fsVbJetzt();bericht.datum=j.datum;bericht.kopf.beginn=j.uhr;scheduleSave();hdrS.textContent=(bericht.kopf.objektAdresse||t.adresse||t.title||'')+' · '+(bericht.datum||'');_neuBauen();toast('✓ Datum '+j.datum+', Beginn '+j.uhr+' Uhr eingetragen','success',3500);},'data-fs-jetzt-beginn'),
+        zk('🏁 Fertig (Ende jetzt)',()=>{const j=_fsVbJetzt();bericht.kopf.ende=j.uhr;scheduleSave();_neuBauen();toast('✓ Ende '+j.uhr+' Uhr eingetragen','success',3500);},'data-fs-jetzt-ende'));
+      const datRow=document.createElement('div');datRow.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 14px;border-top:1px solid var(--border);';
+      const dl=document.createElement('span');dl.style.cssText='font-size:13px;color:var(--text2);width:112px;flex-shrink:0;';dl.textContent='Datum';
+      datRow.append(dl,_inp(bericht.datum,'TT.MM.JJJJ',v=>{bericht.datum=v;},false));
+      w.append(bei,_feld('Lage','lage','z. B. Wohnung darüber, Keller'),datRow,_feld('Beginn','beginn','hh:mm'),_feld('Ende','ende','hh:mm'),zeitKn);
+    }
     if(_fsIstVorab(bericht))w.append( // F16: Objekt und Zugang, Versicherung
       _feld('Versicherung','versicherung',''),
       _feld('Schadennummer','schadennr',''),
@@ -1209,9 +1232,10 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     wb.style.cssText=S_KNOPF+'min-height:44px;border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);';
     wb.onclick=()=>holeWetter(bericht,_neuBauen);
     hilfen.appendChild(wb);
-    w.append(
+    if(!_fsIstVorab(bericht))w.append(
       _feld('Beginn','beginn','hh:mm'),
-      _feld('Ende','ende','hh:mm'),
+      _feld('Ende','ende','hh:mm'));
+    w.append(
       _teilAnwesende(),
       hilfen,
       _feld('Wetter','wetter','z. B. bewölkt'),
@@ -2332,9 +2356,24 @@ const FS_VB_ANGABEN=[
   {k:'V5.5',q:'Was hat sich zuletzt geändert?'}
 ];
 function _fsIstVorab(b){return !!b&&b.fassung==='begehung'&&b.art==='vorab';}
+// F17: Kontakte der Karte als Auswahl „Besichtigung bei“: text = „Rolle: Name“, name, kontakt = „Name, Telefon“. Nur Kontakte mit Namen.
+const FS_VB_ROLLEN={mieter:'Mieter',eigentuemer:'Eigentümer',hausverwaltung:'Hausverwaltung',ag:'Auftraggeber',privatkunde:'Privatkunde'};
+function _fsVbKontakte(t){
+  return ((t&&Array.isArray(t.kontakte))?t.kontakte:[]).filter(k=>k&&String(k.name||k.firma||'').trim()).map(k=>{
+    const name=String(k.name||k.firma).trim(),rolle=FS_VB_ROLLEN[k.rolle]||String(k.rolle||'').trim()||'Kontakt',tel=String(k.tel||k.tel2||'').trim();
+    return {text:rolle+': '+name,name,kontakt:name+(tel?', '+tel:'')};
+  });
+}
+// Datum (TT.MM.JJJJ) und Uhrzeit (hh:mm) von jetzt – für die „Ich bin jetzt hier“-Knöpfe
+function _fsVbJetzt(){
+  const d=new Date(),p=n=>('0'+n).slice(-2);
+  return {datum:p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear(),uhr:p(d.getHours())+':'+p(d.getMinutes())};
+}
 // Anlass aus der Beschreibung der Karte: nur ein VORSCHLAG zum Überschreiben (Tags raus, Leerzeichen zusammen, höchstens 300 Zeichen)
 function _fsVbAnlassAusKarte(t){
-  const s=String((t&&t.desc)||'').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
+  let q=String((t&&t.schadensbild)||'').trim(); // F17: das saubere Feld der Karte zuerst
+  if(!q)q=String((t&&t.desc)||'').split('[E-Mail-Import')[0]; // F17: Anhang „[E-Mail-Import …]: Von: …“ gehört nicht ins Protokoll
+  const s=q.replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
   return s.length>300?s.slice(0,297)+'...':s;
 }
 const FS_BG_MERK_KEY='pam_fs_aufgenommen';
@@ -2359,7 +2398,7 @@ function _fsBgUmstellen(b){
   b.fassung='begehung';
   b.titel=vorab?FS_VB_TITEL:FS_BG_TITEL+(keller?' Keller':' Wohnung');
   Object.assign(b.kopf,{anlass:'',beginn:'',ende:'',geraetLuft:'',geraetOberflaeche:'',geraetBauteil:'',pruefer:_fsBgMerkName()});
-  if(vorab)Object.assign(b.kopf,{versicherung:'',schadennr:'',zugang:'',ansprechpartner:''});
+  if(vorab)Object.assign(b.kopf,{versicherung:'',schadennr:'',zugang:'',ansprechpartner:'',besuchBei:'',lage:'',nutzer:''}); // F17: Nutzer wählt Frank je Besuch („Besichtigung bei“), nicht alle Mieter der Karte
   b.anwesende=[];
   b.sektionen=(vorab?FS_VB_SEKTIONEN:keller?FS_BG_KELLER:FS_BG_WOHNUNG).map(s=>({titel:s.titel,items:s.items.map(_fsBgItem)}));
   b.angaben=(vorab?FS_VB_ANGABEN:keller?FS_BG_KELLER_ANGABEN:FS_BG_WOHNUNG_ANGABEN).map(_fsBgAngabe);
@@ -3341,6 +3380,8 @@ async function _fsMobPdfBg(bericht,task){
       if(hat(k.nutzer))rows.push(['Nutzer',String(k.nutzer).trim()]);
       if(hat(k.anlass))rows.push(['Anlass',String(k.anlass).trim()]);
       if(vorab){ // F16: Versicherung, Zugang, Ansprechpartner; kein Umfangstext (Franks Wahl)
+        if(hat(k.besuchBei))rows.push(['Besichtigung bei',String(k.besuchBei).trim()]); // F17
+        if(hat(k.lage))rows.push(['Lage',String(k.lage).trim()]); // F17
         if(hat(k.versicherung))rows.push(['Versicherung',String(k.versicherung).trim()]);
         if(hat(k.schadennr))rows.push(['Schadennummer',String(k.schadennr).trim()]);
         if(hat(k.zugang))rows.push(['Zugang',String(k.zugang).trim()]);
@@ -5030,7 +5071,8 @@ function _fsListeZeile(b,t){
     return {kurz:steil?'WP-STEILDA':'WP-FLADA',lang:steil?'Wartungsprotokoll Steildach':'Wartungsprotokoll Flachdach',name,sub:(adr&&adr!==name)?adr:''};
   }
   if(b.vorlage==='feuchte'&&b.fassung==='begehung'&&b.art==='vorab'){ // F16
-    return {kurz:'VORAB',lang:'Vorabbesichtigung vor der Schadenaufnahme',name:kartenname||String(b.titel||'Vorabbesichtigung'),sub:''};
+    const bei=String((b.kopf&&b.kopf.besuchBei)||'').trim(),lg=String((b.kopf&&b.kopf.lage)||'').trim(); // F17: bei wem – so sind zwei Besuche an einer Karte zu unterscheiden
+    return {kurz:'VORAB',lang:'Vorabbesichtigung vor der Schadenaufnahme',name:kartenname||String(b.titel||'Vorabbesichtigung'),sub:[bei,lg].filter(Boolean).join(' · ')};
   }
   if(b.vorlage==='feuchte'&&b.fassung==='begehung'){
     const keller=b.art==='keller';
