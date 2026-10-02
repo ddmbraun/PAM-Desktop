@@ -69,7 +69,7 @@ async function _clearCacheAndReload(){
 try{var _cs=+(localStorage.getItem('pam_card_scale')||100);document.documentElement.style.setProperty('--card-scale',(_cs/100).toFixed(2));}catch(e){}
 </script>
 <script src="https://accounts.google.com/gsi/client" defer onload="typeof gdriveInit==='function'?gdriveInit():(window._gsiPending=true)" onerror="window._gsiLoadError=true;window._gsiPending=false;typeof _driveSetStatus==='function'&&_driveSetStatus('⚠ Google-Dienst nicht erreichbar – Netzwerk oder Adblocker prüfen',false)"></script>
-<script src="formulare.js?v=F8" charset="utf-8"></script>
+<script src="formulare.js?v=F9" charset="utf-8"></script>
 <script>
 // ── EMAIL DROP-ZONE – Inline-Handler am Element, kein addEventListener nötig ──
 
@@ -10372,7 +10372,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-02 · #1063'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-02-b1063) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-02 · #1064'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-02-b1064) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -28899,6 +28899,7 @@ function _openPruefDesktopFormular(existingIdx){
 // Die Handy-Fassungen ziehen über 100 weitere Funktionen nach (Kamera, Upload-Warteschlange, Gerätespeicher) – deshalb
 // eigene PC-Fassungen statt Kopien. Nur am Tablet: Fotos aufnehmen, Fotos aus Drive holen, Fotos einer Zeile zuordnen,
 // testo einlesen – am PC gibt es dafür eine freundliche Meldung. ⛔ Zwei Schrägstriche, kein Blockkommentar (b764).
+window._FS_AM_PC=true;   // F9: formulare.js zeigt am PC das PDF und die Foto-Werkzeuge, am Handy/Tablet kein PDF
 function currentTask(){const id=(document.getElementById('taskId')||{}).value||'';return id?findTaskById(id):null;}
 function renderDetail(){try{if(typeof renderPruefberichteDesktop==='function')renderPruefberichteDesktop();}catch(e){console.warn('[b1034] Formular-Liste:',e);}}
 function toast(msg,typ,ms){try{showToast(msg,typ==='error'?'error':(typ==='success'?'success':'info'),ms||3000);}catch(e){}}
@@ -28983,36 +28984,237 @@ async function _shrBytes(f){
   try{const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(id)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});return r.ok?await r.blob():null;}
   catch(e){console.warn('[b1034] Foto fürs PDF:',e);return null;}
 }
-// Fotos im Formular: Klick = kommt ins PDF ja/nein (wie am Tablet), Doppelklick = groß in Drive öffnen. Löschen nur am Tablet.
+// F9: Fotos im Formular am PC – ansehen, ins PDF ja/nein, Reihenfolge, bemalen, entfernen, hinzufügen (von der Festplatte oder aus dem Drive-Foto-Ordner).
+// Kamera und „Foto einer Zeile zuordnen am Handy" bleiben beim Tablet. Die Fotos selbst liegen in Drive; hier ändern sich nur die Einträge im Protokoll
+// (bericht.fotos) – ✕ entfernt den Eintrag, die Datei in Drive bleibt. Bemalen legt eine zweite Fassung an (editedDriveId), das Original bleibt.
+// Vorschau: die bemalte Fassung zuerst (wie in der Großansicht). Nur LESEN, nichts am Foto-Eintrag ändern (sonst änderte jedes Anzeigen die Daten).
+function _pamFormFotoBild(f,img){
+  try{
+    const u=String(f&&f.localUrl||'');
+    if(u.slice(0,5)==='data:'){img.src=u;return;}
+    const id=f&&(f.editedDriveId||f.driveId);
+    if(!id)return;
+    const tl=f.editedDriveId?'':_thumbGespeichert(f);
+    const holen=()=>{_fetchDesktopFotoBlob(id).then(x=>{if(x)img.src=x;}).catch(()=>{});};
+    if(tl){img.src=tl;img.onerror=()=>{img.onerror=null;holen();};return;}
+    holen();
+  }catch(e){console.warn('[F9] Foto-Vorschau:',e);}
+}
+function _pamFormFotoRefKey(f){return f.driveId||f.localKey||f.localUrl||'';}
+// Fotos im Formular: Klick = kommt ins PDF ja/nein, Doppelklick = groß, ✏ = bemalen, ‹ › = Reihenfolge, ✕ = aus dem Protokoll entfernen
 function _wpMobRenderFotos(bericht,grid){
+  if(!grid)return;
   grid.innerHTML='';
+  grid.style.gridTemplateColumns='repeat(auto-fill,minmax(150px,1fr))';
   const fotos=(bericht&&bericht.fotos)||[];
-  if(!fotos.length){const h=document.createElement('div');h.style.cssText='grid-column:1/-1;font-size:12px;color:var(--text2);padding:8px 14px;';h.textContent='Noch keine Fotos – aufnehmen am Tablet.';grid.appendChild(h);return;}
+  if(!fotos.length){const h=document.createElement('div');h.style.cssText='grid-column:1/-1;font-size:12px;color:var(--text2);padding:8px 14px;';h.textContent='Noch keine Fotos – unten „📁 Fotos vom PC“ oder „☁ Drive-Foto-Ordner“ benutzen.';grid.appendChild(h);return;}
+  const neu=()=>_wpMobRenderFotos(bericht,grid);
+  const rund=(txt,titel,stil,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.title=titel;b.setAttribute('aria-label',titel);
+    b.style.cssText='position:absolute;background:rgba(0,0,0,.62);color:#fff;border:none;border-radius:50%;width:26px;height:26px;font-size:12px;line-height:26px;padding:0;cursor:pointer;z-index:3;text-align:center;'+stil;
+    b.onclick=e=>{e.stopPropagation();fn();};return b;};
   fotos.forEach((f,fi)=>{
-    const cell=document.createElement('div');
-    cell.title='Klick: ins PDF ja/nein · Doppelklick: groß öffnen';
+    const cell=document.createElement('div');cell.setAttribute('data-fs-fotozelle',String(fi));
+    cell.title='Klick: ins PDF ja/nein · Doppelklick: groß ansehen';
     cell.style.cssText='position:relative;border:2px solid '+(f.inReport?'#1a7a3c':'var(--border)')+';border-radius:8px;overflow:hidden;background:var(--bg3);aspect-ratio:1;cursor:pointer;';
     const img=document.createElement('img');img.alt='';img.style.cssText='width:100%;height:100%;object-fit:cover;pointer-events:none;';
-    if(typeof _fsMiniaturQuelle==='function')_fsMiniaturQuelle(f,img);
+    _pamFormFotoBild(f,img);
     const badge=document.createElement('div');
-    badge.style.cssText='display:'+(f.inReport?'flex':'none')+';position:absolute;top:3px;right:3px;background:#1a7a3c;color:#fff;border-radius:50%;width:18px;height:18px;font-size:10px;align-items:center;justify-content:center;';
+    badge.style.cssText='display:'+(f.inReport?'flex':'none')+';position:absolute;top:4px;right:4px;background:#1a7a3c;color:#fff;border-radius:50%;width:20px;height:20px;font-size:11px;align-items:center;justify-content:center;font-weight:700;';
     badge.textContent='✓';
     let wecker=null;
     cell.onclick=()=>{
       if(wecker){clearTimeout(wecker);wecker=null;_wpMobOpenFoto(bericht,fi);return;}
       wecker=setTimeout(()=>{wecker=null;f.inReport=!f.inReport;cell.style.borderColor=f.inReport?'#1a7a3c':'var(--border)';badge.style.display=f.inReport?'flex':'none';scheduleSave();},280);
     };
-    cell.append(img,badge);grid.appendChild(cell);
+    const nl=document.createElement('div');nl.style.cssText='position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.5);color:#fff;font-size:10px;padding:2px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;';
+    nl.textContent=(fi+1)+' · '+(f.name||'Foto');
+    cell.append(img,badge,nl);
+    cell.append(rund('👁','Groß ansehen','top:4px;left:4px;',()=>_wpMobOpenFoto(bericht,fi)));
+    cell.append(rund('✏','Bemalen und beschriften – das Original bleibt erhalten','top:4px;left:34px;',()=>_pamFormFotoMalen(bericht,fi,neu)));
+    if(fi>0)cell.append(rund('‹','Ein Foto nach vorn','bottom:24px;left:4px;',()=>{const t=fotos[fi-1];fotos[fi-1]=fotos[fi];fotos[fi]=t;scheduleSave();neu();}));
+    if(fi<fotos.length-1)cell.append(rund('›','Ein Foto nach hinten','bottom:24px;left:34px;',()=>{const t=fotos[fi+1];fotos[fi+1]=fotos[fi];fotos[fi]=t;scheduleSave();neu();}));
+    cell.append(rund('✕','Aus dem Protokoll entfernen – die Datei in Drive bleibt','bottom:24px;right:4px;',()=>{
+      if(!confirm('Dieses Foto aus dem Protokoll entfernen?\n\nDie Datei in Drive bleibt erhalten.'))return;
+      const i=bericht.fotos.indexOf(f);if(i>=0)bericht.fotos.splice(i,1);scheduleSave();neu();
+    }));
+    if(f.editedDriveId){const bm=document.createElement('div');bm.textContent='✏ bearbeitet';bm.title='Es gibt eine bemalte Fassung – das Original bleibt erhalten';
+      bm.style.cssText='position:absolute;top:34px;left:4px;background:rgba(108,99,255,.85);color:#fff;font-size:10px;padding:1px 5px;border-radius:3px;pointer-events:none;';cell.appendChild(bm);}
+    grid.appendChild(cell);
   });
 }
-function _wpMobOpenFoto(bericht,fi){
-  const f=((bericht&&bericht.fotos)||[])[fi];const id=f&&(f.editedDriveId||f.driveId);
-  if(id){window.open('https://drive.google.com/file/d/'+encodeURIComponent(id)+'/view','_blank');return;}
-  toast('Dieses Foto liegt nur am Tablet (noch nicht in Drive)','info',4500);
+// Bemalen: derselbe Maler wie im Wartungsprotokoll und in der Foto-Liste (deskMalenAmFoto) – eine Ablage, keine zweite
+async function _pamFormFotoMalen(bericht,fi,danach){
+  const f=((bericht&&bericht.fotos)||[])[fi];
+  if(!f||!(f.editedDriveId||f.driveId)){toast('Dieses Foto liegt nur am Tablet (noch nicht in Drive) – bemalen geht erst, wenn es in Drive liegt','info',6000);return;}
+  if(typeof _wpFotoMalen!=='function'){toast('Der Foto-Maler fehlt – PAM bitte neu laden (Strg+Umschalt+R)','error',6000);return;}
+  let vomOriginal=false;
+  if(f.editedDriveId&&typeof _deskFrageZeichnung==='function'){
+    const wahl=await _deskFrageZeichnung();
+    if(wahl==='abbruch')return;
+    vomOriginal=(wahl==='neu');
+  }
+  try{
+    await _wpFotoMalen(f,vomOriginal,function(){
+      scheduleSave();
+      if(typeof danach==='function'){try{danach();}catch(e){console.warn('[F9] nach dem Malen:',e);}}
+    });
+  }catch(e){console.warn('[F9] Maler:',e);toast('Bemalen ging nicht: '+(e&&e.message||e),'error',6000);}
 }
-function _wpMobFotoAufnehmen(){toast('📷 Fotos bitte am Tablet aufnehmen – am PC werden sie angezeigt','info',4500);}
-function _wpMobLadeDriveFotos(){toast('☁ Fotos aus Drive bitte am Tablet übernehmen','info',4500);}
-function _wpMobFotoPickerForItem(){toast('📷 Fotos einer Zeile zuordnen geht am Tablet','info',4500);}
+// Großansicht mit Blättern und Bemalen
+async function _wpMobOpenFoto(bericht,start){
+  const fotos=(bericht&&bericht.fotos)||[];
+  if(!fotos.length)return;
+  let cur=Math.max(0,Math.min(start||0,fotos.length-1));
+  const alt=document.getElementById('_pamFormFotoAnsicht');if(alt)alt.remove();
+  const ov=document.createElement('div');ov.id='_pamFormFotoAnsicht';
+  ov.style.cssText='position:fixed;inset:0;z-index:100050;background:rgba(0,0,0,.92);display:flex;flex-direction:column;';
+  const kopf=document.createElement('div');kopf.style.cssText='display:flex;align-items:center;gap:10px;padding:10px 14px;color:#fff;flex-shrink:0;';
+  const lbl=document.createElement('div');lbl.style.cssText='flex:1;font-size:13px;font-weight:600;';
+  const mk=(txt,fn,stil)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.style.cssText='padding:8px 16px;border-radius:20px;border:none;background:rgba(255,255,255,.18);color:#fff;font-size:13px;font-weight:600;cursor:pointer;'+(stil||'');b.onclick=fn;return b;};
+  const zu=()=>{document.removeEventListener('keydown',taste,true);ov.remove();};
+  const bild=document.createElement('img');bild.alt='';bild.style.cssText='max-width:96%;max-height:100%;object-fit:contain;margin:auto;';
+  const mitte=document.createElement('div');mitte.style.cssText='flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;';mitte.appendChild(bild);
+  const zurueck=mk('◀ Zurück',()=>{if(cur>0){cur--;zeig();}});
+  const weiter=mk('Weiter ▶',()=>{if(cur<fotos.length-1){cur++;zeig();}});
+  const malen=mk('✏ Bemalen',()=>{const i=cur;zu();_pamFormFotoMalen(bericht,i,()=>{const g=document.getElementById('_wpMobFotoGrid');if(g)_wpMobRenderFotos(bericht,g);});},'background:#2e4fc4;');
+  const drive=mk('☁ In Drive öffnen',()=>{const f=fotos[cur];const id=f&&(f.editedDriveId||f.driveId);if(id)window.open('https://drive.google.com/file/d/'+encodeURIComponent(id)+'/view','_blank');else toast('Dieses Foto liegt nur am Tablet','info',4000);});
+  kopf.append(lbl,zurueck,weiter,malen,drive,mk('✕ Schließen',zu));
+  // Capture-Phase und stopPropagation: Escape/Pfeiltasten gehören der Großansicht – sonst schlösse das Escape auch die Karte dahinter
+  const taste=e=>{
+    if(e.key==='Escape'){e.stopPropagation();e.preventDefault();zu();}
+    else if(e.key==='ArrowLeft'){e.stopPropagation();e.preventDefault();if(cur>0){cur--;zeig();}}
+    else if(e.key==='ArrowRight'){e.stopPropagation();e.preventDefault();if(cur<fotos.length-1){cur++;zeig();}}
+  };
+  document.addEventListener('keydown',taste,true);
+  ov.append(kopf,mitte);document.body.appendChild(ov);
+  async function zeig(){
+    const f=fotos[cur];
+    lbl.textContent=(cur+1)+'/'+fotos.length+' · '+(f.name||'Foto')+(f.editedDriveId?' · bemalte Fassung':'');
+    zurueck.style.opacity=cur>0?'1':'.35';weiter.style.opacity=cur<fotos.length-1?'1':'.35';
+    bild.removeAttribute('src');bild.alt='Lade …';
+    const mein=cur;
+    const u=String(f.localUrl||'');
+    if(u.slice(0,5)==='data:'&&!(f.editedDriveId||f.driveId)){bild.src=u;return;}
+    const id=f.editedDriveId||f.driveId;
+    if(!id){bild.alt='Dieses Foto liegt nur am Tablet';return;}
+    try{const x=await _fetchDesktopFotoBlob(id);if(mein===cur){if(x)bild.src=x;else bild.alt='Bild nicht verfügbar';}}catch(e){if(mein===cur)bild.alt='Bild nicht verfügbar';}
+  }
+  zeig();
+}
+// Foto einer Zeile (Messstelle, Prüfpunkt, Wand, Raum) zuordnen – Auswahl aus den Fotos des Protokolls, dazu „Fotos vom PC"
+function _wpMobFotoPickerForItem(bericht,it,onChange){
+  if(!Array.isArray(it.fotoRefs))it.fotoRefs=[];
+  const alt=document.getElementById('_pamFormFotoWahl');if(alt)alt.remove();
+  const ov=document.createElement('div');ov.id='_pamFormFotoWahl';
+  ov.style.cssText='position:fixed;inset:0;z-index:100040;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;';
+  const box=document.createElement('div');
+  box.style.cssText='background:var(--bg);color:var(--text);border-radius:12px;padding:18px;width:min(720px,92vw);max-height:80vh;display:flex;flex-direction:column;gap:10px;box-shadow:0 8px 32px rgba(0,0,0,.4);';
+  box.onclick=e=>e.stopPropagation();
+  const hdr=document.createElement('div');hdr.style.cssText='font-size:14px;font-weight:700;display:flex;justify-content:space-between;align-items:center;gap:10px;';
+  const ht=document.createElement('span');ht.textContent='📷 Fotos zuordnen: '+(it.text||'');
+  const x=document.createElement('button');x.type='button';x.textContent='✕';x.style.cssText='background:transparent;border:none;color:var(--text2);font-size:18px;cursor:pointer;';x.onclick=()=>ov.remove();
+  hdr.append(ht,x);
+  const hint=document.createElement('div');hint.style.cssText='font-size:12px;color:var(--text2);';hint.textContent='Fotos anklicken zum Zuordnen oder Lösen (zugeordnete sind rot umrandet). Das Foto selbst bleibt immer im Protokoll.';
+  const grid=document.createElement('div');grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;overflow-y:auto;flex:1;min-height:60px;';
+  const drin=f=>(it.fotoRefs||[]).some(r=>_fsRefPasst(f,r));
+  const bauen=()=>{
+    grid.innerHTML='';
+    const fotos=bericht.fotos||[];
+    if(!fotos.length){const l=document.createElement('div');l.style.cssText='grid-column:1/-1;font-size:12px;color:var(--text2);padding:10px 2px;';l.textContent='Noch keine Fotos im Protokoll – unten „📁 Fotos vom PC“ benutzen.';grid.appendChild(l);return;}
+    fotos.forEach(f=>{
+      const c=document.createElement('div');
+      const an=drin(f);
+      c.style.cssText='position:relative;border:3px solid '+(an?'#c0392b':'var(--border)')+';border-radius:8px;overflow:hidden;background:var(--bg3);aspect-ratio:1;cursor:pointer;';
+      const img=document.createElement('img');img.alt='';img.style.cssText='width:100%;height:100%;object-fit:cover;pointer-events:none;';_pamFormFotoBild(f,img);
+      const b=document.createElement('div');b.style.cssText='display:'+(an?'flex':'none')+';position:absolute;top:4px;right:4px;background:#c0392b;color:#fff;border-radius:50%;width:20px;height:20px;font-size:11px;align-items:center;justify-content:center;font-weight:700;';b.textContent='✓';
+      const nl=document.createElement('div');nl.style.cssText='position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.5);color:#fff;font-size:10px;padding:2px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';nl.textContent=f.name||'';
+      c.onclick=()=>{
+        const r=it.fotoRefs;
+        let ix=r.indexOf(_pamFormFotoRefKey(f));
+        if(ix<0&&f.driveId)ix=r.indexOf(f.driveId);
+        if(ix<0&&f.localKey)ix=r.indexOf(f.localKey);
+        if(ix<0&&f.localUrl)ix=r.indexOf(f.localUrl);
+        if(ix>=0)r.splice(ix,1);else r.push(_pamFormFotoRefKey(f));
+        const lk=drin(f);c.style.borderColor=lk?'#c0392b':'var(--border)';b.style.display=lk?'flex':'none';
+        scheduleSave();if(typeof onChange==='function')onChange();
+      };
+      c.append(img,b,nl);grid.appendChild(c);
+    });
+  };
+  bauen();
+  const zeile=document.createElement('div');zeile.style.cssText='display:flex;gap:8px;';
+  const neuBtn=document.createElement('button');neuBtn.type='button';neuBtn.textContent='📁 Fotos vom PC';
+  neuBtn.style.cssText='flex:1;padding:10px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg3);color:var(--text);font-size:13px;font-weight:600;cursor:pointer;';
+  neuBtn.onclick=()=>{
+    const g=document.getElementById('_wpMobFotoGrid')||document.createElement('div');
+    _wpMobFotoAufnehmen(bericht,g,false,neue=>{
+      (neue||[]).forEach(f=>{const k=_pamFormFotoRefKey(f);if(k&&!it.fotoRefs.includes(k))it.fotoRefs.push(k);});
+      scheduleSave();bauen();if(typeof onChange==='function')onChange();
+      toast('✓ '+(neue||[]).length+' Foto'+((neue||[]).length!==1?'s':'')+' hinzugefügt und zugeordnet','success',3000);
+    });
+  };
+  const fertig=document.createElement('button');fertig.type='button';fertig.textContent='✓ Fertig';
+  fertig.style.cssText='flex:1;padding:10px;border-radius:8px;border:none;background:#1a5c3a;color:#fff;font-size:13px;font-weight:700;cursor:pointer;';fertig.onclick=()=>ov.remove();
+  zeile.append(neuBtn,fertig);
+  box.append(hdr,hint,grid,zeile);ov.appendChild(box);ov.onclick=()=>ov.remove();document.body.appendChild(ov);
+}
+// Fotos von der Festplatte ins Protokoll: verkleinert nach Drive-Foto-Ordner der Karte, dann Eintrag im Protokoll (ins PDF ✓)
+function _wpMobFotoAufnehmen(bericht,grid,kamera,onBehalten){
+  const inp=document.createElement('input');inp.type='file';inp.accept='image/*';inp.multiple=true;inp.style.display='none';
+  inp.onchange=async()=>{
+    const dateien=Array.from(inp.files||[]).filter(d=>/^image\//.test(d.type||'')||/\.(jpe?g|png|webp|heic)$/i.test(d.name||''));
+    try{inp.remove();}catch(e){}
+    if(!dateien.length){toast('Keine Bilddatei gewählt','info',3000);return;}
+    if(!tokenValid()){toast('Bitte zuerst mit Google Drive verbinden (☁)','error',5000);return;}
+    const ordner=(typeof _getDriveFotoFolderId==='function')?_getDriveFotoFolderId():'';
+    if(!ordner){toast('Am Auftrag ist kein Foto-Ordner hinterlegt – dort kann nichts abgelegt werden','error',6000);return;}
+    if(!Array.isArray(bericht.fotos))bericht.fotos=[];
+    const h=new Date(),p=n=>String(n).padStart(2,'0');
+    const stempel=h.getFullYear()+p(h.getMonth()+1)+p(h.getDate())+'_'+p(h.getHours())+p(h.getMinutes())+p(h.getSeconds());
+    const neue=[];let fehler=0;
+    toast('📁 '+dateien.length+' Foto'+(dateien.length>1?'s werden':' wird')+' hochgeladen …','info',4000);
+    for(let i=0;i<dateien.length;i++){
+      const d=dateien[i];
+      try{
+        let blob=d;
+        try{const k=await _shrNeuKodieren(d,2560);if(k&&k.blob)blob=k.blob;}catch(e){console.warn('[F9] Verkleinern:',e);}
+        const name='Protokoll_'+stempel+'_'+(i+1)+'.jpg';
+        const meta=await _driveUploadGeneric(await blob.arrayBuffer(),name,'image/jpeg',ordner);
+        if(!meta||!meta.id)throw new Error('keine Antwort von Drive');
+        const fo={driveId:meta.id,name:meta.name||name,inReport:true,localUrl:null};
+        if(meta.thumbnailLink)fo.thumbnail=meta.thumbnailLink;
+        bericht.fotos.push(fo);neue.push(fo);
+      }catch(e){fehler++;console.warn('[F9] Foto hochladen:',d&&d.name,e);}
+    }
+    if(neue.length){scheduleSave();try{_wpMobRenderFotos(bericht,grid);}catch(e){}
+      if(typeof onBehalten==='function'){try{onBehalten(neue);}catch(e){console.warn('[F9] onBehalten:',e);}}}
+    toast(fehler?('⚠ '+neue.length+' hochgeladen, '+fehler+' ohne Erfolg'):('✓ '+neue.length+' Foto'+(neue.length>1?'s':'')+' hinzugefügt'),fehler?'error':'success',5000);
+  };
+  document.body.appendChild(inp);inp.click();
+}
+// Fotos aus dem Drive-Foto-Ordner der Karte holen (nur solche, die noch nicht im Protokoll stehen)
+async function _wpMobLadeDriveFotos(bericht,grid){
+  if(!tokenValid()){toast('Bitte zuerst mit Google Drive verbinden (☁)','error',5000);return;}
+  const ordner=(typeof _getDriveFotoFolderId==='function')?_getDriveFotoFolderId():'';
+  if(!ordner){toast('⚠ Kein Foto-Ordner eingetragen (Ordner & Links)','error',5000);return;}
+  toast('📂 Lade Fotos aus Drive …','info',3000);
+  try{
+    let dateien=[],pt='';
+    do{
+      const url='https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent("'"+ordner+"' in parents and mimeType contains 'image/' and trashed=false")+'&fields=nextPageToken,files(id,name,mimeType,thumbnailLink)&pageSize=100'+(pt?'&pageToken='+encodeURIComponent(pt):'');
+      const r=await fetch(url,{headers:{Authorization:'Bearer '+gdriveToken}});
+      if(!r.ok)throw new Error('Drive antwortet mit '+r.status);
+      const d=await r.json();dateien=dateien.concat(d.files||[]);pt=d.nextPageToken||'';
+    }while(pt);
+    if(!Array.isArray(bericht.fotos))bericht.fotos=[];
+    const da=new Set();bericht.fotos.forEach(f=>{if(f.driveId)da.add(f.driveId);if(f.editedDriveId)da.add(f.editedDriveId);});
+    let neu=0;
+    dateien.forEach(f=>{if(da.has(f.id))return;const fo={driveId:f.id,name:f.name,inReport:true,localUrl:null};if(f.thumbnailLink)fo.thumbnail=f.thumbnailLink;bericht.fotos.push(fo);neu++;});
+    if(neu)scheduleSave();
+    _wpMobRenderFotos(bericht,grid);
+    toast(neu?('✓ '+neu+' neue Foto'+(neu>1?'s':'')+' aus Drive geholt'):'Keine neuen Fotos im Foto-Ordner','success',4000);
+  }catch(e){toast('Fehler beim Laden: '+(e&&e.message||e),'error',6000);}
+}
 // Offenes Formular nach Neuladen/Zusammenführen wieder anhängen (wie PAM Mobil v306 _pbOffenNeuBinden). Anders als am
 // Handy gewinnt bei GLEICHEM Stempel das offene Formular: am PC kann saveTaskData (offene Karte) eine Kopie gezogen haben,
 // während im Formular schon weitergetippt wurde – das Getippte steckt dann nur im Formular-Objekt.

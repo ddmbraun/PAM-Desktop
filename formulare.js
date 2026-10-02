@@ -1,7 +1,9 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F8';
+const PAM_FORMULARE_VERSION='F9';
+// F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
+function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
    Befund Frank 14.09.2026: ein Formular wie das Wartungsprotokoll, aber mit Messwerten – am
    Tablet vor Ort ausfüllen, als PDF abheften. Werte werden eingetippt; das Einlesen der
@@ -279,7 +281,7 @@ const FS_HILFE=[
   ]],
   ['Abschluss',[
     'Ursache wählen und kurz begründen. Nur Fotos mit grünem Haken kommen ins PDF.',
-    '„PDF erstellen" – das PDF landet im Ordner der Karte, „📂 Öffnen" zeigt es sofort.'
+    'Das PDF erstellst du am PC (Karte → Formulare → ⋯ → „PDF neu erstellen"). Es landet im Ordner der Karte.'
   ]]
 ];
 // F2a: im Begehungsprotokoll gelten andere Hinweise zum Abhaken und zum Abschluss (keine Ursache, keine Empfehlung)
@@ -305,7 +307,7 @@ const FS_HILFE_BG={
   'Abschluss':[
     'Was Mieter oder Nutzer gesagt haben, gehört unter „Angaben der Nutzer" – mit dem Namen, von wem es stammt.',
     'Zusammenfassung: nur das Festgestellte, eine Momentaufnahme. Keine Ursache, keine Empfehlung.',
-    '„PDF erstellen" – das PDF landet im Ordner der Karte, „📂 Öffnen" zeigt es sofort. Nur Fotos mit grünem Haken kommen hinein.'
+    'Das PDF erstellst du am PC (Karte → Formulare → ⋯ → „PDF neu erstellen"). Es landet im Ordner der Karte. Nur Fotos mit grünem Haken kommen hinein.'
   ]
 };
 function _fsHilfeZeigen(b){
@@ -957,13 +959,19 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     const w=document.createElement('div');
     w.appendChild(_kopfZeile('Fotos'));
     const info=document.createElement('div');info.style.cssText='padding:6px 14px;font-size:12px;color:var(--text2);';
-    info.textContent='Antippen = im PDF ✓ · zweimal antippen = groß ansehen';
+    info.textContent=_fsAmPc()
+      ?'Klick = im PDF ✓ · Doppelklick oder 👁 = groß ansehen · ✏ = bemalen und beschriften (das Original bleibt) · ‹ › = Reihenfolge · ✕ = aus dem Protokoll entfernen (in Drive bleibt es)'
+      :'Antippen = im PDF ✓ · zweimal antippen = groß ansehen';
     const grid=document.createElement('div');grid.style.cssText='display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:0 14px 8px;';
     grid.id='_wpMobFotoGrid'; // derselbe Name wie im Wartungsprotokoll: der Foto-Dialog zieht die Miniaturen hierüber nach
     _wpMobRenderFotos(bericht,grid);
     const kr=document.createElement('div');kr.style.cssText='display:flex;gap:8px;padding:0 14px 16px;';
     const mk=(txt,stil,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.style.cssText=S_KNOPF+'flex:1;'+stil;b.onclick=fn;return b;};
-    kr.append(
+    if(_fsAmPc()){ // F9: am PC keine Kamera – Fotos von der Festplatte oder aus dem Drive-Foto-Ordner
+      kr.append(
+        mk('📁 Fotos vom PC','border:1.5px solid var(--border);background:var(--bg3);color:var(--text);',()=>_wpMobFotoAufnehmen(bericht,grid,false)),
+        mk('☁ Drive-Foto-Ordner','border:1.5px dashed var(--green);background:transparent;color:var(--text);',()=>_wpMobLadeDriveFotos(bericht,grid)));
+    }else kr.append(
       mk('📷 Kamera','border:1.5px dashed var(--accent2);background:transparent;color:var(--text);',()=>_wpMobFotoAufnehmen(bericht,grid,true)),
       mk('🖼 Galerie','border:1.5px solid var(--border);background:var(--bg3);color:var(--text);',()=>_wpMobFotoAufnehmen(bericht,grid,false)),
       mk('☁ Drive','border:1.5px dashed var(--green);background:transparent;color:var(--text);',()=>_wpMobLadeDriveFotos(bericht,grid)));
@@ -1811,7 +1819,13 @@ function _openFeuchteprotokollMobil(existingIdx,art){
 
   _neuBauen();
 
-  /* Fußleiste */
+  /* Fußleiste – F9: nur am PC. Handy und Tablet erstellen kein PDF (Frank 02.10.2026: Prüfen und Weiterbearbeiten am Rechner). */
+  if(!_fsAmPc()){
+    body.style.paddingBottom='24px';
+    ov.append(hdr,body);
+    document.body.appendChild(ov);
+    return;
+  }
   const footer=document.createElement('div');
   footer.style.cssText='position:fixed;bottom:0;left:0;right:0;padding:12px 14px;background:var(--bg2);border-top:1px solid var(--border);display:flex;gap:10px;z-index:99999;';
   const pdfBtn=document.createElement('button');pdfBtn.type='button';pdfBtn.textContent='📄 PDF erstellen';
