@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F18';
+const PAM_FORMULARE_VERSION='F19';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
@@ -199,6 +199,7 @@ function _fsVervollstaendigen(b){
     ['anlass','beginn','ende','geraetLuft','geraetOberflaeche','geraetBauteil'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';});
     if(!Array.isArray(b.anwesende))b.anwesende=[];
     if(!Array.isArray(b.angaben))b.angaben=[];
+    if(b.art==='vorab'&&typeof b.schadenbild!=='string')b.schadenbild=''; // F19: freie Beschreibung des Schadenbildes
     if(b.art==='vorab')['versicherung','schadennr','zugang','ansprechpartner','besuchBei','lage'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';}); // F16
   }
   return b;
@@ -1125,7 +1126,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     if(k==='fest'){
       let da=0,offen=0;
       (bericht.sektionen||[]).forEach(s=>((s&&s.items)||[]).forEach(i=>{if(i.typ==='notiz')return;if(i.frei||i.status==='ok'||i.status==='mangel')da++;else offen++;}));
-      return [da?da+' erfasst':'',offen?offen+' offen':''].filter(Boolean).join(' · ')||'keine Punkte';
+      return [String(bericht.schadenbild||'').trim()?'Beschreibung':'',da?da+' erfasst':'',offen?offen+' offen':''].filter(Boolean).join(' · ')||'keine Punkte'; // F19
     }
     if(k==='skizze'){const n=(bericht.raeume||[]).filter(q=>q&&q.skizze&&q.skizze.an).length;return n?plural(n,'Skizze','Skizzen'):'noch keine Skizze';}
     if(k==='angaben'){const a=bericht.angaben||[];return a.filter(x=>x&&String(x.text||'').trim()).length+' von '+a.length+' beantwortet';}
@@ -1796,7 +1797,13 @@ function _openFeuchteprotokollMobil(existingIdx,art){
   function _teilChecklistenBg(){
     const w=document.createElement('div');
     w.appendChild(_kopfZeile('Feststellungen vor Ort'));
-    w.appendChild(_bgInfo('Tippe den Satz an, der stimmt. Was du offen lässt, steht nicht im PDF.'));
+    if(_fsIstVorab(bericht)){ // F19: erst in eigenen Worten beschreiben, darunter die Sätze
+      const sbk=document.createElement('div');sbk.setAttribute('data-fs-schadenbild','1');sbk.style.cssText='padding:8px 14px 4px;';
+      const sbl=document.createElement('div');sbl.style.cssText='font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px;';sbl.textContent='Beschreibung des Schadenbildes';
+      sbk.append(sbl,_bgInfo('Schreibe in eigenen Worten, was du siehst und misst – nur Feststellungen, keine Ursache. Steht im PDF vor den Einzelpunkten.'),_bgTextFeld(bericht.schadenbild,'z. B. Am Balkon steht Wasser, der Ablauf ist mit Laub verstopft …',v=>{bericht.schadenbild=v;},6));
+      w.appendChild(sbk);
+      w.appendChild(_bgInfo('Einzelpunkte: Tippe den Satz an, der stimmt. Rechts öffnet sich ein Eingabefeld für Einzelheiten. Was du offen lässt, steht nicht im PDF.'));
+    }else w.appendChild(_bgInfo('Tippe den Satz an, der stimmt. Was du offen lässt, steht nicht im PDF.'));
     const zuListe=_fsZuLesen(bericht.id);
     const umschalten=(si,zu)=>{
       _fsZuSetzen(bericht.id,si,zu);_neuBauen();
@@ -2382,11 +2389,22 @@ function _fsVbJetzt(){
   const d=new Date(),p=n=>('0'+n).slice(-2);
   return {datum:p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear(),uhr:p(d.getHours())+':'+p(d.getMinutes())};
 }
+// F19: Rückfall, wenn die Karte weder „schadensbild“ noch eine Beschreibung hat: der Anliegen-Text im Betreff der Mail „Neue Anfrage „Verstopfter Ablauf am Balkon“ wurde Ihnen zugewiesen“.
+// Bewusst NUR dieses Muster (kein „AW:“, kein beliebiger Betreff) – sonst stünde Unsinn im Anlass. Die erste passende Mail der Karte zählt.
+function _fsVbAnlassAusMail(t){
+  const quellen=((t&&Array.isArray(t.msThreadMessages))?t.msThreadMessages.map(m=>m&&m.subject):[]).concat([t&&t.msEmailSubject]);
+  for(const sb of quellen){
+    const m=/Neue Anfrage\s*[„"“”]([^„"“”]{3,150})[“”"]/.exec(String(sb||''));
+    if(m)return m[1].replace(/\s+/g,' ').trim();
+  }
+  return '';
+}
 // Anlass aus der Beschreibung der Karte: nur ein VORSCHLAG zum Überschreiben (Tags raus, Leerzeichen zusammen, höchstens 300 Zeichen)
 function _fsVbAnlassAusKarte(t){
   let q=String((t&&t.schadensbild)||'').trim(); // F17: das saubere Feld der Karte zuerst
   if(!q)q=String((t&&t.desc)||'').split('[E-Mail-Import')[0]; // F17: Anhang „[E-Mail-Import …]: Von: …“ gehört nicht ins Protokoll
-  const s=q.replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
+  let s=q.replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
+  if(!s)s=_fsVbAnlassAusMail(t); // F19
   return s.length>300?s.slice(0,297)+'...':s;
 }
 const FS_BG_MERK_KEY='pam_fs_aufgenommen';
@@ -2413,6 +2431,7 @@ function _fsBgUmstellen(b){
   Object.assign(b.kopf,{anlass:'',beginn:'',ende:'',geraetLuft:'',geraetOberflaeche:'',geraetBauteil:'',pruefer:_fsBgMerkName()});
   if(vorab)Object.assign(b.kopf,{versicherung:'',schadennr:'',zugang:'',ansprechpartner:'',besuchBei:'',lage:'',nutzer:''}); // F17: Nutzer wählt Frank je Besuch („Besichtigung bei“), nicht alle Mieter der Karte
   b.anwesende=[];
+  if(vorab)b.schadenbild=''; // F19
   b.sektionen=(vorab?FS_VB_SEKTIONEN:keller?FS_BG_KELLER:FS_BG_WOHNUNG).map(s=>({titel:s.titel,items:s.items.map(_fsBgItem)}));
   b.angaben=(vorab?FS_VB_ANGABEN:keller?FS_BG_KELLER_ANGABEN:FS_BG_WOHNUNG_ANGABEN).map(_fsBgAngabe);
   return b;
@@ -3508,8 +3527,10 @@ async function _fsMobPdfBg(bericht,task){
         ((sek&&sek.items)||[]).forEach(it=>{const s=_fsBgSatz(it,sek);if(s)zeilen.push(s+fotoHinweis(it.fotoRefs));});
         if(zeilen.length)gruppen.push({titel:String(sek.titel||'').replace(/^\d+\s*·\s*/,''),zeilen});
       });
-      if(gruppen.length){
+      const sbText=(vorab&&hat(bericht.schadenbild))?String(bericht.schadenbild).trim():''; // F19
+      if(gruppen.length||sbText){
         abschnitt('Feststellungen vor Ort');
+        if(sbText){unterTitel('Beschreibung des Schadenbildes');absatz(sbText,{einzug:3,abstand:3});y+=2;}
         gruppen.forEach(g=>{
           unterTitel(g.titel);
           g.zeilen.forEach(z=>absatz('- '+z,{einzug:3,abstand:1.5}));
