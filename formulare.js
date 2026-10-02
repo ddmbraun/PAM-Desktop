@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F10';
+const PAM_FORMULARE_VERSION='F11';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
@@ -4630,4 +4630,14 @@ async function _fsWpPdf(bericht,task){
     toast('PDF-Fehler: '+e.message,'error');
     return null;
   }
+}
+
+/* ══ F11: ZU WELCHEM PUNKT GEHÖRT DAS FOTO? ═══════════════════════════════════════════════════════════════
+   Im Foto-Raster unten und in der Großansicht zeigen beide Apps (PC, Handy/Tablet) unter dem Foto, wo es verknüpft ist:
+   Prüfpunkt (Wartungs-/Feuchteprotokoll), Messstelle, Wand, Raum (Begehungsprotokoll). Leer = nicht zugeordnet. */
+function _fsFotoZuordnungText(bericht,f){
+  try{
+    const fn=(bericht&&bericht.fassung==='begehung'&&typeof _fsBgFotoZuordnung==='function')?_fsBgFotoZuordnung:_fsFotoZuordnung;
+    return String(fn(bericht,f)||'');
+  }catch(e){console.warn('[Formular] Foto-Zuordnung:',e);return '';}
 }
