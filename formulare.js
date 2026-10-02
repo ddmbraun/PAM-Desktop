@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F19';
+const PAM_FORMULARE_VERSION='F20';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
@@ -200,6 +200,7 @@ function _fsVervollstaendigen(b){
     if(!Array.isArray(b.anwesende))b.anwesende=[];
     if(!Array.isArray(b.angaben))b.angaben=[];
     if(b.art==='vorab'&&typeof b.schadenbild!=='string')b.schadenbild=''; // F19: freie Beschreibung des Schadenbildes
+    if(b.art==='vorab'&&typeof b.vorgeschichte!=='string')b.vorgeschichte=''; // F20
     if(b.art==='vorab')['versicherung','schadennr','zugang','ansprechpartner','besuchBei','lage'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';}); // F16
   }
   return b;
@@ -387,6 +388,16 @@ function _fsKopfErgaenzen(bericht,t){
   return n;
 }
 
+// F20: Felder, die im Protokoll ANDERS stehen als in der Karte (beide nicht leer). Anlass zählt nicht – den schreibt Frank meist selbst um.
+// Vorabbesichtigung: Nutzer zählt nicht (kommt aus „Besichtigung bei“). Reine Funktion; Rückgabe [{key,name,alt,neu}].
+const FS_KOPF_NAMEN={auftraggeber:'Auftraggeber',objektAdresse:'Objekt',auftragNr:'Auftrag-Nr.',nutzer:'Nutzer / Mieter'};
+function _fsKopfAbweichungen(bericht,t){
+  if(!bericht||!bericht.kopf)return [];
+  const v=_fsKopfAusKarte(t);
+  if(bericht.art==='vorab')delete v.nutzer;
+  return Object.keys(FS_KOPF_NAMEN).filter(k=>k in v).filter(k=>{const alt=String(bericht.kopf[k]||'').trim(),neu=String(v[k]||'').trim();return alt&&neu&&alt!==neu;})
+    .map(k=>({key:k,name:FS_KOPF_NAMEN[k],alt:String(bericht.kopf[k]).trim(),neu:String(v[k]).trim()}));
+}
 // Klartext zu einer Messstelle – ohne Emoji (geht auch ins PDF)
 function _fsKlartext(w){
   if(!w||w.ofRf===null||w.ofRf===undefined||w.grenzeTs===null||w.grenzeTs===undefined||w.ts===null||w.ts===undefined)return {stufe:'',text:''};
@@ -713,7 +724,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
   function _neuBauen(){
     const sc=body.scrollTop;
     body.innerHTML='';
-    if(_fsIstVorab(bericht)&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_bgBlock('auftrag',_teilAuftragBg),_bgBlock('fest',_teilChecklistenBg,'Feststellungen vor Ort'),_bgBlock('angaben',_teilAngabenBg,'Angaben der Nutzer (nicht selbst festgestellt)'),_bgBlock('fotos',_teilFotos,'Fotos'),_bgBlock('termin',_teilTerminBg),_bgBlock('raeume',_teilRaeumeBg,'Räume')); // F16: Vorabbesichtigung – Muss-Abschnitte oben, Bei-Bedarf unten
+    if(_fsIstVorab(bericht)&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_bgBlock('vorort',_teilVorOrtVb),_bgBlock('karte',_teilKarteVb),_bgBlock('versich',_teilVersichVb),_bgBlock('fest',_teilChecklistenBg,'Feststellungen vor Ort'),...(_vbAltAngaben()?[_bgBlock('angaben',_teilAngabenBg,'Angaben der Nutzer (nicht selbst festgestellt)')]:[]),_bgBlock('termin',_teilTerminBg),_bgBlock('raeume',_teilRaeumeBg,'Räume')); // F20: „Vor Ort“ offen, der Rest zugeklappt
     else if(bericht.fassung==='begehung'&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_teilKopfBg(),_bgBlock('raeume',_teilRaeumeBg,'Räume'),_bgBlock('fest',_teilChecklistenBg,'Feststellungen vor Ort'),_bgBlock('angaben',_teilAngabenBg,'Angaben der Nutzer (nicht selbst festgestellt)'),_bgBlock('fazit',_teilZusammenfassungBg,'Zusammenfassung der Feststellungen'),_bgBlock('fotos',_teilFotos,'Fotos')); // F2b: zuklappbar, Leiste oben
     else{
       body.append(_teilErgebnis(),_teilKopf(),_teilRaeume(),_teilStellen(),_teilChecklisten(),_teilBewertung(),_teilFotos()); // v294: Ergebnis oben
@@ -744,6 +755,16 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     _fsStats();
   }
 
+  // F20: „↻ aus Karte“ – leere Felder füllen (wie bisher), ABWEICHENDE Felder nach Rückfrage übernehmen (Frank: Adresse an der Karte korrigiert, Protokoll behielt die alte)
+  function _ausKarteKlick(){
+    const n=_fsKopfErgaenzen(bericht,t);
+    const ab=(typeof _fsKopfAbweichungen==='function')?_fsKopfAbweichungen(bericht,t):[];
+    let m=0;
+    if(ab.length&&confirm('Diese Angaben weichen von der Karte ab:\n\n'+ab.map(x=>x.name+'\n   im Protokoll: '+x.alt+'\n   in der Karte: '+x.neu).join('\n\n')+'\n\nOK = aus der Karte übernehmen\nAbbrechen = so lassen')){ab.forEach(x=>{bericht.kopf[x.key]=x.neu;});m=ab.length;}
+    scheduleSave();_neuBauen();
+    const teile=[n?n+(n===1?' Feld':' Felder')+' ergänzt':'',m?m+(m===1?' Feld':' Felder')+' aus der Karte übernommen':''].filter(Boolean);
+    toast(teile.length?'✓ '+teile.join(', '):(ab.length?'ℹ Nichts geändert – das Protokoll behält seine Angaben':'ℹ Nichts zu übernehmen – alles wie in der Karte'),'info',3500);
+  }
   function _teilErgebnis(){ // v294
     const e=document.createElement('div');e.setAttribute('data-fs-ergebnis','1');
     e.style.cssText='margin:10px;padding:12px 14px;border-radius:10px;background:var(--bg2);border:1px solid var(--border);border-left:6px solid var(--border);';
@@ -755,7 +776,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     const hilfen=document.createElement('div');hilfen.style.cssText='display:flex;flex-wrap:wrap;gap:8px;padding:8px 14px;'; // v294
     const hk=(txt,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.style.cssText=S_KNOPF+'min-height:44px;border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);';b.onclick=fn;return b;};
     hilfen.append(
-      hk('↻ aus Karte',()=>{const n=_fsKopfErgaenzen(bericht,t);scheduleSave();_neuBauen();toast(n?'✓ '+n+(n===1?' Feld':' Felder')+' aus der Karte übernommen':'ℹ Nichts zu übernehmen – Felder schon gefüllt oder keine Angaben an der Karte','info',3500);}),
+      hk('↻ aus Karte',()=>_ausKarteKlick()),
       hk('🌤 Wetter holen',()=>_fsWetterHolen(bericht,_neuBauen)));
     w.append(_kopfZeile('Auftrag und Termin'),hilfen,
       _feld('Auftraggeber','auftraggeber','aus der Karte'),
@@ -1102,19 +1123,24 @@ function _openFeuchteprotokollMobil(existingIdx,art){
   /* ── F2b: Bedienung – jeder Abschnitt lässt sich zuklappen, oben eine Leiste zum Springen ──────────────
      Gemerkt wird je GERÄT im Browser-Speicher (wie bei den Feststellungs-Abschnitten), NICHT am Protokoll – sonst käme es
      aufs andere Gerät mit. Das PDF zeigt immer alles. Standard: alles aufgeklappt. */
-  function _bgZu(k){const l=_fsZuLesen(bericht.id);return k==='skizze'?l.indexOf('a:skizze')<0:l.indexOf('b:'+k)>=0;}
+  function _bgStdZu(k){return k==='skizze'||(_fsIstVorab(bericht)&&FS_VB_STANDARD_ZU.indexOf(k)>=0);} // F20: Standard zu – wie die Raumskizze
+  function _bgZu(k){const l=_fsZuLesen(bericht.id);return _bgStdZu(k)?l.indexOf('a:'+k)<0:l.indexOf('b:'+k)>=0;}
   function _bgZuMehrere(keys,zu){ // Schlüssel: „b:…“ = zu; nur die Raumskizze ist Standard zu und merkt sich das Aufklappen als „a:skizze“
-    const norm=keys.filter(k=>k!=='skizze').map(k=>'b:'+k);
+    const norm=keys.filter(k=>!_bgStdZu(k)).map(k=>'b:'+k);
     if(norm.length)_fsZuMehrere(bericht.id,norm,zu);
-    if(keys.indexOf('skizze')>=0)_fsZuMehrere(bericht.id,['a:skizze'],!zu);
+    const std=keys.filter(_bgStdZu).map(k=>'a:'+k); // F20: auch die Standard-zu-Abschnitte der Vorabbesichtigung
+    if(std.length)_fsZuMehrere(bericht.id,std,!zu);
   }
-  function _bgBloecke(){return _fsIstVorab(bericht)?FS_VB_BLOECKE:FS_BG_BLOECKE;} // F16: Vorabbesichtigung hat eigene Abschnittsliste
+  function _bgBloecke(){return _fsIstVorab(bericht)?FS_VB_BLOECKE.filter(b=>b.k!=='angaben'||_vbAltAngaben()):FS_BG_BLOECKE;} // F16: Vorabbesichtigung hat eigene Abschnittsliste
   function _bgNurDieser(){try{return localStorage.getItem('pam_fs_nurDieser')==='1';}catch(e){return false;}}
   // Kurzfassung, die neben einem zugeklappten Abschnitt steht – nur Zahlen und Stichworte, keine Wertung
   function _bgKurz(k){
     const kf=bericht.kopf||{};
     const gef=arr=>arr.filter(x=>String(kf[x]||'').trim()).length;
     const plural=(n,e,m)=>n+' '+(n===1?e:m);
+    if(k==='vorort'){const nf=(bericht.fotos||[]).length;return [String(bericht.datum||'').trim(),_fsBgZeitText(kf),String(bericht.schadenbild||'').trim()?'Beschreibung':'',nf?plural(nf,'Foto','Fotos'):''].filter(Boolean).join(' · ')||'noch leer';} // F20
+    if(k==='karte')return gef(['auftraggeber','objektAdresse','auftragNr','nutzer'])+' von 4 ausgefüllt'; // F20
+    if(k==='versich')return gef(['versicherung','schadennr','zugang','ansprechpartner'])+' von 4 ausgefüllt'; // F20
     if(k==='auftrag')return _fsIstVorab(bericht)?gef(['auftraggeber','objektAdresse','auftragNr','nutzer','anlass','versicherung','schadennr','zugang','ansprechpartner','besuchBei','lage'])+' von 11 ausgefüllt':gef(['auftraggeber','objektAdresse','auftragNr','nutzer','anlass'])+' von 5 ausgefüllt';
     if(k==='termin'){
       const n=(bericht.anwesende||[]).filter(p=>p&&String(p.name||'').trim()).length;
@@ -1190,14 +1216,22 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     const w=document.createElement('div');
     const hilfen=document.createElement('div');hilfen.style.cssText='display:flex;flex-wrap:wrap;gap:8px;padding:8px 14px;';
     const hk=(txt,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.style.cssText=S_KNOPF+'min-height:44px;border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);';b.onclick=fn;return b;};
-    hilfen.append(hk('↻ aus Karte',()=>{const n=_fsKopfErgaenzen(bericht,t);scheduleSave();_neuBauen();toast(n?'✓ '+n+(n===1?' Feld':' Felder')+' aus der Karte übernommen':'ℹ Nichts zu übernehmen – Felder schon gefüllt oder keine Angaben an der Karte','info',3500);}));
+    hilfen.append(hk('↻ aus Karte',()=>_ausKarteKlick()));
     w.append(hilfen,
       _feld('Auftraggeber','auftraggeber','aus der Karte'),
       _feld('Objekt','objektAdresse','aus der Karte'),
       _feld('Auftrag-Nr.','auftragNr',''),
       _feld('Nutzer / Mieter','nutzer',''),
       _feld('Anlass','anlass','z. B. Meldung des Mieters über …'));
-    if(_fsIstVorab(bericht)){ // F17: Besichtigung bei … (Kontakte der Karte), Lage, Datum und Uhrzeit mit „Jetzt“-Knöpfen
+    return w;
+  }
+  /* ── F20: Vorabbesichtigung schlank (Frank 02.10.2026: „zu viele Felder, die ich vielleicht gar nicht brauche oder nur später“) ──────
+     Offen: „Vor Ort“ = Besichtigung bei, Lage, Zeit-Knöpfe mit einer Zeile Datum/Uhrzeit, Anlass, Beschreibung des Schadenbildes, Fotos, Vorgeschichte (ein Textfeld).
+     Zugeklappt (Standard, aufklappbar): Kartendaten, Versicherung/Zugang, Einzelpunkte, Termin/Wetter, Raumskizze. Daten und PDF unverändert. */
+  let _vbZeitAuf=false; // Datum/Beginn/Ende zum Ändern aufgeklappt (nur Anzeige)
+  function _vbAltAngaben(){return (bericht.angaben||[]).some(a=>a&&String(a.text||'').trim());} // Protokolle aus F16–F19 mit beantworteten Fragen
+  function _teilVorOrtVb(){
+    const w=document.createElement('div');w.setAttribute('data-fs-vorort','1');
       const bei=document.createElement('div');bei.setAttribute('data-fs-besuchbei','1');bei.style.cssText='padding:6px 14px 8px;border-top:1px solid var(--border);';
       const bl=document.createElement('div');bl.style.cssText='font-size:13px;color:var(--text2);margin-bottom:6px;';bl.textContent='Besichtigung bei – wähle den Kontakt für diesen Besuch';bei.appendChild(bl);
       const chips=document.createElement('div');chips.style.cssText='display:flex;flex-wrap:wrap;gap:6px;';
@@ -1212,12 +1246,46 @@ function _openFeuchteprotokollMobil(existingIdx,art){
       zeitKn.append(
         zk('📍 Ich bin jetzt hier (Datum + Uhrzeit)',()=>{const j=_fsVbJetzt();bericht.datum=j.datum;bericht.kopf.beginn=j.uhr;scheduleSave();hdrS.textContent=(bericht.kopf.objektAdresse||t.adresse||t.title||'')+' · '+(bericht.datum||'');const tm=(_fsAmPc()&&typeof _pamVbTermin==='function')?_pamVbTermin(bericht,'beginn'):'';_neuBauen();toast('✓ Datum '+j.datum+', Beginn '+j.uhr+' Uhr eingetragen'+(tm?' · '+tm:''),'success',tm?5000:3500);},'data-fs-jetzt-beginn'),
         zk('🏁 Fertig (Ende jetzt)',()=>{const j=_fsVbJetzt();bericht.kopf.ende=j.uhr;scheduleSave();const tm=(_fsAmPc()&&typeof _pamVbTermin==='function')?_pamVbTermin(bericht,'ende'):'';_neuBauen();toast('✓ Ende '+j.uhr+' Uhr eingetragen'+(tm?' · '+tm:''),'success',tm?5000:3500);},'data-fs-jetzt-ende'));
+      const zz=document.createElement('div');zz.setAttribute('data-fs-zeitzeile','1');zz.style.cssText='display:flex;align-items:center;gap:10px;padding:2px 14px 8px;font-size:14px;color:var(--text);';
+      const zt=document.createElement('span');zt.style.cssText='flex:1;min-width:0;';const ztx=_fsBgZeitText(bericht.kopf);
+      zt.textContent=(String(bericht.datum||'').trim()||'noch kein Datum')+' · '+(ztx||'noch kein Beginn');
+      const zb=document.createElement('button');zb.type='button';zb.textContent=_vbZeitAuf?'▲ fertig':'✏ ändern';zb.setAttribute('data-fs-zeitaendern','1');
+      zb.style.cssText=S_KNOPF+'min-height:40px;border:1px solid var(--border);background:transparent;color:var(--text);';zb.onclick=()=>{_vbZeitAuf=!_vbZeitAuf;_neuBauen();};
+      zz.append(zt,zb);
+      w.append(bei,_feld('Lage','lage','z. B. Wohnung darüber, Keller'),zeitKn,zz);
+      if(_vbZeitAuf){
       const datRow=document.createElement('div');datRow.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 14px;border-top:1px solid var(--border);';
       const dl=document.createElement('span');dl.style.cssText='font-size:13px;color:var(--text2);width:112px;flex-shrink:0;';dl.textContent='Datum';
       datRow.append(dl,_inp(bericht.datum,'TT.MM.JJJJ',v=>{bericht.datum=v;},false));
-      w.append(bei,_feld('Lage','lage','z. B. Wohnung darüber, Keller'),datRow,_feld('Beginn','beginn','hh:mm'),_feld('Ende','ende','hh:mm'),zeitKn);
+      w.append(datRow,_feld('Beginn','beginn','hh:mm'),_feld('Ende','ende','hh:mm'));
+      }
+    w.appendChild(_feld('Anlass','anlass','z. B. Meldung des Mieters über …'));
+    { // F19: in eigenen Worten beschreiben
+      const sbk=document.createElement('div');sbk.setAttribute('data-fs-schadenbild','1');sbk.style.cssText='padding:8px 14px 4px;border-top:1px solid var(--border);';
+      const sbl=document.createElement('div');sbl.style.cssText='font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px;';sbl.textContent='Beschreibung des Schadenbildes';
+      sbk.append(sbl,_bgInfo('Schreibe in eigenen Worten, was du siehst und misst – nur Feststellungen, keine Ursache. Steht im PDF vor den Einzelpunkten.'),_bgTextFeld(bericht.schadenbild,'z. B. Am Balkon steht Wasser, der Ablauf ist mit Laub verstopft …',v=>{bericht.schadenbild=v;},6));
+      w.appendChild(sbk);
     }
-    if(_fsIstVorab(bericht))w.append( // F16: Objekt und Zugang, Versicherung
+    w.appendChild(_teilFotos());
+    { // F20: Vorgeschichte als EIN Textfeld (statt fünf Fragen)
+      const vg=document.createElement('div');vg.setAttribute('data-fs-vorgeschichte','1');vg.style.cssText='padding:8px 14px 12px;border-top:1px solid var(--border);';
+      const vl=document.createElement('div');vl.style.cssText='font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px;';vl.textContent='Vorgeschichte laut Auftraggeber';
+      vg.append(vl,_bgInfo('Was Auftraggeber oder Nutzer berichten – nicht selbst festgestellt: seit wann, was ist passiert, frühere Schäden, bisherige Maßnahmen.'),_bgTextFeld(bericht.vorgeschichte,'z. B. Seit zwei Wochen nach jedem Regen …',v=>{bericht.vorgeschichte=v;},4));
+      w.appendChild(vg);
+    }
+    return w;
+  }
+  function _teilKarteVb(){ // F20: kommt aus der Karte – nur zur Kontrolle
+    const w=document.createElement('div');
+    const hilfen=document.createElement('div');hilfen.style.cssText='display:flex;flex-wrap:wrap;gap:8px;padding:8px 14px;';
+    const b=document.createElement('button');b.type='button';b.textContent='↻ aus Karte';b.style.cssText=S_KNOPF+'min-height:44px;border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);';b.onclick=()=>_ausKarteKlick();
+    hilfen.appendChild(b);
+    w.append(hilfen,_feld('Auftraggeber','auftraggeber','aus der Karte'),_feld('Objekt','objektAdresse','aus der Karte'),_feld('Auftrag-Nr.','auftragNr',''),_feld('Nutzer / Mieter','nutzer',''));
+    return w;
+  }
+  function _teilVersichVb(){ // F20
+    const w=document.createElement('div');
+    w.append( // F16: Objekt und Zugang, Versicherung
       _feld('Versicherung','versicherung',''),
       _feld('Schadennummer','schadennr',''),
       _feld('Zugang','zugang','z. B. Schlüssel beim Hausmeister'),
@@ -1797,13 +1865,8 @@ function _openFeuchteprotokollMobil(existingIdx,art){
   function _teilChecklistenBg(){
     const w=document.createElement('div');
     w.appendChild(_kopfZeile('Feststellungen vor Ort'));
-    if(_fsIstVorab(bericht)){ // F19: erst in eigenen Worten beschreiben, darunter die Sätze
-      const sbk=document.createElement('div');sbk.setAttribute('data-fs-schadenbild','1');sbk.style.cssText='padding:8px 14px 4px;';
-      const sbl=document.createElement('div');sbl.style.cssText='font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px;';sbl.textContent='Beschreibung des Schadenbildes';
-      sbk.append(sbl,_bgInfo('Schreibe in eigenen Worten, was du siehst und misst – nur Feststellungen, keine Ursache. Steht im PDF vor den Einzelpunkten.'),_bgTextFeld(bericht.schadenbild,'z. B. Am Balkon steht Wasser, der Ablauf ist mit Laub verstopft …',v=>{bericht.schadenbild=v;},6));
-      w.appendChild(sbk);
-      w.appendChild(_bgInfo('Einzelpunkte: Tippe den Satz an, der stimmt. Rechts öffnet sich ein Eingabefeld für Einzelheiten. Was du offen lässt, steht nicht im PDF.'));
-    }else w.appendChild(_bgInfo('Tippe den Satz an, der stimmt. Was du offen lässt, steht nicht im PDF.'));
+    if(_fsIstVorab(bericht))w.appendChild(_bgInfo('Einzelpunkte: Tippe den Satz an, der stimmt. Rechts öffnet sich ein Eingabefeld für Einzelheiten. Was du offen lässt, steht nicht im PDF. Die freie Beschreibung steht oben unter „Vor Ort“.')); // F20
+    else w.appendChild(_bgInfo('Tippe den Satz an, der stimmt. Was du offen lässt, steht nicht im PDF.'));
     const zuListe=_fsZuLesen(bericht.id);
     const umschalten=(si,zu)=>{
       _fsZuSetzen(bericht.id,si,zu);_neuBauen();
@@ -2327,7 +2390,8 @@ const FS_BG_WOHNUNG_ANGABEN=[
    Weggelassen (Franks Wahl): Umfang der Schadenaufnahme · Aufwandsschätzung · Hinweistext „unverbindlich". Keine Ampel, keine Ursache, keine Empfehlung.
    ⛔ Datei ist öffentlich: nur Sätze und Programm, nie Namen. Texte, die ins PDF gehen: nur Zeichen der PDF-Schrift. */
 const FS_VB_TITEL='Vorabbesichtigung';
-const FS_VB_BLOECKE=[{k:'auftrag',t:'Anlass, Auftraggeber, Objekt und Zugang',c:'Auftrag'},{k:'fest',t:'Schadenbild und weitere Feststellungen',c:'Schadenbild'},{k:'angaben',t:'Vorgeschichte laut Auftraggeber',c:'Vorgeschichte'},{k:'fotos',t:'Fotos',c:'Fotos'},{k:'termin',t:'Ortstermin und Wetter (bei Bedarf)',c:'Termin'},{k:'raeume',t:'Raumskizze (bei Bedarf)',c:'Skizze'}];
+const FS_VB_BLOECKE=[{k:'vorort',t:'Vor Ort',c:'Vor Ort'},{k:'karte',t:'Kartendaten (aus der Karte)',c:'Karte'},{k:'versich',t:'Versicherung, Zugang, Ansprechpartner',c:'Versicherung'},{k:'fest',t:'Einzelpunkte zum Antippen',c:'Einzelpunkte'},{k:'angaben',t:'Vorgeschichte – Fragen (frühere Fassung)',c:'Fragen'},{k:'termin',t:'Termin und Wetter',c:'Wetter'},{k:'raeume',t:'Raumskizze',c:'Skizze'}]; // F20
+const FS_VB_STANDARD_ZU=['karte','versich','fest','angaben','termin','raeume']; // F20: starten zugeklappt, Aufklappen merkt sich das Gerät („a:…“)
 const FS_VB_SEKTIONEN=[
   {titel:'Schadenbild',items:[
     {k:'V1.1',q:'Sichtbarer Schaden',ok:'Zum Zeitpunkt der Besichtigung war kein Schaden sichtbar.',m:'Sichtbarer Schaden: {}.',mo:'Ein Schaden war sichtbar.',h:'Art des Schadens'},
@@ -2431,9 +2495,9 @@ function _fsBgUmstellen(b){
   Object.assign(b.kopf,{anlass:'',beginn:'',ende:'',geraetLuft:'',geraetOberflaeche:'',geraetBauteil:'',pruefer:_fsBgMerkName()});
   if(vorab)Object.assign(b.kopf,{versicherung:'',schadennr:'',zugang:'',ansprechpartner:'',besuchBei:'',lage:'',nutzer:''}); // F17: Nutzer wählt Frank je Besuch („Besichtigung bei“), nicht alle Mieter der Karte
   b.anwesende=[];
-  if(vorab)b.schadenbild=''; // F19
+  if(vorab){b.schadenbild='';b.vorgeschichte='';} // F19, F20
   b.sektionen=(vorab?FS_VB_SEKTIONEN:keller?FS_BG_KELLER:FS_BG_WOHNUNG).map(s=>({titel:s.titel,items:s.items.map(_fsBgItem)}));
-  b.angaben=(vorab?FS_VB_ANGABEN:keller?FS_BG_KELLER_ANGABEN:FS_BG_WOHNUNG_ANGABEN).map(_fsBgAngabe);
+  b.angaben=(vorab?[]:keller?FS_BG_KELLER_ANGABEN:FS_BG_WOHNUNG_ANGABEN).map(_fsBgAngabe); // F20: Vorabbesichtigung hat ein Textfeld „Vorgeschichte“ statt Fragen
   return b;
 }
 // Satz am Ende sauber schließen
@@ -3543,8 +3607,10 @@ async function _fsMobPdfBg(bericht,task){
     // 6 · Angaben der Nutzer
     {
       const an=(bericht.angaben||[]).filter(a=>a&&hat(a.text));
-      if(an.length){
+      const vgText=(vorab&&hat(bericht.vorgeschichte))?String(bericht.vorgeschichte).trim():''; // F20
+      if(an.length||vgText){
         abschnitt(vorab?'Vorgeschichte laut Auftraggeber (nicht selbst festgestellt)':'Angaben der Nutzer (nicht selbst festgestellt)');
+        if(vgText)absatz(vgText,{abstand:3}); // F20
         an.forEach(a=>{
           if(hat(a.q))absatz(String(a.q).trim(),{groesse:8,farbe:[100,100,100],abstand:0.5});
           absatz('Laut '+(hat(a.von)?String(a.von).trim():(vorab?'Auftraggeber':'Nutzer'))+': '+String(a.text).trim(),{einzug:3,abstand:3});
