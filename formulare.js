@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F17';
+const PAM_FORMULARE_VERSION='F18';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
@@ -1209,8 +1209,8 @@ function _openFeuchteprotokollMobil(existingIdx,art){
       const zeitKn=document.createElement('div');zeitKn.style.cssText='display:flex;flex-wrap:wrap;gap:8px;padding:8px 14px;';
       const zk=(txt,fn,attr)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute(attr,'1');b.style.cssText=S_KNOPF+'min-height:44px;border:1.5px solid '+FS_FARBE+';background:rgba(31,95,139,.12);color:var(--text);';b.onclick=fn;return b;};
       zeitKn.append(
-        zk('📍 Ich bin jetzt hier (Datum + Uhrzeit)',()=>{const j=_fsVbJetzt();bericht.datum=j.datum;bericht.kopf.beginn=j.uhr;scheduleSave();hdrS.textContent=(bericht.kopf.objektAdresse||t.adresse||t.title||'')+' · '+(bericht.datum||'');_neuBauen();toast('✓ Datum '+j.datum+', Beginn '+j.uhr+' Uhr eingetragen','success',3500);},'data-fs-jetzt-beginn'),
-        zk('🏁 Fertig (Ende jetzt)',()=>{const j=_fsVbJetzt();bericht.kopf.ende=j.uhr;scheduleSave();_neuBauen();toast('✓ Ende '+j.uhr+' Uhr eingetragen','success',3500);},'data-fs-jetzt-ende'));
+        zk('📍 Ich bin jetzt hier (Datum + Uhrzeit)',()=>{const j=_fsVbJetzt();bericht.datum=j.datum;bericht.kopf.beginn=j.uhr;scheduleSave();hdrS.textContent=(bericht.kopf.objektAdresse||t.adresse||t.title||'')+' · '+(bericht.datum||'');const tm=(_fsAmPc()&&typeof _pamVbTermin==='function')?_pamVbTermin(bericht,'beginn'):'';_neuBauen();toast('✓ Datum '+j.datum+', Beginn '+j.uhr+' Uhr eingetragen'+(tm?' · '+tm:''),'success',tm?5000:3500);},'data-fs-jetzt-beginn'),
+        zk('🏁 Fertig (Ende jetzt)',()=>{const j=_fsVbJetzt();bericht.kopf.ende=j.uhr;scheduleSave();const tm=(_fsAmPc()&&typeof _pamVbTermin==='function')?_pamVbTermin(bericht,'ende'):'';_neuBauen();toast('✓ Ende '+j.uhr+' Uhr eingetragen'+(tm?' · '+tm:''),'success',tm?5000:3500);},'data-fs-jetzt-ende'));
       const datRow=document.createElement('div');datRow.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 14px;border-top:1px solid var(--border);';
       const dl=document.createElement('span');dl.style.cssText='font-size:13px;color:var(--text2);width:112px;flex-shrink:0;';dl.textContent='Datum';
       datRow.append(dl,_inp(bericht.datum,'TT.MM.JJJJ',v=>{bericht.datum=v;},false));
@@ -2363,6 +2363,19 @@ function _fsVbKontakte(t){
     const name=String(k.name||k.firma).trim(),rolle=FS_VB_ROLLEN[k.rolle]||String(k.rolle||'').trim()||'Kontakt',tel=String(k.tel||k.tel2||'').trim();
     return {text:rolle+': '+name,name,kontakt:name+(tel?', '+tel:'')};
   });
+}
+// F18: Datum TT.MM.JJJJ → JJJJ-MM-TT (Format der Termine in der Karte); ungültig → ''
+function _fsVbIso(datum){
+  const m=/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(String(datum||'').trim());
+  if(!m)return '';
+  const d=+m[1],mo=+m[2],y=+m[3];
+  if(mo<1||mo>12||d<1||d>31)return '';
+  return y+'-'+('0'+mo).slice(-2)+'-'+('0'+d).slice(-2);
+}
+// F18: Beschreibung des Termins in der Karte (und damit des Outlook-Betreffs): „Vorabbesichtigung – Eigentümer“
+function _fsVbTerminText(bericht){
+  const rolle=String((bericht&&bericht.kopf&&bericht.kopf.besuchBei)||'').split(':')[0].trim();
+  return 'Vorabbesichtigung'+(rolle?' – '+rolle:'');
 }
 // Datum (TT.MM.JJJJ) und Uhrzeit (hh:mm) von jetzt – für die „Ich bin jetzt hier“-Knöpfe
 function _fsVbJetzt(){

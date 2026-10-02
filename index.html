@@ -69,7 +69,7 @@ async function _clearCacheAndReload(){
 try{var _cs=+(localStorage.getItem('pam_card_scale')||100);document.documentElement.style.setProperty('--card-scale',(_cs/100).toFixed(2));}catch(e){}
 </script>
 <script src="https://accounts.google.com/gsi/client" defer onload="typeof gdriveInit==='function'?gdriveInit():(window._gsiPending=true)" onerror="window._gsiLoadError=true;window._gsiPending=false;typeof _driveSetStatus==='function'&&_driveSetStatus('⚠ Google-Dienst nicht erreichbar – Netzwerk oder Adblocker prüfen',false)"></script>
-<script src="formulare.js?v=F17" charset="utf-8"></script>
+<script src="formulare.js?v=F18" charset="utf-8"></script>
 <script>
 // ── EMAIL DROP-ZONE – Inline-Handler am Element, kein addEventListener nötig ──
 
@@ -10372,7 +10372,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-02 · #1074'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-02-b1074) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-02 · #1075'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-02-b1075) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -29181,6 +29181,40 @@ async function _pamPbPdf(bi){
   showToast('📄 PDF wird erstellt …','info',3000);
   await _fsPbPdf(b,t);
   try{renderPruefberichteDesktop();}catch(e){console.warn('[F13] Formular-Liste:',e);}
+}
+// F18/b1075: Vorabbesichtigung → Termin in der Karte (und damit Outlook). Aufgerufen von „📍 Ich bin jetzt hier“ (was='beginn') und „🏁 Fertig“ (was='ende').
+// ⛔ Schreibt in die ARBEITSKOPIE der offenen Karte (taskAusserhausTermine), NICHT in task.ausserhausTermine – sonst überschreibt das Speichern der Karte den Termin.
+// Der Termin merkt sich das Protokoll (vorabId). Gibt es heute schon einen eigenen Termin ohne Protokoll, fragt PAM, ob die Besichtigung dazu gehört. Outlook: wie bei jedem Termin beim Speichern (_msAutoPushTermine).
+// Rückgabe: kurzer Text für die Meldung, oder '' wenn nichts geschrieben wurde.
+function _pamVbTermin(bericht,was){
+  try{
+    if(!bericht||typeof taskAusserhausTermine==='undefined'||!Array.isArray(taskAusserhausTermine))return '';
+    if(!((document.getElementById('taskId')||{}).value))return '';
+    const iso=(typeof _fsVbIso==='function')?_fsVbIso(bericht.datum):'';
+    const k=bericht.kopf||{};
+    const von=_normTime(String(k.beginn||'').trim());
+    if(was==='beginn'&&(!iso||!/^\d{2}:\d{2}$/.test(von||''))){showToast('⚠ Termin nicht angelegt: Datum oder Beginn ungültig','warning',5000);return '';}
+    let t=taskAusserhausTermine.find(x=>x&&x.vorabId===bericht.id);
+    let neu=false;
+    if(!t&&was==='beginn'){
+      const kand=taskAusserhausTermine.filter(x=>x&&!x.vorabId&&!x.erledigt&&(x.date||'')===iso);
+      if(kand.length&&confirm('Gehört diese Besichtigung zu dem Termin\n„'+(kand[0].beschreibung||kand[0].betreff||'Termin')+'“ ('+(kand[0].von||'')+(kand[0].bis?'–'+kand[0].bis:'')+' Uhr) an dieser Karte?\n\nOK = diesen Termin nehmen (Uhrzeit wird auf deinen Beginn gesetzt)\nAbbrechen = neuen Termin anlegen'))t=kand[0];
+      if(!t){t={date:iso,von:'',bis:'',beschreibung:(typeof _fsVbTerminText==='function')?_fsVbTerminText(bericht):'Vorabbesichtigung',art:'besichtigung'};taskAusserhausTermine.push(t);neu=true;}
+      t.vorabId=bericht.id;
+    }
+    if(!t)return '';
+    if(was==='beginn'){
+      t.date=iso;t.von=von;
+      if(!t.bis||String(t.bis)<=von)t.bis=_addMinToHHMM(von,60);
+    }else{
+      const ende=_normTime(String(k.ende||'').trim());
+      if(/^\d{2}:\d{2}$/.test(ende||'')&&ende>(t.von||'')&&t.date===iso)t.bis=ende;
+    }
+    t._pamDirty=true;t.outlookDeleted=false;
+    try{renderAusserhausTermine();}catch(e){console.warn('[F18] Termine zeichnen:',e);}
+    scheduleTaskFieldSave();
+    return neu?'Termin in der Karte angelegt':'Termin in der Karte aktualisiert';
+  }catch(e){console.warn('[F18] Termin:',e);showToast('⚠ Termin nicht geschrieben: '+(e.message||e),'warning',5000);return '';}
 }
 // F14: neues Begehungsprotokoll am PC anlegen (Menü ＋). art: 'keller' oder leer (Wohnung). Dasselbe Formular wie am Tablet, danach in der Liste.
 function _pamFeuchteNeu(art){
