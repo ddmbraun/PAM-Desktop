@@ -10373,7 +10373,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-02 · #1079'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-02-b1079) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-02 · #1080'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-02-b1080) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -12325,8 +12325,8 @@ function _tuDeKurz(d){const p=String(d||'').split('-');return p.length>2?(p[2]+'
 // b631: eine Zeile ins Bautagebuch. Schreibt in den GESPEICHERTEN Task und zieht
 // das offene Fenster nach – dasselbe Muster wie _tuKachelErledigt, damit die Zeile
 // auch aus der Matrix heraus ankommt, wo gar kein Fenster offen ist.
-function _tuBtbZeile(task,text){
-  const eintrag={ts:new Date().toISOString(),text:text};
+function _tuBtbZeile(task,text,ts){
+  const eintrag={ts:ts||new Date().toISOString(),text:text}; // b1080: optionale Zeit (Anruf-Zeile = Zeit der Wahl)
   let offen='';
   try{offen=(document.getElementById('taskId')||{}).value||'';}catch(e){}
   if(task&&task.id){
@@ -56687,12 +56687,34 @@ function _pamAnrufErgStatus(t,nr){
   let z=0; for(let i=0;i<l.length&&!l[i].erg.ok;i++)z++;
   return {ok:false,text:'✗ '+z+' × nicht erreicht · zuletzt '+kurz};
 }
-function _pamAnrufErgGeraet(t,nr){
+// b1080: Gerät der gewählten Wahl (wahlTs) – ohne wahlTs die neueste Wahl dieser Nummer
+function _pamAnrufErgGeraet(t,nr,wahlTs){
   const k=_pamWahlNorm(nr); if(!k)return '–';
-  const w=_pamWahlenListe(t).find(function(x){return _pamWahlNorm(x.nr)===k;});
+  const w=_pamWahlenListe(t).find(function(x){return _pamWahlNorm(x.nr)===k&&(!wahlTs||String(x.ts)===String(wahlTs));});
   return (w&&w.von)?w.von:'–';
 }
-function _pamAnrufErgDialog(taskId,nr,name,rolle){
+/* b1080: Die Uhrzeit der Anruf-Zeile ist die Zeit der WAHL (Franks Wunsch), nicht die des Eintragens.
+   ⛔ „Verbraucht“ ist eine Wahl, zu der es schon eine Anruf-Zeile mit GENAU ihrer Zeit und Nummer gibt – so wird aus fünf Wahlen
+      fünf Zeilen mit fünf Zeiten. Zeilen aus b1079 tragen noch die Eintragezeit und verbrauchen keine Wahl.
+   ⛔ Ohne offene Wahl (Nummer von Hand getippt) gilt „jetzt“, wie vorher. */
+function _pamAnrufErgOffeneWahlen(t,nr){
+  const k=_pamWahlNorm(nr); if(!k)return [];
+  const benutzt={};
+  _pamAnrufErgListe(t,nr).forEach(function(x){benutzt[x.ts]=true;});
+  return _pamWahlenListe(t).filter(function(w){return _pamWahlNorm(w.nr)===k&&!benutzt[String(w.ts)];});
+}
+// Das Ergebnis, das zu genau dieser Wahl eingetragen wurde (oder null) – für den Reiter „Gewählt“
+// b1080: Zelle in der Zeile des Reiters „Gewählt“: das Ergebnis, falls eingetragen, sonst der Knopf „✎ Ergebnis“ (merkt sich die Zeit dieser Wahl)
+function _pamAnrufErgWahlZelle(t,w,sid){
+  const z=_pamAnrufErgZuWahl(t,w);
+  if(z)return '<span class="pam-wahl-erg" style="font-size:11px;font-weight:600;white-space:nowrap;color:'+(z.erg.ok?'#0F6E56':'#A32D2D')+';">'+(z.erg.ok?'✓ ':'✗ ')+esc(z.erg.z)+'</span>';
+  return '<button type="button" class="pam-wahl-erg-btn" onclick="_pamAnrufErgDialog(\''+sid+'\',\''+_jsa(w.nr||'')+'\',\''+_jsa(w.name||'')+'\',\'\',\''+_jsa(w.ts||'')+'\')" title="Ergebnis zu diesem Anruf ins Bautagebuch eintragen – mit der Uhrzeit dieser Wahl" style="font-size:10px;padding:1px 7px;border-radius:4px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;">✎ Ergebnis</button>';
+}
+function _pamAnrufErgZuWahl(t,w){
+  if(!t||!w||!w.ts)return null;
+  return _pamAnrufErgListe(t,w.nr).find(function(x){return x.ts===String(w.ts);})||null;
+}
+function _pamAnrufErgDialog(taskId,nr,name,rolle,vorWahlTs){
   const t=_pamWahlKarte(taskId); if(!t)return;
   const alt=document.getElementById('pamAnrufErgDlg'); if(alt)alt.remove();
   const ov=document.createElement('div');
@@ -56705,9 +56727,29 @@ function _pamAnrufErgDialog(taskId,nr,name,rolle){
   kopf.style.cssText='font-size:13px;font-weight:700;margin-bottom:2px;';
   kopf.textContent='📞 Ergebnis: '+([name,rolle].filter(Boolean).join(' · ')||nr);
   const unter=document.createElement('div');
-  unter.style.cssText='font-size:11px;color:var(--text2);margin-bottom:10px;';
-  unter.textContent=nr+' · '+(t.title||'(kein Titel)')+' · Gerät: '+_pamAnrufErgGeraet(t,nr);
+  unter.style.cssText='font-size:11px;color:var(--text2);margin-bottom:8px;';
   box.appendChild(kopf); box.appendChild(unter);
+  // Welcher Anruf? – die offenen Wahlen dieser Nummer, die neueste (oder die angetippte) ist vorgewählt
+  const offene=_pamAnrufErgOffeneWahlen(t,nr);
+  const lab=document.createElement('div');
+  lab.style.cssText='font-size:11px;font-weight:600;margin:2px 0 3px;';
+  lab.textContent='Welcher Anruf?';
+  const sel=document.createElement('select');
+  sel.id='pamAnrufErgWahl';
+  sel.style.cssText='width:100%;box-sizing:border-box;padding:6px 8px;font-size:12px;margin-bottom:8px;';
+  offene.forEach(function(w){
+    const o=document.createElement('option');
+    o.value=String(w.ts);
+    o.textContent=_pamWahlZeit(w.ts,false)+(w.von==='Handy'?' · Handy':(w.von==='PC'?' · PC':''));
+    sel.appendChild(o);
+  });
+  const jetzt=document.createElement('option');
+  jetzt.value=''; jetzt.textContent=offene.length?'jetzt (ohne vermerkte Wahl)':'jetzt (keine Wahl vermerkt)';
+  sel.appendChild(jetzt);
+  sel.value=(vorWahlTs&&offene.some(function(w){return String(w.ts)===String(vorWahlTs);}))?String(vorWahlTs):(offene.length?String(offene[0].ts):'');
+  const zeigeUnter=function(){unter.textContent=nr+' · '+(t.title||'(kein Titel)')+' · Gerät: '+_pamAnrufErgGeraet(t,nr,sel.value);};
+  sel.onchange=zeigeUnter; zeigeUnter();
+  box.appendChild(lab); box.appendChild(sel);
   let gewaehlt=null; const knoepfe=[];
   _PAM_ANRUF_ERG.forEach(function(e){
     const b=document.createElement('button');
@@ -56736,26 +56778,27 @@ function _pamAnrufErgDialog(taskId,nr,name,rolle){
   ok.style.cssText='padding:6px 14px;border-radius:6px;border:none;background:#185FA5;color:#fff;cursor:pointer;font-size:12px;font-weight:600;';
   ok.onclick=function(){
     if(!gewaehlt){if(typeof showToast==='function')showToast('Bitte ein Ergebnis wählen','warning',2500);return;}
-    _pamAnrufErgSpeichern(taskId,nr,name,rolle,gewaehlt.k,notiz.value);
+    _pamAnrufErgSpeichern(taskId,nr,name,rolle,gewaehlt.k,notiz.value,sel.value);
     ov.remove();
   };
   notiz.onkeydown=function(ev){if(ev.key==='Enter'){ev.preventDefault();ok.onclick();}};
   zeile.appendChild(abbr); zeile.appendChild(ok); box.appendChild(zeile);
   ov.appendChild(box); document.body.appendChild(ov);
 }
-function _pamAnrufErgSpeichern(taskId,nr,name,rolle,erg,notiz){
+function _pamAnrufErgSpeichern(taskId,nr,name,rolle,erg,notiz,wahlTs){
   try{
     const t=_pamWahlKarte(taskId); if(!t)return false;
     const e=_PAM_ANRUF_ERG.find(function(x){return x.k===erg;}); if(!e)return false;
     const wer=[name,rolle].filter(Boolean).join(' (')+(rolle&&name?')':'');
-    const text=_pamAnrufErgText(wer||name,nr,_pamAnrufErgGeraet(t,nr),e.z,notiz);
-    if(typeof _tuBtbZeile==='function')_tuBtbZeile(t,text);
-    else{if(!Array.isArray(t.notizVerlauf))t.notizVerlauf=[];t.notizVerlauf.push({ts:new Date().toISOString(),text:text});}
+    const ts=wahlTs?String(wahlTs):''; // b1080: Zeit der Wahl; leer = jetzt
+    const text=_pamAnrufErgText(wer||name,nr,_pamAnrufErgGeraet(t,nr,ts),e.z,notiz);
+    if(typeof _tuBtbZeile==='function')_tuBtbZeile(t,text,ts);
+    else{if(!Array.isArray(t.notizVerlauf))t.notizVerlauf=[];t.notizVerlauf.push({ts:ts||new Date().toISOString(),text:text});}
     if(typeof autoSave==='function')autoSave();
     _pamAnrufRender();
-    if(typeof showToast==='function')showToast('📞 Ins Bautagebuch eingetragen: '+e.z,'success',3000);
+    if(typeof showToast==='function')showToast('📞 Ins Bautagebuch eingetragen: '+e.z+(ts?' · '+_pamWahlZeit(ts,true):''),'success',3000);
     return true;
-  }catch(err){console.warn('[b1079] Anruf-Ergebnis:',err);return false;}
+  }catch(err){console.warn('[b1080] Anruf-Ergebnis:',err);return false;}
 }
 function _pamAnrufReiterWahl(r){
   _pamAnrufReiter=(r==='gewaehlt')?'gewaehlt':(r==='erledigt'?'erledigt':'offen'); // b1035: dritter Reiter
@@ -56893,6 +56936,7 @@ function _pamWahlRender(el,cnt){
       html+='<div class="pam-wahl-zeile" style="display:flex;gap:12px;align-items:baseline;font-size:12px;padding:1px 0;'+(x.aus?'color:var(--text2);':'color:var(--text);')+'">'
         +'<span style="font-weight:600;white-space:nowrap;min-width:112px;">'+esc(_pamWahlZeit(x.w.ts,false))+'</span>'
         +'<span>📞 '+(x.w.name?esc(x.w.name)+' · ':'')+'<b>'+esc(x.w.nr||'')+'</b>'+esc(typeof _pamWahlGeraet==='function'?_pamWahlGeraet(x.w):'')+(x.aus?' <span style="font-size:10px;">(ausgeblendet)</span>':'')+'</span>'
+        +((typeof _pamAnrufErgWahlZelle==='function')?_pamAnrufErgWahlZelle(t,x.w,sid):'') // b1080: Ergebnis oder Knopf
         +'</div>';
     });
     if(g.wahlen.length>3)html+='<div style="font-size:11px;margin-top:2px;"><span class="pam-wahl-mehr" onclick="_pamWahlAufklappen(\''+sid+'\')" style="color:#1a56c4;cursor:pointer;">'+(offen[t.id]?'weniger':'+ '+(g.wahlen.length-3)+' weitere')+'</span></div>';
