@@ -8906,6 +8906,20 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
           </div>
         </div>
 
+        <!-- ══ EINSÄTZE (b1059) ══ -->
+        <div class="mv2-section collapsible baustelle-only" id="tEinsaetzeSect">
+          <div class="mv2-section-label" onclick="_toggleMv2Sect('tEinsaetzeSect',event)">
+            <span class="mvl-dot"><i style="background:#C2410C"></i></span>
+            <span class="mvl-icon">🧾</span>
+            <span class="mvl-text">Einsätze</span>
+            <span class="mvl-badge" id="tEinsaetzeBadge"></span>
+            <span class="mv2-coll-arrow">›</span>
+          </div>
+          <div id="tEinsaetzeBody" style="padding:8px 10px 10px;">
+            <!-- wird von renderEinsaetze() befüllt -->
+          </div>
+        </div>
+
         <!-- ══ BAUDOKU-PLANUNG ══ -->
         <div class="mv2-section collapsible baustelle-only" id="tBaudokuSect">
           <div class="mv2-section-label" onclick="_toggleMv2Sect('tBaudokuSect',event)">
@@ -10358,7 +10372,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-02 · #1058'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-02-b1058) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-02 · #1059'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-02-b1059) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -14264,6 +14278,7 @@ function saveTaskData(){
     materialGeplant:JSON.parse(JSON.stringify(taskBaudokuMaterial||[])),
     baudokuPersonalListe:JSON.parse(JSON.stringify(taskBaudokuPersonalListe||[])),
     baudokuMaschinen:JSON.parse(JSON.stringify(taskBaudokuMaschinen||[])),
+    einsaetze:JSON.parse(JSON.stringify(taskEinsaetze||[])), // b1059
     // ── Baudoku-Feldwerte erhalten (werden nur auf Mobile gesetzt) ──
     baudokuNotiz:existingTask?.baudokuNotiz||'',
     baudokuPersonal:JSON.parse(JSON.stringify(existingTask?.baudokuPersonal||[])),
@@ -18995,6 +19010,7 @@ function renderObjekte(){
          +' title="Rechnungen zu den wiederkehrenden Leistungen – was offen ist und, auf Wunsch, was schon abgerechnet wurde. Über alle Jahre.">RE Rechnungen'
          +(_n?' ('+_n+' offen)':'')+'</button>';
      })()
+    +_esToolbarBtn() // b1059
     // b714: nur sichtbar, wenn wirklich etwas ansteht – die meiste Zeit im Jahr
     // gibt es hier nichts zu tun, ein Dauerknopf wäre nur Ablenkung.
     +(function(){
@@ -23152,6 +23168,226 @@ async function _bdScanBarcode(){
 function _bdStopScan(){
   const ov=document.getElementById('_bdScanOverlay');if(ov)ov.remove();
   if(_bdScanStream){_bdScanStream.getTracks().forEach(t=>t.stop());_bdScanStream=null;}
+}
+
+// ── b1059: EINSÄTZE – ein Eintrag je Arbeitstag an der Karte (Frank 02.10.2026) ──────────
+// Datum · Leistung · Maschine · Material · Stunden · Stand (offen / Rechnungs-Nr. / ohne Berechnung).
+// Zweck: am Jahresende sehen, was für ein Haus noch NICHT abgerechnet ist (Rechnung schreibt Frank in MF dach).
+// ⛔ Hängt NICHT an Außerhaus-Terminen und NICHT an der Baudoku-Planung – die bleibt unverändert (geht aufs Handy).
+// Das Handy kennt dieses Feld nicht und zeigt es (noch) nicht an.
+let taskEinsaetze = []; // [{id,datum,leistung,maschine,material,min,rg,rgFrei,rgAm}] → Task-Feld `einsaetze`
+let _esMitFertig = false; // Übersichtsfenster: auch abgerechnete zeigen
+
+function _esEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function _esId(){return 'es_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
+function _esHeute(){var d=new Date();return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);}
+function _esDe(iso){var p=String(iso||'').split('-');return p.length===3?p[2]+'.'+p[1]+'.'+p[0]:'';}
+function _esOffen(e){return !!e&&!e.rg&&!e.rgFrei;}
+// "8:00" · "8,5" · "8" → Minuten. Alles andere = 0 (kein Fehler, leeres Feld ist erlaubt).
+function _esMinParse(s){
+  s=String(s==null?'':s).trim().replace(',','.');
+  if(!s)return 0;
+  if(s.indexOf(':')>=0){var p=s.split(':');var h=parseFloat(p[0])||0,m=parseFloat(p[1])||0;return Math.max(0,Math.round(h*60+m));}
+  var x=parseFloat(s);return(isFinite(x)&&x>0)?Math.round(x*60):0;
+}
+function _esAnz(n){return n+(n===1?' Einsatz':' Einsätze');}
+function _esMinText(min){min=Number(min)||0;if(!min)return '';var h=Math.floor(min/60),m=min%60;return h+':'+(m<10?'0':'')+m;}
+// Vorschläge aus ALLEN Karten – was einmal getippt wurde, steht beim nächsten Mal zur Auswahl.
+function _esVorschlaege(feld){
+  var set={};
+  var nimm=function(list){(list||[]).forEach(function(e){var v=e&&e[feld];if(v&&String(v).trim())set[String(v).trim()]=1;});};
+  try{Object.keys(boards||{}).forEach(function(bn){if(bn.charAt(0)==='_')return;(boards[bn]||[]).forEach(function(t){if(t)nimm(t.einsaetze);});});}catch(err){console.warn('[ES]',err);}
+  nimm(taskEinsaetze);
+  return Object.keys(set).sort(function(a,b){return a.localeCompare(b,'de');});
+}
+function renderEinsaetze(){
+  var body=document.getElementById('tEinsaetzeBody'),badge=document.getElementById('tEinsaetzeBadge');
+  if(!body)return;
+  var liste=taskEinsaetze||[];
+  var offen=liste.filter(_esOffen).length;
+  if(badge)badge.innerHTML=liste.length?'<span title="Einsätze – davon noch nicht abgerechnet" style="background:'+(offen?'#C2410C':'var(--accent)')+';color:#fff;border-radius:10px;padding:1px 7px;font-size:calc(11px*var(--modal-scale,1));font-weight:700;">'+(offen?offen+' offen':liste.length)+'</span>':'';
+  var sc='var(--modal-scale,1)';
+  var fs12='font-size:calc(12px * '+sc+')',fs13='font-size:calc(13px * '+sc+')';
+  var inp='padding:4px 6px;border-radius:5px;border:1px solid var(--border);background:var(--bg);color:var(--text);'+fs13+';min-width:0;';
+  var idx=liste.map(function(e,i){return i;}).sort(function(a,b){return String(liste[a].datum||'').localeCompare(String(liste[b].datum||''))||(a-b);});
+  var opt=function(v){return '<option value="'+_esEsc(v)+'">';};
+  var h='<datalist id="esLeistungDL">'+_esVorschlaege('leistung').map(opt).join('')+'</datalist>'
+       +'<datalist id="esMaschineDL">'+_esVorschlaege('maschine').map(opt).join('')+'</datalist>';
+  if(!liste.length)h+='<div style="'+fs12+';color:var(--text2);padding:2px 0 8px;">Noch kein Einsatz. Mit „＋ Einsatz" einen Arbeitstag eintragen – er bleibt „offen", bis du die Rechnungsnummer einträgst.</div>';
+  idx.forEach(function(i){
+    var e=liste[i];
+    var stand=e.rg?'<span style="color:#2f7d1e;font-weight:700;">✓ RE '+_esEsc(e.rg)+'</span>'
+      :e.rgFrei?'<span style="color:var(--text2);font-weight:700;">✓ ohne Berechnung</span>'
+      :'<span style="color:#C2410C;font-weight:700;">● offen</span>';
+    var knopf=_esOffen(e)
+      ?'<button type="button" onclick="_esRg('+i+')" style="'+fs12+';padding:3px 9px;border-radius:6px;border:1px solid #2f7d1e;background:var(--bg3);color:#2f7d1e;cursor:pointer;font-weight:600;" title="Rechnung in MF dach geschrieben? Nummer eintragen (oder Minus = ohne Berechnung)">Rechnungs-Nr. eintragen</button>'
+      :'<button type="button" onclick="_esRgZurueck('+i+')" style="'+fs12+';padding:3px 9px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;" title="Wieder auf offen setzen">zurück auf offen</button>';
+    h+='<div style="background:var(--bg3);border:1px solid var(--border);border-left:4px solid '+(_esOffen(e)?'#C2410C':'#2f7d1e')+';border-radius:6px;padding:6px 8px;margin-bottom:6px;">'
+      +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:5px;">'
+      +  '<input type="date" value="'+_esEsc(e.datum)+'" onchange="_esUpd('+i+',\'datum\',this.value,true)" title="Arbeitstag" style="'+inp+'">'
+      +  '<input type="text" id="es_l_'+_esEsc(e.id)+'" list="esLeistungDL" value="'+_esEsc(e.leistung)+'" placeholder="Leistung, z. B. Schornstein verschmiert" oninput="_esUpd('+i+',\'leistung\',this.value)" style="'+inp+'flex:1;min-width:160px;">'
+      +  '<input type="text" value="'+_esEsc(_esMinText(e.min))+'" placeholder="Std (8:00)" onchange="_esUpd('+i+',\'min\',this.value,true)" title="Dauer – 8:00 oder 8,5" style="'+inp+'width:78px;text-align:center;">'
+      +  '<button type="button" onclick="_esDel('+i+')" title="Diesen Einsatz entfernen" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;padding:0 4px;">✕</button>'
+      +'</div>'
+      +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:5px;">'
+      +  '<input type="text" list="esMaschineDL" value="'+_esEsc(e.maschine)+'" placeholder="Maschine, z. B. Hubarbeitsbühne" oninput="_esUpd('+i+',\'maschine\',this.value)" style="'+inp+'flex:1;min-width:150px;">'
+      +  '<input type="text" value="'+_esEsc(e.material)+'" placeholder="Material (wenn nötig)" oninput="_esUpd('+i+',\'material\',this.value)" style="'+inp+'flex:1;min-width:150px;">'
+      +'</div>'
+      +'<div style="display:flex;gap:10px;align-items:center;'+fs13+';">'+stand+'<span style="flex:1;"></span>'+knopf+'</div>'
+      +'</div>';
+  });
+  h+='<button type="button" onclick="_esAdd()" style="width:100%;padding:6px;border-radius:6px;border:1px dashed var(--accent);background:transparent;color:var(--accent);cursor:pointer;'+fs13+';">＋ Einsatz</button>';
+  var sum=liste.reduce(function(s,e){return s+(Number(e.min)||0);},0);
+  var sumOffen=liste.filter(_esOffen).reduce(function(s,e){return s+(Number(e.min)||0);},0);
+  if(liste.length)h+='<div style="'+fs12+';color:var(--text2);margin-top:6px;text-align:right;">'+_esAnz(liste.length)+' · '+(_esMinText(sum)||'0:00')+' h gesamt · davon offen '+offen+' ('+(_esMinText(sumOffen)||'0:00')+' h)</div>';
+  body.innerHTML=h;
+}
+function _esAdd(){
+  if(!Array.isArray(taskEinsaetze))taskEinsaetze=[];
+  var e={id:_esId(),datum:_esHeute(),leistung:'',maschine:'',material:'',min:0,rg:'',rgFrei:false};
+  taskEinsaetze.push(e);
+  renderEinsaetze();scheduleTaskFieldSave();
+  setTimeout(function(){var el=document.getElementById('es_l_'+e.id);if(el)el.focus();},30);
+}
+function _esUpd(i,feld,wert,neuZeichnen){
+  var e=(taskEinsaetze||[])[i];if(!e)return;
+  if(feld==='min')e.min=_esMinParse(wert);
+  else e[feld]=String(wert==null?'':wert);
+  scheduleTaskFieldSave();
+  if(neuZeichnen)renderEinsaetze();
+}
+function _esDel(i){
+  var e=(taskEinsaetze||[])[i];if(!e)return;
+  var was=(e.leistung||'ohne Leistung')+(e.datum?' ('+_esDe(e.datum)+')':'');
+  if(!confirm('Einsatz „'+was+'" entfernen?'))return;
+  taskEinsaetze.splice(i,1);
+  renderEinsaetze();scheduleTaskFieldSave();
+}
+function _esRg(i){
+  var e=(taskEinsaetze||[])[i];if(!e)return;
+  var NL=String.fromCharCode(10);
+  var nr=prompt('Rechnungsnummer aus MF dach für diesen Einsatz ('+_esDe(e.datum)+' · '+(e.leistung||'ohne Leistung')+'):'+NL+NL+'Minus „-" = ohne Berechnung (Kulanz).',e.rg||'');
+  if(nr===null)return;
+  nr=nr.trim();
+  if(!nr)return;
+  if(nr==='-'){e.rg='';e.rgFrei=true;}else{e.rg=nr;e.rgFrei=false;}
+  e.rgAm=_esHeute();
+  renderEinsaetze();scheduleTaskFieldSave();
+  if(typeof showToast==='function')showToast(e.rgFrei?'Ohne Berechnung vermerkt':'Rechnung vermerkt: '+nr,'success',2500);
+}
+function _esRgZurueck(i){
+  var e=(taskEinsaetze||[])[i];if(!e)return;
+  e.rg='';e.rgFrei=false;e.rgAm='';
+  renderEinsaetze();scheduleTaskFieldSave();
+}
+
+// ── Übersicht: alle OFFENEN Einsätze, je Haus/Auftrag zusammen ──────────────────────
+// Haus = das verknüpfte Objekt (objektId), sonst die Karte selbst.
+function _esSammle(){
+  var out=[];
+  try{
+    Object.keys(boards||{}).forEach(function(bn){
+      if(bn.charAt(0)==='_')return;
+      (boards[bn]||[]).forEach(function(t){
+        if(!t||t.archiviert)return;
+        (t.einsaetze||[]).forEach(function(e){
+          if(!e)return;
+          if(_esOffen(e)||_esMitFertig)out.push({t:t,e:e});
+        });
+      });
+    });
+  }catch(err){console.warn('[ES] sammeln:',err);}
+  return out;
+}
+function _esHausName(t){
+  var o=null;
+  try{if(t.objektId&&typeof findTaskById==='function')o=findTaskById(t.objektId);}catch(err){}
+  return String((o&&o.title)||t.title||'(ohne Titel)');
+}
+function _esZahl(){
+  var n=0;
+  try{Object.keys(boards||{}).forEach(function(bn){if(bn.charAt(0)==='_')return;(boards[bn]||[]).forEach(function(t){if(!t||t.archiviert)return;(t.einsaetze||[]).forEach(function(e){if(_esOffen(e))n++;});});});}catch(err){}
+  return n;
+}
+function _esToolbarBtn(){
+  var n=_esZahl();
+  return '<button class="kal-chip" onclick="_esOeffnen()"'+(n?' style="color:#C2410C;border-color:#C2410C;font-weight:700;"':'')
+    +' title="Einsätze (Arbeitstage), für die noch keine Rechnung eingetragen ist – je Haus zusammen. Eingetragen wird im Abschnitt „Einsätze" der Karte.">🧾 Einsätze'+(n?' ('+n+' offen)':'')+'</button>';
+}
+function _esGruppen(){
+  var gr={},reihe=[];
+  _esSammle().forEach(function(p){
+    var k=_esHausName(p.t);
+    if(!gr[k]){gr[k]=[];reihe.push(k);}
+    gr[k].push(p);
+  });
+  reihe.sort(function(a,b){return a.localeCompare(b,'de');});
+  reihe.forEach(function(k){gr[k].sort(function(x,y){return String(x.e.datum||'').localeCompare(String(y.e.datum||''));});});
+  return {gr:gr,reihe:reihe};
+}
+function _esRender(){
+  var body=document.getElementById('esBody'),sub=document.getElementById('esSub'),fb=document.getElementById('esFertigBtn');
+  if(!body)return;
+  if(fb)fb.textContent=(_esMitFertig?'☑':'☐')+' auch abgerechnete';
+  var g=_esGruppen();
+  var anz=0,min=0;
+  var h='';
+  g.reihe.forEach(function(k){
+    var m=0;g.gr[k].forEach(function(p){m+=Number(p.e.min)||0;});
+    h+='<tr><td colspan="6" style="background:var(--bg3);font-weight:700;padding:6px 8px;">'+_esEsc(k)+' <span style="font-weight:400;color:var(--text2);">· '+_esAnz(g.gr[k].length)+' · '+(_esMinText(m)||'0:00')+' h</span></td></tr>';
+    g.gr[k].forEach(function(p){
+      anz++;min+=Number(p.e.min)||0;
+      var stand=p.e.rg?'<span style="color:#2f7d1e;">✓ RE '+_esEsc(p.e.rg)+'</span>':p.e.rgFrei?'<span style="color:var(--text2);">✓ ohne Berechnung</span>':'<span style="color:#C2410C;font-weight:700;">● offen</span>';
+      h+='<tr style="cursor:pointer;" onclick="_esOeffneKarte(\''+_jsa(p.t.id)+'\')" title="Karte öffnen">'
+        +'<td style="padding:4px 8px;white-space:nowrap;">'+_esEsc(_esDe(p.e.datum))+'</td>'
+        +'<td style="padding:4px 8px;">'+_esEsc(p.e.leistung||'—')+'</td>'
+        +'<td style="padding:4px 8px;">'+_esEsc(p.e.maschine||'')+'</td>'
+        +'<td style="padding:4px 8px;">'+_esEsc(p.e.material||'')+'</td>'
+        +'<td style="padding:4px 8px;text-align:right;white-space:nowrap;">'+_esEsc(_esMinText(p.e.min))+'</td>'
+        +'<td style="padding:4px 8px;white-space:nowrap;">'+stand+'</td></tr>';
+    });
+  });
+  if(!anz)h='<tr><td colspan="6" style="padding:14px 8px;color:var(--text2);">'+(_esMitFertig?'Noch keine Einsätze eingetragen.':'Nichts offen – alle eingetragenen Einsätze sind abgerechnet.')+'</td></tr>';
+  body.innerHTML=h;
+  if(sub)sub.textContent=g.reihe.length+(g.reihe.length===1?' Haus/Auftrag · ':' Häuser/Aufträge · ')+_esAnz(anz)+' · '+(_esMinText(min)||'0:00')+' h'+(_esMitFertig?' (mit abgerechneten)':' · nur offene');
+}
+function _esOeffnen(){
+  var old=document.getElementById('esOverlay');if(old)old.remove();
+  var ov=document.createElement('div');ov.id='esOverlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99992;display:flex;align-items:center;justify-content:center;';
+  ov.innerHTML='<div class="tuj-box" style="width:min(980px,97vw);" role="dialog" aria-label="Offene Einsätze">'
+    +'<div class="tuj-head">'
+    +  '<span class="tuj-title">Einsätze – was noch abzurechnen ist</span>'
+    +  '<span style="flex:1;min-width:8px;"></span>'
+    +  '<button type="button" class="tu-btn" id="esFertigBtn" onclick="_esToggleFertig()" title="Auch die Einsätze zeigen, bei denen die Rechnung schon eingetragen ist"></button>'
+    +  '<button type="button" class="tu-btn" onclick="_esKopieren()" title="Liste als Text in die Zwischenablage – zum Abtippen in MF dach">📋 Kopieren</button>'
+    +  '<button type="button" class="tu-btn" onclick="_esClose()">✕ Schließen</button>'
+    +'</div>'
+    +'<div class="tuj-sub" id="esSub"></div>'
+    +'<div class="tuj-scroll"><table class="tuj-tab"><thead><tr><th class="nam">Datum</th><th class="nam">Leistung</th><th class="nam">Maschine</th><th class="nam">Material</th><th>Std</th><th class="nam">Stand</th></tr></thead><tbody id="esBody"></tbody></table></div>'
+    +'<div class="tuj-legend"><span>Klick auf eine Zeile öffnet die Karte – dort trägst du die Rechnungsnummer ein.</span></div>'
+    +'</div>';
+  document.addEventListener('keydown',_esTaste);
+  document.body.appendChild(ov);
+  _esRender();
+}
+function _esTaste(e){if(e.key==='Escape'){var o=document.getElementById('esOverlay');if(o){e.stopPropagation();_esClose();}}}
+function _esClose(){var o=document.getElementById('esOverlay');if(o)o.remove();document.removeEventListener('keydown',_esTaste);}
+function _esToggleFertig(){_esMitFertig=!_esMitFertig;_esRender();}
+function _esOeffneKarte(id){_esClose();if(typeof openEditTaskModal==='function')openEditTaskModal(id);}
+function _esKopieren(){
+  var NL=String.fromCharCode(10);
+  var g=_esGruppen(),z=[];
+  g.reihe.forEach(function(k){
+    z.push(k);
+    g.gr[k].forEach(function(p){
+      z.push('  '+_esDe(p.e.datum)+' · '+(p.e.leistung||'—')+(p.e.maschine?' · '+p.e.maschine:'')+(p.e.material?' · '+p.e.material:'')+(p.e.min?' · '+_esMinText(p.e.min)+' h':'')+(p.e.rg?' · RE '+p.e.rg:p.e.rgFrei?' · ohne Berechnung':''));
+    });
+    z.push('');
+  });
+  var text=z.join(NL);
+  try{navigator.clipboard.writeText(text);if(typeof showToast==='function')showToast('Liste kopiert','success',2200);}
+  catch(err){if(typeof showToast==='function')showToast('Kopieren nicht möglich','error',3000);}
 }
 
 let taskBaudokuMaterial   = []; // [{name,einheit,gruppe,menge,vk}] → Mobile: materialGeplant
@@ -51798,7 +52034,7 @@ function openNewTaskModal(){
   _aufgabenIdCnt=0;
   taskTurnus=[];_tuOffen={};_tuMusterAn=false;_tuDateiOffen={};renderTurnusListe(); // b610 · b694 · b695
   _fotoJahrFilter=''; // b705: gleiche Regel wie _tuMusterAn/_tuDateiOffen – gilt nur je Task
-  taskBaudokuMaterial=[];taskBaudokuPersonalListe=[];taskBaudokuMaschinen=[];
+  taskBaudokuMaterial=[];taskBaudokuPersonalListe=[];taskBaudokuMaschinen=[];taskEinsaetze=[];renderEinsaetze(); // b1059
   renderBaudokuPlanung();
   _attachImgsOpen=false;
   // E-Mail-Felder vollständig leeren (verhindert Übernahme aus vorherigem Task)
@@ -61398,11 +61634,12 @@ function openEditTaskModal(id){
   taskBaudokuMaterial=JSON.parse(JSON.stringify(task.materialGeplant||[]));
   taskBaudokuPersonalListe=JSON.parse(JSON.stringify(task.baudokuPersonalListe||[]));
   taskBaudokuMaschinen=JSON.parse(JSON.stringify(task.baudokuMaschinen||[]));
+  taskEinsaetze=JSON.parse(JSON.stringify(task.einsaetze||[])); // b1059
   _attachImgsOpen=false;
   if(_migrateVideoAttachmentsToFotos())scheduleTaskFieldSave();
   renderLinksList();renderAttachList();renderFotoListDesktop();renderPruefberichteDesktop();
   renderAusserhausTermine();renderZeiterfassung();updateGcalModalBtn();renderTimerSection();renderTaskNotizen();renderCheckliste();renderEmailOriginals();renderEmailPdfs();renderGmailLinks();
-  renderAufgabenList();renderFreieTermine();renderBaudokuPlanung();renderTurnusListe();
+  renderAufgabenList();renderFreieTermine();renderBaudokuPlanung();renderEinsaetze();renderTurnusListe();
   const _ni=document.getElementById('newTaskNotizInput');if(_ni)_ni.value='';
   const _ci=document.getElementById('newChecklistInput');if(_ci)_ci.value='';
   const _gu=document.getElementById('newGmailLinkUrl');if(_gu)_gu.value='';
