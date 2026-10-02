@@ -9112,6 +9112,10 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
                     <span style="line-height:1;">✉</span><span>Outlook</span>
                     <span id="pamOutlookCount" style="display:none;font-size:calc(10px*var(--modal-scale,1));font-weight:700;color:#fff;background:rgba(255,255,255,.25);border-radius:8px;padding:0 5px;min-width:16px;text-align:center;line-height:1.6;"></span>
                   </button>
+                  <button type="button" onclick="_pamMsMehrSuchen()" title="Weitere Mails zu dieser Karte suchen (Nummer / Straße) – auch aus anderen Unterhaltungen und Ordnern"
+                    style="display:flex;align-items:center;justify-content:center;gap:4px;padding:5px 10px;border-radius:6px;background:transparent;color:#0078d4;border:1px solid #0078d4;cursor:pointer;font-size:calc(11px*var(--modal-scale,1));font-weight:600;">
+                    <span style="line-height:1;">🔎</span><span>Mehr Mails</span>
+                  </button>
                   <button type="button" id="pamDriveEmailBtn" onclick="_pamOpenEmailOrdner()" title="E-Mail-Ablageordner in Google Drive öffnen"
                     style="display:none;align-items:center;gap:4px;padding:5px 10px;border-radius:6px;background:#1B5E20;color:#fff;border:none;cursor:pointer;font-size:calc(11px*var(--modal-scale,1));font-weight:600;">
                     Drive
@@ -10352,7 +10356,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-02 · #1055'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-02-b1055) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-02 · #1056'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-02-b1056) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -36155,6 +36159,255 @@ async function _msLoadEmailThread(){
   }
 }
 
+// ── b1056: „🔎 Mehr Mails suchen" ─────────────────────────────────────────────
+// WARUM: `_msLoadEmailThread` holt nur die EINE Outlook-Unterhaltung der Karte (Unterhaltungs-ID).
+// Eine Mail mit anderem Betreff liegt in einer anderen Unterhaltung und wird nie gefunden – so
+// geschehen am 02.10.2026 mit der Züblin-Mail vom 17.09. („…Begleitung Dach [DOKID:3B35A]"),
+// obwohl dieselbe Kostenstellen-Nummer im Betreff stand. Hier wird deshalb zusätzlich nach
+// Merkmalen der Karte gesucht (Nummer im Betreff, Straße + Hausnummer) und das Ergebnis als
+// LISTE ZUM ANKREUZEN gezeigt. ⛔ Es hängt nie etwas von selbst an die Karte.
+// Durchsucht wird je verbundenem Postfach das GANZE Postfach (alle Ordner, auch „Mailarchiv"),
+// ausgenommen Papierkorb, Entwürfe und Junk-E-Mail. Zeitfenster: ab 60 Tage vor dem ältesten
+// Kartendatum (Anlage / älteste Mail), höchstens 20 Treffer; „Weiter zurück" = 1 Jahr.
+function _pamMsSuchMerkmale(task){
+  const t=task||{};
+  const texte=[t.title||'',t.msEmailSubject||''];
+  (t.msThreadMessages||[]).forEach(function(m){if(m&&m.subject)texte.push(m.subject);});
+  (t.emailOriginals||[]).forEach(function(m){if(m&&m.subject)texte.push(m.subject);});
+  const nummern=[];
+  const datumsartig=/^(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/;
+  texte.forEach(function(s){
+    String(s).replace(/(^|[^0-9A-Za-z])(\d{6,10})(?![0-9])/g,function(alles,vor,zahl){
+      if(zahl.charAt(0)==='0'||datumsartig.test(zahl))return alles;   // Telefonnummer / Datum
+      if(nummern.indexOf(zahl)<0)nummern.push(zahl);
+      return alles;
+    });
+  });
+  const strassen=[];
+  const adrTeil=String(t.adresse||'').split(',')[0];
+  [adrTeil].concat(texte).forEach(function(s){
+    const re=/((?:[A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß.\-]+\s+)?[A-Za-zÄÖÜäöüß.\-]*(?:weg|straße|strasse|str\.|allee|platz|gasse|ring|damm|ufer|chaussee))\s*(\d{1,4})(?![0-9])/gi;
+    let m;
+    while((m=re.exec(String(s)))){
+      const name=(m[1]+' '+m[2]).replace(/\s+/g,' ').trim();
+      if(strassen.map(function(x){return x.toLowerCase();}).indexOf(name.toLowerCase())<0)strassen.push(name);
+    }
+  });
+  const eigene=['info@ddmbraun.de','f.braun@ddmbraun.de','frank.braun@sv-fb.de'];
+  const absender=[];
+  const adrQuellen=[t.emailSender||''];
+  (t.msThreadMessages||[]).forEach(function(m){if(m)adrQuellen.push(m.from||'');});
+  (t.emailOriginals||[]).forEach(function(m){if(m)adrQuellen.push(m.sender||m.from||'');});
+  adrQuellen.forEach(function(s){
+    (String(s).match(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g)||[]).forEach(function(a){
+      a=a.toLowerCase();
+      if(eigene.indexOf(a)<0&&absender.indexOf(a)<0)absender.push(a);
+    });
+  });
+  return{nummern:nummern.slice(0,3),strassen:strassen.slice(0,3),absender:absender};
+}
+// Ältestes Kartendatum minus `tage` Tage (Millisekunden). Alte Karten ohne createdAt: Anlagezeit steckt in der ID (t_<ms>_…).
+function _pamMsSuchStart(task,tage){
+  const t=task||{};
+  const ts=[];
+  const add=function(v){const x=v?new Date(v).getTime():0;if(x&&!isNaN(x))ts.push(x);};
+  add(t.createdAt);add(t.msEmailDate);
+  const idm=/^t_(\d{12,14})/.exec(String(t.id||''));
+  if(idm)add(parseInt(idm[1],10));
+  (t.msThreadMessages||[]).forEach(function(m){add(m&&m.date);});
+  (t.emailOriginals||[]).forEach(function(m){add(m&&m.date);});
+  const tg=(tage||60)*86400000;
+  if(!ts.length)return Date.now()-tg;
+  return Math.min.apply(null,ts)-tg;
+}
+// Siebt die rohen Graph-Treffer: ctx={task,start,gesperrt:{'1':[ordnerIds],'2':[…]},absender:[…],max}
+// items = [{konto,raw,grund:[…]}] – gleiche Mail (Kennung) aus mehreren Suchen wird zusammengelegt.
+function _pamMsSuchFiltern(items,ctx){
+  const task=ctx.task||{};
+  const bekannt={};
+  (task.msThreadMessages||[]).forEach(function(m){const k=_pamMailKennung(m);if(k)bekannt[k]=1;});
+  (task.emailOriginals||[]).forEach(function(m){const k=_pamMailKennung(m);if(k)bekannt[k]=1;});
+  const eigeneIds={};
+  (task.msThreadMessages||[]).forEach(function(m){if(m&&m.id)eigeneIds[m.id]=1;});
+  const gesehen={};
+  const aus=[];
+  (items||[]).forEach(function(x){
+    const r=x&&x.raw;
+    if(!r||r.isDraft)return;
+    const sperr=(ctx.gesperrt&&ctx.gesperrt[x.konto])||[];
+    if(r.parentFolderId&&sperr.indexOf(r.parentFolderId)>=0)return;
+    const ts=r.receivedDateTime?new Date(r.receivedDateTime).getTime():0;
+    if(!ts||ts<ctx.start)return;
+    const kennung=String(r.internetMessageId||'').replace(/^<|>$/g,'');
+    if(kennung&&bekannt[kennung])return;
+    if(eigeneIds[r.id])return;
+    if(kennung&&typeof _pamMailHidden==='function'&&_pamMailHidden(task,{internetMessageId:kennung}))return;
+    const schl=kennung||(x.konto+':'+r.id);
+    if(gesehen[schl]){
+      x.grund.forEach(function(g){if(gesehen[schl].grund.indexOf(g)<0)gesehen[schl].grund.push(g);});
+      return;
+    }
+    const eintrag={konto:x.konto,raw:r,kennung:kennung,ts:ts,grund:x.grund.slice()};
+    gesehen[schl]=eintrag;
+    aus.push(eintrag);
+  });
+  const abs=ctx.absender||[];
+  aus.forEach(function(e){
+    const von=String((e.raw.from&&e.raw.from.emailAddress&&e.raw.from.emailAddress.address)||'').toLowerCase();
+    if(von&&abs.indexOf(von)>=0)e.grund.push('Absender schon in der Karte');
+  });
+  aus.sort(function(a,b){return b.ts-a.ts;});
+  return{liste:aus.slice(0,ctx.max||20),gesamt:aus.length};
+}
+// Eine ausgewählte Fundstelle → Zeile im selben Format wie `msThreadMessages` (siehe _msLoadEmailThread).
+function _pamMsSuchZeile(e,myAddrs,sentFolderId){
+  const m=e.raw;
+  return{
+    id:m.id,
+    subject:m.subject||'',
+    from:(m.from&&m.from.emailAddress&&m.from.emailAddress.address)||'',
+    fromName:(m.from&&m.from.emailAddress&&m.from.emailAddress.name)||'',
+    date:m.receivedDateTime||'',
+    preview:_msCleanPreview(m.bodyPreview||''),
+    direction:_b858Richtung(m,myAddrs,sentFolderId),
+    internetMessageId:(m.internetMessageId||'').replace(/^<|>$/g,''),
+    hasAttachments:m.hasAttachments||false,
+    conversationId:m.conversationId||''   // b1056: eigene Unterhaltung → erscheint im Verlauf als eigener Vorgang
+  };
+}
+var _pamMsSuchStand=null;
+async function _pamMsMehrSuchen(tage){
+  const taskId=_getActiveTaskId();
+  const task=findTaskById(taskId)||(_pamCurrentTask&&_pamCurrentTask.id===taskId?_pamCurrentTask:null);
+  if(!task){showToast('⚠ Kein Task geöffnet','error',3000);return;}
+  tage=tage||60;
+  const mk=_pamMsSuchMerkmale(task);
+  if(!mk.nummern.length&&!mk.strassen.length){
+    showToast('⚠ In der Karte steht keine Nummer (ab 6 Ziffern) und keine Straße mit Hausnummer – es gibt nichts zu suchen','warning',6000);
+    return;
+  }
+  // Verbundene Postfächer: wie im Verlauf über das Dauer-Ticket erneuern
+  const konten=[];
+  if(msToken||_msHasStoredAccount('1')){if(await _msRefreshToken()&&msToken)konten.push({k:'1',tok:msToken});}
+  if(msToken2||_msHasStoredAccount('2')){if(await _msRefreshToken2()&&msToken2)konten.push({k:'2',tok:msToken2});}
+  if(!konten.length){showToast('⚠ Outlook nicht verbunden – bitte zuerst verbinden (Toolbar: 📨 Outlook)','warning',5000);return;}
+  showToast('⏳ Suche in Outlook…','info',8000);
+  const kopf=function(tok){return{headers:{Authorization:'Bearer '+tok}};};
+  const ordnerId=async function(tok,name){
+    try{const r=await fetch('https://graph.microsoft.com/v1.0/me/mailFolders/'+name+'?$select=id',kopf(tok));if(r.ok){const d=await r.json();return d.id||'';}}catch(e){}
+    return '';
+  };
+  let fehler=0;
+  const suche=async function(tok,q){
+    try{
+      const r=await fetch('https://graph.microsoft.com/v1.0/me/messages?$search=%22'+encodeURIComponent(q)+'%22&$top=50&$select=id,subject,from,receivedDateTime,internetMessageId,bodyPreview,isDraft,hasAttachments,parentFolderId,conversationId',kopf(tok));
+      if(!r.ok){fehler++;console.warn('[b1056] Suche „'+q+'" HTTP '+r.status);return[];}
+      const d=await r.json();
+      console.log('[b1056] Suche „'+q+'": '+((d.value||[]).length)+' Treffer');
+      return d.value||[];
+    }catch(e){fehler++;console.warn('[b1056] Suche „'+q+'":',e);return[];}
+  };
+  const items=[];
+  const gesperrt={};
+  const sent={};
+  for(const ko of konten){
+    const sperr=[];
+    for(const n of ['deleteditems','junkemail','drafts']){const id=await ordnerId(ko.tok,n);if(id)sperr.push(id);}
+    gesperrt[ko.k]=sperr;
+    sent[ko.k]=await ordnerId(ko.tok,'sentitems');
+    for(const nr of mk.nummern){
+      let tr=await suche(ko.tok,nr);
+      if(!tr.length)tr=await suche(ko.tok,nr+'*');   // falls Outlook „2400026211-LSAI" als ein Wort ablegt
+      tr.forEach(function(r){items.push({konto:ko.k,raw:r,grund:['Nummer '+nr]});});
+    }
+    for(const st of mk.strassen){
+      const tr=await suche(ko.tok,st);
+      tr.forEach(function(r){items.push({konto:ko.k,raw:r,grund:['Adresse '+st]});});
+    }
+  }
+  const start=_pamMsSuchStart(task,tage);
+  const erg=_pamMsSuchFiltern(items,{task:task,start:start,gesperrt:gesperrt,absender:mk.absender,max:20});
+  _pamMsSuchStand={taskId:task.id,liste:erg.liste,gesamt:erg.gesamt,tage:tage,start:start,sent:sent,mk:mk,konten:konten.length,fehler:fehler};
+  _pamMsSuchFensterZeigen();
+}
+function _pamMsSuchFensterZeigen(){
+  const st=_pamMsSuchStand;if(!st)return;
+  const GID='_pamMsSuchOv';
+  const alt=document.getElementById(GID);if(alt)alt.remove();
+  const ov=document.createElement('div');
+  ov.id=GID;
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100003;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+  const dt=function(ms){const d=new Date(ms);return _ez2(d.getDate())+'.'+_ez2(d.getMonth()+1)+'.'+d.getFullYear();};
+  const was=st.mk.nummern.concat(st.mk.strassen).join(' · ');
+  const zeilen=st.liste.map(function(e,i){
+    const r=e.raw;
+    const von=(r.from&&r.from.emailAddress&&(r.from.emailAddress.name||r.from.emailAddress.address))||'';
+    const d=new Date(e.ts);
+    const ds=_ez2(d.getDate())+'.'+_ez2(d.getMonth()+1)+'.'+String(d.getFullYear()).slice(2)+' '+_ez2(d.getHours())+':'+_ez2(d.getMinutes());
+    const chips=e.grund.map(function(g){return'<span style="font-size:10px;padding:1px 7px;border-radius:8px;background:#E6F1FB;color:#185FA5;font-weight:600;white-space:nowrap;">'+esc(g)+'</span>';}).join(' ');
+    const kto=st.konten>1?'<span style="font-size:10px;color:var(--text2);">Postfach '+(e.konto==='2'?'f.braun':'info')+'</span>':'';
+    return'<label style="display:flex;gap:9px;align-items:flex-start;padding:8px 14px;border-bottom:0.5px solid var(--border,#e5e7eb);cursor:pointer;">'
+      +'<input type="checkbox" class="pamMsSuchCb" data-i="'+i+'" style="margin-top:3px;flex-shrink:0;">'
+      +'<div style="flex:1;min-width:0;">'
+      +'<div style="font-size:13px;font-weight:600;color:var(--text1);">'+esc(r.subject||'(kein Betreff)')+(r.hasAttachments?' 📎':'')+'</div>'
+      +'<div style="font-size:12px;color:var(--text2);">'+esc(von)+' · '+ds+' '+kto+'</div>'
+      +'<div style="margin-top:3px;display:flex;gap:4px;flex-wrap:wrap;">'+chips+'</div>'
+      +'</div></label>';
+  }).join('');
+  const leer='<div style="padding:26px 18px;font-size:13px;color:var(--text2);">Nichts Neues gefunden (ab '+dt(st.start)+').'
+    +(st.fehler?' ⚠ '+st.fehler+' Suchanfrage(n) sind fehlgeschlagen – Einzelheiten stehen in der Konsole (Zeilen mit [b1056]).':'')+'</div>';
+  const mehrZ=st.gesamt>st.liste.length?' · '+st.gesamt+' gefunden, die neuesten '+st.liste.length+' gezeigt':'';
+  ov.innerHTML='<div style="background:var(--bg1,#fff);border-radius:12px;width:100%;max-width:760px;max-height:84vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.28);">'
+    +'<div style="background:#0078d4;color:#fff;padding:10px 16px;flex-shrink:0;">'
+    +'<div style="font-weight:700;font-size:13px;">🔎 Weitere Mails zu dieser Karte</div>'
+    +'<div style="font-size:11px;opacity:.85;">Gesucht: '+esc(was)+' · ab '+dt(st.start)+mehrZ+'</div>'
+    +'</div>'
+    +'<div style="font-size:12px;color:var(--text2);padding:8px 16px;border-bottom:0.5px solid var(--border,#e5e7eb);">Haken setzen, was zu diesem Vorgang gehört. Es wird nichts von selbst angehängt.</div>'
+    +'<div style="flex:1;overflow-y:auto;">'+(st.liste.length?zeilen:leer)+'</div>'
+    +'<div style="display:flex;gap:8px;padding:10px 16px;border-top:0.5px solid var(--border,#e5e7eb);flex-shrink:0;">'
+    +(st.tage<365?'<button type="button" onclick="_pamMsMehrSuchen(365)" style="padding:6px 12px;border-radius:6px;border:1px solid var(--border,#ccc);background:transparent;color:var(--text1);cursor:pointer;font-size:12px;">Weiter zurück suchen (1 Jahr)</button>':'')
+    +'<span style="flex:1;"></span>'
+    +(st.liste.length?'<button type="button" onclick="_pamMsMehrUebernehmen()" style="padding:6px 14px;border-radius:6px;border:none;background:#0078d4;color:#fff;cursor:pointer;font-size:12px;font-weight:600;">Ausgewählte übernehmen</button>':'')
+    +'<button type="button" onclick="document.getElementById(\''+GID+'\').remove()" style="padding:6px 12px;border-radius:6px;border:1px solid var(--border,#ccc);background:transparent;color:var(--text1);cursor:pointer;font-size:12px;">Schließen</button>'
+    +'</div></div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('click',function(ev){if(ev.target===ov)ov.remove();});
+}
+async function _pamMsMehrUebernehmen(){
+  const st=_pamMsSuchStand;if(!st)return;
+  const task=findTaskById(st.taskId)||(_pamCurrentTask&&_pamCurrentTask.id===st.taskId?_pamCurrentTask:null);
+  if(!task){showToast('⚠ Karte nicht mehr offen','error',3000);return;}
+  const gew=[];
+  document.querySelectorAll('#_pamMsSuchOv .pamMsSuchCb').forEach(function(cb){
+    if(!cb.checked)return;
+    const e=st.liste[parseInt(cb.getAttribute('data-i'),10)];
+    if(e)gew.push(e);
+  });
+  if(!gew.length){showToast('Nichts angehakt','info',2500);return;}
+  const myAddrs=[(msUserEmail||'').toLowerCase(),(msUserEmail2||'').toLowerCase(),'info@ddmbraun.de','f.braun@ddmbraun.de','frank.braun@sv-fb.de'].filter(Boolean);
+  const neu=gew.map(function(e){return _pamMsSuchZeile(e,myAddrs,(st.sent||{})[e.konto]||'');});
+  const vorh=task.msThreadMessages||[];
+  const zusatz=neu.filter(function(n){return !vorh.some(function(v){return _pamGleicheMail(v,n);});});
+  task.msThreadMessages=vorh.concat(zusatz).sort(function(a,b){return new Date(b.date)-new Date(a.date);});
+  const ov=document.getElementById('_pamMsSuchOv');if(ov)ov.remove();
+  showToast('⏳ '+zusatz.length+' Mail(s) werden übernommen…','info',8000);
+  try{
+    const pdf=await _msSaveThreadPdfs(task,zusatz);
+    const eml=(await _saveThreadMailsAsEml(task,zusatz,'outlook'))||0;
+    const att=await _msSaveThreadAttachments(task,zusatz);
+    await autoSave();
+    if(typeof _msRenderThread==='function')_msRenderThread(task);
+    if(typeof _pamRenderUnifiedEmailList==='function')_pamRenderUnifiedEmailList(task);
+    if(typeof _pamEmailRefresh==='function')_pamEmailRefresh(task);
+    const mld=_b852Meldung(zusatz.length,pdf,eml,att);
+    showToast(mld.text,mld.art,mld.dauer);
+    if(mld.warnung)showToast(mld.warnung.text,mld.warnung.art,mld.warnung.dauer);
+  }catch(e){
+    console.warn('[b1056] Übernehmen:',e);
+    showToast('⚠ '+e.message,'error',6000);
+  }
+}
+
 function _msToggleLinkRow(){
   const row=document.getElementById('msLinkRow');
   if(!row)return;
@@ -36780,6 +37033,7 @@ function _msOpenThreadPopup(){
       </div>
       <span id="_msTPCount" style="font-size:11px;background:rgba(255,255,255,.2);padding:2px 9px;border-radius:10px;font-weight:600;white-space:nowrap;">${countTxt}</span>
       <button type="button" onclick="_msLoadEmailThread()" style="padding:4px 12px;border-radius:5px;background:rgba(255,255,255,.18);color:#fff;border:1px solid rgba(255,255,255,.3);cursor:pointer;font-size:11px;font-weight:600;flex-shrink:0;">⟳ Laden</button>
+      <button type="button" onclick="_pamMsMehrSuchen()" title="Weitere Mails zu dieser Karte suchen" style="padding:4px 12px;border-radius:5px;background:rgba(255,255,255,.18);color:#fff;border:1px solid rgba(255,255,255,.3);cursor:pointer;font-size:11px;font-weight:600;flex-shrink:0;">🔎 Mehr Mails</button>
       <button type="button" onclick="document.getElementById('${GID}').remove()" style="background:rgba(255,255,255,.18);border:none;color:#fff;font-size:15px;cursor:pointer;padding:4px 9px;border-radius:5px;flex-shrink:0;line-height:1;">✕</button>
     </div>
     <div style="display:flex;flex:1;overflow:hidden;">
