@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F11';
+const PAM_FORMULARE_VERSION='F12';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
@@ -4470,6 +4470,18 @@ function _openWartungsprotokollMobil(existingIdx){
   document.body.appendChild(ov);
 }
 
+/* F12: ECHTES HÄKCHEN IM PDF. Das Zeichen ✓ fehlt in der PDF-Grundschrift (Helvetica) und kam als winziger Strich („’“) heraus – in allen bisherigen
+   Wartungsprotokoll-PDFs (Frank 02.10.2026, mit Bild). Jetzt zeichnet didDrawCell zwei Linien mittig in die Zelle: OK grün, N/V grau, Mängel rot und dicker, Rep. blau.
+   Spalten 1–4 der Tabelle; die Zelle bleibt textlos (didParseCell leert sie). */
+const FS_WP_HAKEN={1:[26,122,60,0.45],2:[110,110,110,0.45],3:[192,57,43,0.7],4:[41,128,185,0.45]};
+function _fsWpHakenZeichnen(doc,d){
+  const f=d&&d.column?FS_WP_HAKEN[d.column.index]:null;
+  if(!f||d.section!=='body'||!d.cell||d.cell.raw!=='✓')return;
+  const x=d.cell.x+d.cell.width/2,y=d.cell.y+d.cell.height/2;
+  doc.setDrawColor(f[0],f[1],f[2]);doc.setLineWidth(f[3]);
+  doc.line(x-1.7,y+0.1,x-0.6,y+1.4);doc.line(x-0.6,y+1.4,x+1.9,y-1.5);
+  doc.setDrawColor(0,0,0);doc.setLineWidth(0.2);
+}
 // PDF des Wartungsprotokolls – Fassung des PC (Kopf, Dachaufbau, „Zustandsprüfung“, Mängel-Fotos je Punkt, Mängel/Empfehlungen, Fotodokumentation).
 // Fotos über _fsFotoFuerPdf: die bemalte Fassung zuerst (_shrBytes), auf 1600 px verkleinert.
 async function _fsWpPdf(bericht,task){
@@ -4536,13 +4548,10 @@ async function _fsWpPdf(bericht,task){
           0:{cellWidth:82},1:{cellWidth:10,halign:'center'},2:{cellWidth:10,halign:'center'},
           3:{cellWidth:13,halign:'center'},4:{cellWidth:10,halign:'center'},5:{cellWidth:47}
         },
-        didParseCell:(d)=>{
-          if(d.section==='body'){
-            if(d.column.index===1&&d.cell.raw==='✓')d.cell.styles.textColor=[26,122,60];
-            if(d.column.index===3&&d.cell.raw==='✓'){d.cell.styles.textColor=[192,57,43];d.cell.styles.fontStyle='bold';}
-            if(d.column.index===4&&d.cell.raw==='✓')d.cell.styles.textColor=[41,128,185];
-          }
-        }
+        didParseCell:(d)=>{ // F12: kein Zeichen ✓ im Text (die PDF-Grundschrift kennt es nicht) – das Häkchen wird in didDrawCell gezeichnet
+          if(d.section==='body'&&d.column.index>=1&&d.column.index<=4&&d.cell.raw==='✓')d.cell.text=[''];
+        },
+        didDrawCell:(d)=>_fsWpHakenZeichnen(doc,d)
       });
       y=doc.lastAutoTable.finalY+4;
       // Mängel-Fotos (mit dem Prüfpunkt verknüpfte Fotos) direkt nach dem Abschnitt
