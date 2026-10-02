@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F14';
+const PAM_FORMULARE_VERSION='F15';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
@@ -4939,4 +4939,25 @@ function _fsBgListeInfo(b){
   const namen=((b&&b.raeume)||[]).map(r=>String((r&&r.name)||'').trim()).filter(Boolean);
   const raeume=namen.length>2?namen.slice(0,2).join(', ')+' +'+(namen.length-2):namen.join(', ');
   return {beantwortet,tot,raeume};
+}
+
+/* ══ F15: LISTE – Kürzel, Tooltip, Kartenname ═══════════════════════════════════════════════════════
+   Liefert für eine Zeile der Formular-Liste: kurz (Feldchen, z. B. WP-FLADA), lang (Tooltip, ausgeschrieben), name (fett: Name der Karte),
+   sub (klein: Straße beim Wartungsprotokoll, Raumnamen beim Begehungsprotokoll). null = andere Formulare, Zeile bleibt wie bisher.
+   Steildach: später über b.dachart==='steil'. Reine Funktion, keine Namen/Adressen in dieser Datei. */
+function _fsListeZeile(b,t){
+  if(!b)return null;
+  const kartenname=String((t&&(t.title||t.name))||'').trim();
+  if(b.vorlage==='wartungsprotokoll'){
+    const steil=String(b.dachart||'').toLowerCase()==='steil';
+    const adr=String((b.kopf&&(b.kopf.objektAdresse||b.kopf.adresse))||'').trim();
+    const name=kartenname||adr||String(b.titel||'Wartungsprotokoll');
+    return {kurz:steil?'WP-STEILDA':'WP-FLADA',lang:steil?'Wartungsprotokoll Steildach':'Wartungsprotokoll Flachdach',name,sub:(adr&&adr!==name)?adr:''};
+  }
+  if(b.vorlage==='feuchte'&&b.fassung==='begehung'){
+    const keller=b.art==='keller';
+    const info=(typeof _fsBgListeInfo==='function')?_fsBgListeInfo(b):{raeume:''};
+    return {kurz:keller?'BEG-KELLER':'BEG-WHG',lang:keller?'Begehungsprotokoll Keller':'Begehungsprotokoll Wohnung',name:kartenname||String(b.titel||'Begehungsprotokoll'),sub:info.raeume||''};
+  }
+  return null;
 }
