@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F13';
+const PAM_FORMULARE_VERSION='F14';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
@@ -975,10 +975,10 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     _wpMobRenderFotos(bericht,grid);
     const kr=document.createElement('div');kr.style.cssText='display:flex;gap:8px;padding:0 14px 16px;';
     const mk=(txt,stil,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.style.cssText=S_KNOPF+'flex:1;'+stil;b.onclick=fn;return b;};
-    if(_fsAmPc()){ // F9: am PC keine Kamera – Fotos von der Festplatte oder aus dem Drive-Foto-Ordner
+    if(_fsAmPc()){ // F9: am PC keine Kamera – Fotos von der Festplatte oder aus der Foto-Liste der Karte
       kr.append(
         mk('📁 Fotos vom PC','border:1.5px solid var(--border);background:var(--bg3);color:var(--text);',()=>_wpMobFotoAufnehmen(bericht,grid,false)),
-        mk('☁ Drive-Foto-Ordner','border:1.5px dashed var(--green);background:transparent;color:var(--text);',()=>_wpMobLadeDriveFotos(bericht,grid)));
+        mk('🖼 Fotos der Karte','border:1.5px dashed var(--green);background:transparent;color:var(--text);',()=>_wpMobLadeDriveFotos(bericht,grid)));
     }else kr.append(
       mk('📷 Kamera','border:1.5px dashed var(--accent2);background:transparent;color:var(--text);',()=>_wpMobFotoAufnehmen(bericht,grid,true)),
       mk('🖼 Galerie','border:1.5px solid var(--border);background:var(--bg3);color:var(--text);',()=>_wpMobFotoAufnehmen(bericht,grid,false)),
@@ -4432,7 +4432,7 @@ function _openWartungsprotokollMobil(existingIdx){
     if(_fsAmPc()){
       fotoBtnRow.append(
         mkF('📁 Fotos vom PC','border:1.5px solid var(--border);background:var(--bg3);color:var(--text);',()=>_wpMobFotoAufnehmen(bericht,fotoGrid,false)),
-        mkF('☁ Drive-Foto-Ordner','border:1.5px dashed #34a853;background:rgba(52,168,83,.06);color:var(--text);',()=>_wpMobLadeDriveFotos(bericht,fotoGrid)));
+        mkF('🖼 Fotos der Karte','border:1.5px dashed #34a853;background:rgba(52,168,83,.06);color:var(--text);',()=>_wpMobLadeDriveFotos(bericht,fotoGrid)));
     }else fotoBtnRow.append(
       mkF('📷 Kamera','border:1.5px dashed var(--accent);background:rgba(108,99,255,.06);color:var(--accent);',()=>_wpMobFotoAufnehmen(bericht,fotoGrid,true)),
       mkF('🖼 Galerie','border:1.5px solid var(--border);background:var(--bg3);color:var(--text);',()=>_wpMobFotoAufnehmen(bericht,fotoGrid,false)),
@@ -4928,4 +4928,15 @@ async function _fsPbPdf(bericht,task){
     toast('PDF-Fehler: '+e.message,'error');
     return null;
   }
+}
+
+/* ══ F14: LISTE – wie weit ist das Begehungsprotokoll, und welches ist es? ═══════════════════════════════
+   Die Formular-Liste (PC und Handy/Tablet) zeigt beim Begehungsprotokoll NEUTRAL „beantwortet/gesamt“ (ohne ⚠ – das Protokoll bewertet nichts, Frank 30.09.2026)
+   und die Raumnamen, damit zwei gleich heißende Protokolle (z. B. „Begehungsprotokoll Keller“) auseinanderzuhalten sind. Beantwortet = Satz links oder rechts gewählt. */
+function _fsBgListeInfo(b){
+  let beantwortet=0,tot=0;
+  ((b&&b.sektionen)||[]).forEach(s=>((s&&s.items)||[]).forEach(it=>{tot++;if(it&&(it.status==='ok'||it.status==='mangel'))beantwortet++;}));
+  const namen=((b&&b.raeume)||[]).map(r=>String((r&&r.name)||'').trim()).filter(Boolean);
+  const raeume=namen.length>2?namen.slice(0,2).join(', ')+' +'+(namen.length-2):namen.join(', ');
+  return {beantwortet,tot,raeume};
 }
