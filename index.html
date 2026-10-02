@@ -2162,10 +2162,11 @@ async function _auftragAddToTask(task,boardName,fileMode){
       // b600: Bilder → Bilder-Ordner, alles andere → Dokumente-Ordner. Vorher ging beides
       // nach `fid` (Posteingang) – dieselbe Weiche kennt _uploadEmailOriginal schon länger.
       const _ziele2=_pamAnhangZiele(task,fid);
-      for(const att of info.attachments){
+      const _anhListe2=await _b1057ZipEntpacken(info.attachments,info.subject,{videoAlsDokument:true});   // b1058: ZIP auf Wunsch auspacken (mit Rückfrage)
+      for(const att of _anhListe2){
         if(att._isCidInline)continue; // Fix #223: CID-Inline-Bilder nicht automatisch hochladen
         const isImg=/\.(jpg|jpeg|png|gif|webp|heic|heif|avif|bmp|tiff?)$/i.test(att.name)||(att.mimeType||'').startsWith('image/');
-        if(isImg&&att.b64&&att.b64.length*0.75<_MIN_EMAIL_IMG_BYTES){console.log('[PTP] Bild übersprungen (zu klein, vermutl. Logo/Signatur):',att.name,Math.round(att.b64.length*0.75/1024)+'KB');continue;} // Fix #314
+        if(isImg&&!att._ausZip&&att.b64&&att.b64.length*0.75<_MIN_EMAIL_IMG_BYTES){console.log('[PTP] Bild übersprungen (zu klein, vermutl. Logo/Signatur):',att.name,Math.round(att.b64.length*0.75/1024)+'KB');continue;} // Fix #314
         try{
           const binStr=atob(att.b64);
           const bytes=new Uint8Array(binStr.length);
@@ -2185,7 +2186,7 @@ async function _auftragAddToTask(task,boardName,fileMode){
         }catch(e){_att2Fail++;console.warn('[PTP] EML-Anhang (AddToTask):',e);}
       }
       if(_att2Ok>0){
-        const _imgCnt2=(info.attachments||[]).filter(function(a){return /\.(jpg|jpeg|png|gif|webp|heic)/i.test(a.name)||(a.mimeType||'').startsWith('image/');}).length;
+        const _imgCnt2=(_anhListe2||[]).filter(function(a){return /\.(jpg|jpeg|png|gif|webp|heic)/i.test(a.name)||(a.mimeType||'').startsWith('image/');}).length;
         const _fileCnt2=_att2Ok-_imgCnt2;
         let _msg2='📎 Extrahiert: ';
         if(_imgCnt2)_msg2+='🖼 '+_imgCnt2+' Foto'+(  _imgCnt2!==1?'s':'')+' → Bilder  ';
@@ -2474,10 +2475,11 @@ async function _auftragConfirm(){
     if(rawFile&&rawFile.name.toLowerCase().endsWith('.eml')&&info.attachments&&info.attachments.length>0){
       let _attOk=0,_attFail=0;
       showToast('📎 '+info.attachments.length+' Anhang/Anhänge gefunden – lade hoch…','info',3000);
-      for(const att of info.attachments){
+      const _anhListe=await _b1057ZipEntpacken(info.attachments,info.subject,{videoAlsDokument:true});   // b1058: ZIP auf Wunsch auspacken (mit Rückfrage)
+      for(const att of _anhListe){
         if(att._isCidInline)continue; // Fix #314: CID-Inline-Bilder auch hier ausschließen
         const isImg=/\.(jpg|jpeg|png|gif|webp|heic|heif|avif|bmp|tiff?)$/i.test(att.name)||(att.mimeType||'').startsWith('image/');
-        if(isImg&&att.b64&&att.b64.length*0.75<_MIN_EMAIL_IMG_BYTES){console.log('[PTP] Bild übersprungen (zu klein, vermutl. Logo/Signatur):',att.name,Math.round(att.b64.length*0.75/1024)+'KB');continue;} // Fix #314
+        if(isImg&&!att._ausZip&&att.b64&&att.b64.length*0.75<_MIN_EMAIL_IMG_BYTES){console.log('[PTP] Bild übersprungen (zu klein, vermutl. Logo/Signatur):',att.name,Math.round(att.b64.length*0.75/1024)+'KB');continue;} // Fix #314
         try{
           const binStr=atob(att.b64);
           const bytes=new Uint8Array(binStr.length);
@@ -2500,13 +2502,13 @@ async function _auftragConfirm(){
         }catch(e){_attFail++;console.warn('[PTP] EML-Anhang Upload:',e);}
       }
       if(_attFail===0){
-        const _imgCnt=(info.attachments||[]).filter(function(a){return !a._isCidInline&&(/\.(jpg|jpeg|png|gif|webp|heic)/i.test(a.name)||(a.mimeType||'').startsWith('image/'));}).length;
+        const _imgCnt=(_anhListe||[]).filter(function(a){return !a._isCidInline&&(/\.(jpg|jpeg|png|gif|webp|heic)/i.test(a.name)||(a.mimeType||'').startsWith('image/'));}).length;
         const _fileCnt=_attOk-_imgCnt;
         let _msg='📎 Extrahiert: ';
         if(_imgCnt)_msg+='🖼 '+_imgCnt+' Foto'+(_imgCnt!==1?'s':'')+' → Bilder  ';
         if(_fileCnt)_msg+='📁 '+_fileCnt+' Datei'+(_fileCnt!==1?'en':'')+' → Dokumente';
         showToast(_msg,'success',6000);
-      } else showToast('⚠ '+_attOk+' von '+info.attachments.length+' Anhängen gespeichert · '+_attFail+' fehlgeschlagen','warning',6000);
+      } else showToast('⚠ '+_attOk+' von '+_anhListe.length+' Anhängen gespeichert · '+_attFail+' fehlgeschlagen','warning',6000);
     }
   }
 
@@ -10356,7 +10358,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-02 · #1057'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-02-b1057) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-02 · #1058'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-02-b1058) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -35122,7 +35124,7 @@ function _pamBeideListen(task,feld,glob){
 // OK = Inhalt einzeln ablegen (Fotos/Videos zu den Fotos, Rest zu Dokumente), das ZIP selbst wird NICHT
 // hochgeladen. Abbrechen = das ZIP bleibt eine Datei (wie bisher). Rückgabe: Liste der Anhänge, in der
 // ein ausgepacktes ZIP durch seine Einzeldateien ersetzt ist (Marke _ausZip = Name des ZIP).
-async function _b1057ZipEntpacken(atts,betreff){
+async function _b1057ZipEntpacken(atts,betreff,opt){
   const raus=[];
   for(const att of (atts||[])){
     const istZip=!!att&&/\.zip$/i.test(att.name||'');
@@ -35139,7 +35141,7 @@ async function _b1057ZipEntpacken(atts,betreff){
       const k=x.pfad.split('/').pop();
       const typ=(typeof _mpMimeAusName==='function'?_mpMimeAusName(k):'')||'';
       if(typ.indexOf('image/')===0||(typeof IMAGE_EXTS!=='undefined'&&IMAGE_EXTS.test(k)))nF++;
-      else if(typeof _isVideo==='function'&&_isVideo(typ,k))nV++;
+      else if(typeof _isVideo==='function'&&_isVideo(typ,k)&&!(opt&&opt.videoAlsDokument))nV++;   // b1058: opt.videoAlsDokument = Aufrufer ohne Video-Weiche, Video zählt als Dokument
       else nD++;
     });
     const teile=[];
