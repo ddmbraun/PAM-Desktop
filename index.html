@@ -10372,7 +10372,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-02 · #1059'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-02-b1059) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-02 · #1060'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-02-b1060) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -23174,9 +23174,14 @@ function _bdStopScan(){
 // Datum · Leistung · Maschine · Material · Stunden · Stand (offen / Rechnungs-Nr. / ohne Berechnung).
 // Zweck: am Jahresende sehen, was für ein Haus noch NICHT abgerechnet ist (Rechnung schreibt Frank in MF dach).
 // ⛔ Hängt NICHT an Außerhaus-Terminen und NICHT an der Baudoku-Planung – die bleibt unverändert (geht aufs Handy).
-// Das Handy kennt dieses Feld nicht und zeigt es (noch) nicht an.
-let taskEinsaetze = []; // [{id,datum,leistung,maschine,material,min,rg,rgFrei,rgAm}] → Task-Feld `einsaetze`
+// Das Handy kennt dieses Feld nicht und zeigt es (noch) nicht an; in Mobil steht `einsaetze` in `_pcOnly` (v322).
+// b1060 (Frank 02.10.2026): von–bis statt nur Stunden · Leistung und Material mehrzeilig · Einsätze zuklappbar ·
+//   in der Übersicht mehrere Einsätze anhaken und EINE Rechnungsnummer vergeben.
+let taskEinsaetze = []; // [{id,datum,von,bis,leistung,maschine,material,min,rg,rgFrei,rgAm}] → Task-Feld `einsaetze`
 let _esMitFertig = false; // Übersichtsfenster: auch abgerechnete zeigen
+let _esAuf = {}; // b1060: aufgeklappte Einsätze (id → true) – reine Anzeige, wird NICHT gespeichert
+let _esSel = {}; // b1060: in der Übersicht angehakt (id → true) – reine Anzeige
+const _ES_NL = String.fromCharCode(10);
 
 function _esEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function _esId(){return 'es_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
@@ -23192,60 +23197,143 @@ function _esMinParse(s){
 }
 function _esAnz(n){return n+(n===1?' Einsatz':' Einsätze');}
 function _esMinText(min){min=Number(min)||0;if(!min)return '';var h=Math.floor(min/60),m=min%60;return h+':'+(m<10?'0':'')+m;}
+// b1060: Uhrzeit "HH:MM" gültig? · Dauer aus von/bis (nur wenn beide gültig und bis NACH von liegt, sonst null)
+function _esZeitOk(s){var p=String(s||'').split(':');return p.length===2&&p[0]!==''&&p[1]!==''&&isFinite(+p[0])&&isFinite(+p[1])&&+p[0]>=0&&+p[0]<24&&+p[1]>=0&&+p[1]<60;}
+function _esVonBisMin(von,bis){
+  if(!_esZeitOk(von)||!_esZeitOk(bis))return null;
+  var a=String(von).split(':'),b=String(bis).split(':');
+  var m=(+b[0]*60+ +b[1])-(+a[0]*60+ +a[1]);
+  return m>0?m:null;
+}
+// b1060: mehrzeilige Felder – Zeilen ohne Leerzeilen; Anzeige mit <br>
+function _esZeilen(s){return String(s==null?'':s).split(_ES_NL).map(function(z){return z.trim();}).filter(Boolean);}
+function _esBr(s){return _esZeilen(s).map(_esEsc).join('<br>');}
+function _esRows(el){if(el)el.rows=Math.max(1,String(el.value||'').split(_ES_NL).length);}
 // Vorschläge aus ALLEN Karten – was einmal getippt wurde, steht beim nächsten Mal zur Auswahl.
+// Leistung ist mehrzeilig → Vorschlag je ZEILE.
 function _esVorschlaege(feld){
   var set={};
-  var nimm=function(list){(list||[]).forEach(function(e){var v=e&&e[feld];if(v&&String(v).trim())set[String(v).trim()]=1;});};
+  var nimm=function(list){(list||[]).forEach(function(e){
+    var v=e&&e[feld];if(!v)return;
+    String(v).split(_ES_NL).forEach(function(z){z=z.trim();if(z)set[z]=1;});
+  });};
   try{Object.keys(boards||{}).forEach(function(bn){if(bn.charAt(0)==='_')return;(boards[bn]||[]).forEach(function(t){if(t)nimm(t.einsaetze);});});}catch(err){console.warn('[ES]',err);}
   nimm(taskEinsaetze);
   return Object.keys(set).sort(function(a,b){return a.localeCompare(b,'de');});
 }
-function renderEinsaetze(){
-  var body=document.getElementById('tEinsaetzeBody'),badge=document.getElementById('tEinsaetzeBadge');
-  if(!body)return;
+function _esStandHtml(e){
+  return e.rg?'<span style="color:#2f7d1e;font-weight:700;">✓ RE '+_esEsc(e.rg)+'</span>'
+    :e.rgFrei?'<span style="color:var(--text2);font-weight:700;">✓ ohne Berechnung</span>'
+    :'<span style="color:#C2410C;font-weight:700;">● offen</span>';
+}
+// Die eine Zeile, die man auch zugeklappt sieht
+function _esKopfHtml(e){
+  var z=_esZeilen(e.leistung);
+  var l=z.length?_esEsc(z[0])+(z.length>1?' <span style="color:var(--text2);">(+'+(z.length-1)+')</span>':''):'<span style="color:var(--text2);">ohne Leistung</span>';
+  var zeit=(_esZeitOk(e.von)&&_esZeitOk(e.bis))?(_esEsc(e.von)+'–'+_esEsc(e.bis)+' · '):'';
+  var std=_esMinText(e.min);
+  return '<span style="width:12px;color:var(--text2);">'+(_esAuf[e.id]?'▾':'▸')+'</span>'
+    +'<span style="font-weight:700;white-space:nowrap;">'+_esEsc(_esDe(e.datum)||'ohne Datum')+'</span>'
+    +'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+l+(e.maschine?' · '+_esEsc(e.maschine):'')+'</span>'
+    +'<span style="white-space:nowrap;color:var(--text2);">'+zeit+(std?std+' h':'')+'</span>'
+    +'<span style="white-space:nowrap;">'+_esStandHtml(e)+'</span>';
+}
+// Etikett am Abschnitt + Summenzeile (ohne den ganzen Abschnitt neu zu zeichnen – sonst springt der Cursor)
+function _esSummenNeu(){
   var liste=taskEinsaetze||[];
   var offen=liste.filter(_esOffen).length;
+  var badge=document.getElementById('tEinsaetzeBadge');
   if(badge)badge.innerHTML=liste.length?'<span title="Einsätze – davon noch nicht abgerechnet" style="background:'+(offen?'#C2410C':'var(--accent)')+';color:#fff;border-radius:10px;padding:1px 7px;font-size:calc(11px*var(--modal-scale,1));font-weight:700;">'+(offen?offen+' offen':liste.length)+'</span>':'';
+  var sum=liste.reduce(function(s,e){return s+(Number(e.min)||0);},0);
+  var sumOffen=liste.filter(_esOffen).reduce(function(s,e){return s+(Number(e.min)||0);},0);
+  var el=document.getElementById('tEinsaetzeSumme');
+  if(el)el.textContent=liste.length?(_esAnz(liste.length)+' · '+(_esMinText(sum)||'0:00')+' h gesamt · davon offen '+offen+' ('+(_esMinText(sumOffen)||'0:00')+' h)'):'';
+  return {offen:offen,sum:sum,sumOffen:sumOffen};
+}
+function renderEinsaetze(){
+  var body=document.getElementById('tEinsaetzeBody');
+  if(!body)return;
+  var liste=taskEinsaetze||[];
+  var s=_esSummenNeu();
   var sc='var(--modal-scale,1)';
   var fs12='font-size:calc(12px * '+sc+')',fs13='font-size:calc(13px * '+sc+')';
   var inp='padding:4px 6px;border-radius:5px;border:1px solid var(--border);background:var(--bg);color:var(--text);'+fs13+';min-width:0;';
+  var area=inp+'resize:vertical;font-family:inherit;line-height:1.35;';
   var idx=liste.map(function(e,i){return i;}).sort(function(a,b){return String(liste[a].datum||'').localeCompare(String(liste[b].datum||''))||(a-b);});
   var opt=function(v){return '<option value="'+_esEsc(v)+'">';};
-  var h='<datalist id="esLeistungDL">'+_esVorschlaege('leistung').map(opt).join('')+'</datalist>'
-       +'<datalist id="esMaschineDL">'+_esVorschlaege('maschine').map(opt).join('')+'</datalist>';
+  var vorLeist=_esVorschlaege('leistung');
+  var h='<datalist id="esMaschineDL">'+_esVorschlaege('maschine').map(opt).join('')+'</datalist>';
   if(!liste.length)h+='<div style="'+fs12+';color:var(--text2);padding:2px 0 8px;">Noch kein Einsatz. Mit „＋ Einsatz" einen Arbeitstag eintragen – er bleibt „offen", bis du die Rechnungsnummer einträgst.</div>';
+  if(liste.length>1){
+    var alleAuf=liste.every(function(e){return _esAuf[e.id];});
+    h+='<div style="text-align:right;margin-bottom:4px;"><button type="button" onclick="_esAlleTog()" style="'+fs12+';padding:2px 8px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;">'+(alleAuf?'alle zuklappen':'alle aufklappen')+'</button></div>';
+  }
   idx.forEach(function(i){
     var e=liste[i];
-    var stand=e.rg?'<span style="color:#2f7d1e;font-weight:700;">✓ RE '+_esEsc(e.rg)+'</span>'
-      :e.rgFrei?'<span style="color:var(--text2);font-weight:700;">✓ ohne Berechnung</span>'
-      :'<span style="color:#C2410C;font-weight:700;">● offen</span>';
     var knopf=_esOffen(e)
       ?'<button type="button" onclick="_esRg('+i+')" style="'+fs12+';padding:3px 9px;border-radius:6px;border:1px solid #2f7d1e;background:var(--bg3);color:#2f7d1e;cursor:pointer;font-weight:600;" title="Rechnung in MF dach geschrieben? Nummer eintragen (oder Minus = ohne Berechnung)">Rechnungs-Nr. eintragen</button>'
       :'<button type="button" onclick="_esRgZurueck('+i+')" style="'+fs12+';padding:3px 9px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;" title="Wieder auf offen setzen">zurück auf offen</button>';
     h+='<div style="background:var(--bg3);border:1px solid var(--border);border-left:4px solid '+(_esOffen(e)?'#C2410C':'#2f7d1e')+';border-radius:6px;padding:6px 8px;margin-bottom:6px;">'
-      +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:5px;">'
-      +  '<input type="date" value="'+_esEsc(e.datum)+'" onchange="_esUpd('+i+',\'datum\',this.value,true)" title="Arbeitstag" style="'+inp+'">'
-      +  '<input type="text" id="es_l_'+_esEsc(e.id)+'" list="esLeistungDL" value="'+_esEsc(e.leistung)+'" placeholder="Leistung, z. B. Schornstein verschmiert" oninput="_esUpd('+i+',\'leistung\',this.value)" style="'+inp+'flex:1;min-width:160px;">'
-      +  '<input type="text" value="'+_esEsc(_esMinText(e.min))+'" placeholder="Std (8:00)" onchange="_esUpd('+i+',\'min\',this.value,true)" title="Dauer – 8:00 oder 8,5" style="'+inp+'width:78px;text-align:center;">'
-      +  '<button type="button" onclick="_esDel('+i+')" title="Diesen Einsatz entfernen" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;padding:0 4px;">✕</button>'
-      +'</div>'
-      +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:5px;">'
-      +  '<input type="text" list="esMaschineDL" value="'+_esEsc(e.maschine)+'" placeholder="Maschine, z. B. Hubarbeitsbühne" oninput="_esUpd('+i+',\'maschine\',this.value)" style="'+inp+'flex:1;min-width:150px;">'
-      +  '<input type="text" value="'+_esEsc(e.material)+'" placeholder="Material (wenn nötig)" oninput="_esUpd('+i+',\'material\',this.value)" style="'+inp+'flex:1;min-width:150px;">'
-      +'</div>'
-      +'<div style="display:flex;gap:10px;align-items:center;'+fs13+';">'+stand+'<span style="flex:1;"></span>'+knopf+'</div>'
-      +'</div>';
+      +'<div id="es_k_'+_esEsc(e.id)+'" onclick="_esTog('+i+')" title="Auf- oder zuklappen" style="display:flex;gap:10px;align-items:center;cursor:pointer;'+fs13+';">'+_esKopfHtml(e)+'</div>';
+    if(_esAuf[e.id]){
+      var auto=_esVonBisMin(e.von,e.bis)!==null;
+      var falsch=_esZeitOk(e.von)&&_esZeitOk(e.bis)&&!auto;
+      h+='<div style="margin-top:6px;">'
+        +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:5px;">'
+        +  '<input type="date" value="'+_esEsc(e.datum)+'" onchange="_esUpd('+i+',\'datum\',this.value,true)" title="Arbeitstag" style="'+inp+'">'
+        +  '<input type="time" value="'+_esEsc(e.von)+'" onchange="_esUpd('+i+',\'von\',this.value)" title="von (Uhrzeit)" style="'+inp+'width:92px;">'
+        +  '<span style="color:var(--text2);">–</span>'
+        +  '<input type="time" value="'+_esEsc(e.bis)+'" onchange="_esUpd('+i+',\'bis\',this.value)" title="bis (Uhrzeit)" style="'+inp+'width:92px;">'
+        +  '<input type="text" id="es_s_'+_esEsc(e.id)+'" value="'+_esEsc(_esMinText(e.min))+'"'+(auto?' disabled':'')+' placeholder="Std (8:00)" onchange="_esUpd('+i+',\'min\',this.value,true)" title="'+(auto?'Aus von–bis berechnet':'Dauer – 8:00 oder 8,5')+'" style="'+inp+'width:78px;text-align:center;">'
+        +  '<span id="es_w_'+_esEsc(e.id)+'" style="'+fs12+';color:#c0392b;">'+(falsch?'„bis" liegt nicht nach „von"':'')+'</span>'
+        +  '<span style="flex:1;"></span>'
+        +  '<button type="button" onclick="_esDel('+i+')" title="Diesen Einsatz entfernen" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;padding:0 4px;">✕</button>'
+        +'</div>'
+        +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start;margin-bottom:5px;">'
+        +  '<textarea id="es_l_'+_esEsc(e.id)+'" rows="'+Math.max(1,String(e.leistung||'').split(_ES_NL).length)+'" placeholder="Leistung – eine Zeile je Leistung (Enter = neue Zeile)" oninput="_esUpd('+i+',\'leistung\',this.value);_esRows(this)" style="'+area+'flex:1;min-width:200px;">'+_esEsc(e.leistung)+'</textarea>'
+        +  (vorLeist.length?'<select onchange="_esLeistungAnh('+i+',this)" title="Eine frühere Leistung als neue Zeile anfügen" style="'+inp+'max-width:170px;"><option value="">＋ aus früheren…</option>'+vorLeist.map(function(v){return '<option value="'+_esEsc(v)+'">'+_esEsc(v)+'</option>';}).join('')+'</select>':'')
+        +'</div>'
+        +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start;margin-bottom:5px;">'
+        +  '<input type="text" list="esMaschineDL" value="'+_esEsc(e.maschine)+'" placeholder="Maschine, z. B. Hubarbeitsbühne" oninput="_esUpd('+i+',\'maschine\',this.value)" style="'+inp+'flex:1;min-width:150px;">'
+        +  '<textarea rows="'+Math.max(1,String(e.material||'').split(_ES_NL).length)+'" placeholder="Material – eine Zeile je Material (Enter = neue Zeile)" oninput="_esUpd('+i+',\'material\',this.value);_esRows(this)" style="'+area+'flex:1;min-width:200px;">'+_esEsc(e.material)+'</textarea>'
+        +'</div>'
+        +'<div style="display:flex;gap:10px;align-items:center;'+fs13+';">'+_esStandHtml(e)+'<span style="flex:1;"></span>'+knopf+'</div>'
+        +'</div>';
+    }
+    h+='</div>';
   });
   h+='<button type="button" onclick="_esAdd()" style="width:100%;padding:6px;border-radius:6px;border:1px dashed var(--accent);background:transparent;color:var(--accent);cursor:pointer;'+fs13+';">＋ Einsatz</button>';
-  var sum=liste.reduce(function(s,e){return s+(Number(e.min)||0);},0);
-  var sumOffen=liste.filter(_esOffen).reduce(function(s,e){return s+(Number(e.min)||0);},0);
-  if(liste.length)h+='<div style="'+fs12+';color:var(--text2);margin-top:6px;text-align:right;">'+_esAnz(liste.length)+' · '+(_esMinText(sum)||'0:00')+' h gesamt · davon offen '+offen+' ('+(_esMinText(sumOffen)||'0:00')+' h)</div>';
+  h+='<div id="tEinsaetzeSumme" style="'+fs12+';color:var(--text2);margin-top:6px;text-align:right;">'+(liste.length?(_esAnz(liste.length)+' · '+(_esMinText(s.sum)||'0:00')+' h gesamt · davon offen '+s.offen+' ('+(_esMinText(s.sumOffen)||'0:00')+' h)'):'')+'</div>';
   body.innerHTML=h;
+}
+// Nach einer Eingabe NUR die betroffenen Stellen auffrischen (der ganze Abschnitt würde den Cursor verlieren)
+function _esAnzeigeNeu(i){
+  var e=(taskEinsaetze||[])[i];if(!e)return;
+  var k=document.getElementById('es_k_'+e.id);if(k)k.innerHTML=_esKopfHtml(e);
+  var auto=_esVonBisMin(e.von,e.bis)!==null;
+  var falsch=_esZeitOk(e.von)&&_esZeitOk(e.bis)&&!auto;
+  var s=document.getElementById('es_s_'+e.id);
+  if(s){s.value=_esMinText(e.min);s.disabled=auto;s.title=auto?'Aus von–bis berechnet':'Dauer – 8:00 oder 8,5';}
+  var w=document.getElementById('es_w_'+e.id);
+  if(w)w.textContent=falsch?'„bis" liegt nicht nach „von"':'';
+  _esSummenNeu();
+}
+function _esTog(i){
+  var e=(taskEinsaetze||[])[i];if(!e)return;
+  _esAuf[e.id]=!_esAuf[e.id];
+  renderEinsaetze();
+}
+function _esAlleTog(){
+  var liste=taskEinsaetze||[];
+  var auf=!liste.every(function(e){return _esAuf[e.id];});
+  liste.forEach(function(e){_esAuf[e.id]=auf;});
+  renderEinsaetze();
 }
 function _esAdd(){
   if(!Array.isArray(taskEinsaetze))taskEinsaetze=[];
-  var e={id:_esId(),datum:_esHeute(),leistung:'',maschine:'',material:'',min:0,rg:'',rgFrei:false};
+  var e={id:_esId(),datum:_esHeute(),von:'',bis:'',leistung:'',maschine:'',material:'',min:0,rg:'',rgFrei:false};
   taskEinsaetze.push(e);
+  _esAuf[e.id]=true; // das neue ist offen, die alten bleiben zu
   renderEinsaetze();scheduleTaskFieldSave();
   setTimeout(function(){var el=document.getElementById('es_l_'+e.id);if(el)el.focus();},30);
 }
@@ -23253,20 +23341,28 @@ function _esUpd(i,feld,wert,neuZeichnen){
   var e=(taskEinsaetze||[])[i];if(!e)return;
   if(feld==='min')e.min=_esMinParse(wert);
   else e[feld]=String(wert==null?'':wert);
+  if(feld==='von'||feld==='bis'){var m=_esVonBisMin(e.von,e.bis);if(m!==null)e.min=m;} // b1060: Dauer aus von–bis
   scheduleTaskFieldSave();
-  if(neuZeichnen)renderEinsaetze();
+  if(neuZeichnen)renderEinsaetze();else _esAnzeigeNeu(i);
+}
+function _esLeistungAnh(i,sel){
+  var e=(taskEinsaetze||[])[i];if(!e||!sel||!sel.value)return;
+  var v=sel.value;
+  e.leistung=String(e.leistung||'').trim()?(String(e.leistung).replace(/\s+$/,'')+_ES_NL+v):v;
+  renderEinsaetze();scheduleTaskFieldSave();
 }
 function _esDel(i){
   var e=(taskEinsaetze||[])[i];if(!e)return;
-  var was=(e.leistung||'ohne Leistung')+(e.datum?' ('+_esDe(e.datum)+')':'');
+  var was=(_esZeilen(e.leistung)[0]||'ohne Leistung')+(e.datum?' ('+_esDe(e.datum)+')':'');
   if(!confirm('Einsatz „'+was+'" entfernen?'))return;
+  delete _esAuf[e.id];delete _esSel[e.id];
   taskEinsaetze.splice(i,1);
   renderEinsaetze();scheduleTaskFieldSave();
 }
 function _esRg(i){
   var e=(taskEinsaetze||[])[i];if(!e)return;
   var NL=String.fromCharCode(10);
-  var nr=prompt('Rechnungsnummer aus MF dach für diesen Einsatz ('+_esDe(e.datum)+' · '+(e.leistung||'ohne Leistung')+'):'+NL+NL+'Minus „-" = ohne Berechnung (Kulanz).',e.rg||'');
+  var nr=prompt('Rechnungsnummer aus MF dach für diesen Einsatz ('+_esDe(e.datum)+' · '+(_esZeilen(e.leistung)[0]||'ohne Leistung')+'):'+NL+NL+'Minus „-" = ohne Berechnung (Kulanz).',e.rg||'');
   if(nr===null)return;
   nr=nr.trim();
   if(!nr)return;
@@ -23325,8 +23421,9 @@ function _esGruppen(){
   reihe.forEach(function(k){gr[k].sort(function(x,y){return String(x.e.datum||'').localeCompare(String(y.e.datum||''));});});
   return {gr:gr,reihe:reihe};
 }
+function _esSelZahl(){return _esSammle().filter(function(p){return _esSel[p.e.id]&&_esOffen(p.e);}).length;}
 function _esRender(){
-  var body=document.getElementById('esBody'),sub=document.getElementById('esSub'),fb=document.getElementById('esFertigBtn');
+  var body=document.getElementById('esBody'),sub=document.getElementById('esSub'),fb=document.getElementById('esFertigBtn'),rb=document.getElementById('esRgBtn');
   if(!body)return;
   if(fb)fb.textContent=(_esMitFertig?'☑':'☐')+' auch abgerechnete';
   var g=_esGruppen();
@@ -23334,45 +23431,86 @@ function _esRender(){
   var h='';
   g.reihe.forEach(function(k){
     var m=0;g.gr[k].forEach(function(p){m+=Number(p.e.min)||0;});
-    h+='<tr><td colspan="6" style="background:var(--bg3);font-weight:700;padding:6px 8px;">'+_esEsc(k)+' <span style="font-weight:400;color:var(--text2);">· '+_esAnz(g.gr[k].length)+' · '+(_esMinText(m)||'0:00')+' h</span></td></tr>';
+    h+='<tr><td colspan="7" style="background:var(--bg3);font-weight:700;padding:6px 8px;">'+_esEsc(k)+' <span style="font-weight:400;color:var(--text2);">· '+_esAnz(g.gr[k].length)+' · '+(_esMinText(m)||'0:00')+' h</span></td></tr>';
     g.gr[k].forEach(function(p){
       anz++;min+=Number(p.e.min)||0;
-      var stand=p.e.rg?'<span style="color:#2f7d1e;">✓ RE '+_esEsc(p.e.rg)+'</span>':p.e.rgFrei?'<span style="color:var(--text2);">✓ ohne Berechnung</span>':'<span style="color:#C2410C;font-weight:700;">● offen</span>';
+      var zeit=(_esZeitOk(p.e.von)&&_esZeitOk(p.e.bis))?(_esEsc(p.e.von)+'–'+_esEsc(p.e.bis)+'<br>'):'';
+      var kasten=_esOffen(p.e)?'<input type="checkbox"'+(_esSel[p.e.id]?' checked':'')+' onclick="event.stopPropagation();_esSelTog(\''+_jsa(p.e.id)+'\')" title="Für eine gemeinsame Rechnungsnummer anhaken">':'';
       h+='<tr style="cursor:pointer;" onclick="_esOeffneKarte(\''+_jsa(p.t.id)+'\')" title="Karte öffnen">'
+        +'<td style="padding:4px 8px;width:26px;">'+kasten+'</td>'
         +'<td style="padding:4px 8px;white-space:nowrap;">'+_esEsc(_esDe(p.e.datum))+'</td>'
-        +'<td style="padding:4px 8px;">'+_esEsc(p.e.leistung||'—')+'</td>'
+        +'<td style="padding:4px 8px;">'+(_esBr(p.e.leistung)||'—')+'</td>'
         +'<td style="padding:4px 8px;">'+_esEsc(p.e.maschine||'')+'</td>'
-        +'<td style="padding:4px 8px;">'+_esEsc(p.e.material||'')+'</td>'
-        +'<td style="padding:4px 8px;text-align:right;white-space:nowrap;">'+_esEsc(_esMinText(p.e.min))+'</td>'
-        +'<td style="padding:4px 8px;white-space:nowrap;">'+stand+'</td></tr>';
+        +'<td style="padding:4px 8px;">'+_esBr(p.e.material)+'</td>'
+        +'<td style="padding:4px 8px;text-align:right;white-space:nowrap;">'+zeit+_esEsc(_esMinText(p.e.min))+'</td>'
+        +'<td style="padding:4px 8px;white-space:nowrap;">'+_esStandHtml(p.e)+'</td></tr>';
     });
   });
-  if(!anz)h='<tr><td colspan="6" style="padding:14px 8px;color:var(--text2);">'+(_esMitFertig?'Noch keine Einsätze eingetragen.':'Nichts offen – alle eingetragenen Einsätze sind abgerechnet.')+'</td></tr>';
+  if(!anz)h='<tr><td colspan="7" style="padding:14px 8px;color:var(--text2);">'+(_esMitFertig?'Noch keine Einsätze eingetragen.':'Nichts offen – alle eingetragenen Einsätze sind abgerechnet.')+'</td></tr>';
   body.innerHTML=h;
   if(sub)sub.textContent=g.reihe.length+(g.reihe.length===1?' Haus/Auftrag · ':' Häuser/Aufträge · ')+_esAnz(anz)+' · '+(_esMinText(min)||'0:00')+' h'+(_esMitFertig?' (mit abgerechneten)':' · nur offene');
+  var n=_esSelZahl();
+  if(rb){rb.textContent='Rechnungs-Nr. für '+(n?n+' angehakte':'angehakte')+' eintragen';rb.disabled=!n;rb.style.opacity=n?'1':'.45';}
+}
+function _esSelTog(id){_esSel[id]=!_esSel[id];_esRender();}
+function _esSelAlle(){
+  var offen=_esSammle().filter(function(p){return _esOffen(p.e);});
+  var alle=offen.length>0&&offen.every(function(p){return _esSel[p.e.id];});
+  offen.forEach(function(p){_esSel[p.e.id]=!alle;});
+  _esRender();
+}
+// EINE Rechnungsnummer für alle angehakten Einsätze (Jahres-Sammelrechnung)
+function _esRgMehrere(){
+  var paare=_esSammle().filter(function(p){return _esSel[p.e.id]&&_esOffen(p.e);});
+  if(!paare.length){if(typeof showToast==='function')showToast('Erst Einsätze anhaken','info',2500);return;}
+  var NL=String.fromCharCode(10);
+  var nr=prompt('Rechnungsnummer aus MF dach für die '+paare.length+' angehakten Einsätze:'+NL+NL+'Minus „-" = ohne Berechnung (Kulanz).','');
+  if(nr===null)return;
+  nr=nr.trim();
+  if(!nr)return;
+  var heute=_esHeute(),tasks={};
+  paare.forEach(function(p){
+    if(nr==='-'){p.e.rg='';p.e.rgFrei=true;}else{p.e.rg=nr;p.e.rgFrei=false;}
+    p.e.rgAm=heute;
+    tasks[p.t.id]=p.t;
+  });
+  // Ist eine der Karten gerade offen, deren Arbeitskopie nachziehen – sonst überschreibt ihr Speichern die Nummern wieder
+  var offenId='';
+  try{offenId=(document.getElementById('taskId')||{}).value||'';}catch(err){}
+  Object.keys(tasks).forEach(function(id){
+    if(offenId===id){taskEinsaetze=JSON.parse(JSON.stringify(tasks[id].einsaetze||[]));renderEinsaetze();}
+  });
+  _esSel={};
+  try{autoSave();}catch(err){console.warn('[ES] autoSave:',err);}
+  if(typeof showToast==='function')showToast(nr==='-'?(paare.length+' Einsätze ohne Berechnung vermerkt'):(paare.length+' Einsätze: Rechnung '+nr+' vermerkt'),'success',3200);
+  _esRender();
+  if(typeof currentView!=='undefined'&&currentView==='objekte'&&typeof renderObjekte==='function')renderObjekte();
 }
 function _esOeffnen(){
   var old=document.getElementById('esOverlay');if(old)old.remove();
+  _esSel={};
   var ov=document.createElement('div');ov.id='esOverlay';
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99992;display:flex;align-items:center;justify-content:center;';
-  ov.innerHTML='<div class="tuj-box" style="width:min(980px,97vw);" role="dialog" aria-label="Offene Einsätze">'
+  ov.innerHTML='<div class="tuj-box" style="width:min(1040px,97vw);" role="dialog" aria-label="Offene Einsätze">'
     +'<div class="tuj-head">'
     +  '<span class="tuj-title">Einsätze – was noch abzurechnen ist</span>'
     +  '<span style="flex:1;min-width:8px;"></span>'
     +  '<button type="button" class="tu-btn" id="esFertigBtn" onclick="_esToggleFertig()" title="Auch die Einsätze zeigen, bei denen die Rechnung schon eingetragen ist"></button>'
+    +  '<button type="button" class="tu-btn" onclick="_esSelAlle()" title="Alle offenen Einsätze an- oder abhaken">☑ alle</button>'
+    +  '<button type="button" class="tu-btn" id="esRgBtn" onclick="_esRgMehrere()" style="color:#2f7d1e;border-color:#2f7d1e;font-weight:700;" title="Eine Rechnungsnummer für alle angehakten Einsätze"></button>'
     +  '<button type="button" class="tu-btn" onclick="_esKopieren()" title="Liste als Text in die Zwischenablage – zum Abtippen in MF dach">📋 Kopieren</button>'
     +  '<button type="button" class="tu-btn" onclick="_esClose()">✕ Schließen</button>'
     +'</div>'
     +'<div class="tuj-sub" id="esSub"></div>'
-    +'<div class="tuj-scroll"><table class="tuj-tab"><thead><tr><th class="nam">Datum</th><th class="nam">Leistung</th><th class="nam">Maschine</th><th class="nam">Material</th><th>Std</th><th class="nam">Stand</th></tr></thead><tbody id="esBody"></tbody></table></div>'
-    +'<div class="tuj-legend"><span>Klick auf eine Zeile öffnet die Karte – dort trägst du die Rechnungsnummer ein.</span></div>'
+    +'<div class="tuj-scroll"><table class="tuj-tab"><thead><tr><th style="width:26px;"></th><th class="nam">Datum</th><th class="nam">Leistung</th><th class="nam">Maschine</th><th class="nam">Material</th><th>Zeit</th><th class="nam">Stand</th></tr></thead><tbody id="esBody"></tbody></table></div>'
+    +'<div class="tuj-legend"><span>Häkchen setzen und „Rechnungs-Nr. für … eintragen" = EINE Rechnungsnummer für alle angehakten Einsätze.</span><span>Klick auf eine Zeile öffnet die Karte.</span></div>'
     +'</div>';
   document.addEventListener('keydown',_esTaste);
   document.body.appendChild(ov);
   _esRender();
 }
 function _esTaste(e){if(e.key==='Escape'){var o=document.getElementById('esOverlay');if(o){e.stopPropagation();_esClose();}}}
-function _esClose(){var o=document.getElementById('esOverlay');if(o)o.remove();document.removeEventListener('keydown',_esTaste);}
+function _esClose(){var o=document.getElementById('esOverlay');if(o)o.remove();document.removeEventListener('keydown',_esTaste);_esSel={};}
 function _esToggleFertig(){_esMitFertig=!_esMitFertig;_esRender();}
 function _esOeffneKarte(id){_esClose();if(typeof openEditTaskModal==='function')openEditTaskModal(id);}
 function _esKopieren(){
@@ -23381,7 +23519,9 @@ function _esKopieren(){
   g.reihe.forEach(function(k){
     z.push(k);
     g.gr[k].forEach(function(p){
-      z.push('  '+_esDe(p.e.datum)+' · '+(p.e.leistung||'—')+(p.e.maschine?' · '+p.e.maschine:'')+(p.e.material?' · '+p.e.material:'')+(p.e.min?' · '+_esMinText(p.e.min)+' h':'')+(p.e.rg?' · RE '+p.e.rg:p.e.rgFrei?' · ohne Berechnung':''));
+      var e=p.e;
+      z.push('  '+_esDe(e.datum)+' · '+(_esZeilen(e.leistung).join(' / ')||'—')+(e.maschine?' · '+e.maschine:'')+(_esZeilen(e.material).length?' · '+_esZeilen(e.material).join(' / '):'')
+        +((_esZeitOk(e.von)&&_esZeitOk(e.bis))?' · '+e.von+'–'+e.bis:'')+(e.min?' · '+_esMinText(e.min)+' h':'')+(e.rg?' · RE '+e.rg:e.rgFrei?' · ohne Berechnung':''));
     });
     z.push('');
   });
@@ -23389,7 +23529,6 @@ function _esKopieren(){
   try{navigator.clipboard.writeText(text);if(typeof showToast==='function')showToast('Liste kopiert','success',2200);}
   catch(err){if(typeof showToast==='function')showToast('Kopieren nicht möglich','error',3000);}
 }
-
 let taskBaudokuMaterial   = []; // [{name,einheit,gruppe,menge,vk}] → Mobile: materialGeplant
 let taskBaudokuPersonalListe = []; // [string] → Mobile: baudokuPersonalListe (wer ist verfügbar)
 let taskBaudokuMaschinen  = []; // [{name}] → Mobile: baudokuMaschinen
