@@ -10372,7 +10372,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-02 · #1064'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-02-b1064) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-02 · #1065'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-02-b1065) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -29007,7 +29007,7 @@ function _wpMobRenderFotos(bericht,grid){
   grid.innerHTML='';
   grid.style.gridTemplateColumns='repeat(auto-fill,minmax(150px,1fr))';
   const fotos=(bericht&&bericht.fotos)||[];
-  if(!fotos.length){const h=document.createElement('div');h.style.cssText='grid-column:1/-1;font-size:12px;color:var(--text2);padding:8px 14px;';h.textContent='Noch keine Fotos – unten „📁 Fotos vom PC“ oder „☁ Drive-Foto-Ordner“ benutzen.';grid.appendChild(h);return;}
+  if(!fotos.length){const h=document.createElement('div');h.style.cssText='grid-column:1/-1;font-size:12px;color:var(--text2);padding:8px 14px;';h.textContent='Noch keine Fotos – unten „☁ Drive-Foto-Ordner“ (Fotos der Karte) oder „📁 Fotos vom PC“ benutzen.';grid.appendChild(h);return;}
   const neu=()=>_wpMobRenderFotos(bericht,grid);
   const rund=(txt,titel,stil,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.title=titel;b.setAttribute('aria-label',titel);
     b.style.cssText='position:absolute;background:rgba(0,0,0,.62);color:#fff;border:none;border-radius:50%;width:26px;height:26px;font-size:12px;line-height:26px;padding:0;cursor:pointer;z-index:3;text-align:center;'+stil;
@@ -29120,7 +29120,7 @@ function _wpMobFotoPickerForItem(bericht,it,onChange){
   const bauen=()=>{
     grid.innerHTML='';
     const fotos=bericht.fotos||[];
-    if(!fotos.length){const l=document.createElement('div');l.style.cssText='grid-column:1/-1;font-size:12px;color:var(--text2);padding:10px 2px;';l.textContent='Noch keine Fotos im Protokoll – unten „📁 Fotos vom PC“ benutzen.';grid.appendChild(l);return;}
+    if(!fotos.length){const l=document.createElement('div');l.style.cssText='grid-column:1/-1;font-size:12px;color:var(--text2);padding:10px 2px;';l.textContent='Noch keine Fotos im Protokoll – unten „🖼 Fotos der Karte“ oder „📁 Fotos vom PC“ benutzen.';grid.appendChild(l);return;}
     fotos.forEach(f=>{
       const c=document.createElement('div');
       const an=drin(f);
@@ -29155,7 +29155,13 @@ function _wpMobFotoPickerForItem(bericht,it,onChange){
   };
   const fertig=document.createElement('button');fertig.type='button';fertig.textContent='✓ Fertig';
   fertig.style.cssText='flex:1;padding:10px;border-radius:8px;border:none;background:#1a5c3a;color:#fff;font-size:13px;font-weight:700;cursor:pointer;';fertig.onclick=()=>ov.remove();
-  zeile.append(neuBtn,fertig);
+  const kartenBtn=document.createElement('button');kartenBtn.type='button';kartenBtn.textContent='🖼 Fotos der Karte';
+  kartenBtn.style.cssText='flex:1;padding:10px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg3);color:var(--text);font-size:13px;font-weight:600;cursor:pointer;';
+  kartenBtn.onclick=()=>_pamFormKartenFotoWahl(bericht,neue=>{
+    (neue||[]).forEach(f=>{const k=_pamFormFotoRefKey(f);if(k&&!it.fotoRefs.includes(k))it.fotoRefs.push(k);});
+    if((neue||[]).length){scheduleSave();bauen();if(typeof onChange==='function')onChange();}
+  },'🖼 Fotos der Karte – ins Protokoll übernehmen und „'+(it.text||'')+'“ zuordnen');
+  zeile.append(kartenBtn,neuBtn,fertig);
   box.append(hdr,hint,grid,zeile);ov.appendChild(box);ov.onclick=()=>ov.remove();document.body.appendChild(ov);
 }
 // Fotos von der Festplatte ins Protokoll: verkleinert nach Drive-Foto-Ordner der Karte, dann Eintrag im Protokoll (ins PDF ✓)
@@ -29193,7 +29199,88 @@ function _wpMobFotoAufnehmen(bericht,grid,kamera,onBehalten){
   document.body.appendChild(inp);inp.click();
 }
 // Fotos aus dem Drive-Foto-Ordner der Karte holen (nur solche, die noch nicht im Protokoll stehen)
-async function _wpMobLadeDriveFotos(bericht,grid){
+// b1065: Fotos der Karte (Foto-/Videos-Liste, taskFotos) ins Protokoll übernehmen – Auswahl mit Vorschaubildern, mehrere auf einmal.
+// Schon im Protokoll stehende Fotos sind markiert und nicht doppelt wählbar. Videos fehlen. Eine bemalte Fassung der Karte (editedDriveId) kommt mit.
+function _pamFormKartenFotos(bericht){
+  let t=null;try{t=currentTask();}catch(e){t=null;}
+  const liste=(typeof taskFotos!=='undefined'&&Array.isArray(taskFotos)&&taskFotos.length)?taskFotos:((t&&Array.isArray(t.fotos))?t.fotos:[]);
+  const da=new Set();((bericht&&bericht.fotos)||[]).forEach(f=>{if(f.driveId)da.add(f.driveId);if(f.editedDriveId)da.add(f.editedDriveId);});
+  return liste.filter(f=>f&&f.driveId&&!(typeof _isVideo==='function'&&_isVideo(f.mimeType,f.name)))
+    .map(f=>({f:f,drin:da.has(f.driveId)||(!!f.editedDriveId&&da.has(f.editedDriveId))}));
+}
+function _pamFormFotoEintrag(f){
+  const fo={driveId:f.driveId,name:f.name||'Foto',inReport:true,localUrl:null};
+  const th=f.thumbnail||f.thumbnailLink||'';if(th&&String(th).slice(0,5)!=='blob:')fo.thumbnail=th;
+  if(f.editedDriveId){fo.editedDriveId=f.editedDriveId;if(f.editedName)fo.editedName=f.editedName;}
+  if(f.caption)fo.caption=f.caption;
+  return fo;
+}
+function _pamFormKartenFotoWahl(bericht,fertig,titel){
+  const alt=document.getElementById('_pamFormKartenWahl');if(alt)alt.remove();
+  const alle=_pamFormKartenFotos(bericht);
+  const ov=document.createElement('div');ov.id='_pamFormKartenWahl';
+  ov.style.cssText='position:fixed;inset:0;z-index:100060;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;';
+  const box=document.createElement('div');
+  box.style.cssText='background:var(--bg);color:var(--text);border-radius:12px;padding:18px;width:min(900px,94vw);max-height:86vh;display:flex;flex-direction:column;gap:10px;box-shadow:0 8px 32px rgba(0,0,0,.4);';
+  box.onclick=e=>e.stopPropagation();
+  const hdr=document.createElement('div');hdr.style.cssText='font-size:14px;font-weight:700;display:flex;justify-content:space-between;align-items:center;gap:10px;';
+  const ht=document.createElement('span');ht.textContent=titel||'🖼 Fotos der Karte ins Protokoll übernehmen';
+  const x=document.createElement('button');x.type='button';x.textContent='✕';x.title='Schließen';x.style.cssText='background:transparent;border:none;color:var(--text2);font-size:18px;cursor:pointer;';x.onclick=()=>ov.remove();
+  hdr.append(ht,x);
+  const nDrin=alle.filter(a=>a.drin).length;
+  const hint=document.createElement('div');hint.style.cssText='font-size:12px;color:var(--text2);';
+  hint.textContent=alle.length?('Aus der Foto-Liste dieser Karte ('+alle.length+' Bilder'+(nDrin?', '+nDrin+' schon im Protokoll – grau':'')+'). Anklicken zum Auswählen, dann „Übernehmen“. Videos werden nicht angeboten.'):'Diese Karte hat noch keine Fotos in ihrer Foto-Liste. Unten kannst du Bilder vom PC holen oder aus dem Drive-Foto-Ordner nachladen.';
+  const grid=document.createElement('div');grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;overflow-y:auto;flex:1;min-height:60px;';
+  const gewaehlt=[];   // Reihenfolge des Anklickens = Reihenfolge im Protokoll
+  const btnUe=document.createElement('button');btnUe.type='button';
+  btnUe.style.cssText='flex:1;padding:10px;border-radius:8px;border:none;background:#1a5c3a;color:#fff;font-size:13px;font-weight:700;cursor:pointer;';
+  const zaehl=()=>{btnUe.textContent=gewaehlt.length?('✓ '+gewaehlt.length+' Foto'+(gewaehlt.length>1?'s':'')+' übernehmen'):'✓ Übernehmen';btnUe.disabled=!gewaehlt.length;btnUe.style.opacity=gewaehlt.length?'1':'.45';};
+  let io=null;try{io=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){const im=e.target;io.unobserve(im);if(im._f)_pamFormFotoBild(im._f,im);}});},{root:grid,rootMargin:'200px'});}catch(e){io=null;}
+  alle.forEach(a=>{
+    const f=a.f;
+    const c=document.createElement('div');c.setAttribute('data-fs-kartenfoto',f.driveId);
+    c.style.cssText='position:relative;border:3px solid var(--border);border-radius:8px;overflow:hidden;background:var(--bg3);aspect-ratio:1;cursor:'+(a.drin?'default':'pointer')+';'+(a.drin?'opacity:.45;':'');
+    const img=document.createElement('img');img.alt='';img.style.cssText='width:100%;height:100%;object-fit:cover;pointer-events:none;';img._f=f;
+    if(io)io.observe(img);else _pamFormFotoBild(f,img);
+    const b=document.createElement('div');b.style.cssText='display:none;position:absolute;top:4px;right:4px;background:#1a7a3c;color:#fff;border-radius:50%;width:22px;height:22px;font-size:11px;align-items:center;justify-content:center;font-weight:700;';b.textContent='1';
+    const nl=document.createElement('div');nl.style.cssText='position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.55);color:#fff;font-size:10px;padding:2px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';nl.textContent=(a.drin?'✓ im Protokoll · ':'')+(f.name||'Foto');
+    nl.title=(f.caption?f.caption+' – ':'')+(f.name||'');
+    c.onclick=()=>{
+      if(a.drin)return;
+      const i=gewaehlt.indexOf(f);
+      if(i>=0)gewaehlt.splice(i,1);else gewaehlt.push(f);
+      alle.forEach(z=>{const el=grid.querySelector('[data-fs-kartenfoto="'+z.f.driveId+'"]');if(!el)return;const k=gewaehlt.indexOf(z.f);el.style.borderColor=k>=0?'#1a7a3c':'var(--border)';const bb=el.children[1];if(bb){bb.style.display=k>=0?'flex':'none';bb.textContent=String(k+1);}});
+      zaehl();
+    };
+    c.append(img,b,nl);grid.appendChild(c);
+  });
+  btnUe.onclick=()=>{
+    if(!gewaehlt.length)return;
+    if(!Array.isArray(bericht.fotos))bericht.fotos=[];
+    const neue=[];
+    gewaehlt.forEach(f=>{if(bericht.fotos.some(p=>p.driveId===f.driveId))return;const fo=_pamFormFotoEintrag(f);bericht.fotos.push(fo);neue.push(fo);});
+    ov.remove();
+    if(neue.length)scheduleSave();
+    if(typeof fertig==='function'){try{fertig(neue);}catch(e){console.warn('[b1065] nach dem Übernehmen:',e);}}
+    toast(neue.length?('✓ '+neue.length+' Foto'+(neue.length>1?'s':'')+' ins Protokoll übernommen'):'Nichts Neues übernommen',neue.length?'success':'info',3500);
+  };
+  const zeile=document.createElement('div');zeile.style.cssText='display:flex;gap:8px;flex-wrap:wrap;';
+  const mkB=(txt,stil,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.style.cssText='padding:10px 14px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;'+stil;b.onclick=fn;return b;};
+  const nurNeue=()=>alle.filter(a=>!a.drin);
+  zeile.append(
+    mkB('Alle wählen','border:1.5px solid var(--border);background:var(--bg3);color:var(--text);',()=>{gewaehlt.length=0;nurNeue().forEach(a=>gewaehlt.push(a.f));alle.forEach(z=>{const el=grid.querySelector('[data-fs-kartenfoto="'+z.f.driveId+'"]');if(!el)return;const k=gewaehlt.indexOf(z.f);el.style.borderColor=k>=0?'#1a7a3c':'var(--border)';const bb=el.children[1];if(bb){bb.style.display=k>=0?'flex':'none';bb.textContent=String(k+1);}});zaehl();}),
+    mkB('Keine','border:1.5px solid var(--border);background:var(--bg3);color:var(--text);',()=>{gewaehlt.length=0;alle.forEach(z=>{const el=grid.querySelector('[data-fs-kartenfoto="'+z.f.driveId+'"]');if(!el)return;el.style.borderColor='var(--border)';if(el.children[1])el.children[1].style.display='none';});zaehl();}),
+    mkB('☁ Weitere aus dem Foto-Ordner holen','border:1.5px dashed var(--green);background:transparent;color:var(--text);',()=>{ov.remove();_pamFormOrdnerHolen(bericht,document.getElementById('_wpMobFotoGrid')||document.createElement('div'),fertig);}),
+    btnUe,
+    mkB('Abbrechen','border:1.5px solid var(--border);background:transparent;color:var(--text);',()=>ov.remove()));
+  zaehl();
+  box.append(hdr,hint,grid,zeile);ov.appendChild(box);ov.onclick=()=>ov.remove();document.body.appendChild(ov);
+}
+// Der Knopf „☁ Drive-Foto-Ordner“ im Abschnitt „Fotos“ (Name stammt aus formulare.js): zuerst die Foto-Liste der Karte zur Auswahl
+function _wpMobLadeDriveFotos(bericht,grid){
+  _pamFormKartenFotoWahl(bericht,()=>{try{_wpMobRenderFotos(bericht,grid);}catch(e){}});
+}
+async function _pamFormOrdnerHolen(bericht,grid,fertig){
   if(!tokenValid()){toast('Bitte zuerst mit Google Drive verbinden (☁)','error',5000);return;}
   const ordner=(typeof _getDriveFotoFolderId==='function')?_getDriveFotoFolderId():'';
   if(!ordner){toast('⚠ Kein Foto-Ordner eingetragen (Ordner & Links)','error',5000);return;}
@@ -29208,10 +29295,11 @@ async function _wpMobLadeDriveFotos(bericht,grid){
     }while(pt);
     if(!Array.isArray(bericht.fotos))bericht.fotos=[];
     const da=new Set();bericht.fotos.forEach(f=>{if(f.driveId)da.add(f.driveId);if(f.editedDriveId)da.add(f.editedDriveId);});
-    let neu=0;
-    dateien.forEach(f=>{if(da.has(f.id))return;const fo={driveId:f.id,name:f.name,inReport:true,localUrl:null};if(f.thumbnailLink)fo.thumbnail=f.thumbnailLink;bericht.fotos.push(fo);neu++;});
+    let neu=0;const neueFo=[];
+    dateien.forEach(f=>{if(da.has(f.id))return;const fo={driveId:f.id,name:f.name,inReport:true,localUrl:null};if(f.thumbnailLink)fo.thumbnail=f.thumbnailLink;bericht.fotos.push(fo);neueFo.push(fo);neu++;});
     if(neu)scheduleSave();
     _wpMobRenderFotos(bericht,grid);
+    if(typeof fertig==='function'){try{fertig(neueFo);}catch(e){console.warn('[b1065] nach dem Holen:',e);}}
     toast(neu?('✓ '+neu+' neue Foto'+(neu>1?'s':'')+' aus Drive geholt'):'Keine neuen Fotos im Foto-Ordner','success',4000);
   }catch(e){toast('Fehler beim Laden: '+(e&&e.message||e),'error',6000);}
 }
@@ -29264,7 +29352,10 @@ function _pamFeuchteOeffnen(bi){
   _pamFormUmgebungAnschalten();
   _openFeuchteprotokollMobil(bi);
   const ov=document.getElementById('_fsMobOverlay');   // am PC mittig statt bildschirmfüllend, Kartenfenster abgedunkelt
-  if(ov){ov.style.maxWidth='960px';ov.style.margin='0 auto';ov.style.boxShadow='0 0 0 100vmax rgba(0,0,0,.55)';}
+  if(ov){ov.style.maxWidth='960px';ov.style.margin='0 auto';ov.style.boxShadow='0 0 0 100vmax rgba(0,0,0,.55)';
+    const fu=ov.lastElementChild;   // b1065: die Fußleiste hing am Bildschirmrand – jetzt so breit wie das Formular
+    if(fu&&fu.style.position==='fixed'){fu.style.left='50%';fu.style.right='auto';fu.style.width='min(960px,100%)';fu.style.transform='translateX(-50%)';fu.style.boxSizing='border-box';}
+  }
 }
 async function _pamFeuchtePdf(bi){
   if(!_pamFormularDa()){showToast('⚠ Die Formular-Datei fehlt – PAM bitte neu laden (Strg+Umschalt+R)','error',7000);return;}
