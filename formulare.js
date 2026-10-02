@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F12';
+const PAM_FORMULARE_VERSION='F13';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
@@ -204,6 +204,10 @@ function _fsPdfName(bericht,zeit){
   const d=String((bericht&&bericht.datum)||'').split('.');
   const datum=(d.length===3&&d[2])?(('0'+d[0]).slice(-2)+'-'+('0'+d[1]).slice(-2)+'-'+d[2]):'';
   const uhr=(zeit instanceof Date&&isFinite(zeit.getTime()))?'_'+('0'+zeit.getHours()).slice(-2)+('0'+zeit.getMinutes()).slice(-2):''; // v294
+  if(bericht&&bericht.vorlage==='flachdach'){ // F13: Prüfbericht – Titel (gekürzt) + Datum + Uhrzeit
+    const slug=String(bericht.titel||'Pruefbericht').replace(/[^a-zA-Z0-9-]+/g,'_').replace(/^_+|_+$/g,'').slice(0,30)||'Pruefbericht';
+    return slug+(datum?'_'+datum:'')+uhr+'.pdf';
+  }
   if(bericht&&bericht.vorlage==='wartungsprotokoll'){ // F10: Name wie am PC bisher (Adresse gekürzt wegen der Pfadlänge) + Uhrzeit
     const slug=String((bericht.kopf&&bericht.kopf.objektAdresse)||'').split(',')[0].replace(/[^a-zA-Z0-9]/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,'').slice(0,30);
     return 'Wartungsprotokoll'+(slug?'_'+slug:'')+(datum?'_'+datum:'')+uhr+'.pdf';
@@ -1933,6 +1937,7 @@ async function _fsFotoFuerPdf(f){
 }
 
 async function _fsMobPdf(bericht,task){
+  if(bericht&&bericht.vorlage==='flachdach'&&typeof _fsPbPdf==='function')return _fsPbPdf(bericht,task); // F13: Prüfbericht Flachdach hat sein eigenes PDF
   if(bericht&&bericht.vorlage==='wartungsprotokoll'&&typeof _fsWpPdf==='function')return _fsWpPdf(bericht,task); // F10: Wartungsprotokoll hat sein eigenes PDF
   if(bericht&&bericht.fassung==='begehung'&&typeof _fsMobPdfBg==='function')return _fsMobPdfBg(bericht,task); // F2a: Begehungsprotokoll hat ein eigenes PDF
   if(!window.jspdf){toast('PDF-Bibliothek lädt noch …','error');return null;}
@@ -4649,4 +4654,278 @@ function _fsFotoZuordnungText(bericht,f){
     const fn=(bericht&&bericht.fassung==='begehung'&&typeof _fsBgFotoZuordnung==='function')?_fsBgFotoZuordnung:_fsFotoZuordnung;
     return String(fn(bericht,f)||'');
   }catch(e){console.warn('[Formular] Foto-Zuordnung:',e);return '';}
+}
+
+/* ══ F13: PRÜFBERICHT FLACHDACH – EINE Fassung für PC, Handy und Tablet ═════════════════════════════════════
+   Vorher gab es das Formular zweimal (PAM Desktop und PAM Mobil, verschiedener Code, leicht verschiedenes PDF). Seit F13 steht es nur noch hier.
+   Daten unverändert: bericht.vorlage==='flachdach', titel, datum, bemerkung, sektionen[].items[]{text,status ok/mangel/offen,notiz}, driveFileId –
+   alte Berichte öffnen unverändert. Die Funktion heißt weiter _openPruefformular (so ruft sie die Handy-Liste und das PC-Menü).
+   Handy und Tablet: ausfüllen, KEIN PDF (wie bei den anderen Formularen). PC: PDF erstellen. PDF = die Fassung des PC („Ergebnis: 5/15 OK“). */
+const FS_PB_FARBE='#1a5c3a';
+const FS_PB_VORLAGE={
+  titel:'Flachdach-Check',
+  sektionen:[
+    {titel:'1 · Abdichtung & Oberfläche',items:[
+      'Dachabdichtung auf Risse / Blasen prüfen',
+      'Versprödung oder Alterungsschäden sichtbar?',
+      'Kiesschicht gleichmäßig verteilt (Kiesflachdach)',
+      'Aufkantungen / Randabschlüsse dicht?',
+      'Bewuchs (Moos, Pflanzen) entfernt?',
+      'Dampfsperre / Wärmedämmung unauffällig?'
+    ]},
+    {titel:'2 · Entwässerung',items:[
+      'Dachgullys / Abläufe frei und funktionsfähig?',
+      'Notüberlauf vorhanden und frei?',
+      'Gefälle zur Entwässerung ausreichend?',
+      'Dachrinnen und Fallrohre gereinigt?'
+    ]},
+    {titel:'3 · Anschlüsse & Durchdringungen',items:[
+      'Dachdurchdringungen (Rohre, Kabel) dicht?',
+      'Lichtkuppeln / Oberlichter dicht und gängig?',
+      'Wandanschlüsse und Attika in Ordnung?',
+      'Türschwellen / Terrassen-Anschlüsse dicht?',
+      'Dachrand-Abschlussprofile fest verankert?'
+    ]}
+  ]
+};
+function _fsPbNeuerBericht(){
+  const h=new Date(),dd=String(h.getDate()).padStart(2,'0'),mm=String(h.getMonth()+1).padStart(2,'0'),yyyy=h.getFullYear();
+  return {
+    id:'pb_'+Date.now(),vorlage:'flachdach',titel:FS_PB_VORLAGE.titel,datum:dd+'.'+mm+'.'+yyyy,bemerkung:'',createdAt:new Date().toISOString(),
+    sektionen:FS_PB_VORLAGE.sektionen.map(s=>({titel:s.titel,items:s.items.map(text=>({text,status:'offen',notiz:''}))}))
+  };
+}
+// Alte oder halbleere Berichte ergänzen, nichts überschreiben
+function _fsPbVervollstaendigen(b){
+  if(!Array.isArray(b.sektionen))b.sektionen=[];
+  b.sektionen.forEach(s=>{if(!Array.isArray(s.items))s.items=[];});
+  if(!b.id)b.id='pb_'+Date.now();
+  if(typeof b.bemerkung!=='string')b.bemerkung='';
+  if(!b.titel)b.titel='Prüfbericht';
+  return b;
+}
+function _fsPbZaehlen(b){
+  const z={ok:0,mangel:0,offen:0,tot:0};
+  ((b&&b.sektionen)||[]).forEach(s=>((s&&s.items)||[]).forEach(it=>{z.tot++;if(it.status==='ok')z.ok++;else if(it.status==='mangel')z.mangel++;else z.offen++;}));
+  return z;
+}
+
+function _openPruefformular(existingIdx){
+  const t=currentTask();if(!t)return;
+  if(!t.pruefberichte)t.pruefberichte=[];
+  let bericht;
+  if(typeof existingIdx==='number'&&t.pruefberichte[existingIdx]){
+    bericht=t.pruefberichte[existingIdx];
+  }else{
+    bericht=_fsPbNeuerBericht();
+    t.pruefberichte.push(bericht);scheduleSave();
+  }
+  _fsPbVervollstaendigen(bericht);
+
+  const GID='_pruefformularOverlay';const old=document.getElementById(GID);if(old)old.remove();
+  if(typeof _pbOffenMerken==='function')_pbOffenMerken(t,bericht,GID,function(){_pbRender();_pbStats();}); // v306: nach Neuladen/Zusammenführen wieder anhängen
+  const ov=document.createElement('div');ov.id=GID;
+  ov.style.cssText='position:fixed;inset:0;z-index:99998;display:flex;flex-direction:column;background:var(--bg);';
+  ov._pbBericht=bericht;
+
+  /* Kopfleiste: ← · Titel (änderbar) + Objekt · Datum (änderbar) */
+  const hdr=document.createElement('div');
+  hdr.style.cssText='background:'+FS_PB_FARBE+';padding:12px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0;';
+  const closeBtn=document.createElement('button');closeBtn.type='button';closeBtn.textContent='←';
+  closeBtn.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:40px;height:40px;border-radius:8px;font-size:18px;cursor:pointer;flex-shrink:0;';
+  closeBtn.onclick=()=>{ov.remove();try{const ct=currentTask();if(ct)renderDetail(ct);}catch(e){console.warn('[Prüfbericht] zurück:',e);}};
+  const hdrMeta=document.createElement('div');hdrMeta.style.cssText='flex:1;min-width:0;';
+  const titelEl=document.createElement('input');titelEl.type='text';titelEl.value=bericht.titel||'';titelEl.placeholder='Titel';titelEl.autocomplete='off';titelEl.setAttribute('aria-label','Titel');
+  titelEl.style.cssText='width:100%;box-sizing:border-box;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:6px;padding:5px 8px;color:#fff;font-size:15px;font-weight:700;font-family:inherit;';
+  titelEl.oninput=()=>{bericht.titel=titelEl.value;scheduleSave();};
+  const hdrS=document.createElement('div');hdrS.style.cssText='font-size:11px;color:rgba(255,255,255,.75);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';hdrS.textContent=t.title||t.name||'Objektadresse';
+  hdrMeta.append(titelEl,hdrS);
+  const datumEl=document.createElement('input');datumEl.type='text';datumEl.value=bericht.datum||'';datumEl.placeholder='TT.MM.JJJJ';datumEl.autocomplete='off';datumEl.setAttribute('aria-label','Datum');
+  datumEl.style.cssText='width:104px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:6px;padding:7px 8px;color:#fff;font-size:14px;font-family:inherit;flex-shrink:0;';
+  datumEl.oninput=()=>{bericht.datum=datumEl.value;scheduleSave();};
+  hdr.append(closeBtn,hdrMeta,datumEl);
+
+  /* Zählleiste */
+  const statsEl=document.createElement('div');statsEl.id='_pbStats';
+  statsEl.style.cssText='display:flex;flex-wrap:wrap;gap:6px 16px;padding:7px 14px;background:var(--bg3);border-bottom:1px solid var(--border);flex-shrink:0;font-size:12px;font-weight:600;';
+  function _pbStats(){
+    const z=_fsPbZaehlen(bericht);
+    statsEl.innerHTML='';
+    [['✓ '+z.ok+' OK','#1a7a3c'],['⚠ '+z.mangel+' Mängel','var(--red)'],['○ '+z.offen+' offen','var(--text2)'],[z.ok+' / '+z.tot+' geprüft','var(--text2)']].forEach(([txt,col])=>{
+      const s=document.createElement('span');s.style.color=col;s.textContent=txt;statsEl.appendChild(s);
+    });
+  }
+
+  const body=document.createElement('div');
+  body.style.cssText='flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:0 0 90px;';
+
+  const statDef=[
+    {v:'ok',sym:'✓ OK',col:'#1a7a3c',bg:'#e6f5ec'},
+    {v:'mangel',sym:'⚠ Mangel',col:'#c0392b',bg:'#fdecea'}
+  ];
+
+  function _pbRender(){
+    body.innerHTML='';
+    bericht.sektionen.forEach(sek=>{
+      const sekDiv=document.createElement('div');
+      const sekHdr=document.createElement('div');
+      sekHdr.style.cssText='padding:8px 14px;font-size:12px;font-weight:700;color:'+FS_PB_FARBE+';background:rgba(26,92,58,.08);border-bottom:1px solid var(--border);border-top:1px solid var(--border);border-left:3px solid '+FS_PB_FARBE+';';
+      sekHdr.textContent=sek.titel||'';
+      sekDiv.appendChild(sekHdr);
+      sek.items.forEach(it=>{
+        const rowBg=()=>it.status==='mangel'?'rgba(192,57,43,.06)':it.status==='ok'?'rgba(26,122,60,.05)':'transparent';
+        const row=document.createElement('div');row.setAttribute('data-pb-punkt','1');
+        row.style.cssText='padding:10px 14px;border-bottom:1px solid var(--border);margin:2px 0;background:'+rowBg()+';transition:background .2s;';
+        const txt=document.createElement('div');
+        txt.style.cssText='font-size:13px;color:var(--text);line-height:1.35;margin-bottom:8px;font-weight:500;';
+        txt.textContent=it.text||'';
+        const btnRow=document.createElement('div');
+        btnRow.style.cssText='display:grid;grid-template-columns:repeat(2,1fr);gap:6px;';
+        const notizWrap=document.createElement('div');notizWrap.className='pb-notiz';
+        const nBtn=document.createElement('button');nBtn.type='button';nBtn.textContent='+ Notiz';
+        const zeigen=()=>{
+          const m=it.status==='mangel'||!!it.notiz;
+          notizWrap.style.display=m?'block':'none';
+          nBtn.style.display=(!m&&notizWrap.style.display==='none')?'':'none';
+        };
+        statDef.forEach(s=>{
+          const btn=document.createElement('button');btn.type='button';btn.textContent=s.sym;btn.setAttribute('data-pb-status',s.v);
+          const on=it.status===s.v;
+          btn.style.cssText='padding:9px 4px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;border:2px solid '+(on?s.col:'var(--border)')+';background:'+(on?s.bg:'transparent')+';color:'+(on?s.col:'var(--text2)')+';box-shadow:'+(on?'0 1px 4px '+s.col+'44':'none')+';';
+          btn.onclick=()=>{
+            it.status=it.status===s.v?'offen':s.v;
+            row.style.background=rowBg();
+            scheduleSave();_pbStats();
+            btnRow.querySelectorAll('button').forEach((b2,bi)=>{
+              const s2=statDef[bi];const on2=it.status===s2.v;
+              b2.style.borderColor=on2?s2.col:'var(--border)';
+              b2.style.background=on2?s2.bg:'transparent';
+              b2.style.color=on2?s2.col:'var(--text2)';
+              b2.style.boxShadow=on2?'0 1px 4px '+s2.col+'44':'none';
+            });
+            zeigen();
+          };
+          btnRow.appendChild(btn);
+        });
+        notizWrap.style.cssText='margin-top:6px;';
+        const nIn=document.createElement('textarea');nIn.placeholder='Notiz / Beschreibung…';nIn.value=it.notiz||'';nIn.rows=2;nIn.autocomplete='off';
+        nIn.style.cssText='width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:14px;color:var(--text);resize:vertical;font-family:inherit;';
+        nIn.oninput=()=>{it.notiz=nIn.value;scheduleSave();};
+        notizWrap.appendChild(nIn);
+        nBtn.style.cssText='margin-top:5px;font-size:11px;padding:4px 10px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;font-family:inherit;';
+        nBtn.onclick=()=>{notizWrap.style.display='block';nBtn.style.display='none';nIn.focus();};
+        row.append(txt,btnRow,nBtn,notizWrap);
+        zeigen();
+        sekDiv.appendChild(row);
+      });
+      /* + Freier Eintrag */
+      const add=document.createElement('div');add.style.cssText='padding:10px 14px;border-bottom:1px solid var(--border);';
+      const addB=document.createElement('button');addB.type='button';addB.textContent='+ Freier Eintrag';addB.setAttribute('data-pb-frei','1');
+      addB.style.cssText='font-size:12px;padding:8px 14px;border-radius:6px;border:1px dashed var(--border);background:transparent;color:var(--text2);cursor:pointer;width:100%;font-family:inherit;';
+      addB.onclick=()=>{
+        const text=prompt('Neuer Prüfpunkt:');
+        if(text&&text.trim()){sek.items.push({text:text.trim(),status:'offen',notiz:''});scheduleSave();_pbRender();_pbStats();}
+      };
+      add.appendChild(addB);sekDiv.appendChild(add);
+      body.appendChild(sekDiv);
+    });
+    /* Allgemeine Bemerkungen */
+    const bem=document.createElement('div');bem.style.cssText='padding:14px;';
+    const bl=document.createElement('div');bl.style.cssText='font-size:12px;font-weight:700;color:'+FS_PB_FARBE+';border-left:3px solid '+FS_PB_FARBE+';padding-left:8px;margin-bottom:8px;';bl.textContent='Bemerkungen';
+    const bt=document.createElement('textarea');bt.rows=3;bt.placeholder='Gesamtbeurteilung, Empfehlungen…';bt.value=bericht.bemerkung||'';bt.autocomplete='off';
+    bt.style.cssText='width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:14px;color:var(--text);resize:vertical;font-family:inherit;';
+    bt.oninput=()=>{bericht.bemerkung=bt.value;scheduleSave();};
+    bem.append(bl,bt);body.appendChild(bem);
+  }
+  _pbRender();_pbStats();
+
+  /* Fußleiste – nur am PC. Handy und Tablet erstellen kein PDF. */
+  if(!_fsAmPc()){
+    body.style.paddingBottom='24px';
+    ov.append(hdr,statsEl,body);
+    document.body.appendChild(ov);
+    return;
+  }
+  const footer=document.createElement('div');
+  footer.style.cssText='position:fixed;bottom:0;left:0;right:0;padding:12px 14px;background:var(--bg2);border-top:1px solid var(--border);display:flex;gap:10px;z-index:99999;';
+  const pdfBtn=document.createElement('button');pdfBtn.type='button';pdfBtn.textContent='📄 PDF erstellen';
+  pdfBtn.style.cssText='flex:1;padding:12px;background:'+FS_PB_FARBE+';color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;';
+  pdfBtn.onclick=async()=>{
+    pdfBtn.disabled=true;const alt=pdfBtn.textContent;pdfBtn.textContent='⏳ PDF wird erstellt …';
+    try{await _fsPbPdf(bericht,t);}finally{pdfBtn.disabled=false;pdfBtn.textContent=alt;}
+  };
+  const openBtn=document.createElement('button');openBtn.type='button';openBtn.textContent='📂 Öffnen';
+  openBtn.style.cssText='padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;color:var(--text);';
+  openBtn.onclick=()=>_fsPdfOeffnen(bericht);
+  const shareBtn=document.createElement('button');shareBtn.type='button';shareBtn.textContent='📤';
+  shareBtn.style.cssText='padding:12px 16px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:18px;cursor:pointer;color:var(--text);';
+  shareBtn.onclick=async()=>{
+    const blob=_fsPdfBlobs[bericht.id];
+    if(navigator.share&&blob){
+      const file=new File([blob],bericht.pdfName||_fsPdfName(bericht),{type:'application/pdf'});
+      try{await navigator.share({title:bericht.titel||'Prüfbericht',files:[file]});}
+      catch(e){if(e.name!=='AbortError')toast('Teilen fehlgeschlagen','error');}
+    }else{toast('Bitte zuerst PDF erstellen','info');}
+  };
+  footer.append(pdfBtn,openBtn,shareBtn);
+  ov.append(hdr,statsEl,body,footer);
+  document.body.appendChild(ov);
+}
+
+// PDF des Prüfberichts – Fassung des PC (Kopf, „Ergebnis: n/m OK · n Mängel · n offen“, Tabellen Status · Prüfpunkt · Notiz, Bemerkungen, Seitenzahl)
+async function _fsPbPdf(bericht,task){
+  if(!window.jspdf){toast('PDF-Bibliothek lädt noch …','error');return null;}
+  try{
+    _fsPbVervollstaendigen(bericht);
+    const t=task||{};
+    const {jsPDF}=window.jspdf;
+    const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+    const W=210,M=14;let y=M;
+    const farbe=[26,92,58];
+    doc.setFillColor(...farbe);doc.rect(0,0,W,28,'F');
+    doc.setTextColor(255,255,255);doc.setFontSize(16);doc.setFont('helvetica','bold');
+    doc.text(bericht.titel||'Prüfbericht',M,12);
+    doc.setFontSize(9);doc.setFont('helvetica','normal');
+    doc.text((t.title||t.name||'')+(t.adresse?' · '+t.adresse:''),M,19);
+    doc.text('Datum: '+(bericht.datum||''),M,25);
+    y=36;
+    const z=_fsPbZaehlen(bericht);
+    doc.setFontSize(10);doc.setFont('helvetica','bold');doc.setTextColor(0,0,0);
+    doc.text('Ergebnis: '+z.ok+'/'+z.tot+' OK'+(z.mangel?' · '+z.mangel+' Mängel':'')+(z.offen?' · '+z.offen+' offen':''),M,y);y+=8;
+    (bericht.sektionen||[]).forEach(sek=>{
+      if(y>265){doc.addPage();y=M;}
+      doc.setFillColor(240,240,240);doc.rect(M,y,W-2*M,7,'F');
+      doc.setFontSize(9);doc.setFont('helvetica','bold');doc.setTextColor(60,60,60);
+      doc.text(sek.titel||'',M+2,y+5);y+=9;
+      doc.autoTable({startY:y,head:[['Status','Prüfpunkt','Notiz']],
+        body:(sek.items||[]).map(it=>[it.status==='ok'?'OK':it.status==='mangel'?'MANGEL':'OFFEN',it.text||'',it.notiz||'']),
+        theme:'grid',margin:{left:M,right:M},
+        headStyles:{fillColor:farbe,fontSize:8,fontStyle:'bold'},
+        bodyStyles:{fontSize:8,minCellHeight:7},
+        columnStyles:{0:{cellWidth:20,fontStyle:'bold'},1:{cellWidth:110},2:{cellWidth:52}},
+        didParseCell:(d)=>{if(d.section==='body'&&d.column.index===0){if(d.cell.raw==='OK')d.cell.styles.textColor=[26,122,60];else if(d.cell.raw==='MANGEL'){d.cell.styles.textColor=[192,57,43];d.cell.styles.fontStyle='bold';}else d.cell.styles.textColor=[130,130,130];}}
+      });
+      y=doc.lastAutoTable.finalY+5;
+    });
+    if(bericht.bemerkung){if(y>255){doc.addPage();y=M;}doc.setFontSize(9);doc.setFont('helvetica','bold');doc.setTextColor(0,0,0);doc.text('Bemerkungen:',M,y);y+=5;doc.setFont('helvetica','normal');const lines=doc.splitTextToSize(bericht.bemerkung,W-2*M);doc.text(lines,M,y);}
+    const pages=doc.internal.getNumberOfPages();
+    for(let p=1;p<=pages;p++){doc.setPage(p);doc.setFontSize(8);doc.setTextColor(150,150,150);doc.text('Seite '+p+' von '+pages,W/2,292,{align:'center'});}
+
+    const blob=doc.output('blob');
+    _fsPdfBlobs[bericht.id]=blob;
+    const name=_fsPdfName(bericht,new Date());
+    toast('✓ PDF erstellt','success',4000);
+    const inDrive=await _fsPdfNachDrive(blob,name,bericht,task);
+    if(!inDrive){ // ohne Drive bleibt nur das Gerät: dann herunterladen
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');a.href=url;a.download=name;
+      document.body.appendChild(a);a.click();a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),5000);
+    }
+    return blob;
+  }catch(e){
+    console.error('[Prüfbericht] PDF:',e);
+    toast('PDF-Fehler: '+e.message,'error');
+    return null;
+  }
 }
