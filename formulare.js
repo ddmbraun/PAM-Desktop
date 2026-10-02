@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F15';
+const PAM_FORMULARE_VERSION='F16';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
@@ -110,6 +110,7 @@ function _fsIstKeller(b){return !!b&&b.art==='keller';}
 function _fsBewertungenFuer(b){return _fsIstKeller(b)?FS_KELLER_BEWERTUNGEN:FS_BEWERTUNGEN;}
 function _fsRaumVorschlaege(b){return _fsIstKeller(b)?FS_KELLER_RAEUME:FS_RAUM_VORSCHLAEGE;}
 function _fsTitel(b){
+  if(b&&b.fassung==='begehung'&&b.art==='vorab')return 'Vorabbesichtigung'; // F16
   if(b&&b.fassung==='begehung')return 'Begehungsprotokoll'+(b.art==='keller'?' Keller':' Wohnung'); // F2a (bewusst ohne Hilfsnamen: alte Prüfungen schneiden diese Funktion einzeln aus)
   return _fsIstKeller(b)?FS_KELLER_TITEL:'Feuchte- und Schimmelprotokoll';
 }
@@ -180,6 +181,7 @@ function _fsNeuerBericht(t,art){
     b.art='keller';b.titel=FS_KELLER_TITEL;
     b.sektionen=FS_KELLER_SEKTIONEN.map(s=>({titel:s.titel,items:s.items.map(text=>({text,status:'offen',notiz:''}))}));
   }
+  if(art==='vorab'){b.art='vorab';b.titel='Vorabbesichtigung';} // F16: Inhalte setzt _fsBgUmstellen
   return b;
 }
 // Altbestand/Fremdgerät: fehlende Teile ergänzen, nichts überschreiben
@@ -197,6 +199,7 @@ function _fsVervollstaendigen(b){
     ['anlass','beginn','ende','geraetLuft','geraetOberflaeche','geraetBauteil'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';});
     if(!Array.isArray(b.anwesende))b.anwesende=[];
     if(!Array.isArray(b.angaben))b.angaben=[];
+    if(b.art==='vorab')['versicherung','schadennr','zugang','ansprechpartner'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';}); // F16
   }
   return b;
 }
@@ -212,6 +215,7 @@ function _fsPdfName(bericht,zeit){
     const slug=String((bericht.kopf&&bericht.kopf.objektAdresse)||'').split(',')[0].replace(/[^a-zA-Z0-9]/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,'').slice(0,30);
     return 'Wartungsprotokoll'+(slug?'_'+slug:'')+(datum?'_'+datum:'')+uhr+'.pdf';
   }
+  if(bericht&&bericht.fassung==='begehung'&&bericht.art==='vorab')return 'Vorabbesichtigung'+(datum?'_'+datum:'')+uhr+'.pdf'; // F16
   if(bericht&&bericht.fassung==='begehung')return 'Begehung'+(bericht.art==='keller'?'_Keller':'_Wohnung')+(datum?'_'+datum:'')+uhr+'.pdf'; // F2a: kurzer Name (Pfadlänge)
   return 'Feuchteprotokoll'+(bericht&&bericht.art==='keller'?'_Keller':'')+(datum?'_'+datum:'')+uhr+'.pdf';
 }
@@ -374,6 +378,7 @@ function _fsKopfAusKarte(t){
 function _fsKopfErgaenzen(bericht,t){
   if(!bericht||!bericht.kopf)return 0;
   const v=_fsKopfAusKarte(t);let n=0;
+  if(bericht.art==='vorab'&&typeof _fsVbAnlassAusKarte==='function'){const a=_fsVbAnlassAusKarte(t);if(a)v.anlass=a;} // F16: Anlass = Beschreibung der Karte (Vorschlag)
   Object.keys(v).forEach(key=>{if(v[key]&&!String(bericht.kopf[key]||'').trim()){bericht.kopf[key]=v[key];n++;}});
   return n;
 }
@@ -635,6 +640,13 @@ function _openFeuchteprotokollMobil(existingIdx,art){
   }else{
     bericht=_fsNeuerBericht(t,art);
     if(typeof _fsBgUmstellen==='function')_fsBgUmstellen(bericht); // F2a: neue Protokolle starten als Begehungsprotokoll
+    if(art==='vorab'){ // F16: Anlass aus der Karte vorschlagen; die Bei-Bedarf-Abschnitte (Feststellungen 2–4, Termin, Räume) starten zugeklappt – nur Anzeige, nicht im Protokoll
+      try{
+        _fsKopfErgaenzen(bericht,t);
+        [1,2,3].forEach(si=>_fsZuSetzen(bericht.id,si,true));
+        _fsZuMehrere(bericht.id,['b:termin','b:raeume'],true);
+      }catch(e){console.warn('[Vorabbesichtigung] Start:',e);}
+    }
     t.pruefberichte.push(bericht);
     scheduleSave();
   }
@@ -697,7 +709,8 @@ function _openFeuchteprotokollMobil(existingIdx,art){
   function _neuBauen(){
     const sc=body.scrollTop;
     body.innerHTML='';
-    if(bericht.fassung==='begehung'&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_teilKopfBg(),_bgBlock('raeume',_teilRaeumeBg,'Räume'),_bgBlock('fest',_teilChecklistenBg,'Feststellungen vor Ort'),_bgBlock('angaben',_teilAngabenBg,'Angaben der Nutzer (nicht selbst festgestellt)'),_bgBlock('fazit',_teilZusammenfassungBg,'Zusammenfassung der Feststellungen'),_bgBlock('fotos',_teilFotos,'Fotos')); // F2b: zuklappbar, Leiste oben
+    if(_fsIstVorab(bericht)&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_bgBlock('auftrag',_teilAuftragBg),_bgBlock('fest',_teilChecklistenBg,'Feststellungen vor Ort'),_bgBlock('angaben',_teilAngabenBg,'Angaben der Nutzer (nicht selbst festgestellt)'),_bgBlock('fotos',_teilFotos,'Fotos'),_bgBlock('termin',_teilTerminBg),_bgBlock('raeume',_teilRaeumeBg,'Räume')); // F16: Vorabbesichtigung – Muss-Abschnitte oben, Bei-Bedarf unten
+    else if(bericht.fassung==='begehung'&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_teilKopfBg(),_bgBlock('raeume',_teilRaeumeBg,'Räume'),_bgBlock('fest',_teilChecklistenBg,'Feststellungen vor Ort'),_bgBlock('angaben',_teilAngabenBg,'Angaben der Nutzer (nicht selbst festgestellt)'),_bgBlock('fazit',_teilZusammenfassungBg,'Zusammenfassung der Feststellungen'),_bgBlock('fotos',_teilFotos,'Fotos')); // F2b: zuklappbar, Leiste oben
     else{
       body.append(_teilErgebnis(),_teilKopf(),_teilRaeume(),_teilStellen(),_teilChecklisten(),_teilBewertung(),_teilFotos()); // v294: Ergebnis oben
       if(typeof _teilUmwandeln==='function'&&body.firstChild&&typeof body.insertBefore==='function')body.insertBefore(_teilUmwandeln(),body.firstChild); // F2a: Hinweis zum Umwandeln ganz oben
@@ -1091,13 +1104,14 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     if(norm.length)_fsZuMehrere(bericht.id,norm,zu);
     if(keys.indexOf('skizze')>=0)_fsZuMehrere(bericht.id,['a:skizze'],!zu);
   }
+  function _bgBloecke(){return _fsIstVorab(bericht)?FS_VB_BLOECKE:FS_BG_BLOECKE;} // F16: Vorabbesichtigung hat eigene Abschnittsliste
   function _bgNurDieser(){try{return localStorage.getItem('pam_fs_nurDieser')==='1';}catch(e){return false;}}
   // Kurzfassung, die neben einem zugeklappten Abschnitt steht – nur Zahlen und Stichworte, keine Wertung
   function _bgKurz(k){
     const kf=bericht.kopf||{};
     const gef=arr=>arr.filter(x=>String(kf[x]||'').trim()).length;
     const plural=(n,e,m)=>n+' '+(n===1?e:m);
-    if(k==='auftrag')return gef(['auftraggeber','objektAdresse','auftragNr','nutzer','anlass'])+' von 5 ausgefüllt';
+    if(k==='auftrag')return _fsIstVorab(bericht)?gef(['auftraggeber','objektAdresse','auftragNr','nutzer','anlass','versicherung','schadennr','zugang','ansprechpartner'])+' von 9 ausgefüllt':gef(['auftraggeber','objektAdresse','auftragNr','nutzer','anlass'])+' von 5 ausgefüllt';
     if(k==='termin'){
       const n=(bericht.anwesende||[]).filter(p=>p&&String(p.name||'').trim()).length;
       return [_fsBgZeitText(kf),n?plural(n,'Person','Personen'):''].filter(Boolean).join(' · ')||'noch leer';
@@ -1119,7 +1133,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
   // Ein Abschnitt mit Pfeil in der Überschrift. bauFn baut den Inhalt (erst wenn aufgeklappt); hat der Inhalt schon eine eigene
   // Überschrift (kopfText), wird sie entfernt – die Überschrift ist jetzt der Pfeil-Knopf.
   function _bgBlock(k,bauFn,kopfText){
-    const def=FS_BG_BLOECKE.find(b=>b.k===k)||{t:k};
+    const def=_bgBloecke().find(b=>b.k===k)||{t:k};
     const zu=_bgZu(k);
     const w=document.createElement('div');w.setAttribute('data-fs-block',k);w.style.scrollMarginTop='56px';
     const kopf=document.createElement('button');kopf.type='button';kopf.setAttribute('data-fs-blockkopf',k);kopf.setAttribute('aria-expanded',zu?'false':'true');
@@ -1142,7 +1156,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     return w;
   }
   function _bgSpringe(k){ // Leiste: Abschnitt aufklappen und hinscrollen; mit „Nur dieser" gehen alle anderen zu
-    const alle=FS_BG_BLOECKE.map(b=>b.k);
+    const alle=_bgBloecke().map(b=>b.k);
     if(_bgNurDieser())_bgZuMehrere(alle.filter(x=>x!==k),true);
     _bgZuMehrere([k],false);
     _neuBauen();
@@ -1151,7 +1165,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
   function _teilLeiste(){
     const w=document.createElement('div');w.setAttribute('data-fs-leiste','1');
     w.style.cssText='position:sticky;top:0;z-index:6;background:var(--bg);border-bottom:1px solid var(--border);padding:6px 10px;display:flex;gap:6px;align-items:center;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch;';
-    const alle=FS_BG_BLOECKE.map(b=>b.k);
+    const alle=_bgBloecke().map(b=>b.k);
     const offene=alle.filter(k=>!_bgZu(k)).length;
     const nur=_bgNurDieser();
     const mk=(txt,an,fn,attr)=>{
@@ -1160,10 +1174,10 @@ function _openFeuchteprotokollMobil(existingIdx,art){
         +'border:2px solid '+(an?FS_FARBE:'var(--border)')+';background:'+(an?'rgba(31,95,139,.18)':'transparent')+';color:var(--text);font-weight:'+(an?'700':'600')+';';
       b.onclick=fn;return b;
     };
-    w.appendChild(mk('📋 Messliste',false,()=>_fsBgMessfensterZeigen(bericht,'liste'),['data-fs-messliste','1'])); // F4a: ganz vorn, auch am Handy
+    if(!_fsIstVorab(bericht))w.appendChild(mk('📋 Messliste',false,()=>_fsBgMessfensterZeigen(bericht,'liste'),['data-fs-messliste','1'])); // F4a: ganz vorn, auch am Handy (F16: nicht bei der Vorabbesichtigung)
     w.appendChild(mk(offene?'▸ Alles zu':'▾ Alles auf',false,()=>{_bgZuMehrere(alle,!!offene);_neuBauen();},['data-fs-alles','1']));
     w.appendChild(mk(nur?'✓ Nur dieser':'Nur dieser',nur,()=>{try{localStorage.setItem('pam_fs_nurDieser',nur?'0':'1');}catch(e){}_neuBauen();},['data-fs-nur','1']));
-    FS_BG_BLOECKE.forEach(b=>w.appendChild(mk(b.c,false,()=>_bgSpringe(b.k),['data-fs-sprung',b.k])));
+    _bgBloecke().forEach(b=>w.appendChild(mk(b.c,false,()=>_bgSpringe(b.k),['data-fs-sprung',b.k])));
     return w;
   }
 
@@ -1179,6 +1193,11 @@ function _openFeuchteprotokollMobil(existingIdx,art){
       _feld('Auftrag-Nr.','auftragNr',''),
       _feld('Nutzer / Mieter','nutzer',''),
       _feld('Anlass','anlass','z. B. Meldung des Mieters über …'));
+    if(_fsIstVorab(bericht))w.append( // F16: Objekt und Zugang, Versicherung
+      _feld('Versicherung','versicherung',''),
+      _feld('Schadennummer','schadennr',''),
+      _feld('Zugang','zugang','z. B. Schlüssel beim Hausmeister'),
+      _feld('Ansprechpartner','ansprechpartner','vor Ort, mit Telefon'));
     return w;
   }
   // Inhalt „Ortstermin": Beginn/Ende, Anwesende, Wetter, Aufgenommen von
@@ -1789,7 +1808,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
   function _teilAngabenBg(){
     const w=document.createElement('div');w.setAttribute('data-fs-angaben','1');
     w.appendChild(_kopfZeile('Angaben der Nutzer (nicht selbst festgestellt)'));
-    w.appendChild(_bgInfo('Was Mieter oder Nutzer gesagt haben. Im PDF steht „Laut …". Fragen ohne Eintrag erscheinen nicht.'));
+    w.appendChild(_bgInfo(_fsIstVorab(bericht)?'Was der Auftraggeber oder Nutzer berichtet hat – nicht selbst festgestellt. Im PDF steht „Laut …". Fragen ohne Eintrag erscheinen nicht.':'Was Mieter oder Nutzer gesagt haben. Im PDF steht „Laut …". Fragen ohne Eintrag erscheinen nicht.')); // F16
     const namen=_bgNamenListe();
     bericht.angaben.forEach((a,ai)=>{
       const row=document.createElement('div');row.style.cssText='padding:10px 14px;border-bottom:1px solid var(--border);';
@@ -2270,6 +2289,54 @@ const FS_BG_WOHNUNG_ANGABEN=[
   {k:'W3.3',q:'Wie wird gelüftet und geheizt?',alt:'Wie wird gelüftet und geheizt?'},
   {k:'W3.4',q:'Wird in der Wohnung gewöhnlich Wäsche getrocknet?'}
 ];
+/* ══ F16: VORABBESICHTIGUNG – dritte Art des Begehungsprotokolls (art:'vorab', Frank 02.10.2026) ═══════════════════
+   Besichtigung VOR der Schadenaufnahme. Gleiche Bausteine wie das Begehungsprotokoll (Fotos, Kopf aus der Karte, Sätze zum Antippen, PDF), eigene Inhalte.
+   Muss: Anlass und Auftraggeber · Objekt und Zugang · Schadenbild (nur Feststellungen) · Vorgeschichte laut Auftraggeber.
+   Kann (zuklappbar, was leer bleibt, steht nicht im PDF): Nicht einsehbar · Dringlichkeit und Gefahr · Vorhandene Unterlagen · Raumskizze · Wetter und Klima.
+   Weggelassen (Franks Wahl): Umfang der Schadenaufnahme · Aufwandsschätzung · Hinweistext „unverbindlich". Keine Ampel, keine Ursache, keine Empfehlung.
+   ⛔ Datei ist öffentlich: nur Sätze und Programm, nie Namen. Texte, die ins PDF gehen: nur Zeichen der PDF-Schrift. */
+const FS_VB_TITEL='Vorabbesichtigung';
+const FS_VB_BLOECKE=[{k:'auftrag',t:'Anlass, Auftraggeber, Objekt und Zugang',c:'Auftrag'},{k:'fest',t:'Schadenbild und weitere Feststellungen',c:'Schadenbild'},{k:'angaben',t:'Vorgeschichte laut Auftraggeber',c:'Vorgeschichte'},{k:'fotos',t:'Fotos',c:'Fotos'},{k:'termin',t:'Ortstermin und Wetter (bei Bedarf)',c:'Termin'},{k:'raeume',t:'Raumskizze (bei Bedarf)',c:'Skizze'}];
+const FS_VB_SEKTIONEN=[
+  {titel:'Schadenbild',items:[
+    {k:'V1.1',q:'Sichtbarer Schaden',ok:'Zum Zeitpunkt der Besichtigung war kein Schaden sichtbar.',m:'Sichtbarer Schaden: {}.',mo:'Ein Schaden war sichtbar.',h:'Art des Schadens'},
+    {k:'V1.2',typ:'notiz',abh:'V1.1',q:'Lage des Schadens',m:'Lage des Schadens: {}.',h:'Raum, Bauteil, Höhe über Boden'},
+    {k:'V1.3',typ:'notiz',abh:'V1.1',q:'Ausdehnung',m:'Ungefähre Ausdehnung: {}.',h:'Zahl und Einheit, z. B. 40 x 60 cm'},
+    {k:'V1.4',q:'Nässe oder Wasser',ok:'Es war keine Nässe sichtbar.',m:'Nässe sichtbar: {}.',mo:'Nässe war sichtbar.',h:'wo'},
+    {k:'V1.5',q:'Schimmel',ok:'Es war kein Schimmel sichtbar.',m:'Schimmel sichtbar: {}.',mo:'Schimmel war sichtbar.',h:'wo, ungefähre Fläche'},
+    {k:'V1.6',q:'Verfärbungen, Risse, abplatzender Putz oder Farbe',ok:'Keine Verfärbungen, Risse, kein abplatzender Putz und keine abplatzende Farbe sichtbar.',m:'Festgestellt: {}.',mo:'Verfärbungen, Risse oder abplatzender Putz bzw. Farbe waren sichtbar.',h:'was, wo'},
+    {k:'V1.7',q:'Beschädigte Bauteile',ok:'Es waren keine beschädigten Bauteile sichtbar.',m:'Beschädigte Bauteile: {}.',mo:'Beschädigte Bauteile waren sichtbar.',h:'welche, wo'},
+    {k:'V1.8',q:'Geruch',ok:'Es wurde kein auffälliger Geruch wahrgenommen.',m:'Geruch wahrgenommen: {}.',mo:'Ein auffälliger Geruch wurde wahrgenommen.',h:'muffig, modrig, …'}
+  ]},
+  {titel:'Nicht einsehbar',items:[
+    {k:'V2.1',q:'Verdeckte Bauteile',ok:'Alle betroffenen Bauteile waren einsehbar.',m:'Nicht einsehbar waren: {}.',mo:'Betroffene Bauteile waren nicht einsehbar.',h:'was, z. B. hinter Verkleidung oder Möbeln'},
+    {k:'V2.2',q:'Räume ohne Zugang',ok:'Alle betroffenen Räume waren zugänglich.',m:'Nicht zugänglich waren: {}.',mo:'Betroffene Räume waren nicht zugänglich.',h:'welche'}
+  ]},
+  {titel:'Dringlichkeit und Gefahr',items:[
+    {k:'V3.1',q:'Austretendes Wasser',ok:'Zum Zeitpunkt der Besichtigung trat kein Wasser aus.',m:'Zum Zeitpunkt der Besichtigung trat Wasser aus: {}.',mo:'Zum Zeitpunkt der Besichtigung trat Wasser aus.',h:'wo'},
+    {k:'V3.2',q:'Elektrische Anlagen im Schadenbereich',ok:'Im Schadenbereich waren keine nassen oder beschädigten elektrischen Anlagen erkennbar.',m:'Im Schadenbereich waren elektrische Anlagen nass oder beschädigt: {}.',mo:'Im Schadenbereich waren elektrische Anlagen nass oder beschädigt.',h:'was'},
+    {k:'V3.3',q:'Lose oder herabhängende Bauteile',ok:'Es waren keine losen oder herabhängenden Bauteile sichtbar.',m:'Lose oder herabhängende Bauteile: {}.',mo:'Lose oder herabhängende Bauteile waren sichtbar.',h:'was, wo'}
+  ]},
+  {titel:'Vorhandene Unterlagen',items:[
+    {k:'V4.1',q:'Pläne',ok:'Pläne wurden nicht vorgelegt.',m:'Pläne wurden vorgelegt: {}.',mo:'Pläne wurden vorgelegt.',h:'welche'},
+    {k:'V4.2',q:'Rechnungen und Reparaturbelege',ok:'Rechnungen und Reparaturbelege wurden nicht vorgelegt.',m:'Rechnungen oder Reparaturbelege wurden vorgelegt: {}.',mo:'Rechnungen oder Reparaturbelege wurden vorgelegt.',h:'welche'},
+    {k:'V4.3',q:'Schreiben der Versicherung',ok:'Schreiben der Versicherung wurden nicht vorgelegt.',m:'Schreiben der Versicherung wurden vorgelegt: {}.',mo:'Schreiben der Versicherung wurden vorgelegt.',h:'welche'},
+    {k:'V4.4',q:'Frühere Gutachten',ok:'Frühere Gutachten wurden nicht vorgelegt.',m:'Frühere Gutachten wurden vorgelegt: {}.',mo:'Frühere Gutachten wurden vorgelegt.',h:'welche'}
+  ]}
+];
+const FS_VB_ANGABEN=[
+  {k:'V5.1',q:'Wann wurde der Schaden bemerkt?'},
+  {k:'V5.2',q:'Was ist nach Angabe passiert?'},
+  {k:'V5.3',q:'Frühere Schäden, Reparaturen oder Gutachten'},
+  {k:'V5.4',q:'Bisherige Maßnahmen, z. B. Trocknung oder Abdichtung'},
+  {k:'V5.5',q:'Was hat sich zuletzt geändert?'}
+];
+function _fsIstVorab(b){return !!b&&b.fassung==='begehung'&&b.art==='vorab';}
+// Anlass aus der Beschreibung der Karte: nur ein VORSCHLAG zum Überschreiben (Tags raus, Leerzeichen zusammen, höchstens 300 Zeichen)
+function _fsVbAnlassAusKarte(t){
+  const s=String((t&&t.desc)||'').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
+  return s.length>300?s.slice(0,297)+'...':s;
+}
 const FS_BG_MERK_KEY='pam_fs_aufgenommen';
 function _fsIstBegehung(b){return !!b&&b.fassung==='begehung';}
 // „Aufgenommen von": einmal getippt, das Gerät merkt es sich (NICHT in dieser öffentlichen Datei)
@@ -2288,13 +2355,14 @@ function _fsBgAngabe(d){return {k:d.k,q:d.q,text:'',von:''};}
 function _fsBgNeuerBericht(t,art){return _fsBgUmstellen(_fsNeuerBericht(t,art));}
 // Ein frisch angelegtes (leeres) Protokoll auf die Fassung „Begehungsprotokoll" umstellen
 function _fsBgUmstellen(b){
-  const keller=b.art==='keller';
+  const keller=b.art==='keller',vorab=b.art==='vorab'; // F16: vorab = Vorabbesichtigung
   b.fassung='begehung';
-  b.titel=FS_BG_TITEL+(keller?' Keller':' Wohnung');
+  b.titel=vorab?FS_VB_TITEL:FS_BG_TITEL+(keller?' Keller':' Wohnung');
   Object.assign(b.kopf,{anlass:'',beginn:'',ende:'',geraetLuft:'',geraetOberflaeche:'',geraetBauteil:'',pruefer:_fsBgMerkName()});
+  if(vorab)Object.assign(b.kopf,{versicherung:'',schadennr:'',zugang:'',ansprechpartner:''});
   b.anwesende=[];
-  b.sektionen=(keller?FS_BG_KELLER:FS_BG_WOHNUNG).map(s=>({titel:s.titel,items:s.items.map(_fsBgItem)}));
-  b.angaben=(keller?FS_BG_KELLER_ANGABEN:FS_BG_WOHNUNG_ANGABEN).map(_fsBgAngabe);
+  b.sektionen=(vorab?FS_VB_SEKTIONEN:keller?FS_BG_KELLER:FS_BG_WOHNUNG).map(s=>({titel:s.titel,items:s.items.map(_fsBgItem)}));
+  b.angaben=(vorab?FS_VB_ANGABEN:keller?FS_BG_KELLER_ANGABEN:FS_BG_WOHNUNG_ANGABEN).map(_fsBgAngabe);
   return b;
 }
 // Satz am Ende sauber schließen
@@ -3251,9 +3319,10 @@ async function _fsMobPdfBg(bericht,task){
     // Kopf
     doc.setFillColor(...farbe);doc.rect(0,0,W,32,'F');
     doc.setTextColor(255,255,255);doc.setFontSize(16);doc.setFont('helvetica','bold');
-    doc.text(FS_BG_TITEL,M,12);
+    const vorab=_fsIstVorab(bericht); // F16
+    doc.text(vorab?FS_VB_TITEL:FS_BG_TITEL,M,12);
     doc.setFontSize(9);doc.setFont('helvetica','normal');
-    doc.text('Feststellungen vor Ort – Feuchte '+(keller?'im Keller':'in der Wohnung'),M,18);
+    doc.text(vorab?'Feststellungen vor der Schadenaufnahme':'Feststellungen vor Ort – Feuchte '+(keller?'im Keller':'in der Wohnung'),M,18);
     const objekt=String(k.objektAdresse||(task&&task.adresse)||'').trim();
     if(objekt)doc.text(doc.splitTextToSize('Objekt: '+objekt,W-2*M)[0],M,24);
     doc.text('Datum: '+(hat(bericht.datum)?bericht.datum:'–')+(k.auftragNr?' · Auftrag: '+k.auftragNr:''),M,29.5);
@@ -3271,8 +3340,14 @@ async function _fsMobPdfBg(bericht,task){
       if(objekt)rows.push(['Objekt',objekt]);
       if(hat(k.nutzer))rows.push(['Nutzer',String(k.nutzer).trim()]);
       if(hat(k.anlass))rows.push(['Anlass',String(k.anlass).trim()]);
+      if(vorab){ // F16: Versicherung, Zugang, Ansprechpartner; kein Umfangstext (Franks Wahl)
+        if(hat(k.versicherung))rows.push(['Versicherung',String(k.versicherung).trim()]);
+        if(hat(k.schadennr))rows.push(['Schadennummer',String(k.schadennr).trim()]);
+        if(hat(k.zugang))rows.push(['Zugang',String(k.zugang).trim()]);
+        if(hat(k.ansprechpartner))rows.push(['Ansprechpartner',String(k.ansprechpartner).trim()]);
+      }
       tabelle2(rows);
-      absatz('Umfang: '+FS_BG_UMFANG,{groesse:8.5,farbe:[70,70,70],abstand:5});
+      if(!vorab)absatz('Umfang: '+FS_BG_UMFANG,{groesse:8.5,farbe:[70,70,70],abstand:5});
     }
 
     // 2 · Ortstermin
@@ -3394,10 +3469,10 @@ async function _fsMobPdfBg(bericht,task){
     {
       const an=(bericht.angaben||[]).filter(a=>a&&hat(a.text));
       if(an.length){
-        abschnitt('Angaben der Nutzer (nicht selbst festgestellt)');
+        abschnitt(vorab?'Vorgeschichte laut Auftraggeber (nicht selbst festgestellt)':'Angaben der Nutzer (nicht selbst festgestellt)');
         an.forEach(a=>{
           if(hat(a.q))absatz(String(a.q).trim(),{groesse:8,farbe:[100,100,100],abstand:0.5});
-          absatz('Laut '+(hat(a.von)?String(a.von).trim():'Nutzer')+': '+String(a.text).trim(),{einzug:3,abstand:3});
+          absatz('Laut '+(hat(a.von)?String(a.von).trim():(vorab?'Auftraggeber':'Nutzer'))+': '+String(a.text).trim(),{einzug:3,abstand:3});
         });
         y+=2;
       }
@@ -4953,6 +5028,9 @@ function _fsListeZeile(b,t){
     const adr=String((b.kopf&&(b.kopf.objektAdresse||b.kopf.adresse))||'').trim();
     const name=kartenname||adr||String(b.titel||'Wartungsprotokoll');
     return {kurz:steil?'WP-STEILDA':'WP-FLADA',lang:steil?'Wartungsprotokoll Steildach':'Wartungsprotokoll Flachdach',name,sub:(adr&&adr!==name)?adr:''};
+  }
+  if(b.vorlage==='feuchte'&&b.fassung==='begehung'&&b.art==='vorab'){ // F16
+    return {kurz:'VORAB',lang:'Vorabbesichtigung vor der Schadenaufnahme',name:kartenname||String(b.titel||'Vorabbesichtigung'),sub:''};
   }
   if(b.vorlage==='feuchte'&&b.fassung==='begehung'){
     const keller=b.art==='keller';
