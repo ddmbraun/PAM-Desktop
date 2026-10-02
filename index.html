@@ -10356,7 +10356,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-02 · #1056'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-02-b1056) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-02 · #1057'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-02-b1057) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -35114,6 +35114,62 @@ function _pamBeideListen(task,feld,glob){
   return a.concat(b);
 }
 
+// ── b1057: ZIP-Anhang einer Outlook-Mail auf Wunsch auspacken ─────────────────────
+// Bis b1056 packte PAM ein ZIP nur beim HINEINZIEHEN aus (b603: .eml ziehen, b1030: ZIP ziehen). Der
+// Outlook-Verlauf, „🔎 Mehr Mails" und „📎 Anhänge nachholen" legten das ZIP als EINE Datei ab
+// (Frank 02.10.2026: „20260917_HBS324_Dach.zip", 13 MB). Hier wird – wie bei b1030 – vorher GEFRAGT.
+// Anders als b1030 auch bei ZIPs nur mit Dokumenten (Pläne!): Frank erwartet dort das Auspacken.
+// OK = Inhalt einzeln ablegen (Fotos/Videos zu den Fotos, Rest zu Dokumente), das ZIP selbst wird NICHT
+// hochgeladen. Abbrechen = das ZIP bleibt eine Datei (wie bisher). Rückgabe: Liste der Anhänge, in der
+// ein ausgepacktes ZIP durch seine Einzeldateien ersetzt ist (Marke _ausZip = Name des ZIP).
+async function _b1057ZipEntpacken(atts,betreff){
+  const raus=[];
+  for(const att of (atts||[])){
+    const istZip=!!att&&/\.zip$/i.test(att.name||'');
+    if(!istZip||!att.b64||typeof window==='undefined'||!window.JSZip||typeof confirm!=='function'){raus.push(att);continue;}
+    if(att.b64.length*0.75>_PAM_ZIP_MAX){raus.push(att);continue;}   // über 500 MB nicht in den Speicher laden
+    let eintraege=[];
+    try{
+      const zip=await window.JSZip.loadAsync(_mpB64ZuBytes(att.b64));
+      zip.forEach(function(pfad,e){if(!e.dir&&!_pamZipMuell(pfad))eintraege.push({pfad:String(e.name||pfad),e:e});});
+    }catch(err){console.warn('[b1057] ZIP nicht lesbar:',att.name,err);raus.push(att);continue;}
+    if(!eintraege.length){raus.push(att);continue;}
+    let nF=0,nV=0,nD=0;
+    eintraege.forEach(function(x){
+      const k=x.pfad.split('/').pop();
+      const typ=(typeof _mpMimeAusName==='function'?_mpMimeAusName(k):'')||'';
+      if(typ.indexOf('image/')===0||(typeof IMAGE_EXTS!=='undefined'&&IMAGE_EXTS.test(k)))nF++;
+      else if(typeof _isVideo==='function'&&_isVideo(typ,k))nV++;
+      else nD++;
+    });
+    const teile=[];
+    if(nF)teile.push(nF+' Foto'+(nF===1?'':'s'));
+    if(nV)teile.push(nV+' Video'+(nV===1?'':'s'));
+    if(nD)teile.push(nD+' Dokument'+(nD===1?'':'e'));
+    const wohin=[];
+    if(nD)wohin.push('Dokumente zu Dokumente');
+    if(nF||nV)wohin.push('Fotos/Videos zu den Fotos');
+    if(!confirm('Die Mail'+(betreff?' „'+String(betreff).substring(0,70)+'"':'')+' enthält das ZIP „'+att.name+'" mit '+teile.join(', ')+'.\n\nAuspacken?\n\nOK = Inhalt einzeln ablegen ('+wohin.join(', ')+'), das ZIP selbst wird nicht hochgeladen\nAbbrechen = das ZIP als eine Datei ablegen')){
+      raus.push(att);continue;
+    }
+    const kurzZaehler={};
+    eintraege.forEach(function(x){const k=x.pfad.split('/').pop();kurzZaehler[k]=(kurzZaehler[k]||0)+1;});
+    const vorher=raus.length;
+    for(const x of eintraege){
+      try{
+        const buf=await x.e.async('uint8array');
+        let b64='';const CH=8192;
+        for(let i=0;i<buf.length;i+=CH)b64+=String.fromCharCode.apply(null,buf.subarray(i,i+CH));
+        const k=x.pfad.split('/').pop();
+        // gleicher Dateiname in zwei Unterordnern: Pfad mit Unterstrich statt Schrägstrich, sonst fiele die zweite Datei als Doppelte weg
+        const name=kurzZaehler[k]>1?x.pfad.replace(/\//g,'_'):k;
+        raus.push({name:name,mimeType:(typeof _mpMimeAusName==='function'?_mpMimeAusName(k):'')||'application/octet-stream',b64:btoa(b64),_ausZip:att.name});
+      }catch(err){console.warn('[b1057] ZIP-Eintrag:',x.pfad,err);}
+    }
+    if(raus.length===vorher)raus.push(att);   // kein einziger Eintrag ließ sich lesen: dann lieber das ganze ZIP als gar nichts
+  }
+  return raus;
+}
 async function _pamAnhaengeAusEmlText(task,emlText,mid,rueckfallFid){
   const raus={bilder:0,dateien:0,fehler:0};
   if(!task||!emlText||!gdriveToken)return raus;
@@ -35132,6 +35188,7 @@ async function _pamAnhaengeAusEmlText(task,emlText,mid,rueckfallFid){
     (k.embedded||[]).forEach(function(e){if(e&&e.parsed)sammle(e.parsed,tiefe+1);});
   })(info,0);
   if(!atts.length)return raus;
+  const attsFinal=await _b1057ZipEntpacken(atts,info&&info.subject);   // b1057: ZIP auf Wunsch auspacken (mit Rückfrage)
   const ziele=_pamAnhangZiele(task,rueckfallFid);
   // ⛔ Doppel-Schutz: Was schon einmal aus DIESER Mail geholt wurde, wird nicht erneut
   // hochgeladen. Ohne das legte der Nachhol-Knopf bei jedem Druck neue Kopien in Drive an.
@@ -35148,7 +35205,7 @@ async function _pamAnhaengeAusEmlText(task,emlText,mid,rueckfallFid){
   _pamBeideListen(task,'fotos',typeof taskFotos!=='undefined'?taskFotos:null)
     .forEach(function(f){if(f&&f.name)schonDa.add(String(f.name));});
   const today=new Date().toLocaleDateString('de-DE');
-  for(const att of atts){
+  for(const att of attsFinal){
     try{
       if(att._isCidInline)continue;   // Fix #314: Signatur-/Inline-Bilder nicht ablegen
       const isImg=/\.(jpg|jpeg|png|gif|webp|heic|heif|avif|bmp|tiff?)$/i.test(att.name)||(att.mimeType||'').startsWith('image/');
@@ -35164,7 +35221,7 @@ async function _pamAnhaengeAusEmlText(task,emlText,mid,rueckfallFid){
       const zuFotos=isImg||isVid;
       // Fix #369: Logos und Signaturbilder unter 50 KB überspringen. ⛔ Gilt NUR für Bilder —
       // ein kurzes Video oder eine kleine PDF darf nicht an derselben Schwelle hängenbleiben.
-      if(isImg&&att.b64&&att.b64.length*0.75<_MIN_EMAIL_IMG_BYTES)continue;
+      if(isImg&&!att._ausZip&&att.b64&&att.b64.length*0.75<_MIN_EMAIL_IMG_BYTES)continue;   // b1057: Bilder aus einem ausgepackten ZIP bleiben (kein Signatur-Logo)
       // b922: Dokumente sprechend benannt. Bilder UND Videos behalten ihren Namen — sie
       // landen in der Galerie, wo Vorschau und Zeitstempel zählen, nicht der Absender.
       const anhName=zuFotos?att.name:_olAnhangName(info,att.name);
@@ -36650,6 +36707,24 @@ async function _b865Warum(was,resp){
 // in der Karte ab: Bilder ueber `_pamAnhangZiele` in den Foto-Ordner, alles
 // andere in den Dokumente-Ordner. Jeder Eintrag traegt die Kennung SEINER Mail
 // (`messageId`) - daran haengt die 📎-Marke an der Verlaufszeile.
+// ── b1057: Anhänge NICHT zweimal holen ───────────────────────────────────────────
+// Zwei Wege legen die Anhänge einer Verlaufsmail ab: (1) _pamAnhaengeAusEmlText beim Ablegen der
+// .eml (Name MIT Vorsatz „JJJJ.MM.TT_[DOKID_…]_<Original>", benennt über _olAnhangName) und danach
+// (2) _msSaveThreadAttachments (Name = Original OHNE Vorsatz). Beide erkennen Doppeltes nur am
+// NAMEN – Weg 2 hielt die Datei von Weg 1 deshalb für neu und lud sie ein zweites Mal hoch
+// (Frank 02.10.2026: ZIP 2×, Angebots-PDF 3× in „Dokumente"). Gemessen in Drive: gleiche Bytes.
+// Weg 1 setzt am emailOriginals-Eintrag der Mail `anhGeholt`. Ist das gesetzt, überspringt Weg 2 die Mail.
+// ⛔ Nachteil bewusst in Kauf genommen: scheiterte bei Weg 1 ein einzelner Anhang, holt Weg 2 ihn nicht
+// mehr nach – dafür gibt es „📎 Anhänge aus Mails nachholen" (b983 Teil B).
+function _b1057AnhaengeSchonAusEml(task,mid){
+  if(!task||!mid)return false;
+  const k=String(mid).replace(/^<|>$/g,'');
+  if(!k)return false;
+  const liste=(typeof _pamBeideListen==='function')
+    ?_pamBeideListen(task,'emailOriginals',typeof taskEmailOriginals!=='undefined'?taskEmailOriginals:null)
+    :(task.emailOriginals||[]);
+  return liste.some(function(e){return !!(e&&e.anhGeholt&&String(e.messageId||'').replace(/^<|>$/g,'')===k);});
+}
 async function _msSaveThreadAttachments(task,threadMsgs){
   const erg={geholt:0,uebersprungen:0,fehler:0,ohneInhalt:0,keinDrive:false};
   if(typeof gdriveToken==='undefined'||!gdriveToken){erg.keinDrive=true;return erg;}
@@ -36679,6 +36754,7 @@ async function _msSaveThreadAttachments(task,threadMsgs){
   (task.fotos||[]).forEach(merken);
   for(const m of mitAnhang){
     const mid=m.internetMessageId||m.messageId||'';
+    if(_b1057AnhaengeSchonAusEml(task,mid)){erg.uebersprungen++;continue;}   // b1057: Weg 1 hat die Anhänge dieser Mail schon geholt
     let liste=[];
     try{
       /* b865: ⛔ `contentId` MUSS hier raus. Microsoft hat es am 01.09.2026 im Klartext
