@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F25';
+const PAM_FORMULARE_VERSION='F27';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
@@ -110,7 +110,7 @@ function _fsIstKeller(b){return !!b&&b.art==='keller';}
 function _fsBewertungenFuer(b){return _fsIstKeller(b)?FS_KELLER_BEWERTUNGEN:FS_BEWERTUNGEN;}
 function _fsRaumVorschlaege(b){return _fsIstKeller(b)?FS_KELLER_RAEUME:FS_RAUM_VORSCHLAEGE;}
 function _fsTitel(b){
-  if(b&&b.fassung==='begehung'&&b.art==='vorab')return b.schlank?'Besichtigung':'Vorabbesichtigung'; // F16, F23
+  if(b&&b.fassung==='begehung'&&b.art==='vorab')return b.schlank?_fsB2Name(b):'Vorabbesichtigung'; // F16, F23, F26: Besichtigung 2 trägt den Namen, den Frank vergeben hat
   if(b&&b.fassung==='begehung')return 'Begehungsprotokoll'+(b.art==='keller'?' Keller':' Wohnung'); // F2a (bewusst ohne Hilfsnamen: alte Prüfungen schneiden diese Funktion einzeln aus)
   return _fsIstKeller(b)?FS_KELLER_TITEL:'Feuchte- und Schimmelprotokoll';
 }
@@ -181,7 +181,7 @@ function _fsNeuerBericht(t,art){
     b.art='keller';b.titel=FS_KELLER_TITEL;
     b.sektionen=FS_KELLER_SEKTIONEN.map(s=>({titel:s.titel,items:s.items.map(text=>({text,status:'offen',notiz:''}))}));
   }
-  if(art==='vorab'||art==='besichtigung2'){b.art='vorab';b.titel='Vorabbesichtigung';if(art==='besichtigung2'){b.schlank=true;b.titel='Besichtigung';}} // F16: Inhalte setzt _fsBgUmstellen · F23: „Besichtigung 2“ = dieselbe Art, aber schlank (Kennzeichen schlank)
+  if(art==='vorab'||art==='besichtigung2'){b.art='vorab';b.titel='Vorabbesichtigung';if(art==='besichtigung2'){b.schlank=true;b.titel='Besichtigung';b.protName='';}} // F16: Inhalte setzt _fsBgUmstellen · F23: „Besichtigung 2“ = dieselbe Art, aber schlank (Kennzeichen schlank)
   return b;
 }
 // Altbestand/Fremdgerät: fehlende Teile ergänzen, nichts überschreiben
@@ -204,7 +204,8 @@ function _fsVervollstaendigen(b){
     if(b.art==='vorab'){if(!Array.isArray(b.vbStellen))b.vbStellen=[];b.vbStellen.forEach(s=>{if(!s)return;if(!Array.isArray(s.merkmale))s.merkmale=[];if(!Array.isArray(s.fotoRefs))s.fotoRefs=[];if(typeof s.ort!=='string')s.ort='';if(typeof s.text!=='string')s.text='';['raum','messwert','geraet'].forEach(k=>{if(typeof s[k]!=='string')s[k]='';});}); // F21, F22
       if(!Array.isArray(b.vbUmgebung))b.vbUmgebung=[];b.vbUmgebung.forEach(r=>{if(!r)return;if(typeof r.text!=='string')r.text='';if(typeof r.status!=='string')r.status='';if(typeof r.grund!=='string')r.grund='';});
       if(typeof b.meldungStatus!=='string')b.meldungStatus='';if(typeof b.meldungAbw!=='string')b.meldungAbw='';
-      if(typeof b.luftbildEbene!=='string')b.luftbildEbene='';b.vbStellen.forEach(s=>{if(s&&s.pin!==undefined&&s.pin!==null&&!(isFinite(+s.pin.lat)&&isFinite(+s.pin.lon)))s.pin=null;});} // F22: Eingrenzen · F24: Luftbild-Pin je Stelle
+      if(typeof b.luftbildEbene!=='string')b.luftbildEbene='';if(b.schlank&&typeof b.protName!=='string')b.protName='';
+      if(b.luftbildAnsicht!==undefined&&b.luftbildAnsicht!==null&&!_fsLbAnsichtOk(b.luftbildAnsicht))b.luftbildAnsicht=null; /* F27: zuletzt gesehener Kartenausschnitt */ b.vbStellen.forEach(s=>{if(s&&s.pin!==undefined&&s.pin!==null&&!(isFinite(+s.pin.lat)&&isFinite(+s.pin.lon)))s.pin=null;});} // F22: Eingrenzen · F24: Luftbild-Pin je Stelle
     if(b.art==='vorab')['versicherung','schadennr','zugang','ansprechpartner','besuchBei','lage'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';}); // F16
   }
   return b;
@@ -223,7 +224,7 @@ function _fsPdfName(bericht,zeit){
   }
   if(bericht&&bericht.fassung==='begehung'&&bericht.art==='vorab'){ // F16, F17: mit der Rolle, bei wem es war (Eigentuemer, Mieter, …)
     const rolle=String((bericht.kopf&&bericht.kopf.besuchBei)||'').split(':')[0].replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/Ä/g,'Ae').replace(/Ö/g,'Oe').replace(/Ü/g,'Ue').replace(/ß/g,'ss').replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,16);
-    return (bericht.schlank?'Besichtigung':'Vorabbesichtigung')+(rolle?'_'+rolle:'')+(datum?'_'+datum:'')+uhr+'.pdf'; // F23
+    return (bericht.schlank?(_fsDateiSlug(bericht.protName,30)||'Besichtigung'):'Vorabbesichtigung')+(rolle?'_'+rolle:'')+(datum?'_'+datum:'')+uhr+'.pdf'; // F23, F26
   }
   if(bericht&&bericht.fassung==='begehung')return 'Begehung'+(bericht.art==='keller'?'_Keller':'_Wohnung')+(datum?'_'+datum:'')+uhr+'.pdf'; // F2a: kurzer Name (Pfadlänge)
   return 'Feuchteprotokoll'+(bericht&&bericht.art==='keller'?'_Keller':'')+(datum?'_'+datum:'')+uhr+'.pdf';
@@ -1263,7 +1264,13 @@ function _openFeuchteprotokollMobil(existingIdx,art){
       const zb=document.createElement('button');zb.type='button';zb.textContent=_vbZeitAuf?'▲ fertig':'✏ ändern';zb.setAttribute('data-fs-zeitaendern','1');
       zb.style.cssText=S_KNOPF+'min-height:40px;border:1px solid var(--border);background:transparent;color:var(--text);';zb.onclick=()=>{_vbZeitAuf=!_vbZeitAuf;_neuBauen();};
       zz.append(zt,zb);
-      w.append(...[bei].concat(bericht.schlank?[]:[_feld('Lage','lage','z. B. Wohnung darüber, Keller')],[zeitKn,zz])); // F23: Besichtigung 2 ohne Lage
+      const nameZeile=(()=>{ // F26: Name des Protokolls (Besichtigung 2) – erscheint in der Liste an der Karte, im PDF und im Dateinamen
+      const row=document.createElement('div');row.setAttribute('data-fs-protname','1');row.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 14px;';
+      const l=document.createElement('span');l.style.cssText='font-size:13px;color:var(--text2);width:112px;flex-shrink:0;';l.textContent='Name';
+      row.append(l,_inp(bericht.protName,'Besichtigung – z. B. Besichtigung Wohnung 2. OG',v=>{bericht.protName=v;hdrT.textContent='💧 '+_fsTitel(bericht);},false));
+      return row;
+    })();
+    w.append(...(bericht.schlank?[nameZeile]:[]).concat([bei],bericht.schlank?[]:[_feld('Lage','lage','z. B. Wohnung darüber, Keller')],[zeitKn,zz])); // F23: Besichtigung 2 ohne Lage · F26: mit Name
       if(_vbZeitAuf){
       const datRow=document.createElement('div');datRow.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 14px;border-top:1px solid var(--border);';
       const dl=document.createElement('span');dl.style.cssText='font-size:13px;color:var(--text2);width:112px;flex-shrink:0;';dl.textContent='Datum';
@@ -2586,6 +2593,27 @@ const FS_VB_TITEL='Vorabbesichtigung';
    Fotos (der Stelle zugeordnet) · Raumskizze. Keine Vorgeschichte, keine Karte/Versicherung/Einzelpunkte/Wetter-Abschnitte, keine Raum-/Merkmal-Knöpfe, kein Messwert-Feld,
    Umgebung nur ✓ / ⚠. Daten und PDF teilen sich mit der Vorabbesichtigung (vbStellen, vbUmgebung, meldungStatus). Die Vorabbesichtigung selbst bleibt unverändert. */
 const FS_B2_TITEL='Besichtigung';
+/* F26: Besichtigung 2 hat einen NAMEN (b.protName, Frank 03.10.2026: „kann ich den Namen des Protokolls ändern – auch PDF und Namen“): Liste an der Karte, PDF-Titel, Dateiname.
+   Leer = „Besichtigung“ (in der Liste dann wie bisher der Kartenname). Der Dateiname wird auf Buchstaben/Ziffern/Unterstrich gekürzt (Pfadlänge, ⛔ 218-Wächter). */
+function _fsB2Name(b){const n=String((b&&b.protName)||'').replace(/\s+/g,' ').trim();return n||FS_B2_TITEL;}
+function _fsDateiSlug(text,max){
+  return String(text||'').replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/Ä/g,'Ae').replace(/Ö/g,'Oe').replace(/Ü/g,'Ue').replace(/ß/g,'ss')
+    .replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,max||30).replace(/_+$/g,'');
+}
+// Umbenennen aus der Liste an der Karte („⋯ → ✏ Umbenennen“ am PC, „✏“ am Handy): nur Besichtigung 2
+function _fsProtokollUmbenennen(bi){
+  try{
+    const t=currentTask();const b=t&&Array.isArray(t.pruefberichte)?t.pruefberichte[bi]:null;
+    if(!b||!b.schlank){toast('Nur die Besichtigung 2 lässt sich umbenennen','info',3500);return;}
+    const neu=prompt('Name des Protokolls (leer = „Besichtigung“)',String(b.protName||'').trim());
+    if(neu===null)return;
+    b.protName=String(neu).replace(/\s+/g,' ').trim();
+    scheduleSave();
+    if(typeof renderPruefberichteDesktop==='function')renderPruefberichteDesktop();
+    else if(typeof renderDetail==='function')renderDetail(t);
+    toast('✓ Name: '+_fsB2Name(b),'success',3000);
+  }catch(e){console.warn('[Besichtigung] Umbenennen:',e);}
+}
 const FS_B2_BLOECKE=[{k:'vorort',t:'Vor Ort',c:'Vor Ort'},{k:'gemeldet',t:'Gemeldet / vorgefunden',c:'Gemeldet'},{k:'stellen',t:'Feststellungen',c:'Feststellungen'},{k:'fotos',t:'Fotos',c:'Fotos'},{k:'raeume',t:'Raumskizze',c:'Skizze'}];
 const FS_B2_STANDARD_ZU=['raeume']; // alles andere offen (wie im Entwurf), nur die Raumskizze startet zugeklappt
 const FS_VB_BLOECKE=[{k:'vorort',t:'Vor Ort',c:'Vor Ort'},{k:'gemeldet',t:'Gemeldet und vorgefunden',c:'Gemeldet'},{k:'stellen',t:'Feststellungen – Stelle für Stelle',c:'Stellen'},{k:'umgebung',t:'Umgebung abgehen (Eingrenzen)',c:'Umgebung'},{k:'ergebnis',t:'Ergebnis der Eingrenzung',c:'Ergebnis'},{k:'fotos',t:'Fotos',c:'Fotos'},{k:'vorgeschichte',t:'Vorgeschichte laut Auftraggeber',c:'Vorgeschichte'},{k:'karte',t:'Kartendaten (aus der Karte)',c:'Karte'},{k:'versich',t:'Versicherung, Zugang, Ansprechpartner',c:'Versicherung'},{k:'fest',t:'Einzelpunkte zum Antippen',c:'Einzelpunkte'},{k:'angaben',t:'Vorgeschichte – Fragen (frühere Fassung)',c:'Fragen'},{k:'termin',t:'Termin und Wetter',c:'Wetter'},{k:'raeume',t:'Raumskizze',c:'Skizze'}]; // F20
@@ -2800,6 +2828,16 @@ async function _fsLuftbildBild(b,ebeneK){
     return {dataUrl:c.toDataURL('image/jpeg',0.86),w:a.W,h:a.H,quelle:eb.quelle,ebene:k};
   }catch(e){console.warn('[Luftbild] PDF-Bild:',e);return null;}
 }
+// F27: zuletzt gesehener Ausschnitt des Luftbilds (gilt für das ganze Protokoll) und wo das Fenster beim Öffnen anfängt
+function _fsLbAnsichtOk(a){return !!a&&isFinite(+a.lat)&&isFinite(+a.lon)&&isFinite(+a.zoom)&&+a.zoom>=3&&+a.zoom<=22&&Math.abs(+a.lat)<=90&&Math.abs(+a.lon)<=180;}
+// Reihenfolge: eigener Pin → zuletzt gesehener Ausschnitt → Pin einer anderen Stelle → Standort der Karte (sonst null: dann wird die Adresse gesucht)
+function _fsLbStart(eigene,ansicht,andere,karte){
+  if(eigene)return {lat:+eigene.lat,lon:+eigene.lon,zoom:19,quelle:'pin'};
+  if(_fsLbAnsichtOk(ansicht))return {lat:+ansicht.lat,lon:+ansicht.lon,zoom:+ansicht.zoom,quelle:'ansicht'};
+  if(andere)return {lat:+andere.lat,lon:+andere.lon,zoom:19,quelle:'andere'};
+  if(karte)return {lat:+karte.lat,lon:+karte.lon,zoom:19,quelle:'karte'};
+  return null;
+}
 // Adresse → Koordinaten (Photon; in beiden Apps erlaubt); null, wenn nichts gefunden
 async function _fsLbGeocode(adresse){
   try{
@@ -2827,19 +2865,29 @@ function _fsLuftbildFenster(bericht,t,s,beiAenderung){
   const akt=document.createElement('div');akt.style.cssText='display:flex;flex-wrap:wrap;gap:6px;width:100%;';
   const aknopf=(txt,attr)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute(attr,'1');b.style.cssText='padding:6px 14px;min-height:38px;border-radius:10px;border:1.5px dashed rgba(255,255,255,.85);background:transparent;color:#fff;font-size:14px;cursor:pointer;font-family:inherit;';return b;};
   const gps=aknopf('📍 Mein Standort','data-fs-lbgps'),suche=aknopf('🔎 Adresse suchen','data-fs-lbadresse');
-  akt.append(gps,suche);
+  const pinGps=aknopf('📌 Pin an meinem Standort','data-fs-lbpingps');pinGps.style.display='none';pinGps.style.background='rgba(217,72,15,.9)';pinGps.style.borderStyle='solid'; // F27: erscheint, sobald der Standort gefunden ist
+  akt.append(gps,suche,pinGps);
   kopf.append(ti,weg,fertig,eb,akt,info);
-  const mapEl=document.createElement('div');mapEl.style.cssText='flex:1;min-height:0;';
-  ov.append(kopf,mapEl);document.body.appendChild(ov);
+  // F27: Karte in einem Rahmen mit Fadenkreuz (Bildmitte), Hinweis „Noch kein Pin“ und dem großen Knopf „📌 Pin hier setzen“
+  const mapWrap=document.createElement('div');mapWrap.style.cssText='position:relative;flex:1;min-height:0;';
+  const mapEl=document.createElement('div');mapEl.style.cssText='position:absolute;inset:0;';
+  const kreuz=document.createElement('div');kreuz.setAttribute('data-fs-lbkreuz','1');kreuz.style.cssText='position:absolute;left:50%;top:50%;width:46px;height:46px;margin:-23px 0 0 -23px;pointer-events:none;z-index:1100;';
+  kreuz.innerHTML='<svg width="46" height="46" viewBox="0 0 46 46"><circle cx="23" cy="23" r="9" fill="none" stroke="#fff" stroke-width="4"/><circle cx="23" cy="23" r="9" fill="none" stroke="#d9480f" stroke-width="2"/><path d="M23 0v13M23 33v13M0 23h13M33 23h13" stroke="#fff" stroke-width="4"/><path d="M23 0v13M23 33v13M0 23h13M33 23h13" stroke="#d9480f" stroke-width="2"/></svg>';
+  const hinweis=document.createElement('div');hinweis.setAttribute('data-fs-lbhinweis','1');hinweis.style.cssText='position:absolute;left:8px;right:8px;top:8px;z-index:1100;background:#d9480f;color:#fff;border-radius:10px;padding:8px 12px;font-size:14px;font-weight:700;pointer-events:none;box-shadow:0 2px 8px rgba(0,0,0,.4);';
+  hinweis.textContent='Noch kein Pin – tippe auf die Karte oder schiebe das Kreuz auf die Stelle und tippe auf 📌.';
+  const pinKnopf=document.createElement('button');pinKnopf.type='button';pinKnopf.setAttribute('data-fs-lbpinhier','1');
+  pinKnopf.style.cssText='position:absolute;left:50%;bottom:30px;transform:translateX(-50%);z-index:1100;padding:12px 22px;min-height:50px;border-radius:26px;border:3px solid #fff;background:#d9480f;color:#fff;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 10px rgba(0,0,0,.5);white-space:nowrap;';
+  mapWrap.append(mapEl,kreuz,hinweis,pinKnopf);
+  ov.append(kopf,mapWrap);document.body.appendChild(ov);
   const bez=()=>_fsVbBezeichnung(bericht,s,(bericht.vbStellen||[]).indexOf(s)+1);
-  const titel=()=>{ti.textContent='Von außen markieren: '+bez()+(_fsVbPinOk(s)?' · Pin gesetzt':' · noch kein Pin');weg.style.display=_fsVbPinOk(s)?'':'none';};
+  const titel=()=>{const pin=_fsVbPinOk(s);ti.textContent='Von außen markieren: '+bez()+(pin?' · Pin gesetzt':' · noch kein Pin');weg.style.display=pin?'':'none';hinweis.style.display=pin?'none':'';pinKnopf.textContent=pin?'📌 Pin hierher verschieben':'📌 Pin hier setzen';};
   const adr=String((bericht.kopf&&bericht.kopf.objektAdresse)||(t&&t.adresse)||'').trim(); // F25: die Adresse im Protokoll zuerst, dann die der Karte
   const eigene=_fsVbPinOk(s)?{lat:+s.pin.lat,lon:+s.pin.lon}:null;
   const andere=_fsLbPunkte(bericht).filter(q=>q.s!==s)[0]||null;
   const karte=(t&&isFinite(+t.lat)&&isFinite(+t.lon)&&(+t.lat||+t.lon))?{lat:+t.lat,lon:+t.lon}:null;
-  const start=eigene||(andere&&{lat:andere.lat,lon:andere.lon})||karte;
+  const start=_fsLbStart(eigene,bericht.luftbildAnsicht,andere,karte); // F27: eigener Pin → zuletzt gesehener Ausschnitt → anderer Pin → Standort der Karte
   const map=L.map(mapEl,{zoomControl:true,zoomSnap:0.25,zoomDelta:0.5,wheelPxPerZoomLevel:120});
-  map.setView(start?[start.lat,start.lon]:[51.1,10.4],start?19:6);
+  map.setView(start?[start.lat,start.lon]:[51.1,10.4],start?start.zoom:6);
   let lay=null,ebK='';
   let gespeichert='';try{gespeichert=localStorage.getItem('pam_fs_luftbild')||'';}catch(e){}
   const wahlEbene=k=>{
@@ -2867,20 +2915,24 @@ function _fsLuftbildFenster(bericht,t,s,beiAenderung){
     });
     titel();
   };
-  map.on('click',e=>{s.pin={lat:Math.round(e.latlng.lat*1e6)/1e6,lon:Math.round(e.latlng.lng*1e6)/1e6};scheduleSave();zeichneMarker();});
+  const setzePin=(la,lo)=>{s.pin={lat:Math.round(la*1e6)/1e6,lon:Math.round(lo*1e6)/1e6};scheduleSave();zeichneMarker();};
+  map.on('click',e=>setzePin(e.latlng.lat,e.latlng.lng));
+  pinKnopf.onclick=()=>{const c=map.getCenter();setzePin(c.lat,c.lng);}; // F27: Pin in die Bildmitte (Fadenkreuz)
   weg.onclick=()=>{s.pin=null;scheduleSave();zeichneMarker();};
   // F25: „Mein Standort“ springt zum GPS-Standort des Geräts (blauer Punkt; am PC ungenau), „Adresse suchen“ zur Adresse im Protokoll
-  let gpsMarker=null;
+  let gpsMarker=null,gpsPos=null;
   gps.onclick=()=>{
     if(!navigator.geolocation){toast('Dieses Gerät kann den Standort nicht bestimmen','error',4500);return;}
     gps.disabled=true;gps.textContent='📍 suche …';
     navigator.geolocation.getCurrentPosition(pos=>{
       gps.disabled=false;gps.textContent='📍 Mein Standort';
       const la=pos.coords.latitude,lo=pos.coords.longitude;
-      try{map.setView([la,lo],19);if(gpsMarker)map.removeLayer(gpsMarker);gpsMarker=L.circleMarker([la,lo],{radius:8,color:'#ffffff',weight:3,fillColor:'#1a73e8',fillOpacity:1}).addTo(map);}catch(e){}
+      gpsPos={la,lo};pinGps.style.display='';
+      try{map.setView([la,lo],19);if(gpsMarker)map.removeLayer(gpsMarker);gpsMarker=L.circleMarker([la,lo],{radius:8,color:'#ffffff',weight:3,fillColor:'#1a73e8',fillOpacity:1,interactive:false}).addTo(map);}catch(e){}
       if(pos.coords.accuracy>50)toast('Standort nur auf etwa '+Math.round(pos.coords.accuracy)+' m genau','info',4500);
     },()=>{gps.disabled=false;gps.textContent='📍 Mein Standort';toast('Standort nicht verfügbar – bitte den Zugriff auf den Standort erlauben','error',5000);},{enableHighAccuracy:true,timeout:15000,maximumAge:30000});
   };
+  pinGps.onclick=()=>{if(gpsPos)setzePin(gpsPos.la,gpsPos.lo);}; // F27: Pin genau an den Standort des Geräts
   suche.onclick=async()=>{
     if(!adr){toast('Im Protokoll und an der Karte steht keine Adresse','info',4000);return;}
     suche.disabled=true;suche.textContent='🔎 suche …';
@@ -2889,10 +2941,14 @@ function _fsLuftbildFenster(bericht,t,s,beiAenderung){
     if(r&&document.getElementById('_fsLbOverlay')===ov)map.setView([r.lat,r.lon],19);
     else if(!r)toast('Adresse „'+adr+'“ nicht gefunden','info',5000);
   };
-  const zu=()=>{try{map.remove();}catch(e){}ov.remove();document.removeEventListener('keydown',taste,true);if(typeof beiAenderung==='function')beiAenderung();};
-  const taste=e=>{if(e.key==='Escape'){e.stopPropagation();zu();}};
+  const zu=()=>{
+    try{const c=map.getCenter();bericht.luftbildAnsicht={lat:Math.round(c.lat*1e6)/1e6,lon:Math.round(c.lng*1e6)/1e6,zoom:map.getZoom()};scheduleSave();}catch(e){} // F27: Ausschnitt merken (auch ohne Pin)
+    try{map.remove();}catch(e){}ov.remove();document.removeEventListener('keydown',taste,true);if(typeof beiAenderung==='function')beiAenderung();
+  };
+  const schliessen=()=>{if(!_fsVbPinOk(s)&&!confirm('Es ist noch kein Pin gesetzt – wirklich schließen?\n\nOhne Pin wird nur der Kartenausschnitt gemerkt.'))return;zu();}; // F27
+  const taste=e=>{if(e.key==='Escape'){e.stopPropagation();schliessen();}};
   document.addEventListener('keydown',taste,true);
-  fertig.onclick=zu;
+  fertig.onclick=schliessen;
   zeichneMarker();
   setTimeout(()=>{try{map.invalidateSize();}catch(e){}},60);
   if(!start){ // kein Standort an der Karte: Adresse suchen
@@ -2974,7 +3030,7 @@ function _fsBgUmstellen(b){
   Object.assign(b.kopf,{anlass:'',beginn:'',ende:'',geraetLuft:'',geraetOberflaeche:'',geraetBauteil:'',pruefer:_fsBgMerkName()});
   if(vorab)Object.assign(b.kopf,{versicherung:'',schadennr:'',zugang:'',ansprechpartner:'',besuchBei:'',lage:'',nutzer:''}); // F17: Nutzer wählt Frank je Besuch („Besichtigung bei“), nicht alle Mieter der Karte
   b.anwesende=[];
-  if(vorab){b.schadenbild='';b.vorgeschichte='';b.vbStellen=[];b.vbUmgebung=[];b.meldungStatus='';b.meldungAbw='';b.luftbildEbene='';} // F19, F20, F21, F22, F24
+  if(vorab){b.schadenbild='';b.vorgeschichte='';b.vbStellen=[];b.vbUmgebung=[];b.meldungStatus='';b.meldungAbw='';b.luftbildEbene='';b.luftbildAnsicht=null;} // F19, F20, F21, F22, F24, F27
   b.sektionen=(vorab?FS_VB_SEKTIONEN:keller?FS_BG_KELLER:FS_BG_WOHNUNG).map(s=>({titel:s.titel,items:s.items.map(_fsBgItem)}));
   b.angaben=(vorab?[]:keller?FS_BG_KELLER_ANGABEN:FS_BG_WOHNUNG_ANGABEN).map(_fsBgAngabe); // F20: Vorabbesichtigung hat ein Textfeld „Vorgeschichte“ statt Fragen
   return b;
@@ -3935,7 +3991,7 @@ async function _fsMobPdfBg(bericht,task){
     doc.setFillColor(...farbe);doc.rect(0,0,W,32,'F');
     doc.setTextColor(255,255,255);doc.setFontSize(16);doc.setFont('helvetica','bold');
     const vorab=_fsIstVorab(bericht); // F16
-    doc.text(vorab?(bericht.schlank?FS_B2_TITEL:FS_VB_TITEL):FS_BG_TITEL,M,12); // F23
+    doc.text(vorab?(bericht.schlank?String(doc.splitTextToSize(_fsB2Name(bericht),W-2*M)[0]||FS_B2_TITEL):FS_VB_TITEL):FS_BG_TITEL,M,12); // F23, F26
     doc.setFontSize(9);doc.setFont('helvetica','normal');
     doc.text(vorab?(bericht.schlank?'Feststellungen vor Ort':'Feststellungen vor der Schadenaufnahme'):'Feststellungen vor Ort – Feuchte '+(keller?'im Keller':'in der Wohnung'),M,18);
     const objekt=String(k.objektAdresse||(task&&task.adresse)||'').trim();
@@ -5683,7 +5739,7 @@ function _fsListeZeile(b,t){
   }
   if(b.vorlage==='feuchte'&&b.fassung==='begehung'&&b.art==='vorab'){ // F16
     const bei=String((b.kopf&&b.kopf.besuchBei)||'').trim(),lg=String((b.kopf&&b.kopf.lage)||'').trim(); // F17: bei wem – so sind zwei Besuche an einer Karte zu unterscheiden
-    return {kurz:b.schlank?'BESICHT':'VORAB',lang:b.schlank?'Besichtigung':'Vorabbesichtigung vor der Schadenaufnahme',name:kartenname||String(b.titel||(b.schlank?'Besichtigung':'Vorabbesichtigung')),sub:[bei,lg].filter(Boolean).join(' · ')};
+    return {kurz:b.schlank?'BESICHT':'VORAB',lang:b.schlank?'Besichtigung':'Vorabbesichtigung vor der Schadenaufnahme',name:(b.schlank&&String(b.protName||'').trim())||kartenname||String(b.titel||(b.schlank?'Besichtigung':'Vorabbesichtigung')),sub:[bei,lg].filter(Boolean).join(' · ')};
   }
   if(b.vorlage==='feuchte'&&b.fassung==='begehung'){
     const keller=b.art==='keller';
