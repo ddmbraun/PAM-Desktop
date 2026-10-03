@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F23';
+const PAM_FORMULARE_VERSION='F24';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
@@ -203,7 +203,8 @@ function _fsVervollstaendigen(b){
     if(b.art==='vorab'&&typeof b.vorgeschichte!=='string')b.vorgeschichte=''; // F20
     if(b.art==='vorab'){if(!Array.isArray(b.vbStellen))b.vbStellen=[];b.vbStellen.forEach(s=>{if(!s)return;if(!Array.isArray(s.merkmale))s.merkmale=[];if(!Array.isArray(s.fotoRefs))s.fotoRefs=[];if(typeof s.ort!=='string')s.ort='';if(typeof s.text!=='string')s.text='';['raum','messwert','geraet'].forEach(k=>{if(typeof s[k]!=='string')s[k]='';});}); // F21, F22
       if(!Array.isArray(b.vbUmgebung))b.vbUmgebung=[];b.vbUmgebung.forEach(r=>{if(!r)return;if(typeof r.text!=='string')r.text='';if(typeof r.status!=='string')r.status='';if(typeof r.grund!=='string')r.grund='';});
-      if(typeof b.meldungStatus!=='string')b.meldungStatus='';if(typeof b.meldungAbw!=='string')b.meldungAbw='';} // F22: Eingrenzen
+      if(typeof b.meldungStatus!=='string')b.meldungStatus='';if(typeof b.meldungAbw!=='string')b.meldungAbw='';
+      if(typeof b.luftbildEbene!=='string')b.luftbildEbene='';b.vbStellen.forEach(s=>{if(s&&s.pin!==undefined&&s.pin!==null&&!(isFinite(+s.pin.lat)&&isFinite(+s.pin.lon)))s.pin=null;});} // F22: Eingrenzen · F24: Luftbild-Pin je Stelle
     if(b.art==='vorab')['versicherung','schadennr','zugang','ansprechpartner','besuchBei','lage'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';}); // F16
   }
   return b;
@@ -1269,6 +1270,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
       datRow.append(dl,_inp(bericht.datum,'TT.MM.JJJJ',v=>{bericht.datum=v;},false));
       w.append(datRow,_feld('Beginn','beginn','hh:mm'),_feld('Ende','ende','hh:mm'));
       }
+    if(bericht.schlank)w.appendChild(_teilAnwesende()); // F24: Besichtigung 2: wer ist noch vor Ort (Name und Rolle; Kontakte der Karte zum Antippen); steht im PDF unter „Anwesend“
     return w;
   }
   // F22: „Gemeldet und vorgefunden“ – der Satz aus der Meldung (Anlass) und ob es so vorgefunden wurde
@@ -1381,7 +1383,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
         const c=_chip(x[1],r.status===x[0],()=>{
           r.status=r.status===x[0]?'':x[0];
           let tm='';
-          if(r.status==='auff'&&!r.stelle){r.stelle=true;const sn=_fsVbStelleNeu();sn.ort=String(r.text||'').trim();bericht.vbStellen.push(sn);tm='Neue Stelle '+bericht.vbStellen.length+' angelegt: '+sn.ort;}
+          if(r.status==='auff'&&!r.stelle){r.stelle=true;const sn=_fsVbStelleNeu();sn.ort=String(r.text||'').trim();if(bericht.schlank)sn.raum='Umgebung';bericht.vbStellen.push(sn);tm='Neue Stelle angelegt: '+(bericht.schlank?'Umgebung – ':'')+sn.ort;} // F24: bei Besichtigung 2 unter „Umgebung“ einsortiert
           scheduleSave();_neuBauen();if(tm)toast('⚠ '+tm,'info',4500);
         });c.setAttribute('data-fs-umgstatus',x[0]);wahl.appendChild(c);});
       k.append(kz,wahl);
@@ -1396,10 +1398,54 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     eg.append(ei,eb);w.appendChild(eg);
     return w;
   }
+  // F24: Besichtigung 2 – Stellen nach RAUM gruppiert: Raum als Überschrift (Knöpfe, änderbar), darunter „Stelle 1, Stelle 2 …“ je Raum;
+  // je Stelle: wo · was siehst du · von außen markieren (Luftbild) · Fotos
+  function _teilVbStellenB2(){
+    if(!Array.isArray(bericht.vbStellen))bericht.vbStellen=[];
+    const w=document.createElement('div');w.setAttribute('data-fs-vbstellen','1');w.style.cssText='padding:8px 14px 10px;';
+    w.append(_bgInfo('Wähle den Raum und lege darin die Stellen an: wo · was siehst du · von außen markieren · Foto. Nur Feststellungen, keine Ursache.'));
+    const neueStelle=raum=>{const sn=_fsVbStelleNeu();sn.raum=raum;bericht.vbStellen.push(sn);scheduleSave();_neuBauen();const e=body.querySelector('[data-fs-vbort="'+(bericht.vbStellen.length-1)+'"]');if(e){try{e.scrollIntoView({block:'center'});}catch(_e){}e.focus();}};
+    _fsVbRaumGruppen(bericht).forEach(gr=>{
+      const box=document.createElement('div');box.setAttribute('data-fs-raumgruppe',gr.raum);box.style.cssText='margin:10px 0 4px;';
+      const rk=document.createElement('div');rk.style.cssText='display:flex;align-items:center;gap:8px;padding:2px 0 4px;border-bottom:2px solid '+FS_FARBE+';';
+      const rn=document.createElement('div');rn.style.cssText='flex:1;min-width:0;font-size:16px;font-weight:700;color:var(--text);';rn.textContent=gr.raum||'Ohne Raum';
+      const re=document.createElement('button');re.type='button';re.textContent='✎ Raum umbenennen';re.setAttribute('data-fs-raumumbenennen',gr.raum);
+      re.style.cssText=S_KNOPF+'min-height:36px;padding:4px 10px;font-size:13px;border:1px solid var(--border);background:transparent;color:var(--text2);';
+      re.onclick=()=>{const n=prompt('Neuer Name für „'+(gr.raum||'Ohne Raum')+'“',gr.raum);if(n===null)return;const nn=String(n).trim();gr.stellen.forEach(x=>{x.s.raum=nn;});scheduleSave();_neuBauen();};
+      rk.append(rn,re);box.appendChild(rk);w.appendChild(box);
+      gr.stellen.forEach(({s,si})=>{
+        if(!Array.isArray(s.merkmale))s.merkmale=[];if(!Array.isArray(s.fotoRefs))s.fotoRefs=[];
+        const k=document.createElement('div');k.setAttribute('data-fs-vbstelle',String(si));
+        k.style.cssText='margin:8px 0;padding:8px 10px 10px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg2);';
+        const kz=document.createElement('div');kz.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:6px;';
+        const nr=document.createElement('div');nr.style.cssText='flex:1;font-size:14px;font-weight:700;color:var(--text);';nr.textContent=_fsVbBezeichnung(bericht,s,si+1);
+        kz.append(nr,_bgXKnopf('Stelle entfernen',()=>{if(_fsVbStelleGefuelltS(s)&&!confirm(_fsVbBezeichnung(bericht,s,si+1)+' entfernen? Die Fotos bleiben im Protokoll.'))return;bericht.vbStellen.splice(si,1);scheduleSave();_neuBauen();}));
+        const ortI=_inp(s.ort,'Wo? z. B. Decke, Eckbereich Wand 1 / Wand 2',v=>{s.ort=v;if(_vbUmgFuellen){try{_vbUmgFuellen();}catch(_e){}}},false);ortI.setAttribute('data-fs-vbort',String(si));
+        const tx=_bgTextFeld(s.text,'Was siehst du? (tippen)',v=>{s.text=v;},3);tx.style.marginTop='6px';
+        const lb=document.createElement('button');lb.type='button';lb.setAttribute('data-fs-lbknopf',String(si));
+        lb.textContent=_fsVbPinOk(s)?'📍 Von außen markiert – Luftbild öffnen':'🛰 Von außen markieren (Luftbild)';
+        lb.style.cssText=S_KNOPF+'display:block;width:100%;min-height:44px;margin-top:6px;border:1.5px solid '+FS_FARBE+';background:'+(_fsVbPinOk(s)?'rgba(46,125,79,.15)':'transparent')+';color:var(--text);';
+        lb.onclick=()=>_fsLuftbildFenster(bericht,t,s,()=>_neuBauen());
+        const fl=_fsFotoLeiste(bericht,{text:_fsVbBezeichnung(bericht,s,si+1)+(String(s.ort||'').trim()?' – '+String(s.ort).trim():''),fotoRefs:s.fotoRefs},'Fotos zu dieser Stelle',false);
+        k.append(kz,ortI,tx,lb,fl);box.appendChild(k);
+      });
+      const plus=document.createElement('button');plus.type='button';plus.textContent='＋ Stelle in '+(gr.raum||'diesem Raum');plus.setAttribute('data-fs-stelleinraum',gr.raum);
+      plus.style.cssText=S_KNOPF+'display:block;width:100%;min-height:44px;margin:4px 0;border:1.5px dashed '+FS_FARBE+';background:rgba(31,95,139,.06);color:var(--text);';
+      plus.onclick=()=>neueStelle(gr.raum);box.appendChild(plus);
+    });
+    // Neuer Raum: Knöpfe (Standard + Räume der Raumskizze + eigener Name)
+    const lr=document.createElement('div');lr.style.cssText='font-size:13px;color:var(--text2);margin:12px 0 4px;';lr.textContent=bericht.vbStellen.length?'Weiterer Raum – antippen und eine Stelle darin anlegen:':'Raum wählen – dann legst du darin die erste Stelle an:';
+    const rc=document.createElement('div');rc.setAttribute('data-fs-raumwahl','1');rc.style.cssText='display:flex;flex-wrap:wrap;gap:6px;';
+    const namen=FS_VB_RAEUME.slice();(bericht.raeume||[]).forEach(r=>{const n=String((r&&r.name)||'').trim();if(n&&namen.indexOf(n)<0)namen.push(n);});
+    namen.forEach(n=>{const c=_chip('＋ '+n,false,()=>neueStelle(n));c.setAttribute('data-fs-raumneu',n);rc.appendChild(c);});
+    const eig=_chip('＋ anderer Raum',false,()=>{const n=prompt('Name des Raums');if(n&&n.trim())neueStelle(n.trim());});eig.setAttribute('data-fs-raumneuname','1');rc.appendChild(eig);
+    w.append(lr,rc);
+    return w;
+  }
   // F23: Besichtigung 2 – ein Abschnitt „Feststellungen“: Stellen (wo · was · Fotos) und darunter „Umgebung abgehen“
   function _teilFeststellungenB2(){
     const w=document.createElement('div');
-    w.appendChild(_teilVbStellen());
+    w.appendChild(_teilVbStellenB2());
     const h=document.createElement('div');h.setAttribute('data-fs-b2umgebung','1');h.style.cssText='font-size:14px;font-weight:700;color:var(--text);padding:8px 14px 0;border-top:1px solid var(--border);margin-top:6px;';h.textContent='Umgebung abgehen';
     w.append(h,_teilUmgebungVb());
     return w;
@@ -2583,7 +2629,10 @@ const FS_VB_ORTE=['Decke','Wand','Boden','Fenster','Dach','Kehle','Dachrand','Ba
 function _fsVbStelleNeu(){return {raum:'',ort:'',merkmale:[],text:'',messwert:'',geraet:'',fotoRefs:[]};} // F22: Raum, Messwert, Gerät
 function _fsVbStelleGefuellt(s){return !!s&&(!!String(s.raum||'').trim()||!!String(s.messwert||'').trim()||!!String(s.ort||'').trim()||(Array.isArray(s.merkmale)&&s.merkmale.length>0)||!!String(s.text||'').trim()||(Array.isArray(s.fotoRefs)&&s.fotoRefs.length>0));}
 // Nur ausgefüllte Stellen, fortlaufend nummeriert (so stehen sie im PDF und in der Foto-Unterschrift)
-function _fsVbStellenGefuellt(b){const out=[];((b&&Array.isArray(b.vbStellen))?b.vbStellen:[]).forEach(s=>{if(_fsVbStelleGefuellt(s))out.push({s,nr:out.length+1});});return out;}
+// F24: Besichtigung 2 – eine Stelle, die nur einen Raum trägt (gerade angelegt), zählt nicht als ausgefüllt
+function _fsVbPinOk(s){return !!s&&!!s.pin&&isFinite(+s.pin.lat)&&isFinite(+s.pin.lon);}
+function _fsVbStelleGefuelltS(s){return !!s&&(!!String(s.ort||'').trim()||!!String(s.text||'').trim()||(Array.isArray(s.merkmale)&&s.merkmale.length>0)||(Array.isArray(s.fotoRefs)&&s.fotoRefs.length>0)||_fsVbPinOk(s));}
+function _fsVbStellenGefuellt(b){const f=(b&&b.schlank)?_fsVbStelleGefuelltS:_fsVbStelleGefuellt;const out=[];((b&&Array.isArray(b.vbStellen))?b.vbStellen:[]).forEach(s=>{if(f(s))out.push({s,nr:out.length+1});});return out;}
 // F22: Raum und Bauteil zusammen – „Wohnzimmer, Decke“; steht der Raum schon im Bauteil-Feld (ältere Protokolle), wird er nicht doppelt gesetzt
 function _fsVbOrtVoll(s){
   if(!s)return '';
@@ -2654,6 +2703,182 @@ function _fsVbMeldungZeile(b){
   if(b.meldungStatus==='abw'){const w=String(b.meldungAbw||'').trim().replace(/\s+/g,' ');return 'Gemeldet: '+a+(/[.!?]$/.test(a)?'':'.')+' Abweichend vorgefunden'+(w?': '+w:'.');}
   return '';
 }
+/* F24: BESICHTIGUNG 2 – Raum als Überschrift, Luftbild-Markierung je Stelle (Frank 03.10.2026: „Wohnzimmer, dann Stelle 1, Stelle 2“; „von außen die Stelle kennzeichnen … ich muss das richtige Luftbild auswählen können, mal ist Google besser, mal die anderen“).
+   Daten: vbStellen[].raum (wie bisher), vbStellen[].pin={lat,lon}, bericht.luftbildEbene ('th'|'esri'|'google'|'osm' oder ''). Das Luftbild ist Leaflet (steckt in beiden Apps) mit denselben vier Ebenen wie der Dachplan. */
+function _fsVbRaumName(s){return String((s&&s.raum)||'').trim();}
+// Stellen nach Raum gruppiert, in der Reihenfolge des ersten Auftretens; '' = ohne Raum
+function _fsVbRaumGruppen(b){
+  const out=[],idx={};
+  ((b&&Array.isArray(b.vbStellen))?b.vbStellen:[]).forEach((s,si)=>{
+    if(!s)return;
+    const r=_fsVbRaumName(s);
+    if(!Object.prototype.hasOwnProperty.call(idx,r)){idx[r]=out.length;out.push({raum:r,stellen:[]});}
+    out[idx[r]].stellen.push({s,si});
+  });
+  return out;
+}
+// Bezeichnung: Besichtigung 2 → „Wohnzimmer, Stelle 2“ (gezählt je Raum, nur ausgefüllte davor); sonst „Stelle n“
+function _fsVbBezeichnung(b,s,nrGlobal){
+  if(!(b&&b.schlank))return 'Stelle '+nrGlobal;
+  const r=_fsVbRaumName(s);let k=1;
+  for(const x of (Array.isArray(b.vbStellen)?b.vbStellen:[])){if(x===s)break;if(x&&_fsVbRaumName(x)===r&&_fsVbStelleGefuelltS(x))k++;}
+  return (r?r+', ':'')+'Stelle '+k;
+}
+const FS_LB_BREITE=960,FS_LB_HOEHE=640;
+const FS_LB_EBENEN=[
+  {k:'th',t:'Amtlich (TH)',quelle:'Luftbild © GDI-Th (dl-de/by-2-0)'},
+  {k:'esri',t:'Esri',quelle:'Luftbild © Esri, Maxar'},
+  {k:'google',t:'Google',quelle:'Luftbild © Google'},
+  {k:'osm',t:'Karte',quelle:'Karte © OpenStreetMap-Mitwirkende'}
+];
+function _fsLbInTH(la,lo){return la>=50.15&&la<=51.75&&lo>=9.80&&lo<=12.75;} // wie beim Dachplan: außerhalb Thüringens Esri
+function _fsLbStartEbene(la,lo){return (isFinite(la)&&isFinite(lo)&&_fsLbInTH(la,lo))?'th':'esri';}
+function _fsLbKachelUrl(k,z,x,y){
+  if(k==='th'){const sz=40075016.68557849/Math.pow(2,z),minx=-20037508.342789244+x*sz,maxy=20037508.342789244-y*sz;return 'https://www.geoproxy.geoportal-th.de/geoproxy/services/DOP?service=WMS&request=GetMap&version=1.3.0&layers=th_dop&styles=&format=image/png&transparent=false&crs=EPSG:3857&bbox='+minx+','+(maxy-sz)+','+(minx+sz)+','+maxy+'&width=256&height=256';}
+  if(k==='google')return 'https://mt'+((x+y)%4)+'.google.com/vt/lyrs=s&x='+x+'&y='+y+'&z='+z;
+  if(k==='osm')return 'https://'+['a','b','c'][(x+y)%3]+'.tile.openstreetmap.org/'+z+'/'+x+'/'+y+'.png';
+  return 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/'+z+'/'+y+'/'+x;
+}
+// Position in „Weltpixeln“ (Web-Mercator, 256-px-Kacheln) bei Zoom z
+function _fsLbWeltPx(lat,lon,z){const n=256*Math.pow(2,z),sn=Math.sin(lat*Math.PI/180);return {x:(lon+180)/360*n,y:(0.5-Math.log((1+sn)/(1-sn))/(4*Math.PI))*n};}
+// Alle gesetzten Pins, nummeriert in der Reihenfolge des PDFs (Raum-Gruppen)
+function _fsLbPunkte(b){
+  const out=[];
+  _fsVbRaumGruppen(b).forEach(g=>g.stellen.forEach(x=>{if(_fsVbPinOk(x.s))out.push({n:out.length+1,lat:+x.s.pin.lat,lon:+x.s.pin.lon,s:x.s,label:_fsVbBezeichnung(b,x.s,x.si+1)});}));
+  return out;
+}
+// Ausschnitt, in dem alle Pins mit Rand liegen: höchster Zoom (höchstens zMax), bei dem es passt
+function _fsLbAnsicht(punkte,W,H,zMax){
+  if(!punkte||!punkte.length)return null;
+  zMax=zMax||19;
+  for(let z=zMax;z>=12;z--){
+    const q=punkte.map(a=>_fsLbWeltPx(a.lat,a.lon,z)),xs=q.map(a=>a.x),ys=q.map(a=>a.y);
+    const x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys);
+    if(z===12||((x1-x0)<=W-160&&(y1-y0)<=H-160))return {z,cx:(x0+x1)/2,cy:(y0+y1)/2,W,H};
+  }
+  return null;
+}
+// Kacheln, die den Ausschnitt decken, mit Versatz im Bild
+function _fsLbKacheln(a){
+  const out=[],n=Math.pow(2,a.z),ox=a.cx-a.W/2,oy=a.cy-a.H/2;
+  for(let ty=Math.floor(oy/256);ty<=Math.floor((oy+a.H)/256);ty++){
+    if(ty<0||ty>=n)continue;
+    for(let tx=Math.floor(ox/256);tx<=Math.floor((ox+a.W)/256);tx++)out.push({x:((tx%n)+n)%n,y:ty,dx:tx*256-ox,dy:ty*256-oy});
+  }
+  return out;
+}
+// Luftbild fürs PDF: Kacheln der gewählten Ebene zusammensetzen und die Pins als nummerierte Kreise einzeichnen.
+// Geht nur im Browser; kommt weniger als 60 % der Kacheln an (kein Netz, gesperrt), gibt es null – das PDF nennt dann nur die Lage als Text.
+async function _fsLuftbildBild(b,ebeneK){
+  try{
+    if(typeof Image==='undefined'||typeof document==='undefined'||typeof document.createElement!=='function')return null;
+    const pk=_fsLbPunkte(b);if(!pk.length)return null;
+    const k=(FS_LB_EBENEN.some(e=>e.k===ebeneK)?ebeneK:_fsLbStartEbene(pk[0].lat,pk[0].lon));
+    const a=_fsLbAnsicht(pk,FS_LB_BREITE,FS_LB_HOEHE,19),kl=_fsLbKacheln(a);
+    const c=document.createElement('canvas');c.width=a.W;c.height=a.H;
+    const g=c.getContext&&c.getContext('2d');if(!g)return null;
+    g.fillStyle='#8a8a8a';g.fillRect(0,0,a.W,a.H);
+    let ok=0;
+    await Promise.all(kl.map(t=>new Promise(res=>{
+      const i=new Image();i.crossOrigin='anonymous';
+      const to=setTimeout(()=>res(),12000);
+      i.onload=()=>{clearTimeout(to);try{g.drawImage(i,Math.round(t.dx),Math.round(t.dy));ok++;}catch(e){}res();};
+      i.onerror=()=>{clearTimeout(to);res();};
+      i.src=_fsLbKachelUrl(k,a.z,t.x,t.y);
+    })));
+    if(ok<kl.length*0.6)return null;
+    pk.forEach(q=>{
+      const w=_fsLbWeltPx(q.lat,q.lon,a.z),px=w.x-(a.cx-a.W/2),py=w.y-(a.cy-a.H/2);
+      g.beginPath();g.arc(px,py,17,0,2*Math.PI);g.fillStyle='rgba(31,95,139,0.95)';g.fill();g.lineWidth=3;g.strokeStyle='#ffffff';g.stroke();
+      g.fillStyle='#ffffff';g.font='bold 19px sans-serif';g.textAlign='center';g.textBaseline='middle';g.fillText(String(q.n),px,py+1);
+    });
+    const eb=FS_LB_EBENEN.find(e=>e.k===k)||FS_LB_EBENEN[1];
+    g.fillStyle='rgba(255,255,255,0.82)';g.fillRect(0,a.H-20,a.W,20);g.fillStyle='#222222';g.font='12px sans-serif';g.textAlign='left';g.textBaseline='middle';g.fillText(eb.quelle,6,a.H-10);
+    return {dataUrl:c.toDataURL('image/jpeg',0.86),w:a.W,h:a.H,quelle:eb.quelle,ebene:k};
+  }catch(e){console.warn('[Luftbild] PDF-Bild:',e);return null;}
+}
+// Adresse → Koordinaten (Photon; in beiden Apps erlaubt); null, wenn nichts gefunden
+async function _fsLbGeocode(adresse){
+  try{
+    const q=String(adresse||'').trim();if(!q)return null;
+    const r=await fetch('https://photon.komoot.io/api/?limit=1&lang=de&q='+encodeURIComponent(q));
+    const j=await r.json();const c=j&&j.features&&j.features[0]&&j.features[0].geometry&&j.features[0].geometry.coordinates;
+    return (c&&isFinite(+c[1])&&isFinite(+c[0]))?{lat:+c[1],lon:+c[0]}:null;
+  }catch(e){return null;}
+}
+// Das Luftbild-Fenster: füllt den Bildschirm, über dem Protokoll. Tippen setzt den Pin der Stelle s; vier Ebenen zum Umschalten.
+function _fsLuftbildFenster(bericht,t,s,beiAenderung){
+  if(typeof L==='undefined'||!L||typeof L.map!=='function'){toast('Das Luftbild braucht einmal Internet zum Laden','error');return;}
+  const old=document.getElementById('_fsLbOverlay');if(old)old.remove();
+  const ov=document.createElement('div');ov.id='_fsLbOverlay';
+  ov.style.cssText='position:fixed;inset:0;z-index:100001;display:flex;flex-direction:column;background:var(--bg);';
+  const kopf=document.createElement('div');kopf.style.cssText='background:#1f5f8b;color:#fff;padding:8px 10px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;flex-shrink:0;';
+  const ti=document.createElement('div');ti.style.cssText='flex:1 1 200px;min-width:0;font-size:15px;font-weight:700;';
+  const fertig=document.createElement('button');fertig.type='button';fertig.textContent='✓ Fertig';fertig.setAttribute('data-fs-lbfertig','1');
+  fertig.style.cssText='padding:8px 16px;min-height:42px;border-radius:10px;border:none;background:#fff;color:#1f5f8b;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;';
+  const weg=document.createElement('button');weg.type='button';weg.textContent='✕ Pin entfernen';weg.setAttribute('data-fs-lbweg','1');
+  weg.style.cssText='padding:8px 12px;min-height:42px;border-radius:10px;border:1.5px solid rgba(255,255,255,.7);background:transparent;color:#fff;font-size:14px;cursor:pointer;font-family:inherit;';
+  const eb=document.createElement('div');eb.style.cssText='display:flex;flex-wrap:wrap;gap:6px;width:100%;';
+  const info=document.createElement('div');info.style.cssText='width:100%;font-size:12px;color:rgba(255,255,255,.85);';
+  info.textContent='Auf die Stelle tippen setzt den Pin. Zoomen: Mausrad oder zwei Finger. Oben das Luftbild wählen – mal ist Google, mal ein anderes deutlicher.';
+  kopf.append(ti,weg,fertig,eb,info);
+  const mapEl=document.createElement('div');mapEl.style.cssText='flex:1;min-height:0;';
+  ov.append(kopf,mapEl);document.body.appendChild(ov);
+  const bez=()=>_fsVbBezeichnung(bericht,s,(bericht.vbStellen||[]).indexOf(s)+1);
+  const titel=()=>{ti.textContent='Von außen markieren: '+bez()+(_fsVbPinOk(s)?' · Pin gesetzt':' · noch kein Pin');weg.style.display=_fsVbPinOk(s)?'':'none';};
+  const adr=String((t&&t.adresse)||(bericht.kopf&&bericht.kopf.objektAdresse)||'').trim();
+  const eigene=_fsVbPinOk(s)?{lat:+s.pin.lat,lon:+s.pin.lon}:null;
+  const andere=_fsLbPunkte(bericht).filter(q=>q.s!==s)[0]||null;
+  const karte=(t&&isFinite(+t.lat)&&isFinite(+t.lon)&&(+t.lat||+t.lon))?{lat:+t.lat,lon:+t.lon}:null;
+  const start=eigene||(andere&&{lat:andere.lat,lon:andere.lon})||karte;
+  const map=L.map(mapEl,{zoomControl:true,zoomSnap:0.25,zoomDelta:0.5,wheelPxPerZoomLevel:120});
+  map.setView(start?[start.lat,start.lon]:[51.1,10.4],start?19:6);
+  let lay=null,ebK='';
+  let gespeichert='';try{gespeichert=localStorage.getItem('pam_fs_luftbild')||'';}catch(e){}
+  const wahlEbene=k=>{
+    if(!FS_LB_EBENEN.some(e=>e.k===k))k='esri';
+    if(lay){try{map.removeLayer(lay);}catch(e){}}
+    lay=_fsLbLeafletEbene(k);lay.addTo(map);ebK=k;bericht.luftbildEbene=k;
+    try{localStorage.setItem('pam_fs_luftbild',k);}catch(e){}
+    [...eb.children].forEach(b=>{const an=b.getAttribute('data-fs-lbebene')===k;b.style.background=an?'#fff':'transparent';b.style.color=an?'#1f5f8b':'#fff';b.style.fontWeight=an?'700':'400';});
+    scheduleSave();
+  };
+  FS_LB_EBENEN.forEach(e=>{
+    const b=document.createElement('button');b.type='button';b.textContent=e.t;b.setAttribute('data-fs-lbebene',e.k);
+    b.style.cssText='padding:6px 14px;min-height:38px;border-radius:18px;border:1.5px solid rgba(255,255,255,.8);background:transparent;color:#fff;font-size:14px;cursor:pointer;font-family:inherit;';
+    b.onclick=()=>wahlEbene(e.k);eb.appendChild(b);
+  });
+  wahlEbene(bericht.luftbildEbene||gespeichert||_fsLbStartEbene(start&&start.lat,start&&start.lon));
+  const gruppe=L.layerGroup().addTo(map);
+  const marker=(q,aktiv)=>L.marker([q.lat,q.lon],{draggable:!!aktiv,icon:L.divIcon({className:'',iconSize:[34,34],iconAnchor:[17,17],html:'<div style="width:34px;height:34px;border-radius:50%;background:'+(aktiv?'#d9480f':'rgba(31,95,139,.95)')+';border:3px solid #fff;color:#fff;font:bold 18px/28px sans-serif;text-align:center;box-shadow:0 1px 6px rgba(0,0,0,.6);">'+q.n+'</div>'})});
+  const zeichneMarker=()=>{
+    gruppe.clearLayers();
+    _fsLbPunkte(bericht).forEach(q=>{
+      const aktiv=q.s===s,m=marker(q,aktiv);
+      if(aktiv)m.on('dragend',()=>{const ll=m.getLatLng();s.pin={lat:Math.round(ll.lat*1e6)/1e6,lon:Math.round(ll.lng*1e6)/1e6};scheduleSave();titel();});
+      gruppe.addLayer(m);
+    });
+    titel();
+  };
+  map.on('click',e=>{s.pin={lat:Math.round(e.latlng.lat*1e6)/1e6,lon:Math.round(e.latlng.lng*1e6)/1e6};scheduleSave();zeichneMarker();});
+  weg.onclick=()=>{s.pin=null;scheduleSave();zeichneMarker();};
+  const zu=()=>{try{map.remove();}catch(e){}ov.remove();document.removeEventListener('keydown',taste,true);if(typeof beiAenderung==='function')beiAenderung();};
+  const taste=e=>{if(e.key==='Escape'){e.stopPropagation();zu();}};
+  document.addEventListener('keydown',taste,true);
+  fertig.onclick=zu;
+  zeichneMarker();
+  setTimeout(()=>{try{map.invalidateSize();}catch(e){}},60);
+  if(!start){ // kein Standort an der Karte: Adresse suchen
+    _fsLbGeocode(adr).then(r=>{if(r&&document.getElementById('_fsLbOverlay')===ov){map.setView([r.lat,r.lon],19);if(!bericht.luftbildEbene||bericht.luftbildEbene===ebK)wahlEbene(_fsLbStartEbene(r.lat,r.lon));}else if(!r)toast('Adresse nicht gefunden – bitte auf der Karte zur Stelle zoomen','info',5000);});
+  }
+}
+function _fsLbLeafletEbene(k){
+  const e=FS_LB_EBENEN.find(x=>x.k===k)||FS_LB_EBENEN[1];
+  if(k==='th')return L.tileLayer.wms('https://www.geoproxy.geoportal-th.de/geoproxy/services/DOP',{layers:'th_dop',format:'image/png',version:'1.3.0',maxZoom:21,attribution:e.quelle});
+  if(k==='google')return L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{maxZoom:21,maxNativeZoom:20,subdomains:['mt0','mt1','mt2','mt3'],attribution:e.quelle});
+  if(k==='osm')return L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:21,maxNativeZoom:19,attribution:e.quelle});
+  return L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:21,maxNativeZoom:19,attribution:e.quelle});
+}
 // F17: Kontakte der Karte als Auswahl „Besichtigung bei“: text = „Rolle: Name“, name, kontakt = „Name, Telefon“. Nur Kontakte mit Namen.
 const FS_VB_ROLLEN={mieter:'Mieter',eigentuemer:'Eigentümer',hausverwaltung:'Hausverwaltung',ag:'Auftraggeber',privatkunde:'Privatkunde'};
 function _fsVbKontakte(t){
@@ -2722,7 +2947,7 @@ function _fsBgUmstellen(b){
   Object.assign(b.kopf,{anlass:'',beginn:'',ende:'',geraetLuft:'',geraetOberflaeche:'',geraetBauteil:'',pruefer:_fsBgMerkName()});
   if(vorab)Object.assign(b.kopf,{versicherung:'',schadennr:'',zugang:'',ansprechpartner:'',besuchBei:'',lage:'',nutzer:''}); // F17: Nutzer wählt Frank je Besuch („Besichtigung bei“), nicht alle Mieter der Karte
   b.anwesende=[];
-  if(vorab){b.schadenbild='';b.vorgeschichte='';b.vbStellen=[];b.vbUmgebung=[];b.meldungStatus='';b.meldungAbw='';} // F19, F20, F21, F22
+  if(vorab){b.schadenbild='';b.vorgeschichte='';b.vbStellen=[];b.vbUmgebung=[];b.meldungStatus='';b.meldungAbw='';b.luftbildEbene='';} // F19, F20, F21, F22, F24
   b.sektionen=(vorab?FS_VB_SEKTIONEN:keller?FS_BG_KELLER:FS_BG_WOHNUNG).map(s=>({titel:s.titel,items:s.items.map(_fsBgItem)}));
   b.angaben=(vorab?[]:keller?FS_BG_KELLER_ANGABEN:FS_BG_WOHNUNG_ANGABEN).map(_fsBgAngabe); // F20: Vorabbesichtigung hat ein Textfeld „Vorgeschichte“ statt Fragen
   return b;
@@ -3158,7 +3383,7 @@ function _fsBgMessfensterZeigen(b,tab0){
 // Bildunterschrift im PDF: wozu gehört das Foto – Raum, Wand, Messstelle (mit der gedruckten Nummer), Feststellung
 function _fsBgFotoZuordnung(b,f){
   const teile=[];
-  if(typeof _fsVbStellenGefuellt==='function')_fsVbStellenGefuellt(b).forEach(x=>{if((x.s.fotoRefs||[]).some(r=>_fsRefPasst(f,r))){const o=_fsVbOrtVoll(x.s);teile.push('Stelle '+x.nr+(o?' – '+o:''));}}); // F21, F22
+  if(typeof _fsVbStellenGefuellt==='function')_fsVbStellenGefuellt(b).forEach(x=>{if((x.s.fotoRefs||[]).some(r=>_fsRefPasst(f,r))){const o=b.schlank?String(x.s.ort||'').trim():_fsVbOrtVoll(x.s);teile.push(_fsVbBezeichnung(b,x.s,x.nr)+(o?' – '+o:''));}}); // F21, F22, F24
   ((b&&b.raeume)||[]).forEach(r=>{
     if(!r)return;
     const name=String(r.name||'').trim()||'Raum';
@@ -3827,7 +4052,32 @@ async function _fsMobPdfBg(bericht,task){
         if(mzl){absatz(mzl,{abstand:3});y+=1;} // F22
         if(erg.length&&!bericht.schlank){unterTitel('Eingrenzung');erg.forEach(z=>absatz(z,{einzug:3,abstand:1.5}));y+=3;} // F22
         if(sbText){unterTitel('Beschreibung des Schadenbildes');absatz(sbText,{einzug:3,abstand:3});y+=2;}
-        if(vbs.length){unterTitel('Stelle für Stelle');vbs.forEach(x=>{const st=_fsVbStelleSatz(x.s);absatz(x.nr+' · '+(st||'Stelle')+fotoHinweis(x.s.fotoRefs),{einzug:3,abstand:1.5});});y+=3;} // F21
+        if(vbs.length){
+          const lbp=bericht.schlank?_fsLbPunkte(bericht):[]; // F24
+          unterTitel(bericht.schlank?'Feststellungen':'Stelle für Stelle');
+          if(bericht.schlank){ // F24: Besichtigung 2 – je Raum „Wohnzimmer, Stelle 1 · Decke: …“
+            const gr=_fsVbRaumGruppen(bericht);
+            gr.forEach(g=>g.stellen.forEach(({s})=>{
+              const x=vbs.find(v=>v.s===s);if(!x)return;
+              const st=_fsVbStelleSatz(Object.assign({},s,{raum:''})),pk=lbp.find(q=>q.s===s);
+              absatz(_fsVbBezeichnung(bericht,s,x.nr)+' · '+(st||'Stelle')+fotoHinweis(s.fotoRefs)+(pk?' – Luftbild Nr. '+pk.n:''),{einzug:3,abstand:1.5});
+            }));
+            y+=3;
+          }else{vbs.forEach(x=>{const st=_fsVbStelleSatz(x.s);absatz(x.nr+' · '+(st||'Stelle')+fotoHinweis(x.s.fotoRefs),{einzug:3,abstand:1.5});});y+=3;}
+          if(lbp.length){ // F24: Lage von außen – Luftbild mit den Markierungen (oder, wenn das Bild nicht zu laden ist, die Lage als Text)
+            const bild=await _fsLuftbildBild(bericht,bericht.luftbildEbene||'');
+            const iw=W-2*M,ih=bild?iw*bild.h/bild.w:0;
+            if(y+(bild?ih+22:30)>285){doc.addPage();y=M;}
+            unterTitel('Lage von außen (Luftbild)');
+            if(bild){
+              try{doc.addImage(bild.dataUrl,'JPEG',M,y,iw,ih);}catch(e){console.warn('[Luftbild] addImage:',e);}
+              y+=ih+2;
+              absatz('Markierungen: '+lbp.map(q=>q.n+' = '+q.label).join(' · ')+'. '+bild.quelle+'.',{groesse:7.5,farbe:[100,100,100],abstand:4});
+            }else{
+              absatz('Von außen markiert (Luftbild, im PDF nicht abgebildet): '+lbp.map(q=>q.n+' = '+q.label+' ('+q.lat.toFixed(5)+' N, '+q.lon.toFixed(5)+' O)').join(' · ')+'.',{groesse:8,farbe:[70,70,70],abstand:4});
+            }
+          }
+        } // F21, F24
         if(erg.length&&bericht.schlank){unterTitel('Umgebung');erg.forEach(z=>absatz(z,{einzug:3,abstand:1.5}));y+=3;} // F23: Besichtigung 2: erst die Stellen, dann die Umgebung
         gruppen.forEach(g=>{
           unterTitel(g.titel);
