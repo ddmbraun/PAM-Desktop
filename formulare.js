@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F28';
+const PAM_FORMULARE_VERSION='F29';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
@@ -206,6 +206,7 @@ function _fsVervollstaendigen(b){
       if(typeof b.meldungStatus!=='string')b.meldungStatus='';if(typeof b.meldungAbw!=='string')b.meldungAbw='';
       if(typeof b.luftbildEbene!=='string')b.luftbildEbene='';if(b.schlank&&typeof b.protName!=='string')b.protName='';
       if(b.luftbildAnsicht!==undefined&&b.luftbildAnsicht!==null&&!_fsLbAnsichtOk(b.luftbildAnsicht))b.luftbildAnsicht=null; /* F27: zuletzt gesehener Kartenausschnitt */
+      (b.fotos||[]).forEach(f=>{if(f&&f.blick!==undefined&&!(typeof f.blick==='number'&&isFinite(f.blick)))delete f.blick;}); /* F29 */
       if(b.schlank){ /* F28: Innen/Außen – welche Teile sichtbar sind, je Stelle Typ + Seite, je Umgebungszeile der Bereich */
         if(typeof b.zeigeInnen!=='boolean')b.zeigeInnen=true;if(typeof b.zeigeAussen!=='boolean')b.zeigeAussen=true;
         b.vbStellen.forEach(s=>{if(!s)return;if(s.typ!=='innen'&&s.typ!=='aussen')s.typ=(String(s.raum||'').trim()==='Außen')?'aussen':'innen';if(typeof s.seite!=='string')s.seite='';if(typeof s.seiteGrad!=='number'||!isFinite(s.seiteGrad))s.seiteGrad=null;});
@@ -497,13 +498,28 @@ function _fsFotoLeiste(bericht,it,label,kompakt){ // kompakt: nur 📷 (+Zahl) n
       const x=document.createElement('button');x.type='button';x.textContent='✕';x.title='Verknüpfung lösen – das Foto bleibt im Protokoll';
       x.style.cssText='position:absolute;top:2px;right:2px;width:24px;height:24px;border-radius:50%;border:none;background:rgba(0,0,0,.65);color:#fff;font-size:12px;line-height:24px;padding:0;cursor:pointer;';
       x.onclick=e=>{e.stopPropagation();it.fotoRefs.splice(ri,1);scheduleSave();neu();};
-      th.append(img,x);w.appendChild(th);
+      th.append(img,x);
+      if(typeof f.blick==='number'&&isFinite(f.blick)){ /* F29: Kennzeichen „Blick nach …“ am Foto; antippen entfernt es */
+        const bk=document.createElement('button');bk.type='button';bk.setAttribute('data-fs-blick','1');bk.textContent='↗ '+FS_B2_SEITEN[Math.round((((f.blick%360)+360)%360)/45)%8];bk.title='Blick nach '+_fsBlickWort(f.blick)+' ('+Math.round(f.blick)+'°) – antippen zum Entfernen';
+        bk.style.cssText='position:absolute;left:2px;bottom:2px;min-width:30px;height:20px;border-radius:10px;border:none;background:rgba(31,95,139,.9);color:#fff;font-size:11px;font-weight:700;line-height:20px;padding:0 6px;cursor:pointer;';
+        bk.onclick=e=>{e.stopPropagation();if(confirm('Blickrichtung (Blick nach '+_fsBlickWort(f.blick)+') am Foto entfernen?')){delete f.blick;scheduleSave();neu();}};
+        th.appendChild(bk);
+      }
+      w.appendChild(th);
     });
     const b=document.createElement('button');b.type='button';b.setAttribute('data-fs-fotoknopf','1');
     b.textContent=kompakt?'📷'+(anz?' '+anz:''):'📷 '+label+(anz?' ('+anz+')':'');
     b.title=label;b.setAttribute('aria-label',label+(anz?' ('+anz+')':''));
     b.style.cssText=(kompakt?'flex:0 0 auto;min-width:52px;':'flex:1 1 160px;')+'min-height:44px;padding:8px 12px;border-radius:8px;border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;';
-    b.onclick=()=>_wpMobFotoPickerForItem(bericht,it,neu);
+    b.onclick=()=>{
+      /* F29: Besichtigung 2 – die Blickrichtung des Geräts im Moment des Antippens geht mit dem neuen Foto (richte das Gerät vorher auf die Wand) */
+      const g=bericht.schlank?_fsKompassLetzte(6000):null,vor=it.fotoRefs.slice();
+      if(g!==null)toast('🧭 Blick nach '+_fsBlickWort(g)+' – wird am Foto gespeichert','info',2500);
+      _wpMobFotoPickerForItem(bericht,it,()=>{
+        if(g!==null){let neuDa=false;it.fotoRefs.forEach(ref=>{if(vor.indexOf(ref)>=0)return;const f=(bericht.fotos||[]).find(x=>_fsRefPasst(x,ref));if(f&&typeof f.blick!=='number'){f.blick=g;neuDa=true;}});if(neuDa)scheduleSave();}
+        neu();
+      });
+    };
     w.appendChild(b);
   };
   neu();
@@ -1446,7 +1462,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       FS_B2_SEITEN.concat(FS_B2_SEITENEXTRA).forEach(kk=>{const c=_chip(kk,s.seite===kk,()=>{s.seite=s.seite===kk?'':kk;s.seiteGrad=null;scheduleSave();_neuBauen();});c.setAttribute('data-fs-seiteknopf',kk);c.style.minHeight='38px';c.style.padding='4px 12px';sc.appendChild(c);});
       sb.append(sl,sc);
       if(s.seite&&typeof s.seiteGrad==='number')sb.appendChild(_bgInfo('Gemessen mit dem Kompass: '+Math.round(s.seiteGrad)+'° ('+_fsSeiteText(s.seite)+').'));
-      sb.appendChild(_fsNadelBox(s,()=>_neuBauen()));
+      sb.appendChild(_fsNadelBox(s,()=>_neuBauen(),typ)); /* F29: zugeklappt; drinnen/draußen rechnet verschieden */
       const tx=_bgTextFeld(s.text,'Was siehst du? (tippen)',v=>{s.text=v;},3);tx.style.marginTop='6px';
       const pin=_fsVbPinOk(s);
       const lb=document.createElement('button');lb.type='button';lb.setAttribute('data-fs-lbknopf',String(si));
@@ -2208,6 +2224,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   document.body.appendChild(ov);
   /* F28: die Frage „Innen · Außen · Beides“ kommt VOR dem Anlegen; am PC das Fenster schweben lassen und die Liste auffrischen, weil der Aufrufer schon fertig ist */
   try{if(art==='besichtigung2'&&typeof existingIdx!=='number'){if(typeof _pamFormUeberlagerungPc==='function'&&typeof _fsAmPc==='function'&&_fsAmPc())_pamFormUeberlagerungPc(ov);if(typeof renderPruefberichteDesktop==='function')renderPruefberichteDesktop();}}catch(e){console.warn('[Besichtigung] Start:',e);}
+  try{if(bericht.schlank&&!(typeof DeviceOrientationEvent!=='undefined'&&typeof DeviceOrientationEvent.requestPermission==='function'))_fsKompassStart();}catch(e){} /* F29: Android merkt die Blickrichtung für Fotos von selbst */
 }
 
 // Rechenzeile unter einer Messstelle – nur Zahlen und feste Texte, deshalb textContent
@@ -2818,8 +2835,8 @@ function _fsSeiteText(k){k=String(k||'').trim();return FS_B2_SEITENTEXT[k]||(FS_
 // Typ einer Stelle; ältere Besichtigungen (F23–F27) hatten „Außen“ als Raum
 function _fsVbTyp(s){return (s&&s.typ==='aussen')?'aussen':(s&&s.typ==='innen')?'innen':(_fsVbRaumName(s)==='Außen'?'aussen':'innen');}
 function _fsB2Sichtbar(b,typ){return !(b&&b.schlank)||(typ==='aussen'?b.zeigeAussen!==false:b.zeigeInnen!==false);}
-// Die Wand zeigt in die Gegenrichtung der Blickrichtung (du schaust nach Norden → Südseite)
-function _fsWandRichtung(grad){const g=((+grad%360)+360)%360,w=(g+180)%360;return {blick:g,wand:w,seite:FS_B2_SEITEN[Math.round(w/45)%8]};}
+// Draußen zeigt die Wand in die Gegenrichtung der Blickrichtung (du schaust nach Norden → Südseite); drinnen gilt die Blickrichtung selbst (du schaust nach Süden → Südseite)
+function _fsWandRichtung(grad,drinnen){const g=((+grad%360)+360)%360,w=drinnen?g:(g+180)%360;return {blick:g,wand:w,seite:FS_B2_SEITEN[Math.round(w/45)%8]};} // F29: DRINNEN schaust du zur Außenwand hinaus → Blickrichtung = Seite; DRAUSSEN schaust du auf die Wand zurück → Gegenrichtung
 function _fsBlickWort(grad){const g=((+grad%360)+360)%360;return FS_B2_SEITENTEXT[FS_B2_SEITEN[Math.round(g/45)%8]];}
 // Kompass aus den Sensorwinkeln (W3C: alpha, beta, gamma): steht das Gerät aufrecht (über etwa 45°), zeigt die Rückseite (Kamera) die Blickrichtung, liegt es flach, die Oberkante.
 function _fsKompassRichtung(alpha,beta,gamma){
@@ -2877,11 +2894,34 @@ function _fsLbKachelUrl(k,z,x,y){
 }
 // Position in „Weltpixeln“ (Web-Mercator, 256-px-Kacheln) bei Zoom z
 function _fsLbWeltPx(lat,lon,z){const n=256*Math.pow(2,z),sn=Math.sin(lat*Math.PI/180);return {x:(lon+180)/360*n,y:(0.5-Math.log((1+sn)/(1-sn))/(4*Math.PI))*n};}
+/* F29: PIN-FORM (Frank 03.10.2026, Variante A): ein Kreis mit der Nummer NEBEN der Stelle, ein Strich und eine Pfeilspitze, deren Spitze genau auf die Stelle zeigt – die Stelle bleibt frei.
+   Der Kreis lässt sich ziehen (Richtung ang in Grad, 0 = rechts, gegen den Uhrzeigersinn; Länge len in Bildpunkten), die Stelle (lat/lon) bleibt. */
+const FS_LB_PIN_ANG=225,FS_LB_PIN_LEN=62,FS_LB_PIN_R=18;
+function _fsLbPinRing(pin){
+  const a=pin&&isFinite(+pin.ang)?((+pin.ang%360)+360)%360:FS_LB_PIN_ANG;
+  const l=pin&&isFinite(+pin.len)?Math.max(30,Math.min(160,+pin.len)):FS_LB_PIN_LEN;
+  return {ang:a,len:l};
+}
+// Mitte des Kreises: von der Stelle (px,py) aus in Richtung ang (Grad, 0 = rechts, gegen den Uhrzeigersinn; Bildschirm-y zeigt nach unten) im Abstand len
+function _fsLbRingPos(px,py,ang,len){const r=ang*Math.PI/180;return {x:px+Math.cos(r)*len,y:py-Math.sin(r)*len};}
 // Alle gesetzten Pins, nummeriert in der Reihenfolge des PDFs (Raum-Gruppen)
 function _fsLbPunkte(b){
   const out=[];
-  _fsVbRaumGruppen(b).forEach(g=>g.stellen.forEach(x=>{if(_fsVbPinOk(x.s)&&_fsB2Sichtbar(b,_fsVbTyp(x.s)))out.push({n:out.length+1,lat:+x.s.pin.lat,lon:+x.s.pin.lon,s:x.s,label:_fsVbBezeichnung(b,x.s,x.si+1)});}));
+  _fsVbRaumGruppen(b).forEach(g=>g.stellen.forEach(x=>{if(_fsVbPinOk(x.s)&&_fsB2Sichtbar(b,_fsVbTyp(x.s))){const r=_fsLbPinRing(x.s.pin);out.push({n:out.length+1,lat:+x.s.pin.lat,lon:+x.s.pin.lon,ang:r.ang,len:r.len,s:x.s,label:_fsVbBezeichnung(b,x.s,x.si+1)});}}));
   return out;
+}
+// Kacheln, die nur flaches Grau zeigen (Esri „Map data not yet available“), erkennt man an den Bildpunkten d (RGBA): fast alle gleich und grau
+function _fsLbKachelLeer(d){
+  if(!d||!d.length)return false;
+  const zaehl={};let n=0,best=0,bestK='';
+  for(let i=0;i+2<d.length;i+=52){
+    const r=d[i],g=d[i+1],bl=d[i+2],k=(r>>3)+','+(g>>3)+','+(bl>>3);
+    zaehl[k]=(zaehl[k]||0)+1;n++;
+    if(zaehl[k]>best){best=zaehl[k];bestK=k;}
+  }
+  if(!n||best/n<0.8)return false;
+  const p=bestK.split(',').map(x=>(+x)*8+4);
+  return Math.abs(p[0]-p[1])<=10&&Math.abs(p[1]-p[2])<=10&&p[0]>=110&&p[0]<=245;
 }
 // Ausschnitt, in dem alle Pins mit Rand liegen: höchster Zoom (höchstens zMax), bei dem es passt
 function _fsLbAnsicht(punkte,W,H,zMax){
@@ -2905,29 +2945,62 @@ function _fsLbKacheln(a){
 }
 // Luftbild fürs PDF: Kacheln der gewählten Ebene zusammensetzen und die Pins als nummerierte Kreise einzeichnen.
 // Geht nur im Browser; kommt weniger als 60 % der Kacheln an (kein Netz, gesperrt), gibt es null – das PDF nennt dann nur die Lage als Text.
+// Kacheln der Ebene k laden und in die Leinwand zeichnen; Rückgabe: wie viele da sind (ok), wie viele nur flaches Grau zeigen (leer)
+async function _fsLbKachelnZeichnen(g,a,k){
+  const kl=_fsLbKacheln(a);let ok=0,leer=0;
+  g.fillStyle='#8a8a8a';g.fillRect(0,0,a.W,a.H);
+  await Promise.all(kl.map(t=>new Promise(res=>{
+    const i=new Image();i.crossOrigin='anonymous';
+    const to=setTimeout(()=>res(),12000);
+    i.onload=()=>{
+      clearTimeout(to);
+      try{
+        const dx=Math.round(t.dx),dy=Math.round(t.dy);g.drawImage(i,dx,dy);
+        let lr=false;
+        if(typeof g.getImageData==='function'){try{const x0=Math.max(0,dx),y0=Math.max(0,dy),w=Math.min(a.W,dx+256)-x0,h=Math.min(a.H,dy+256)-y0;if(w>8&&h>8)lr=_fsLbKachelLeer(g.getImageData(x0,y0,w,h).data);}catch(e){}}
+        if(lr)leer++;else ok++;
+      }catch(e){}
+      res();
+    };
+    i.onerror=()=>{clearTimeout(to);res();};
+    i.src=_fsLbKachelUrl(k,a.z,t.x,t.y);
+  })));
+  return {n:kl.length,ok,leer};
+}
+// Pin auf die Leinwand: Kreis mit Nummer, Strich, Pfeilspitze AUF die Stelle (px,py); der Kreis weicht aus, wenn er aus dem Bild liefe
+function _fsLbPinZeichnen(g,px,py,n,pin,W,H){
+  const r=_fsLbPinRing(pin),R=FS_LB_PIN_R;let ang=r.ang;
+  let rp=_fsLbRingPos(px,py,ang,r.len);
+  if(rp.x<R+4||rp.x>W-R-4||rp.y<R+4||rp.y>H-R-24){ang=(ang+180)%360;rp=_fsLbRingPos(px,py,ang,r.len);}
+  const dx=Math.cos(ang*Math.PI/180),dy=-Math.sin(ang*Math.PI/180),nx=-dy,ny=dx;
+  const sx=rp.x-dx*R,sy=rp.y-dy*R,ex=px+dx*12,ey=py+dy*12;
+  g.lineCap='round';g.lineJoin='round';
+  g.lineWidth=6;g.strokeStyle='#ffffff';g.beginPath();g.moveTo(sx,sy);g.lineTo(ex,ey);g.stroke();
+  g.lineWidth=3;g.strokeStyle='#d9480f';g.beginPath();g.moveTo(sx,sy);g.lineTo(ex,ey);g.stroke();
+  g.beginPath();g.moveTo(px,py);g.lineTo(px+dx*16+nx*7,py+dy*16+ny*7);g.lineTo(px+dx*16-nx*7,py+dy*16-ny*7);g.closePath();g.fillStyle='#d9480f';g.fill();g.lineWidth=2;g.strokeStyle='#ffffff';g.stroke();
+  g.beginPath();g.arc(rp.x,rp.y,R,0,2*Math.PI);g.fillStyle='#d9480f';g.fill();g.lineWidth=3;g.strokeStyle='#ffffff';g.stroke();
+  g.fillStyle='#ffffff';g.font='bold '+R+'px sans-serif';g.textAlign='center';g.textBaseline='middle';g.fillText(String(n),rp.x,rp.y+1);
+}
+// Luftbild fürs PDF: Kacheln der gewählten Ebene zusammensetzen und die Pins einzeichnen (F29: Kreis + Strich + Pfeilspitze).
+// Geht nur im Browser; kommt weniger als 60 % der Kacheln an (kein Netz, gesperrt) oder zeigen mehr als 20 % nur flaches Grau (Esri „Map data not yet available“), geht es bis zu drei Zoomstufen tiefer;
+// klappt es nie, gibt es null – das PDF nennt dann nur die Lage als Text.
 async function _fsLuftbildBild(b,ebeneK){
   try{
     if(typeof Image==='undefined'||typeof document==='undefined'||typeof document.createElement!=='function')return null;
     const pk=_fsLbPunkte(b);if(!pk.length)return null;
     const k=(FS_LB_EBENEN.some(e=>e.k===ebeneK)?ebeneK:_fsLbStartEbene(pk[0].lat,pk[0].lon));
-    const a=_fsLbAnsicht(pk,FS_LB_BREITE,FS_LB_HOEHE,19),kl=_fsLbKacheln(a);
-    const c=document.createElement('canvas');c.width=a.W;c.height=a.H;
+    const a0=_fsLbAnsicht(pk,FS_LB_BREITE,FS_LB_HOEHE,19);if(!a0)return null;
+    const c=document.createElement('canvas');c.width=a0.W;c.height=a0.H;
     const g=c.getContext&&c.getContext('2d');if(!g)return null;
-    g.fillStyle='#8a8a8a';g.fillRect(0,0,a.W,a.H);
-    let ok=0;
-    await Promise.all(kl.map(t=>new Promise(res=>{
-      const i=new Image();i.crossOrigin='anonymous';
-      const to=setTimeout(()=>res(),12000);
-      i.onload=()=>{clearTimeout(to);try{g.drawImage(i,Math.round(t.dx),Math.round(t.dy));ok++;}catch(e){}res();};
-      i.onerror=()=>{clearTimeout(to);res();};
-      i.src=_fsLbKachelUrl(k,a.z,t.x,t.y);
-    })));
-    if(ok<kl.length*0.6)return null;
-    pk.forEach(q=>{
-      const w=_fsLbWeltPx(q.lat,q.lon,a.z),px=w.x-(a.cx-a.W/2),py=w.y-(a.cy-a.H/2);
-      g.beginPath();g.arc(px,py,17,0,2*Math.PI);g.fillStyle='rgba(31,95,139,0.95)';g.fill();g.lineWidth=3;g.strokeStyle='#ffffff';g.stroke();
-      g.fillStyle='#ffffff';g.font='bold 19px sans-serif';g.textAlign='center';g.textBaseline='middle';g.fillText(String(q.n),px,py+1);
-    });
+    let a=null,gut=false;
+    const zMin=Math.max(12,a0.z-3);
+    for(let z=a0.z;z>=zMin;z--){
+      a=_fsLbAnsicht(pk,FS_LB_BREITE,FS_LB_HOEHE,z);if(!a)return null;
+      const r=await _fsLbKachelnZeichnen(g,a,k);
+      if(r.ok>=r.n*0.6&&r.leer<=r.n*0.2){gut=true;break;}
+    }
+    if(!gut)return null;
+    pk.forEach(q=>{const w=_fsLbWeltPx(q.lat,q.lon,a.z);_fsLbPinZeichnen(g,w.x-(a.cx-a.W/2),w.y-(a.cy-a.H/2),q.n,q.s.pin,a.W,a.H);});
     const eb=FS_LB_EBENEN.find(e=>e.k===k)||FS_LB_EBENEN[1];
     g.fillStyle='rgba(255,255,255,0.82)';g.fillRect(0,a.H-20,a.W,20);g.fillStyle='#222222';g.font='12px sans-serif';g.textAlign='left';g.textBaseline='middle';g.fillText(eb.quelle,6,a.H-10);
     return {dataUrl:c.toDataURL('image/jpeg',0.86),w:a.W,h:a.H,quelle:eb.quelle,ebene:k};
@@ -3010,17 +3083,37 @@ function _fsLuftbildFenster(bericht,t,s,beiAenderung){
   });
   wahlEbene(bericht.luftbildEbene||gespeichert||_fsLbStartEbene(start&&start.lat,start&&start.lon));
   const gruppe=L.layerGroup().addTo(map);
-  const marker=(q,aktiv)=>L.marker([q.lat,q.lon],{draggable:!!aktiv,icon:L.divIcon({className:'',iconSize:[34,34],iconAnchor:[17,17],html:'<div style="width:34px;height:34px;border-radius:50%;background:'+(aktiv?'#d9480f':'rgba(31,95,139,.95)')+';border:3px solid #fff;color:#fff;font:bold 18px/28px sans-serif;text-align:center;box-shadow:0 1px 6px rgba(0,0,0,.6);">'+q.n+'</div>'})});
+  // F29: Kreis mit Nummer + Strich + Pfeilspitze AUF die Stelle (Spitze am Ziel, die Stelle bleibt frei); der Kreis des gewählten Pins lässt sich ziehen (Richtung/Länge), die Stelle bleibt
+  const pinSvg=(q,aktiv)=>{
+    const r=_fsLbPinRing(q.s.pin),R=FS_LB_PIN_R,rp=_fsLbRingPos(0,0,r.ang,r.len);
+    const dx=Math.cos(r.ang*Math.PI/180),dy=-Math.sin(r.ang*Math.PI/180),nx=-dy,ny=dx,farbe=aktiv?'#d9480f':'#1f5f8b';
+    const sx=rp.x-dx*R,sy=rp.y-dy*R,ex=dx*12,ey=dy*12;
+    const pts=[[0,0],[dx*16+nx*7,dy*16+ny*7],[dx*16-nx*7,dy*16-ny*7]].map(p=>p.join(',')).join(' ');
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="360" height="360" viewBox="-180 -180 360 360" style="overflow:visible;pointer-events:none">'
+      +'<line x1="'+sx+'" y1="'+sy+'" x2="'+ex+'" y2="'+ey+'" stroke="#fff" stroke-width="6" stroke-linecap="round"/><line x1="'+sx+'" y1="'+sy+'" x2="'+ex+'" y2="'+ey+'" stroke="'+farbe+'" stroke-width="3" stroke-linecap="round"/>'
+      +'<polygon points="'+pts+'" fill="'+farbe+'" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>'
+      +'<g data-ring="1" style="pointer-events:all;cursor:'+(aktiv?'grab':'default')+';touch-action:none"><circle cx="'+rp.x+'" cy="'+rp.y+'" r="'+R+'" fill="'+farbe+'" stroke="#fff" stroke-width="3"/><text x="'+rp.x+'" y="'+(rp.y+R*0.35)+'" text-anchor="middle" font-size="'+R+'" font-weight="700" fill="#fff" style="pointer-events:none">'+q.n+'</text></g></svg>';
+  };
+  const marker=(q,aktiv)=>L.marker([q.lat,q.lon],{interactive:false,keyboard:false,icon:L.divIcon({className:'',iconSize:[360,360],iconAnchor:[180,180],html:pinSvg(q,aktiv)})});
   const zeichneMarker=()=>{
     gruppe.clearLayers();
     _fsLbPunkte(bericht).forEach(q=>{
       const aktiv=q.s===s,m=marker(q,aktiv);
-      if(aktiv)m.on('dragend',()=>{const ll=m.getLatLng();s.pin={lat:Math.round(ll.lat*1e6)/1e6,lon:Math.round(ll.lng*1e6)/1e6};scheduleSave();titel();});
       gruppe.addLayer(m);
+      if(aktiv){
+        const el=m.getElement(),ring=el&&el.querySelector('[data-ring]');
+        if(ring)L.DomEvent.on(ring,'pointerdown',ev=>{
+          L.DomEvent.stop(ev);
+          const rc=el.getBoundingClientRect(),cx=rc.left+rc.width/2,cy=rc.top+rc.height/2;
+          const bewege=e2=>{const dx=e2.clientX-cx,dy=e2.clientY-cy;s.pin.len=Math.round(Math.max(30,Math.min(160,Math.hypot(dx,dy))));s.pin.ang=Math.round((Math.atan2(-dy,dx)*180/Math.PI+360)%360);el.innerHTML=pinSvg(Object.assign({},q,{s:s}),true);};
+          const ende=()=>{document.removeEventListener('pointermove',bewege,true);document.removeEventListener('pointerup',ende,true);scheduleSave();zeichneMarker();};
+          document.addEventListener('pointermove',bewege,true);document.addEventListener('pointerup',ende,true);
+        });
+      }
     });
     titel();
   };
-  const setzePin=(la,lo)=>{s.pin={lat:Math.round(la*1e6)/1e6,lon:Math.round(lo*1e6)/1e6};scheduleSave();zeichneMarker();};
+  const setzePin=(la,lo)=>{const alt=_fsVbPinOk(s)?s.pin:null;s.pin={lat:Math.round(la*1e6)/1e6,lon:Math.round(lo*1e6)/1e6};if(alt){if(isFinite(+alt.ang))s.pin.ang=+alt.ang;if(isFinite(+alt.len))s.pin.len=+alt.len;}scheduleSave();zeichneMarker();}; // F29: Kreis-Lage bleibt beim Verschieben der Stelle
   map.on('click',e=>setzePin(e.latlng.lat,e.latlng.lng));
   pinKnopf.onclick=()=>{const c=map.getCenter();setzePin(c.lat,c.lng);}; // F27: Pin in die Bildmitte (Fadenkreuz)
   weg.onclick=()=>{s.pin=null;scheduleSave();zeichneMarker();};
@@ -3060,9 +3153,37 @@ function _fsLuftbildFenster(bericht,t,s,beiAenderung){
     _fsLbGeocode(adr).then(r=>{if(r&&document.getElementById('_fsLbOverlay')===ov){map.setView([r.lat,r.lon],19);if(!bericht.luftbildEbene||bericht.luftbildEbene===ebK)wahlEbene(_fsLbStartEbene(r.lat,r.lon));}else if(!r)toast('Adresse nicht gefunden – bitte auf der Karte zur Stelle zoomen','info',5000);});
   }
 }
-/* F28: Kompassnadel für die Seite (freiwillig). Läuft nur am Handy/Tablet (am PC gibt es keinen Kompass); iPhone fragt einmal nach der Erlaubnis.
-   Gemessen wird, wohin das Gerät zeigt; die Wand zeigt in die Gegenrichtung (_fsWandRichtung). Drinnen weicht der Kompass oft um 20–45° ab – darum nur ein Vorschlag. */
-function _fsNadelBox(s,beiAenderung){
+/* F29: Kompass-Verfolger – merkt sich die letzte Blickrichtung (nur Handy/Tablet), damit ein Foto sie mitnehmen kann. Läuft, solange das Protokoll offen ist.
+   Android startet ohne Nachfrage; das iPhone erst, wenn in der Nadel einmal „Kompass einschalten“ erlaubt wurde. */
+const _fsKompass={grad:null,zeit:0,laeuft:false,h:null};
+function _fsKompassStart(){
+  if(_fsKompass.laeuft||typeof window==='undefined'||typeof window.addEventListener!=='function')return false;
+  const h=ev=>{
+    if(typeof document!=='undefined'&&typeof document.getElementById==='function'&&!document.getElementById('_fsMobOverlay')){_fsKompassStop();return;}
+    let g=null;
+    if(typeof ev.webkitCompassHeading==='number'&&isFinite(ev.webkitCompassHeading))g=Math.round(ev.webkitCompassHeading)%360;
+    else if(ev.absolute===true){const k=_fsKompassRichtung(ev.alpha,ev.beta,ev.gamma);if(k)g=k.grad;}
+    if(g===null)return;
+    _fsKompass.grad=g;_fsKompass.zeit=Date.now();
+  };
+  window.addEventListener('deviceorientationabsolute',h,true);window.addEventListener('deviceorientation',h,true);
+  _fsKompass.h=h;_fsKompass.laeuft=true;return true;
+}
+function _fsKompassStop(){
+  if(_fsKompass.h&&typeof window!=='undefined'){window.removeEventListener('deviceorientationabsolute',_fsKompass.h,true);window.removeEventListener('deviceorientation',_fsKompass.h,true);}
+  _fsKompass.h=null;_fsKompass.laeuft=false;
+}
+// letzte Blickrichtung, wenn sie höchstens maxMs alt ist; sonst null
+function _fsKompassLetzte(maxMs){return (_fsKompass.grad!==null&&Date.now()-_fsKompass.zeit<=(maxMs||5000))?_fsKompass.grad:null;}
+/* F28/F29: Kompassnadel für die Seite (freiwillig, standardmäßig ZUGEKLAPPT – „🧭 Seite messen“). Läuft nur am Handy/Tablet (am PC gibt es keinen Kompass); iPhone fragt einmal nach der Erlaubnis.
+   Gemessen wird, wohin das Gerät zeigt. Draußen zeigt die Wand in die Gegenrichtung (du schaust auf sie zurück), drinnen gilt die Blickrichtung (du schaust zur Außenwand hinaus) – siehe _fsWandRichtung.
+   Drinnen weicht der Kompass oft um 20–45° ab – darum nur ein Vorschlag. */
+const _fsNadelAuf=new WeakSet(); // welche Stellen die Nadel aufgeklappt haben (bleibt beim Neuaufbau des Fensters)
+function _fsNadelBox(s,beiAenderung,typ){
+  const drinnen=(typ!=='aussen');
+  const hulle=document.createElement('div');hulle.setAttribute('data-fs-nadelhuelle','1');
+  const kopfK=document.createElement('button');kopfK.type='button';kopfK.setAttribute('data-fs-nadelkopf','1');
+  kopfK.style.cssText='display:block;width:100%;min-height:40px;margin-top:6px;padding:6px 12px;border-radius:10px;border:1.5px dashed #1f5f8b;background:transparent;color:var(--text);font-size:14px;cursor:pointer;font-family:inherit;text-align:left;';
   const box=document.createElement('div');box.setAttribute('data-fs-nadel','1');
   box.style.cssText='display:flex;gap:12px;align-items:center;margin-top:6px;border:1.5px dashed #1f5f8b;border-radius:10px;padding:8px 10px;background:rgba(31,95,139,.08);';
   const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('width','84');svg.setAttribute('height','84');svg.setAttribute('viewBox','-42 -42 84 84');svg.style.flexShrink='0';
@@ -3074,9 +3195,17 @@ function _fsNadelBox(s,beiAenderung){
   const bUe=document.createElement('button');bUe.type='button';bUe.setAttribute('data-fs-nadelubernehmen','1');bUe.textContent='Seite übernehmen';bUe.disabled=true;bUe.style.cssText=bst+'opacity:.5;';
   const hinweis=document.createElement('div');hinweis.style.cssText='font-size:12px;color:var(--text2);line-height:1.4;';hinweis.textContent='Drinnen kann der Kompass 20–45° falsch zeigen (Stahl, Heizkörper), draußen vor der Wand ist er brauchbarer. Die Seite lässt sich immer von Hand ändern.';
   rechts.append(nt,bAn,bUe,hinweis);box.append(svg,rechts);
+  const zeigeKopf=()=>{const auf=_fsNadelAuf.has(s);kopfK.textContent=(auf?'▾ ':'▸ ')+'🧭 Seite messen (Kompass)';box.style.display=auf?'flex':'none';};
+  kopfK.onclick=()=>{if(_fsNadelAuf.has(s))_fsNadelAuf.delete(s);else _fsNadelAuf.add(s);zeigeKopf();};
   let letzte=null,laeuft=false,kam=false;
   const rose=svg.querySelector('[data-fs-rose]');
-  const zeige=g=>{letzte=g;rose.setAttribute('transform','rotate('+(-g)+')');const r=_fsWandRichtung(g);nt.innerHTML='Du schaust nach <b>'+g+'°</b> ('+_fsBlickWort(g)+'). Die Wand zeigt nach <b>'+Math.round(r.wand)+'°</b> → <b>'+FS_B2_SEITENTEXT[r.seite]+'seite</b>.';bUe.disabled=false;bUe.style.opacity='1';};
+  const zeige=g=>{
+    letzte=g;rose.setAttribute('transform','rotate('+(-g)+')');const r=_fsWandRichtung(g,drinnen);
+    nt.innerHTML=drinnen
+      ?'Du schaust nach <b>'+g+'°</b> ('+_fsBlickWort(g)+'). Die Wand liegt im <b>'+FS_B2_SEITENTEXT[r.seite]+'</b> → <b>'+FS_B2_SEITENTEXT[r.seite]+'seite</b>.'
+      :'Du schaust nach <b>'+g+'°</b> ('+_fsBlickWort(g)+'). Die Wand zeigt nach <b>'+Math.round(r.wand)+'°</b> → <b>'+FS_B2_SEITENTEXT[r.seite]+'seite</b>.';
+    bUe.disabled=false;bUe.style.opacity='1';
+  };
   const h=ev=>{
     if(!box.isConnected){stopp();return;}
     let g=null;
@@ -3096,10 +3225,12 @@ function _fsNadelBox(s,beiAenderung){
     }catch(e){nt.textContent='Der Kompass lässt sich nicht einschalten.';return;}
     laeuft=true;kam=false;bAn.textContent='🧭 Kompass ausschalten';nt.textContent='Kompass sucht …';
     window.addEventListener('deviceorientationabsolute',h,true);window.addEventListener('deviceorientation',h,true);
+    try{_fsKompassStart();}catch(e){} /* F29: derselbe Kompass merkt die Blickrichtung auch für Fotos */
     setTimeout(()=>{if(laeuft&&!kam)nt.textContent='Dieses Gerät meldet keinen Kompass (am PC gibt es keinen). Wähle die Seite von Hand.';},2500);
   };
-  bUe.onclick=()=>{if(letzte===null)return;const r=_fsWandRichtung(letzte);s.seite=r.seite;s.seiteGrad=Math.round(r.wand);scheduleSave();stopp();if(typeof beiAenderung==='function')beiAenderung();};
-  return box;
+  bUe.onclick=()=>{if(letzte===null)return;const r=_fsWandRichtung(letzte,drinnen);s.seite=r.seite;s.seiteGrad=Math.round(r.wand);scheduleSave();stopp();if(typeof beiAenderung==='function')beiAenderung();};
+  hulle.append(kopfK,box);zeigeKopf();
+  return hulle;
 }
 // Frage beim Anlegen einer Besichtigung 2: Innen · Außen · Beides (merkt die letzte Wahl nur als Vorauswahl)
 function _fsB2Teilwahl(cb){
@@ -3654,7 +3785,8 @@ function _fsBgFotoZuordnung(b,f){
   ((b&&b.sektionen)||[]).forEach(sek=>((sek&&sek.items)||[]).forEach(it=>{
     if(it&&it.text&&(it.fotoRefs||[]).some(r=>_fsRefPasst(f,r)))teile.push(it.text);
   }));
-  return teile.join(' · ');
+  const bl=(teile.length&&f&&typeof f.blick==='number'&&isFinite(f.blick))?' – Blick nach '+_fsBlickWort(f.blick):''; // F29: Blickrichtung des Fotos
+  return teile.join(' · ')+bl;
 }
 /* ══ F3: RAUMSKIZZE – PAM zeichnet den Raum von oben ═══════════════════════════════════════════════════════
    Rechteck-Raum mit den Wänden W1–W4 (Art steht dabei), Tür und Fenster je Wand und den Messstellen als nummerierte Punkte an ihrer Wand
