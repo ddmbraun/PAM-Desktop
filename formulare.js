@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F30';
+const PAM_FORMULARE_VERSION='F31';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
@@ -476,7 +476,7 @@ function _fsMiniaturQuelle(f,img){
     }
   }catch(e){console.warn('[Feuchte] Miniatur:',e);}
 }
-function _fsFotoLeiste(bericht,it,label,kompakt){ // kompakt: nur 📷 (+Zahl) neben der Notiz – die Checkliste bleibt kurz
+function _fsFotoLeiste(bericht,it,label,kompakt,vorne){ // kompakt: nur 📷 (+Zahl) neben der Notiz – die Checkliste bleibt kurz
   if(!Array.isArray(it.fotoRefs))it.fotoRefs=[];
   const w=document.createElement('div');w.setAttribute('data-fs-fotoleiste','1');
   w.style.cssText='display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px;';
@@ -508,7 +508,7 @@ function _fsFotoLeiste(bericht,it,label,kompakt){ // kompakt: nur 📷 (+Zahl) n
       w.appendChild(th);
     });
     const b=document.createElement('button');b.type='button';b.setAttribute('data-fs-fotoknopf','1');
-    b.textContent=kompakt?'📷'+(anz?' '+anz:''):'📷 '+label+(anz?' ('+anz+')':'');
+    b.textContent=vorne?'📷 Foto'+(anz?' ('+anz+')':''):kompakt?'📷'+(anz?' '+anz:''):'📷 '+label+(anz?' ('+anz+')':''); /* F31: neben dem Luftbild-Knopf kurz */
     b.title=label;b.setAttribute('aria-label',label+(anz?' ('+anz+')':''));
     b.style.cssText=(kompakt?'flex:0 0 auto;min-width:52px;':'flex:1 1 160px;')+'min-height:44px;padding:8px 12px;border-radius:8px;border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;';
     b.onclick=()=>{
@@ -520,7 +520,8 @@ function _fsFotoLeiste(bericht,it,label,kompakt){ // kompakt: nur 📷 (+Zahl) n
         neu();
       });
     };
-    w.appendChild(b);
+    if(vorne){const kn=document.createElement('div');kn.setAttribute('data-fs-knopfreihe','1');kn.style.cssText='display:flex;gap:8px;flex:1 1 100%;order:-1;';b.style.flex='1 1 120px';b.style.minWidth='0';kn.append(vorne,b);w.appendChild(kn);} /* F31: Luftbild-Knopf und Foto-Knopf in EINER Reihe, Miniaturen darunter */
+    else w.appendChild(b);
   };
   neu();
   return w;
@@ -1464,19 +1465,32 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const sb=document.createElement('div');sb.setAttribute('data-fs-seite',String(si));sb.style.cssText='margin:8px 0 2px;';
       const sl=document.createElement('div');sl.style.cssText='font-size:12px;color:var(--text2);';sl.textContent='Seite (freiwillig) – '+(typ==='aussen'?'welche Richtung zeigt die Wand bzw. Fläche?':'von außen gesehen: wo kommt es herein?');
       const sc=document.createElement('div');sc.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin:4px 0;';
-      FS_B2_SEITEN.concat(FS_B2_SEITENEXTRA).forEach(kk=>{const c=_chip(kk,s.seite===kk,()=>{s.seite=s.seite===kk?'':kk;s.seiteGrad=null;scheduleSave();_neuBauen();});c.setAttribute('data-fs-seiteknopf',kk);c.style.minHeight='38px';c.style.padding='4px 12px';sc.appendChild(c);});
-      sb.append(sl,sc);
-      if(s.seite&&typeof s.seiteGrad==='number')sb.appendChild(_bgInfo('Gemessen mit dem Kompass: '+Math.round(s.seiteGrad)+'° ('+_fsSeiteText(s.seite)+').'));
-      sb.appendChild(_fsNadelBox(s,()=>_neuBauen(),typ)); /* F29: zugeklappt; drinnen/draußen rechnet verschieden */
+      FS_B2_SEITEN.concat(FS_B2_SEITENEXTRA).forEach(kk=>{const c=_chip(kk,s.seite===kk,()=>{s.seite=s.seite===kk?'':kk;s.seiteGrad=null;_fsSeiteAuf.delete(s);scheduleSave();_neuBauen();});c.setAttribute('data-fs-seiteknopf',kk);c.style.minHeight='38px';c.style.padding='4px 12px';sc.appendChild(c);});
+      /* F31: die Seite steht in EINER Zeile („Seite  Südost  [ändern] [🧭]“); die elf Knöpfe klappen erst auf „ändern/wählen“ auf und nach der Wahl wieder zu */
+      const sw=document.createElement('div');sw.setAttribute('data-fs-seitewahlbox','1');sw.style.display=_fsSeiteAuf.has(s)?'':'none';sw.append(sl,sc);
+      const sz=document.createElement('div');sz.setAttribute('data-fs-seitezeile','1');sz.style.cssText='display:flex;align-items:center;gap:8px;min-height:44px;padding:4px 10px;border:1.5px solid var(--border);border-radius:10px;';
+      const szl=document.createElement('span');szl.style.cssText='font-size:12px;color:var(--text2);flex-shrink:0;';szl.textContent='Seite';
+      const szw=document.createElement('span');szw.setAttribute('data-fs-seitewert','1');szw.style.cssText='flex:1;min-width:0;font-size:14px;'+(_fsSeiteText(s.seite)?'font-weight:700;color:var(--text);':'color:var(--text2);');szw.textContent=_fsSeiteZeile(s);
+      const S_MINI='flex-shrink:0;min-height:36px;padding:4px 12px;border-radius:10px;border:1.5px solid #1f5f8b;background:transparent;color:var(--text);font-size:14px;cursor:pointer;font-family:inherit;';
+      const saText=()=>_fsSeiteAuf.has(s)?'▾ zu':(_fsSeiteText(s.seite)?'ändern':'wählen');
+      const sa=document.createElement('button');sa.type='button';sa.setAttribute('data-fs-seiteaendern','1');sa.setAttribute('aria-expanded',_fsSeiteAuf.has(s)?'true':'false');sa.style.cssText=S_MINI;sa.textContent=saText();
+      sa.onclick=()=>{if(_fsSeiteAuf.has(s))_fsSeiteAuf.delete(s);else _fsSeiteAuf.add(s);const a=_fsSeiteAuf.has(s);sw.style.display=a?'':'none';sa.setAttribute('aria-expanded',a?'true':'false');sa.textContent=saText();};
+      const sk=document.createElement('button');sk.type='button';sk.setAttribute('data-fs-seitekompass','1');sk.title='Seite messen (Kompass)';sk.setAttribute('aria-label','Seite messen (Kompass)');sk.style.cssText=S_MINI+(_fsNadelAuf.has(s)?'background:rgba(31,95,139,.22);':'');sk.textContent='🧭';
+      sz.append(szl,szw,sa,sk);sb.append(sz,sw);
+      if(s.seite&&typeof s.seiteGrad==='number')sw.appendChild(_bgInfo('Gemessen mit dem Kompass: '+Math.round(s.seiteGrad)+'° ('+_fsSeiteText(s.seite)+').'));
+      const nb=_fsNadelBox(s,()=>_neuBauen(),typ);sb.appendChild(nb); /* F29: zugeklappt; drinnen/draußen rechnet verschieden */
+      const nk=typeof nb.querySelector==='function'?nb.querySelector('[data-fs-nadelkopf]'):null; /* F31: der 🧭-Knopf in der Seiten-Zeile klappt den Kompass auf und zu, die eigene Kopfzeile des Kompasses entfällt */
+      if(nk){nk.style.display='none';sk.onclick=()=>{nk.click();sk.style.background=_fsNadelAuf.has(s)?'rgba(31,95,139,.22)':'transparent';};}else sk.style.display='none';
       const tx=_bgTextFeld(s.text,'Was siehst du? (tippen)',v=>{s.text=v;},3);tx.style.marginTop='6px';
       const pin=_fsVbPinOk(s);
       const lb=document.createElement('button');lb.type='button';lb.setAttribute('data-fs-lbknopf',String(si));
-      lb.textContent=pin?'📍 Von außen markiert – Luftbild öffnen':'🛰 Von außen markieren'+(typ==='innen'?' – wo kommt es herein? (Luftbild)':' (Luftbild)');
-      lb.style.cssText=S_KNOPF+'display:block;width:100%;min-height:48px;margin-top:8px;border:1.5px solid '+farbe+';background:'+(pin?'rgba(46,125,79,.15)':'rgba(217,72,15,.08)')+';color:var(--text);font-weight:700;';
+      const lbLang=pin?'📍 Von außen markiert – Luftbild öffnen':'🛰 Von außen markieren'+(typ==='innen'?' – wo kommt es herein? (Luftbild)':' (Luftbild)');
+      lb.textContent=pin?'📍 markiert':'🛰 Luftbild';lb.title=lbLang;lb.setAttribute('aria-label',lbLang); /* F31: kurzer Knopf neben „Foto“, der lange Text bleibt als Hinweis */
+      lb.style.cssText=S_KNOPF+'flex:1 1 120px;min-width:0;min-height:44px;border:1.5px solid '+farbe+';background:'+(pin?'rgba(46,125,79,.15)':'rgba(217,72,15,.08)')+';color:var(--text);font-weight:700;';
       lb.onclick=()=>_fsLuftbildFenster(bericht,t,s,()=>_neuBauen());
       const se=_fsSeiteText(s.seite);
-      const fl=_fsFotoLeiste(bericht,{text:_fsVbBezeichnung(bericht,s,si+1)+(se?' – Seite '+se:'')+(String(s.ort||'').trim()?' – '+String(s.ort).trim():''),fotoRefs:s.fotoRefs},'Fotos zu dieser Stelle',false);
-      k.append(kz,ortI,sb,tx,lb,fl);
+      const fl=_fsFotoLeiste(bericht,{text:_fsVbBezeichnung(bericht,s,si+1)+(se?' – Seite '+se:'')+(String(s.ort||'').trim()?' – '+String(s.ort).trim():''),fotoRefs:s.fotoRefs},'Fotos zu dieser Stelle',false,lb);
+      k.append(kz,ortI,sb,tx,fl);
       return k;
     };
     ['innen','aussen'].forEach(typ=>{
@@ -3019,6 +3033,7 @@ async function _fsLuftbildBild(b,ebeneK){
   }catch(e){console.warn('[Luftbild] PDF-Bild:',e);return null;}
 }
 // F27: zuletzt gesehener Ausschnitt des Luftbilds (gilt für das ganze Protokoll) und wo das Fenster beim Öffnen anfängt
+function _fsLbAnsichtGleich(a,b){return _fsLbAnsichtOk(a)&&_fsLbAnsichtOk(b)&&Math.abs(+a.lat-+b.lat)<=2e-6&&Math.abs(+a.lon-+b.lon)<=2e-6&&+a.zoom===+b.zoom;} /* F31: derselbe Ausschnitt (Rundung auf 6 Stellen darf um eine Stelle wackeln) */
 function _fsLbAnsichtOk(a){return !!a&&isFinite(+a.lat)&&isFinite(+a.lon)&&isFinite(+a.zoom)&&+a.zoom>=3&&+a.zoom<=22&&Math.abs(+a.lat)<=90&&Math.abs(+a.lon)<=180;}
 // Reihenfolge: eigener Pin → zuletzt gesehener Ausschnitt → Pin einer anderen Stelle → Standort der Karte (sonst null: dann wird die Adresse gesucht)
 function _fsLbStart(eigene,ansicht,andere,karte){
@@ -3083,10 +3098,10 @@ function _fsLuftbildFenster(bericht,t,s,beiAenderung){
   const wahlEbene=k=>{
     if(!FS_LB_EBENEN.some(e=>e.k===k))k='esri';
     if(lay){try{map.removeLayer(lay);}catch(e){}}
-    lay=_fsLbLeafletEbene(k);lay.addTo(map);ebK=k;bericht.luftbildEbene=k;
+    lay=_fsLbLeafletEbene(k);lay.addTo(map);ebK=k;const ebNeu=bericht.luftbildEbene!==k;bericht.luftbildEbene=k; /* F31: nur speichern, wenn sich die Ebene ändert */
     try{localStorage.setItem('pam_fs_luftbild',k);}catch(e){}
     [...eb.children].forEach(b=>{const an=b.getAttribute('data-fs-lbebene')===k;b.style.background=an?'#fff':'transparent';b.style.color=an?'#1f5f8b':'#fff';b.style.fontWeight=an?'700':'400';});
-    scheduleSave();
+    if(ebNeu)scheduleSave();
   };
   FS_LB_EBENEN.forEach(e=>{
     const b=document.createElement('button');b.type='button';b.textContent=e.t;b.setAttribute('data-fs-lbebene',e.k);
@@ -3118,8 +3133,8 @@ function _fsLuftbildFenster(bericht,t,s,beiAenderung){
           L.DomEvent.stop(ev);
           const rc=el.getBoundingClientRect(),cx=rc.left+rc.width/2,cy=rc.top+rc.height/2;
           const bewege=e2=>{const dx=e2.clientX-cx,dy=e2.clientY-cy;s.pin.len=Math.round(Math.max(30,Math.min(160,Math.hypot(dx,dy))));s.pin.ang=Math.round((Math.atan2(-dy,dx)*180/Math.PI+360)%360);el.innerHTML=pinSvg(Object.assign({},q,{s:s}),true);};
-          const ende=()=>{document.removeEventListener('pointermove',bewege,true);document.removeEventListener('pointerup',ende,true);scheduleSave();zeichneMarker();};
-          document.addEventListener('pointermove',bewege,true);document.addEventListener('pointerup',ende,true);
+          const ende=()=>{document.removeEventListener('pointermove',bewege,true);document.removeEventListener('pointerup',ende,true);document.removeEventListener('pointercancel',ende,true);scheduleSave();zeichneMarker();}; /* F31: auch bei abgebrochener Berührung (pointercancel) */
+          document.addEventListener('pointermove',bewege,true);document.addEventListener('pointerup',ende,true);document.addEventListener('pointercancel',ende,true);
         });
       }
     });
@@ -3152,7 +3167,7 @@ function _fsLuftbildFenster(bericht,t,s,beiAenderung){
     else if(!r)toast('Adresse „'+adr+'“ nicht gefunden','info',5000);
   };
   const zu=()=>{
-    try{const c=map.getCenter();bericht.luftbildAnsicht={lat:Math.round(c.lat*1e6)/1e6,lon:Math.round(c.lng*1e6)/1e6,zoom:map.getZoom()};scheduleSave();}catch(e){} // F27: Ausschnitt merken (auch ohne Pin)
+    try{const c=map.getCenter(),neuA={lat:Math.round(c.lat*1e6)/1e6,lon:Math.round(c.lng*1e6)/1e6,zoom:map.getZoom()};if(!_fsLbAnsichtGleich(bericht.luftbildAnsicht,neuA)){bericht.luftbildAnsicht=neuA;scheduleSave();}}catch(e){} /* F31: nur wenn der Ausschnitt sich geändert hat */ // F27: Ausschnitt merken (auch ohne Pin)
     try{map.remove();}catch(e){}ov.remove();document.removeEventListener('keydown',taste,true);if(typeof beiAenderung==='function')beiAenderung();
   };
   const schliessen=()=>{if(!_fsVbPinOk(s)&&!confirm('Es ist noch kein Pin gesetzt – wirklich schließen?\n\nOhne Pin wird nur der Kartenausschnitt gemerkt.'))return;zu();}; // F27
@@ -3169,6 +3184,10 @@ function _fsLuftbildFenster(bericht,t,s,beiAenderung){
    („▸ Außen – Dach, Stelle 1 · Kehle über dem Wohnzimmer · Seite Süd · 📍 · 📷 2“). Standard: ZU – nur die gerade angelegte/geöffnete Stelle ist offen; „＋ Stelle“ klappt alle anderen zu;
    je Raum/Bereich „alle zu / alle auf“. Hat das Protokoll nur EINE Stelle, ist sie offen. Nur Anzeige (nicht im Protokoll, geht nicht auf andere Geräte), Eingaben bleiben erhalten. */
 const _fsStelleAuf=new WeakSet(),_fsStelleZu=new WeakSet();
+/* F31: bei welchen Stellen die Seiten-Auswahl (elf Knöpfe) gerade aufgeklappt ist – nur Anzeige, nicht im Protokoll */
+const _fsSeiteAuf=new WeakSet();
+/* F31: Text der Seiten-Zeile: „Südost“, mit Kompass „Südost · gemessen 135°“, ohne Seite „keine gewählt (freiwillig)“ */
+function _fsSeiteZeile(s){const t=_fsSeiteText(s&&s.seite);if(!t)return 'keine gewählt (freiwillig)';return t+((s&&typeof s.seiteGrad==='number'&&isFinite(s.seiteGrad))?' · gemessen '+Math.round(s.seiteGrad)+'°':'');}
 function _fsStelleOffen(b,s){const n=(b&&Array.isArray(b.vbStellen))?b.vbStellen.filter(x=>x).length:0;return _fsStelleAuf.has(s)||(n<=1&&!_fsStelleZu.has(s));}
 function _fsStelleSetzen(s,auf){if(!s)return;if(auf){_fsStelleAuf.add(s);_fsStelleZu.delete(s);}else{_fsStelleAuf.delete(s);_fsStelleZu.add(s);}}
 // Eine Zeile für die zugeklappte Stelle: Bezeichnung · Wo (oder Anfang des Textes) · Seite · 📍 (Pin) · 📷 Anzahl Fotos; ganz leer → „noch leer“
@@ -3233,7 +3252,7 @@ function _fsNadelBox(s,beiAenderung,typ){
   const zeige=g=>{
     letzte=g;rose.setAttribute('transform','rotate('+(-g)+')');const r=_fsWandRichtung(g,drinnen);
     nt.innerHTML=drinnen
-      ?'Du schaust nach <b>'+g+'°</b> ('+_fsBlickWort(g)+'). Die Wand liegt im <b>'+FS_B2_SEITENTEXT[r.seite]+'</b> → <b>'+FS_B2_SEITENTEXT[r.seite]+'seite</b>.'
+      ?'Du schaust nach <b>'+g+'°</b> ('+_fsBlickWort(g)+'). Die Wand liegt im <b>'+FS_B2_SEITENTEXT[r.seite]+'en</b> → <b>'+FS_B2_SEITENTEXT[r.seite]+'seite</b>.'
       :'Du schaust nach <b>'+g+'°</b> ('+_fsBlickWort(g)+'). Die Wand zeigt nach <b>'+Math.round(r.wand)+'°</b> → <b>'+FS_B2_SEITENTEXT[r.seite]+'seite</b>.';
     bUe.disabled=false;bUe.style.opacity='1';
   };
