@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F27';
+const PAM_FORMULARE_VERSION='F28';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
@@ -205,7 +205,13 @@ function _fsVervollstaendigen(b){
       if(!Array.isArray(b.vbUmgebung))b.vbUmgebung=[];b.vbUmgebung.forEach(r=>{if(!r)return;if(typeof r.text!=='string')r.text='';if(typeof r.status!=='string')r.status='';if(typeof r.grund!=='string')r.grund='';});
       if(typeof b.meldungStatus!=='string')b.meldungStatus='';if(typeof b.meldungAbw!=='string')b.meldungAbw='';
       if(typeof b.luftbildEbene!=='string')b.luftbildEbene='';if(b.schlank&&typeof b.protName!=='string')b.protName='';
-      if(b.luftbildAnsicht!==undefined&&b.luftbildAnsicht!==null&&!_fsLbAnsichtOk(b.luftbildAnsicht))b.luftbildAnsicht=null; /* F27: zuletzt gesehener Kartenausschnitt */ b.vbStellen.forEach(s=>{if(s&&s.pin!==undefined&&s.pin!==null&&!(isFinite(+s.pin.lat)&&isFinite(+s.pin.lon)))s.pin=null;});} // F22: Eingrenzen · F24: Luftbild-Pin je Stelle
+      if(b.luftbildAnsicht!==undefined&&b.luftbildAnsicht!==null&&!_fsLbAnsichtOk(b.luftbildAnsicht))b.luftbildAnsicht=null; /* F27: zuletzt gesehener Kartenausschnitt */
+      if(b.schlank){ /* F28: Innen/Außen – welche Teile sichtbar sind, je Stelle Typ + Seite, je Umgebungszeile der Bereich */
+        if(typeof b.zeigeInnen!=='boolean')b.zeigeInnen=true;if(typeof b.zeigeAussen!=='boolean')b.zeigeAussen=true;
+        b.vbStellen.forEach(s=>{if(!s)return;if(s.typ!=='innen'&&s.typ!=='aussen')s.typ=(String(s.raum||'').trim()==='Außen')?'aussen':'innen';if(typeof s.seite!=='string')s.seite='';if(typeof s.seiteGrad!=='number'||!isFinite(s.seiteGrad))s.seiteGrad=null;});
+        b.vbUmgebung.forEach(r=>{if(r&&r.bereich!=='aussen')r.bereich='innen';});
+      }
+      b.vbStellen.forEach(s=>{if(s&&s.pin!==undefined&&s.pin!==null&&!(isFinite(+s.pin.lat)&&isFinite(+s.pin.lon)))s.pin=null;});} // F22: Eingrenzen · F24: Luftbild-Pin je Stelle
     if(b.art==='vorab')['versicherung','schadennr','zugang','ansprechpartner','besuchBei','lage'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';}); // F16
   }
   return b;
@@ -651,15 +657,17 @@ async function _fsPdfNachDrive(blob,name,bericht,t){
   }
 }
 
-function _openFeuchteprotokollMobil(existingIdx,art){
+function _openFeuchteprotokollMobil(existingIdx,art,teil){
   const t=currentTask();if(!t)return;
   if(!t.pruefberichte)t.pruefberichte=[];
+  if(art==='besichtigung2'&&typeof existingIdx!=='number'&&!teil){_fsB2Teilwahl(w=>{if(w)_openFeuchteprotokollMobil(undefined,art,w);});return;} // F28: erst fragen: Innen · Außen · Beides
   let bericht;
   if(typeof existingIdx==='number'&&t.pruefberichte[existingIdx]&&t.pruefberichte[existingIdx].vorlage==='feuchte'){
     bericht=t.pruefberichte[existingIdx];
   }else{
     bericht=_fsNeuerBericht(t,art);
     if(typeof _fsBgUmstellen==='function')_fsBgUmstellen(bericht); // F2a: neue Protokolle starten als Begehungsprotokoll
+    if(art==='besichtigung2'){bericht.zeigeInnen=teil!=='aussen';bericht.zeigeAussen=teil!=='innen';} // F28: nur der gewählte Teil ist sichtbar
     if(art==='vorab'||art==='besichtigung2'){ // F16 (F23: auch Besichtigung 2): Anlass aus der Karte vorschlagen; die Bei-Bedarf-Abschnitte (Feststellungen 2–4, Termin, Räume) starten zugeklappt – nur Anzeige, nicht im Protokoll
       try{
         _fsKopfErgaenzen(bericht,t);
@@ -1365,11 +1373,12 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     const vz=document.createElement('div');vz.setAttribute('data-fs-umgvorschlaege','1');
     const fuelleVorschlaege=function(){
       vz.innerHTML='';
-      const vs=_fsVbUmgebungVorschlaege(bericht);
+      const beide=!!bericht.schlank&&_fsB2Sichtbar(bericht,'innen')&&_fsB2Sichtbar(bericht,'aussen');
+      const vs=bericht.schlank?_fsVbUmgebungVorschlaegeB2(bericht):_fsVbUmgebungVorschlaege(bericht).map(v=>({text:v,bereich:'innen'})); // F28: Besichtigung 2 mit Innen/Außen
       if(vs.length){
         const vc=document.createElement('div');vc.style.cssText='display:flex;flex-wrap:wrap;gap:4px;margin:6px 0;';
-        const neuZeile=t=>{bericht.vbUmgebung.push({text:t,status:'',grund:'',stelle:false});};
-        vs.forEach(v=>{const c=document.createElement('button');c.type='button';c.textContent='＋ '+v;c.setAttribute('data-fs-umgvorschlag',v);
+        const neuZeile=v=>{bericht.vbUmgebung.push({text:v.text,bereich:v.bereich,status:'',grund:'',stelle:false});};
+        vs.forEach(v=>{const c=document.createElement('button');c.type='button';c.textContent='＋ '+(beide?(v.bereich==='aussen'?'Außen: ':'Innen: '):'')+v.text;c.setAttribute('data-fs-umgvorschlag',v.text);
           c.style.cssText='padding:4px 9px;min-height:34px;border-radius:14px;font-size:12px;cursor:pointer;font-family:inherit;border:1px dashed var(--border);background:transparent;color:var(--text2);';
           c.onclick=()=>{neuZeile(v);scheduleSave();_neuBauen();};vc.appendChild(c);});
         const alle=document.createElement('button');alle.type='button';alle.textContent='＋ alle '+vs.length+' übernehmen';alle.setAttribute('data-fs-umgalle','1');
@@ -1380,17 +1389,18 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     };
     fuelleVorschlaege();_vbUmgFuellen=fuelleVorschlaege;w.appendChild(vz);
     bericht.vbUmgebung.forEach((r,ri)=>{
+      if(bericht.schlank&&!_fsB2Sichtbar(bericht,r.bereich==='aussen'?'aussen':'innen'))return; /* F28: ausgeblendeter Teil */
       const k=document.createElement('div');k.setAttribute('data-fs-umgzeile',String(ri));
       k.style.cssText='margin:6px 0;padding:8px 10px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg2);';
       const kz=document.createElement('div');kz.style.cssText='display:flex;align-items:center;gap:8px;';
-      const nm=document.createElement('div');nm.style.cssText='flex:1;min-width:0;font-size:14px;font-weight:700;color:var(--text);';nm.textContent=r.text||'(ohne Text)';
+      const nm=document.createElement('div');nm.style.cssText='flex:1;min-width:0;font-size:14px;font-weight:700;color:var(--text);';nm.textContent=(bericht.schlank?(r.bereich==='aussen'?'🌤 ':'🏠 '):'')+(r.text||'(ohne Text)');
       kz.append(nm,_bgXKnopf('Zeile entfernen',()=>{if(r.status&&!confirm('Zeile „'+(r.text||'')+'" entfernen?'))return;bericht.vbUmgebung.splice(ri,1);scheduleSave();_neuBauen();}));
       const wahl=document.createElement('div');wahl.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;';
       [['ok','✓ ohne Auffälligkeit'],['auff','⚠ auffällig']].concat(bericht.schlank?[]:[['nicht','∅ nicht geprüft']]).forEach(x=>{ // F23: Besichtigung 2 nur ✓ / ⚠
         const c=_chip(x[1],r.status===x[0],()=>{
           r.status=r.status===x[0]?'':x[0];
           let tm='';
-          if(r.status==='auff'&&!r.stelle){r.stelle=true;const sn=_fsVbStelleNeu();sn.ort=String(r.text||'').trim();if(bericht.schlank)sn.raum='Umgebung';bericht.vbStellen.push(sn);tm='Neue Stelle angelegt: '+(bericht.schlank?'Umgebung – ':'')+sn.ort;} // F24: bei Besichtigung 2 unter „Umgebung“ einsortiert
+          if(r.status==='auff'&&!r.stelle){r.stelle=true;const sn=_fsVbStelleNeu();sn.ort=String(r.text||'').trim();if(bericht.schlank){sn.typ=(r.bereich==='aussen')?'aussen':'innen';sn.raum=(sn.typ==='aussen')?_fsB2BereichFuerText(sn.ort):'Umgebung';}bericht.vbStellen.push(sn);tm='Neue Stelle angelegt: '+(bericht.schlank?(sn.typ==='aussen'?'Außen – '+sn.raum+' – ':'Umgebung – '):'')+sn.ort;} // F24, F28: Außen-Zeilen kommen nach „Außen“ (Bereich nach dem Text), Innen-Zeilen unter „Umgebung“
           scheduleSave();_neuBauen();if(tm)toast('⚠ '+tm,'info',4500);
         });c.setAttribute('data-fs-umgstatus',x[0]);wahl.appendChild(c);});
       k.append(kz,wahl);
@@ -1401,52 +1411,82 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     const ei=_inp('','Eigene Zeile, z. B. Heizungsrohr im Flur',()=>{},false);ei.setAttribute('data-fs-umgeigen','1');
     const eb=document.createElement('button');eb.type='button';eb.textContent='＋ Zeile';eb.setAttribute('data-fs-umgeigenneu','1');
     eb.style.cssText=S_KNOPF+'min-height:44px;flex-shrink:0;border:1.5px dashed '+FS_FARBE+';background:rgba(31,95,139,.08);color:var(--text);';
-    eb.onclick=()=>{const t=String(ei.value||'').trim();if(!t)return;bericht.vbUmgebung.push({text:t,status:'',grund:'',stelle:false});scheduleSave();_neuBauen();};
+    eb.onclick=()=>{const t=String(ei.value||'').trim();if(!t)return;bericht.vbUmgebung.push({text:t,bereich:(bericht.schlank&&!_fsB2Sichtbar(bericht,'innen'))?'aussen':'innen',status:'',grund:'',stelle:false});scheduleSave();_neuBauen();};
     eg.append(ei,eb);w.appendChild(eg);
     return w;
   }
-  // F24: Besichtigung 2 – Stellen nach RAUM gruppiert: Raum als Überschrift (Knöpfe, änderbar), darunter „Stelle 1, Stelle 2 …“ je Raum;
-  // je Stelle: wo · was siehst du · von außen markieren (Luftbild) · Fotos
+  // F24, F28: Besichtigung 2 – Feststellungen INNEN (Raum als Überschrift) und AUSSEN (Bereich als Überschrift); Haken zum Ein-/Ausblenden; Innen zuerst.
+  // Je Stelle: wo · Seite (freiwillig, mit Kompassnadel) · was siehst du · von außen markieren (Luftbild, groß – auch bei Innen: wo regnet es herein) · Fotos
   function _teilVbStellenB2(){
     if(!Array.isArray(bericht.vbStellen))bericht.vbStellen=[];
     const w=document.createElement('div');w.setAttribute('data-fs-vbstellen','1');w.style.cssText='padding:8px 14px 10px;';
-    w.append(_bgInfo('Wähle den Raum und lege darin die Stellen an: wo · was siehst du · von außen markieren · Foto. Nur Feststellungen, keine Ursache.'));
-    const neueStelle=raum=>{const sn=_fsVbStelleNeu();sn.raum=raum;bericht.vbStellen.push(sn);scheduleSave();_neuBauen();const e=body.querySelector('[data-fs-vbort="'+(bericht.vbStellen.length-1)+'"]');if(e){try{e.scrollIntoView({block:'center'});}catch(_e){}e.focus();}};
-    _fsVbRaumGruppen(bericht).forEach(gr=>{
-      const box=document.createElement('div');box.setAttribute('data-fs-raumgruppe',gr.raum);box.style.cssText='margin:10px 0 4px;';
-      const rk=document.createElement('div');rk.style.cssText='display:flex;align-items:center;gap:8px;padding:2px 0 4px;border-bottom:2px solid '+FS_FARBE+';';
-      const rn=document.createElement('div');rn.style.cssText='flex:1;min-width:0;font-size:16px;font-weight:700;color:var(--text);';rn.textContent=gr.raum||'Ohne Raum';
-      const re=document.createElement('button');re.type='button';re.textContent='✎ Raum umbenennen';re.setAttribute('data-fs-raumumbenennen',gr.raum);
-      re.style.cssText=S_KNOPF+'min-height:36px;padding:4px 10px;font-size:13px;border:1px solid var(--border);background:transparent;color:var(--text2);';
-      re.onclick=()=>{const n=prompt('Neuer Name für „'+(gr.raum||'Ohne Raum')+'“',gr.raum);if(n===null)return;const nn=String(n).trim();gr.stellen.forEach(x=>{x.s.raum=nn;});scheduleSave();_neuBauen();};
-      rk.append(rn,re);box.appendChild(rk);w.appendChild(box);
-      gr.stellen.forEach(({s,si})=>{
-        if(!Array.isArray(s.merkmale))s.merkmale=[];if(!Array.isArray(s.fotoRefs))s.fotoRefs=[];
-        const k=document.createElement('div');k.setAttribute('data-fs-vbstelle',String(si));
-        k.style.cssText='margin:8px 0;padding:8px 10px 10px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg2);';
-        const kz=document.createElement('div');kz.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:6px;';
-        const nr=document.createElement('div');nr.style.cssText='flex:1;font-size:14px;font-weight:700;color:var(--text);';nr.textContent=_fsVbBezeichnung(bericht,s,si+1);
-        kz.append(nr,_bgXKnopf('Stelle entfernen',()=>{if(_fsVbStelleGefuelltS(s)&&!confirm(_fsVbBezeichnung(bericht,s,si+1)+' entfernen? Die Fotos bleiben im Protokoll.'))return;bericht.vbStellen.splice(si,1);scheduleSave();_neuBauen();}));
-        const ortI=_inp(s.ort,'Wo? z. B. Decke, Eckbereich Wand 1 / Wand 2',v=>{s.ort=v;if(_vbUmgFuellen){try{_vbUmgFuellen();}catch(_e){}}},false);ortI.setAttribute('data-fs-vbort',String(si));
-        const tx=_bgTextFeld(s.text,'Was siehst du? (tippen)',v=>{s.text=v;},3);tx.style.marginTop='6px';
-        const lb=document.createElement('button');lb.type='button';lb.setAttribute('data-fs-lbknopf',String(si));
-        lb.textContent=_fsVbPinOk(s)?'📍 Von außen markiert – Luftbild öffnen':'🛰 Von außen markieren (Luftbild)';
-        lb.style.cssText=S_KNOPF+'display:block;width:100%;min-height:44px;margin-top:6px;border:1.5px solid '+FS_FARBE+';background:'+(_fsVbPinOk(s)?'rgba(46,125,79,.15)':'transparent')+';color:var(--text);';
-        lb.onclick=()=>_fsLuftbildFenster(bericht,t,s,()=>_neuBauen());
-        const fl=_fsFotoLeiste(bericht,{text:_fsVbBezeichnung(bericht,s,si+1)+(String(s.ort||'').trim()?' – '+String(s.ort).trim():''),fotoRefs:s.fotoRefs},'Fotos zu dieser Stelle',false);
-        k.append(kz,ortI,tx,lb,fl);box.appendChild(k);
-      });
-      const plus=document.createElement('button');plus.type='button';plus.textContent='＋ Stelle in '+(gr.raum||'diesem Raum');plus.setAttribute('data-fs-stelleinraum',gr.raum);
-      plus.style.cssText=S_KNOPF+'display:block;width:100%;min-height:44px;margin:4px 0;border:1.5px dashed '+FS_FARBE+';background:rgba(31,95,139,.06);color:var(--text);';
-      plus.onclick=()=>neueStelle(gr.raum);box.appendChild(plus);
+    w.append(_bgInfo('Innen oder Außen – und darin die Stellen: wo · Seite (freiwillig) · was siehst du · von außen markieren · Foto. Nur Feststellungen, keine Ursache.'));
+    const hk=document.createElement('div');hk.setAttribute('data-fs-b2haken','1');hk.style.cssText='display:flex;flex-wrap:wrap;gap:16px;padding:2px 0 6px;font-size:15px;';
+    [['innen','🏠 Innen besichtigen','data-fs-b2innen','zeigeInnen','zeigeAussen'],['aussen','🌤 Außen besichtigen','data-fs-b2aussen','zeigeAussen','zeigeInnen']].forEach(x=>{
+      const l=document.createElement('label');l.style.cssText='display:flex;align-items:center;gap:8px;min-height:40px;cursor:pointer;';
+      const c=document.createElement('input');c.type='checkbox';c.checked=bericht[x[3]]!==false;c.setAttribute(x[2],'1');c.style.cssText='width:22px;height:22px;';
+      c.onchange=()=>{if(!c.checked&&bericht[x[4]]===false){c.checked=true;toast('Innen oder Außen bleibt mindestens eins an','info',3500);return;}bericht[x[3]]=c.checked;scheduleSave();_neuBauen();};
+      l.append(c,document.createTextNode(x[1]));hk.appendChild(l);
     });
-    // Neuer Raum: Knöpfe (Standard + Räume der Raumskizze + eigener Name)
-    const lr=document.createElement('div');lr.style.cssText='font-size:13px;color:var(--text2);margin:12px 0 4px;';lr.textContent=bericht.vbStellen.length?'Weiterer Raum – antippen und eine Stelle darin anlegen:':'Raum wählen – dann legst du darin die erste Stelle an:';
-    const rc=document.createElement('div');rc.setAttribute('data-fs-raumwahl','1');rc.style.cssText='display:flex;flex-wrap:wrap;gap:6px;';
-    const namen=FS_VB_RAEUME.slice();(bericht.raeume||[]).forEach(r=>{const n=String((r&&r.name)||'').trim();if(n&&namen.indexOf(n)<0)namen.push(n);});
-    namen.forEach(n=>{const c=_chip('＋ '+n,false,()=>neueStelle(n));c.setAttribute('data-fs-raumneu',n);rc.appendChild(c);});
-    const eig=_chip('＋ anderer Raum',false,()=>{const n=prompt('Name des Raums');if(n&&n.trim())neueStelle(n.trim());});eig.setAttribute('data-fs-raumneuname','1');rc.appendChild(eig);
-    w.append(lr,rc);
+    w.appendChild(hk);
+    const neueStelle=(typ,gruppe)=>{const sn=_fsVbStelleNeu();sn.typ=typ;sn.raum=gruppe;sn.seite='';sn.seiteGrad=null;bericht.vbStellen.push(sn);scheduleSave();_neuBauen();const e=body.querySelector('[data-fs-vbort="'+(bericht.vbStellen.length-1)+'"]');if(e){try{e.scrollIntoView({block:'center'});}catch(_e){}e.focus();}};
+    const stelleKarte=(s,si,typ)=>{
+      if(!Array.isArray(s.merkmale))s.merkmale=[];if(!Array.isArray(s.fotoRefs))s.fotoRefs=[];
+      const farbe=typ==='aussen'?'#d9480f':FS_FARBE;
+      const k=document.createElement('div');k.setAttribute('data-fs-vbstelle',String(si));k.setAttribute('data-fs-typ',typ);
+      k.style.cssText='margin:8px 0;padding:8px 10px 10px;border:1.5px solid '+(typ==='aussen'?'rgba(217,72,15,.55)':'var(--border)')+';border-radius:10px;background:var(--bg2);';
+      const kz=document.createElement('div');kz.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:6px;';
+      const nr=document.createElement('div');nr.style.cssText='flex:1;font-size:14px;font-weight:700;color:var(--text);';nr.textContent=_fsVbBezeichnung(bericht,s,si+1);
+      kz.append(nr,_bgXKnopf('Stelle entfernen',()=>{if(_fsVbStelleGefuelltS(s)&&!confirm(_fsVbBezeichnung(bericht,s,si+1)+' entfernen? Die Fotos bleiben im Protokoll.'))return;bericht.vbStellen.splice(si,1);scheduleSave();_neuBauen();}));
+      const ortI=_inp(s.ort,typ==='aussen'?'Wo? z. B. Kehle über dem Wohnzimmer, linke Ecke':'Wo? z. B. Decke, Eckbereich Wand 1 / Wand 2',v=>{s.ort=v;if(_vbUmgFuellen){try{_vbUmgFuellen();}catch(_e){}}},false);ortI.setAttribute('data-fs-vbort',String(si));
+      // Seite (freiwillig): Himmelsrichtung oder Straßenseite/Hofseite/Giebel; Kompassnadel misst als Vorschlag
+      const sb=document.createElement('div');sb.setAttribute('data-fs-seite',String(si));sb.style.cssText='margin:8px 0 2px;';
+      const sl=document.createElement('div');sl.style.cssText='font-size:12px;color:var(--text2);';sl.textContent='Seite (freiwillig) – '+(typ==='aussen'?'welche Richtung zeigt die Wand bzw. Fläche?':'von außen gesehen: wo kommt es herein?');
+      const sc=document.createElement('div');sc.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin:4px 0;';
+      FS_B2_SEITEN.concat(FS_B2_SEITENEXTRA).forEach(kk=>{const c=_chip(kk,s.seite===kk,()=>{s.seite=s.seite===kk?'':kk;s.seiteGrad=null;scheduleSave();_neuBauen();});c.setAttribute('data-fs-seiteknopf',kk);c.style.minHeight='38px';c.style.padding='4px 12px';sc.appendChild(c);});
+      sb.append(sl,sc);
+      if(s.seite&&typeof s.seiteGrad==='number')sb.appendChild(_bgInfo('Gemessen mit dem Kompass: '+Math.round(s.seiteGrad)+'° ('+_fsSeiteText(s.seite)+').'));
+      sb.appendChild(_fsNadelBox(s,()=>_neuBauen()));
+      const tx=_bgTextFeld(s.text,'Was siehst du? (tippen)',v=>{s.text=v;},3);tx.style.marginTop='6px';
+      const pin=_fsVbPinOk(s);
+      const lb=document.createElement('button');lb.type='button';lb.setAttribute('data-fs-lbknopf',String(si));
+      lb.textContent=pin?'📍 Von außen markiert – Luftbild öffnen':'🛰 Von außen markieren'+(typ==='innen'?' – wo kommt es herein? (Luftbild)':' (Luftbild)');
+      lb.style.cssText=S_KNOPF+'display:block;width:100%;min-height:48px;margin-top:8px;border:1.5px solid '+farbe+';background:'+(pin?'rgba(46,125,79,.15)':'rgba(217,72,15,.08)')+';color:var(--text);font-weight:700;';
+      lb.onclick=()=>_fsLuftbildFenster(bericht,t,s,()=>_neuBauen());
+      const se=_fsSeiteText(s.seite);
+      const fl=_fsFotoLeiste(bericht,{text:_fsVbBezeichnung(bericht,s,si+1)+(se?' – Seite '+se:'')+(String(s.ort||'').trim()?' – '+String(s.ort).trim():''),fotoRefs:s.fotoRefs},'Fotos zu dieser Stelle',false);
+      k.append(kz,ortI,sb,tx,lb,fl);
+      return k;
+    };
+    ['innen','aussen'].forEach(typ=>{
+      if(!_fsB2Sichtbar(bericht,typ))return;
+      const farbe=typ==='aussen'?'#d9480f':FS_FARBE;
+      const sek=document.createElement('div');sek.setAttribute('data-fs-b2teil',typ);
+      const th=document.createElement('div');th.style.cssText='font-size:17px;font-weight:700;color:var(--text);margin:14px 0 4px;padding-bottom:3px;border-bottom:3px solid '+farbe+';';th.textContent=typ==='innen'?'🏠 Innen':'🌤 Außen';
+      sek.appendChild(th);
+      _fsVbRaumGruppen(bericht,typ).forEach(gr=>{
+        const box=document.createElement('div');box.setAttribute('data-fs-raumgruppe',gr.raum);box.setAttribute('data-fs-typ',typ);box.style.cssText='margin:10px 0 4px;';
+        const rk=document.createElement('div');rk.style.cssText='display:flex;align-items:center;gap:8px;padding:2px 0 4px;border-bottom:2px solid '+farbe+';';
+        const rn=document.createElement('div');rn.style.cssText='flex:1;min-width:0;font-size:16px;font-weight:700;color:var(--text);';rn.textContent=gr.raum||(typ==='aussen'?'Außen':'Ohne Raum');
+        const re=document.createElement('button');re.type='button';re.textContent=typ==='aussen'?'✎ Bereich umbenennen':'✎ Raum umbenennen';re.setAttribute('data-fs-raumumbenennen',gr.raum);
+        re.style.cssText=S_KNOPF+'min-height:36px;padding:4px 10px;font-size:13px;border:1px solid var(--border);background:transparent;color:var(--text2);';
+        re.onclick=()=>{const n=prompt('Neuer Name für „'+(gr.raum||'Ohne Raum')+'“',gr.raum);if(n===null)return;const nn=String(n).trim();gr.stellen.forEach(x=>{x.s.raum=nn;});scheduleSave();_neuBauen();};
+        rk.append(rn,re);box.appendChild(rk);sek.appendChild(box);
+        gr.stellen.forEach(({s,si})=>box.appendChild(stelleKarte(s,si,typ)));
+        const plus=document.createElement('button');plus.type='button';plus.textContent='＋ Stelle in '+(gr.raum||(typ==='aussen'?'Außen':'diesem Raum'));plus.setAttribute('data-fs-stelleinraum',gr.raum);
+        plus.style.cssText=S_KNOPF+'display:block;width:100%;min-height:44px;margin:4px 0;border:1.5px dashed '+farbe+';background:rgba(31,95,139,.06);color:var(--text);';
+        plus.onclick=()=>neueStelle(typ,gr.raum);box.appendChild(plus);
+      });
+      const vorhanden=_fsVbRaumGruppen(bericht,typ).length>0;
+      const lr=document.createElement('div');lr.style.cssText='font-size:13px;color:var(--text2);margin:12px 0 4px;';
+      lr.textContent=typ==='innen'?(vorhanden?'Weiterer Raum – antippen und eine Stelle darin anlegen:':'Raum wählen – dann legst du darin die erste Stelle an:'):(vorhanden?'Weiterer Bereich – antippen und eine Stelle darin anlegen:':'Bereich wählen – dann legst du darin die erste Stelle an:');
+      const rc=document.createElement('div');rc.setAttribute(typ==='innen'?'data-fs-raumwahl':'data-fs-bereichwahl','1');rc.style.cssText='display:flex;flex-wrap:wrap;gap:6px;';
+      const namen=(typ==='innen'?FS_B2_RAEUME:FS_B2_BEREICHE).slice();
+      if(typ==='innen')(bericht.raeume||[]).forEach(r=>{const n=String((r&&r.name)||'').trim();if(n&&namen.indexOf(n)<0)namen.push(n);});
+      namen.forEach(n=>{const c=_chip('＋ '+n,false,()=>neueStelle(typ,n));c.setAttribute(typ==='innen'?'data-fs-raumneu':'data-fs-bereichneu',n);rc.appendChild(c);});
+      const eig=_chip(typ==='innen'?'＋ anderer Raum':'＋ anderer Bereich',false,()=>{const n=prompt(typ==='innen'?'Name des Raums':'Name des Bereichs');if(n&&n.trim())neueStelle(typ,n.trim());});eig.setAttribute('data-fs-raumneuname',typ);rc.appendChild(eig);
+      sek.append(lr,rc);w.appendChild(sek);
+    });
     return w;
   }
   // F23: Besichtigung 2 – ein Abschnitt „Feststellungen“: Stellen (wo · was · Fotos) und darunter „Umgebung abgehen“
@@ -2166,6 +2206,8 @@ function _openFeuchteprotokollMobil(existingIdx,art){
   footer.append(pdfBtn,openBtn,shareBtn);
   ov.append(hdr,body,footer);
   document.body.appendChild(ov);
+  /* F28: die Frage „Innen · Außen · Beides“ kommt VOR dem Anlegen; am PC das Fenster schweben lassen und die Liste auffrischen, weil der Aufrufer schon fertig ist */
+  try{if(art==='besichtigung2'&&typeof existingIdx!=='number'){if(typeof _pamFormUeberlagerungPc==='function'&&typeof _fsAmPc==='function'&&_fsAmPc())_pamFormUeberlagerungPc(ov);if(typeof renderPruefberichteDesktop==='function')renderPruefberichteDesktop();}}catch(e){console.warn('[Besichtigung] Start:',e);}
 }
 
 // Rechenzeile unter einer Messstelle – nur Zahlen und feste Texte, deshalb textContent
@@ -2663,7 +2705,7 @@ function _fsVbStelleGefuellt(s){return !!s&&(!!String(s.raum||'').trim()||!!Stri
 // F24: Besichtigung 2 – eine Stelle, die nur einen Raum trägt (gerade angelegt), zählt nicht als ausgefüllt
 function _fsVbPinOk(s){return !!s&&!!s.pin&&isFinite(+s.pin.lat)&&isFinite(+s.pin.lon);}
 function _fsVbStelleGefuelltS(s){return !!s&&(!!String(s.ort||'').trim()||!!String(s.text||'').trim()||(Array.isArray(s.merkmale)&&s.merkmale.length>0)||(Array.isArray(s.fotoRefs)&&s.fotoRefs.length>0)||_fsVbPinOk(s));}
-function _fsVbStellenGefuellt(b){const f=(b&&b.schlank)?_fsVbStelleGefuelltS:_fsVbStelleGefuellt;const out=[];((b&&Array.isArray(b.vbStellen))?b.vbStellen:[]).forEach(s=>{if(f(s))out.push({s,nr:out.length+1});});return out;}
+function _fsVbStellenGefuellt(b){const f=(b&&b.schlank)?_fsVbStelleGefuelltS:_fsVbStelleGefuellt;const out=[];((b&&Array.isArray(b.vbStellen))?b.vbStellen:[]).forEach(s=>{if(f(s)&&_fsB2Sichtbar(b,_fsVbTyp(s)))out.push({s,nr:out.length+1});});return out;} // F28: ausgeblendeter Teil zählt nicht
 // F22: Raum und Bauteil zusammen – „Wohnzimmer, Decke“; steht der Raum schon im Bauteil-Feld (ältere Protokolle), wird er nicht doppelt gesetzt
 function _fsVbOrtVoll(s){
   if(!s)return '';
@@ -2712,13 +2754,31 @@ function _fsVbUmgebungVorschlaege(b){
   _fsVbUmgebungSchluessel(b).forEach(k=>FS_VB_UMGEBUNG[k].forEach(v=>{if(da.indexOf(v.toLowerCase())<0&&out.indexOf(v)<0)out.push(v);}));
   return out;
 }
-function _fsVbUmgebungZeilen(b){return ((b&&Array.isArray(b.vbUmgebung))?b.vbUmgebung:[]).filter(r=>r&&FS_VB_STATUS[r.status]&&String(r.text||'').trim());}
+function _fsVbUmgebungZeilen(b){return ((b&&Array.isArray(b.vbUmgebung))?b.vbUmgebung:[]).filter(r=>r&&FS_VB_STATUS[r.status]&&String(r.text||'').trim()&&_fsB2Sichtbar(b,r.bereich==='aussen'?'aussen':'innen'));} // F28
+// F28: Vorschläge für Besichtigung 2 – INNEN aus den Innen-Stellen (Bauteil), AUSSEN aus den Außen-Stellen (Bereich/Wo); nur sichtbare Teile; Rückgabe [{text,bereich}]
+function _fsVbUmgebungVorschlaegeB2(b){
+  const da=((b&&Array.isArray(b.vbUmgebung))?b.vbUmgebung:[]).map(r=>((r&&r.bereich==='aussen')?'a|':'i|')+String((r&&r.text)||'').trim().toLowerCase());
+  const out=[],add=(text,bereich)=>{const k=(bereich==='aussen'?'a|':'i|')+text.toLowerCase();if(da.indexOf(k)<0&&!out.some(o=>o.bereich===bereich&&o.text===text))out.push({text,bereich});};
+  ((b&&Array.isArray(b.vbStellen))?b.vbStellen:[]).forEach(s=>{
+    if(!_fsVbStelleGefuelltS(s)||!_fsB2Sichtbar(b,_fsVbTyp(s)))return;
+    if(_fsVbTyp(s)==='aussen'){
+      const t=(_fsVbRaumName(s)+' '+String(s.ort||'')).toLowerCase();
+      Object.keys(FS_B2_UMGEBUNG_AUSSEN).forEach(k=>{if(t.indexOf(k.toLowerCase())>=0)FS_B2_UMGEBUNG_AUSSEN[k].forEach(v=>add(v,'aussen'));});
+      if(/kehle|dachrand/.test(t))FS_B2_UMGEBUNG_AUSSEN.Dach.forEach(v=>add(v,'aussen'));
+    }else{
+      const t=_fsVbOrtVoll(s).toLowerCase();
+      Object.keys(FS_VB_UMGEBUNG).forEach(k=>{if(t.indexOf(k.toLowerCase())>=0)FS_VB_UMGEBUNG[k].forEach(v=>add(v,'innen'));});
+      Object.keys(FS_VB_UMGEBUNG_ALIAS).forEach(a=>{if(t.indexOf(a)>=0)FS_VB_UMGEBUNG[FS_VB_UMGEBUNG_ALIAS[a]].forEach(v=>add(v,'innen'));});
+    }
+  });
+  return out;
+}
 // Ergebnis der Eingrenzung als Zeilen (Ansicht UND PDF): leer, wenn nichts erfasst ist
 function _fsVbErgebnisZeilen(b){
   const out=[];
   const st=_fsVbStellenGefuellt(b).map(x=>'Stelle '+x.nr+' ('+(_fsVbOrtVoll(x.s)||'ohne Ort')+')');
   const z=_fsVbUmgebungZeilen(b);
-  const tx=r=>String(r.text).trim();
+  const tx=r=>((b&&b.schlank&&r.bereich==='aussen')?'Außen: ':'')+String(r.text).trim(); // F28
   const ok=z.filter(r=>r.status==='ok').map(tx),auff=z.filter(r=>r.status==='auff').map(tx),nicht=z.filter(r=>r.status==='nicht').map(r=>tx(r)+(String(r.grund||'').trim()?' ('+String(r.grund).trim()+')':''));
   if(st.length&&!(b&&b.schlank))out.push('Schaden zeigt sich an: '+st.join('; ')+'.'); // F23: bei Besichtigung 2 stehen die Stellen gleich darunter
   if(ok.length)out.push('Geprüft, ohne Auffälligkeit: '+ok.join(', ')+'.');
@@ -2737,11 +2797,55 @@ function _fsVbMeldungZeile(b){
 /* F24: BESICHTIGUNG 2 – Raum als Überschrift, Luftbild-Markierung je Stelle (Frank 03.10.2026: „Wohnzimmer, dann Stelle 1, Stelle 2“; „von außen die Stelle kennzeichnen … ich muss das richtige Luftbild auswählen können, mal ist Google besser, mal die anderen“).
    Daten: vbStellen[].raum (wie bisher), vbStellen[].pin={lat,lon}, bericht.luftbildEbene ('th'|'esri'|'google'|'osm' oder ''). Das Luftbild ist Leaflet (steckt in beiden Apps) mit denselben vier Ebenen wie der Dachplan. */
 function _fsVbRaumName(s){return String((s&&s.raum)||'').trim();}
-// Stellen nach Raum gruppiert, in der Reihenfolge des ersten Auftretens; '' = ohne Raum
-function _fsVbRaumGruppen(b){
+/* F28: BESICHTIGUNG 2 – INNEN und AUSSEN (Frank 03.10.2026: „bei Feststellungen müssen wir zwischen innen und außen unterscheiden“; „auch eine Stelle im Wohnzimmer von außen markieren, wenn es hereinregnet“;
+   „wenn ich nur eine Außenansicht mache, kann ich Innen ausblenden“; „Seite freiwillig“; „Innen zuerst“; „beim Anlegen fragen“; „Kompassnadel“).
+   Je Stelle: typ 'innen'|'aussen' (Gruppe = Raum bzw. Bereich in s.raum), seite (N…NW oder Straßenseite/Hofseite/Giebel, freiwillig), seiteGrad (nur wenn mit dem Kompass gemessen).
+   Je Protokoll: zeigeInnen / zeigeAussen (Haken). Ein ausgeblendeter Teil bleibt gespeichert, steht aber nicht im PDF und nicht im Luftbild. */
+const FS_B2_RAEUME=['Wohnzimmer','Schlafzimmer','Kinderzimmer','Küche','Bad','Flur','Treppenhaus','Keller'];
+const FS_B2_BEREICHE=['Dach','Wand','Fassade','Balkon','Terrasse','Hof / Außenanlage','Sockel'];
+const FS_B2_SEITEN=['N','NO','O','SO','S','SW','W','NW'];
+const FS_B2_SEITENTEXT={N:'Nord',NO:'Nordost',O:'Ost',SO:'Südost',S:'Süd',SW:'Südwest',W:'West',NW:'Nordwest'};
+const FS_B2_SEITENEXTRA=['Straßenseite','Hofseite','Giebel'];
+const FS_B2_UMGEBUNG_AUSSEN={
+  Dach:['Kehle','Dachrand','Durchdringungen','Entwässerung','Dämmung'],
+  Wand:['Fassade','Sockel','Fallrohr','Fenster in der Nähe'],
+  Fassade:['Fenster in der Nähe','Fallrohr','Sockel'],
+  Balkon:['Ablauf','Anschluss an die Wand','Brüstung'],
+  Terrasse:['Ablauf','Anschluss an die Wand'],
+  Sockel:['Fallrohr','Geländeanschluss']
+};
+function _fsSeiteText(k){k=String(k||'').trim();return FS_B2_SEITENTEXT[k]||(FS_B2_SEITENEXTRA.indexOf(k)>=0?k:'');}
+// Typ einer Stelle; ältere Besichtigungen (F23–F27) hatten „Außen“ als Raum
+function _fsVbTyp(s){return (s&&s.typ==='aussen')?'aussen':(s&&s.typ==='innen')?'innen':(_fsVbRaumName(s)==='Außen'?'aussen':'innen');}
+function _fsB2Sichtbar(b,typ){return !(b&&b.schlank)||(typ==='aussen'?b.zeigeAussen!==false:b.zeigeInnen!==false);}
+// Die Wand zeigt in die Gegenrichtung der Blickrichtung (du schaust nach Norden → Südseite)
+function _fsWandRichtung(grad){const g=((+grad%360)+360)%360,w=(g+180)%360;return {blick:g,wand:w,seite:FS_B2_SEITEN[Math.round(w/45)%8]};}
+function _fsBlickWort(grad){const g=((+grad%360)+360)%360;return FS_B2_SEITENTEXT[FS_B2_SEITEN[Math.round(g/45)%8]];}
+// Kompass aus den Sensorwinkeln (W3C: alpha, beta, gamma): steht das Gerät aufrecht (über etwa 45°), zeigt die Rückseite (Kamera) die Blickrichtung, liegt es flach, die Oberkante.
+function _fsKompassRichtung(alpha,beta,gamma){
+  if(![alpha,beta,gamma].every(v=>typeof v==='number'&&isFinite(v)))return null;
+  const r=Math.PI/180,a=alpha*r,b=beta*r,g=gamma*r,cA=Math.cos(a),sA=Math.sin(a),cB=Math.cos(b),sB=Math.sin(b),cG=Math.cos(g),sG=Math.sin(g);
+  const aufrecht=Math.abs(sB)>0.7;
+  const x=aufrecht?-(cG*sA*sB+cA*sG):-cB*sA,y=aufrecht?-(sA*sG-cA*cG*sB):cA*cB;
+  let grad=Math.atan2(x,y)/r;if(grad<0)grad+=360;
+  return {grad:Math.round(grad)%360,art:aufrecht?'rueck':'oben'};
+}
+// Bereich außen zu einem Umgebungstext: „Kehle“ → Dach, „Fallrohr“ → Sockel, sonst „Außen“
+function _fsB2BereichFuerText(text){
+  const t=String(text||'').toLowerCase();
+  if(/dach|kehle|durchdring|entwässer|dämm/.test(t))return 'Dach';
+  if(/balkon|brüstung/.test(t))return 'Balkon';
+  if(/terrasse/.test(t))return 'Terrasse';
+  if(/sockel|fallrohr|gelände/.test(t))return 'Sockel';
+  if(/wand|fassade|fenster/.test(t))return 'Wand';
+  return 'Außen';
+}
+// Stellen nach Raum gruppiert, in der Reihenfolge des ersten Auftretens; '' = ohne Raum; mit typ nur die Stellen dieses Typs (Besichtigung 2)
+function _fsVbRaumGruppen(b,typ){
   const out=[],idx={};
   ((b&&Array.isArray(b.vbStellen))?b.vbStellen:[]).forEach((s,si)=>{
     if(!s)return;
+    if(typ&&_fsVbTyp(s)!==typ)return;
     const r=_fsVbRaumName(s);
     if(!Object.prototype.hasOwnProperty.call(idx,r)){idx[r]=out.length;out.push({raum:r,stellen:[]});}
     out[idx[r]].stellen.push({s,si});
@@ -2751,8 +2855,9 @@ function _fsVbRaumGruppen(b){
 // Bezeichnung: Besichtigung 2 → „Wohnzimmer, Stelle 2“ (gezählt je Raum, nur ausgefüllte davor); sonst „Stelle n“
 function _fsVbBezeichnung(b,s,nrGlobal){
   if(!(b&&b.schlank))return 'Stelle '+nrGlobal;
-  const r=_fsVbRaumName(s);let k=1;
-  for(const x of (Array.isArray(b.vbStellen)?b.vbStellen:[])){if(x===s)break;if(x&&_fsVbRaumName(x)===r&&_fsVbStelleGefuelltS(x))k++;}
+  const r=_fsVbRaumName(s),ty=_fsVbTyp(s);let k=1;
+  for(const x of (Array.isArray(b.vbStellen)?b.vbStellen:[])){if(x===s)break;if(x&&_fsVbTyp(x)===ty&&_fsVbRaumName(x)===r&&_fsVbStelleGefuelltS(x))k++;}
+  if(ty==='aussen')return 'Außen'+(r&&r!=='Außen'?' – '+r:'')+', Stelle '+k; // F28
   return (r?r+', ':'')+'Stelle '+k;
 }
 const FS_LB_BREITE=960,FS_LB_HOEHE=640;
@@ -2775,7 +2880,7 @@ function _fsLbWeltPx(lat,lon,z){const n=256*Math.pow(2,z),sn=Math.sin(lat*Math.P
 // Alle gesetzten Pins, nummeriert in der Reihenfolge des PDFs (Raum-Gruppen)
 function _fsLbPunkte(b){
   const out=[];
-  _fsVbRaumGruppen(b).forEach(g=>g.stellen.forEach(x=>{if(_fsVbPinOk(x.s))out.push({n:out.length+1,lat:+x.s.pin.lat,lon:+x.s.pin.lon,s:x.s,label:_fsVbBezeichnung(b,x.s,x.si+1)});}));
+  _fsVbRaumGruppen(b).forEach(g=>g.stellen.forEach(x=>{if(_fsVbPinOk(x.s)&&_fsB2Sichtbar(b,_fsVbTyp(x.s)))out.push({n:out.length+1,lat:+x.s.pin.lat,lon:+x.s.pin.lon,s:x.s,label:_fsVbBezeichnung(b,x.s,x.si+1)});}));
   return out;
 }
 // Ausschnitt, in dem alle Pins mit Rand liegen: höchster Zoom (höchstens zMax), bei dem es passt
@@ -2954,6 +3059,68 @@ function _fsLuftbildFenster(bericht,t,s,beiAenderung){
   if(!start){ // kein Standort an der Karte: Adresse suchen
     _fsLbGeocode(adr).then(r=>{if(r&&document.getElementById('_fsLbOverlay')===ov){map.setView([r.lat,r.lon],19);if(!bericht.luftbildEbene||bericht.luftbildEbene===ebK)wahlEbene(_fsLbStartEbene(r.lat,r.lon));}else if(!r)toast('Adresse nicht gefunden – bitte auf der Karte zur Stelle zoomen','info',5000);});
   }
+}
+/* F28: Kompassnadel für die Seite (freiwillig). Läuft nur am Handy/Tablet (am PC gibt es keinen Kompass); iPhone fragt einmal nach der Erlaubnis.
+   Gemessen wird, wohin das Gerät zeigt; die Wand zeigt in die Gegenrichtung (_fsWandRichtung). Drinnen weicht der Kompass oft um 20–45° ab – darum nur ein Vorschlag. */
+function _fsNadelBox(s,beiAenderung){
+  const box=document.createElement('div');box.setAttribute('data-fs-nadel','1');
+  box.style.cssText='display:flex;gap:12px;align-items:center;margin-top:6px;border:1.5px dashed #1f5f8b;border-radius:10px;padding:8px 10px;background:rgba(31,95,139,.08);';
+  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('width','84');svg.setAttribute('height','84');svg.setAttribute('viewBox','-42 -42 84 84');svg.style.flexShrink='0';
+  svg.innerHTML='<circle r="38" fill="#fff" stroke="#1f5f8b" stroke-width="3"/><g data-fs-rose="1"><text y="-22" text-anchor="middle" font-size="13" font-weight="700" fill="#d9480f">N</text><text x="26" y="5" text-anchor="middle" font-size="11" fill="#555">O</text><text y="31" text-anchor="middle" font-size="11" fill="#555">S</text><text x="-26" y="5" text-anchor="middle" font-size="11" fill="#555">W</text><polygon points="0,-30 5,0 -5,0" fill="#d9480f"/><polygon points="0,30 5,0 -5,0" fill="#999"/></g><path d="M0 -42 L7 -33 L-7 -33Z" fill="#1f5f8b"/>';
+  const rechts=document.createElement('div');rechts.style.cssText='flex:1;min-width:0;font-size:14px;color:var(--text);';
+  const nt=document.createElement('div');nt.setAttribute('data-fs-nadeltext','1');nt.style.marginBottom='6px';nt.textContent='Kompass aus – zum Messen einschalten und das Gerät auf die Wand richten.';
+  const bst='padding:6px 12px;min-height:38px;border-radius:10px;border:1.5px solid #1f5f8b;background:transparent;color:var(--text);font-size:14px;cursor:pointer;font-family:inherit;margin:0 6px 4px 0;';
+  const bAn=document.createElement('button');bAn.type='button';bAn.setAttribute('data-fs-nadelan','1');bAn.textContent='🧭 Kompass einschalten';bAn.style.cssText=bst;
+  const bUe=document.createElement('button');bUe.type='button';bUe.setAttribute('data-fs-nadelubernehmen','1');bUe.textContent='Seite übernehmen';bUe.disabled=true;bUe.style.cssText=bst+'opacity:.5;';
+  const hinweis=document.createElement('div');hinweis.style.cssText='font-size:12px;color:var(--text2);line-height:1.4;';hinweis.textContent='Drinnen kann der Kompass 20–45° falsch zeigen (Stahl, Heizkörper), draußen vor der Wand ist er brauchbarer. Die Seite lässt sich immer von Hand ändern.';
+  rechts.append(nt,bAn,bUe,hinweis);box.append(svg,rechts);
+  let letzte=null,laeuft=false,kam=false;
+  const rose=svg.querySelector('[data-fs-rose]');
+  const zeige=g=>{letzte=g;rose.setAttribute('transform','rotate('+(-g)+')');const r=_fsWandRichtung(g);nt.innerHTML='Du schaust nach <b>'+g+'°</b> ('+_fsBlickWort(g)+'). Die Wand zeigt nach <b>'+Math.round(r.wand)+'°</b> → <b>'+FS_B2_SEITENTEXT[r.seite]+'seite</b>.';bUe.disabled=false;bUe.style.opacity='1';};
+  const h=ev=>{
+    if(!box.isConnected){stopp();return;}
+    let g=null;
+    if(typeof ev.webkitCompassHeading==='number'&&isFinite(ev.webkitCompassHeading))g=Math.round(ev.webkitCompassHeading)%360;
+    else if(ev.absolute===true){const k=_fsKompassRichtung(ev.alpha,ev.beta,ev.gamma);if(k)g=k.grad;}
+    if(g===null)return;
+    kam=true;zeige(g);
+  };
+  const stopp=()=>{window.removeEventListener('deviceorientationabsolute',h,true);window.removeEventListener('deviceorientation',h,true);laeuft=false;bAn.textContent='🧭 Kompass einschalten';};
+  bAn.onclick=async()=>{
+    if(laeuft){stopp();return;}
+    try{
+      if(typeof DeviceOrientationEvent!=='undefined'&&typeof DeviceOrientationEvent.requestPermission==='function'){
+        const r=await DeviceOrientationEvent.requestPermission();
+        if(r!=='granted'){nt.textContent='Der Zugriff auf die Bewegungssensoren wurde nicht erlaubt (iPhone: Einstellungen → Safari).';return;}
+      }
+    }catch(e){nt.textContent='Der Kompass lässt sich nicht einschalten.';return;}
+    laeuft=true;kam=false;bAn.textContent='🧭 Kompass ausschalten';nt.textContent='Kompass sucht …';
+    window.addEventListener('deviceorientationabsolute',h,true);window.addEventListener('deviceorientation',h,true);
+    setTimeout(()=>{if(laeuft&&!kam)nt.textContent='Dieses Gerät meldet keinen Kompass (am PC gibt es keinen). Wähle die Seite von Hand.';},2500);
+  };
+  bUe.onclick=()=>{if(letzte===null)return;const r=_fsWandRichtung(letzte);s.seite=r.seite;s.seiteGrad=Math.round(r.wand);scheduleSave();stopp();if(typeof beiAenderung==='function')beiAenderung();};
+  return box;
+}
+// Frage beim Anlegen einer Besichtigung 2: Innen · Außen · Beides (merkt die letzte Wahl nur als Vorauswahl)
+function _fsB2Teilwahl(cb){
+  const old=document.getElementById('_fsB2Wahl');if(old)old.remove();
+  let letzte='';try{letzte=localStorage.getItem('pam_fs_b2teil')||'';}catch(e){}
+  const ov=document.createElement('div');ov.id='_fsB2Wahl';ov.style.cssText='position:fixed;inset:0;z-index:100002;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;';
+  const box=document.createElement('div');box.style.cssText='background:var(--bg);color:var(--text);border-radius:14px;padding:18px;max-width:420px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.5);';
+  const ti=document.createElement('div');ti.style.cssText='font-size:18px;font-weight:700;margin-bottom:4px;';ti.textContent='Was besichtigst du?';
+  const info=document.createElement('div');info.style.cssText='font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.4;';info.textContent='Nur der gewählte Teil erscheint, damit das Protokoll kurz bleibt. Im Protokoll lässt er sich jederzeit mit den Haken zu- oder abschalten.';
+  const zu=w=>{try{localStorage.setItem('pam_fs_b2teil',w||letzte);}catch(e){}document.removeEventListener('keydown',taste,true);ov.remove();cb(w);};
+  const taste=e=>{if(e.key==='Escape'){e.stopPropagation();document.removeEventListener('keydown',taste,true);ov.remove();cb(null);}};
+  document.addEventListener('keydown',taste,true);
+  box.append(ti,info);
+  [['innen','🏠 Innen'],['aussen','🌤 Außen'],['beides','🏠 🌤 Beides']].forEach(([k,txt])=>{
+    const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute('data-fs-b2wahl',k);
+    b.style.cssText='display:block;width:100%;min-height:54px;margin:8px 0;border-radius:12px;font-size:18px;font-weight:700;cursor:pointer;font-family:inherit;color:var(--text);border:2px solid #1f5f8b;background:'+(letzte===k?'rgba(31,95,139,.22)':'transparent')+';';
+    b.onclick=()=>zu(k);box.appendChild(b);
+  });
+  const ab=document.createElement('button');ab.type='button';ab.textContent='Abbrechen';ab.setAttribute('data-fs-b2wahl','abbruch');ab.style.cssText='display:block;width:100%;min-height:44px;margin-top:6px;border-radius:10px;font-size:15px;cursor:pointer;font-family:inherit;color:var(--text2);border:1px solid var(--border);background:transparent;';
+  ab.onclick=()=>{document.removeEventListener('keydown',taste,true);ov.remove();cb(null);};
+  box.appendChild(ab);ov.appendChild(box);document.body.appendChild(ov);
 }
 function _fsLbLeafletEbene(k){
   const e=FS_LB_EBENEN.find(x=>x.k===k)||FS_LB_EBENEN[1];
@@ -3466,7 +3633,7 @@ function _fsBgMessfensterZeigen(b,tab0){
 // Bildunterschrift im PDF: wozu gehört das Foto – Raum, Wand, Messstelle (mit der gedruckten Nummer), Feststellung
 function _fsBgFotoZuordnung(b,f){
   const teile=[];
-  if(typeof _fsVbStellenGefuellt==='function')_fsVbStellenGefuellt(b).forEach(x=>{if((x.s.fotoRefs||[]).some(r=>_fsRefPasst(f,r))){const o=b.schlank?String(x.s.ort||'').trim():_fsVbOrtVoll(x.s);teile.push(_fsVbBezeichnung(b,x.s,x.nr)+(o?' – '+o:''));}}); // F21, F22, F24
+  if(typeof _fsVbStellenGefuellt==='function')_fsVbStellenGefuellt(b).forEach(x=>{if((x.s.fotoRefs||[]).some(r=>_fsRefPasst(f,r))){const o=b.schlank?String(x.s.ort||'').trim():_fsVbOrtVoll(x.s);teile.push(_fsVbBezeichnung(b,x.s,x.nr)+((b.schlank&&_fsSeiteText(x.s.seite))?' – Seite '+_fsSeiteText(x.s.seite):'')+(o?' – '+o:''));}}); // F21, F22, F24, F28
   ((b&&b.raeume)||[]).forEach(r=>{
     if(!r)return;
     const name=String(r.name||'').trim()||'Raum';
@@ -4137,15 +4304,17 @@ async function _fsMobPdfBg(bericht,task){
         if(sbText){unterTitel('Beschreibung des Schadenbildes');absatz(sbText,{einzug:3,abstand:3});y+=2;}
         if(vbs.length){
           const lbp=bericht.schlank?_fsLbPunkte(bericht):[]; // F24
-          unterTitel(bericht.schlank?'Feststellungen':'Stelle für Stelle');
-          if(bericht.schlank){ // F24: Besichtigung 2 – je Raum „Wohnzimmer, Stelle 1 · Decke: …“
-            const gr=_fsVbRaumGruppen(bericht);
-            gr.forEach(g=>g.stellen.forEach(({s})=>{
-              const x=vbs.find(v=>v.s===s);if(!x)return;
-              const st=_fsVbStelleSatz(Object.assign({},s,{raum:''})),pk=lbp.find(q=>q.s===s);
-              absatz(_fsVbBezeichnung(bericht,s,x.nr)+' · '+(st||'Stelle')+fotoHinweis(s.fotoRefs)+(pk?' – Luftbild Nr. '+pk.n:''),{einzug:3,abstand:1.5});
-            }));
-            y+=3;
+          if(!bericht.schlank)unterTitel('Stelle für Stelle');
+          if(bericht.schlank){ // F24, F28: Besichtigung 2 – „Feststellungen innen“ (je Raum „Wohnzimmer, Stelle 1 · Decke: …“) und „Feststellungen außen“ („Außen – Dach, Stelle 1 · …“); Seite nur, wenn gesetzt
+            ['innen','aussen'].forEach(typ=>{
+              const zeilen=[];
+              _fsVbRaumGruppen(bericht,typ).forEach(g=>g.stellen.forEach(({s})=>{
+                const x=vbs.find(v=>v.s===s);if(!x)return;
+                const st=_fsVbStelleSatz(Object.assign({},s,{raum:''})),pk=lbp.find(q=>q.s===s),se=_fsSeiteText(s.seite);
+                zeilen.push(_fsVbBezeichnung(bericht,s,x.nr)+' · '+(st||'Stelle')+(se?' – Seite '+se:'')+fotoHinweis(s.fotoRefs)+(pk?' – Luftbild Nr. '+pk.n:''));
+              }));
+              if(zeilen.length){unterTitel(typ==='innen'?'Feststellungen innen':'Feststellungen außen');zeilen.forEach(z=>absatz(z,{einzug:3,abstand:1.5}));y+=3;}
+            });
           }else{vbs.forEach(x=>{const st=_fsVbStelleSatz(x.s);absatz(x.nr+' · '+(st||'Stelle')+fotoHinweis(x.s.fotoRefs),{einzug:3,abstand:1.5});});y+=3;}
           if(lbp.length){ // F24: Lage von außen – Luftbild mit den Markierungen (oder, wenn das Bild nicht zu laden ist, die Lage als Text)
             const bild=await _fsLuftbildBild(bericht,bericht.luftbildEbene||'');
