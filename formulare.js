@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F24';
+const PAM_FORMULARE_VERSION='F25';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
@@ -1097,7 +1097,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
       const n=_inp(p.name,'Name',v=>{p.name=v;},false);n.setAttribute('data-fs-person',String(pi));
       const sel=document.createElement('select');sel.style.cssText=S_INP;
       const o0=document.createElement('option');o0.value='';o0.textContent='– Rolle –';sel.appendChild(o0);
-      const rollen=FS_BG_ROLLEN.slice();if(p.rolle&&rollen.indexOf(p.rolle)<0)rollen.push(p.rolle);
+      const rollen=(bericht.schlank?FS_B2_ROLLEN:FS_BG_ROLLEN).slice();if(p.rolle&&rollen.indexOf(p.rolle)<0)rollen.push(p.rolle); // F25: Besichtigung 2 hat eigene Rollen; eine schon eingetragene fremde Rolle bleibt auswählbar
       rollen.forEach(r=>{const o=document.createElement('option');o.value=r;o.textContent=r;sel.appendChild(o);});
       sel.value=p.rolle||'';
       sel.onchange=()=>{p.rolle=sel.value;scheduleSave();_neuBauen();};
@@ -1118,7 +1118,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
       const nm=_fsKontaktName(kx);
       if(!nm||schon.has(nm.toLowerCase())||n>=8)return;
       n++;
-      const rolle=kx.rolle==='mieter'?'Nutzer':(['ag','privatkunde','eigentuemer','hausverwaltung'].indexOf(kx.rolle)>=0?'Vertreter Auftraggeber':'');
+      const rolle=bericht.schlank?(FS_B2_KONTAKTROLLEN[kx.rolle]||''):(kx.rolle==='mieter'?'Nutzer':(['ag','privatkunde','eigentuemer','hausverwaltung'].indexOf(kx.rolle)>=0?'Vertreter Auftraggeber':'')); // F25
       chips.appendChild(_chip('＋ '+nm,false,()=>{bericht.anwesende.push({name:nm,rolle});scheduleSave();_neuBauen();}));
     });
     w.appendChild(chips);
@@ -2498,6 +2498,9 @@ async function _fsMobPdf(bericht,task){
 const FS_BG_TITEL='Begehungsprotokoll';
 const FS_BG_UMFANG='Dieses Protokoll hält den vorgefundenen Zustand und die Messwerte zum Zeitpunkt der Begehung fest. Eine Bewertung der Ursachen und Empfehlungen zur Beseitigung sind nicht Gegenstand dieses Protokolls.';
 const FS_BG_ROLLEN=['Nutzer','Mieter Nachbarkeller','Vertreter Auftraggeber','Aufgenommen von','Sonstige'];
+// F25 (Frank 03.10.2026): Rollen bei „Anwesend“ in Besichtigung 2 – ohne „Nutzer“ und „Mieter Nachbarkeller“, „Vertreter“ statt „Vertreter Auftraggeber"; die Begehungsprotokolle behalten FS_BG_ROLLEN
+const FS_B2_ROLLEN=['Eigentümer','Eigentümer (wohnt vor Ort)','Mieter','Mieterin','Handwerker','Vertreter','Aufgenommen von','Sonstige'];
+const FS_B2_KONTAKTROLLEN={mieter:'Mieter',eigentuemer:'Eigentümer',hausverwaltung:'Vertreter',ag:'Vertreter',privatkunde:'Vertreter',handwerker:'Handwerker'};
 // F2b: die zuklappbaren Abschnitte des Begehungsprotokolls (k = Schlüssel, t = Überschrift, c = Kurzname in der Sprungleiste)
 const FS_BG_BLOECKE=[{k:'auftrag',t:'Auftrag und Umfang',c:'Auftrag'},{k:'termin',t:'Ortstermin',c:'Termin'},{k:'geraete',t:'Messgeräte',c:'Geräte'},{k:'raeume',t:'Räume',c:'Räume'},{k:'fest',t:'Feststellungen vor Ort',c:'Feststellungen'},{k:'angaben',t:'Angaben der Nutzer (nicht selbst festgestellt)',c:'Angaben'},{k:'fazit',t:'Zusammenfassung der Feststellungen',c:'Zusammenfassung'},{k:'fotos',t:'Fotos',c:'Fotos'}];
 const FS_BG_GERAETE={
@@ -2821,12 +2824,16 @@ function _fsLuftbildFenster(bericht,t,s,beiAenderung){
   const eb=document.createElement('div');eb.style.cssText='display:flex;flex-wrap:wrap;gap:6px;width:100%;';
   const info=document.createElement('div');info.style.cssText='width:100%;font-size:12px;color:rgba(255,255,255,.85);';
   info.textContent='Auf die Stelle tippen setzt den Pin. Zoomen: Mausrad oder zwei Finger. Oben das Luftbild wählen – mal ist Google, mal ein anderes deutlicher.';
-  kopf.append(ti,weg,fertig,eb,info);
+  const akt=document.createElement('div');akt.style.cssText='display:flex;flex-wrap:wrap;gap:6px;width:100%;';
+  const aknopf=(txt,attr)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute(attr,'1');b.style.cssText='padding:6px 14px;min-height:38px;border-radius:10px;border:1.5px dashed rgba(255,255,255,.85);background:transparent;color:#fff;font-size:14px;cursor:pointer;font-family:inherit;';return b;};
+  const gps=aknopf('📍 Mein Standort','data-fs-lbgps'),suche=aknopf('🔎 Adresse suchen','data-fs-lbadresse');
+  akt.append(gps,suche);
+  kopf.append(ti,weg,fertig,eb,akt,info);
   const mapEl=document.createElement('div');mapEl.style.cssText='flex:1;min-height:0;';
   ov.append(kopf,mapEl);document.body.appendChild(ov);
   const bez=()=>_fsVbBezeichnung(bericht,s,(bericht.vbStellen||[]).indexOf(s)+1);
   const titel=()=>{ti.textContent='Von außen markieren: '+bez()+(_fsVbPinOk(s)?' · Pin gesetzt':' · noch kein Pin');weg.style.display=_fsVbPinOk(s)?'':'none';};
-  const adr=String((t&&t.adresse)||(bericht.kopf&&bericht.kopf.objektAdresse)||'').trim();
+  const adr=String((bericht.kopf&&bericht.kopf.objektAdresse)||(t&&t.adresse)||'').trim(); // F25: die Adresse im Protokoll zuerst, dann die der Karte
   const eigene=_fsVbPinOk(s)?{lat:+s.pin.lat,lon:+s.pin.lon}:null;
   const andere=_fsLbPunkte(bericht).filter(q=>q.s!==s)[0]||null;
   const karte=(t&&isFinite(+t.lat)&&isFinite(+t.lon)&&(+t.lat||+t.lon))?{lat:+t.lat,lon:+t.lon}:null;
@@ -2862,6 +2869,26 @@ function _fsLuftbildFenster(bericht,t,s,beiAenderung){
   };
   map.on('click',e=>{s.pin={lat:Math.round(e.latlng.lat*1e6)/1e6,lon:Math.round(e.latlng.lng*1e6)/1e6};scheduleSave();zeichneMarker();});
   weg.onclick=()=>{s.pin=null;scheduleSave();zeichneMarker();};
+  // F25: „Mein Standort“ springt zum GPS-Standort des Geräts (blauer Punkt; am PC ungenau), „Adresse suchen“ zur Adresse im Protokoll
+  let gpsMarker=null;
+  gps.onclick=()=>{
+    if(!navigator.geolocation){toast('Dieses Gerät kann den Standort nicht bestimmen','error',4500);return;}
+    gps.disabled=true;gps.textContent='📍 suche …';
+    navigator.geolocation.getCurrentPosition(pos=>{
+      gps.disabled=false;gps.textContent='📍 Mein Standort';
+      const la=pos.coords.latitude,lo=pos.coords.longitude;
+      try{map.setView([la,lo],19);if(gpsMarker)map.removeLayer(gpsMarker);gpsMarker=L.circleMarker([la,lo],{radius:8,color:'#ffffff',weight:3,fillColor:'#1a73e8',fillOpacity:1}).addTo(map);}catch(e){}
+      if(pos.coords.accuracy>50)toast('Standort nur auf etwa '+Math.round(pos.coords.accuracy)+' m genau','info',4500);
+    },()=>{gps.disabled=false;gps.textContent='📍 Mein Standort';toast('Standort nicht verfügbar – bitte den Zugriff auf den Standort erlauben','error',5000);},{enableHighAccuracy:true,timeout:15000,maximumAge:30000});
+  };
+  suche.onclick=async()=>{
+    if(!adr){toast('Im Protokoll und an der Karte steht keine Adresse','info',4000);return;}
+    suche.disabled=true;suche.textContent='🔎 suche …';
+    const r=await _fsLbGeocode(adr);
+    suche.disabled=false;suche.textContent='🔎 Adresse suchen';
+    if(r&&document.getElementById('_fsLbOverlay')===ov)map.setView([r.lat,r.lon],19);
+    else if(!r)toast('Adresse „'+adr+'“ nicht gefunden','info',5000);
+  };
   const zu=()=>{try{map.remove();}catch(e){}ov.remove();document.removeEventListener('keydown',taste,true);if(typeof beiAenderung==='function')beiAenderung();};
   const taste=e=>{if(e.key==='Escape'){e.stopPropagation();zu();}};
   document.addEventListener('keydown',taste,true);
