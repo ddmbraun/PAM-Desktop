@@ -10392,7 +10392,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-03 · #1082'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-03-b1082) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-03 · #1083'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-03-b1083) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -56437,6 +56437,7 @@ function _pamOpenAnrufListe(){
   if(f)f.value='';
   ov.style.display='block';
   try{ _pamFWAnwenden('anruf'); _pamFWInit('anruf'); }catch(e){} // b1082: Lage + Groesse vom letzten Mal
+  _pamAnrufAlleKarten={}; // b1083: übrige Kontakte wieder eingeklappt
   const _eT=document.getElementById('pamAnrufErledigtTage'); // b1035: Zeitraum im Reiter Erledigt wieder auf 7 Tage
   if(_eT)_eT.value='7';
   _pamAnrufRender();
@@ -56452,13 +56453,37 @@ function _pamAnrufKarte(taskId){
   _pamCloseAnrufListe();
   openEditTaskModal(taskId);
 }
+/* b1083: welche Karten der Anrufliste ihre übrigen Kontakte gerade zeigen (nur für diese Sitzung, nichts wird gespeichert). */
+var _pamAnrufAlleKarten={};
+function _pamAnrufAlleToggle(id){
+  id=String(id||''); if(!id)return;
+  _pamAnrufAlleKarten[id]=!_pamAnrufAlleKarten[id];
+  _pamAnrufRender();
+}
+
+/* b1083: Zeit für „✓ Anruf erledigt“ (Wunsch Frank 03.10.2026: „soll die zuletzt gewählt Zeit eingetragen werden“).
+   Bis b1082 stand hier die ZEIT DES KLICKS – wer um 9:00 telefonierte und um 11:00 abhakte, las 11:00. PAM kennt das Gespräch nicht,
+   nur den Klick auf die Nummer (anrufWahlen). Genommen wird die NEUESTE Wahl der ganzen Karte (egal welche Nummer): der zuletzt geführte Anruf.
+   ⛔ Nur wenn sie höchstens 24 Stunden alt ist – wer nach Tagen abhakt, bekäme sonst eine uralte Uhrzeit. Liegt sie in der Zukunft (falsche Geräteuhr) oder fehlt, gilt die Klickzeit.
+   ⛔ KEIN neues Kartenfeld (PAM Mobil kennt PC-Felder nur über _pcOnly): der Name im Reiter „Erledigt“ wird beim Zeichnen aus anrufWahlen gelesen (Wahl mit gleicher ts). */
+function _pamAnrufErledigtZeit(t){
+  const jetzt=new Date(), klick=jetzt.toISOString(), jms=jetzt.getTime();
+  try{
+    const w=(typeof _pamWahlenListe==='function')?_pamWahlenListe(t)[0]:null;
+    if(!w)return klick;
+    const ms=Date.parse(w.ts);
+    if(isNaN(ms)||ms>jms||jms-ms>24*3600*1000)return klick;
+    return String(w.ts);
+  }catch(e){return klick;}
+}
+
 function _pamAnrufErledigt(taskId){
   const t=(typeof findTaskById==='function')?findTaskById(taskId):null;
   if(!t)return;
   t.anrufOffen=false;
   // b1035: Zeitpunkt merken, damit die Karte im Reiter „✓ Erledigt“ steht. Eigenes Kartenfeld wie anrufWahlen:
   // saveTaskData überlagert seit b717, das Feld überlebt also das Speichern der offenen Karte.
-  t.anrufErledigtAm=new Date().toISOString();
+  t.anrufErledigtAm=(typeof _pamAnrufErledigtZeit==='function')?_pamAnrufErledigtZeit(t):new Date().toISOString(); // b1083: Zeit der neuesten Wahl, sonst Klickzeit (typeof: Alt-Prüfungen schneiden diese Funktion allein aus)
   // Karte gerade offen? Dann die zwei Kästchen mitlösen (Kopf + Termine-Zeile), sonst kommt
   // der Haken beim nächsten saveTaskData zurück (b591).
   try{
@@ -56641,8 +56666,14 @@ function _pamAnrufRender(){
       const _fs=_ueber?'background:#FCEBEB;color:#A32D2D;':(_istHeute?'background:#FAEEDA;color:#854F0B;':'background:var(--bg3);color:var(--text2);');
       _faelligChip=' <span class="pam-anruf-faellig" style="margin-left:6px;padding:1px 7px;border-radius:4px;font-weight:600;'+_fs+'">📞 bis '+esc(typeof _tzDatumKurz==='function'?_tzDatumKurz(_fd):_fd)+(_ueber?' · überfällig':(_istHeute?' · heute':''))+'</span>';
     }
+    // b1083: sind in der Karte Kontakte mit dem Haken „📞 Anruf“ markiert, stehen NUR die hier; die übrigen (Hausverwaltung, Eigentümer …) auf Klick.
+    //        Ist keiner markiert, stehen wie bisher alle da – sonst hätte die Karte plötzlich keine Nummer.
+    const _mk=nrn.liste.filter(function(e){return e.markiert;});
+    const _nurMk=_mk.length>0&&_mk.length<nrn.liste.length;
+    const _alleZeigen=!!(typeof _pamAnrufAlleKarten!=='undefined'&&_pamAnrufAlleKarten[String(t.id)]);
+    const _sichtbar=(_nurMk&&!_alleZeigen)?_mk:nrn.liste;
     let pillen='';
-    nrn.liste.forEach(function(e){
+    _sichtbar.forEach(function(e){
       const text=[e.name,e.rolle].filter(Boolean).join(' · ');
       const stil=e.markiert
         ?'background:#185FA5;color:#fff;border:1px solid #185FA5;'
@@ -56662,6 +56693,9 @@ function _pamAnrufRender(){
         +'</span>'
         +'</span>';
     });
+    if(_nurMk){
+      pillen+='<a class="pam-anruf-mehr" href="#" onclick="_pamAnrufAlleToggle(\''+safeId+'\');return false;" title="Die übrigen Kontakte dieser Karte (ohne Haken 📞 Anruf) ein- oder ausblenden" style="align-self:center;font-size:11px;color:#1a56c4;text-decoration:none;">'+(_alleZeigen?'weniger anzeigen':'+ '+(nrn.liste.length-_mk.length)+' weitere Kontakte anzeigen')+'</a>';
+    }
     if(!nrn.liste.length){
       pillen='<span style="font-size:12px;color:#A32D2D;">Keine Telefonnummer hinterlegt, weder im Kontakte-Kasten noch in den Mails.</span>';
     }
@@ -57244,12 +57278,18 @@ function _pamErledigtRender(el,cnt){
   liste.slice(0,MAXK).forEach(function(x){
     const t=x.t,sid=_jsa(String(t.id));
     const wann=(typeof _pamWahlZeit==='function')?_pamWahlZeit(x.ts,false):x.ts;
+    // b1083: ist die Zeit die einer Wahl (nicht die des Klicks), steht dahinter, wer gewählt wurde
+    let _wahlName='';
+    try{
+      const _w=(typeof _pamWahlenListe==='function')?_pamWahlenListe(t).find(function(z){return String(z.ts)===String(x.ts);}):null;
+      if(_w){const _n=String(_w.name||'').trim()||String(_w.nr||'').trim(); if(_n)_wahlName=' · gewählt: '+_n;}
+    }catch(e){}
     const nrn=(typeof _pamAnrufNummern==='function')?_pamAnrufNummern(t).liste:[];
     const wer=nrn.slice(0,4).map(function(e){return [e.name,e.rolle,e.nr].filter(Boolean).join(' · ');}).join('   |   ');
     html+='<div class="pam-erledigt-zeile" style="border-bottom:1px solid var(--border);padding:8px 10px;">'
       +'<div style="font-size:11px;color:var(--text2);">'+esc(x.board)+(t.status?' · '+esc(t.status):'')+'</div>'
       +'<div style="font-size:13px;font-weight:600;color:var(--text);margin:2px 0 4px;">'+esc(t.title||'(kein Titel)')+'</div>'
-      +'<div class="pam-erledigt-am" style="font-size:12px;color:var(--text);margin-bottom:4px;">✓ erledigt '+esc(wann)+'</div>'
+      +'<div class="pam-erledigt-am" style="font-size:12px;color:var(--text);margin-bottom:4px;">✓ erledigt '+esc(wann)+esc(_wahlName)+'</div>'
       +(wer?'<div class="pam-erledigt-wer" style="font-size:11px;color:var(--text2);margin-bottom:6px;">'+esc(wer)+'</div>':'')
       +'<div style="display:flex;gap:6px;flex-wrap:wrap;">'
       +'<button onclick="_pamAnrufKarte(\''+sid+'\')" title="Öffnet die Karte" style="'+knopf+'">📂 Karte öffnen</button>'
