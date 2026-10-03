@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F29';
+const PAM_FORMULARE_VERSION='F30';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
@@ -1445,15 +1445,20 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       l.append(c,document.createTextNode(x[1]));hk.appendChild(l);
     });
     w.appendChild(hk);
-    const neueStelle=(typ,gruppe)=>{const sn=_fsVbStelleNeu();sn.typ=typ;sn.raum=gruppe;sn.seite='';sn.seiteGrad=null;bericht.vbStellen.push(sn);scheduleSave();_neuBauen();const e=body.querySelector('[data-fs-vbort="'+(bericht.vbStellen.length-1)+'"]');if(e){try{e.scrollIntoView({block:'center'});}catch(_e){}e.focus();}};
+    const neueStelle=(typ,gruppe)=>{bericht.vbStellen.forEach(x=>{if(x)_fsStelleSetzen(x,false);});const sn=_fsVbStelleNeu();sn.typ=typ;sn.raum=gruppe;sn.seite='';sn.seiteGrad=null;_fsStelleSetzen(sn,true);bericht.vbStellen.push(sn);scheduleSave();_neuBauen();const e=body.querySelector('[data-fs-vbort="'+(bericht.vbStellen.length-1)+'"]');if(e){try{e.scrollIntoView({block:'center'});}catch(_e){}e.focus();}};
     const stelleKarte=(s,si,typ)=>{
       if(!Array.isArray(s.merkmale))s.merkmale=[];if(!Array.isArray(s.fotoRefs))s.fotoRefs=[];
       const farbe=typ==='aussen'?'#d9480f':FS_FARBE;
       const k=document.createElement('div');k.setAttribute('data-fs-vbstelle',String(si));k.setAttribute('data-fs-typ',typ);
       k.style.cssText='margin:8px 0;padding:8px 10px 10px;border:1.5px solid '+(typ==='aussen'?'rgba(217,72,15,.55)':'var(--border)')+';border-radius:10px;background:var(--bg2);';
-      const kz=document.createElement('div');kz.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:6px;';
-      const nr=document.createElement('div');nr.style.cssText='flex:1;font-size:14px;font-weight:700;color:var(--text);';nr.textContent=_fsVbBezeichnung(bericht,s,si+1);
+      const offen=_fsStelleOffen(bericht,s); /* F30 */
+      const kz=document.createElement('div');kz.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:'+(offen?'6':'0')+'px;';
+      const nr=document.createElement('button');nr.type='button';nr.setAttribute('data-fs-stellekopf',String(si));nr.setAttribute('aria-expanded',offen?'true':'false');
+      nr.style.cssText='flex:1;min-width:0;min-height:40px;text-align:left;font-size:14px;font-weight:700;color:var(--text);background:transparent;border:none;padding:0;cursor:pointer;font-family:inherit;'+(offen?'':'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;');
+      nr.textContent=(offen?'▾ ':'▸ ')+(offen?_fsVbBezeichnung(bericht,s,si+1):_fsStelleKurz(bericht,s,si+1));
+      nr.onclick=()=>{_fsStelleSetzen(s,!offen);_neuBauen();};
       kz.append(nr,_bgXKnopf('Stelle entfernen',()=>{if(_fsVbStelleGefuelltS(s)&&!confirm(_fsVbBezeichnung(bericht,s,si+1)+' entfernen? Die Fotos bleiben im Protokoll.'))return;bericht.vbStellen.splice(si,1);scheduleSave();_neuBauen();}));
+      if(!offen){k.append(kz);return k;} /* F30: zugeklappt = nur die Zeile */
       const ortI=_inp(s.ort,typ==='aussen'?'Wo? z. B. Kehle über dem Wohnzimmer, linke Ecke':'Wo? z. B. Decke, Eckbereich Wand 1 / Wand 2',v=>{s.ort=v;if(_vbUmgFuellen){try{_vbUmgFuellen();}catch(_e){}}},false);ortI.setAttribute('data-fs-vbort',String(si));
       // Seite (freiwillig): Himmelsrichtung oder Straßenseite/Hofseite/Giebel; Kompassnadel misst als Vorschlag
       const sb=document.createElement('div');sb.setAttribute('data-fs-seite',String(si));sb.style.cssText='margin:8px 0 2px;';
@@ -1482,12 +1487,19 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       sek.appendChild(th);
       _fsVbRaumGruppen(bericht,typ).forEach(gr=>{
         const box=document.createElement('div');box.setAttribute('data-fs-raumgruppe',gr.raum);box.setAttribute('data-fs-typ',typ);box.style.cssText='margin:10px 0 4px;';
-        const rk=document.createElement('div');rk.style.cssText='display:flex;align-items:center;gap:8px;padding:2px 0 4px;border-bottom:2px solid '+farbe+';';
+        const rk=document.createElement('div');rk.style.cssText='display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:2px 0 4px;border-bottom:2px solid '+farbe+';';
         const rn=document.createElement('div');rn.style.cssText='flex:1;min-width:0;font-size:16px;font-weight:700;color:var(--text);';rn.textContent=gr.raum||(typ==='aussen'?'Außen':'Ohne Raum');
         const re=document.createElement('button');re.type='button';re.textContent=typ==='aussen'?'✎ Bereich umbenennen':'✎ Raum umbenennen';re.setAttribute('data-fs-raumumbenennen',gr.raum);
         re.style.cssText=S_KNOPF+'min-height:36px;padding:4px 10px;font-size:13px;border:1px solid var(--border);background:transparent;color:var(--text2);';
         re.onclick=()=>{const n=prompt('Neuer Name für „'+(gr.raum||'Ohne Raum')+'“',gr.raum);if(n===null)return;const nn=String(n).trim();gr.stellen.forEach(x=>{x.s.raum=nn;});scheduleSave();_neuBauen();};
-        rk.append(rn,re);box.appendChild(rk);sek.appendChild(box);
+        if(gr.stellen.length>1){ /* F30: alle zuklappen / aufklappen */
+          const anyAuf=gr.stellen.some(x=>_fsStelleOffen(bericht,x.s));
+          const ak=document.createElement('button');ak.type='button';ak.setAttribute('data-fs-gruppealle',gr.raum);ak.textContent=anyAuf?'▾ alle zu':'▸ alle auf';
+          ak.style.cssText=S_KNOPF+'min-height:36px;padding:4px 10px;font-size:13px;border:1px solid var(--border);background:transparent;color:var(--text2);';
+          ak.onclick=()=>{gr.stellen.forEach(x=>_fsStelleSetzen(x.s,!anyAuf));_neuBauen();};
+          rk.append(rn,ak,re);
+        }else rk.append(rn,re);
+        box.appendChild(rk);sek.appendChild(box);
         gr.stellen.forEach(({s,si})=>box.appendChild(stelleKarte(s,si,typ)));
         const plus=document.createElement('button');plus.type='button';plus.textContent='＋ Stelle in '+(gr.raum||(typ==='aussen'?'Außen':'diesem Raum'));plus.setAttribute('data-fs-stelleinraum',gr.raum);
         plus.style.cssText=S_KNOPF+'display:block;width:100%;min-height:44px;margin:4px 0;border:1.5px dashed '+farbe+';background:rgba(31,95,139,.06);color:var(--text);';
@@ -3152,6 +3164,25 @@ function _fsLuftbildFenster(bericht,t,s,beiAenderung){
   if(!start){ // kein Standort an der Karte: Adresse suchen
     _fsLbGeocode(adr).then(r=>{if(r&&document.getElementById('_fsLbOverlay')===ov){map.setView([r.lat,r.lon],19);if(!bericht.luftbildEbene||bericht.luftbildEbene===ebK)wahlEbene(_fsLbStartEbene(r.lat,r.lon));}else if(!r)toast('Adresse nicht gefunden – bitte auf der Karte zur Stelle zoomen','info',5000);});
   }
+}
+/* F30: STELLEN ZUKLAPPEN (Frank 03.10.2026: „das nimmt ganz schön viel Platz weg“ → „bau 1–3 und 6“). Besichtigung 2: jede Stelle lässt sich auf EINE Zeile zuklappen
+   („▸ Außen – Dach, Stelle 1 · Kehle über dem Wohnzimmer · Seite Süd · 📍 · 📷 2“). Standard: ZU – nur die gerade angelegte/geöffnete Stelle ist offen; „＋ Stelle“ klappt alle anderen zu;
+   je Raum/Bereich „alle zu / alle auf“. Hat das Protokoll nur EINE Stelle, ist sie offen. Nur Anzeige (nicht im Protokoll, geht nicht auf andere Geräte), Eingaben bleiben erhalten. */
+const _fsStelleAuf=new WeakSet(),_fsStelleZu=new WeakSet();
+function _fsStelleOffen(b,s){const n=(b&&Array.isArray(b.vbStellen))?b.vbStellen.filter(x=>x).length:0;return _fsStelleAuf.has(s)||(n<=1&&!_fsStelleZu.has(s));}
+function _fsStelleSetzen(s,auf){if(!s)return;if(auf){_fsStelleAuf.add(s);_fsStelleZu.delete(s);}else{_fsStelleAuf.delete(s);_fsStelleZu.add(s);}}
+// Eine Zeile für die zugeklappte Stelle: Bezeichnung · Wo (oder Anfang des Textes) · Seite · 📍 (Pin) · 📷 Anzahl Fotos; ganz leer → „noch leer“
+function _fsStelleKurz(b,s,nr){
+  const kurz=(x,n)=>{x=String(x||'').trim().replace(/\s+/g,' ');return x.length>n?x.slice(0,n-1)+'…':x;};
+  const t=[_fsVbBezeichnung(b,s,nr)];
+  const wo=kurz(s&&s.ort,38),tx=kurz(s&&s.text,38);
+  if(wo)t.push(wo);else if(tx)t.push(tx);
+  const se=_fsSeiteText(s&&s.seite);if(se)t.push('Seite '+se);
+  if(_fsVbPinOk(s))t.push('📍');
+  const nf=((s&&Array.isArray(s.fotoRefs))?s.fotoRefs:[]).filter(r=>((b&&b.fotos)||[]).some(f=>_fsRefPasst(f,r))).length;
+  if(nf)t.push('📷 '+nf);
+  if(t.length===1)t.push('noch leer');
+  return t.join(' · ');
 }
 /* F29: Kompass-Verfolger – merkt sich die letzte Blickrichtung (nur Handy/Tablet), damit ein Foto sie mitnehmen kann. Läuft, solange das Protokoll offen ist.
    Android startet ohne Nachfrage; das iPhone erst, wenn in der Nadel einmal „Kompass einschalten“ erlaubt wurde. */
