@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F21';
+const PAM_FORMULARE_VERSION='F22';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
@@ -201,7 +201,9 @@ function _fsVervollstaendigen(b){
     if(!Array.isArray(b.angaben))b.angaben=[];
     if(b.art==='vorab'&&typeof b.schadenbild!=='string')b.schadenbild=''; // F19: freie Beschreibung des Schadenbildes
     if(b.art==='vorab'&&typeof b.vorgeschichte!=='string')b.vorgeschichte=''; // F20
-    if(b.art==='vorab'){if(!Array.isArray(b.vbStellen))b.vbStellen=[];b.vbStellen.forEach(s=>{if(!s)return;if(!Array.isArray(s.merkmale))s.merkmale=[];if(!Array.isArray(s.fotoRefs))s.fotoRefs=[];if(typeof s.ort!=='string')s.ort='';if(typeof s.text!=='string')s.text='';});} // F21
+    if(b.art==='vorab'){if(!Array.isArray(b.vbStellen))b.vbStellen=[];b.vbStellen.forEach(s=>{if(!s)return;if(!Array.isArray(s.merkmale))s.merkmale=[];if(!Array.isArray(s.fotoRefs))s.fotoRefs=[];if(typeof s.ort!=='string')s.ort='';if(typeof s.text!=='string')s.text='';['raum','messwert','geraet'].forEach(k=>{if(typeof s[k]!=='string')s[k]='';});}); // F21, F22
+      if(!Array.isArray(b.vbUmgebung))b.vbUmgebung=[];b.vbUmgebung.forEach(r=>{if(!r)return;if(typeof r.text!=='string')r.text='';if(typeof r.status!=='string')r.status='';if(typeof r.grund!=='string')r.grund='';});
+      if(typeof b.meldungStatus!=='string')b.meldungStatus='';if(typeof b.meldungAbw!=='string')b.meldungAbw='';} // F22: Eingrenzen
     if(b.art==='vorab')['versicherung','schadennr','zugang','ansprechpartner','besuchBei','lage'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';}); // F16
   }
   return b;
@@ -725,7 +727,7 @@ function _openFeuchteprotokollMobil(existingIdx,art){
   function _neuBauen(){
     const sc=body.scrollTop;
     body.innerHTML='';
-    if(_fsIstVorab(bericht)&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_bgBlock('vorort',_teilVorOrtVb),_bgBlock('karte',_teilKarteVb),_bgBlock('versich',_teilVersichVb),_bgBlock('fest',_teilChecklistenBg,'Feststellungen vor Ort'),...(_vbAltAngaben()?[_bgBlock('angaben',_teilAngabenBg,'Angaben der Nutzer (nicht selbst festgestellt)')]:[]),_bgBlock('termin',_teilTerminBg),_bgBlock('raeume',_teilRaeumeBg,'Räume')); // F20: „Vor Ort“ offen, der Rest zugeklappt
+    if(_fsIstVorab(bericht)&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_bgBlock('vorort',_teilVorOrtVb),_bgBlock('gemeldet',_teilGemeldetVb),_bgBlock('stellen',_teilStellenBlockVb),_bgBlock('umgebung',_teilUmgebungVb),_bgBlock('ergebnis',_teilErgebnisVb),_bgBlock('fotos',_teilFotos,'Fotos'),_bgBlock('vorgeschichte',_teilVorgeschichteVb),_bgBlock('karte',_teilKarteVb),_bgBlock('versich',_teilVersichVb),_bgBlock('fest',_teilChecklistenBg,'Feststellungen vor Ort'),...(_vbAltAngaben()?[_bgBlock('angaben',_teilAngabenBg,'Angaben der Nutzer (nicht selbst festgestellt)')]:[]),_bgBlock('termin',_teilTerminBg),_bgBlock('raeume',_teilRaeumeBg,'Räume')); // F20: „Vor Ort“ offen, der Rest zugeklappt
     else if(bericht.fassung==='begehung'&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_teilKopfBg(),_bgBlock('raeume',_teilRaeumeBg,'Räume'),_bgBlock('fest',_teilChecklistenBg,'Feststellungen vor Ort'),_bgBlock('angaben',_teilAngabenBg,'Angaben der Nutzer (nicht selbst festgestellt)'),_bgBlock('fazit',_teilZusammenfassungBg,'Zusammenfassung der Feststellungen'),_bgBlock('fotos',_teilFotos,'Fotos')); // F2b: zuklappbar, Leiste oben
     else{
       body.append(_teilErgebnis(),_teilKopf(),_teilRaeume(),_teilStellen(),_teilChecklisten(),_teilBewertung(),_teilFotos()); // v294: Ergebnis oben
@@ -1139,7 +1141,12 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     const kf=bericht.kopf||{};
     const gef=arr=>arr.filter(x=>String(kf[x]||'').trim()).length;
     const plural=(n,e,m)=>n+' '+(n===1?e:m);
-    if(k==='vorort'){const nf=(bericht.fotos||[]).length;return [String(bericht.datum||'').trim(),_fsBgZeitText(kf),String(bericht.schadenbild||'').trim()?'Beschreibung':'',(typeof _fsVbStellenGefuellt==='function'&&_fsVbStellenGefuellt(bericht).length)?plural(_fsVbStellenGefuellt(bericht).length,'Stelle','Stellen'):'',nf?plural(nf,'Foto','Fotos'):''].filter(Boolean).join(' · ')||'noch leer';} // F20, F21
+    if(k==='vorort')return [String(bericht.datum||'').trim(),_fsBgZeitText(kf),String(kf.besuchBei||'').trim()].filter(Boolean).join(' · ')||'noch leer'; // F20, F22: Stellen und Fotos haben eigene Abschnitte
+    if(k==='gemeldet')return bericht.meldungStatus==='wie'?'wie gemeldet':bericht.meldungStatus==='abw'?'abweichend':(String(kf.anlass||'').trim()?'noch nicht bestätigt':'noch leer'); // F22
+    if(k==='stellen'){const n=_fsVbStellenGefuellt(bericht).length;return n?plural(n,'Stelle','Stellen'):'noch keine Stelle';} // F22
+    if(k==='umgebung'){const z=(bericht.vbUmgebung||[]).filter(r=>r&&String(r.text||'').trim()),g=_fsVbUmgebungZeilen(bericht).length;return z.length?g+' von '+z.length+' abgegangen':'noch leer';} // F22
+    if(k==='ergebnis'){const n=_fsVbErgebnisZeilen(bericht).length;return n?'entsteht aus Stellen und Umgebung':'noch leer';} // F22
+    if(k==='vorgeschichte')return String(bericht.vorgeschichte||'').trim()?'ausgefüllt':'noch leer'; // F22
     if(k==='karte')return gef(['auftraggeber','objektAdresse','auftragNr','nutzer'])+' von 4 ausgefüllt'; // F20
     if(k==='versich')return gef(['versicherung','schadennr','zugang','ansprechpartner'])+' von 4 ausgefüllt'; // F20
     if(k==='auftrag')return _fsIstVorab(bericht)?gef(['auftraggeber','objektAdresse','auftragNr','nutzer','anlass','versicherung','schadennr','zugang','ansprechpartner','besuchBei','lage'])+' von 11 ausgefüllt':gef(['auftraggeber','objektAdresse','auftragNr','nutzer','anlass'])+' von 5 ausgefüllt';
@@ -1260,29 +1267,48 @@ function _openFeuchteprotokollMobil(existingIdx,art){
       datRow.append(dl,_inp(bericht.datum,'TT.MM.JJJJ',v=>{bericht.datum=v;},false));
       w.append(datRow,_feld('Beginn','beginn','hh:mm'),_feld('Ende','ende','hh:mm'));
       }
-    w.appendChild(_feld('Anlass','anlass','z. B. Meldung des Mieters über …'));
-    if(String(bericht.schadenbild||'').trim()){ // F19 (seit F21 nur noch, wenn schon Text da ist – neue Protokolle beschreiben Stelle für Stelle): in eigenen Worten beschreiben
-      const sbk=document.createElement('div');sbk.setAttribute('data-fs-schadenbild','1');sbk.style.cssText='padding:8px 14px 4px;border-top:1px solid var(--border);';
+    return w;
+  }
+  // F22: „Gemeldet und vorgefunden“ – der Satz aus der Meldung (Anlass) und ob es so vorgefunden wurde
+  function _teilGemeldetVb(){
+    const w=document.createElement('div');w.setAttribute('data-fs-gemeldet','1');
+    w.appendChild(_feld('Anlass','anlass','z. B. Schaden an der Decke im Wohnzimmer'));
+    const wi=_bgInfo('So wurde der Schaden gemeldet. Bestätige, ob du es so vorgefunden hast – nur Feststellung, keine Ursache.');w.appendChild(wi);
+    const wahl=document.createElement('div');wahl.style.cssText='display:flex;flex-wrap:wrap;gap:6px;padding:4px 14px 8px;';
+    [['wie','✓ wie gemeldet vorgefunden'],['abw','≠ abweichend vorgefunden']].forEach(x=>{
+      const c=_chip(x[1],bericht.meldungStatus===x[0],()=>{bericht.meldungStatus=bericht.meldungStatus===x[0]?'':x[0];scheduleSave();_neuBauen();});
+      c.setAttribute('data-fs-meldung',x[0]);wahl.appendChild(c);});
+    w.appendChild(wahl);
+    if(bericht.meldungStatus==='abw'){
+      const ab=document.createElement('div');ab.style.cssText='padding:0 14px 10px;';
+      ab.appendChild(_bgTextFeld(bericht.meldungAbw,'Was war anders, z. B. nicht im Wohnzimmer, sondern im Flur …',v=>{bericht.meldungAbw=v;},2));
+      w.appendChild(ab);
+    }
+    return w;
+  }
+  // F22: Abschnitt „Stelle für Stelle“ (früher Teil von „Vor Ort“); Beschreibung des Schadenbildes nur noch, wenn in einem älteren Protokoll schon Text steht
+  function _teilStellenBlockVb(){
+    const w=document.createElement('div');
+    if(String(bericht.schadenbild||'').trim()){ // F19 (seit F21 nur noch, wenn schon Text da ist)
+      const sbk=document.createElement('div');sbk.setAttribute('data-fs-schadenbild','1');sbk.style.cssText='padding:8px 14px 4px;';
       const sbl=document.createElement('div');sbl.style.cssText='font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px;';sbl.textContent='Beschreibung des Schadenbildes';
       sbk.append(sbl,_bgInfo('Schreibe in eigenen Worten, was du siehst und misst – nur Feststellungen, keine Ursache. Steht im PDF vor den Einzelpunkten.'),_bgTextFeld(bericht.schadenbild,'z. B. Am Balkon steht Wasser, der Ablauf ist mit Laub verstopft …',v=>{bericht.schadenbild=v;},6));
       w.appendChild(sbk);
     }
-    w.appendChild(_teilVbStellen()); // F21
-    w.appendChild(_teilFotos());
-    { // F20: Vorgeschichte als EIN Textfeld (statt fünf Fragen)
-      const vg=document.createElement('div');vg.setAttribute('data-fs-vorgeschichte','1');vg.style.cssText='padding:8px 14px 12px;border-top:1px solid var(--border);';
-      const vl=document.createElement('div');vl.style.cssText='font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px;';vl.textContent='Vorgeschichte laut Auftraggeber';
-      vg.append(vl,_bgInfo('Was Auftraggeber oder Nutzer berichten – nicht selbst festgestellt: seit wann, was ist passiert, frühere Schäden, bisherige Maßnahmen.'),_bgTextFeld(bericht.vorgeschichte,'z. B. Seit zwei Wochen nach jedem Regen …',v=>{bericht.vorgeschichte=v;},4));
-      w.appendChild(vg);
-    }
+    w.appendChild(_teilVbStellen());
     return w;
   }
-  // F21: Feststellungen Stelle für Stelle – wo · was (Knöpfe) · Einzelheiten · Fotos
+  function _teilVorgeschichteVb(){ // F20 (F22: eigener Abschnitt): Vorgeschichte als EIN Textfeld
+    const vg=document.createElement('div');vg.setAttribute('data-fs-vorgeschichte','1');vg.style.cssText='padding:8px 14px 12px;';
+    vg.append(_bgInfo('Was Auftraggeber oder Nutzer berichten – nicht selbst festgestellt: seit wann, was ist passiert, frühere Schäden, bisherige Maßnahmen.'),_bgTextFeld(bericht.vorgeschichte,'z. B. Seit zwei Wochen nach jedem Regen …',v=>{bericht.vorgeschichte=v;},4));
+    return vg;
+  }
+  // F21: Feststellungen Stelle für Stelle – F22: Raum · Bauteil · was (Knöpfe) · Einzelheiten · Messwert · Fotos
   function _teilVbStellen(){
     if(!Array.isArray(bericht.vbStellen))bericht.vbStellen=[];
-    const w=document.createElement('div');w.setAttribute('data-fs-vbstellen','1');w.style.cssText='padding:8px 14px 10px;border-top:1px solid var(--border);';
-    const h=document.createElement('div');h.style.cssText='font-size:14px;font-weight:700;color:var(--text);margin-bottom:2px;';h.textContent='Feststellungen – Stelle für Stelle';
-    w.append(h,_bgInfo('Für jede Stelle: wo · was siehst du (antippen) · Einzelheiten · Foto. Nur Feststellungen, keine Ursache.'));
+    const w=document.createElement('div');w.setAttribute('data-fs-vbstellen','1');w.style.cssText='padding:8px 14px 10px;';
+    w.append(_bgInfo('Für jede Stelle: Raum · Bauteil · was siehst du (antippen) · Einzelheiten · Messwert · Foto. Nur Feststellungen, keine Ursache.'));
+    const lab=t=>{const d=document.createElement('div');d.style.cssText='font-size:12px;color:var(--text2);margin:6px 0 2px;';d.textContent=t;return d;};
     bericht.vbStellen.forEach((s,si)=>{
       if(!Array.isArray(s.merkmale))s.merkmale=[];if(!Array.isArray(s.fotoRefs))s.fotoRefs=[];
       const k=document.createElement('div');k.setAttribute('data-fs-vbstelle',String(si));
@@ -1290,7 +1316,14 @@ function _openFeuchteprotokollMobil(existingIdx,art){
       const kz=document.createElement('div');kz.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:6px;';
       const nr=document.createElement('div');nr.style.cssText='flex:1;font-size:14px;font-weight:700;color:var(--text);';nr.textContent='Stelle '+(si+1);
       kz.append(nr,_bgXKnopf('Stelle entfernen',()=>{if(_fsVbStelleGefuellt(s)&&!confirm('Stelle '+(si+1)+' entfernen? Die Fotos bleiben im Protokoll.'))return;bericht.vbStellen.splice(si,1);scheduleSave();_neuBauen();}));
-      const ortI=_inp(s.ort,'Wo? z. B. Wohnzimmer, Decke',v=>{s.ort=v;},false);ortI.setAttribute('data-fs-vbort',String(si));
+      // Raum (aus der Standardliste und den Räumen der Raumskizze)
+      const cur=String(s.raum||'').trim();
+      const rn=FS_VB_RAEUME.slice();(bericht.raeume||[]).forEach(r=>{const n=String((r&&r.name)||'').trim();if(n&&rn.indexOf(n)<0)rn.push(n);});if(cur&&rn.indexOf(cur)<0)rn.push(cur);
+      const rc=document.createElement('div');rc.setAttribute('data-fs-vbraeume',String(si));rc.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 4px;';
+      rn.forEach(n=>{const c=_chip(n,cur===n,()=>{s.raum=cur===n?'':n;scheduleSave();_neuBauen();});c.setAttribute('data-fs-vbraum',n);rc.appendChild(c);});
+      const eig=_chip('＋ anderer Raum',false,()=>{const n=prompt('Name des Raums');if(n&&n.trim()){s.raum=n.trim();scheduleSave();_neuBauen();}});eig.setAttribute('data-fs-vbraumneu','1');rc.appendChild(eig);
+      // Bauteil
+      const ortI=_inp(s.ort,'Bauteil / Ort, z. B. Decke, an der Kehle',v=>{s.ort=v;},false);ortI.setAttribute('data-fs-vbort',String(si));
       const oc=document.createElement('div');oc.style.cssText='display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 4px;';
       FS_VB_ORTE.forEach(o=>{const c=document.createElement('button');c.type='button';c.textContent='＋ '+o;c.setAttribute('data-fs-vbortvorschlag',o);
         c.style.cssText='padding:4px 9px;min-height:34px;border-radius:14px;font-size:12px;cursor:pointer;font-family:inherit;border:1px dashed var(--border);background:transparent;color:var(--text2);';
@@ -1298,13 +1331,70 @@ function _openFeuchteprotokollMobil(existingIdx,art){
       const mc=document.createElement('div');mc.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;';
       FS_VB_MERKMALE.forEach(m=>{const an=s.merkmale.indexOf(m)>=0;const c=_chip(m,an,()=>{const i=s.merkmale.indexOf(m);if(i>=0)s.merkmale.splice(i,1);else s.merkmale.push(m);scheduleSave();_neuBauen();});c.setAttribute('data-fs-vbmerkmal',m);mc.appendChild(c);});
       const tx=_bgTextFeld(s.text,'Einzelheiten, z. B. ca. 40 x 60 cm, Rand bräunlich …',v=>{s.text=v;},2);
-      const fl=_fsFotoLeiste(bericht,{text:'Stelle '+(si+1)+(String(s.ort||'').trim()?', '+String(s.ort).trim():''),fotoRefs:s.fotoRefs},'Fotos zu dieser Stelle',false);
-      k.append(kz,ortI,oc,mc,tx,fl);w.appendChild(k);
+      // Messwert (optional)
+      const mg=document.createElement('div');mg.style.cssText='display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px;margin:6px 0;';
+      const mwI=_inp(s.messwert,'Messwert, z. B. 62 Digits',v=>{s.messwert=v;},false);mwI.setAttribute('data-fs-vbmesswert',String(si));
+      const geI=_inp(s.geraet,'Gerät, z. B. Trotec BM31WP',v=>{s.geraet=v;},false);geI.setAttribute('data-fs-vbgeraet',String(si));
+      mg.append(mwI,geI);
+      const fl=_fsFotoLeiste(bericht,{text:'Stelle '+(si+1)+(_fsVbOrtVoll(s)?', '+_fsVbOrtVoll(s):''),fotoRefs:s.fotoRefs},'Fotos zu dieser Stelle',false);
+      k.append(kz,lab('Raum'),rc,lab('Bauteil / Ort'),ortI,oc,lab('Was siehst du?'),mc,tx,lab('Messwert (optional)'),mg,fl);w.appendChild(k);
     });
     const add=document.createElement('button');add.type='button';add.textContent='＋ Stelle';add.setAttribute('data-fs-vbstelleneu','1');
     add.style.cssText=S_KNOPF+'display:block;width:100%;min-height:48px;margin-top:6px;border:1.5px dashed '+FS_FARBE+';background:rgba(31,95,139,.08);color:var(--text);';
     add.onclick=()=>{bericht.vbStellen.push(_fsVbStelleNeu());scheduleSave();_neuBauen();const e=body.querySelector('[data-fs-vbort="'+(bericht.vbStellen.length-1)+'"]');if(e){try{e.scrollIntoView({block:'center'});}catch(_e){}e.focus();}};
     w.appendChild(add);
+    return w;
+  }
+  // F22: Umgebung abgehen – Vorschläge nach dem Bauteil der Stellen; je Zeile ✓ ohne Auffälligkeit · ⚠ auffällig (legt eine Stelle an) · ∅ nicht geprüft
+  function _teilUmgebungVb(){
+    if(!Array.isArray(bericht.vbUmgebung))bericht.vbUmgebung=[];
+    const w=document.createElement('div');w.setAttribute('data-fs-umgebung','1');w.style.cssText='padding:8px 14px 10px;';
+    w.appendChild(_bgInfo('Gehe die Umgebung der Stelle ab und halte fest, was du geprüft hast: ✓ ohne Auffälligkeit · ⚠ auffällig (legt eine neue Stelle an) · ∅ nicht geprüft. Nur Feststellungen, keine Ursache.'));
+    const vs=_fsVbUmgebungVorschlaege(bericht);
+    if(vs.length){
+      const vc=document.createElement('div');vc.style.cssText='display:flex;flex-wrap:wrap;gap:4px;margin:6px 0;';
+      const neuZeile=t=>{bericht.vbUmgebung.push({text:t,status:'',grund:'',stelle:false});};
+      vs.forEach(v=>{const c=document.createElement('button');c.type='button';c.textContent='＋ '+v;c.setAttribute('data-fs-umgvorschlag',v);
+        c.style.cssText='padding:4px 9px;min-height:34px;border-radius:14px;font-size:12px;cursor:pointer;font-family:inherit;border:1px dashed var(--border);background:transparent;color:var(--text2);';
+        c.onclick=()=>{neuZeile(v);scheduleSave();_neuBauen();};vc.appendChild(c);});
+      const alle=document.createElement('button');alle.type='button';alle.textContent='＋ alle '+vs.length+' übernehmen';alle.setAttribute('data-fs-umgalle','1');
+      alle.style.cssText='padding:4px 10px;min-height:34px;border-radius:14px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;border:1.5px solid '+FS_FARBE+';background:rgba(31,95,139,.1);color:var(--text);';
+      alle.onclick=()=>{vs.forEach(neuZeile);scheduleSave();_neuBauen();};vc.appendChild(alle);
+      w.appendChild(vc);
+    }else if(!bericht.vbUmgebung.length)w.appendChild(_bgInfo('Vorschläge erscheinen, sobald bei einer Stelle ein Bauteil steht (z. B. Decke, Wand, Dach).'));
+    bericht.vbUmgebung.forEach((r,ri)=>{
+      const k=document.createElement('div');k.setAttribute('data-fs-umgzeile',String(ri));
+      k.style.cssText='margin:6px 0;padding:8px 10px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg2);';
+      const kz=document.createElement('div');kz.style.cssText='display:flex;align-items:center;gap:8px;';
+      const nm=document.createElement('div');nm.style.cssText='flex:1;min-width:0;font-size:14px;font-weight:700;color:var(--text);';nm.textContent=r.text||'(ohne Text)';
+      kz.append(nm,_bgXKnopf('Zeile entfernen',()=>{if(r.status&&!confirm('Zeile „'+(r.text||'')+'" entfernen?'))return;bericht.vbUmgebung.splice(ri,1);scheduleSave();_neuBauen();}));
+      const wahl=document.createElement('div');wahl.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;';
+      [['ok','✓ ohne Auffälligkeit'],['auff','⚠ auffällig'],['nicht','∅ nicht geprüft']].forEach(x=>{
+        const c=_chip(x[1],r.status===x[0],()=>{
+          r.status=r.status===x[0]?'':x[0];
+          let tm='';
+          if(r.status==='auff'&&!r.stelle){r.stelle=true;const sn=_fsVbStelleNeu();sn.ort=String(r.text||'').trim();bericht.vbStellen.push(sn);tm='Neue Stelle '+bericht.vbStellen.length+' angelegt: '+sn.ort;}
+          scheduleSave();_neuBauen();if(tm)toast('⚠ '+tm,'info',4500);
+        });c.setAttribute('data-fs-umgstatus',x[0]);wahl.appendChild(c);});
+      k.append(kz,wahl);
+      if(r.status==='nicht'){const g=_inp(r.grund,'Grund, z. B. Wohnung nicht zugänglich',v=>{r.grund=v;},false);g.setAttribute('data-fs-umggrund',String(ri));g.style.marginTop='6px';k.appendChild(g);}
+      w.appendChild(k);
+    });
+    const eg=document.createElement('div');eg.style.cssText='display:flex;gap:6px;margin-top:8px;';
+    const ei=_inp('','Eigene Zeile, z. B. Heizungsrohr im Flur',()=>{},false);ei.setAttribute('data-fs-umgeigen','1');
+    const eb=document.createElement('button');eb.type='button';eb.textContent='＋ Zeile';eb.setAttribute('data-fs-umgeigenneu','1');
+    eb.style.cssText=S_KNOPF+'min-height:44px;flex-shrink:0;border:1.5px dashed '+FS_FARBE+';background:rgba(31,95,139,.08);color:var(--text);';
+    eb.onclick=()=>{const t=String(ei.value||'').trim();if(!t)return;bericht.vbUmgebung.push({text:t,status:'',grund:'',stelle:false});scheduleSave();_neuBauen();};
+    eg.append(ei,eb);w.appendChild(eg);
+    return w;
+  }
+  // F22: Ergebnis der Eingrenzung – entsteht von selbst, nichts auszufüllen; steht so im PDF
+  function _teilErgebnisVb(){
+    const w=document.createElement('div');w.setAttribute('data-fs-eingrenzung','1');w.style.cssText='padding:8px 14px 10px;';
+    const mz=_fsVbMeldungZeile(bericht),ez=_fsVbErgebnisZeilen(bericht);
+    if(!mz&&!ez.length){w.appendChild(_bgInfo('Noch nichts erfasst. Das Ergebnis entsteht von selbst aus „Gemeldet“, den Stellen und der Umgebung.'));return w;}
+    w.appendChild(_bgInfo('Entsteht von selbst aus Stellen und Umgebung – so steht es im PDF.'));
+    [mz].concat(ez).filter(Boolean).forEach(z=>{const d=document.createElement('div');d.style.cssText='font-size:14px;color:var(--text);margin:4px 0;';d.textContent=z;w.appendChild(d);});
     return w;
   }
   function _teilKarteVb(){ // F20: kommt aus der Karte – nur zur Kontrolle
@@ -1577,6 +1667,10 @@ function _openFeuchteprotokollMobil(existingIdx,art){
     else if(_bgRaumTab==='skizze')w.appendChild(_teilSkizzeBg(_bgRaumSel));
     else if(_bgRaumTab==='messplan')w.appendChild(_teilMessplanBg(_bgRaumSel));
     else w.appendChild(_bgRaumKlima(r,_bgRaumSel));
+    const loe=document.createElement('button');loe.type='button';loe.textContent='🗑 Raum löschen';loe.setAttribute('data-fs-raumloeschen','1'); // F22: beschriftet statt nur ✕ in der Klima-Zeile
+    loe.style.cssText=S_KNOPF+'display:block;margin:12px 14px;min-height:44px;border:1.5px solid var(--red);background:transparent;color:var(--red);';
+    loe.onclick=()=>{if(!confirm('Raum „'+(String(r.name||'').trim()||'ohne Namen')+'" mit allen Wänden entfernen?'))return;bericht.raeume.splice(_bgRaumSel,1);_bgRaumSel=null;scheduleSave();_neuBauen();};
+    w.appendChild(loe);
     return w;
   }
   // Der Abschnitt „Räume“: Raumliste oder Raum-Seite
@@ -2422,8 +2516,8 @@ const FS_BG_WOHNUNG_ANGABEN=[
    Weggelassen (Franks Wahl): Umfang der Schadenaufnahme · Aufwandsschätzung · Hinweistext „unverbindlich". Keine Ampel, keine Ursache, keine Empfehlung.
    ⛔ Datei ist öffentlich: nur Sätze und Programm, nie Namen. Texte, die ins PDF gehen: nur Zeichen der PDF-Schrift. */
 const FS_VB_TITEL='Vorabbesichtigung';
-const FS_VB_BLOECKE=[{k:'vorort',t:'Vor Ort',c:'Vor Ort'},{k:'karte',t:'Kartendaten (aus der Karte)',c:'Karte'},{k:'versich',t:'Versicherung, Zugang, Ansprechpartner',c:'Versicherung'},{k:'fest',t:'Einzelpunkte zum Antippen',c:'Einzelpunkte'},{k:'angaben',t:'Vorgeschichte – Fragen (frühere Fassung)',c:'Fragen'},{k:'termin',t:'Termin und Wetter',c:'Wetter'},{k:'raeume',t:'Raumskizze',c:'Skizze'}]; // F20
-const FS_VB_STANDARD_ZU=['karte','versich','fest','angaben','termin','raeume']; // F20: starten zugeklappt, Aufklappen merkt sich das Gerät („a:…“)
+const FS_VB_BLOECKE=[{k:'vorort',t:'Vor Ort',c:'Vor Ort'},{k:'gemeldet',t:'Gemeldet und vorgefunden',c:'Gemeldet'},{k:'stellen',t:'Feststellungen – Stelle für Stelle',c:'Stellen'},{k:'umgebung',t:'Umgebung abgehen (Eingrenzen)',c:'Umgebung'},{k:'ergebnis',t:'Ergebnis der Eingrenzung',c:'Ergebnis'},{k:'fotos',t:'Fotos',c:'Fotos'},{k:'vorgeschichte',t:'Vorgeschichte laut Auftraggeber',c:'Vorgeschichte'},{k:'karte',t:'Kartendaten (aus der Karte)',c:'Karte'},{k:'versich',t:'Versicherung, Zugang, Ansprechpartner',c:'Versicherung'},{k:'fest',t:'Einzelpunkte zum Antippen',c:'Einzelpunkte'},{k:'angaben',t:'Vorgeschichte – Fragen (frühere Fassung)',c:'Fragen'},{k:'termin',t:'Termin und Wetter',c:'Wetter'},{k:'raeume',t:'Raumskizze',c:'Skizze'}]; // F20
+const FS_VB_STANDARD_ZU=['vorort','gemeldet','stellen','umgebung','ergebnis','fotos','vorgeschichte','karte','versich','fest','angaben','termin','raeume']; // F20, F22 (Frank: „alle immer zugeklappt“): alle Abschnitte starten zugeklappt, Aufklappen merkt sich das Gerät je Protokoll („a:…“)
 const FS_VB_SEKTIONEN=[
   {titel:'Schadenbild',items:[
     {k:'V1.1',q:'Sichtbarer Schaden',ok:'Zum Zeitpunkt der Besichtigung war kein Schaden sichtbar.',m:'Sichtbarer Schaden: {}.',mo:'Ein Schaden war sichtbar.',h:'Art des Schadens'},
@@ -2463,16 +2557,79 @@ function _fsIstVorab(b){return !!b&&b.fassung==='begehung'&&b.art==='vorab';}
    bericht.vbStellen=[{ort, merkmale:[…], text, fotoRefs:[…]}]. Merkmale sind kurze Feststellungen zum Antippen, keine Ursache. PDF: „1 · Ort: Merkmale – Text (Foto 1, 2)“. */
 const FS_VB_MERKMALE=['nass','feucht','Schimmel','Verfärbung / Fleck','Riss','Putz / Farbe abgeplatzt','Laub / verstopft','undicht / offen','Geruch'];
 const FS_VB_ORTE=['Decke','Wand','Boden','Fenster','Dach','Kehle','Dachrand','Balkon','Ablauf','Fassade','Keller'];
-function _fsVbStelleNeu(){return {ort:'',merkmale:[],text:'',fotoRefs:[]};}
-function _fsVbStelleGefuellt(s){return !!s&&(!!String(s.ort||'').trim()||(Array.isArray(s.merkmale)&&s.merkmale.length>0)||!!String(s.text||'').trim()||(Array.isArray(s.fotoRefs)&&s.fotoRefs.length>0));}
+function _fsVbStelleNeu(){return {raum:'',ort:'',merkmale:[],text:'',messwert:'',geraet:'',fotoRefs:[]};} // F22: Raum, Messwert, Gerät
+function _fsVbStelleGefuellt(s){return !!s&&(!!String(s.raum||'').trim()||!!String(s.messwert||'').trim()||!!String(s.ort||'').trim()||(Array.isArray(s.merkmale)&&s.merkmale.length>0)||!!String(s.text||'').trim()||(Array.isArray(s.fotoRefs)&&s.fotoRefs.length>0));}
 // Nur ausgefüllte Stellen, fortlaufend nummeriert (so stehen sie im PDF und in der Foto-Unterschrift)
 function _fsVbStellenGefuellt(b){const out=[];((b&&Array.isArray(b.vbStellen))?b.vbStellen:[]).forEach(s=>{if(_fsVbStelleGefuellt(s))out.push({s,nr:out.length+1});});return out;}
+// F22: Raum und Bauteil zusammen – „Wohnzimmer, Decke“; steht der Raum schon im Bauteil-Feld (ältere Protokolle), wird er nicht doppelt gesetzt
+function _fsVbOrtVoll(s){
+  if(!s)return '';
+  const r=String(s.raum||'').trim(),o=String(s.ort||'').trim();
+  if(!r)return o;
+  if(o&&o.toLowerCase().indexOf(r.toLowerCase())===0)return o;
+  return o?r+', '+o:r;
+}
 // Satz einer Stelle ohne Nummer und ohne Foto-Hinweis: „Wohnzimmer, Decke: nass, Verfärbung / Fleck – ca. 40 x 60 cm“
 function _fsVbStelleSatz(s){
   if(!s)return '';
-  const ort=String(s.ort||'').trim(),mm=(Array.isArray(s.merkmale)?s.merkmale:[]).map(x=>String(x||'').trim()).filter(Boolean).join(', '),tx=String(s.text||'').trim().replace(/\s+/g,' ');
-  const was=[mm,tx].filter(Boolean).join(' – ');
+  const ort=_fsVbOrtVoll(s),mm=(Array.isArray(s.merkmale)?s.merkmale:[]).map(x=>String(x||'').trim()).filter(Boolean).join(', '),tx=String(s.text||'').trim().replace(/\s+/g,' ');
+  const mw=String(s.messwert||'').trim(),ge=String(s.geraet||'').trim(),mwTxt=mw?'Messwert '+mw+(ge?' ('+ge+')':''):''; // F22
+  const was=[mm,tx,mwTxt].filter(Boolean).join(' – ');
   return ort?(was?ort+': '+was:ort):was;
+}
+/* F22: EINGRENZEN (Frank 03.10.2026: aus der Meldung „Schaden an der Decke im Wohnzimmer“ den Schaden aufnehmen, eingrenzen und nachvollziehbar machen).
+   Ablauf: Meldung (kopf.anlass) → wie gemeldet / abweichend (meldungStatus, meldungAbw) → Stellen (mit Raum, Bauteil, Messwert) → Umgebung abgehen
+   (vbUmgebung=[{text, status:'ok'|'auff'|'nicht', grund, stelle}]) → Ergebnis der Eingrenzung (entsteht von selbst). Nur Feststellungen: gesehen, geprüft, nicht geprüft. */
+const FS_VB_RAEUME=['Wohnzimmer','Schlafzimmer','Kinderzimmer','Küche','Bad','Flur','Treppenhaus','Keller','Außen'];
+const FS_VB_UMGEBUNG={
+  Decke:['Wände im Raum','Fenster im Raum','Raum bzw. Wohnung darüber','Dach bzw. Dachboden darüber','Leitungen und Heizkörper in der Nähe','Nachbarräume'],
+  Wand:['Nachbarwand','Raum dahinter','Fassade außen','Fenster in der Nähe','Sockel und Boden','Leitungen in der Nähe'],
+  Boden:['Wände am Rand','Raum darunter','Anschluss Bad bzw. Küche','Leitungen in der Nähe','Außentür bzw. Schwelle'],
+  Fenster:['Laibung','Fensterbank innen und außen','Anschluss an die Fassade','Rollladenkasten'],
+  Dach:['Kehle','Dachrand','Durchdringungen','Entwässerung','Dämmung','Raum darunter'],
+  Balkon:['Ablauf','Anschluss an die Wand','Brüstung','Raum darunter','Tür und Schwelle'],
+  Keller:['Wände innen','Sockel außen','Fallrohr und Entwässerung','Leitungen in der Nähe','Geländeanschluss']
+};
+const FS_VB_UMGEBUNG_ALIAS={kehle:'Dach',dachrand:'Dach',ablauf:'Dach',fassade:'Wand'};
+const FS_VB_STATUS={ok:'geprüft, ohne Auffälligkeit',auff:'geprüft, auffällig',nicht:'nicht geprüft'};
+// Bauteile, die in den ausgefüllten Stellen vorkommen (Raum + Bauteil-Feld), als Schlüssel von FS_VB_UMGEBUNG
+function _fsVbUmgebungSchluessel(b){
+  const out=[];
+  _fsVbStellenGefuellt(b).forEach(x=>{
+    const t=_fsVbOrtVoll(x.s).toLowerCase();
+    Object.keys(FS_VB_UMGEBUNG).forEach(k=>{if(t.indexOf(k.toLowerCase())>=0&&out.indexOf(k)<0)out.push(k);});
+    Object.keys(FS_VB_UMGEBUNG_ALIAS).forEach(a=>{const k=FS_VB_UMGEBUNG_ALIAS[a];if(t.indexOf(a)>=0&&out.indexOf(k)<0)out.push(k);});
+  });
+  return out;
+}
+// Vorschläge zum Abgehen: nur was noch nicht in der Liste steht
+function _fsVbUmgebungVorschlaege(b){
+  const da=((b&&Array.isArray(b.vbUmgebung))?b.vbUmgebung:[]).map(r=>String((r&&r.text)||'').trim().toLowerCase());
+  const out=[];
+  _fsVbUmgebungSchluessel(b).forEach(k=>FS_VB_UMGEBUNG[k].forEach(v=>{if(da.indexOf(v.toLowerCase())<0&&out.indexOf(v)<0)out.push(v);}));
+  return out;
+}
+function _fsVbUmgebungZeilen(b){return ((b&&Array.isArray(b.vbUmgebung))?b.vbUmgebung:[]).filter(r=>r&&FS_VB_STATUS[r.status]&&String(r.text||'').trim());}
+// Ergebnis der Eingrenzung als Zeilen (Ansicht UND PDF): leer, wenn nichts erfasst ist
+function _fsVbErgebnisZeilen(b){
+  const out=[];
+  const st=_fsVbStellenGefuellt(b).map(x=>'Stelle '+x.nr+' ('+(_fsVbOrtVoll(x.s)||'ohne Ort')+')');
+  const z=_fsVbUmgebungZeilen(b);
+  const tx=r=>String(r.text).trim();
+  const ok=z.filter(r=>r.status==='ok').map(tx),auff=z.filter(r=>r.status==='auff').map(tx),nicht=z.filter(r=>r.status==='nicht').map(r=>tx(r)+(String(r.grund||'').trim()?' ('+String(r.grund).trim()+')':''));
+  if(st.length)out.push('Schaden zeigt sich an: '+st.join('; ')+'.');
+  if(ok.length)out.push('Geprüft, ohne Auffälligkeit: '+ok.join(', ')+'.');
+  if(auff.length)out.push('Geprüft, auffällig: '+auff.join(', ')+'.');
+  if(nicht.length)out.push('Nicht geprüft: '+nicht.join(', ')+'.');
+  return out;
+}
+// Meldung (Anlass) und was vorgefunden wurde – nur wenn „wie gemeldet“ oder „abweichend“ gewählt ist
+function _fsVbMeldungZeile(b){
+  const a=String((b&&b.kopf&&b.kopf.anlass)||'').trim().replace(/\s+/g,' ');
+  if(!b||!a)return '';
+  if(b.meldungStatus==='wie')return 'Gemeldet: '+a+(/[.!?]$/.test(a)?'':'.')+' Vorgefunden wie gemeldet.';
+  if(b.meldungStatus==='abw'){const w=String(b.meldungAbw||'').trim().replace(/\s+/g,' ');return 'Gemeldet: '+a+(/[.!?]$/.test(a)?'':'.')+' Abweichend vorgefunden'+(w?': '+w:'.');}
+  return '';
 }
 // F17: Kontakte der Karte als Auswahl „Besichtigung bei“: text = „Rolle: Name“, name, kontakt = „Name, Telefon“. Nur Kontakte mit Namen.
 const FS_VB_ROLLEN={mieter:'Mieter',eigentuemer:'Eigentümer',hausverwaltung:'Hausverwaltung',ag:'Auftraggeber',privatkunde:'Privatkunde'};
@@ -2542,7 +2699,7 @@ function _fsBgUmstellen(b){
   Object.assign(b.kopf,{anlass:'',beginn:'',ende:'',geraetLuft:'',geraetOberflaeche:'',geraetBauteil:'',pruefer:_fsBgMerkName()});
   if(vorab)Object.assign(b.kopf,{versicherung:'',schadennr:'',zugang:'',ansprechpartner:'',besuchBei:'',lage:'',nutzer:''}); // F17: Nutzer wählt Frank je Besuch („Besichtigung bei“), nicht alle Mieter der Karte
   b.anwesende=[];
-  if(vorab){b.schadenbild='';b.vorgeschichte='';b.vbStellen=[];} // F19, F20, F21
+  if(vorab){b.schadenbild='';b.vorgeschichte='';b.vbStellen=[];b.vbUmgebung=[];b.meldungStatus='';b.meldungAbw='';} // F19, F20, F21, F22
   b.sektionen=(vorab?FS_VB_SEKTIONEN:keller?FS_BG_KELLER:FS_BG_WOHNUNG).map(s=>({titel:s.titel,items:s.items.map(_fsBgItem)}));
   b.angaben=(vorab?[]:keller?FS_BG_KELLER_ANGABEN:FS_BG_WOHNUNG_ANGABEN).map(_fsBgAngabe); // F20: Vorabbesichtigung hat ein Textfeld „Vorgeschichte“ statt Fragen
   return b;
@@ -2978,7 +3135,7 @@ function _fsBgMessfensterZeigen(b,tab0){
 // Bildunterschrift im PDF: wozu gehört das Foto – Raum, Wand, Messstelle (mit der gedruckten Nummer), Feststellung
 function _fsBgFotoZuordnung(b,f){
   const teile=[];
-  if(typeof _fsVbStellenGefuellt==='function')_fsVbStellenGefuellt(b).forEach(x=>{if((x.s.fotoRefs||[]).some(r=>_fsRefPasst(f,r))){const o=String(x.s.ort||'').trim();teile.push('Stelle '+x.nr+(o?' – '+o:''));}}); // F21
+  if(typeof _fsVbStellenGefuellt==='function')_fsVbStellenGefuellt(b).forEach(x=>{if((x.s.fotoRefs||[]).some(r=>_fsRefPasst(f,r))){const o=_fsVbOrtVoll(x.s);teile.push('Stelle '+x.nr+(o?' – '+o:''));}}); // F21, F22
   ((b&&b.raeume)||[]).forEach(r=>{
     if(!r)return;
     const name=String(r.name||'').trim()||'Raum';
@@ -3641,8 +3798,11 @@ async function _fsMobPdfBg(bericht,task){
       });
       const sbText=(vorab&&hat(bericht.schadenbild))?String(bericht.schadenbild).trim():''; // F19
       const vbs=(vorab&&typeof _fsVbStellenGefuellt==='function')?_fsVbStellenGefuellt(bericht):[]; // F21
-      if(gruppen.length||sbText||vbs.length){
+      const mzl=vorab?_fsVbMeldungZeile(bericht):'',erg=vorab?_fsVbErgebnisZeilen(bericht):[]; // F22
+      if(gruppen.length||sbText||vbs.length||mzl||erg.length){
         abschnitt('Feststellungen vor Ort');
+        if(mzl){absatz(mzl,{abstand:3});y+=1;} // F22
+        if(erg.length){unterTitel('Eingrenzung');erg.forEach(z=>absatz(z,{einzug:3,abstand:1.5}));y+=3;} // F22
         if(sbText){unterTitel('Beschreibung des Schadenbildes');absatz(sbText,{einzug:3,abstand:3});y+=2;}
         if(vbs.length){unterTitel('Stelle für Stelle');vbs.forEach(x=>{const st=_fsVbStelleSatz(x.s);absatz(x.nr+' · '+(st||'Stelle')+fotoHinweis(x.s.fotoRefs),{einzug:3,abstand:1.5});});y+=3;} // F21
         gruppen.forEach(g=>{
