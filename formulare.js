@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F33';
+const PAM_FORMULARE_VERSION='F34';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
@@ -3096,6 +3096,13 @@ async function _fsLuftbildBild(b,ebeneK){
   }catch(e){console.warn('[Luftbild] PDF-Bild:',e);return null;}
 }
 // F27: zuletzt gesehener Ausschnitt des Luftbilds (gilt für das ganze Protokoll) und wo das Fenster beim Öffnen anfängt
+/* F34: Pin im Luftbild FEST oder LOSE (Frank 04.10.2026: „der Pin muss gesperrt werden, dass ich ihn nicht aus Versehen verrücke“).
+   'leer' = noch kein Pin (Tippen setzt ihn) · 'fest' = Tippen auf die Karte ändert nichts · 'lose' = nach „✥ Pin verschieben“: Pfeilspitze ziehen, Kreuz oder Tippen */
+function _fsLbPinZustand(pinDa,lose){return !pinDa?'leer':(lose?'lose':'fest');}
+/* F34: Standort – eine Messung dauert bis FS_LB_GPS_MS; eine neue Ortung wird nur genommen, wenn sie genauer ist als die bisher beste dieser Messung */
+const FS_LB_GPS_MS=8000,FS_LB_GPS_GUT=6,FS_LB_GPS_PIN=15;
+function _fsLbGpsBesser(alt,neu){if(!neu||!isFinite(+neu.la)||!isFinite(+neu.lo))return false;if(!alt)return true;if(!isFinite(+neu.acc))return false;return !isFinite(+alt.acc)||+neu.acc<+alt.acc;}
+function _fsLbGpsUngenau(acc){return !isFinite(+acc)||+acc>FS_LB_GPS_PIN;}
 function _fsLbAnsichtGleich(a,b){return _fsLbAnsichtOk(a)&&_fsLbAnsichtOk(b)&&Math.abs(+a.lat-+b.lat)<=2e-6&&Math.abs(+a.lon-+b.lon)<=2e-6&&+a.zoom===+b.zoom;} /* F31: derselbe Ausschnitt (Rundung auf 6 Stellen darf um eine Stelle wackeln) */
 function _fsLbAnsichtOk(a){return !!a&&isFinite(+a.lat)&&isFinite(+a.lon)&&isFinite(+a.zoom)&&+a.zoom>=3&&+a.zoom<=22&&Math.abs(+a.lat)<=90&&Math.abs(+a.lon)<=180;}
 // Reihenfolge: eigener Pin → zuletzt gesehener Ausschnitt → Pin einer anderen Stelle → Standort der Karte (sonst null: dann wird die Adresse gesucht)
@@ -3129,12 +3136,13 @@ function _fsLuftbildFenster(bericht,t,s,beiAenderung){
   weg.style.cssText='padding:8px 12px;min-height:42px;border-radius:10px;border:1.5px solid rgba(255,255,255,.7);background:transparent;color:#fff;font-size:14px;cursor:pointer;font-family:inherit;';
   const eb=document.createElement('div');eb.style.cssText='display:flex;flex-wrap:wrap;gap:6px;width:100%;';
   const info=document.createElement('div');info.style.cssText='width:100%;font-size:12px;color:rgba(255,255,255,.85);';
-  info.textContent='Auf die Stelle tippen setzt den Pin. Zoomen: Mausrad oder zwei Finger. Oben das Luftbild wählen – mal ist Google, mal ein anderes deutlicher.';
+  info.textContent='Auf die Stelle tippen setzt den Pin – danach ist er fest (🔒) und verrutscht nicht mehr. „✥ Pin verschieben“ macht ihn lose: dann die Pfeilspitze mit dem Finger ziehen oder das Kreuz benutzen. Zoomen: Mausrad oder zwei Finger.';
   const akt=document.createElement('div');akt.style.cssText='display:flex;flex-wrap:wrap;gap:6px;width:100%;';
   const aknopf=(txt,attr)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute(attr,'1');b.style.cssText='padding:6px 14px;min-height:38px;border-radius:10px;border:1.5px dashed rgba(255,255,255,.85);background:transparent;color:#fff;font-size:14px;cursor:pointer;font-family:inherit;';return b;};
   const gps=aknopf('📍 Mein Standort','data-fs-lbgps'),suche=aknopf('🔎 Adresse suchen','data-fs-lbadresse');
   const pinGps=aknopf('📌 Pin an meinem Standort','data-fs-lbpingps');pinGps.style.display='none';pinGps.style.background='rgba(217,72,15,.9)';pinGps.style.borderStyle='solid'; // F27: erscheint, sobald der Standort gefunden ist
-  akt.append(gps,suche,pinGps);
+  const zumPin=aknopf('🎯 Zum Pin','data-fs-lbzumpin');zumPin.style.display='none'; /* F34: stellt die Karte wieder auf den Pin */
+  akt.append(gps,suche,zumPin,pinGps);
   kopf.append(ti,weg,fertig,eb,akt,info);
   // F27: Karte in einem Rahmen mit Fadenkreuz (Bildmitte), Hinweis „Noch kein Pin“ und dem großen Knopf „📌 Pin hier setzen“
   const mapWrap=document.createElement('div');mapWrap.style.cssText='position:relative;flex:1;min-height:0;';
@@ -3144,11 +3152,22 @@ function _fsLuftbildFenster(bericht,t,s,beiAenderung){
   const hinweis=document.createElement('div');hinweis.setAttribute('data-fs-lbhinweis','1');hinweis.style.cssText='position:absolute;left:8px;right:8px;top:8px;z-index:1100;background:#d9480f;color:#fff;border-radius:10px;padding:8px 12px;font-size:14px;font-weight:700;pointer-events:none;box-shadow:0 2px 8px rgba(0,0,0,.4);';
   hinweis.textContent='Noch kein Pin – tippe auf die Karte oder schiebe das Kreuz auf die Stelle und tippe auf 📌.';
   const pinKnopf=document.createElement('button');pinKnopf.type='button';pinKnopf.setAttribute('data-fs-lbpinhier','1');
-  pinKnopf.style.cssText='position:absolute;left:50%;bottom:30px;transform:translateX(-50%);z-index:1100;padding:12px 22px;min-height:50px;border-radius:26px;border:3px solid #fff;background:#d9480f;color:#fff;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 10px rgba(0,0,0,.5);white-space:nowrap;';
-  mapWrap.append(mapEl,kreuz,hinweis,pinKnopf);
+  const pinLeiste=document.createElement('div');pinLeiste.setAttribute('data-fs-lbpinleiste','1');pinLeiste.style.cssText='position:absolute;left:8px;right:8px;bottom:30px;z-index:1100;display:flex;flex-wrap:wrap;justify-content:center;gap:8px;pointer-events:none;'; /* F34: zwei Knöpfe nebeneinander */
+  const PIN_KNOPF='pointer-events:auto;padding:12px 22px;min-height:50px;border-radius:26px;border:3px solid #fff;color:#fff;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 10px rgba(0,0,0,.5);white-space:nowrap;';
+  pinKnopf.style.cssText=PIN_KNOPF+'background:#d9480f;';
+  const festKnopf=document.createElement('button');festKnopf.type='button';festKnopf.setAttribute('data-fs-lbfest','1');festKnopf.textContent='✓ Pin fest';festKnopf.style.cssText=PIN_KNOPF+'background:#2e7d4f;display:none;';
+  pinLeiste.append(pinKnopf,festKnopf);
+  mapWrap.append(mapEl,kreuz,hinweis,pinLeiste);
   ov.append(kopf,mapWrap);document.body.appendChild(ov);
   const bez=()=>_fsVbBezeichnung(bericht,s,(bericht.vbStellen||[]).indexOf(s)+1);
-  const titel=()=>{const pin=_fsVbPinOk(s);ti.textContent='Von außen markieren: '+bez()+(pin?' · Pin gesetzt':' · noch kein Pin');weg.style.display=pin?'':'none';hinweis.style.display=pin?'none':'';pinKnopf.textContent=pin?'📌 Pin hierher verschieben':'📌 Pin hier setzen';};
+  let lose=false,festGesagt=false; /* F34: ein gesetzter Pin ist fest, bis „✥ Pin verschieben“ ihn lose macht */
+  const titel=()=>{
+    const pin=_fsVbPinOk(s),z=_fsLbPinZustand(pin,lose);
+    ti.textContent='Von außen markieren: '+bez()+(z==='leer'?' · noch kein Pin':z==='fest'?' · 🔒 Pin fest':' · Pin lose – verschieben');
+    weg.style.display=pin?'':'none';hinweis.style.display=pin?'none':'';
+    pinKnopf.textContent=z==='leer'?'📌 Pin hier setzen':z==='fest'?'✥ Pin verschieben':'📌 Pin ans Kreuz';
+    festKnopf.style.display=z==='lose'?'':'none';kreuz.style.display=z==='fest'?'none':'';zumPin.style.display=pin?'':'none';
+  };
   const adr=String((bericht.kopf&&bericht.kopf.objektAdresse)||(t&&t.adresse)||'').trim(); // F25: die Adresse im Protokoll zuerst, dann die der Karte
   const eigene=_fsVbPinOk(s)?{lat:+s.pin.lat,lon:+s.pin.lon}:null;
   const andere=_fsLbPunkte(bericht).filter(q=>q.s!==s)[0]||null;
@@ -3174,7 +3193,7 @@ function _fsLuftbildFenster(bericht,t,s,beiAenderung){
   wahlEbene(bericht.luftbildEbene||gespeichert||_fsLbStartEbene(start&&start.lat,start&&start.lon));
   const gruppe=L.layerGroup().addTo(map);
   // F29: Kreis mit Nummer + Strich + Pfeilspitze AUF die Stelle (Spitze am Ziel, die Stelle bleibt frei); der Kreis des gewählten Pins lässt sich ziehen (Richtung/Länge), die Stelle bleibt
-  const pinSvg=(q,aktiv)=>{
+  const pinSvg=(q,aktiv,los)=>{
     const r=_fsLbPinRing(q.s.pin),R=FS_LB_PIN_R,rp=_fsLbRingPos(0,0,r.ang,r.len);
     const dx=Math.cos(r.ang*Math.PI/180),dy=-Math.sin(r.ang*Math.PI/180),nx=-dy,ny=dx,farbe=aktiv?'#d9480f':'#1f5f8b';
     const sx=rp.x-dx*R,sy=rp.y-dy*R,ex=dx*12,ey=dy*12;
@@ -3182,20 +3201,29 @@ function _fsLuftbildFenster(bericht,t,s,beiAenderung){
     return '<svg xmlns="http://www.w3.org/2000/svg" width="360" height="360" viewBox="-180 -180 360 360" style="overflow:visible;pointer-events:none">'
       +'<line x1="'+sx+'" y1="'+sy+'" x2="'+ex+'" y2="'+ey+'" stroke="#fff" stroke-width="6" stroke-linecap="round"/><line x1="'+sx+'" y1="'+sy+'" x2="'+ex+'" y2="'+ey+'" stroke="'+farbe+'" stroke-width="3" stroke-linecap="round"/>'
       +'<polygon points="'+pts+'" fill="'+farbe+'" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>'
-      +'<g data-ring="1" style="pointer-events:all;cursor:'+(aktiv?'grab':'default')+';touch-action:none"><circle cx="'+rp.x+'" cy="'+rp.y+'" r="'+R+'" fill="'+farbe+'" stroke="#fff" stroke-width="3"/><text x="'+rp.x+'" y="'+(rp.y+R*0.35)+'" text-anchor="middle" font-size="'+R+'" font-weight="700" fill="#fff" style="pointer-events:none">'+q.n+'</text></g></svg>';
+      +'<g data-ring="1" style="pointer-events:all;cursor:'+((aktiv&&los)?'grab':'default')+';touch-action:none"><circle cx="'+rp.x+'" cy="'+rp.y+'" r="'+R+'" fill="'+farbe+'" stroke="#fff" stroke-width="3"/><text x="'+rp.x+'" y="'+(rp.y+R*0.35)+'" text-anchor="middle" font-size="'+R+'" font-weight="700" fill="#fff" style="pointer-events:none">'+q.n+'</text></g>'
+      +((aktiv&&los)?'<g data-ziel="1" style="pointer-events:all;cursor:move;touch-action:none"><circle cx="0" cy="0" r="26" fill="rgba(217,72,15,.2)" stroke="#d9480f" stroke-width="2.5" stroke-dasharray="6 4"/></g>':'')+'</svg>'; /* F34: lose → Griff an der Pfeilspitze (Zielpunkt) */
   };
-  const marker=(q,aktiv)=>L.marker([q.lat,q.lon],{interactive:false,keyboard:false,icon:L.divIcon({className:'',iconSize:[360,360],iconAnchor:[180,180],html:pinSvg(q,aktiv)})});
+  const marker=(q,aktiv)=>L.marker([q.lat,q.lon],{interactive:false,keyboard:false,icon:L.divIcon({className:'',iconSize:[360,360],iconAnchor:[180,180],html:pinSvg(q,aktiv,lose)})});
   const zeichneMarker=()=>{
     gruppe.clearLayers();
     _fsLbPunkte(bericht).forEach(q=>{
       const aktiv=q.s===s,m=marker(q,aktiv);
       gruppe.addLayer(m);
-      if(aktiv){
+      if(aktiv&&lose){ /* F34: Kreis und Pfeilspitze lassen sich nur im losen Zustand ziehen */
         const el=m.getElement(),ring=el&&el.querySelector('[data-ring]');
+        const ziel=el&&el.querySelector('[data-ziel]');
+        if(ziel)L.DomEvent.on(ziel,'pointerdown',ev=>{ /* Pfeilspitze ziehen: die Stelle (lat/lon) wandert mit dem Finger, die Karte bleibt stehen */
+          L.DomEvent.stop(ev);
+          const p0=map.latLngToContainerPoint([+s.pin.lat,+s.pin.lon]),m0=map.mouseEventToContainerPoint(ev),ox=p0.x-m0.x,oy=p0.y-m0.y;
+          const bewegeZ=e2=>{const mp=map.mouseEventToContainerPoint(e2),ll=map.containerPointToLatLng([mp.x+ox,mp.y+oy]);s.pin.lat=Math.round(ll.lat*1e6)/1e6;s.pin.lon=Math.round(ll.lng*1e6)/1e6;m.setLatLng([s.pin.lat,s.pin.lon]);};
+          const endeZ=()=>{document.removeEventListener('pointermove',bewegeZ,true);document.removeEventListener('pointerup',endeZ,true);document.removeEventListener('pointercancel',endeZ,true);scheduleSave();zeichneMarker();};
+          document.addEventListener('pointermove',bewegeZ,true);document.addEventListener('pointerup',endeZ,true);document.addEventListener('pointercancel',endeZ,true);
+        });
         if(ring)L.DomEvent.on(ring,'pointerdown',ev=>{
           L.DomEvent.stop(ev);
           const rc=el.getBoundingClientRect(),cx=rc.left+rc.width/2,cy=rc.top+rc.height/2;
-          const bewege=e2=>{const dx=e2.clientX-cx,dy=e2.clientY-cy;s.pin.len=Math.round(Math.max(30,Math.min(160,Math.hypot(dx,dy))));s.pin.ang=Math.round((Math.atan2(-dy,dx)*180/Math.PI+360)%360);el.innerHTML=pinSvg(Object.assign({},q,{s:s}),true);};
+          const bewege=e2=>{const dx=e2.clientX-cx,dy=e2.clientY-cy;s.pin.len=Math.round(Math.max(30,Math.min(160,Math.hypot(dx,dy))));s.pin.ang=Math.round((Math.atan2(-dy,dx)*180/Math.PI+360)%360);el.innerHTML=pinSvg(Object.assign({},q,{s:s}),true,true);};
           const ende=()=>{document.removeEventListener('pointermove',bewege,true);document.removeEventListener('pointerup',ende,true);document.removeEventListener('pointercancel',ende,true);scheduleSave();zeichneMarker();}; /* F31: auch bei abgebrochener Berührung (pointercancel) */
           document.addEventListener('pointermove',bewege,true);document.addEventListener('pointerup',ende,true);document.addEventListener('pointercancel',ende,true);
         });
@@ -3203,24 +3231,38 @@ function _fsLuftbildFenster(bericht,t,s,beiAenderung){
     });
     titel();
   };
-  const setzePin=(la,lo)=>{const alt=_fsVbPinOk(s)?s.pin:null;s.pin={lat:Math.round(la*1e6)/1e6,lon:Math.round(lo*1e6)/1e6};if(alt){if(isFinite(+alt.ang))s.pin.ang=+alt.ang;if(isFinite(+alt.len))s.pin.len=+alt.len;}scheduleSave();zeichneMarker();}; // F29: Kreis-Lage bleibt beim Verschieben der Stelle
-  map.on('click',e=>setzePin(e.latlng.lat,e.latlng.lng));
-  pinKnopf.onclick=()=>{const c=map.getCenter();setzePin(c.lat,c.lng);}; // F27: Pin in die Bildmitte (Fadenkreuz)
-  weg.onclick=()=>{s.pin=null;scheduleSave();zeichneMarker();};
+  const setzePin=(la,lo)=>{const alt=_fsVbPinOk(s)?s.pin:null;s.pin={lat:Math.round(la*1e6)/1e6,lon:Math.round(lo*1e6)/1e6};if(alt){if(isFinite(+alt.ang))s.pin.ang=+alt.ang;if(isFinite(+alt.len))s.pin.len=+alt.len;}if(!alt)lose=false;scheduleSave();zeichneMarker();}; // F29: Kreis-Lage bleibt beim Verschieben der Stelle
+  map.on('click',e=>{if(_fsLbPinZustand(_fsVbPinOk(s),lose)==='fest'){if(!festGesagt){festGesagt=true;toast('Der Pin ist fest – zum Ändern „✥ Pin verschieben“ antippen','info',3500);}return;}setzePin(e.latlng.lat,e.latlng.lng);}); /* F34: ein fester Pin verrutscht beim Tippen nicht */
+  pinKnopf.onclick=()=>{if(_fsLbPinZustand(_fsVbPinOk(s),lose)==='fest'){lose=true;zeichneMarker();return;}const c=map.getCenter();setzePin(c.lat,c.lng);};
+  festKnopf.onclick=()=>{lose=false;zeichneMarker();};
+  zumPin.onclick=()=>{if(_fsVbPinOk(s)){try{map.setView([+s.pin.lat,+s.pin.lon],Math.max(map.getZoom(),18));}catch(e){}}}; // F27: Pin in die Bildmitte (Fadenkreuz)
+  weg.onclick=()=>{s.pin=null;lose=false;scheduleSave();zeichneMarker();};
   // F25: „Mein Standort“ springt zum GPS-Standort des Geräts (blauer Punkt; am PC ungenau), „Adresse suchen“ zur Adresse im Protokoll
-  let gpsMarker=null,gpsPos=null;
+  let gpsMarker=null,gpsKreis=null,gpsPos=null,gpsWatch=null,gpsUhr=null,gpsLauf=null; /* F34: gpsLauf = beste Ortung der laufenden Messung */
+  const gpsStopp=()=>{
+    if(gpsWatch!==null){try{navigator.geolocation.clearWatch(gpsWatch);}catch(e){}gpsWatch=null;}
+    if(gpsUhr){clearTimeout(gpsUhr);gpsUhr=null;}
+    gps.disabled=false;gps.textContent='📍 Mein Standort'+((gpsPos&&isFinite(gpsPos.acc))?' (± '+Math.round(gpsPos.acc)+' m)':'');
+  };
   gps.onclick=()=>{
     if(!navigator.geolocation){toast('Dieses Gerät kann den Standort nicht bestimmen','error',4500);return;}
-    gps.disabled=true;gps.textContent='📍 suche …';
-    navigator.geolocation.getCurrentPosition(pos=>{
-      gps.disabled=false;gps.textContent='📍 Mein Standort';
-      const la=pos.coords.latitude,lo=pos.coords.longitude;
-      gpsPos={la,lo};pinGps.style.display='';
-      try{map.setView([la,lo],19);if(gpsMarker)map.removeLayer(gpsMarker);gpsMarker=L.circleMarker([la,lo],{radius:8,color:'#ffffff',weight:3,fillColor:'#1a73e8',fillOpacity:1,interactive:false}).addTo(map);}catch(e){}
-      if(pos.coords.accuracy>50)toast('Standort nur auf etwa '+Math.round(pos.coords.accuracy)+' m genau','info',4500);
-    },()=>{gps.disabled=false;gps.textContent='📍 Mein Standort';toast('Standort nicht verfügbar – bitte den Zugriff auf den Standort erlauben','error',5000);},{enableHighAccuracy:true,timeout:15000,maximumAge:30000});
+    gpsStopp();gpsLauf=null;gps.disabled=true;gps.textContent='📍 messe …';
+    gpsUhr=setTimeout(()=>{gpsUhr=null;const l=gpsLauf;gpsStopp();if(!l)toast('Standort nicht verfügbar – bitte den Zugriff auf den Standort erlauben','error',5000);else if(!isFinite(l.acc)||l.acc>50)toast('Standort nur auf etwa '+Math.round(l.acc)+' m genau','info',4500);},FS_LB_GPS_MS);
+    gpsWatch=navigator.geolocation.watchPosition(pos=>{ /* F34: einige Sekunden nachmessen statt die erste (oft grobe) Antwort zu nehmen */
+      const la=pos.coords.latitude,lo=pos.coords.longitude,acc=+pos.coords.accuracy,neuP={la:la,lo:lo,acc:acc};
+      if(!_fsLbGpsBesser(gpsLauf,neuP))return;
+      const erste=!gpsLauf;gpsLauf=neuP;
+      gpsPos=neuP;pinGps.style.display='';gps.textContent='📍 messe … ± '+(isFinite(acc)?Math.round(acc):'?')+' m';
+      try{if(erste)map.setView([la,lo],19);if(gpsMarker)map.removeLayer(gpsMarker);if(gpsKreis)map.removeLayer(gpsKreis);gpsKreis=L.circle([la,lo],{radius:isFinite(acc)?acc:0,color:'#1a73e8',weight:1,fillColor:'#1a73e8',fillOpacity:0.12,interactive:false}).addTo(map);gpsMarker=L.circleMarker([la,lo],{radius:8,color:'#ffffff',weight:3,fillColor:'#1a73e8',fillOpacity:1,interactive:false}).addTo(map);}catch(e){} /* F34: heller Kreis = so ungenau ist die Ortung */
+      if(isFinite(acc)&&acc<=FS_LB_GPS_GUT)gpsStopp(); /* genau genug – nicht weiter messen */
+    },()=>{if(gpsLauf)return;gpsStopp();toast('Standort nicht verfügbar – bitte den Zugriff auf den Standort erlauben','error',5000);},{enableHighAccuracy:true,timeout:15000,maximumAge:0}); /* F34: maximumAge 0 = immer frisch messen */
   };
-  pinGps.onclick=()=>{if(gpsPos)setzePin(gpsPos.la,gpsPos.lo);}; // F27: Pin genau an den Standort des Geräts
+  pinGps.onclick=()=>{
+    if(!gpsPos)return;
+    if(_fsLbPinZustand(_fsVbPinOk(s),lose)==='fest'){toast('Der Pin ist fest – erst „✥ Pin verschieben“ antippen','info',3500);return;}
+    if(_fsLbGpsUngenau(gpsPos.acc)&&!confirm('Der Standort ist nur auf etwa ± '+(isFinite(gpsPos.acc)?Math.round(gpsPos.acc):'?')+' m genau.\n\nTrotzdem den Pin dorthin setzen?\n\nGenauer geht es mit dem Kreuz: Karte schieben, bis es auf der Stelle liegt.'))return;
+    setzePin(gpsPos.la,gpsPos.lo);
+  }; // F27: Pin genau an den Standort des Geräts
   suche.onclick=async()=>{
     if(!adr){toast('Im Protokoll und an der Karte steht keine Adresse','info',4000);return;}
     suche.disabled=true;suche.textContent='🔎 suche …';
@@ -3231,7 +3273,7 @@ function _fsLuftbildFenster(bericht,t,s,beiAenderung){
   };
   const zu=()=>{
     try{const c=map.getCenter(),neuA={lat:Math.round(c.lat*1e6)/1e6,lon:Math.round(c.lng*1e6)/1e6,zoom:map.getZoom()};if(!_fsLbAnsichtGleich(bericht.luftbildAnsicht,neuA)){bericht.luftbildAnsicht=neuA;scheduleSave();}}catch(e){} /* F31: nur wenn der Ausschnitt sich geändert hat */ // F27: Ausschnitt merken (auch ohne Pin)
-    try{map.remove();}catch(e){}ov.remove();document.removeEventListener('keydown',taste,true);if(typeof beiAenderung==='function')beiAenderung();
+    gpsStopp();try{map.remove();}catch(e){}ov.remove();document.removeEventListener('keydown',taste,true);if(typeof beiAenderung==='function')beiAenderung();
   };
   const schliessen=()=>{if(!_fsVbPinOk(s)&&!confirm('Es ist noch kein Pin gesetzt – wirklich schließen?\n\nOhne Pin wird nur der Kartenausschnitt gemerkt.'))return;zu();}; // F27
   const taste=e=>{if(e.key==='Escape'){e.stopPropagation();schliessen();}};
@@ -3293,11 +3335,13 @@ function _fsAsMarkeOk(s){return !!s&&!!s.skz&&typeof s.skz.k==='string'&&!!s.skz
 /* Stellen, die in dieser Skizze stehen können: außen, im selben Bereich */
 function _fsAsStellen(b,sk){return ((b&&Array.isArray(b.vbStellen))?b.vbStellen:[]).filter(s=>s&&sk&&_fsVbTyp(s)==='aussen'&&_fsVbRaumName(s)===sk.bereich);}
 function _fsAsNummer(b,s){const m=/Stelle ([0-9]+)$/.exec(_fsVbBezeichnung(b,s,0));return m?+m[1]:0;}
-function _fsAsMarken(b,sk){return _fsAsStellen(b,sk).filter(s=>_fsAsMarkeOk(s)&&s.skz.k===sk.id).map(s=>({s:s,n:_fsAsNummer(b,s),x:+s.skz.x,y:+s.skz.y,label:_fsVbBezeichnung(b,s,0)}));}
+function _fsAsMarken(b,sk){return _fsAsStellen(b,sk).filter(s=>_fsAsMarkeOk(s)&&s.skz.k===sk.id).map(s=>({s:s,n:_fsAsNummer(b,s),x:+s.skz.x,y:+s.skz.y,ang:_fsAsRing(s.skz).ang,len:_fsAsRing(s.skz).len,label:_fsVbBezeichnung(b,s,0)}));}
 /* Marke setzen oder verschieben (Anteile 0…1, 3 Stellen, bleibt auf der Fläche); eine Stelle steht damit nur noch in DIESER Skizze */
 function _fsAsMarkeSetzen(sk,s,x,y){
   if(!sk||!sk.id||!s||!isFinite(+x)||!isFinite(+y))return false;
+  const alt=(_fsAsMarkeOk(s)&&s.skz.k===sk.id)?s.skz:null; /* F34: die Lage des Kreises (Richtung/Länge) bleibt beim Verschieben der Stelle */
   s.skz={k:sk.id,x:Math.round(Math.max(0.03,Math.min(0.97,+x))*1000)/1000,y:Math.round(Math.max(0.04,Math.min(0.96,+y))*1000)/1000};
+  if(alt){if(isFinite(+alt.ang))s.skz.ang=+alt.ang;if(isFinite(+alt.len))s.skz.len=+alt.len;}
   return true;
 }
 function _fsAsMarkeWeg(s){if(s&&s.skz){s.skz=null;return true;}return false;}
@@ -3331,15 +3375,60 @@ function _fsAsKurz(b,sk){
 function _fsAsPseudoRaum(sk){return {name:(String((sk&&sk.name)||'').trim()||'Außen'),skizze:sk};}
 function _fsStempelListe(sk){return (sk&&sk.aussen&&FS_AS_STEMPEL[sk.aussen])||FS_BG_STEMPEL;}
 /* Marken: orangefarbener Kreis mit der Nummer der Stelle; sel = im Zeichenfenster gewählte Stelle (blauer Ring, nie im gespeicherten Bild) */
-function _fsAsMarkenZeichnen(g,b,sk,sel){
-  const W=FS_BG_SKIZZE_W,H=FS_BG_SKIZZE_H;
+/* F34: Die Nummer steht NEBEN der Stelle (Frank 04.10.2026: „den Punkt musst du mir auch mit so einem Pfeil machen“): Kreis mit Nummer, Strich, Pfeilspitze AUF die Stelle – wie der Pin im Luftbild.
+   stelle.skz bekommt dazu ang (Grad, 0 = rechts, gegen den Uhrzeigersinn) und len (Bildpunkte der 900×640-Fläche, 50…220); ohne Angabe 225° / 90. */
+const FS_AS_PIN_ANG=225,FS_AS_PIN_LEN=90,FS_AS_PIN_R=26;
+function _fsAsRing(z){
+  const a=(z&&isFinite(+z.ang))?((+z.ang%360)+360)%360:FS_AS_PIN_ANG;
+  const l=(z&&isFinite(+z.len))?Math.max(50,Math.min(220,+z.len)):FS_AS_PIN_LEN;
+  return {ang:a,len:l};
+}
+function _fsAsRingSetzen(s,ang,len){
+  if(!_fsAsMarkeOk(s)||!isFinite(+ang)||!isFinite(+len))return false;
+  s.skz.ang=Math.round(((+ang%360)+360)%360)%360;s.skz.len=Math.round(Math.max(50,Math.min(220,+len)));
+  return true;
+}
+/* Lage in Bildpunkten: px/py = die Stelle (Pfeilspitze), x/y = Mitte des Kreises; liefe der Kreis aus der Fläche, zeigt er zur anderen Seite */
+function _fsAsRingLage(q,W,H){
+  const px=q.x*W,py=q.y*H,R=FS_AS_PIN_R;let ang=q.ang,rp=_fsLbRingPos(px,py,ang,q.len);
+  if(rp.x<R+4||rp.x>W-R-4||rp.y<R+4||rp.y>H-R-4){ang=(ang+180)%360;rp=_fsLbRingPos(px,py,ang,q.len);}
+  return {px:px,py:py,x:rp.x,y:rp.y,ang:ang};
+}
+/* Was liegt an dieser Stelle der Fläche (Bildpunkte)? {s, teil:'ring'|'ziel'} – der Kreis geht vor, die oberste Marke gewinnt; null = nichts. Großzügig, damit der Finger trifft. */
+function _fsAsTreffer(b,sk,px,py){
+  const W=FS_BG_SKIZZE_W,H=FS_BG_SKIZZE_H,l=_fsAsMarken(b,sk);
+  for(let i=l.length-1;i>=0;i--){
+    const L=_fsAsRingLage(l[i],W,H);
+    if(Math.hypot(L.x-px,L.y-py)<=FS_AS_PIN_R+12)return {s:l[i].s,teil:'ring'};
+    if(Math.hypot(L.px-px,L.py-py)<=32)return {s:l[i].s,teil:'ziel'};
+  }
+  return null;
+}
+/* F34: neue Stelle direkt aus dem Zeichenfenster – außen, im Bereich der Skizze, mit kurzer Beschreibung (Wo?) */
+function _fsAsStelleNeu(b,sk,ort){
+  if(!b||!sk)return null;
+  if(!Array.isArray(b.vbStellen))b.vbStellen=[];
+  const sn=_fsVbStelleNeu();sn.typ='aussen';sn.raum=String(sk.bereich||'');sn.seite='';sn.seiteGrad=null;sn.ort=String(ort||'').trim();
+  b.vbStellen.push(sn);return sn;
+}
+/* sel = im Zeichenfenster gewählte Stelle (blauer Ring um den Kreis), lose = sie lässt sich gerade verschieben (gestrichelter Griff an der Pfeilspitze) – beides nie im gespeicherten Bild */
+function _fsAsMarkenZeichnen(g,b,sk,sel,lose){
+  const W=FS_BG_SKIZZE_W,H=FS_BG_SKIZZE_H,R=FS_AS_PIN_R;
   _fsAsMarken(b,sk).forEach(q=>{
-    const px=q.x*W,py=q.y*H;
-    if(sel&&q.s===sel){g.strokeStyle='#1f5f8b';g.lineWidth=4;g.beginPath();g.arc(px,py,36,0,Math.PI*2);g.stroke();}
-    g.fillStyle='#d9480f';g.beginPath();g.arc(px,py,26,0,Math.PI*2);g.fill();
-    g.strokeStyle='#ffffff';g.lineWidth=4;g.beginPath();g.arc(px,py,26,0,Math.PI*2);g.stroke();
+    const L=_fsAsRingLage(q,W,H),dx=Math.cos(L.ang*Math.PI/180),dy=-Math.sin(L.ang*Math.PI/180),nx=-dy,ny=dx;
+    const sx=L.x-dx*R,sy=L.y-dy*R,ex=L.px+dx*16,ey=L.py+dy*16;
+    g.lineCap='round';g.lineJoin='round';
+    g.lineWidth=9;g.strokeStyle='#ffffff';g.beginPath();g.moveTo(sx,sy);g.lineTo(ex,ey);g.stroke();
+    g.lineWidth=4;g.strokeStyle='#d9480f';g.beginPath();g.moveTo(sx,sy);g.lineTo(ex,ey);g.stroke();
+    g.beginPath();g.moveTo(L.px,L.py);g.lineTo(L.px+dx*24+nx*10,L.py+dy*24+ny*10);g.lineTo(L.px+dx*24-nx*10,L.py+dy*24-ny*10);g.closePath();g.fillStyle='#d9480f';g.fill();g.lineWidth=2;g.strokeStyle='#ffffff';g.stroke();
+    if(sel&&q.s===sel){
+      g.strokeStyle='#1f5f8b';g.lineWidth=4;g.beginPath();g.arc(L.x,L.y,R+10,0,Math.PI*2);g.stroke();
+      if(lose){g.lineWidth=3;if(typeof g.setLineDash==='function')g.setLineDash([8,6]);g.beginPath();g.arc(L.px,L.py,30,0,Math.PI*2);g.stroke();if(typeof g.setLineDash==='function')g.setLineDash([]);}
+    }
+    g.fillStyle='#d9480f';g.beginPath();g.arc(L.x,L.y,R,0,Math.PI*2);g.fill();
+    g.strokeStyle='#ffffff';g.lineWidth=4;g.beginPath();g.arc(L.x,L.y,R,0,Math.PI*2);g.stroke();
     g.fillStyle='#ffffff';g.font='bold 28px sans-serif';g.textAlign='center';g.textBaseline='middle';
-    g.fillText(String(q.n),px,py+1);
+    g.fillText(String(q.n),L.x,L.y+1);
   });
 }
 /* Zeichnet die Außenskizze auf die 900×640-Fläche: Viereck, Name, Ränder, Stempel, Striche, Marken (opt.ohneMarken: ohne – das Zeichenfenster legt sie live darüber) */
@@ -4303,13 +4392,13 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
   ov.append(kopf,leiste,feld,fuss);
   const g=cv.getContext('2d');
   const bild=new Image();let bildDa=false;
-  let modus=sk.aussen?(_fsAsStellen(b,sk).length?'stelle':'stempel'):'zeichnen',farbe=FS_BG_STRICH_FARBEN[0],aktiv=null,zieh=null,sel=-1,stiftGesehen=false,selS=null,ziehS=null; /* F33: Außenskizze beginnt bei „Stellen“; selS = gewählte Stelle, ziehS = Marke wird gezogen */
+  let modus=sk.aussen?'stelle':'zeichnen',farbe=FS_BG_STRICH_FARBEN[0],aktiv=null,zieh=null,sel=-1,stiftGesehen=false,selS=null,ziehS=null,loseS=false,festGesagtS=false,neuText=null; /* F34: loseS = gewählte Nummer lässt sich verschieben; neuText = Beschreibung einer neuen Stelle, die auf den Tipp in die Skizze wartet */ /* F33: Außenskizze beginnt bei „Stellen“; selS = gewählte Stelle, ziehS = Marke wird gezogen */
   const neu=()=>{
     g.fillStyle='#ffffff';g.fillRect(0,0,W,H);
     if(bildDa)g.drawImage(bild,0,0,W,H);
     _fsBgStempelZeichnen(g,r);
     _fsBgStricheZeichnen(g,r);
-    if(sk.aussen)_fsAsMarkenZeichnen(g,b,sk,modus==='stelle'?selS:null); /* F33 */
+    if(sk.aussen)_fsAsMarkenZeichnen(g,b,sk,modus==='stelle'?selS:null,modus==='stelle'&&loseS); /* F33, F34 */
     const st=(modus==='stempel'&&sel>=0&&Array.isArray(sk.stempel))?sk.stempel[sel]:null,m=st?FS_BG_STEMPEL_MASSE[st.t]:null;
     if(st&&m){ // Auswahlrahmen – nur hier im Fenster, nicht im gespeicherten Bild
       const s=Math.max(0.5,Math.min(2,(+st.s)||1));
@@ -4331,20 +4420,33 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
     leiste.innerHTML='';
     (sk.aussen?[['stelle','① Stellen'],['stempel','▣ Stempel'],['zeichnen','✏ Zeichnen']]:[['zeichnen','✏ Zeichnen'],['stempel','▣ Stempel']]).forEach(([k,txt])=>{
       const an=modus===k;
-      leiste.appendChild(knopf(txt,'border:3px solid '+(an?FS_FARBE:'var(--border)')+';background:'+(an?'rgba(31,95,139,.18)':'transparent')+';',()=>{modus=k;sel=-1;neu();leisteBauen();},['data-fs-ez-modus',k]));
+      leiste.appendChild(knopf(txt,'border:3px solid '+(an?FS_FARBE:'var(--border)')+';background:'+(an?'rgba(31,95,139,.18)':'transparent')+';',()=>{modus=k;sel=-1;loseS=false;neuText=null;neu();leisteBauen();},['data-fs-ez-modus',k]));
     });
     const trenn=document.createElement('span');trenn.style.cssText='width:1px;align-self:stretch;background:var(--border);';leiste.appendChild(trenn);
     if(modus==='stelle'){ /* F33: Stellen des Bereichs als Nummern in die Skizze setzen */
       const ls=_fsAsStellen(b,sk);
       if(selS&&ls.indexOf(selS)<0)selS=null;
-      if(!selS)selS=ls.find(s=>!_fsAsMarkeOk(s))||null;
+      if(!selS&&neuText===null)selS=ls.find(s=>!_fsAsMarkeOk(s))||null;
       ls.forEach(s=>{
         const hier=_fsAsMarkeOk(s)&&s.skz.k===sk.id,woanders=_fsAsMarkeOk(s)&&s.skz.k!==sk.id,an=selS===s,nr=_fsAsNummer(b,s);
-        leiste.appendChild(knopf('Stelle '+nr+(hier?' ✓':woanders?' (andere Skizze)':''),'border:3px solid '+(an?'#d9480f':'var(--border)')+';background:'+(an?'rgba(217,72,15,.16)':'transparent')+';',()=>{selS=s;neu();leisteBauen();},['data-fs-ez-stelle',String(nr)]));
+        leiste.appendChild(knopf('Stelle '+nr+(hier?' ✓':woanders?' (andere Skizze)':''),'border:3px solid '+(an?'#d9480f':'var(--border)')+';background:'+(an?'rgba(217,72,15,.16)':'transparent')+';',()=>{selS=s;loseS=false;neuText=null;neu();leisteBauen();},['data-fs-ez-stelle',String(nr)]));
       });
-      if(selS&&_fsAsMarkeOk(selS)&&selS.skz.k===sk.id)leiste.appendChild(knopf('Aus Skizze nehmen',RAND+'color:var(--red);',()=>{if(_fsAsMarkeWeg(selS)){scheduleSave();neu();leisteBauen();}},['data-fs-ez-stelleweg','1']));
+      /* F34: neue Stelle gleich hier anlegen – erst die kurze Beschreibung, dann in die Skizze tippen */
+      leiste.appendChild(knopf('＋ neue Stelle','border:2px dashed #d9480f;background:'+(neuText!==null?'rgba(217,72,15,.16)':'transparent')+';',()=>{const tx=prompt('Neue Stelle in „'+(sk.bereich||'Außen')+'“ – wo ist sie?\n(kurze Beschreibung, z. B. Riss unter der Traufe)','');if(tx===null)return;neuText=String(tx);selS=null;loseS=false;neu();leisteBauen();},['data-fs-ez-stelleneu','1']));
+      const selHier=!!selS&&_fsAsMarkeOk(selS)&&selS.skz.k===sk.id;
+      if(selHier){
+        leiste.appendChild(knopf(loseS?'✓ Fest':'✥ Verschieben','border:3px solid '+(loseS?'#2e7d4f':'var(--border)')+';background:'+(loseS?'rgba(46,125,79,.16)':'transparent')+';',()=>{loseS=!loseS;neu();leisteBauen();},['data-fs-ez-stellelose','1']));
+        leiste.appendChild(knopf('Aus Skizze nehmen',RAND+'color:var(--red);',()=>{if(_fsAsMarkeWeg(selS)){loseS=false;scheduleSave();neu();leisteBauen();}},['data-fs-ez-stelleweg','1']));
+      }
+      if(selS)leiste.appendChild(knopf('Beschreibung ändern',RAND,()=>{const tx=prompt('Beschreibung der Stelle '+_fsAsNummer(b,selS)+' (Wo?)',String(selS.ort||''));if(tx===null)return;selS.ort=String(tx).trim();scheduleSave();neu();leisteBauen();},['data-fs-ez-stelletext','1']));
       const z=document.createElement('span');z.setAttribute('data-fs-ez-zaehler','1');z.style.cssText='font-size:13px;color:var(--text2);';
-      z.textContent=!ls.length?'In diesem Bereich gibt es noch keine Stelle – erst im Protokoll eine Stelle anlegen.':selS?'Stelle '+_fsAsNummer(b,selS)+(String(selS.ort||'').trim()?' („'+_fsBgSkizzeKuerzen(selS.ort,30)+'“)':'')+': in die Skizze tippen oder die Nummer ziehen':'Oben eine Stelle wählen, dann in die Skizze tippen';
+      const selName=selS?'Stelle '+_fsAsNummer(b,selS)+(String(selS.ort||'').trim()?' („'+_fsBgSkizzeKuerzen(selS.ort,30)+'“)':''):'';
+      z.textContent=neuText!==null?'Neue Stelle'+(neuText.trim()?' („'+_fsBgSkizzeKuerzen(neuText,30)+'“)':'')+': jetzt in die Skizze tippen, wo sie ist'
+        :!ls.length?'Noch keine Stelle in diesem Bereich – „＋ neue Stelle“ antippen.'
+        :!selS?'Oben eine Stelle wählen oder „＋ neue Stelle“ antippen'
+        :!selHier?selName+': in die Skizze tippen, wo sie ist'
+        :loseS?selName+' ist lose: Pfeilspitze oder Kreis ziehen oder an die richtige Stelle tippen – dann „✓ Fest“'
+        :selName+' ist fest (🔒) – „✥ Verschieben“ macht sie lose';
       leiste.appendChild(z);
     }else if(modus==='zeichnen'){
       FS_BG_STRICH_FARBEN.forEach((f,i)=>{
@@ -4389,11 +4491,19 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
     try{cv.setPointerCapture(e.pointerId);}catch(x){}
     const p=pos(e);
     if(modus==='stelle'){ /* F33: auf eine Nummer tippen = diese Stelle wählen und ziehen; sonst die gewählte Stelle hierher setzen */
-      const tm=_fsAsMarken(b,sk).filter(q=>Math.hypot(q.x*W-p[0],q.y*H-p[1])<=38).pop();
-      if(tm)selS=tm.s;
-      else if(!selS){toast('Erst oben eine Stelle wählen','info',2500);return;}
-      else _fsAsMarkeSetzen(sk,selS,p[0]/W,p[1]/H);
-      ziehS={id:e.pointerId,s:selS};neu();leisteBauen();
+      if(neuText!==null){ /* F34: „＋ neue Stelle“ – hier anlegen und setzen */
+        const sn=_fsAsStelleNeu(b,sk,neuText);neuText=null;
+        if(sn){_fsAsMarkeSetzen(sk,sn,p[0]/W,p[1]/H);selS=sn;loseS=false;scheduleSave();}
+        neu();leisteBauen();return;
+      }
+      const tr=_fsAsTreffer(b,sk,p[0],p[1]);
+      if(tr&&tr.s!==selS){selS=tr.s;loseS=false;neu();leisteBauen();return;} /* andere Nummer angetippt = auswählen, nichts bewegen */
+      if(!selS){toast('Erst oben eine Stelle wählen oder „＋ neue Stelle“ antippen','info',3000);return;}
+      if(!(_fsAsMarkeOk(selS)&&selS.skz.k===sk.id)){_fsAsMarkeSetzen(sk,selS,p[0]/W,p[1]/H);loseS=false;scheduleSave();neu();leisteBauen();return;} /* erstes Setzen – danach fest */
+      if(!loseS){if(!festGesagtS){festGesagtS=true;toast('Die Nummer ist fest – zum Ändern „✥ Verschieben“ antippen','info',3500);}return;} /* F34: fest = Tippen verrückt nichts */
+      ziehS={id:e.pointerId,s:selS,teil:(tr&&tr.teil==='ring')?'ring':'ziel'};
+      if(!tr)_fsAsMarkeSetzen(sk,selS,p[0]/W,p[1]/H);
+      neu();
       return;
     }
     if(modus==='stempel'){ // Stempel antippen = auswählen, ziehen = verschieben; daneben tippen = nichts mehr ausgewählt
@@ -4406,7 +4516,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
     aktiv={id:e.pointerId,pts:[p]};
   });
   cv.addEventListener('pointermove',e=>{
-    if(ziehS&&e.pointerId===ziehS.id){e.preventDefault();const p=pos(e);if(_fsAsMarkeSetzen(sk,ziehS.s,p[0]/W,p[1]/H))neu();return;} /* F33 */
+    if(ziehS&&e.pointerId===ziehS.id){e.preventDefault();const p=pos(e),zs=ziehS.s;if(ziehS.teil==='ring'){const tx=zs.skz.x*W,ty=zs.skz.y*H;if(_fsAsRingSetzen(zs,Math.atan2(-(p[1]-ty),p[0]-tx)*180/Math.PI,Math.hypot(p[0]-tx,p[1]-ty)))neu();}else if(_fsAsMarkeSetzen(sk,zs,p[0]/W,p[1]/H))neu();return;} /* F33, F34: Kreis ziehen = Richtung/Länge, sonst die Stelle */
     if(zieh&&e.pointerId===zieh.id){
       e.preventDefault();
       const p=pos(e),st=sk.stempel[sel];
