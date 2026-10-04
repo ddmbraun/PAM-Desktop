@@ -10397,7 +10397,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-04 · #1105'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-04-b1105) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-04 · #1106'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-04-b1106) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -34702,7 +34702,7 @@ function _pamPfadFenster(pfad,kopiert,geteilt,opt){
     +'<div id="_pamPfadLaenge" style="font-size:11px;color:'+_pamLaengeZeile(pfad).farbe+';margin-top:5px;">'+_pamLaengeZeile(pfad).text+'</div>'
     +warn
     +(geteilt?'<div style="font-size:12px;color:#b45309;margin-top:8px;">⚠ Dieser Ordner liegt in einer <b>Geteilten Ablage</b>. Dort beginnt der Pfad am Rechner mit <b>G:\\Geteilte Ablagen\\…</b> – der obere Teil oben stimmt dann nicht.</div>':'')
-    +'<div style="font-size:11px;color:var(--text2);margin-top:8px;">In Word bearbeiten und mit <b>Strg+S</b> speichern – Drive lädt die Datei von selbst wieder hoch. Es bleibt dieselbe Datei, nichts muss zurückgespeichert werden.</div>'
+    +(opt.ohneWord?'':'<div style="font-size:11px;color:var(--text2);margin-top:8px;">In Word bearbeiten und mit <b>Strg+S</b> speichern – Drive lädt die Datei von selbst wieder hoch. Es bleibt dieselbe Datei, nichts muss zurückgespeichert werden.</div>')
     +'<div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;">'
     +(kuerzbar?'<button type="button" id="_pamPfadKurz" style="padding:8px 14px;border-radius:8px;background:#b45309;color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer;">✂ Namen kürzen und kopieren</button>':'')
     +'<button type="button" id="_pamPfadKop" style="padding:8px 14px;border-radius:8px;background:var(--bg3);color:var(--text);border:1px solid var(--border);font-size:13px;cursor:pointer;">'+(opt.knopf&&!kopiert?esc(opt.knopf):'📋 Nochmal kopieren')+'</button>'
@@ -44232,17 +44232,48 @@ async function createAbschlussakte(){
     btn.textContent='📁 Abschlussakte';btn.disabled=false;
   }
 }
+/* b1106: Foto entfernen – dieselbe Rückfrage wie bei Dokumenten (b1105): nur aus der Karte ODER die Datei in den Drive-Papierkorb.
+   Frank 04.10.2026 nach dem Versuch mit einer Test-PDF („HTTP 403“): „Haben wir dann bei Bildern dasselbe Problem?“ → bisher nahm das „✕“
+   am Foto nur den Verweis weg; jetzt gibt es den Papierkorb auch hier – mit derselben Grenze: nur Fotos, die PAM selbst hochgeladen hat. */
+/* Wird das Foto noch an anderer Stelle der Karte verwendet (Protokoll, Dachplan, Notiz)? Gesucht wird die Drive-Kennung in allem außer der Fotoliste. */
+function _pamFotoVerwendet(t,f){
+  if(!t||!f)return false;
+  const ids=[f.driveId,f.editedDriveId].filter(function(x){return !!x;}).map(String);
+  if(!ids.length)return false;
+  let s='';
+  try{const c=Object.assign({},t);delete c.fotos;s=JSON.stringify(c);}catch(e){return false;}
+  return ids.some(function(id){return s.indexOf('"'+id+'"')>=0;});
+}
 function removeFotoDesktop(i){
   const f=taskFotos&&taskFotos[i];if(!f)return;
-  const hasDrive=!!f.driveId;
-  const msg=hasDrive
-    ? 'Foto-Verweis entfernen?\n\nOK = nur den Verweis hier entfernen (Datei bleibt im Drive-Ordner)\nAbbrechen = nichts tun'
-    : 'Foto-Eintrag entfernen?';
-  if(!confirm(msg))return;
-  taskFotos.splice(i,1);
+  const tid=(document.getElementById('taskId')||{}).value||'';
+  const t=(tid&&typeof findTaskById==='function')?findTaskById(tid):null;
+  _pamDokWegFenster(f,function(art){_pamFotoWegAusfuehren(f,art);},{titel:'Foto entfernen',name:(f.caption?String(f.caption)+' — ':'')+(f.name||'Foto'),fid:String(f.driveId||''),
+    warnung:_pamFotoVerwendet(t,f)?'⚠ Dieses Foto wird in der Karte noch an anderer Stelle verwendet (Protokoll, Dachplan oder Notiz). Liegt es im Papierkorb, fehlt es dort.':''});
+}
+/* Führt die Wahl am Foto aus. f = der Eintrag selbst (sein Platz kann sich während des Wartens verschieben). */
+async function _pamFotoWegAusfuehren(f,art){
+  if(!f||typeof taskFotos==='undefined'||!taskFotos||taskFotos.indexOf(f)<0){showToast('Dieses Foto steht nicht mehr in der Liste – bitte die Karte neu öffnen','warning',5000);return false;}
+  const nm=f.name||'Das Foto';
+  if(art==='papierkorb'){
+    const fid=String(f.driveId||'');
+    if(!fid){showToast('⚠ Zu diesem Foto gibt es keine Datei in Drive','warning',5000);return false;}
+    const r=await _ztlAnhPapierkorb(fid);
+    if(r==='HTTP 403'){_pamWegNichtErlaubt(nm,fid);return false;}
+    if(r!=='ok'&&r!=='weg'){showToast('⚠ „'+nm+'“ ließ sich nicht in den Drive-Papierkorb legen ('+r+') – das Foto bleibt in der Karte','error',9000);return false;}
+    if(f.editedDriveId&&String(f.editedDriveId)!==fid){ /* die bemalte oder zugeschnittene Fassung geht mit – sie stammt immer von PAM */
+      const r2=await _ztlAnhPapierkorb(String(f.editedDriveId));
+      if(r2!=='ok'&&r2!=='weg')console.warn('[Foto entfernen] bemalte Fassung:',r2);
+    }
+  }else if(art!=='karte')return false;
+  const j=taskFotos.indexOf(f);
+  if(j>=0)taskFotos.splice(j,1);
   _fotoSelPurge(); // b601: verwaiste Auswahl-Schlüssel entfernen, sonst zählt die Leiste zu viel
   renderFotoListDesktop();
   scheduleTaskFieldSave(); // b520: sofort sichern statt erst beim Modal-Schließen (wie Caption-Fix b516)
+  if(art==='papierkorb')showToast('🗑 „'+nm+'“ liegt im Drive-Papierkorb (30 Tage zurückholbar)','success',6000);
+  else showToast('✕ Aus der Karte entfernt – in Drive liegt das Foto weiter','info',5000);
+  return true;
 }
 // Beschreibung (Caption) zu einem Foto bearbeiten. Wird beim Modal-Save persistiert.
 function editFotoCaptionDesktop(i){
@@ -44578,7 +44609,7 @@ function _pamFotoMenuEintraege(f,i){
       titel:schnitt?'Ausschnitt zurücknehmen – danach gilt wieder das ganze Original (der Ausschnitt bleibt in Drive)':'Zeichnung zurücknehmen – danach gilt wieder das unbemalte Original (die Zeichnung bleibt in Drive)',
       tu:function(){deskZeichnungZurueck(i);}});
   }
-  e.push({sym:'✕',text:'Aus der Karte entfernen',titel:'Aus dieser Karte entfernen – mit Rückfrage; die Datei bleibt in Google Drive',rot:true,trenner:true,tu:function(){removeFotoDesktop(i);}});
+  e.push({sym:'✕',text:'Aus der Karte entfernen',titel:'Aus dieser Karte entfernen – mit Rückfrage: die Datei bleibt in Google Drive oder kommt auf Wunsch in den Drive-Papierkorb',rot:true,trenner:true,tu:function(){removeFotoDesktop(i);}});
   return e;
 }
 function _pamFotoMenu(i,btn){
@@ -45003,17 +45034,35 @@ function _pamDokPdfMerkerLoesen(t,fid){
   });
   return n;
 }
+/* b1106: Drive hat den Papierkorb abgelehnt (403). Gemessen am 04.10.2026 mit einer über den Explorer eingelegten Test-PDF: PAM darf bei Google
+   nur Dateien ändern, die es selbst hochgeladen hat (Recht drive.file). Statt „HTTP 403“ sagt PAM das in Worten und zeigt den Ordner zum
+   Löschen im Explorer. ⛔ Mehr Rechte holt PAM dafür NICHT – alle Apps unter derselben Adresse hätten sonst Schreibzugriff auf das ganze Drive. */
+async function _pamWegNichtErlaubt(nm,fid){
+  const text='PAM hat „'+nm+'“ nicht selbst hochgeladen und darf die Datei deshalb nicht in den Papierkorb legen – Google erlaubt PAM das nur bei eigenen Dateien. Der Eintrag bleibt in der Karte. Zum Löschen: Ordner-Pfad kopieren, im Explorer Strg+L, einfügen, Enter – und die Datei dort löschen.';
+  try{
+    const erg=await _pamDrivePfad(fid);
+    if(!erg||!erg.pfad)throw new Error('kein Pfad');
+    const ordner=_pamPfadTeile(erg.pfad).ordner||erg.pfad;
+    _pamPfadFenster(ordner,false,erg.geteilt,{titel:'⚠ Diese Datei darf PAM nicht wegwerfen',hinweis:text,knopf:'📋 Ordner-Pfad kopieren',ohneWord:true});
+    return true;
+  }catch(e){
+    console.warn('[Papierkorb] Pfad:',e);
+    showToast('⚠ '+text,'warning',14000);
+    return false;
+  }
+}
 /* Das Fenster. a = der Eintrag, beiWahl('karte' | 'papierkorb'). Ohne Drive-Datei oder ohne Drive-Verbindung gibt es nur „aus der Karte“. */
-function _pamDokWegFenster(a,beiWahl){
+function _pamDokWegFenster(a,beiWahl,opt){
+  opt=opt||{}; /* b1106: opt.titel / opt.name / opt.fid / opt.warnung – dasselbe Fenster auch für Fotos */
   const alt=document.getElementById('_pamDokWegOv');if(alt)alt.remove();
   if(!a)return;
-  const fid=_pamDokDriveId(a),drive=!!fid&&(typeof _ztlAnhTokenOk==='function')&&_ztlAnhTokenOk();
+  const fid=(opt.fid!==undefined)?String(opt.fid||''):_pamDokDriveId(a),drive=!!fid&&(typeof _ztlAnhTokenOk==='function')&&_ztlAnhTokenOk();
   const ov=document.createElement('div');ov.id='_pamDokWegOv';
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000003;display:flex;align-items:center;justify-content:center;';
   const bx=document.createElement('div');
   bx.style.cssText='background:var(--bg2);border-radius:12px;padding:18px 20px;width:min(520px,94vw);box-shadow:0 8px 40px rgba(0,0,0,.5);color:var(--text);';
-  const ti=document.createElement('div');ti.style.cssText='font-size:15px;font-weight:700;margin-bottom:4px;';ti.textContent='Dokument entfernen';
-  const nm=document.createElement('div');nm.style.cssText='font-size:13px;font-weight:600;margin-bottom:10px;word-break:break-all;';nm.textContent=a.name||a.filename||'Diese Datei';
+  const ti=document.createElement('div');ti.style.cssText='font-size:15px;font-weight:700;margin-bottom:4px;';ti.textContent=opt.titel||'Dokument entfernen';
+  const nm=document.createElement('div');nm.style.cssText='font-size:13px;font-weight:600;margin-bottom:10px;word-break:break-all;';nm.textContent=opt.name||a.name||a.filename||'Diese Datei';
   const knopf=function(text,unter,stil,art){
     const b=document.createElement('button');b.type='button';b.setAttribute('data-dokweg',art);
     b.style.cssText='display:block;width:100%;text-align:left;margin:8px 0 0;padding:10px 12px;border-radius:8px;cursor:pointer;font-family:inherit;color:var(--text);'+stil;
@@ -45024,6 +45073,7 @@ function _pamDokWegFenster(a,beiWahl){
     return b;
   };
   bx.append(ti,nm);
+  if(opt.warnung){const wz=document.createElement('div');wz.setAttribute('data-dokweg-warnung','1');wz.style.cssText='font-size:12px;margin:0 0 4px;padding:8px 10px;border-radius:8px;border:1px solid #b45309;background:rgba(180,83,9,.10);color:var(--text);';wz.textContent=opt.warnung;bx.appendChild(wz);}
   if(drive)bx.appendChild(knopf('🗑 Datei in den Drive-Papierkorb','Die Datei verschwindet aus dem Ordner und aus der Karte. Im Papierkorb von Google Drive ist sie noch 30 Tage zurückholbar.','border:2px solid #b45309;background:rgba(180,83,9,.10);','papierkorb'));
   bx.appendChild(knopf('✕ Nur aus der Karte entfernen','Die Datei bleibt in Google Drive liegen. „🔄 Ordner abgleichen“ holt sie wieder in die Liste.','border:1px solid var(--border);background:var(--bg3);','karte'));
   if(!drive){
@@ -45044,6 +45094,7 @@ async function _pamDokWegAusfuehren(a,art,danach){
     const fid=_pamDokDriveId(a);
     if(!fid){showToast('⚠ Zu diesem Eintrag gibt es keine Datei in Drive','warning',5000);return false;}
     const r=await _ztlAnhPapierkorb(fid);
+    if(r==='HTTP 403'){_pamWegNichtErlaubt(nm,fid);return false;} /* b1106: fremde Datei – in Worten statt „HTTP 403“ */
     if(r!=='ok'&&r!=='weg'){showToast('⚠ „'+nm+'“ ließ sich nicht in den Drive-Papierkorb legen ('+r+') – der Eintrag bleibt in der Karte','error',9000);return false;}
     const tid=(document.getElementById('taskId')||{}).value||'';
     geloest=_pamDokPdfMerkerLoesen((tid&&typeof findTaskById==='function')?findTaskById(tid):null,fid);
