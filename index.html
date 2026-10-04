@@ -10397,7 +10397,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-04 · #1106'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-04-b1106) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-04 · #1107'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-04-b1107) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -28300,22 +28300,54 @@ async function _pamFotosOhneDateiPruefen(){
   }
   _pamToteFenster(erg,taskId);
 }
-function _pamToteFenster(erg,taskId){
+/* ── b1107: 🧹 dasselbe für die DOKUMENTE ─────────────────────────────────────────────────────────────────────────
+   Frank 04.10.2026: nach dem Löschen einer Datei im Explorer – „Wie aktualisiert sich jetzt die Anzeige im PAM?“ → gar nicht: der Abgleich trägt
+   nur Neues ein, der Eintrag blieb stehen und musste einzeln heraus. Jetzt: „📁 Ordner ▾ → 🧹 Einträge ohne Datei aufräumen“ sieht für jedes
+   Dokument der Karte in Drive nach und entfernt nach EINEM Klick die Einträge, deren Datei gelöscht ist oder im Papierkorb liegt.
+   In Drive wird nichts gelöscht. Tot ist nur, was Drive ausdrücklich nicht (mehr) kennt; „unklar“ bleibt. Einträge ohne Drive-Datei bleiben.
+   Anders als bei den Fotos sind die Dateien im Papierkorb hier VORAB angehakt – genau dafür ist das Werkzeug da (im Explorer gelöscht =
+   Drive-Papierkorb); holt man die Datei zurück, bringt „Ordner abgleichen“ den Eintrag wieder. */
+function _pamDokToteKey(a){return 'dok|'+_pamDokDriveId(a);}
+async function _pamDokOhneDateiPruefen(){
+  if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden','error',5000);return;}
+  const taskId=(document.getElementById('taskId')||{}).value||'';
+  const liste=(taskAttachments||[]).filter(function(a){return !!_pamDokDriveId(a);});
+  if(!liste.length){showToast('Keine Drive-Dokumente an dieser Karte','info',3000);return;}
+  _mpFortschrittZeigen(liste.length,'🧹 Dokumente werden in Drive nachgesehen…');
+  const erg={weg:[],papierkorb:[],unklar:0,da:0};
+  const STUECK=6;
+  for(let i=0;i<liste.length;i+=STUECK){
+    await Promise.all(liste.slice(i,i+STUECK).map(async function(a){
+      const art=_pamToteEinstufen([await _pamToteStatus(_pamDokDriveId(a))]);
+      if(art==='weg'||art==='papierkorb')erg[art].push(a);else erg[art]++;
+      _mpFortschrittSchritt(String(a.name||a.filename||'').substring(0,70));
+    }));
+  }
+  _mpFortschrittSchliessen();
+  if(!erg.weg.length&&!erg.papierkorb.length){
+    showToast('✓ Alle '+erg.da+' Dokumente sind in Drive vorhanden'+(erg.unklar?' – '+erg.unklar+' ließen sich gerade nicht prüfen, bitte später nochmal':''),erg.unklar?'info':'success',6000);
+    return;
+  }
+  _pamToteFenster(erg,taskId,'dok');
+}
+function _pamToteFenster(erg,taskId,art){
+  const dok=art==='dok'; /* b1107: dasselbe Fenster für Fotos (Vorgabe) und Dokumente */
   const alt=document.getElementById('_pamToteOverlay');if(alt)alt.remove();
   const zeile=function(f,an){
     return '<label style="display:flex;align-items:center;gap:8px;padding:5px 4px;border-bottom:1px solid var(--border);cursor:pointer;">'
-      +'<input type="checkbox" class="_ptTot" data-key="'+esc(_pamToteKey(f))+'"'+(an?' checked':'')+' style="width:15px;height:15px;flex-shrink:0;" autocomplete="off">'
-      +'<span style="font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(f.name||'')+'">'+esc(f.name||'(ohne Namen)')+'</span>'
+      +'<input type="checkbox" class="_ptTot" data-key="'+esc(dok?_pamDokToteKey(f):_pamToteKey(f))+'"'+(an?' checked':'')+' style="width:15px;height:15px;flex-shrink:0;" autocomplete="off">'
+      +'<span style="font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(f.name||f.filename||'')+'">'+esc(f.name||f.filename||'(ohne Namen)')+'</span>'
       +(f.ordner?'<span style="font-size:10px;color:var(--text2);flex-shrink:0;">'+esc(f.ordner)+'</span>':'')+'</label>';
   };
   const kopf=function(t,hinweis){return '<div style="font-weight:700;font-size:12px;margin:10px 0 2px;">'+t+'</div><div style="font-size:11px;color:var(--text2);margin-bottom:4px;">'+hinweis+'</div>';};
   let inhalt='';
   if(erg.weg.length)inhalt+=kopf('🗑 Datei gelöscht ('+erg.weg.length+')','Google Drive kennt diese Dateien nicht mehr.')+erg.weg.map(function(f){return zeile(f,true);}).join('');
-  if(erg.papierkorb.length)inhalt+=kopf('♻ Im Drive-Papierkorb ('+erg.papierkorb.length+')','Lassen sich in Drive noch zurückholen – darum nicht vorab angehakt.')+erg.papierkorb.map(function(f){return zeile(f,false);}).join('');
-  if(erg.unklar)inhalt+='<div style="font-size:11px;color:var(--text2);margin-top:10px;">ℹ '+erg.unklar+' Foto'+(erg.unklar===1?'':'s')+' ließ'+(erg.unklar===1?'':'en')+' sich gerade nicht prüfen – die bleiben. Bitte später nochmal.</div>';
+  if(erg.papierkorb.length)inhalt+=kopf('♻ Im Drive-Papierkorb ('+erg.papierkorb.length+')',dok?'Lassen sich in Drive noch 30 Tage zurückholen. Holst du eine zurück, bringt „Ordner abgleichen“ den Eintrag wieder.':'Lassen sich in Drive noch zurückholen – darum nicht vorab angehakt.')+erg.papierkorb.map(function(f){return zeile(f,dok);}).join('');
+  if(erg.unklar)inhalt+='<div style="font-size:11px;color:var(--text2);margin-top:10px;">ℹ '+erg.unklar+(dok?' Dokument'+(erg.unklar===1?'':'e'):' Foto'+(erg.unklar===1?'':'s'))+' ließ'+(erg.unklar===1?'':'en')+' sich gerade nicht prüfen – die bleiben. Bitte später nochmal.</div>';
   const ov=document.createElement('div');
   ov.id='_pamToteOverlay';
   ov.dataset.taskId=taskId||'';
+  ov.dataset.art=dok?'dok':'foto';
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:4000;display:flex;align-items:center;justify-content:center;';
   ov.innerHTML='<div style="background:var(--bg2);border-radius:14px;width:min(560px,94vw);max-height:80vh;display:flex;flex-direction:column;overflow:hidden;">'
     +'<div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);flex-shrink:0;">'
@@ -28332,11 +28364,20 @@ function _pamToteFenster(erg,taskId){
 function _pamToteEntfernen(){
   const ov=document.getElementById('_pamToteOverlay');if(!ov)return;
   const keys=new Set(Array.from(ov.querySelectorAll('input._ptTot')).filter(function(c){return c.checked;}).map(function(c){return c.getAttribute('data-key');}));
-  const taskId=ov.dataset.taskId||'';
+  const taskId=ov.dataset.taskId||'',art=ov.dataset.art||'foto';
   ov.remove();
   if(!keys.size){showToast('Nichts angehakt – nichts entfernt','info',3000);return;}
   // ⛔ Zwischen Prüfen und Klick kann eine andere Karte geöffnet worden sein – dann NICHT deren Fotos anfassen
   if(((document.getElementById('taskId')||{}).value||'')!==taskId){showToast('⚠ Inzwischen ist eine andere Karte offen – nichts entfernt','error',6000);return;}
+  if(art==='dok'){ /* b1107: Dokumente – an Ort und Stelle aus der Liste; hing an der Datei das PDF eines Protokolls, wird dessen Merker gelöst (sonst schriebe „PDF erstellen“ in den Papierkorb) */
+    const t=(taskId&&typeof findTaskById==='function')?findTaskById(taskId):null;
+    let weg=0;
+    for(let i=(taskAttachments||[]).length-1;i>=0;i--){const a=taskAttachments[i];if(a&&_pamDokDriveId(a)&&keys.has(_pamDokToteKey(a))){_pamDokPdfMerkerLoesen(t,_pamDokDriveId(a));taskAttachments.splice(i,1);weg++;}}
+    renderAttachList();
+    scheduleTaskFieldSave();
+    showToast('🧹 '+weg+' Eintr'+(weg===1?'ag':'äge')+' ohne Datei entfernt – in Drive wurde nichts gelöscht','success',5000);
+    return;
+  }
   let raus=0;
   for(let i=(taskFotos||[]).length-1;i>=0;i--){if(keys.has(_pamToteKey(taskFotos[i]))){taskFotos.splice(i,1);raus++;}}   // an Ort und Stelle: andere Stellen halten dieselbe Liste
   if(typeof _fotoSelPurge==='function')_fotoSelPurge();
@@ -44889,6 +44930,7 @@ function _pamDokOrdnerEintraege(){
   return [
     {sym:'↗',text:'Dokumente-Ordner in Google Drive öffnen',titel:'Den Dokumente-Ordner dieser Karte im Browser öffnen',tu:function(){tDokOrdnerOeffnen();}},
     {sym:'🔄',text:'Ordner abgleichen',titel:'Dokumente-Ordner samt Unterordnern abgleichen – trägt automatisch alles Neue nach',tu:function(){_dokSyncOrdner();}},
+    {sym:'🧹',text:'Einträge ohne Datei aufräumen',titel:'Sieht für jedes Dokument dieser Karte in Google Drive nach, ob die Datei noch da ist, zeigt die gelöschten und die im Papierkorb und entfernt nach einem Klick nur deren Einträge – in Drive wird nichts gelöscht',tu:function(){_pamDokOhneDateiPruefen();}},
     {sym:'💻',text:'Windows-Pfad kopieren',titel:'Windows-Pfad dieses Ordners kopieren – Datei in Word öffnen, mit Strg+S speichern, Drive lädt selbst hoch',tu:function(){_pamDokPfadKopieren();}},
     {sym:'⚙',text:'Ordner-Link ändern',titel:'Zum Feld „Dokumente-Ordner" unter „Ordner & Links" springen',trenner:true,tu:function(){_pamFotoOrdnerEinstellen('tDokOrdner');}}
   ];
