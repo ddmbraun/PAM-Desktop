@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F39';
+const PAM_FORMULARE_VERSION='F40';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -524,8 +524,11 @@ function _fsMiniaturQuelle(f,img){
     if(u.startsWith('data:')||u.startsWith('blob:')){img.src=u;return;}
     if(f.localKey&&!f.driveId&&typeof _mobPhotoGet==='function'){Promise.resolve(_mobPhotoGet(f.localKey)).then(d=>{if(d){f.localUrl=d;img.src=d;}}).catch(()=>{});return;}
     if(f.driveId){
-      const ts=_thumbGespeichert(f);if(ts){img.src=ts;return;}
-      Promise.resolve(_mobFetchThumb(f.driveId)).then(d=>{if(d){img.src=d;if(_thumbMerken(f,d))scheduleSave();}}).catch(()=>{});
+      /* F40: die gemerkte Vorschau-Adresse von Drive läuft nach Stunden ab (Antwort 403) – lädt sie nicht, EINMAL frisch holen statt ein leeres Kästchen zu zeigen */
+      const frisch=()=>Promise.resolve(_mobFetchThumb(f.driveId)).then(d=>{if(d){img.src=d;if(_thumbMerken(f,d))scheduleSave();}}).catch(()=>{});
+      const ts=_thumbGespeichert(f);
+      if(ts){const vorher=img.onerror;img.onerror=()=>{img.onerror=vorher||null;frisch();};img.src=ts;return;}
+      frisch();
     }
   }catch(e){console.warn('[Feuchte] Miniatur:',e);}
 }
@@ -740,14 +743,14 @@ function _fsFotoLeiste(bericht,it,label,kompakt,vorne){ // kompakt: nur 📷 (+Z
       const th=document.createElement('div');th.setAttribute('data-fs-miniatur',String(ri));
       th.title=f.inReport?'Kommt ins PDF':'Nicht im PDF – unten bei „Fotos" antippen';
       const unten=!!bericht.schlank; /* F38: Besichtigung 2 – größeres Vorschaubild, „📌“ und „✕“ stehen darunter statt über dem Bild */
-      th.style.cssText='position:relative;width:'+(unten?'var(--fs-mini,64px)':'64px')+';height:'+(unten?'var(--fs-mini,64px)':'64px')+';border-radius:8px;overflow:hidden;cursor:pointer;flex-shrink:0;background:var(--bg3);border:2px solid '+(f.inReport?'#1a7a3c':'var(--border)')+';';
+      th.style.cssText='position:relative;width:'+(unten?'var(--fs-mini,76px)':'64px')+';height:'+(unten?'var(--fs-mini,76px)':'64px')+';border-radius:8px;overflow:hidden;cursor:pointer;flex-shrink:0;background:var(--bg3);border:2px solid '+(f.inReport?'#1a7a3c':'var(--border)')+';';
       const img=document.createElement('img');img.alt='';img.style.cssText='width:100%;height:100%;object-fit:cover;pointer-events:none;';
       _fsMiniaturQuelle(f,img);
       th.onclick=()=>_wpMobOpenFoto(bericht,fi);
       const x=document.createElement('button');x.type='button';x.textContent='✕';x.title='Verknüpfung lösen – das Foto bleibt im Protokoll';
       x.style.cssText='position:absolute;top:2px;right:2px;width:24px;height:24px;border-radius:50%;border:none;background:rgba(0,0,0,.65);color:#fff;font-size:var(--fs12,12px);line-height:24px;padding:0;cursor:pointer;';
       x.onclick=e=>{e.stopPropagation();it.fotoRefs.splice(ri,1);scheduleSave();neu();};
-      if(unten){x.style.cssText='flex:0 0 auto;min-width:34px;height:var(--fsh,30px);border-radius:8px;border:none;background:#4a5568;color:#fff;font-size:var(--fs14,14px);padding:0 8px;cursor:pointer;';th.append(img);}
+      if(unten){x.style.cssText='flex:0 0 auto;min-width:28px;height:var(--fsh,30px);border-radius:8px;border:none;background:#4a5568;color:#fff;font-size:var(--fs14,14px);padding:0 6px;cursor:pointer;';th.append(img);}
       else th.append(img,x);
       if(typeof f.blick==='number'&&isFinite(f.blick)){ /* F29: Kennzeichen „Blick nach …“ am Foto; antippen entfernt es */
         const bk=document.createElement('button');bk.type='button';bk.setAttribute('data-fs-blick','1');bk.textContent='↗ '+FS_B2_SEITEN[Math.round((((f.blick%360)+360)%360)/45)%8];bk.title='Blick nach '+_fsBlickWort(f.blick)+' ('+Math.round(f.blick)+'°) – antippen zum Entfernen';
@@ -760,8 +763,8 @@ function _fsFotoLeiste(bericht,it,label,kompakt,vorne){ // kompakt: nur 📷 (+Z
         const pk=document.createElement('button');pk.type='button';pk.setAttribute('data-fs-fotopin','1');pk.textContent='📌'+(np?' '+np:'');pk.title='Im Foto markieren – Pins mit Beschriftung'+(np?' ('+_fsFpLegende(f)+')':'');pk.setAttribute('aria-label',pk.title);
         pk.style.cssText='position:absolute;left:2px;top:2px;min-width:30px;height:24px;border-radius:12px;border:none;background:'+(np?'rgba(217,72,15,.95)':'rgba(0,0,0,.65)')+';color:#fff;font-size:var(--fs12,12px);font-weight:700;line-height:24px;padding:0 6px;cursor:pointer;';
         pk.onclick=e=>{e.stopPropagation();_fsFotoPinsFenster(bericht,f,()=>neu());};
-        pk.style.cssText='flex:1 1 auto;min-width:0;height:var(--fsh,30px);border-radius:8px;border:none;background:'+(np?'rgba(217,72,15,.95)':'#4a5568')+';color:#fff;font-size:var(--fs14,14px);font-weight:700;padding:0 6px;cursor:pointer;';
-        const hu=document.createElement('div');hu.setAttribute('data-fs-miniaturbox','1');hu.style.cssText='display:flex;flex-direction:column;gap:4px;flex-shrink:0;width:var(--fs-mini,64px);';
+        pk.style.cssText='flex:1 1 auto;min-width:0;white-space:nowrap;height:var(--fsh,30px);border-radius:8px;border:none;background:'+(np?'rgba(217,72,15,.95)':'#4a5568')+';color:#fff;font-size:var(--fs14,14px);font-weight:700;padding:0 6px;cursor:pointer;';
+        const hu=document.createElement('div');hu.setAttribute('data-fs-miniaturbox','1');hu.style.cssText='display:flex;flex-direction:column;gap:4px;flex-shrink:0;width:var(--fs-mini,76px);';
         const zl=document.createElement('div');zl.setAttribute('data-fs-miniaturknoepfe','1');zl.style.cssText='display:flex;gap:4px;';
         zl.append(pk,x);hu.append(th,zl);w.appendChild(hu);
       }
