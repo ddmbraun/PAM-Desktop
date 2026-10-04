@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F31';
+const PAM_FORMULARE_VERSION='F33';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
@@ -207,6 +207,12 @@ function _fsVervollstaendigen(b){
       if(typeof b.luftbildEbene!=='string')b.luftbildEbene='';if(b.schlank&&typeof b.protName!=='string')b.protName='';
       if(b.luftbildAnsicht!==undefined&&b.luftbildAnsicht!==null&&!_fsLbAnsichtOk(b.luftbildAnsicht))b.luftbildAnsicht=null; /* F27: zuletzt gesehener Kartenausschnitt */
       (b.fotos||[]).forEach(f=>{if(f&&f.blick!==undefined&&!(typeof f.blick==='number'&&isFinite(f.blick)))delete f.blick;}); /* F29 */
+      if(b.schlank){ /* F33: Außenskizzen (Liste am Protokoll) und die Marke je Stelle (s.skz = {k: Kennung der Skizze, x, y}); eine Marke ohne ihre Skizze entfällt */
+        if(!Array.isArray(b.aussenSkizzen))b.aussenSkizzen=[];
+        b.aussenSkizzen=b.aussenSkizzen.filter(k=>k&&typeof k.id==='string'&&k.id);
+        b.aussenSkizzen.forEach(k=>{k.an=true;if(k.aussen!=='dach')k.aussen='wand';['bereich','name','oben'].forEach(f=>{if(typeof k[f]!=='string')k[f]='';});if(!Array.isArray(k.striche))k.striche=[];if(!Array.isArray(k.stempel))k.stempel=[];});
+        b.vbStellen.forEach(s=>{if(s&&s.skz!==undefined&&s.skz!==null&&!(_fsAsMarkeOk(s)&&b.aussenSkizzen.some(k=>k.id===s.skz.k)))s.skz=null;});
+      }
       if(b.schlank){ /* F28: Innen/Außen – welche Teile sichtbar sind, je Stelle Typ + Seite, je Umgebungszeile der Bereich */
         if(typeof b.zeigeInnen!=='boolean')b.zeigeInnen=true;if(typeof b.zeigeAussen!=='boolean')b.zeigeAussen=true;
         b.vbStellen.forEach(s=>{if(!s)return;if(s.typ!=='innen'&&s.typ!=='aussen')s.typ=(String(s.raum||'').trim()==='Außen')?'aussen':'innen';if(typeof s.seite!=='string')s.seite='';if(typeof s.seiteGrad!=='number'||!isFinite(s.seiteGrad))s.seiteGrad=null;});
@@ -476,6 +482,8 @@ function _fsMiniaturQuelle(f,img){
     }
   }catch(e){console.warn('[Feuchte] Miniatur:',e);}
 }
+/* F32: frisch aufgenommen = der Geräteschlüssel des Fotos („photo_<Zeit>_…“) ist nicht älter als der Moment seit (Antippen des Foto-Knopfs). Ein angehaktes älteres Foto ist nicht frisch. */
+function _fsFotoFrisch(f,seit){const m=/^photo_([0-9]+)_/.exec(String((f&&f.localKey)||''));return !!m&&+m[1]>=+seit;}
 function _fsFotoLeiste(bericht,it,label,kompakt,vorne){ // kompakt: nur 📷 (+Zahl) neben der Notiz – die Checkliste bleibt kurz
   if(!Array.isArray(it.fotoRefs))it.fotoRefs=[];
   const w=document.createElement('div');w.setAttribute('data-fs-fotoleiste','1');
@@ -513,10 +521,10 @@ function _fsFotoLeiste(bericht,it,label,kompakt,vorne){ // kompakt: nur 📷 (+Z
     b.style.cssText=(kompakt?'flex:0 0 auto;min-width:52px;':'flex:1 1 160px;')+'min-height:44px;padding:8px 12px;border-radius:8px;border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;';
     b.onclick=()=>{
       /* F29: Besichtigung 2 – die Blickrichtung des Geräts im Moment des Antippens geht mit dem neuen Foto (richte das Gerät vorher auf die Wand) */
-      const g=bericht.schlank?_fsKompassLetzte(6000):null,vor=it.fotoRefs.slice();
+      const g=bericht.schlank?_fsKompassLetzte(6000):null,vor=it.fotoRefs.slice(),t0=Date.now();let blickDa=false; /* F32: die Blickrichtung gilt nur für das ERSTE frisch aufgenommene Foto nach dem Antippen – bei „Weiteres“ hat man sich vielleicht schon gedreht, ein angehaktes älteres Foto wurde woanders gemacht */
       if(g!==null)toast('🧭 Blick nach '+_fsBlickWort(g)+' – wird am Foto gespeichert','info',2500);
       _wpMobFotoPickerForItem(bericht,it,()=>{
-        if(g!==null){let neuDa=false;it.fotoRefs.forEach(ref=>{if(vor.indexOf(ref)>=0)return;const f=(bericht.fotos||[]).find(x=>_fsRefPasst(x,ref));if(f&&typeof f.blick!=='number'){f.blick=g;neuDa=true;}});if(neuDa)scheduleSave();}
+        if(g!==null&&!blickDa){let neuDa=false;it.fotoRefs.forEach(ref=>{if(vor.indexOf(ref)>=0)return;const f=(bericht.fotos||[]).find(x=>_fsRefPasst(x,ref));if(f&&typeof f.blick!=='number'&&_fsFotoFrisch(f,t0)){f.blick=g;neuDa=true;}});if(neuDa){blickDa=true;scheduleSave();}}
         neu();
       });
     };
@@ -1493,6 +1501,52 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       k.append(kz,ortI,sb,tx,fl);
       return k;
     };
+    /* F33: AUSSENSKIZZE je Bereich (Frank 03.10.2026: „bei Raumskizze kann ich nur Räume auswählen, wenn ich aber draußen die Skizze machen will …“ → Entwurf → „bau“).
+       Zugeklappt eine Zeile je Skizze; offen: Name, Fläche (Wand von vorn / Dachfläche von oben), Vorschau, „Einzeichnen“ (Stellen als Nummern, Stempel, Striche), Legende. */
+    const asBlock=bereich=>{
+      const wr=document.createElement('div');wr.setAttribute('data-fs-asblock',bereich);
+      _fsAsFuerBereich(bericht,bereich).forEach(sk=>{
+        const auf=_fsAsAuf.has(sk);
+        const k=document.createElement('div');k.setAttribute('data-fs-as',sk.id);k.style.cssText='margin:6px 0;padding:6px 10px '+(auf?'10':'6')+'px;border:1.5px dashed rgba(217,72,15,.7);border-radius:10px;background:var(--bg2);';
+        const kopf=document.createElement('button');kopf.type='button';kopf.setAttribute('data-fs-askopf',sk.id);kopf.setAttribute('aria-expanded',auf?'true':'false');
+        kopf.style.cssText='display:block;width:100%;min-height:40px;text-align:left;font-size:14px;font-weight:700;color:var(--text);background:transparent;border:none;padding:0;cursor:pointer;font-family:inherit;'+(auf?'':'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;');
+        kopf.textContent=(auf?'▾ ':'▸ ')+'✏ '+_fsAsKurz(bericht,sk);
+        kopf.onclick=()=>{if(auf)_fsAsAuf.delete(sk);else _fsAsAuf.add(sk);_neuBauen();};
+        k.appendChild(kopf);
+        if(!auf){wr.appendChild(k);return;}
+        const bild=document.createElement('img');bild.setAttribute('data-fs-asbild',sk.id);bild.alt='Skizze außen';
+        bild.style.cssText='display:block;width:100%;max-width:560px;margin:8px 0 4px;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer;';
+        const zeichne=()=>{const u=_fsBgSkizzeBild(bericht,_fsAsPseudoRaum(sk));if(u)bild.src=u;};
+        const oeffnen=()=>_fsBgEinzeichnenZeigen(bericht,_fsAsPseudoRaum(sk),()=>{_neuBauen();});
+        const nm=_inp(sk.name,'Name der Skizze, z. B. Wand Straßenseite',v=>{sk.name=v;zeichne();},false);nm.setAttribute('data-fs-asname',sk.id);
+        const fz=document.createElement('div');fz.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 2px;';
+        FS_AS_FLAECHEN.forEach(f=>{const c=_chip(f.t,sk.aussen===f.k,()=>{if(sk.aussen===f.k)return;if(_fsBgStempelAnzahl(sk)&&!confirm('Die gesetzten Stempel bleiben stehen, passen aber zur anderen Ansicht. Trotzdem wechseln?'))return;sk.aussen=f.k;scheduleSave();_neuBauen();});c.setAttribute('data-fs-asflaeche',f.k);c.style.minHeight='38px';fz.appendChild(c);});
+        k.append(nm,fz);
+        if(sk.aussen==='dach'){
+          const ol=document.createElement('div');ol.style.cssText='font-size:12px;color:var(--text2);margin-top:6px;';ol.textContent='Oben in der Skizze ist (freiwillig):';
+          const oc=document.createElement('div');oc.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin:4px 0;';
+          FS_B2_SEITEN.forEach(kk=>{const c=_chip(kk,sk.oben===kk,()=>{sk.oben=sk.oben===kk?'':kk;scheduleSave();_neuBauen();});c.setAttribute('data-fs-asoben',kk);c.style.minHeight='38px';c.style.padding='4px 12px';oc.appendChild(c);});
+          k.append(ol,oc);
+        }
+        bild.onclick=oeffnen;zeichne();k.appendChild(bild);
+        const ez=document.createElement('button');ez.type='button';ez.setAttribute('data-fs-aszeichnen',sk.id);ez.textContent='✏ Einzeichnen – Stellen als Nummern, Stempel, Striche';
+        ez.style.cssText=S_KNOPF+'display:block;width:100%;min-height:48px;margin:4px 0;border:1.5px solid #d9480f;background:rgba(217,72,15,.08);color:var(--text);text-align:left;';
+        ez.onclick=oeffnen;k.appendChild(ez);
+        const mk=_fsAsMarken(bericht,sk);
+        if(mk.length){const lg=document.createElement('div');lg.setAttribute('data-fs-aslegende',sk.id);lg.style.cssText='font-size:14px;color:var(--text);margin:6px 0 2px;';mk.forEach(q=>{const z=document.createElement('div');z.style.cssText='padding:2px 0;';const nf=(Array.isArray(q.s.fotoRefs)?q.s.fotoRefs:[]).filter(r=>(bericht.fotos||[]).some(f=>_fsRefPasst(f,r))).length;z.textContent=q.n+' = '+q.label+(String(q.s.ort||'').trim()?' · '+String(q.s.ort).trim():'')+(nf?' · 📷 '+nf:'');lg.appendChild(z);});k.appendChild(lg);}
+        else{const hi=document.createElement('div');hi.style.cssText='font-size:12px;color:var(--text2);margin:4px 0;';hi.textContent='Noch keine Stelle in der Skizze – „Einzeichnen“ antippen, oben eine Stelle wählen und in die Skizze tippen.';k.appendChild(hi);}
+        const nh=document.createElement('div');nh.style.cssText='font-size:12px;color:var(--text2);margin:4px 0;line-height:1.4;';nh.textContent='Nicht maßstäblich. Die Nummern sind die Stellen dieses Bereichs – ihre Fotos hängen an der Stelle. Im PDF steht die Skizze nur, wenn etwas eingezeichnet ist.';k.appendChild(nh);
+        const weg=document.createElement('button');weg.type='button';weg.setAttribute('data-fs-asweg',sk.id);weg.textContent='✕ Skizze entfernen';
+        weg.style.cssText=S_KNOPF+'display:block;width:100%;margin-top:6px;border:1px solid var(--border);background:transparent;color:var(--text2);';
+        weg.onclick=()=>{if(_fsAsBenutzt(bericht,sk)&&!confirm('Skizze „'+(String(sk.name||'').trim()||'Außen')+'“ entfernen? Stempel, Striche und die Nummern in der Skizze gehen verloren. Die Stellen und ihre Fotos bleiben.'))return;_fsAsWeg(bericht,sk);scheduleSave();_neuBauen();};
+        k.appendChild(weg);wr.appendChild(k);
+      });
+      const neuK=document.createElement('button');neuK.type='button';neuK.setAttribute('data-fs-asneu',bereich);neuK.textContent='＋ Skizze für '+(bereich||'Außen');
+      neuK.style.cssText=S_KNOPF+'display:block;width:100%;min-height:44px;margin:4px 0;border:1.5px dashed #d9480f;background:transparent;color:var(--text);';
+      neuK.onclick=()=>{const sk=_fsAsNeu(bericht,bereich);if(!sk){toast('Genug Skizzen in diesem Protokoll – bitte eine entfernen','info',3500);return;}_fsAsAuf.add(sk);scheduleSave();_neuBauen();};
+      wr.appendChild(neuK);
+      return wr;
+    };
     ['innen','aussen'].forEach(typ=>{
       if(!_fsB2Sichtbar(bericht,typ))return;
       const farbe=typ==='aussen'?'#d9480f':FS_FARBE;
@@ -1505,7 +1559,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
         const rn=document.createElement('div');rn.style.cssText='flex:1;min-width:0;font-size:16px;font-weight:700;color:var(--text);';rn.textContent=gr.raum||(typ==='aussen'?'Außen':'Ohne Raum');
         const re=document.createElement('button');re.type='button';re.textContent=typ==='aussen'?'✎ Bereich umbenennen':'✎ Raum umbenennen';re.setAttribute('data-fs-raumumbenennen',gr.raum);
         re.style.cssText=S_KNOPF+'min-height:36px;padding:4px 10px;font-size:13px;border:1px solid var(--border);background:transparent;color:var(--text2);';
-        re.onclick=()=>{const n=prompt('Neuer Name für „'+(gr.raum||'Ohne Raum')+'“',gr.raum);if(n===null)return;const nn=String(n).trim();gr.stellen.forEach(x=>{x.s.raum=nn;});scheduleSave();_neuBauen();};
+        re.onclick=()=>{const n=prompt('Neuer Name für „'+(gr.raum||'Ohne Raum')+'“',gr.raum);if(n===null)return;const nn=String(n).trim();if(typ==='aussen')_fsAsListe(bericht).forEach(k=>{if(k.bereich===gr.raum)k.bereich=nn;});gr.stellen.forEach(x=>{x.s.raum=nn;});scheduleSave();_neuBauen();}; /* F33: die Skizzen des Bereichs gehen mit */
         if(gr.stellen.length>1){ /* F30: alle zuklappen / aufklappen */
           const anyAuf=gr.stellen.some(x=>_fsStelleOffen(bericht,x.s));
           const ak=document.createElement('button');ak.type='button';ak.setAttribute('data-fs-gruppealle',gr.raum);ak.textContent=anyAuf?'▾ alle zu':'▸ alle auf';
@@ -1518,7 +1572,16 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
         const plus=document.createElement('button');plus.type='button';plus.textContent='＋ Stelle in '+(gr.raum||(typ==='aussen'?'Außen':'diesem Raum'));plus.setAttribute('data-fs-stelleinraum',gr.raum);
         plus.style.cssText=S_KNOPF+'display:block;width:100%;min-height:44px;margin:4px 0;border:1.5px dashed '+farbe+';background:rgba(31,95,139,.06);color:var(--text);';
         plus.onclick=()=>neueStelle(typ,gr.raum);box.appendChild(plus);
+        if(typ==='aussen')box.appendChild(asBlock(gr.raum)); /* F33 */
       });
+      if(typ==='aussen'){ /* F33: Skizzen, deren Bereich keine Stelle mehr hat, bleiben sichtbar (sonst ließen sie sich nicht mehr entfernen) */
+        const da=_fsVbRaumGruppen(bericht,'aussen').map(g=>g.raum);
+        _fsAsListe(bericht).map(k=>k.bereich).filter((v,i,a)=>a.indexOf(v)===i&&da.indexOf(v)<0).forEach(bn=>{
+          const box=document.createElement('div');box.setAttribute('data-fs-asohnestelle',bn);box.style.cssText='margin:10px 0 4px;';
+          const rn=document.createElement('div');rn.style.cssText='font-size:16px;font-weight:700;color:var(--text);padding:2px 0 4px;border-bottom:2px solid '+farbe+';';rn.textContent=(bn||'Außen')+' (nur Skizze, keine Stelle)';
+          box.append(rn,asBlock(bn));sek.appendChild(box);
+        });
+      }
       const vorhanden=_fsVbRaumGruppen(bericht,typ).length>0;
       const lr=document.createElement('div');lr.style.cssText='font-size:13px;color:var(--text2);margin:12px 0 4px;';
       lr.textContent=typ==='innen'?(vorhanden?'Weiterer Raum – antippen und eine Stelle darin anlegen:':'Raum wählen – dann legst du darin die erste Stelle an:'):(vorhanden?'Weiterer Bereich – antippen und eine Stelle darin anlegen:':'Bereich wählen – dann legst du darin die erste Stelle an:');
@@ -2747,7 +2810,7 @@ function _fsVbStelleGefuellt(s){return !!s&&(!!String(s.raum||'').trim()||!!Stri
 // Nur ausgefüllte Stellen, fortlaufend nummeriert (so stehen sie im PDF und in der Foto-Unterschrift)
 // F24: Besichtigung 2 – eine Stelle, die nur einen Raum trägt (gerade angelegt), zählt nicht als ausgefüllt
 function _fsVbPinOk(s){return !!s&&!!s.pin&&isFinite(+s.pin.lat)&&isFinite(+s.pin.lon);}
-function _fsVbStelleGefuelltS(s){return !!s&&(!!String(s.ort||'').trim()||!!String(s.text||'').trim()||(Array.isArray(s.merkmale)&&s.merkmale.length>0)||(Array.isArray(s.fotoRefs)&&s.fotoRefs.length>0)||_fsVbPinOk(s));}
+function _fsVbStelleGefuelltS(s){return !!s&&(!!String(s.ort||'').trim()||!!String(s.text||'').trim()||(Array.isArray(s.merkmale)&&s.merkmale.length>0)||(Array.isArray(s.fotoRefs)&&s.fotoRefs.length>0)||_fsVbPinOk(s)||_fsAsMarkeOk(s));}
 function _fsVbStellenGefuellt(b){const f=(b&&b.schlank)?_fsVbStelleGefuelltS:_fsVbStelleGefuellt;const out=[];((b&&Array.isArray(b.vbStellen))?b.vbStellen:[]).forEach(s=>{if(f(s)&&_fsB2Sichtbar(b,_fsVbTyp(s)))out.push({s,nr:out.length+1});});return out;} // F28: ausgeblendeter Teil zählt nicht
 // F22: Raum und Bauteil zusammen – „Wohnzimmer, Decke“; steht der Raum schon im Bauteil-Feld (ältere Protokolle), wird er nicht doppelt gesetzt
 function _fsVbOrtVoll(s){
@@ -3198,6 +3261,7 @@ function _fsStelleKurz(b,s,nr){
   if(wo)t.push(wo);else if(tx)t.push(tx);
   const se=_fsSeiteText(s&&s.seite);if(se)t.push('Seite '+se);
   if(_fsVbPinOk(s))t.push('📍');
+  if(_fsAsMarkeOk(s))t.push('✏'); /* F33: steht in einer Außenskizze */
   const nf=((s&&Array.isArray(s.fotoRefs))?s.fotoRefs:[]).filter(r=>((b&&b.fotos)||[]).some(f=>_fsRefPasst(f,r))).length;
   if(nf)t.push('📷 '+nf);
   if(t.length===1)t.push('noch leer');
@@ -3205,6 +3269,98 @@ function _fsStelleKurz(b,s,nr){
 }
 /* F29: Kompass-Verfolger – merkt sich die letzte Blickrichtung (nur Handy/Tablet), damit ein Foto sie mitnehmen kann. Läuft, solange das Protokoll offen ist.
    Android startet ohne Nachfrage; das iPhone erst, wenn in der Nadel einmal „Kompass einschalten“ erlaubt wurde. */
+/* ── F33: AUSSENSKIZZE (Besichtigung 2) ──────────────────────────────────────────────────────────────────────────────
+   Am Protokoll: aussenSkizzen = [{id, an:true, aussen:'wand'|'dach', bereich (Name des Außen-Bereichs), name, oben ('' oder N…NW, nur Dach), striche, stempel}].
+   Striche und Stempel sind dieselben Daten wie in der Raumskizze (Anteile 0…1 der 900×640-Fläche) – derselbe Zeichner, dasselbe Zeichenfenster.
+   Eine Stelle steht höchstens in EINER Skizze: stelle.skz = {k: Kennung der Skizze, x, y}. Die Nummer ist die der Stelle („Außen – Wand, Stelle 2“ → 2);
+   Fotos hängen weiter an der Stelle. Nicht maßstäblich. */
+const FS_AS_FLAECHEN=[{k:'wand',t:'Wand (von vorn)'},{k:'dach',t:'Dachfläche (von oben)'}];
+const FS_AS_STEMPEL={wand:[{t:'afenster',n:'Fenster'},{t:'atuer',n:'Tür'},{t:'fbank',n:'Fensterbank'},{t:'rohr',n:'Fallrohr'}],dach:[{t:'dfenster',n:'Dachfenster'},{t:'schorn',n:'Schornstein'},{t:'gully',n:'Ablauf'},{t:'kuppel',n:'Lichtkuppel'}]};
+const FS_AS_MAX=12;
+const _fsAsAuf=new WeakSet(); /* welche Skizzen im Formular aufgeklappt sind – nur Anzeige */
+function _fsAsListe(b){return (b&&Array.isArray(b.aussenSkizzen))?b.aussenSkizzen.filter(k=>k&&k.id):[];}
+function _fsAsFuerBereich(b,bereich){return _fsAsListe(b).filter(k=>k.bereich===bereich);}
+/* Neue Skizze für einen Bereich; „Dach“ im Namen → Dachfläche, sonst Wand. null, wenn die Obergrenze erreicht ist */
+function _fsAsNeu(b,bereich){
+  if(!b)return null;
+  if(!Array.isArray(b.aussenSkizzen))b.aussenSkizzen=[];
+  if(_fsAsListe(b).length>=FS_AS_MAX)return null;
+  const br=String(bereich||''),n=_fsAsFuerBereich(b,br).length;
+  const k={id:'as'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),an:true,aussen:/dach/i.test(br)?'dach':'wand',bereich:br,name:(br.trim()||'Außen')+(n?' '+(n+1):''),oben:'',striche:[],stempel:[]};
+  b.aussenSkizzen.push(k);return k;
+}
+function _fsAsMarkeOk(s){return !!s&&!!s.skz&&typeof s.skz.k==='string'&&!!s.skz.k&&isFinite(+s.skz.x)&&isFinite(+s.skz.y);}
+/* Stellen, die in dieser Skizze stehen können: außen, im selben Bereich */
+function _fsAsStellen(b,sk){return ((b&&Array.isArray(b.vbStellen))?b.vbStellen:[]).filter(s=>s&&sk&&_fsVbTyp(s)==='aussen'&&_fsVbRaumName(s)===sk.bereich);}
+function _fsAsNummer(b,s){const m=/Stelle ([0-9]+)$/.exec(_fsVbBezeichnung(b,s,0));return m?+m[1]:0;}
+function _fsAsMarken(b,sk){return _fsAsStellen(b,sk).filter(s=>_fsAsMarkeOk(s)&&s.skz.k===sk.id).map(s=>({s:s,n:_fsAsNummer(b,s),x:+s.skz.x,y:+s.skz.y,label:_fsVbBezeichnung(b,s,0)}));}
+/* Marke setzen oder verschieben (Anteile 0…1, 3 Stellen, bleibt auf der Fläche); eine Stelle steht damit nur noch in DIESER Skizze */
+function _fsAsMarkeSetzen(sk,s,x,y){
+  if(!sk||!sk.id||!s||!isFinite(+x)||!isFinite(+y))return false;
+  s.skz={k:sk.id,x:Math.round(Math.max(0.03,Math.min(0.97,+x))*1000)/1000,y:Math.round(Math.max(0.04,Math.min(0.96,+y))*1000)/1000};
+  return true;
+}
+function _fsAsMarkeWeg(s){if(s&&s.skz){s.skz=null;return true;}return false;}
+/* Skizze entfernen: aus der Liste, und die Marken der Stellen, die in ihr standen */
+function _fsAsWeg(b,sk){
+  if(!b||!sk||!Array.isArray(b.aussenSkizzen))return false;
+  const i=b.aussenSkizzen.indexOf(sk);if(i<0)return false;
+  b.aussenSkizzen.splice(i,1);
+  (Array.isArray(b.vbStellen)?b.vbStellen:[]).forEach(s=>{if(_fsAsMarkeOk(s)&&s.skz.k===sk.id)s.skz=null;});
+  return true;
+}
+function _fsAsBenutzt(b,sk){return _fsBgStempelAnzahl(sk)>0||_fsBgStricheAnzahl(sk)>0||_fsAsMarken(b,sk).length>0;}
+/* Beschriftung der vier Ränder [oben, rechts, unten, links]: Wand fest; Dach nur, wenn „oben ist …“ gewählt wurde (dann im Uhrzeigersinn weiter) */
+function _fsAsRaender(sk){
+  if(!sk||sk.aussen!=='dach')return ['oben','rechts','unten','links'];
+  const i=FS_B2_SEITEN.indexOf(sk.oben);
+  if(i<0)return ['','','',''];
+  return [0,2,4,6].map(d=>FS_B2_SEITENTEXT[FS_B2_SEITEN[(i+d)%8]]);
+}
+/* Eine Zeile für die zugeklappte Skizze */
+function _fsAsKurz(b,sk){
+  const t=['Skizze: '+(String((sk&&sk.name)||'').trim()||'Außen')];
+  const nm=_fsAsMarken(b,sk).length,ns=_fsBgStempelAnzahl(sk),nl=(sk&&Array.isArray(sk.striche))?sk.striche.length:0;
+  if(nm)t.push(nm+' Stelle'+(nm===1?'':'n'));
+  if(ns)t.push(ns+' Stempel');
+  if(nl)t.push(nl+' Strich'+(nl===1?'':'e'));
+  if(t.length===1)t.push('noch leer');
+  return t.join(' · ');
+}
+/* Die Zeichen- und Stempelfunktionen der Raumskizze erwarten einen „Raum“ mit .name und .skizze – die Außenskizze reicht sich so hinein */
+function _fsAsPseudoRaum(sk){return {name:(String((sk&&sk.name)||'').trim()||'Außen'),skizze:sk};}
+function _fsStempelListe(sk){return (sk&&sk.aussen&&FS_AS_STEMPEL[sk.aussen])||FS_BG_STEMPEL;}
+/* Marken: orangefarbener Kreis mit der Nummer der Stelle; sel = im Zeichenfenster gewählte Stelle (blauer Ring, nie im gespeicherten Bild) */
+function _fsAsMarkenZeichnen(g,b,sk,sel){
+  const W=FS_BG_SKIZZE_W,H=FS_BG_SKIZZE_H;
+  _fsAsMarken(b,sk).forEach(q=>{
+    const px=q.x*W,py=q.y*H;
+    if(sel&&q.s===sel){g.strokeStyle='#1f5f8b';g.lineWidth=4;g.beginPath();g.arc(px,py,36,0,Math.PI*2);g.stroke();}
+    g.fillStyle='#d9480f';g.beginPath();g.arc(px,py,26,0,Math.PI*2);g.fill();
+    g.strokeStyle='#ffffff';g.lineWidth=4;g.beginPath();g.arc(px,py,26,0,Math.PI*2);g.stroke();
+    g.fillStyle='#ffffff';g.font='bold 28px sans-serif';g.textAlign='center';g.textBaseline='middle';
+    g.fillText(String(q.n),px,py+1);
+  });
+}
+/* Zeichnet die Außenskizze auf die 900×640-Fläche: Viereck, Name, Ränder, Stempel, Striche, Marken (opt.ohneMarken: ohne – das Zeichenfenster legt sie live darüber) */
+function _fsAsZeichnen(g,b,sk,opt){
+  const W=FS_BG_SKIZZE_W,H=FS_BG_SKIZZE_H,x0=130,y0=100,w=640,h=440,dach=!!sk&&sk.aussen==='dach';
+  g.fillStyle='#ffffff';g.fillRect(0,0,W,H);
+  g.fillStyle=dach?'#f1f1ee':'#faf7f0';g.fillRect(x0,y0,w,h);
+  g.strokeStyle='#222222';g.lineWidth=6;g.lineCap='square';
+  g.beginPath();g.moveTo(x0,y0);g.lineTo(x0+w,y0);g.lineTo(x0+w,y0+h);g.lineTo(x0,y0+h);g.lineTo(x0,y0);g.stroke();
+  g.textBaseline='middle';g.fillStyle='#1c1c1e';g.font='bold 30px sans-serif';g.textAlign='left';
+  g.fillText(_fsBgSkizzeKuerzen((sk&&sk.name)||'Außen',36)+(dach?' – von oben':' – von vorn'),24,32);
+  const rd=_fsAsRaender(sk);
+  g.font='24px sans-serif';g.fillStyle='#555555';
+  g.textAlign='center';if(rd[0])g.fillText(rd[0],x0+w/2,y0-24);if(rd[2])g.fillText(rd[2],x0+w/2,y0+h+28);
+  g.textAlign='right';if(rd[3])g.fillText(rd[3],x0-14,y0+h/2);
+  g.textAlign='left';if(rd[1])g.fillText(rd[1],x0+w+14,y0+h/2);
+  const r=_fsAsPseudoRaum(sk);
+  _fsBgStempelZeichnen(g,r);
+  _fsBgStricheZeichnen(g,r);
+  if(!(opt&&opt.ohneMarken))_fsAsMarkenZeichnen(g,b,sk,null);
+}
 const _fsKompass={grad:null,zeit:0,laeuft:false,h:null};
 function _fsKompassStart(){
   if(_fsKompass.laeuft||typeof window==='undefined'||typeof window.addEventListener!=='function')return false;
@@ -3874,6 +4030,7 @@ function _fsBgSkizzeSeite(geo,seite,t0,t1){
 }
 // Zeichnet die Skizze auf einen 2D-Zeichenbereich g (Canvas oder Nachbau). Nutzt nur einfache Aufrufe.
 function _fsBgSkizzeZeichnen(g,b,r,opt){
+  if(r&&r.skizze&&r.skizze.aussen){_fsAsZeichnen(g,b,r.skizze,opt);return;} /* F33: Außenskizze (Wand von vorn / Dachfläche von oben) */
   const geo=_fsBgSkizzeGeometrie(r),W=geo.W,H=geo.H,x0=geo.x0,y0=geo.y0,w=geo.w,h=geo.h,m=geo.m;
   g.fillStyle='#ffffff';g.fillRect(0,0,W,H);
   g.fillStyle='#eef4f9';g.fillRect(x0,y0,w,h);
@@ -4000,7 +4157,8 @@ function _fsBgStricheZeichnen(g,r){
    „Tür“ und „Fenster“ an den Wänden bleiben daneben bestehen. ⛔ Obergrenze: 60 Stempel je Raum. */
 const FS_BG_STEMPEL=[{t:'tuer',n:'Tür'},{t:'fenster',n:'Fenster'},{t:'schrank',n:'Schrank'},{t:'heiz',n:'Heizkörper'}];
 // Größe bei Maßstab 1 auf der 900×640-Fläche (w × h) und Versatz der Trefferfläche (oy): die Tür liegt mit ihrer Lücke auf der Wand, der Schwenkbogen oberhalb
-const FS_BG_STEMPEL_MASSE={tuer:{w:110,h:110,oy:-55},fenster:{w:120,h:18,oy:0},schrank:{w:110,h:56,oy:0},heiz:{w:100,h:22,oy:0}};
+const FS_BG_STEMPEL_MASSE={tuer:{w:110,h:110,oy:-55},fenster:{w:120,h:18,oy:0},schrank:{w:110,h:56,oy:0},heiz:{w:100,h:22,oy:0},
+  afenster:{w:90,h:110,oy:0},atuer:{w:80,h:150,oy:0},fbank:{w:120,h:14,oy:0},rohr:{w:16,h:200,oy:0},dfenster:{w:100,h:80,oy:0},schorn:{w:60,h:60,oy:0},gully:{w:44,h:44,oy:0},kuppel:{w:90,h:90,oy:0}}; /* F33: zweite Zeile = Außenskizze (Wand von vorn, Dachfläche von oben) */
 const FS_BG_STEMPEL_MAX=60;
 function _fsBgStempelAnzahl(sk){return (sk&&Array.isArray(sk.stempel))?sk.stempel.length:0;}
 // Neuen Stempel in die Mitte der Skizze setzen; gibt seinen Platz zurück, -1 bei unbekannter Art oder voller Skizze
@@ -4067,6 +4225,36 @@ function _fsBgStempelZeichnen(g,r){
       g.fillStyle='#fdf0d5';g.fillRect(-55,-28,110,56);
       g.strokeStyle='#8a5a2b';g.lineWidth=4;g.strokeRect(-55,-28,110,56);
       g.lineWidth=2;g.beginPath();g.moveTo(-55,-28);g.lineTo(55,28);g.moveTo(55,-28);g.lineTo(-55,28);g.stroke();
+    }else if(st.t==='afenster'){ /* F33: Fenster von vorn */
+      g.fillStyle='#dff1ff';g.fillRect(-45,-55,90,110);
+      g.strokeStyle='#1f5f8b';g.lineWidth=4;g.strokeRect(-45,-55,90,110);
+      g.lineWidth=2;g.beginPath();g.moveTo(0,-55);g.lineTo(0,55);g.moveTo(-45,0);g.lineTo(45,0);g.stroke();
+    }else if(st.t==='atuer'){ /* Tür von vorn */
+      g.fillStyle='#f1e3d0';g.fillRect(-40,-75,80,150);
+      g.strokeStyle='#8a5a2b';g.lineWidth=4;g.strokeRect(-40,-75,80,150);
+      g.fillStyle='#8a5a2b';g.beginPath();g.arc(24,6,5,0,Math.PI*2);g.fill();
+    }else if(st.t==='fbank'){ /* Fensterbank */
+      g.fillStyle='#bdbdbd';g.fillRect(-60,-7,120,14);
+      g.strokeStyle='#444444';g.lineWidth=2;g.strokeRect(-60,-7,120,14);
+    }else if(st.t==='rohr'){ /* Fallrohr */
+      g.fillStyle='#d9d9d9';g.fillRect(-8,-100,16,200);
+      g.strokeStyle='#444444';g.lineWidth=2;g.strokeRect(-8,-100,16,200);
+    }else if(st.t==='dfenster'){ /* Dachfenster von oben */
+      g.fillStyle='#dff1ff';g.fillRect(-50,-40,100,80);
+      g.strokeStyle='#1f5f8b';g.lineWidth=4;g.strokeRect(-50,-40,100,80);
+      g.lineWidth=2;g.beginPath();g.moveTo(-50,-40);g.lineTo(50,40);g.stroke();
+    }else if(st.t==='schorn'){ /* Schornstein */
+      g.fillStyle='#8f8f8f';g.fillRect(-30,-30,60,60);
+      g.strokeStyle='#333333';g.lineWidth=4;g.strokeRect(-30,-30,60,60);
+      g.lineWidth=2;g.beginPath();g.moveTo(-30,-30);g.lineTo(30,30);g.moveTo(30,-30);g.lineTo(-30,30);g.stroke();
+    }else if(st.t==='gully'){ /* Ablauf */
+      g.fillStyle='#ffffff';g.beginPath();g.arc(0,0,22,0,Math.PI*2);g.fill();
+      g.strokeStyle='#333333';g.lineWidth=4;g.beginPath();g.arc(0,0,22,0,Math.PI*2);g.stroke();
+      g.lineWidth=2;g.beginPath();g.moveTo(-14,0);g.lineTo(14,0);g.moveTo(0,-14);g.lineTo(0,14);g.stroke();
+    }else if(st.t==='kuppel'){ /* Lichtkuppel */
+      g.fillStyle='#eef0ff';g.beginPath();g.arc(0,0,45,0,Math.PI*2);g.fill();
+      g.strokeStyle='#333333';g.lineWidth=4;g.beginPath();g.arc(0,0,45,0,Math.PI*2);g.stroke();
+      g.lineWidth=2;g.beginPath();g.arc(0,0,26,0,Math.PI*2);g.stroke();
     }else{ // Heizkörper
       g.fillStyle='#fde2e2';g.fillRect(-50,-11,100,22);
       g.strokeStyle='#b3261e';g.lineWidth=3;g.strokeRect(-50,-11,100,22);
@@ -4094,7 +4282,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
   if(!sk||!sk.an)return;
   const alt=document.getElementById('_fsEinzeichnen');if(alt){alt.remove();return;}
   const W=FS_BG_SKIZZE_W,H=FS_BG_SKIZZE_H;
-  const unterlage=_fsBgSkizzeBild(b,Object.assign({},r,{skizze:Object.assign({},sk,{striche:[],stempel:[]})})); // die Zeichnung ohne Striche und Stempel, die kommen live darüber
+  const unterlage=_fsBgSkizzeBild(b,Object.assign({},r,{skizze:Object.assign({},sk,{striche:[],stempel:[]})}),{ohneMarken:true}); // die Zeichnung ohne Striche und Stempel (F33: und ohne Stellen-Nummern), die kommen live darüber
   if(!unterlage){toast('Einzeichnen geht hier nicht (kein Zeichenbereich)','error',4000);return;}
   const ov=document.createElement('div');ov.id='_fsEinzeichnen';
   ov.style.cssText='position:fixed;inset:0;z-index:99999;background:var(--bg);color:var(--text);display:flex;flex-direction:column;';
@@ -4115,12 +4303,13 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
   ov.append(kopf,leiste,feld,fuss);
   const g=cv.getContext('2d');
   const bild=new Image();let bildDa=false;
-  let modus='zeichnen',farbe=FS_BG_STRICH_FARBEN[0],aktiv=null,zieh=null,sel=-1,stiftGesehen=false;
+  let modus=sk.aussen?(_fsAsStellen(b,sk).length?'stelle':'stempel'):'zeichnen',farbe=FS_BG_STRICH_FARBEN[0],aktiv=null,zieh=null,sel=-1,stiftGesehen=false,selS=null,ziehS=null; /* F33: Außenskizze beginnt bei „Stellen“; selS = gewählte Stelle, ziehS = Marke wird gezogen */
   const neu=()=>{
     g.fillStyle='#ffffff';g.fillRect(0,0,W,H);
     if(bildDa)g.drawImage(bild,0,0,W,H);
     _fsBgStempelZeichnen(g,r);
     _fsBgStricheZeichnen(g,r);
+    if(sk.aussen)_fsAsMarkenZeichnen(g,b,sk,modus==='stelle'?selS:null); /* F33 */
     const st=(modus==='stempel'&&sel>=0&&Array.isArray(sk.stempel))?sk.stempel[sel]:null,m=st?FS_BG_STEMPEL_MASSE[st.t]:null;
     if(st&&m){ // Auswahlrahmen – nur hier im Fenster, nicht im gespeicherten Bild
       const s=Math.max(0.5,Math.min(2,(+st.s)||1));
@@ -4140,12 +4329,24 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
   const RAND='border:2px solid var(--border);background:transparent;';
   const leisteBauen=()=>{
     leiste.innerHTML='';
-    [['zeichnen','✏ Zeichnen'],['stempel','▣ Stempel']].forEach(([k,txt])=>{
+    (sk.aussen?[['stelle','① Stellen'],['stempel','▣ Stempel'],['zeichnen','✏ Zeichnen']]:[['zeichnen','✏ Zeichnen'],['stempel','▣ Stempel']]).forEach(([k,txt])=>{
       const an=modus===k;
       leiste.appendChild(knopf(txt,'border:3px solid '+(an?FS_FARBE:'var(--border)')+';background:'+(an?'rgba(31,95,139,.18)':'transparent')+';',()=>{modus=k;sel=-1;neu();leisteBauen();},['data-fs-ez-modus',k]));
     });
     const trenn=document.createElement('span');trenn.style.cssText='width:1px;align-self:stretch;background:var(--border);';leiste.appendChild(trenn);
-    if(modus==='zeichnen'){
+    if(modus==='stelle'){ /* F33: Stellen des Bereichs als Nummern in die Skizze setzen */
+      const ls=_fsAsStellen(b,sk);
+      if(selS&&ls.indexOf(selS)<0)selS=null;
+      if(!selS)selS=ls.find(s=>!_fsAsMarkeOk(s))||null;
+      ls.forEach(s=>{
+        const hier=_fsAsMarkeOk(s)&&s.skz.k===sk.id,woanders=_fsAsMarkeOk(s)&&s.skz.k!==sk.id,an=selS===s,nr=_fsAsNummer(b,s);
+        leiste.appendChild(knopf('Stelle '+nr+(hier?' ✓':woanders?' (andere Skizze)':''),'border:3px solid '+(an?'#d9480f':'var(--border)')+';background:'+(an?'rgba(217,72,15,.16)':'transparent')+';',()=>{selS=s;neu();leisteBauen();},['data-fs-ez-stelle',String(nr)]));
+      });
+      if(selS&&_fsAsMarkeOk(selS)&&selS.skz.k===sk.id)leiste.appendChild(knopf('Aus Skizze nehmen',RAND+'color:var(--red);',()=>{if(_fsAsMarkeWeg(selS)){scheduleSave();neu();leisteBauen();}},['data-fs-ez-stelleweg','1']));
+      const z=document.createElement('span');z.setAttribute('data-fs-ez-zaehler','1');z.style.cssText='font-size:13px;color:var(--text2);';
+      z.textContent=!ls.length?'In diesem Bereich gibt es noch keine Stelle – erst im Protokoll eine Stelle anlegen.':selS?'Stelle '+_fsAsNummer(b,selS)+(String(selS.ort||'').trim()?' („'+_fsBgSkizzeKuerzen(selS.ort,30)+'“)':'')+': in die Skizze tippen oder die Nummer ziehen':'Oben eine Stelle wählen, dann in die Skizze tippen';
+      leiste.appendChild(z);
+    }else if(modus==='zeichnen'){
       FS_BG_STRICH_FARBEN.forEach((f,i)=>{
         const an=f===farbe;
         leiste.appendChild(knopf(FS_BG_STRICH_NAMEN[i],'border:3px solid '+(an?FS_FARBE:'var(--border)')+';background:transparent;border-left:14px solid '+f+';',()=>{farbe=f;leisteBauen();},['data-fs-ez-farbe',String(i)]));
@@ -4160,7 +4361,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
       const n=(sk.striche||[]).length;z.textContent=n+' Strich'+(n===1?'':'e');
       leiste.appendChild(z);
     }else{
-      FS_BG_STEMPEL.forEach(x=>{
+      _fsStempelListe(sk).forEach(x=>{ /* F33: die Außenskizze hat eigene Stempel */
         leiste.appendChild(knopf('+ '+x.n,'border:2px solid '+FS_FARBE+';background:rgba(31,95,139,.10);',()=>{
           const i=_fsBgStempelNeu(sk,x.t);
           if(i<0){toast('Genug Stempel in diesem Raum – bitte einen löschen','info',3500);return;}
@@ -4187,6 +4388,14 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
     e.preventDefault();
     try{cv.setPointerCapture(e.pointerId);}catch(x){}
     const p=pos(e);
+    if(modus==='stelle'){ /* F33: auf eine Nummer tippen = diese Stelle wählen und ziehen; sonst die gewählte Stelle hierher setzen */
+      const tm=_fsAsMarken(b,sk).filter(q=>Math.hypot(q.x*W-p[0],q.y*H-p[1])<=38).pop();
+      if(tm)selS=tm.s;
+      else if(!selS){toast('Erst oben eine Stelle wählen','info',2500);return;}
+      else _fsAsMarkeSetzen(sk,selS,p[0]/W,p[1]/H);
+      ziehS={id:e.pointerId,s:selS};neu();leisteBauen();
+      return;
+    }
     if(modus==='stempel'){ // Stempel antippen = auswählen, ziehen = verschieben; daneben tippen = nichts mehr ausgewählt
       const i=_fsBgStempelTreffer(sk,p[0],p[1]);
       sel=i;
@@ -4197,6 +4406,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
     aktiv={id:e.pointerId,pts:[p]};
   });
   cv.addEventListener('pointermove',e=>{
+    if(ziehS&&e.pointerId===ziehS.id){e.preventDefault();const p=pos(e);if(_fsAsMarkeSetzen(sk,ziehS.s,p[0]/W,p[1]/H))neu();return;} /* F33 */
     if(zieh&&e.pointerId===zieh.id){
       e.preventDefault();
       const p=pos(e),st=sk.stempel[sel];
@@ -4211,6 +4421,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
     g.beginPath();g.moveTo(q[0],q[1]);g.lineTo(p[0],p[1]);g.stroke(); // Livespur; das gespeicherte Bild entsteht beim Loslassen
   });
   const ende=e=>{
+    if(ziehS&&e.pointerId===ziehS.id){ziehS=null;scheduleSave();neu();leisteBauen();return;} /* F33 */
     if(zieh&&e.pointerId===zieh.id){const z=zieh;zieh=null;if(z.bewegt)scheduleSave();neu();return;}
     if(!aktiv||e.pointerId!==aktiv.id)return;
     const a=aktiv;aktiv=null;
@@ -4493,7 +4704,7 @@ async function _fsMobPdfBg(bericht,task){
               _fsVbRaumGruppen(bericht,typ).forEach(g=>g.stellen.forEach(({s})=>{
                 const x=vbs.find(v=>v.s===s);if(!x)return;
                 const st=_fsVbStelleSatz(Object.assign({},s,{raum:''})),pk=lbp.find(q=>q.s===s),se=_fsSeiteText(s.seite);
-                zeilen.push(_fsVbBezeichnung(bericht,s,x.nr)+' · '+(st||'Stelle')+(se?' – Seite '+se:'')+fotoHinweis(s.fotoRefs)+(pk?' – Luftbild Nr. '+pk.n:''));
+                zeilen.push(_fsVbBezeichnung(bericht,s,x.nr)+' · '+(st||'Stelle')+(se?' – Seite '+se:'')+fotoHinweis(s.fotoRefs)+(pk?' – Luftbild Nr. '+pk.n:'')+((_fsAsMarkeOk(s)&&_fsAsListe(bericht).some(k=>k.id===s.skz.k))?' – Skizze „'+(String((_fsAsListe(bericht).find(k=>k.id===s.skz.k)||{}).name||'').trim()||'Außen')+'“':'')); /* F33 */
               }));
               if(zeilen.length){unterTitel(typ==='innen'?'Feststellungen innen':'Feststellungen außen');zeilen.forEach(z=>absatz(z,{einzug:3,abstand:1.5}));y+=3;}
             });
@@ -4509,6 +4720,20 @@ async function _fsMobPdfBg(bericht,task){
               absatz('Markierungen: '+lbp.map(q=>q.n+' = '+q.label).join(' · ')+'. '+bild.quelle+'.',{groesse:7.5,farbe:[100,100,100],abstand:4});
             }else{
               absatz('Von außen markiert (Luftbild, im PDF nicht abgebildet): '+lbp.map(q=>q.n+' = '+q.label+' ('+q.lat.toFixed(5)+' N, '+q.lon.toFixed(5)+' O)').join(' · ')+'.',{groesse:8,farbe:[70,70,70],abstand:4});
+            }
+          }
+          if(bericht.schlank&&_fsB2Sichtbar(bericht,'aussen')){ /* F33: Außenskizzen – nur, wenn etwas eingezeichnet ist */
+            for(const sk of _fsAsListe(bericht)){
+              if(!_fsAsBenutzt(bericht,sk))continue;
+              const url=_fsBgSkizzeBild(bericht,_fsAsPseudoRaum(sk));
+              if(!url)continue;
+              const sw=120,sh=sw*FS_BG_SKIZZE_H/FS_BG_SKIZZE_W;
+              if(y+sh+18>285){doc.addPage();y=M;}
+              unterTitel('Skizze außen – '+(hat(sk.name)?String(sk.name).trim():'Außen'));
+              try{doc.addImage(url,'JPEG',M,y,sw,sh);}catch(e){console.warn('[Skizze außen]',e);}
+              y+=sh+2;
+              const mk=_fsAsMarken(bericht,sk);
+              absatz('Nicht maßstäblich, '+(sk.aussen==='dach'?'Ansicht von oben':'Ansicht von vorn')+'.'+(mk.length?' Nummern: '+mk.map(q=>q.n+' = '+q.label+(hat(q.s.ort)?' ('+String(q.s.ort).trim()+')':'')).join(' · ')+'.':''),{groesse:7.5,farbe:[100,100,100],abstand:4});
             }
           }
         } // F21, F24
