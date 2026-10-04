@@ -1,9 +1,55 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F37';
+const PAM_FORMULARE_VERSION='F38';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
+/* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
+   Rückmeldung vom Tablet (04.10.2026): Schrift und Knöpfe zu klein, Knöpfe im Dunkeln nur dünne Umrisse, Hinweistexte in leeren Feldern zu blass.
+   Lösung ohne Umbau der vielen Einzel-Stile: das Protokoll-Fenster und seine Unterfenster (Skizze einzeichnen, Foto markieren, Luftbild, Auswahl
+   Innen/Außen) bekommen die Klasse fs-sicht. Darin gelten kräftigere Farbwerte (Flächen, Ränder, Knopf-Füllung) und – nur an Handy/Tablet (fs-touch) –
+   größere Schrift und höhere Knöpfe. Die Einzel-Stile fragen diese Werte mit Rückfall auf den alten Wert ab (z. B. font-size:var(--fs12,12px)):
+   ohne die Klasse bleibt alles wie vorher. Das Fenster „Messliste und Ablauf“ und die Messpunkt-Wahl bekommen die Klasse NICHT.
+   Farben nur Blau und Orange (keine Unterscheidung über Rot/Grün). */
+function _fsSichtCss(){
+  return '.fs-sicht{--bg2:#1e2029;--bg3:#3a3d4c;--border:#6a6e86;--fs-kfl:#17395c;--fs-krd:#5aa9e6;--fs-cfl:#2a2d3a;--fs-can:#1f5f8b;--fs-ph:#b9bccb;--fs-hdr:#243247;--fs-hfa:#5aa9e6;--fs-karte:#16171d;--fs-kante:6px;--fs-lbfl:rgba(217,72,15,.34);--fs-frb:2px;}'
+    +'.fs-sicht.fs-hell{--bg:#e9ecf2;--bg2:#ffffff;--bg3:#ffffff;--border:#7d8198;--fs-kfl:#d6e7f7;--fs-krd:#1f5f8b;--fs-cfl:#ffffff;--fs-can:#b9d7f2;--fs-ph:#5d6074;--fs-hdr:#cfdcea;--fs-hfa:#1f5f8b;--fs-karte:#ffffff;--fs-schatten:0 2px 6px rgba(0,0,0,.18);--fs-lbfl:#ffd9c4;}'
+    +'.fs-sicht input::placeholder,.fs-sicht textarea::placeholder{color:var(--fs-ph)!important;opacity:1!important;}'
+    +'.fs-sicht.fs-touch{--fs11:13px;--fs12:14px;--fs13:14px;--fsh:44px;--fs-mini:84px;}'
+    +'@media (min-width:700px) and (min-height:600px){.fs-sicht.fs-touch{--fs11:14px;--fs12:15px;--fs13:16px;--fs14:17px;--fs15:18px;--fs16:19px;--fs17:20px;--fs18:21px;--fsh:48px;--fsh44:50px;--fs-fpad:12px;--fs-mini:120px;}}';
+}
+/* Ist die Schriftfarbe dunkel, läuft die App im hellen Modus. farbe = berechnete Farbe „rgb(r, g, b)“; Unlesbares zählt als dunkler Modus. */
+function _fsSichtIstHell(farbe){
+  const m=String(farbe||'').match(/[0-9.]+/g);
+  if(!m||m.length<3)return false;
+  const f=v=>{v=Math.max(0,Math.min(255,+v))/255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);};
+  return (0.2126*f(m[0])+0.7152*f(m[1])+0.0722*f(m[2]))<0.4;
+}
+function _fsSichtStil(){
+  if(typeof document==='undefined'||typeof document.getElementById!=='function'||typeof document.createElement!=='function')return;
+  if(document.getElementById('_fsSichtStil'))return;
+  const st=document.createElement('style');st.id='_fsSichtStil';st.textContent=_fsSichtCss();
+  const ziel=document.head||document.body;if(ziel&&typeof ziel.appendChild==='function')ziel.appendChild(st);
+}
+function _fsSichtHell(){
+  try{
+    if(typeof getComputedStyle!=='function'||typeof document==='undefined'||!document.body)return false;
+    const p=document.createElement('span');p.style.cssText='position:absolute;visibility:hidden;color:var(--text);';
+    document.body.appendChild(p);const c=getComputedStyle(p).color;p.remove();
+    return _fsSichtIstHell(c);
+  }catch(e){return false;}
+}
+/* Hängt die Klassen an ein Fenster. Fehlt etwas (Prüfumgebung ohne Klassenliste), bleibt das Fenster wie früher. */
+function _fsSichtAn(el){
+  try{
+    if(!el||!el.classList||typeof el.classList.add!=='function')return false;
+    _fsSichtStil();
+    el.classList.add('fs-sicht');
+    if(!_fsAmPc())el.classList.add('fs-touch');
+    if(_fsSichtHell())el.classList.add('fs-hell');
+    return true;
+  }catch(e){console.warn('[Sichtbarkeit]',e);return false;}
+}
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
    Befund Frank 14.09.2026: ein Formular wie das Wartungsprotokoll, aber mit Messwerten – am
    Tablet vor Ort ausfüllen, als PDF abheften. Werte werden eingetippt; das Einlesen der
@@ -355,18 +401,18 @@ function _fsHilfeZeigen(b){
   const kopf=document.createElement('div');
   kopf.style.cssText='background:'+FS_FARBE+';padding:12px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0;';
   const zu=document.createElement('button');zu.type='button';zu.textContent='←';zu.setAttribute('aria-label','Anleitung schließen');
-  zu.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:40px;height:40px;border-radius:8px;font-size:18px;cursor:pointer;flex-shrink:0;';
+  zu.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:40px;height:40px;border-radius:8px;font-size:var(--fs18,18px);cursor:pointer;flex-shrink:0;';
   zu.onclick=()=>ov.remove();
-  const t=document.createElement('div');t.style.cssText='font-size:15px;font-weight:700;color:#fff;';t.textContent="📘 So geht's – Feuchte messen";
+  const t=document.createElement('div');t.style.cssText='font-size:var(--fs15,15px);font-weight:700;color:#fff;';t.textContent="📘 So geht's – Feuchte messen";
   kopf.append(zu,t);
   const inhalt=document.createElement('div');
   inhalt.style.cssText='flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:4px 16px 40px;';
   FS_HILFE.forEach(([titel,zeilen0])=>{
     const zeilen=(bg&&FS_HILFE_BG[titel])?FS_HILFE_BG[titel]:zeilen0; // F2a
     const h=document.createElement('div');h.textContent=titel;
-    h.style.cssText='font-size:15px;font-weight:700;color:var(--text);margin:16px 0 6px;padding-left:8px;border-left:4px solid '+FS_FARBE+';';
+    h.style.cssText='font-size:var(--fs15,15px);font-weight:700;color:var(--text);margin:16px 0 6px;padding-left:8px;border-left:4px solid '+FS_FARBE+';';
     const ol=document.createElement('ol');ol.style.cssText='margin:0;padding-left:22px;';
-    zeilen.forEach(z=>{const li=document.createElement('li');li.textContent=z;li.style.cssText='font-size:15px;line-height:1.5;color:var(--text);margin-bottom:6px;';ol.appendChild(li);});
+    zeilen.forEach(z=>{const li=document.createElement('li');li.textContent=z;li.style.cssText='font-size:var(--fs15,15px);line-height:1.5;color:var(--text);margin-bottom:6px;';ol.appendChild(li);});
     inhalt.append(h,ol);
   });
   ov.append(kopf,inhalt);
@@ -514,8 +560,9 @@ function _fsFpText(p,t){if(!_fsFpOk(p))return false;p.t=String(t===null||t===und
 /* Pin entfernen – die folgenden rücken auf (Nummer = Platz in der Liste) */
 function _fsFpWeg(f,i){const l=_fsFpListe(f);if(!l[i])return false;f.pins=l.filter((p,k)=>k!==i);return true;}
 /* Lage in Bildpunkten eines W×H großen Bildes: px/py = die Stelle (Pfeilspitze), x/y = Mitte des Kreises, R = Radius, s = Maßstab; liefe der Kreis aus dem Bild, zeigt er zur anderen Seite */
+function _fsFpMass(W,H){return Math.max(+W||0,+H||0)/FS_FP_BREITE;} /* F38: die lange Seite zählt */
 function _fsFpLage(p,W,H){
-  const s=W/FS_FP_BREITE,R=FS_FP_R*s,px=p.x*W,py=p.y*H,r=_fsFpRing(p);
+  const s=_fsFpMass(W,H),R=FS_FP_R*s,px=p.x*W,py=p.y*H,r=_fsFpRing(p);
   let ang=r.ang,rp=_fsLbRingPos(px,py,ang,r.len*s);
   if(rp.x<R+4||rp.x>W-R-4||rp.y<R+4||rp.y>H-R-4){ang=(ang+180)%360;rp=_fsLbRingPos(px,py,ang,r.len*s);}
   return {px:px,py:py,x:rp.x,y:rp.y,ang:ang,R:R,s:s};
@@ -536,11 +583,11 @@ function _fsFpLegende(f){return _fsFpListe(f).map((p,i)=>(i+1)+' = '+(String(p.t
 function _fsFpZeichnen(g,f,W,H,sel,lose){
   _fsFpListe(f).forEach((p,i)=>{
     const L=_fsFpLage(p,W,H),s=L.s,R=L.R,dx=Math.cos(L.ang*Math.PI/180),dy=-Math.sin(L.ang*Math.PI/180),nx=-dy,ny=dx;
-    const sx=L.x-dx*R,sy=L.y-dy*R,ex=L.px+dx*16*s,ey=L.py+dy*16*s;
+    const sx=L.x-dx*R,sy=L.y-dy*R,ex=L.px+dx*22*s,ey=L.py+dy*22*s;
     g.lineCap='round';g.lineJoin='round';
-    g.lineWidth=9*s;g.strokeStyle='#ffffff';g.beginPath();g.moveTo(sx,sy);g.lineTo(ex,ey);g.stroke();
-    g.lineWidth=4*s;g.strokeStyle='#d9480f';g.beginPath();g.moveTo(sx,sy);g.lineTo(ex,ey);g.stroke();
-    g.beginPath();g.moveTo(L.px,L.py);g.lineTo(L.px+(dx*24+nx*10)*s,L.py+(dy*24+ny*10)*s);g.lineTo(L.px+(dx*24-nx*10)*s,L.py+(dy*24-ny*10)*s);g.closePath();g.fillStyle='#d9480f';g.fill();g.lineWidth=2*s;g.strokeStyle='#ffffff';g.stroke();
+    g.lineWidth=13*s;g.strokeStyle='#ffffff';g.beginPath();g.moveTo(sx,sy);g.lineTo(ex,ey);g.stroke(); /* F38: Pfeil dicker, heller Rand breiter */
+    g.lineWidth=7*s;g.strokeStyle='#d9480f';g.beginPath();g.moveTo(sx,sy);g.lineTo(ex,ey);g.stroke();
+    g.beginPath();g.moveTo(L.px,L.py);g.lineTo(L.px+(dx*32+nx*14)*s,L.py+(dy*32+ny*14)*s);g.lineTo(L.px+(dx*32-nx*14)*s,L.py+(dy*32-ny*14)*s);g.closePath();g.fillStyle='#d9480f';g.fill();g.lineWidth=3*s;g.strokeStyle='#ffffff';g.stroke();
     if(sel===i){
       g.strokeStyle='#1f5f8b';g.lineWidth=4*s;g.beginPath();g.arc(L.x,L.y,R+10*s,0,Math.PI*2);g.stroke();
       if(lose){g.lineWidth=3*s;if(typeof g.setLineDash==='function')g.setLineDash([8*s,6*s]);g.beginPath();g.arc(L.px,L.py,30*s,0,Math.PI*2);g.stroke();if(typeof g.setLineDash==='function')g.setLineDash([]);}
@@ -568,12 +615,12 @@ async function _fsFpEinbrennen(d,f){
 function _fsFotoPinsFenster(bericht,f,fertig){
   const alt=document.getElementById('_fsFotoPins');if(alt)alt.remove();
   if(!f)return;
-  const ov=document.createElement('div');ov.id='_fsFotoPins';
+  const ov=document.createElement('div');ov.id='_fsFotoPins';_fsSichtAn(ov);
   ov.style.cssText='position:fixed;inset:0;z-index:100060;background:var(--bg);color:var(--text);display:flex;flex-direction:column;';
   const kopf=document.createElement('div');kopf.style.cssText='background:'+FS_FARBE+';padding:10px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0;';
   const zu=document.createElement('button');zu.type='button';zu.textContent='←';zu.setAttribute('aria-label','Markieren beenden');zu.setAttribute('data-fs-fp-zu','1');
   zu.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:44px;height:44px;border-radius:8px;font-size:20px;cursor:pointer;flex-shrink:0;';
-  const ti=document.createElement('div');ti.style.cssText='font-size:16px;font-weight:700;color:#fff;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+  const ti=document.createElement('div');ti.style.cssText='font-size:var(--fs16,16px);font-weight:700;color:#fff;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
   const zuT=_fsBgFotoZuordnung(bericht,f);ti.textContent='📌 Foto markieren'+(zuT?' – '+zuT:'');
   kopf.append(zu,ti);
   const leiste=document.createElement('div');leiste.style.cssText='display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border);flex-shrink:0;';
@@ -584,7 +631,7 @@ function _fsFotoPinsFenster(bericht,f,fertig){
   const liste=document.createElement('div');liste.setAttribute('data-fs-fp-liste','1');liste.style.cssText='flex-shrink:0;max-height:24vh;overflow:auto;padding:6px 12px;border-top:1px solid var(--border);';
   const fuss=document.createElement('div');fuss.style.cssText='flex-shrink:0;padding:10px 14px 14px;border-top:1px solid var(--border);';
   const fb=document.createElement('button');fb.type='button';fb.textContent='✓ Fertig';fb.setAttribute('data-fs-fp-fertig','1');
-  fb.style.cssText='width:100%;min-height:54px;border-radius:12px;border:none;background:'+FS_FARBE+';color:#fff;font-size:18px;font-weight:700;font-family:inherit;cursor:pointer;';
+  fb.style.cssText='width:100%;min-height:54px;border-radius:12px;border:none;background:'+FS_FARBE+';color:#fff;font-size:var(--fs18,18px);font-weight:700;font-family:inherit;cursor:pointer;';
   fuss.appendChild(fb);
   ov.append(kopf,leiste,feld,liste,fuss);
   const g=cv.getContext('2d');
@@ -597,22 +644,22 @@ function _fsFotoPinsFenster(bericht,f,fertig){
     _fsFpZeichnen(g,f,W,H,sel,lose);
   };
   const knopf=(txt,stil,fn,attr)=>{
-    const x=document.createElement('button');x.type='button';x.textContent=txt;x.style.cssText='font-family:inherit;cursor:pointer;border-radius:10px;min-height:48px;padding:6px 12px;font-size:15px;font-weight:700;color:var(--text);'+stil;
+    const x=document.createElement('button');x.type='button';x.textContent=txt;x.style.cssText='font-family:inherit;cursor:pointer;border-radius:10px;min-height:48px;padding:6px 12px;font-size:var(--fs15,15px);font-weight:700;color:var(--text);'+stil;
     if(attr)x.setAttribute(attr[0],attr[1]);
     x.onclick=fn;return x;
   };
-  const RAND='border:2px solid var(--border);background:transparent;';
+  const RAND='border:2px solid var(--fs-krd,var(--border));background:var(--fs-kfl,transparent);';
   const beschriften=i=>{const p=pins()[i];if(!p)return;const tx=prompt('Beschriftung für Pin '+(i+1)+'\n(z. B. Schaden, undicht)',String(p.t||''));if(tx===null)return;_fsFpText(p,tx);scheduleSave();alles();};
   const leisteBauen=()=>{
     leiste.innerHTML='';
-    leiste.appendChild(knopf('📌 Pin setzen','border:3px solid '+(setzen?'#d9480f':'var(--border)')+';background:'+(setzen?'rgba(217,72,15,.16)':'transparent')+';',()=>{setzen=!setzen;if(setzen){sel=-1;lose=false;}alles();},['data-fs-fp-setzen','1']));
+    leiste.appendChild(knopf('📌 Pin setzen','border:3px solid '+(setzen?'#d9480f':'var(--border)')+';background:'+(setzen?'rgba(217,72,15,.16)':'var(--fs-cfl,transparent)')+';',()=>{setzen=!setzen;if(setzen){sel=-1;lose=false;}alles();},['data-fs-fp-setzen','1']));
     const p=sel>=0?pins()[sel]:null;
     if(p){
       leiste.appendChild(knopf('Beschriftung ändern',RAND,()=>beschriften(sel),['data-fs-fp-text','1']));
-      leiste.appendChild(knopf(lose?'✓ Fest':'✥ Verschieben','border:3px solid '+(lose?'#2e7d4f':'var(--border)')+';background:'+(lose?'rgba(46,125,79,.16)':'transparent')+';',()=>{lose=!lose;alles();},['data-fs-fp-lose','1']));
+      leiste.appendChild(knopf(lose?'✓ Fest':'✥ Verschieben','border:3px solid '+(lose?'#2e7d4f':'var(--border)')+';background:'+(lose?'rgba(46,125,79,.16)':'var(--fs-cfl,transparent)')+';',()=>{lose=!lose;alles();},['data-fs-fp-lose','1']));
       leiste.appendChild(knopf('Entfernen',RAND+'color:var(--red);',()=>{if(String(p.t||'').trim()&&!confirm('Pin '+(sel+1)+' („'+String(p.t).trim()+'“) entfernen?'))return;if(_fsFpWeg(f,sel)){sel=-1;lose=false;scheduleSave();alles();}},['data-fs-fp-weg','1']));
     }
-    const z=document.createElement('span');z.setAttribute('data-fs-fp-hinweis','1');z.style.cssText='font-size:13px;color:var(--text2);flex:1 1 200px;';
+    const z=document.createElement('span');z.setAttribute('data-fs-fp-hinweis','1');z.style.cssText='font-size:var(--fs13,13px);color:var(--text2);flex:1 1 200px;';
     z.textContent=setzen?'Jetzt ins Foto tippen, wo der Pin hin soll'
       :!p?(pins().length?'Pin antippen zum Ändern – oder „📌 Pin setzen“ für einen weiteren':'„📌 Pin setzen“ antippen, dann ins Foto tippen')
       :lose?'Pin '+(sel+1)+' ist lose: Pfeilspitze oder Kreis ziehen oder an die richtige Stelle tippen – dann „✓ Fest“'
@@ -623,7 +670,7 @@ function _fsFotoPinsFenster(bericht,f,fertig){
     liste.innerHTML='';
     pins().forEach((p,i)=>{
       const r=document.createElement('button');r.type='button';r.setAttribute('data-fs-fp-zeile',String(i));
-      r.style.cssText='display:block;width:100%;text-align:left;min-height:40px;margin:3px 0;padding:6px 10px;border-radius:8px;font-family:inherit;font-size:15px;cursor:pointer;color:var(--text);border:2px solid '+(sel===i?'#d9480f':'transparent')+';background:'+(sel===i?'rgba(217,72,15,.12)':'var(--bg2)')+';';
+      r.style.cssText='display:block;width:100%;text-align:left;min-height:var(--fsh,40px);margin:3px 0;padding:6px 10px;border-radius:8px;font-family:inherit;font-size:var(--fs15,15px);cursor:pointer;color:var(--text);border:2px solid '+(sel===i?'#d9480f':'transparent')+';background:'+(sel===i?'rgba(217,72,15,.12)':'var(--bg2)')+';';
       r.textContent=(i+1)+' = '+(String(p.t||'').trim()||'ohne Text');
       r.onclick=()=>{sel=i;lose=false;setzen=false;alles();};
       liste.appendChild(r);
@@ -656,7 +703,7 @@ function _fsFotoPinsFenster(bericht,f,fertig){
     if(!zieh||e.pointerId!==zieh.id)return;
     e.preventDefault();
     const p=pos(e),pin=pins()[sel];if(!pin)return;
-    if(zieh.teil==='ring'){const tx=pin.x*W,ty=pin.y*H,s=W/FS_FP_BREITE;_fsFpRingSetzen(pin,Math.atan2(-(p[1]-ty),p[0]-tx)*180/Math.PI,Math.hypot(p[0]-tx,p[1]-ty)/s);}
+    if(zieh.teil==='ring'){const tx=pin.x*W,ty=pin.y*H,s=_fsFpMass(W,H);_fsFpRingSetzen(pin,Math.atan2(-(p[1]-ty),p[0]-tx)*180/Math.PI,Math.hypot(p[0]-tx,p[1]-ty)/s);}
     else _fsFpBewegen(pin,p[0]/W,p[1]/H);
     zeichne();
   });
@@ -692,33 +739,38 @@ function _fsFotoLeiste(bericht,it,label,kompakt,vorne){ // kompakt: nur 📷 (+Z
       const f=fotos[fi];
       const th=document.createElement('div');th.setAttribute('data-fs-miniatur',String(ri));
       th.title=f.inReport?'Kommt ins PDF':'Nicht im PDF – unten bei „Fotos" antippen';
-      th.style.cssText='position:relative;width:64px;height:64px;border-radius:8px;overflow:hidden;cursor:pointer;flex-shrink:0;background:var(--bg3);border:2px solid '+(f.inReport?'#1a7a3c':'var(--border)')+';';
+      const unten=!!bericht.schlank; /* F38: Besichtigung 2 – größeres Vorschaubild, „📌“ und „✕“ stehen darunter statt über dem Bild */
+      th.style.cssText='position:relative;width:'+(unten?'var(--fs-mini,64px)':'64px')+';height:'+(unten?'var(--fs-mini,64px)':'64px')+';border-radius:8px;overflow:hidden;cursor:pointer;flex-shrink:0;background:var(--bg3);border:2px solid '+(f.inReport?'#1a7a3c':'var(--border)')+';';
       const img=document.createElement('img');img.alt='';img.style.cssText='width:100%;height:100%;object-fit:cover;pointer-events:none;';
       _fsMiniaturQuelle(f,img);
       th.onclick=()=>_wpMobOpenFoto(bericht,fi);
       const x=document.createElement('button');x.type='button';x.textContent='✕';x.title='Verknüpfung lösen – das Foto bleibt im Protokoll';
-      x.style.cssText='position:absolute;top:2px;right:2px;width:24px;height:24px;border-radius:50%;border:none;background:rgba(0,0,0,.65);color:#fff;font-size:12px;line-height:24px;padding:0;cursor:pointer;';
+      x.style.cssText='position:absolute;top:2px;right:2px;width:24px;height:24px;border-radius:50%;border:none;background:rgba(0,0,0,.65);color:#fff;font-size:var(--fs12,12px);line-height:24px;padding:0;cursor:pointer;';
       x.onclick=e=>{e.stopPropagation();it.fotoRefs.splice(ri,1);scheduleSave();neu();};
-      th.append(img,x);
+      if(unten){x.style.cssText='flex:0 0 auto;min-width:34px;height:var(--fsh,30px);border-radius:8px;border:none;background:#4a5568;color:#fff;font-size:var(--fs14,14px);padding:0 8px;cursor:pointer;';th.append(img);}
+      else th.append(img,x);
       if(typeof f.blick==='number'&&isFinite(f.blick)){ /* F29: Kennzeichen „Blick nach …“ am Foto; antippen entfernt es */
         const bk=document.createElement('button');bk.type='button';bk.setAttribute('data-fs-blick','1');bk.textContent='↗ '+FS_B2_SEITEN[Math.round((((f.blick%360)+360)%360)/45)%8];bk.title='Blick nach '+_fsBlickWort(f.blick)+' ('+Math.round(f.blick)+'°) – antippen zum Entfernen';
-        bk.style.cssText='position:absolute;left:2px;bottom:2px;min-width:30px;height:20px;border-radius:10px;border:none;background:rgba(31,95,139,.9);color:#fff;font-size:11px;font-weight:700;line-height:20px;padding:0 6px;cursor:pointer;';
+        bk.style.cssText='position:absolute;left:2px;bottom:2px;min-width:30px;height:20px;border-radius:10px;border:none;background:rgba(31,95,139,.9);color:#fff;font-size:var(--fs11,11px);font-weight:700;line-height:20px;padding:0 6px;cursor:pointer;';
         bk.onclick=e=>{e.stopPropagation();if(confirm('Blickrichtung (Blick nach '+_fsBlickWort(f.blick)+') am Foto entfernen?')){delete f.blick;scheduleSave();neu();}};
         th.appendChild(bk);
       }
       if(bericht.schlank){ /* F37: „📌“ an der Miniatur öffnet das Foto zum Markieren; mit Pins steht ihre Anzahl dabei */
         const np=_fsFpListe(f).length;
         const pk=document.createElement('button');pk.type='button';pk.setAttribute('data-fs-fotopin','1');pk.textContent='📌'+(np?' '+np:'');pk.title='Im Foto markieren – Pins mit Beschriftung'+(np?' ('+_fsFpLegende(f)+')':'');pk.setAttribute('aria-label',pk.title);
-        pk.style.cssText='position:absolute;left:2px;top:2px;min-width:30px;height:24px;border-radius:12px;border:none;background:'+(np?'rgba(217,72,15,.95)':'rgba(0,0,0,.65)')+';color:#fff;font-size:12px;font-weight:700;line-height:24px;padding:0 6px;cursor:pointer;';
+        pk.style.cssText='position:absolute;left:2px;top:2px;min-width:30px;height:24px;border-radius:12px;border:none;background:'+(np?'rgba(217,72,15,.95)':'rgba(0,0,0,.65)')+';color:#fff;font-size:var(--fs12,12px);font-weight:700;line-height:24px;padding:0 6px;cursor:pointer;';
         pk.onclick=e=>{e.stopPropagation();_fsFotoPinsFenster(bericht,f,()=>neu());};
-        th.appendChild(pk);
+        pk.style.cssText='flex:1 1 auto;min-width:0;height:var(--fsh,30px);border-radius:8px;border:none;background:'+(np?'rgba(217,72,15,.95)':'#4a5568')+';color:#fff;font-size:var(--fs14,14px);font-weight:700;padding:0 6px;cursor:pointer;';
+        const hu=document.createElement('div');hu.setAttribute('data-fs-miniaturbox','1');hu.style.cssText='display:flex;flex-direction:column;gap:4px;flex-shrink:0;width:var(--fs-mini,64px);';
+        const zl=document.createElement('div');zl.setAttribute('data-fs-miniaturknoepfe','1');zl.style.cssText='display:flex;gap:4px;';
+        zl.append(pk,x);hu.append(th,zl);w.appendChild(hu);
       }
-      w.appendChild(th);
+      else w.appendChild(th);
     });
     const b=document.createElement('button');b.type='button';b.setAttribute('data-fs-fotoknopf','1');
     b.textContent=vorne?'📷 Foto'+(anz?' ('+anz+')':''):kompakt?'📷'+(anz?' '+anz:''):'📷 '+label+(anz?' ('+anz+')':''); /* F31: neben dem Luftbild-Knopf kurz */
     b.title=label;b.setAttribute('aria-label',label+(anz?' ('+anz+')':''));
-    b.style.cssText=(kompakt?'flex:0 0 auto;min-width:52px;':'flex:1 1 160px;')+'min-height:44px;padding:8px 12px;border-radius:8px;border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;';
+    b.style.cssText=(kompakt?'flex:0 0 auto;min-width:52px;':'flex:1 1 160px;')+'min-height:var(--fsh44,44px);padding:8px 12px;border-radius:8px;border:1.5px solid var(--fs-krd,var(--border));background:var(--fs-kfl,transparent);color:var(--text);font-size:var(--fs14,14px);font-weight:600;cursor:pointer;font-family:inherit;';
     b.onclick=()=>{
       /* F29: Besichtigung 2 – die Blickrichtung des Geräts im Moment des Antippens geht mit dem neuen Foto (richte das Gerät vorher auf die Wand) */
       const g=bericht.schlank?_fsKompassLetzte(6000):null,vor=it.fotoRefs.slice(),t0=Date.now();let blickDa=false; /* F32: die Blickrichtung gilt nur für das ERSTE frisch aufgenommene Foto nach dem Antippen – bei „Weiteres“ hat man sich vielleicht schon gedreht, ein angehaktes älteres Foto wurde woanders gemacht */
@@ -816,9 +868,9 @@ function _fsErgebnisZeigen(el,bericht){
   el.style.borderLeftColor=farbe;
   el.setAttribute('data-fs-stufe',e.stufe||'keine');
   el.innerHTML='';
-  const k=document.createElement('div');k.style.cssText='font-size:17px;font-weight:700;color:var(--text);';
+  const k=document.createElement('div');k.style.cssText='font-size:var(--fs17,17px);font-weight:700;color:var(--text);';
   k.textContent=e.stufe==='gruen'?'✅ Keine Schimmelgefahr':e.stufe==='gelb'?'⚠ Mögliches Schimmelrisiko':e.stufe==='rot'?'⛔ Akute Schimmelgefahr':'ℹ Ergebnis';
-  const tx=document.createElement('div');tx.style.cssText='font-size:14px;color:var(--text);margin-top:4px;line-height:1.45;';tx.textContent=e.text;
+  const tx=document.createElement('div');tx.style.cssText='font-size:var(--fs14,14px);color:var(--text);margin-top:4px;line-height:1.45;';tx.textContent=e.text;
   el.append(k,tx);
 }
 
@@ -909,28 +961,29 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   if(typeof _pbOffenMerken==='function')_pbOffenMerken(t,bericht,GID,function(){_neuBauen();}); // v306: nach Neuladen/Zusammenführen an den frischen Stand hängen, bei jüngerer Fassung von drüben neu zeichnen
   const ov=document.createElement('div');ov.id=GID;
   ov.style.cssText='position:fixed;inset:0;z-index:99998;display:flex;flex-direction:column;background:var(--bg);';
+  _fsSichtAn(ov); /* F38 */
   ov._fsBericht=bericht; // F2a: „📘 So geht's" liest daraus, welches Protokoll offen ist
 
-  const S_INP='width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:16px;color:var(--text);font-family:inherit;min-width:0;';
-  const S_HDR='padding:10px 14px;font-size:13px;font-weight:700;color:var(--text);background:var(--bg2);border-top:1px solid var(--border);border-bottom:1px solid var(--border);border-left:4px solid '+FS_FARBE+';';
-  const S_RAUMGRID='display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,.8fr) minmax(0,.8fr) minmax(0,.9fr) 40px;gap:6px;';
-  const S_KNOPF='padding:9px 12px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:600;font-family:inherit;';
+  const S_INP='width:100%;box-sizing:border-box;background:var(--bg3);border:var(--fs-frb,1px) solid var(--border);border-radius:6px;padding:var(--fs-fpad,8px);font-size:var(--fs16,16px);color:var(--text);font-family:inherit;min-width:0;';
+  const S_HDR='padding:10px 14px;font-size:var(--fs13,13px);font-weight:700;color:var(--text);background:var(--fs-hdr,var(--bg2));border-top:1px solid var(--border);border-bottom:1px solid var(--border);border-left:var(--fs-kante,4px) solid var(--fs-hfa,'+FS_FARBE+');';
+  const S_RAUMGRID='display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,.8fr) minmax(0,.8fr) minmax(0,.9fr) var(--fsh,40px);gap:6px;';
+  const S_KNOPF='padding:9px 12px;border-radius:8px;font-size:var(--fs14,14px);cursor:pointer;font-weight:600;font-family:inherit;';
 
   /* Kopfleiste */
   const hdr=document.createElement('div');
   hdr.style.cssText='background:'+FS_FARBE+';padding:12px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0;';
   const closeBtn=document.createElement('button');closeBtn.type='button';closeBtn.textContent='←';
-  closeBtn.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:40px;height:40px;border-radius:8px;font-size:18px;cursor:pointer;flex-shrink:0;';
+  closeBtn.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:40px;height:40px;border-radius:8px;font-size:var(--fs18,18px);cursor:pointer;flex-shrink:0;';
   closeBtn.onclick=()=>{ov.remove();try{const ct=currentTask();if(ct)renderDetail(ct);}catch(e){console.warn('[Feuchte] zurück:',e);}};
   const hdrMeta=document.createElement('div');hdrMeta.style.cssText='flex:1;min-width:0;';
-  const hdrT=document.createElement('div');hdrT.style.cssText='font-size:15px;font-weight:700;color:#fff;';hdrT.textContent='💧 '+_fsTitel(bericht);
-  const hdrS=document.createElement('div');hdrS.style.cssText='font-size:12px;color:rgba(255,255,255,.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+  const hdrT=document.createElement('div');hdrT.style.cssText='font-size:var(--fs15,15px);font-weight:700;color:#fff;';hdrT.textContent='💧 '+_fsTitel(bericht);
+  const hdrS=document.createElement('div');hdrS.style.cssText='font-size:var(--fs12,12px);color:rgba(255,255,255,.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
   hdrS.textContent=(bericht.kopf.objektAdresse||t.adresse||t.title||'')+' · '+(bericht.datum||'');
   hdrMeta.append(hdrT,hdrS);
   const statsEl=document.createElement('div');statsEl.id='_fsMobStats';
-  statsEl.style.cssText='background:rgba(255,255,255,.18);border-radius:6px;padding:3px 8px;font-size:12px;color:#fff;white-space:nowrap;flex-shrink:0;';
+  statsEl.style.cssText='background:rgba(255,255,255,.18);border-radius:6px;padding:3px 8px;font-size:var(--fs12,12px);color:#fff;white-space:nowrap;flex-shrink:0;';
   const hilfeBtn=document.createElement('button');hilfeBtn.type='button';hilfeBtn.textContent='📘';hilfeBtn.title="So geht's";hilfeBtn.setAttribute('aria-label',"So geht's – Anleitung"); // v304
-  hilfeBtn.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:40px;height:40px;border-radius:8px;font-size:18px;cursor:pointer;flex-shrink:0;';
+  hilfeBtn.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:40px;height:40px;border-radius:8px;font-size:var(--fs18,18px);cursor:pointer;flex-shrink:0;';
   hilfeBtn.onclick=()=>_fsHilfeZeigen();
   hdr.append(closeBtn,hdrMeta,hilfeBtn,statsEl);
 
@@ -949,20 +1002,20 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   function _feld(label,key,ph,zahl){
     const row=document.createElement('div');
     row.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 14px;border-top:1px solid var(--border);';
-    const l=document.createElement('span');l.style.cssText='font-size:13px;color:var(--text2);width:112px;flex-shrink:0;';l.textContent=label;
+    const l=document.createElement('span');l.style.cssText='font-size:var(--fs13,13px);color:var(--text2);width:112px;flex-shrink:0;';l.textContent=label;
     const i=_inp(bericht.kopf[key],ph,v=>{bericht.kopf[key]=v;if(key==='aussenT'||key==='aussenRf')_fsWerteNeu();if(key==='pruefer'&&bericht.fassung==='begehung'&&typeof _fsBgMerkName==='function')_fsBgMerkName(v);},zahl);
     row.append(l,i);return row;
   }
   function _chip(label,an,fn){
     const b=document.createElement('button');b.type='button';b.textContent=label;
-    b.style.cssText='padding:8px 14px;border-radius:16px;font-size:14px;cursor:pointer;font-family:inherit;min-height:40px;'
-      +'border:2px solid '+(an?FS_FARBE:'var(--border)')+';background:'+(an?'rgba(31,95,139,.18)':'transparent')+';color:var(--text);font-weight:'+(an?'700':'400')+';';
+    b.style.cssText='padding:8px 14px;border-radius:16px;font-size:var(--fs14,14px);cursor:pointer;font-family:inherit;min-height:var(--fsh,40px);'
+      +'border:2px solid '+(an?'var(--fs-krd,'+FS_FARBE+')':'var(--border)')+';background:'+(an?'var(--fs-can,rgba(31,95,139,.18))':'var(--fs-cfl,transparent)')+';color:var(--text);font-weight:'+(an?'700':'400')+';';
     b.onclick=fn;return b;
   }
   function _neuBauen(){
     const sc=body.scrollTop;
     body.innerHTML='';_vbUmgFuellen=null; // F23
-    if(_fsIstVorab(bericht)&&bericht.schlank&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_bgBlock('vorort',_teilVorOrtVb),_bgBlock('gemeldet',_teilGemeldetVb),_bgBlock('stellen',_teilFeststellungenB2),_bgBlock('fotos',_teilFotos,'Fotos'),_bgBlock('raeume',_teilRaeumeBg,'Räume')); // F23: Besichtigung 2
+    if(_fsIstVorab(bericht)&&bericht.schlank&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_bgBlock('vorort',_teilVorOrtVb),_bgBlock('gemeldet',_teilGemeldetVb),_bgBlock('stellen',_teilFeststellungenB2),_bgBlock('fotos',_teilFotos,'Fotos')); // F23: Besichtigung 2 · F38: ohne den Abschnitt „Räume“ (seit F36 sitzt die Skizze beim Raum; der Balken stand noch da und hieß „raeume“)
     else if(_fsIstVorab(bericht)&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_bgBlock('vorort',_teilVorOrtVb),_bgBlock('gemeldet',_teilGemeldetVb),_bgBlock('stellen',_teilStellenBlockVb),_bgBlock('umgebung',_teilUmgebungVb),_bgBlock('ergebnis',_teilErgebnisVb),_bgBlock('fotos',_teilFotos,'Fotos'),_bgBlock('vorgeschichte',_teilVorgeschichteVb),_bgBlock('karte',_teilKarteVb),_bgBlock('versich',_teilVersichVb),_bgBlock('fest',_teilChecklistenBg,'Feststellungen vor Ort'),...(_vbAltAngaben()?[_bgBlock('angaben',_teilAngabenBg,'Angaben der Nutzer (nicht selbst festgestellt)')]:[]),_bgBlock('termin',_teilTerminBg),_bgBlock('raeume',_teilRaeumeBg,'Räume')); // F20: „Vor Ort“ offen, der Rest zugeklappt
     else if(bericht.fassung==='begehung'&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_teilKopfBg(),_bgBlock('raeume',_teilRaeumeBg,'Räume'),_bgBlock('fest',_teilChecklistenBg,'Feststellungen vor Ort'),_bgBlock('angaben',_teilAngabenBg,'Angaben der Nutzer (nicht selbst festgestellt)'),_bgBlock('fazit',_teilZusammenfassungBg,'Zusammenfassung der Feststellungen'),_bgBlock('fotos',_teilFotos,'Fotos')); // F2b: zuklappbar, Leiste oben
     else{
@@ -1013,7 +1066,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   function _teilKopf(){
     const w=document.createElement('div');
     const hilfen=document.createElement('div');hilfen.style.cssText='display:flex;flex-wrap:wrap;gap:8px;padding:8px 14px;'; // v294
-    const hk=(txt,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.style.cssText=S_KNOPF+'min-height:44px;border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);';b.onclick=fn;return b;};
+    const hk=(txt,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.style.cssText=S_KNOPF+'min-height:var(--fsh44,44px);border:1.5px solid var(--fs-krd,'+FS_FARBE+');background:var(--fs-kfl,transparent);color:var(--text);';b.onclick=fn;return b;};
     hilfen.append(
       hk('↻ aus Karte',()=>_ausKarteKlick()),
       hk('🌤 Wetter holen',()=>_fsWetterHolen(bericht,_neuBauen)));
@@ -1029,7 +1082,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       _feld('Außen °C','aussenT','z. B. 12,5',true),
       _feld('Außen % rF','aussenRf','z. B. 80',true));
     const td=document.createElement('div');td.setAttribute('data-fs-aussen','1');
-    td.style.cssText='padding:0 14px 6px 136px;font-size:13px;color:var(--text2);';
+    td.style.cssText='padding:0 14px 6px 136px;font-size:var(--fs13,13px);color:var(--text2);';
     w.append(td,_feld('Messgeräte','messgeraete','z. B. testo 605i / 805i'),_feld('Prüfer','pruefer',''));
     return w;
   }
@@ -1038,7 +1091,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const w=document.createElement('div');
     w.appendChild(_kopfZeile('Raumklima'));
     if(bericht.raeume.length){
-      const kz=document.createElement('div');kz.style.cssText=S_RAUMGRID+'padding:6px 14px 0;font-size:12px;color:var(--text2);';
+      const kz=document.createElement('div');kz.style.cssText=S_RAUMGRID+'padding:6px 14px 0;font-size:var(--fs12,12px);color:var(--text2);';
       ['Raum','°C','% rF','Taupunkt',''].forEach(x=>{const s=document.createElement('span');s.textContent=x;kz.appendChild(s);});
       w.appendChild(kz);
     }
@@ -1055,9 +1108,9 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const tI=_inp(r.t,'°C',v=>{r.t=v;_fsWerteNeu();},true);
       const fI=_inp(r.rf,'%',v=>{r.rf=v;_fsWerteNeu();},true);
       const td=document.createElement('span');td.setAttribute('data-fs-raum',String(ri));
-      td.style.cssText='font-size:14px;color:var(--text);text-align:center;';
+      td.style.cssText='font-size:var(--fs14,14px);color:var(--text);text-align:center;';
       const x=document.createElement('button');x.type='button';x.textContent='✕';x.title='Raum entfernen';
-      x.style.cssText='width:40px;height:40px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--red);font-size:15px;cursor:pointer;';
+      x.style.cssText='width:var(--fsh,40px);height:var(--fsh,40px);border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--red);font-size:var(--fs15,15px);cursor:pointer;';
       x.onclick=()=>{if(!confirm('Raum „'+(r.name||'ohne Namen')+'" entfernen?'))return;bericht.raeume.splice(ri,1);scheduleSave();_neuBauen();};
       row.append(nameI,tI,fI,td,x);
       w.appendChild(row);
@@ -1080,7 +1133,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   function _teilStellen(){
     const w=document.createElement('div');
     w.appendChild(_kopfZeile('Messstellen'));
-    const info=document.createElement('div');info.style.cssText='padding:6px 14px 2px;font-size:12px;color:var(--text2);';
+    const info=document.createElement('div');info.style.cssText='padding:6px 14px 2px;font-size:var(--fs12,12px);color:var(--text2);';
     info.textContent='Oberfläche mit dem Infrarot-Thermometer. Bauteilfeuchte in Digits – immer eine trockene Stelle zum Vergleich messen.'
       +(_fsIstKeller(bericht)?' Im Keller an derselben Wand in mehreren Höhen messen (z. B. 10, 50, 100 cm) – jede Höhe eine eigene Stelle.':'');
     w.appendChild(info);
@@ -1094,7 +1147,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const txtI=_inp(st.text,_fsIstKeller(bericht)?'Stelle, z. B. Außenwand 10 cm':'Stelle, z. B. Außenecke oben',v=>{st.text=v;},false);
       txtI.setAttribute('data-fs-stellentext',String(si));
       const x=document.createElement('button');x.type='button';x.textContent='✕';x.title='Messstelle entfernen';
-      x.style.cssText='width:40px;height:40px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--red);font-size:15px;cursor:pointer;flex-shrink:0;';
+      x.style.cssText='width:var(--fsh,40px);height:var(--fsh,40px);border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--red);font-size:var(--fs15,15px);cursor:pointer;flex-shrink:0;';
       x.onclick=()=>{if(!confirm('Messstelle '+(si+1)+' entfernen?'))return;bericht.stellen.splice(si,1);scheduleSave();_neuBauen();};
       top.append(nr,txtI,x);
 
@@ -1109,7 +1162,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
 
       const gr=document.createElement('div');gr.style.cssText='display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:8px;';
       [['Oberfläche °C','ts'],['Bauteil (Digits)','mf'],['Vergleich trocken','mfVergleich']].forEach(([lab,key])=>{
-        const z=document.createElement('label');z.style.cssText='display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--text2);min-width:0;';
+        const z=document.createElement('label');z.style.cssText='display:flex;flex-direction:column;gap:3px;font-size:var(--fs12,12px);color:var(--text2);min-width:0;';
         const s=document.createElement('span');s.textContent=lab;
         z.append(s,_inp(st[key],'',v=>{st[key]=v;_fsWerteNeu();},true));
         gr.appendChild(z);
@@ -1119,7 +1172,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       if(st.testo||_fsZahl(st.luftT)!==null||_fsZahl(st.luftRf)!==null){
         luftGr=document.createElement('div');luftGr.style.cssText='display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:8px;';
         [['Luft °C (Messung)','luftT'],['Luft % rF (Messung)','luftRf']].forEach(([lab,key])=>{
-          const z=document.createElement('label');z.style.cssText='display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--text2);min-width:0;';
+          const z=document.createElement('label');z.style.cssText='display:flex;flex-direction:column;gap:3px;font-size:var(--fs12,12px);color:var(--text2);min-width:0;';
           const s=document.createElement('span');s.textContent=lab;
           const li=_inp(st[key],'leer = Raumklima',v=>{st[key]=v;_fsWerteNeu();},true);li.setAttribute('data-fs-luft',key);
           z.append(s,li);luftGr.appendChild(z);
@@ -1162,7 +1215,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     };
     w.appendChild(add);
     const testoBtn=document.createElement('button');testoBtn.type='button';testoBtn.textContent='📥 testo-Messung einlesen'; // v292
-    testoBtn.style.cssText=S_KNOPF+'display:block;width:calc(100% - 20px);margin:0 10px 14px;border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);';
+    testoBtn.style.cssText=S_KNOPF+'display:block;width:calc(100% - 20px);margin:0 10px 14px;border:1.5px solid var(--fs-krd,'+FS_FARBE+');background:var(--fs-kfl,transparent);color:var(--text);';
     testoBtn.onclick=()=>_fsTestoEinlesen(bericht,t,_neuBauen);
     w.appendChild(testoBtn);
     return w;
@@ -1186,18 +1239,18 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const kt=document.createElement('span');kt.textContent=sek.titel||'';kt.style.cssText='flex:1;min-width:0;';
       kopf.append(pfeil,kt);
       if(zu){const kurz=document.createElement('span');kurz.setAttribute('data-fs-sekkurz',String(si));kurz.textContent=_fsSektionKurz(sek);
-        kurz.style.cssText='font-size:12px;font-weight:600;color:var(--text2);white-space:nowrap;flex-shrink:0;';kopf.appendChild(kurz);}
+        kurz.style.cssText='font-size:var(--fs12,12px);font-weight:600;color:var(--text2);white-space:nowrap;flex-shrink:0;';kopf.appendChild(kurz);}
       kopf.onclick=()=>umschalten(si,!zu);
       w.appendChild(kopf);
       if(zu)return;
       sek.items.forEach(it=>{
         const row=document.createElement('div');row.style.cssText='padding:10px 14px;border-bottom:1px solid var(--border);';
-        const txt=document.createElement('div');txt.style.cssText='font-size:14px;color:var(--text);margin-bottom:6px;';txt.textContent=it.text||'';
+        const txt=document.createElement('div');txt.style.cssText='font-size:var(--fs14,14px);color:var(--text);margin-bottom:6px;';txt.textContent=it.text||'';
         const knr=document.createElement('div');knr.style.cssText='display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;';
         stufen.forEach(s=>{
           const an=(it.status||'offen')===s.k;
           const b=document.createElement('button');b.type='button';b.textContent=s.t;
-          b.style.cssText='padding:8px 4px;min-height:40px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;'
+          b.style.cssText='padding:8px 4px;min-height:var(--fsh,40px);border-radius:8px;font-size:var(--fs13,13px);font-weight:700;cursor:pointer;font-family:inherit;'
             +'border:2px solid '+(an?s.c:'var(--border)')+';background:'+(an?'var(--bg3)':'transparent')+';color:'+(an?s.c:'var(--text2)')+';';
           b.onclick=()=>{it.status=s.k;scheduleSave();_neuBauen();};
           knr.appendChild(b);
@@ -1215,7 +1268,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       frei.onclick=()=>{const tx=prompt('Prüfpunkt:');if(tx&&tx.trim()){sek.items.push({text:tx.trim(),status:'offen',notiz:''});scheduleSave();_neuBauen();}};
       w.appendChild(frei);
       const ein=document.createElement('button');ein.type='button';ein.textContent='▲ Abschnitt einklappen';ein.setAttribute('data-fs-einklappen',String(si)); // v304
-      ein.style.cssText=S_KNOPF+'display:block;width:calc(100% - 28px);margin:0 14px 12px;border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);';
+      ein.style.cssText=S_KNOPF+'display:block;width:calc(100% - 28px);margin:0 14px 12px;border:1.5px solid var(--fs-krd,'+FS_FARBE+');background:var(--fs-kfl,transparent);color:var(--text);';
       ein.onclick=()=>umschalten(si,true);
       w.appendChild(ein);
     });
@@ -1243,7 +1296,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   function _teilFotos(){
     const w=document.createElement('div');
     w.appendChild(_kopfZeile('Fotos'));
-    const info=document.createElement('div');info.style.cssText='padding:6px 14px;font-size:12px;color:var(--text2);';
+    const info=document.createElement('div');info.style.cssText='padding:6px 14px;font-size:var(--fs12,12px);color:var(--text2);';
     info.textContent=_fsAmPc()
       ?'Klick = im PDF ✓ · Doppelklick oder 👁 = groß ansehen · ✏ = bemalen und beschriften (das Original bleibt) · ‹ › = Reihenfolge · ✕ = aus dem Protokoll entfernen (in Drive bleibt es)'
       :'Antippen = im PDF ✓ · zweimal antippen = groß ansehen';
@@ -1255,11 +1308,11 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     if(_fsAmPc()){ // F9: am PC keine Kamera – Fotos von der Festplatte oder aus der Foto-Liste der Karte
       kr.append(
         mk('📁 Fotos vom PC','border:1.5px solid var(--border);background:var(--bg3);color:var(--text);',()=>_wpMobFotoAufnehmen(bericht,grid,false)),
-        mk('🖼 Fotos der Karte','border:1.5px dashed var(--green);background:transparent;color:var(--text);',()=>_wpMobLadeDriveFotos(bericht,grid)));
+        mk('🖼 Fotos der Karte','border:1.5px dashed var(--green);background:var(--fs-kfl,transparent);color:var(--text);',()=>_wpMobLadeDriveFotos(bericht,grid)));
     }else kr.append(
-      mk('📷 Kamera','border:1.5px dashed var(--accent2);background:transparent;color:var(--text);',()=>_wpMobFotoAufnehmen(bericht,grid,true)),
+      mk('📷 Kamera','border:1.5px dashed var(--accent2);background:var(--fs-kfl,transparent);color:var(--text);',()=>_wpMobFotoAufnehmen(bericht,grid,true)),
       mk('🖼 Galerie','border:1.5px solid var(--border);background:var(--bg3);color:var(--text);',()=>_wpMobFotoAufnehmen(bericht,grid,false)),
-      mk('☁ Drive','border:1.5px dashed var(--green);background:transparent;color:var(--text);',()=>_wpMobLadeDriveFotos(bericht,grid)));
+      mk('☁ Drive','border:1.5px dashed var(--green);background:var(--fs-kfl,transparent);color:var(--text);',()=>_wpMobLadeDriveFotos(bericht,grid)));
     w.append(info,grid,kr);
     return w;
   }
@@ -1274,11 +1327,11 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   }
   function _bgXKnopf(titel,fn){
     const x=document.createElement('button');x.type='button';x.textContent='✕';x.title=titel;x.setAttribute('aria-label',titel);
-    x.style.cssText='width:40px;height:40px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--red);font-size:15px;cursor:pointer;flex-shrink:0;';
+    x.style.cssText='width:var(--fsh,40px);height:var(--fsh,40px);border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--red);font-size:var(--fs15,15px);cursor:pointer;flex-shrink:0;';
     x.onclick=fn;return x;
   }
   function _bgInfo(text){
-    const d=document.createElement('div');d.style.cssText='padding:6px 14px;font-size:12px;color:var(--text2);line-height:1.45;';d.textContent=text;return d;
+    const d=document.createElement('div');d.style.cssText='padding:6px 14px;font-size:var(--fs12,12px);color:var(--text2);line-height:1.45;';d.textContent=text;return d;
   }
   function _bgNamenListe(){ // „Name (Rolle)" aller eingetragenen Anwesenden
     return (bericht.anwesende||[]).filter(p=>p&&String(p.name||'').trim())
@@ -1288,11 +1341,11 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   // Altes Protokoll: Hinweis mit Knopf zum Umwandeln (nichts geschieht ohne Rückfrage)
   function _teilUmwandeln(){
     const w=document.createElement('div');w.setAttribute('data-fs-umwandeln','1');
-    w.style.cssText='margin:10px;padding:10px 12px;border-radius:10px;background:var(--bg2);border:1px solid var(--border);border-left:6px solid var(--orange);font-size:13px;color:var(--text);line-height:1.45;';
+    w.style.cssText='margin:10px;padding:10px 12px;border-radius:10px;background:var(--bg2);border:1px solid var(--border);border-left:6px solid var(--orange);font-size:var(--fs13,13px);color:var(--text);line-height:1.45;';
     const tx=document.createElement('div');
     tx.textContent='Das ist noch das alte Feuchte- und Schimmelprotokoll. Das neue Begehungsprotokoll hält nur Feststellungen fest: keine Ampel, keine Ursache, keine Empfehlung.';
     const b=document.createElement('button');b.type='button';b.textContent='🔄 In Begehungsprotokoll umwandeln';b.setAttribute('data-fs-umwandeln-knopf','1');
-    b.style.cssText=S_KNOPF+'margin-top:8px;min-height:44px;border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);';
+    b.style.cssText=S_KNOPF+'margin-top:8px;min-height:var(--fsh44,44px);border:1.5px solid var(--fs-krd,'+FS_FARBE+');background:var(--fs-kfl,transparent);color:var(--text);';
     b.onclick=()=>{
       if(!confirm('In Begehungsprotokoll umwandeln?\n\nAlle Eingaben, Fotos und Messwerte bleiben erhalten. Im PDF stehen künftig nur Feststellungen: Ampel, Ergebnis, Taupunkt-Werte, Ursache und Empfehlungen entfallen (sie bleiben in den Daten). Einige Punkte müssen neu beantwortet werden.'))return;
       const r=_fsZuBegehung(bericht);
@@ -1318,16 +1371,16 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   function _teilAnwesende(){
     const w=document.createElement('div');w.setAttribute('data-fs-anwesende','1');
     w.style.cssText='padding:6px 14px 8px;border-top:1px solid var(--border);';
-    const kopf=document.createElement('div');kopf.style.cssText='font-size:13px;color:var(--text2);margin-bottom:6px;';kopf.textContent='Anwesend – Name und Rolle';
+    const kopf=document.createElement('div');kopf.style.cssText='font-size:var(--fs13,13px);color:var(--text2);margin-bottom:6px;';kopf.textContent='Anwesend – Name und Rolle';
     w.appendChild(kopf);
     const altText=String(bericht.kopf.anwesend||'').trim();
     if(!bericht.anwesende.length&&altText){
-      const h=document.createElement('div');h.style.cssText='font-size:12px;color:var(--text2);margin-bottom:6px;padding-left:8px;border-left:3px solid var(--orange);line-height:1.45;';
+      const h=document.createElement('div');h.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin-bottom:6px;padding-left:8px;border-left:3px solid var(--orange);line-height:1.45;';
       h.textContent='Bisher als Text eingetragen: '+altText+' – bitte unten als Personen anlegen.';
       w.appendChild(h);
     }
     bericht.anwesende.forEach((p,pi)=>{
-      const row=document.createElement('div');row.style.cssText='display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) 40px;gap:6px;margin-bottom:6px;align-items:center;';
+      const row=document.createElement('div');row.style.cssText='display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) var(--fsh,40px);gap:6px;margin-bottom:6px;align-items:center;';
       const n=_inp(p.name,'Name',v=>{p.name=v;},false);n.setAttribute('data-fs-person',String(pi));
       const sel=document.createElement('select');sel.style.cssText=S_INP;
       const o0=document.createElement('option');o0.value='';o0.textContent='– Rolle –';sel.appendChild(o0);
@@ -1416,7 +1469,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const kt=document.createElement('span');kt.textContent=def.t;kt.style.cssText='flex:1;min-width:0;';
     kopf.append(pfeil,kt);
     if(zu){const kurz=document.createElement('span');kurz.setAttribute('data-fs-blockkurz',k);kurz.textContent=_bgKurz(k);
-      kurz.style.cssText='font-size:12px;font-weight:600;color:var(--text2);white-space:nowrap;flex-shrink:0;';kopf.appendChild(kurz);}
+      kurz.style.cssText='font-size:var(--fs12,12px);font-weight:600;color:var(--text2);white-space:nowrap;flex-shrink:0;';kopf.appendChild(kurz);}
     kopf.onclick=()=>{
       _bgZuMehrere([k],!zu);_neuBauen();
       const el=body.querySelector('[data-fs-block="'+k+'"]');if(el){try{el.scrollIntoView({block:'nearest'});}catch(e){}}
@@ -1444,8 +1497,8 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const nur=_bgNurDieser();
     const mk=(txt,an,fn,attr)=>{
       const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute(attr[0],attr[1]);
-      b.style.cssText='flex:0 0 auto;padding:6px 12px;min-height:40px;border-radius:18px;font-size:13px;cursor:pointer;font-family:inherit;'
-        +'border:2px solid '+(an?FS_FARBE:'var(--border)')+';background:'+(an?'rgba(31,95,139,.18)':'transparent')+';color:var(--text);font-weight:'+(an?'700':'600')+';';
+      b.style.cssText='flex:0 0 auto;padding:6px 12px;min-height:var(--fsh,40px);border-radius:18px;font-size:var(--fs13,13px);cursor:pointer;font-family:inherit;'
+        +'border:2px solid '+(an?'var(--fs-krd,'+FS_FARBE+')':'var(--border)')+';background:'+(an?'var(--fs-can,rgba(31,95,139,.18))':'var(--fs-cfl,transparent)')+';color:var(--text);font-weight:'+(an?'700':'600')+';';
       b.onclick=fn;return b;
     };
     if(!_fsIstVorab(bericht))w.appendChild(mk('📋 Messliste',false,()=>_fsBgMessfensterZeigen(bericht,'liste'),['data-fs-messliste','1'])); // F4a: ganz vorn, auch am Handy (F16: nicht bei der Vorabbesichtigung)
@@ -1459,7 +1512,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   function _teilAuftragBg(){
     const w=document.createElement('div');
     const hilfen=document.createElement('div');hilfen.style.cssText='display:flex;flex-wrap:wrap;gap:8px;padding:8px 14px;';
-    const hk=(txt,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.style.cssText=S_KNOPF+'min-height:44px;border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);';b.onclick=fn;return b;};
+    const hk=(txt,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.style.cssText=S_KNOPF+'min-height:var(--fsh44,44px);border:1.5px solid var(--fs-krd,'+FS_FARBE+');background:var(--fs-kfl,transparent);color:var(--text);';b.onclick=fn;return b;};
     hilfen.append(hk('↻ aus Karte',()=>_ausKarteKlick()));
     w.append(hilfen,
       _feld('Auftraggeber','auftraggeber','aus der Karte'),
@@ -1478,7 +1531,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   function _teilVorOrtVb(){
     const w=document.createElement('div');w.setAttribute('data-fs-vorort','1');
       const bei=document.createElement('div');bei.setAttribute('data-fs-besuchbei','1');bei.style.cssText='padding:6px 14px 8px;border-top:1px solid var(--border);';
-      const bl=document.createElement('div');bl.style.cssText='font-size:13px;color:var(--text2);margin-bottom:6px;';bl.textContent='Besichtigung bei – wähle den Kontakt für diesen Besuch';bei.appendChild(bl);
+      const bl=document.createElement('div');bl.style.cssText='font-size:var(--fs13,13px);color:var(--text2);margin-bottom:6px;';bl.textContent='Besichtigung bei – wähle den Kontakt für diesen Besuch';bei.appendChild(bl);
       const chips=document.createElement('div');chips.style.cssText='display:flex;flex-wrap:wrap;gap:6px;';
       _fsVbKontakte(t).forEach(k=>{chips.appendChild(_chip(k.text,bericht.kopf.besuchBei===k.text,()=>{
         const an=bericht.kopf.besuchBei===k.text;
@@ -1487,26 +1540,26 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       if(!chips.childNodes.length)chips.appendChild(_bgInfo('Die Karte hat keine Kontakte mit Namen – trage Nutzer und Ansprechpartner von Hand ein.'));
       bei.appendChild(chips);
       const zeitKn=document.createElement('div');zeitKn.style.cssText='display:flex;flex-wrap:wrap;gap:8px;padding:8px 14px;';
-      const zk=(txt,fn,attr)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute(attr,'1');b.style.cssText=S_KNOPF+'min-height:44px;border:1.5px solid '+FS_FARBE+';background:rgba(31,95,139,.12);color:var(--text);';b.onclick=fn;return b;};
+      const zk=(txt,fn,attr)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute(attr,'1');b.style.cssText=S_KNOPF+'min-height:var(--fsh44,44px);border:1.5px solid '+FS_FARBE+';background:rgba(31,95,139,.12);color:var(--text);';b.onclick=fn;return b;};
       zeitKn.append(
         zk('📍 Ich bin jetzt hier (Datum + Uhrzeit)',()=>{const j=_fsVbJetzt();bericht.datum=j.datum;bericht.kopf.beginn=j.uhr;scheduleSave();hdrS.textContent=(bericht.kopf.objektAdresse||t.adresse||t.title||'')+' · '+(bericht.datum||'');const tm=(_fsAmPc()&&typeof _pamVbTermin==='function')?_pamVbTermin(bericht,'beginn'):'';_neuBauen();toast('✓ Datum '+j.datum+', Beginn '+j.uhr+' Uhr eingetragen'+(tm?' · '+tm:''),'success',tm?5000:3500);},'data-fs-jetzt-beginn'),
         zk('🏁 Fertig (Ende jetzt)',()=>{const j=_fsVbJetzt();bericht.kopf.ende=j.uhr;scheduleSave();const tm=(_fsAmPc()&&typeof _pamVbTermin==='function')?_pamVbTermin(bericht,'ende'):'';_neuBauen();toast('✓ Ende '+j.uhr+' Uhr eingetragen'+(tm?' · '+tm:''),'success',tm?5000:3500);},'data-fs-jetzt-ende'));
-      const zz=document.createElement('div');zz.setAttribute('data-fs-zeitzeile','1');zz.style.cssText='display:flex;align-items:center;gap:10px;padding:2px 14px 8px;font-size:14px;color:var(--text);';
+      const zz=document.createElement('div');zz.setAttribute('data-fs-zeitzeile','1');zz.style.cssText='display:flex;align-items:center;gap:10px;padding:2px 14px 8px;font-size:var(--fs14,14px);color:var(--text);';
       const zt=document.createElement('span');zt.style.cssText='flex:1;min-width:0;';const ztx=_fsBgZeitText(bericht.kopf);
       zt.textContent=(String(bericht.datum||'').trim()||'noch kein Datum')+' · '+(ztx||'noch kein Beginn');
       const zb=document.createElement('button');zb.type='button';zb.textContent=_vbZeitAuf?'▲ fertig':'✏ ändern';zb.setAttribute('data-fs-zeitaendern','1');
-      zb.style.cssText=S_KNOPF+'min-height:40px;border:1px solid var(--border);background:transparent;color:var(--text);';zb.onclick=()=>{_vbZeitAuf=!_vbZeitAuf;_neuBauen();};
+      zb.style.cssText=S_KNOPF+'min-height:var(--fsh,40px);border:1px solid var(--fs-krd,var(--border));background:var(--fs-kfl,transparent);color:var(--text);';zb.onclick=()=>{_vbZeitAuf=!_vbZeitAuf;_neuBauen();};
       zz.append(zt,zb);
       const nameZeile=(()=>{ // F26: Name des Protokolls (Besichtigung 2) – erscheint in der Liste an der Karte, im PDF und im Dateinamen
       const row=document.createElement('div');row.setAttribute('data-fs-protname','1');row.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 14px;';
-      const l=document.createElement('span');l.style.cssText='font-size:13px;color:var(--text2);width:112px;flex-shrink:0;';l.textContent='Name';
+      const l=document.createElement('span');l.style.cssText='font-size:var(--fs13,13px);color:var(--text2);width:112px;flex-shrink:0;';l.textContent='Name';
       row.append(l,_inp(bericht.protName,'Besichtigung – z. B. Besichtigung Wohnung 2. OG',v=>{bericht.protName=v;hdrT.textContent='💧 '+_fsTitel(bericht);},false));
       return row;
     })();
     w.append(...(bericht.schlank?[nameZeile]:[]).concat([bei],bericht.schlank?[]:[_feld('Lage','lage','z. B. Wohnung darüber, Keller')],[zeitKn,zz])); // F23: Besichtigung 2 ohne Lage · F26: mit Name
       if(_vbZeitAuf){
       const datRow=document.createElement('div');datRow.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 14px;border-top:1px solid var(--border);';
-      const dl=document.createElement('span');dl.style.cssText='font-size:13px;color:var(--text2);width:112px;flex-shrink:0;';dl.textContent='Datum';
+      const dl=document.createElement('span');dl.style.cssText='font-size:var(--fs13,13px);color:var(--text2);width:112px;flex-shrink:0;';dl.textContent='Datum';
       datRow.append(dl,_inp(bericht.datum,'TT.MM.JJJJ',v=>{bericht.datum=v;},false));
       w.append(datRow,_feld('Beginn','beginn','hh:mm'),_feld('Ende','ende','hh:mm'));
       }
@@ -1535,7 +1588,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const w=document.createElement('div');
     if(String(bericht.schadenbild||'').trim()){ // F19 (seit F21 nur noch, wenn schon Text da ist)
       const sbk=document.createElement('div');sbk.setAttribute('data-fs-schadenbild','1');sbk.style.cssText='padding:8px 14px 4px;';
-      const sbl=document.createElement('div');sbl.style.cssText='font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px;';sbl.textContent='Beschreibung des Schadenbildes';
+      const sbl=document.createElement('div');sbl.style.cssText='font-size:var(--fs14,14px);font-weight:700;color:var(--text);margin-bottom:4px;';sbl.textContent='Beschreibung des Schadenbildes';
       sbk.append(sbl,_bgInfo('Schreibe in eigenen Worten, was du siehst und misst – nur Feststellungen, keine Ursache. Steht im PDF vor den Einzelpunkten.'),_bgTextFeld(bericht.schadenbild,'z. B. Am Balkon steht Wasser, der Ablauf ist mit Laub verstopft …',v=>{bericht.schadenbild=v;},6));
       w.appendChild(sbk);
     }
@@ -1552,13 +1605,13 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     if(!Array.isArray(bericht.vbStellen))bericht.vbStellen=[];
     const w=document.createElement('div');w.setAttribute('data-fs-vbstellen','1');w.style.cssText='padding:8px 14px 10px;';
     w.append(_bgInfo(bericht.schlank?'Für jede Stelle: wo · was siehst du · Foto. Einfach tippen. Nur Feststellungen, keine Ursache.':'Für jede Stelle: Raum · Bauteil · was siehst du (antippen) · Einzelheiten · Messwert · Foto. Nur Feststellungen, keine Ursache.'));
-    const lab=t=>{const d=document.createElement('div');d.style.cssText='font-size:12px;color:var(--text2);margin:6px 0 2px;';d.textContent=t;return d;};
+    const lab=t=>{const d=document.createElement('div');d.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin:6px 0 2px;';d.textContent=t;return d;};
     bericht.vbStellen.forEach((s,si)=>{
       if(!Array.isArray(s.merkmale))s.merkmale=[];if(!Array.isArray(s.fotoRefs))s.fotoRefs=[];
       const k=document.createElement('div');k.setAttribute('data-fs-vbstelle',String(si));
       k.style.cssText='margin:8px 0;padding:8px 10px 10px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg2);';
       const kz=document.createElement('div');kz.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:6px;';
-      const nr=document.createElement('div');nr.style.cssText='flex:1;font-size:14px;font-weight:700;color:var(--text);';nr.textContent='Stelle '+(si+1);
+      const nr=document.createElement('div');nr.style.cssText='flex:1;font-size:var(--fs14,14px);font-weight:700;color:var(--text);';nr.textContent='Stelle '+(si+1);
       kz.append(nr,_bgXKnopf('Stelle entfernen',()=>{if(_fsVbStelleGefuellt(s)&&!confirm('Stelle '+(si+1)+' entfernen? Die Fotos bleiben im Protokoll.'))return;bericht.vbStellen.splice(si,1);scheduleSave();_neuBauen();}));
       // Raum (aus der Standardliste und den Räumen der Raumskizze)
       const cur=String(s.raum||'').trim();
@@ -1570,7 +1623,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const ortI=_inp(s.ort,bericht.schlank?'Wo? z. B. Wohnzimmer, Decke':'Bauteil / Ort, z. B. Decke, an der Kehle',v=>{s.ort=v;if(_vbUmgFuellen){try{_vbUmgFuellen();}catch(_e){}}},false);ortI.setAttribute('data-fs-vbort',String(si)); /* F23: Vorschläge der Umgebung laufen mit */
       const oc=document.createElement('div');oc.style.cssText='display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 4px;';
       FS_VB_ORTE.forEach(o=>{const c=document.createElement('button');c.type='button';c.textContent='＋ '+o;c.setAttribute('data-fs-vbortvorschlag',o);
-        c.style.cssText='padding:4px 9px;min-height:34px;border-radius:14px;font-size:12px;cursor:pointer;font-family:inherit;border:1px dashed var(--border);background:transparent;color:var(--text2);';
+        c.style.cssText='padding:4px 9px;min-height:var(--fsh,34px);border-radius:14px;font-size:var(--fs12,12px);cursor:pointer;font-family:inherit;border:1px dashed var(--border);background:transparent;color:var(--text2);';
         c.onclick=()=>{const a=String(s.ort||'').trim();s.ort=a?a+', '+o:o;scheduleSave();_neuBauen();};oc.appendChild(c);});
       const mc=document.createElement('div');mc.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;';
       FS_VB_MERKMALE.forEach(m=>{const an=s.merkmale.indexOf(m)>=0;const c=_chip(m,an,()=>{const i=s.merkmale.indexOf(m);if(i>=0)s.merkmale.splice(i,1);else s.merkmale.push(m);scheduleSave();_neuBauen();});c.setAttribute('data-fs-vbmerkmal',m);mc.appendChild(c);});
@@ -1604,10 +1657,10 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
         const vc=document.createElement('div');vc.style.cssText='display:flex;flex-wrap:wrap;gap:4px;margin:6px 0;';
         const neuZeile=v=>{bericht.vbUmgebung.push({text:v.text,bereich:v.bereich,status:'',grund:'',stelle:false});};
         vs.forEach(v=>{const c=document.createElement('button');c.type='button';c.textContent='＋ '+(beide?(v.bereich==='aussen'?'Außen: ':'Innen: '):'')+v.text;c.setAttribute('data-fs-umgvorschlag',v.text);
-          c.style.cssText='padding:4px 9px;min-height:34px;border-radius:14px;font-size:12px;cursor:pointer;font-family:inherit;border:1px dashed var(--border);background:transparent;color:var(--text2);';
+          c.style.cssText='padding:4px 9px;min-height:var(--fsh,34px);border-radius:14px;font-size:var(--fs12,12px);cursor:pointer;font-family:inherit;border:1px dashed var(--border);background:transparent;color:var(--text2);';
           c.onclick=()=>{neuZeile(v);scheduleSave();_neuBauen();};vc.appendChild(c);});
         const alle=document.createElement('button');alle.type='button';alle.textContent='＋ alle '+vs.length+' übernehmen';alle.setAttribute('data-fs-umgalle','1');
-        alle.style.cssText='padding:4px 10px;min-height:34px;border-radius:14px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;border:1.5px solid '+FS_FARBE+';background:rgba(31,95,139,.1);color:var(--text);';
+        alle.style.cssText='padding:4px 10px;min-height:var(--fsh,34px);border-radius:14px;font-size:var(--fs12,12px);font-weight:700;cursor:pointer;font-family:inherit;border:1.5px solid '+FS_FARBE+';background:rgba(31,95,139,.1);color:var(--text);';
         alle.onclick=()=>{vs.forEach(neuZeile);scheduleSave();_neuBauen();};vc.appendChild(alle);
         vz.appendChild(vc);
       }else if(!bericht.vbUmgebung.length)vz.appendChild(_bgInfo('Vorschläge erscheinen, sobald bei einer Stelle ein Bauteil steht (z. B. Decke, Wand, Dach).'));
@@ -1618,7 +1671,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const k=document.createElement('div');k.setAttribute('data-fs-umgzeile',String(ri));
       k.style.cssText='margin:6px 0;padding:8px 10px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg2);';
       const kz=document.createElement('div');kz.style.cssText='display:flex;align-items:center;gap:8px;';
-      const nm=document.createElement('div');nm.style.cssText='flex:1;min-width:0;font-size:14px;font-weight:700;color:var(--text);';nm.textContent=(bericht.schlank?(r.bereich==='aussen'?'🌤 ':'🏠 '):'')+(r.text||'(ohne Text)');
+      const nm=document.createElement('div');nm.style.cssText='flex:1;min-width:0;font-size:var(--fs14,14px);font-weight:700;color:var(--text);';nm.textContent=(bericht.schlank?(r.bereich==='aussen'?'🌤 ':'🏠 '):'')+(r.text||'(ohne Text)');
       kz.append(nm,_bgXKnopf('Zeile entfernen',()=>{if(r.status&&!confirm('Zeile „'+(r.text||'')+'" entfernen?'))return;bericht.vbUmgebung.splice(ri,1);scheduleSave();_neuBauen();}));
       const wahl=document.createElement('div');wahl.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;';
       [['ok','✓ ohne Auffälligkeit'],['auff','⚠ auffällig']].concat(bericht.schlank?[]:[['nicht','∅ nicht geprüft']]).forEach(x=>{ // F23: Besichtigung 2 nur ✓ / ⚠
@@ -1635,7 +1688,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const eg=document.createElement('div');eg.style.cssText='display:flex;gap:6px;margin-top:8px;';
     const ei=_inp('','Eigene Zeile, z. B. Heizungsrohr im Flur',()=>{},false);ei.setAttribute('data-fs-umgeigen','1');
     const eb=document.createElement('button');eb.type='button';eb.textContent='＋ Zeile';eb.setAttribute('data-fs-umgeigenneu','1');
-    eb.style.cssText=S_KNOPF+'min-height:44px;flex-shrink:0;border:1.5px dashed '+FS_FARBE+';background:rgba(31,95,139,.08);color:var(--text);';
+    eb.style.cssText=S_KNOPF+'min-height:var(--fsh44,44px);flex-shrink:0;border:1.5px dashed '+FS_FARBE+';background:rgba(31,95,139,.08);color:var(--text);';
     eb.onclick=()=>{const t=String(ei.value||'').trim();if(!t)return;bericht.vbUmgebung.push({text:t,bereich:(bericht.schlank&&!_fsB2Sichtbar(bericht,'innen'))?'aussen':'innen',status:'',grund:'',stelle:false});scheduleSave();_neuBauen();};
     eg.append(ei,eb);w.appendChild(eg);
     return w;
@@ -1646,9 +1699,9 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     if(!Array.isArray(bericht.vbStellen))bericht.vbStellen=[];
     const w=document.createElement('div');w.setAttribute('data-fs-vbstellen','1');w.style.cssText='padding:8px 14px 10px;';
     w.append(_bgInfo('Innen oder Außen – und darin die Stellen: wo · Seite (freiwillig) · was siehst du · von außen markieren · Foto. Nur Feststellungen, keine Ursache.'));
-    const hk=document.createElement('div');hk.setAttribute('data-fs-b2haken','1');hk.style.cssText='display:flex;flex-wrap:wrap;gap:16px;padding:2px 0 6px;font-size:15px;';
+    const hk=document.createElement('div');hk.setAttribute('data-fs-b2haken','1');hk.style.cssText='display:flex;flex-wrap:wrap;gap:16px;padding:2px 0 6px;font-size:var(--fs15,15px);';
     [['innen','🏠 Innen besichtigen','data-fs-b2innen','zeigeInnen','zeigeAussen'],['aussen','🌤 Außen besichtigen','data-fs-b2aussen','zeigeAussen','zeigeInnen']].forEach(x=>{
-      const l=document.createElement('label');l.style.cssText='display:flex;align-items:center;gap:8px;min-height:40px;cursor:pointer;';
+      const l=document.createElement('label');l.style.cssText='display:flex;align-items:center;gap:8px;min-height:var(--fsh,40px);cursor:pointer;';
       const c=document.createElement('input');c.type='checkbox';c.checked=bericht[x[3]]!==false;c.setAttribute(x[2],'1');c.style.cssText='width:22px;height:22px;';
       c.onchange=()=>{if(!c.checked&&bericht[x[4]]===false){c.checked=true;toast('Innen oder Außen bleibt mindestens eins an','info',3500);return;}bericht[x[3]]=c.checked;scheduleSave();_neuBauen();};
       l.append(c,document.createTextNode(x[1]));hk.appendChild(l);
@@ -1659,11 +1712,11 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       if(!Array.isArray(s.merkmale))s.merkmale=[];if(!Array.isArray(s.fotoRefs))s.fotoRefs=[];
       const farbe=typ==='aussen'?'#d9480f':FS_FARBE;
       const k=document.createElement('div');k.setAttribute('data-fs-vbstelle',String(si));k.setAttribute('data-fs-typ',typ);
-      k.style.cssText='margin:8px 0;padding:8px 10px 10px;border:1.5px solid var(--border);border-left:4px solid '+farbe+';border-radius:10px;background:var(--bg2);'; /* F35: ein ruhiger Rahmen, die Kante links zeigt innen (blau) / außen (orange) */
+      k.style.cssText='margin:8px 0;padding:8px 10px 10px;border:1.5px solid var(--border);border-left:var(--fs-kante,4px) solid '+farbe+';border-radius:10px;background:var(--fs-karte,var(--bg2));box-shadow:var(--fs-schatten,none);'; /* F38: klar vom Hintergrund abgesetzt */ /* F35: ein ruhiger Rahmen, die Kante links zeigt innen (blau) / außen (orange) */
       const offen=_fsStelleOffen(bericht,s); /* F30 */
       const kz=document.createElement('div');kz.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:'+(offen?'6':'0')+'px;';
       const nr=document.createElement('button');nr.type='button';nr.setAttribute('data-fs-stellekopf',String(si));nr.setAttribute('aria-expanded',offen?'true':'false');
-      nr.style.cssText='flex:1;min-width:0;min-height:40px;text-align:left;font-size:14px;font-weight:700;color:var(--text);background:transparent;border:none;padding:0;cursor:pointer;font-family:inherit;'+(offen?'':'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;');
+      nr.style.cssText='flex:1;min-width:0;min-height:var(--fsh,40px);text-align:left;font-size:var(--fs14,14px);font-weight:700;color:var(--text);background:transparent;border:none;padding:0;cursor:pointer;font-family:inherit;'+(offen?'':'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;');
       nr.textContent=(offen?'▾ ':'▸ ')+(offen?_fsStelleNrText(bericht,s):_fsStelleKurz(bericht,s,si+1,true)); /* F35: der Raum/Bereich steht in der Überschrift darüber – hier nur „Stelle n“ */
       nr.title=_fsVbBezeichnung(bericht,s,si+1);
       nr.onclick=()=>{_fsStelleSetzen(s,!offen);_neuBauen();};
@@ -1672,15 +1725,15 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const ortI=_inp(s.ort,typ==='aussen'?'Wo? z. B. Kehle über dem Wohnzimmer, linke Ecke':'Wo? z. B. Decke, Eckbereich Wand 1 / Wand 2',v=>{s.ort=v;if(_vbUmgFuellen){try{_vbUmgFuellen();}catch(_e){}}},false);ortI.setAttribute('data-fs-vbort',String(si));
       // Seite (freiwillig): Himmelsrichtung oder Straßenseite/Hofseite/Giebel; Kompassnadel misst als Vorschlag
       const sb=document.createElement('div');sb.setAttribute('data-fs-seite',String(si));sb.style.cssText='margin:8px 0 2px;';
-      const sl=document.createElement('div');sl.style.cssText='font-size:12px;color:var(--text2);';sl.textContent='Seite (freiwillig) – '+(typ==='aussen'?'welche Richtung zeigt die Wand bzw. Fläche?':'von außen gesehen: wo kommt es herein?');
+      const sl=document.createElement('div');sl.style.cssText='font-size:var(--fs12,12px);color:var(--text2);';sl.textContent='Seite (freiwillig) – '+(typ==='aussen'?'welche Richtung zeigt die Wand bzw. Fläche?':'von außen gesehen: wo kommt es herein?');
       const sc=document.createElement('div');sc.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin:4px 0;';
-      FS_B2_SEITEN.concat(FS_B2_SEITENEXTRA).forEach(kk=>{const c=_chip(kk,s.seite===kk,()=>{s.seite=s.seite===kk?'':kk;s.seiteGrad=null;_fsSeiteAuf.delete(s);scheduleSave();_neuBauen();});c.setAttribute('data-fs-seiteknopf',kk);c.style.minHeight='38px';c.style.padding='4px 12px';sc.appendChild(c);});
+      FS_B2_SEITEN.concat(FS_B2_SEITENEXTRA).forEach(kk=>{const c=_chip(kk,s.seite===kk,()=>{s.seite=s.seite===kk?'':kk;s.seiteGrad=null;_fsSeiteAuf.delete(s);scheduleSave();_neuBauen();});c.setAttribute('data-fs-seiteknopf',kk);c.style.minHeight='var(--fsh,38px)';c.style.padding='4px 12px';sc.appendChild(c);});
       /* F31: die Seite steht in EINER Zeile („Seite  Südost  [ändern] [🧭]“); die elf Knöpfe klappen erst auf „ändern/wählen“ auf und nach der Wahl wieder zu */
       const sw=document.createElement('div');sw.setAttribute('data-fs-seitewahlbox','1');sw.style.display=_fsSeiteAuf.has(s)?'':'none';sw.append(sl,sc);
-      const sz=document.createElement('div');sz.setAttribute('data-fs-seitezeile','1');sz.style.cssText='display:flex;align-items:center;gap:8px;min-height:44px;padding:4px 10px;border:1.5px solid var(--border);border-radius:10px;';
-      const szl=document.createElement('span');szl.style.cssText='font-size:12px;color:var(--text2);flex-shrink:0;';szl.textContent='Seite';
-      const szw=document.createElement('span');szw.setAttribute('data-fs-seitewert','1');szw.style.cssText='flex:1;min-width:0;font-size:14px;'+(_fsSeiteText(s.seite)?'font-weight:700;color:var(--text);':'color:var(--text2);');szw.textContent=_fsSeiteZeile(s);
-      const S_MINI='flex-shrink:0;min-height:36px;padding:4px 12px;border-radius:10px;border:1.5px solid #1f5f8b;background:transparent;color:var(--text);font-size:14px;cursor:pointer;font-family:inherit;';
+      const sz=document.createElement('div');sz.setAttribute('data-fs-seitezeile','1');sz.style.cssText='display:flex;align-items:center;gap:8px;min-height:var(--fsh44,44px);padding:4px 10px;border:1.5px solid var(--border);border-radius:10px;';
+      const szl=document.createElement('span');szl.style.cssText='font-size:var(--fs12,12px);color:var(--text2);flex-shrink:0;';szl.textContent='Seite';
+      const szw=document.createElement('span');szw.setAttribute('data-fs-seitewert','1');szw.style.cssText='flex:1;min-width:0;font-size:var(--fs14,14px);'+(_fsSeiteText(s.seite)?'font-weight:700;color:var(--text);':'color:var(--text2);');szw.textContent=_fsSeiteZeile(s);
+      const S_MINI='flex-shrink:0;min-height:var(--fsh,36px);padding:4px 12px;border-radius:10px;border:1.5px solid var(--fs-krd,#1f5f8b);background:var(--fs-kfl,transparent);color:var(--text);font-size:var(--fs14,14px);cursor:pointer;font-family:inherit;';
       const saText=()=>_fsSeiteAuf.has(s)?'▾ zu':(_fsSeiteText(s.seite)?'ändern':'wählen');
       const sa=document.createElement('button');sa.type='button';sa.setAttribute('data-fs-seiteaendern','1');sa.setAttribute('aria-expanded',_fsSeiteAuf.has(s)?'true':'false');sa.style.cssText=S_MINI;sa.textContent=saText();
       sa.onclick=()=>{if(_fsSeiteAuf.has(s))_fsSeiteAuf.delete(s);else _fsSeiteAuf.add(s);const a=_fsSeiteAuf.has(s);sw.style.display=a?'':'none';sa.setAttribute('aria-expanded',a?'true':'false');sa.textContent=saText();};
@@ -1689,13 +1742,13 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       if(s.seite&&typeof s.seiteGrad==='number')sw.appendChild(_bgInfo('Gemessen mit dem Kompass: '+Math.round(s.seiteGrad)+'° ('+_fsSeiteText(s.seite)+').'));
       const nb=_fsNadelBox(s,()=>_neuBauen(),typ);sb.appendChild(nb); /* F29: zugeklappt; drinnen/draußen rechnet verschieden */
       const nk=typeof nb.querySelector==='function'?nb.querySelector('[data-fs-nadelkopf]'):null; /* F31: der 🧭-Knopf in der Seiten-Zeile klappt den Kompass auf und zu, die eigene Kopfzeile des Kompasses entfällt */
-      if(nk){nk.style.display='none';sk.onclick=()=>{nk.click();sk.style.background=_fsNadelAuf.has(s)?'rgba(31,95,139,.22)':'transparent';};}else sk.style.display='none';
+      if(nk){nk.style.display='none';sk.onclick=()=>{nk.click();sk.style.background=_fsNadelAuf.has(s)?'rgba(31,95,139,.22)':'var(--fs-kfl,transparent)';};}else sk.style.display='none';
       const tx=_bgTextFeld(s.text,'Was siehst du? (tippen)',v=>{s.text=v;},3);tx.style.marginTop='6px';
       const pin=_fsVbPinOk(s);
       const lb=document.createElement('button');lb.type='button';lb.setAttribute('data-fs-lbknopf',String(si));
       const lbLang=pin?'📍 Von außen markiert – Luftbild öffnen':'🛰 Von außen markieren'+(typ==='innen'?' – wo kommt es herein? (Luftbild)':' (Luftbild)');
       lb.textContent=pin?'📍 markiert':'🛰 Luftbild';lb.title=lbLang;lb.setAttribute('aria-label',lbLang); /* F31: kurzer Knopf neben „Foto“, der lange Text bleibt als Hinweis */
-      lb.style.cssText=S_KNOPF+'flex:1 1 120px;min-width:0;min-height:44px;border:1.5px solid '+farbe+';background:'+(pin?'rgba(46,125,79,.15)':'rgba(217,72,15,.08)')+';color:var(--text);font-weight:700;';
+      lb.style.cssText=S_KNOPF+'flex:1 1 120px;min-width:0;min-height:var(--fsh44,44px);border:1.5px solid '+farbe+';background:'+(pin?'rgba(46,125,79,.15)':'var(--fs-lbfl,rgba(217,72,15,.08))')+';color:var(--text);font-weight:700;';
       lb.onclick=()=>_fsLuftbildFenster(bericht,t,s,()=>_neuBauen());
       const se=_fsSeiteText(s.seite);
       const fl=_fsFotoLeiste(bericht,{text:_fsVbBezeichnung(bericht,s,si+1)+(se?' – Seite '+se:'')+(String(s.ort||'').trim()?' – '+String(s.ort).trim():''),fotoRefs:s.fotoRefs},'Fotos zu dieser Stelle',false,lb);
@@ -1710,7 +1763,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
         const auf=_fsAsAuf.has(sk);
         const k=document.createElement('div');k.setAttribute('data-fs-as',sk.id);k.style.cssText='margin:6px 0;padding:6px 10px '+(auf?'10':'6')+'px;border:1.5px solid '+(auf?'var(--border)':'transparent')+';border-radius:10px;background:var(--bg2);'; /* F35: kein gestrichelter Rahmen */
         const kopf=document.createElement('button');kopf.type='button';kopf.setAttribute('data-fs-askopf',sk.id);kopf.setAttribute('aria-expanded',auf?'true':'false');
-        kopf.style.cssText='display:block;width:100%;min-height:40px;text-align:left;font-size:14px;font-weight:700;color:var(--text);background:transparent;border:none;padding:0;cursor:pointer;font-family:inherit;'+(auf?'':'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;');
+        kopf.style.cssText='display:block;width:100%;min-height:var(--fsh,40px);text-align:left;font-size:var(--fs14,14px);font-weight:700;color:var(--text);background:transparent;border:none;padding:0;cursor:pointer;font-family:inherit;'+(auf?'':'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;');
         if(auf)kopf.textContent='▾ ✏ '+_fsAsKurz(bericht,sk);
         else{ /* F35: zugeklappt = Mini-Bild + Text, damit eine Skizze nicht wie eine Stelle aussieht */
           kopf.style.display='flex';kopf.style.alignItems='center';kopf.style.gap='10px';
@@ -1729,12 +1782,12 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
         const oeffnen=()=>_fsBgEinzeichnenZeigen(bericht,_fsAsPseudoRaum(sk),()=>{_neuBauen();});
         const nm=_inp(sk.name,'Name der Skizze, z. B. Wand Straßenseite',v=>{sk.name=v;zeichne();},false);nm.setAttribute('data-fs-asname',sk.id);
         const fz=document.createElement('div');fz.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 2px;';
-        _fsAsFlaechen(sk).forEach(f=>{const c=_chip(f.t,sk.aussen===f.k,()=>{if(sk.aussen===f.k)return;if(_fsBgStempelAnzahl(sk)&&!confirm('Die gesetzten Stempel bleiben stehen, passen aber zur anderen Ansicht. Trotzdem wechseln?'))return;sk.aussen=f.k;scheduleSave();_neuBauen();});c.setAttribute('data-fs-asflaeche',f.k);c.style.minHeight='38px';fz.appendChild(c);});
+        _fsAsFlaechen(sk).forEach(f=>{const c=_chip(f.t,sk.aussen===f.k,()=>{if(sk.aussen===f.k)return;if(_fsBgStempelAnzahl(sk)&&!confirm('Die gesetzten Stempel bleiben stehen, passen aber zur anderen Ansicht. Trotzdem wechseln?'))return;sk.aussen=f.k;scheduleSave();_neuBauen();});c.setAttribute('data-fs-asflaeche',f.k);c.style.minHeight='var(--fsh,38px)';fz.appendChild(c);});
         k.append(nm,fz);
         if(sk.aussen==='dach'){
-          const ol=document.createElement('div');ol.style.cssText='font-size:12px;color:var(--text2);margin-top:6px;';ol.textContent='Oben in der Skizze ist (freiwillig):';
+          const ol=document.createElement('div');ol.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin-top:6px;';ol.textContent='Oben in der Skizze ist (freiwillig):';
           const oc=document.createElement('div');oc.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin:4px 0;';
-          FS_B2_SEITEN.forEach(kk=>{const c=_chip(kk,sk.oben===kk,()=>{sk.oben=sk.oben===kk?'':kk;scheduleSave();_neuBauen();});c.setAttribute('data-fs-asoben',kk);c.style.minHeight='38px';c.style.padding='4px 12px';oc.appendChild(c);});
+          FS_B2_SEITEN.forEach(kk=>{const c=_chip(kk,sk.oben===kk,()=>{sk.oben=sk.oben===kk?'':kk;scheduleSave();_neuBauen();});c.setAttribute('data-fs-asoben',kk);c.style.minHeight='var(--fsh,38px)';c.style.padding='4px 12px';oc.appendChild(c);});
           k.append(ol,oc);
         }
         bild.onclick=oeffnen;zeichne();k.appendChild(bild);
@@ -1742,16 +1795,16 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
         ez.style.cssText=S_KNOPF+'display:block;width:100%;min-height:48px;margin:4px 0;border:1.5px solid #d9480f;background:rgba(217,72,15,.08);color:var(--text);text-align:left;';
         ez.onclick=oeffnen;k.appendChild(ez);
         const mk=_fsAsMarken(bericht,sk);
-        if(mk.length){const lg=document.createElement('div');lg.setAttribute('data-fs-aslegende',sk.id);lg.style.cssText='font-size:14px;color:var(--text);margin:6px 0 2px;';mk.forEach(q=>{const z=document.createElement('div');z.style.cssText='padding:2px 0;';const nf=(Array.isArray(q.s.fotoRefs)?q.s.fotoRefs:[]).filter(r=>(bericht.fotos||[]).some(f=>_fsRefPasst(f,r))).length;z.textContent=q.n+' = '+q.label+(String(q.s.ort||'').trim()?' · '+String(q.s.ort).trim():'')+(nf?' · 📷 '+nf:'');lg.appendChild(z);});k.appendChild(lg);}
-        else{const hi=document.createElement('div');hi.style.cssText='font-size:12px;color:var(--text2);margin:4px 0;';hi.textContent='Noch keine Stelle in der Skizze – „Einzeichnen“ antippen, oben eine Stelle wählen und in die Skizze tippen.';k.appendChild(hi);}
-        const nh=document.createElement('div');nh.style.cssText='font-size:12px;color:var(--text2);margin:4px 0;line-height:1.4;';nh.textContent='Nicht maßstäblich. Die Nummern sind die Stellen dieses Bereichs – ihre Fotos hängen an der Stelle. Im PDF steht die Skizze nur, wenn etwas eingezeichnet ist.';k.appendChild(nh);
+        if(mk.length){const lg=document.createElement('div');lg.setAttribute('data-fs-aslegende',sk.id);lg.style.cssText='font-size:var(--fs14,14px);color:var(--text);margin:6px 0 2px;';mk.forEach(q=>{const z=document.createElement('div');z.style.cssText='padding:2px 0;';const nf=(Array.isArray(q.s.fotoRefs)?q.s.fotoRefs:[]).filter(r=>(bericht.fotos||[]).some(f=>_fsRefPasst(f,r))).length;z.textContent=q.n+' = '+q.label+(String(q.s.ort||'').trim()?' · '+String(q.s.ort).trim():'')+(nf?' · 📷 '+nf:'');lg.appendChild(z);});k.appendChild(lg);}
+        else{const hi=document.createElement('div');hi.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin:4px 0;';hi.textContent='Noch keine Stelle in der Skizze – „Einzeichnen“ antippen, oben eine Stelle wählen und in die Skizze tippen.';k.appendChild(hi);}
+        const nh=document.createElement('div');nh.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin:4px 0;line-height:1.4;';nh.textContent='Nicht maßstäblich. Die Nummern sind die Stellen dieses Bereichs – ihre Fotos hängen an der Stelle. Im PDF steht die Skizze nur, wenn etwas eingezeichnet ist.';k.appendChild(nh);
         const weg=document.createElement('button');weg.type='button';weg.setAttribute('data-fs-asweg',sk.id);weg.textContent='✕ Skizze entfernen';
         weg.style.cssText=S_KNOPF+'display:block;width:100%;margin-top:6px;border:1px solid var(--border);background:transparent;color:var(--text2);';
         weg.onclick=()=>{if(_fsAsBenutzt(bericht,sk)&&!confirm('Skizze „'+(String(sk.name||'').trim()||'Außen')+'“ entfernen? Stempel, Striche und die Nummern in der Skizze gehen verloren. Die Stellen und ihre Fotos bleiben.'))return;_fsAsWeg(bericht,sk);scheduleSave();_neuBauen();};
         k.appendChild(weg);wr.appendChild(k);
       });
       const neuK=document.createElement('button');neuK.type='button';neuK.setAttribute('data-fs-asneu',bereich);neuK.textContent='＋ Skizze für '+(bereich||(typ==='innen'?'diesen Raum':'Außen'));
-      neuK.style.cssText=S_KNOPF+'display:block;width:100%;min-height:42px;margin:4px 0;border:1.5px solid var(--border);background:transparent;color:var(--text);';
+      neuK.style.cssText=S_KNOPF+'display:block;width:100%;min-height:var(--fsh,42px);margin:4px 0;border:1.5px solid var(--fs-krd,var(--border));background:var(--fs-kfl,transparent);color:var(--text);';
       neuK.onclick=()=>{const sk=_fsAsNeu(bericht,bereich,typ);if(!sk){toast('Genug Skizzen in diesem Protokoll – bitte eine entfernen','info',3500);return;}_fsAsAuf.add(sk);scheduleSave();_neuBauen();};
       wr._fsNeuKnopf=neuK;if(mitKnopf!==false)wr.appendChild(neuK); /* F35: im Bereich mit Stellen wandert der Knopf in die Knopf-Zeile */
       return wr;
@@ -1760,26 +1813,26 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       if(!_fsB2Sichtbar(bericht,typ))return;
       const farbe=typ==='aussen'?'#d9480f':FS_FARBE;
       const sek=document.createElement('div');sek.setAttribute('data-fs-b2teil',typ);
-      const th=document.createElement('div');th.style.cssText='font-size:17px;font-weight:700;color:var(--text);margin:14px 0 4px;padding-bottom:3px;border-bottom:3px solid '+farbe+';';th.textContent=typ==='innen'?'🏠 Innen':'🌤 Außen';
+      const th=document.createElement('div');th.style.cssText='font-size:var(--fs17,17px);font-weight:700;color:var(--text);margin:14px 0 4px;padding-bottom:3px;border-bottom:3px solid '+farbe+';';th.textContent=typ==='innen'?'🏠 Innen':'🌤 Außen';
       sek.appendChild(th);
       _fsVbRaumGruppen(bericht,typ).forEach(gr=>{
         const box=document.createElement('div');box.setAttribute('data-fs-raumgruppe',gr.raum);box.setAttribute('data-fs-typ',typ);box.style.cssText='margin:10px 0 4px;';
         const rk=document.createElement('div');rk.style.cssText='display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:2px 0 4px;border-bottom:2px solid '+farbe+';';
-        const rn=document.createElement('div');rn.style.cssText='flex:1;min-width:0;font-size:16px;font-weight:700;color:var(--text);';rn.textContent=gr.raum||(typ==='aussen'?'Außen':'Ohne Raum');
+        const rn=document.createElement('div');rn.style.cssText='flex:1;min-width:0;font-size:var(--fs16,16px);font-weight:700;color:var(--text);';rn.textContent=gr.raum||(typ==='aussen'?'Außen':'Ohne Raum');
         const re=document.createElement('button');re.type='button';re.textContent='✎';re.title=typ==='aussen'?'Bereich umbenennen':'Raum umbenennen';re.setAttribute('aria-label',re.title);re.setAttribute('data-fs-raumumbenennen',gr.raum); /* F35: kleines Stift-Symbol statt großem Knopf */
-        re.style.cssText=S_KNOPF+'min-height:40px;min-width:44px;padding:4px 8px;font-size:17px;border:none;background:transparent;color:var(--text2);';
+        re.style.cssText=S_KNOPF+'min-height:var(--fsh,40px);min-width:var(--fsh,44px);padding:4px 8px;font-size:var(--fs17,17px);border:1.5px solid var(--fs-krd,transparent);background:var(--fs-kfl,transparent);color:var(--text);'; /* F38: ein richtiger Knopf mit Rahmen */
         re.onclick=()=>{const n=prompt('Neuer Name für „'+(gr.raum||'Ohne Raum')+'“',gr.raum);if(n===null)return;const nn=String(n).trim();_fsAsListe(bericht).forEach(k=>{if(_fsAsTyp(k)===typ&&k.bereich===gr.raum)k.bereich=nn;});gr.stellen.forEach(x=>{x.s.raum=nn;});scheduleSave();_neuBauen();}; /* F33: die Skizzen des Bereichs gehen mit */
         if(gr.stellen.length>1){ /* F30: alle zuklappen / aufklappen */
           const anyAuf=gr.stellen.some(x=>_fsStelleOffen(bericht,x.s));
           const ak=document.createElement('button');ak.type='button';ak.setAttribute('data-fs-gruppealle',gr.raum);ak.textContent=anyAuf?'▾ alle zu':'▸ alle auf';
-          ak.style.cssText=S_KNOPF+'min-height:36px;padding:4px 10px;font-size:13px;border:1px solid var(--border);background:transparent;color:var(--text2);';
+          ak.style.cssText=S_KNOPF+'min-height:var(--fsh,36px);padding:4px 10px;font-size:var(--fs13,13px);border:1px solid var(--border);background:transparent;color:var(--text2);';
           ak.onclick=()=>{gr.stellen.forEach(x=>_fsStelleSetzen(x.s,!anyAuf));_neuBauen();};
           rk.append(rn,ak,re);
         }else rk.append(rn,re);
         box.appendChild(rk);sek.appendChild(box);
         gr.stellen.forEach(({s,si})=>box.appendChild(stelleKarte(s,si,typ)));
         const plus=document.createElement('button');plus.type='button';const plusLang='＋ Stelle in '+(gr.raum||(typ==='aussen'?'Außen':'diesem Raum'));plus.textContent='＋ Stelle';plus.title=plusLang;plus.setAttribute('aria-label',plusLang);plus.setAttribute('data-fs-stelleinraum',gr.raum); /* F35: kurz – der Name steht in der Überschrift */
-        const S_AKT=S_KNOPF+'flex:1 1 120px;min-width:0;min-height:42px;border:1.5px solid var(--border);background:transparent;color:var(--text);';
+        const S_AKT=S_KNOPF+'flex:1 1 120px;min-width:0;min-height:var(--fsh,42px);border:1.5px solid var(--fs-krd,var(--border));background:var(--fs-kfl,transparent);color:var(--text);';
         plus.style.cssText=S_AKT;
         plus.onclick=()=>neueStelle(typ,gr.raum);
         const akt=document.createElement('div');akt.setAttribute('data-fs-gruppeakt',gr.raum);akt.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 2px;'; /* F35: EINE Zeile – „＋ Stelle“ und (außen) „＋ Skizze“ */
@@ -1795,12 +1848,12 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
         const da=_fsVbRaumGruppen(bericht,typ).map(g=>g.raum);
         _fsAsListe(bericht).filter(k=>_fsAsTyp(k)===typ).map(k=>k.bereich).filter((v,i,a)=>a.indexOf(v)===i&&da.indexOf(v)<0).forEach(bn=>{
           const box=document.createElement('div');box.setAttribute('data-fs-asohnestelle',bn);box.style.cssText='margin:10px 0 4px;';
-          const rn=document.createElement('div');rn.style.cssText='font-size:16px;font-weight:700;color:var(--text);padding:2px 0 4px;border-bottom:2px solid '+farbe+';';rn.textContent=(bn||(typ==='innen'?'Raum':'Außen'))+' (nur Skizze, keine Stelle)';
+          const rn=document.createElement('div');rn.style.cssText='font-size:var(--fs16,16px);font-weight:700;color:var(--text);padding:2px 0 4px;border-bottom:2px solid '+farbe+';';rn.textContent=(bn||(typ==='innen'?'Raum':'Außen'))+' (nur Skizze, keine Stelle)';
           box.append(rn,asBlock(bn,true,typ));sek.appendChild(box);
         });
       }
       const daNamen=_fsVbRaumGruppen(bericht,typ).map(g=>g.raum),vorhanden=daNamen.length>0;
-      const lr=document.createElement('div');lr.style.cssText='font-size:13px;color:var(--text2);margin:12px 0 4px;';
+      const lr=document.createElement('div');lr.style.cssText='font-size:var(--fs13,13px);color:var(--text2);margin:12px 0 4px;';
       lr.textContent=typ==='innen'?(vorhanden?'Weiterer Raum – antippen und eine Stelle darin anlegen:':'Raum wählen – dann legst du darin die erste Stelle an:'):(vorhanden?'Weiterer Bereich – antippen und eine Stelle darin anlegen:':'Bereich wählen – dann legst du darin die erste Stelle an:');
       const rc=document.createElement('div');rc.setAttribute(typ==='innen'?'data-fs-raumwahl':'data-fs-bereichwahl','1');rc.style.cssText='display:flex;flex-wrap:wrap;gap:6px;';
       const namen=(typ==='innen'?FS_B2_RAEUME:FS_B2_BEREICHE).slice();
@@ -1810,7 +1863,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       if(vorhanden){ /* F35: gibt es schon einen Raum/Bereich, steht die Auswahl hinter EINEM Knopf; beim leeren Protokoll bleibt sie offen (kein zusätzlicher Tipp) */
         const wk=document.createElement('button');wk.type='button';wk.setAttribute('data-fs-weiter',typ);
         const wText=()=>'＋ weiterer '+(typ==='innen'?'Raum':'Bereich')+(_fsWeiterOffen(bericht,typ)?' ▾':' ▸');
-        wk.style.cssText=S_KNOPF+'display:block;width:100%;min-height:42px;margin:14px 0 4px;padding:0 12px;text-align:left;border:1.5px solid var(--border);background:transparent;color:var(--text);';
+        wk.style.cssText=S_KNOPF+'display:block;width:100%;min-height:var(--fsh,42px);margin:14px 0 4px;padding:0 12px;text-align:left;border:1.5px solid var(--fs-krd,var(--border));background:var(--fs-kfl,transparent);color:var(--text);';
         wk.setAttribute('aria-expanded',_fsWeiterOffen(bericht,typ)?'true':'false');wk.textContent=wText();
         rc.style.display=_fsWeiterOffen(bericht,typ)?'flex':'none';
         wk.onclick=()=>{const a=!_fsWeiterOffen(bericht,typ);_fsWeiterSetzen(bericht,typ,a);rc.style.display=a?'flex':'none';wk.setAttribute('aria-expanded',a?'true':'false');wk.textContent=wText();};
@@ -1824,7 +1877,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   function _teilFeststellungenB2(){
     const w=document.createElement('div');
     w.appendChild(_teilVbStellenB2());
-    const h=document.createElement('div');h.setAttribute('data-fs-b2umgebung','1');h.style.cssText='font-size:14px;font-weight:700;color:var(--text);padding:8px 14px 0;border-top:1px solid var(--border);margin-top:6px;';h.textContent='Umgebung abgehen';
+    const h=document.createElement('div');h.setAttribute('data-fs-b2umgebung','1');h.style.cssText='font-size:var(--fs14,14px);font-weight:700;color:var(--text);padding:8px 14px 0;border-top:1px solid var(--border);margin-top:6px;';h.textContent='Umgebung abgehen';
     w.append(h,_teilUmgebungVb());
     return w;
   }
@@ -1834,13 +1887,13 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const mz=_fsVbMeldungZeile(bericht),ez=_fsVbErgebnisZeilen(bericht);
     if(!mz&&!ez.length){w.appendChild(_bgInfo('Noch nichts erfasst. Das Ergebnis entsteht von selbst aus „Gemeldet“, den Stellen und der Umgebung.'));return w;}
     w.appendChild(_bgInfo('Entsteht von selbst aus Stellen und Umgebung – so steht es im PDF.'));
-    [mz].concat(ez).filter(Boolean).forEach(z=>{const d=document.createElement('div');d.style.cssText='font-size:14px;color:var(--text);margin:4px 0;';d.textContent=z;w.appendChild(d);});
+    [mz].concat(ez).filter(Boolean).forEach(z=>{const d=document.createElement('div');d.style.cssText='font-size:var(--fs14,14px);color:var(--text);margin:4px 0;';d.textContent=z;w.appendChild(d);});
     return w;
   }
   function _teilKarteVb(){ // F20: kommt aus der Karte – nur zur Kontrolle
     const w=document.createElement('div');
     const hilfen=document.createElement('div');hilfen.style.cssText='display:flex;flex-wrap:wrap;gap:8px;padding:8px 14px;';
-    const b=document.createElement('button');b.type='button';b.textContent='↻ aus Karte';b.style.cssText=S_KNOPF+'min-height:44px;border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);';b.onclick=()=>_ausKarteKlick();
+    const b=document.createElement('button');b.type='button';b.textContent='↻ aus Karte';b.style.cssText=S_KNOPF+'min-height:var(--fsh44,44px);border:1.5px solid var(--fs-krd,'+FS_FARBE+');background:var(--fs-kfl,transparent);color:var(--text);';b.onclick=()=>_ausKarteKlick();
     hilfen.appendChild(b);
     w.append(hilfen,_feld('Auftraggeber','auftraggeber','aus der Karte'),_feld('Objekt','objektAdresse','aus der Karte'),_feld('Auftrag-Nr.','auftragNr',''),_feld('Nutzer / Mieter','nutzer',''));
     return w;
@@ -1860,7 +1913,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const w=document.createElement('div');
     const hilfen=document.createElement('div');hilfen.style.cssText='display:flex;flex-wrap:wrap;gap:8px;padding:8px 14px;';
     const wb=document.createElement('button');wb.type='button';wb.textContent='🌤 Wetter holen';
-    wb.style.cssText=S_KNOPF+'min-height:44px;border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);';
+    wb.style.cssText=S_KNOPF+'min-height:var(--fsh44,44px);border:1.5px solid var(--fs-krd,'+FS_FARBE+');background:var(--fs-kfl,transparent);color:var(--text);';
     wb.onclick=()=>holeWetter(bericht,_neuBauen);
     hilfen.appendChild(wb);
     if(!_fsIstVorab(bericht))w.append(
@@ -1874,7 +1927,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       _feld('Außen °C','aussenT','z. B. 12,5',true),
       _feld('Außen % rF','aussenRf','z. B. 80',true));
     const td=document.createElement('div');td.setAttribute('data-fs-aussen','1');
-    td.style.cssText='padding:0 14px 6px 136px;font-size:13px;color:var(--text2);';
+    td.style.cssText='padding:0 14px 6px 136px;font-size:var(--fs13,13px);color:var(--text2);';
     w.appendChild(td);
     const q=_fsBgWetterQuelle(bericht.kopf);
     if(q)w.appendChild(_bgInfo(q.replace(/^Angabe des Wetterdienstes /,'Quelle: ')));
@@ -1903,7 +1956,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   /* ── F2c: Raumklima mit Uhrzeit, Bedingungen, Wänden und Fotos · Messstellen mit Wand, Höhe, Uhrzeit, Vergleichsstelle ───────
      Eigene Fassungen der Teile (die alten _teilRaeume/_teilStellen bleiben für das alte Protokoll unverändert). */
   function _bgLabelFeld(text,el){
-    const z=document.createElement('label');z.style.cssText='display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--text2);min-width:0;';
+    const z=document.createElement('label');z.style.cssText='display:flex;flex-direction:column;gap:3px;font-size:var(--fs12,12px);color:var(--text2);min-width:0;';
     const s=document.createElement('span');s.textContent=text;z.append(s,el);return z;
   }
   /* ── F6: Raum-Seite – ein Abschnitt „Räume“: Raumliste, darin je Raum eine Seite mit den Reitern Klima · Wände · Skizze · Messplan ────────
@@ -1943,7 +1996,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   function _bgRaumKlima(r,ri){
     const card=document.createElement('div');card.setAttribute('data-fs-raumkarte',String(ri));
     card.style.cssText='margin:6px 10px;padding:2px 0 8px;border:1px solid var(--border);border-radius:10px;background:var(--bg2);';
-    const kz=document.createElement('div');kz.style.cssText=S_RAUMGRID+'padding:6px 14px 0;font-size:12px;color:var(--text2);';
+    const kz=document.createElement('div');kz.style.cssText=S_RAUMGRID+'padding:6px 14px 0;font-size:var(--fs12,12px);color:var(--text2);';
     ['Raum','°C','% rF','Taupunkt',''].forEach(x=>{const s=document.createElement('span');s.textContent=x;kz.appendChild(s);});
     card.appendChild(kz);
     const row=document.createElement('div');row.style.cssText=S_RAUMGRID+'padding:6px 14px;align-items:center;';
@@ -1958,9 +2011,9 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const tI=_inp(r.t,'°C',v=>{r.t=v;_fsWerteNeu();},true);
     const fI=_inp(r.rf,'%',v=>{r.rf=v;_fsWerteNeu();},true);
     const td=document.createElement('span');td.setAttribute('data-fs-raum',String(ri));
-    td.style.cssText='font-size:14px;color:var(--text);text-align:center;';
+    td.style.cssText='font-size:var(--fs14,14px);color:var(--text);text-align:center;';
     const x=document.createElement('button');x.type='button';x.textContent='✕';x.title='Raum entfernen';
-    x.style.cssText='width:40px;height:40px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--red);font-size:15px;cursor:pointer;';
+    x.style.cssText='width:var(--fsh,40px);height:var(--fsh,40px);border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--red);font-size:var(--fs15,15px);cursor:pointer;';
     x.onclick=()=>{if(!confirm('Raum „'+(r.name||'ohne Namen')+'" mit allen Wänden entfernen?'))return;bericht.raeume.splice(ri,1);_bgRaumSel=null;scheduleSave();_neuBauen();};
     row.append(nameI,tI,fI,td,x);
     const r2=document.createElement('div');r2.style.cssText='display:grid;grid-template-columns:96px minmax(0,1fr);gap:6px;padding:0 14px 6px;align-items:center;';
@@ -1972,12 +2025,12 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   function _bgRaumWaende(r,ri){
     const card=document.createElement('div');card.setAttribute('data-fs-raumwaende',String(ri));
     card.style.cssText='margin:6px 10px;padding:2px 0 8px;border:1px solid var(--border);border-radius:10px;background:var(--bg2);';
-    const wt=document.createElement('div');wt.style.cssText='padding:6px 14px 2px;font-size:12px;font-weight:700;color:var(--text2);';wt.textContent='Wände';card.appendChild(wt);
+    const wt=document.createElement('div');wt.style.cssText='padding:6px 14px 2px;font-size:var(--fs12,12px);font-weight:700;color:var(--text2);';wt.textContent='Wände';card.appendChild(wt);
     r.waende.forEach((wd,wi)=>{
       if(!Array.isArray(wd.fotoRefs))wd.fotoRefs=[];
       const wr=document.createElement('div');wr.setAttribute('data-fs-wand',(r.name||'')+'|'+wd.k);
-      wr.style.cssText='display:grid;grid-template-columns:54px minmax(0,1fr) 40px;gap:6px;align-items:center;padding:3px 14px;';
-      const kk=document.createElement('span');kk.textContent=wd.k;kk.style.cssText='font-size:14px;font-weight:700;color:var(--text);';
+      wr.style.cssText='display:grid;grid-template-columns:54px minmax(0,1fr) var(--fsh,40px);gap:6px;align-items:center;padding:3px 14px;';
+      const kk=document.createElement('span');kk.textContent=wd.k;kk.style.cssText='font-size:var(--fs14,14px);font-weight:700;color:var(--text);';
       let aI;
       if(/^W\d+$/.test(wd.k)){ // F3a: Art als Auswahl; unbekannte (frühere Freitext-)Werte bleiben als eigener Eintrag stehen
         const cur=String(wd.art||'').trim();
@@ -2028,11 +2081,11 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const kn=document.createElement('div');kn.style.cssText='display:flex;flex-wrap:wrap;gap:8px;padding:2px 10px 8px;';
     const mk=(txt,stil,fn,attr)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.style.cssText=S_KNOPF+'flex:1 1 200px;min-height:48px;'+stil;if(attr)b.setAttribute(attr[0],attr[1]);b.onclick=fn;return b;};
     kn.append(
-      mk('📋 Messliste (am Handy)','border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);',()=>_fsBgMessfensterZeigen(bericht,'liste'),['data-fs-messlistenknopf','1']),
+      mk('📋 Messliste (am Handy)','border:1.5px solid var(--fs-krd,'+FS_FARBE+');background:var(--fs-kfl,transparent);color:var(--text);',()=>_fsBgMessfensterZeigen(bericht,'liste'),['data-fs-messlistenknopf','1']),
       mk('📋 Messungen nach Messplan zuordnen','border:1.5px solid '+FS_FARBE+';background:rgba(31,95,139,.12);color:var(--text);',()=>{if(typeof _fsTestoPlanZuordnen==='function')_fsTestoPlanZuordnen(bericht,t,_neuBauen);},['data-fs-planzuordnen','1']),
-      mk('📥 testo-Messung einlesen (einzeln)','border:1.5px solid var(--border);background:transparent;color:var(--text);',()=>_fsTestoEinlesen(bericht,t,_neuBauen)));
+      mk('📥 testo-Messung einlesen (einzeln)','border:1.5px solid var(--fs-krd,var(--border));background:var(--fs-kfl,transparent);color:var(--text);',()=>_fsTestoEinlesen(bericht,t,_neuBauen)));
     w.appendChild(kn);
-    const stand=document.createElement('div');stand.setAttribute('data-fs-planstand','1');stand.style.cssText='padding:0 14px 6px;font-size:13px;font-weight:600;color:var(--text2);';
+    const stand=document.createElement('div');stand.setAttribute('data-fs-planstand','1');stand.style.cssText='padding:0 14px 6px;font-size:var(--fs13,13px);font-weight:600;color:var(--text2);';
     stand.textContent=plan.length?'Messplan: '+erl+' von '+plan.length+' zugeordnet':'Noch kein Messplan – lege einen Raum mit Wänden an (ein Raum braucht einen Namen).';
     w.appendChild(stand);
     bericht.raeume.forEach((r,ri)=>{
@@ -2040,17 +2093,17 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       if(!Array.isArray(r.fotoRefs))r.fotoRefs=[];
       const k=document.createElement('button');k.type='button';k.setAttribute('data-fs-raumkachel',String(ri));
       k.style.cssText='display:block;width:calc(100% - 20px);margin:0 10px 8px;padding:12px 14px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg2);color:var(--text);text-align:left;font-family:inherit;cursor:pointer;min-height:64px;';
-      const n=document.createElement('div');n.textContent=(String(r.name||'').trim()||'Raum '+(ri+1));n.style.cssText='font-size:17px;font-weight:700;';
-      const s=document.createElement('div');s.textContent=_bgRaumKurz(r,plan);s.style.cssText='font-size:13px;color:var(--text2);margin-top:3px;line-height:1.4;';
+      const n=document.createElement('div');n.textContent=(String(r.name||'').trim()||'Raum '+(ri+1));n.style.cssText='font-size:var(--fs17,17px);font-weight:700;';
+      const s=document.createElement('div');s.textContent=_bgRaumKurz(r,plan);s.style.cssText='font-size:var(--fs13,13px);color:var(--text2);margin-top:3px;line-height:1.4;';
       k.append(n,s);k.onclick=()=>_bgRaumWahl(ri,'klima');
       w.appendChild(k);
     });
     const ohne=bericht.stellen.filter(s=>_bgStelleGehoertZu(s,null)).length;
     if(ohne){
       const k=document.createElement('button');k.type='button';k.setAttribute('data-fs-raumkachel','ohne');
-      k.style.cssText='display:block;width:calc(100% - 20px);margin:0 10px 8px;padding:12px 14px;border-radius:12px;border:1.5px dashed var(--border);background:transparent;color:var(--text);text-align:left;font-family:inherit;cursor:pointer;min-height:56px;';
-      const n=document.createElement('div');n.textContent='Messstellen ohne Raum';n.style.cssText='font-size:16px;font-weight:700;';
-      const s=document.createElement('div');s.textContent=ohne+(ohne===1?' Messstelle':' Messstellen')+' – hier einem Raum zuordnen';s.style.cssText='font-size:13px;color:var(--text2);margin-top:3px;';
+      k.style.cssText='display:block;width:calc(100% - 20px);margin:0 10px 8px;padding:12px 14px;border-radius:12px;border:1.5px dashed var(--border);background:var(--fs-kfl,transparent);color:var(--text);text-align:left;font-family:inherit;cursor:pointer;min-height:56px;';
+      const n=document.createElement('div');n.textContent='Messstellen ohne Raum';n.style.cssText='font-size:var(--fs16,16px);font-weight:700;';
+      const s=document.createElement('div');s.textContent=ohne+(ohne===1?' Messstelle':' Messstellen')+' – hier einem Raum zuordnen';s.style.cssText='font-size:var(--fs13,13px);color:var(--text2);margin-top:3px;';
       k.append(n,s);k.onclick=()=>_bgRaumWahl('ohne');
       w.appendChild(k);
     }
@@ -2076,15 +2129,15 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     if(r){if(!Array.isArray(r.waende))r.waende=[];if(!Array.isArray(r.fotoRefs))r.fotoRefs=[];}
     const kz=document.createElement('div');kz.style.cssText='display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border);';
     const zurueck=document.createElement('button');zurueck.type='button';zurueck.textContent='‹ Räume';zurueck.setAttribute('data-fs-raumzurueck','1');
-    zurueck.style.cssText=S_KNOPF+'min-height:44px;border:1.5px solid var(--border);background:transparent;color:var(--text);';zurueck.onclick=()=>_bgRaumWahl(null);
-    const ti=document.createElement('div');ti.style.cssText='flex:1;min-width:0;text-align:center;font-size:16px;font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    zurueck.style.cssText=S_KNOPF+'min-height:var(--fsh44,44px);border:1.5px solid var(--fs-krd,var(--border));background:var(--fs-kfl,transparent);color:var(--text);';zurueck.onclick=()=>_bgRaumWahl(null);
+    const ti=document.createElement('div');ti.style.cssText='flex:1;min-width:0;text-align:center;font-size:var(--fs16,16px);font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
     ti.textContent=ohne?'Messstellen ohne Raum':(String(r.name||'').trim()||'Raum '+(_bgRaumSel+1));
     kz.append(zurueck,ti);
     if(!ohne){
       const weiter=document.createElement('button');weiter.type='button';weiter.setAttribute('data-fs-raumweiter','1');
       const naechster=_bgRaumSel+1<n?_bgRaumSel+1:null;
       weiter.textContent=naechster===null?'Raumliste ›':'Nächster Raum ›';
-      weiter.style.cssText=S_KNOPF+'min-height:44px;border:1.5px solid '+FS_FARBE+';background:rgba(31,95,139,.10);color:var(--text);';
+      weiter.style.cssText=S_KNOPF+'min-height:var(--fsh44,44px);border:1.5px solid '+FS_FARBE+';background:rgba(31,95,139,.10);color:var(--text);';
       weiter.onclick=()=>_bgRaumWahl(naechster,'klima');
       kz.appendChild(weiter);
     }
@@ -2098,7 +2151,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     [['klima','Klima'],['waende','Wände'],['skizze','Skizze'],['messplan','Messplan']].forEach(([k,txt])=>{
       const an=_bgRaumTab===k;
       const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute('data-fs-raumreiter',k);
-      b.style.cssText='min-height:48px;padding:6px 2px;border-radius:10px;font-size:15px;font-weight:'+(an?'700':'600')+';font-family:inherit;cursor:pointer;color:var(--text);border:2px solid '+(an?FS_FARBE:'var(--border)')+';background:'+(an?'rgba(31,95,139,.18)':'transparent')+';';
+      b.style.cssText='min-height:48px;padding:6px 2px;border-radius:10px;font-size:var(--fs15,15px);font-weight:'+(an?'700':'600')+';font-family:inherit;cursor:pointer;color:var(--text);border:2px solid '+(an?FS_FARBE:'var(--border)')+';background:'+(an?'rgba(31,95,139,.18)':'transparent')+';';
       b.onclick=()=>{_bgRaumTab=k;_neuBauen();};
       tabs.appendChild(b);
     });
@@ -2108,7 +2161,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     else if(_bgRaumTab==='messplan')w.appendChild(_teilMessplanBg(_bgRaumSel));
     else w.appendChild(_bgRaumKlima(r,_bgRaumSel));
     const loe=document.createElement('button');loe.type='button';loe.textContent='🗑 Raum löschen';loe.setAttribute('data-fs-raumloeschen','1'); // F22: beschriftet statt nur ✕ in der Klima-Zeile
-    loe.style.cssText=S_KNOPF+'display:block;margin:12px 14px;min-height:44px;border:1.5px solid var(--red);background:transparent;color:var(--red);';
+    loe.style.cssText=S_KNOPF+'display:block;margin:12px 14px;min-height:var(--fsh44,44px);border:1.5px solid var(--red);background:transparent;color:var(--red);';
     loe.onclick=()=>{if(!confirm('Raum „'+(String(r.name||'').trim()||'ohne Namen')+'" mit allen Wänden entfernen?'))return;bericht.raeume.splice(_bgRaumSel,1);_bgRaumSel=null;scheduleSave();_neuBauen();};
     w.appendChild(loe);
     return w;
@@ -2128,10 +2181,10 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   function _bgSchrittHinweis(titel,text){
     const d=document.createElement('div');d.setAttribute('data-fs-schritthinweis',titel);
     d.style.cssText='margin:8px 10px;padding:10px 12px;border-radius:10px;border-left:5px solid '+FS_FARBE+';background:rgba(31,95,139,.10);';
-    const t1=document.createElement('div');t1.textContent=titel;t1.style.cssText='font-size:14px;font-weight:700;color:var(--text);';
-    const t2=document.createElement('div');t2.textContent=text;t2.style.cssText='font-size:14px;line-height:1.5;color:var(--text);margin-top:2px;';
+    const t1=document.createElement('div');t1.textContent=titel;t1.style.cssText='font-size:var(--fs14,14px);font-weight:700;color:var(--text);';
+    const t2=document.createElement('div');t2.textContent=text;t2.style.cssText='font-size:var(--fs14,14px);line-height:1.5;color:var(--text);margin-top:2px;';
     const kb=document.createElement('button');kb.type='button';kb.textContent='ℹ So misst du';kb.setAttribute('data-fs-hinweisknopf','1');
-    kb.style.cssText=S_KNOPF+'margin-top:8px;min-height:44px;border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);';
+    kb.style.cssText=S_KNOPF+'margin-top:8px;min-height:var(--fsh44,44px);border:1.5px solid var(--fs-krd,'+FS_FARBE+');background:var(--fs-kfl,transparent);color:var(--text);';
     kb.onclick=()=>_fsBgMessfensterZeigen(bericht,'ablauf');
     d.append(t1,t2,kb);return d;
   }
@@ -2146,9 +2199,9 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const plan=_fsBgMessplan(bericht).filter(p=>p.raum===name);
     const erl=plan.filter(p=>_fsBgPlanErledigt(bericht,p)).length;
     const kopf=document.createElement('div');kopf.style.cssText='display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;';
-    const kt=document.createElement('span');kt.textContent='📋 Messplan dieses Raums';kt.style.cssText='font-size:15px;font-weight:700;color:var(--text);flex:1;';
+    const kt=document.createElement('span');kt.textContent='📋 Messplan dieses Raums';kt.style.cssText='font-size:var(--fs15,15px);font-weight:700;color:var(--text);flex:1;';
     const ks=document.createElement('span');ks.setAttribute('data-fs-planstand','1');ks.textContent=plan.length?erl+' von '+plan.length+' zugeordnet':'';
-    ks.style.cssText='font-size:12px;font-weight:600;color:var(--text2);';
+    ks.style.cssText='font-size:var(--fs12,12px);font-weight:600;color:var(--text2);';
     kopf.append(kt,ks);box.appendChild(kopf);
     const info=_bgInfo('Miss immer in dieser Reihenfolge: Raum für Raum, W1 bis W4, an jeder Wand von der ersten bis zur letzten Höhe. Eine Wand, die du nicht misst, schaltest du ab – sie fehlt dann in der Messliste, ihre Höhen bleiben gespeichert. Höhen ändern: Zahlen eintragen (z. B. 10, 50, 100). Die Reihenfolge über alle Räume steht in der „Messliste“.');
     info.style.padding='6px 0';box.appendChild(info);
@@ -2169,11 +2222,11 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const z=bereich[wd.k],an=_fsBgWandHoehen(wd).length>0; // F8: an = die Wand steht im Messplan
       const row=document.createElement('div');row.setAttribute('data-fs-planwand',name+'|'+wd.k);row.setAttribute('data-fs-planan',an?'1':'0');
       row.style.cssText='display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;margin:6px 0;padding:6px 8px;border-radius:10px;border:1.5px solid '+(an?'var(--border)':'transparent')+';'+(an?'':'opacity:.65;');
-      const lab=document.createElement('span');lab.style.cssText='flex:1 1 130px;min-width:0;font-size:14px;font-weight:700;color:var(--text);';
+      const lab=document.createElement('span');lab.style.cssText='flex:1 1 130px;min-width:0;font-size:var(--fs14,14px);font-weight:700;color:var(--text);';
       lab.textContent=wd.k+(String(wd.art||'').trim()?' – '+String(wd.art).trim():'');
       const sw=document.createElement('button');sw.type='button';sw.setAttribute('data-fs-wandschalter',name+'|'+wd.k);
       sw.textContent=an?'✓ wird gemessen':'✕ wird nicht gemessen';
-      sw.style.cssText=S_KNOPF+'flex:0 0 auto;min-height:44px;border:2px solid '+(an?FS_FARBE:'var(--border)')+';background:'+(an?'rgba(31,95,139,.18)':'transparent')+';color:var(--text);';
+      sw.style.cssText=S_KNOPF+'flex:0 0 auto;min-height:var(--fsh44,44px);border:2px solid '+(an?FS_FARBE:'var(--border)')+';background:'+(an?'rgba(31,95,139,.18)':'transparent')+';color:var(--text);';
       sw.onclick=()=>{_fsBgWandMessenSetzen(wd,!an);scheduleSave();_neuBauen();};
       row.append(lab,sw);
       if(an){
@@ -2181,12 +2234,12 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
         hi.setAttribute('data-fs-planhoehe',name+'|'+wd.k);hi.setAttribute('aria-label','Höhen in cm an '+wd.k);
         hi.style.flex='1 1 150px';hi.style.width='auto';hi.style.minHeight='44px';
         hi.onchange=()=>{scheduleSave();_neuBauen();};
-        const st=document.createElement('span');st.style.cssText='flex:0 0 auto;min-width:88px;font-size:12px;font-weight:600;color:var(--text2);text-align:right;';
+        const st=document.createElement('span');st.style.cssText='flex:0 0 auto;min-width:88px;font-size:var(--fs12,12px);font-weight:600;color:var(--text2);text-align:right;';
         st.textContent=z?('Nr '+z.von+(z.bis>z.von?'–'+z.bis:'')+(z.erl?' · '+z.erl+'/'+z.n+' ✓':'')):'';
         row.append(hi,st);
       }else{ // abgeschaltet: grau und eingeklappt, die Höhen bleiben gespeichert
         const gesp=_fsBgHoehenListe(typeof wd.hoehen==='string'?wd.hoehen:FS_BG_HOEHEN_STANDARD).join(', ');
-        const g=document.createElement('span');g.style.cssText='flex:1 1 100%;font-size:12px;color:var(--text2);';
+        const g=document.createElement('span');g.style.cssText='flex:1 1 100%;font-size:var(--fs12,12px);color:var(--text2);';
         g.textContent=gesp?('Höhen '+gesp+' cm bleiben gespeichert – beim Einschalten gelten sie wieder.'):('Beim Einschalten gelten wieder '+FS_BG_HOEHEN_STANDARD+' cm.');
         row.appendChild(g);
       }
@@ -2194,7 +2247,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     });
     w.appendChild(box);
     if(name){ // Messstellen gehören über den Raumnamen zum Raum – ohne Namen gibt es keine
-      const mt=document.createElement('div');mt.style.cssText='padding:8px 14px 0;font-size:13px;font-weight:700;color:var(--text);';mt.textContent='Messstellen dieses Raums';
+      const mt=document.createElement('div');mt.style.cssText='padding:8px 14px 0;font-size:var(--fs13,13px);font-weight:700;color:var(--text);';mt.textContent='Messstellen dieses Raums';
       w.appendChild(mt);
       w.appendChild(_teilStellenBg(name));
     }
@@ -2217,7 +2270,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const txtI=_inp(st.text,'Ort im Raum, z. B. Ecke oben',v=>{st.text=v;},false);
       txtI.setAttribute('data-fs-stellentext',String(si));
       const x=document.createElement('button');x.type='button';x.textContent='✕';x.title='Messstelle entfernen';
-      x.style.cssText='width:40px;height:40px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--red);font-size:15px;cursor:pointer;flex-shrink:0;';
+      x.style.cssText='width:var(--fsh,40px);height:var(--fsh,40px);border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--red);font-size:var(--fs15,15px);cursor:pointer;flex-shrink:0;';
       x.onclick=()=>{if(!confirm('Messstelle '+(si+1)+' entfernen?'))return;bericht.stellen.splice(si,1);scheduleSave();_neuBauen();};
       top.append(nr,txtI,x);
 
@@ -2278,7 +2331,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       if(st.testo){
         zusammen=document.createElement('div');zusammen.style.cssText='margin-top:8px;';
         const mb=document.createElement('button');mb.type='button';mb.textContent='⇢ Zu anderer Stelle';mb.setAttribute('data-fs-zusammen',String(si));
-        mb.style.cssText=S_KNOPF+'min-height:40px;border:1.5px solid var(--border);background:transparent;color:var(--text);';
+        mb.style.cssText=S_KNOPF+'min-height:var(--fsh,40px);border:1.5px solid var(--fs-krd,var(--border));background:var(--fs-kfl,transparent);color:var(--text);';
         mb.onclick=()=>{
           const alt=zusammen.querySelector('select');if(alt){alt.remove();return;}
           const ziele=bericht.stellen.map((z,zi)=>({z,zi})).filter(q=>q.zi!==si&&!q.z.testo);
@@ -2301,7 +2354,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       notiz.style.marginTop='8px';
       const fotoLeiste=_fsFotoLeiste(bericht,st,'Fotos zu dieser Stelle');
       const pdfNr=(druck.find(q=>q.i===si)||{}).nr;
-      const pl=document.createElement('div');pl.setAttribute('data-fs-impdf',String(si));pl.style.cssText='margin-top:6px;font-size:12px;color:var(--text2);';
+      const pl=document.createElement('div');pl.setAttribute('data-fs-impdf',String(si));pl.style.cssText='margin-top:6px;font-size:var(--fs12,12px);color:var(--text2);';
       pl.textContent=pdfNr?'Im PDF: '+(st.referenz?'Vergleichsstelle ':'Nr ')+pdfNr:'Kommt ins PDF, sobald etwas eingetragen ist.';
 
       card.append(top,sel,ortRow,gr,luftGr,bf,werte);
@@ -2333,7 +2386,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     if(!r.skizze||!r.skizze.an){
       const neu=document.createElement('button');neu.type='button';neu.setAttribute('data-fs-skizze-neu','1');
       neu.textContent='＋ Skizze für '+(String(r.name||'').trim()||'diesen Raum')+' anlegen';
-      neu.style.cssText=S_KNOPF+'display:block;width:calc(100% - 28px);margin:6px 14px 12px;min-height:44px;border:1.5px dashed '+FS_FARBE+';background:rgba(31,95,139,.08);color:var(--text);';
+      neu.style.cssText=S_KNOPF+'display:block;width:calc(100% - 28px);margin:6px 14px 12px;min-height:var(--fsh44,44px);border:1.5px dashed '+FS_FARBE+';background:rgba(31,95,139,.08);color:var(--text);';
       neu.onclick=()=>{r.skizze={an:true,l:'',b:'',dreh:0};_fsBgWaendeVier(r);scheduleSave();_neuBauen();};
       w.appendChild(neu);
       return w;
@@ -2344,7 +2397,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const neuZeichnen=()=>{const u=_fsBgSkizzeBild(bericht,r);if(u)vorschau.src=u;};
     const masse=document.createElement('div');masse.style.cssText='display:grid;grid-template-columns:repeat(2,minmax(0,1fr)) auto;gap:6px;padding:0 14px;align-items:end;';
     const dreh=document.createElement('button');dreh.type='button';dreh.setAttribute('data-fs-skizze-dreh','1');dreh.textContent='↻ Drehen';
-    dreh.style.cssText=S_KNOPF+'min-height:44px;border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);';
+    dreh.style.cssText=S_KNOPF+'min-height:var(--fsh44,44px);border:1.5px solid var(--fs-krd,'+FS_FARBE+');background:var(--fs-kfl,transparent);color:var(--text);';
     dreh.onclick=()=>{
       if((_fsBgStricheAnzahl(sk)||_fsBgStempelAnzahl(sk))&&!confirm('Die eingezeichneten Striche und Stempel drehen nicht mit. Trotzdem drehen?'))return; // F5/F7
       sk.dreh=((parseInt(sk.dreh,10)||0)+1)%4;scheduleSave();neuZeichnen();
@@ -2366,7 +2419,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const wd=(r.waende||[]).find(q=>q&&q.k==='W'+i);
       if(!wd)continue;
       const row=document.createElement('div');row.setAttribute('data-fs-skizze-wand','W'+i);row.style.cssText='display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0;';
-      const l=document.createElement('span');l.style.cssText='flex:1 1 120px;min-width:0;font-size:14px;font-weight:700;color:var(--text);';l.textContent='W'+i+(String(wd.art||'').trim()?' – '+String(wd.art).trim():'');
+      const l=document.createElement('span');l.style.cssText='flex:1 1 120px;min-width:0;font-size:var(--fs14,14px);font-weight:700;color:var(--text);';l.textContent='W'+i+(String(wd.art||'').trim()?' – '+String(wd.art).trim():'');
       row.append(l,_chip('Tür',!!wd.tuer,()=>{wd.tuer=!wd.tuer;scheduleSave();_neuBauen();}),_chip('Fenster',!!wd.fenster,()=>{wd.fenster=!wd.fenster;scheduleSave();_neuBauen();}));
       zeilen.appendChild(row);
     }
@@ -2398,14 +2451,14 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     if(it.typ==='notiz'){ // nur ein Textfeld, erscheint erst, wenn der Punkt davor „festgestellt" ist
       const ab=sek.items.find(x=>x&&x.k===it.abh);
       if(!ab||ab.status!=='mangel'){row.style.display='none';return row;}
-      const l=document.createElement('div');l.style.cssText='font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px;';l.textContent=it.text||'';
+      const l=document.createElement('div');l.style.cssText='font-size:var(--fs14,14px);font-weight:600;color:var(--text);margin-bottom:6px;';l.textContent=it.text||'';
       row.append(l,_inp(it.notiz,it.h||'Angabe …',v=>{it.notiz=v;},false));
       return row;
     }
     const st=it.status||'offen';
-    const q=document.createElement('div');q.style.cssText='font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px;';q.textContent=it.text||'';
+    const q=document.createElement('div');q.style.cssText='font-size:var(--fs14,14px);font-weight:600;color:var(--text);margin-bottom:6px;';q.textContent=it.text||'';
     if(it.neuAnsehen&&st==='offen'){
-      const hw=document.createElement('span');hw.setAttribute('data-fs-neuansehen','1');hw.textContent='  · bitte neu beantworten';hw.style.cssText='font-weight:600;font-size:12px;color:var(--orange);';q.appendChild(hw);
+      const hw=document.createElement('span');hw.setAttribute('data-fs-neuansehen','1');hw.textContent='  · bitte neu beantworten';hw.style.cssText='font-weight:600;font-size:var(--fs12,12px);color:var(--orange);';q.appendChild(hw);
     }
     const knr=document.createElement('div');knr.style.cssText='display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;';
     const kurz=it.mo||String(it.m||'').split(': {}').join('').split(' {}').join('');
@@ -2413,8 +2466,8 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       if(!text)return;
       const an=st===k;
       const b=document.createElement('button');b.type='button';b.textContent=text;b.setAttribute('data-fs-satz',k);
-      b.style.cssText='padding:8px 8px;min-height:44px;border-radius:8px;font-size:13px;line-height:1.35;text-align:left;cursor:pointer;font-family:inherit;'
-        +'border:2px solid '+(an?FS_FARBE:'var(--border)')+';background:'+(an?'rgba(31,95,139,.18)':'transparent')+';color:var(--text);font-weight:'+(an?'700':'400')+';';
+      b.style.cssText='padding:8px 8px;min-height:var(--fsh44,44px);border-radius:8px;font-size:var(--fs13,13px);line-height:1.35;text-align:left;cursor:pointer;font-family:inherit;'
+        +'border:2px solid '+(an?'var(--fs-krd,'+FS_FARBE+')':'var(--border)')+';background:'+(an?'var(--fs-can,rgba(31,95,139,.18))':'var(--fs-cfl,transparent)')+';color:var(--text);font-weight:'+(an?'700':'400')+';';
       b.onclick=()=>{it.status=an?'offen':k;scheduleSave();_neuBauen();};
       knr.appendChild(b);
     });
@@ -2448,7 +2501,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const kt=document.createElement('span');kt.textContent=sek.titel||'';kt.style.cssText='flex:1;min-width:0;';
       kopf.append(pfeil,kt);
       if(zu){const kurz=document.createElement('span');kurz.setAttribute('data-fs-sekkurz',String(si));kurz.textContent=_fsBgSektionKurz(sek);
-        kurz.style.cssText='font-size:12px;font-weight:600;color:var(--text2);white-space:nowrap;flex-shrink:0;';kopf.appendChild(kurz);}
+        kurz.style.cssText='font-size:var(--fs12,12px);font-weight:600;color:var(--text2);white-space:nowrap;flex-shrink:0;';kopf.appendChild(kurz);}
       kopf.onclick=()=>umschalten(si,!zu);
       w.appendChild(kopf);
       if(zu)return;
@@ -2458,7 +2511,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       frei.onclick=()=>{const tx=prompt('Feststellung als ganzer Satz:');if(tx&&tx.trim()){sek.items.push({frei:true,text:tx.trim(),notiz:'',status:'mangel',fotoRefs:[]});scheduleSave();_neuBauen();}};
       w.appendChild(frei);
       const ein=document.createElement('button');ein.type='button';ein.textContent='▲ Abschnitt einklappen';ein.setAttribute('data-fs-einklappen',String(si));
-      ein.style.cssText=S_KNOPF+'display:block;width:calc(100% - 28px);margin:0 14px 12px;border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);';
+      ein.style.cssText=S_KNOPF+'display:block;width:calc(100% - 28px);margin:0 14px 12px;border:1.5px solid var(--fs-krd,'+FS_FARBE+');background:var(--fs-kfl,transparent);color:var(--text);';
       ein.onclick=()=>umschalten(si,true);
       w.appendChild(ein);
     });
@@ -2474,14 +2527,14 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const row=document.createElement('div');row.style.cssText='padding:10px 14px;border-bottom:1px solid var(--border);';
       row.setAttribute('data-fs-angabe',a.k||String(ai));
       const top=document.createElement('div');top.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:6px;';
-      const q=document.createElement('div');q.style.cssText='flex:1;min-width:0;font-size:14px;font-weight:600;color:var(--text);';q.textContent=a.q||'';
+      const q=document.createElement('div');q.style.cssText='flex:1;min-width:0;font-size:var(--fs14,14px);font-weight:600;color:var(--text);';q.textContent=a.q||'';
       top.appendChild(q);
       if(a.frei)top.appendChild(_bgXKnopf('Angabe entfernen',()=>{if(String(a.text||'').trim()&&!confirm('Angabe entfernen?'))return;bericht.angaben.splice(ai,1);scheduleSave();_neuBauen();}));
       row.append(top,_bgTextFeld(a.text,'Was wurde gesagt …',v=>{a.text=v;},2));
       const opts=namen.slice();if(a.von&&opts.indexOf(a.von)<0)opts.push(a.von);
       if(opts.length){
         const c=document.createElement('div');c.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;align-items:center;';
-        const l=document.createElement('span');l.style.cssText='font-size:12px;color:var(--text2);';l.textContent='Laut:';c.appendChild(l);
+        const l=document.createElement('span');l.style.cssText='font-size:var(--fs12,12px);color:var(--text2);';l.textContent='Laut:';c.appendChild(l);
         opts.forEach(nm=>c.appendChild(_chip(nm,a.von===nm,()=>{a.von=(a.von===nm)?'':nm;scheduleSave();_neuBauen();})));
         row.appendChild(c);
       }
@@ -2516,13 +2569,13 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   const footer=document.createElement('div');
   footer.style.cssText='position:fixed;bottom:0;left:0;right:0;padding:12px 14px;background:var(--bg2);border-top:1px solid var(--border);display:flex;gap:10px;z-index:99999;';
   const pdfBtn=document.createElement('button');pdfBtn.type='button';pdfBtn.textContent='📄 PDF erstellen';
-  pdfBtn.style.cssText='flex:1;padding:12px;background:'+FS_FARBE+';color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;';
+  pdfBtn.style.cssText='flex:1;padding:12px;background:'+FS_FARBE+';color:#fff;border:none;border-radius:8px;font-size:var(--fs15,15px);font-weight:700;cursor:pointer;';
   pdfBtn.onclick=async()=>{
     pdfBtn.disabled=true;const alt=pdfBtn.textContent;pdfBtn.textContent='⏳ PDF wird erstellt …';
     try{await _fsMobPdf(bericht,t);}finally{pdfBtn.disabled=false;pdfBtn.textContent=alt;}
   };
   const shareBtn=document.createElement('button');shareBtn.type='button';shareBtn.textContent='📤';
-  shareBtn.style.cssText='padding:12px 16px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:18px;cursor:pointer;color:var(--text);';
+  shareBtn.style.cssText='padding:12px 16px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:var(--fs18,18px);cursor:pointer;color:var(--text);';
   shareBtn.onclick=async()=>{
     const blob=_fsPdfBlobs[bericht.id];
     if(navigator.share&&blob){
@@ -2532,7 +2585,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     }else{toast('Bitte zuerst PDF erstellen','info');}
   };
   const openBtn=document.createElement('button');openBtn.type='button';openBtn.textContent='📂 Öffnen'; // v294
-  openBtn.style.cssText='padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;color:var(--text);';
+  openBtn.style.cssText='padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:var(--fs15,15px);font-weight:600;cursor:pointer;color:var(--text);';
   openBtn.onclick=()=>_fsPdfOeffnen(bericht);
   footer.append(pdfBtn,openBtn,shareBtn);
   ov.append(hdr,body,footer);
@@ -2545,7 +2598,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
 // Rechenzeile unter einer Messstelle – nur Zahlen und feste Texte, deshalb textContent
 function _fsWerteZeile(el,w,st){
   el.innerHTML='';
-  const z=document.createElement('div');z.style.cssText='font-size:14px;color:var(--text);line-height:1.6;';
+  const z=document.createElement('div');z.style.cssText='font-size:var(--fs14,14px);color:var(--text);line-height:1.6;';
   if(!w.raumGefunden){
     z.style.color='var(--text2)';
     z.textContent='Raum wählen und dort Temperatur und Luftfeuchte eintragen – dann rechnet PAM.';
@@ -2564,17 +2617,17 @@ function _fsWerteZeile(el,w,st){
     z.appendChild(amp);
   }
   el.appendChild(z);
-  {const kl=_fsKlartext(w);if(kl.text){const d=document.createElement('div');d.setAttribute('data-fs-klartext',kl.stufe);d.style.cssText='font-size:14px;font-weight:600;color:var(--text);margin-top:3px;line-height:1.45;';d.textContent=(kl.stufe==='gruen'?'✅ ':kl.stufe==='gelb'?'⚠ ':'⛔ ')+kl.text;el.appendChild(d);}} // v294
+  {const kl=_fsKlartext(w);if(kl.text){const d=document.createElement('div');d.setAttribute('data-fs-klartext',kl.stufe);d.style.cssText='font-size:var(--fs14,14px);font-weight:600;color:var(--text);margin-top:3px;line-height:1.45;';d.textContent=(kl.stufe==='gruen'?'✅ ':kl.stufe==='gelb'?'⚠ ':'⛔ ')+kl.text;el.appendChild(d);}} // v294
   const z2=[];
   if(w.frsi!==null)z2.push('Temperaturfaktor '+(Math.round(w.frsi*100)/100).toFixed(2).replace('.',','));
   if(w.faktor!==null)z2.push('Bauteil ×'+_fsEins(w.faktor)+' gegenüber Vergleich');
-  if(z2.length){const d=document.createElement('div');d.style.cssText='font-size:13px;color:var(--text2);';d.textContent=z2.join(' · ');el.appendChild(d);}
+  if(z2.length){const d=document.createElement('div');d.style.cssText='font-size:var(--fs13,13px);color:var(--text2);';d.textContent=z2.join(' · ');el.appendChild(d);}
   if(st&&st.testo){ // v292
-    const d=document.createElement('div');d.style.cssText='font-size:13px;color:var(--text2);';
+    const d=document.createElement('div');d.style.cssText='font-size:var(--fs13,13px);color:var(--text2);';
     d.textContent=_fsTestoInfoText(st,w);el.appendChild(d);
   }
   w.hinweise.forEach(h=>{
-    const d=document.createElement('div');d.style.cssText='font-size:13px;font-weight:700;color:var(--text);margin-top:4px;padding-left:8px;border-left:4px solid var(--orange);';
+    const d=document.createElement('div');d.style.cssText='font-size:var(--fs13,13px);font-weight:700;color:var(--text);margin-top:4px;padding-left:8px;border-left:4px solid var(--orange);';
     d.textContent='⚠ '+h;el.appendChild(d);
   });
 }
@@ -2583,7 +2636,7 @@ function _fsWerteZeile(el,w,st){
 // Keine Ampelfarbe, kein Klartext, keine Schlussfolgerung. Orange nur als Merkhilfe für Fehlendes aus der testo-Messung.
 function _fsWerteZeileBg(el,w,st){
   el.innerHTML='';
-  const z=document.createElement('div');z.style.cssText='font-size:12px;color:var(--text2);line-height:1.5;';
+  const z=document.createElement('div');z.style.cssText='font-size:var(--fs12,12px);color:var(--text2);line-height:1.5;';
   if(!w.raumGefunden){
     z.textContent='Sobald ein Raum mit Temperatur und Luftfeuchte gewählt ist, steht hier Taupunkt und Oberflächenfeuchte (nur Anzeige, nicht im PDF).';
   }else{
@@ -2594,12 +2647,12 @@ function _fsWerteZeileBg(el,w,st){
   }
   el.appendChild(z);
   if(st&&st.testo){
-    const d=document.createElement('div');d.style.cssText='font-size:12px;color:var(--text2);';
+    const d=document.createElement('div');d.style.cssText='font-size:var(--fs12,12px);color:var(--text2);';
     d.textContent=_fsTestoInfoText(st,w);el.appendChild(d);
     (Array.isArray(st.testo.warnungen)?st.testo.warnungen:[]).forEach(h=>{
       if(typeof h!=='string'||!h)return;
       const m=document.createElement('div');m.setAttribute('data-fs-merkhilfe','1');
-      m.style.cssText='font-size:12px;font-weight:600;color:var(--text);margin-top:4px;padding-left:8px;border-left:4px solid var(--orange);';
+      m.style.cssText='font-size:var(--fs12,12px);font-weight:600;color:var(--text);margin-top:4px;padding-left:8px;border-left:4px solid var(--orange);';
       m.textContent='Merkhilfe: '+h;el.appendChild(m);
     });
   }
@@ -3288,11 +3341,11 @@ function _fsLbPinZeichnen(g,px,py,n,pin,W,H){
   let rp=_fsLbRingPos(px,py,ang,r.len);
   if(rp.x<R+4||rp.x>W-R-4||rp.y<R+4||rp.y>H-R-24){ang=(ang+180)%360;rp=_fsLbRingPos(px,py,ang,r.len);}
   const dx=Math.cos(ang*Math.PI/180),dy=-Math.sin(ang*Math.PI/180),nx=-dy,ny=dx;
-  const sx=rp.x-dx*R,sy=rp.y-dy*R,ex=px+dx*12,ey=py+dy*12;
+  const sx=rp.x-dx*R,sy=rp.y-dy*R,ex=px+dx*16,ey=py+dy*16;
   g.lineCap='round';g.lineJoin='round';
-  g.lineWidth=6;g.strokeStyle='#ffffff';g.beginPath();g.moveTo(sx,sy);g.lineTo(ex,ey);g.stroke();
-  g.lineWidth=3;g.strokeStyle='#d9480f';g.beginPath();g.moveTo(sx,sy);g.lineTo(ex,ey);g.stroke();
-  g.beginPath();g.moveTo(px,py);g.lineTo(px+dx*16+nx*7,py+dy*16+ny*7);g.lineTo(px+dx*16-nx*7,py+dy*16-ny*7);g.closePath();g.fillStyle='#d9480f';g.fill();g.lineWidth=2;g.strokeStyle='#ffffff';g.stroke();
+  g.lineWidth=9;g.strokeStyle='#ffffff';g.beginPath();g.moveTo(sx,sy);g.lineTo(ex,ey);g.stroke(); /* F38: Pfeil dicker */
+  g.lineWidth=5;g.strokeStyle='#d9480f';g.beginPath();g.moveTo(sx,sy);g.lineTo(ex,ey);g.stroke();
+  g.beginPath();g.moveTo(px,py);g.lineTo(px+dx*22+nx*10,py+dy*22+ny*10);g.lineTo(px+dx*22-nx*10,py+dy*22-ny*10);g.closePath();g.fillStyle='#d9480f';g.fill();g.lineWidth=2;g.strokeStyle='#ffffff';g.stroke();
   g.beginPath();g.arc(rp.x,rp.y,R,0,2*Math.PI);g.fillStyle='#d9480f';g.fill();g.lineWidth=3;g.strokeStyle='#ffffff';g.stroke();
   g.fillStyle='#ffffff';g.font='bold '+R+'px sans-serif';g.textAlign='center';g.textBaseline='middle';g.fillText(String(n),rp.x,rp.y+1);
 }
@@ -3352,19 +3405,19 @@ async function _fsLbGeocode(adresse){
 function _fsLuftbildFenster(bericht,t,s,beiAenderung){
   if(typeof L==='undefined'||!L||typeof L.map!=='function'){toast('Das Luftbild braucht einmal Internet zum Laden','error');return;}
   const old=document.getElementById('_fsLbOverlay');if(old)old.remove();
-  const ov=document.createElement('div');ov.id='_fsLbOverlay';
+  const ov=document.createElement('div');ov.id='_fsLbOverlay';_fsSichtAn(ov);
   ov.style.cssText='position:fixed;inset:0;z-index:100001;display:flex;flex-direction:column;background:var(--bg);';
   const kopf=document.createElement('div');kopf.style.cssText='background:#1f5f8b;color:#fff;padding:8px 10px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;flex-shrink:0;';
-  const ti=document.createElement('div');ti.style.cssText='flex:1 1 200px;min-width:0;font-size:15px;font-weight:700;';
+  const ti=document.createElement('div');ti.style.cssText='flex:1 1 200px;min-width:0;font-size:var(--fs15,15px);font-weight:700;';
   const fertig=document.createElement('button');fertig.type='button';fertig.textContent='✓ Fertig';fertig.setAttribute('data-fs-lbfertig','1');
-  fertig.style.cssText='padding:8px 16px;min-height:42px;border-radius:10px;border:none;background:#fff;color:#1f5f8b;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;';
+  fertig.style.cssText='padding:8px 16px;min-height:var(--fsh,42px);border-radius:10px;border:none;background:#fff;color:#1f5f8b;font-size:var(--fs15,15px);font-weight:700;cursor:pointer;font-family:inherit;';
   const weg=document.createElement('button');weg.type='button';weg.textContent='✕ Pin entfernen';weg.setAttribute('data-fs-lbweg','1');
-  weg.style.cssText='padding:8px 12px;min-height:42px;border-radius:10px;border:1.5px solid rgba(255,255,255,.7);background:transparent;color:#fff;font-size:14px;cursor:pointer;font-family:inherit;';
+  weg.style.cssText='padding:8px 12px;min-height:var(--fsh,42px);border-radius:10px;border:1.5px solid rgba(255,255,255,.7);background:transparent;color:#fff;font-size:var(--fs14,14px);cursor:pointer;font-family:inherit;';
   const eb=document.createElement('div');eb.style.cssText='display:flex;flex-wrap:wrap;gap:6px;width:100%;';
-  const info=document.createElement('div');info.style.cssText='width:100%;font-size:12px;color:rgba(255,255,255,.85);';
+  const info=document.createElement('div');info.style.cssText='width:100%;font-size:var(--fs12,12px);color:rgba(255,255,255,.85);';
   info.textContent='Auf die Stelle tippen setzt den Pin – danach ist er fest (🔒) und verrutscht nicht mehr. „✥ Pin verschieben“ macht ihn lose: dann die Pfeilspitze mit dem Finger ziehen oder das Kreuz benutzen. Zoomen: Mausrad oder zwei Finger.';
   const akt=document.createElement('div');akt.style.cssText='display:flex;flex-wrap:wrap;gap:6px;width:100%;';
-  const aknopf=(txt,attr)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute(attr,'1');b.style.cssText='padding:6px 14px;min-height:38px;border-radius:10px;border:1.5px dashed rgba(255,255,255,.85);background:transparent;color:#fff;font-size:14px;cursor:pointer;font-family:inherit;';return b;};
+  const aknopf=(txt,attr)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute(attr,'1');b.style.cssText='padding:6px 14px;min-height:var(--fsh,38px);border-radius:10px;border:1.5px dashed rgba(255,255,255,.85);background:transparent;color:#fff;font-size:var(--fs14,14px);cursor:pointer;font-family:inherit;';return b;};
   const gps=aknopf('📍 Mein Standort','data-fs-lbgps'),suche=aknopf('🔎 Adresse suchen','data-fs-lbadresse');
   const pinGps=aknopf('📌 Pin an meinem Standort','data-fs-lbpingps');pinGps.style.display='none';pinGps.style.background='rgba(217,72,15,.9)';pinGps.style.borderStyle='solid'; // F27: erscheint, sobald der Standort gefunden ist
   const zumPin=aknopf('🎯 Zum Pin','data-fs-lbzumpin');zumPin.style.display='none'; /* F34: stellt die Karte wieder auf den Pin */
@@ -3375,11 +3428,11 @@ function _fsLuftbildFenster(bericht,t,s,beiAenderung){
   const mapEl=document.createElement('div');mapEl.style.cssText='position:absolute;inset:0;';
   const kreuz=document.createElement('div');kreuz.setAttribute('data-fs-lbkreuz','1');kreuz.style.cssText='position:absolute;left:50%;top:50%;width:46px;height:46px;margin:-23px 0 0 -23px;pointer-events:none;z-index:1100;';
   kreuz.innerHTML='<svg width="46" height="46" viewBox="0 0 46 46"><circle cx="23" cy="23" r="9" fill="none" stroke="#fff" stroke-width="4"/><circle cx="23" cy="23" r="9" fill="none" stroke="#d9480f" stroke-width="2"/><path d="M23 0v13M23 33v13M0 23h13M33 23h13" stroke="#fff" stroke-width="4"/><path d="M23 0v13M23 33v13M0 23h13M33 23h13" stroke="#d9480f" stroke-width="2"/></svg>';
-  const hinweis=document.createElement('div');hinweis.setAttribute('data-fs-lbhinweis','1');hinweis.style.cssText='position:absolute;left:8px;right:8px;top:8px;z-index:1100;background:#d9480f;color:#fff;border-radius:10px;padding:8px 12px;font-size:14px;font-weight:700;pointer-events:none;box-shadow:0 2px 8px rgba(0,0,0,.4);';
+  const hinweis=document.createElement('div');hinweis.setAttribute('data-fs-lbhinweis','1');hinweis.style.cssText='position:absolute;left:8px;right:8px;top:8px;z-index:1100;background:#d9480f;color:#fff;border-radius:10px;padding:8px 12px;font-size:var(--fs14,14px);font-weight:700;pointer-events:none;box-shadow:0 2px 8px rgba(0,0,0,.4);';
   hinweis.textContent='Noch kein Pin – tippe auf die Karte oder schiebe das Kreuz auf die Stelle und tippe auf 📌.';
   const pinKnopf=document.createElement('button');pinKnopf.type='button';pinKnopf.setAttribute('data-fs-lbpinhier','1');
   const pinLeiste=document.createElement('div');pinLeiste.setAttribute('data-fs-lbpinleiste','1');pinLeiste.style.cssText='position:absolute;left:8px;right:8px;bottom:30px;z-index:1100;display:flex;flex-wrap:wrap;justify-content:center;gap:8px;pointer-events:none;'; /* F34: zwei Knöpfe nebeneinander */
-  const PIN_KNOPF='pointer-events:auto;padding:12px 22px;min-height:50px;border-radius:26px;border:3px solid #fff;color:#fff;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 10px rgba(0,0,0,.5);white-space:nowrap;';
+  const PIN_KNOPF='pointer-events:auto;padding:12px 22px;min-height:50px;border-radius:26px;border:3px solid #fff;color:#fff;font-size:var(--fs16,16px);font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 10px rgba(0,0,0,.5);white-space:nowrap;';
   pinKnopf.style.cssText=PIN_KNOPF+'background:#d9480f;';
   const festKnopf=document.createElement('button');festKnopf.type='button';festKnopf.setAttribute('data-fs-lbfest','1');festKnopf.textContent='✓ Pin fest';festKnopf.style.cssText=PIN_KNOPF+'background:#2e7d4f;display:none;';
   pinLeiste.append(pinKnopf,festKnopf);
@@ -3413,7 +3466,7 @@ function _fsLuftbildFenster(bericht,t,s,beiAenderung){
   };
   FS_LB_EBENEN.forEach(e=>{
     const b=document.createElement('button');b.type='button';b.textContent=e.t;b.setAttribute('data-fs-lbebene',e.k);
-    b.style.cssText='padding:6px 14px;min-height:38px;border-radius:18px;border:1.5px solid rgba(255,255,255,.8);background:transparent;color:#fff;font-size:14px;cursor:pointer;font-family:inherit;';
+    b.style.cssText='padding:6px 14px;min-height:var(--fsh,38px);border-radius:18px;border:1.5px solid rgba(255,255,255,.8);background:transparent;color:#fff;font-size:var(--fs14,14px);cursor:pointer;font-family:inherit;';
     b.onclick=()=>wahlEbene(e.k);eb.appendChild(b);
   });
   wahlEbene(bericht.luftbildEbene||gespeichert||_fsLbStartEbene(start&&start.lat,start&&start.lon));
@@ -3422,10 +3475,10 @@ function _fsLuftbildFenster(bericht,t,s,beiAenderung){
   const pinSvg=(q,aktiv,los)=>{
     const r=_fsLbPinRing(q.s.pin),R=FS_LB_PIN_R,rp=_fsLbRingPos(0,0,r.ang,r.len);
     const dx=Math.cos(r.ang*Math.PI/180),dy=-Math.sin(r.ang*Math.PI/180),nx=-dy,ny=dx,farbe=aktiv?'#d9480f':'#1f5f8b';
-    const sx=rp.x-dx*R,sy=rp.y-dy*R,ex=dx*12,ey=dy*12;
-    const pts=[[0,0],[dx*16+nx*7,dy*16+ny*7],[dx*16-nx*7,dy*16-ny*7]].map(p=>p.join(',')).join(' ');
+    const sx=rp.x-dx*R,sy=rp.y-dy*R,ex=dx*16,ey=dy*16; /* F38: Pfeil dicker, Spitze größer */
+    const pts=[[0,0],[dx*22+nx*10,dy*22+ny*10],[dx*22-nx*10,dy*22-ny*10]].map(p=>p.join(',')).join(' ');
     return '<svg xmlns="http://www.w3.org/2000/svg" width="360" height="360" viewBox="-180 -180 360 360" style="overflow:visible;pointer-events:none">'
-      +'<line x1="'+sx+'" y1="'+sy+'" x2="'+ex+'" y2="'+ey+'" stroke="#fff" stroke-width="6" stroke-linecap="round"/><line x1="'+sx+'" y1="'+sy+'" x2="'+ex+'" y2="'+ey+'" stroke="'+farbe+'" stroke-width="3" stroke-linecap="round"/>'
+      +'<line x1="'+sx+'" y1="'+sy+'" x2="'+ex+'" y2="'+ey+'" stroke="#fff" stroke-width="9" stroke-linecap="round"/><line x1="'+sx+'" y1="'+sy+'" x2="'+ex+'" y2="'+ey+'" stroke="'+farbe+'" stroke-width="5" stroke-linecap="round"/>'
       +'<polygon points="'+pts+'" fill="'+farbe+'" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>'
       +'<g data-ring="1" style="pointer-events:all;cursor:'+((aktiv&&los)?'grab':'default')+';touch-action:none"><circle cx="'+rp.x+'" cy="'+rp.y+'" r="'+R+'" fill="'+farbe+'" stroke="#fff" stroke-width="3"/><text x="'+rp.x+'" y="'+(rp.y+R*0.35)+'" text-anchor="middle" font-size="'+R+'" font-weight="700" fill="#fff" style="pointer-events:none">'+q.n+'</text></g>'
       +((aktiv&&los)?'<g data-ziel="1" style="pointer-events:all;cursor:move;touch-action:none"><circle cx="0" cy="0" r="26" fill="rgba(217,72,15,.2)" stroke="#d9480f" stroke-width="2.5" stroke-dasharray="6 4"/></g>':'')+'</svg>'; /* F34: lose → Griff an der Pfeilspitze (Zielpunkt) */
@@ -3674,11 +3727,11 @@ function _fsAsMarkenZeichnen(g,b,sk,sel,lose){
   const W=FS_BG_SKIZZE_W,H=FS_BG_SKIZZE_H,R=FS_AS_PIN_R;
   _fsAsMarken(b,sk).forEach(q=>{
     const L=_fsAsRingLage(q,W,H),dx=Math.cos(L.ang*Math.PI/180),dy=-Math.sin(L.ang*Math.PI/180),nx=-dy,ny=dx;
-    const sx=L.x-dx*R,sy=L.y-dy*R,ex=L.px+dx*16,ey=L.py+dy*16;
+    const sx=L.x-dx*R,sy=L.y-dy*R,ex=L.px+dx*20,ey=L.py+dy*20;
     g.lineCap='round';g.lineJoin='round';
-    g.lineWidth=9;g.strokeStyle='#ffffff';g.beginPath();g.moveTo(sx,sy);g.lineTo(ex,ey);g.stroke();
-    g.lineWidth=4;g.strokeStyle='#d9480f';g.beginPath();g.moveTo(sx,sy);g.lineTo(ex,ey);g.stroke();
-    g.beginPath();g.moveTo(L.px,L.py);g.lineTo(L.px+dx*24+nx*10,L.py+dy*24+ny*10);g.lineTo(L.px+dx*24-nx*10,L.py+dy*24-ny*10);g.closePath();g.fillStyle='#d9480f';g.fill();g.lineWidth=2;g.strokeStyle='#ffffff';g.stroke();
+    g.lineWidth=12;g.strokeStyle='#ffffff';g.beginPath();g.moveTo(sx,sy);g.lineTo(ex,ey);g.stroke(); /* F38: Pfeil dicker */
+    g.lineWidth=6;g.strokeStyle='#d9480f';g.beginPath();g.moveTo(sx,sy);g.lineTo(ex,ey);g.stroke();
+    g.beginPath();g.moveTo(L.px,L.py);g.lineTo(L.px+dx*30+nx*13,L.py+dy*30+ny*13);g.lineTo(L.px+dx*30-nx*13,L.py+dy*30-ny*13);g.closePath();g.fillStyle='#d9480f';g.fill();g.lineWidth=2;g.strokeStyle='#ffffff';g.stroke();
     if(sel&&q.s===sel){
       g.strokeStyle='#1f5f8b';g.lineWidth=4;g.beginPath();g.arc(L.x,L.y,R+10,0,Math.PI*2);g.stroke();
       if(lose){g.lineWidth=3;if(typeof g.setLineDash==='function')g.setLineDash([8,6]);g.beginPath();g.arc(L.px,L.py,30,0,Math.PI*2);g.stroke();if(typeof g.setLineDash==='function')g.setLineDash([]);}
@@ -3736,17 +3789,17 @@ function _fsNadelBox(s,beiAenderung,typ){
   const drinnen=(typ!=='aussen');
   const hulle=document.createElement('div');hulle.setAttribute('data-fs-nadelhuelle','1');
   const kopfK=document.createElement('button');kopfK.type='button';kopfK.setAttribute('data-fs-nadelkopf','1');
-  kopfK.style.cssText='display:block;width:100%;min-height:40px;margin-top:6px;padding:6px 12px;border-radius:10px;border:1.5px dashed #1f5f8b;background:transparent;color:var(--text);font-size:14px;cursor:pointer;font-family:inherit;text-align:left;';
+  kopfK.style.cssText='display:block;width:100%;min-height:var(--fsh,40px);margin-top:6px;padding:6px 12px;border-radius:10px;border:1.5px dashed var(--fs-krd,#1f5f8b);background:var(--fs-kfl,transparent);color:var(--text);font-size:var(--fs14,14px);cursor:pointer;font-family:inherit;text-align:left;';
   const box=document.createElement('div');box.setAttribute('data-fs-nadel','1');
   box.style.cssText='display:flex;gap:12px;align-items:center;margin-top:6px;border:1.5px dashed #1f5f8b;border-radius:10px;padding:8px 10px;background:rgba(31,95,139,.08);';
   const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('width','84');svg.setAttribute('height','84');svg.setAttribute('viewBox','-42 -42 84 84');svg.style.flexShrink='0';
   svg.innerHTML='<circle r="38" fill="#fff" stroke="#1f5f8b" stroke-width="3"/><g data-fs-rose="1"><text y="-22" text-anchor="middle" font-size="13" font-weight="700" fill="#d9480f">N</text><text x="26" y="5" text-anchor="middle" font-size="11" fill="#555">O</text><text y="31" text-anchor="middle" font-size="11" fill="#555">S</text><text x="-26" y="5" text-anchor="middle" font-size="11" fill="#555">W</text><polygon points="0,-30 5,0 -5,0" fill="#d9480f"/><polygon points="0,30 5,0 -5,0" fill="#999"/></g><path d="M0 -42 L7 -33 L-7 -33Z" fill="#1f5f8b"/>';
-  const rechts=document.createElement('div');rechts.style.cssText='flex:1;min-width:0;font-size:14px;color:var(--text);';
+  const rechts=document.createElement('div');rechts.style.cssText='flex:1;min-width:0;font-size:var(--fs14,14px);color:var(--text);';
   const nt=document.createElement('div');nt.setAttribute('data-fs-nadeltext','1');nt.style.marginBottom='6px';nt.textContent='Kompass aus – zum Messen einschalten und das Gerät auf die Wand richten.';
-  const bst='padding:6px 12px;min-height:38px;border-radius:10px;border:1.5px solid #1f5f8b;background:transparent;color:var(--text);font-size:14px;cursor:pointer;font-family:inherit;margin:0 6px 4px 0;';
+  const bst='padding:6px 12px;min-height:var(--fsh,38px);border-radius:10px;border:1.5px solid var(--fs-krd,#1f5f8b);background:var(--fs-kfl,transparent);color:var(--text);font-size:var(--fs14,14px);cursor:pointer;font-family:inherit;margin:0 6px 4px 0;';
   const bAn=document.createElement('button');bAn.type='button';bAn.setAttribute('data-fs-nadelan','1');bAn.textContent='🧭 Kompass einschalten';bAn.style.cssText=bst;
   const bUe=document.createElement('button');bUe.type='button';bUe.setAttribute('data-fs-nadelubernehmen','1');bUe.textContent='Seite übernehmen';bUe.disabled=true;bUe.style.cssText=bst+'opacity:.5;';
-  const hinweis=document.createElement('div');hinweis.style.cssText='font-size:12px;color:var(--text2);line-height:1.4;';hinweis.textContent='Drinnen kann der Kompass 20–45° falsch zeigen (Stahl, Heizkörper), draußen vor der Wand ist er brauchbarer. Die Seite lässt sich immer von Hand ändern.';
+  const hinweis=document.createElement('div');hinweis.style.cssText='font-size:var(--fs12,12px);color:var(--text2);line-height:1.4;';hinweis.textContent='Drinnen kann der Kompass 20–45° falsch zeigen (Stahl, Heizkörper), draußen vor der Wand ist er brauchbarer. Die Seite lässt sich immer von Hand ändern.';
   rechts.append(nt,bAn,bUe,hinweis);box.append(svg,rechts);
   const zeigeKopf=()=>{const auf=_fsNadelAuf.has(s);kopfK.textContent=(auf?'▾ ':'▸ ')+'🧭 Seite messen (Kompass)';box.style.display=auf?'flex':'none';};
   kopfK.onclick=()=>{if(_fsNadelAuf.has(s))_fsNadelAuf.delete(s);else _fsNadelAuf.add(s);zeigeKopf();};
@@ -3789,20 +3842,20 @@ function _fsNadelBox(s,beiAenderung,typ){
 function _fsB2Teilwahl(cb){
   const old=document.getElementById('_fsB2Wahl');if(old)old.remove();
   let letzte='';try{letzte=localStorage.getItem('pam_fs_b2teil')||'';}catch(e){}
-  const ov=document.createElement('div');ov.id='_fsB2Wahl';ov.style.cssText='position:fixed;inset:0;z-index:100002;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;';
+  const ov=document.createElement('div');ov.id='_fsB2Wahl';_fsSichtAn(ov);ov.style.cssText='position:fixed;inset:0;z-index:100002;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;';
   const box=document.createElement('div');box.style.cssText='background:var(--bg);color:var(--text);border-radius:14px;padding:18px;max-width:420px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.5);';
-  const ti=document.createElement('div');ti.style.cssText='font-size:18px;font-weight:700;margin-bottom:4px;';ti.textContent='Was besichtigst du?';
-  const info=document.createElement('div');info.style.cssText='font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.4;';info.textContent='Nur der gewählte Teil erscheint, damit das Protokoll kurz bleibt. Im Protokoll lässt er sich jederzeit mit den Haken zu- oder abschalten.';
+  const ti=document.createElement('div');ti.style.cssText='font-size:var(--fs18,18px);font-weight:700;margin-bottom:4px;';ti.textContent='Was besichtigst du?';
+  const info=document.createElement('div');info.style.cssText='font-size:var(--fs13,13px);color:var(--text2);margin-bottom:12px;line-height:1.4;';info.textContent='Nur der gewählte Teil erscheint, damit das Protokoll kurz bleibt. Im Protokoll lässt er sich jederzeit mit den Haken zu- oder abschalten.';
   const zu=w=>{try{localStorage.setItem('pam_fs_b2teil',w||letzte);}catch(e){}document.removeEventListener('keydown',taste,true);ov.remove();cb(w);};
   const taste=e=>{if(e.key==='Escape'){e.stopPropagation();document.removeEventListener('keydown',taste,true);ov.remove();cb(null);}};
   document.addEventListener('keydown',taste,true);
   box.append(ti,info);
   [['innen','🏠 Innen'],['aussen','🌤 Außen'],['beides','🏠 🌤 Beides']].forEach(([k,txt])=>{
     const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute('data-fs-b2wahl',k);
-    b.style.cssText='display:block;width:100%;min-height:54px;margin:8px 0;border-radius:12px;font-size:18px;font-weight:700;cursor:pointer;font-family:inherit;color:var(--text);border:2px solid #1f5f8b;background:'+(letzte===k?'rgba(31,95,139,.22)':'transparent')+';';
+    b.style.cssText='display:block;width:100%;min-height:54px;margin:8px 0;border-radius:12px;font-size:var(--fs18,18px);font-weight:700;cursor:pointer;font-family:inherit;color:var(--text);border:2px solid #1f5f8b;background:'+(letzte===k?'rgba(31,95,139,.22)':'transparent')+';';
     b.onclick=()=>zu(k);box.appendChild(b);
   });
-  const ab=document.createElement('button');ab.type='button';ab.textContent='Abbrechen';ab.setAttribute('data-fs-b2wahl','abbruch');ab.style.cssText='display:block;width:100%;min-height:44px;margin-top:6px;border-radius:10px;font-size:15px;cursor:pointer;font-family:inherit;color:var(--text2);border:1px solid var(--border);background:transparent;';
+  const ab=document.createElement('button');ab.type='button';ab.textContent='Abbrechen';ab.setAttribute('data-fs-b2wahl','abbruch');ab.style.cssText='display:block;width:100%;min-height:var(--fsh44,44px);margin-top:6px;border-radius:10px;font-size:var(--fs15,15px);cursor:pointer;font-family:inherit;color:var(--text2);border:1px solid var(--border);background:transparent;';
   ab.onclick=()=>{document.removeEventListener('keydown',taste,true);ov.remove();cb(null);};
   box.appendChild(ab);ov.appendChild(box);document.body.appendChild(ov);
 }
@@ -4639,12 +4692,12 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
   const W=FS_BG_SKIZZE_W,H=FS_BG_SKIZZE_H;
   const unterlage=_fsBgSkizzeBild(b,Object.assign({},r,{skizze:Object.assign({},sk,{striche:[],stempel:[]})}),{ohneMarken:true}); // die Zeichnung ohne Striche und Stempel (F33: und ohne Stellen-Nummern), die kommen live darüber
   if(!unterlage){toast('Einzeichnen geht hier nicht (kein Zeichenbereich)','error',4000);return;}
-  const ov=document.createElement('div');ov.id='_fsEinzeichnen';
+  const ov=document.createElement('div');ov.id='_fsEinzeichnen';_fsSichtAn(ov);
   ov.style.cssText='position:fixed;inset:0;z-index:99999;background:var(--bg);color:var(--text);display:flex;flex-direction:column;';
   const kopf=document.createElement('div');kopf.style.cssText='background:'+FS_FARBE+';padding:10px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0;';
   const zu=document.createElement('button');zu.type='button';zu.textContent='←';zu.setAttribute('aria-label','Einzeichnen beenden');zu.setAttribute('data-fs-ez-zu','1');
   zu.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:44px;height:44px;border-radius:8px;font-size:20px;cursor:pointer;flex-shrink:0;';
-  const ti=document.createElement('div');ti.style.cssText='font-size:16px;font-weight:700;color:#fff;flex:1;min-width:0;';ti.textContent='✏ Einzeichnen – '+(String(r.name||'').trim()||'Raum');
+  const ti=document.createElement('div');ti.style.cssText='font-size:var(--fs16,16px);font-weight:700;color:#fff;flex:1;min-width:0;';ti.textContent='✏ Einzeichnen – '+(String(r.name||'').trim()||'Raum');
   kopf.append(zu,ti);
   const leiste=document.createElement('div');leiste.style.cssText='display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border);flex-shrink:0;';
   const feld=document.createElement('div');feld.style.cssText='flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px;background:var(--bg3);';
@@ -4653,7 +4706,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
   feld.appendChild(cv);
   const fuss=document.createElement('div');fuss.style.cssText='flex-shrink:0;padding:10px 14px 14px;border-top:1px solid var(--border);';
   const fb=document.createElement('button');fb.type='button';fb.textContent='✓ Fertig';fb.setAttribute('data-fs-ez-fertig','1');
-  fb.style.cssText='width:100%;min-height:56px;border-radius:12px;border:none;background:'+FS_FARBE+';color:#fff;font-size:18px;font-weight:700;font-family:inherit;cursor:pointer;';
+  fb.style.cssText='width:100%;min-height:56px;border-radius:12px;border:none;background:'+FS_FARBE+';color:#fff;font-size:var(--fs18,18px);font-weight:700;font-family:inherit;cursor:pointer;';
   fuss.appendChild(fb);
   ov.append(kopf,leiste,feld,fuss);
   const g=cv.getContext('2d');
@@ -4677,16 +4730,16 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
   bild.onload=()=>{bildDa=true;neu();};
   bild.src=unterlage;
   const knopf=(txt,stil,fn,attr)=>{
-    const x=document.createElement('button');x.type='button';x.textContent=txt;x.style.cssText='font-family:inherit;cursor:pointer;border-radius:10px;min-height:48px;padding:6px 12px;font-size:15px;font-weight:700;color:var(--text);'+stil;
+    const x=document.createElement('button');x.type='button';x.textContent=txt;x.style.cssText='font-family:inherit;cursor:pointer;border-radius:10px;min-height:48px;padding:6px 12px;font-size:var(--fs15,15px);font-weight:700;color:var(--text);'+stil;
     if(attr)x.setAttribute(attr[0],attr[1]);
     x.onclick=fn;return x;
   };
-  const RAND='border:2px solid var(--border);background:transparent;';
+  const RAND='border:2px solid var(--fs-krd,var(--border));background:var(--fs-kfl,transparent);';
   const leisteBauen=()=>{
     leiste.innerHTML='';
     (sk.aussen?[['stelle','① Stellen'],['stempel','▣ Stempel'],['zeichnen','✏ Zeichnen']]:[['zeichnen','✏ Zeichnen'],['stempel','▣ Stempel']]).forEach(([k,txt])=>{
       const an=modus===k;
-      leiste.appendChild(knopf(txt,'border:3px solid '+(an?FS_FARBE:'var(--border)')+';background:'+(an?'rgba(31,95,139,.18)':'transparent')+';',()=>{modus=k;sel=-1;loseS=false;neuText=null;neu();leisteBauen();},['data-fs-ez-modus',k]));
+      leiste.appendChild(knopf(txt,'border:3px solid '+(an?'var(--fs-krd,'+FS_FARBE+')':'var(--border)')+';background:'+(an?'var(--fs-can,rgba(31,95,139,.18))':'var(--fs-cfl,transparent)')+';',()=>{modus=k;sel=-1;loseS=false;neuText=null;neu();leisteBauen();},['data-fs-ez-modus',k]));
     });
     const trenn=document.createElement('span');trenn.style.cssText='width:1px;align-self:stretch;background:var(--border);';leiste.appendChild(trenn);
     if(modus==='stelle'){ /* F33: Stellen des Bereichs als Nummern in die Skizze setzen */
@@ -4695,17 +4748,17 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
       if(!selS&&neuText===null)selS=ls.find(s=>!_fsAsMarkeOk(s))||null;
       ls.forEach(s=>{
         const hier=_fsAsMarkeOk(s)&&s.skz.k===sk.id,woanders=_fsAsMarkeOk(s)&&s.skz.k!==sk.id,an=selS===s,nr=_fsAsNummer(b,s);
-        leiste.appendChild(knopf('Stelle '+nr+(hier?' ✓':woanders?' (andere Skizze)':''),'border:3px solid '+(an?'#d9480f':'var(--border)')+';background:'+(an?'rgba(217,72,15,.16)':'transparent')+';',()=>{selS=s;loseS=false;neuText=null;neu();leisteBauen();},['data-fs-ez-stelle',String(nr)]));
+        leiste.appendChild(knopf('Stelle '+nr+(hier?' ✓':woanders?' (andere Skizze)':''),'border:3px solid '+(an?'#d9480f':'var(--border)')+';background:'+(an?'rgba(217,72,15,.16)':'var(--fs-cfl,transparent)')+';',()=>{selS=s;loseS=false;neuText=null;neu();leisteBauen();},['data-fs-ez-stelle',String(nr)]));
       });
       /* F34: neue Stelle gleich hier anlegen – erst die kurze Beschreibung, dann in die Skizze tippen */
-      leiste.appendChild(knopf('＋ neue Stelle','border:2px dashed #d9480f;background:'+(neuText!==null?'rgba(217,72,15,.16)':'transparent')+';',()=>{const tx=prompt('Neue Stelle in „'+(sk.bereich||'Außen')+'“ – wo ist sie?\n(kurze Beschreibung, z. B. Riss unter der Traufe)','');if(tx===null)return;neuText=String(tx);selS=null;loseS=false;neu();leisteBauen();},['data-fs-ez-stelleneu','1']));
+      leiste.appendChild(knopf('＋ neue Stelle','border:2px dashed #d9480f;background:'+(neuText!==null?'rgba(217,72,15,.16)':'var(--fs-cfl,transparent)')+';',()=>{const tx=prompt('Neue Stelle in „'+(sk.bereich||'Außen')+'“ – wo ist sie?\n(kurze Beschreibung, z. B. Riss unter der Traufe)','');if(tx===null)return;neuText=String(tx);selS=null;loseS=false;neu();leisteBauen();},['data-fs-ez-stelleneu','1']));
       const selHier=!!selS&&_fsAsMarkeOk(selS)&&selS.skz.k===sk.id;
       if(selHier){
-        leiste.appendChild(knopf(loseS?'✓ Fest':'✥ Verschieben','border:3px solid '+(loseS?'#2e7d4f':'var(--border)')+';background:'+(loseS?'rgba(46,125,79,.16)':'transparent')+';',()=>{loseS=!loseS;neu();leisteBauen();},['data-fs-ez-stellelose','1']));
+        leiste.appendChild(knopf(loseS?'✓ Fest':'✥ Verschieben','border:3px solid '+(loseS?'#2e7d4f':'var(--border)')+';background:'+(loseS?'rgba(46,125,79,.16)':'var(--fs-cfl,transparent)')+';',()=>{loseS=!loseS;neu();leisteBauen();},['data-fs-ez-stellelose','1']));
         leiste.appendChild(knopf('Aus Skizze nehmen',RAND+'color:var(--red);',()=>{if(_fsAsMarkeWeg(selS)){loseS=false;scheduleSave();neu();leisteBauen();}},['data-fs-ez-stelleweg','1']));
       }
       if(selS)leiste.appendChild(knopf('Beschreibung ändern',RAND,()=>{const tx=prompt('Beschreibung der Stelle '+_fsAsNummer(b,selS)+' (Wo?)',String(selS.ort||''));if(tx===null)return;selS.ort=String(tx).trim();scheduleSave();neu();leisteBauen();},['data-fs-ez-stelletext','1']));
-      const z=document.createElement('span');z.setAttribute('data-fs-ez-zaehler','1');z.style.cssText='font-size:13px;color:var(--text2);';
+      const z=document.createElement('span');z.setAttribute('data-fs-ez-zaehler','1');z.style.cssText='font-size:var(--fs13,13px);color:var(--text2);';
       const selName=selS?'Stelle '+_fsAsNummer(b,selS)+(String(selS.ort||'').trim()?' („'+_fsBgSkizzeKuerzen(selS.ort,30)+'“)':''):'';
       z.textContent=neuText!==null?'Neue Stelle'+(neuText.trim()?' („'+_fsBgSkizzeKuerzen(neuText,30)+'“)':'')+': jetzt in die Skizze tippen, wo sie ist'
         :!ls.length?'Noch keine Stelle in diesem Bereich – „＋ neue Stelle“ antippen.'
@@ -4717,7 +4770,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
     }else if(modus==='zeichnen'){
       FS_BG_STRICH_FARBEN.forEach((f,i)=>{
         const an=f===farbe;
-        leiste.appendChild(knopf(FS_BG_STRICH_NAMEN[i],'border:3px solid '+(an?FS_FARBE:'var(--border)')+';background:transparent;border-left:14px solid '+f+';',()=>{farbe=f;leisteBauen();},['data-fs-ez-farbe',String(i)]));
+        leiste.appendChild(knopf(FS_BG_STRICH_NAMEN[i],'border:3px solid '+(an?'var(--fs-krd,'+FS_FARBE+')':'var(--border)')+';background:var(--fs-cfl,transparent);border-left:14px solid '+f+';',()=>{farbe=f;leisteBauen();},['data-fs-ez-farbe',String(i)]));
       });
       leiste.appendChild(knopf('↶ Rückgängig',RAND,()=>{if(_fsBgStrichZurueck(sk)){scheduleSave();neu();leisteBauen();}},['data-fs-ez-zurueck','1']));
       leiste.appendChild(knopf('Alle Striche löschen',RAND+'color:var(--red);',()=>{
@@ -4725,7 +4778,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
         if(!confirm('Alle von Hand gezeichneten Striche in diesem Raum löschen? Die Stempel bleiben.'))return;
         _fsBgStricheLoeschen(sk);scheduleSave();neu();leisteBauen();
       },['data-fs-ez-loeschen','1']));
-      const z=document.createElement('span');z.setAttribute('data-fs-ez-zaehler','1');z.style.cssText='font-size:13px;color:var(--text2);';
+      const z=document.createElement('span');z.setAttribute('data-fs-ez-zaehler','1');z.style.cssText='font-size:var(--fs13,13px);color:var(--text2);';
       const n=(sk.striche||[]).length;z.textContent=n+' Strich'+(n===1?'':'e');
       leiste.appendChild(z);
     }else{
@@ -4743,7 +4796,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
         leiste.appendChild(knopf('Kleiner',RAND,()=>{if(_fsBgStempelGroesse(st,-0.25)){scheduleSave();neu();}},['data-fs-ez-klein','1']));
         leiste.appendChild(knopf('Löschen',RAND+'color:var(--red);',()=>{if(_fsBgStempelWeg(sk,sel)){sel=-1;scheduleSave();neu();leisteBauen();}},['data-fs-ez-stweg','1']));
       }
-      const z=document.createElement('span');z.setAttribute('data-fs-ez-zaehler','1');z.style.cssText='font-size:13px;color:var(--text2);';
+      const z=document.createElement('span');z.setAttribute('data-fs-ez-zaehler','1');z.style.cssText='font-size:var(--fs13,13px);color:var(--text2);';
       const n=_fsBgStempelAnzahl(sk);
       z.textContent=n+' Stempel'+(st?' – ziehen zum Verschieben':' – antippen oder oben einen setzen');
       leiste.appendChild(z);
@@ -5471,15 +5524,15 @@ async function _fsTestoEinlesen(bericht,t,neuBauen){
   box.style.cssText='background:var(--bg);color:var(--text);border-radius:16px 16px 0 0;width:100%;max-height:90vh;display:flex;flex-direction:column;';
   box.onclick=e=>e.stopPropagation();
   const kopf=document.createElement('div');kopf.style.cssText='display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border);';
-  const ti=document.createElement('div');ti.style.cssText='flex:1;font-size:17px;font-weight:700;';ti.textContent='📥 testo-Messungen';
+  const ti=document.createElement('div');ti.style.cssText='flex:1;font-size:var(--fs17,17px);font-weight:700;';ti.textContent='📥 testo-Messungen';
   const zu=document.createElement('button');zu.type='button';zu.textContent='✕';
-  zu.style.cssText='width:44px;height:44px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);font-size:18px;cursor:pointer;';
+  zu.style.cssText='width:44px;height:44px;border-radius:8px;border:1px solid var(--fs-krd,var(--border));background:var(--fs-kfl,transparent);color:var(--text);font-size:var(--fs18,18px);cursor:pointer;';
   zu.onclick=()=>ov.remove();
   kopf.append(ti,zu);
   const inhalt=document.createElement('div');inhalt.style.cssText='flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:10px 14px;';
   const fuss=document.createElement('div');fuss.style.cssText='padding:10px 14px 14px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;';
   box.append(kopf,inhalt,fuss);ov.appendChild(box);document.body.appendChild(ov);
-  const info=txt=>{inhalt.innerHTML='';const d=document.createElement('div');d.style.cssText='font-size:15px;color:var(--text);padding:12px 0;line-height:1.5;';d.textContent=txt;inhalt.appendChild(d);};
+  const info=txt=>{inhalt.innerHTML='';const d=document.createElement('div');d.style.cssText='font-size:var(--fs15,15px);color:var(--text);padding:12px 0;line-height:1.5;';d.textContent=txt;inhalt.appendChild(d);};
 
   info('Suche den Ordner „'+FS_TESTO_ORDNER+'" in Google Drive …');
   let ordnerId=null,dateien=[];
@@ -5513,9 +5566,9 @@ async function _fsTestoEinlesen(bericht,t,neuBauen){
   _fsTestoSortieren(messungen); // v293: noch nicht eingelesene zuerst
 
   const gewaehlt=new Set();
-  const raumLab=document.createElement('label');raumLab.style.cssText='font-size:13px;color:var(--text2);';raumLab.textContent='Raum für die neuen Messstellen';
+  const raumLab=document.createElement('label');raumLab.style.cssText='font-size:var(--fs13,13px);color:var(--text2);';raumLab.textContent='Raum für die neuen Messstellen';
   const raumSel=document.createElement('select');
-  raumSel.style.cssText='width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:16px;color:var(--text);font-family:inherit;';
+  raumSel.style.cssText='width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:var(--fs16,16px);color:var(--text);font-family:inherit;';
   const raumOptionen=wahl=>{
     raumSel.innerHTML='';
     const o0=document.createElement('option');o0.value='';o0.textContent='– ohne Raum (Luft aus der testo-Messung) –';raumSel.appendChild(o0);
@@ -5532,32 +5585,32 @@ async function _fsTestoEinlesen(bericht,t,neuBauen){
     else raumOptionen(letzterRaum);
   };
   const knopf=document.createElement('button');knopf.type='button';
-  knopf.style.cssText='min-height:52px;border-radius:10px;border:none;background:'+FS_FARBE+';color:#fff;font-size:16px;font-weight:700;font-family:inherit;cursor:pointer;';
+  knopf.style.cssText='min-height:52px;border-radius:10px;border:none;background:'+FS_FARBE+';color:#fff;font-size:var(--fs16,16px);font-weight:700;font-family:inherit;cursor:pointer;';
   const knopfText=()=>{knopf.disabled=!gewaehlt.size;knopf.style.opacity=gewaehlt.size?'1':'.45';knopf.textContent=gewaehlt.size?'Einlesen ('+gewaehlt.size+')':'Messungen antippen';};
   knopfText();
   fuss.append(raumLab,raumSel,knopf);
 
   inhalt.innerHTML='';
-  const hinweis=document.createElement('div');hinweis.style.cssText='font-size:13px;color:var(--text2);margin:0 0 8px;line-height:1.45;';
+  const hinweis=document.createElement('div');hinweis.style.cssText='font-size:var(--fs13,13px);color:var(--text2);margin:0 0 8px;line-height:1.45;';
   hinweis.textContent='Ordner „'+FS_TESTO_ORDNER+'" · Messungen antippen. PAM legt beim Einlesen eine Kopie in den Ordner des Auftrags – die Originale hier kannst du später in Drive löschen.';
   inhalt.appendChild(hinweis);
   if(csvText){ // v305: gut sichtbar statt im Kleingedruckten
     const cw=document.createElement('div');cw.setAttribute('data-fs-nurcsv',String(nurCsv.length));
-    cw.style.cssText='font-size:14px;font-weight:600;color:var(--text);margin:0 0 10px;padding:10px 12px;border-radius:8px;background:var(--bg2);border-left:5px solid var(--orange);line-height:1.45;';
+    cw.style.cssText='font-size:var(--fs14,14px);font-weight:600;color:var(--text);margin:0 0 10px;padding:10px 12px;border-radius:8px;background:var(--bg2);border-left:5px solid var(--orange);line-height:1.45;';
     cw.textContent=csvText;inhalt.appendChild(cw);
   }
   messungen.forEach((m,i)=>{
     const row=document.createElement('button');row.type='button';row.setAttribute('data-fs-testo',String(i));
     row.style.cssText='display:block;width:100%;text-align:left;margin:0 0 8px;padding:12px;border-radius:10px;border:2px solid var(--border);background:var(--bg2);color:var(--text);font-family:inherit;cursor:pointer;';
     if(m.fehler){row.disabled=true;row.textContent='⛔ '+m.datei+': '+m.fehler;inhalt.appendChild(row);return;}
-    const z1=document.createElement('div');z1.style.cssText='font-size:16px;font-weight:700;';
+    const z1=document.createElement('div');z1.style.cssText='font-size:var(--fs16,16px);font-weight:700;';
     z1.textContent=(m.zeit?_fsZeitText(m.zeit):m.datei)+(m.schonDa?' · schon eingelesen'+(m.schonDaKarte?' ('+m.schonDaKarte+')':''):'');
-    const z2=document.createElement('div');z2.style.cssText='font-size:14px;margin-top:3px;';
+    const z2=document.createElement('div');z2.style.cssText='font-size:var(--fs14,14px);margin-top:3px;';
     z2.textContent='Luft '+(m.luftT===null?'–':_fsEins(m.luftT)+' °C')+' · '+(m.luftRf===null?'–':_fsEins(m.luftRf)+' %')
       +' · Oberfläche '+(m.ts===null?'–':_fsEins(m.ts)+' °C')+' · '+(m.bildDatei?'📷 Foto':'ohne Foto');
     row.append(z1,z2);
     m.warnungen.forEach(h=>{
-      const d=document.createElement('div');d.style.cssText='font-size:13px;font-weight:700;color:var(--text);margin-top:4px;padding-left:8px;border-left:4px solid var(--orange);';
+      const d=document.createElement('div');d.style.cssText='font-size:var(--fs13,13px);font-weight:700;color:var(--text);margin-top:4px;padding-left:8px;border-left:4px solid var(--orange);';
       d.textContent='⚠ '+h;row.appendChild(d);
     });
     if(m.schonDa)row.style.opacity='.6';
@@ -5659,7 +5712,7 @@ async function _fsTestoPlanZuordnen(bericht,t,neuBauen){
   if(typeof _mobPhotoSave!=='function'||typeof _uploadMitGeduld!=='function'){toast('📋 Messungen bitte am Tablet zuordnen','info',5000);return;}
   if(!(typeof tokenValid==='function'&&tokenValid())){toast('Drive nicht verbunden – zum Einlesen bitte mit Empfang anmelden','error',5000);return;}
   if(!_fsBgMessplan(bericht).length){toast('Erst den Messplan anlegen: Räume mit Wänden anlegen (bei „Räume“), Höhen je Wand im Raum bei „Messplan“','info',6000);return;}
-  const KNOPF='padding:9px 12px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:600;font-family:inherit;';
+  const KNOPF='padding:9px 12px;border-radius:8px;font-size:var(--fs14,14px);cursor:pointer;font-weight:600;font-family:inherit;';
   const GID='_fsTestoPlanSheet';const alt=document.getElementById(GID);if(alt)alt.remove();
   const ov=document.createElement('div');ov.id=GID;
   ov.style.cssText='position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;';
@@ -5667,15 +5720,15 @@ async function _fsTestoPlanZuordnen(bericht,t,neuBauen){
   box.style.cssText='background:var(--bg);color:var(--text);border-radius:16px 16px 0 0;width:100%;max-height:92vh;display:flex;flex-direction:column;';
   box.onclick=e=>e.stopPropagation();
   const kopf=document.createElement('div');kopf.style.cssText='display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border);';
-  const ti=document.createElement('div');ti.style.cssText='flex:1;font-size:17px;font-weight:700;';ti.textContent='📋 Messungen nach Messplan';
+  const ti=document.createElement('div');ti.style.cssText='flex:1;font-size:var(--fs17,17px);font-weight:700;';ti.textContent='📋 Messungen nach Messplan';
   const zu=document.createElement('button');zu.type='button';zu.textContent='✕';
-  zu.style.cssText='width:44px;height:44px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);font-size:18px;cursor:pointer;';
+  zu.style.cssText='width:44px;height:44px;border-radius:8px;border:1px solid var(--fs-krd,var(--border));background:var(--fs-kfl,transparent);color:var(--text);font-size:var(--fs18,18px);cursor:pointer;';
   zu.onclick=()=>ov.remove();
   kopf.append(ti,zu);
   const inhalt=document.createElement('div');inhalt.style.cssText='flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:10px 14px;';
   const fuss=document.createElement('div');fuss.style.cssText='padding:10px 14px 14px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;';
   box.append(kopf,inhalt,fuss);ov.appendChild(box);document.body.appendChild(ov);
-  const info=txt=>{inhalt.innerHTML='';const d=document.createElement('div');d.style.cssText='font-size:15px;color:var(--text);padding:12px 0;line-height:1.5;';d.textContent=txt;inhalt.appendChild(d);fuss.innerHTML='';};
+  const info=txt=>{inhalt.innerHTML='';const d=document.createElement('div');d.style.cssText='font-size:var(--fs15,15px);color:var(--text);padding:12px 0;line-height:1.5;';d.textContent=txt;inhalt.appendChild(d);fuss.innerHTML='';};
 
   let messungen=[],nurCsv=[],doppelt=0,unlesbar=[],abgeschnitten=false,aeltere=false,mitBild=true;
   const weg=new Set(),aus=new Set(); // weg: Messungen (Nummer in messungen), die nicht verwendet werden; aus: Plan-Zeilen, an denen nicht gemessen wurde
@@ -5724,10 +5777,10 @@ async function _fsTestoPlanZuordnen(bericht,t,neuBauen){
 
   const warnung=(txt,stark)=>{
     const d=document.createElement('div');
-    d.style.cssText='font-size:14px;font-weight:600;color:var(--text);margin:0 0 10px;padding:10px 12px;border-radius:8px;background:var(--bg2);border-left:5px solid '+(stark?'var(--orange)':FS_FARBE)+';line-height:1.45;';
+    d.style.cssText='font-size:var(--fs14,14px);font-weight:600;color:var(--text);margin:0 0 10px;padding:10px 12px;border-radius:8px;background:var(--bg2);border-left:5px solid '+(stark?'var(--orange)':FS_FARBE)+';line-height:1.45;';
     d.textContent=txt;inhalt.appendChild(d);return d;
   };
-  const knopfStil=(rand)=>KNOPF+'flex:1 1 140px;min-height:44px;border:1.5px solid '+rand+';background:transparent;color:var(--text);';
+  const knopfStil=(rand)=>KNOPF+'flex:1 1 140px;min-height:var(--fsh44,44px);border:1.5px solid '+rand+';background:var(--fs-kfl,transparent);color:var(--text);';
   const messText=m=>zeitHMS(m.zeit)+' · Luft '+fmt(m.luftT,' °C')+' / '+fmt(m.luftRf,' %')+' · Oberfläche '+fmt(m.ts,' °C')+' · '+(m.bildDatei?'📷 Foto':'ohne Foto');
 
   const zeige=()=>{
@@ -5738,7 +5791,7 @@ async function _fsTestoPlanZuordnen(bericht,t,neuBauen){
     const v=_fsBgPlanVorschlag(aktiv,ms);
     const paarVon=new Map();v.paare.forEach(pr=>paarVon.set(schluessel(pr.plan),pr.m));
 
-    const h=document.createElement('div');h.style.cssText='font-size:14px;color:var(--text);margin:0 0 10px;line-height:1.5;';
+    const h=document.createElement('div');h.style.cssText='font-size:var(--fs14,14px);color:var(--text);margin:0 0 10px;line-height:1.5;';
     h.textContent=ms.length+' Messung'+(ms.length===1?'':'en')+' (nach Uhrzeit sortiert) · '+plan.length+' offene Plan-Zeile'+(plan.length===1?'':'n')
       +'. Die Messungen liegen der Reihe nach auf den Plan-Zeilen. Prüfe jede Zeile – eingetragen wird erst, wenn du unten „Übernehmen“ antippst.';
     inhalt.appendChild(h);
@@ -5758,16 +5811,16 @@ async function _fsTestoPlanZuordnen(bericht,t,neuBauen){
       row.style.cssText='margin:0 0 8px;padding:10px 12px;border-radius:10px;border:2px solid '+(m?FS_FARBE:'var(--border)')+';background:'+(m?'rgba(31,95,139,.10)':'var(--bg2)')+';'+((istAus||!m)?'opacity:.75;':'');
       const top=document.createElement('div');top.style.cssText='display:flex;align-items:center;gap:10px;';
       const nr=document.createElement('span');nr.textContent=String(p.nr);
-      nr.style.cssText='min-width:30px;height:30px;border-radius:15px;background:'+FS_FARBE+';color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex-shrink:0;padding:0 4px;box-sizing:border-box;';
-      const ort=document.createElement('div');ort.style.cssText='flex:1;min-width:0;font-size:16px;font-weight:700;line-height:1.3;';
+      nr.style.cssText='min-width:30px;height:30px;border-radius:15px;background:'+FS_FARBE+';color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:var(--fs14,14px);flex-shrink:0;padding:0 4px;box-sizing:border-box;';
+      const ort=document.createElement('div');ort.style.cssText='flex:1;min-width:0;font-size:var(--fs16,16px);font-weight:700;line-height:1.3;';
       ort.textContent=p.raum+' – '+p.wand+(p.art?' ('+p.art+')':'')+', '+p.hoehe+' cm';
       top.append(nr,ort);
       const fi=(bericht.fotos||[]).findIndex(f=>(p.fotoRefs||[]).some(r=>_fsRefPasst(f,r)));
       if(fi>=0){const img=document.createElement('img');img.alt='Foto dieser Wand';img.style.cssText='width:56px;height:56px;object-fit:cover;border-radius:8px;flex-shrink:0;background:var(--bg3);';_fsMiniaturQuelle(bericht.fotos[fi],img);top.appendChild(img);}
       row.appendChild(top);
       if(m){
-        const z=document.createElement('div');z.setAttribute('data-fs-planmessung',String(p.nr));z.style.cssText='font-size:14px;margin-top:6px;line-height:1.4;';z.textContent=messText(m);row.appendChild(z);
-        (m.warnungen||[]).forEach(hw=>{const d=document.createElement('div');d.style.cssText='font-size:13px;font-weight:700;margin-top:4px;padding-left:8px;border-left:4px solid var(--orange);';d.textContent='⚠ '+hw;row.appendChild(d);});
+        const z=document.createElement('div');z.setAttribute('data-fs-planmessung',String(p.nr));z.style.cssText='font-size:var(--fs14,14px);margin-top:6px;line-height:1.4;';z.textContent=messText(m);row.appendChild(z);
+        (m.warnungen||[]).forEach(hw=>{const d=document.createElement('div');d.style.cssText='font-size:var(--fs13,13px);font-weight:700;margin-top:4px;padding-left:8px;border-left:4px solid var(--orange);';d.textContent='⚠ '+hw;row.appendChild(d);});
         const br=document.createElement('div');br.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;';
         const bw=document.createElement('button');bw.type='button';bw.textContent='✕ Messung weglassen';bw.setAttribute('data-fs-planweg',String(p.nr));bw.style.cssText=knopfStil('var(--border)');
         bw.onclick=()=>{weg.add(m._i);zeige();};
@@ -5775,17 +5828,17 @@ async function _fsTestoPlanZuordnen(bericht,t,neuBauen){
         bn.onclick=()=>{aus.add(k);zeige();};
         br.append(bw,bn);row.appendChild(br);
       }else if(istAus){
-        const z=document.createElement('div');z.style.cssText='font-size:14px;margin-top:6px;';z.textContent='Hier nicht gemessen – übersprungen';row.appendChild(z);
+        const z=document.createElement('div');z.style.cssText='font-size:var(--fs14,14px);margin-top:6px;';z.textContent='Hier nicht gemessen – übersprungen';row.appendChild(z);
         const bz=document.createElement('button');bz.type='button';bz.textContent='↶ Doch gemessen';bz.setAttribute('data-fs-planzurueck',String(p.nr));bz.style.cssText=knopfStil('var(--border)')+'margin-top:8px;';
         bz.onclick=()=>{aus.delete(k);zeige();};
         row.appendChild(bz);
       }else{
-        const z=document.createElement('div');z.style.cssText='font-size:14px;margin-top:6px;';z.textContent='noch keine Messung';row.appendChild(z);
+        const z=document.createElement('div');z.style.cssText='font-size:var(--fs14,14px);margin-top:6px;';z.textContent='noch keine Messung';row.appendChild(z);
       }
       inhalt.appendChild(row);
     });
     v.ohnePlan.forEach(m=>{
-      const row=document.createElement('div');row.style.cssText='margin:0 0 8px;padding:10px 12px;border-radius:10px;border:2px dashed var(--border);background:var(--bg2);opacity:.75;font-size:14px;line-height:1.4;';
+      const row=document.createElement('div');row.style.cssText='margin:0 0 8px;padding:10px 12px;border-radius:10px;border:2px dashed var(--border);background:var(--bg2);opacity:.75;font-size:var(--fs14,14px);line-height:1.4;';
       row.textContent='Keine Plan-Zeile mehr, wird nicht übernommen: '+messText(m);inhalt.appendChild(row);
     });
     if(weg.size){
@@ -5798,14 +5851,14 @@ async function _fsTestoPlanZuordnen(bericht,t,neuBauen){
     }
 
     if(v.paare.some(pr=>pr.m.bildDatei)){
-      const lab=document.createElement('label');lab.style.cssText='display:flex;align-items:center;gap:10px;font-size:14px;min-height:44px;';
+      const lab=document.createElement('label');lab.style.cssText='display:flex;align-items:center;gap:10px;font-size:var(--fs14,14px);min-height:var(--fsh44,44px);';
       const cb=document.createElement('input');cb.type='checkbox';cb.checked=mitBild;cb.style.cssText='width:22px;height:22px;flex-shrink:0;';
       cb.onchange=()=>{mitBild=cb.checked;};
       const tx=document.createElement('span');tx.textContent='Messbild mit Messpunkt erstellen (jedes Foto antippen)';
       lab.append(cb,tx);fuss.appendChild(lab);
     }
     const knopf=document.createElement('button');knopf.type='button';knopf.setAttribute('data-fs-planuebernehmen','1');
-    knopf.style.cssText='min-height:52px;border-radius:10px;border:none;background:'+FS_FARBE+';color:#fff;font-size:16px;font-weight:700;font-family:inherit;cursor:pointer;';
+    knopf.style.cssText='min-height:52px;border-radius:10px;border:none;background:'+FS_FARBE+';color:#fff;font-size:var(--fs16,16px);font-weight:700;font-family:inherit;cursor:pointer;';
     knopf.disabled=!v.paare.length;knopf.style.opacity=v.paare.length?'1':'.45';
     knopf.textContent=v.paare.length?('✓ '+v.paare.length+' Messung'+(v.paare.length===1?'':'en')+' übernehmen'):'Nichts zu übernehmen';
     knopf.onclick=()=>uebernehmen(v.paare,knopf);
@@ -5982,20 +6035,20 @@ function _openWartungsprotokollMobil(existingIdx){
   const hdr=document.createElement('div');
   hdr.style.cssText='background:'+FS_WP_FARBE+';padding:12px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0;';
   const closeBtn=document.createElement('button');closeBtn.type='button';closeBtn.textContent='←';
-  closeBtn.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:40px;height:40px;border-radius:8px;font-size:18px;cursor:pointer;flex-shrink:0;';
+  closeBtn.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:40px;height:40px;border-radius:8px;font-size:var(--fs18,18px);cursor:pointer;flex-shrink:0;';
   closeBtn.onclick=()=>{ov.remove();try{const ct=currentTask();if(ct)renderDetail(ct);}catch(e){console.warn('[Wartung] zurück:',e);}};
   const hdrMeta=document.createElement('div');hdrMeta.style.cssText='flex:1;min-width:0;';
-  const hdrT=document.createElement('div');hdrT.style.cssText='font-size:15px;font-weight:700;color:#fff;';hdrT.textContent='🏠 Wartungsprotokoll Flachdach';
-  const hdrS=document.createElement('div');hdrS.style.cssText='font-size:11px;color:rgba(255,255,255,.75);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';hdrS.textContent=t.adresse||t.title||'Objektadresse';
+  const hdrT=document.createElement('div');hdrT.style.cssText='font-size:var(--fs15,15px);font-weight:700;color:#fff;';hdrT.textContent='🏠 Wartungsprotokoll Flachdach';
+  const hdrS=document.createElement('div');hdrS.style.cssText='font-size:var(--fs11,11px);color:rgba(255,255,255,.75);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';hdrS.textContent=t.adresse||t.title||'Objektadresse';
   hdrMeta.append(hdrT,hdrS);
   const datumEl=document.createElement('input');datumEl.type='text';datumEl.value=bericht.datum||'';datumEl.placeholder='TT.MM.JJJJ';datumEl.autocomplete='off';datumEl.setAttribute('aria-label','Datum');
-  datumEl.style.cssText='width:104px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:6px;padding:7px 8px;color:#fff;font-size:14px;font-family:inherit;flex-shrink:0;';
+  datumEl.style.cssText='width:104px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:6px;padding:7px 8px;color:#fff;font-size:var(--fs14,14px);font-family:inherit;flex-shrink:0;';
   datumEl.oninput=()=>{bericht.datum=datumEl.value;scheduleSave();};
   hdr.append(closeBtn,hdrMeta,datumEl);
 
   /* Zählleiste */
   const statsEl=document.createElement('div');statsEl.id='_wpMobStats';
-  statsEl.style.cssText='display:flex;flex-wrap:wrap;gap:6px 16px;padding:7px 14px;background:var(--bg3);border-bottom:1px solid var(--border);flex-shrink:0;font-size:12px;font-weight:600;';
+  statsEl.style.cssText='display:flex;flex-wrap:wrap;gap:6px 16px;padding:7px 14px;background:var(--bg3);border-bottom:1px solid var(--border);flex-shrink:0;font-size:var(--fs12,12px);font-weight:600;';
   function _wpMobStats(){
     const z=_fsWpZaehlen(bericht);
     statsEl.innerHTML='';
@@ -6022,28 +6075,28 @@ function _openWartungsprotokollMobil(existingIdx){
     const kopfSek=document.createElement('div');
     kopfSek.style.cssText='background:var(--bg2);border-bottom:1px solid var(--border);';
     const kopfHdr=document.createElement('div');
-    kopfHdr.style.cssText='padding:10px 14px 6px;font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;';
+    kopfHdr.style.cssText='padding:10px 14px 6px;font-size:var(--fs11,11px);font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;';
     kopfHdr.textContent='Auftragsdaten & Dachaufbau';
     kopfSek.appendChild(kopfHdr);
     function _mf(label,key,placeholder){
       const row=document.createElement('div');
       row.style.cssText='display:flex;align-items:center;padding:8px 14px;border-top:1px solid var(--border);gap:10px;';
-      const lbl=document.createElement('span');lbl.style.cssText='font-size:12px;color:var(--text2);min-width:105px;flex-shrink:0;';lbl.textContent=label;
+      const lbl=document.createElement('span');lbl.style.cssText='font-size:var(--fs12,12px);color:var(--text2);min-width:105px;flex-shrink:0;';lbl.textContent=label;
       const inp=document.createElement('input');inp.type='text';inp.value=bericht.kopf[key]||'';inp.placeholder=placeholder||'';inp.autocomplete='off';
-      inp.style.cssText='flex:1;min-width:0;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 8px;font-size:14px;color:var(--text);font-family:inherit;';
+      inp.style.cssText='flex:1;min-width:0;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 8px;font-size:var(--fs14,14px);color:var(--text);font-family:inherit;';
       inp.oninput=()=>{bericht.kopf[key]=inp.value;scheduleSave();};
       row.append(lbl,inp);return row;
     }
     function _mcg(label,key,opts){
       const wrap=document.createElement('div');
       wrap.style.cssText='padding:8px 14px;border-top:1px solid var(--border);';
-      const lbl=document.createElement('div');lbl.style.cssText='font-size:11px;color:var(--text2);margin-bottom:6px;';lbl.textContent=label;
+      const lbl=document.createElement('div');lbl.style.cssText='font-size:var(--fs11,11px);color:var(--text2);margin-bottom:6px;';lbl.textContent=label;
       const row=document.createElement('div');row.style.cssText='display:flex;flex-wrap:wrap;gap:6px;';
       if(!Array.isArray(bericht.kopf[key]))bericht.kopf[key]=[];
       opts.forEach(opt=>{
         const btn=document.createElement('button');btn.type='button';btn.textContent=opt;
         const on=bericht.kopf[key].includes(opt);
-        btn.style.cssText='padding:6px 12px;border-radius:14px;font-size:12px;cursor:pointer;font-family:inherit;border:1px solid '+(on?FS_WP_FARBE:'var(--border)')+';background:'+(on?'rgba(26,92,58,.12)':'transparent')+';color:'+(on?FS_WP_FARBE:'var(--text2)')+';';
+        btn.style.cssText='padding:6px 12px;border-radius:14px;font-size:var(--fs12,12px);cursor:pointer;font-family:inherit;border:1px solid '+(on?FS_WP_FARBE:'var(--border)')+';background:'+(on?'rgba(26,92,58,.12)':'transparent')+';color:'+(on?FS_WP_FARBE:'var(--text2)')+';';
         btn.onclick=()=>{
           const arr=bericht.kopf[key];const idx=arr.indexOf(opt);
           if(idx>=0)arr.splice(idx,1);else arr.push(opt);
@@ -6072,7 +6125,7 @@ function _openWartungsprotokollMobil(existingIdx){
     bericht.sektionen.forEach(sek=>{
       const sekDiv=document.createElement('div');
       const sekHdr=document.createElement('div');
-      sekHdr.style.cssText='padding:8px 14px;font-size:12px;font-weight:700;color:'+FS_WP_FARBE+';background:rgba(26,92,58,.08);border-bottom:1px solid var(--border);border-top:1px solid var(--border);border-left:3px solid '+FS_WP_FARBE+';';
+      sekHdr.style.cssText='padding:8px 14px;font-size:var(--fs12,12px);font-weight:700;color:'+FS_WP_FARBE+';background:rgba(26,92,58,.08);border-bottom:1px solid var(--border);border-top:1px solid var(--border);border-left:3px solid '+FS_WP_FARBE+';';
       sekHdr.textContent=sek.titel;
       sekDiv.appendChild(sekHdr);
       sek.items.forEach(it=>{
@@ -6081,7 +6134,7 @@ function _openWartungsprotokollMobil(existingIdx){
         const row=document.createElement('div');row.setAttribute('data-wp-punkt','1');
         row.style.cssText='padding:10px 14px;border-bottom:1px solid var(--border);border-radius:6px;margin:2px 0;background:'+rowBg()+';transition:background .2s;';
         const txt=document.createElement('div');
-        txt.style.cssText='font-size:13px;color:var(--text);line-height:1.35;margin-bottom:8px;font-weight:500;';
+        txt.style.cssText='font-size:var(--fs13,13px);color:var(--text);line-height:1.35;margin-bottom:8px;font-weight:500;';
         txt.textContent=it.text;
         const btnRow=document.createElement('div');
         btnRow.style.cssText='display:grid;grid-template-columns:repeat(4,1fr);gap:5px;';
@@ -6097,7 +6150,7 @@ function _openWartungsprotokollMobil(existingIdx){
         statDef.forEach(s=>{
           const btn=document.createElement('button');btn.type='button';btn.textContent=s.sym;btn.setAttribute('data-wp-status',s.v);
           const on=it.status===s.v;
-          btn.style.cssText='padding:9px 4px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;border:2px solid '+(on?s.col:'var(--border)')+';background:'+(on?s.bg:'transparent')+';color:'+(on?s.col:'var(--text2)')+';box-shadow:'+(on?'0 1px 4px '+s.col+'44':'none')+';';
+          btn.style.cssText='padding:9px 4px;border-radius:8px;font-size:var(--fs11,11px);font-weight:700;cursor:pointer;font-family:inherit;border:2px solid '+(on?s.col:'var(--border)')+';background:'+(on?s.bg:'transparent')+';color:'+(on?s.col:'var(--text2)')+';box-shadow:'+(on?'0 1px 4px '+s.col+'44':'none')+';';
           btn.onclick=()=>{
             it.status=it.status===s.v?'offen':s.v;
             row.style.background=rowBg();
@@ -6116,12 +6169,12 @@ function _openWartungsprotokollMobil(existingIdx){
         massnWrap.style.cssText='margin-top:6px;';
         const massnIn=document.createElement('input');massnIn.type='text';
         massnIn.placeholder='Zusätzliche Maßnahmen…';massnIn.value=it.massnahmen||'';massnIn.autocomplete='off';
-        massnIn.style.cssText='width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;font-size:14px;color:var(--text);font-family:inherit;';
+        massnIn.style.cssText='width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:8px 10px;font-size:var(--fs14,14px);color:var(--text);font-family:inherit;';
         massnIn.oninput=()=>{it.massnahmen=massnIn.value;scheduleSave();};
         massnWrap.appendChild(massnIn);
         fotoRefArea.style.cssText='margin-top:6px;';
         fotoRefArea.appendChild(_fsFotoLeiste(bericht,it,'Foto zu diesem Punkt'));
-        mBtn.style.cssText='margin-top:5px;font-size:11px;padding:4px 10px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;font-family:inherit;';
+        mBtn.style.cssText='margin-top:5px;font-size:var(--fs11,11px);padding:4px 10px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;font-family:inherit;';
         mBtn.onclick=()=>{massnWrap.style.display='block';mBtn.style.display='none';massnIn.focus();};
         row.append(txt,btnRow,mBtn,massnWrap,fotoRefArea);
         zeigen();
@@ -6133,20 +6186,20 @@ function _openWartungsprotokollMobil(existingIdx){
     /* ── Festgestellte Mängel / Empfehlungen ── */
     const maengelSek=document.createElement('div');
     maengelSek.style.cssText='padding:14px;border-top:1px solid var(--border);';
-    const mHdr=document.createElement('div');mHdr.style.cssText='font-size:12px;font-weight:700;color:'+FS_WP_FARBE+';border-left:3px solid '+FS_WP_FARBE+';padding-left:8px;margin-bottom:8px;';
+    const mHdr=document.createElement('div');mHdr.style.cssText='font-size:var(--fs12,12px);font-weight:700;color:'+FS_WP_FARBE+';border-left:3px solid '+FS_WP_FARBE+';padding-left:8px;margin-bottom:8px;';
     mHdr.textContent='Festgestellte Mängel / Empfehlungen';
     const mTA=document.createElement('textarea');mTA.rows=3;
     mTA.placeholder='Nr., Beschreibung, Empfehlungen, nächste Wartung…';mTA.value=bericht.maengelEmpfehlungen||'';
-    mTA.style.cssText='width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:14px;color:var(--text);resize:vertical;font-family:inherit;';
+    mTA.style.cssText='width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:var(--fs14,14px);color:var(--text);resize:vertical;font-family:inherit;';
     mTA.oninput=()=>{bericht.maengelEmpfehlungen=mTA.value;scheduleSave();};
     maengelSek.append(mHdr,mTA);
     body.appendChild(maengelSek);
 
     /* ── Techniker ── */
     const techSek=document.createElement('div');techSek.style.cssText='padding:0 14px 14px;';
-    const tl=document.createElement('div');tl.style.cssText='font-size:12px;color:var(--text2);margin-bottom:4px;';tl.textContent='Techniker';
+    const tl=document.createElement('div');tl.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin-bottom:4px;';tl.textContent='Techniker';
     const ti=document.createElement('input');ti.type='text';ti.value=bericht.techniker||'';ti.placeholder='Name Techniker';ti.autocomplete='off';
-    ti.style.cssText='width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:14px;color:var(--text);font-family:inherit;';
+    ti.style.cssText='width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:var(--fs14,14px);color:var(--text);font-family:inherit;';
     ti.oninput=()=>{bericht.techniker=ti.value;scheduleSave();};
     techSek.append(tl,ti);
     body.appendChild(techSek);
@@ -6154,9 +6207,9 @@ function _openWartungsprotokollMobil(existingIdx){
     /* ── Fotos (Raster und Knöpfe: am PC die PC-Werkzeuge, sonst Kamera · Galerie · Drive – dieselben Funktionsnamen wie beim Feuchteprotokoll) ── */
     const fotoSek=document.createElement('div');
     fotoSek.style.cssText='border-top:1px solid var(--border);';
-    const fHdr=document.createElement('div');fHdr.style.cssText='padding:10px 14px 4px;font-size:12px;font-weight:700;color:'+FS_WP_FARBE+';border-left:3px solid '+FS_WP_FARBE+';padding-left:17px;';
+    const fHdr=document.createElement('div');fHdr.style.cssText='padding:10px 14px 4px;font-size:var(--fs12,12px);font-weight:700;color:'+FS_WP_FARBE+';border-left:3px solid '+FS_WP_FARBE+';padding-left:17px;';
     fHdr.textContent='Fotos';
-    const fInfo=document.createElement('div');fInfo.style.cssText='padding:0 14px 8px;font-size:11px;color:var(--text2);';
+    const fInfo=document.createElement('div');fInfo.style.cssText='padding:0 14px 8px;font-size:var(--fs11,11px);color:var(--text2);';
     fInfo.textContent=_fsAmPc()
       ?'Klick = im PDF ✓ · Doppelklick oder 👁 = groß ansehen · ✏ = bemalen und beschriften (das Original bleibt) · ‹ › = Reihenfolge · ✕ = aus dem Protokoll entfernen (in Drive bleibt es). 360°-Fotos bitte als Flat-Export aus Insta360.'
       :'Antippen = im PDF ✓ · zweimal antippen = groß ansehen. 360°-Fotos bitte als Flat-Export aus Insta360.';
@@ -6164,7 +6217,7 @@ function _openWartungsprotokollMobil(existingIdx){
     fotoGrid.id='_wpMobFotoGrid'; // derselbe Name wie im Feuchteprotokoll: Foto-Dialog und Maler ziehen die Miniaturen hierüber nach
     _wpMobRenderFotos(bericht,fotoGrid);
     const fotoBtnRow=document.createElement('div');fotoBtnRow.style.cssText='display:flex;gap:8px;padding:0 14px 14px;';
-    const mkF=(txt,stil,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.style.cssText='flex:1;padding:10px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:600;font-family:inherit;'+stil;b.onclick=fn;return b;};
+    const mkF=(txt,stil,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.style.cssText='flex:1;padding:10px;border-radius:8px;font-size:var(--fs13,13px);cursor:pointer;font-weight:600;font-family:inherit;'+stil;b.onclick=fn;return b;};
     if(_fsAmPc()){
       fotoBtnRow.append(
         mkF('📁 Fotos vom PC','border:1.5px solid var(--border);background:var(--bg3);color:var(--text);',()=>_wpMobFotoAufnehmen(bericht,fotoGrid,false)),
@@ -6188,16 +6241,16 @@ function _openWartungsprotokollMobil(existingIdx){
   const footer=document.createElement('div');
   footer.style.cssText='position:fixed;bottom:0;left:0;right:0;padding:12px 14px;background:var(--bg2);border-top:1px solid var(--border);display:flex;gap:10px;z-index:99999;';
   const pdfBtn=document.createElement('button');pdfBtn.type='button';pdfBtn.textContent='📄 PDF erstellen';
-  pdfBtn.style.cssText='flex:1;padding:12px;background:'+FS_WP_FARBE+';color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;';
+  pdfBtn.style.cssText='flex:1;padding:12px;background:'+FS_WP_FARBE+';color:#fff;border:none;border-radius:8px;font-size:var(--fs15,15px);font-weight:700;cursor:pointer;';
   pdfBtn.onclick=async()=>{
     pdfBtn.disabled=true;const alt=pdfBtn.textContent;pdfBtn.textContent='⏳ PDF wird erstellt …';
     try{await _fsWpPdf(bericht,t);}finally{pdfBtn.disabled=false;pdfBtn.textContent=alt;}
   };
   const openBtn=document.createElement('button');openBtn.type='button';openBtn.textContent='📂 Öffnen';
-  openBtn.style.cssText='padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;color:var(--text);';
+  openBtn.style.cssText='padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:var(--fs15,15px);font-weight:600;cursor:pointer;color:var(--text);';
   openBtn.onclick=()=>_fsPdfOeffnen(bericht);
   const shareBtn=document.createElement('button');shareBtn.type='button';shareBtn.textContent='📤';
-  shareBtn.style.cssText='padding:12px 16px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:18px;cursor:pointer;color:var(--text);';
+  shareBtn.style.cssText='padding:12px 16px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:var(--fs18,18px);cursor:pointer;color:var(--text);';
   shareBtn.onclick=async()=>{
     const blob=_fsPdfBlobs[bericht.id];
     if(navigator.share&&blob){
@@ -6468,22 +6521,22 @@ function _openPruefformular(existingIdx){
   const hdr=document.createElement('div');
   hdr.style.cssText='background:'+FS_PB_FARBE+';padding:12px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0;';
   const closeBtn=document.createElement('button');closeBtn.type='button';closeBtn.textContent='←';
-  closeBtn.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:40px;height:40px;border-radius:8px;font-size:18px;cursor:pointer;flex-shrink:0;';
+  closeBtn.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:40px;height:40px;border-radius:8px;font-size:var(--fs18,18px);cursor:pointer;flex-shrink:0;';
   closeBtn.onclick=()=>{ov.remove();try{const ct=currentTask();if(ct)renderDetail(ct);}catch(e){console.warn('[Prüfbericht] zurück:',e);}};
   const hdrMeta=document.createElement('div');hdrMeta.style.cssText='flex:1;min-width:0;';
   const titelEl=document.createElement('input');titelEl.type='text';titelEl.value=bericht.titel||'';titelEl.placeholder='Titel';titelEl.autocomplete='off';titelEl.setAttribute('aria-label','Titel');
-  titelEl.style.cssText='width:100%;box-sizing:border-box;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:6px;padding:5px 8px;color:#fff;font-size:15px;font-weight:700;font-family:inherit;';
+  titelEl.style.cssText='width:100%;box-sizing:border-box;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:6px;padding:5px 8px;color:#fff;font-size:var(--fs15,15px);font-weight:700;font-family:inherit;';
   titelEl.oninput=()=>{bericht.titel=titelEl.value;scheduleSave();};
-  const hdrS=document.createElement('div');hdrS.style.cssText='font-size:11px;color:rgba(255,255,255,.75);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';hdrS.textContent=t.title||t.name||'Objektadresse';
+  const hdrS=document.createElement('div');hdrS.style.cssText='font-size:var(--fs11,11px);color:rgba(255,255,255,.75);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';hdrS.textContent=t.title||t.name||'Objektadresse';
   hdrMeta.append(titelEl,hdrS);
   const datumEl=document.createElement('input');datumEl.type='text';datumEl.value=bericht.datum||'';datumEl.placeholder='TT.MM.JJJJ';datumEl.autocomplete='off';datumEl.setAttribute('aria-label','Datum');
-  datumEl.style.cssText='width:104px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:6px;padding:7px 8px;color:#fff;font-size:14px;font-family:inherit;flex-shrink:0;';
+  datumEl.style.cssText='width:104px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:6px;padding:7px 8px;color:#fff;font-size:var(--fs14,14px);font-family:inherit;flex-shrink:0;';
   datumEl.oninput=()=>{bericht.datum=datumEl.value;scheduleSave();};
   hdr.append(closeBtn,hdrMeta,datumEl);
 
   /* Zählleiste */
   const statsEl=document.createElement('div');statsEl.id='_pbStats';
-  statsEl.style.cssText='display:flex;flex-wrap:wrap;gap:6px 16px;padding:7px 14px;background:var(--bg3);border-bottom:1px solid var(--border);flex-shrink:0;font-size:12px;font-weight:600;';
+  statsEl.style.cssText='display:flex;flex-wrap:wrap;gap:6px 16px;padding:7px 14px;background:var(--bg3);border-bottom:1px solid var(--border);flex-shrink:0;font-size:var(--fs12,12px);font-weight:600;';
   function _pbStats(){
     const z=_fsPbZaehlen(bericht);
     statsEl.innerHTML='';
@@ -6505,7 +6558,7 @@ function _openPruefformular(existingIdx){
     bericht.sektionen.forEach(sek=>{
       const sekDiv=document.createElement('div');
       const sekHdr=document.createElement('div');
-      sekHdr.style.cssText='padding:8px 14px;font-size:12px;font-weight:700;color:'+FS_PB_FARBE+';background:rgba(26,92,58,.08);border-bottom:1px solid var(--border);border-top:1px solid var(--border);border-left:3px solid '+FS_PB_FARBE+';';
+      sekHdr.style.cssText='padding:8px 14px;font-size:var(--fs12,12px);font-weight:700;color:'+FS_PB_FARBE+';background:rgba(26,92,58,.08);border-bottom:1px solid var(--border);border-top:1px solid var(--border);border-left:3px solid '+FS_PB_FARBE+';';
       sekHdr.textContent=sek.titel||'';
       sekDiv.appendChild(sekHdr);
       sek.items.forEach(it=>{
@@ -6513,7 +6566,7 @@ function _openPruefformular(existingIdx){
         const row=document.createElement('div');row.setAttribute('data-pb-punkt','1');
         row.style.cssText='padding:10px 14px;border-bottom:1px solid var(--border);margin:2px 0;background:'+rowBg()+';transition:background .2s;';
         const txt=document.createElement('div');
-        txt.style.cssText='font-size:13px;color:var(--text);line-height:1.35;margin-bottom:8px;font-weight:500;';
+        txt.style.cssText='font-size:var(--fs13,13px);color:var(--text);line-height:1.35;margin-bottom:8px;font-weight:500;';
         txt.textContent=it.text||'';
         const btnRow=document.createElement('div');
         btnRow.style.cssText='display:grid;grid-template-columns:repeat(2,1fr);gap:6px;';
@@ -6527,7 +6580,7 @@ function _openPruefformular(existingIdx){
         statDef.forEach(s=>{
           const btn=document.createElement('button');btn.type='button';btn.textContent=s.sym;btn.setAttribute('data-pb-status',s.v);
           const on=it.status===s.v;
-          btn.style.cssText='padding:9px 4px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;border:2px solid '+(on?s.col:'var(--border)')+';background:'+(on?s.bg:'transparent')+';color:'+(on?s.col:'var(--text2)')+';box-shadow:'+(on?'0 1px 4px '+s.col+'44':'none')+';';
+          btn.style.cssText='padding:9px 4px;border-radius:8px;font-size:var(--fs12,12px);font-weight:700;cursor:pointer;font-family:inherit;border:2px solid '+(on?s.col:'var(--border)')+';background:'+(on?s.bg:'transparent')+';color:'+(on?s.col:'var(--text2)')+';box-shadow:'+(on?'0 1px 4px '+s.col+'44':'none')+';';
           btn.onclick=()=>{
             it.status=it.status===s.v?'offen':s.v;
             row.style.background=rowBg();
@@ -6545,10 +6598,10 @@ function _openPruefformular(existingIdx){
         });
         notizWrap.style.cssText='margin-top:6px;';
         const nIn=document.createElement('textarea');nIn.placeholder='Notiz / Beschreibung…';nIn.value=it.notiz||'';nIn.rows=2;nIn.autocomplete='off';
-        nIn.style.cssText='width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:14px;color:var(--text);resize:vertical;font-family:inherit;';
+        nIn.style.cssText='width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:var(--fs14,14px);color:var(--text);resize:vertical;font-family:inherit;';
         nIn.oninput=()=>{it.notiz=nIn.value;scheduleSave();};
         notizWrap.appendChild(nIn);
-        nBtn.style.cssText='margin-top:5px;font-size:11px;padding:4px 10px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;font-family:inherit;';
+        nBtn.style.cssText='margin-top:5px;font-size:var(--fs11,11px);padding:4px 10px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;font-family:inherit;';
         nBtn.onclick=()=>{notizWrap.style.display='block';nBtn.style.display='none';nIn.focus();};
         row.append(txt,btnRow,nBtn,notizWrap);
         zeigen();
@@ -6557,7 +6610,7 @@ function _openPruefformular(existingIdx){
       /* + Freier Eintrag */
       const add=document.createElement('div');add.style.cssText='padding:10px 14px;border-bottom:1px solid var(--border);';
       const addB=document.createElement('button');addB.type='button';addB.textContent='+ Freier Eintrag';addB.setAttribute('data-pb-frei','1');
-      addB.style.cssText='font-size:12px;padding:8px 14px;border-radius:6px;border:1px dashed var(--border);background:transparent;color:var(--text2);cursor:pointer;width:100%;font-family:inherit;';
+      addB.style.cssText='font-size:var(--fs12,12px);padding:8px 14px;border-radius:6px;border:1px dashed var(--border);background:transparent;color:var(--text2);cursor:pointer;width:100%;font-family:inherit;';
       addB.onclick=()=>{
         const text=prompt('Neuer Prüfpunkt:');
         if(text&&text.trim()){sek.items.push({text:text.trim(),status:'offen',notiz:''});scheduleSave();_pbRender();_pbStats();}
@@ -6567,9 +6620,9 @@ function _openPruefformular(existingIdx){
     });
     /* Allgemeine Bemerkungen */
     const bem=document.createElement('div');bem.style.cssText='padding:14px;';
-    const bl=document.createElement('div');bl.style.cssText='font-size:12px;font-weight:700;color:'+FS_PB_FARBE+';border-left:3px solid '+FS_PB_FARBE+';padding-left:8px;margin-bottom:8px;';bl.textContent='Bemerkungen';
+    const bl=document.createElement('div');bl.style.cssText='font-size:var(--fs12,12px);font-weight:700;color:'+FS_PB_FARBE+';border-left:3px solid '+FS_PB_FARBE+';padding-left:8px;margin-bottom:8px;';bl.textContent='Bemerkungen';
     const bt=document.createElement('textarea');bt.rows=3;bt.placeholder='Gesamtbeurteilung, Empfehlungen…';bt.value=bericht.bemerkung||'';bt.autocomplete='off';
-    bt.style.cssText='width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:14px;color:var(--text);resize:vertical;font-family:inherit;';
+    bt.style.cssText='width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:var(--fs14,14px);color:var(--text);resize:vertical;font-family:inherit;';
     bt.oninput=()=>{bericht.bemerkung=bt.value;scheduleSave();};
     bem.append(bl,bt);body.appendChild(bem);
   }
@@ -6585,16 +6638,16 @@ function _openPruefformular(existingIdx){
   const footer=document.createElement('div');
   footer.style.cssText='position:fixed;bottom:0;left:0;right:0;padding:12px 14px;background:var(--bg2);border-top:1px solid var(--border);display:flex;gap:10px;z-index:99999;';
   const pdfBtn=document.createElement('button');pdfBtn.type='button';pdfBtn.textContent='📄 PDF erstellen';
-  pdfBtn.style.cssText='flex:1;padding:12px;background:'+FS_PB_FARBE+';color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;';
+  pdfBtn.style.cssText='flex:1;padding:12px;background:'+FS_PB_FARBE+';color:#fff;border:none;border-radius:8px;font-size:var(--fs15,15px);font-weight:700;cursor:pointer;';
   pdfBtn.onclick=async()=>{
     pdfBtn.disabled=true;const alt=pdfBtn.textContent;pdfBtn.textContent='⏳ PDF wird erstellt …';
     try{await _fsPbPdf(bericht,t);}finally{pdfBtn.disabled=false;pdfBtn.textContent=alt;}
   };
   const openBtn=document.createElement('button');openBtn.type='button';openBtn.textContent='📂 Öffnen';
-  openBtn.style.cssText='padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;color:var(--text);';
+  openBtn.style.cssText='padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:var(--fs15,15px);font-weight:600;cursor:pointer;color:var(--text);';
   openBtn.onclick=()=>_fsPdfOeffnen(bericht);
   const shareBtn=document.createElement('button');shareBtn.type='button';shareBtn.textContent='📤';
-  shareBtn.style.cssText='padding:12px 16px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:18px;cursor:pointer;color:var(--text);';
+  shareBtn.style.cssText='padding:12px 16px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:var(--fs18,18px);cursor:pointer;color:var(--text);';
   shareBtn.onclick=async()=>{
     const blob=_fsPdfBlobs[bericht.id];
     if(navigator.share&&blob){
