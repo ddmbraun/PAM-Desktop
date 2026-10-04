@@ -10397,7 +10397,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-04 · #1107'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-04-b1107) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-04 · #1108'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-04-b1108) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -29001,6 +29001,55 @@ function _pamFormFotoBild(f,img){
 }
 function _pamFormFotoRefKey(f){return f.driveId||f.localKey||f.localUrl||'';}
 // Fotos im Formular: Klick = kommt ins PDF ja/nein, Doppelklick = groß, ✏ = bemalen, ‹ › = Reihenfolge, ✕ = aus dem Protokoll entfernen
+/* ── b1108: FOTO IM FORMULAR entfernen – wahlweise in den Drive-Papierkorb ─────────────────────────────────────────
+   Frank 04.10.2026 (Bild der Kachel „gehört zum Protokoll“): „Erkläre mir, wie ich das Foto löschen kann … weil das Foto nur am
+   Formular hängt“ → bisher zwei Schritte (✕ im Formular, dann die Datei in Drive) → „baue“. Das „✕“ am Foto im Abschnitt „Fotos“ des
+   Formulars und ein neuer Eintrag im ⋯-Menü der Kachel öffnen dasselbe Fenster wie bei Dokumenten und Karten-Fotos (b1105/b1106).
+   Grenze wie dort: in den Papierkorb gehen nur Fotos, die PAM selbst hochgeladen hat – sonst die Erklärung mit Ordner-Pfad. */
+/* Wird das Foto außerhalb DIESES Formulars noch gebraucht (Fotoliste der Karte, anderes Protokoll, Dachplan, Notiz)? */
+function _pamFormFotoVerwendet(t,bericht,f){
+  if(!f)return false;
+  const ids=[f.driveId,f.editedDriveId].filter(function(x){return !!x;}).map(String);
+  if(!ids.length)return false;
+  let s='';
+  try{
+    const c=Object.assign({},t||{});
+    c.pruefberichte=(Array.isArray(c.pruefberichte)?c.pruefberichte:[]).filter(function(b){return b!==bericht;});
+    if(typeof taskFotos!=='undefined'&&Array.isArray(taskFotos))c.fotos=taskFotos; /* die offene Karte: der ungespeicherte Stand zählt */
+    s=JSON.stringify(c);
+  }catch(e){return false;}
+  return ids.some(function(id){return s.indexOf('"'+id+'"')>=0;});
+}
+function _pamFormFotoWegFragen(bericht,f,danach){
+  if(!bericht||!f)return;
+  const tid=(document.getElementById('taskId')||{}).value||'';
+  const t=(tid&&typeof findTaskById==='function')?findTaskById(tid):null;
+  _pamDokWegFenster(f,function(art){_pamFormFotoWegAusfuehren(bericht,f,art,danach);},{titel:'Foto aus dem Formular entfernen',name:(f.caption?String(f.caption)+' — ':'')+(f.name||'Foto'),fid:String(f.driveId||''),
+    karteText:'✕ Nur aus dem Formular entfernen',karteUnter:'Das Foto steht dann nicht mehr im Formular, im PDF und im Word-Dokument. Die Datei bleibt in Google Drive im Foto-Ordner liegen.',
+    warnung:_pamFormFotoVerwendet(t,bericht,f)?'⚠ Dieses Foto wird in der Karte noch an anderer Stelle verwendet (Fotoliste, anderes Protokoll, Dachplan oder Notiz). Liegt es im Papierkorb, fehlt es dort.':''});
+}
+async function _pamFormFotoWegAusfuehren(bericht,f,art,danach){
+  if(!bericht||!Array.isArray(bericht.fotos)||bericht.fotos.indexOf(f)<0){showToast('Dieses Foto steht nicht mehr im Formular','warning',5000);return false;}
+  const nm=f.name||'Das Foto';
+  if(art==='papierkorb'){
+    const fid=String(f.driveId||'');
+    if(!fid){showToast('⚠ Dieses Foto liegt noch nicht in Drive – es lässt sich nur aus dem Formular entfernen','warning',6000);return false;}
+    const r=await _ztlAnhPapierkorb(fid);
+    if(r==='HTTP 403'){_pamWegNichtErlaubt(nm,fid);return false;}
+    if(r!=='ok'&&r!=='weg'){showToast('⚠ „'+nm+'“ ließ sich nicht in den Drive-Papierkorb legen ('+r+') – das Foto bleibt im Formular','error',9000);return false;}
+    if(f.editedDriveId&&String(f.editedDriveId)!==fid){
+      const r2=await _ztlAnhPapierkorb(String(f.editedDriveId));
+      if(r2!=='ok'&&r2!=='weg')console.warn('[Formular-Foto entfernen] bemalte Fassung:',r2);
+    }
+  }else if(art!=='karte')return false;
+  const i=bericht.fotos.indexOf(f);
+  if(i>=0)bericht.fotos.splice(i,1);
+  scheduleSave();
+  if(art==='papierkorb')showToast('🗑 „'+nm+'“ liegt im Drive-Papierkorb (30 Tage zurückholbar) und ist aus dem Formular','success',6000);
+  else showToast('✕ Aus dem Formular entfernt – in Drive liegt das Foto weiter','info',5000);
+  if(typeof danach==='function'){try{danach();}catch(e){console.warn('[Formular-Foto entfernen]',e);}}
+  return true;
+}
 function _wpMobRenderFotos(bericht,grid){
   if(!grid)return;
   grid.innerHTML='';
@@ -29036,9 +29085,8 @@ function _wpMobRenderFotos(bericht,grid){
     cell.append(rund('✏','Bemalen und beschriften – das Original bleibt erhalten','top:4px;left:34px;',()=>_pamFormFotoMalen(bericht,fi,neu)));
     if(fi>0)cell.append(rund('‹','Ein Foto nach vorn','bottom:48px;left:4px;',()=>{const t=fotos[fi-1];fotos[fi-1]=fotos[fi];fotos[fi]=t;scheduleSave();neu();}));
     if(fi<fotos.length-1)cell.append(rund('›','Ein Foto nach hinten','bottom:48px;left:34px;',()=>{const t=fotos[fi+1];fotos[fi+1]=fotos[fi];fotos[fi]=t;scheduleSave();neu();}));
-    cell.append(rund('✕','Aus dem Protokoll entfernen – die Datei in Drive bleibt','bottom:48px;right:4px;',()=>{
-      if(!confirm('Dieses Foto aus dem Protokoll entfernen?\n\nDie Datei in Drive bleibt erhalten.'))return;
-      const i=bericht.fotos.indexOf(f);if(i>=0)bericht.fotos.splice(i,1);scheduleSave();neu();
+    cell.append(rund('✕','Aus dem Protokoll entfernen – mit Rückfrage: die Datei bleibt in Drive oder kommt auf Wunsch in den Drive-Papierkorb','bottom:48px;right:4px;',()=>{
+      _pamFormFotoWegFragen(bericht,f,neu); /* b1108: Fenster mit Wahl statt confirm */
     }));
     if(f.editedDriveId){const bm=document.createElement('div');bm.textContent='✏ bearbeitet';bm.title='Es gibt eine bemalte Fassung – das Original bleibt erhalten';
       bm.style.cssText='position:absolute;top:34px;left:4px;background:rgba(108,99,255,.85);color:#fff;font-size:10px;padding:1px 5px;border-radius:3px;pointer-events:none;';cell.appendChild(bm);}
@@ -44681,6 +44729,8 @@ function _pamFotoRefMenuEintraege(ref,art,id){
     e.push({sym:'↗',text:'Zur Leistung springen',titel:'Zur Leistung springen – dort kann die Datei entfernt oder getauscht werden',tu:function(){_tuRefSpringen(ref.leistungId);}});
   }else if(art==='wp'){
     e.push({sym:'↗',text:'Zum Wartungsprotokoll springen',titel:'Zum Wartungsprotokoll springen – dort kann das Foto geändert oder entfernt werden',tu:function(){_wpRefSpringen(ref.berichtId);}});
+    /* b1108: gleich von der Kachel aus entfernen – dasselbe Fenster wie im Formular */
+    if(ref.fo&&ref.berichtRef)e.push({sym:'✕',text:'Aus dem Formular entfernen',titel:'Aus dem Formular (Protokoll) entfernen – mit Rückfrage: die Datei bleibt in Google Drive oder kommt auf Wunsch in den Drive-Papierkorb',rot:true,tu:function(){_pamFormFotoWegFragen(ref.berichtRef,ref.fo,function(){if(typeof renderFotoListDesktop==='function')renderFotoListDesktop();});}});
   }else return [];
   e.push({sym:'⧉',text:'Kopie an eine andere Karte',titel:'Kopie an eine andere Karte legen – das Original bleibt beim '+(art==='dp'?'Pin':art==='tu'?'Leistungs-Eintrag':'Protokoll'),trenner:true,tu:function(){_pamFotoRefKopie(art,id);}});
   return e;
@@ -45117,7 +45167,7 @@ function _pamDokWegFenster(a,beiWahl,opt){
   bx.append(ti,nm);
   if(opt.warnung){const wz=document.createElement('div');wz.setAttribute('data-dokweg-warnung','1');wz.style.cssText='font-size:12px;margin:0 0 4px;padding:8px 10px;border-radius:8px;border:1px solid #b45309;background:rgba(180,83,9,.10);color:var(--text);';wz.textContent=opt.warnung;bx.appendChild(wz);}
   if(drive)bx.appendChild(knopf('🗑 Datei in den Drive-Papierkorb','Die Datei verschwindet aus dem Ordner und aus der Karte. Im Papierkorb von Google Drive ist sie noch 30 Tage zurückholbar.','border:2px solid #b45309;background:rgba(180,83,9,.10);','papierkorb'));
-  bx.appendChild(knopf('✕ Nur aus der Karte entfernen','Die Datei bleibt in Google Drive liegen. „🔄 Ordner abgleichen“ holt sie wieder in die Liste.','border:1px solid var(--border);background:var(--bg3);','karte'));
+  bx.appendChild(knopf(opt.karteText||'✕ Nur aus der Karte entfernen',opt.karteUnter||'Die Datei bleibt in Google Drive liegen. „🔄 Ordner abgleichen“ holt sie wieder in die Liste.','border:1px solid var(--border);background:var(--bg3);','karte')); /* b1108: Wortlaut vorgebbar (Formular) */
   if(!drive){
     const h=document.createElement('div');h.style.cssText='font-size:12px;color:var(--text2);margin-top:8px;';
     h.textContent=fid?'Der Drive-Papierkorb geht gerade nicht – Drive ist nicht verbunden.':'Zu diesem Eintrag gibt es keine Datei in Google Drive – er lässt sich nur aus der Karte entfernen.';
