@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F38';
+const PAM_FORMULARE_VERSION='F39';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -875,6 +875,80 @@ function _fsErgebnisZeigen(el,bericht){
 }
 
 // PDF öffnen: das eben erstellte vom Gerät, sonst das in Drive abgelegte
+/* ── F39: BESICHTIGUNG 2 ALS WORD – der INHALT (reine Rechnung, ohne Bildschirm) ─────────────────────────────────────
+   Das PDF bleibt der unveränderte Nachweis; daneben gibt es am PC ein bearbeitbares Word-Dokument. Diese Funktion legt fest, WAS drinsteht
+   und in welcher Reihenfolge – wie im Muster vom 04.10.2026: Vor Ort · Gemeldet und vorgefunden · Feststellungen innen · Feststellungen außen
+   (je Stelle eine kleine Tabelle „Wo / Seite / Festgestellt“, darunter ihre Fotos; danach die Skizzen des Teils) · Lage von außen (Luftbild) ·
+   Umgebung · weitere Fotos. Nur Ausgefülltes, nur Feststellungen – keine Ursache, keine Empfehlung. WIE es aussieht (Schrift, Tabellen,
+   Briefkopf), macht PAM Desktop. Blöcke: {a:'kapitel'|'unter'|'text', t} · {a:'tabelle', z:[[Bezeichnung, Inhalt]]} ·
+   {a:'fotos', l:[{foto, text}]} · {a:'skizze', sk, t, ersatz} · {a:'luftbild', t, ersatz}. */
+/* Das Bild einer Skizze fürs Word (JPEG als data-URL, '' wenn es nicht geht) – hier, damit PAM Desktop keinen Skizzen-Code braucht */
+function _fsWordSkizzeBild(b,sk){try{return _fsBgSkizzeBild(b,_fsAsPseudoRaum(sk))||'';}catch(e){console.warn('[Word] Skizze:',e);return '';}}
+function _fsWordAufbau(b,task){
+  const k=(b&&b.kopf)||{},hat=v=>!(v===null||v===undefined||String(v).trim()==='');
+  const out={titel:_fsB2Name(b),objekt:String(k.objektAdresse||(task&&task.adresse)||'').trim(),auftraggeber:String((task&&task.rechnungsanschrift)||k.auftraggeber||'').trim(),
+    auftragNr:String(k.auftragNr||'').trim(),datum:String((b&&b.datum)||'').trim(),pruefer:String(k.pruefer||'').trim(),bloecke:[]};
+  if(!b)return out;
+  const B=out.bloecke,alle=(Array.isArray(b.fotos)?b.fotos:[]).filter(f=>f&&f.inReport),drin=[];
+  const fotoText=f=>{const zu=_fsBgFotoZuordnung(b,f),fpl=_fsFpLegende(f);return (zu||'')+(fpl?(zu?'. ':'')+'Markiert: '+fpl:'');};
+  const fotosVon=refs=>{const l=[];(Array.isArray(refs)?refs:[]).forEach(r=>{const f=alle.find(x=>_fsRefPasst(x,r));if(f&&l.indexOf(f)<0)l.push(f);});return l;};
+  { /* Vor Ort */
+    const z=[],zt=_fsBgZeitText(k),aw=_fsBgAnwesendText(b);
+    if(hat(b.datum)||zt)z.push(['Datum, Zeit',[hat(b.datum)?String(b.datum).trim():'',zt].filter(Boolean).join(', ')]);
+    if(hat(k.besuchBei))z.push(['Besichtigung bei',String(k.besuchBei).trim()]);
+    if(aw)z.push(['Anwesend',aw]);
+    if(hat(k.pruefer))z.push(['Aufgenommen von',String(k.pruefer).trim()]);
+    if(z.length){B.push({a:'kapitel',t:'Vor Ort'});B.push({a:'tabelle',z:z});}
+  }
+  { /* Gemeldet und vorgefunden */
+    const z=[];
+    if(hat(k.anlass))z.push(['Gemeldet',String(k.anlass).trim().replace(/\s+/g,' ')]);
+    if(z.length&&b.meldungStatus==='wie')z.push(['Vorgefunden','wie gemeldet']);
+    if(z.length&&b.meldungStatus==='abw'){const w=String(b.meldungAbw||'').trim().replace(/\s+/g,' ');z.push(['Vorgefunden','abweichend'+(w?': '+w:'')]);}
+    if(z.length){B.push({a:'kapitel',t:'Gemeldet und vorgefunden'});B.push({a:'tabelle',z:z});}
+  }
+  const vbs=_fsVbStellenGefuellt(b);
+  ['innen','aussen'].forEach(typ=>{
+    if(!_fsB2Sichtbar(b,typ))return;
+    const teil=[];
+    _fsVbRaumGruppen(b,typ).forEach(g=>g.stellen.forEach(({s})=>{
+      const x=vbs.find(v=>v.s===s);if(!x)return;
+      teil.push({a:'unter',t:_fsVbBezeichnung(b,s,x.nr)});
+      const z=[],se=_fsSeiteText(s.seite);
+      if(hat(s.ort))z.push(['Wo',String(s.ort).trim()]);
+      if(se)z.push(['Seite',se]);
+      if(hat(s.text))z.push(['Festgestellt',String(s.text).trim()]);
+      if(z.length)teil.push({a:'tabelle',z:z});
+      const fl=fotosVon(s.fotoRefs);
+      if(fl.length){fl.forEach(f=>{if(drin.indexOf(f)<0)drin.push(f);});teil.push({a:'fotos',l:fl.map(f=>({foto:f,text:fotoText(f)}))});}
+    }));
+    _fsAsListe(b).forEach(sk=>{ /* Skizzen des Teils – nur, wenn etwas eingezeichnet ist */
+      if(_fsAsTyp(sk)!==typ||!_fsAsBenutzt(b,sk))return;
+      const mk=_fsAsMarken(b,sk),nm=hat(sk.name)?String(sk.name).trim():(typ==='innen'?'Raum':'Außen');
+      const tx='Skizze '+nm+', Ansicht '+_fsAsAnsicht(sk)+' (nicht maßstäblich).'+(mk.length?' '+mk.map(q=>q.n+' = '+q.label+(hat(q.s.ort)?' ('+String(q.s.ort).trim()+')':'')).join(' · '):'');
+      teil.push({a:'unter',t:'Skizze '+(typ==='innen'?'innen':'außen')+' – '+nm});
+      teil.push({a:'skizze',sk:sk,t:tx,ersatz:'Die Skizze „'+nm+'“ konnte nicht als Bild eingefügt werden.'});
+    });
+    if(teil.length){B.push({a:'kapitel',t:typ==='innen'?'Feststellungen innen':'Feststellungen außen'});teil.forEach(x=>B.push(x));}
+  });
+  { /* Lage von außen */
+    const lbp=_fsLbPunkte(b);
+    if(lbp.length){
+      B.push({a:'kapitel',t:'Lage von außen (Luftbild)'});
+      B.push({a:'luftbild',t:'Luftbild mit Markierung. '+lbp.map(q=>q.n+' = '+q.label).join(' · ')+'.',
+        ersatz:'Von außen markiert (Luftbild nicht abgebildet): '+lbp.map(q=>q.n+' = '+q.label+' ('+q.lat.toFixed(5)+' N, '+q.lon.toFixed(5)+' O)').join(' · ')+'.'});
+    }
+  }
+  { /* Umgebung */
+    const erg=_fsVbErgebnisZeilen(b);
+    if(erg.length){B.push({a:'kapitel',t:'Umgebung'});erg.forEach(z=>B.push({a:'text',t:z}));}
+  }
+  { /* Fotos im Protokoll, die an keiner Stelle hängen */
+    const rest=alle.filter(f=>drin.indexOf(f)<0);
+    if(rest.length){B.push({a:'kapitel',t:'Weitere Fotos'});B.push({a:'fotos',l:rest.map(f=>({foto:f,text:fotoText(f)}))});}
+  }
+  return out;
+}
 function _fsPdfOeffnen(bericht){
   const blob=_fsPdfBlobs[bericht.id];
   if(blob&&typeof _dateiBlobOeffnen==='function'){_dateiBlobOeffnen(blob,bericht.pdfName||_fsPdfName(bericht));return 'geraet';}
@@ -2587,7 +2661,12 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   const openBtn=document.createElement('button');openBtn.type='button';openBtn.textContent='📂 Öffnen'; // v294
   openBtn.style.cssText='padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:var(--fs15,15px);font-weight:600;cursor:pointer;color:var(--text);';
   openBtn.onclick=()=>_fsPdfOeffnen(bericht);
-  footer.append(pdfBtn,openBtn,shareBtn);
+  if(bericht.schlank&&typeof window!=='undefined'&&typeof window._pamBesichtigungWord==='function'){ /* F39: Besichtigung 2 zusätzlich als bearbeitbares Word-Dokument – nur am PC, den Bau übernimmt PAM Desktop */
+    const wordBtn=document.createElement('button');wordBtn.type='button';wordBtn.textContent='📝 Word';wordBtn.setAttribute('data-fs-word','1');wordBtn.title='Word-Dokument zum Bearbeiten erstellen (das PDF bleibt der unveränderte Nachweis)';
+    wordBtn.style.cssText='padding:12px;background:var(--fs-kfl,var(--bg3));border:1px solid var(--fs-krd,var(--border));border-radius:8px;font-size:var(--fs15,15px);font-weight:600;cursor:pointer;color:var(--text);';
+    wordBtn.onclick=async()=>{wordBtn.disabled=true;const alt=wordBtn.textContent;wordBtn.textContent='⏳ Word …';try{await window._pamBesichtigungWord(bericht,t);}finally{wordBtn.disabled=false;wordBtn.textContent=alt;}};
+    footer.append(pdfBtn,wordBtn,openBtn,shareBtn);
+  }else footer.append(pdfBtn,openBtn,shareBtn);
   ov.append(hdr,body,footer);
   document.body.appendChild(ov);
   /* F28: die Frage „Innen · Außen · Beides“ kommt VOR dem Anlegen; am PC das Fenster schweben lassen und die Liste auffrischen, weil der Aufrufer schon fertig ist */
