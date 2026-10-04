@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F36';
+const PAM_FORMULARE_VERSION='F37';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
@@ -207,6 +207,7 @@ function _fsVervollstaendigen(b){
       if(typeof b.luftbildEbene!=='string')b.luftbildEbene='';if(b.schlank&&typeof b.protName!=='string')b.protName='';
       if(b.luftbildAnsicht!==undefined&&b.luftbildAnsicht!==null&&!_fsLbAnsichtOk(b.luftbildAnsicht))b.luftbildAnsicht=null; /* F27: zuletzt gesehener Kartenausschnitt */
       (b.fotos||[]).forEach(f=>{if(f&&f.blick!==undefined&&!(typeof f.blick==='number'&&isFinite(f.blick)))delete f.blick;}); /* F29 */
+      (b.fotos||[]).forEach(f=>{if(f&&f.pins!==undefined){f.pins=_fsFpListe(f).slice(0,FS_FP_MAX);f.pins.forEach(p=>{if(typeof p.t!=='string')p.t=String(p.t===null||p.t===undefined?'':p.t);});}}); /* F37: Foto-Pins – Unbrauchbares fällt heraus */
       if(b.schlank){ /* F33: Außenskizzen (Liste am Protokoll) und die Marke je Stelle (s.skz = {k: Kennung der Skizze, x, y}); eine Marke ohne ihre Skizze entfällt */
         if(!Array.isArray(b.aussenSkizzen))b.aussenSkizzen=[];
         b.aussenSkizzen=b.aussenSkizzen.filter(k=>k&&typeof k.id==='string'&&k.id);
@@ -484,6 +485,198 @@ function _fsMiniaturQuelle(f,img){
 }
 /* F32: frisch aufgenommen = der Geräteschlüssel des Fotos („photo_<Zeit>_…“) ist nicht älter als der Moment seit (Antippen des Foto-Knopfs). Ein angehaktes älteres Foto ist nicht frisch. */
 function _fsFotoFrisch(f,seit){const m=/^photo_([0-9]+)_/.exec(String((f&&f.localKey)||''));return !!m&&+m[1]>=+seit;}
+/* ── F37: FOTO-PINS (Besichtigung 2) ─────────────────────────────────────────────────────────────────────────────────
+   Frank 04.10.2026: „Wenn das Foto geöffnet ist – kann ich da mehrere Stellen markieren, mit einem Pin, und diesen Pin beschriften, z. B. Schaden, undicht?
+   Das müsste ich am PC noch bearbeiten können … die Pins muss ich vor Ort machen, damit ich das noch weiß, wenn ich im Büro bin.“
+   Am Foto: foto.pins = [{x, y (Anteile 0…1 des Bildes), t (Beschriftung), ang, len}] – Nummer = Platz in der Liste + 1. Form wie im Luftbild und in der Skizze:
+   Kreis mit Nummer NEBEN der Stelle, Strich, Pfeilspitze auf die Stelle. Das Foto selbst bleibt unverändert (nichts wird eingebrannt); gezeichnet wird für
+   die Anzeige und fürs PDF. Größen beziehen sich auf eine 900 Bildpunkte breite Fläche und wachsen mit dem Bild. */
+const FS_FP_MAX=20,FS_FP_ANG=225,FS_FP_LEN=90,FS_FP_R=26,FS_FP_BREITE=900;
+function _fsFpOk(p){return !!p&&typeof p==='object'&&isFinite(+p.x)&&isFinite(+p.y)&&p.x!==null&&p.y!==null&&p.x!==''&&p.y!=='';}
+function _fsFpListe(f){return (f&&Array.isArray(f.pins))?f.pins.filter(_fsFpOk):[];}
+function _fsFpKlemme(v){return Math.round(Math.max(0.02,Math.min(0.98,+v))*1000)/1000;}
+/* Neuer Pin an der Stelle x/y (Anteile); gibt seinen Platz zurück, -1 bei Unbrauchbarem oder voller Liste */
+function _fsFpNeu(f,x,y,text){
+  if(!f||typeof f!=='object'||!isFinite(+x)||!isFinite(+y))return -1;
+  f.pins=_fsFpListe(f);
+  if(f.pins.length>=FS_FP_MAX)return -1;
+  f.pins.push({x:_fsFpKlemme(x),y:_fsFpKlemme(y),t:String(text||'').trim()});
+  return f.pins.length-1;
+}
+function _fsFpBewegen(p,x,y){if(!_fsFpOk(p)||!isFinite(+x)||!isFinite(+y))return false;p.x=_fsFpKlemme(x);p.y=_fsFpKlemme(y);return true;}
+function _fsFpRing(p){
+  const a=(p&&isFinite(+p.ang)&&p.ang!==null)?((+p.ang%360)+360)%360:FS_FP_ANG;
+  const l=(p&&isFinite(+p.len)&&p.len!==null)?Math.max(50,Math.min(220,+p.len)):FS_FP_LEN;
+  return {ang:a,len:l};
+}
+function _fsFpRingSetzen(p,ang,len){if(!_fsFpOk(p)||!isFinite(+ang)||!isFinite(+len))return false;p.ang=Math.round(((+ang%360)+360)%360)%360;p.len=Math.round(Math.max(50,Math.min(220,+len)));return true;}
+function _fsFpText(p,t){if(!_fsFpOk(p))return false;p.t=String(t===null||t===undefined?'':t).trim();return true;}
+/* Pin entfernen – die folgenden rücken auf (Nummer = Platz in der Liste) */
+function _fsFpWeg(f,i){const l=_fsFpListe(f);if(!l[i])return false;f.pins=l.filter((p,k)=>k!==i);return true;}
+/* Lage in Bildpunkten eines W×H großen Bildes: px/py = die Stelle (Pfeilspitze), x/y = Mitte des Kreises, R = Radius, s = Maßstab; liefe der Kreis aus dem Bild, zeigt er zur anderen Seite */
+function _fsFpLage(p,W,H){
+  const s=W/FS_FP_BREITE,R=FS_FP_R*s,px=p.x*W,py=p.y*H,r=_fsFpRing(p);
+  let ang=r.ang,rp=_fsLbRingPos(px,py,ang,r.len*s);
+  if(rp.x<R+4||rp.x>W-R-4||rp.y<R+4||rp.y>H-R-4){ang=(ang+180)%360;rp=_fsLbRingPos(px,py,ang,r.len*s);}
+  return {px:px,py:py,x:rp.x,y:rp.y,ang:ang,R:R,s:s};
+}
+/* Was liegt an dieser Stelle des Bildes? {i, teil:'ring'|'ziel'} – der Kreis geht vor, der zuletzt gesetzte Pin gewinnt; null = nichts */
+function _fsFpTreffer(f,px,py,W,H){
+  const l=_fsFpListe(f);
+  for(let i=l.length-1;i>=0;i--){
+    const L=_fsFpLage(l[i],W,H);
+    if(Math.hypot(L.x-px,L.y-py)<=L.R+12*L.s)return {i:i,teil:'ring'};
+    if(Math.hypot(L.px-px,L.py-py)<=32*L.s)return {i:i,teil:'ziel'};
+  }
+  return null;
+}
+/* „1 = Schaden · 2 = undicht“ – für die Liste unter dem Foto und die Bildunterschrift im PDF; '' ohne Pins */
+function _fsFpLegende(f){return _fsFpListe(f).map((p,i)=>(i+1)+' = '+(String(p.t||'').trim()||'ohne Text')).join(' · ');}
+/* Zeichnet die Pins auf ein W×H großes Bild. sel = gewählter Pin (blauer Ring), lose = er lässt sich gerade verschieben (gestrichelter Griff) – beides nur im Fenster */
+function _fsFpZeichnen(g,f,W,H,sel,lose){
+  _fsFpListe(f).forEach((p,i)=>{
+    const L=_fsFpLage(p,W,H),s=L.s,R=L.R,dx=Math.cos(L.ang*Math.PI/180),dy=-Math.sin(L.ang*Math.PI/180),nx=-dy,ny=dx;
+    const sx=L.x-dx*R,sy=L.y-dy*R,ex=L.px+dx*16*s,ey=L.py+dy*16*s;
+    g.lineCap='round';g.lineJoin='round';
+    g.lineWidth=9*s;g.strokeStyle='#ffffff';g.beginPath();g.moveTo(sx,sy);g.lineTo(ex,ey);g.stroke();
+    g.lineWidth=4*s;g.strokeStyle='#d9480f';g.beginPath();g.moveTo(sx,sy);g.lineTo(ex,ey);g.stroke();
+    g.beginPath();g.moveTo(L.px,L.py);g.lineTo(L.px+(dx*24+nx*10)*s,L.py+(dy*24+ny*10)*s);g.lineTo(L.px+(dx*24-nx*10)*s,L.py+(dy*24-ny*10)*s);g.closePath();g.fillStyle='#d9480f';g.fill();g.lineWidth=2*s;g.strokeStyle='#ffffff';g.stroke();
+    if(sel===i){
+      g.strokeStyle='#1f5f8b';g.lineWidth=4*s;g.beginPath();g.arc(L.x,L.y,R+10*s,0,Math.PI*2);g.stroke();
+      if(lose){g.lineWidth=3*s;if(typeof g.setLineDash==='function')g.setLineDash([8*s,6*s]);g.beginPath();g.arc(L.px,L.py,30*s,0,Math.PI*2);g.stroke();if(typeof g.setLineDash==='function')g.setLineDash([]);}
+    }
+    g.fillStyle='#d9480f';g.beginPath();g.arc(L.x,L.y,R,0,Math.PI*2);g.fill();
+    g.strokeStyle='#ffffff';g.lineWidth=4*s;g.beginPath();g.arc(L.x,L.y,R,0,Math.PI*2);g.stroke();
+    g.fillStyle='#ffffff';g.font='bold '+Math.round(28*s)+'px sans-serif';g.textAlign='center';g.textBaseline='middle';
+    g.fillText(String(i+1),L.x,L.y+1*s);
+  });
+}
+/* Fürs PDF: Pins auf das (schon verkleinerte) Foto zeichnen. d = {dataUrl,w,h} von _fsFotoFuerPdf. Ohne Pins oder ohne Zeichenbereich kommt d unverändert zurück – das Original wird nie angefasst. */
+async function _fsFpEinbrennen(d,f){
+  try{
+    if(!d||!d.dataUrl||!_fsFpListe(f).length||typeof Image==='undefined'||typeof document==='undefined'||typeof document.createElement!=='function')return d;
+    const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=()=>rej(new Error('Bild lädt nicht'));i.src=d.dataUrl;});
+    const c=document.createElement('canvas');c.width=img.naturalWidth||d.w;c.height=img.naturalHeight||d.h;
+    const g=c.getContext&&c.getContext('2d');if(!g)return d;
+    g.drawImage(img,0,0,c.width,c.height);
+    _fsFpZeichnen(g,f,c.width,c.height,-1,false);
+    return {dataUrl:c.toDataURL('image/jpeg',0.9),w:c.width,h:c.height};
+  }catch(e){console.warn('[Foto-Pins] PDF:',e);return d;}
+}
+/* Das Fenster „Foto markieren“: Foto groß, „📌 Pin setzen“ → ins Foto tippen → Beschriftung. Ein gesetzter Pin ist fest; „✥ Verschieben“ macht den gewählten lose
+   (Pfeilspitze oder Kreis ziehen, oder an die richtige Stelle tippen). Darunter die Liste „1 = Schaden …“. Dasselbe Fenster am Tablet und am PC. fertig() beim Schließen. */
+function _fsFotoPinsFenster(bericht,f,fertig){
+  const alt=document.getElementById('_fsFotoPins');if(alt)alt.remove();
+  if(!f)return;
+  const ov=document.createElement('div');ov.id='_fsFotoPins';
+  ov.style.cssText='position:fixed;inset:0;z-index:100060;background:var(--bg);color:var(--text);display:flex;flex-direction:column;';
+  const kopf=document.createElement('div');kopf.style.cssText='background:'+FS_FARBE+';padding:10px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0;';
+  const zu=document.createElement('button');zu.type='button';zu.textContent='←';zu.setAttribute('aria-label','Markieren beenden');zu.setAttribute('data-fs-fp-zu','1');
+  zu.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:44px;height:44px;border-radius:8px;font-size:20px;cursor:pointer;flex-shrink:0;';
+  const ti=document.createElement('div');ti.style.cssText='font-size:16px;font-weight:700;color:#fff;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+  const zuT=_fsBgFotoZuordnung(bericht,f);ti.textContent='📌 Foto markieren'+(zuT?' – '+zuT:'');
+  kopf.append(zu,ti);
+  const leiste=document.createElement('div');leiste.style.cssText='display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border);flex-shrink:0;';
+  const feld=document.createElement('div');feld.style.cssText='flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px;background:var(--bg3);';
+  const cv=document.createElement('canvas');cv.width=900;cv.height=640;cv.setAttribute('data-fs-fp-flaeche','1');
+  cv.style.cssText='display:block;max-width:100%;max-height:100%;width:auto;height:auto;background:#fff;border:1px solid var(--border);touch-action:none;cursor:crosshair;';
+  feld.appendChild(cv);
+  const liste=document.createElement('div');liste.setAttribute('data-fs-fp-liste','1');liste.style.cssText='flex-shrink:0;max-height:24vh;overflow:auto;padding:6px 12px;border-top:1px solid var(--border);';
+  const fuss=document.createElement('div');fuss.style.cssText='flex-shrink:0;padding:10px 14px 14px;border-top:1px solid var(--border);';
+  const fb=document.createElement('button');fb.type='button';fb.textContent='✓ Fertig';fb.setAttribute('data-fs-fp-fertig','1');
+  fb.style.cssText='width:100%;min-height:54px;border-radius:12px;border:none;background:'+FS_FARBE+';color:#fff;font-size:18px;font-weight:700;font-family:inherit;cursor:pointer;';
+  fuss.appendChild(fb);
+  ov.append(kopf,leiste,feld,liste,fuss);
+  const g=cv.getContext('2d');
+  let W=900,H=640,bild=null,geladen=false,sel=-1,lose=false,setzen=false,zieh=null,festGesagt=false;
+  const pins=()=>_fsFpListe(f);
+  const zeichne=()=>{
+    g.fillStyle='#ffffff';g.fillRect(0,0,W,H);
+    if(bild)g.drawImage(bild,0,0,W,H);
+    else{g.fillStyle='#666666';g.font='28px sans-serif';g.textAlign='center';g.textBaseline='middle';g.fillText(geladen?'Foto nicht verfügbar':'Lade Foto …',W/2,H/2);}
+    _fsFpZeichnen(g,f,W,H,sel,lose);
+  };
+  const knopf=(txt,stil,fn,attr)=>{
+    const x=document.createElement('button');x.type='button';x.textContent=txt;x.style.cssText='font-family:inherit;cursor:pointer;border-radius:10px;min-height:48px;padding:6px 12px;font-size:15px;font-weight:700;color:var(--text);'+stil;
+    if(attr)x.setAttribute(attr[0],attr[1]);
+    x.onclick=fn;return x;
+  };
+  const RAND='border:2px solid var(--border);background:transparent;';
+  const beschriften=i=>{const p=pins()[i];if(!p)return;const tx=prompt('Beschriftung für Pin '+(i+1)+'\n(z. B. Schaden, undicht)',String(p.t||''));if(tx===null)return;_fsFpText(p,tx);scheduleSave();alles();};
+  const leisteBauen=()=>{
+    leiste.innerHTML='';
+    leiste.appendChild(knopf('📌 Pin setzen','border:3px solid '+(setzen?'#d9480f':'var(--border)')+';background:'+(setzen?'rgba(217,72,15,.16)':'transparent')+';',()=>{setzen=!setzen;if(setzen){sel=-1;lose=false;}alles();},['data-fs-fp-setzen','1']));
+    const p=sel>=0?pins()[sel]:null;
+    if(p){
+      leiste.appendChild(knopf('Beschriftung ändern',RAND,()=>beschriften(sel),['data-fs-fp-text','1']));
+      leiste.appendChild(knopf(lose?'✓ Fest':'✥ Verschieben','border:3px solid '+(lose?'#2e7d4f':'var(--border)')+';background:'+(lose?'rgba(46,125,79,.16)':'transparent')+';',()=>{lose=!lose;alles();},['data-fs-fp-lose','1']));
+      leiste.appendChild(knopf('Entfernen',RAND+'color:var(--red);',()=>{if(String(p.t||'').trim()&&!confirm('Pin '+(sel+1)+' („'+String(p.t).trim()+'“) entfernen?'))return;if(_fsFpWeg(f,sel)){sel=-1;lose=false;scheduleSave();alles();}},['data-fs-fp-weg','1']));
+    }
+    const z=document.createElement('span');z.setAttribute('data-fs-fp-hinweis','1');z.style.cssText='font-size:13px;color:var(--text2);flex:1 1 200px;';
+    z.textContent=setzen?'Jetzt ins Foto tippen, wo der Pin hin soll'
+      :!p?(pins().length?'Pin antippen zum Ändern – oder „📌 Pin setzen“ für einen weiteren':'„📌 Pin setzen“ antippen, dann ins Foto tippen')
+      :lose?'Pin '+(sel+1)+' ist lose: Pfeilspitze oder Kreis ziehen oder an die richtige Stelle tippen – dann „✓ Fest“'
+      :'Pin '+(sel+1)+' ist fest (🔒) – „✥ Verschieben“ macht ihn lose';
+    leiste.appendChild(z);
+  };
+  const listeBauen=()=>{
+    liste.innerHTML='';
+    pins().forEach((p,i)=>{
+      const r=document.createElement('button');r.type='button';r.setAttribute('data-fs-fp-zeile',String(i));
+      r.style.cssText='display:block;width:100%;text-align:left;min-height:40px;margin:3px 0;padding:6px 10px;border-radius:8px;font-family:inherit;font-size:15px;cursor:pointer;color:var(--text);border:2px solid '+(sel===i?'#d9480f':'transparent')+';background:'+(sel===i?'rgba(217,72,15,.12)':'var(--bg2)')+';';
+      r.textContent=(i+1)+' = '+(String(p.t||'').trim()||'ohne Text');
+      r.onclick=()=>{sel=i;lose=false;setzen=false;alles();};
+      liste.appendChild(r);
+    });
+    liste.style.display=pins().length?'':'none';
+  };
+  const alles=()=>{zeichne();leisteBauen();listeBauen();};
+  const pos=e=>{const rc=cv.getBoundingClientRect();return [(e.clientX-rc.left)/rc.width*W,(e.clientY-rc.top)/rc.height*H];};
+  cv.addEventListener('pointerdown',e=>{
+    e.preventDefault();
+    try{cv.setPointerCapture(e.pointerId);}catch(x){}
+    const p=pos(e);
+    if(setzen){ /* neuer Pin: erst die Stelle, dann die Beschriftung */
+      const i=_fsFpNeu(f,p[0]/W,p[1]/H,'');
+      if(i<0){toast('Genug Pins auf diesem Foto – bitte einen entfernen','info',3500);return;}
+      setzen=false;sel=i;lose=false;scheduleSave();alles();
+      setTimeout(()=>{if(document.getElementById('_fsFotoPins')===ov)beschriften(i);},80);
+      return;
+    }
+    const tr=_fsFpTreffer(f,p[0],p[1],W,H);
+    if(tr&&tr.i!==sel){sel=tr.i;lose=false;alles();return;} /* anderen Pin angetippt = auswählen, nichts bewegen */
+    const pin=sel>=0?pins()[sel]:null;
+    if(!pin)return;
+    if(!lose){if(!festGesagt){festGesagt=true;toast('Der Pin ist fest – zum Ändern „✥ Verschieben“ antippen','info',3500);}return;} /* fest = Tippen verrückt nichts */
+    zieh={id:e.pointerId,teil:(tr&&tr.teil==='ring')?'ring':'ziel'};
+    if(!tr)_fsFpBewegen(pin,p[0]/W,p[1]/H);
+    zeichne();
+  });
+  cv.addEventListener('pointermove',e=>{
+    if(!zieh||e.pointerId!==zieh.id)return;
+    e.preventDefault();
+    const p=pos(e),pin=pins()[sel];if(!pin)return;
+    if(zieh.teil==='ring'){const tx=pin.x*W,ty=pin.y*H,s=W/FS_FP_BREITE;_fsFpRingSetzen(pin,Math.atan2(-(p[1]-ty),p[0]-tx)*180/Math.PI,Math.hypot(p[0]-tx,p[1]-ty)/s);}
+    else _fsFpBewegen(pin,p[0]/W,p[1]/H);
+    zeichne();
+  });
+  const ende=e=>{if(!zieh||e.pointerId!==zieh.id)return;zieh=null;scheduleSave();alles();};
+  cv.addEventListener('pointerup',ende);
+  cv.addEventListener('pointercancel',ende);
+  const schliessen=()=>{ov.remove();if(typeof fertig==='function'){try{fertig();}catch(x){console.warn('[Foto-Pins]',x);}}};
+  zu.onclick=schliessen;fb.onclick=schliessen;
+  alles();
+  document.body.appendChild(ov);
+  /* Das Foto in guter Auflösung holen (derselbe Weg wie fürs PDF: Gerätespeicher, sonst Drive); klappt das nicht, die Miniatur */
+  (async()=>{
+    let d=null;try{d=await _fsFotoFuerPdf(f);}catch(e){d=null;}
+    if(document.getElementById('_fsFotoPins')!==ov)return;
+    const im=new Image();
+    im.onload=()=>{if(document.getElementById('_fsFotoPins')!==ov)return;const nw=im.naturalWidth||900,nh=im.naturalHeight||640,k=Math.min(1,1600/nw);W=Math.max(1,Math.round(nw*k));H=Math.max(1,Math.round(nh*k));cv.width=W;cv.height=H;bild=im;geladen=true;zeichne();};
+    im.onerror=()=>{geladen=true;zeichne();};
+    if(d&&d.dataUrl)im.src=d.dataUrl;else{geladen=true;zeichne();_fsMiniaturQuelle(f,im);}
+  })();
+}
 function _fsFotoLeiste(bericht,it,label,kompakt,vorne){ // kompakt: nur 📷 (+Zahl) neben der Notiz – die Checkliste bleibt kurz
   if(!Array.isArray(it.fotoRefs))it.fotoRefs=[];
   const w=document.createElement('div');w.setAttribute('data-fs-fotoleiste','1');
@@ -512,6 +705,13 @@ function _fsFotoLeiste(bericht,it,label,kompakt,vorne){ // kompakt: nur 📷 (+Z
         bk.style.cssText='position:absolute;left:2px;bottom:2px;min-width:30px;height:20px;border-radius:10px;border:none;background:rgba(31,95,139,.9);color:#fff;font-size:11px;font-weight:700;line-height:20px;padding:0 6px;cursor:pointer;';
         bk.onclick=e=>{e.stopPropagation();if(confirm('Blickrichtung (Blick nach '+_fsBlickWort(f.blick)+') am Foto entfernen?')){delete f.blick;scheduleSave();neu();}};
         th.appendChild(bk);
+      }
+      if(bericht.schlank){ /* F37: „📌“ an der Miniatur öffnet das Foto zum Markieren; mit Pins steht ihre Anzahl dabei */
+        const np=_fsFpListe(f).length;
+        const pk=document.createElement('button');pk.type='button';pk.setAttribute('data-fs-fotopin','1');pk.textContent='📌'+(np?' '+np:'');pk.title='Im Foto markieren – Pins mit Beschriftung'+(np?' ('+_fsFpLegende(f)+')':'');pk.setAttribute('aria-label',pk.title);
+        pk.style.cssText='position:absolute;left:2px;top:2px;min-width:30px;height:24px;border-radius:12px;border:none;background:'+(np?'rgba(217,72,15,.95)':'rgba(0,0,0,.65)')+';color:#fff;font-size:12px;font-weight:700;line-height:24px;padding:0 6px;cursor:pointer;';
+        pk.onclick=e=>{e.stopPropagation();_fsFotoPinsFenster(bericht,f,()=>neu());};
+        th.appendChild(pk);
       }
       w.appendChild(th);
     });
@@ -4950,7 +5150,7 @@ async function _fsMobPdfBg(bericht,task){
       for(let fi=0;fi<fotoList.length;fi++){
         const f=fotoList[fi];
         setSaveInd('saving','PDF: Foto '+(fi+1)+'/'+fotoList.length+' …');
-        const d=await _fsFotoFuerPdf(f);
+        const d=await _fsFpEinbrennen(await _fsFotoFuerPdf(f),f); /* F37: Foto-Pins fürs PDF daraufgezeichnet (das Original bleibt unverändert) */
         if(!d)continue;
         if(col===0){
           if(erste){if(y+9+iH+10>285){doc.addPage();y=M;}abschnitt('Fotos');erste=false;}
@@ -4962,7 +5162,8 @@ async function _fsMobPdfBg(bericht,task){
         try{doc.addImage(d.dataUrl,'JPEG',x,y,w,h);}catch(e){console.warn('[Feuchte] Bild:',e);}
         const zu=_fsBgFotoZuordnung(bericht,f);
         doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(90,90,90);
-        const cap=doc.splitTextToSize('Foto '+(fi+1)+(zu?' – '+zu:''),iW).slice(0,3); // F2c: die Unterschrift nennt Raum, Wand und Messstelle – bis zu drei Zeilen statt nur der ersten
+        const fpl=_fsFpLegende(f); /* F37: „Markiert: 1 = Schaden · 2 = undicht“ */
+        const cap=doc.splitTextToSize('Foto '+(fi+1)+(zu?' – '+zu:'')+(fpl?' – Markiert: '+fpl:''),iW).slice(0,fpl?7:3); // F2c: die Unterschrift nennt Raum, Wand und Messstelle – bis zu drei Zeilen statt nur der ersten
         doc.text(cap,x,y+h+3.5);
         zeileH=Math.max(zeileH,h+(cap.length-1)*3);
         if(col===1)y+=zeileH+9;
