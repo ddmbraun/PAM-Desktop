@@ -10397,7 +10397,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-05 · #1114'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-05-b1114) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-05 · #1115'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-05-b1115) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -56801,6 +56801,8 @@ function _pamAnrufErledigt(taskId){
    ⛔ Gibt es in der Karte schon einen Termin ohne Datum, wird KEIN zweiter angelegt (sonst entstünde bei jedem Klick ein Geisterchip).
    ⛔ Ist die Karte gerade im Task-Fenster offen, hält das Fenster eine EIGENE Terminliste (taskAusserhausTermine): saveTaskData überschriebe sonst eine Änderung direkt an der Karte. */
 function _pamAnrufTermin(taskId,name){
+  // b1115: der Knopf fragt erst nach Zeitfenster und Tag; ein drittes Argument (aus der Abfrage) legt direkt an wie b1082
+  if(arguments.length<3&&typeof _pamAnrufTerminDialog==='function'){ _pamAnrufTerminDialog(taskId,name); return; }
   const t=(typeof findTaskById==='function')?findTaskById(taskId):null;
   if(!t){ try{showToast('⚠ Karte nicht gefunden','warning',4000);}catch(e){} return; }
   const idEl=document.getElementById('taskId');
@@ -56817,6 +56819,180 @@ function _pamAnrufTermin(taskId,name){
   try{ if(typeof _kalSchwebAn!=='undefined'&&!_kalSchwebAn&&currentView!=='kalender') _kalSchwebAuf(); else if(typeof _kalSchwebAn!=='undefined'&&_kalSchwebAn) _kalSchwebZeichne(); }catch(e){}
   try{ _pamAnrufRender(); }catch(e){}
   try{ showToast(gibt?'ℹ In dieser Karte gibt es schon einen Termin ohne Datum – er steht im Wochenfenster unter „Ungeplant“':'✓ Termin ohne Datum angelegt – im Wochenfenster unter „Ungeplant“ auf einen freien Platz ziehen','info',5000); }catch(e){}
+}
+/* b1115: „📅 Termin“ fragt erst nach dem Zeitfenster – zwei Zahlen tippen („zwischen 13 und 17 Uhr“), dazu freiwillig der Tag.
+   Das Fenster ist NUR Text hinter der Beschreibung: kein neues Feld, steht damit auch am Handy und im Outlook-Betreff.
+   Mit Tag: 30 Minuten auf dem ersten freien Platz im Fenster (Schritt 30 min, Fahrzeiten zählen über _kalwConflictAt mit);
+   nichts frei → der Termin bleibt ohne Datum unter „Ungeplant“. Ohne Tag: wie b1082, nur mit dem Fenster im Text.
+   ⛔ Ein Termin ohne Datum, der schon zu DIESEM Namen gehört, wird weiterbenutzt (kein Geisterchip je Klick, wie b1082);
+      für einen anderen Namen derselben Karte entsteht ein eigener. */
+// Uhrzeit aus dem Tippfeld: „13“, „7.30“, „7:30“, „7,30“, „730“, „0730“ → Minuten seit Mitternacht; leer → -1; unlesbar → null
+function _pamAnrufZeitLesen(s){
+  let x=String(s==null?'':s).toLowerCase().split('uhr').join('').split(' ').join('');
+  if(!x)return -1;
+  x=x.split('.').join(':').split(',').join(':');
+  const ziffern=function(z){ if(!z)return false; for(let i=0;i<z.length;i++){ if('0123456789'.indexOf(z.charAt(i))<0)return false; } return true; };
+  let h=0,m=0;
+  if(x.indexOf(':')>=0){
+    const p=x.split(':');
+    if(p.length!==2||!ziffern(p[0])||!ziffern(p[1])||p[0].length>2||p[1].length!==2)return null;
+    h=+p[0]; m=+p[1];
+  }else{
+    if(!ziffern(x)||x.length>4)return null;
+    if(x.length<=2){ h=+x; }
+    else{ h=+x.slice(0,x.length-2); m=+x.slice(-2); }
+  }
+  if(h>23||m>59)return null;
+  return h*60+m;
+}
+function _pamAnrufZeitKurz(min){ const h=Math.floor(min/60),m=min%60; return m?(h+':'+String(m).padStart(2,'0')):String(h); }
+function _pamAnrufZeitHHMM(min){ return String(Math.floor(min/60)).padStart(2,'0')+':'+String(min%60).padStart(2,'0'); }
+function _pamAnrufFensterText(vonMin,bisMin){
+  if(!(vonMin>=0))return '';
+  if(!(bisMin>=0))return 'ab '+_pamAnrufZeitKurz(vonMin)+' Uhr';
+  return 'zwischen '+_pamAnrufZeitKurz(vonMin)+' und '+_pamAnrufZeitKurz(bisMin)+' Uhr';
+}
+// Hängt das Fenster an die Beschreibung; ein früher angehängtes Fenster („ – zwischen … Uhr“ / „ – ab … Uhr“ am Ende) wird ersetzt
+function _pamAnrufFensterAnText(bez,fenster){
+  let b=String(bez==null?'':bez).trim();
+  if(b.slice(-4)===' Uhr'){
+    const i=Math.max(b.lastIndexOf(' – zwischen '),b.lastIndexOf(' – ab '));
+    if(i>=0)b=b.slice(0,i).trim();
+  }
+  if(!fenster)return b;
+  return b?(b+' – '+fenster):fenster;
+}
+// Erster freier 30-Minuten-Platz im Fenster (ohne zweite Zahl: bis 18 Uhr); -1 = nichts frei
+function _pamAnrufFreierPlatz(iso,vonMin,bisMin,taskId,idx){
+  const ende=(bisMin>=0)?bisMin:Math.max(vonMin+30,18*60);
+  for(let s=vonMin;s<ende;s+=30){
+    if(s+30>ende&&s!==vonMin)break;
+    const hit=(typeof _kalwConflictAt==='function')?_kalwConflictAt(iso,s,s+30,taskId,idx):null;
+    if(!hit)return s;
+  }
+  return -1;
+}
+function _pamAnrufTerminFenster(taskId,name,vonMin,bisMin,iso){
+  const t=(typeof findTaskById==='function')?findTaskById(taskId):null;
+  if(!t){ try{showToast('⚠ Karte nicht gefunden','warning',4000);}catch(e){} return null; }
+  const idEl=document.getElementById('taskId');
+  const imFenster=!!(idEl&&idEl.value===taskId&&typeof taskAusserhausTermine!=='undefined'&&Array.isArray(taskAusserhausTermine));
+  if(!imFenster&&!Array.isArray(t.ausserhausTermine))t.ausserhausTermine=[];
+  const liste=imFenster?taskAusserhausTermine:t.ausserhausTermine;
+  const n=String(name||'').trim();
+  const grund='Termin nach Anruf'+(n?' '+n:'');
+  const fenster=_pamAnrufFensterText(vonMin,bisMin);
+  let idx=-1;
+  for(let i=0;i<liste.length;i++){
+    const x=liste[i];
+    if(!x||x.hiddenInPam||((x.date||x.datum)||'').trim())continue;
+    const b=_pamAnrufFensterAnText(x.beschreibung,'');
+    if(b===grund){ idx=i; break; }
+  }
+  const neu=idx<0;
+  let e;
+  if(neu){ e={date:'',von:'',bis:'',beschreibung:_pamAnrufFensterAnText(grund,fenster),_pamDirty:true}; liste.push(e); idx=liste.length-1; }
+  else{ e=liste[idx]; e.beschreibung=_pamAnrufFensterAnText(e.beschreibung,fenster); e._pamDirty=true; }
+  let platz=-1;
+  if(iso){
+    platz=_pamAnrufFreierPlatz(iso,vonMin,bisMin,taskId,idx);
+    if(platz>=0){ e.date=iso; e.von=_pamAnrufZeitHHMM(platz); e.bis=_pamAnrufZeitHHMM(platz+30); e.outlookDeleted=false; }
+  }
+  if(imFenster){ try{renderAusserhausTermine();}catch(err){} try{scheduleTaskFieldSave();}catch(err){} }
+  else{ try{autoSave();}catch(err){ console.warn('[b1115]',err); } try{render();}catch(err){} }
+  try{ if(typeof _kalSchwebAn!=='undefined'&&!_kalSchwebAn&&currentView!=='kalender') _kalSchwebAuf(); else if(typeof _kalSchwebAn!=='undefined'&&_kalSchwebAn) _kalSchwebZeichne(); }catch(err){}
+  try{ _pamAnrufRender(); }catch(err){}
+  const tag=iso?((typeof _kalDe==='function')?_kalDe(iso):iso):'';
+  let meldung='', art='info', dauer=5000;
+  if(platz>=0) meldung='✓ Termin '+tag+' '+e.von+'–'+e.bis+' angelegt · im Text: '+fenster;
+  else if(iso){ meldung='⚠ Am '+tag+' ist '+fenster+' nichts mehr frei – der Termin liegt ohne Datum im Wochenfenster unter „Ungeplant“'; art='warning'; dauer=8000; }
+  else meldung=(neu?'✓ Termin ohne Datum angelegt':'✓ Zeitfenster am Termin ohne Datum geändert')+' ('+fenster+') – im Wochenfenster unter „Ungeplant“ auf einen freien Platz ziehen';
+  try{ showToast(meldung,art,dauer); }catch(err){}
+  // Karte nicht im Task-Fenster offen: wie beim Hineinziehen im Wochenraster gleich nach Outlook schreiben (das Task-Fenster macht es beim Speichern selbst)
+  if(platz>=0&&!imFenster&&typeof msToken!=='undefined'&&msToken&&typeof _msAutoPushTermine==='function'){
+    try{
+      _msAutoPushTermine(t).then(function(b){
+        if(b&&b.gepusht>0){ try{showToast('✓ Termin '+tag+' '+e.von+'–'+e.bis+' · nach Outlook','info',3000);}catch(err){} }
+      }).catch(function(err){ console.warn('[b1115] Outlook',err); try{showToast('⚠ Termin angelegt – Outlook nicht erreicht','warning',6000);}catch(e2){} });
+    }catch(err){ console.warn('[b1115] Outlook',err); }
+  }
+  return {neu:neu,idx:idx,platz:platz,fenster:fenster};
+}
+function _pamAnrufTerminDialog(taskId,name){
+  const t=(typeof findTaskById==='function')?findTaskById(taskId):null;
+  if(!t){ try{showToast('⚠ Karte nicht gefunden','warning',4000);}catch(e){} return; }
+  const alt=document.getElementById('pamAnrufTerminDlg'); if(alt)alt.remove();
+  const ov=document.createElement('div');
+  ov.id='pamAnrufTerminDlg';
+  ov.style.cssText='position:fixed;inset:0;z-index:10700;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;';
+  ov.onclick=function(ev){if(ev.target===ov)ov.remove();};
+  const box=document.createElement('div');
+  box.style.cssText='background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:16px;width:min(420px,92vw);box-shadow:0 8px 30px rgba(0,0,0,.35);';
+  const kopf=document.createElement('div');
+  kopf.style.cssText='font-size:13px;font-weight:700;margin-bottom:2px;';
+  kopf.textContent='📅 Termin'+(String(name||'').trim()?': '+String(name).trim():'');
+  const unter=document.createElement('div');
+  unter.style.cssText='font-size:11px;color:var(--text2);margin-bottom:12px;';
+  unter.textContent=t.title||'(kein Titel)';
+  box.appendChild(kopf); box.appendChild(unter);
+  const feld=function(id,platzhalter){
+    const i=document.createElement('input');
+    i.type='text'; i.id=id; i.autocomplete='off'; i.inputMode='numeric'; i.placeholder=platzhalter; i.maxLength=8;
+    i.style.cssText='width:64px;box-sizing:border-box;padding:7px 8px;font-size:14px;text-align:center;';
+    return i;
+  };
+  const wort=function(txt){ const s=document.createElement('span'); s.textContent=txt; s.style.cssText='font-size:13px;'; return s; };
+  const zeileF=document.createElement('div');
+  zeileF.style.cssText='display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+  const von=feld('pamAnrufTerminVon','13'), bis=feld('pamAnrufTerminBis','17');
+  zeileF.appendChild(wort('zwischen')); zeileF.appendChild(von); zeileF.appendChild(wort('und')); zeileF.appendChild(bis); zeileF.appendChild(wort('Uhr'));
+  box.appendChild(zeileF);
+  const labT=document.createElement('div');
+  labT.style.cssText='font-size:11px;font-weight:600;margin:12px 0 3px;';
+  labT.textContent='Tag (darf leer bleiben)';
+  const tag=document.createElement('input');
+  tag.type='date'; tag.id='pamAnrufTerminTag'; tag.autocomplete='off';
+  tag.style.cssText='box-sizing:border-box;padding:6px 8px;font-size:13px;';
+  box.appendChild(labT); box.appendChild(tag);
+  const hilfe=document.createElement('div');
+  hilfe.style.cssText='font-size:11px;color:var(--text2);margin-top:10px;line-height:1.45;';
+  hilfe.textContent='Nur Zahlen tippen, z. B. 13 und 17 – halbe Stunde: 7.30 oder 730. Mit Tag: 30 Minuten auf dem ersten freien Platz im Fenster. Ohne Tag: der Termin liegt im Wochenfenster unter „Ungeplant“. Alles leer: Termin ohne Datum wie bisher.';
+  box.appendChild(hilfe);
+  const fehler=document.createElement('div');
+  fehler.id='pamAnrufTerminFehler';
+  fehler.style.cssText='font-size:12px;font-weight:700;margin-top:8px;min-height:16px;';
+  box.appendChild(fehler);
+  const zeile=document.createElement('div');
+  zeile.style.cssText='display:flex;gap:8px;justify-content:flex-end;margin-top:8px;';
+  const abbr=document.createElement('button');
+  abbr.type='button'; abbr.textContent='Abbrechen';
+  abbr.style.cssText='padding:6px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;font-size:12px;';
+  abbr.onclick=function(){ov.remove();};
+  const ok=document.createElement('button');
+  ok.type='button'; ok.id='pamAnrufTerminAnlegen'; ok.textContent='Termin anlegen';
+  ok.style.cssText='padding:6px 14px;border-radius:6px;border:none;background:#185FA5;color:#fff;cursor:pointer;font-size:12px;font-weight:600;';
+  const melde=function(txt,el){ fehler.textContent='⚠ '+txt; try{ if(el)el.focus(); }catch(e){} };
+  ok.onclick=function(){
+    const v=_pamAnrufZeitLesen(von.value), b=_pamAnrufZeitLesen(bis.value), iso=String(tag.value||'').trim();
+    if(v===null)return melde('Uhrzeit nicht erkannt – z. B. 13, 7.30 oder 730',von);
+    if(b===null)return melde('Uhrzeit nicht erkannt – z. B. 17, 9.30 oder 930',bis);
+    if(v<0&&b>=0)return melde('Bitte auch die erste Uhrzeit eintragen',von);
+    if(b>=0&&b<=v)return melde('Die zweite Uhrzeit muss nach der ersten liegen',bis);
+    if(iso&&v<0)return melde('Mit Tag braucht es ein Zeitfenster – oder den Tag leer lassen',von);
+    if(iso&&typeof _tzHeuteIso==='function'&&iso<_tzHeuteIso())return melde('Der Tag liegt in der Vergangenheit',tag);
+    ov.remove();
+    if(v<0&&!iso)_pamAnrufTermin(taskId,name,true);
+    else _pamAnrufTerminFenster(taskId,name,v,b,iso);
+  };
+  const tasten=function(ev){
+    if(ev.key==='Enter'){ ev.preventDefault(); ok.onclick(); }
+    else if(ev.key==='Escape'){ ev.preventDefault(); ov.remove(); }
+    else fehler.textContent='';
+  };
+  von.onkeydown=tasten; bis.onkeydown=tasten; tag.onkeydown=tasten;
+  zeile.appendChild(abbr); zeile.appendChild(ok); box.appendChild(zeile);
+  ov.appendChild(box); document.body.appendChild(ov);
+  try{ von.focus(); }catch(e){}
 }
 
 function _pamAnrufKopieren(nr){
@@ -56989,7 +57165,7 @@ function _pamAnrufRender(){
         +((_es&&_es.ok&&_es.k==='termin'&&typeof _pamAnrufTerminHinweisHtml==='function')?_pamAnrufTerminHinweisHtml(t,_es.ts):'')
         +'<button type="button" class="pam-anruf-erg-btn" onclick="_pamAnrufErgDialog(\''+safeId+'\',\''+_jsa(e.nr)+'\',\''+_jsa(e.name)+'\',\''+_jsa(e.rolle)+'\')" title="Ergebnis dieses Anrufs ins Bautagebuch eintragen: erreicht, Termin, nicht erreicht …" style="font-size:10px;padding:1px 7px;border-radius:4px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;">✎ Ergebnis</button>'
         +((_es&&_es.ok)?'':'<button type="button" class="pam-anruf-erreicht-btn" onclick="_pamAnrufErreicht(\''+safeId+'\',\''+_jsa(e.nr)+'\',\''+_jsa(e.name)+'\',\''+_jsa(e.rolle)+'\')" title="Du hast diese Person erreicht: trägt „erreicht, kein Termin“ mit der Uhrzeit deines Anrufs ins Bautagebuch ein. Mehr Angaben (Termin, Notiz) gehen über „✎ Ergebnis“." style="font-size:10px;padding:1px 7px;border-radius:4px;border:1px solid #0F6E56;background:var(--bg2);color:#0F6E56;cursor:pointer;">✓ erreicht</button>')
-        +'<button type="button" class="pam-anruf-termin-btn" onclick="_pamAnrufTermin(\''+safeId+'\',\''+_jsa(e.name)+'\')" title="Legt in dieser Karte einen Termin ohne Datum an – er steht dann im Wochenfenster unter „Ungeplant“ und lässt sich dort auf einen freien Platz ziehen" style="font-size:10px;padding:1px 7px;border-radius:4px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;">📅 Termin</button>'
+        +'<button type="button" class="pam-anruf-termin-btn" onclick="_pamAnrufTermin(\''+safeId+'\',\''+_jsa(e.name)+'\')" title="Legt in dieser Karte einen Termin an – fragt vorher nach Zeitfenster (z. B. zwischen 13 und 17 Uhr) und Tag. Ohne Tag steht er im Wochenfenster unter „Ungeplant“ und lässt sich dort auf einen freien Platz ziehen" style="font-size:10px;padding:1px 7px;border-radius:4px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;">📅 Termin</button>'
         +((typeof _pamWahlHandDialog==='function')?'<button type="button" class="pam-wahl-hand-btn" onclick="_pamWahlHandDialog(\''+safeId+'\',\''+_jsa(e.nr)+'\',\''+_jsa(e.name)+'\',\''+_jsa(e.rolle)+'\')" title="Du hast diese Nummer direkt am Telefon gewählt, nicht über PAM: trägt die Wahl mit Datum und Uhrzeit nach (Rückfrage „Wann?“). Abgehakt wird dabei nichts." style="font-size:10px;padding:1px 7px;border-radius:4px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;">＋ gewählt</button>':'')
         +'</span>'
         +'</span>';
