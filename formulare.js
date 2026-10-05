@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F40';
+const PAM_FORMULARE_VERSION='F41';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -3707,8 +3707,8 @@ function _fsAsTyp(sk){return (sk&&sk.typ==='innen')?'innen':'aussen';}
 function _fsAsFlaechen(sk){return _fsAsTyp(sk)==='innen'?FS_AS_FLAECHEN_INNEN:FS_AS_FLAECHEN;}
 function _fsAsAnsicht(sk){const k=sk&&sk.aussen;return (k==='dach'||k==='raum')?'von oben':k==='decke'?'von unten':'von vorn';}
 function _fsAsFarbe(sk){const k=sk&&sk.aussen;return k==='dach'?'#f1f1ee':k==='raum'?'#eef4f9':k==='decke'?'#f4f4f4':'#faf7f0';}
-const FS_AS_STEMPEL={wand:[{t:'afenster',n:'Fenster'},{t:'atuer',n:'Tür'},{t:'fbank',n:'Fensterbank'},{t:'rohr',n:'Fallrohr'}],dach:[{t:'dfenster',n:'Dachfenster'},{t:'schorn',n:'Schornstein'},{t:'gully',n:'Ablauf'},{t:'kuppel',n:'Lichtkuppel'}],
-  raum:[{t:'tuer',n:'Tür'},{t:'fenster',n:'Fenster'},{t:'schrank',n:'Schrank'},{t:'heiz',n:'Heizkörper'}],iwand:[{t:'afenster',n:'Fenster'},{t:'atuer',n:'Tür'},{t:'heiz',n:'Heizkörper'},{t:'steck',n:'Steckdose'}],decke:[{t:'lampe',n:'Lampe'},{t:'dfenster',n:'Dachfenster'}]}; /* F36: zweite Zeile = innen */
+const FS_AS_STEMPEL={wand:[{t:'afenster',n:'Fenster'},{t:'atuer',n:'Tür'},{t:'fbank',n:'Fensterbank'},{t:'rohr',n:'Fallrohr'},{t:'rinne',n:'Dachrinne'},{t:'text',n:'Text'}],dach:[{t:'dfenster',n:'Dachfenster'},{t:'schorn',n:'Schornstein'},{t:'gully',n:'Ablauf'},{t:'kuppel',n:'Lichtkuppel'},{t:'rinne',n:'Dachrinne'},{t:'wandan',n:'Wandanschluss'},{t:'pult',n:'Pult'},{t:'text',n:'Text'}],
+  raum:[{t:'tuer',n:'Tür'},{t:'fenster',n:'Fenster'},{t:'schrank',n:'Schrank'},{t:'heiz',n:'Heizkörper'},{t:'text',n:'Text'}],iwand:[{t:'afenster',n:'Fenster'},{t:'atuer',n:'Tür'},{t:'heiz',n:'Heizkörper'},{t:'steck',n:'Steckdose'},{t:'text',n:'Text'}],decke:[{t:'lampe',n:'Lampe'},{t:'dfenster',n:'Dachfenster'},{t:'text',n:'Text'}]}; /* F36: zweite Zeile = innen */
 const FS_AS_MAX=12;
 const _fsAsAuf=new WeakSet(); /* welche Skizzen im Formular aufgeklappt sind – nur Anzeige */
 function _fsAsListe(b){return (b&&Array.isArray(b.aussenSkizzen))?b.aussenSkizzen.filter(k=>k&&k.id):[];}
@@ -4634,21 +4634,42 @@ function _fsBgStricheZeichnen(g,r){
 /* ── F7: Stempel (Tür, Fenster, Schrank, Heizkörper) in der Raumskizze ─────────────────────────────────────────────────
    Frank (01.10.2026): „Stempel für Tür oder Fenster, die ich dahin klicken kann – und verschieben.“ Ein Stempel ist ein GEGENSTAND, kein gemalter Strich:
    raum.skizze.stempel = [{t:'tuer'|'fenster'|'schrank'|'heiz', x, y (Mitte, Anteil 0…1 der 900×640-Fläche), r (0/90/180/270 Grad), s (Größe 0,5…2)}].
+   F41: Leisten und Text drehen in 45-Grad-Schritten; der Text-Stempel trägt zusätzlich txt (höchstens 30 Zeichen) und steht nie auf dem Kopf (0 · 315 · 270 · 45).
    Deshalb bleibt er jederzeit verschiebbar, drehbar und in der Größe änderbar. Er erscheint in der Skizze im Formular, in der Messliste und im PDF
    (derselbe Zeichner), unter den Freihand-Strichen. Wie die Striche dreht er NICHT mit, wenn die ganze Skizze gedreht wird. Die festen Schalter
    „Tür“ und „Fenster“ an den Wänden bleiben daneben bestehen. ⛔ Obergrenze: 60 Stempel je Raum. */
-const FS_BG_STEMPEL=[{t:'tuer',n:'Tür'},{t:'fenster',n:'Fenster'},{t:'schrank',n:'Schrank'},{t:'heiz',n:'Heizkörper'}];
+const FS_BG_STEMPEL=[{t:'tuer',n:'Tür'},{t:'fenster',n:'Fenster'},{t:'schrank',n:'Schrank'},{t:'heiz',n:'Heizkörper'},{t:'text',n:'Text'}];
 // Größe bei Maßstab 1 auf der 900×640-Fläche (w × h) und Versatz der Trefferfläche (oy): die Tür liegt mit ihrer Lücke auf der Wand, der Schwenkbogen oberhalb
 const FS_BG_STEMPEL_MASSE={tuer:{w:110,h:110,oy:-55},fenster:{w:120,h:18,oy:0},schrank:{w:110,h:56,oy:0},heiz:{w:100,h:22,oy:0},
-  afenster:{w:90,h:110,oy:0},atuer:{w:80,h:150,oy:0},fbank:{w:120,h:14,oy:0},rohr:{w:16,h:200,oy:0},dfenster:{w:100,h:80,oy:0},schorn:{w:60,h:60,oy:0},gully:{w:44,h:44,oy:0},kuppel:{w:90,h:90,oy:0},steck:{w:36,h:36,oy:0},lampe:{w:60,h:60,oy:0}}; /* F33: zweite Zeile = Außenskizze (Wand von vorn, Dachfläche von oben) */
+  afenster:{w:90,h:110,oy:0},atuer:{w:80,h:150,oy:0},fbank:{w:120,h:14,oy:0},rohr:{w:16,h:200,oy:0},dfenster:{w:100,h:80,oy:0},schorn:{w:60,h:60,oy:0},gully:{w:44,h:44,oy:0},kuppel:{w:90,h:90,oy:0},steck:{w:36,h:36,oy:0},lampe:{w:60,h:60,oy:0},
+  rinne:{w:320,h:16,oy:0,leiste:1},wandan:{w:320,h:22,oy:0,leiste:1},pult:{w:320,h:18,oy:0,leiste:1},text:{w:120,h:40,oy:0}}; /* F41: dritte Zeile = Dachkanten als Leisten (Dachrinne, Wandanschluss, Pult – „Größe“ ändert nur die LÄNGE, 160…640) und Text · F33: zweite Zeile = Außenskizze (Wand von vorn, Dachfläche von oben) */
 const FS_BG_STEMPEL_MAX=60;
 function _fsBgStempelAnzahl(sk){return (sk&&Array.isArray(sk.stempel))?sk.stempel.length:0;}
 // Neuen Stempel in die Mitte der Skizze setzen; gibt seinen Platz zurück, -1 bei unbekannter Art oder voller Skizze
-function _fsBgStempelNeu(sk,art){
+function _fsBgStempelNeu(sk,art,txt){
   if(!sk||!FS_BG_STEMPEL_MASSE[art]||_fsBgStempelAnzahl(sk)>=FS_BG_STEMPEL_MAX)return -1;
+  const neu={t:art,x:0.5,y:0.5,r:0,s:1};
+  if(art==='text'&&!_fsBgStempelTextSetzen(neu,txt))return -1; /* F41: ein Text-Stempel ohne Text entsteht nicht */
   if(!Array.isArray(sk.stempel))sk.stempel=[];
-  sk.stempel.push({t:art,x:0.5,y:0.5,r:0,s:1});
+  sk.stempel.push(neu);
   return sk.stempel.length-1;
+}
+/* F41: Text-Stempel (Frank 05.10.2026: „ein Feld, wo ich zum Beispiel die Meterzahl eintrage … wie eine Art Textfeld“) – eine Zeile, höchstens 30 Zeichen; leer = false, nichts geändert */
+const FS_BG_STEMPEL_TEXT_MAX=30;
+function _fsBgStempelTextSetzen(st,txt){
+  const tx=String(txt==null?'':txt).replace(/\s+/g,' ').trim().slice(0,FS_BG_STEMPEL_TEXT_MAX);
+  if(!st||!tx)return false;
+  st.txt=tx;return true;
+}
+function _fsBgStempelTextBreite(txt){return Math.max(44,String(txt||'').length*15+20);}
+/* F41: Fläche eines Stempels in Bildpunkten der 900×640-Fläche {w,h,oy} – für Treffer und Auswahlrahmen. Leisten wachsen nur in der Länge, der Text richtet sich nach seiner Länge. null bei unbekannter Art */
+function _fsBgStempelBox(st){
+  const m=FS_BG_STEMPEL_MASSE[st&&st.t];
+  if(!m)return null;
+  const s=Math.max(0.5,Math.min(2,(+st.s)||1));
+  if(m.leiste)return {w:m.w*s,h:m.h,oy:0};
+  if(st.t==='text')return {w:_fsBgStempelTextBreite(st.txt)*s,h:m.h*s,oy:0};
+  return {w:m.w*s,h:m.h*s,oy:(m.oy||0)*s};
 }
 // Mitte verschieben (Anteile 0…1, 3 Stellen); der Stempel bleibt auf der Fläche
 function _fsBgStempelBewegen(st,x,y){
@@ -4659,7 +4680,9 @@ function _fsBgStempelBewegen(st,x,y){
 }
 function _fsBgStempelDrehen(st){
   if(!st)return false;
-  st.r=(((parseInt(st.r,10)||0)+90)%360+360)%360;
+  const r=(((parseInt(st.r,10)||0)%360)+360)%360,m=FS_BG_STEMPEL_MASSE[st.t];
+  if(st.t==='text'){const f=[0,315,270,45];st.r=f[(f.indexOf(r)+1)%4];return true;} /* F41: waagerecht · schräg steigend · senkrecht (von unten nach oben) · schräg fallend – nie auf dem Kopf */
+  st.r=(r+((m&&m.leiste)?45:90))%360; /* F41: Leisten in 45-Grad-Schritten, alles andere wie bisher 90 */
   return true;
 }
 // Größe um einen Schritt ändern (z. B. 0,25 oder −0,25), zwischen 0,5 und 2
@@ -4677,12 +4700,12 @@ function _fsBgStempelWeg(sk,i){
 function _fsBgStempelTreffer(sk,px,py){
   const l=(sk&&Array.isArray(sk.stempel))?sk.stempel:[];
   for(let i=l.length-1;i>=0;i--){
-    const st=l[i],m=FS_BG_STEMPEL_MASSE[st&&st.t];
+    const st=l[i],m=_fsBgStempelBox(st); /* F41 */
     if(!m)continue;
-    const s=(+st.s)||1,a=-((+st.r)||0)*Math.PI/180;
+    const a=-((+st.r)||0)*Math.PI/180;
     const dx=px-st.x*FS_BG_SKIZZE_W,dy=py-st.y*FS_BG_SKIZZE_H;
     const lx=dx*Math.cos(a)-dy*Math.sin(a),ly=dx*Math.sin(a)+dy*Math.cos(a);
-    if(Math.abs(lx)<=m.w*s/2+14&&Math.abs(ly-(m.oy||0)*s)<=m.h*s/2+14)return i;
+    if(Math.abs(lx)<=m.w/2+14&&Math.abs(ly-m.oy)<=m.h/2+14)return i;
   }
   return -1;
 }
@@ -4691,9 +4714,10 @@ function _fsBgStempelZeichnen(g,r){
   const sk=(r&&r.skizze)||{},W=FS_BG_SKIZZE_W,H=FS_BG_SKIZZE_H;
   (Array.isArray(sk.stempel)?sk.stempel:[]).forEach(st=>{
     if(!st||!FS_BG_STEMPEL_MASSE[st.t]||!isFinite(+st.x)||!isFinite(+st.y))return;
-    const s=Math.max(0.5,Math.min(2,(+st.s)||1));
+    if(st.t==='text'&&!String(st.txt||'').trim())return;
+    const s=Math.max(0.5,Math.min(2,(+st.s)||1)),leiste=!!FS_BG_STEMPEL_MASSE[st.t].leiste,L=FS_BG_STEMPEL_MASSE[st.t].w*s; /* F41: L = Länge einer Leiste */
     g.save();
-    g.translate(st.x*W,st.y*H);g.rotate(((+st.r)||0)*Math.PI/180);g.scale(s,s);
+    g.translate(st.x*W,st.y*H);g.rotate(((+st.r)||0)*Math.PI/180);if(!leiste)g.scale(s,s);
     g.lineCap='butt';g.lineJoin='miter';
     if(st.t==='tuer'){ // Lücke in der Wand, Türblatt und Schwenkbogen (nach oben, bei Drehung 0)
       g.strokeStyle='#ffffff';g.lineWidth=24;g.beginPath();g.moveTo(-55,0);g.lineTo(55,0);g.stroke();
@@ -4745,6 +4769,26 @@ function _fsBgStempelZeichnen(g,r){
       g.fillStyle='#fff7c2';g.beginPath();g.arc(0,0,30,0,Math.PI*2);g.fill();
       g.strokeStyle='#333333';g.lineWidth=3;g.beginPath();g.arc(0,0,30,0,Math.PI*2);g.stroke();
       g.lineWidth=2;g.beginPath();g.moveTo(-21,-21);g.lineTo(21,21);g.moveTo(21,-21);g.lineTo(-21,21);g.stroke();
+    }else if(st.t==='rinne'){ /* F41: Dachrinne – Doppellinie. Die drei Leisten unterscheiden sich am MUSTER, nicht an der Farbe */
+      g.fillStyle='#e3e3e3';g.fillRect(-L/2,-8,L,16);
+      g.strokeStyle='#333333';g.lineWidth=3;g.beginPath();g.moveTo(-L/2,-8);g.lineTo(L/2,-8);g.moveTo(-L/2,8);g.lineTo(L/2,8);g.stroke();
+      g.lineWidth=2;g.beginPath();g.moveTo(-L/2,-8);g.lineTo(-L/2,8);g.moveTo(L/2,-8);g.lineTo(L/2,8);g.stroke();
+    }else if(st.t==='wandan'){ /* Wandanschluss – schraffiert */
+      g.fillStyle='#ffffff';g.fillRect(-L/2,-11,L,22);
+      g.strokeStyle='#333333';g.lineWidth=2;g.beginPath();
+      for(let x=-L/2;x<=L/2-22;x+=14){g.moveTo(x,11);g.lineTo(x+22,-11);}
+      g.stroke();
+      g.strokeRect(-L/2,-11,L,22);
+    }else if(st.t==='pult'){ /* Pult (obere Kante des Pultdachs) – dicke Außenkante */
+      g.fillStyle='#f3f3f3';g.fillRect(-L/2,-9,L,18);
+      g.strokeStyle='#333333';g.lineWidth=2;g.strokeRect(-L/2,-9,L,18);
+      g.lineWidth=7;g.beginPath();g.moveTo(-L/2,-6);g.lineTo(L/2,-6);g.stroke();
+    }else if(st.t==='text'){ /* Text – schwarz auf weißem Grund, damit er über Linien lesbar bleibt */
+      const tx=String(st.txt||''),bw=_fsBgStempelTextBreite(tx);
+      g.fillStyle='#ffffff';g.fillRect(-bw/2,-20,bw,40);
+      g.strokeStyle='#333333';g.lineWidth=1.5;g.strokeRect(-bw/2,-20,bw,40);
+      g.fillStyle='#111111';g.font='bold 26px sans-serif';g.textAlign='center';g.textBaseline='middle';
+      g.fillText(tx,0,1,bw-12);
     }else{ // Heizkörper
       g.fillStyle='#fde2e2';g.fillRect(-50,-11,100,22);
       g.strokeStyle='#b3261e';g.lineWidth=3;g.strokeRect(-50,-11,100,22);
@@ -4800,12 +4844,11 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
     _fsBgStempelZeichnen(g,r);
     _fsBgStricheZeichnen(g,r);
     if(sk.aussen)_fsAsMarkenZeichnen(g,b,sk,modus==='stelle'?selS:null,modus==='stelle'&&loseS); /* F33, F34 */
-    const st=(modus==='stempel'&&sel>=0&&Array.isArray(sk.stempel))?sk.stempel[sel]:null,m=st?FS_BG_STEMPEL_MASSE[st.t]:null;
+    const st=(modus==='stempel'&&sel>=0&&Array.isArray(sk.stempel))?sk.stempel[sel]:null,m=st?_fsBgStempelBox(st):null; /* F41 */
     if(st&&m){ // Auswahlrahmen – nur hier im Fenster, nicht im gespeicherten Bild
-      const s=Math.max(0.5,Math.min(2,(+st.s)||1));
       g.save();g.translate(st.x*W,st.y*H);g.rotate(((+st.r)||0)*Math.PI/180);
       g.strokeStyle='#1f5f8b';g.lineWidth=3;g.setLineDash([10,7]);
-      g.strokeRect(-m.w*s/2-8,(m.oy||0)*s-m.h*s/2-8,m.w*s+16,m.h*s+16);
+      g.strokeRect(-m.w/2-8,m.oy-m.h/2-8,m.w+16,m.h+16);
       g.setLineDash([]);g.restore();
     }
   };
@@ -4866,7 +4909,10 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
     }else{
       _fsStempelListe(sk).forEach(x=>{ /* F33: die Außenskizze hat eigene Stempel */
         leiste.appendChild(knopf('+ '+x.n,'border:2px solid '+FS_FARBE+';background:rgba(31,95,139,.10);',()=>{
-          const i=_fsBgStempelNeu(sk,x.t);
+          let tx; /* F41: der Text-Stempel fragt zuerst nach dem Text */
+          if(x.t==='text'){tx=prompt('Text in der Skizze – z. B. eine Länge „12,50 m“ (höchstens '+FS_BG_STEMPEL_TEXT_MAX+' Zeichen)','');if(tx===null||!String(tx).trim())return;}
+          if(_fsBgStempelAnzahl(sk)>=FS_BG_STEMPEL_MAX){toast('Genug Stempel in diesem Raum – bitte einen löschen','info',3500);return;}
+          const i=_fsBgStempelNeu(sk,x.t,tx);
           if(i<0){toast('Genug Stempel in diesem Raum – bitte einen löschen','info',3500);return;}
           sel=i;scheduleSave();neu();leisteBauen();
         },['data-fs-ez-neu',x.t]));
@@ -4874,8 +4920,10 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
       const st=(sel>=0&&Array.isArray(sk.stempel))?sk.stempel[sel]:null;
       if(st){
         leiste.appendChild(knopf('↻ Drehen',RAND,()=>{if(_fsBgStempelDrehen(st)){scheduleSave();neu();}},['data-fs-ez-dreh','1']));
-        leiste.appendChild(knopf('Größer',RAND,()=>{if(_fsBgStempelGroesse(st,0.25)){scheduleSave();neu();}},['data-fs-ez-gross','1']));
-        leiste.appendChild(knopf('Kleiner',RAND,()=>{if(_fsBgStempelGroesse(st,-0.25)){scheduleSave();neu();}},['data-fs-ez-klein','1']));
+        const lst=!!(FS_BG_STEMPEL_MASSE[st.t]||{}).leiste; /* F41: bei einer Leiste ändert sich nur die Länge */
+        leiste.appendChild(knopf(lst?'Länger':'Größer',RAND,()=>{if(_fsBgStempelGroesse(st,0.25)){scheduleSave();neu();}},['data-fs-ez-gross','1']));
+        leiste.appendChild(knopf(lst?'Kürzer':'Kleiner',RAND,()=>{if(_fsBgStempelGroesse(st,-0.25)){scheduleSave();neu();}},['data-fs-ez-klein','1']));
+        if(st.t==='text')leiste.appendChild(knopf('Text ändern',RAND,()=>{const tx=prompt('Text in der Skizze (höchstens '+FS_BG_STEMPEL_TEXT_MAX+' Zeichen)',String(st.txt||''));if(tx===null)return;if(_fsBgStempelTextSetzen(st,tx)){scheduleSave();neu();}else toast('Der Text ist leer – zum Entfernen „Löschen“ antippen','info',3500);},['data-fs-ez-sttext','1']));
         leiste.appendChild(knopf('Löschen',RAND+'color:var(--red);',()=>{if(_fsBgStempelWeg(sk,sel)){sel=-1;scheduleSave();neu();leisteBauen();}},['data-fs-ez-stweg','1']));
       }
       const z=document.createElement('span');z.setAttribute('data-fs-ez-zaehler','1');z.style.cssText='font-size:var(--fs13,13px);color:var(--text2);';
