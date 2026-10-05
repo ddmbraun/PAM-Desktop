@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F41';
+const PAM_FORMULARE_VERSION='F42';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -277,6 +277,10 @@ function _fsPdfName(bericht,zeit){
   if(bericht&&bericht.vorlage==='flachdach'){ // F13: Prüfbericht – Titel (gekürzt) + Datum + Uhrzeit
     const slug=String(bericht.titel||'Pruefbericht').replace(/[^a-zA-Z0-9-]+/g,'_').replace(/^_+|_+$/g,'').slice(0,30)||'Pruefbericht';
     return slug+(datum?'_'+datum:'')+uhr+'.pdf';
+  }
+  if(bericht&&bericht.vorlage==='wartungsprotokoll'&&bericht.art==='rep'){ /* F42: REP-Auftrag – Straße (gekürzt wegen der Pfadlänge) + Datum + Uhrzeit */
+    const slug=String((bericht.kopf&&bericht.kopf.objektAdresse)||'').split(',')[0].replace(/[^a-zA-Z0-9]/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,'').slice(0,30);
+    return 'REP-Auftrag'+(slug?'_'+slug:'')+(datum?'_'+datum:'')+uhr+'.pdf';
   }
   if(bericht&&bericht.vorlage==='wartungsprotokoll'){ // F10: Name wie am PC bisher (Adresse gekürzt wegen der Pfadlänge) + Uhrzeit
     const slug=String((bericht.kopf&&bericht.kopf.objektAdresse)||'').split(',')[0].replace(/[^a-zA-Z0-9]/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,'').slice(0,30);
@@ -6145,6 +6149,7 @@ function _fsWpZaehlen(b){
 
 function _openWartungsprotokollMobil(existingIdx){
   const t=currentTask();if(!t)return;
+  if(typeof existingIdx==='number'&&t.pruefberichte&&t.pruefberichte[existingIdx]&&t.pruefberichte[existingIdx].art==='rep'&&typeof _openRepAuftrag==='function')return _openRepAuftrag(existingIdx); /* F42: der REP-Auftrag hat sein eigenes, kurzes Formular */
   if(!t.pruefberichte)t.pruefberichte=[];
   let bericht;
   if(typeof existingIdx==='number'&&t.pruefberichte[existingIdx]&&t.pruefberichte[existingIdx].vorlage==='wartungsprotokoll'){
@@ -6409,6 +6414,7 @@ function _fsWpHakenZeichnen(doc,d){
 // PDF des Wartungsprotokolls – Fassung des PC (Kopf, Dachaufbau, „Zustandsprüfung“, Mängel-Fotos je Punkt, Mängel/Empfehlungen, Fotodokumentation).
 // Fotos über _fsFotoFuerPdf: die bemalte Fassung zuerst (_shrBytes), auf 1600 px verkleinert.
 async function _fsWpPdf(bericht,task){
+  if(bericht&&bericht.art==='rep'&&typeof _fsRaPdf==='function')return _fsRaPdf(bericht,task); /* F42: der REP-Auftrag hat sein eigenes PDF */
   if(!window.jspdf){toast('PDF-Bibliothek lädt noch …','error');return null;}
   try{
     _fsWpVervollstaendigen(bericht);
@@ -6560,6 +6566,309 @@ async function _fsWpPdf(bericht,task){
     return blob;
   }catch(e){
     console.error('[Wartung] PDF:',e);
+    toast('PDF-Fehler: '+e.message,'error');
+    return null;
+  }
+}
+
+/* ══ F42: REP-AUFTRAG (Reparaturauftrag) – ein kurzes Blatt für vor Ort ═══════════════════════════════════════════════
+   Frank 05.10.2026 (Muster „Reparaturauftrag / Besichtigung“ aus der Warenwirtschaft): „Brauchen noch so ne Art Reparaturauftrag … nichts Kompliziertes“ ·
+   „keine Wochentabelle, nur wo ich das Datum eintragen kann, im Kalender“ · „Auftrag erteilt brauch ich nicht“ · Rep.-Nr., Kunden-Nr. und Kostenstelle
+   stehen in der Karte → „bau, nenn es REP-Auftrag“.
+   Daten: bericht.vorlage==='wartungsprotokoll' UND bericht.art==='rep'. So behandeln beide Apps den REP-Auftrag in Liste, Öffnen, PDF, Löschen und Abgleich
+   wie ein Wartungsprotokoll – ohne eigene Zeilenart. kopf{objektAdresse, auftraggeber, kostenstelle, repNr, kundenNr, ansprechpartner, telefon, schadensbild},
+   arbeiten, material, mitarbeiter; sektionen und fotos bleiben leere Listen. Der Kopf kommt aus der Karte und bleibt änderbar.
+   PDF: nur am PC (wie alle Formulare). Leere Felder „Arbeiten“ / „Material“ geben im PDF Schreiblinien – so taugt es auch als Zettel zum Ausdrucken.
+   ⛔ Die alten Funktionen (_fsPdfName, _fsListeZeile, _openWartungsprotokollMobil, _fsWpPdf) prüfen art==='rep' INLINE und rufen die neuen nur mit typeof-Wache. */
+const FS_RA_FELDER=[['objektAdresse','Objekt'],['auftraggeber','Auftraggeber'],['kostenstelle','Kostenstelle'],['repNr','Rep.-Nr.'],['kundenNr','Kunden-Nr.'],['ansprechpartner','Ansprechpartner vor Ort'],['telefon','Telefon'],['schadensbild','Baustelle / Schadensbild']];
+function _fsIstRep(b){return !!b&&b.vorlage==='wartungsprotokoll'&&b.art==='rep';}
+/* Was die Karte für den Kopf hergibt (reine Funktion). Ansprechpartner: der Anruf-Kontakt, sonst der Mieter, sonst der erste Kontakt mit Namen. */
+function _fsRaAusKarte(t){
+  const kontakte=(t&&Array.isArray(t.kontakte))?t.kontakte.filter(k=>k&&String(k.name||'').trim()):[];
+  const ap=kontakte.find(k=>k.anrufKontakt)||kontakte.find(k=>k.rolle==='mieter')||kontakte[0]||null;
+  const tags=((t&&Array.isArray(t.tags))?t.tags:[]).map(x=>String(x||'').trim()).filter(Boolean);
+  const ausTitel=/(?:^|\D)(2\d{5})(?!\d)/.exec(String((t&&t.title)||''));
+  const allg=(typeof _fsKopfAusKarte==='function')?_fsKopfAusKarte(t):{};
+  return {
+    objektAdresse:String((t&&(t.adresse||t.objektName))||'').trim(),
+    auftraggeber:String(allg.auftraggeber||'').trim(),
+    kostenstelle:tags.length?tags.join(', '):(ausTitel?ausTitel[1]:''),
+    repNr:String((t&&t.repNr)||'').trim(),
+    kundenNr:String((t&&t.kundenNr)||'').trim(),
+    ansprechpartner:ap?String(ap.name).trim():'',
+    telefon:ap?String(ap.tel||ap.tel2||'').trim():'',
+    schadensbild:String((t&&t.schadensbild)||'').trim()
+  };
+}
+function _fsRaVervollstaendigen(b){
+  if(!b)return b;
+  if(!b.kopf||typeof b.kopf!=='object')b.kopf={};
+  FS_RA_FELDER.forEach(f=>{if(typeof b.kopf[f[0]]!=='string')b.kopf[f[0]]=(b.kopf[f[0]]===undefined||b.kopf[f[0]]===null)?'':String(b.kopf[f[0]]);});
+  ['arbeiten','material','mitarbeiter','datum'].forEach(k=>{if(typeof b[k]!=='string')b[k]=(b[k]===undefined||b[k]===null)?'':String(b[k]);});
+  if(!Array.isArray(b.sektionen))b.sektionen=[];
+  if(!Array.isArray(b.fotos))b.fotos=[];
+  if(!b.id)b.id='ra_'+Date.now();
+  return b;
+}
+/* Kopf aus der Karte: ohne „alles“ nur LEERE Felder füllen (was eingetragen ist, bleibt); mit alles=true jedes Feld, zu dem die Karte etwas hat. Gibt die Zahl der geänderten Felder zurück. */
+function _fsRaErgaenzen(b,t,alles){
+  if(!b||!b.kopf)return 0;
+  const v=_fsRaAusKarte(t);let n=0;
+  FS_RA_FELDER.forEach(f=>{const k=f[0],neu=String(v[k]||'').trim(),alt=String(b.kopf[k]||'').trim();if(neu&&neu!==alt&&(alles||!alt)){b.kopf[k]=neu;n++;}});
+  return n;
+}
+function _fsRaAbweichungen(b,t){
+  if(!b||!b.kopf)return [];
+  const v=_fsRaAusKarte(t);
+  return FS_RA_FELDER.filter(f=>{const neu=String(v[f[0]]||'').trim(),alt=String(b.kopf[f[0]]||'').trim();return neu&&alt&&neu!==alt;}).map(f=>({key:f[0],name:f[1],alt:String(b.kopf[f[0]]).trim(),neu:String(v[f[0]]).trim()}));
+}
+function _fsRaNeuerBericht(t){
+  const h=new Date(),p=n=>('0'+n).slice(-2);
+  const b=_fsRaVervollstaendigen({id:'ra_'+Date.now(),vorlage:'wartungsprotokoll',art:'rep',titel:'REP-Auftrag',datum:p(h.getDate())+'.'+p(h.getMonth()+1)+'.'+h.getFullYear(),createdAt:h.toISOString(),kopf:{},arbeiten:'',material:'',mitarbeiter:'',sektionen:[],fotos:[]});
+  _fsRaErgaenzen(b,t);
+  return b;
+}
+/* Datum: gespeichert wie überall TT.MM.JJJJ, das Kalenderfeld des Browsers will JJJJ-MM-TT */
+function _fsRaDatumIso(datum){
+  const m=/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(String(datum||'').trim());
+  if(!m||+m[2]<1||+m[2]>12||+m[1]<1||+m[1]>31)return '';
+  return m[3]+'-'+('0'+m[2]).slice(-2)+'-'+('0'+m[1]).slice(-2);
+}
+function _fsRaDatumAusIso(iso){
+  const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso||'').trim());
+  return m?(m[3]+'.'+m[2]+'.'+m[1]):'';
+}
+/* Kurze Zeile für die zugeklappten Karten-Angaben und für die Formular-Liste */
+function _fsRaKurz(b){
+  const k=(b&&b.kopf)||{};
+  return [String(k.objektAdresse||'').split(',')[0].trim(),k.repNr?'Rep.-Nr. '+k.repNr:'',k.kostenstelle?'Kst. '+k.kostenstelle:''].filter(Boolean).join(' · ');
+}
+
+function _openRepAuftrag(existingIdx){
+  const t=currentTask();if(!t)return;
+  if(!t.pruefberichte)t.pruefberichte=[];
+  let bericht,neuAngelegt=false;
+  if(typeof existingIdx==='number'&&_fsIstRep(t.pruefberichte[existingIdx])){
+    bericht=t.pruefberichte[existingIdx];
+  }else{
+    bericht=_fsRaNeuerBericht(t);neuAngelegt=true;
+    try{const wer=String(localStorage.getItem('pam_fs_aufgenommen')||'').trim();if(wer)bericht.mitarbeiter=wer;}catch(e){}
+    t.pruefberichte.push(bericht);scheduleSave();
+  }
+  _fsRaVervollstaendigen(bericht);
+  if(!neuAngelegt&&_fsRaErgaenzen(bericht,t))scheduleSave(); /* in der Karte nachgetragene Nummern kommen an, ohne Eingetragenes zu überschreiben */
+
+  const GID='_wpMobOverlay';const old=document.getElementById(GID);if(old)old.remove(); /* derselbe Fenstername wie das Wartungsprotokoll: die PC-Umgebung richtet das Fenster darüber aus */
+  const ov=document.createElement('div');ov.id=GID;ov.setAttribute('data-fs-rep','1');
+  if(typeof _fsSichtAn==='function')_fsSichtAn(ov);
+  ov.style.cssText='position:fixed;inset:0;z-index:99998;display:flex;flex-direction:column;background:var(--bg);color:var(--text);';
+  ov._wpBericht=bericht;
+
+  const hdr=document.createElement('div');
+  hdr.style.cssText='background:'+FS_FARBE+';padding:12px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0;';
+  const closeBtn=document.createElement('button');closeBtn.type='button';closeBtn.textContent='←';closeBtn.setAttribute('aria-label','REP-Auftrag schließen');closeBtn.setAttribute('data-fs-ra-zu','1');
+  closeBtn.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:44px;height:44px;border-radius:8px;font-size:var(--fs18,18px);cursor:pointer;flex-shrink:0;';
+  closeBtn.onclick=()=>{ov.remove();try{const ct=currentTask();if(ct)renderDetail(ct);}catch(e){console.warn('[REP-Auftrag] zurück:',e);}};
+  const hdrMeta=document.createElement('div');hdrMeta.style.cssText='flex:1;min-width:0;';
+  const hdrT=document.createElement('div');hdrT.style.cssText='font-size:var(--fs16,16px);font-weight:700;color:#fff;';hdrT.textContent='🔧 REP-Auftrag';
+  const hdrS=document.createElement('div');hdrS.style.cssText='font-size:var(--fs12,12px);color:rgba(255,255,255,.8);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+  hdrMeta.append(hdrT,hdrS);
+  hdr.append(closeBtn,hdrMeta);
+
+  const body=document.createElement('div');
+  body.style.cssText='flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:0 0 90px;';
+  const FELD='width:100%;box-sizing:border-box;background:var(--bg3);border:2px solid var(--border);border-radius:8px;padding:9px 10px;font-size:var(--fs15,15px);color:var(--text);font-family:inherit;min-height:var(--fsh,40px);';
+  const KNOPF='font-family:inherit;cursor:pointer;border-radius:10px;min-height:var(--fsh,40px);padding:6px 14px;font-size:var(--fs14,14px);font-weight:700;color:var(--text);border:2px solid var(--fs-krd,var(--border));background:var(--fs-kfl,transparent);';
+  let kopfAuf=false;
+  const abschnitt=(titel)=>{
+    const s=document.createElement('div');s.style.cssText='padding:14px 14px 4px;';
+    const h=document.createElement('div');h.style.cssText='font-size:var(--fs13,13px);font-weight:700;color:var(--fs-hfa,'+FS_FARBE+');border-left:4px solid '+FS_FARBE+';padding-left:8px;margin-bottom:8px;';h.textContent=titel;
+    s.appendChild(h);return s;
+  };
+  const kopfzeile=()=>{hdrS.textContent=_fsRaKurz(bericht)||t.adresse||t.title||'';};
+
+  function _raRender(){
+    body.innerHTML='';kopfzeile();
+
+    /* ── Datum: Kalender, steht auf heute ── */
+    const dSek=abschnitt('Datum');
+    const dZeile=document.createElement('div');dZeile.style.cssText='display:flex;gap:8px;align-items:center;flex-wrap:wrap;';
+    const dEl=document.createElement('input');dEl.type='date';dEl.value=_fsRaDatumIso(bericht.datum);dEl.setAttribute('aria-label','Datum');dEl.setAttribute('data-fs-ra','datum');
+    dEl.style.cssText=FELD+'width:auto;flex:0 1 200px;';
+    dEl.onchange=()=>{const d=_fsRaDatumAusIso(dEl.value);if(d){bericht.datum=d;scheduleSave();}};
+    const heute=document.createElement('button');heute.type='button';heute.textContent='Heute';heute.setAttribute('data-fs-ra-heute','1');heute.style.cssText=KNOPF;
+    heute.onclick=()=>{const h=new Date(),p=n=>('0'+n).slice(-2);bericht.datum=p(h.getDate())+'.'+p(h.getMonth()+1)+'.'+h.getFullYear();dEl.value=_fsRaDatumIso(bericht.datum);scheduleSave();};
+    dZeile.append(dEl,heute);dSek.appendChild(dZeile);body.appendChild(dSek);
+
+    /* ── Ausgeführte Arbeiten ── */
+    const aSek=abschnitt('Ausgeführte Arbeiten');
+    const aTA=document.createElement('textarea');aTA.rows=5;aTA.value=bericht.arbeiten||'';aTA.placeholder='Was wurde gemacht?';aTA.setAttribute('data-fs-ra','arbeiten');
+    aTA.style.cssText=FELD+'resize:vertical;';
+    aTA.oninput=()=>{bericht.arbeiten=aTA.value;scheduleSave();};
+    aSek.appendChild(aTA);body.appendChild(aSek);
+
+    /* ── Material ── */
+    const mSek=abschnitt('Material');
+    const mHinweis=document.createElement('div');mHinweis.style.cssText='font-size:var(--fs13,13px);font-weight:700;color:#d9480f;margin-bottom:6px;';mHinweis.textContent='Genaue Maß- und Mengenangaben';
+    const mTA=document.createElement('textarea');mTA.rows=4;mTA.value=bericht.material||'';mTA.placeholder='z. B. 2,5 m Wandanschlussblech';mTA.setAttribute('data-fs-ra','material');
+    mTA.style.cssText=FELD+'resize:vertical;';
+    mTA.oninput=()=>{bericht.material=mTA.value;scheduleSave();};
+    mSek.append(mHinweis,mTA);body.appendChild(mSek);
+
+    /* ── Mitarbeiter ── */
+    const wSek=abschnitt('Mitarbeiter');
+    const wEl=document.createElement('input');wEl.type='text';wEl.value=bericht.mitarbeiter||'';wEl.placeholder='Name';wEl.autocomplete='off';wEl.setAttribute('data-fs-ra','mitarbeiter');
+    wEl.style.cssText=FELD;
+    wEl.oninput=()=>{bericht.mitarbeiter=wEl.value;scheduleSave();};
+    wSek.appendChild(wEl);body.appendChild(wSek);
+
+    /* ── Angaben aus der Karte: zugeklappt eine Zeile, aufgeklappt die acht Felder (änderbar) ── */
+    const kSek=document.createElement('div');kSek.style.cssText='margin:14px 14px 0;border:2px solid var(--border);border-radius:10px;background:var(--fs-karte,var(--bg2));';
+    const kKopf=document.createElement('button');kKopf.type='button';kKopf.setAttribute('data-fs-ra-kopf','1');
+    kKopf.style.cssText='display:block;width:100%;text-align:left;background:transparent;border:none;color:var(--text);font-family:inherit;cursor:pointer;padding:10px 12px;min-height:var(--fsh,40px);font-size:var(--fs14,14px);font-weight:700;';
+    const kurz=_fsRaKurz(bericht);
+    kKopf.textContent=(kopfAuf?'▾ ':'▸ ')+'Angaben aus der Karte'+(!kopfAuf&&kurz?' – '+kurz:'');
+    kKopf.onclick=()=>{kopfAuf=!kopfAuf;_raRender();};
+    kSek.appendChild(kKopf);
+    if(kopfAuf){
+      const kInnen=document.createElement('div');kInnen.style.cssText='padding:0 12px 12px;display:flex;flex-wrap:wrap;gap:8px;';
+      FS_RA_FELDER.forEach(f=>{
+        const key=f[0],breit=(key==='objektAdresse'||key==='auftraggeber'||key==='schadensbild');
+        const w=document.createElement('label');w.style.cssText='display:block;flex:1 1 '+(breit?'100%':'150px')+';font-size:var(--fs12,12px);color:var(--text2);';
+        const l=document.createElement('div');l.style.cssText='margin-bottom:2px;';l.textContent=f[1];
+        const el=document.createElement('input');el.type='text';el.value=bericht.kopf[key]||'';el.autocomplete='off';el.setAttribute('data-fs-ra',key);
+        el.style.cssText=FELD;
+        el.oninput=()=>{bericht.kopf[key]=el.value;kopfzeile();scheduleSave();};
+        w.append(l,el);kInnen.appendChild(w);
+      });
+      const holen=document.createElement('button');holen.type='button';holen.textContent='↻ Aus der Karte neu holen';holen.setAttribute('data-fs-ra-holen','1');holen.style.cssText=KNOPF+'flex:1 1 100%;';
+      holen.onclick=()=>{
+        const ct=currentTask()||t,ab=_fsRaAbweichungen(bericht,ct);
+        if(ab.length&&!confirm('Diese Angaben stehen im REP-Auftrag anders als in der Karte:\n\n'+ab.map(a=>a.name+': „'+a.alt+'“ → „'+a.neu+'“').join('\n')+'\n\nMit den Angaben der Karte überschreiben?'))return;
+        const n=_fsRaErgaenzen(bericht,ct,true);
+        if(n){scheduleSave();_raRender();}
+        toast(n?'✓ '+n+' Angabe'+(n===1?'':'n')+' aus der Karte übernommen':'Die Karte hat nichts Neues','info',3000);
+      };
+      kInnen.appendChild(holen);
+      kSek.appendChild(kInnen);
+    }
+    body.appendChild(kSek);
+
+    if(!_fsAmPc()){
+      const info=document.createElement('div');info.style.cssText='padding:14px;font-size:var(--fs12,12px);color:var(--text2);';
+      info.textContent='Speichert von selbst. Das PDF erstellst du am PC.';
+      body.appendChild(info);
+    }
+  }
+  if(typeof _pbOffenMerken==='function')_pbOffenMerken(t,bericht,GID,function(){_fsRaVervollstaendigen(bericht);_raRender();});
+  _raRender();
+
+  /* Fußleiste nur am PC – Handy und Tablet erstellen kein PDF (F9) */
+  if(!_fsAmPc()){
+    body.style.paddingBottom='24px';
+    ov.append(hdr,body);
+    document.body.appendChild(ov);
+    return;
+  }
+  const footer=document.createElement('div');
+  footer.style.cssText='position:fixed;bottom:0;left:0;right:0;padding:12px 14px;background:var(--bg2);border-top:1px solid var(--border);display:flex;gap:10px;z-index:99999;';
+  const pdfBtn=document.createElement('button');pdfBtn.type='button';pdfBtn.textContent='📄 PDF erstellen';pdfBtn.setAttribute('data-fs-ra-pdf','1');
+  pdfBtn.style.cssText='flex:1;padding:12px;background:'+FS_FARBE+';color:#fff;border:none;border-radius:8px;font-size:var(--fs15,15px);font-weight:700;cursor:pointer;font-family:inherit;';
+  pdfBtn.onclick=async()=>{
+    pdfBtn.disabled=true;const alt=pdfBtn.textContent;pdfBtn.textContent='⏳ PDF wird erstellt …';
+    try{await _fsRaPdf(bericht,currentTask()||t);}finally{pdfBtn.disabled=false;pdfBtn.textContent=alt;}
+  };
+  const openBtn=document.createElement('button');openBtn.type='button';openBtn.textContent='📂 Öffnen';
+  openBtn.style.cssText='padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:var(--fs15,15px);font-weight:600;cursor:pointer;color:var(--text);font-family:inherit;';
+  openBtn.onclick=()=>_fsPdfOeffnen(bericht);
+  footer.append(pdfBtn,openBtn);
+  ov.append(hdr,body,footer);
+  document.body.appendChild(ov);
+}
+
+/* Was im PDF steht und in welcher Reihenfolge (reine Rechnung – die Prüfung führt sie aus). Leere Angaben fehlen; leere Textfelder werden zu Schreiblinien. */
+function _fsRaPdfAufbau(bericht){
+  const b=bericht||{},k=b.kopf||{},s=v=>String(v||'').trim();
+  const adr=s(k.objektAdresse).split(',').map(x=>x.trim()).filter(Boolean);
+  const links=adr.slice();if(s(k.auftraggeber))links.push('Auftraggeber: '+s(k.auftraggeber));
+  const rechts=[['Datum',s(b.datum)],['Kostenstelle',s(k.kostenstelle)],['Rep.-Nr.',s(k.repNr)],['Kunden-Nr.',s(k.kundenNr)]].filter(z=>z[1]).map(z=>z[0]+': '+z[1]);
+  const baustelle=[['Ansprechpartner',s(k.ansprechpartner)],['Telefon',s(k.telefon)],['Baustelle / Schadensbild',s(k.schadensbild)]].filter(z=>z[1]).map(z=>z[0]+': '+z[1]);
+  return {titel:'REP-Auftrag',links,rechts,baustelle,arbeiten:s(b.arbeiten),material:s(b.material),mitarbeiter:s(b.mitarbeiter)};
+}
+async function _fsRaPdf(bericht,task){
+  if(!window.jspdf){toast('PDF-Bibliothek lädt noch …','error');return null;}
+  try{
+    _fsRaVervollstaendigen(bericht);
+    const a=_fsRaPdfAufbau(bericht);
+    const {jsPDF}=window.jspdf;
+    const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+    const W=210,M=20,B=W-2*M;let y=22;
+    const platz=h=>{if(y+h>272){doc.addPage();y=22;}};
+    doc.setTextColor(0,0,0);doc.setDrawColor(0,0,0);doc.setLineWidth(0.2);
+
+    /* Kopf: links Objekt und Auftraggeber, rechts Datum und Nummern */
+    doc.setFont('helvetica','normal');doc.setFontSize(11);
+    let yl=y;a.links.forEach(z=>{const zl=doc.splitTextToSize(z,105);doc.text(zl,M,yl);yl+=zl.length*5.2;});
+    let yr=y;a.rechts.forEach(z=>{doc.text(z,W-M-52,yr);yr+=5.2;});
+    y=Math.max(yl,yr,y+10)+10;
+
+    doc.setFont('helvetica','bold');doc.setFontSize(16);doc.text(a.titel,M,y);y+=10;
+
+    if(a.baustelle.length){
+      doc.setFont('helvetica','bold');doc.setFontSize(10);
+      a.baustelle.forEach(z=>{const zl=doc.splitTextToSize(z,B);platz(zl.length*4.8);doc.text(zl,M,y);y+=zl.length*4.8;});
+      y+=5;
+    }
+
+    /* Textblock oder – wenn leer – Schreiblinien */
+    const block=(titel,zusatz,text,linien)=>{
+      platz(22);
+      doc.setFont('helvetica','bolditalic');doc.setFontSize(10);doc.text(titel,M,y);
+      if(zusatz){doc.text(zusatz,M+doc.getTextWidth(titel+'  '),y);}
+      y+=6;
+      doc.setFont('helvetica','normal');doc.setFontSize(10.5);
+      if(text){
+        doc.splitTextToSize(text,B).forEach(z=>{platz(5.2);doc.text(z,M,y);y+=5.2;});
+        y+=5;
+      }else{
+        for(let i=0;i<linien;i++){platz(9);y+=9;doc.line(M,y,W-M,y);}
+        y+=8;
+      }
+    };
+    block('Ausgeführte Arbeiten','',a.arbeiten,5);
+    block('Material','– genaue Maß- und Mengenangaben',a.material,4);
+
+    /* Abnahme und Unterschriften */
+    platz(40);
+    y+=4;
+    doc.setFont('helvetica','bolditalic');doc.setFontSize(10);doc.text('Ausführung und Lieferung bestätigt und abgenommen:',M,y);
+    y+=22;
+    const bw=(B-20)/2;
+    doc.line(M,y,M+bw,y);doc.line(M+bw+20,y,W-M,y);
+    doc.setFontSize(9);
+    doc.text('Datum / Unterschrift Mitarbeiter',M,y+4.5);doc.text('Datum / Unterschrift Kunde',M+bw+20,y+4.5);
+    if(a.mitarbeiter){doc.setFont('helvetica','normal');doc.text(a.mitarbeiter,M,y+9);}
+
+    const pages=doc.internal.getNumberOfPages();
+    for(let p=1;p<=pages;p++){
+      doc.setPage(p);doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(150,150,150);
+      doc.text('Seite '+p+' von '+pages,W/2,292,{align:'center'});
+    }
+
+    const blob=doc.output('blob');
+    _fsPdfBlobs[bericht.id]=blob;
+    const name=_fsPdfName(bericht,new Date());
+    toast('✓ REP-Auftrag PDF erstellt','success',4000);
+    const inDrive=await _fsPdfNachDrive(blob,name,bericht,task);
+    if(!inDrive){ /* ohne Drive bleibt nur das Gerät: dann herunterladen */
+      const url=URL.createObjectURL(blob);
+      const el=document.createElement('a');el.href=url;el.download=name;
+      document.body.appendChild(el);el.click();el.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),5000);
+    }
+    return blob;
+  }catch(e){
+    console.error('[REP-Auftrag] PDF:',e);
     toast('PDF-Fehler: '+e.message,'error');
     return null;
   }
@@ -6867,6 +7176,10 @@ function _fsBgListeInfo(b){
 function _fsListeZeile(b,t){
   if(!b)return null;
   const kartenname=String((t&&(t.title||t.name))||'').trim();
+  if(b.vorlage==='wartungsprotokoll'&&b.art==='rep'){ /* F42: REP-Auftrag – Kürzel REP, klein darunter Rep.-Nr. und der Anfang der Arbeiten */
+    const adr=String((b.kopf&&b.kopf.objektAdresse)||'').trim(),rn=String((b.kopf&&b.kopf.repNr)||'').trim(),arb=String(b.arbeiten||'').replace(/\s+/g,' ').trim();
+    return {kurz:'REP',lang:'REP-Auftrag',name:kartenname||adr||'REP-Auftrag',sub:[rn?'Rep.-Nr. '+rn:'',arb.length>50?arb.slice(0,50)+' …':arb].filter(Boolean).join(' · ')};
+  }
   if(b.vorlage==='wartungsprotokoll'){
     const steil=String(b.dachart||'').toLowerCase()==='steil';
     const adr=String((b.kopf&&(b.kopf.objektAdresse||b.kopf.adresse))||'').trim();
