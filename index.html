@@ -8176,6 +8176,8 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
 .kalw-card.conf.nosync{border-left-color:#9ca3af;}
 .kalw-card.sel{outline:2px solid var(--accent);}
 .kalw-card b{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.kalw-grid.kalw-tag .kalw-card{font-size:12px;white-space:nowrap;text-overflow:ellipsis;}
+.kalw-grid.kalw-tag .kalw-card b{display:inline;margin-right:10px;overflow:visible;}
 .kalw-anf{position:absolute;left:2px;right:2px;border-radius:4px 4px 0 0;z-index:1;border:1px dashed #94a3b8;background:repeating-linear-gradient(45deg,rgba(148,163,184,.30) 0 4px,transparent 4px 8px);box-sizing:border-box;padding:1px 4px;font-size:9px;line-height:1.1;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .kalw-anf.nach{border-radius:0 0 4px 4px;}
 /* Paket 2 (b485): Halbe-Stunden-Linie + „Jetzt"-Linie */
@@ -10397,7 +10399,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-05 · #1118'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-05-b1118) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-05 · #1119'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-05-b1119) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -21622,6 +21624,37 @@ function _kalSchwebInitDrag(){
 
 function _kalSetView(v){_kalView=(v==='woche')?'woche':'liste';try{localStorage.setItem('pam_kal_view',_kalView);}catch(e){}_kalPick=null;renderKalender(true);}
 function _kalWeekNav(d){ if(d===0)_kalWeekOff=0; else _kalWeekOff+=d; _kalPick=null; _kalwMonatOff=0; renderKalender(true); }
+/* b1119: Tagesansicht des Wochenrasters (Wunsch Frank 05.10.2026: in der Woche stehen zu viele Termine, die Texte sind nicht mehr lesbar).
+   _kalTag = ISO-Tag oder null (ganze Woche). Gilt für den Reiter „Kalender“ und das schwebende Wochenfenster gemeinsam – beide
+   zeichnen dasselbe Raster (_kalRenderWeek). Nicht gespeichert: nach dem Neuladen steht wieder die Woche. */
+let _kalTag=null;
+// Nur merken (Tag + dessen Woche), nichts zeichnen – für Aufrufer, die danach selbst zeichnen
+function _kalTagSetz(iso){
+  iso=String(iso||'');
+  const d=new Date(iso+'T00:00:00');
+  if(!iso||isNaN(d.getTime())){ _kalTag=null; return false; }
+  _kalTag=iso;
+  const ziel=_kalwMontagVon(d), jetzt=_kalwMontagVon(new Date());
+  _kalWeekOff=Math.round((ziel.getTime()-jetzt.getTime())/604800000);
+  _kalwMonatOff=0;
+  return true;
+}
+function _kalTagZeig(iso){ _kalTagSetz(iso); renderKalender(true); }
+// ‹ › in der Tagesansicht: ein Tag weiter; 0 = heute. Ohne Sonntag im Raster (Mo–Sa) wird er übersprungen.
+function _kalTagNav(d){
+  const basis=(d===0||!_kalTag)?new Date():new Date(_kalTag+'T00:00:00');
+  if(d!==0){ basis.setDate(basis.getDate()+d); if(KALW_DAYS===6&&basis.getDay()===0)basis.setDate(basis.getDate()+(d<0?-1:1)); }
+  _kalTagZeig(_kalIso(basis));
+}
+// Knöpfe „Tag“ / „Woche“: Tag = heute, wenn heute in der gezeigten Woche liegt, sonst deren Montag
+function _kalTagUmschalten(an){
+  if(!an){ _kalTagZeig(''); return; }
+  if(_kalTag)return;
+  const mon=_kalMonday(), heute=_kalIso(new Date());
+  let ziel=_kalIso(mon);
+  for(let i=0;i<KALW_DAYS;i++){ const x=new Date(mon); x.setDate(x.getDate()+i); if(_kalIso(x)===heute)ziel=heute; }
+  _kalTagZeig(ziel);
+}
 
 // ── b909: Kleiner Monatskalender neben dem Wochenraster (Wunsch Frank, wie in Outlook) ──
 // Zum Wochenwechsel gab es bisher nur ‹ › und „Heute" – eine Woche in vier Monaten war
@@ -21643,6 +21676,7 @@ function _kalwSpringZu(iso){
   // Über die Zeitumstellung ist eine Woche nicht exakt 168 h – runden fängt die Stunde ab.
   _kalWeekOff=Math.round((ziel.getTime()-jetzt.getTime())/604800000);
   _kalwMonatOff=0; _kalPick=null;
+  if(typeof _kalTag!=='undefined'&&_kalTag)_kalTag=iso;   // b1119: in der Tagesansicht zeigt der Klick im Monat diesen Tag
   renderKalender(true);
 }
 function _kalwMonatHtml(mon){
@@ -21654,7 +21688,8 @@ function _kalwMonatHtml(mon){
   const heuteIso=_kalIso(new Date());
   // Die im Raster gezeigten Tage hervorheben
   const inWoche={};
-  for(let i=0;i<KALW_DAYS;i++){ const d=new Date(mon); d.setDate(d.getDate()+i); inWoche[_kalIso(d)]=1; }
+  if(typeof _kalTag!=='undefined'&&_kalTag) inWoche[_kalTag]=1;   // b1119: in der Tagesansicht nur den gezeigten Tag
+  else for(let i=0;i<KALW_DAYS;i++){ const d=new Date(mon); d.setDate(d.getDate()+i); inWoche[_kalIso(d)]=1; }
   let h='<div class="kalw-mon">'
     + '<div class="kalw-mon-kopf">'
     +   '<button class="kalw-mon-nav" onclick="_kalwMonatNav(-1)" title="Voriger Monat">↑</button>'
@@ -21701,7 +21736,8 @@ function _kalFahrtText(t){return ((t&&t.fahrtText)||'').trim();}
 function _kalwCollect(){
   const mon=_kalMonday();
   const endD=new Date(mon); endD.setDate(endD.getDate()+KALW_DAYS-1);
-  const from=_kalIso(mon), to=_kalIso(endD);
+  const _tag=(typeof _kalTag!=='undefined'&&_kalTag)?_kalTag:'';   // b1119: Tagesansicht sammelt nur diesen Tag
+  const from=_tag||_kalIso(mon), to=_tag||_kalIso(endD);
   const q=(_kalSearch||'').toLowerCase();
   const grid=[], backlog=[], ohneZeit=[];
 
@@ -21826,23 +21862,31 @@ function _kalwCard(r,hr){
     + ' onclick="event.stopPropagation();_kalwPick(\''+_jsa(key)+'\')"'
     + ' ondblclick="event.stopPropagation();_kalOpenTask(\''+_jsa(r.taskId)+'\')"'
     + ' title="'+_escHtml(tip)+'">'
-    + '<b>'+esc(_normTime(r.von))+' '+esc(lbl)+'</b>'+esc(r.ks||r.title)+'</div>';
+    + '<b>'+esc(_normTime(r.von))+' '+esc(lbl)+'</b>'+esc((typeof _kalTag!=='undefined'&&_kalTag)?((r.ks?r.ks+' · ':'')+(r.title||'')):(r.ks||r.title))+'</div>';   // b1119: in der Tagesansicht ist Platz für Kostenstelle UND Titel
   return s;
 }
 
 function _kalRenderWeek(){
   const D=_kalwCollect(), mon=D.mon;
   const WD=['Mo','Di','Mi','Do','Fr','Sa','So'];
-  const days=[]; for(let i=0;i<KALW_DAYS;i++){const x=new Date(mon);x.setDate(x.getDate()+i);days.push(x);}
+  const _tag=(typeof _kalTag!=='undefined'&&_kalTag)?_kalTag:'';   // b1119: Tagesansicht = nur diese eine Spalte (typeof: Alt-Prüfungen schneiden die Funktion allein aus)
+  const days=[]; if(_tag)days.push(new Date(_tag+'T00:00:00')); else for(let i=0;i<KALW_DAYS;i++){const x=new Date(mon);x.setDate(x.getDate()+i);days.push(x);}
   const now=new Date(), nowMin=now.getHours()*60+now.getMinutes();
   const last=days[days.length-1], todayIso=_kalIso(now);
   const fmt=x=>String(x.getDate()).padStart(2,'0')+'.'+String(x.getMonth()+1).padStart(2,'0')+'.';
 
   let h='<div class="kalw-nav">'
-    + '<button class="kal-btn" onclick="_kalWeekNav(-1)" title="Vorige Woche">‹</button>'
-    + '<button class="kal-btn" onclick="_kalWeekNav(0)" title="Aktuelle Woche">Heute</button>'
-    + '<button class="kal-btn" onclick="_kalWeekNav(1)" title="Nächste Woche">›</button>'
-    + '<span class="kalw-kw">KW '+_kalKW(mon)+' · '+fmt(mon)+'–'+fmt(last)+last.getFullYear()+'</span>'
+    + (_tag
+      ? '<button class="kal-btn" onclick="_kalTagNav(-1)" title="Voriger Tag">‹</button>'
+        + '<button class="kal-btn" onclick="_kalTagNav(0)" title="Heutiger Tag">Heute</button>'
+        + '<button class="kal-btn" onclick="_kalTagNav(1)" title="Nächster Tag">›</button>'
+        + '<span class="kalw-kw">'+['Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag','Sonntag'][(last.getDay()+6)%7]+' '+fmt(last)+last.getFullYear()+' · KW '+_kalKW(mon)+'</span>'
+      : '<button class="kal-btn" onclick="_kalWeekNav(-1)" title="Vorige Woche">‹</button>'
+        + '<button class="kal-btn" onclick="_kalWeekNav(0)" title="Aktuelle Woche">Heute</button>'
+        + '<button class="kal-btn" onclick="_kalWeekNav(1)" title="Nächste Woche">›</button>'
+        + '<span class="kalw-kw">KW '+_kalKW(mon)+' · '+fmt(mon)+'–'+fmt(last)+last.getFullYear()+'</span>')
+    + '<button class="kal-btn'+(_tag?' kal-btn-primary':'')+'" onclick="_kalTagUmschalten(1)" title="Nur einen Tag zeigen – über die ganze Breite, mit dem ganzen Text der Termine">Tag</button>'
+    + '<button class="kal-btn'+(_tag?'':' kal-btn-primary')+'" onclick="_kalTagUmschalten(0)" title="Die ganze Woche zeigen">Woche</button>'
     + '<span class="kal-spacer"></span>'
     + '<button class="kal-btn" onclick="_kalwSetName()" title="Name des markierten Termins – steht so in Outlook (leer = automatisch aus Kostenstelle, Auftrag und Beschreibung)">✏ Name</button>'
     + '<button class="kal-btn" onclick="_kalwSetFahrt()" title="Hin-/Rückfahrtzeit für den markierten Termin setzen – wird vor bzw. nach dem Termin geblockt">🚗 Fahrt</button>'
@@ -21869,10 +21913,12 @@ function _kalRenderWeek(){
   // ein falsches Datum (das dann auch so nach Outlook ging). Breite mitgerechnet: Zeitspalte
   // + je Tag eine Spalte + je Spaltenzwischenraum der Abstand.
   const _kalwGridStyle='grid-template-columns:46px repeat('+KALW_DAYS+',minmax(112px,1fr));min-width:'+(46+KALW_DAYS*114)+'px;';
-  h+='<div class="kalw-scroll"><div class="kalw-grid" style="'+_kalwGridStyle+'"><div></div>';
+  h+=_tag?'<div class="kalw-scroll"><div class="kalw-grid kalw-tag" style="grid-template-columns:46px minmax(112px,1fr);min-width:160px;"><div></div>'
+         :'<div class="kalw-scroll"><div class="kalw-grid" style="'+_kalwGridStyle+'"><div></div>';
   days.forEach((x,i)=>{
     const iso=_kalIso(x);
-    h+='<div class="kalw-hd'+(iso===todayIso?' today':'')+'">'+WD[i]+' '+fmt(x)+'</div>';
+    // b1119: Klick auf den Tageskopf zeigt nur diesen Tag; in der Tagesansicht führt er zurück zur Woche
+    h+='<div class="kalw-hd'+(iso===todayIso?' today':'')+'" style="cursor:pointer" onclick="_kalTagZeig(\''+_jsa(_tag?'':iso)+'\')" title="'+(_tag?'Zurück zur ganzen Woche':'Nur diesen Tag zeigen')+'">'+WD[(x.getDay()+6)%7]+' '+fmt(x)+'</div>';
   });
   for(let hr=KALW_H0; hr<=KALW_H1; hr++){
     h+='<div class="kalw-tl">'+String(hr).padStart(2,'0')+':00</div>';
@@ -57395,6 +57441,8 @@ function _pamAnrufTerminFenster(taskId,name,vonMin,bisMin,iso){
     platz=_pamAnrufFreierPlatz(iso,vonMin,bisMin,taskId,idx);
     if(platz>=0){ e.date=iso; e.von=_pamAnrufZeitHHMM(platz); e.bis=_pamAnrufZeitHHMM(platz+30); e.outlookDeleted=false; }
   }
+  // b1119: mit Tag springt das Wochenraster auf diesen Tag (Tagesansicht) – auch wenn der Termin noch unter „Ungeplant“ liegt
+  if(iso&&typeof _kalTagSetz==='function'){ try{_kalTagSetz(iso);}catch(err){} }
   if(imFenster){ try{renderAusserhausTermine();}catch(err){} try{scheduleTaskFieldSave();}catch(err){} }
   else{ try{autoSave();}catch(err){ console.warn('[b1115]',err); } try{render();}catch(err){} }
   try{ if(typeof _kalSchwebAn!=='undefined'&&!_kalSchwebAn&&currentView!=='kalender') _kalSchwebAuf(); else if(typeof _kalSchwebAn!=='undefined'&&_kalSchwebAn) _kalSchwebZeichne(); }catch(err){}
