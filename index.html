@@ -10397,7 +10397,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-05 · #1115'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-05-b1115) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-05 · #1116'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-05-b1116) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -24582,6 +24582,7 @@ function renderAusserhausTermine(){
       <div class="tz-more">
         <button onclick="openGcalTermin(${i})" title="Öffnet Google Kalender mit vorausgefülltem Termin – dort muss noch selbst gespeichert werden. PAM merkt sich davon nichts. Für den automatischen Weg den Knopf „📆 Outlook“ daneben nehmen.">📅 Zu Google (von Hand)</button>
         <button onclick="openOutlookTermin(${i})" title="Diesen Termin in Outlook eintragen">📆 Outlook</button>
+        <button onclick="_tmAusKarte(${i})" title="Den Termin per Mail an einen Kontakt dieser Karte mitteilen – mit vorgefertigtem Text, als Entwurf in Outlook. Braucht ein Datum am Termin."${t.date?'':' style="opacity:.5;"'}>✉ Termin mitteilen</button>
         <button class="${hatFahrt?'tz-an':''}" onclick="_kalFahrtDialogForm(${i})" title="${esc(fahrtTitel)}">🚗 Fahrzeit${hatFahrt?' ('+(fh===fr?fh:fh+'/'+fr)+' min)':'…'}</button>
         <button class="tz-danger" onclick="removeAusserhausTermin(${i})" title="Diesen Termin aus der Liste entfernen">🗑 Löschen</button>
       </div>
@@ -38323,7 +38324,7 @@ function _mvMerge(a,b){
   return Object.keys(map).map(function(k){return map[k];});
 }
 function _mvSichtbar(liste){
-  return (liste||[]).filter(function(v){return _mvGueltig(v)&&!v.weg;})
+  return (liste||[]).filter(function(v){return _mvGueltig(v)&&!v.weg&&v.art!=='termin';})   // b1116: die Termin-Vorlage gehört nur ins Fenster „Termin mitteilen“
     .sort(function(x,y){return String(x.name).localeCompare(String(y.name),'de');});
 }
 async function _mvDateiLesen(){
@@ -38806,6 +38807,369 @@ function _mvOeffnen(which){
     st.laedt=false;
     let letzte='';try{letzte=localStorage.getItem('pam_mv_letzte')||'';}catch(e){}
     waehle(st.liste.some(function(x){return x.id===letzte;})?letzte:(st.liste[0]?st.liste[0].id:''));
+    zeichne();
+  });
+}
+// ══ b1116: „✉ Termin mitteilen“ – Termin per Mail an einen Kontakt der Karte ═══════════════
+/* Frank 05.10.2026: „Ich habe einen Termin vereinbart und möchte den per E-Mail an jemanden aus meinem Kontaktbuch
+   versenden – mit vorgefertigtem Text wie bei den anderen.“
+   Knopf am Termin in der Karte (⋯) und in der Anrufliste unter der Nummer. Fenster: Empfänger = Kontakte DER KARTE mit
+   Mail-Adresse zum Anhaken (genau eine Adresse → schon angehakt), Betreff und Text fertig gefüllt, dann Entwurf in Outlook
+   im Postfach der Karte (_pamAntwortEntwurf). Mehrere Empfänger → je Person eine eigene Mail.
+   Der Text ist EINE Vorlage (Kennung mv_termin_mitteilen, art 'termin') in derselben Drive-Datei wie die Mailvorlagen –
+   änderbar im Fenster über „⚙ Text der Vorlage ändern“; im Antwort-Fenster (_mvSichtbar) steht sie nicht, dort gäbe es keinen Termin.
+   {Termin-Zeit} = das Zeitfenster aus der Beschreibung („zwischen 13 und 17 Uhr“, „ab 7 Uhr“ – Franks Wahl), sonst „um <Von> Uhr“.
+   ⛔ PAM verschickt nichts und weiß nicht, ob Frank den Entwurf sendet: die Bautagebuch-Zeile sagt „als Entwurf“.
+   ⛔ Karte im Task-Fenster offen → Termine und Kontakte aus dem Fenster (Arbeitslisten), nicht aus der Karte (b985-Lehre).
+   ⛔ Starttext ohne Namen und Anschriften: index.html wird öffentlich ausgeliefert.
+   ⛔ Keine Regex-Literale in diesen Funktionen: die Prüfsuiten schneiden sie mit einem Zeichenketten-Zähler aus. */
+var TM_VORLAGE_ID='mv_termin_mitteilen';
+var TM_PLATZHALTER=['Termin-Tag','Termin-Zeit','Empfänger'];
+var TM_VORGABE={id:TM_VORLAGE_ID,name:'Termin mitteilen',art:'termin',ts:'2026-10-05T00:00:00.000Z',weg:null,
+  betreff:'Termin am {Termin-Tag}[ – {Adresse}]',
+  text:'Guten Tag[ {Empfänger}],\n\nfür die Arbeiten[ in {Adresse}][, Wohnung {Wohnung}] haben wir folgenden Termin vorgesehen:\n\n{Termin-Tag}[, {Termin-Zeit}]\n\nBitte geben Sie uns kurz Bescheid, falls der Termin nicht passt.\n\nMit freundlichen Grüßen\n{Firma}'};
+function _tmHeuteIso(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+// „2026-10-07“ → „Mittwoch, 07.10.2026“; kein gültiger Tag → leer
+function _tmTagLang(iso){
+  const p=String(iso||'').trim().split('-');
+  if(p.length!==3)return '';
+  const d=new Date(+p[0],+p[1]-1,+p[2]);
+  if(isNaN(d.getTime())||d.getMonth()!==(+p[1]-1)||d.getDate()!==(+p[2]))return '';
+  return ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'][d.getDay()]+', '+p[2]+'.'+p[1]+'.'+p[0];
+}
+// Zeitfenster aus der Beschreibung – so schreibt es „📅 Termin“ seit b1115 hinein, Frank tippt es auch von Hand
+function _tmFenster(bez){
+  const z='([0-9][0-9]?(?:[:.][0-9][0-9])?)';
+  const s=String(bez||'');
+  let m=new RegExp('zwischen +'+z+' *(?:uhr +)?und +'+z+' *uhr','i').exec(s);
+  if(m)return 'zwischen '+m[1]+' und '+m[2]+' Uhr';
+  m=new RegExp('(?:^|[^a-zäöüß])ab +'+z+' *uhr','i').exec(s);
+  if(m)return 'ab '+m[1]+' Uhr';
+  return '';
+}
+function _tmZeitText(tm){
+  const f=_tmFenster(tm&&tm.beschreibung);
+  if(f)return f;
+  const von=String((tm&&tm.von)||'').trim();
+  return von?('um '+von+' Uhr'):'';
+}
+// Werte für die Vorlage. empf weggelassen = {Empfänger} bleibt wörtlich stehen (mehrere Empfänger, wird je Mail ersetzt)
+function _tmWerte(task,kontakte,tm,empf){
+  const w=_mvWerte(task,kontakte);
+  w['Termin-Tag']=_tmTagLang(tm&&(tm.date||tm.datum));
+  w['Termin-Zeit']=_tmZeitText(tm);
+  if(empf!==undefined)w['Empfänger']=String(empf||'').trim();
+  return w;
+}
+// Wer kann die Mail bekommen? Kontakte mit Mail-Adresse (je Adresse einmal); die ohne Adresse getrennt, damit Frank sieht, warum sie fehlen
+function _tmEmpfaenger(kontakte){
+  const mit=[],ohne=[],gesehen={};
+  (kontakte||[]).forEach(function(k){
+    if(!k)return;
+    const name=String(k.name||'').trim(),adr=String(k.email||'').trim(),rolle=String(k.rolle||'');
+    if(!name&&!adr)return;
+    if(adr.indexOf('@')<1){ohne.push({name:name,rolle:rolle});return;}
+    const key=adr.toLowerCase();
+    if(gesehen[key])return;
+    gesehen[key]=true;
+    mit.push({name:name,adr:adr,rolle:rolle});
+  });
+  return{mit:mit,ohne:ohne};
+}
+// Vorwahl: genau EINE Adresse → angehakt. Sonst nur, wenn der Knopf an einer Person hing (Anrufliste) und die eine Adresse hat. Sonst wählt Frank.
+function _tmVorwahl(mit,name){
+  if(!mit||!mit.length)return [];
+  if(mit.length===1)return [mit[0].adr];
+  const n=String(name||'').trim().toLowerCase();
+  if(n){
+    const k=mit.filter(function(e){return e.name.toLowerCase()===n;});
+    if(k.length===1)return [k[0].adr];
+  }
+  return [];
+}
+// Text für EINE Person: steht {Empfänger} noch wörtlich da (mehrere angehakt), wird es ersetzt; ohne Namen fällt es samt Leerzeichen davor weg
+function _tmFuerPerson(text,name){
+  const n=String(name||'').trim();
+  let s=String(text||'');
+  if(!n)s=s.split(' {Empfänger}').join('');
+  return s.split('{Empfänger}').join(n);
+}
+// Termine der Karte, die man mitteilen kann: mit Datum ab heute, nicht erledigt, nicht ausgeblendet – frühester zuerst
+function _tmTermine(t){
+  if(!t)return [];
+  let liste=Array.isArray(t.ausserhausTermine)?t.ausserhausTermine:[];
+  try{
+    const idEl=document.getElementById('taskId');
+    if(idEl&&idEl.value===t.id&&typeof taskAusserhausTermine!=='undefined'&&Array.isArray(taskAusserhausTermine))liste=taskAusserhausTermine;
+  }catch(e){}
+  const heute=_tmHeuteIso();
+  const schl=function(x){return String(x.date||x.datum)+' '+String(x.von||'');};
+  return liste.filter(function(x){
+    if(!x||x.hiddenInPam||x.erledigt)return false;
+    const d=String((x.date||x.datum)||'').trim();
+    return d.length===10&&d>=heute;
+  }).sort(function(a,b){const x=schl(a),y=schl(b);return x<y?-1:(x>y?1:0);});
+}
+// ⛔ beginnt NICHT mit „✓ “ (das wäre eine Systemzeile und im Bautagebuch ausgeblendet)
+function _tmBtbText(tm,empf){
+  const d=String((tm&&(tm.date||tm.datum))||'');
+  const tag=(typeof _tzDatumKurz==='function')?_tzDatumKurz(d):d;
+  const zeit=_tmZeitText(tm);
+  return '✉ Terminmail als Entwurf in Outlook · Termin '+tag+(zeit?' '+zeit:'')+' · an '+(empf||[]).join(', ');
+}
+// Franks eigene Fassung aus Drive, sonst der Starttext. Nicht lesbar → Starttext + Grund (Speichern geht dann nicht).
+async function _tmVorlageLaden(){
+  const erg=await _mvDateiLesen();
+  if(!erg.ok)return{ok:false,grund:erg.grund,vorlage:TM_VORGABE};
+  const v=_mvMerge([TM_VORGABE],(erg.liste||[]).filter(function(x){return x&&x.id===TM_VORLAGE_ID;}))[0];
+  return{ok:true,vorlage:(v&&!v.weg)?v:TM_VORGABE};
+}
+// Knopf am Termin in der Karte (⋯): i = Platz in der Terminliste des offenen Task-Fensters
+function _tmAusKarte(i){
+  const tid=(document.getElementById('taskId')||{}).value||'';
+  const task=tid?findTaskById(tid):null;
+  if(!task){showToast('Bitte die Karte erst speichern – danach geht „✉ Termin mitteilen“.','warning',5000);return;}
+  const tm=(typeof taskAusserhausTermine!=='undefined'&&Array.isArray(taskAusserhausTermine))?taskAusserhausTermine[i]:null;
+  if(!tm)return;
+  if(!_tmTagLang(tm.date)){showToast('Dieser Termin hat noch kein Datum – erst den Tag eintragen, dann mitteilen.','warning',5000);return;}
+  _tmOeffnen(task,[tm],'');
+}
+// Knopf in der Anrufliste unter der Nummer: name = die Person, an deren Nummer der Knopf hängt
+function _tmAusAnrufliste(taskId,name){
+  const task=(typeof findTaskById==='function')?findTaskById(taskId):null;
+  if(!task){showToast('⚠ Karte nicht gefunden','warning',4000);return;}
+  const tl=_tmTermine(task);
+  if(!tl.length){showToast('In dieser Karte steht kein Termin mit Datum ab heute – erst über „📅 Termin“ anlegen.','warning',6000);return;}
+  _tmOeffnen(task,tl,name);
+}
+// Knöpfe per addEventListener, nicht als onclick-Text (wie _mvOeffnen: pruefen.js liest jeden onclick-Text der Datei)
+function _tmOeffnen(task,termine,name){
+  if(!task||!termine||!termine.length)return;
+  let kontakte=task.kontakte||[];
+  try{
+    if((document.getElementById('taskId')||{}).value===task.id&&typeof getKontaktePTP==='function'){const k=getKontaktePTP();if(k&&k.length)kontakte=k;}
+  }catch(e){}
+  const emp=_tmEmpfaenger(kontakte);
+  const st={tmIdx:0,an:{},frei:'',vorlage:TM_VORGABE,grund:'',laedt:true,modus:'mail',gefT:'',taWert:'',gefB:'',betrWert:'',edit:null,editSauber:true};
+  _tmVorwahl(emp.mit,name).forEach(function(a){st.an[a]=true;});
+  const alt=document.getElementById('_tmOverlay');if(alt)alt.remove();
+  const ov=document.createElement('div');
+  ov.id='_tmOverlay';
+  ov.style.cssText='position:fixed;inset:0;z-index:19000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;';
+  const box=document.createElement('div');
+  box.style.cssText='background:var(--bg2);color:var(--text1);border:1px solid var(--border);border-radius:12px;width:min(720px,96vw);max-height:92vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.35);font-size:13px;';
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  const KN='display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:7px;border:1px solid var(--border);background:transparent;color:var(--text1);cursor:pointer;font-size:12px;font-weight:600;';
+  const KN_HAUPT='display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:7px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:12px;font-weight:700;';
+  const FELD='width:100%;box-sizing:border-box;padding:7px 9px;border-radius:8px;border:1px solid var(--border);background:var(--bg3,var(--bg2));color:var(--text1);font-size:13px;';
+  const LBL='font-size:11px;font-weight:700;color:var(--text2);';
+  function el(tag,stil,text){const e=document.createElement(tag);if(stil)e.style.cssText=stil;if(text!=null)e.textContent=text;return e;}
+  function knopf(txt,stil,fn,titel){const b=document.createElement('button');b.type='button';b.textContent=txt;b.style.cssText=stil;if(titel)b.title=titel;b.addEventListener('click',fn);return b;}
+  function tm(){return termine[st.tmIdx]||termine[0];}
+  // von Hand getippte Adresse: gilt erst, wenn hinter dem @ noch ein Name mit Punkt steht („halb@“ ist keine)
+  function freiAdr(){const a=String(st.frei||'').trim(),i=a.indexOf('@');return (i>0&&a.indexOf(' ')<0&&a.indexOf('.',i+2)>i&&a.charAt(a.length-1)!=='.')?a:'';}
+  function gewaehlte(){
+    const g=emp.mit.filter(function(e){return st.an[e.adr];}).map(function(e){return{name:e.name,adr:e.adr};});
+    const f=freiAdr();
+    if(f&&!g.some(function(e){return e.adr.toLowerCase()===f.toLowerCase();}))g.push({name:'',adr:f});
+    return g;
+  }
+  function werte(){
+    const g=gewaehlte();
+    return (g.length>1)?_tmWerte(task,kontakte,tm()):_tmWerte(task,kontakte,tm(),g.length?g[0].name:'');
+  }
+  // füllt Betreff und Text neu – aber nur, wo Frank nichts von Hand geändert hat (alles=true: beide neu)
+  function fuelle(alles){
+    const w=werte(),nT=_mvFuellen(st.vorlage.text,w),nB=_mvFuellen(st.vorlage.betreff||'',w);
+    if(alles||st.taWert===st.gefT)st.taWert=nT;
+    st.gefT=nT;
+    if(alles||st.betrWert===st.gefB)st.betrWert=nB;
+    st.gefB=nB;
+  }
+  function sauberOderFragen(){
+    if(st.modus==='vorlage')return st.editSauber||confirm('Die Änderungen am Text der Vorlage sind nicht gespeichert. Verwerfen?');
+    return (st.taWert===st.gefT&&st.betrWert===st.gefB)||confirm('Dein geänderter Text geht verloren. Trotzdem?');
+  }
+  function weg(){ov.remove();document.removeEventListener('keydown',taste,true);}
+  function zu(){if(sauberOderFragen())weg();}
+  function taste(e){if(e.key==='Escape'&&document.getElementById('_tmOverlay')===ov){e.stopImmediatePropagation();e.preventDefault();zu();}}
+  document.addEventListener('keydown',taste,true);
+  function zeichne(){
+    box.innerHTML='';
+    const kopf=el('div','display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap;');
+    kopf.appendChild(el('div','flex:1;font-weight:700;font-size:15px;',st.modus==='mail'?'✉ Termin mitteilen':'⚙ Text der Vorlage „Termin mitteilen“'));
+    kopf.appendChild(knopf('✕','background:none;border:none;color:var(--text2);font-size:18px;cursor:pointer;padding:0 4px;',zu,'Schließen'));
+    box.appendChild(kopf);
+    if(st.laedt){box.appendChild(el('div','padding:40px;text-align:center;color:var(--text2);','⏳ Text wird geladen …'));return;}
+    if(st.grund)box.appendChild(el('div','margin:10px 16px 0;padding:8px 10px;border-radius:7px;background:rgba(230,126,34,.16);color:var(--text1);font-size:12px;','⚠ '+st.grund));
+    if(st.modus==='mail')zeichneMail();else zeichneVorlage();
+  }
+  function zeichneMail(){
+    const verb=_pamOutlookVerbunden(task);
+    const info=el('div','padding:10px 16px 0;font-size:12px;color:var(--text2);line-height:1.7;');
+    const zeile=function(lbl,inhalt){const d=el('div','');d.appendChild(el('b','color:var(--text1);',lbl+' '));d.appendChild(typeof inhalt==='string'?document.createTextNode(inhalt):inhalt);info.appendChild(d);};
+    const tmText=function(x){const z=_tmZeitText(x),b=String(x.beschreibung||'').trim();return _tmTagLang(x.date||x.datum)+(z?', '+z:'')+(b?'  ·  '+b:'');};
+    if(termine.length>1){
+      const sel=document.createElement('select');
+      sel.id='_tmTerminWahl';sel.style.cssText='font-size:12px;padding:3px 6px;max-width:100%;';
+      termine.forEach(function(x,i){const o=document.createElement('option');o.value=String(i);o.textContent=tmText(x);sel.appendChild(o);});
+      sel.value=String(st.tmIdx);
+      sel.addEventListener('change',function(){st.tmIdx=+sel.value||0;fuelle(false);zeichne();});
+      zeile('Termin:',sel);
+    }else zeile('Termin:',tmText(tm()));
+    zeile('Karte:',task.title||'(kein Titel)');
+    zeile('Postfach:',verb?(task.msAccount==='2'&&typeof msUserEmail2!=='undefined'&&msUserEmail2?msUserEmail2:((typeof msUserEmail!=='undefined'&&msUserEmail)||'Outlook')):'–');
+    box.appendChild(info);
+    if(!verb)box.appendChild(el('div','margin:10px 16px 0;padding:8px 10px;border-radius:7px;background:rgba(192,57,43,.14);color:var(--text1);font-size:12px;font-weight:600;','⛔ Outlook ist in PAM nicht verbunden – bitte oben 📨 verbinden. Den Text kannst du trotzdem kopieren.'));
+    const rumpf=el('div','display:flex;flex-direction:column;gap:6px;padding:12px 16px;overflow:auto;flex:1;min-height:0;');
+    rumpf.appendChild(el('div',LBL,'An – Kontakte dieser Karte mit Mail-Adresse'));
+    const kasten=el('div','border:1px solid var(--border);border-radius:8px;padding:6px 10px;max-height:130px;overflow:auto;font-size:12px;line-height:1.8;');
+    if(!emp.mit.length)kasten.appendChild(el('div','color:var(--text2);','Bei keinem Kontakt dieser Karte steht eine Mail-Adresse – unten von Hand eintragen oder im Kontakt nachtragen.'));
+    emp.mit.forEach(function(e){
+      const zl=document.createElement('label');zl.style.cssText='display:flex;gap:7px;align-items:center;cursor:pointer;';
+      const cb=document.createElement('input');cb.type='checkbox';cb.className='_tmAn';cb.setAttribute('data-adr',e.adr);cb.checked=!!st.an[e.adr];
+      cb.addEventListener('change',function(){if(cb.checked)st.an[e.adr]=true;else delete st.an[e.adr];auffrischen();});
+      const rolle=(typeof _GK_ROLLE_TEXT!=='undefined'&&_GK_ROLLE_TEXT[e.rolle])||'';
+      zl.appendChild(cb);
+      zl.appendChild(el('span','',[e.name,rolle].filter(Boolean).join(' · ')+(e.name||rolle?'  ':'')+'<'+e.adr+'>'));
+      kasten.appendChild(zl);
+    });
+    if(emp.ohne.length)kasten.appendChild(el('div','color:var(--text2);font-size:11px;','Ohne Mail-Adresse (im Kontakt nachtragen): '+emp.ohne.map(function(o){return o.name||'(ohne Namen)';}).join(', ')));
+    rumpf.appendChild(kasten);
+    const inF=document.createElement('input');inF.type='text';inF.id='_tmFrei';inF.autocomplete='off';inF.value=st.frei||'';
+    inF.placeholder='weitere Adresse von Hand (freiwillig)';
+    inF.style.cssText=FELD;
+    inF.addEventListener('input',function(){st.frei=inF.value;auffrischen();});
+    rumpf.appendChild(inF);
+    const mehr=el('div','font-size:11px;color:var(--text2);','Jede Person bekommt eine eigene Mail – {Empfänger} wird je Mail durch den Namen ersetzt.');
+    rumpf.appendChild(mehr);
+    const inB=document.createElement('input');inB.type='text';inB.id='_tmBetreff';inB.value=st.betrWert||'';
+    inB.style.cssText=FELD;
+    inB.addEventListener('input',function(){st.betrWert=inB.value;});
+    rumpf.appendChild(el('div',LBL+'margin-top:4px;','Betreff'));
+    rumpf.appendChild(inB);
+    const ta=document.createElement('textarea');ta.id='_tmText';
+    ta.style.cssText=FELD+'padding:10px;min-height:230px;flex:1;resize:vertical;font:13px/1.5 Calibri,Arial,sans-serif;';
+    ta.value=st.taWert||'';
+    ta.addEventListener('input',function(){st.taWert=ta.value;});
+    rumpf.appendChild(el('div',LBL,'Text'));
+    rumpf.appendChild(ta);
+    const fehltZeile=el('div','font-size:12px;color:var(--text2);','');
+    rumpf.appendChild(fehltZeile);
+    box.appendChild(rumpf);
+    const fuss=el('div','display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;align-items:center;padding:10px 16px;border-top:1px solid var(--border);');
+    fuss.appendChild(el('div','flex:1;min-width:180px;font-size:11px;color:var(--text2);','Es wird nichts verschickt – der Entwurf liegt danach in Outlook unter Entwürfe.'));
+    fuss.appendChild(knopf('⚙ Text der Vorlage ändern',KN,function(){
+      if(!sauberOderFragen())return;
+      st.taWert=st.gefT;st.betrWert=st.gefB;
+      st.modus='vorlage';st.edit={text:st.vorlage.text,betreff:st.vorlage.betreff||''};st.editSauber=true;zeichne();
+    },'Den vorgefertigten Text dauerhaft ändern – gilt danach auf beiden Rechnern'));
+    fuss.appendChild(knopf('📋 Text kopieren',KN,function(){
+      const txt=st.taWert||'';
+      const markiert=function(){ta.focus();ta.select();showToast('Der Text ist markiert – bitte Strg+C drücken','info',4000);};
+      if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(function(){showToast('✓ Text kopiert','success',2000);},markiert);
+      else markiert();
+    }));
+    fuss.appendChild(knopf('Abbrechen',KN,zu));
+    const los=knopf('📧 Entwurf in Outlook anlegen',KN_HAUPT,async function(){
+      const g=gewaehlte();
+      if(String(st.frei||'').trim()&&!freiAdr()){showToast('Die von Hand eingetragene Adresse ist unvollständig – bitte prüfen oder das Feld leeren.','warning',5000);return;}
+      if(!g.length){showToast('Bitte einen Empfänger anhaken oder eine Adresse eintragen.','warning',4000);return;}
+      if(!String(st.taWert||'').trim()){showToast('Der Text ist leer.','warning',3000);return;}
+      los.disabled=true;los.style.opacity='.6';
+      const termin=tm(),fertig=[],fehl=[];
+      for(const p of g){
+        // ein im Fenster selbst getippter {Platzhalter} im Betreff wird gefüllt (wie b1054)
+        const betreff=_mvFuellen(_tmFuerPerson(st.betrWert,p.name),_tmWerte(task,kontakte,termin,p.name))||('Termin am '+_tmTagLang(termin.date||termin.datum));
+        const r=await _pamAntwortEntwurf(task,p.adr,betreff,_tmFuerPerson(st.taWert,p.name),'✅ Terminmail an '+_mvTextHtml(p.name||p.adr)+' liegt in Outlook unter <b>Entwürfe</b>');
+        if(r==='ok')fertig.push(p.name||p.adr);else fehl.push(p.name||p.adr);
+      }
+      if(fertig.length){
+        try{
+          if(typeof _tuBtbZeile==='function')_tuBtbZeile(task,_tmBtbText(termin,fertig));
+          if(typeof autoSave==='function')autoSave();
+          if(typeof _pamAnrufRender==='function')_pamAnrufRender();
+        }catch(e){console.warn('[b1116] Bautagebuch:',e);}
+      }
+      if(!fehl.length){weg();return;}
+      if(fertig.length)showToast('⚠ Kein Entwurf für: '+fehl.join(', ')+' – für '+fertig.join(', ')+' liegt er in Outlook.','warning',10000);
+      los.disabled=false;los.style.opacity='';
+    });
+    fuss.appendChild(los);
+    box.appendChild(fuss);
+    // nach Haken / getippter Adresse: Text nachziehen (nur wo unverändert), Knopf und Hinweise richtigstellen – ohne das Fenster neu zu bauen
+    function auffrischen(){
+      fuelle(false);
+      if(ta.value!==st.taWert)ta.value=st.taWert;
+      if(inB.value!==st.betrWert)inB.value=st.betrWert;
+      const n=gewaehlte().length;
+      mehr.style.display=n>1?'':'none';
+      los.textContent=n>1?('📧 '+n+' Entwürfe in Outlook anlegen'):'📧 Entwurf in Outlook anlegen';
+      const aus=!verb;
+      los.disabled=aus;los.style.opacity=aus?'.5':'';los.style.cursor=aus?'not-allowed':'pointer';
+      const fehlt=_mvFehlend(String(st.vorlage.text||'')+' '+String(st.vorlage.betreff||''),werte());
+      fehltZeile.textContent=fehlt.length?('Nicht gefunden: '+fehlt.join(', ')+' – steht darum nicht im Text. Bei Bedarf oben ergänzen.'):'Alles gefunden – bitte trotzdem kurz lesen.';
+    }
+    auffrischen();
+  }
+  function zeichneVorlage(){
+    const rumpf=el('div','display:flex;flex-direction:column;gap:7px;padding:12px 16px;overflow:auto;flex:1;min-height:0;');
+    const inBt=document.createElement('input');inBt.type='text';inBt.id='_tmVBetreff';inBt.value=st.edit.betreff||'';
+    inBt.style.cssText=FELD;
+    inBt.addEventListener('input',function(){st.edit.betreff=inBt.value;st.editSauber=false;});
+    const ta=document.createElement('textarea');ta.id='_tmVText';ta.value=st.edit.text;
+    ta.style.cssText=FELD+'padding:10px;min-height:230px;resize:vertical;font:13px/1.5 Calibri,Arial,sans-serif;';
+    ta.addEventListener('input',function(){st.edit.text=ta.value;st.editSauber=false;});
+    const reihe=el('div','display:flex;flex-wrap:wrap;gap:5px;align-items:center;');
+    reihe.appendChild(el('span','font-size:11px;color:var(--text2);margin-right:2px;','Einsetzen:'));
+    let ziel=ta;
+    inBt.addEventListener('focus',function(){ziel=inBt;});
+    ta.addEventListener('focus',function(){ziel=ta;});
+    TM_PLATZHALTER.concat(MV_PLATZHALTER.filter(function(k){return k!=='Dokument';})).forEach(function(k){
+      reihe.appendChild(knopf('{'+k+'}',KN+'padding:3px 8px;font-size:11px;',function(){
+        const f=ziel;
+        const a=(typeof f.selectionStart==='number')?f.selectionStart:f.value.length;
+        const b=(typeof f.selectionEnd==='number')?f.selectionEnd:a;
+        f.setRangeText('{'+k+'}',a,b,'end');f.focus();
+        st.edit.text=ta.value;st.edit.betreff=inBt.value;st.editSauber=false;
+      },'Setzt die Stelle an den Cursor (in Betreff oder Text, je nachdem, wo du zuletzt warst)'));
+    });
+    const hilfe=el('div','font-size:11.5px;color:var(--text2);line-height:1.55;padding:8px 10px;border-radius:7px;border:1px dashed var(--border);',
+      'So füllt PAM die Stellen: {Termin-Tag} = Wochentag und Datum des Termins · {Termin-Zeit} = das Zeitfenster aus der Beschreibung des Termins (zwischen 13 und 17 Uhr, ab 7 Uhr), sonst die Von-Zeit · {Empfänger} = Name des angehakten Kontakts · {Adresse}, {Wohnung}, {Firma} und die übrigen wie bei den Mailvorlagen. Was in [ ] steht, fällt ganz weg, wenn PAM einen Wert darin nicht findet.');
+    rumpf.append(el('div',LBL,'Betreff'),inBt,el('div',LBL,'Text'),ta,reihe,hilfe);
+    box.appendChild(rumpf);
+    const fuss=el('div','display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 16px;border-top:1px solid var(--border);');
+    fuss.appendChild(el('div','flex:1;min-width:180px;font-size:11px;color:var(--text2);','Gespeichert in Google Drive ('+MAILVORLAGEN_DATEI+') – gilt auf beiden Rechnern.'));
+    fuss.appendChild(knopf('↺ Starttext',KN,function(){
+      st.edit={text:TM_VORGABE.text,betreff:TM_VORGABE.betreff};st.editSauber=false;zeichne();
+    },'Setzt den mitgelieferten Text wieder ein – gilt erst nach „Speichern“'));
+    fuss.appendChild(knopf('← Zurück',KN,function(){
+      if(!sauberOderFragen())return;
+      st.modus='mail';st.edit=null;st.editSauber=true;zeichne();
+    }));
+    const sp=knopf('💾 Speichern',KN_HAUPT,async function(){
+      const text=String(st.edit.text||''),betreffV=String(st.edit.betreff||'').trim();
+      if(!text.trim()){showToast('Der Text ist leer.','warning',3000);return;}
+      sp.disabled=true;sp.style.opacity='.6';
+      const neu={id:TM_VORLAGE_ID,name:TM_VORGABE.name,art:'termin',text:text,betreff:betreffV,ts:new Date().toISOString(),weg:null};
+      const erg=await _mvSpeichern(neu);
+      sp.disabled=false;sp.style.opacity='';
+      if(!erg.ok){showToast('⚠ '+erg.grund,'error',8000);return;}
+      st.vorlage=neu;st.grund='';st.modus='mail';st.edit=null;st.editSauber=true;
+      fuelle(true);
+      showToast('✓ Text gespeichert – gilt auf beiden Rechnern','success',3000);zeichne();
+    });
+    fuss.appendChild(sp);
+    box.appendChild(fuss);
+  }
+  zeichne();
+  _tmVorlageLaden().then(function(erg){
+    if(document.getElementById('_tmOverlay')!==ov)return;
+    st.vorlage=erg.vorlage;
+    if(!erg.ok)st.grund='Deine Fassung des Textes ist aus Google Drive nicht lesbar ('+erg.grund+') – gezeigt wird der Starttext, Speichern geht gerade nicht.';
+    st.laedt=false;
+    fuelle(true);
     zeichne();
   });
 }
@@ -57146,6 +57510,7 @@ function _pamAnrufRender(){
     const _nurMk=_mk.length>0&&_mk.length<nrn.liste.length;
     const _alleZeigen=!!(typeof _pamAnrufAlleKarten!=='undefined'&&_pamAnrufAlleKarten[String(t.id)]);
     const _sichtbar=(_nurMk&&!_alleZeigen)?_mk:nrn.liste;
+    const _tmDa=(typeof _tmTermine==='function')&&_tmTermine(t).length>0; // b1116: „✉ Termin mitteilen“ nur, wenn die Karte einen Termin mit Datum ab heute hat
     let pillen='';
     _sichtbar.forEach(function(e){
       const text=[e.name,e.rolle].filter(Boolean).join(' · ');
@@ -57166,6 +57531,7 @@ function _pamAnrufRender(){
         +'<button type="button" class="pam-anruf-erg-btn" onclick="_pamAnrufErgDialog(\''+safeId+'\',\''+_jsa(e.nr)+'\',\''+_jsa(e.name)+'\',\''+_jsa(e.rolle)+'\')" title="Ergebnis dieses Anrufs ins Bautagebuch eintragen: erreicht, Termin, nicht erreicht …" style="font-size:10px;padding:1px 7px;border-radius:4px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;">✎ Ergebnis</button>'
         +((_es&&_es.ok)?'':'<button type="button" class="pam-anruf-erreicht-btn" onclick="_pamAnrufErreicht(\''+safeId+'\',\''+_jsa(e.nr)+'\',\''+_jsa(e.name)+'\',\''+_jsa(e.rolle)+'\')" title="Du hast diese Person erreicht: trägt „erreicht, kein Termin“ mit der Uhrzeit deines Anrufs ins Bautagebuch ein. Mehr Angaben (Termin, Notiz) gehen über „✎ Ergebnis“." style="font-size:10px;padding:1px 7px;border-radius:4px;border:1px solid #0F6E56;background:var(--bg2);color:#0F6E56;cursor:pointer;">✓ erreicht</button>')
         +'<button type="button" class="pam-anruf-termin-btn" onclick="_pamAnrufTermin(\''+safeId+'\',\''+_jsa(e.name)+'\')" title="Legt in dieser Karte einen Termin an – fragt vorher nach Zeitfenster (z. B. zwischen 13 und 17 Uhr) und Tag. Ohne Tag steht er im Wochenfenster unter „Ungeplant“ und lässt sich dort auf einen freien Platz ziehen" style="font-size:10px;padding:1px 7px;border-radius:4px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;">📅 Termin</button>'
+        +(_tmDa?'<button type="button" class="pam-anruf-terminmail-btn" onclick="_tmAusAnrufliste(\''+safeId+'\',\''+_jsa(e.name)+'\')" title="Den Termin dieser Karte per Mail mitteilen – mit vorgefertigtem Text, als Entwurf in Outlook. Verschickt wird nichts von allein." style="font-size:10px;padding:1px 7px;border-radius:4px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;">✉ Termin mitteilen</button>':'')
         +((typeof _pamWahlHandDialog==='function')?'<button type="button" class="pam-wahl-hand-btn" onclick="_pamWahlHandDialog(\''+safeId+'\',\''+_jsa(e.nr)+'\',\''+_jsa(e.name)+'\',\''+_jsa(e.rolle)+'\')" title="Du hast diese Nummer direkt am Telefon gewählt, nicht über PAM: trägt die Wahl mit Datum und Uhrzeit nach (Rückfrage „Wann?“). Abgehakt wird dabei nichts." style="font-size:10px;padding:1px 7px;border-radius:4px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;">＋ gewählt</button>':'')
         +'</span>'
         +'</span>';
