@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F42';
+const PAM_FORMULARE_VERSION='F43';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -6607,6 +6607,9 @@ function _fsRaVervollstaendigen(b){
   ['arbeiten','material','mitarbeiter','datum'].forEach(k=>{if(typeof b[k]!=='string')b[k]=(b[k]===undefined||b[k]===null)?'':String(b[k]);});
   if(!Array.isArray(b.sektionen))b.sektionen=[];
   if(!Array.isArray(b.fotos))b.fotos=[];
+  b.zeiten=(Array.isArray(b.zeiten)?b.zeiten:[]).filter(z=>z&&typeof z==='object'); /* F43 */
+  b.zeiten.forEach((z,i)=>{if(!z.id)z.id='z'+Date.now().toString(36)+i;z.datum=_fsRaDatumAusIso(_fsRaDatumIso(z.datum));z.von=_fsRaUhr(z.von);z.bis=_fsRaUhr(z.bis);});
+  if(!_fsRaSignDa(b))b.unterschrift=null;else{const u=b.unterschrift;u.name=String(u.name||'');u.zeit=String(u.zeit||'');u.v=Math.max(0.2,Math.min(20,+u.v||3));}
   if(!b.id)b.id='ra_'+Date.now();
   return b;
 }
@@ -6624,7 +6627,7 @@ function _fsRaAbweichungen(b,t){
 }
 function _fsRaNeuerBericht(t){
   const h=new Date(),p=n=>('0'+n).slice(-2);
-  const b=_fsRaVervollstaendigen({id:'ra_'+Date.now(),vorlage:'wartungsprotokoll',art:'rep',titel:'REP-Auftrag',datum:p(h.getDate())+'.'+p(h.getMonth()+1)+'.'+h.getFullYear(),createdAt:h.toISOString(),kopf:{},arbeiten:'',material:'',mitarbeiter:'',sektionen:[],fotos:[]});
+  const b=_fsRaVervollstaendigen({id:'ra_'+Date.now(),vorlage:'wartungsprotokoll',art:'rep',titel:'REP-Auftrag',datum:p(h.getDate())+'.'+p(h.getMonth()+1)+'.'+h.getFullYear(),createdAt:h.toISOString(),kopf:{},arbeiten:'',material:'',mitarbeiter:String((t&&t.owner)||'').trim(),zeiten:[],unterschrift:null,sektionen:[],fotos:[]});
   _fsRaErgaenzen(b,t);
   return b;
 }
@@ -6637,6 +6640,127 @@ function _fsRaDatumIso(datum){
 function _fsRaDatumAusIso(iso){
   const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso||'').trim());
   return m?(m[3]+'.'+m[2]+'.'+m[1]):'';
+}
+/* ── F43: ZEITEN – je Tag oder Einsatz eine Zeile {id, datum (TT.MM.JJJJ), von, bis (hh:mm)} in bericht.zeiten ──
+   Frank 05.10.2026: „von bis … mit Start und Ende“ · „weil ich noch einen anderen Tag hin muss, bräuchte ich das auf demselben Zettel“ → „baue“.
+   Dauer je Zeile und Summe werden nur GERECHNET (nichts davon gespeichert). Ende vor Start oder gleich = keine Dauer. Über Mitternacht gibt es nicht.
+   Das Datum des Zettels (bericht.datum: Liste, Dateiname, PDF oben rechts) ist der früheste Tag der Zeilen; ohne Zeile bleibt es, wie es ist. */
+const FS_RA_ZEIT_MAX=40;
+function _fsRaJetzt(){return _fsVbJetzt();} /* Datum und Uhrzeit von jetzt – dieselbe Rechnung wie bei „Ich bin jetzt hier“ */
+function _fsRaUhr(v){
+  const m=/^(\d{1,2}):(\d{2})/.exec(String(v===undefined||v===null?'':v).trim());
+  if(!m||+m[1]>23||+m[2]>59)return '';
+  return ('0'+m[1]).slice(-2)+':'+m[2];
+}
+function _fsRaZeitMin(z){
+  const a=_fsRaUhr(z&&z.von),b=_fsRaUhr(z&&z.bis);
+  if(!a||!b)return null;
+  const m=(+b.slice(0,2)*60+(+b.slice(3)))-(+a.slice(0,2)*60+(+a.slice(3)));
+  return m>0?m:null;
+}
+function _fsRaDauerText(min){
+  const m=Math.round(+min);
+  if(!isFinite(m)||m<=0)return '';
+  const h=Math.floor(m/60),r=m%60;
+  return [h?h+' Std':'',r?r+' Min':''].filter(Boolean).join(' ');
+}
+function _fsRaZeitSumme(b){return ((b&&Array.isArray(b.zeiten))?b.zeiten:[]).reduce((s,z)=>s+(_fsRaZeitMin(z)||0),0);}
+/* Neue Zeile ans Ende; null, wenn die Obergrenze erreicht ist */
+function _fsRaZeitNeu(b,datum,von){
+  if(!b)return null;
+  if(!Array.isArray(b.zeiten))b.zeiten=[];
+  if(b.zeiten.length>=FS_RA_ZEIT_MAX)return null;
+  const z={id:'z'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),datum:_fsRaDatumAusIso(_fsRaDatumIso(datum)),von:_fsRaUhr(von),bis:''};
+  b.zeiten.push(z);return z;
+}
+function _fsRaZeitWeg(b,id){
+  if(!b||!Array.isArray(b.zeiten))return false;
+  const i=b.zeiten.findIndex(z=>z&&z.id===id);
+  if(i<0)return false;
+  b.zeiten.splice(i,1);return true;
+}
+/* Die zuletzt begonnene Zeile ohne Ende – darauf wirkt „Ende“ */
+function _fsRaZeitOffen(b){
+  const l=(b&&Array.isArray(b.zeiten))?b.zeiten:[];
+  for(let i=l.length-1;i>=0;i--){if(l[i]&&_fsRaUhr(l[i].von)&&!_fsRaUhr(l[i].bis))return l[i];}
+  return null;
+}
+function _fsRaWochentag(datum){
+  const iso=_fsRaDatumIso(datum);
+  if(!iso)return '';
+  return ['So','Mo','Di','Mi','Do','Fr','Sa'][new Date(+iso.slice(0,4),+iso.slice(5,7)-1,+iso.slice(8,10)).getDay()];
+}
+function _fsRaZeitText(z){
+  if(!z)return '';
+  const wt=_fsRaWochentag(z.datum),von=_fsRaUhr(z.von),bis=_fsRaUhr(z.bis);
+  return [[wt,_fsRaDatumAusIso(_fsRaDatumIso(z.datum))].filter(Boolean).join(' '),von||bis?(von||'?')+'–'+(bis||'?'):''].filter(Boolean).join(', ');
+}
+/* Datum des Zettels = frühester Tag der Zeilen. Gibt true zurück, wenn es sich geändert hat. */
+function _fsRaDatumNachziehen(b){
+  const tage=((b&&Array.isArray(b.zeiten))?b.zeiten:[]).map(z=>_fsRaDatumIso(z&&z.datum)).filter(Boolean).sort();
+  if(!tage.length)return false;
+  const d=_fsRaDatumAusIso(tage[0]);
+  if(b.datum===d)return false;
+  b.datum=d;return true;
+}
+/* ── F43: UNTERSCHRIFT DES KUNDEN ──
+   Frank 05.10.2026: „ich möchte doch ein Feld Unterschrift für den Kunden … dann kann ich ihm das per PDF schicken“ · „das Feld vergrößern, dass er Platz hat“ → „baue“.
+   bericht.unterschrift = {striche:[[[x,y],…],…], v, name, zeit} oder null. Die Punkte sind Anteile 0…1 des Rahmens UM die Unterschrift, v ist Breite : Höhe
+   dieses Rahmens – so bleibt sie unverzerrt, egal wie das Gerät gehalten wurde. zeit = Zeitpunkt des Übernehmens (ISO). Nichts davon steht in dieser Datei. */
+const FS_RA_SIGN_MAX=3000;
+function _fsRaSignDa(b){const u=b&&b.unterschrift;return !!u&&Array.isArray(u.striche)&&u.striche.some(s=>Array.isArray(s)&&s.length>0);}
+/* Aus den Bildpunkt-Strichen des Unterschriftsfelds: Rahmen um alles, Punkte als Anteile (3 Stellen); Punkte näher als 2 Bildpunkte entfallen, über der Obergrenze wird ausgedünnt. null = nichts Brauchbares */
+function _fsRaSignAusPixeln(striche){
+  let roh=(Array.isArray(striche)?striche:[]).map(s=>{
+    const out=[];let lx=null,ly=null;
+    (Array.isArray(s)?s:[]).forEach(p=>{if(!Array.isArray(p))return;const x=+p[0],y=+p[1];if(!isFinite(x)||!isFinite(y))return;if(lx!==null&&Math.hypot(x-lx,y-ly)<2)return;lx=x;ly=y;out.push([x,y]);});
+    return out;
+  }).filter(s=>s.length);
+  let n=0;roh.forEach(s=>{n+=s.length;});
+  if(!n)return null;
+  const k=Math.ceil(n/FS_RA_SIGN_MAX);
+  if(k>1)roh=roh.map(s=>s.filter((p,i)=>i%k===0||i===s.length-1));
+  let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
+  roh.forEach(s=>s.forEach(p=>{x0=Math.min(x0,p[0]);y0=Math.min(y0,p[1]);x1=Math.max(x1,p[0]);y1=Math.max(y1,p[1]);}));
+  const w=Math.max(1,x1-x0),h=Math.max(1,y1-y0),r=v=>Math.round(v*1000)/1000;
+  return {striche:roh.map(s=>s.map(p=>[r((p[0]-x0)/w),r((p[1]-y0)/h)])),v:r(Math.max(0.2,Math.min(20,w/h)))};
+}
+/* Unterschrift übernehmen; false (nichts geändert), wenn nichts gezeichnet wurde */
+function _fsRaSignSetzen(b,striche,name,zeit){
+  const u=_fsRaSignAusPixeln(striche);
+  if(!b||!u)return false;
+  u.name=String(name===undefined||name===null?'':name).replace(/\s+/g,' ').trim().slice(0,60);
+  const d=(zeit&&typeof zeit.getTime==='function'&&isFinite(zeit.getTime()))?zeit:new Date();
+  u.zeit=d.toISOString();
+  b.unterschrift=u;return true;
+}
+function _fsRaSignWeg(b){if(b&&b.unterschrift){b.unterschrift=null;return true;}return false;}
+function _fsRaSignZeitText(u){
+  const d=new Date(String((u&&u.zeit)||''));
+  if(!(u&&u.zeit)||!isFinite(d.getTime()))return '';
+  const p=n=>('0'+n).slice(-2);
+  return p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear()+', '+p(d.getHours())+':'+p(d.getMinutes())+' Uhr';
+}
+/* Wohin die Unterschrift in einem Feld (x, y, w, h) kommt: Seitenverhältnis bleibt, waagerecht mittig, unten bündig. Gibt die Umrechnung Anteil → Ort zurück. */
+function _fsRaSignLage(u,x,y,w,h){
+  const v=Math.max(0.2,Math.min(20,+(u&&u.v)||3));
+  let bw=w,bh=w/v;if(bh>h){bh=h;bw=h*v;}
+  const ox=x+(w-bw)/2,oy=y+(h-bh);
+  return p=>[ox+(+p[0])*bw,oy+(+p[1])*bh];
+}
+function _fsRaSignPunkte(s){return (Array.isArray(s)?s:[]).filter(q=>Array.isArray(q)&&isFinite(+q[0])&&isFinite(+q[1]));}
+/* Zeichnet die Unterschrift auf einen Zeichenbereich; gibt die Zahl der Striche zurück */
+function _fsRaSignZeichnen(g,u,x,y,w,h){
+  if(!u||!Array.isArray(u.striche))return 0;
+  const L=_fsRaSignLage(u,x,y,w,h);let n=0;
+  g.strokeStyle='#111111';g.lineWidth=Math.max(1.5,h/40);g.lineCap='round';g.lineJoin='round';
+  u.striche.forEach(s=>{
+    const p=_fsRaSignPunkte(s);if(!p.length)return;
+    const a=L(p[0]);g.beginPath();g.moveTo(a[0],a[1]);
+    if(p.length===1)g.lineTo(a[0]+0.1,a[1]);else for(let i=1;i<p.length;i++){const c=L(p[i]);g.lineTo(c[0],c[1]);}
+    g.stroke();n++;
+  });
+  return n;
 }
 /* Kurze Zeile für die zugeklappten Karten-Angaben und für die Formular-Liste */
 function _fsRaKurz(b){
@@ -6652,7 +6776,7 @@ function _openRepAuftrag(existingIdx){
     bericht=t.pruefberichte[existingIdx];
   }else{
     bericht=_fsRaNeuerBericht(t);neuAngelegt=true;
-    try{const wer=String(localStorage.getItem('pam_fs_aufgenommen')||'').trim();if(wer)bericht.mitarbeiter=wer;}catch(e){}
+    if(!bericht.mitarbeiter){try{const wer=String(localStorage.getItem('pam_fs_ra_mitarbeiter')||localStorage.getItem('pam_fs_aufgenommen')||'').trim();if(wer)bericht.mitarbeiter=wer;}catch(e){}} /* F43: Bearbeiter der Karte geht vor; sonst der zuletzt hier getippte Name (kein Name in dieser öffentlichen Datei) */
     t.pruefberichte.push(bericht);scheduleSave();
   }
   _fsRaVervollstaendigen(bericht);
@@ -6690,15 +6814,58 @@ function _openRepAuftrag(existingIdx){
   function _raRender(){
     body.innerHTML='';kopfzeile();
 
-    /* ── Datum: Kalender, steht auf heute ── */
-    const dSek=abschnitt('Datum');
-    const dZeile=document.createElement('div');dZeile.style.cssText='display:flex;gap:8px;align-items:center;flex-wrap:wrap;';
-    const dEl=document.createElement('input');dEl.type='date';dEl.value=_fsRaDatumIso(bericht.datum);dEl.setAttribute('aria-label','Datum');dEl.setAttribute('data-fs-ra','datum');
-    dEl.style.cssText=FELD+'width:auto;flex:0 1 200px;';
-    dEl.onchange=()=>{const d=_fsRaDatumAusIso(dEl.value);if(d){bericht.datum=d;scheduleSave();}};
-    const heute=document.createElement('button');heute.type='button';heute.textContent='Heute';heute.setAttribute('data-fs-ra-heute','1');heute.style.cssText=KNOPF;
-    heute.onclick=()=>{const h=new Date(),p=n=>('0'+n).slice(-2);bericht.datum=p(h.getDate())+'.'+p(h.getMonth()+1)+'.'+h.getFullYear();dEl.value=_fsRaDatumIso(bericht.datum);scheduleSave();};
-    dZeile.append(dEl,heute);dSek.appendChild(dZeile);body.appendChild(dSek);
+    /* ── Zeiten (F43): je Tag oder Einsatz eine Zeile – Datum (Kalender), von, bis; Dauer und Summe rechnen sich ── */
+    const zSek=abschnitt('Zeiten');
+    const zSumme=document.createElement('div');zSumme.setAttribute('data-fs-ra-summe','1');zSumme.style.cssText='font-size:var(--fs14,14px);margin:2px 0 8px;';
+    const summeNeu=()=>{
+      const n=bericht.zeiten.length,m=_fsRaZeitSumme(bericht);
+      zSumme.textContent=n?(m?'Summe: '+_fsRaDauerText(m):''):'Noch keine Zeit eingetragen – „▶ Start“ antippen, wenn du anfängst.';
+      zSumme.style.color=n?'var(--text)':'var(--text2)';zSumme.style.fontWeight=n?'700':'400';
+    };
+    bericht.zeiten.forEach(z=>{
+      const zeile=document.createElement('div');zeile.setAttribute('data-fs-ra-zeit',z.id);zeile.style.cssText='display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px;';
+      const mk=(typ,wert,name,attr)=>{const el=document.createElement('input');el.type=typ;el.value=wert;el.setAttribute('aria-label',name);el.setAttribute('data-fs-ra-z',attr);el.style.cssText=FELD+'width:auto;flex:'+(typ==='date'?'1 1 150px':'0 1 100px')+';';return el;};
+      const dEl=mk('date',_fsRaDatumIso(z.datum),'Datum','datum'),vEl=mk('time',z.von,'von','von'),bEl=mk('time',z.bis,'bis','bis');
+      const strich=document.createElement('span');strich.textContent='–';strich.style.cssText='color:var(--text2);';
+      const dau=document.createElement('span');dau.setAttribute('data-fs-ra-dauer','1');dau.style.cssText='flex:1 1 96px;font-size:var(--fs13,13px);font-weight:700;white-space:nowrap;';
+      const dauNeu=()=>{const m=_fsRaZeitMin(z),falsch=m===null&&!!z.von&&!!z.bis;dau.textContent=falsch?'Ende liegt vor Start':(m?_fsRaDauerText(m):'');dau.style.color=falsch?'#d9480f':'var(--text)';};
+      const geaendert=()=>{_fsRaDatumNachziehen(bericht);dauNeu();summeNeu();scheduleSave();};
+      dEl.onchange=()=>{const d=_fsRaDatumAusIso(dEl.value);if(d){z.datum=d;geaendert();}};
+      vEl.onchange=()=>{z.von=_fsRaUhr(vEl.value);geaendert();};
+      bEl.onchange=()=>{z.bis=_fsRaUhr(bEl.value);geaendert();};
+      const weg=document.createElement('button');weg.type='button';weg.textContent='✕';weg.setAttribute('aria-label','Diese Zeit entfernen');weg.setAttribute('data-fs-ra-zweg','1');
+      weg.style.cssText='flex:0 0 auto;min-width:var(--fsh,40px);min-height:var(--fsh,40px);border-radius:8px;border:2px solid var(--border);background:transparent;color:var(--text2);font-size:var(--fs15,15px);font-family:inherit;cursor:pointer;';
+      weg.onclick=()=>{
+        if((z.von||z.bis)&&!confirm('Diese Zeit entfernen?\n\n'+_fsRaZeitText(z)))return;
+        if(_fsRaZeitWeg(bericht,z.id)){_fsRaDatumNachziehen(bericht);scheduleSave();_raRender();}
+      };
+      const paar=document.createElement('span');paar.style.cssText='display:flex;gap:6px;align-items:center;flex:0 1 auto;min-width:0;';paar.append(vEl,strich,bEl); /* von – bis bleiben nebeneinander */
+      if(typeof window!=='undefined'&&window.innerWidth<560)zeile.append(dEl,weg,paar,dau); /* Handy: oben Datum und ✕, darunter von – bis und die Dauer */
+      else zeile.append(dEl,paar,dau,weg);
+      dauNeu();zSek.appendChild(zeile);
+    });
+    summeNeu();zSek.appendChild(zSumme);
+    const zKnoepfe=document.createElement('div');zKnoepfe.style.cssText='display:flex;gap:8px;flex-wrap:wrap;';
+    const zk=(txt,attr,fn)=>{const k=document.createElement('button');k.type='button';k.textContent=txt;k.setAttribute(attr,'1');k.style.cssText=KNOPF+'flex:1 1 90px;';k.onclick=fn;return k;};
+    const voll=()=>toast('Genug Zeilen – bitte eine entfernen','info',3500);
+    zKnoepfe.append(
+      zk('▶ Start','data-fs-ra-start',()=>{
+        const off=_fsRaZeitOffen(bericht);
+        if(off&&!confirm('Es läuft noch eine Zeit ohne Ende:\n'+_fsRaZeitText(off)+'\n\nTrotzdem eine neue beginnen?'))return;
+        const j=_fsRaJetzt();
+        if(!_fsRaZeitNeu(bericht,j.datum,j.uhr)){voll();return;}
+        _fsRaDatumNachziehen(bericht);scheduleSave();_raRender();
+      }),
+      zk('■ Ende','data-fs-ra-ende',()=>{
+        const off=_fsRaZeitOffen(bericht);
+        if(!off){toast('Keine offene Zeit – erst „▶ Start“ antippen','info',3500);return;}
+        off.bis=_fsRaJetzt().uhr;scheduleSave();_raRender();
+      }),
+      zk('＋ Zeile','data-fs-ra-zneu',()=>{
+        if(!_fsRaZeitNeu(bericht,_fsRaJetzt().datum,'')){voll();return;}
+        _fsRaDatumNachziehen(bericht);scheduleSave();_raRender();
+      }));
+    zSek.appendChild(zKnoepfe);body.appendChild(zSek);
 
     /* ── Ausgeführte Arbeiten ── */
     const aSek=abschnitt('Ausgeführte Arbeiten');
@@ -6719,8 +6886,28 @@ function _openRepAuftrag(existingIdx){
     const wSek=abschnitt('Mitarbeiter');
     const wEl=document.createElement('input');wEl.type='text';wEl.value=bericht.mitarbeiter||'';wEl.placeholder='Name';wEl.autocomplete='off';wEl.setAttribute('data-fs-ra','mitarbeiter');
     wEl.style.cssText=FELD;
-    wEl.oninput=()=>{bericht.mitarbeiter=wEl.value;scheduleSave();};
+    wEl.oninput=()=>{bericht.mitarbeiter=wEl.value;try{localStorage.setItem('pam_fs_ra_mitarbeiter',wEl.value.trim());}catch(e){}scheduleSave();};
     wSek.appendChild(wEl);body.appendChild(wSek);
+
+    /* ── Unterschrift Kunde (F43): großes Feld über den ganzen Bildschirm, danach klein angezeigt ── */
+    const uSek=abschnitt('Unterschrift Kunde');
+    const uk=(txt,attr,stil,fn)=>{const k=document.createElement('button');k.type='button';k.textContent=txt;k.setAttribute(attr,'1');k.style.cssText=KNOPF+stil;k.onclick=fn;return k;};
+    if(_fsRaSignDa(bericht)){
+      const u=bericht.unterschrift;
+      const bild=document.createElement('canvas');bild.width=600;bild.height=180;bild.setAttribute('data-fs-ra-signbild','1');
+      bild.style.cssText='display:block;width:100%;max-width:420px;height:auto;background:#ffffff;border:2px solid var(--border);border-radius:8px;';
+      try{const g=bild.getContext('2d');if(g){g.fillStyle='#ffffff';g.fillRect(0,0,600,180);_fsRaSignZeichnen(g,u,20,12,560,156);}}catch(e){console.warn('[REP-Auftrag] Unterschrift zeigen:',e);}
+      const ut=document.createElement('div');ut.setAttribute('data-fs-ra-signtext','1');ut.style.cssText='font-size:var(--fs13,13px);color:var(--text2);margin:6px 0 8px;';
+      ut.textContent=[u.name,_fsRaSignZeitText(u)].filter(Boolean).join(' · ');
+      const ur=document.createElement('div');ur.style.cssText='display:flex;gap:8px;flex-wrap:wrap;';
+      ur.append(
+        uk('Neu unterschreiben','data-fs-ra-signneu','',()=>{if(confirm('Die vorhandene Unterschrift ersetzen?'))_fsRaSignFenster(bericht,()=>_raRender());}),
+        uk('Entfernen','data-fs-ra-signweg','color:var(--text2);',()=>{if(confirm('Die Unterschrift des Kunden entfernen?')&&_fsRaSignWeg(bericht)){scheduleSave();_raRender();}}));
+      uSek.append(bild,ut,ur);
+    }else{
+      uSek.appendChild(uk('✍ Unterschreiben lassen','data-fs-ra-sign','width:100%;min-height:52px;font-size:var(--fs16,16px);',()=>_fsRaSignFenster(bericht,()=>_raRender())));
+    }
+    body.appendChild(uSek);
 
     /* ── Angaben aus der Karte: zugeklappt eine Zeile, aufgeklappt die acht Felder (änderbar) ── */
     const kSek=document.createElement('div');kSek.style.cssText='margin:14px 14px 0;border:2px solid var(--border);border-radius:10px;background:var(--fs-karte,var(--bg2));';
@@ -6786,6 +6973,71 @@ function _openRepAuftrag(existingIdx){
   document.body.appendChild(ov);
 }
 
+/* F43: Das Unterschriftsfeld über den ganzen Bildschirm. Oben der Satz, den der Kunde bestätigt, dazwischen nur Schreibfläche, unten Name und Knöpfe.
+   Mit Stift zählen Finger und Handballen nicht (wie beim Einzeichnen). fertig() wird nach „Übernehmen“ gerufen. */
+function _fsRaSignFenster(bericht,fertig){
+  const alt=document.getElementById('_fsRaSign');if(alt)alt.remove();
+  const fen=document.createElement('div');fen.id='_fsRaSign';
+  if(typeof _fsSichtAn==='function')_fsSichtAn(fen);
+  fen.style.cssText='position:fixed;inset:0;z-index:100000;background:var(--bg);color:var(--text);display:flex;flex-direction:column;';
+  const kopf=document.createElement('div');kopf.style.cssText='background:'+FS_FARBE+';color:#fff;padding:10px 14px;flex-shrink:0;';
+  const k1=document.createElement('div');k1.style.cssText='font-size:var(--fs16,16px);font-weight:700;';k1.textContent='Ausführung und Lieferung bestätigt und abgenommen';
+  const k2=document.createElement('div');k2.style.cssText='font-size:var(--fs13,13px);opacity:.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';k2.textContent=['Unterschrift Kunde',_fsRaKurz(bericht)].filter(Boolean).join(' – ');
+  kopf.append(k1,k2);
+  const feld=document.createElement('div');feld.style.cssText='flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px;background:var(--bg3);';
+  const cv=document.createElement('canvas');cv.setAttribute('data-fs-ra-signfeld','1');
+  cv.style.cssText='display:block;max-width:100%;max-height:100%;width:auto;height:auto;background:#ffffff;border:2px solid var(--border);border-radius:8px;touch-action:none;cursor:crosshair;';
+  feld.appendChild(cv);
+  const fuss=document.createElement('div');fuss.style.cssText='flex-shrink:0;padding:10px 14px 14px;border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap;align-items:center;';
+  const nameEl=document.createElement('input');nameEl.type='text';nameEl.placeholder='Name in Druckbuchstaben';nameEl.autocomplete='off';nameEl.setAttribute('data-fs-ra-signname','1');
+  nameEl.value=(bericht.unterschrift&&bericht.unterschrift.name)||'';
+  nameEl.style.cssText='flex:1 1 200px;box-sizing:border-box;background:var(--bg3);border:2px solid var(--border);border-radius:8px;padding:9px 10px;font-size:var(--fs15,15px);color:var(--text);font-family:inherit;min-height:48px;';
+  const kn=(txt,attr,stil,fn)=>{const k=document.createElement('button');k.type='button';k.textContent=txt;k.setAttribute(attr,'1');k.style.cssText='font-family:inherit;cursor:pointer;border-radius:10px;min-height:48px;padding:6px 16px;font-size:var(--fs15,15px);font-weight:700;'+stil;k.onclick=fn;return k;};
+  const NEBEN='color:var(--text);border:2px solid var(--fs-krd,var(--border));background:var(--fs-kfl,transparent);';
+  let striche=[],aktiv=null,stiftGesehen=false,W=1200,H=400,g=null;
+  const neu=()=>{
+    if(!g)return;
+    g.fillStyle='#ffffff';g.fillRect(0,0,W,H);
+    g.strokeStyle='#b9c0cc';g.lineWidth=2;g.lineCap='butt';g.beginPath();g.moveTo(W*0.06,H*0.78);g.lineTo(W*0.94,H*0.78);g.stroke(); /* Schreiblinie – nur hier, nicht in der gespeicherten Unterschrift */
+    g.strokeStyle='#111111';g.lineWidth=5;g.lineCap='round';g.lineJoin='round';
+    striche.forEach(s=>{if(!s.length)return;g.beginPath();g.moveTo(s[0][0],s[0][1]);if(s.length===1)g.lineTo(s[0][0]+0.1,s[0][1]);else for(let i=1;i<s.length;i++)g.lineTo(s[i][0],s[i][1]);g.stroke();});
+  };
+  fuss.append(nameEl,
+    kn('Abbrechen','data-fs-ra-signab',NEBEN,()=>fen.remove()),
+    kn('Löschen','data-fs-ra-signleer',NEBEN,()=>{striche=[];aktiv=null;neu();}),
+    kn('✓ Übernehmen','data-fs-ra-signok','color:#fff;border:none;background:'+FS_FARBE+';flex:1 1 160px;',()=>{
+      if(!_fsRaSignSetzen(bericht,striche,nameEl.value,new Date())){toast('Bitte erst im weißen Feld unterschreiben','info',3500);return;}
+      scheduleSave();fen.remove();
+      if(typeof fertig==='function'){try{fertig();}catch(e){console.warn('[REP-Auftrag] nach der Unterschrift:',e);}}
+      toast('✓ Unterschrift übernommen','success',3000);
+    }));
+  fen.append(kopf,feld,fuss);
+  document.body.appendChild(fen);
+  /* Zeichenfläche so breit wie hoch, wie das Feld gerade Platz hat (feste innere Größe – beim Drehen des Geräts wird nur gleichmäßig skaliert) */
+  try{const rc=feld.getBoundingClientRect();if(rc&&rc.width>40&&rc.height>40)H=Math.max(300,Math.min(1600,Math.round(W*(rc.height-16)/(rc.width-16))));}catch(e){}
+  cv.width=W;cv.height=H;
+  try{g=cv.getContext('2d');}catch(e){g=null;}
+  if(!g){fen.remove();toast('Unterschreiben geht hier nicht (kein Zeichenbereich)','error',4000);return;}
+  neu();
+  const pos=ev=>{const rc=cv.getBoundingClientRect();return [(ev.clientX-rc.left)/rc.width*W,(ev.clientY-rc.top)/rc.height*H];};
+  cv.addEventListener('pointerdown',ev=>{
+    if(ev.pointerType==='pen')stiftGesehen=true;
+    if(ev.pointerType==='touch'&&stiftGesehen)return;
+    ev.preventDefault();
+    try{cv.setPointerCapture(ev.pointerId);}catch(x){}
+    aktiv={id:ev.pointerId,s:[pos(ev)]};striche.push(aktiv.s);neu();
+  });
+  cv.addEventListener('pointermove',ev=>{
+    if(!aktiv||ev.pointerId!==aktiv.id)return;
+    ev.preventDefault();
+    const p=pos(ev),l=aktiv.s[aktiv.s.length-1];
+    aktiv.s.push(p);
+    g.strokeStyle='#111111';g.lineWidth=5;g.lineCap='round';g.lineJoin='round';g.beginPath();g.moveTo(l[0],l[1]);g.lineTo(p[0],p[1]);g.stroke();
+  });
+  const ende=ev=>{if(aktiv&&ev.pointerId===aktiv.id)aktiv=null;};
+  cv.addEventListener('pointerup',ende);cv.addEventListener('pointercancel',ende);
+}
+
 /* Was im PDF steht und in welcher Reihenfolge (reine Rechnung – die Prüfung führt sie aus). Leere Angaben fehlen; leere Textfelder werden zu Schreiblinien. */
 function _fsRaPdfAufbau(bericht){
   const b=bericht||{},k=b.kopf||{},s=v=>String(v||'').trim();
@@ -6793,7 +7045,11 @@ function _fsRaPdfAufbau(bericht){
   const links=adr.slice();if(s(k.auftraggeber))links.push('Auftraggeber: '+s(k.auftraggeber));
   const rechts=[['Datum',s(b.datum)],['Kostenstelle',s(k.kostenstelle)],['Rep.-Nr.',s(k.repNr)],['Kunden-Nr.',s(k.kundenNr)]].filter(z=>z[1]).map(z=>z[0]+': '+z[1]);
   const baustelle=[['Ansprechpartner',s(k.ansprechpartner)],['Telefon',s(k.telefon)],['Baustelle / Schadensbild',s(k.schadensbild)]].filter(z=>z[1]).map(z=>z[0]+': '+z[1]);
-  return {titel:'REP-Auftrag',links,rechts,baustelle,arbeiten:s(b.arbeiten),material:s(b.material),mitarbeiter:s(b.mitarbeiter)};
+  const zeiten=(Array.isArray(b.zeiten)?b.zeiten:[]).filter(z=>z&&(_fsRaUhr(z.von)||_fsRaUhr(z.bis))) /* F43: eine Zeile nur mit Datum (noch ohne Uhrzeit) ist keine Zeit und fehlt im PDF */
+    .map((z,i)=>({z:z,i:i,k:(_fsRaDatumIso(z.datum)||'9999-99-99')+' '+(_fsRaUhr(z.von)||'99:99')})).sort((p,q)=>p.k<q.k?-1:p.k>q.k?1:p.i-q.i).map(p=>p.z) /* im PDF nach Tag und Beginn geordnet; Zeilen ohne Datum zuletzt */
+    .map(z=>({datum:[_fsRaWochentag(z.datum),_fsRaDatumAusIso(_fsRaDatumIso(z.datum))].filter(Boolean).join(' '),von:_fsRaUhr(z.von),bis:_fsRaUhr(z.bis),dauer:_fsRaDauerText(_fsRaZeitMin(z)||0)}));
+  const unterschrift=_fsRaSignDa(b)?{name:s(b.unterschrift.name),zeit:_fsRaSignZeitText(b.unterschrift)}:null; /* F43 */
+  return {titel:'REP-Auftrag',links,rechts,baustelle,zeiten,summe:_fsRaDauerText(_fsRaZeitSumme(b)),arbeiten:s(b.arbeiten),material:s(b.material),mitarbeiter:s(b.mitarbeiter),unterschrift};
 }
 async function _fsRaPdf(bericht,task){
   if(!window.jspdf){toast('PDF-Bibliothek lädt noch …','error');return null;}
@@ -6817,6 +7073,19 @@ async function _fsRaPdf(bericht,task){
     if(a.baustelle.length){
       doc.setFont('helvetica','bold');doc.setFontSize(10);
       a.baustelle.forEach(z=>{const zl=doc.splitTextToSize(z,B);platz(zl.length*4.8);doc.text(zl,M,y);y+=zl.length*4.8;});
+      y+=5;
+    }
+
+    /* F43: Zeiten als kleine Tabelle (nur wenn es Zeilen gibt); Summe ab zwei Zeilen */
+    if(a.zeiten.length){
+      platz(24);
+      const sp=[M,M+42,M+62,M+82];
+      doc.setFont('helvetica','bolditalic');doc.setFontSize(10);doc.text('Zeiten',M,y);y+=6;
+      doc.setFont('helvetica','bold');doc.setFontSize(9.5);['Datum','von','bis','Dauer'].forEach((k,i)=>doc.text(k,sp[i],y));
+      y+=1.5;doc.setFillColor(0,0,0);doc.rect(M,y,118,0.2,'F');y+=4.6;
+      doc.setFont('helvetica','normal');doc.setFontSize(10.5);
+      a.zeiten.forEach(z=>{platz(5.2);[z.datum,z.von,z.bis,z.dauer].forEach((k,i)=>{if(k)doc.text(k,sp[i],y);});y+=5.2;});
+      if(a.summe&&a.zeiten.length>1){platz(5.2);doc.setFont('helvetica','bold');doc.text('Summe',sp[2],y);doc.text(a.summe,sp[3],y);y+=5.2;}
       y+=5;
     }
 
@@ -6844,10 +7113,25 @@ async function _fsRaPdf(bericht,task){
     doc.setFont('helvetica','bolditalic');doc.setFontSize(10);doc.text('Ausführung und Lieferung bestätigt und abgenommen:',M,y);
     y+=22;
     const bw=(B-20)/2;
+    if(a.unterschrift){ /* F43: die Unterschrift des Kunden über seiner Linie – 18 mm hoch, unverzerrt */
+      const L=_fsRaSignLage(bericht.unterschrift,M+bw+22,y-19.5,bw-4,18.5);
+      if(typeof doc.setLineCap==='function')doc.setLineCap('round');
+      if(typeof doc.setLineJoin==='function')doc.setLineJoin('round');
+      doc.setLineWidth(0.4);
+      bericht.unterschrift.striche.forEach(st=>{
+        const p=_fsRaSignPunkte(st);
+        if(p.length===1){const q=L(p[0]);doc.line(q[0],q[1],q[0]+0.2,q[1]);}
+        for(let i=1;i<p.length;i++){const q=L(p[i-1]),r=L(p[i]);doc.line(q[0],q[1],r[0],r[1]);}
+      });
+      if(typeof doc.setLineCap==='function')doc.setLineCap('butt');
+      if(typeof doc.setLineJoin==='function')doc.setLineJoin('miter');
+      doc.setLineWidth(0.2);
+    }
     doc.line(M,y,M+bw,y);doc.line(M+bw+20,y,W-M,y);
     doc.setFontSize(9);
     doc.text('Datum / Unterschrift Mitarbeiter',M,y+4.5);doc.text('Datum / Unterschrift Kunde',M+bw+20,y+4.5);
     if(a.mitarbeiter){doc.setFont('helvetica','normal');doc.text(a.mitarbeiter,M,y+9);}
+    if(a.unterschrift){const ut=[a.unterschrift.name,a.unterschrift.zeit].filter(Boolean).join(', ');if(ut){doc.setFont('helvetica','normal');doc.setFontSize(9);doc.text(doc.splitTextToSize(ut,bw),M+bw+20,y+9);}}
 
     const pages=doc.internal.getNumberOfPages();
     for(let p=1;p<=pages;p++){
@@ -7178,7 +7462,7 @@ function _fsListeZeile(b,t){
   const kartenname=String((t&&(t.title||t.name))||'').trim();
   if(b.vorlage==='wartungsprotokoll'&&b.art==='rep'){ /* F42: REP-Auftrag – Kürzel REP, klein darunter Rep.-Nr. und der Anfang der Arbeiten */
     const adr=String((b.kopf&&b.kopf.objektAdresse)||'').trim(),rn=String((b.kopf&&b.kopf.repNr)||'').trim(),arb=String(b.arbeiten||'').replace(/\s+/g,' ').trim();
-    return {kurz:'REP',lang:'REP-Auftrag',name:kartenname||adr||'REP-Auftrag',sub:[rn?'Rep.-Nr. '+rn:'',arb.length>50?arb.slice(0,50)+' …':arb].filter(Boolean).join(' · ')};
+    return {kurz:'REP',lang:'REP-Auftrag',name:kartenname||adr||'REP-Auftrag',sub:[rn?'Rep.-Nr. '+rn:'',arb.length>50?arb.slice(0,50)+' …':arb,(b.unterschrift&&Array.isArray(b.unterschrift.striche)&&b.unterschrift.striche.length)?'unterschrieben':''].filter(Boolean).join(' · ')};
   }
   if(b.vorlage==='wartungsprotokoll'){
     const steil=String(b.dachart||'').toLowerCase()==='steil';
