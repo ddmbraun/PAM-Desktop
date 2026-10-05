@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F43';
+const PAM_FORMULARE_VERSION='F44';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -49,6 +49,37 @@ function _fsSichtAn(el){
     if(_fsSichtHell())el.classList.add('fs-hell');
     return true;
   }catch(e){console.warn('[Sichtbarkeit]',e);return false;}
+}
+/* ══ F44: EINZEILIGES FELD, DAS BEIM ANTIPPEN AUFKLAPPT ═════════════════════════════════════════════════════════════
+   Frank 05.10.2026 (REP-Auftrag „Baustelle / Schadensbild“, Besichtigung 2 „Anlass“): „wenn der Text lang ist, wird das so abgeschnitten“ – aber es soll
+   „in einer Reihe“ bleiben: „dass es nur eine Zeile anzeigt und ich dann klicke“. Zugeklappt eine Zeile; passt der Text nicht hinein, steht rechts „…“.
+   Antippen/Anklicken (Fokus) klappt auf – so hoch wie der Text; woanders hintippen klappt wieder zu. Der Text selbst bleibt immer vollständig.
+   Rückgabe: die Hülle (data-fs-klapp = 'zu' | 'auf'); attr = [Name, Wert] kommt an das Textfeld. Der Aufrufer speichert in onIn selbst. */
+function _fsKlappFeld(wert,ph,onIn,stil,attr){
+  const hl=document.createElement('span');hl.setAttribute('data-fs-klapp','zu');
+  hl.style.cssText='position:relative;display:block;flex:1 1 0%;min-width:0;'; /* in einer Reihe neben der Beschriftung: nimmt den Rest, nie mehr */
+  const ta=document.createElement('textarea');ta.rows=1;ta.autocomplete='off';
+  ta.value=(wert===null||wert===undefined)?'':String(wert);ta.placeholder=ph||'';
+  if(attr)ta.setAttribute(attr[0],attr[1]);
+  ta.style.cssText=(stil||'')+'display:block;resize:none;overflow:hidden;white-space:pre;';
+  const mehr=document.createElement('span');mehr.setAttribute('data-fs-klapp-mehr','1');mehr.setAttribute('aria-hidden','true');mehr.textContent='…';
+  mehr.style.cssText='position:absolute;right:2px;top:2px;bottom:2px;display:none;align-items:center;padding:0 9px 0 5px;background:var(--bg3);color:var(--text);font-weight:700;border-radius:5px;pointer-events:none;';
+  const istZu=()=>hl.getAttribute('data-fs-klapp')==='zu';
+  const pruefen=()=>{
+    let ueber=false;
+    try{ueber=istZu()&&(/\n/.test(ta.value)||ta.scrollWidth>ta.clientWidth+1);}catch(x){}
+    mehr.style.display=ueber?'flex':'none';
+  };
+  const hoch=()=>{ta.style.height='auto';ta.style.height=((+ta.scrollHeight||0)+4)+'px';};
+  const auf=()=>{hl.setAttribute('data-fs-klapp','auf');ta.style.whiteSpace='pre-wrap';mehr.style.display='none';hoch();};
+  const zu=()=>{hl.setAttribute('data-fs-klapp','zu');ta.style.whiteSpace='pre';ta.style.height='';ta.scrollTop=0;ta.scrollLeft=0;pruefen();};
+  ta.addEventListener('focus',auf);
+  ta.addEventListener('click',()=>{if(istZu())auf();}); /* falls der Fokus schon im Feld war oder kein Fokus-Ereignis kommt */
+  ta.addEventListener('blur',zu);
+  ta.oninput=()=>{if(typeof onIn==='function')onIn(ta.value);if(istZu())pruefen();else hoch();};
+  hl.append(ta,mehr);
+  if(typeof setTimeout==='function')setTimeout(pruefen,0); /* erst messen, wenn das Feld im Fenster hängt */
+  return hl;
 }
 /* ══ v291: FEUCHTE- UND SCHIMMELPROTOKOLL (Mobil) ═════════════════════════════════════════
    Befund Frank 14.09.2026: ein Formular wie das Wartungsprotokoll, aber mit Messwerten – am
@@ -1085,7 +1116,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     row.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 14px;border-top:1px solid var(--border);';
     const l=document.createElement('span');l.style.cssText='font-size:var(--fs13,13px);color:var(--text2);width:112px;flex-shrink:0;';l.textContent=label;
     const i=_inp(bericht.kopf[key],ph,v=>{bericht.kopf[key]=v;if(key==='aussenT'||key==='aussenRf')_fsWerteNeu();if(key==='pruefer'&&bericht.fassung==='begehung'&&typeof _fsBgMerkName==='function')_fsBgMerkName(v);},zahl);
-    row.append(l,i);return row;
+    row.append(l,(key==='anlass'&&typeof _fsKlappFeld==='function')?_fsKlappFeld(bericht.kopf[key],ph,v=>{bericht.kopf[key]=v;scheduleSave();},S_INP,['data-fs-klappfeld',key]):i);return row; /* F44: „Anlass“ bleibt eine Zeile und klappt beim Antippen auf */
   }
   function _chip(label,an,fn){
     const b=document.createElement('button');b.type='button';b.textContent=label;
@@ -6923,6 +6954,7 @@ function _openRepAuftrag(existingIdx){
         const key=f[0],breit=(key==='objektAdresse'||key==='auftraggeber'||key==='schadensbild');
         const w=document.createElement('label');w.style.cssText='display:block;flex:1 1 '+(breit?'100%':'150px')+';font-size:var(--fs12,12px);color:var(--text2);';
         const l=document.createElement('div');l.style.cssText='margin-bottom:2px;';l.textContent=f[1];
+        if(key==='schadensbild'){w.append(l,_fsKlappFeld(bericht.kopf[key]||'','',v=>{bericht.kopf[key]=v;kopfzeile();scheduleSave();},FELD,['data-fs-ra',key]));kInnen.appendChild(w);return;} /* F44: eine Zeile, klappt beim Antippen auf */
         const el=document.createElement('input');el.type='text';el.value=bericht.kopf[key]||'';el.autocomplete='off';el.setAttribute('data-fs-ra',key);
         el.style.cssText=FELD;
         el.oninput=()=>{bericht.kopf[key]=el.value;kopfzeile();scheduleSave();};
