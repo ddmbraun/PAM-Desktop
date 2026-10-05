@@ -10399,7 +10399,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-05 · #1119'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-05-b1119) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-05 · #1120'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-05-b1120) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -24313,6 +24313,7 @@ function _btbNotizCard(n,i){
     +' onblur="updateNotizText('+i+',this.value)"'
     +' onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){this.blur();event.preventDefault();}"'
     +' style="background:transparent;border:none;border-bottom:1px dashed var(--border);color:var(--text);font-size:13px;padding:0;width:100%;outline:none;cursor:text;resize:vertical;line-height:1.4;font-family:inherit;">'+esc(n.text||'')+'</textarea>'
+    +((typeof _tmEntwuerfeKnopfHtml==='function')?_tmEntwuerfeKnopfHtml(n.text):'') // b1120: an der Zeile „✉ Terminmail als Entwurf …“ der Weg zurück zu den Entwürfen
     +'</div>'
     +'<button type="button" class="notiz-del" onclick="removeTaskNotiz('+i+')" title="Eintrag löschen">✕</button>'
     +'</div>';
@@ -38278,14 +38279,30 @@ async function _pamOutlookEntwurf(token,opt){
 // b892: der Kasten lag hinter dem Nachrichten-Fenster (Franks Betriebs-Probe 02.09.) –
 // er steht jetzt auf der OBERSTEN Stapel-Hoehe der App. test_b892 wacht als Verhaeltnis:
 // kein anderes Element der Datei darf je hoeher stapeln als dieser Kasten.
-function _pamShowDraftToast(link,txt){
+// b1120: dritter Parameter freiwillig (Frank 05.10.2026: „Warum geht das so schnell wieder weg, wie finde ich das wieder?“).
+// bleibt===true → der Kasten verschwindet NICHT nach 12 s, sondern erst beim Klick (öffnet den Entwurf) oder über ✕; mehrere stapeln sich nach oben.
+// Ohne den Parameter ist alles wie bisher – die übrigen Entwurfs-Wege sind nicht angefasst.
+function _pamShowDraftToast(link,txt,bleibt){
   const d=document.createElement('div');
-  d.style.cssText='position:fixed;bottom:24px;right:24px;background:#185FA5;color:#fff;padding:12px 18px;border-radius:8px;font-size:13px;z-index:1000100;box-shadow:0 4px 16px rgba(0,0,0,.3);cursor:pointer;display:flex;align-items:center;gap:10px;';
+  let unten=24;
+  if(bleibt===true){
+    d.className='pam-entwurf-bleibt';
+    const da=document.querySelectorAll('.pam-entwurf-bleibt');
+    for(let i=0;i<da.length;i++){const r=da[i].getBoundingClientRect();unten=Math.max(unten,Math.round(window.innerHeight-r.top)+8);}
+  }
+  d.style.cssText='position:fixed;bottom:'+unten+'px;right:24px;background:#185FA5;color:#fff;padding:12px 18px;border-radius:8px;font-size:13px;z-index:1000100;box-shadow:0 4px 16px rgba(0,0,0,.3);cursor:pointer;display:flex;align-items:center;gap:10px;';
   d.innerHTML='<span>'+(txt||'✅ Entwurf liegt in Outlook unter <b>Entwürfe</b>')+'</span>'
     +'<span style="background:rgba(255,255,255,.2);padding:3px 10px;border-radius:5px;font-weight:700;white-space:nowrap;">🌐 Im Web öffnen</span>';
   d.onclick=function(){try{window.open(link,'_blank');}catch(e){}d.remove();};
+  if(bleibt===true){
+    const x=document.createElement('button');
+    x.type='button';x.className='pam-entwurf-zu';x.textContent='✕';x.title='Schließen – der Entwurf bleibt in Outlook unter Entwürfe liegen';
+    x.style.cssText='background:none;border:none;color:#fff;font-size:16px;cursor:pointer;padding:0 2px;opacity:.85;';
+    x.onclick=function(ev){ev.stopPropagation();d.remove();};
+    d.appendChild(x);
+  }
   document.body.appendChild(d);
-  setTimeout(function(){try{d.remove();}catch(e){}},12000);
+  if(bleibt!==true)setTimeout(function(){try{d.remove();}catch(e){}},12000);
 }
 /* ═══════════════════════════════════════════════════════════════════════════
    b1015 · Antworten ohne Windows-Mailfenster + Mail-Vorlagen
@@ -38333,7 +38350,7 @@ function _pamNotwegHinweis(){
 }
 // Entwurf als NEUE Mail im Postfach der Karte. Rückgabe 'ok' oder 'fehler' – beides heißt
 // für den Aufrufer „erledigt": es wird KEIN Windows-Mailfenster mehr geöffnet.
-async function _pamAntwortEntwurf(task,an,betreff,text,hinweis,anhaenge){
+async function _pamAntwortEntwurf(task,an,betreff,text,hinweis,anhaenge,bleibt){
   try{
     if(!await _msPickRefresh(task)){showToast('⚠ Outlook-Anmeldung abgelaufen – bitte oben 📨 neu verbinden. Es wurde nichts verschickt.','error',7000);return 'fehler';}
     const tok=_msPickToken(task);
@@ -38342,7 +38359,7 @@ async function _pamAntwortEntwurf(task,an,betreff,text,hinweis,anhaenge){
     const opt={to:an||'',subj:betreff||'',body:text||''};
     if(anhaenge&&anhaenge.length)opt.anhaenge=anhaenge;   // b1053: nur wenn welche gewählt sind – sonst wie bisher
     const erg=await _pamOutlookEntwurf(tok,opt);
-    _pamShowDraftToast(erg.link,hinweis||'✅ Antwort-Entwurf (als neue Mail) liegt in Outlook unter <b>Entwürfe</b>');
+    _pamShowDraftToast(erg.link,hinweis||'✅ Antwort-Entwurf (als neue Mail) liegt in Outlook unter <b>Entwürfe</b>',bleibt===true);
     if(erg.fehl&&erg.fehl.length)showToast('⚠ Nicht angehängt (bitte in Outlook selbst anhängen): '+erg.fehl.join(', '),'warning',12000);
     return 'ok';
   }catch(e){
@@ -38943,6 +38960,26 @@ function _tmTerminPerson(tm){
   if(b.indexOf(anfang)!==0)return '';
   return b.slice(anfang.length).split(' – ')[0].trim();
 }
+/* b1120 (Frank nach dem Gebrauch von b1118: „Ansprechpartner falsch gewählt, du hast die Hausverwaltung als Mieter vor Ort genommen“):
+   „Termin nach Anruf <Name>“ sagt nur, mit wem TELEFONIERT wurde. Ist das die Hausverwaltung oder der AG-Kontakt, ist vor Ort trotzdem der Mieter.
+   Person vor Ort = Name aus der Beschreibung, wenn er NICHT zu einem Kontakt mit Rolle hausverwaltung/ag gehört; sonst der Mieter der Karte
+   (der mit Haken 📞 Anruf, sonst der erste Mieter); gibt es keinen Mieter → leer („bei …“ fällt dann weg).
+   ⛔ Nicht _mvMieter nehmen: das liefert ersatzweise JEDEN Kontakt mit Haken, der nicht „…verwalt…“ heißt – also auch den AG-Kontakt. */
+function _tmIstVerwaltung(kontakte,name){
+  const n=String(name||'').trim().toLowerCase();
+  if(!n)return false;
+  // (Variable heißt „kt“, nicht „k“: test_b778 verbietet dateiweit die Schreibweise mit k für die Word-Felder – die sind hier nicht gemeint)
+  return (kontakte||[]).some(function(kt){return !!kt&&String(kt.name||'').trim().toLowerCase()===n&&(kt.rolle==='hausverwaltung'||kt.rolle==='ag');});
+}
+function _tmMieterVorOrt(kontakte){
+  const L=(kontakte||[]).filter(function(k){return !!k&&String(k.name||'').trim()&&k.rolle==='mieter';});
+  const k=L.filter(function(x){return x.anrufKontakt;})[0]||L[0];
+  return k?String(k.name).trim():'';
+}
+function _tmPersonVorOrt(kontakte,tm){
+  const tp=_tmTerminPerson(tm);
+  return (tp&&!_tmIstVerwaltung(kontakte,tp))?tp:_tmMieterVorOrt(kontakte);
+}
 // Betreff nach dem Füllen: fehlt vorn ein Wert (keine Adresse in der Karte), bleibt kein Trennzeichen am Anfang stehen
 function _tmBetreffPutzen(s){
   let b=String(s||'').trim();
@@ -38958,8 +38995,9 @@ function _tmWerte(task,kontakte,tm,empf,terminPerson){
   w['Termin-Tag']=_tmTagLang(tm&&(tm.date||tm.datum));
   w['Termin-Zeit']=_tmZeitText(tm);
   w['Straße']=_tmStrasse(w.Adresse);
-  w['Mieter-Name']=_tmNameTeile(w.Mieter).rest;
-  const tp=String(terminPerson===undefined?_tmTerminPerson(tm):(terminPerson||'')).trim();
+  const kk=kontakte||(task&&task.kontakte)||[];
+  w['Mieter-Name']=_tmNameTeile(_tmMieterVorOrt(kk)).rest;   // b1120: nur ein echter Mieter, nie ersatzweise der AG-Kontakt
+  const tp=String(terminPerson===undefined?_tmPersonVorOrt(kk,tm):(terminPerson||'')).trim();
   const e=String(empf||'').trim();
   w['Termin-Person']=(tp&&tp.toLowerCase()!==e.toLowerCase())?_tmBeiName(tp):'';
   if(empf!==undefined){w['Empfänger']=e;w['Anrede']=_tmAnrede(e);}
@@ -39020,7 +39058,19 @@ function _tmBtbText(tm,empf){
   const d=String((tm&&(tm.date||tm.datum))||'');
   const tag=(typeof _tzDatumKurz==='function')?_tzDatumKurz(d):d;
   const zeit=_tmZeitText(tm);
-  return '✉ Terminmail als Entwurf in Outlook · Termin '+tag+(zeit?' '+zeit:'')+' · an '+(empf||[]).join(', ');
+  return TM_BTB_ANFANG+' · Termin '+tag+(zeit?' '+zeit:'')+' · an '+(empf||[]).join(', ');
+}
+/* b1120: Knopf an der Bautagebuch-Zeile der Terminmail – öffnet den ORDNER „Entwürfe“ von Outlook im Browser, nicht die einzelne Mail:
+   PAM merkt sich keinen Link (das wäre ein neues Feld, das auch PAM Mobil kennen müsste), und der Link wäre nach dem Senden ohnehin tot.
+   Der Anfang der Zeile ist derselbe Wortlaut, den _tmBtbText schreibt. */
+var TM_BTB_ANFANG='✉ Terminmail als Entwurf in Outlook';
+function _tmEntwuerfeKnopfHtml(text){
+  if(String(text||'').indexOf(TM_BTB_ANFANG)!==0)return '';
+  return '<button type="button" class="tm-entwuerfe-btn" onclick="_tmEntwuerfeOeffnen()" title="Öffnet in Outlook im Browser den Ordner „Entwürfe“ – dort liegt die Terminmail, solange du sie nicht gesendet hast" style="margin-top:4px;font-size:11px;padding:2px 9px;border-radius:5px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;">📂 Entwürfe in Outlook öffnen</button>';
+}
+function _tmEntwuerfeOeffnen(){
+  try{window.open('https://outlook.office.com/mail/drafts','_blank');}
+  catch(e){if(typeof showToast==='function')showToast('Outlook ließ sich nicht öffnen – bitte Outlook selbst öffnen, Ordner „Entwürfe“.','warning',6000);}
 }
 // Franks eigene Fassungen aus Drive, sonst die Starttexte. Nicht lesbar → Starttexte + Grund (Speichern geht dann nicht).
 async function _tmVorlageLaden(){
@@ -39087,8 +39137,8 @@ function _tmOeffnen(task,termine,name){
   function el(tag,stil,text){const e=document.createElement(tag);if(stil)e.style.cssText=stil;if(text!=null)e.textContent=text;return e;}
   function knopf(txt,stil,fn,titel){const b=document.createElement('button');b.type='button';b.textContent=txt;b.style.cssText=stil;if(titel)b.title=titel;b.addEventListener('click',fn);return b;}
   function tm(){return termine[st.tmIdx]||termine[0];}
-  // Person des Termins: aus der Beschreibung, sonst der Mieter der Karte
-  function terminPerson(){return _tmTerminPerson(tm())||_mvMieter(kontakte);}
+  // Person vor Ort: aus der Beschreibung – aber nie die Hausverwaltung / der AG-Kontakt; sonst der Mieter der Karte (b1120)
+  function terminPerson(){return _tmPersonVorOrt(kontakte,tm());}
   // von Hand getippte Adresse: gilt erst, wenn hinter dem @ noch ein Name mit Punkt steht („halb@“ ist keine)
   function freiAdr(){const a=String(st.frei||'').trim(),i=a.indexOf('@');return (i>0&&a.indexOf(' ')<0&&a.indexOf('.',i+2)>i&&a.charAt(a.length-1)!=='.')?a:'';}
   function gewaehlte(){
@@ -39229,7 +39279,8 @@ function _tmOeffnen(task,termine,name){
         const z=zustand(p.key);
         // ein im Fenster selbst getippter {Platzhalter} im Betreff wird gefüllt (wie b1054)
         const betreff=_tmBetreffPutzen(_mvFuellen(z.betrWert,_tmWerte(task,kontakte,termin,p.name,terminPerson())))||('Termin am '+_tmTagLang(termin.date||termin.datum));
-        const r=await _pamAntwortEntwurf(task,p.adr,betreff,z.taWert,'✅ Terminmail an '+_mvTextHtml(p.name||p.adr)+' liegt in Outlook unter <b>Entwürfe</b>');
+        // b1120: letzter Wert true = der blaue Kasten bleibt stehen, bis Frank ihn anklickt oder mit ✕ schließt (nur bei der Terminmail)
+        const r=await _pamAntwortEntwurf(task,p.adr,betreff,z.taWert,'✅ Terminmail an '+_mvTextHtml(p.name||p.adr)+' liegt in Outlook unter <b>Entwürfe</b>',null,true);
         if(r==='ok')fertig.push(p.name||p.adr);else fehl.push(p.name||p.adr);
       }
       if(fertig.length){
