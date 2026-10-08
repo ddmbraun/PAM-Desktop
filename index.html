@@ -10547,7 +10547,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-08 · #1135'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-08-b1135) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-08 · #1136'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-08-b1136) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -21494,8 +21494,11 @@ function _kiRestUpdate(){
 
 // ── AUTO-AMPEL: berechnet Ampelfarbe aus Datumsfeldern ──────────────────────
 function _getAmpel(task){
-  const today = new Date().toISOString().split('T')[0];
-  const in3   = new Date(Date.now()+3*864e5).toISOString().split('T')[0];
+  // b1136: Ortszeit statt toISOString() – UTC lieferte zwischen 0 und 2 Uhr (Sommerzeit; Winter 0–1 Uhr) noch den Vortag:
+  // ein Termin von gestern war dann nicht „rot“, einer von heute galt als „morgen“
+  const _lok=function(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
+  const today = _lok(new Date());
+  const in3   = _lok(new Date(Date.now()+3*864e5));
   const dates = [];
   if(task.due) dates.push(task.due);
   // b1125: Abgehakte zählen nicht mehr (die Karte zeigte rot, obwohl alles erledigt war) …
@@ -62703,14 +62706,17 @@ function _emRenderTerminList(){
   // b812: keine leere Platzhalter-Zeile mehr. Sie fraß gut einen Fingerbreit
   // Bildschirm für nichts. Eine Zeile entsteht jetzt erst über „＋ Frei“.
   if(!termine.length)return;
-  termine.forEach(function(t,i){_emAddTerminRow(t.text||'',t.datum||'',i);});
+  termine.forEach(function(t,i){_emAddTerminRow(t.text||'',t.datum||'',i,!!t.erledigt,t.id);}); // b1136: Haken + Kennung mitgeben
 }
-function _emAddTerminRow(txt,dat,idx){
+// b1136: erl/fid = Haken und Kennung des Eintrags – sie stehen an der Zeile (data-erl / data-id), damit _emDoSave sie behält
+function _emAddTerminRow(txt,dat,idx,erl,fid){
   let el=document.getElementById('emTerminList');
   if(!el)return;
   let row=document.createElement('div');
   row.className='em-termin-row';
-  row.innerHTML=
+  if(row.dataset){ if(erl)row.dataset.erl='1'; if(fid!=null&&fid!=='')row.dataset.id=String(fid); }
+  if(erl){ row.style.opacity='.55'; row.title='Erledigt (am PC abgehakt) – bleibt beim Speichern erledigt'; }
+  row.innerHTML=(erl?'<span title="Erledigt" style="flex-shrink:0;">✓</span>':'')+
     '<input type="text" class="em-field-input em-termin-txt" placeholder="z. B. Mo 09:00" value="'+_escHtml(txt)+'" oninput="_emScheduleSave()" autocomplete="off" style="flex:1.5;">'+
     '<input type="date" class="em-field-input em-termin-dat" value="'+_escHtml(dat)+'" oninput="_emScheduleSave()" autocomplete="off" style="flex:1;">'+
     '<button class="em-termin-del" onclick="this.parentElement.remove();_emScheduleSave();" title="Entfernen">×</button>';
@@ -62727,14 +62733,20 @@ function _emRenderAufgabenList(){
   const el=document.getElementById('emAufgabenList');if(!el)return;
   el.innerHTML='';
   const aufgaben=(_emCurrentTask&&_emCurrentTask.aufgaben)||[];
-  aufgaben.forEach(function(a,i){_emAddAufgabeRow(a.typ||'',a.datum||'',i);});
+  aufgaben.forEach(function(a,i){_emAddAufgabeRow(a.typ||'',a.datum||'',i,!!a.erledigt,a.id);}); // b1136: Haken + Kennung mitgeben
 }
-function _emAddAufgabeRow(typ,dat,idx){
+// b1136: erl/aid = Haken und Kennung (data-erl / data-id). Ein gespeicherter Typ, den die Liste nicht kennt (z. B. „Anruf bis“,
+// „Ortstermin am“ aus „＋ Termin“), steht als eigene, gewählte Option vorn – vorher fiel die Auswahl lautlos auf „Ortstermin“
+// (Option ohne Treffer → erste Option, Lehre b968/b974) und das Speichern schrieb den falschen Typ zurück.
+function _emAddAufgabeRow(typ,dat,idx,erl,aid){
   const el=document.getElementById('emAufgabenList');if(!el)return;
   const row=document.createElement('div');
   row.className='em-termin-row';
-  const opts=_AUFG_TYPEN_EM.map(t=>'<option'+(t===typ?' selected':'')+'>'+t+'</option>').join('');
-  row.innerHTML='<select class="em-field-input em-aufg-typ" oninput="_emScheduleSave()" style="flex:1.5;">'+opts+'</select>'
+  if(row.dataset){ if(erl)row.dataset.erl='1'; if(aid!=null&&aid!=='')row.dataset.id=String(aid); }
+  if(erl){ row.style.opacity='.55'; row.title='Erledigt (am PC abgehakt) – bleibt beim Speichern erledigt'; }
+  const _liste=(typ&&_AUFG_TYPEN_EM.indexOf(typ)<0)?[typ].concat(_AUFG_TYPEN_EM):_AUFG_TYPEN_EM;
+  const opts=_liste.map(t=>'<option value="'+_escHtml(t)+'"'+(t===typ?' selected':'')+'>'+_escHtml(t)+'</option>').join('');
+  row.innerHTML=(erl?'<span title="Erledigt" style="flex-shrink:0;">✓</span>':'')+'<select class="em-field-input em-aufg-typ" oninput="_emScheduleSave()" style="flex:1.5;">'+opts+'</select>'
     +'<input type="date" class="em-field-input em-aufg-dat" value="'+_escHtml(dat)+'" oninput="_emScheduleSave()" autocomplete="off" style="flex:1;">'
     +'<button class="em-termin-del" onclick="this.parentElement.remove();_emScheduleSave();" title="Entfernen">×</button>';
   el.appendChild(row);
@@ -63271,7 +63283,7 @@ function _emUpdateTop2(){
   // Aufgaben MIT Datum (nur wenn Datum vergeben)
   const _aufgIconsT={'Ortstermin':'📍','Ortstermin am':'📍','Anruf':'📞','Anruf bis':'📞','Ausführungstermin':'🔨','Besichtigung':'👁','Besichtigung am':'👁','Auftrag erteilt':'📋','Angebot':'📝','E-Mail':'📧','E-Mail bis':'📧','Rückfragen':'❓','Rückfragen bis':'❓','Abgeschlossen':'✅'};
   (t.aufgaben||[]).forEach(function(a){
-    if(!a.datum)return;
+    if(!a.datum||a.erledigt)return;   // b1136: abgehakte Aufgaben sind kein Schild (vorher rot „überfällig“, obwohl erledigt)
     let d=new Date(a.datum);let today=new Date();today.setHours(0,0,0,0);
     let overdue=d<today;
     let lbl=d.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit'});
@@ -63282,6 +63294,7 @@ function _emUpdateTop2(){
   // Freie Termine MIT Datum (nur wenn Datum vergeben)
   let terminRows=document.querySelectorAll('#emTerminList .em-termin-row');
   terminRows.forEach(function(row){
+    if(row.dataset&&row.dataset.erl==='1')return;   // b1136: abgehakte freie Termine sind kein Schild (und nie „überfällig“)
     let txt=(row.querySelector('.em-termin-txt')||{}).value||'';
     let dat=(row.querySelector('.em-termin-dat')||{}).value||'';
     if(dat){
@@ -64251,21 +64264,39 @@ function _emDoSave(){
   if(_emNameEl)t.emailSenderName=(_emNameEl.value||'').trim();
   let terminRows=document.querySelectorAll('#emTerminList .em-termin-row');
   let termine=[];
+  // b1136: Haken (erledigt) und Kennung behalten. Vorher baute das E-Mail-Fenster beide Listen neu auf: abgehakte Einträge waren
+  // danach wieder offen, freie Termine hatten KEINE Kennung (die Handgriffe am PC finden sie über die Kennung) und Aufgaben
+  // bekamen neue Nummern ab 0. Neue Zeilen bekommen die nächste freie Nummer der Karte.
+  let _ftMax=0;
+  (t.freieTermine||[]).forEach(function(f){ if(f&&typeof f.id==='number'&&f.id>_ftMax)_ftMax=f.id; });
   terminRows.forEach(function(row){
     let txt=(row.querySelector('.em-termin-txt')||{}).value||'';
     let dat=(row.querySelector('.em-termin-dat')||{}).value||'';
-    if(txt.trim()||dat)termine.push({text:txt.trim(),datum:dat});
+    if(txt.trim()||dat){
+      const ds=row.dataset||{};
+      const altId=(ds.id!=null&&ds.id!=='')?Number(ds.id):NaN;
+      const e={id:isNaN(altId)?(++_ftMax):altId,text:txt.trim(),datum:dat};
+      if(ds.erl==='1')e.erledigt=true;
+      termine.push(e);
+    }
   });
   t.freieTermine=termine.length?termine:[];
   t.freierTermin=termine.length?{text:termine[0].text,datum:termine[0].datum}:null;
   // Aufgaben mit Termin speichern
   const aufgRows=document.querySelectorAll('#emAufgabenList .em-termin-row');
   const aufgaben=[];
-  let _aufgId=0;
+  let _aufgMax=-1;
+  (t.aufgaben||[]).forEach(function(a){ if(a&&typeof a.id==='number'&&a.id>_aufgMax)_aufgMax=a.id; });
   aufgRows.forEach(function(row){
     const typ=(row.querySelector('.em-aufg-typ')||{}).value||'';
     const dat=(row.querySelector('.em-aufg-dat')||{}).value||'';
-    if(typ)aufgaben.push({id:_aufgId++,typ:typ,datum:dat});
+    if(typ){
+      const ds=row.dataset||{};
+      const altId=(ds.id!=null&&ds.id!=='')?Number(ds.id):NaN;
+      const a={id:isNaN(altId)?(++_aufgMax):altId,typ:typ,datum:dat};
+      if(ds.erl==='1')a.erledigt=true;   // b1136
+      aufgaben.push(a);
+    }
   });
   t.aufgaben=aufgaben;
   // b861: Das war die EINZIGE ungesicherte Zeile dieser Funktion - obwohl weiter oben
