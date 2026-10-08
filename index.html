@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data: blob:; script-src 'self' 'unsafe-inline' https://accounts.google.com https://ssl.gstatic.com; connect-src 'self' blob: https://*.googleapis.com https://accounts.google.com https://www.googleapis.com https://oauth2.googleapis.com https://lh3.googleusercontent.com https://*.googleusercontent.com https://login.microsoftonline.com https://graph.microsoft.com https://europe-west1-ptp-workboard.cloudfunctions.net https://photon.komoot.io https://nominatim.openstreetmap.org https://api.anthropic.com https://outlook.office.com; img-src 'self' data: blob: https: https://*.googleusercontent.com https://drive.google.com https://lh3.googleusercontent.com; style-src 'self' 'unsafe-inline' https://ssl.gstatic.com; frame-src 'self' https://accounts.google.com https://drive.google.com https://login.microsoftonline.com https://login.live.com https://*.msftauth.net https://*.msauth.net blob:; worker-src blob: 'self';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data: blob:; script-src 'self' 'unsafe-inline' https://accounts.google.com https://ssl.gstatic.com; connect-src 'self' blob: https://*.googleapis.com https://accounts.google.com https://www.googleapis.com https://oauth2.googleapis.com https://lh3.googleusercontent.com https://*.googleusercontent.com https://login.microsoftonline.com https://graph.microsoft.com https://europe-west1-ptp-workboard.cloudfunctions.net https://photon.komoot.io https://nominatim.openstreetmap.org https://api.anthropic.com https://outlook.office.com https://outlook.office365.com; img-src 'self' data: blob: https: https://*.googleusercontent.com https://drive.google.com https://lh3.googleusercontent.com; style-src 'self' 'unsafe-inline' https://ssl.gstatic.com; frame-src 'self' https://accounts.google.com https://drive.google.com https://login.microsoftonline.com https://login.live.com https://*.msftauth.net https://*.msauth.net blob:; worker-src blob: 'self';">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PAM Workboard</title>
 <link rel="manifest" href="manifest.json">
@@ -10554,7 +10554,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-08 · #1143'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-08-b1143) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-08 · #1144'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-08-b1144) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -39842,25 +39842,43 @@ function _pamB64Bytes(b64){
   for(let i=0;i<roh.length;i++)u[i]=roh.charCodeAt(i);
   return u;
 }
-/* b1143: eine Datei über 3 MB an den Entwurf hängen. Graph gibt eine Upload-Adresse zurück (auf outlook.office.com – genau diese
-   eine Adresse steht dafür in der Gästeliste connect-src), dorthin geht die Datei in Stücken. Das Ticket steckt in der Adresse,
-   deshalb ohne Anmelde-Kopf. Rückgabe true = hängt dran; false = nicht (Grund in der Konsole), der Aufrufer meldet es. */
+/* b1144: Upload-Adressen, die Microsoft für die Stücke zurückgibt. In Microsofts Anleitung steht outlook.office.com; für Franks
+   Postfach kam am 08.10.2026 outlook.office365.com (gemessen in den Entwicklerwerkzeugen, b1143 lehnte sie deshalb ab).
+   Beide – und NUR diese – stehen in der Gästeliste connect-src. */
+const _PAM_UPLOAD_HOSTS=['https://outlook.office.com/','https://outlook.office365.com/'];
+// nur der Servername einer Adresse – nie der Rest (darin steckt ein Einmal-Schlüssel)
+function _pamNurHost(url){
+  const t=String(url||''),i=t.indexOf('://');
+  if(i<0)return '(keine Adresse)';
+  return t.slice(i+3).split('/')[0].split('?')[0].split('#')[0]||'(keine Adresse)';
+}
+/* b1143: eine Datei über 3 MB an den Entwurf hängen. Graph gibt eine Upload-Adresse zurück, dorthin geht die Datei in Stücken.
+   Das Ticket steckt in der Adresse, deshalb ohne Anmelde-Kopf.
+   b1144: Rückgabe '' = hängt dran; sonst der Grund in Worten (ohne Schlüssel) – er steht dann in „Nicht angehängt (…)“. */
 async function _pamAnhangGross(H,ziel,a){
   const nm=(a&&a.name)||'Anhang';
   const bytes=_pamB64Bytes(a.contentBytes);
   const rs=await fetch(ziel+'/createUploadSession',{method:'POST',headers:H,
     body:JSON.stringify({AttachmentItem:{attachmentType:'file',name:nm,size:bytes.length,contentType:a.contentType||'application/octet-stream'}})});
-  if(!rs.ok){console.warn('[b1143] Upload-Sitzung HTTP',rs.status,nm);return false;}
+  if(!rs.ok){console.warn('[b1144] Upload-Sitzung HTTP',rs.status,nm);return 'Outlook lehnte das Hochladen ab, Fehler '+rs.status;}
   const url=String(((await rs.json())||{}).uploadUrl||'');
-  // ⛔ nur an Outlook – kommt eine andere Adresse zurück, geht nichts raus
-  if(url.indexOf('https://outlook.office.com/')!==0){console.warn('[b1143] unerwartete Upload-Adresse',nm);return false;}
+  // ⛔ nur an Outlook – kommt eine andere Adresse zurück, geht nichts raus (gemeldet wird nur der Servername)
+  if(!_PAM_UPLOAD_HOSTS.some(function(h){return url.indexOf(h)===0;})){
+    const host=_pamNurHost(url);
+    console.warn('[b1144] unerwartete Upload-Adresse',nm,host);
+    return 'Outlook schickte eine unbekannte Upload-Adresse: '+host;
+  }
+  const teile=Math.ceil(bytes.length/_PAM_ANH_STUECK);
   for(let von=0;von<bytes.length;von+=_PAM_ANH_STUECK){
     const bis=Math.min(von+_PAM_ANH_STUECK,bytes.length);
     const r=await fetch(url,{method:'PUT',headers:{'Content-Type':'application/octet-stream','Content-Range':'bytes '+von+'-'+(bis-1)+'/'+bytes.length},
       body:bytes.slice(von,bis)});
-    if(!r.ok){console.warn('[b1143] Upload HTTP',r.status,nm,von);return false;}
+    if(!r.ok){
+      console.warn('[b1144] Upload HTTP',r.status,nm,von);
+      return 'Teil '+(Math.floor(von/_PAM_ANH_STUECK)+1)+' von '+teile+' kam nicht an, Fehler '+r.status;
+    }
   }
-  return true;
+  return '';
 }
 /* b1143: alle Anhänge an den Entwurf draftId – EINE Stelle für neue Mail, Antwort im Verlauf und Antwort mit Vorlage.
    Bis 3 MB in einem Stück (wie bisher), größer über _pamAnhangGross; was über die 20 MB der Mail käme, geht nicht mit.
@@ -39875,12 +39893,13 @@ async function _pamAnhaengeDran(H,draftId,liste){
       if(_pamAnhGroesse(a)<=_PAM_ANH_MAX){
         const r=await fetch(ziel,{method:'POST',headers:H,
           body:JSON.stringify(Object.assign({'@odata.type':'#microsoft.graph.fileAttachment'},a))});
-        if(!r.ok){console.warn('[Entwurf] Anhang HTTP',r.status,nm);fehl.push(nm);}
+        if(!r.ok){console.warn('[Entwurf] Anhang HTTP',r.status,nm);fehl.push(nm+' (Outlook lehnte ab, Fehler '+r.status+')');}   // b1144: mit Grund
       }else{
         try{showToast('📎 '+nm+' ('+_pamAnhMB(_pamAnhGroesse(a))+') wird angehängt …','info',8000);}catch(eT){}
-        if(!await _pamAnhangGross(H,ziel,a))fehl.push(nm);
+        const grund=await _pamAnhangGross(H,ziel,a);
+        if(grund)fehl.push(nm+' ('+grund+')');
       }
-    }catch(e){console.warn('[Entwurf] Anhang:',nm,e);fehl.push(nm);}
+    }catch(e){console.warn('[Entwurf] Anhang:',nm,e);fehl.push(nm+' (Verbindung zu Outlook gestört)');}
   }
   return fehl;
 }
