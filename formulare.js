@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F45';
+const PAM_FORMULARE_VERSION='F46';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -14,6 +14,12 @@ function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 function _fsSichtCss(){
   return '.fs-sicht{--bg2:#1e2029;--bg3:#3a3d4c;--border:#6a6e86;--fs-kfl:#17395c;--fs-krd:#5aa9e6;--fs-cfl:#2a2d3a;--fs-can:#1f5f8b;--fs-ph:#b9bccb;--fs-hdr:#243247;--fs-hfa:#5aa9e6;--fs-karte:#16171d;--fs-kante:6px;--fs-lbfl:rgba(217,72,15,.34);--fs-frb:2px;}'
     +'.fs-sicht.fs-hell{--bg:#e9ecf2;--bg2:#ffffff;--bg3:#ffffff;--border:#7d8198;--fs-kfl:#d6e7f7;--fs-krd:#1f5f8b;--fs-cfl:#ffffff;--fs-can:#b9d7f2;--fs-ph:#5d6074;--fs-hdr:#cfdcea;--fs-hfa:#1f5f8b;--fs-karte:#ffffff;--fs-schatten:0 2px 6px rgba(0,0,0,.18);--fs-lbfl:#ffd9c4;}'
+    +'.fs-sicht.fs-hell.fs-grau2{--bg:#dcdfe5;--fs-karte:#eceef2;--bg2:#f4f5f7;--bg3:#f4f5f7;--fs-cfl:#f4f5f7;--fs-hdr:#c3d1e0;--fs-kfl:#cde0f2;--text2:#4f5064;}'
+    +'.fs-sicht.fs-hell.fs-grau3{--bg:#c8cbd2;--fs-karte:#dadce1;--bg2:#e8e9ed;--bg3:#e8e9ed;--fs-cfl:#e8e9ed;--fs-hdr:#b3c4d7;--fs-kfl:#c2d8ee;--border:#737790;--text2:#41424f;}'
+    +'.fs-sicht.fs-hell.fs-grau4{--bg:#b3b7bf;--fs-karte:#c6c9d0;--bg2:#d9dbe0;--bg3:#d9dbe0;--fs-cfl:#d9dbe0;--fs-hdr:#a5b7cb;--fs-kfl:#b5cde6;--border:#5f637a;--fs-ph:#50536a;--text2:#33343f;}'
+    +'[data-fs-grauwahl]{display:flex;gap:4px;flex-shrink:0;margin-left:auto;}.fs-sicht:not(.fs-hell) [data-fs-grauwahl]{display:none!important;}'
+    +'[data-fs-grauwahl] button{width:38px;height:40px;padding:0;border:none;border-radius:8px;background:rgba(255,255,255,.2);color:#fff;font-size:var(--fs15,15px);font-weight:700;font-family:inherit;cursor:pointer;}'
+    +'[data-fs-grauwahl] button[aria-pressed="true"]{background:#fff;color:#1f5f8b;}'
     +'.fs-sicht input::placeholder,.fs-sicht textarea::placeholder{color:var(--fs-ph)!important;opacity:1!important;}'
     +'.fs-sicht.fs-touch{--fs11:13px;--fs12:14px;--fs13:14px;--fsh:44px;--fs-mini:84px;}'
     +'@media (min-width:700px) and (min-height:600px){.fs-sicht.fs-touch{--fs11:14px;--fs12:15px;--fs13:16px;--fs14:17px;--fs15:18px;--fs16:19px;--fs17:20px;--fs18:21px;--fsh:48px;--fsh44:50px;--fs-fpad:12px;--fs-mini:120px;}}';
@@ -47,8 +53,49 @@ function _fsSichtAn(el){
     el.classList.add('fs-sicht');
     if(!_fsAmPc())el.classList.add('fs-touch');
     if(_fsSichtHell())el.classList.add('fs-hell');
+    _fsGrauSetzen(el,_fsGrauStufe()); /* F46: wirkt nur im hellen Modus (Stil oben) */
     return true;
   }catch(e){console.warn('[Sichtbarkeit]',e);return false;}
+}
+/* ══ F46: HINTERGRUND-STUFEN 1–4 ═══════════════════════════════════════════════════════════════════════════════════
+   Frank 08.10.2026: „dem weißen Hintergrund noch etwas dunkler vergrauen“ – „alle 4 Stufen zur Auswahl mit 1234“. Vier Knöpfe in der Kopfleiste
+   des Protokolls: 1 Weiß (wie bisher) · 2 Hellgrau · 3 Grau · 4 Dunkelgrau. Nur im hellen Modus sichtbar und wirksam; die Schrift bleibt dunkel.
+   Gilt für alle Fenster mit fs-sicht (Protokoll, Skizze, Luftbild, Foto-Markieren). Gemerkt im Gerät unter pam_fs_grau; PAM Desktop gibt
+   den Schlüssel an den anderen Rechner weiter (PAM_GETEILT_KEYS). */
+const FS_GRAU_KEY='pam_fs_grau';
+const FS_GRAU_NAMEN=['Weiß','Hellgrau','Grau','Dunkelgrau'];
+function _fsGrauStufe(){
+  try{const v=parseInt(localStorage.getItem(FS_GRAU_KEY),10);return (v>=1&&v<=4)?v:1;}catch(e){return 1;}
+}
+function _fsGrauSetzen(el,stufe){
+  try{
+    if(!el||!el.classList||typeof el.classList.remove!=='function')return false;
+    el.classList.remove('fs-grau2','fs-grau3','fs-grau4');
+    if(stufe>=2&&stufe<=4)el.classList.add('fs-grau'+stufe);
+    return true;
+  }catch(e){return false;}
+}
+/* Neue Stufe merken und sofort an allen offenen Fenstern und Knopf-Gruppen zeigen. */
+function _fsGrauWaehlen(stufe){
+  stufe=(stufe>=1&&stufe<=4)?stufe:1;
+  try{localStorage.setItem(FS_GRAU_KEY,String(stufe));}catch(e){console.warn('[Hintergrund]',e);}
+  try{
+    document.querySelectorAll('.fs-sicht').forEach(el=>_fsGrauSetzen(el,stufe));
+    document.querySelectorAll('[data-fs-grauwahl] button').forEach(b=>b.setAttribute('aria-pressed',String(+b.getAttribute('data-fs-grau')===stufe)));
+  }catch(e){console.warn('[Hintergrund]',e);}
+  return stufe;
+}
+function _fsGrauKnoepfe(){
+  const g=document.createElement('div');g.setAttribute('data-fs-grauwahl','1');g.setAttribute('role','group');g.setAttribute('aria-label','Hintergrund');
+  const akt=_fsGrauStufe();
+  FS_GRAU_NAMEN.forEach((name,i)=>{
+    const b=document.createElement('button');b.type='button';b.textContent=String(i+1);
+    b.setAttribute('data-fs-grau',String(i+1));b.title='Hintergrund '+(i+1)+' – '+name;b.setAttribute('aria-label',b.title);
+    b.setAttribute('aria-pressed',String(i+1===akt));
+    b.onclick=()=>_fsGrauWaehlen(i+1);
+    g.appendChild(b);
+  });
+  return g;
 }
 /* ══ F44: EINZEILIGES FELD, DAS BEIM ANTIPPEN AUFKLAPPT ═════════════════════════════════════════════════════════════
    Frank 05.10.2026 (REP-Auftrag „Baustelle / Schadensbild“, Besichtigung 2 „Anlass“): „wenn der Text lang ist, wird das so abgeschnitten“ – aber es soll
@@ -1083,11 +1130,11 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
 
   /* Kopfleiste */
   const hdr=document.createElement('div');
-  hdr.style.cssText='background:'+FS_FARBE+';padding:12px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0;';
+  hdr.style.cssText='background:'+FS_FARBE+';padding:12px 14px;display:flex;flex-wrap:wrap;align-items:center;gap:10px;flex-shrink:0;'; /* F46: schmales Handy – die Knöpfe 1–4 rutschen in eine zweite Zeile */
   const closeBtn=document.createElement('button');closeBtn.type='button';closeBtn.textContent='←';
   closeBtn.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:40px;height:40px;border-radius:8px;font-size:var(--fs18,18px);cursor:pointer;flex-shrink:0;';
   closeBtn.onclick=()=>{ov.remove();try{const ct=currentTask();if(ct)renderDetail(ct);}catch(e){console.warn('[Feuchte] zurück:',e);}};
-  const hdrMeta=document.createElement('div');hdrMeta.style.cssText='flex:1;min-width:0;';
+  const hdrMeta=document.createElement('div');hdrMeta.style.cssText='flex:1 1 100px;min-width:0;';
   const hdrT=document.createElement('div');hdrT.style.cssText='font-size:var(--fs15,15px);font-weight:700;color:#fff;';hdrT.textContent='💧 '+_fsTitel(bericht);
   const hdrS=document.createElement('div');hdrS.style.cssText='font-size:var(--fs12,12px);color:rgba(255,255,255,.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
   hdrS.textContent=(bericht.kopf.objektAdresse||t.adresse||t.title||'')+' · '+(bericht.datum||'');
@@ -1097,7 +1144,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   const hilfeBtn=document.createElement('button');hilfeBtn.type='button';hilfeBtn.textContent='📘';hilfeBtn.title="So geht's";hilfeBtn.setAttribute('aria-label',"So geht's – Anleitung"); // v304
   hilfeBtn.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:40px;height:40px;border-radius:8px;font-size:var(--fs18,18px);cursor:pointer;flex-shrink:0;';
   hilfeBtn.onclick=()=>_fsHilfeZeigen();
-  hdr.append(closeBtn,hdrMeta,hilfeBtn,statsEl);
+  hdr.append(closeBtn,hdrMeta,hilfeBtn,statsEl,_fsGrauKnoepfe()); /* F46: Hintergrund 1–4, nur im hellen Modus zu sehen */
 
   const body=document.createElement('div');
   body.style.cssText='flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:0 0 96px;';
