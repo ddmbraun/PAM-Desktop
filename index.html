@@ -10554,7 +10554,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-08 · #1146'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-08-b1146) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-08 · #1147'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-08-b1147) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -22603,7 +22603,7 @@ function _kalFahrtDialog(taskId,idx,focus){
   if(!r.t){ showToast('⚠ Termin nicht gefunden','warning',4000); return; }
   const t=r.t, task=r.task||{};
   const vorschlag=_kalFahrtText(t) || ((task.adresse||'').trim()) || (task.title||'').trim();
-  const autoName=(r.live&&r.task&&typeof _msTerminSubject==='function')?_msTerminSubject(r.task,r.live):'';
+  const autoName=(r.live&&r.task&&typeof _msTerminSubject==='function')?((typeof _msOutlookBetreff==='function')?_msOutlookBetreff(r.task,r.live):_msTerminSubject(r.task,r.live)):'';   // b1147: so wie es in Outlook steht
   const old=document.getElementById('kalfOverlay'); if(old)old.remove();
   const ov=document.createElement('div'); ov.id='kalfOverlay';
   ov.addEventListener('click',function(e){ if(e.target===ov)_kalfClose(); });
@@ -22835,21 +22835,23 @@ async function _kalDeleteTermin(taskId,idx){
   const task=findTaskById(taskId); if(!task||!Array.isArray(task.ausserhausTermine)||!task.ausserhausTermine[idx])return;
   const t=task.ausserhausTermine[idx];
   const inOutlook=!!t.outlookEventId;
-  if(!confirm('Diesen Termin wirklich löschen?'+(inOutlook?'\n\nEr wird auch aus Outlook entfernt.':'')))return;
+  const olFehlt=inOutlook&&!msToken;   // b1147: dann bleibt der Outlook-Eintrag stehen (wie removeAusserhausTermin)
+  if(!confirm('Diesen Termin wirklich löschen?'+(inOutlook?(olFehlt?'\n\n⚠ Outlook (info@) ist gerade NICHT verbunden – in Outlook bleibt der Termin stehen und muss dort von Hand gelöscht werden.\nAbbrechen, oben über 📨 verbinden und dann löschen = PAM nimmt ihn auch aus Outlook.':'\n\nEr wird auch aus Outlook entfernt.'):'')))return;
   if(inOutlook && msToken){
     try{
       const _del=()=>fetch('https://graph.microsoft.com/v1.0/me/events/'+encodeURIComponent(t.outlookEventId),{method:'DELETE',headers:{Authorization:'Bearer '+msToken}});
       let r=await _del();
       if(r.status===401){ try{ if(typeof _msRefreshToken==='function' && await _msRefreshToken()){ r=await _del(); } }catch(_){}}
-      if(!r.ok && r.status!==404) showToast('⚠ Outlook: Termin nicht gelöscht (HTTP '+r.status+') – aus PAM trotzdem entfernt','warning',6000);
-    }catch(e){ showToast('⚠ Outlook-Löschen fehlgeschlagen – aus PAM trotzdem entfernt','warning',5000); }
+      if(!r.ok && r.status!==404) ((typeof _ahToastLang==='function')?_ahToastLang:showToast)('⚠ Outlook: Termin nicht gelöscht (HTTP '+r.status+') – aus PAM trotzdem entfernt'+((typeof _ahOutlookRestText==='function')?'. In Outlook steht noch: '+_ahOutlookRestText(t):''),'warning',12000);
+    }catch(e){ ((typeof _ahToastLang==='function')?_ahToastLang:showToast)('⚠ Outlook-Löschen fehlgeschlagen – aus PAM trotzdem entfernt'+((typeof _ahOutlookRestText==='function')?'. In Outlook steht noch: '+_ahOutlookRestText(t):''),'warning',12000); }
   }
   if(msToken) await _msDeleteFahrtEvents(t);      // Fahrt-Einträge nicht verwaisen lassen
   task.ausserhausTermine.splice(idx,1);
   try{ const openId=(document.getElementById('taskId')||{}).value||''; if(openId===task.id && Array.isArray(taskAusserhausTermine)){ taskAusserhausTermine.splice(idx,1); if(document.getElementById('ausserhausTermineList'))renderAusserhausTermine(); } }catch(e){}
   try{autoSave();}catch(e){console.warn('[KAL]',e);}
   renderKalender(true);
-  showToast('🗑 Termin gelöscht','success',3000);
+  if(olFehlt)((typeof _ahToastLang==='function')?_ahToastLang:showToast)((typeof _ahOutlookBleibtText==='function')?_ahOutlookBleibtText(t):'⚠ Outlook war nicht verbunden – der Termin steht dort noch. Bitte in Outlook selbst löschen.','warning',15000);   // b1147
+  else showToast('🗑 Termin gelöscht','success',3000);
 }
 // b909: Einzelnen Termin aus der Kalenderansicht nach Outlook schreiben („● nicht sync").
 // Bewusst NICHT über _msAutoPushTermine: die schreibt nur, was _pamDirty trägt, und genau
@@ -23048,6 +23050,35 @@ function _msTerminSubject(task,t,alteArt){
   if(bez && (alteArt || !doppelt)) s+=' – '+bez;
   return s.trim();
 }
+// b1147 (Frank 08.10.2026 „Zeitfenster in Outlook besser darstellen“, Entwurf A + C, „baue beides“):
+// Termine mit Zeitfenster bekommen in Outlook „⏳ 10:30–11:30 · “ VORN in den Betreff – vorher stand
+// „– zwischen … Uhr“ ganz hinten und war in der schmalen Wochenspalte abgeschnitten. Dazu ein Satz oben
+// im Text des Termins. Nur das, was nach Outlook geht, ändert sich: _msTerminSubject (PAM-Anzeigen und
+// Wiedererkennen alter Betreffs im Abgleich) bleibt wie es ist. Ein frei vergebener Name (✏ Name) bleibt wörtlich.
+function _msOutlookFenster(t){
+  if(!t||((t.betreff||'').trim()))return '';
+  return (typeof _ahFensterKurz==='function')?_ahFensterKurz(t):'';
+}
+function _msOutlookBetreff(task,t){
+  const fk=_msOutlookFenster(t);
+  if(!fk)return _msTerminSubject(task,t);
+  const bez=(typeof _pamAnrufFensterAnText==='function')?_pamAnrufFensterAnText(t.beschreibung,''):String(t.beschreibung||'');
+  let s=_msTerminSubject(task,Object.assign({},t,{beschreibung:bez}));
+  if(s.indexOf('🔷 ')===0)s=s.slice('🔷 '.length);
+  // „10:30–11:30 Uhr“ → „10:30–11:30“ (kürzer für die schmale Spalte, wie im Entwurf); „ab 13 Uhr“ bleibt
+  const k=(fk.indexOf('ab ')!==0&&fk.slice(-4)===' Uhr')?fk.slice(0,-4):fk;
+  return '🔷 ⏳ '+k+' · '+s;
+}
+function _msOutlookText(t,link,von,bis){
+  const h=function(x){return String(x==null?'':x).split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;').split('"').join('&quot;');};
+  let s='';
+  const fk=_msOutlookFenster(t);
+  if(fk){
+    const lang=((typeof _tmFenster==='function')?_tmFenster(t.beschreibung):'')||fk;
+    s='⏳ <b>Zeitfenster '+h(lang)+'</b> – genaue Uhrzeit noch offen. Im Kalender belegt: '+h(von)+'–'+h(bis)+' Uhr.<br>';
+  }
+  return s+'🔗 In PAM öffnen: <a href="'+h(link)+'">'+h(link)+'</a>';
+}
 function _msTerminComplete(t){ return !!(t && t.date && t.von && (((t.beschreibung||'').trim())||((t.betreff||'').trim()))); }
 // ── Fahrt als eigene Outlook-Termine (vor + nach dem Ortstermin) ──────────────
 // Der Ortstermin selbst bleibt reine Arbeitszeit; die Fahrt bekommt eigene
@@ -23124,10 +23155,13 @@ async function _msPushTermin(task,t){
   const ort=((task&&task.adresse)||'').trim();
   const base=window.location.origin+window.location.pathname;
   const link=base+'?task='+encodeURIComponent(task.id||'');
-  const ev={ subject:_msTerminSubject(task,t), categories:['PAM'],
+  // b1147: Betreff + Text über _msOutlookBetreff/_msOutlookText (Zeitfenster vorn) – ohne Fenster unverändert
+  const _olB=(typeof _msOutlookBetreff==='function')?_msOutlookBetreff(task,t):_msTerminSubject(task,t);
+  const _olT=(typeof _msOutlookText==='function')?_msOutlookText(t,link,_normTime(t.von),bisT):('🔗 In PAM öffnen: <a href="'+link+'">'+link+'</a>');
+  const ev={ subject:_olB, categories:['PAM'],
     start:{dateTime:start,timeZone:'Europe/Berlin'},
     end:{dateTime:end,timeZone:'Europe/Berlin'},
-    body:{contentType:'HTML',content:'🔗 In PAM öffnen: <a href="'+link+'">'+link+'</a>'} };
+    body:{contentType:'HTML',content:_olT} };
   if(ort)ev.location={displayName:ort};
   const isUpdate=!!t.outlookEventId;
   const url='https://graph.microsoft.com/v1.0/me/events'+(isUpdate?'/'+encodeURIComponent(t.outlookEventId):'');
@@ -23754,18 +23788,41 @@ function erledigtAusserhausTermin(i){
 // und Rückfahrt blieb für immer stehen, und mit dem Eintrag war auch die Outlook-Nummer
 // weg (nicht mehr auffindbar). Der Kalender konnte es längst richtig (_kalDeleteTermin);
 // hier fehlte es. Gleiche Nachfrage, gleiche Reihenfolge, gleiche Fehlermeldungen.
+// b1147 (Frank 08.10.2026, „baue beides“): Wer ohne Outlook-Verbindung löscht, behielt den Outlook-Eintrag –
+// ohne ein Wort (gemessen: ein Probe-Termin „Ortstermin“ stand danach nur noch in Outlook). Jetzt warnt die
+// Rückfrage vorher und eine Meldung nennt danach den Termin, damit er in Outlook zu finden ist.
+// Beispiel: „🔷 260999 Auftrag 1 – Ortstermin“ am Fr 09.10. um 10:00
+function _ahOutlookRestText(t){
+  if(!t)return '';
+  const name=String(t._pushedSubject||t.betreff||t.beschreibung||'Termin').trim();
+  const d=String((t.date||t.datum)||'').trim();
+  const tag=d?((typeof _tzDatumKurz==='function')?_tzDatumKurz(d):d):'';
+  return '„'+name+'“'+(tag?' am '+tag:'')+(t.von?' um '+_normTime(t.von):'');
+}
+function _ahOutlookBleibtText(t){
+  return '⚠ Outlook (info@) war nicht verbunden – in Outlook steht dieser Termin noch: '+_ahOutlookRestText(t)+'. Bitte dort selbst löschen.';
+}
+// Wie showToast, aber die Meldung bricht um statt in einer Zeile über den Bildschirmrand zu laufen (showToast: nowrap)
+function _ahToastLang(msg,type,ms){
+  showToast(msg,type,ms);
+  try{
+    const g=document.getElementById('_globalToast'), x=g&&g.lastElementChild;
+    if(x){ x.style.whiteSpace='normal'; x.style.maxWidth='min(760px,92vw)'; x.style.textAlign='center'; }
+  }catch(e){}
+}
 async function removeAusserhausTermin(i){
   const t=taskAusserhausTermine[i]; if(!t)return;
   const fp=_kalwFp(t);                 // Fingerabdruck VOR dem Warten auf Outlook
   const inOutlook=!!t.outlookEventId;
-  if(!confirm('Diesen Termin wirklich löschen?'+(inOutlook?'\n\nEr wird auch aus Outlook entfernt.':'')))return;
+  const olFehlt=inOutlook&&!msToken;   // b1147: dann bleibt der Outlook-Eintrag stehen
+  if(!confirm('Diesen Termin wirklich löschen?'+(inOutlook?(olFehlt?'\n\n⚠ Outlook (info@) ist gerade NICHT verbunden – in Outlook bleibt der Termin stehen und muss dort von Hand gelöscht werden.\nAbbrechen, oben über 📨 verbinden und dann löschen = PAM nimmt ihn auch aus Outlook.':'\n\nEr wird auch aus Outlook entfernt.'):'')))return;
   if(inOutlook && msToken){
     try{
       const _del=()=>fetch('https://graph.microsoft.com/v1.0/me/events/'+encodeURIComponent(t.outlookEventId),{method:'DELETE',headers:{Authorization:'Bearer '+msToken}});
       let r=await _del();
       if(r.status===401){ try{ if(typeof _msRefreshToken==='function' && await _msRefreshToken()){ r=await _del(); } }catch(_){}}
-      if(!r.ok && r.status!==404) showToast('⚠ Outlook: Termin nicht gelöscht (HTTP '+r.status+') – aus PAM trotzdem entfernt','warning',6000);
-    }catch(e){ showToast('⚠ Outlook-Löschen fehlgeschlagen – aus PAM trotzdem entfernt','warning',5000); }
+      if(!r.ok && r.status!==404) ((typeof _ahToastLang==='function')?_ahToastLang:showToast)('⚠ Outlook: Termin nicht gelöscht (HTTP '+r.status+') – aus PAM trotzdem entfernt'+((typeof _ahOutlookRestText==='function')?'. In Outlook steht noch: '+_ahOutlookRestText(t):''),'warning',12000);
+    }catch(e){ ((typeof _ahToastLang==='function')?_ahToastLang:showToast)('⚠ Outlook-Löschen fehlgeschlagen – aus PAM trotzdem entfernt'+((typeof _ahOutlookRestText==='function')?'. In Outlook steht noch: '+_ahOutlookRestText(t):''),'warning',12000); }
   }
   if(msToken && typeof _msDeleteFahrtEvents==='function'){
     try{ await _msDeleteFahrtEvents(t); }catch(e){ console.warn('[TERM] Fahrt-Einträge:',e); }
@@ -23788,6 +23845,7 @@ async function removeAusserhausTermin(i){
   taskAusserhausTermine.splice(j,1);
   renderAusserhausTermine();
   scheduleTaskFieldSave();
+  if(olFehlt){ try{ ((typeof _ahToastLang==='function')?_ahToastLang:showToast)((typeof _ahOutlookBleibtText==='function')?_ahOutlookBleibtText(t):'⚠ Outlook war nicht verbunden – der Termin steht dort noch. Bitte in Outlook selbst löschen.','warning',15000); }catch(e){} }   // b1147
 }
 function syncAusserhausTermin(i,field,val){if(taskAusserhausTermine[i]){taskAusserhausTermine[i][field]=val;if(['date','von','bis','beschreibung'].includes(field))taskAusserhausTermine[i]._pamDirty=true;if(field==='von'||field==='bis'){renderTermineGesamt();_updateHdrZeitBadge();_tzDauerRefresh('a',i,taskAusserhausTermine[i].von,taskAusserhausTermine[i].bis);/* b596 */}if(field==='date'||field==='beschreibung'){if(typeof _tzStatusRender==='function')_tzStatusRender();/* b598 */}scheduleTaskFieldSave();if(field==='date'&&val&&taskAusserhausTermine[i].art==='ausfuehrung'&&typeof _ausfHakenFrage==='function')_ausfHakenFrage('eingeplant');/* b1009 */}}
 // b1009: Auswahlfeld „Art" am Außerhaus-Termin. Jede Option mit value (Falle b992); eine
