@@ -10534,7 +10534,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-08 · #1131'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-08-b1131) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-08 · #1132'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-08-b1132) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -25354,8 +25354,16 @@ const TN_WAS=[
   {wert:'besichtigung',sym:'👁',text:'Besichtigung',aufg:'Besichtigung am',   merker:'Besichtigung am'},
   {wert:'ausfuehrung', sym:'🔨',text:'Ausführung',  aufg:'Ausführungstermin', merker:'Ausführung am'},
   {wert:'anruf',       sym:'📞',text:'Anruf bis',   aufg:'Anruf bis',         merker:'Anruf bis',nurTag:true},
-  {wert:'sonst',       sym:'•', text:'Sonstiges …', aufg:'',                  merker:''}
+  {wert:'sonst',       sym:'•', text:'Sonstiges …', aufg:'',                  merker:''},
+  // b1132 (Frank 08.10.2026: „baue weitere“): die übrigen Aufgaben-Arten (Angebot, E-Mail bis, Rückfragen bis …) – nur mit Tag,
+  // die Art wird im Fenster aus einer Liste gewählt (_tnWeitereTypen). Vorher gingen sie auf Auftrags-Boards nur über den Umweg „Typ umstellen“.
+  {wert:'weitere',     sym:'🗂', text:'Weitere …',   aufg:'',                  merker:'',nurTag:true,auswahl:true}
 ];
+// b1132: Aufgaben-Arten, die keinen eigenen Knopf im Fenster haben – aus AUFGABEN_TYPEN, damit eine neue Art dort automatisch mitkommt
+function _tnWeitereTypen(){
+  const alle=(typeof AUFGABEN_TYPEN!=='undefined'&&Array.isArray(AUFGABEN_TYPEN))?AUFGABEN_TYPEN:[];
+  return alle.filter(function(t){ return !TN_WAS.some(function(w){ return w.aufg===t; }); });
+}
 // Rechnet aus den Angaben im Fenster aus, WAS angelegt wird – ohne etwas anzulegen.
 // e = {was, modus:'uhr'|'fenster'|'tag', tag:'JJJJ-MM-TT'|'', von, bis (getippt), text}
 // Rückgabe: {fehler, feld} oder {art:'ah'|'aufg'|'frei', eintrag, fenster?, folge}
@@ -25366,10 +25374,21 @@ function _tnPlan(e){
   const tag=String(e.tag||'').trim();
   const text=String(e.text||'').trim();
   if(w.wert==='sonst'&&!text)return {fehler:'Bitte kurz eintragen, was es ist',feld:'text'};
+  // b1132: „Weitere …“ – die Art kommt aus der Auswahl im Fenster und muss eine der übrigen Aufgaben-Arten sein
+  const typ=String(e.typ||'');
+  if(w.auswahl){
+    const erlaubt=(typeof _tnWeitereTypen==='function')?_tnWeitereTypen():[];
+    if(!typ||erlaubt.indexOf(typ)<0)return {fehler:'Bitte auswählen, welche Aufgabe',feld:'typ'};
+  }
   const modus=w.nurTag?'tag':(e.modus==='fenster'||e.modus==='tag'?e.modus:'uhr');
   const tagTxt=tag?((typeof _tzDatumKurz==='function')?_tzDatumKurz(tag):tag):'';
   if(modus==='tag'){
     if(!tag)return {fehler:'Bitte den Tag eintragen',feld:'tag'};
+    if(w.auswahl){
+      const name=(typeof _tzListeAufgName==='function')?_tzListeAufgName(typ):typ;
+      return {art:'aufg',eintrag:{typ:typ,datum:tag},
+        folge:'→ „'+name+' '+tagTxt+'“ · steht auf der Karte und im Kalender oben (Zeile „ohne Uhrzeit“) · nicht in Outlook, zählt nicht als Zeit'};
+    }
     if(w.wert==='sonst')return {art:'frei',eintrag:{text:text,datum:tag},
       folge:'→ freier Termin „'+text+'“ am '+tagTxt+' · steht auf der Karte und im Kalender oben (Zeile „ohne Uhrzeit“) · nicht in Outlook, zählt nicht als Zeit'};
     return {art:'aufg',eintrag:{typ:w.aufg,datum:tag},
@@ -25895,6 +25914,13 @@ function _tnDialog(){
   txtZeile.appendChild(el('div','tn-lbl','Was genau? (kurz)'));
   const txt=el('input','tn-text'); txt.type='text'; txt.id='tnText'; txt.autocomplete='off'; txt.maxLength=80;
   txtZeile.appendChild(txt); box.appendChild(txtZeile);
+  // b1132: „… Weitere“ – welche der übrigen Aufgaben-Arten (Wert = gespeicherte Art, Text = Anzeige, Lehre b992)
+  const typZeile=el('div'); typZeile.style.display='none';
+  typZeile.appendChild(el('div','tn-lbl','Welche?'));
+  const typWahl=el('select','tn-tag'); typWahl.id='tnTyp';
+  const leer=el('option','','— wählen'); leer.value=''; typWahl.appendChild(leer);
+  ((typeof _tnWeitereTypen==='function')?_tnWeitereTypen():[]).forEach(function(t){ const o=el('option','',(typeof _tzListeAufgName==='function')?_tzListeAufgName(t):t); o.value=t; typWahl.appendChild(o); });
+  typZeile.appendChild(typWahl); box.appendChild(typZeile);
   // Wann?
   box.appendChild(el('div','tn-lbl','Wann?'));
   const tagZ=el('div','tn-wahl'); tagZ.style.cursor='default';
@@ -25925,11 +25951,12 @@ function _tnDialog(){
   const abbr=el('button','tn-btn','Abbrechen'); abbr.type='button'; abbr.addEventListener('click',function(){ov.remove();});
   const ok=el('button','tn-btn haupt','Anlegen'); ok.type='button'; ok.id='tnAnlegen';
   btns.appendChild(abbr); btns.appendChild(ok); box.appendChild(btns);
-  const werte=function(){return {was:was,modus:modus,tag:tag.value,von:(modus==='fenster'?vonF:vonU).value,bis:(modus==='fenster'?bisF:bisU).value,text:txt.value};};
+  const werte=function(){return {was:was,modus:modus,tag:tag.value,von:(modus==='fenster'?vonF:vonU).value,bis:(modus==='fenster'?bisF:bisU).value,text:txt.value,typ:typWahl.value};};
   const zeichne=function(){
     const w=TN_WAS.find(function(x){return x.wert===was;});
     const nurTag=!!(w&&w.nurTag);
     txtZeile.style.display=(was==='sonst')?'':'none';
+    typZeile.style.display=(w&&w.auswahl)?'':'none';
     wahlen.forEach(function(x){
       const sperr=nurTag&&x.wert!=='tag';
       x.z.classList.toggle('aus',sperr); x.r.disabled=sperr;
@@ -25949,18 +25976,18 @@ function _tnDialog(){
       was=w.wert;
       chips.querySelectorAll('.tn-chip').forEach(function(k){k.classList.toggle('an',k===c);});
       zeichne();
-      try{(w.wert==='sonst'?txt:tag).focus();}catch(err){}
+      try{(w.wert==='sonst'?txt:(w.auswahl?typWahl:tag)).focus();}catch(err){}
     });
     chips.appendChild(c);
   });
   [vonU,bisU].forEach(function(f){f.addEventListener('focus',function(){waehle('uhr');});});
   [vonF,bisF].forEach(function(f){f.addEventListener('focus',function(){waehle('fenster');});});
-  [txt,tag,vonU,bisU,vonF,bisF].forEach(function(f){f.addEventListener('input',zeichne);f.addEventListener('change',zeichne);});
+  [txt,tag,vonU,bisU,vonF,bisF,typWahl].forEach(function(f){f.addEventListener('input',zeichne);f.addEventListener('change',zeichne);});
   ok.addEventListener('click',function(){
     const p=_tnPlan(werte());
     if(p.fehler){
       fehler.textContent='⚠ '+p.fehler;
-      const f={tag:tag,text:txt,von:(modus==='fenster'?vonF:vonU),bis:(modus==='fenster'?bisF:bisU)}[p.feld]||chips.querySelector('.tn-chip');
+      const f={tag:tag,text:txt,typ:typWahl,von:(modus==='fenster'?vonF:vonU),bis:(modus==='fenster'?bisF:bisU)}[p.feld]||chips.querySelector('.tn-chip');
       try{if(f)f.focus();}catch(err){}
       return;
     }
