@@ -10554,7 +10554,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-08 · #1139'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-08-b1139) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-08 · #1140'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-08-b1140) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -16698,6 +16698,15 @@ function _listeDreiAnwenden(taskId,remoteTask,lt,mergedTask){
     if(n)mergedTask[f]=n;
   });
 }
+// b1140 Block 1 (Karte am PC OFFEN): Termine je Termin dreiseitig über die feste Kennung (geänderte Uhrzeit = derselbe Termin, kein Doppel;
+// drüben Gelöschtes bleibt weg; ohne Momentaufnahme nach Kennung vereinigen) + Löschvermerke beider Seiten vereinigen. Ersetzt das
+// Ergebnis der Zeile davor (Vereinigung nach Tag|Von|Bis|Text), die als Weg für Prüfsuiten ohne diese Funktion stehen bleibt.
+function _ahBlock1(taskId,remoteTask,lt,mergedTask){
+  if(!lt||!mergedTask||typeof _ahMerge!=='function')return;
+  const b=(typeof _listenBasisTask==='function')?_listenBasisTask(taskId):null;
+  mergedTask.ausserhausTermine=_ahMerge(remoteTask&&remoteTask.ausserhausTermine,lt.ausserhausTermine,b?(Array.isArray(b.ausserhausTermine)?b.ausserhausTermine:[]):null);
+  if(Array.isArray(lt.ausserhausGeloescht)||(remoteTask&&Array.isArray(remoteTask.ausserhausGeloescht)))mergedTask.ausserhausGeloescht=_ahGeloeschtMerge(remoteTask&&remoteTask.ausserhausGeloescht,lt.ausserhausGeloescht);
+}
 // b1036 Block 1b (Karte am PC NICHT offen, hier aber geändert): nur die Listen, die hier seit dem Abgleich geändert wurden –
 // sind sie unverändert, gilt ohnehin der Stand von drüben (mt ist dort schon der Remote-Stand).
 function _listeDreiNachtragen(rt,lt,mt,snapObj){
@@ -16707,6 +16716,78 @@ function _listeDreiNachtragen(rt,lt,mt,snapObj){
     const n=_listeDreiSnap(f,rt[f],lt[f],snapObj);
     if(n)mt[f]=n;
   });
+}
+// ══ b1140 / v379 (Befund Termine B2 + B3, Frank 08.10.2026 „1,2,3 … baue“): feste Kennung je Außer-Haus-Termin + Löschvermerk für Outlook ══
+// B2: bis b1139/v378 erkannten PC und Handy einen Termin beim Zusammenführen an Tag|Von|Bis|Text – änderte ein Gerät die Uhrzeit,
+//     während das andere gespeichert hatte, standen alter und neuer Termin da (Doppel), und Gelöschtes kam im Konflikt zurück.
+//     Jetzt trägt jeder Termin `tid`: neue bekommen sie beim Anlegen (Zufall – zwei Geräte, die gleichzeitig einen LEEREN Termin
+//     anlegen, dürfen nicht dieselbe bekommen), alte beim Laden aus ihrem INHALT (so geben PC und Handy demselben alten Termin dieselbe).
+//     Zusammengeführt wird je Termin dreiseitig über die Kennung (_liste3Wege, wie b1036/v308 für vier andere Listen).
+// B3: am Handy gelöschte Termine, die schon in Outlook stehen, hinterlassen an der Karte einen Löschvermerk `ausserhausGeloescht`
+//     [{oid,fh,fr,tid,t,erl}] (oid = Outlook-Eintrag, fh/fr = Fahrt-Einträge). Nur der PC spricht mit Outlook: er löscht dort und setzt erl.
+// ⛔ _ahTidAusInhalt … _ahGeloeschtMerge stehen ZEICHENGLEICH in PAM Desktop und PAM Mobil (test_b1140 / test_v379 vergleichen).
+function _ahTidAusInhalt(x){
+  const s=String((x&&(x.date||x.datum))||'')+'|'+String((x&&x.von)||'')+'|'+String((x&&x.bis)||'')+'|'+String((x&&x.beschreibung)||'');
+  let h=5381;
+  for(let i=0;i<s.length;i++)h=(((h<<5)+h)^s.charCodeAt(i))>>>0;
+  return 'k'+h.toString(36);
+}
+function _ahTidNeu(){return 'n'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);}
+function _ahKennung(x){return (x&&typeof x==='object')?(x.tid||_ahTidAusInhalt(x)):'';}
+function _ahTidSichern(liste){
+  if(!Array.isArray(liste))return 0;
+  const da={};let n=0;
+  liste.forEach(function(x){if(x&&x.tid)da[x.tid]=1;});
+  liste.forEach(function(x){
+    if(!x||typeof x!=='object'||x.tid)return;
+    const g=_ahTidAusInhalt(x);let k=g,z=2;
+    while(da[k])k=g+'-'+(z++);
+    x.tid=k;da[k]=1;n++;
+  });
+  return n;
+}
+function _ahTidDaten(daten){
+  let n=0;
+  if(!daten||typeof daten!=='object')return 0;
+  Object.keys(daten).forEach(function(k){
+    if(k.charAt(0)==='_'||!Array.isArray(daten[k]))return;
+    daten[k].forEach(function(t){if(t&&Array.isArray(t.ausserhausTermine))n+=_ahTidSichern(t.ausserhausTermine);});
+  });
+  return n;
+}
+// Ohne gemeinsamen Stand: nach Kennung vereinigen (im Zweifel behalten) – beim selben Termin gilt die hiesige Fassung, Reihenfolge wie drüben.
+function _ahVereinigen(remoteList,localList){
+  const rem=Array.isArray(remoteList)?remoteList:[],loc=Array.isArray(localList)?localList:[];
+  const L=new Map();
+  loc.forEach(function(x){const k=_ahKennung(x);if(k&&!L.has(k))L.set(k,x);});
+  const out=[],schonDa=new Set();
+  rem.forEach(function(x){const k=_ahKennung(x);if(!k){out.push(x);return;}if(schonDa.has(k))return;schonDa.add(k);out.push(L.has(k)?L.get(k):x);});
+  loc.forEach(function(x){const k=_ahKennung(x);if(!k){out.push(x);return;}if(schonDa.has(k))return;schonDa.add(k);out.push(x);});
+  return out;
+}
+// Je Termin dreiseitig (hier · drüben · letzter gemeinsamer Stand). Die Kennung selbst zählt beim Vergleich nicht als Änderung (alte Termine
+// bekommen sie erst beim Laden); nimmt man die Fassung von drüben und ihr fehlt die Kennung, behält sie die hiesige.
+function _ahMerge(remoteList,localList,basisList,ers){
+  const e=function(k,w){if(k==='tid')return undefined;return ers?ers.call(this,k,w):w;};
+  const nimm=function(x,r){if(r&&!r.tid&&x&&x.tid){const o=Object.assign({},r);o.tid=x.tid;return o;}return r;};
+  const r=(typeof _liste3Wege==='function')?_liste3Wege(remoteList,localList,basisList,_ahKennung,e,nimm):null;
+  return r||_ahVereinigen(remoteList,localList);
+}
+function _ahGrabstein(t,x){
+  if(!t||!x||!x.outlookEventId)return false;
+  if(!Array.isArray(t.ausserhausGeloescht))t.ausserhausGeloescht=[];
+  if(!t.ausserhausGeloescht.some(function(g){return g&&g.oid===x.outlookEventId;}))t.ausserhausGeloescht.push({oid:x.outlookEventId,fh:x.outlookFahrtHinId||'',fr:x.outlookFahrtRueckId||'',tid:x.tid||'',t:Date.now()});
+  return true;
+}
+function _ahGeloeschtMerge(a,b){
+  const m=new Map(),out=[];
+  [].concat(Array.isArray(a)?a:[],Array.isArray(b)?b:[]).forEach(function(g){
+    if(!g||!g.oid)return;
+    const v=m.get(g.oid);
+    if(!v){const n=Object.assign({},g);m.set(g.oid,n);out.push(n);return;}
+    if(g.erl&&!v.erl)v.erl=g.erl;
+  });
+  return out;
 }
 // b903 (Befund Frank 04.09.2026, Betriebsprobe zu b902): Listen-Regel für das OFFENE Fenster (Block 1).
 // Block 1 vereinigte fotos/attachments/pruefberichte/checkliste/kontakte blind – ein am Handy entferntes
@@ -17132,6 +17213,7 @@ async function gdriveSaveData() {
                   // b1013: Löschvermerke beider Seiten vereinigen, gelöschte Uhr-Zeilen herausnehmen
                   if(typeof _zeitGeloeschtMerge==='function'&&(Array.isArray(lt.zeitGeloescht)||(remoteTask&&Array.isArray(remoteTask.zeitGeloescht)))){mergedTask.zeitGeloescht=_zeitGeloeschtMerge(remoteTask&&remoteTask.zeitGeloescht,lt.zeitGeloescht);mergedTask.zeitEntries=_zeitOhneGeloeschte(mergedTask.zeitEntries,mergedTask.zeitGeloescht);}
                   mergedTask.ausserhausTermine=_mergeListByKey(remoteTask&&remoteTask.ausserhausTermine,lt.ausserhausTermine,e=>((e.date||'')+'|'+(e.von||'')+'|'+(e.bis||'')+'|'+(e.beschreibung||'')));
+                  if(typeof _ahBlock1==='function')_ahBlock1(modalTaskId,remoteTask,lt,mergedTask); // b1140: Termine über feste Kennung
                   // b903: fotos/attachments/pruefberichte/checkliste/kontakte über die Fenster-Regel (siehe _mergeListeFenster):
                   // unverändert → Handy-Stand; geändert → gerichtet mit dem Schnappschuss. Vorher blinde Vereinigung –
                   // ein am Handy entferntes Foto kam zurück (Betriebsprobe Frank 04.09.).
@@ -17227,6 +17309,11 @@ async function gdriveSaveData() {
                         // b1013: Löschvermerke vereinigen (werden nur angehängt – nichts kann zurückkommen)
                         else if(f==='zeitGeloescht'&&Array.isArray(lt[f])&&typeof _zeitGeloeschtMerge==='function'){mt[f]=_zeitGeloeschtMerge(rt[f],lt[f]);}
                         // b1012: Zeitzeilen gerichtet + jüngerer Standort gewinnt (sonst warf ein ✎ aus „Mein Tag“ gleichzeitige Handy-Zeilen weg)
+                        // b1140 (B2): Termine je Termin dreiseitig über die feste Kennung – bis b1139 gewann hier die ganze eigene Liste
+                        // (eine gleichzeitige Handy-Änderung an einem ANDEREN Termin derselben Karte ging verloren)
+                        else if(f==='ausserhausTermine'&&Array.isArray(lt[f])&&typeof _ahMerge==='function'){mt[f]=_ahMerge(rt[f],lt[f],Array.isArray(_snapObj[f])?_snapObj[f]:[]);}
+                        // b1140 (B3): Löschvermerke vereinigen (werden nur angehängt bzw. als erledigt markiert)
+                        else if(f==='ausserhausGeloescht'&&Array.isArray(lt[f])&&typeof _ahGeloeschtMerge==='function'){mt[f]=_ahGeloeschtMerge(rt[f],lt[f]);}
                         else if(f==='zeitEntries'&&Array.isArray(lt[f])&&typeof _zeitZeilenGerichtet==='function'){mt[f]=_zeitZeilenGerichtet(rt[f],lt[f],_snapObj[f]);}
                         else mt[f]=lt[f];
                       }
@@ -17761,6 +17848,9 @@ function loadFromObject(data,herkunft){
     if(k.startsWith('_'))continue;
     if(Array.isArray(v))boards[k]=v;
   }
+  // b1140: alte Außer-Haus-Termine bekommen ihre feste Kennung SOFORT beim Laden – aus dem Inhalt, wie am Handy (v379), bevor sie hier
+  // jemand ändert (sonst bekäme derselbe Termin auf beiden Geräten verschiedene Kennungen)
+  if(typeof _ahTidDaten==='function')_ahTidDaten(boards);
   // b643: Board-Reihenfolge aus dem Merkfeld herstellen. Die reine Datei-Reihenfolge
   // war nie verlässlich: das Handy schrieb versteckte und sichtbare Boards als zwei
   // Töpfe nacheinander zurück, der Konflikt-Abgleich baute nach Remote-Reihenfolge –
@@ -18106,6 +18196,7 @@ function _pamMigrateOldMerges(){
   }finally{_pamMigrateBusy=false;}
 }
 function buildSaveObject(){
+  if(typeof _ahTidDaten==='function')_ahTidDaten(boards);   // b1140: Netz für Termine, die ohne Kennung dazukamen (z. B. Karte kopiert)
   const out={_statuses:statuses};
   out._archivedTasks=archivedTasks.slice(); // b787: IMMER, auch leer (Mobil v237 gleich; Näheres in CHANGES.md)
   if(Object.keys(boardStatuses).length)out._boardStatuses={...boardStatuses};
@@ -22260,6 +22351,7 @@ async function _kalwApply(key,iso,hr,mins){
 
   if(isNew){                                 // virtueller Backlog-Eintrag → Termin anlegen
     t={date:'',von:'',bis:'',beschreibung:(task.title||'Außentermin').trim()};
+    if(typeof _ahTidNeu==='function')t.tid=_ahTidNeu();   // b1140: neuer Termin → sofort feste Kennung
     task.ausserhausTermine.push(t); i=task.ausserhausTermine.length-1;
   }
 
@@ -23120,9 +23212,56 @@ function _pamOutlookKandidat(t,heute){
   return (typeof _msTerminComplete==='function')?_msTerminComplete(t):!!(t.date&&t.von);
 }
 var _pamOutlookNachziehenLaeuft=false;
+/* b1140 (Befund Termine B3, dritter Punkt; Frank 08.10.2026 „1,2,3 … baue“): ein am Handy gelöschter Termin, der schon in Outlook steht,
+   hinterlässt an der Karte einen Löschvermerk (ausserhausGeloescht, PAM Mobil v379). Nur der PC spricht mit Outlook: hier wird der Eintrag
+   dort gelöscht (samt Fahrt-Einträgen) und der Vermerk als erledigt markiert – beim Outlook-Abgleich und einmal nach dem Start
+   (läuft in _pamOutlookNachziehen mit). Ohne weitere Rückfrage: das Handy hat beim Löschen gefragt (Frank: „baue“ auf genau diesen Vorschlag).
+   ⛔ Steht derselbe Outlook-Eintrag noch an einem Termin dieser Karte (am PC gleichzeitig geändert → beim Zusammenführen geblieben),
+      wird NICHT gelöscht – der Vermerk bleibt liegen. ⛔ Zwei Rechner: der zweite bekommt 404 → zählt als erledigt (_msDeleteEvent wirft nicht).
+   ⛔ Erledigte Vermerke werden nach 60 Tagen weggeräumt. */
+var _pamOutlookLoeschenLaeuft=false;
+async function _pamOutlookLoeschvermerke(){
+  if(_pamOutlookLoeschenLaeuft)return 0;
+  if(typeof msToken==='undefined'||!msToken||typeof _msDeleteEvent!=='function')return 0;
+  let offenId='';
+  try{ const m=document.getElementById('taskModal'); if(m&&m.classList&&m.classList.contains('open'))offenId=String((document.getElementById('taskId')||{}).value||''); }catch(e){}
+  const karten=[];
+  Object.keys(boards||{}).forEach(function(b){
+    (Array.isArray(boards[b])?boards[b]:[]).forEach(function(task){
+      if(task&&Array.isArray(task.ausserhausGeloescht)&&task.ausserhausGeloescht.some(function(g){return g&&g.oid&&!g.erl;}))karten.push(task);
+    });
+  });
+  if(!karten.length)return 0;
+  _pamOutlookLoeschenLaeuft=true;
+  let n=0,fehler=0;
+  const jetzt=Date.now();
+  try{
+    for(const task of karten){
+      const offen=(offenId&&String(task.id)===offenId&&typeof taskAusserhausTermine!=='undefined'&&Array.isArray(taskAusserhausTermine))?taskAusserhausTermine:[];
+      const noch=[].concat(Array.isArray(task.ausserhausTermine)?task.ausserhausTermine:[],offen);
+      for(const g of task.ausserhausGeloescht){
+        if(!g||!g.oid||g.erl)continue;
+        if(noch.some(function(x){return x&&x.outlookEventId===g.oid;}))continue;   // Termin ist (wieder) da → Outlook-Eintrag bleibt
+        try{
+          await _msDeleteEvent(g.oid);
+          for(const f of [g.fh,g.fr]){ if(f){ try{ await _msDeleteEvent(f); }catch(e2){ console.warn('[b1140] Fahrt-Eintrag:',e2); } } }
+          g.erl=jetzt; n++;
+        }catch(e){ fehler++; console.warn('[b1140] Outlook löschen:',e); }
+      }
+      task.ausserhausGeloescht=task.ausserhausGeloescht.filter(function(g){return !(g&&g.erl&&jetzt-g.erl>60*864e5);});
+    }
+  }finally{ _pamOutlookLoeschenLaeuft=false; }
+  if(n>0){
+    try{ if(typeof autoSave==='function')autoSave(); }catch(e){}
+    try{ if(typeof showToast==='function')showToast('🗑 '+n+' Termin'+(n>1?'e':'')+' in Outlook gelöscht (am Handy gelöscht)','info',5000); }catch(e){}
+  }
+  if(fehler>0){ try{ if(typeof showToast==='function')showToast('⚠ '+fehler+' am Handy gelöschte'+(fehler>1?' Termine ließen':'r Termin ließ')+' sich in Outlook nicht löschen – PAM versucht es beim nächsten Abgleich wieder','warning',8000); }catch(e){} }
+  return n;
+}
 async function _pamOutlookNachziehen(){
   if(_pamOutlookNachziehenLaeuft)return null;
   if(typeof msToken==='undefined'||!msToken||typeof _msAutoPushTermine!=='function')return null;
+  if(typeof _pamOutlookLoeschvermerke==='function'){ try{ await _pamOutlookLoeschvermerke(); }catch(e){ console.warn('[b1140] Löschvermerke:',e); } }   // b1140: am Handy Gelöschtes auch in Outlook löschen
   const heute=(typeof _tzHeuteIso==='function')?_tzHeuteIso():new Date().toISOString().slice(0,10);
   let offenId='';
   try{ const m=document.getElementById('taskModal'); if(m&&m.classList&&m.classList.contains('open'))offenId=String((document.getElementById('taskId')||{}).value||''); }catch(e){}
@@ -23591,6 +23730,7 @@ function toggleColSort(status,field){
 function addAusserhausTermin(date='',von='',bis='',beschreibung=''){
   if(typeof _tzSubOeffnen==='function')_tzSubOeffnen('tTermineSect');
   taskAusserhausTermine.push({date,von,bis,beschreibung,_pamDirty:true});
+  if(typeof _ahTidNeu==='function')taskAusserhausTermine[taskAusserhausTermine.length-1].tid=_ahTidNeu();   // b1140: feste Kennung
   renderAusserhausTermine();
   scheduleTaskFieldSave();
 }
@@ -25536,6 +25676,7 @@ function _tnAnlegen(plan){
     if(platz>=0){e.von=_pamAnrufZeitHHMM(platz);e.bis=_pamAnrufZeitHHMM(platz+30);}
     else{voll=true;e.date='';}   // nichts frei → ohne Datum unter „Ungeplant“ (wie b1115)
   }
+  if(typeof _ahTidNeu==='function'&&!e.tid)e.tid=_ahTidNeu();   // b1140: feste Kennung
   taskAusserhausTermine.push(e);
   const i=taskAusserhausTermine.length-1;
   renderAusserhausTermine(); scheduleTaskFieldSave();
@@ -30949,6 +31090,7 @@ function _pamVbTermin(bericht,was){
       const kand=taskAusserhausTermine.filter(x=>x&&!x.vorabId&&!x.erledigt&&(x.date||'')===iso);
       if(kand.length&&confirm('Gehört diese Besichtigung zu dem Termin\n„'+(kand[0].beschreibung||kand[0].betreff||'Termin')+'“ ('+(kand[0].von||'')+(kand[0].bis?'–'+kand[0].bis:'')+' Uhr) an dieser Karte?\n\nOK = diesen Termin nehmen (Uhrzeit wird auf deinen Beginn gesetzt)\nAbbrechen = neuen Termin anlegen'))t=kand[0];
       if(!t){t={date:iso,von:'',bis:'',beschreibung:(typeof _fsVbTerminText==='function')?_fsVbTerminText(bericht):'Vorabbesichtigung',art:'besichtigung'};taskAusserhausTermine.push(t);neu=true;}
+      if(neu&&typeof _ahTidNeu==='function'&&!t.tid)t.tid=_ahTidNeu();   // b1140: feste Kennung
       t.vorabId=bericht.id;
     }
     if(!t)return '';
@@ -59785,6 +59927,7 @@ function _pamAnrufTermin(taskId,name){
   if(!gibt){
     const n=String(name||'').trim();
     liste.push({date:'',von:'',bis:'',beschreibung:'Termin nach Anruf'+(n?' '+n:''),_pamDirty:true});
+    if(typeof _ahTidNeu==='function')liste[liste.length-1].tid=_ahTidNeu();   // b1140: feste Kennung
     if(imFenster){ try{renderAusserhausTermine();}catch(e){} try{scheduleTaskFieldSave();}catch(e){} }
     else{ try{autoSave();}catch(e){ console.warn('[b1082]',e); } try{render();}catch(e){} }
   }
@@ -59878,6 +60021,7 @@ function _pamAnrufTerminFenster(taskId,name,vonMin,bisMin,iso,fest){
   const neu=idx<0;
   let e;
   if(neu){ e={date:'',von:'',bis:'',beschreibung:_pamAnrufFensterAnText(grund,fenster),_pamDirty:true}; liste.push(e); idx=liste.length-1; }
+  if(neu&&typeof _ahTidNeu==='function')e.tid=_ahTidNeu();   // b1140: feste Kennung
   else{ e=liste[idx]; e.beschreibung=_pamAnrufFensterAnText(e.beschreibung,fenster); e._pamDirty=true; }
   let platz=-1;
   if(iso&&!nurTag){
