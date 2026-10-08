@@ -10534,7 +10534,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-08 · #1132'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-08-b1132) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-08 · #1133'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-08-b1133) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -24673,6 +24673,7 @@ function _btbNotizCard(n,i){
     +' onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){this.blur();event.preventDefault();}"'
     +' style="background:transparent;border:none;border-bottom:1px dashed var(--border);color:var(--text);font-size:13px;padding:0;width:100%;outline:none;cursor:text;resize:vertical;line-height:1.4;font-family:inherit;">'+esc(n.text||'')+'</textarea>'
     +((typeof _tmEntwuerfeKnopfHtml==='function')?_tmEntwuerfeKnopfHtml(n.text):'') // b1120: an der Zeile „✉ Terminmail als Entwurf …“ der Weg zurück zu den Entwürfen
+    +((typeof _dsEntwuerfeKnopfHtml==='function')?_dsEntwuerfeKnopfHtml(n.text):'') // b1133: dasselbe an „✉ Fotodokumentation / Unterlagen / Foto als Entwurf …“
     +'</div>'
     +'<button type="button" class="notiz-del" onclick="removeTaskNotiz('+i+')" title="Eintrag löschen">✕</button>'
     +'</div>';
@@ -32457,44 +32458,13 @@ async function _fsMail(blob,name){
   let t=null;
   try{t=findTaskById(_getActiveTaskId());}catch(e){t=null;}
   if(!t&&typeof _pamCurrentTask!=='undefined'&&_pamCurrentTask)t=_pamCurrentTask;
-  const kontakte=(t&&t.kontakte)||[];
-  // Betreff bewusst neutral: der Auftragstitel würde sonst beim Empfänger
-  // mitlesbar ankommen. Im Fenster lässt er sich frei ändern.
-  const wahl=await _pdfSendenDialog({
-    to:((kontakte.find(function(k){return k.email;})||{}).email)||'',
-    vorschlaege:kontakte.filter(function(k){return k.email;}).map(function(k){return {name:k.name||'',email:k.email};}),
-    subj:'Foto',
-    body:'Guten Tag,\n\nanbei ein Foto.\n\nMit freundlichen Grüßen\n',
-    anhaenge:[name]
-  });
-  if(!wahl){showToast('Senden abgebrochen – es wurde nichts verschickt','info',3000);return;}
-  const token=(typeof msToken!=='undefined'&&msToken)||(typeof msToken2!=='undefined'&&msToken2)||null;
-  let _grund='Outlook ist nicht verbunden';
-  if(token){
-    try{
-      showToast('📧 Entwurf wird angelegt…','info',3000);
-      const b64=_fsB64(await blob.arrayBuffer());
-      const erg=await _pamOutlookEntwurf(token,{to:wahl.to,subj:wahl.subj,body:wahl.body,
-        anhaenge:[{name:name,contentType:blob.type||'application/octet-stream',contentBytes:b64}]});
-      if(!erg.fehl.length){
-        _pamShowDraftToast(erg.link,'✅ Entwurf mit '+esc(name)+' liegt in Outlook unter <b>Entwürfe</b>');
-        showToast('✓ Entwurf angelegt – es wurde nichts verschickt','success',6000);
-        return;
-      }
-      _grund='Der Anhang ging nicht an den Entwurf: '+erg.fehl.join(', ');
-    }catch(e){console.warn('[FotoSenden] Entwurf:',e);_grund=(e&&e.message)||'Entwurf nicht möglich';}
-  }
-  // Notweg: Datei speichern, Mailfenster öffnen. Der Anhang muss dort von Hand dran –
-  // b774: der Grund wird jetzt genannt, vorher stand da immer „ohne Outlook-Verbindung".
-  try{
-    const u=URL.createObjectURL(blob);
-    const a=document.createElement('a');a.href=u;a.download=name;
-    document.body.appendChild(a);a.click();a.remove();
-    setTimeout(function(){URL.revokeObjectURL(u);},4000);
-  }catch(e){console.warn('[FotoSenden] Download:',e);}
-  window.open('mailto:'+encodeURIComponent(wahl.to)+'?subject='+encodeURIComponent(wahl.subj)
-    +'&body='+encodeURIComponent(wahl.body||''),'_blank');
-  showToast('⚠ '+_grund+' – '+name+' wurde gespeichert, bitte im Mailfenster anhängen','warning',10000);
+  // b1133: Fenster „✉ Dokument senden“ mit dem Text „Foto senden“. Der Betreff nennt die Straße, nie den Auftragstitel
+  // (der käme sonst beim Empfänger mitlesbar an). Das Foto ist schon gesäubert (_fsWeg, b862). Ohne Outlook bietet das
+  // Fenster den Notweg „⬇ Speichern + Mailfenster“ (bis b1132 stand er hier).
+  const erg=await _dsOeffnen({task:t,art:'fo',
+    fest:[{name:name,contentType:blob.type||'application/octet-stream',contentBytes:_fsB64(await blob.arrayBuffer())}],
+    roh:[{name:name,blob:blob}]});
+  if(erg!=='ok')showToast('Senden abgebrochen – es wurde nichts verschickt','info',3000);
 }
 
 async function createPdfFromSelected(){
@@ -33763,134 +33733,60 @@ async function _pdfSendenCreate(t,sendMail){
   }
 }
 
-// b593: Vor dem Absenden ein kleines Fenster – Empfänger, Betreff, Text und die Liste der
-// Anhänge zum Kontrollieren. Bis b592 ging die Mail mit LEEREM Text sofort an den ersten
-// Ansprechpartner raus, ohne Rückfrage. Gibt {to,subj,body} zurück oder null bei Abbruch.
-function _pdfSendenDialog(vorgabe){
-  return new Promise(function(fertig){
-    const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-    const ov=document.createElement('div');
-    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000001;display:flex;align-items:center;justify-content:center;';
-    const bx=document.createElement('div');
-    bx.style.cssText='background:var(--bg2);border-radius:14px;padding:18px 20px;width:min(560px,94vw);max-height:90vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,.5);';
-    const inp='width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;padding:8px 10px;outline:none;';
-    const lbl='display:block;font-size:11px;font-weight:700;color:var(--text2);margin:10px 0 4px;';
-    bx.innerHTML='<div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:4px;">📧 Entwurf für Outlook</div>'
-      +'<div style="font-size:12px;color:var(--text2);">PAM legt die Mail mit Anhang in <b>Entwürfe</b> ab. Abgeschickt wird sie erst von dir in Outlook.</div>'
-      +'<label style="'+lbl+'">Empfänger</label><input type="text" id="_psdTo" value="'+esc(vorgabe.to)+'" placeholder="name@firma.de" style="'+inp+'">'
-      +(vorgabe.vorschlaege&&vorgabe.vorschlaege.length>1
-        ?'<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:5px;">'+vorgabe.vorschlaege.map(function(v){
-            return '<button type="button" data-psdmail="'+esc(v.email)+'" style="padding:2px 8px;border-radius:12px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:11px;cursor:pointer;">'+esc(v.name||v.email)+'</button>';
-          }).join('')+'</div>':'')
-      +'<label style="'+lbl+'">Betreff</label><input type="text" id="_psdSubj" value="'+esc(vorgabe.subj)+'" style="'+inp+'">'
-      +'<label style="'+lbl+'">Nachricht</label><textarea id="_psdBody" rows="7" style="'+inp+'resize:vertical;line-height:1.5;">'+esc(vorgabe.body)+'</textarea>'
-      +'<label style="'+lbl+'">Anhänge</label><div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:12px;color:var(--text);line-height:1.7;">'
-        +vorgabe.anhaenge.map(function(n){return '📎 '+esc(n);}).join('<br>')+'</div>'
-      +'<div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;">'
-      +'<button type="button" id="_psdAb" style="padding:9px 14px;border-radius:8px;background:var(--bg3);color:var(--text2);border:1px solid var(--border);font-size:13px;cursor:pointer;">Abbrechen</button>'
-      +'<button type="button" id="_psdOk" style="padding:9px 18px;border-radius:8px;background:#185FA5;color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer;">Entwurf anlegen</button></div>';
-    ov.appendChild(bx);document.body.appendChild(ov);
-    const schliessen=function(erg){ov.remove();fertig(erg);};
-    bx.querySelectorAll('[data-psdmail]').forEach(function(b){
-      b.onclick=function(){document.getElementById('_psdTo').value=b.dataset.psdmail;};
-    });
-    bx.querySelector('#_psdAb').onclick=function(){schliessen(null);};
-    bx.querySelector('#_psdOk').onclick=function(){
-      const to=(document.getElementById('_psdTo').value||'').trim();
-      if(!to||to.indexOf('@')<0){showToast('⚠ Bitte einen Empfänger eintragen','warning',3000);return;}
-      schliessen({to:to,subj:(document.getElementById('_psdSubj').value||'').trim(),body:document.getElementById('_psdBody').value||''});
-    };
-    ov.addEventListener('click',function(e){if(e.target===ov)schliessen(null);});
-    setTimeout(function(){const el=document.getElementById('_psdTo');if(el&&!el.value)el.focus();},50);
-  });
-}
+// b593: Vor dem Absenden wird kontrolliert – Empfänger, Betreff, Text und die Liste der Anhänge. Bis b592 ging die
+// Mail mit LEEREM Text sofort an den ersten Ansprechpartner raus, ohne Rückfrage.
+// b1133: Das kleine Fenster dafür (_pdfSendenDialog) ist weg – alle vier Mail-Knöpfe öffnen jetzt „✉ Dokument senden“
+// (_dsOeffnen). Hier werden nur noch die Anhänge vorbereitet, und zwar VOR dem Fenster: so steht dort schon, was
+// mitgeht und was nicht.
 async function _pdfSendenMail(bytes,fname,t,extraAnhänge,vorgabeMail){
   const b64=_fsB64(bytes); // b774: stückweise – die alte Zeile baute erst einen Riesen-String
-  const kontakte=(t.kontakte||[]);
-  // b593: Empfänger, Betreff und Text erst bestätigen lassen
-  const wahl=await _pdfSendenDialog({
-    to:vorgabeMail||((kontakte.find(k=>k.email)||{}).email||''),
-    vorschlaege:kontakte.filter(k=>k.email).map(function(k){return {name:k.name||'',email:k.email};}),
-    subj:(t.title||'Auftrag')+' – Unterlagen',
-    body:'Sehr geehrte Damen und Herren,\n\nanbei erhalten Sie die Unterlagen zum Vorgang "'+(t.title||'')+'".\n\nMit freundlichen Grüßen\n',
-    anhaenge:[fname].concat((extraAnhänge||[]).map(function(a){return a&&a.name?a.name:String(a);}))
-  });
-  if(!wahl){showToast('Senden abgebrochen – das Dokument wurde nicht verschickt','info',3000);return;}
-  showToast('📧 Mail wird vorbereitet…','info',3000);
-  const toAddr=wahl.to;
-  const subj=wahl.subj;
-  const token=msToken||msToken2||null;
-  let _grund='Outlook ist nicht verbunden';
-  if(token){
-    try{
-      // Hauptanhang: generiertes PDF
-      const attachments=[{'@odata.type':'#microsoft.graph.fileAttachment',name:fname,contentType:'application/pdf',contentBytes:b64}];
-      // Zusatz-Anhänge: ausgewählte Drive-Dokumente herunterladen
-      const _fehlen=[]; // b593: was der Dialog verspricht, aber nicht mitgeht, wird gemeldet
-      if(extraAnhänge&&extraAnhänge.length&&gdriveToken){
-        showToast('📎 Lade Dokumente…','info',6000);
-        for(const anh of extraAnhänge){
-          if(!anh.fileId){_fehlen.push(anh.name||String(anh));continue;}
-          try{
-            const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(anh.fileId)+'?alt=media',
-              {headers:{Authorization:'Bearer '+gdriveToken}});
-            if(!r.ok){console.warn('[PdfSenden] Drive-Download fehlgeschlagen:',anh.name,r.status);_fehlen.push(anh.name||'Anhang');continue;}
-            const blob=await r.blob();
-            let mime=blob.type||'application/octet-stream';
-            let ab;
-            /* b862: ⛔ Bis hierher ging JEDE Zusatzdatei ROH raus - auch ein Bild, also mit
-               GPS, Kamera und Aufnahmezeit. Genau das darf nach Franks Vorgabe vom
-               01.09. nicht passieren. Bilder werden deshalb erst gesaeubert (und dabei
-               gleich verkleinert). Geht das nicht, wird die Datei NICHT angehaengt,
-               sondern gemeldet - lieber fehlt sie, als dass Daten mitgehen.
-               ⛔ Nicht-Bilder (PDF, Word, ...) bleiben unveraendert: an denen haengen
-               keine EXIF-Daten, und ein Umbau wuerde sie beschaedigen. */
-            if(/^image\//i.test(mime)||/\.(jpe?g|png|gif|webp|hei[cf]|bmp|tiff?)$/i.test(anh.name||'')){
-              const _roh=URL.createObjectURL(blob);
-              let _sauber=null;
-              try{_sauber=await _correctFotoForPdf(_roh,_B862_MAIL_BILD);}
-              catch(e){console.warn('[b862] Bild saeubern:',anh.name,e);_sauber=null;}
-              try{URL.revokeObjectURL(_roh);}catch(e){}
-              if(!_sauber){_fehlen.push((anh.name||'Bild')+' (Bilddaten nicht entfernbar)');continue;}
-              const _bl=await (await fetch(_sauber)).blob();
-              ab=await _bl.arrayBuffer();
-              mime='image/jpeg';
-            } else {
-              ab=await blob.arrayBuffer();
-            }
-            const ab64=_fsB64(ab); // b774: stückweise – die alte Zeile baute erst einen Riesen-String
-            attachments.push({'@odata.type':'#microsoft.graph.fileAttachment',name:anh.name,contentType:mime,contentBytes:ab64});
-          }catch(e){console.warn('[PdfSenden] Anhang-Fehler:',anh.name,e);_fehlen.push(anh.name||'Anhang');}
+  // Hauptanhang: generiertes PDF
+  const attachments=[{'@odata.type':'#microsoft.graph.fileAttachment',name:fname,contentType:'application/pdf',contentBytes:b64}];
+  // Zusatz-Anhänge: ausgewählte Drive-Dokumente herunterladen
+  const _fehlen=[]; // b593: was nicht mitgeht, wird genannt – im Fenster unter „Nicht dabei“
+  if(extraAnhänge&&extraAnhänge.length&&gdriveToken){
+    showToast('📎 Lade Dokumente…','info',6000);
+    for(const anh of extraAnhänge){
+      if(!anh.fileId){_fehlen.push(anh.name||String(anh));continue;}
+      try{
+        const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(anh.fileId)+'?alt=media',
+          {headers:{Authorization:'Bearer '+gdriveToken}});
+        if(!r.ok){console.warn('[PdfSenden] Drive-Download fehlgeschlagen:',anh.name,r.status);_fehlen.push(anh.name||'Anhang');continue;}
+        const blob=await r.blob();
+        let mime=blob.type||'application/octet-stream';
+        let ab;
+        /* b862: ⛔ Bis hierher ging JEDE Zusatzdatei ROH raus - auch ein Bild, also mit
+           GPS, Kamera und Aufnahmezeit. Genau das darf nach Franks Vorgabe vom
+           01.09. nicht passieren. Bilder werden deshalb erst gesaeubert (und dabei
+           gleich verkleinert). Geht das nicht, wird die Datei NICHT angehaengt,
+           sondern gemeldet - lieber fehlt sie, als dass Daten mitgehen.
+           ⛔ Nicht-Bilder (PDF, Word, ...) bleiben unveraendert: an denen haengen
+           keine EXIF-Daten, und ein Umbau wuerde sie beschaedigen. */
+        if(/^image\//i.test(mime)||/\.(jpe?g|png|gif|webp|hei[cf]|bmp|tiff?)$/i.test(anh.name||'')){
+          const _roh=URL.createObjectURL(blob);
+          let _sauber=null;
+          try{_sauber=await _correctFotoForPdf(_roh,_B862_MAIL_BILD);}
+          catch(e){console.warn('[b862] Bild saeubern:',anh.name,e);_sauber=null;}
+          try{URL.revokeObjectURL(_roh);}catch(e){}
+          if(!_sauber){_fehlen.push((anh.name||'Bild')+' (Bilddaten nicht entfernbar)');continue;}
+          const _bl=await (await fetch(_sauber)).blob();
+          ab=await _bl.arrayBuffer();
+          mime='image/jpeg';
+        } else {
+          ab=await blob.arrayBuffer();
         }
-      }else if(extraAnhänge&&extraAnhänge.length){
-        (extraAnhänge||[]).forEach(function(a){_fehlen.push(a&&a.name?a.name:String(a));}); // Drive nicht verbunden
-      }
-      // b774: Entwurf statt Direktversand – siehe _pamOutlookEntwurf. Der Versand hier
-      // konnte nie klappen (Mail.Send fehlt im Token), er fiel nur still auf mailto zurück.
-      showToast('📧 Entwurf wird angelegt…','info',4000);
-      const erg=await _pamOutlookEntwurf(token,{to:toAddr,subj:subj,body:wahl.body,anhaenge:attachments});
-      _fehlen.push.apply(_fehlen,erg.fehl);
-      if(_fehlen.length<attachments.length){
-        const dran=attachments.length-erg.fehl.length;
-        _pamShowDraftToast(erg.link,'✅ Entwurf mit '+dran+' Anlage'+(dran!==1?'n':'')+' liegt in Outlook unter <b>Entwürfe</b>');
-        showToast('✓ Entwurf angelegt – es wurde nichts verschickt','success',6000);
-        // b593: nie still schlucken – was der Dialog versprochen hat, aber nicht mitging
-        if(_fehlen.length)showToast('⚠ NICHT am Entwurf: '+_fehlen.join(', ')+' – bitte von Hand nachreichen','warning',10000);
-        return;
-      }
-      _grund='Kein Anhang ging an den Entwurf: '+_fehlen.join(', ');
-    }catch(e){console.warn('[PdfSenden] Entwurf:',e);_grund=(e&&e.message)||'Entwurf nicht möglich';}
+        const ab64=_fsB64(ab); // b774: stückweise – die alte Zeile baute erst einen Riesen-String
+        attachments.push({'@odata.type':'#microsoft.graph.fileAttachment',name:anh.name,contentType:mime,contentBytes:ab64});
+      }catch(e){console.warn('[PdfSenden] Anhang-Fehler:',anh.name,e);_fehlen.push(anh.name||'Anhang');}
+    }
+  }else if(extraAnhänge&&extraAnhänge.length){
+    (extraAnhänge||[]).forEach(function(a){_fehlen.push(a&&a.name?a.name:String(a));}); // Drive nicht verbunden
   }
-  // Notweg: Datei herunterladen + Mailfenster mit Text öffnen. b774: mit Grund –
-  // vorher stand hier eine Meldung, die den Anschein erweckte, es liege an der Bedienung.
-  try{
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));
-    a.download=fname;document.body.appendChild(a);a.click();a.remove();
-  }catch(e){console.warn('[PdfSenden] Download:',e);}
-  const mailto='mailto:'+encodeURIComponent(toAddr)+'?subject='+encodeURIComponent(subj)+'&body='+encodeURIComponent(wahl.body||'');
-  window.open(mailto,'_blank');
-  showToast('⚠ '+_grund+' – '+fname+' wurde gespeichert, bitte im Mailfenster anhängen','warning',10000);
+  // b1133: Fenster „✉ Dokument senden“ mit dem Text „Unterlagen senden“; vorgewählt ist der in der Übersicht gewählte Kontakt.
+  // Ohne Outlook bietet das Fenster den Notweg „⬇ Speichern + Mailfenster“ mit dem PDF (bis b1132 stand er hier).
+  const erg=await _dsOeffnen({task:t,art:'ul',fest:attachments,festFehl:_fehlen,
+    roh:[{name:fname,bytes:bytes,mime:'application/pdf'}],vorwahl:vorgabeMail});
+  if(erg!=='ok')showToast('Senden abgebrochen – das Dokument wurde nicht verschickt','info',3000);
 }
 
 let _currentFotoLbIdx=-1;
@@ -39668,6 +39564,7 @@ function _mvMerge(a,b){
 }
 function _mvSichtbar(liste){
   return (liste||[]).filter(function(v){return _mvGueltig(v)&&!v.weg&&v.art!=='termin';})   // b1116: die Termin-Vorlage gehört nur ins Fenster „Termin mitteilen“
+    .filter(function(v){return v.art!=='dokument';})   // b1133: die drei Dokument-Texte nur ins Fenster „✉ Dokument senden“
     .sort(function(x,y){return String(x.name).localeCompare(String(y.name),'de');});
 }
 async function _mvDateiLesen(){
@@ -40675,6 +40572,559 @@ function _tmOeffnen(task,termine,name){
     if(!erg.ok)st.grund='Deine Fassung des Textes ist aus Google Drive nicht lesbar ('+erg.grund+') – gezeigt wird der Starttext, Speichern geht gerade nicht.';
     st.laedt=false;
     zeichne();
+  });
+}
+// ══ b1133: „✉ Dokument senden“ – EIN Fenster für alle vier Mail-Knöpfe ═══════════════════════
+/* Frank 08.10.2026, als er eine Fotodoku als PDF über 📤 am Dokument verschicken wollte: „Warum können wir den nicht auch so anpassen
+   wie bei den anderen E-Mail-Funktionen, wie zum Beispiel Termin versenden?“ Entwurf Claude-Code\Entwurf_Dokument-senden_2026-10-08.html,
+   Freigabe „v1, wie vorgeschlagen“ und „Regel und Text passen, baue“.
+   Bis b1132 öffneten vier Knöpfe das kleine Fenster _pdfSendenDialog (b593): 📤 am Dokument (_pamDokEntwurf), Foto wegschicken (_fsMail),
+   Fotodoku-Fenster (_fdkEntwurf) und 📋 Übersicht (_pdfSendenMail). Dort: immer „Sehr geehrte Damen und Herren“, fester Betreff, Absender
+   immer zuerst Postfach 1 (msToken||msToken2), keine Vorlage, kein Verlauf, und ein Klick neben das Fenster warf den Text weg.
+   Jetzt bereiten die vier Wege nur noch den Anhang vor (holen, Bilder säubern, 3-MB-Prüfung – unverändert) und rufen _dsOeffnen.
+   Das Fenster ist gebaut wie „✉ Termin mitteilen“ (b1116–b1120) und nimmt dessen Bausteine:
+   - Empfänger = Kontakte der Karte mit Adresse zum Anhaken (_tmEmpfaenger, _tmVorwahl); mehrere → je Person eine eigene Mail mit eigener Anrede (_tmAnrede).
+   - Franks Regel für Antwort oder neue Mail: „Antwort“ ist vorgewählt, wenn die angehakte Person die letzte Mail an der Karte geschrieben hat
+     (_dsZiel: die jüngste Mail mit Outlook-Kennung, nicht von uns). An alle anderen geht eine neue Mail. Bei der Antwort bleibt der Betreff
+     der Unterhaltung – ein anderer Betreff trennt sie in Outlook.
+   - drei Vorlagen (art 'dokument') in pam_mailvorlagen.json, im Fenster umschaltbar und über ⚙ dauerhaft änderbar.
+   - weitere Dokumente der Karte zum Anhaken (wie b1053: nur Dateien mit Drive-Kennung, keine Bilder).
+   - Absender = Postfach der Karte (_msPickToken), Bautagebuch-Zeile mit „📂 Entwürfe in Outlook öffnen“, der blaue Kasten bleibt stehen.
+   - Ohne Outlook-Verbindung: Notweg „⬇ Speichern + Mailfenster“ (bis b1132 in _fsMail und _pdfSendenMail).
+   ⛔ Das Fenster liegt auf 1000002 – über dem Fotodoku-Fenster (1000001). Die Meldungen von showToast liegen auf 99999 und damit darunter:
+      solange das Fenster offen ist, wird ihr Kasten nach vorn geholt (_dsToastOben), und das Fenster zeigt jede eigene Meldung zusätzlich in einer Zeile.
+   ⛔ Keine Regex-Literale in den _ds…-Funktionen (die Prüfsuiten schneiden sie mit einem Zeichenketten-Zähler aus, wie b1116).
+   ⛔ Starttexte ohne Namen und Anschriften: index.html wird öffentlich ausgeliefert. */
+var DS_BTB={fd:'Fotodokumentation',ul:'Unterlagen',fo:'Foto'};
+var DS_PLATZHALTER=['Anrede','Straße','Mieter-Name','Empfänger'];
+var DS_VORGABE={
+  fd:{id:'mv_dok_fotodoku',name:'Fotodokumentation senden',art:'dokument',ts:'2026-10-08T08:00:00.000Z',weg:null,
+    betreff:'{Straße}[, Wohnung {Mieter-Name}] – Fotodokumentation',
+    text:'{Anrede},\n\nanbei erhalten Sie die Fotodokumentation[ zum Objekt {Adresse}][, Wohnung {Mieter-Name}].\n\nMit freundlichen Grüßen\n{Firma}'},
+  ul:{id:'mv_dok_unterlagen',name:'Unterlagen senden',art:'dokument',ts:'2026-10-08T08:00:00.000Z',weg:null,
+    betreff:'{Straße}[, Wohnung {Mieter-Name}] – Unterlagen',
+    text:'{Anrede},\n\nanbei erhalten Sie die Unterlagen[ zum Objekt {Adresse}][, Wohnung {Mieter-Name}].\n\nMit freundlichen Grüßen\n{Firma}'},
+  fo:{id:'mv_dok_foto',name:'Foto senden',art:'dokument',ts:'2026-10-08T08:00:00.000Z',weg:null,
+    betreff:'{Straße}[, Wohnung {Mieter-Name}] – Foto',
+    text:'{Anrede},\n\nanbei ein Foto[ zum Objekt {Adresse}][, Wohnung {Mieter-Name}].\n\nMit freundlichen Grüßen\n{Firma}'}
+};
+// Welche Vorlage passt zu einer Datei? „FotoDoku“ oder „Fotodokumentation“ im Namen → Fotodoku, sonst Unterlagen
+function _dsArtFuerName(name){return String(name||'').toLowerCase().indexOf('fotodoku')>=0?'fd':'ul';}
+// Name ohne Endung (für {Dokument})
+function _dsOhneEndung(name){const n=String(name||''),i=n.lastIndexOf('.');return (i>0&&n.length-i<=6)?n.slice(0,i):n;}
+// Werte für die Vorlage – dieselben wie bei der Terminmail, nur ohne Termin. empfName = Name des Kontakts (für {Anrede}); leer → „Sehr geehrte Damen und Herren“
+function _dsWerte(task,kontakte,empfName,dokName){
+  const kk=kontakte||(task&&task.kontakte)||[];
+  const w=_mvWerte(task,kk);
+  w['Straße']=_tmStrasse(w.Adresse);
+  const mieterVorOrt=_tmMieterVorOrt(kk);   // nur ein echter Mieter, nie ersatzweise der AG-Kontakt (wie b1120)
+  w['Mieter-Name']=_tmNameTeile(mieterVorOrt).rest;
+  const e=String(empfName||'').trim();
+  w['Empfänger']=e;
+  w['Anrede']=_tmAnrede(e);
+  w.Dokument=String(dokName||'');
+  return w;
+}
+// Betreff einer NEUEN Mail: gefüllt, vorn geputzt; bleibt nichts übrig, das Wort der Vorlage
+function _dsBetreffNeu(vorlage,w,art){return _tmBetreffPutzen(_mvFuellen((vorlage&&vorlage.betreff)||'',w))||DS_BTB[art]||DS_BTB.ul;}
+// Worauf kann geantwortet werden? Die jüngste Mail der Karte mit Outlook-Kennung (_mvZiel) – nur, wenn sie von außen kam
+function _dsZiel(task){
+  if(!task)return null;
+  let z=null;
+  try{z=_mvZiel(task);}catch(e){z=null;}
+  if(!z||z.art!=='antwort'||!z.msg||!z.msg.id||!z.an)return null;
+  if(_mvEigeneAdresse(z.an))return null;
+  return z;
+}
+// Franks Regel: eine Antwort gibt es nur an die Person, die diese letzte Mail geschrieben hat (gleiche Adresse, Groß/klein egal)
+function _dsAntwortMoeglich(ziel,adr){return !!(ziel&&adr&&String(ziel.an).trim().toLowerCase()===String(adr).trim().toLowerCase());}
+// Größe eines fertigen Outlook-Anhangs (Base64 → Bytes) und als Text
+function _dsGroesse(a){return Math.floor(String((a&&a.contentBytes)||'').length*3/4);}
+function _dsMB(n){return n<1048576?(Math.max(1,Math.round(n/1024))+' KB'):((n/1048576).toFixed(1).replace('.',',')+' MB');}
+// „2026-09-07T08:56:00Z“ → „07.09.2026, 08:56“ (Ortszeit); unlesbar → leer
+function _dsDatum(iso){
+  const d=new Date(iso||'');
+  if(isNaN(d.getTime()))return '';
+  const z2=function(n){return String(n).padStart(2,'0');};
+  return z2(d.getDate())+'.'+z2(d.getMonth()+1)+'.'+d.getFullYear()+', '+z2(d.getHours())+':'+z2(d.getMinutes());
+}
+// Bautagebuch-Zeile. an = [{name,antwort}]. ⛔ beginnt NICHT mit „✓ “ (das wäre eine Systemzeile und im Bautagebuch ausgeblendet)
+function _dsBtbText(art,an,dateien){
+  const wer=(an||[]).map(function(p){return String((p&&p.name)||'')+((p&&p.antwort)?' (Antwort)':'');}).join(', ');
+  return '✉ '+(DS_BTB[art]||DS_BTB.ul)+' als Entwurf in Outlook · an '+wer+((dateien&&dateien.length)?(' · '+dateien.join(', ')):'');
+}
+// an diesen Zeilen derselbe Knopf „📂 Entwürfe in Outlook öffnen“ wie an der Zeile der Terminmail (b1120)
+function _dsEntwuerfeKnopfHtml(text){
+  const s=String(text||'');
+  const treffer=Object.keys(DS_BTB).some(function(a){return s.indexOf('✉ '+DS_BTB[a]+' als Entwurf in Outlook')===0;});
+  return (treffer&&typeof _tmEntwuerfeKnopfHtml==='function')?_tmEntwuerfeKnopfHtml(TM_BTB_ANFANG):'';
+}
+// Meldungen (99999) vor das Fenster (1000002) holen – und beim Schließen wieder zurück
+function _dsToastOben(an){const g=document.getElementById('_globalToast');if(g)g.style.zIndex=an?'1000003':'99999';}
+// Franks Fassungen der drei Texte aus Drive, sonst die Starttexte. Nicht lesbar → Starttexte + Grund (Speichern geht dann nicht)
+async function _dsVorlagenLaden(){
+  const v={fd:DS_VORGABE.fd,ul:DS_VORGABE.ul,fo:DS_VORGABE.fo};
+  const erg=await _mvDateiLesen();
+  if(!erg.ok)return{ok:false,grund:erg.grund,vorl:v};
+  Object.keys(v).forEach(function(a){
+    const vg=DS_VORGABE[a];
+    const x=_mvMerge([vg],(erg.liste||[]).filter(function(y){return y&&y.id===vg.id;}))[0];
+    v[a]=(x&&!x.weg)?x:vg;
+  });
+  return{ok:true,vorl:v};
+}
+/* Antwort im Verlauf: createReply im Postfach der Karte, Anhänge dran, Franks Text OBEN einsetzen – das Zitat der alten Mail baut Outlook selbst.
+   Rückgabe 'ok' (Entwurf liegt in Outlook), 'fehler' (nichts angelegt, Grund gemeldet) oder 'neu' (die alte Mail ist in Outlook nicht
+   erreichbar – der Aufrufer legt dann eine neue Mail an). Der Betreff wird NICHT angefasst (sonst trennt Outlook die Unterhaltung). */
+async function _dsAntwortEntwurf(task,ziel,text,anhaenge,wer){
+  let draft=null;
+  try{
+    if(!await _msPickRefresh(task)){showToast('⚠ Outlook-Anmeldung abgelaufen – bitte oben 📨 neu verbinden. Es wurde nichts angelegt.','error',7000);return 'fehler';}
+    const tok=_msPickToken(task);
+    if(!tok){showToast('⚠ Outlook ist nicht verbunden – bitte oben 📨 verbinden. Es wurde nichts angelegt.','error',7000);return 'fehler';}
+    const H={Authorization:'Bearer '+tok,'Content-Type':'application/json'};
+    showToast('📧 Antwort-Entwurf wird angelegt…','info',3000);
+    const r1=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(ziel.msg.id)+'/createReply',{method:'POST',headers:H,body:JSON.stringify({})});
+    if(!r1.ok)throw new Error('createReply HTTP '+r1.status);
+    draft=await r1.json();
+    const fehlA=[];
+    for(const a of (anhaenge||[])){
+      const nm=(a&&a.name)||'Anhang';
+      const gr=_dsGroesse(a);
+      if(gr>_PAM_ANH_MAX){fehlA.push(nm+' ('+_dsMB(gr)+')');continue;}
+      try{
+        const ra=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(draft.id)+'/attachments',{method:'POST',headers:H,
+          body:JSON.stringify(Object.assign({'@odata.type':'#microsoft.graph.fileAttachment'},a))});
+        if(!ra.ok){console.warn('[b1133] Anhang HTTP',ra.status,nm);fehlA.push(nm);}
+      }catch(eA){console.warn('[b1133] Anhang:',nm,eA);fehlA.push(nm);}
+    }
+    if(fehlA.length)showToast('⚠ Nicht angehängt (bitte in Outlook selbst anhängen): '+fehlA.join(', '),'warning',12000);
+    const alt=(draft&&draft.body&&draft.body.content)||'';
+    // Offen seit b1015 (Franks Probe 14.09.: in der gesendeten Antwort fehlte das Zitat). Diese Zeile zeigt, ob Outlook das Zitat überhaupt in den Entwurf legt.
+    console.info('[b1133] Antwort-Entwurf: Outlook lieferte '+alt.length+' Zeichen (Zitat der alten Mail) vor dem Einsetzen');
+    const istHtml=!(draft&&draft.body)||String(draft.body.contentType||'').toLowerCase()==='html';
+    const oben='<div style="font-family:Calibri,Arial,sans-serif;font-size:11pt;">'+_mvTextHtml(text)+'</div><br>';
+    let neu;
+    if(istHtml){
+      const ib=alt.toLowerCase().indexOf('<body'),jb=ib>=0?alt.indexOf('>',ib):-1;
+      neu=jb>=0?(alt.slice(0,jb+1)+oben+alt.slice(jb+1)):(oben+alt);
+    }else neu=oben+_mvTextHtml(alt);
+    const link=draft.webLink||('https://outlook.office.com/mail/drafts/id/'+draft.id);
+    const r2=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(draft.id),{method:'PATCH',headers:H,body:JSON.stringify({body:{contentType:'html',content:neu}})});
+    if(!r2.ok){
+      // der Text ließ sich nicht einsetzen: in die Zwischenablage und sagen – der Entwurf selbst liegt schon in Outlook
+      try{if(navigator.clipboard&&navigator.clipboard.writeText)await navigator.clipboard.writeText(text);}catch(e){}
+      _pamShowDraftToast(link,'⚠ Antwort liegt in Outlook unter Entwürfe, aber OHNE deinen Text – er ist kopiert, bitte mit Strg+V einfügen',true);
+      return 'ok';
+    }
+    _pamShowDraftToast(link,'✅ Antwort an '+_mvTextHtml(wer||'')+' liegt in Outlook unter <b>Entwürfe</b>',true);
+    return 'ok';
+  }catch(e){
+    console.warn('[b1133] Antwort-Entwurf:',e);
+    if(draft){showToast('⚠ Der Antwort-Entwurf liegt in Outlook, ist aber unvollständig – bitte unter Entwürfe prüfen','warning',10000);return 'ok';}
+    return 'neu';
+  }
+}
+// Notweg ohne Outlook-Verbindung (bis b1132 in _fsMail und _pdfSendenMail): Datei speichern, Mailfenster von Windows mit Text öffnen
+function _dsNotweg(roh,an,betreff,text){
+  const namen=[];
+  (roh||[]).forEach(function(d){
+    if(!d)return;
+    try{
+      const blob=d.blob||new Blob([d.bytes],{type:d.mime||'application/octet-stream'});
+      const u=URL.createObjectURL(blob);
+      const a=document.createElement('a');a.href=u;a.download=d.name||'Anhang';
+      document.body.appendChild(a);a.click();a.remove();
+      setTimeout(function(){URL.revokeObjectURL(u);},4000);
+      namen.push(d.name||'Anhang');
+    }catch(e){console.warn('[b1133] Notweg speichern:',d.name,e);}
+  });
+  try{window.open('mailto:'+encodeURIComponent(an||'')+'?subject='+encodeURIComponent(betreff||'')+'&body='+encodeURIComponent(text||''),'_blank');}catch(e){}
+  showToast('⚠ Outlook ist in PAM nicht verbunden – '+(namen.join(', ')||'die Datei')+' wurde gespeichert, bitte im Mailfenster anhängen. Dort den ABSENDER prüfen.','warning',12000);
+}
+/* Das Fenster. opt: task (darf fehlen) · art 'fd'|'ul'|'fo' · fest = fertige Outlook-Anhänge [{name,contentType,contentBytes}] ·
+   festFehl = Namen, die schon beim Vorbereiten nicht mitgingen · roh = [{name,blob}] oder [{name,bytes,mime}] für den Notweg ·
+   ohneDok = Drive-Kennungen, die unter „weitere Dokumente“ nicht noch einmal stehen · vorwahl = Adresse, die angehakt sein soll.
+   Rückgabe (Promise, sobald das Fenster zu ist): 'ok' = mindestens ein Entwurf liegt in Outlook, sonst 'abbruch'.
+   Knöpfe per addEventListener, nicht als onclick-Text (wie _tmOeffnen: pruefen.js liest jeden onclick-Text der Datei). */
+function _dsOeffnen(opt){
+  opt=opt||{};
+  return new Promise(function(erledigt){
+    const task=opt.task||null;
+    let kontakte=(task&&task.kontakte)||[];
+    try{
+      if(task&&(document.getElementById('taskId')||{}).value===task.id&&typeof getKontaktePTP==='function'){const kp=getKontaktePTP();if(kp&&kp.length)kontakte=kp;}
+    }catch(e){}
+    const emp=_tmEmpfaenger(kontakte);
+    const ziel=_dsZiel(task);
+    const fest=(opt.fest||[]).filter(Boolean);
+    const roh=(opt.roh||[]).filter(Boolean);
+    const dokName=_dsOhneEndung(fest[0]&&fest[0].name);
+    const st={art:DS_VORGABE[opt.art]?opt.art:'ul',an:{},frei:'',sicht:'',vorl:{fd:DS_VORGABE.fd,ul:DS_VORGABE.ul,fo:DS_VORGABE.fo},ps:{},anh:{},
+      grund:'',laedt:true,modus:'mail',edit:null,editSauber:true,meldung:'',meldArt:'',fertig:[]};
+    // Vorwahl: die Adresse vom Aufrufer (Übersicht: der dort gewählte Kontakt), sonst wie bei der Terminmail (eine Adresse → die,
+    // sonst die Hausverwaltung / der AG-Kontakt); bleibt niemand übrig, die Person, die die letzte Mail geschrieben hat
+    const vw=String(opt.vorwahl||'').trim().toLowerCase();
+    const vwTreffer=vw?emp.mit.filter(function(e){return e.adr.toLowerCase()===vw;}):[];
+    (vwTreffer.length?[vwTreffer[0].adr]:_tmVorwahl(emp.mit,'')).forEach(function(a){st.an[a]=true;});
+    if(!Object.keys(st.an).length&&ziel)emp.mit.forEach(function(e){if(_dsAntwortMoeglich(ziel,e.adr))st.an[e.adr]=true;});
+    const alt=document.getElementById('_dsOverlay');if(alt)alt.remove();
+    const ov=document.createElement('div');
+    ov.id='_dsOverlay';
+    ov.style.cssText='position:fixed;inset:0;z-index:1000002;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;';
+    const box=document.createElement('div');
+    box.style.cssText='background:var(--bg2);color:var(--text1);border:1px solid var(--border);border-radius:12px;width:min(720px,96vw);max-height:92vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.35);font-size:13px;';
+    ov.appendChild(box);
+    document.body.appendChild(ov);
+    const KN='display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:7px;border:1px solid var(--border);background:transparent;color:var(--text1);cursor:pointer;font-size:12px;font-weight:600;';
+    const KN_HAUPT='display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:7px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:12px;font-weight:700;';
+    const KN_AKTIV='background:var(--accent);color:#fff;border-color:var(--accent);';
+    const FELD='width:100%;box-sizing:border-box;padding:7px 9px;border-radius:8px;border:1px solid var(--border);background:var(--bg3,var(--bg2));color:var(--text1);font-size:13px;';
+    const LBL='font-size:11px;font-weight:700;color:var(--text2);';
+    function el(tag,stil,text){const e=document.createElement(tag);if(stil)e.style.cssText=stil;if(text!=null)e.textContent=text;return e;}
+    function knopf(txt,stil,fn,titel){const b=document.createElement('button');b.type='button';b.textContent=txt;b.style.cssText=stil;if(titel)b.title=titel;b.addEventListener('click',fn);return b;}
+    // von Hand getippte Adresse: gilt erst, wenn hinter dem @ noch ein Name mit Punkt steht (wie b1116)
+    function freiAdr(){const a=String(st.frei||'').trim(),i=a.indexOf('@');return (i>0&&a.indexOf(' ')<0&&a.indexOf('.',i+2)>i&&!a.endsWith('.'))?a:'';}
+    function gewaehlte(){
+      const g=emp.mit.filter(function(e){return st.an[e.adr];}).map(function(e){return{name:e.name,adr:e.adr,key:e.adr};});
+      const f=freiAdr();
+      if(f&&!g.some(function(e){return e.adr.toLowerCase()===f.toLowerCase();}))g.push({name:'',adr:f,key:''});
+      return g;
+    }
+    function nameVon(key){
+      if(!key)return '';
+      const e=emp.mit.filter(function(x){return x.adr===key;})[0];
+      return e?e.name:'';
+    }
+    // je Empfänger ein eigener Stand: Antwort oder neue Mail, Betreff, Text, von Hand geändert?
+    function zustand(key){
+      if(!st.ps[key])st.ps[key]={weg:_dsAntwortMoeglich(ziel,key)?'antwort':'neu',gefT:'',taWert:'',gefB:'',betrWert:'',neu:true};
+      return st.ps[key];
+    }
+    function werte(key){return _dsWerte(task,kontakte,nameVon(key),dokName);}
+    // füllt Betreff und Text EINES Empfängers neu – aber nur, wo Frank nichts von Hand geändert hat (alles=true: beide neu).
+    // Bei der Antwort steht immer der Betreff der Unterhaltung.
+    function fuelleEine(key,alles){
+      const z=zustand(key),v=st.vorl[st.art],w=werte(key);
+      const nT=_mvFuellen(v.text,w);
+      const nB=(z.weg==='antwort'&&ziel)?_pamAwBetreff(ziel.betreff):_dsBetreffNeu(v,w,st.art);
+      if(alles||z.neu||z.gefT===z.taWert)z.taWert=nT;   // von Hand geänderter Text bleibt stehen
+      z.gefT=nT;
+      if(alles||z.neu||z.betrWert===z.gefB||z.weg==='antwort')z.betrWert=nB;
+      z.gefB=nB;
+      z.neu=false;
+    }
+    function fuelleAlle(alles){Object.keys(st.ps).forEach(function(k){fuelleEine(k,alles);});}
+    // wessen Mail zeigt das Fenster gerade? Der zuletzt gewählte unter den Angehakten, sonst der erste; niemand angehakt → Vorschau ohne Namen
+    function sichtKey(){
+      const g=gewaehlte().map(function(p){return p.key;});
+      if(!g.length)return '';
+      if(g.indexOf(st.sicht)<0)st.sicht=g[0];
+      return st.sicht;
+    }
+    function geaendert(){return Object.keys(st.ps).some(function(k){const z=st.ps[k];return !z.neu&&(z.taWert!==z.gefT||(z.weg!=='antwort'&&z.betrWert!==z.gefB));});}
+    function sauberOderFragen(){
+      if(st.modus==='vorlage')return st.editSauber||confirm('Die Änderungen am Text der Vorlage sind nicht gespeichert. Verwerfen?');
+      return !geaendert()||confirm('Dein geänderter Text geht verloren. Trotzdem?');
+    }
+    function weg(){ov.remove();document.removeEventListener('keydown',taste,true);_dsToastOben(false);erledigt(st.fertig.length?'ok':'abbruch');}
+    function zu(){if(sauberOderFragen())weg();}
+    // ⛔ Ein Klick NEBEN das Fenster schließt es nicht (bis b1132 ging dabei der Text verloren) – nur ✕, Abbrechen und Esc, mit Rückfrage
+    function taste(e){if(e.key==='Escape'&&document.getElementById('_dsOverlay')===ov){e.stopImmediatePropagation();e.preventDefault();zu();}}
+    document.addEventListener('keydown',taste,true);
+    // Meldung in der Zeile über den Knöpfen UND als Meldung unten (die liegt sonst hinter dem Fenster)
+    function melde(txt,art){
+      st.meldung=String(txt||'');st.meldArt=art||'';
+      const m=box.querySelector('._dsMeldung');
+      if(m){m.textContent=st.meldung;m.style.display=st.meldung?'':'none';m.style.color=(st.meldArt==='fehler')?'#c0392b':'var(--text1)';}
+    }
+    function sag(txt,art,dauer){
+      melde(txt,art);
+      try{showToast(txt,art==='fehler'?'error':(art==='ok'?'success':(art==='warn'?'warning':'info')),dauer||5000);}catch(e){}
+      _dsToastOben(true);
+    }
+    function zeichne(){
+      box.innerHTML='';
+      const kopf=el('div','display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap;');
+      kopf.appendChild(el('div','flex:1;font-weight:700;font-size:15px;',st.modus==='mail'?('✉ '+DS_VORGABE[st.art].name):('⚙ Text der Vorlage „'+DS_VORGABE[st.art].name+'“')));
+      kopf.appendChild(knopf('✕','background:none;border:none;color:var(--text2);font-size:18px;cursor:pointer;padding:0 4px;',zu,'Schließen'));
+      box.appendChild(kopf);
+      if(st.laedt){box.appendChild(el('div','padding:40px;text-align:center;color:var(--text2);','⏳ Text wird geladen …'));return;}
+      if(st.grund)box.appendChild(el('div','margin:10px 16px 0;padding:8px 10px;border-radius:7px;background:rgba(230,126,34,.16);color:var(--text1);font-size:12px;','⚠ '+st.grund));
+      if(st.modus==='mail')zeichneMail();else zeichneVorlage();
+    }
+    function zeichneMail(){
+      const verb=_pamOutlookVerbunden(task);
+      const info=el('div','padding:10px 16px 0;font-size:12px;color:var(--text2);line-height:1.7;');
+      const zeile=function(lbl,inhalt){const d=el('div','');d.appendChild(el('b','color:var(--text1);',lbl+' '));d.appendChild(document.createTextNode(inhalt));info.appendChild(d);};
+      zeile('Karte:',task?(task.title||'(kein Titel)'):'– (keine Karte offen)');
+      zeile('Postfach:',verb?(task&&task.msAccount==='2'&&typeof msUserEmail2!=='undefined'&&msUserEmail2?msUserEmail2:((typeof msUserEmail!=='undefined'&&msUserEmail)||'Outlook')):'–');
+      box.appendChild(info);
+      if(!verb)box.appendChild(el('div','margin:10px 16px 0;padding:8px 10px;border-radius:7px;background:rgba(192,57,43,.14);color:var(--text1);font-size:12px;font-weight:600;',
+        '⛔ Outlook ist in PAM nicht verbunden – bitte oben 📨 verbinden.'+(roh.length?' Ohne Verbindung geht nur „⬇ Speichern + Mailfenster“ (dort den Absender prüfen).':' Den Text kannst du trotzdem kopieren.')));
+      const rumpf=el('div','display:flex;flex-direction:column;gap:6px;padding:12px 16px;overflow:auto;flex:1;min-height:0;');
+      rumpf.appendChild(el('div',LBL,'An – Kontakte dieser Karte mit Mail-Adresse'));
+      // flex-shrink:0 – sonst drückt der viele Inhalt darunter den Kasten zusammen und er bekommt einen Rollbalken (gemessen: 44 statt 53 px)
+      const kasten=el('div','flex-shrink:0;border:1px solid var(--border);border-radius:8px;padding:6px 10px;max-height:130px;overflow:auto;font-size:12px;line-height:1.8;');
+      if(!emp.mit.length)kasten.appendChild(el('div','color:var(--text2);','Bei keinem Kontakt dieser Karte steht eine Mail-Adresse – unten von Hand eintragen oder im Kontakt nachtragen.'));
+      emp.mit.forEach(function(e){
+        const zl=document.createElement('label');zl.style.cssText='display:flex;gap:7px;align-items:center;cursor:pointer;';
+        const cb=document.createElement('input');cb.type='checkbox';cb.className='_dsAn';cb.setAttribute('data-adr',e.adr);cb.checked=!!st.an[e.adr];
+        cb.addEventListener('change',function(){if(cb.checked){st.an[e.adr]=true;st.sicht=e.adr;}else delete st.an[e.adr];auffrischen();});
+        const rolle=(typeof _GK_ROLLE_TEXT!=='undefined'&&_GK_ROLLE_TEXT[e.rolle])||'';
+        zl.appendChild(cb);
+        zl.appendChild(el('span','',[e.name,rolle].filter(Boolean).join(' · ')+(e.name||rolle?'  ':'')+'<'+e.adr+'>'));
+        kasten.appendChild(zl);
+      });
+      if(emp.ohne.length)kasten.appendChild(el('div','color:var(--text2);font-size:11px;','Ohne Mail-Adresse (im Kontakt nachtragen): '+emp.ohne.map(function(o){return o.name||'(ohne Namen)';}).join(', ')));
+      rumpf.appendChild(kasten);
+      const inF=document.createElement('input');inF.type='text';inF.id='_dsFrei';inF.autocomplete='off';inF.value=st.frei||'';
+      inF.placeholder='weitere Adresse von Hand (freiwillig)';
+      inF.style.cssText=FELD;
+      inF.addEventListener('input',function(){st.frei=inF.value;auffrischen();});
+      rumpf.appendChild(inF);
+      // Wahl-Leiste: wessen Mail (nur bei mehreren), Antwort oder neue Mail – wird bei jedem Haken neu gebaut, die Felder darunter bleiben stehen
+      const wahl=el('div','display:flex;flex-direction:column;gap:5px;margin-top:4px;');
+      wahl.id='_dsWahl';
+      rumpf.appendChild(wahl);
+      const inB=document.createElement('input');inB.type='text';inB.id='_dsBetreff';
+      inB.style.cssText=FELD;
+      inB.addEventListener('input',function(){const z=zustand(sichtKey());if(z.weg!=='antwort')z.betrWert=inB.value;});
+      const kB=el('div',LBL+'margin-top:4px;','Betreff');
+      rumpf.appendChild(kB);
+      rumpf.appendChild(inB);
+      const textKopf=el('div','display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:space-between;margin-top:4px;');
+      textKopf.appendChild(el('span',LBL,'Text'));
+      const vWahl=el('span','font-size:11px;color:var(--text2);display:inline-flex;gap:5px;align-items:center;','Vorlage:');
+      const sel=document.createElement('select');sel.id='_dsVorlage';sel.style.cssText='font-size:12px;padding:3px 6px;';
+      ['fd','ul','fo'].forEach(function(a){const o=document.createElement('option');o.value=a;o.textContent=DS_VORGABE[a].name;sel.appendChild(o);});
+      sel.value=st.art;
+      sel.addEventListener('change',function(){
+        const neuArt=DS_VORGABE[sel.value]?sel.value:st.art;
+        if(neuArt===st.art)return;
+        if(geaendert()&&!confirm('Dein geänderter Text geht verloren. Trotzdem?')){sel.value=st.art;return;}
+        st.art=neuArt;fuelleAlle(true);zeichne();
+      });
+      vWahl.appendChild(sel);
+      textKopf.appendChild(vWahl);
+      rumpf.appendChild(textKopf);
+      const ta=document.createElement('textarea');ta.id='_dsText';
+      ta.style.cssText=FELD+'padding:10px;min-height:170px;flex:1;resize:vertical;font:13px/1.5 Calibri,Arial,sans-serif;';
+      ta.addEventListener('input',function(){zustand(sichtKey()).taWert=ta.value;});
+      rumpf.appendChild(ta);
+      const zitat=el('div','border-left:3px solid var(--border);padding:4px 10px;color:var(--text2);font-size:11.5px;','');
+      zitat.id='_dsZitat';
+      rumpf.appendChild(zitat);
+      const fehltZeile=el('div','font-size:12px;color:var(--text2);','');
+      rumpf.appendChild(fehltZeile);
+      // Anhang: was der Knopf mitbringt (fest) und weitere Dokumente der Karte zum Anhaken
+      rumpf.appendChild(el('div',LBL+'margin-top:4px;','📎 Anhang'));
+      const ak=el('div','flex-shrink:0;border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;line-height:1.8;');
+      fest.forEach(function(a){
+        const gr=_dsGroesse(a),gross=gr>_PAM_ANH_MAX;
+        const zl=el('div','',null);zl.className='_dsFest';
+        zl.appendChild(el('span','','📎 '+(a.name||'Anhang')+' · '+_dsMB(gr)));
+        if(gross)zl.appendChild(el('span','color:#c0392b;font-weight:600;',' – zu groß, geht nicht mit (höchstens 3 MB)'));
+        ak.appendChild(zl);
+      });
+      if(opt.festFehl&&opt.festFehl.length)ak.appendChild(el('div','color:#b9770e;font-size:11px;','Nicht dabei: '+opt.festFehl.join(', ')+' – bitte in Outlook selbst anhängen'));
+      let dokListe=[];
+      try{
+        const ohne=(opt.ohneDok||[]).map(String);
+        const festNamen=fest.map(function(a){return String((a&&a.name)||'');});
+        dokListe=(task?(_pamDokIndex(task).docs||[]):[]).filter(function(d){
+          return d&&d.kind==='attach'&&d.fileId&&!_mvIstBild(d.name)&&ohne.indexOf(String(d.fileId))<0&&festNamen.indexOf(String(d.name||''))<0;
+        });
+      }catch(eD){dokListe=[];}
+      if(dokListe.length){
+        ak.appendChild(el('div','color:var(--text2);font-size:11px;margin-top:2px;','Weitere Dokumente dieser Karte:'));
+        dokListe.forEach(function(d){
+          const zl=document.createElement('label');zl.style.cssText='display:flex;gap:7px;align-items:center;cursor:pointer;';
+          const cb=document.createElement('input');cb.type='checkbox';cb.className='_dsDok';cb.setAttribute('data-fid',d.fileId);cb.checked=!!st.anh[d.fileId];
+          cb.addEventListener('change',function(){if(cb.checked)st.anh[d.fileId]={fileId:d.fileId,name:d.name};else delete st.anh[d.fileId];});
+          zl.appendChild(cb);zl.appendChild(el('span','',d.name));ak.appendChild(zl);
+        });
+      }
+      rumpf.appendChild(ak);
+      rumpf.appendChild(el('div','font-size:11px;color:var(--text2);','Je Datei bis ca. 3 MB (Grenze von Outlook). Fotos gehen nur ohne Standort- und Kameradaten mit. Was nicht mitgeht, sagt PAM dir.'));
+      box.appendChild(rumpf);
+      const ml=el('div','display:none;padding:6px 16px;font-size:12px;font-weight:600;border-top:1px solid var(--border);','');
+      ml.className='_dsMeldung';
+      box.appendChild(ml);
+      melde(st.meldung,st.meldArt);
+      const fuss=el('div','display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;align-items:center;padding:10px 16px;border-top:1px solid var(--border);');
+      fuss.appendChild(el('div','flex:1;min-width:180px;font-size:11px;color:var(--text2);','Es wird nichts verschickt – der Entwurf liegt danach in Outlook unter Entwürfe.'));
+      fuss.appendChild(knopf('⚙ Text der Vorlage ändern',KN,function(){
+        const v=st.vorl[st.art];
+        st.modus='vorlage';st.edit={text:v.text,betreff:v.betreff||''};st.editSauber=true;zeichne();
+      },'Den vorgefertigten Text, der gerade gezeigt wird, dauerhaft ändern – gilt danach auf beiden Rechnern'));
+      fuss.appendChild(knopf('📋 Text kopieren',KN,function(){
+        const txt=ta.value||'';
+        const markiert=function(){ta.focus();ta.select();sag('Der Text ist markiert – bitte Strg+C drücken','info',4000);};
+        if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(function(){sag('✓ Text kopiert','ok',2000);},markiert);
+        else markiert();
+      }));
+      if(!verb&&roh.length)fuss.appendChild(knopf('⬇ Speichern + Mailfenster',KN,function(){
+        const g=gewaehlte(),z=zustand(sichtKey());
+        _dsNotweg(roh,(g[0]&&g[0].adr)||'',z.betrWert,z.taWert);
+        _dsToastOben(true);
+      },'Ohne Outlook-Verbindung: die Datei wird gespeichert und das Mailfenster von Windows geöffnet – dort von Hand anhängen und den Absender prüfen'));
+      fuss.appendChild(knopf('Abbrechen',KN,zu));
+      const los=knopf('📧 Entwurf in Outlook anlegen',KN_HAUPT,async function(){
+        const g=gewaehlte();
+        if(String(st.frei||'').trim()&&!freiAdr()){sag('Die von Hand eingetragene Adresse ist unvollständig – bitte prüfen oder das Feld leeren.','warn');return;}
+        if(!g.length){sag('Bitte einen Empfänger anhaken oder eine Adresse eintragen.','warn',4000);return;}
+        g.forEach(function(p){fuelleEine(p.key,false);});
+        const leer=g.filter(function(p){return !String(zustand(p.key).taWert||'').trim();});
+        if(leer.length){sag('Der Text ist leer'+(g.length>1?' (Mail an '+(leer[0].name||leer[0].adr)+')':'')+'.','warn',4000);return;}
+        los.disabled=true;los.style.opacity='.6';
+        melde('⏳ Entwurf wird angelegt …','');
+        let extra={liste:[],fehl:[]};
+        const docs=Object.keys(st.anh).map(function(k){return st.anh[k];});
+        if(docs.length){melde('📎 Dokumente werden geholt …','');extra=await _mvAnhaengeLaden(docs);}
+        if(extra.fehl.length){showToast('⚠ Nicht angehängt (bitte in Outlook selbst anhängen): '+extra.fehl.join(', '),'warning',12000);_dsToastOben(true);}
+        const anh=fest.concat(extra.liste);
+        const dateien=anh.filter(function(a){return _dsGroesse(a)<=_PAM_ANH_MAX;}).map(function(a){return a.name;});
+        const fehl=[],neuFertig=[];
+        for(const p of g){
+          const z=zustand(p.key),wer=p.name||p.adr;
+          let r='neu',antwort=false;
+          if(z.weg==='antwort'&&_dsAntwortMoeglich(ziel,p.adr)){r=await _dsAntwortEntwurf(task,ziel,z.taWert,anh,wer);antwort=(r==='ok');}
+          if(r==='neu'){
+            // neue Mail – oder Ersatz, wenn die alte Mail in Outlook nicht erreichbar war (dann mit dem Betreff der Unterhaltung)
+            const ersatz=(z.weg==='antwort');
+            const betreff=ersatz?_pamAwBetreff(ziel&&ziel.betreff):(_tmBetreffPutzen(_mvFuellen(z.betrWert,werte(p.key)))||DS_BTB[st.art]);
+            const hinweis='✅ Entwurf an '+_mvTextHtml(wer)+(ersatz?' (als neue Mail – die alte Mail war in Outlook nicht erreichbar)':'')+' liegt in Outlook unter <b>Entwürfe</b>';
+            r=await _pamAntwortEntwurf(task,p.adr,betreff,z.taWert,hinweis,anh,true);
+          }
+          _dsToastOben(true);
+          if(r==='ok'){st.fertig.push(p.key);neuFertig.push({name:wer,antwort:antwort});}else fehl.push(wer);
+        }
+        if(neuFertig.length&&task){
+          try{
+            if(typeof _tuBtbZeile==='function')_tuBtbZeile(task,_dsBtbText(st.art,neuFertig,dateien));
+            if(typeof autoSave==='function')autoSave();
+          }catch(e){console.warn('[b1133] Bautagebuch:',e);}
+        }
+        if(!fehl.length){weg();return;}
+        // wer schon einen Entwurf hat, fällt aus der Auswahl – ein zweiter Klick legt nur noch die übrigen an
+        g.forEach(function(p){if(st.fertig.indexOf(p.key)>=0){if(p.key)delete st.an[p.key];else st.frei='';}});
+        zeichne();
+        sag('⚠ Kein Entwurf für: '+fehl.join(', ')+(neuFertig.length?(' – für '+neuFertig.map(function(p){return p.name;}).join(', ')+' liegt er in Outlook.'):' – der Grund steht in der Meldung unten.'),'fehler',10000);
+      });
+      fuss.appendChild(los);
+      box.appendChild(fuss);
+      // nach Haken / getippter Adresse / Umschalten: Leiste neu, Betreff und Text des gezeigten Empfängers einsetzen, Knopf richtigstellen –
+      // ohne das Fenster neu zu bauen (sonst verlöre das Adressfeld beim Tippen die Schreibmarke)
+      function auffrischen(){
+        const g=gewaehlte(),key=sichtKey(),z=zustand(key);
+        g.forEach(function(p){fuelleEine(p.key,false);});
+        fuelleEine(key,false);
+        wahl.innerHTML='';
+        if(g.length>1){
+          const r1=el('div','display:flex;flex-wrap:wrap;gap:5px;align-items:center;');
+          r1.appendChild(el('span',LBL+'margin-right:2px;','Mail an:'));
+          g.forEach(function(p){
+            const b=knopf(p.name||p.adr,KN+'padding:4px 10px;font-size:11px;'+(p.key===key?KN_AKTIV:''),function(){st.sicht=p.key;auffrischen();},'Betreff und Text der Mail an diese Person zeigen');
+            b.className='_dsPerson';
+            r1.appendChild(b);
+          });
+          r1.appendChild(el('span','font-size:11px;color:var(--text2);','Jede Person bekommt eine eigene Mail.'));
+          wahl.appendChild(r1);
+        }
+        const antwortGeht=!!key&&_dsAntwortMoeglich(ziel,key);
+        if(antwortGeht){
+          const r2=el('div','display:flex;flex-wrap:wrap;gap:5px;align-items:center;');
+          r2.appendChild(el('span',LBL+'margin-right:2px;','Wie:'));
+          [['antwort','↩ Als Antwort auf die letzte Mail','Die Mails bleiben in Outlook als eine Unterhaltung zusammen, die alte Mail steht darunter'],
+           ['neu','✉ Als neue Mail','Eigener Betreff mit Straße, ohne die alte Mail darunter']].forEach(function(w){
+            const b=knopf(w[1],KN+'padding:4px 10px;font-size:11px;'+(z.weg===w[0]?KN_AKTIV:''),function(){
+              if(z.weg===w[0])return;
+              z.weg=w[0];fuelleEine(key,false);auffrischen();
+            },w[2]);
+            b.className='_dsWeg';b.setAttribute('data-weg',w[0]);b.setAttribute('data-an',z.weg===w[0]?'1':'0');
+            r2.appendChild(b);
+          });
+          wahl.appendChild(r2);
+          const dt=_dsDatum(ziel.msg&&ziel.msg.date);
+          wahl.appendChild(el('div','font-size:11px;color:var(--text2);','Letzte Mail'+(ziel.name?' von '+ziel.name:'')+(dt?' vom '+dt:'')+': „'+(ziel.betreff||'(ohne Betreff)')+'“'));
+        }
+        const istAntwort=antwortGeht&&z.weg==='antwort';
+        if(ta.value!==z.taWert)ta.value=z.taWert;
+        if(inB.value!==z.betrWert)inB.value=z.betrWert;
+        inB.readOnly=istAntwort;inB.style.opacity=istAntwort?'.7':'';
+        kB.textContent=istAntwort?'Betreff (bleibt wie in der Unterhaltung, damit Outlook die Mails zusammenhält)':'Betreff';
+        zitat.textContent=istAntwort?('— darunter setzt Outlook selbst die alte Mail'+(_dsDatum(ziel.msg&&ziel.msg.date)?' vom '+_dsDatum(ziel.msg.date):'')+' —'):'';
+        zitat.style.display=istAntwort?'':'none';
+        los.textContent=g.length>1?('📧 '+g.length+' Entwürfe in Outlook anlegen'):'📧 Entwurf in Outlook anlegen';
+        const aus=!verb;
+        los.disabled=aus;los.style.opacity=aus?'.5':'';los.style.cursor=aus?'not-allowed':'pointer';
+        const v=st.vorl[st.art];
+        const fehlt=_mvFehlend(String(v.text||'')+' '+String(v.betreff||''),werte(key)).filter(function(k){return k!=='Empfänger'&&k!=='Anrede';});
+        fehltZeile.textContent=fehlt.length?('Nicht gefunden: '+fehlt.join(', ')+' – steht darum nicht im Text. Bei Bedarf oben ergänzen.'):'Alles gefunden – bitte trotzdem kurz lesen.';
+      }
+      auffrischen();
+    }
+    function zeichneVorlage(){
+      const vg=DS_VORGABE[st.art];
+      const rumpf=el('div','display:flex;flex-direction:column;gap:7px;padding:12px 16px;overflow:auto;flex:1;min-height:0;');
+      const inBt=document.createElement('input');inBt.type='text';inBt.id='_dsVBetreff';inBt.value=st.edit.betreff||'';
+      inBt.style.cssText=FELD;
+      inBt.addEventListener('input',function(){st.edit.betreff=inBt.value;st.editSauber=false;});
+      const ta=document.createElement('textarea');ta.id='_dsVText';ta.value=st.edit.text;
+      ta.style.cssText=FELD+'padding:10px;min-height:210px;resize:vertical;font:13px/1.5 Calibri,Arial,sans-serif;';
+      ta.addEventListener('input',function(){st.edit.text=ta.value;st.editSauber=false;});
+      const reihe=el('div','display:flex;flex-wrap:wrap;gap:5px;align-items:center;');
+      reihe.appendChild(el('span','font-size:11px;color:var(--text2);margin-right:2px;','Einsetzen:'));
+      let ziel2=ta;
+      inBt.addEventListener('focus',function(){ziel2=inBt;});
+      ta.addEventListener('focus',function(){ziel2=ta;});
+      DS_PLATZHALTER.concat(MV_PLATZHALTER).forEach(function(k){
+        reihe.appendChild(knopf('{'+k+'}',KN+'padding:3px 8px;font-size:11px;',function(){
+          const f=ziel2;
+          const a=(typeof f.selectionStart==='number')?f.selectionStart:f.value.length;
+          const b=(typeof f.selectionEnd==='number')?f.selectionEnd:a;
+          f.setRangeText('{'+k+'}',a,b,'end');f.focus();
+          st.edit.text=ta.value;st.edit.betreff=inBt.value;st.editSauber=false;
+        },'Setzt die Stelle an den Cursor (in Betreff oder Text, je nachdem, wo du zuletzt warst)'));
+      });
+      rumpf.append(el('div',LBL,'Betreff (gilt für eine neue Mail – bei einer Antwort bleibt der Betreff der Unterhaltung)'),inBt,el('div',LBL,'Text'),ta,reihe,
+        el('div','font-size:11.5px;color:var(--text2);line-height:1.55;padding:8px 10px;border-radius:7px;border:1px dashed var(--border);',
+          'So füllt PAM die Stellen: {Anrede} = „Sehr geehrte Frau …“ / „Sehr geehrter Herr …“, wenn im Namen des Kontakts Frau, Fr., Herr oder Hr. steht, sonst „Guten Tag <Name>“ · {Straße} = Adresse der Karte bis zum Komma · {Mieter-Name} = Mieter ohne Frau/Herr · {Empfänger} = Name des Kontakts · {Dokument} = Name der Datei ohne Endung · die übrigen wie bei den Mailvorlagen. Was in [ ] steht, fällt ganz weg, wenn PAM einen Wert darin nicht findet.'));
+      box.appendChild(rumpf);
+      const fuss=el('div','display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 16px;border-top:1px solid var(--border);');
+      fuss.appendChild(el('div','flex:1;min-width:180px;font-size:11px;color:var(--text2);','Gespeichert in Google Drive ('+MAILVORLAGEN_DATEI+') – gilt auf beiden Rechnern.'));
+      fuss.appendChild(knopf('↺ Starttext',KN,function(){
+        st.edit={text:vg.text,betreff:vg.betreff};st.editSauber=false;zeichne();
+      },'Setzt den mitgelieferten Text wieder ein – gilt erst nach „Speichern“'));
+      fuss.appendChild(knopf('← Zurück',KN,function(){
+        if(!sauberOderFragen())return;
+        st.modus='mail';st.edit=null;st.editSauber=true;zeichne();
+      }));
+      const sp=knopf('💾 Speichern',KN_HAUPT,async function(){
+        const text=String(st.edit.text||''),betreffV=String(st.edit.betreff||'').trim();
+        if(!text.trim()){showToast('Der Text ist leer.','warning',3000);_dsToastOben(true);return;}
+        sp.disabled=true;sp.style.opacity='.6';
+        const neu={id:vg.id,name:vg.name,art:'dokument',text:text,betreff:betreffV,ts:new Date().toISOString(),weg:null};
+        const erg=await _mvSpeichern(neu);
+        sp.disabled=false;sp.style.opacity='';
+        if(!erg.ok){showToast('⚠ '+erg.grund,'error',8000);_dsToastOben(true);return;}
+        st.vorl[st.art]=neu;st.grund='';st.modus='mail';st.edit=null;st.editSauber=true;
+        fuelleAlle(false);
+        zeichne();
+        sag('✓ Text gespeichert – gilt auf beiden Rechnern','ok',3000);
+      });
+      fuss.appendChild(sp);
+      box.appendChild(fuss);
+    }
+    zeichne();
+    _dsVorlagenLaden().then(function(erg){
+      if(document.getElementById('_dsOverlay')!==ov)return;
+      st.vorl=erg.vorl;
+      if(!erg.ok)st.grund='Deine Fassung des Textes ist aus Google Drive nicht lesbar ('+erg.grund+') – gezeigt wird der Starttext, Speichern geht gerade nicht.';
+      st.laedt=false;
+      zeichne();
+    });
   });
 }
 async function _pamEmailAntwortenMitVerlauf(){
@@ -46349,28 +46799,12 @@ async function _pamDokEntwurf(i){
   }
   let t=null;
   try{t=findTaskById((document.getElementById('taskId')||{}).value||'');}catch(e){t=null;}
-  const kontakte=((t&&t.kontakte)||[]).filter(function(k){return k.email;});
-  const wahl=await _pdfSendenDialog({
-    to:((kontakte[0]||{}).email)||'',
-    vorschlaege:kontakte.map(function(k){return {name:k.name||'',email:k.email};}),
-    subj:'Unterlagen',
-    body:'Sehr geehrte Damen und Herren,\n\nanbei die Unterlagen.\n\nMit freundlichen Grüßen\n',
-    anhaenge:[name]
-  });
-  if(!wahl){showToast('Abgebrochen – es wurde kein Entwurf angelegt','info',3000);return;}
-  try{
-    showToast('📧 Entwurf wird angelegt…','info',4000);
-    const erg=await _pamOutlookEntwurf(token,{to:wahl.to,subj:wahl.subj,body:wahl.body,
-      anhaenge:[{name:name,contentType:blob.type||'application/octet-stream',contentBytes:_fsB64(await blob.arrayBuffer())}]});
-    if(erg.fehl.length){
-      showToast('⚠ '+name+' ging nicht an den Entwurf ('+erg.fehl.join(', ')+') – bitte über ⬇ herunterladen und von Hand anhängen','warning',11000);return;
-    }
-    _pamShowDraftToast(erg.link,'✅ Entwurf mit '+esc(name)+' liegt in Outlook unter <b>Entwürfe</b>');
-    showToast('✓ Entwurf angelegt – es wurde nichts verschickt','success',6000);
-  }catch(e){
-    console.warn('[DokEntwurf] Entwurf:',e);
-    showToast('⚠ Entwurf nicht möglich: '+((e&&e.message)||'')+' – bitte über ⬇ herunterladen','error',9000);
-  }
+  // b1133: statt des kleinen Fensters (b593) das Fenster „✉ Dokument senden“ – Empfänger mit Rolle, Anrede, Vorlage, Antwort im Verlauf.
+  // „FotoDoku“ im Dateinamen → Text „Fotodokumentation senden“, sonst „Unterlagen senden“. Die Datei selbst steht nicht noch einmal unter „weitere Dokumente“.
+  const erg=await _dsOeffnen({task:t,art:_dsArtFuerName(name),
+    fest:[{name:name,contentType:blob.type||'application/octet-stream',contentBytes:_fsB64(await blob.arrayBuffer())}],
+    roh:[{name:name,blob:blob}],ohneDok:[fid]});
+  if(erg!=='ok')showToast('Abgebrochen – es wurde kein Entwurf angelegt','info',3000);
 }
 async function downloadAttach(i){
   const a=taskAttachments[i];
@@ -71060,36 +71494,14 @@ function _fdkPdfBauen(bilder,opt){
   }
   return doc;
 }
-// b774: Entwurf in Outlook mit der eben gebauten Datei. Empfänger kommt aus demselben
-// Fenster wie überall sonst (_pdfSendenDialog), abgeschickt wird nichts.
+// b774: Entwurf in Outlook mit der eben gebauten Datei, abgeschickt wird nichts.
+// b1133: Empfänger, Text und Antwort im Verlauf kommen aus dem Fenster „✉ Dokument senden“ (Text „Fotodokumentation senden“).
 async function _fdkEntwurf(t,bytes,fname,mime,sag){
   const token=(typeof msToken!=='undefined'&&msToken)||(typeof msToken2!=='undefined'&&msToken2)||null;
   if(!token){showToast('⚠ Outlook ist nicht verbunden – oben in der Leiste auf 📨 Outlook klicken. Die Datei liegt im Ordner und unter „💾 Herunterladen".','warning',10000);return;}
-  const kontakte=(t.kontakte||[]).filter(function(k){return k.email;});
-  const wahl=await _pdfSendenDialog({
-    to:((kontakte[0]||{}).email)||'',
-    vorschlaege:kontakte.map(function(k){return {name:k.name||'',email:k.email};}),
-    subj:'Fotodokumentation',
-    body:'Sehr geehrte Damen und Herren,\n\nanbei die Fotodokumentation.\n\nMit freundlichen Grüßen\n',
-    anhaenge:[fname]
-  });
-  if(!wahl){showToast('Abgebrochen – es wurde kein Entwurf angelegt','info',3000);return;}
-  try{
-    if(sag)sag('⏳ Entwurf wird angelegt…');
-    const erg=await _pamOutlookEntwurf(token,{to:wahl.to,subj:wahl.subj,body:wahl.body,
-      anhaenge:[{name:fname,contentType:mime,contentBytes:_fsB64(bytes)}]});
-    if(erg.fehl.length){
-      showToast('⚠ Anhang ging nicht an den Entwurf: '+erg.fehl.join(', ')+' – bitte über „💾 Herunterladen" von Hand anhängen','warning',11000);
-      if(sag)sag('⚠ Entwurf ohne Anhang – bitte herunterladen und von Hand anhängen.');
-      return;
-    }
-    _pamShowDraftToast(erg.link,'✅ Entwurf mit '+esc(fname)+' liegt in Outlook unter <b>Entwürfe</b>');
-    showToast('✓ Entwurf angelegt – es wurde nichts verschickt','success',6000);
-    if(sag)sag('✓ Entwurf liegt in Outlook unter „Entwürfe".');
-  }catch(e){
-    console.warn('[FDK] Entwurf:',e);
-    showToast('⚠ Entwurf nicht möglich: '+((e&&e.message)||'')+' – bitte „💾 Herunterladen" nehmen','error',9000);
-  }
+  const erg=await _dsOeffnen({task:t,art:'fd',fest:[{name:fname,contentType:mime,contentBytes:_fsB64(bytes)}],roh:[{name:fname,bytes:bytes,mime:mime}]});
+  if(erg!=='ok'){showToast('Abgebrochen – es wurde kein Entwurf angelegt','info',3000);if(sag)sag('Kein Entwurf angelegt – die Datei liegt im Ordner und unter „💾 Herunterladen".');return;}
+  if(sag)sag('✓ Entwurf liegt in Outlook unter „Entwürfe".');
 }
 // b783: Word aufmachen geht NICHT - gemessen an Franks PC 24.08. Ueber
 // `ms-word:ofe|u|file:///…` oeffnet sich eine Datei mit 70-Zeichen-Pfad, seine echten
