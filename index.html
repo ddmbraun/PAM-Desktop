@@ -10547,7 +10547,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-08 · #1134'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-08-b1134) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-08 · #1135'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-08-b1135) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -22910,6 +22910,8 @@ async function _kalSyncStatus(manual){
     if(metaCount>0)showToast('ℹ '+metaCount+' Termin'+(metaCount>1?'e':'')+' in Outlook geändert (Betreff/Ort) – siehe „ℹ Outlook geändert"','info',5000);
     if(manual && pulled===0)showToast('✓ Kalender aktualisiert'+(metaCount>0?'':' – keine Zeitänderungen'),'success',2500);
     if(currentView==='kalender'||(typeof _kalSchwebAn!=='undefined'&&_kalSchwebAn))renderKalender(true); // b1081
+    // b1135: beim Abgleich auch markierte Termine (Handy / ohne Outlook-Verbindung) nach Outlook – nur offene ab heute
+    if(typeof _pamOutlookNachziehen==='function'){ try{ _pamOutlookNachziehen(); }catch(e){ console.warn('[b1135]',e); } }
   }catch(e){console.warn('[KAL] Sync-Fehler:',e);}
   finally{_kalSyncing=false;}
 }
@@ -23055,7 +23057,8 @@ async function _msPushTermin(task,t){
 // b908: liefert eine Bilanz {gepusht, fehler, unvollstaendig, ohneToken}. Vorher gab die
 // Funktion nichts zurueck UND fing jeden Fehler selbst ab - der Aufrufer im Wochenraster
 // konnte gar nicht erkennen, ob etwas angekommen ist, und meldete blind Erfolg.
-async function _msAutoPushTermine(task){
+// b1135: nurDiese (freiwillig) = Prüffunktion je Termin – die Runde „nachziehen“ schreibt nur offene Termine ab heute
+async function _msAutoPushTermine(task,nurDiese){
   const bilanz={gepusht:0,fehler:0,unvollstaendig:0,ohneToken:false};
   if(!msToken){ bilanz.ohneToken=true; return bilanz; }
   if(!task||!Array.isArray(task.ausserhausTermine))return bilanz;
@@ -23064,6 +23067,7 @@ async function _msAutoPushTermine(task){
   for(let i=0;i<task.ausserhausTermine.length;i++){
     const t=task.ausserhausTermine[i];
     if(!t||!t._pamDirty||t._pamPushing)continue;
+    if(typeof nurDiese==='function'&&!nurDiese(t))continue; // b1135
     // Unvollstaendig heisst: Datum, Uhrzeit oder Bezeichnung fehlt. Das wurde bisher still
     // uebersprungen - jetzt zaehlt es, damit der Aufrufer es sagen kann.
     if(!_msTerminComplete(t)){ bilanz.unvollstaendig++; continue; }
@@ -23090,6 +23094,60 @@ async function _msAutoPushTermine(task){
   }
   return bilanz;
 }
+// ══ b1135: markierte Termine von selbst nach Outlook (Befund Termine Teil B3, PC-Teil; Frank 08.10.2026: „bau“) ══
+// PAM Mobil setzt seit v378 den Merker _pamDirty, wenn am Handy ein Außerhaus-Termin angelegt oder Tag/Uhrzeit/Text geändert
+// wird. Der PC schrieb markierte Termine bisher nur beim Speichern DIESER Karte (saveTaskData) oder bei Kalender-Handgriffen.
+// Jetzt zusätzlich: beim Outlook-Abgleich (_kalSyncStatus – Kalender/Wochenfenster öffnen, ↻ Aktualisieren) und einmal kurz
+// nach dem Start. Trifft auch Termine, die am PC ohne Outlook-Verbindung angelegt wurden.
+// ⛔ Nur OFFENE Termine AB HEUTE (nicht abgehakt, nicht ausgeblendet, vollständig). Älteres geht wie bisher beim Speichern der
+//    Karte (gemessen 08.10.: der einzige markierte Termin war ein abgehakter vom 28.07. – den soll niemand ungefragt anfassen).
+// ⛔ Die gerade offene Karte nicht – die schreibt beim Speichern selbst (Arbeitskopie, sonst doppelt).
+// ⛔ Bewusst KEIN Takt (setInterval): zwei gleichzeitig offene Rechner würden denselben Handy-Termin beide in Outlook anlegen.
+function _pamOutlookKandidat(t,heute){
+  if(!t||!t._pamDirty||t._pamPushing||t.erledigt||t.hiddenInPam)return false;
+  const d=String(t.date||'').trim();
+  if(!d||d<String(heute||''))return false;
+  return (typeof _msTerminComplete==='function')?_msTerminComplete(t):!!(t.date&&t.von);
+}
+var _pamOutlookNachziehenLaeuft=false;
+async function _pamOutlookNachziehen(){
+  if(_pamOutlookNachziehenLaeuft)return null;
+  if(typeof msToken==='undefined'||!msToken||typeof _msAutoPushTermine!=='function')return null;
+  const heute=(typeof _tzHeuteIso==='function')?_tzHeuteIso():new Date().toISOString().slice(0,10);
+  let offenId='';
+  try{ const m=document.getElementById('taskModal'); if(m&&m.classList&&m.classList.contains('open'))offenId=String((document.getElementById('taskId')||{}).value||''); }catch(e){}
+  const karten=[];
+  Object.keys(boards||{}).forEach(function(b){
+    (Array.isArray(boards[b])?boards[b]:[]).forEach(function(task){
+      if(!task||!Array.isArray(task.ausserhausTermine))return;
+      if(offenId&&String(task.id)===offenId)return;
+      if(task.ausserhausTermine.some(function(t){return _pamOutlookKandidat(t,heute);}))karten.push(task);
+    });
+  });
+  if(!karten.length)return {gepusht:0,fehler:0,karten:0};
+  _pamOutlookNachziehenLaeuft=true;
+  let gepusht=0, fehler=0;
+  try{
+    for(const task of karten){
+      const b=await _msAutoPushTermine(task,function(t){return _pamOutlookKandidat(t,heute);});
+      if(b){ gepusht+=(b.gepusht||0); fehler+=(b.fehler||0); }
+    }
+  }finally{ _pamOutlookNachziehenLaeuft=false; }
+  if(gepusht>0&&typeof showToast==='function')showToast('✓ '+gepusht+' Termin'+(gepusht>1?'e':'')+' nach Outlook nachgetragen (am Handy oder ohne Outlook-Verbindung angelegt/geändert)','info',5000);
+  return {gepusht:gepusht,fehler:fehler,karten:karten.length};
+}
+// Einmal kurz nach dem Start: wartet, bis Daten geladen und Outlook verbunden sind (höchstens ~3½ Minuten), dann EIN Lauf.
+(function(){
+  if(typeof document==='undefined'||typeof setTimeout!=='function')return;   // Prüfumgebung ohne Seite: nichts planen
+  let n=0;
+  const versuch=function(){
+    n++;
+    const bereit=(typeof msToken!=='undefined'&&!!msToken)&&(typeof boards!=='undefined'&&boards&&Object.keys(boards).length>0);
+    if(bereit){ try{ _pamOutlookNachziehen(); }catch(e){ console.warn('[b1135] Nachziehen:',e); } return; }
+    if(n<7)setTimeout(versuch,30000);
+  };
+  setTimeout(versuch,20000);
+})();
 // Manueller Knopf (📆) – schreibt genau diesen Termin sofort nach Outlook (auch Bestand)
 function openOutlookTermin(i){
   const t=taskAusserhausTermine[i]; if(!t)return;
