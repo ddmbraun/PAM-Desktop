@@ -10547,7 +10547,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-08 · #1136'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-08-b1136) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-08 · #1137'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-08-b1137) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -40298,6 +40298,50 @@ function _tmVorwahl(mit,name){
   }
   return [];
 }
+/* b1137 (Wunsch Frank 05.10., „baue“ 08.10.): Mail-Adresse eines Kontakts OHNE Adresse direkt im Fenster „✉ Termin mitteilen“ eintragen.
+   Gültig wie die Hand-Adresse (freiAdr): ein @ nicht vorn, dahinter ein Name mit Punkt, kein Leerzeichen, kein Punkt am Ende. „halb@“ ist keine.
+   (Eigene Funktion statt freiAdr umzubauen: test_b1116 schneidet die freiAdr-Zeile aus und führt sie allein aus.) */
+function _tmAdrOk(s){const a=String(s||'').trim(),i=a.indexOf('@');return (i>0&&a.indexOf(' ')<0&&a.indexOf('.',i+2)>i&&a.charAt(a.length-1)!=='.')?a:'';}
+/* Schreibt die eingetragene Adresse in den Kontakt der Karte – in den ERSTEN Kontakt mit diesem Namen, der noch keine Adresse hat.
+   Karte im Task-Fenster offen → auch ins Feld im Fenster (die Arbeitskopie wird beim Speichern zur Karte, b985-Lehre: beide Listen).
+   Eine vorhandene Adresse wird NIE überschrieben. Rückgabe: true = eingetragen. */
+function _tmAdresseInKontakt(task,name,adr){
+  const n=String(name||'').trim().toLowerCase(),a=_tmAdrOk(adr);
+  if(!task||!n||!a)return false;
+  const passt=function(kName,kMail){return String(kName||'').trim().toLowerCase()===n&&String(kMail||'').indexOf('@')<1;};
+  let imFenster=false,inKarte=false;
+  try{
+    const c=((document.getElementById('taskId')||{}).value===task.id)?document.getElementById('tKontakteContainer'):null;
+    if(c){
+      const zeilen=c.querySelectorAll('.kontakt-entry');
+      for(let i=0;i<zeilen.length;i++){
+        const nEl=zeilen[i].querySelector('.k-name'),eEl=zeilen[i].querySelector('.k-email');
+        if(nEl&&eEl&&passt(nEl.value,eEl.value)){eEl.value=a;imFenster=true;break;}
+      }
+    }
+  }catch(e){console.warn('[b1137] Kontakt im Fenster:',e);}
+  (Array.isArray(task.kontakte)?task.kontakte:[]).some(function(k){
+    if(k&&passt(k.name,k.email)){k.email=a;inKarte=true;return true;}
+    return false;
+  });
+  if(imFenster){try{if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();}catch(e){}}
+  else if(inKarte){try{if(typeof autoSave==='function')autoSave();}catch(e){}}
+  return imFenster||inKarte;
+}
+/* b1137: Hinweis am Schalter „Bestätigen“ (Wunsch Frank 05.10.: „Bestätigen“ gewählt – die Mail ging trotzdem an die Hausverwaltung,
+   weil die Mieterin keine Adresse hatte; der Schalter wechselt nur den TEXT, Empfänger und Anrede kommen von den Haken).
+   art = gewählter Text der gezeigten Mail, an = deren Empfänger (Name, sonst Adresse), tp = Person vor Ort,
+   wo = wo steht tp: 'gezeigt' | 'gewaehlt' (angehakt, aber eine andere Mail wird gezeigt) | 'mit' (hat Adresse, nicht angehakt) | 'ohne' | ''.
+   Leer = kein Hinweis. */
+function _tmBestaetigenHinweis(art,an,tp,wo){
+  const p=String(tp||'').trim(),e=String(an||'').trim();
+  if(art!=='B'||!p||!e||wo==='gezeigt'||e.toLowerCase()===p.toLowerCase())return '';
+  let rest='';
+  if(wo==='gewaehlt')rest=' Die Mail an '+p+' zeigst du oben über „Mail an: '+p+'“.';
+  else if(wo==='mit')rest=' Für '+p+' oben den Haken setzen.';
+  else if(wo==='ohne')rest=' '+p+' hat keine Mail-Adresse – oben unter „Ohne Mail-Adresse“ eintragen.';
+  return '⚠ „Bestätigen“ ist für die Person vor Ort gedacht ('+p+') – diese Mail geht aber an '+e+'.'+rest;
+}
 // b1118: welcher der beiden Texte für diesen Empfänger? Ist er die Person des Termins → 'B' (bestätigen), sonst 'A' (mitteilen)
 function _tmArtFuer(empfName,terminPerson){
   const n=String(empfName||'').trim().toLowerCase(),tp=String(terminPerson||'').trim().toLowerCase();
@@ -40384,7 +40428,8 @@ function _tmOeffnen(task,termine,name){
   }catch(e){}
   const emp=_tmEmpfaenger(kontakte);
   // ps = je Empfänger ein eigener Stand (welcher Text, Betreff, Text, von Hand geändert?). Schlüssel = Adresse; '' = ohne Namen (Vorschau ohne Haken + Hand-Adresse)
-  const st={tmIdx:_tmTerminVorwahl(termine,name),an:{},frei:'',sicht:'',vorl:{A:TM_VORGABE,B:TM_VORGABE_B},ps:{},grund:'',laedt:true,modus:'mail',edit:null,editArt:'A',editSauber:true};
+  const st={tmIdx:_tmTerminVorwahl(termine,name),an:{},frei:'',sicht:'',vorl:{A:TM_VORGABE,B:TM_VORGABE_B},ps:{},grund:'',laedt:true,modus:'mail',edit:null,editArt:'A',editSauber:true,
+    nach:{}};   // b1137: je Kontakt ohne Adresse (Platz i in emp.ohne) die im Fenster eingetragene Adresse {adr,an}; Schlüssel der Mail = 'ohne:'+i
   _tmVorwahl(emp.mit,name).forEach(function(a){st.an[a]=true;});
   const alt=document.getElementById('_tmOverlay');if(alt)alt.remove();
   const ov=document.createElement('div');
@@ -40409,12 +40454,18 @@ function _tmOeffnen(task,termine,name){
   function freiAdr(){const a=String(st.frei||'').trim(),i=a.indexOf('@');return (i>0&&a.indexOf(' ')<0&&a.indexOf('.',i+2)>i&&a.charAt(a.length-1)!=='.')?a:'';}
   function gewaehlte(){
     const g=emp.mit.filter(function(e){return st.an[e.adr];}).map(function(e){return{name:e.name,adr:e.adr,key:e.adr};});
+    // b1137: im Fenster nachgetragene Adressen (gültig + Haken) – eine Adresse, die schon angehakt ist, nicht doppelt
+    emp.ohne.forEach(function(o,i){
+      const n=st.nach[i],a=n&&n.an?_tmAdrOk(n.adr):'';
+      if(a&&!g.some(function(e){return e.adr.toLowerCase()===a.toLowerCase();}))g.push({name:o.name,adr:a,key:'ohne:'+i,nach:i});
+    });
     const f=freiAdr();
     if(f&&!g.some(function(e){return e.adr.toLowerCase()===f.toLowerCase();}))g.push({name:'',adr:f,key:''});
     return g;
   }
   function nameVon(key){
     if(!key)return '';
+    if(String(key).indexOf('ohne:')===0){const o=emp.ohne[+String(key).slice(5)];return o?o.name:'';}   // b1137
     const e=emp.mit.filter(function(x){return x.adr===key;})[0];
     return e?e.name:'';
   }
@@ -40483,8 +40534,10 @@ function _tmOeffnen(task,termine,name){
     if(!verb)box.appendChild(el('div','margin:10px 16px 0;padding:8px 10px;border-radius:7px;background:rgba(192,57,43,.14);color:var(--text1);font-size:12px;font-weight:600;','⛔ Outlook ist in PAM nicht verbunden – bitte oben 📨 verbinden. Den Text kannst du trotzdem kopieren.'));
     const rumpf=el('div','display:flex;flex-direction:column;gap:6px;padding:12px 16px;overflow:auto;flex:1;min-height:0;');
     rumpf.appendChild(el('div',LBL,'An – Kontakte dieser Karte mit Mail-Adresse'));
-    const kasten=el('div','border:1px solid var(--border);border-radius:8px;padding:6px 10px;max-height:130px;overflow:auto;font-size:12px;line-height:1.8;');
-    if(!emp.mit.length)kasten.appendChild(el('div','color:var(--text2);','Bei keinem Kontakt dieser Karte steht eine Mail-Adresse – unten von Hand eintragen oder im Kontakt nachtragen.'));
+    // b1137: flex-shrink:0 – bei knapper Fensterhöhe gab sonst GERADE dieser Kasten nach (overflow:auto darf in der Flex-Spalte bis auf eine Zeile schrumpfen)
+    // und versteckte die Empfänger; jetzt scrollt der ganze Bereich darunter
+    const kasten=el('div','flex-shrink:0;border:1px solid var(--border);border-radius:8px;padding:6px 10px;max-height:'+(emp.ohne.length?'200':'130')+'px;overflow:auto;font-size:12px;line-height:1.8;');
+    if(!emp.mit.length)kasten.appendChild(el('div','color:var(--text2);',emp.ohne.length?'Bei keinem Kontakt dieser Karte steht eine Mail-Adresse – unten bei der Person eintragen oder ganz unten von Hand.':'Bei keinem Kontakt dieser Karte steht eine Mail-Adresse – unten von Hand eintragen oder im Kontakt nachtragen.'));
     emp.mit.forEach(function(e){
       const zl=document.createElement('label');zl.style.cssText='display:flex;gap:7px;align-items:center;cursor:pointer;';
       const cb=document.createElement('input');cb.type='checkbox';cb.className='_tmAn';cb.setAttribute('data-adr',e.adr);cb.checked=!!st.an[e.adr];
@@ -40494,7 +40547,34 @@ function _tmOeffnen(task,termine,name){
       zl.appendChild(el('span','',[e.name,rolle].filter(Boolean).join(' · ')+(e.name||rolle?'  ':'')+'<'+e.adr+'>'));
       kasten.appendChild(zl);
     });
-    if(emp.ohne.length)kasten.appendChild(el('div','color:var(--text2);font-size:11px;','Ohne Mail-Adresse (im Kontakt nachtragen): '+emp.ohne.map(function(o){return o.name||'(ohne Namen)';}).join(', ')));
+    // b1137: Kontakte ohne Adresse – je Person ein Feld. Gültige Adresse getippt → Haken an, ihre Mail wird gezeigt (richtige Anrede, Text passend
+    // zur Person); gespeichert wird die Adresse im Kontakt erst, wenn der Entwurf in Outlook liegt (Abbrechen = nichts gespeichert).
+    if(emp.ohne.length){
+      kasten.appendChild(el('div','color:var(--text2);font-size:11px;line-height:1.4;margin-top:'+(emp.mit.length?'6':'2')+'px;','Ohne Mail-Adresse – hier eintragen, dann geht die Mail an diese Person. PAM speichert die Adresse im Kontakt, sobald der Entwurf in Outlook liegt.'));
+      emp.ohne.forEach(function(o,i){
+        const n=st.nach[i]||(st.nach[i]={adr:'',an:false});
+        const zl=el('div','display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-top:3px;');
+        const cb=document.createElement('input');cb.type='checkbox';cb.className='_tmNachAn';cb.setAttribute('data-i',String(i));
+        const gueltig=function(){return !!_tmAdrOk(n.adr);};
+        const stelle=function(){cb.disabled=!gueltig();cb.checked=gueltig()&&n.an;cb.title=gueltig()?'Mail an diese Person':'Erst eine vollständige Mail-Adresse eintragen';};
+        cb.addEventListener('change',function(){n.an=cb.checked;if(cb.checked)st.sicht='ohne:'+i;auffrischen();});
+        const rolle=(typeof _GK_ROLLE_TEXT!=='undefined'&&_GK_ROLLE_TEXT[o.rolle])||'';
+        const inA=document.createElement('input');inA.type='email';inA.className='_tmNachAdr';inA.setAttribute('data-i',String(i));inA.autocomplete='off';
+        inA.placeholder='Mail-Adresse eintragen';inA.value=n.adr||'';
+        inA.style.cssText=FELD+'flex:1;min-width:170px;width:auto;padding:4px 8px;font-size:12px;';
+        inA.addEventListener('input',function(){
+          const vorher=gueltig();n.adr=inA.value;const jetzt=gueltig();
+          if(jetzt&&!vorher){n.an=true;st.sicht='ohne:'+i;}   // eben vollständig geworden → angehakt und gezeigt
+          if(!jetzt)n.an=false;
+          stelle();auffrischen();
+        });
+        stelle();
+        zl.appendChild(cb);
+        zl.appendChild(el('span','white-space:nowrap;',[o.name,rolle].filter(Boolean).join(' · ')));
+        zl.appendChild(inA);
+        kasten.appendChild(zl);
+      });
+    }
     rumpf.appendChild(kasten);
     const inF=document.createElement('input');inF.type='text';inF.id='_tmFrei';inF.autocomplete='off';inF.value=st.frei||'';
     inF.placeholder='weitere Adresse von Hand (freiwillig)';
@@ -40551,15 +40631,20 @@ function _tmOeffnen(task,termine,name){
       const leer=g.filter(function(p){return !String(zustand(p.key).taWert||'').trim();});
       if(leer.length){showToast('Der Text ist leer'+(g.length>1?' (Mail an '+(leer[0].name||leer[0].adr)+')':'')+'.','warning',4000);return;}
       los.disabled=true;los.style.opacity='.6';
-      const termin=tm(),fertig=[],fehl=[];
+      const termin=tm(),fertig=[],fehl=[],gespeichert=[];
       for(const p of g){
         const z=zustand(p.key);
         // ein im Fenster selbst getippter {Platzhalter} im Betreff wird gefüllt (wie b1054)
         const betreff=_tmBetreffPutzen(_mvFuellen(z.betrWert,_tmWerte(task,kontakte,termin,p.name,terminPerson())))||('Termin am '+_tmTagLang(termin.date||termin.datum));
         // b1120: letzter Wert true = der blaue Kasten bleibt stehen, bis Frank ihn anklickt oder mit ✕ schließt (nur bei der Terminmail)
         const r=await _pamAntwortEntwurf(task,p.adr,betreff,z.taWert,'✅ Terminmail an '+_mvTextHtml(p.name||p.adr)+' liegt in Outlook unter <b>Entwürfe</b>',null,true);
-        if(r==='ok')fertig.push(p.name||p.adr);else fehl.push(p.name||p.adr);
+        if(r==='ok'){
+          fertig.push(p.name||p.adr);
+          // b1137: im Fenster nachgetragene Adresse → in den Kontakt der Karte (erst jetzt: der Entwurf liegt in Outlook)
+          if(p.nach!=null&&_tmAdresseInKontakt(task,p.name,p.adr))gespeichert.push(p.name);
+        }else fehl.push(p.name||p.adr);
       }
+      if(gespeichert.length){try{showToast('✓ Mail-Adresse im Kontakt gespeichert: '+gespeichert.join(', '),'success',5000);}catch(e){}}
       if(fertig.length){
         try{
           if(typeof _tuBtbZeile==='function')_tuBtbZeile(task,_tmBtbText(termin,fertig));
@@ -40603,6 +40688,17 @@ function _tmOeffnen(task,termine,name){
         r2.appendChild(b);
       });
       wahl.appendChild(r2);
+      // b1137: „Bestätigen“ gewählt, die gezeigte Mail geht aber nicht an die Person vor Ort → sagen, warum, und was zu tun ist
+      const gp=g.filter(function(p){return p.key===key;})[0],tpN=terminPerson(),tpL=String(tpN||'').trim().toLowerCase();
+      let wo='';
+      if(tpL){
+        if(gp&&String(nameVon(key)).trim().toLowerCase()===tpL)wo='gezeigt';
+        else if(g.some(function(p){return String(nameVon(p.key)).trim().toLowerCase()===tpL;}))wo='gewaehlt';
+        else if(emp.mit.some(function(e){return e.name.trim().toLowerCase()===tpL;})||emp.ohne.some(function(o,i){return o.name.trim().toLowerCase()===tpL&&!!_tmAdrOk((st.nach[i]||{}).adr);}))wo='mit';
+        else if(emp.ohne.some(function(o){return o.name.trim().toLowerCase()===tpL;}))wo='ohne';
+      }
+      const hTxt=gp?_tmBestaetigenHinweis(z.art,gp.name||gp.adr,tpN,wo):'';
+      if(hTxt){const h=el('div','padding:6px 9px;border-radius:7px;background:rgba(230,126,34,.16);color:var(--text1);font-size:12px;line-height:1.45;',hTxt);h.id='_tmHinweisB';wahl.appendChild(h);}
       if(ta.value!==z.taWert)ta.value=z.taWert;
       if(inB.value!==z.betrWert)inB.value=z.betrWert;
       los.textContent=g.length>1?('📧 '+g.length+' Entwürfe in Outlook anlegen'):'📧 Entwurf in Outlook anlegen';
@@ -59596,7 +59692,11 @@ function _pamAnrufTerminFenster(taskId,name,vonMin,bisMin,iso){
   else if(nurTag) meldung=(neu?'✓ Termin ohne Uhrzeit angelegt':'✓ Tag am Termin ohne Datum geändert')+' ('+fenster+') – er liegt im Wochenfenster unter „Ungeplant“; dort auf die Uhrzeit ziehen, sobald sie feststeht';
   else if(iso){ meldung='⚠ Am '+tag+' ist '+fenster+' nichts mehr frei – der Termin liegt ohne Datum im Wochenfenster unter „Ungeplant“'; art='warning'; dauer=8000; }
   else meldung=(neu?'✓ Termin ohne Datum angelegt':'✓ Zeitfenster am Termin ohne Datum geändert')+' ('+fenster+') – im Wochenfenster unter „Ungeplant“ auf einen freien Platz ziehen';
-  try{ showToast(meldung,art,dauer); }catch(err){}
+  // b1137 (Wunsch Frank 05.10., „baue“ 08.10.): bekam der Termin Tag + Uhrzeit, kommt statt der kurzen Meldung ein Kasten, der STEHEN BLEIBT –
+  // „✉ gleich mitteilen“ oder ✕. Das Mail-Fenster öffnet sich NICHT von selbst (Frank: „öffnet sich das oder bleibt es“ → bleibt).
+  // Ohne Tag (nur Zeitfenster / nur Tag als Text / nichts frei) gibt es nichts mitzuteilen → Meldung wie bisher.
+  if(platz>=0&&typeof _pamTerminKasten==='function'){ try{ _pamTerminKasten(taskId,n,e,meldung); }catch(err){ console.warn('[b1137] Kasten:',err); try{ showToast(meldung,art,dauer); }catch(e2){} } }
+  else{ try{ showToast(meldung,art,dauer); }catch(err){} }
   // Karte nicht im Task-Fenster offen: wie beim Hineinziehen im Wochenraster gleich nach Outlook schreiben (das Task-Fenster macht es beim Speichern selbst)
   if(platz>=0&&!imFenster&&typeof msToken!=='undefined'&&msToken&&typeof _msAutoPushTermine==='function'){
     try{
@@ -59606,6 +59706,51 @@ function _pamAnrufTerminFenster(taskId,name,vonMin,bisMin,iso){
     }catch(err){ console.warn('[b1115] Outlook',err); }
   }
   return {neu:neu,idx:idx,platz:platz,fenster:fenster};
+}
+/* b1137: Kasten unten rechts nach „📅 Termin“ mit Tag + Uhrzeit. Gestapelt wie die blauen Entwurf-Kästen (b1120), damit nichts übereinander liegt.
+   Derselbe Termin (gleiche Karte + gleiche Person) hat höchstens EINEN Kasten – ein zweiter Klick ersetzt den alten.
+   Text und Kartentitel als textContent (Titel und Namen kommen aus den Daten). */
+function _pamTerminKasten(taskId,name,tm,meldung){
+  const t=(typeof findTaskById==='function')?findTaskById(taskId):null;
+  const nm=String(name||'').trim();
+  const alte=document.querySelectorAll('.pam-termin-kasten');
+  for(let i=0;i<alte.length;i++){ if(alte[i].getAttribute('data-task')===String(taskId)&&alte[i].getAttribute('data-name')===nm)alte[i].remove(); }
+  let unten=24;
+  const da=document.querySelectorAll('.pam-entwurf-bleibt,.pam-termin-kasten');
+  for(let i=0;i<da.length;i++){ const r=da[i].getBoundingClientRect(); unten=Math.max(unten,Math.round(window.innerHeight-r.top)+8); }
+  const d=document.createElement('div');
+  d.className='pam-termin-kasten';
+  d.setAttribute('data-task',String(taskId)); d.setAttribute('data-name',nm);
+  d.style.cssText='position:fixed;bottom:'+unten+'px;right:24px;max-width:min(560px,calc(100vw - 48px));background:#185FA5;color:#fff;padding:10px 14px;border-radius:8px;font-size:13px;z-index:1000100;box-shadow:0 4px 16px rgba(0,0,0,.3);display:flex;align-items:center;gap:10px;flex-wrap:wrap;';
+  const txt=document.createElement('div'); txt.style.cssText='flex:1;min-width:200px;line-height:1.4;';
+  const z1=document.createElement('div'); z1.textContent=String(meldung||'✓ Termin angelegt');
+  const z2=document.createElement('div'); z2.style.cssText='font-size:11px;opacity:.85;'; z2.textContent=(t&&t.title)||'';
+  txt.appendChild(z1); if(z2.textContent)txt.appendChild(z2);
+  const mit=document.createElement('button');
+  mit.type='button'; mit.className='pam-termin-kasten-mit'; mit.textContent='✉ gleich mitteilen';
+  mit.title='Öffnet „✉ Termin mitteilen“ für diesen Termin – verschickt wird dort nichts von selbst';
+  mit.style.cssText='background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.35);color:#fff;padding:4px 10px;border-radius:5px;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap;';
+  mit.addEventListener('click',function(){ d.remove(); _pamTerminKastenMitteilen(taskId,nm,tm); });
+  const x=document.createElement('button');
+  x.type='button'; x.className='pam-termin-kasten-zu'; x.textContent='✕';
+  x.title='Schließen – der Termin bleibt angelegt';
+  x.style.cssText='background:none;border:none;color:#fff;font-size:16px;cursor:pointer;padding:0 2px;opacity:.85;';
+  x.addEventListener('click',function(){ d.remove(); });
+  // beide Knöpfe zusammen – bei schmalem Fenster rutschen sie gemeinsam unter den Text (sonst stand das ✕ allein in einer Zeile)
+  const knoepfe=document.createElement('div'); knoepfe.style.cssText='display:flex;align-items:center;gap:8px;margin-left:auto;';
+  knoepfe.appendChild(mit); knoepfe.appendChild(x);
+  d.appendChild(txt); d.appendChild(knoepfe);
+  document.body.appendChild(d);
+  return d;
+}
+// „✉ gleich mitteilen“: ist genau dieser Termin noch mitteilbar (Tag ab heute, nicht abgehakt, nicht ausgeblendet) → nur er im Fenster;
+// sonst (inzwischen verschoben, gespeichert, gelöscht) wie der Knopf ✉ in der Anrufliste: alle Termine der Karte, der zur Person vorgewählt
+function _pamTerminKastenMitteilen(taskId,name,tm){
+  const task=(typeof findTaskById==='function')?findTaskById(taskId):null;
+  if(!task){ try{showToast('⚠ Karte nicht gefunden','warning',4000);}catch(e){} return; }
+  const tl=(typeof _tmTermine==='function')?_tmTermine(task):[];
+  if(tm&&tl.indexOf(tm)>=0&&typeof _tmOeffnen==='function'){ _tmOeffnen(task,[tm],name); return; }
+  if(typeof _tmAusAnrufliste==='function')_tmAusAnrufliste(taskId,name);
 }
 function _pamAnrufTerminDialog(taskId,name){
   const t=(typeof findTaskById==='function')?findTaskById(taskId):null;
