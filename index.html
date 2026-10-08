@@ -10435,7 +10435,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-07 · #1128'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-07-b1128) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-08 · #1129'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-08-b1129) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -63624,14 +63624,15 @@ function openColManager(){
 }
 // b1125 (Frank 07.10.2026, Variante B): Boards, in denen die 🏢-Zeile nur bei aufgeklappter Karte steht.
 // Board umbenannt → der Schalter gilt für den alten Namen und ist für den neuen wieder aus.
-// b1127: steht jetzt in workboard.json (pcEinstellungen.hvZuBoards) und gilt an JEDEM Rechner. Der Browser-
-// Merkzettel 'pam_hv_zu_boards' (b1125/b1126) wird nur noch gelesen, solange die Datei noch keine Liste trägt,
-// und beim ersten Speichern hier aufgeräumt.
+// b1127 legte die Liste in workboard.json (pcEinstellungen.hvZuBoards). b1129: Für Einstellungen gibt es seit b531
+// pam_settings.json – dorthin. Die Funktionen lesen/schreiben wieder den Merkzettel 'pam_hv_zu_boards'; der Haken aus
+// b1129 (PAM_GETEILT_KEYS) trägt jede Änderung nach pam_settings.json, beim Start kommt der Stand von dort.
+// Der b1127-Stand wird einmal übernommen (_pamHvZuUebergang); pcEinstellungen ruht danach.
 // ⛔ Schlüssel als Text in den Funktionen, KEIN const oben: liefe render() einmal, bevor diese Zeilen
 //    erreicht sind, wäre ein const noch nicht da (TDZ-Fehler, das Board bliebe leer).
 function _pamHvZuListe(){
-  try{if(typeof pcEinstellungen!=='undefined'&&pcEinstellungen&&Array.isArray(pcEinstellungen.hvZuBoards))return pcEinstellungen.hvZuBoards.map(String);}catch(e){}
-  try{const v=JSON.parse(localStorage.getItem('pam_hv_zu_boards')||'[]');return Array.isArray(v)?v:[];}catch(e){return [];}
+  try{if(localStorage.getItem('pam_hv_zu_boards')===null&&typeof _pamHvZuUebergang==='function')_pamHvZuUebergang();}catch(e){}
+  try{const v=JSON.parse(localStorage.getItem('pam_hv_zu_boards')||'[]');return Array.isArray(v)?v.map(String):[];}catch(e){return [];}
 }
 function _pamHvZu(board){
   return !!board&&_pamHvZuListe().indexOf(String(board))>=0;
@@ -63640,12 +63641,20 @@ function _pamHvZuSetzen(board,an){
   if(!board)return;
   const l=_pamHvZuListe().filter(b=>b!==String(board));
   if(an)l.push(String(board));
-  if(typeof pcEinstellungen!=='undefined'){
-    pcEinstellungen=Object.assign({},pcEinstellungen||{},{hvZuBoards:l}); // gespeichert wird mit dem nächsten autoSave (saveColumns ruft es)
-    try{localStorage.removeItem('pam_hv_zu_boards');}catch(e){}
-    return;
-  }
-  try{localStorage.setItem('pam_hv_zu_boards',JSON.stringify(l));}catch(e){}
+  try{localStorage.setItem('pam_hv_zu_boards',JSON.stringify(l));}catch(e){}   // b1129: geht über den Haken nach pam_settings.json
+}
+// b1129: Übergang vom b1127-Stand. Nur wenn der Merkzettel hier leer ist, die Einstellungs-Datei gelesen ist und noch
+// KEINE Liste trägt – dann ist der b1127-Stand der neueste. Sonst nichts tun (die Datei gewinnt).
+function _pamHvZuUebergang(){
+  try{
+    if(typeof pcEinstellungen==='undefined'||!pcEinstellungen||!Array.isArray(pcEinstellungen.hvZuBoards))return false;
+    if(localStorage.getItem('pam_hv_zu_boards')!==null)return false;
+    if(typeof _pamGeteiltBereit==='undefined'||!_pamGeteiltBereit)return false;
+    const g=(typeof pamSettings!=='undefined'&&pamSettings&&pamSettings.geteilt)||{};
+    if(Object.prototype.hasOwnProperty.call(g,'pam_hv_zu_boards'))return false;
+    localStorage.setItem('pam_hv_zu_boards',JSON.stringify(pcEinstellungen.hvZuBoards.map(String)));
+    return true;
+  }catch(e){return false;}
 }
 function closeColManager(){_b976ColBoard='';document.getElementById('colModal').classList.remove('open');} // b976: Merker räumen, sonst wirkt er veraltet nach
 function renderColList(){
@@ -65010,7 +65019,9 @@ function _pamFirma(){
 
 async function settingsInit(){
   // b886: Notbetrieb – Einstellungen direkt vom Helfer lesen (keine Drive-Suche)
-  if(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB){await settingsRead();return;}
+  // b1129: geteilte Merkzettel erst anwenden, wenn wirklich gelesen wurde (settingsRead tauscht dann pamSettings aus)
+  // typeof: test_b886 führt settingsInit ohne pamSettings aus
+  if(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB){const _vorNb=(typeof pamSettings!=='undefined')?pamSettings:null;await settingsRead();if(typeof pamSettings!=='undefined'&&pamSettings!==_vorNb&&typeof _pamGeteiltAnwenden==='function')_pamGeteiltAnwenden();return;}
   if(!gdriveTokenValid())return;
   try{
     const q=encodeURIComponent("name='"+SETTINGS_FILE_NAME+"' and trashed=false");
@@ -65019,7 +65030,7 @@ async function settingsInit(){
     if(r.status===401){_handleDrive401();return;}
     if(!r.ok)return;
     const d=await r.json();
-    if(d.files&&d.files.length>0){settingsFileId=d.files[0].id;await settingsRead();}
+    if(d.files&&d.files.length>0){settingsFileId=d.files[0].id;const _vor=(typeof pamSettings!=='undefined')?pamSettings:null;await settingsRead();if(typeof pamSettings!=='undefined'&&pamSettings!==_vor&&typeof _pamGeteiltAnwenden==='function')_pamGeteiltAnwenden();}
   }catch(e){console.warn('[Einstellungen] Init:',e);}
 }
 
@@ -65138,6 +65149,114 @@ async function settingsSaveToDrive(geaendert){
     console.warn('[Einstellungen] Speichern:',e);
     return false;
   }
+}
+
+// ── b1129: Merkzettel, die an JEDEM Rechner gleich sein sollen (Frank 07.10.2026: „bau A1–A7, B überall gleich“) ──
+// Diese Einstellungen lagen nur im Browser-Merkzettel (localStorage) des einen Rechners. Jetzt stehen sie zusätzlich in
+// pam_settings.json unter `geteilt` – derselben Datei wie Ordner, Briefkopf und Zettel-Kennwort (eigene Datei seit b531,
+// weil das Handy unbekannte Felder in workboard.json beim Speichern verliert). Das Handy kennt die Datei nicht.
+// Bauart: die rund 20 Schreibstellen im Programm bleiben WÖRTLICH; ein Haken an localStorage.setItem/removeItem merkt
+// nur DIESE Schlüssel vor und schreibt sie gebündelt (2 s) als Päckchen {geteilt} – frisch gelesen, Schlüssel für Schlüssel
+// zusammengeführt (zwei Rechner, verschiedene Einstellungen: nichts geht verloren). Beim Start (settingsInit) werden die
+// Werte aus der Datei in den Merkzettel geschrieben; was nur beim Start gelesen wird (Kalender, Hell/Dunkel), wird neu
+// angewendet. Gilt auf dem anderen Rechner beim nächsten Öffnen/F5.
+// ⛔ Geschrieben wird erst, NACHDEM die Datei gelesen ist (_pamGeteiltBereit) – sonst legte ein früher Speicherlauf eine
+//    ZWEITE pam_settings.json an bzw. stempelte alte Werte über die des anderen Rechners.
+// ⛔ Je Rechner bleiben: Anmeldungen, Gerätekennung, laufende Uhr, Fenstergrößen/Spaltenbreiten/Zoom, „zuletzt benutzt“.
+const PAM_GETEILT_KEYS=[
+  'pam_kal_view','pam_kalw_cfg','pam_kalw_monat',                                              // A1 Kalender
+  'pam_heute_filter_typ','pam_heute_view_mode','pam_heute_date_filter','pam_heute_typ2_filter',
+  'pam_heute_akt_filter','pam_heute_termin_filter','pam_heute_filter','pam_heute_col_collapsed', // A2 „Heute“
+  'pam_btb_sys',                                                                                 // A3 Bautagebuch
+  'pam_ueb_werkzeuge','pam_ueb_auswahl_v1',                                                      // A4 Übersicht/PDF
+  'pam_gmluecken_aus',                                                                           // A5 GM-Lücken
+  'pamAbRollen',                                                                                 // A6 Adressbuch-Rollen
+  'pam_hv_zu_boards',                                                                            // A7 🏢-Board-Schalter
+  'pam_theme_v1','pam_modal_scale_l','pam_modal_scale_r','pam_em_schrift'                        // B Hell/Dunkel, Schrift
+];
+let _pamGeteiltOffen={};       // Schlüssel → Wert (null = entfernt), wartet aufs Speichern
+let _pamGeteiltTimer=null;
+let _pamGeteiltBereit=false;   // erst wenn pam_settings.json gelesen ist
+let _pamGeteiltRoh=null;       // die Original-Funktionen von Storage (ohne Haken)
+function _pamGeteiltIst(k){return PAM_GETEILT_KEYS.indexOf(String(k))>=0;}
+function _pamGeteiltLies(k){try{return _pamGeteiltRoh?_pamGeteiltRoh.get.call(localStorage,k):localStorage.getItem(k);}catch(e){return null;}}
+function _pamGeteiltSchreibRoh(k,v){try{if(v===null){_pamGeteiltRoh?_pamGeteiltRoh.rem.call(localStorage,k):localStorage.removeItem(k);}else{_pamGeteiltRoh?_pamGeteiltRoh.set.call(localStorage,k,v):localStorage.setItem(k,v);}}catch(e){}}
+function _pamGeteiltVormerken(k,v){
+  _pamGeteiltOffen[k]=v;
+  if(!_pamGeteiltBereit)return;               // wird nach dem Lesen der Datei mitgeschrieben
+  clearTimeout(_pamGeteiltTimer);
+  _pamGeteiltTimer=setTimeout(_pamGeteiltSpeichern,2000);
+}
+(function(){
+  try{
+    if(typeof Storage==='undefined'||typeof localStorage==='undefined'||!Storage.prototype||Storage.prototype._pamGeteiltHaken)return;
+    const set=Storage.prototype.setItem,rem=Storage.prototype.removeItem,get=Storage.prototype.getItem;
+    _pamGeteiltRoh={set:set,rem:rem,get:get};
+    Storage.prototype.setItem=function(k,v){
+      let geteilt=false;try{geteilt=(this===window.localStorage)&&_pamGeteiltIst(k);}catch(e){}
+      const alt=geteilt?get.call(this,k):null;
+      set.call(this,k,v);
+      if(geteilt&&alt!==String(v))_pamGeteiltVormerken(String(k),String(v));
+    };
+    Storage.prototype.removeItem=function(k){
+      let geteilt=false;try{geteilt=(this===window.localStorage)&&_pamGeteiltIst(k);}catch(e){}
+      const alt=geteilt?get.call(this,k):null;
+      rem.call(this,k);
+      if(geteilt&&alt!==null)_pamGeteiltVormerken(String(k),null);
+    };
+    Storage.prototype._pamGeteiltHaken=true;
+  }catch(e){console.warn('[b1129] Merkzettel-Haken:',e);}
+})();
+async function _pamGeteiltSpeichern(){
+  _pamGeteiltTimer=null;
+  if(!_pamGeteiltBereit)return;
+  const paket=_pamGeteiltOffen;_pamGeteiltOffen={};
+  if(!Object.keys(paket).length)return;
+  const zurueck=function(){Object.keys(paket).forEach(function(k){if(!(k in _pamGeteiltOffen))_pamGeteiltOffen[k]=paket[k];});clearTimeout(_pamGeteiltTimer);_pamGeteiltTimer=setTimeout(_pamGeteiltSpeichern,30000);};
+  try{
+    const f=await _settingsFrischLesen();
+    if(!f.ok){zurueck();return;}
+    const geteilt=Object.assign({},(f.daten&&f.daten.geteilt&&typeof f.daten.geteilt==='object')?f.daten.geteilt:{});
+    Object.keys(paket).forEach(function(k){if(paket[k]===null)delete geteilt[k];else geteilt[k]=paket[k];});
+    const ok=await settingsSaveToDrive({geteilt:geteilt});
+    if(!ok)zurueck();
+  }catch(e){console.warn('[b1129] Einstellungen speichern:',e);zurueck();}
+}
+// Nach dem Lesen von pam_settings.json (settingsInit): Werte der Datei in den Merkzettel, was nur hier liegt hinauf.
+function _pamGeteiltAnwenden(){
+  _pamGeteiltBereit=true;
+  const g=(typeof pamSettings!=='undefined'&&pamSettings&&pamSettings.geteilt&&typeof pamSettings.geteilt==='object')?pamSettings.geteilt:{};
+  const geaendert=[];
+  PAM_GETEILT_KEYS.forEach(function(k){
+    if(k in _pamGeteiltOffen)return;                                // hier eben geändert – das gilt
+    const lokal=_pamGeteiltLies(k);
+    if(Object.prototype.hasOwnProperty.call(g,k)){
+      const v=(g[k]===null||g[k]===undefined)?null:String(g[k]);
+      if(v!==lokal){_pamGeteiltSchreibRoh(k,v);geaendert.push(k);}
+    }else if(lokal!==null){
+      _pamGeteiltOffen[k]=lokal;                                     // erster Rechner bringt seinen Stand ein
+    }
+  });
+  if(typeof _pamHvZuUebergang==='function')_pamHvZuUebergang();    // b1127-Stand aus workboard.json hierher
+  if(geaendert.length)_pamGeteiltNeuAnwenden(geaendert);
+  if(Object.keys(_pamGeteiltOffen).length){clearTimeout(_pamGeteiltTimer);_pamGeteiltTimer=setTimeout(_pamGeteiltSpeichern,2000);}
+  return geaendert;
+}
+// Was PAM nur beim Start aus dem Merkzettel liest, hier nachziehen (dieselben Regeln wie beim Start).
+function _pamGeteiltNeuAnwenden(keys){
+  try{
+    if(keys.indexOf('pam_kalw_cfg')>=0&&typeof KALW_H0!=='undefined'){
+      KALW_H0=7;KALW_H1=16;KALW_DAYS=6;
+      const c=JSON.parse(_pamGeteiltLies('pam_kalw_cfg')||'{}');
+      if(Number.isInteger(c.h0)&&c.h0>=0&&c.h0<=22)KALW_H0=c.h0;
+      if(Number.isInteger(c.h1)&&c.h1>KALW_H0&&c.h1<=23)KALW_H1=c.h1;
+      if(c.days===7||c.days===6)KALW_DAYS=c.days;
+    }
+  }catch(e){}
+  try{if(keys.indexOf('pam_kal_view')>=0&&typeof _kalView!=='undefined')_kalView=(_pamGeteiltLies('pam_kal_view')||'liste');}catch(e){}
+  try{if(keys.indexOf('pam_kalw_monat')>=0&&typeof _kalwMonatAn!=='undefined')_kalwMonatAn=(_pamGeteiltLies('pam_kalw_monat')!=='0');}catch(e){}
+  try{if(keys.indexOf('pam_theme_v1')>=0&&typeof applyStoredTheme==='function')applyStoredTheme();}catch(e){}
+  try{if(typeof render==='function')render();}catch(e){}
 }
 
 // ── b748: Kürzel je Hausverwaltung im ⚙-Dialog ────────────────────────────────
