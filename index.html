@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data: blob:; script-src 'self' 'unsafe-inline' https://accounts.google.com https://ssl.gstatic.com; connect-src 'self' blob: https://*.googleapis.com https://accounts.google.com https://www.googleapis.com https://oauth2.googleapis.com https://lh3.googleusercontent.com https://*.googleusercontent.com https://login.microsoftonline.com https://graph.microsoft.com https://europe-west1-ptp-workboard.cloudfunctions.net https://photon.komoot.io https://nominatim.openstreetmap.org https://api.anthropic.com; img-src 'self' data: blob: https: https://*.googleusercontent.com https://drive.google.com https://lh3.googleusercontent.com; style-src 'self' 'unsafe-inline' https://ssl.gstatic.com; frame-src 'self' https://accounts.google.com https://drive.google.com https://login.microsoftonline.com https://login.live.com https://*.msftauth.net https://*.msauth.net blob:; worker-src blob: 'self';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data: blob:; script-src 'self' 'unsafe-inline' https://accounts.google.com https://ssl.gstatic.com; connect-src 'self' blob: https://*.googleapis.com https://accounts.google.com https://www.googleapis.com https://oauth2.googleapis.com https://lh3.googleusercontent.com https://*.googleusercontent.com https://login.microsoftonline.com https://graph.microsoft.com https://europe-west1-ptp-workboard.cloudfunctions.net https://photon.komoot.io https://nominatim.openstreetmap.org https://api.anthropic.com https://outlook.office.com; img-src 'self' data: blob: https: https://*.googleusercontent.com https://drive.google.com https://lh3.googleusercontent.com; style-src 'self' 'unsafe-inline' https://ssl.gstatic.com; frame-src 'self' https://accounts.google.com https://drive.google.com https://login.microsoftonline.com https://login.live.com https://*.msftauth.net https://*.msauth.net blob:; worker-src blob: 'self';">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PAM Workboard</title>
 <link rel="manifest" href="manifest.json">
@@ -10554,7 +10554,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-08 · #1142'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-08-b1142) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-08 · #1143'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-08-b1143) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -39819,7 +39819,71 @@ async function _olOrdnerLaden(){
 // steht nicht in MS_SCOPES. Ein Entwurf kommt mit Mail.ReadWrite aus, das ist da.
 // Frank will die Mail ohnehin vor dem Abschicken lesen (24.08.2026).
 // Rückgabe {id,link,fehl}: fehl = Namen der Anhänge, die nicht drangingen.
+// b1143: _PAM_ANH_MAX ist nur noch die Grenze für den EINFACHEN Weg (ein Stück, POST …/attachments – mehr nimmt Graph so nicht).
+// Größere Dateien gehen in Stücken über eine Upload-Sitzung von Outlook (_pamAnhangGross). Für die ganze Mail gilt _PAM_MAIL_MAX.
 const _PAM_ANH_MAX=3*1024*1024;
+const _PAM_MAIL_MAX=20*1024*1024;   // b1143, Frank 08.10.2026: alle Anhänge einer Mail zusammen höchstens 20 MB (wie Outlook am PC)
+const _PAM_ANH_STUECK=3200*1024;     // je Stück unter den 4 MB, die Outlook je Anfrage annimmt (Vielfaches von 320 KB)
+// genaue Größe aus dem Base64-Text: je 4 Zeichen 3 Bytes, die „=“ am Ende sind nur Füllung
+function _pamAnhGroesse(a){const s=String((a&&a.contentBytes)||'');return Math.floor(s.length*3/4)-(s.endsWith('==')?2:(s.endsWith('=')?1:0));}
+function _pamAnhMB(n){return n<1048576?(Math.max(1,Math.round(n/1024))+' KB'):((n/1048576).toFixed(1).replace('.',',')+' MB');}
+// Welche Anhänge passen in EINE Mail? Der Reihe nach, solange es zusammen höchstens 20 MB sind – was danach kommt, geht nicht mit.
+function _pamAnhangPassend(liste){
+  const passt=[],zuViel=[];let summe=0;
+  (liste||[]).forEach(function(a){
+    const gr=_pamAnhGroesse(a);
+    if(summe+gr<=_PAM_MAIL_MAX){passt.push(a);summe+=gr;}else zuViel.push(a);
+  });
+  return{passt:passt,zuViel:zuViel,summe:summe};
+}
+function _pamB64Bytes(b64){
+  const roh=atob(String(b64||''));
+  const u=new Uint8Array(roh.length);
+  for(let i=0;i<roh.length;i++)u[i]=roh.charCodeAt(i);
+  return u;
+}
+/* b1143: eine Datei über 3 MB an den Entwurf hängen. Graph gibt eine Upload-Adresse zurück (auf outlook.office.com – genau diese
+   eine Adresse steht dafür in der Gästeliste connect-src), dorthin geht die Datei in Stücken. Das Ticket steckt in der Adresse,
+   deshalb ohne Anmelde-Kopf. Rückgabe true = hängt dran; false = nicht (Grund in der Konsole), der Aufrufer meldet es. */
+async function _pamAnhangGross(H,ziel,a){
+  const nm=(a&&a.name)||'Anhang';
+  const bytes=_pamB64Bytes(a.contentBytes);
+  const rs=await fetch(ziel+'/createUploadSession',{method:'POST',headers:H,
+    body:JSON.stringify({AttachmentItem:{attachmentType:'file',name:nm,size:bytes.length,contentType:a.contentType||'application/octet-stream'}})});
+  if(!rs.ok){console.warn('[b1143] Upload-Sitzung HTTP',rs.status,nm);return false;}
+  const url=String(((await rs.json())||{}).uploadUrl||'');
+  // ⛔ nur an Outlook – kommt eine andere Adresse zurück, geht nichts raus
+  if(url.indexOf('https://outlook.office.com/')!==0){console.warn('[b1143] unerwartete Upload-Adresse',nm);return false;}
+  for(let von=0;von<bytes.length;von+=_PAM_ANH_STUECK){
+    const bis=Math.min(von+_PAM_ANH_STUECK,bytes.length);
+    const r=await fetch(url,{method:'PUT',headers:{'Content-Type':'application/octet-stream','Content-Range':'bytes '+von+'-'+(bis-1)+'/'+bytes.length},
+      body:bytes.slice(von,bis)});
+    if(!r.ok){console.warn('[b1143] Upload HTTP',r.status,nm,von);return false;}
+  }
+  return true;
+}
+/* b1143: alle Anhänge an den Entwurf draftId – EINE Stelle für neue Mail, Antwort im Verlauf und Antwort mit Vorlage.
+   Bis 3 MB in einem Stück (wie bisher), größer über _pamAnhangGross; was über die 20 MB der Mail käme, geht nicht mit.
+   Rückgabe: Namen (mit Grund) der Anhänge, die NICHT dranhängen – nie still weglassen. */
+async function _pamAnhaengeDran(H,draftId,liste){
+  const ziel='https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(draftId)+'/attachments';
+  const aus=_pamAnhangPassend(liste),fehl=[];
+  aus.zuViel.forEach(function(a){fehl.push(((a&&a.name)||'Anhang')+' ('+_pamAnhMB(_pamAnhGroesse(a))+' – zusammen über 20 MB)');});
+  for(const a of aus.passt){
+    const nm=(a&&a.name)||'Anhang';
+    try{
+      if(_pamAnhGroesse(a)<=_PAM_ANH_MAX){
+        const r=await fetch(ziel,{method:'POST',headers:H,
+          body:JSON.stringify(Object.assign({'@odata.type':'#microsoft.graph.fileAttachment'},a))});
+        if(!r.ok){console.warn('[Entwurf] Anhang HTTP',r.status,nm);fehl.push(nm);}
+      }else{
+        try{showToast('📎 '+nm+' ('+_pamAnhMB(_pamAnhGroesse(a))+') wird angehängt …','info',8000);}catch(eT){}
+        if(!await _pamAnhangGross(H,ziel,a))fehl.push(nm);
+      }
+    }catch(e){console.warn('[Entwurf] Anhang:',nm,e);fehl.push(nm);}
+  }
+  return fehl;
+}
 async function _pamOutlookEntwurf(token,opt){
   const H={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
   const r1=await fetch('https://graph.microsoft.com/v1.0/me/messages',{method:'POST',headers:H,
@@ -39827,21 +39891,9 @@ async function _pamOutlookEntwurf(token,opt){
       toRecipients:opt.to?[{emailAddress:{address:opt.to}}]:[]})});
   if(!r1.ok)throw new Error('Entwurf anlegen HTTP '+r1.status);
   const draft=await r1.json();
-  const ziel='https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(draft.id)+'/attachments';
-  const fehl=[];
-  for(const a of (opt.anhaenge||[])){
-    const nm=(a&&a.name)||'Anhang';
-    try{
-      // Graph nimmt je Anhang rund 3 MB. Größeres ginge nur über eine Upload-Sitzung,
-      // deren Adresse auf outlook.office.com zeigt – das lässt die CSP nicht durch, und
-      // die wird nicht aufgeweicht. Zu Großes wird gemeldet, nicht still verschluckt.
-      const gr=Math.floor(String(a.contentBytes||'').length*3/4);
-      if(gr>_PAM_ANH_MAX){fehl.push(nm+' ('+(gr/1048576).toFixed(1)+' MB)');continue;}
-      const r=await fetch(ziel,{method:'POST',headers:H,
-        body:JSON.stringify(Object.assign({'@odata.type':'#microsoft.graph.fileAttachment'},a))});
-      if(!r.ok){console.warn('[Entwurf] Anhang HTTP',r.status,nm);fehl.push(nm);}
-    }catch(e){console.warn('[Entwurf] Anhang:',nm,e);fehl.push(nm);}
-  }
+  // b1143: bis b1142 stand hier die 3-MB-Grenze je Datei (die Upload-Adresse auf outlook.office.com war nicht in der Gästeliste).
+  // Frank 08.10.2026: größere Dateien sollen mit – zusammen bis 20 MB. Zu Großes wird weiter gemeldet, nicht still verschluckt.
+  const fehl=await _pamAnhaengeDran(H,draft.id,opt.anhaenge||[]);
   return {id:draft.id,link:draft.webLink||('https://outlook.office.com/mail/drafts/id/'+draft.id),fehl:fehl};
 }
 // Fix #372: Nach createReply NICHT mehr automatisch Outlook Web öffnen (Wunsch Frank:
@@ -40111,7 +40163,7 @@ function _mvTextHtml(text){
 // Entwurf mit Vorlagentext. Rückgabe true = Entwurf liegt in Outlook.
 // b1053: gewählte Dokumente der Karte aus Drive holen und als Outlook-Anhang vorbereiten.
 // Bilder werden hier nie angeboten/mitgeschickt (b862: GPS/Kamera-Daten müssten erst entfernt werden).
-// Was nicht geht (Drive nicht verbunden, Download scheitert, über 3 MB), kommt in `fehl` – nie still weglassen.
+// Was nicht geht (Drive nicht verbunden, Download scheitert, über 20 MB – bis b1142: 3 MB), kommt in `fehl` – nie still weglassen.
 function _mvIstBild(name){return /\.(jpe?g|png|gif|webp|hei[cf]|bmp|tiff?)$/i.test(String(name||''));}
 async function _mvAnhaengeLaden(docs){
   const liste=[],fehl=[];
@@ -40123,7 +40175,7 @@ async function _mvAnhaengeLaden(docs){
       const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(d.fileId)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
       if(!r.ok){fehl.push(nm+' (Drive HTTP '+r.status+')');continue;}
       const ab=await (await r.blob()).arrayBuffer();
-      if(ab.byteLength>_PAM_ANH_MAX){fehl.push(nm+' ('+(ab.byteLength/1048576).toFixed(1)+' MB – zu groß für den Entwurf)');continue;}
+      if(ab.byteLength>_PAM_MAIL_MAX){fehl.push(nm+' ('+_pamAnhMB(ab.byteLength)+' – größer als 20 MB)');continue;}
       liste.push({'@odata.type':'#microsoft.graph.fileAttachment',name:nm,contentType:/\.pdf$/i.test(nm)?'application/pdf':'application/octet-stream',contentBytes:_fsB64(ab)});
     }catch(e){console.warn('[b1053] Anhang:',nm,e);fehl.push(nm);}
   }
@@ -40149,13 +40201,8 @@ async function _mvEntwurf(task,ziel,text,betreffEigen,anhDocs){
     if(!r1.ok)throw new Error('createReply HTTP '+r1.status);
     draft=await r1.json();
     // b1053: gewählte Dokumente an den Entwurf hängen (Fehler werden gesammelt, brechen den Entwurf nicht ab)
-    const fehlA=anh.fehl.slice();
-    for(const a of anh.liste){
-      try{
-        const ra=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(draft.id)+'/attachments',{method:'POST',headers:H,body:JSON.stringify(a)});
-        if(!ra.ok){console.warn('[b1053] Anhang HTTP',ra.status,a.name);fehlA.push(a.name);}
-      }catch(eA){console.warn('[b1053] Anhang:',a.name,eA);fehlA.push(a.name);}
-    }
+    // b1143: über _pamAnhaengeDran – große Dateien in Stücken, zusammen bis 20 MB
+    const fehlA=anh.fehl.concat(await _pamAnhaengeDran(H,draft.id,anh.liste));
     if(fehlA.length)showToast('⚠ Nicht angehängt (bitte in Outlook selbst anhängen): '+fehlA.join(', '),'warning',12000);
     // Text OBEN einsetzen, das Zitat der Originalmail (von Outlook gebaut) bleibt darunter
     const alt=(draft&&draft.body&&draft.body.content)||'';
@@ -40330,7 +40377,7 @@ function _mvOeffnen(which){
         zl.appendChild(cb);zl.appendChild(el('span','',d.name));kasten.appendChild(zl);
       });
       rechts.appendChild(kasten);
-      rechts.appendChild(el('div','font-size:11px;color:var(--text2);','Je Datei bis ca. 3 MB. Größeres und Bilder hängst du in Outlook selbst an – PAM sagt dir, was nicht mitging.'));
+      rechts.appendChild(el('div','font-size:11px;color:var(--text2);','Zusammen bis 20 MB je Mail. Bilder hängst du in Outlook selbst an – PAM sagt dir, was nicht mitging.'));
     }
     if(v){
       const benutzt=[];
@@ -41075,17 +41122,7 @@ async function _dsAntwortEntwurf(task,ziel,text,anhaenge,wer){
     const r1=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(ziel.msg.id)+'/createReply',{method:'POST',headers:H,body:JSON.stringify({})});
     if(!r1.ok)throw new Error('createReply HTTP '+r1.status);
     draft=await r1.json();
-    const fehlA=[];
-    for(const a of (anhaenge||[])){
-      const nm=(a&&a.name)||'Anhang';
-      const gr=_dsGroesse(a);
-      if(gr>_PAM_ANH_MAX){fehlA.push(nm+' ('+_dsMB(gr)+')');continue;}
-      try{
-        const ra=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(draft.id)+'/attachments',{method:'POST',headers:H,
-          body:JSON.stringify(Object.assign({'@odata.type':'#microsoft.graph.fileAttachment'},a))});
-        if(!ra.ok){console.warn('[b1133] Anhang HTTP',ra.status,nm);fehlA.push(nm);}
-      }catch(eA){console.warn('[b1133] Anhang:',nm,eA);fehlA.push(nm);}
-    }
+    const fehlA=await _pamAnhaengeDran(H,draft.id,anhaenge||[]);   // b1143: große Dateien in Stücken, zusammen bis 20 MB
     if(fehlA.length)showToast('⚠ Nicht angehängt (bitte in Outlook selbst anhängen): '+fehlA.join(', '),'warning',12000);
     const alt=(draft&&draft.body&&draft.body.content)||'';
     // Offen seit b1015 (Franks Probe 14.09.: in der gesendeten Antwort fehlte das Zitat). Diese Zeile zeigt, ob Outlook das Zitat überhaupt in den Entwurf legt.
@@ -41342,13 +41379,19 @@ function _dsOeffnen(opt){
       // Anhang: was der Knopf mitbringt (fest) und weitere Dokumente der Karte zum Anhaken
       rumpf.appendChild(el('div',LBL+'margin-top:4px;','📎 Anhang'));
       const ak=el('div','flex-shrink:0;border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;line-height:1.8;');
+      // b1143: zusammen bis 20 MB je Mail (Frank 08.10.2026) – was darüber käme, steht rot da und geht nicht mit
+      const festPasst=_pamAnhangPassend(fest);
       fest.forEach(function(a){
-        const gr=_dsGroesse(a),gross=gr>_PAM_ANH_MAX;
+        const gr=_dsGroesse(a),gross=festPasst.zuViel.indexOf(a)>=0;
         const zl=el('div','',null);zl.className='_dsFest';
         zl.appendChild(el('span','','📎 '+(a.name||'Anhang')+' · '+_dsMB(gr)));
-        if(gross)zl.appendChild(el('span','color:#c0392b;font-weight:600;',' – zu groß, geht nicht mit (höchstens 3 MB)'));
+        if(gross)zl.appendChild(el('span','color:#c0392b;font-weight:600;',' – zu groß, geht nicht mit (zusammen höchstens 20 MB je Mail)'));
         ak.appendChild(zl);
       });
+      if(fest.length>1||festPasst.summe>_PAM_ANH_MAX){
+        const sz=el('div','color:var(--text2);font-size:11px;','Zusammen: '+_dsMB(festPasst.summe)+' von höchstens 20 MB');sz.className='_dsSumme';
+        ak.appendChild(sz);
+      }
       if(opt.festFehl&&opt.festFehl.length)ak.appendChild(el('div','color:#b9770e;font-size:11px;','Nicht dabei: '+opt.festFehl.join(', ')+' – bitte in Outlook selbst anhängen'));
       let dokListe=[];
       try{
@@ -41368,7 +41411,7 @@ function _dsOeffnen(opt){
         });
       }
       rumpf.appendChild(ak);
-      rumpf.appendChild(el('div','font-size:11px;color:var(--text2);','Je Datei bis ca. 3 MB (Grenze von Outlook). Fotos gehen nur ohne Standort- und Kameradaten mit. Was nicht mitgeht, sagt PAM dir.'));
+      rumpf.appendChild(el('div','font-size:11px;color:var(--text2);','Zusammen bis 20 MB je Mail (wie Outlook am PC). Fotos gehen nur ohne Standort- und Kameradaten mit. Was nicht mitgeht, sagt PAM dir.'));
       box.appendChild(rumpf);
       const ml=el('div','display:none;padding:6px 16px;font-size:12px;font-weight:600;border-top:1px solid var(--border);','');
       ml.className='_dsMeldung';
@@ -41411,7 +41454,7 @@ function _dsOeffnen(opt){
         if(docs.length){melde('📎 Dokumente werden geholt …','');extra=await _mvAnhaengeLaden(docs);}
         if(extra.fehl.length){showToast('⚠ Nicht angehängt (bitte in Outlook selbst anhängen): '+extra.fehl.join(', '),'warning',12000);_dsToastOben(true);}
         const anh=fest.concat(extra.liste);
-        const dateien=anh.filter(function(a){return _dsGroesse(a)<=_PAM_ANH_MAX;}).map(function(a){return a.name;});
+        const dateien=_pamAnhangPassend(anh).passt.map(function(a){return a.name;});   // b1143: was in die 20 MB passt
         const fehl=[],neuFertig=[];
         for(const p of g){
           const z=zustand(p.key),wer=p.name||p.adr;
@@ -47781,8 +47824,8 @@ async function _pamDokEntwurf(i){
     blob=await (await fetch(_sauber)).blob();
   }
   // Früh prüfen: sonst füllt man erst das Fenster aus und erfährt danach, dass es nicht geht.
-  if(blob.size>_PAM_ANH_MAX){
-    showToast('⚠ '+name+' ist '+(blob.size/1048576).toFixed(1)+' MB – an einen Entwurf gehen höchstens 3 MB. Bitte über ⬇ herunterladen und von Hand anhängen.','warning',11000);
+  if(blob.size>_PAM_MAIL_MAX){   // b1143: bis b1142 waren es 3 MB
+    showToast('⚠ '+name+' ist '+_pamAnhMB(blob.size)+' – an einen Entwurf gehen höchstens 20 MB. Bitte über ⬇ herunterladen und von Hand anhängen.','warning',11000);
     return;
   }
   let t=null;
