@@ -10554,7 +10554,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-08 · #1147'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-08-b1147) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-08 · #1148'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-08-b1148) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -22052,7 +22052,7 @@ function _kalwCollect(){
         const hay=((t.betreff||'')+' '+(t.beschreibung||'')+' '+(task.title||'')+' '+(ks||'')).toLowerCase();
         if(q && !hay.includes(q)) return;
         const ds=((t.date||t.datum)||'').trim();
-        const rec={taskId:task.id,idx:i,t:t,ks:ks,title:task.title||'',
+        const rec={taskId:task.id,idx:i,t:t,ks:ks,title:task.title||'',adr:task.adresse||'',   // b1148: adr = Straße fürs Kästchen
                    bez:(((t.betreff||'').trim())||t.beschreibung||''),   // eigener Name schlägt die Beschreibung
                    sync:!!t.outlookEventId,del:!!t.outlookDeleted};
 
@@ -22165,7 +22165,9 @@ function _kalwCard(r,hr){
     + ' onclick="event.stopPropagation();_kalwPick(\''+_jsa(key)+'\')"'
     + ' ondblclick="event.stopPropagation();_kalOpenTask(\''+_jsa(r.taskId)+'\','+(+r.idx)+')"'   // b1131: + Platz des Termins → Karte klappt ihn auf
     + ' title="'+_escHtml(tip)+'">'
-    + '<b>'+(_fk?esc('⏳ '+_fk+(_fn?' · '+_fn:'')+' · genaue Zeit offen'):(esc(_normTime(r.von))+' '+esc(lbl)))+'</b>'+esc((typeof _kalTag!=='undefined'&&_kalTag)?((r.ks?r.ks+' · ':'')+(r.title||'')):(r.ks||r.title))+'</div>';   // b1119: in der Tagesansicht ist Platz für Kostenstelle UND Titel
+    // b1148: Straße zuerst, „Termin nach Anruf“ fällt weg (_ahKalText/_ahKalRest); ohne die Helfer (Alt-Prüfungen schneiden einzeln aus) wie bisher
+    + '<b>'+((typeof _ahKalText==='function')?esc(_ahKalText(r,_fk)):(_fk?esc('⏳ '+_fk+(_fn?' · '+_fn:'')+' · genaue Zeit offen'):(esc(_normTime(r.von))+' '+esc(lbl))))+'</b>'
+    + esc((typeof _ahKalRest==='function')?_ahKalRest(r,(typeof _kalTag!=='undefined'&&!!_kalTag)):((typeof _kalTag!=='undefined'&&_kalTag)?((r.ks?r.ks+' · ':'')+(r.title||'')):(r.ks||r.title)))+'</div>';   // b1119: in der Tagesansicht ist Platz für Kostenstelle UND Titel
   return s;
 }
 
@@ -22869,7 +22871,7 @@ async function _kalPushJetzt(taskId,idx){
     try{ const openId=(document.getElementById('taskId')||{}).value||''; if(openId===task.id && Array.isArray(taskAusserhausTermine) && taskAusserhausTermine[idx]){ taskAusserhausTermine[idx].outlookEventId=t.outlookEventId; taskAusserhausTermine[idx]._pamDirty=false; if(document.getElementById('ausserhausTermineList'))renderAusserhausTermine(); } }catch(e){}
     try{autoSave();}catch(e){console.warn('[KAL]',e);}
     renderKalender(true);
-    showToast('✅ In Outlook: '+_msTerminSubject(task,t),'success',4500);
+    showToast('✅ In Outlook: '+(t._pushedSubject||_msTerminSubject(task,t)),'success',4500);   // b1148: so wie es in Outlook steht
   }catch(e){ showToast('⚠ Outlook: '+((e&&e.message)||e),'error',6000); }
 }
 /* b1085: Doppelklick auf einen Termin (Wochenraster / Reiter „Kalender“) bei bereits OFFENEM Task.
@@ -23059,15 +23061,63 @@ function _msOutlookFenster(t){
   if(!t||((t.betreff||'').trim()))return '';
   return (typeof _ahFensterKurz==='function')?_ahFensterKurz(t):'';
 }
+// b1148 (Frank 08.10.2026: „Termin nach Anruf“ sagt nichts – im kurzen Kästchen stand NUR das; „Straße zuerst“,
+// „Kalender und Outlook“, „baue“): Anzeige = Straße · mit wem/was · Nummer. Nur die ANZEIGE ändert sich – der gespeicherte
+// Text bleibt „Termin nach Anruf <Name>“, daraus liest PAM weiter die Person (✉ Termin mitteilen, _tmTerminPerson).
+// Straße = Adressfeld der Karte bis zum ersten Komma; ohne Adresse der Kartenname ohne die Nummer vorn.
+function _ahStrasse(adr){
+  let a=String(adr==null?'':adr).split('\n')[0];
+  const k=a.indexOf(','); if(k>=0)a=a.slice(0,k);
+  a=a.trim();
+  let z=0; while(z<a.length&&z<5&&'0123456789'.indexOf(a.charAt(z))>=0)z++;
+  return (z===5)?'':a;   // nur Postleitzahl + Ort = keine Straße
+}
+function _ahTitelOhneKs(title,ks){
+  let s=String(title==null?'':title).trim();
+  if(ks&&s.indexOf(ks)===0){ s=s.slice(String(ks).length); while(s&&' –-·'.indexOf(s.charAt(0))>=0)s=s.slice(1); }
+  return s.trim();
+}
+// Termin-Text ohne Zeitfenster-Zusatz und ohne „Termin nach Anruf“; leer, wenn er nur den Kartennamen oder die Straße wiederholt
+function _ahAnzeigeText(bez,title,ks,ort){
+  let b=(typeof _pamAnrufFensterAnText==='function')?_pamAnrufFensterAnText(bez,''):String(bez==null?'':bez).trim();
+  if(b==='Termin nach Anruf')b='';
+  else if(b.indexOf('Termin nach Anruf ')===0)b=b.slice(18).trim();
+  const n=function(x){return String(x==null?'':x).split(' ').join('').toLowerCase();};
+  const nb=n(b);
+  if(nb&&(nb===n(title)||nb===n((ks||'')+' '+(title||''))||nb===n(_ahTitelOhneKs(title,ks))||nb===n(ort)))b='';
+  return b;
+}
+// „10:30–11:30 Uhr“ → „10:30–11:30“ (kürzer, wie im Entwurf b1147); „ab 13 Uhr“ bleibt
+function _ahFensterAnzeige(fk){
+  fk=String(fk||'');
+  return (fk.indexOf('ab ')!==0&&fk.slice(-4)===' Uhr')?fk.slice(0,-4):fk;
+}
+// Kalender-Kästchen, fetter Teil: „16:30 Teststraße 5 · Frau A“ · mit Fenster „⏳ 10:30–11:30 Teststraße 5 · Frau A“
+function _ahKalText(r,fk){
+  const ort=_ahStrasse(r.adr)||_ahTitelOhneKs(r.title,r.ks);
+  const txt=_ahAnzeigeText(r.bez,r.title,r.ks,ort);
+  const teile=[ort,txt].filter(function(x){return !!x;}).join(' · ');
+  if(fk)return '⏳ '+_ahFensterAnzeige(fk)+(teile?' '+teile:'');
+  return _normTime(r.von)+(teile?' '+teile:'');
+}
+// … und der Rest dahinter: die Nummer (Tagesansicht: Nummer · Kartenname). Steht der Kartenname schon vorn (keine Adresse), nicht noch einmal.
+function _ahKalRest(r,tagAnsicht){
+  const mitAdr=!!_ahStrasse(r.adr);
+  if(tagAnsicht)return mitAdr?((r.ks?r.ks+' · ':'')+(r.title||'')):(r.ks||'');
+  return r.ks||(mitAdr?(r.title||''):'');
+}
+// Outlook: „🔷 Teststraße 5 · Frau A · 260999“, mit Fenster „🔷 ⏳ 10:30–11:30 · Teststraße 5 · Frau A · 260999“.
+// Ein frei vergebener Name (✏ Name) bleibt wörtlich (wie b1147).
 function _msOutlookBetreff(task,t){
+  if(!t||((t.betreff||'').trim()))return _msTerminSubject(task,t);
+  const ks=(typeof _kalKostenstelle==='function')?_kalKostenstelle(task):'';
+  const title=String((task&&task.title)||'').trim();
+  const ort=_ahStrasse(task&&task.adresse)||_ahTitelOhneKs(title,ks);
+  const txt=_ahAnzeigeText(t.beschreibung,title,ks,ort);
+  const teile=[ort,txt,ks].filter(function(x){return !!x;});
+  if(!teile.length)return _msTerminSubject(task,t);
   const fk=_msOutlookFenster(t);
-  if(!fk)return _msTerminSubject(task,t);
-  const bez=(typeof _pamAnrufFensterAnText==='function')?_pamAnrufFensterAnText(t.beschreibung,''):String(t.beschreibung||'');
-  let s=_msTerminSubject(task,Object.assign({},t,{beschreibung:bez}));
-  if(s.indexOf('🔷 ')===0)s=s.slice('🔷 '.length);
-  // „10:30–11:30 Uhr“ → „10:30–11:30“ (kürzer für die schmale Spalte, wie im Entwurf); „ab 13 Uhr“ bleibt
-  const k=(fk.indexOf('ab ')!==0&&fk.slice(-4)===' Uhr')?fk.slice(0,-4):fk;
-  return '🔷 ⏳ '+k+' · '+s;
+  return '🔷 '+(fk?'⏳ '+_ahFensterAnzeige(fk)+' · ':'')+teile.join(' · ');
 }
 function _msOutlookText(t,link,von,bis){
   const h=function(x){return String(x==null?'':x).split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;').split('"').join('&quot;');};
@@ -23347,7 +23397,7 @@ function openOutlookTermin(i){
     scheduleTaskFieldSave();
     renderAusserhausTermine();
     if(currentView==='kalender'||(typeof _kalSchwebAn!=='undefined'&&_kalSchwebAn))renderKalender(true); // b1081
-    showToast('✅ In Outlook: '+_msTerminSubject(task,t),'success',4500);
+    showToast('✅ In Outlook: '+(t._pushedSubject||_msTerminSubject(task,t)),'success',4500);   // b1148: so wie es in Outlook steht
   }).catch(e=>showToast('⚠ Outlook: '+(e.message||e),'error',6000));
 }
 // Deep-Link: PAM per ?task=<ID> öffnen (Rücksprung aus Outlook-Termin)
@@ -26861,7 +26911,7 @@ function _openOutlookZeitPC(i){
   showToast('⏳ Schreibe Zeiteintrag nach Outlook…','info',3000);
   _msPushTermin(task,e).then(()=>{
     try{scheduleTaskFieldSave();}catch(_){}
-    showToast('✅ In Outlook: '+_msTerminSubject(task,e),'success',4500);
+    showToast('✅ In Outlook: '+(e._pushedSubject||_msTerminSubject(task,e)),'success',4500);   // b1148
   }).catch(err=>showToast('⚠ Outlook: '+(err.message||err),'error',6000));
 }
 
