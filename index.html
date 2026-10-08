@@ -69,7 +69,7 @@ async function _clearCacheAndReload(){
 try{var _cs=+(localStorage.getItem('pam_card_scale')||100);document.documentElement.style.setProperty('--card-scale',(_cs/100).toFixed(2));}catch(e){}
 </script>
 <script src="https://accounts.google.com/gsi/client" defer onload="typeof gdriveInit==='function'?gdriveInit():(window._gsiPending=true)" onerror="window._gsiLoadError=true;window._gsiPending=false;typeof _driveSetStatus==='function'&&_driveSetStatus('⚠ Google-Dienst nicht erreichbar – Netzwerk oder Adblocker prüfen',false)"></script>
-<script src="formulare.js?v=F44" charset="utf-8"></script>
+<script src="formulare.js?v=F45" charset="utf-8"></script>
 <script>
 // ── EMAIL DROP-ZONE – Inline-Handler am Element, kein addEventListener nötig ──
 
@@ -10554,7 +10554,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-08 · #1140'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-08-b1140) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-08 · #1141'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-08-b1141) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -31072,6 +31072,8 @@ async function _pamPbPdf(bi){
   await _fsPbPdf(b,t);
   try{renderPruefberichteDesktop();}catch(e){console.warn('[F13] Formular-Liste:',e);}
 }
+// ⛔ b1141/F45: seit F45 OHNE Aufrufer – die Vor-Ort-Knöpfe legen keinen Termin mehr an (Frank 08.10.: „ich will keinen Termin, ich hab ja schon einen“);
+//    an ihre Stelle tritt _pamVbZeitUebertragen (unten). Die Funktion bleibt, weil test_f18 sie prüft – nicht wieder anschließen.
 // F18/b1075: Vorabbesichtigung → Termin in der Karte (und damit Outlook). Aufgerufen von „📍 Ich bin jetzt hier“ (was='beginn') und „🏁 Fertig“ (was='ende').
 // ⛔ Schreibt in die ARBEITSKOPIE der offenen Karte (taskAusserhausTermine), NICHT in task.ausserhausTermine – sonst überschreibt das Speichern der Karte den Termin.
 // Der Termin merkt sich das Protokoll (vorabId). Gibt es heute schon einen eigenen Termin ohne Protokoll, fragt PAM, ob die Besichtigung dazu gehört. Outlook: wie bei jedem Termin beim Speichern (_msAutoPushTermine).
@@ -31106,6 +31108,170 @@ function _pamVbTermin(bericht,was){
     scheduleTaskFieldSave();
     return neu?'Termin in der Karte angelegt':'Termin in der Karte aktualisiert';
   }catch(e){console.warn('[F18] Termin:',e);showToast('⚠ Termin nicht geschrieben: '+(e.message||e),'warning',5000);return '';}
+}
+/* b1141 / F45 (Entwurf Claude-Code\Entwurf_Protokoll-Zeit-in-Termin_2026-10-08.html; Frank 08.10.2026 „1,2,3 … baue“):
+   Die Vor-Ort-Knöpfe im Protokoll schreiben nur noch ins Protokoll. Am PC überträgt Frank die Zeit auf Knopfdruck („📅 Zeit in Termin übertragen“)
+   in einen VORHANDENEN Außer-Haus-Termin der Karte; PAM setzt dort Tag + echte Zeiten (geht wie jede Terminänderung nach Outlook).
+   Neu angelegt wird nur, wenn die Karte GAR KEINEN Termin hat. Mehrere Protokolle vom selben Tag teilen sich EINEN Termin: vom ersten Beginn
+   bis zum letzten Ende (Frank: „ja eigentlich schon, du hast recht“). Ein Termin mit Protokollen eines ANDEREN Tages ist nicht wählbar.
+   Verbindung am Termin: vorabIds [Protokoll-Kennungen]; das alte Einzelfeld vorabId (F18) wird mitgelesen und beim Übertragen umgestellt.
+   Abhaken macht Frank selbst. Termine: offene Karte → Arbeitskopie (taskAusserhausTermine), sonst die Karte. Texte nur über textContent. */
+function _pamVbIds(x){const a=(x&&Array.isArray(x.vorabIds))?x.vorabIds.slice():[];if(x&&x.vorabId&&a.indexOf(x.vorabId)<0)a.push(x.vorabId);return a;}
+function _pamVbListe(task){
+  try{if(task&&(document.getElementById('taskId')||{}).value===task.id&&typeof taskAusserhausTermine!=='undefined'&&Array.isArray(taskAusserhausTermine))return {liste:taskAusserhausTermine,fenster:true};}catch(e){}
+  if(task&&!Array.isArray(task.ausserhausTermine))task.ausserhausTermine=[];
+  return {liste:task?task.ausserhausTermine:[],fenster:false};
+}
+function _pamVbZeit(b){
+  const st=(typeof _fsVbZeitStatus==='function')?_fsVbZeitStatus((b&&b.kopf)||{}):{art:'ohne'};
+  return Object.assign({iso:(typeof _fsVbIso==='function')?_fsVbIso(b&&b.datum):''},st);
+}
+function _pamVbName(b){return String(((typeof _fsTitel==='function')?_fsTitel(b):'')||(b&&b.protName)||'Besichtigung').trim();}
+function _pamVbProt(task,id){return ((task&&task.pruefberichte)||[]).filter(function(b){return b&&b.id===id;})[0]||null;}
+// Zeitspanne eines Termins: verbundene Protokolle (plus „dazu“) vom Tag iso mit gültiger Zeit → vom ersten Beginn bis zum letzten Ende
+function _pamVbSpanne(task,tm,dazu,iso){
+  const ids=_pamVbIds(tm);if(dazu&&ids.indexOf(dazu.id)<0)ids.push(dazu.id);
+  let von='',bis='';const mit=[],ohne=[];
+  ids.forEach(function(id){
+    const q=(dazu&&dazu.id===id)?dazu:_pamVbProt(task,id);if(!q)return;
+    const z=_pamVbZeit(q);if(z.iso!==iso)return;
+    if(z.art!=='ok'){ohne.push(q);return;}
+    mit.push(q);if(!von||z.b<von)von=z.b;if(!bis||z.e>bis)bis=z.e;
+  });
+  return {von:von,bis:bis,mit:mit,ohne:ohne};
+}
+// Protokolle eines ANDEREN Tages, die schon an diesem Termin hängen (dann ist er nicht wählbar)
+function _pamVbFremdTag(task,tm,bericht,iso){
+  return _pamVbIds(tm).filter(function(id){return id!==bericht.id;}).map(function(id){return _pamVbProt(task,id);}).filter(function(q){return q&&_pamVbZeit(q).iso!==iso;});
+}
+function _pamVbTagKurz(iso){return (typeof _tzDatumKurz==='function'&&iso)?_tzDatumKurz(iso):String(iso||'');}
+// Beschriftung des Knopfs im Protokoll: neu · fertig (Termin trägt genau die Zeit) · erneut (Zeit seitdem geändert)
+function _pamVbZeitStand(bericht,task){
+  task=task||((typeof currentTask==='function')?currentTask():null);
+  if(!bericht||!task)return {art:'neu',txt:'📅 Zeit in Termin übertragen'};
+  const tm=_pamVbListe(task).liste.filter(function(x){return x&&!x.hiddenInPam&&_pamVbIds(x).indexOf(bericht.id)>=0;})[0];
+  if(!tm)return {art:'neu',txt:'📅 Zeit in Termin übertragen'};
+  const z=_pamVbZeit(bericht),sp=_pamVbSpanne(task,tm,null,z.iso);
+  const andere=_pamVbIds(tm).filter(function(id){return id!==bericht.id;}).map(function(id){return _pamVbProt(task,id);}).filter(Boolean).map(_pamVbName);
+  if(z.art==='ok'&&(tm.date||'')===z.iso&&tm.von===sp.von&&tm.bis===sp.bis)
+    return {art:'fertig',txt:'✓ im Termin: '+_pamVbTagKurz(tm.date)+' '+tm.von+'–'+tm.bis+(andere.length?' (zusammen mit '+andere.join(', ')+')':'')};
+  return {art:'erneut',txt:'↻ Zeit geändert – erneut übertragen'};
+}
+// Das Fenster: Zeit unvollständig → erst eintragen · Karte ohne Termin → anlegen · sonst Termin wählen, vorher/nachher, Übernehmen
+function _pamVbZeitUebertragen(bericht,task,nachher,zeitAuf){
+  task=task||((typeof currentTask==='function')?currentTask():null);
+  if(!bericht||!task){showToast('⚠ Keine Karte offen','warning',4000);return;}
+  const z=_pamVbZeit(bericht);
+  const tagL=((typeof _tmTagLang==='function'&&z.iso)?_tmTagLang(z.iso):'')||String(bericht.datum||'ohne Datum');
+  const alt=document.getElementById('_pamVbUebDlg');if(alt)alt.remove();
+  const ov=document.createElement('div');ov.id='_pamVbUebDlg';
+  ov.style.cssText='position:fixed;inset:0;z-index:1000090;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;';   // über dem Formular (100060), unter dem blauen Kasten (1000100, test_b892)
+  const box=document.createElement('div');
+  box.style.cssText='background:var(--bg2);color:var(--text1,var(--text));border:1px solid var(--border);border-radius:12px;width:min(560px,96vw);max-height:90vh;overflow:auto;padding:16px;box-shadow:0 8px 32px rgba(0,0,0,.35);font-size:13px;line-height:1.5;box-sizing:border-box;';
+  ov.appendChild(box);
+  const el=function(tag,stil,text){const e=document.createElement(tag);if(stil)e.style.cssText=stil;if(text!=null)e.textContent=text;return e;};
+  const KN='padding:7px 12px;border-radius:7px;border:1px solid var(--border);background:transparent;color:inherit;cursor:pointer;font-size:12px;font-weight:600;';
+  const KNH='padding:7px 14px;border-radius:7px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:12px;font-weight:700;';
+  const WARN='margin-top:8px;padding:7px 10px;border-radius:7px;background:rgba(230,126,34,.16);font-size:12px;';
+  const INFO='margin-top:8px;padding:7px 10px;border-radius:7px;background:var(--bg3,rgba(127,127,127,.12));font-size:12px;';
+  const knopf=function(txt,stil,fn){const b=el('button',stil,txt);b.type='button';b.addEventListener('click',fn);return b;};
+  const taste=function(e){if(e.key==='Escape'&&document.getElementById('_pamVbUebDlg')===ov){e.stopImmediatePropagation();e.preventDefault();weg();}};
+  function weg(){ov.remove();document.removeEventListener('keydown',taste,true);}
+  document.addEventListener('keydown',taste,true);
+  ov.addEventListener('click',function(e){if(e.target===ov)weg();});
+  box.appendChild(el('div','font-weight:700;font-size:15px;margin-bottom:4px;','📅 Zeit in Termin übertragen'));
+  box.appendChild(el('div','','Protokoll „'+_pamVbName(bericht)+'“: '+tagL+' · '+(z.b||'?')+'–'+(z.e||'?')+' Uhr'));
+  const fuss=el('div','display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;margin-top:14px;');
+  const L=_pamVbListe(task);
+  const speichern=function(){
+    if(L.fenster){try{renderAusserhausTermine();}catch(e){} try{scheduleTaskFieldSave();}catch(e){}}
+    else{try{autoSave();}catch(e){} try{render();}catch(e){}}
+  };
+  const melden=function(txt){try{(typeof toast==='function'?toast:showToast)(txt,'success',5000);}catch(e){}};
+  // 1) Zeit im Protokoll nicht vollständig → erst eintragen
+  if(z.art!=='ok'||!z.iso){
+    const grund=!z.iso?'Im Protokoll fehlt ein gültiges Datum.':(z.art==='ohne'?'Im Protokoll fehlt der Beginn.':(z.art==='endeFehlt'?'Im Protokoll fehlt das Ende.':(z.art==='endeVor'?'Im Protokoll liegt das Ende vor dem Beginn.':'Das Ende im Protokoll ist keine Uhrzeit.')));
+    box.appendChild(el('div',WARN,'⚠ '+grund+' Trag es zuerst richtig ein – dann übertragen.'));
+    const zk=knopf('✏ Zeit eintragen',KNH,function(){weg();if(typeof zeitAuf==='function')zeitAuf();});zk.id='_pamVbUebZeit';
+    fuss.append(zk,knopf('Abbrechen',KN,weg));
+    box.appendChild(fuss);document.body.appendChild(ov);return;
+  }
+  const kand=L.liste.map(function(x,i){return {x:x,i:i};}).filter(function(o){return o.x&&!o.x.hiddenInPam;})
+    .sort(function(a,b){const p=String(a.x.date||'9')+' '+String(a.x.von||''),q=String(b.x.date||'9')+' '+String(b.x.von||'');return p<q?-1:(p>q?1:0);});
+  // 2) Karte hat keinen Termin → auf Wunsch anlegen
+  if(!kand.length){
+    const text=(typeof _fsVbTerminText==='function')?_fsVbTerminText(bericht):'Besichtigung';
+    box.appendChild(el('div','margin-top:10px;','Diese Karte hat noch keinen Außer-Haus-Termin. Soll PAM einen anlegen?'));
+    box.appendChild(el('div','font-weight:700;margin-top:4px;',tagL+' · '+z.b+'–'+z.e+' Uhr · „'+text+'“'));
+    box.appendChild(el('div',INFO,'ⓘ Weitere Protokolle vom selben Tag hängen sich später an diesen Termin. Geht wie jeder Termin nach Outlook. Abhaken machst du selbst.'));
+    const nk=knopf('＋ Neuen Termin anlegen',KNH,function(){
+      const n={date:z.iso,von:z.b,bis:z.e,beschreibung:text,art:'besichtigung',vorabIds:[bericht.id],_pamDirty:true,outlookDeleted:false};
+      if(typeof _ahTidNeu==='function')n.tid=_ahTidNeu();
+      L.liste.push(n);speichern();weg();
+      melden('✓ Neuer Termin angelegt: '+_pamVbTagKurz(z.iso)+' '+z.b+'–'+z.e+' Uhr');
+      if(typeof nachher==='function')nachher();
+    });nk.id='_pamVbUebNeu';
+    fuss.append(nk,knopf('Abbrechen',KN,weg));
+    box.appendChild(fuss);document.body.appendChild(ov);return;
+  }
+  // 3) vorhandenen Termin wählen – vorgewählt: der schon verbundene, sonst der erste am selben Tag
+  const eigen=kand.filter(function(o){return _pamVbIds(o.x).indexOf(bericht.id)>=0;})[0]||null;
+  const waehlbar=function(o){return !_pamVbFremdTag(task,o.x,bericht,z.iso).length;};
+  let wahl=(eigen&&waehlbar(eigen))?eigen:(kand.filter(function(o){return (o.x.date||'')===z.iso&&waehlbar(o);})[0]||null);
+  box.appendChild(el('div','font-size:12px;font-weight:700;color:var(--text2);margin-top:12px;','Welcher Termin dieser Karte gehört dazu?'));
+  const listeEl=el('div','display:flex;flex-direction:column;gap:6px;margin-top:6px;');
+  const vergl=el('div','');
+  const ok=knopf('Übernehmen',KNH,function(){
+    if(!wahl||!waehlbar(wahl))return;
+    const sp=_pamVbSpanne(task,wahl.x,bericht,z.iso);if(!sp.von||!sp.bis)return;
+    L.liste.forEach(function(x){
+      if(!x)return;
+      if(x.vorabId){if(!Array.isArray(x.vorabIds))x.vorabIds=[];if(x.vorabIds.indexOf(x.vorabId)<0)x.vorabIds.push(x.vorabId);delete x.vorabId;}
+      if(x!==wahl.x&&Array.isArray(x.vorabIds))x.vorabIds=x.vorabIds.filter(function(id){return id!==bericht.id;});
+    });
+    const t2=wahl.x;
+    if(!Array.isArray(t2.vorabIds))t2.vorabIds=[];
+    if(t2.vorabIds.indexOf(bericht.id)<0)t2.vorabIds.push(bericht.id);
+    t2.date=z.iso;t2.von=sp.von;t2.bis=sp.bis;t2._pamDirty=true;t2.outlookDeleted=false;
+    speichern();weg();
+    melden('✓ Termin „'+String(t2.beschreibung||t2.betreff||'Termin')+'“ auf '+sp.von+'–'+sp.bis+' Uhr gesetzt – geht beim Speichern nach Outlook');
+    if(typeof nachher==='function')nachher();
+  });
+  ok.id='_pamVbUebOk';
+  function vergleich(){
+    vergl.innerHTML='';
+    if(!wahl||!waehlbar(wahl)){vergl.appendChild(el('div',INFO,'Kein Termin am gleichen Tag – bitte den richtigen Termin auswählen.'));ok.disabled=true;ok.style.opacity='.5';return;}
+    ok.disabled=false;ok.style.opacity='';
+    const t2=wahl.x,sp=_pamVbSpanne(task,t2,bericht,z.iso);
+    const tab=el('div','margin-top:10px;display:grid;grid-template-columns:auto 1fr;gap:2px 10px;font-size:12px;');
+    tab.append(el('span','color:var(--text2);','vorher'),el('span','',((typeof _tmTagLang==='function'&&t2.date)?_tmTagLang(t2.date):(t2.date||'ohne Tag'))+' · '+(t2.von||'?')+'–'+(t2.bis||'?')+' Uhr'),
+      el('b','','nachher'),el('b','',tagL+' · '+sp.von+'–'+sp.bis+' Uhr'));
+    vergl.appendChild(tab);
+    const andere=sp.mit.filter(function(q){return q.id!==bericht.id;}),ohne=sp.ohne.filter(function(q){return q.id!==bericht.id;});
+    if(andere.length)vergl.appendChild(el('div',INFO,'Zusammen mit '+andere.map(function(q){const zz=_pamVbZeit(q);return '„'+_pamVbName(q)+'“ ('+zz.b+'–'+zz.e+')';}).join(' und ')+': der Termin läuft vom ersten Beginn bis zum letzten Ende.'));
+    if(ohne.length)vergl.appendChild(el('div',WARN,'⚠ '+ohne.map(function(q){return '„'+_pamVbName(q)+'“';}).join(', ')+' hat noch keine gültige Zeit – zählt erst mit, wenn du sie dort einträgst.'));
+    if((t2.date||'')!==z.iso)vergl.appendChild(el('div',WARN,'⚠ Das Datum des Termins ändert sich: '+(t2.date?_pamVbTagKurz(t2.date):'ohne Tag')+' → '+_pamVbTagKurz(z.iso)));
+  }
+  kand.forEach(function(o){
+    const fremd=_pamVbFremdTag(task,o.x,bericht,z.iso);
+    const andere=_pamVbIds(o.x).filter(function(id){return id!==bericht.id;}).map(function(id){return _pamVbProt(task,id);}).filter(function(q){return q&&_pamVbZeit(q).iso===z.iso;});
+    const lab=el('label','display:flex;gap:8px;align-items:flex-start;padding:7px 9px;border:1px solid var(--border);border-radius:8px;cursor:'+(fremd.length?'not-allowed':'pointer')+';opacity:'+(fremd.length?'.55':'1')+';');
+    const r=document.createElement('input');r.type='radio';r.name='_pamVbWahl';r.className='_pamVbWahl';r.checked=(o===wahl);r.disabled=!!fremd.length;
+    r.addEventListener('change',function(){if(r.checked){wahl=o;vergleich();}});
+    const sp=el('span','');
+    sp.appendChild(el('b','',((typeof _tmTagLang==='function'&&o.x.date)?_tmTagLang(o.x.date):(o.x.date||'ohne Tag'))+' · '+(o.x.von||'?')+'–'+(o.x.bis||'?')+' Uhr'));
+    sp.appendChild(el('div','font-size:12px;color:var(--text2);',String(o.x.beschreibung||o.x.betreff||'Termin')+((o.x.date||'')===z.iso?' · gleicher Tag':'')+(o===eigen?' · 🔗 schon verbunden':'')));
+    if(andere.length)sp.appendChild(el('div','font-size:12px;color:var(--text2);','verbunden: '+andere.map(function(q){return '„'+_pamVbName(q)+'“ '+((typeof _fsBgZeitText==='function')?_fsBgZeitText(q.kopf):'');}).join(', ')));
+    if(fremd.length)sp.appendChild(el('div','font-size:12px;color:var(--text2);','gehört schon zu „'+_pamVbName(fremd[0])+'“ vom '+String(fremd[0].datum||'')+' – ein Termin hat nur einen Tag'));
+    lab.append(r,sp);listeEl.appendChild(lab);
+  });
+  box.appendChild(listeEl);
+  box.appendChild(vergl);
+  box.appendChild(el('div',INFO,'ⓘ Geht wie jede Terminänderung nach Outlook. Auf der Karte zählen dann die echten Stunden. Abhaken machst du selbst.'));
+  fuss.append(ok,knopf('Abbrechen',KN,weg));
+  box.appendChild(fuss);
+  document.body.appendChild(ov);
+  vergleich();
 }
 // F14: neues Begehungsprotokoll am PC anlegen (Menü ＋). art: 'keller' oder leer (Wohnung). Dasselbe Formular wie am Tablet, danach in der Liste.
 function _pamFeuchteNeu(art){

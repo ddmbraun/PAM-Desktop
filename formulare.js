@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F44';
+const PAM_FORMULARE_VERSION='F45';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -1654,21 +1654,35 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const zeitKn=document.createElement('div');zeitKn.style.cssText='display:flex;flex-wrap:wrap;gap:8px;padding:8px 14px;';
       const zk=(txt,fn,attr)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute(attr,'1');b.style.cssText=S_KNOPF+'min-height:var(--fsh44,44px);border:1.5px solid '+FS_FARBE+';background:rgba(31,95,139,.12);color:var(--text);';b.onclick=fn;return b;};
       zeitKn.append(
-        zk('📍 Ich bin jetzt hier (Datum + Uhrzeit)',()=>{const j=_fsVbJetzt();bericht.datum=j.datum;bericht.kopf.beginn=j.uhr;scheduleSave();hdrS.textContent=(bericht.kopf.objektAdresse||t.adresse||t.title||'')+' · '+(bericht.datum||'');const tm=(_fsAmPc()&&typeof _pamVbTermin==='function')?_pamVbTermin(bericht,'beginn'):'';_neuBauen();toast('✓ Datum '+j.datum+', Beginn '+j.uhr+' Uhr eingetragen'+(tm?' · '+tm:''),'success',tm?5000:3500);},'data-fs-jetzt-beginn'),
-        zk('🏁 Fertig (Ende jetzt)',()=>{const j=_fsVbJetzt();bericht.kopf.ende=j.uhr;scheduleSave();const tm=(_fsAmPc()&&typeof _pamVbTermin==='function')?_pamVbTermin(bericht,'ende'):'';_neuBauen();toast('✓ Ende '+j.uhr+' Uhr eingetragen'+(tm?' · '+tm:''),'success',tm?5000:3500);},'data-fs-jetzt-ende'));
+        zk('📍 Ich bin jetzt hier (Datum + Uhrzeit)',()=>{const j=_fsVbJetzt();bericht.datum=j.datum;bericht.kopf.beginn=j.uhr;scheduleSave();hdrS.textContent=(bericht.kopf.objektAdresse||t.adresse||t.title||'')+' · '+(bericht.datum||'');_neuBauen();toast('✓ Datum '+j.datum+', Beginn '+j.uhr+' Uhr eingetragen – nur im Protokoll','success',3500);},'data-fs-jetzt-beginn'),
+        zk('🏁 Fertig (Ende jetzt)',()=>{const j=_fsVbJetzt();const tag=String(bericht.datum||'').trim();
+          if(tag&&tag!==j.datum&&!confirm(_fsVbFertigFrage(tag,j))){_vbZeitAuf=true;_neuBauen();toast('Bitte das Ende von Hand eintragen (Feld „Ende“)','info',4000);return;}
+          bericht.kopf.ende=j.uhr;scheduleSave();_neuBauen();toast('✓ Ende '+j.uhr+' Uhr eingetragen – nur im Protokoll','success',3500);},'data-fs-jetzt-ende'));
       const zz=document.createElement('div');zz.setAttribute('data-fs-zeitzeile','1');zz.style.cssText='display:flex;align-items:center;gap:10px;padding:2px 14px 8px;font-size:var(--fs14,14px);color:var(--text);';
       const zt=document.createElement('span');zt.style.cssText='flex:1;min-width:0;';const ztx=_fsBgZeitText(bericht.kopf);
       zt.textContent=(String(bericht.datum||'').trim()||'noch kein Datum')+' · '+(ztx||'noch kein Beginn');
       const zb=document.createElement('button');zb.type='button';zb.textContent=_vbZeitAuf?'▲ fertig':'✏ ändern';zb.setAttribute('data-fs-zeitaendern','1');
       zb.style.cssText=S_KNOPF+'min-height:var(--fsh,40px);border:1px solid var(--fs-krd,var(--border));background:var(--fs-kfl,transparent);color:var(--text);';zb.onclick=()=>{_vbZeitAuf=!_vbZeitAuf;_neuBauen();};
       zz.append(zt,zb);
+      /* F45: Hinweis, wenn das Ende fehlt oder nicht zum Beginn passt */
+      const hinweisVb=(()=>{const tx=_fsVbZeitHinweis(bericht.kopf);if(!tx)return null;
+        const h=document.createElement('div');h.setAttribute('data-fs-zeithinweis','1');
+        h.style.cssText='margin:0 14px 8px;padding:7px 10px;border-radius:8px;background:rgba(230,126,34,.16);color:var(--text);font-size:var(--fs13,13px);line-height:1.45;';
+        h.textContent=tx;return h;})();
+      /* F45: nur am PC – die Zeit auf Knopfdruck in einen vorhandenen Termin der Karte übertragen (die Knöpfe oben legen keinen Termin mehr an) */
+      const uebVb=(()=>{if(!_fsAmPc()||typeof _pamVbZeitStand!=='function'||typeof _pamVbZeitUebertragen!=='function')return null;
+        const st=_pamVbZeitStand(bericht,t);const r=document.createElement('div');r.style.cssText='padding:0 14px 8px;';
+        const b=document.createElement('button');b.type='button';b.textContent=st.txt;b.setAttribute('data-fs-zeit-termin',st.art);
+        b.style.cssText=S_KNOPF+'min-height:var(--fsh,40px);border:1.5px solid '+FS_FARBE+';background:'+(st.art==='fertig'?'transparent':'rgba(31,95,139,.12)')+';color:var(--text);';
+        b.onclick=()=>{_pamVbZeitUebertragen(bericht,t,()=>_neuBauen(),()=>{_vbZeitAuf=true;_neuBauen();});};
+        r.appendChild(b);return r;})();
       const nameZeile=(()=>{ // F26: Name des Protokolls (Besichtigung 2) – erscheint in der Liste an der Karte, im PDF und im Dateinamen
       const row=document.createElement('div');row.setAttribute('data-fs-protname','1');row.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 14px;';
       const l=document.createElement('span');l.style.cssText='font-size:var(--fs13,13px);color:var(--text2);width:112px;flex-shrink:0;';l.textContent='Name';
       row.append(l,_inp(bericht.protName,'Besichtigung – z. B. Besichtigung Wohnung 2. OG',v=>{bericht.protName=v;hdrT.textContent='💧 '+_fsTitel(bericht);},false));
       return row;
     })();
-    w.append(...(bericht.schlank?[nameZeile]:[]).concat([bei],bericht.schlank?[]:[_feld('Lage','lage','z. B. Wohnung darüber, Keller')],[zeitKn,zz])); // F23: Besichtigung 2 ohne Lage · F26: mit Name
+    w.append(...(bericht.schlank?[nameZeile]:[]).concat([bei],bericht.schlank?[]:[_feld('Lage','lage','z. B. Wohnung darüber, Keller')],[zeitKn,zz],hinweisVb?[hinweisVb]:[],uebVb?[uebVb]:[])); // F23: Besichtigung 2 ohne Lage · F26: mit Name
       if(_vbZeitAuf){
       const datRow=document.createElement('div');datRow.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 14px;border-top:1px solid var(--border);';
       const dl=document.createElement('span');dl.style.cssText='font-size:var(--fs13,13px);color:var(--text2);width:112px;flex-shrink:0;';dl.textContent='Datum';
@@ -4091,6 +4105,29 @@ function _fsBgAnwesendText(b){
   const l=(b&&Array.isArray(b.anwesende))?b.anwesende.filter(p=>p&&String(p.name||'').trim()):[];
   if(l.length)return l.map(p=>String(p.name).trim()+(String(p.rolle||'').trim()?' ('+String(p.rolle).trim()+')':'')).join(' · ');
   return String((b&&b.kopf&&b.kopf.anwesend)||'').trim();
+}
+/* F45: Uhrzeit lesen – „9:30“, „09.30“ → „09:30“; keine gültige Uhrzeit → leer */
+function _fsVbUhr(s){const m=/^(\d{1,2})[:.](\d{2})$/.exec(String(s==null?'':s).trim());if(!m||+m[1]>23||+m[2]>59)return '';return ('0'+(+m[1])).slice(-2)+':'+m[2];}
+/* F45: Zustand der Zeit im Protokoll – ohne (kein Beginn) · endeFehlt · endeUngueltig · endeVor (Ende vor oder gleich Beginn) · ok */
+function _fsVbZeitStatus(k){
+  const b=_fsVbUhr(k&&k.beginn),roh=String((k&&k.ende)||'').trim(),e=_fsVbUhr(roh);
+  if(!b)return {art:'ohne'};
+  if(!roh)return {art:'endeFehlt',b:b};
+  if(!e)return {art:'endeUngueltig',b:b,roh:roh};
+  if(e<=b)return {art:'endeVor',b:b,e:e};
+  return {art:'ok',b:b,e:e};
+}
+/* F45: Hinweis unter der Zeitzeile (Anlass: Protokoll mit 14:23 bis 09:48 – „Fertig“ erst am nächsten Tag gedrückt) */
+function _fsVbZeitHinweis(k){
+  const s=_fsVbZeitStatus(k);
+  if(s.art==='endeFehlt')return '⚠ Ende fehlt – am Schluss „🏁 Fertig“ drücken oder über „✏ ändern“ nachtragen.';
+  if(s.art==='endeUngueltig')return '⚠ Ende „'+s.roh+'“ ist keine Uhrzeit (hh:mm) – über „✏ ändern“ richtigstellen.';
+  if(s.art==='endeVor')return '⚠ Ende '+s.e+' liegt vor Beginn '+s.b+' – vermutlich „Fertig“ an einem anderen Tag gedrückt. Über „✏ ändern“ richtigstellen.';
+  return '';
+}
+/* F45: Rückfrage, wenn „🏁 Fertig“ an einem anderen Tag gedrückt wird als dem des Protokolls */
+function _fsVbFertigFrage(tag,j){
+  return 'Das Protokoll ist vom '+tag+', heute ist der '+j.datum+'.\n\n„Fertig“ würde '+j.uhr+' Uhr als Ende eintragen – das passt dann nicht zum Beginn.\n\nOK = trotzdem '+j.uhr+' Uhr eintragen\nAbbrechen = Ende von Hand eintragen';
 }
 function _fsBgZeitText(k){
   const a=String((k&&k.beginn)||'').trim(),e=String((k&&k.ende)||'').trim();
