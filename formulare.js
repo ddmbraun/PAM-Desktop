@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F47';
+const PAM_FORMULARE_VERSION='F48';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -1201,7 +1201,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     row.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 14px;border-top:1px solid var(--border);';
     const l=document.createElement('span');l.style.cssText='font-size:var(--fs13,13px);color:var(--text2);width:112px;flex-shrink:0;';l.textContent=label;
     const i=_inp(bericht.kopf[key],ph,v=>{bericht.kopf[key]=v;if(key==='aussenT'||key==='aussenRf')_fsWerteNeu();if(key==='pruefer'&&bericht.fassung==='begehung'&&typeof _fsBgMerkName==='function')_fsBgMerkName(v);},zahl);
-    row.append(l,(key==='anlass'&&typeof _fsKlappFeld==='function')?_fsKlappFeld(bericht.kopf[key],ph,v=>{bericht.kopf[key]=v;scheduleSave();},S_INP,['data-fs-klappfeld',key]):i);return row; /* F44: „Anlass“ bleibt eine Zeile und klappt beim Antippen auf */
+    row.append(l,(key==='anlass'&&typeof _fsKlappFeld==='function')?_fsKlappFeld(bericht.kopf[key],ph,v=>{bericht.kopf[key]=v;if(key==='anlass'&&_fsVbNameNachAnlass(bericht,v)){hdrT.textContent='🔍 '+_fsTitel(bericht);const ni=body.querySelector('[data-fs-protname] input');if(ni)ni.value=bericht.protName;}scheduleSave();},S_INP,['data-fs-klappfeld',key]):i);return row; /* F44: „Anlass“ bleibt eine Zeile und klappt beim Antippen auf */
   }
   function _chip(label,an,fn){
     const b=document.createElement('button');b.type='button';b.textContent=label;
@@ -1618,6 +1618,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const kopf=document.createElement('div');kopf.style.cssText='font-size:var(--fs13,13px);color:var(--text2);margin-bottom:6px;';kopf.textContent='Anwesend – Person und Rolle';
     w.appendChild(kopf);
     const wahl=_fsAnwesendWahl(t,bericht.kopf.pruefer);
+    const ichMerken=q=>{const n=String((q&&q.name)||'').trim();if(q&&q.rolle==='Aufgenommen von'&&n){bericht.kopf.pruefer=n;_fsBgMerkName(n);}}; /* F48: wer „Aufgenommen von“ ist, merkt sich das Gerät (am PC an beiden Rechnern gleich) – fürs nächste Protokoll */
     bericht.anwesende.forEach((p,pi)=>{
       const row=document.createElement('div');row.style.cssText='display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) var(--fsh,40px);gap:6px;margin-bottom:6px;align-items:center;';
       const ps=document.createElement('select');ps.style.cssText=S_INP;ps.setAttribute('data-fs-person',String(pi));
@@ -1628,15 +1629,15 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       opts.forEach(o=>{const e=document.createElement('option');e.value=o.w;e.textContent=o.t;ps.appendChild(e);});
       ps.value=name;
       ps.onchange=()=>{
-        if(ps.value==='__frei'){const n=prompt('Name der Person',name);if(n!==null&&n.trim()){p.name=n.replace(/\s+/g,' ').trim();scheduleSave();}_neuBauen();return;}
-        p.name=ps.value;const x=wahl.find(q=>q.name===ps.value);if(x&&x.rolle)p.rolle=x.rolle;scheduleSave();_neuBauen();
+        if(ps.value==='__frei'){const n=prompt('Name der Person',name);if(n!==null&&n.trim()){p.name=n.replace(/\s+/g,' ').trim();ichMerken(p);scheduleSave();}_neuBauen();return;}
+        p.name=ps.value;const x=wahl.find(q=>q.name===ps.value);if(x&&x.rolle)p.rolle=x.rolle;ichMerken(p);scheduleSave();_neuBauen();
       };
       const sel=document.createElement('select');sel.style.cssText=S_INP;
       const o0=document.createElement('option');o0.value='';o0.textContent='– Rolle –';sel.appendChild(o0);
       const rollen=FS_B2_ROLLEN.slice();if(p.rolle&&rollen.indexOf(p.rolle)<0)rollen.push(p.rolle);
       rollen.forEach(r=>{const o=document.createElement('option');o.value=r;o.textContent=r;sel.appendChild(o);});
       sel.value=p.rolle||'';
-      sel.onchange=()=>{p.rolle=sel.value;scheduleSave();_neuBauen();};
+      sel.onchange=()=>{p.rolle=sel.value;ichMerken(p);scheduleSave();_neuBauen();};
       const x=_bgXKnopf('Person entfernen',()=>{if(String(p.name||'').trim()&&!confirm('„'+String(p.name).trim()+'" entfernen?'))return;bericht.anwesende.splice(pi,1);scheduleSave();_neuBauen();});
       row.append(ps,sel,x);w.appendChild(row);
     });
@@ -1850,7 +1851,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const nameZeile=(()=>{ // F26: Name des Protokolls (Besichtigung 2) – erscheint in der Liste an der Karte, im PDF und im Dateinamen
       const row=document.createElement('div');row.setAttribute('data-fs-protname','1');row.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 14px;';
       const l=document.createElement('span');l.style.cssText='font-size:var(--fs13,13px);color:var(--text2);width:112px;flex-shrink:0;';l.textContent='Name';
-      row.append(l,_inp(bericht.protName,'Besichtigung – z. B. Besichtigung Wohnung 2. OG',v=>{bericht.protName=v;hdrT.textContent='🔍 '+_fsTitel(bericht);},false));
+      row.append(l,_inp(bericht.protName,'leer = Vorabbesichtigung – z. B. Wohnung 2. OG',v=>{bericht.protName=v;hdrT.textContent='🔍 '+_fsTitel(bericht);bericht.protNameAuto=false;},false)); /* F48: grauer Text; selbst getippt = PAM zieht nicht mehr nach */
       return row;
     })();
     w.append(...(bericht.schlank?[nameZeile,_vbKopfB2()]:[]).concat([bei],bericht.schlank?[]:[_feld('Lage','lage','z. B. Wohnung darüber, Keller')],[zeitKn,zz],hinweisVb?[hinweisVb]:[],uebVb?[uebVb]:[])); // F23: Besichtigung 2 ohne Lage · F26: mit Name
@@ -4297,10 +4298,18 @@ function _fsVbVorbelegen(b,t){
   if(!b||!b.kopf)return b;
   const a=String(b.kopf.anlass||'').trim();
   if(a){b.kopf.anlassVorschlag=a;b.kopf.anlassQuelle=_fsVbAnlassQuelle(t);}
-  if(b.schlank&&!String(b.protName||'').trim())b.protName=_fsNameAusAnlass(a);
+  if(b.schlank&&!String(b.protName||'').trim())b.protName=_fsNameAusAnlass(a);if(b.schlank&&String(b.protName||'').trim())b.protNameAuto=true; /* F48: von PAM gesetzt – darf beim Ändern des Anlasses nachziehen */
   const ich=String(b.kopf.pruefer||'').trim();
   if(ich&&Array.isArray(b.anwesende)&&!b.anwesende.some(p=>p&&String(p.name||'').trim().toLowerCase()===ich.toLowerCase()))b.anwesende.push({name:ich,rolle:'Aufgenommen von'});
   return b;
+}
+/* F48: Name aus dem Anlass NACHZIEHEN (Frank 09.10.2026: Karte ohne Schadensbild → Name blieb leer). Nur wenn der Name leer ist oder von PAM stammt
+   (protNameAuto); einen selbst eingetippten Namen ändert PAM nie. Gibt true zurück, wenn der Name gesetzt wurde. */
+function _fsVbNameNachAnlass(b,anlass){
+  if(!b||!b.schlank)return false;
+  if(String(b.protName||'').trim()&&b.protNameAuto!==true)return false;
+  b.protName=_fsNameAusAnlass(anlass);b.protNameAuto=!!b.protName;
+  return true;
 }
 // Auswahl „Auftraggeber“: Hausverwaltung, Rechnungsanschrift, dann Eigentümer/Auftraggeber aus den Kontakten, danach die übrigen Kontakte
 function _fsAuftraggeberWahl(t){
