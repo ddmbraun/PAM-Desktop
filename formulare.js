@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F46';
+const PAM_FORMULARE_VERSION='F47';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -305,7 +305,7 @@ function _fsNeuerBericht(t,art){
     b.art='keller';b.titel=FS_KELLER_TITEL;
     b.sektionen=FS_KELLER_SEKTIONEN.map(s=>({titel:s.titel,items:s.items.map(text=>({text,status:'offen',notiz:''}))}));
   }
-  if(art==='vorab'||art==='besichtigung2'){b.art='vorab';b.titel='Vorabbesichtigung';if(art==='besichtigung2'){b.schlank=true;b.titel='Besichtigung';b.protName='';}} // F16: Inhalte setzt _fsBgUmstellen · F23: „Besichtigung 2“ = dieselbe Art, aber schlank (Kennzeichen schlank)
+  if(art==='vorab'||art==='besichtigung2'){b.art='vorab';b.titel='Vorabbesichtigung';if(art==='besichtigung2'){b.schlank=true;b.titel='Vorabbesichtigung';b.protName='';}} // F16: Inhalte setzt _fsBgUmstellen · F23: „Besichtigung 2“ = dieselbe Art, aber schlank (Kennzeichen schlank)
   return b;
 }
 // Altbestand/Fremdgerät: fehlende Teile ergänzen, nichts überschreiben
@@ -342,6 +342,7 @@ function _fsVervollstaendigen(b){
         if(typeof b.zeigeInnen!=='boolean')b.zeigeInnen=true;if(typeof b.zeigeAussen!=='boolean')b.zeigeAussen=true;
         b.vbStellen.forEach(s=>{if(!s)return;if(s.typ!=='innen'&&s.typ!=='aussen')s.typ=(String(s.raum||'').trim()==='Außen')?'aussen':'innen';if(typeof s.seite!=='string')s.seite='';if(typeof s.seiteGrad!=='number'||!isFinite(s.seiteGrad))s.seiteGrad=null;});
         b.vbUmgebung.forEach(r=>{if(r&&r.bereich!=='aussen')r.bereich='innen';});
+        if(!Array.isArray(b.notizen))b.notizen=[];b.notizen=b.notizen.filter(n=>n&&typeof n==='object');b.notizen.forEach(n=>{if(typeof n.text!=='string')n.text=String(n.text==null?'':n.text);n.pdf=n.pdf===true;if(typeof n.id!=='string'||!n.id)n.id='nz_'+Math.random().toString(36).slice(2,9);}); /* F47: Notizen – je Notiz „im PDF“ oder „nur für mich“ */
       }
       b.vbStellen.forEach(s=>{if(s&&s.pin!==undefined&&s.pin!==null&&!(isFinite(+s.pin.lat)&&isFinite(+s.pin.lon)))s.pin=null;});} // F22: Eingrenzen · F24: Luftbild-Pin je Stelle
     if(b.art==='vorab')['versicherung','schadennr','zugang','ansprechpartner','besuchBei','lage'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';}); // F16
@@ -366,7 +367,7 @@ function _fsPdfName(bericht,zeit){
   }
   if(bericht&&bericht.fassung==='begehung'&&bericht.art==='vorab'){ // F16, F17: mit der Rolle, bei wem es war (Eigentuemer, Mieter, …)
     const rolle=String((bericht.kopf&&bericht.kopf.besuchBei)||'').split(':')[0].replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/Ä/g,'Ae').replace(/Ö/g,'Oe').replace(/Ü/g,'Ue').replace(/ß/g,'ss').replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,16);
-    return (bericht.schlank?(_fsDateiSlug(bericht.protName,30)||'Besichtigung'):'Vorabbesichtigung')+(rolle?'_'+rolle:'')+(datum?'_'+datum:'')+uhr+'.pdf'; // F23, F26
+    return (bericht.schlank?(_fsDateiSlug(bericht.protName,30)||'Vorabbesichtigung'):'Vorabbesichtigung')+(rolle?'_'+rolle:'')+(datum?'_'+datum:'')+uhr+'.pdf'; // F23, F26
   }
   if(bericht&&bericht.fassung==='begehung')return 'Begehung'+(bericht.art==='keller'?'_Keller':'_Wohnung')+(datum?'_'+datum:'')+uhr+'.pdf'; // F2a: kurzer Name (Pfadlänge)
   return 'Feuchteprotokoll'+(bericht&&bericht.art==='keller'?'_Keller':'')+(datum?'_'+datum:'')+uhr+'.pdf';
@@ -474,6 +475,36 @@ const FS_HILFE_BG={
     'Das PDF erstellst du am PC (Karte → Formulare → ⋯ → „PDF neu erstellen"). Es landet im Ordner der Karte. Nur Fotos mit grünem Haken kommen hinein.'
   ]
 };
+/* F47: eigene Anleitung der Vorabbesichtigung (vorher zeigte 📘 auch hier „Feuchte messen“ mit testo und Messplan) */
+const FS_HILFE_VB=[
+  ['Vor Ort',[
+    'Name, Auftraggeber und Objekt kommen aus der Karte. Prüfen und bei Bedarf ändern – „↻ Aus der Karte neu holen“ holt sie neu.',
+    '„Besichtigung bei“: die Person antippen, in deren Wohnung du bist (Mieter oder Eigentümer).',
+    'Bei Ankunft „📍 Ich bin jetzt hier“, am Schluss „🏁 Fertig“. Vergessen? In der Formular-Liste der Karte steht dann „Ende fehlt“ – dort mit 🏁 nachtragen.',
+    '„🌤 Wetter holen“ nimmt das Wetter zur Beginn-Zeit vom Wetterdienst (Standort nötig) – im PDF steht „nicht vor Ort gemessen“.',
+    'Am PC: „📅 Zeit in Termin übertragen“ setzt die Zeit in den Termin der Karte – auch aus der Formular-Liste (⋯).'
+  ]],
+  ['Gemeldet und Vorgeschichte',[
+    'Der Anlass kommt aus der Karte. Antippen, ob du es wie gemeldet vorgefunden hast.',
+    'Was Auftraggeber oder Nutzer erzählen, gehört in „Vorgeschichte laut Auftraggeber“ – im PDF steht es als „nicht selbst festgestellt“.'
+  ]],
+  ['Feststellungen',[
+    'Erst Innen oder Außen, dann einen Raum bzw. Bereich wählen und darin „＋ Stelle“.',
+    'Je Stelle: Wo? · Seite (freiwillig; 🧭 misst sie, erst „Seite übernehmen“ trägt sie ein) · Was siehst du? · 📷 Foto · 🛰 Luftbild.',
+    'Weitere Stellen im selben Raum oder Bereich: dort „＋ Stelle“. Eine zweite Wand als eigene Gruppe: „＋ anderer Bereich“ mit eigenem Namen.',
+    '„＋ Skizze“: innen Raum von oben, Wand von vorn oder Decke von unten; außen Wand von vorn oder Dachfläche von oben.',
+    'Die Überschrift „🏠 Innen“ oder „🌤 Außen“ antippen klappt den Teil zu – im PDF bleibt alles.'
+  ]],
+  ['Umgebung abgehen',[
+    '✓ nichts festgestellt · ⚠ festgestellt (legt eine neue Stelle an) · ∅ nicht geprüft mit Grund, z. B. kein Zugang.',
+    'Was du nicht antippst, steht nicht im PDF.'
+  ]],
+  ['Notizen, Fotos, PDF',[
+    '📝 Notizen: „📄 im PDF“ steht unter „Bemerkungen“, „🔒 nur für mich“ siehst nur du.',
+    'Fotos: einmal antippen = ins PDF ja oder nein, zweimal = groß. 📌 markiert Stellen im Foto.',
+    'Das PDF erstellst du am PC (Karte → Formulare → ⋯ → „PDF neu erstellen“). Nur Feststellungen – keine Ursache, keine Empfehlung.'
+  ]]
+];
 function _fsHilfeZeigen(b){
   const alt=document.getElementById('_fsHilfe');if(alt){alt.remove();return;}
   if(!b){try{b=(document.getElementById('_fsMobOverlay')||{})._fsBericht;}catch(e){b=null;}} // F2a: das offene Protokoll (Knopf ruft ohne Angabe auf)
@@ -485,11 +516,11 @@ function _fsHilfeZeigen(b){
   const zu=document.createElement('button');zu.type='button';zu.textContent='←';zu.setAttribute('aria-label','Anleitung schließen');
   zu.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:40px;height:40px;border-radius:8px;font-size:var(--fs18,18px);cursor:pointer;flex-shrink:0;';
   zu.onclick=()=>ov.remove();
-  const t=document.createElement('div');t.style.cssText='font-size:var(--fs15,15px);font-weight:700;color:#fff;';t.textContent="📘 So geht's – Feuchte messen";
+  const t=document.createElement('div');t.style.cssText='font-size:var(--fs15,15px);font-weight:700;color:#fff;';t.textContent=(b&&_fsIstVorab(b))?"📘 So geht's – Vorabbesichtigung":"📘 So geht's – Feuchte messen"; /* F47 */
   kopf.append(zu,t);
   const inhalt=document.createElement('div');
   inhalt.style.cssText='flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:4px 16px 40px;';
-  FS_HILFE.forEach(([titel,zeilen0])=>{
+  ((b&&_fsIstVorab(b))?FS_HILFE_VB:FS_HILFE).forEach(([titel,zeilen0])=>{ /* F47 */
     const zeilen=(bg&&FS_HILFE_BG[titel])?FS_HILFE_BG[titel]:zeilen0; // F2a
     const h=document.createElement('div');h.textContent=titel;
     h.style.cssText='font-size:var(--fs15,15px);font-weight:700;color:var(--text);margin:16px 0 6px;padding-left:8px;border-left:4px solid '+FS_FARBE+';';
@@ -982,6 +1013,7 @@ function _fsWordAufbau(b,task){
     if(hat(b.datum)||zt)z.push(['Datum, Zeit',[hat(b.datum)?String(b.datum).trim():'',zt].filter(Boolean).join(', ')]);
     if(hat(k.besuchBei))z.push(['Besichtigung bei',String(k.besuchBei).trim()]);
     if(aw)z.push(['Anwesend',aw]);
+    {const wt=_fsWetterKurz(k);if(wt)z.push(['Wetter',wt+' (Wetterdienst, nicht vor Ort gemessen)']);} /* F47 */
     if(hat(k.pruefer))z.push(['Aufgenommen von',String(k.pruefer).trim()]);
     if(z.length){B.push({a:'kapitel',t:'Vor Ort'});B.push({a:'tabelle',z:z});}
   }
@@ -1027,6 +1059,11 @@ function _fsWordAufbau(b,task){
   { /* Umgebung */
     const erg=_fsVbErgebnisZeilen(b);
     if(erg.length){B.push({a:'kapitel',t:'Umgebung'});erg.forEach(z=>B.push({a:'text',t:z}));}
+  }
+  if(hat(b.vorgeschichte)){B.push({a:'kapitel',t:'Vorgeschichte laut Auftraggeber (nicht selbst festgestellt)'});B.push({a:'text',t:String(b.vorgeschichte).trim()});} /* F47 */
+  { /* F47: Bemerkungen – nur Notizen mit „im PDF“ */
+    const nz=Array.isArray(b.notizen)?b.notizen.filter(n=>n&&n.pdf===true&&hat(n.text)):[];
+    if(nz.length){B.push({a:'kapitel',t:'Bemerkungen'});nz.forEach(n=>B.push({a:'text',t:String(n.text).trim()}));}
   }
   { /* Fotos im Protokoll, die an keiner Stelle hängen */
     const rest=alle.filter(f=>drin.indexOf(f)<0);
@@ -1107,6 +1144,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     if(art==='vorab'||art==='besichtigung2'){ // F16 (F23: auch Besichtigung 2): Anlass aus der Karte vorschlagen; die Bei-Bedarf-Abschnitte (Feststellungen 2–4, Termin, Räume) starten zugeklappt – nur Anzeige, nicht im Protokoll
       try{
         _fsKopfErgaenzen(bericht,t);
+        if(art==='besichtigung2')_fsVbVorbelegen(bericht,t); /* F47: Name aus dem Anlass, du selbst unter „Anwesend“, Herkunft des Anlasses */
         [1,2,3].forEach(si=>_fsZuSetzen(bericht.id,si,true));
         _fsZuMehrere(bericht.id,['b:termin','b:raeume'],true);
       }catch(e){console.warn('[Vorabbesichtigung] Start:',e);}
@@ -1135,7 +1173,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   closeBtn.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:40px;height:40px;border-radius:8px;font-size:var(--fs18,18px);cursor:pointer;flex-shrink:0;';
   closeBtn.onclick=()=>{ov.remove();try{const ct=currentTask();if(ct)renderDetail(ct);}catch(e){console.warn('[Feuchte] zurück:',e);}};
   const hdrMeta=document.createElement('div');hdrMeta.style.cssText='flex:1 1 100px;min-width:0;';
-  const hdrT=document.createElement('div');hdrT.style.cssText='font-size:var(--fs15,15px);font-weight:700;color:#fff;';hdrT.textContent='💧 '+_fsTitel(bericht);
+  const hdrT=document.createElement('div');hdrT.style.cssText='font-size:var(--fs15,15px);font-weight:700;color:#fff;';hdrT.textContent=(_fsIstVorab(bericht)?'🔍 ':'💧 ')+_fsTitel(bericht); /* F47: 🔍 wie im Menü */
   const hdrS=document.createElement('div');hdrS.style.cssText='font-size:var(--fs12,12px);color:rgba(255,255,255,.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
   hdrS.textContent=(bericht.kopf.objektAdresse||t.adresse||t.title||'')+' · '+(bericht.datum||'');
   hdrMeta.append(hdrT,hdrS);
@@ -1174,7 +1212,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   function _neuBauen(){
     const sc=body.scrollTop;
     body.innerHTML='';_vbUmgFuellen=null; // F23
-    if(_fsIstVorab(bericht)&&bericht.schlank&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_bgBlock('vorort',_teilVorOrtVb),_bgBlock('gemeldet',_teilGemeldetVb),_bgBlock('stellen',_teilFeststellungenB2),_bgBlock('fotos',_teilFotos,'Fotos')); // F23: Besichtigung 2 · F38: ohne den Abschnitt „Räume“ (seit F36 sitzt die Skizze beim Raum; der Balken stand noch da und hieß „raeume“)
+    if(_fsIstVorab(bericht)&&bericht.schlank&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_bgBlock('vorort',_teilVorOrtVb),_bgBlock('gemeldet',_teilGemeldetVb),_bgBlock('stellen',_teilFeststellungenB2),_bgBlock('notizen',_teilNotizenB2),_bgBlock('fotos',_teilFotos,'Fotos')); // F23: Besichtigung 2 · F38: ohne den Abschnitt „Räume“ (seit F36 sitzt die Skizze beim Raum; der Balken stand noch da und hieß „raeume“)
     else if(_fsIstVorab(bericht)&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_bgBlock('vorort',_teilVorOrtVb),_bgBlock('gemeldet',_teilGemeldetVb),_bgBlock('stellen',_teilStellenBlockVb),_bgBlock('umgebung',_teilUmgebungVb),_bgBlock('ergebnis',_teilErgebnisVb),_bgBlock('fotos',_teilFotos,'Fotos'),_bgBlock('vorgeschichte',_teilVorgeschichteVb),_bgBlock('karte',_teilKarteVb),_bgBlock('versich',_teilVersichVb),_bgBlock('fest',_teilChecklistenBg,'Feststellungen vor Ort'),...(_vbAltAngaben()?[_bgBlock('angaben',_teilAngabenBg,'Angaben der Nutzer (nicht selbst festgestellt)')]:[]),_bgBlock('termin',_teilTerminBg),_bgBlock('raeume',_teilRaeumeBg,'Räume')); // F20: „Vor Ort“ offen, der Rest zugeklappt
     else if(bericht.fassung==='begehung'&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_teilKopfBg(),_bgBlock('raeume',_teilRaeumeBg,'Räume'),_bgBlock('fest',_teilChecklistenBg,'Feststellungen vor Ort'),_bgBlock('angaben',_teilAngabenBg,'Angaben der Nutzer (nicht selbst festgestellt)'),_bgBlock('fazit',_teilZusammenfassungBg,'Zusammenfassung der Feststellungen'),_bgBlock('fotos',_teilFotos,'Fotos')); // F2b: zuklappbar, Leiste oben
     else{
@@ -1184,7 +1222,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     body.scrollTop=sc;
     _fsWerteNeu();
   }
-  function _fsStats(){
+  function _fsStats(){if(_fsIstVorab(bericht)){const n=_fsVbStellenGefuellt(bericht).length;statsEl.textContent=n+(n===1?' Stelle':' Stellen');return;} /* F47: vorher zählte die Kopfleiste die Messstellen des Feuchte-Teils („0 Stellen“) */
     const w=bericht.stellen.map(st=>_fsStelleWerte(bericht,st));
     const rot=w.filter(x=>x.ampel==='rot').length;
     statsEl.textContent=bericht.stellen.length+(bericht.stellen.length===1?' Stelle':' Stellen')+((rot&&bericht.fassung!=='begehung')?' · '+rot+' rot':''); // F2a: keine Ampelzählung im Begehungsprotokoll
@@ -1528,6 +1566,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   }
 
   function _teilAnwesende(){
+    if(bericht.schlank)return _teilAnwesendeB2(); /* F47 */
     const w=document.createElement('div');w.setAttribute('data-fs-anwesende','1');
     w.style.cssText='padding:6px 14px 8px;border-top:1px solid var(--border);';
     const kopf=document.createElement('div');kopf.style.cssText='font-size:var(--fs13,13px);color:var(--text2);margin-bottom:6px;';kopf.textContent='Anwesend – Name und Rolle';
@@ -1567,6 +1606,46 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const rolle=bericht.schlank?(FS_B2_KONTAKTROLLEN[kx.rolle]||''):(kx.rolle==='mieter'?'Nutzer':(['ag','privatkunde','eigentuemer','hausverwaltung'].indexOf(kx.rolle)>=0?'Vertreter Auftraggeber':'')); // F25
       chips.appendChild(_chip('＋ '+nm,false,()=>{bericht.anwesende.push({name:nm,rolle});scheduleSave();_neuBauen();}));
     });
+    w.appendChild(chips);
+    return w;
+  }
+
+  /* F47: Anwesend als Auswahlliste (Frank 09.10.2026: „alle, die bei Ansprechpartner aufgelistet sind … Dropdownliste“) – je Zeile eine Person aus
+     den Kontakten der Karte, du selbst oder „✎ andere Person eintippen …“; die Rolle stellt sich nach dem Kontakt ein (änderbar) */
+  function _teilAnwesendeB2(){
+    const w=document.createElement('div');w.setAttribute('data-fs-anwesende','1');
+    w.style.cssText='padding:6px 14px 8px;border-top:1px solid var(--border);';
+    const kopf=document.createElement('div');kopf.style.cssText='font-size:var(--fs13,13px);color:var(--text2);margin-bottom:6px;';kopf.textContent='Anwesend – Person und Rolle';
+    w.appendChild(kopf);
+    const wahl=_fsAnwesendWahl(t,bericht.kopf.pruefer);
+    bericht.anwesende.forEach((p,pi)=>{
+      const row=document.createElement('div');row.style.cssText='display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) var(--fsh,40px);gap:6px;margin-bottom:6px;align-items:center;';
+      const ps=document.createElement('select');ps.style.cssText=S_INP;ps.setAttribute('data-fs-person',String(pi));
+      const name=String(p.name||'').trim();
+      const opts=[{w:'',t:'– Person wählen –'}].concat(wahl.map(x=>({w:x.name,t:x.name+(x.rolle?' ('+x.rolle+')':'')})));
+      if(name&&!wahl.some(x=>x.name===name))opts.push({w:name,t:name});
+      opts.push({w:'__frei',t:'✎ andere Person eintippen …'});
+      opts.forEach(o=>{const e=document.createElement('option');e.value=o.w;e.textContent=o.t;ps.appendChild(e);});
+      ps.value=name;
+      ps.onchange=()=>{
+        if(ps.value==='__frei'){const n=prompt('Name der Person',name);if(n!==null&&n.trim()){p.name=n.replace(/\s+/g,' ').trim();scheduleSave();}_neuBauen();return;}
+        p.name=ps.value;const x=wahl.find(q=>q.name===ps.value);if(x&&x.rolle)p.rolle=x.rolle;scheduleSave();_neuBauen();
+      };
+      const sel=document.createElement('select');sel.style.cssText=S_INP;
+      const o0=document.createElement('option');o0.value='';o0.textContent='– Rolle –';sel.appendChild(o0);
+      const rollen=FS_B2_ROLLEN.slice();if(p.rolle&&rollen.indexOf(p.rolle)<0)rollen.push(p.rolle);
+      rollen.forEach(r=>{const o=document.createElement('option');o.value=r;o.textContent=r;sel.appendChild(o);});
+      sel.value=p.rolle||'';
+      sel.onchange=()=>{p.rolle=sel.value;scheduleSave();_neuBauen();};
+      const x=_bgXKnopf('Person entfernen',()=>{if(String(p.name||'').trim()&&!confirm('„'+String(p.name).trim()+'" entfernen?'))return;bericht.anwesende.splice(pi,1);scheduleSave();_neuBauen();});
+      row.append(ps,sel,x);w.appendChild(row);
+    });
+    const chips=document.createElement('div');chips.style.cssText='display:flex;flex-wrap:wrap;gap:6px;padding-top:2px;';
+    chips.appendChild(_chip('＋ Person',false,()=>{
+      bericht.anwesende.push({name:'',rolle:''});scheduleSave();_neuBauen();
+      const neu=body.querySelector('[data-fs-person="'+(bericht.anwesende.length-1)+'"]');
+      if(neu){try{neu.scrollIntoView({block:'center'});}catch(e){}neu.focus();}
+    }));
     w.appendChild(chips);
     return w;
   }
@@ -1613,6 +1692,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     if(k==='skizze'){const n=(bericht.raeume||[]).filter(q=>q&&q.skizze&&q.skizze.an).length;return n?plural(n,'Skizze','Skizzen'):'noch keine Skizze';}
     if(k==='angaben'){const a=bericht.angaben||[];return a.filter(x=>x&&String(x.text||'').trim()).length+' von '+a.length+' beantwortet';}
     if(k==='fazit')return String(bericht.bemerkung||'').trim()?'ausgefüllt':'noch leer';
+    if(k==='notizen'){const l=(bericht.notizen||[]).filter(n=>n&&String(n.text||'').trim());return l.length?plural(l.length,'Notiz','Notizen')+' · '+l.filter(n=>n.pdf===true).length+' im PDF':'noch leer';} /* F47 */
     if(k==='fotos'){const f=bericht.fotos||[];return f.length?plural(f.length,'Foto','Fotos')+' ('+f.filter(x=>x&&x.inReport).length+' im PDF)':'noch kein Foto';}
     return '';
   }
@@ -1687,12 +1767,56 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   let _vbZeitAuf=false; // Datum/Beginn/Ende zum Ändern aufgeklappt (nur Anzeige)
   let _vbUmgFuellen=null; // F23: füllt die Umgebungs-Vorschläge neu (gesetzt von _teilUmgebungVb, solange der Abschnitt aufgebaut ist)
   function _vbAltAngaben(){return (bericht.angaben||[]).some(a=>a&&String(a.text||'').trim());} // Protokolle aus F16–F19 mit beantworteten Fragen
+  /* F47: Auftraggeber (Auswahl: Hausverwaltung, sonst Eigentümer …) und Objekt sichtbar in „Vor Ort“, darunter die Auftrags-Nr. und „↻ Aus der Karte neu holen“
+     (vorher druckte das PDF diese Angaben, ohne dass sie im Formular zu sehen waren) */
+  function _vbKopfB2(){
+    const w=document.createElement('div');w.setAttribute('data-fs-vbkopf','1');
+    const row=document.createElement('div');row.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 14px;border-top:1px solid var(--border);';
+    const l=document.createElement('span');l.style.cssText='font-size:var(--fs13,13px);color:var(--text2);width:112px;flex-shrink:0;';l.textContent='Auftraggeber';
+    const sel=document.createElement('select');sel.style.cssText=S_INP;sel.setAttribute('data-fs-auftraggeber','1');
+    const akt=String(bericht.kopf.auftraggeber||'').trim(),liste=_fsAuftraggeberWahl(t);
+    if(akt&&liste.indexOf(akt)<0)liste.unshift(akt);
+    const opt=(w2,t2)=>{const o=document.createElement('option');o.value=w2;o.textContent=t2;sel.appendChild(o);};
+    if(!akt)opt('','– Auftraggeber wählen –');
+    liste.forEach(n=>opt(n,n));
+    opt('__frei','✎ anderen Auftraggeber eintippen …');
+    sel.value=akt;
+    sel.onchange=()=>{
+      if(sel.value==='__frei'){const n=prompt('Auftraggeber',akt);if(n!==null&&n.trim()){bericht.kopf.auftraggeber=n.replace(/\s+/g,' ').trim();scheduleSave();}_neuBauen();return;}
+      bericht.kopf.auftraggeber=sel.value;scheduleSave();
+    };
+    row.append(l,sel);
+    const ob=_feld('Objekt','objektAdresse','Adresse der Besichtigung');ob.setAttribute('data-fs-vbobjekt','1');
+    const nr=document.createElement('div');nr.style.cssText='display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:0 14px 8px;font-size:var(--fs12,12px);color:var(--text2);';
+    const nt=document.createElement('span');nt.style.cssText='flex:1 1 140px;min-width:0;';nt.textContent='Auftrags-Nr.: '+(String(bericht.kopf.auftragNr||'').trim()||'–');
+    const rb=document.createElement('button');rb.type='button';rb.textContent='↻ Aus der Karte neu holen';rb.setAttribute('data-fs-auskarte','1');
+    rb.style.cssText=S_KNOPF+'min-height:var(--fsh,36px);border:1px solid var(--fs-krd,var(--border));background:var(--fs-kfl,transparent);color:var(--text);';
+    rb.onclick=()=>_ausKarteKlick();
+    nr.append(nt,rb);
+    w.append(row,ob,nr);
+    return w;
+  }
+  /* F47: „🌤 Wetter holen“ in „Vor Ort“ – Wetterdienst zur Beginn-Zeit (Standort nötig), im PDF mit „nicht vor Ort gemessen“ */
+  function _vbWetterB2(){
+    const w=document.createElement('div');w.setAttribute('data-fs-vbwetter','1');w.style.cssText='display:flex;align-items:flex-start;gap:10px;padding:8px 14px;border-top:1px solid var(--border);';
+    const holeW=_fsWetterHolen;
+    const k=bericht.kopf,txt=_fsWetterKurz(k);
+    const b=document.createElement('button');b.type='button';b.textContent=txt?'🌤 neu holen':'🌤 Wetter holen';b.setAttribute('data-fs-vbwetterknopf','1');
+    b.style.cssText=S_KNOPF+'flex-shrink:0;min-height:var(--fsh44,44px);border:1.5px solid var(--fs-krd,'+FS_FARBE+');background:var(--fs-kfl,transparent);color:var(--text);';
+    b.onclick=()=>holeW(bericht,_neuBauen);
+    const tx=document.createElement('div');tx.style.cssText='flex:1;min-width:0;font-size:var(--fs14,14px);color:'+(txt?'var(--text)':'var(--text2)')+';line-height:1.4;';
+    tx.textContent=txt||'Wetter noch nicht geholt (freiwillig)';
+    const q=_fsBgWetterQuelle(k);
+    if(q){const qd=document.createElement('div');qd.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin-top:2px;';qd.textContent=q.replace(/^Angabe des Wetterdienstes /,'Quelle: ');tx.appendChild(qd);}
+    w.append(b,tx);
+    return w;
+  }
   function _teilVorOrtVb(){
     const w=document.createElement('div');w.setAttribute('data-fs-vorort','1');
       const bei=document.createElement('div');bei.setAttribute('data-fs-besuchbei','1');bei.style.cssText='padding:6px 14px 8px;border-top:1px solid var(--border);';
       const bl=document.createElement('div');bl.style.cssText='font-size:var(--fs13,13px);color:var(--text2);margin-bottom:6px;';bl.textContent='Besichtigung bei – wähle den Kontakt für diesen Besuch';bei.appendChild(bl);
       const chips=document.createElement('div');chips.style.cssText='display:flex;flex-wrap:wrap;gap:6px;';
-      _fsVbKontakte(t).forEach(k=>{chips.appendChild(_chip(k.text,bericht.kopf.besuchBei===k.text,()=>{
+      _fsVbKontakte(t).filter(k=>!bericht.schlank||_fsVbBeiPerson(k)).forEach(k=>{chips.appendChild(_chip(k.text,bericht.kopf.besuchBei===k.text,()=>{ /* F47: nur Personen, in deren Wohnung man ist – die Hausverwaltung ist Auftraggeber */
         const an=bericht.kopf.besuchBei===k.text;
         bericht.kopf.besuchBei=an?'':k.text;bericht.kopf.nutzer=an?'':k.name;bericht.kopf.ansprechpartner=an?'':k.kontakt;
         scheduleSave();_neuBauen();}));});
@@ -1703,7 +1827,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       zeitKn.append(
         zk('📍 Ich bin jetzt hier (Datum + Uhrzeit)',()=>{const j=_fsVbJetzt();bericht.datum=j.datum;bericht.kopf.beginn=j.uhr;scheduleSave();hdrS.textContent=(bericht.kopf.objektAdresse||t.adresse||t.title||'')+' · '+(bericht.datum||'');_neuBauen();toast('✓ Datum '+j.datum+', Beginn '+j.uhr+' Uhr eingetragen – nur im Protokoll','success',3500);},'data-fs-jetzt-beginn'),
         zk('🏁 Fertig (Ende jetzt)',()=>{const j=_fsVbJetzt();const tag=String(bericht.datum||'').trim();
-          if(tag&&tag!==j.datum&&!confirm(_fsVbFertigFrage(tag,j))){_vbZeitAuf=true;_neuBauen();toast('Bitte das Ende von Hand eintragen (Feld „Ende“)','info',4000);return;}
+          if(tag&&_fsVbIso(tag)!==_fsVbIso(j.datum)&&!confirm(_fsVbFertigFrage(tag,j))){ /* F47: „9.10.2026“ und „09.10.2026“ sind derselbe Tag */_vbZeitAuf=true;_neuBauen();toast('Bitte das Ende von Hand eintragen (Feld „Ende“)','info',4000);return;}
           bericht.kopf.ende=j.uhr;scheduleSave();_neuBauen();toast('✓ Ende '+j.uhr+' Uhr eingetragen – nur im Protokoll','success',3500);},'data-fs-jetzt-ende'));
       const zz=document.createElement('div');zz.setAttribute('data-fs-zeitzeile','1');zz.style.cssText='display:flex;align-items:center;gap:10px;padding:2px 14px 8px;font-size:var(--fs14,14px);color:var(--text);';
       const zt=document.createElement('span');zt.style.cssText='flex:1;min-width:0;';const ztx=_fsBgZeitText(bericht.kopf);
@@ -1726,23 +1850,24 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const nameZeile=(()=>{ // F26: Name des Protokolls (Besichtigung 2) – erscheint in der Liste an der Karte, im PDF und im Dateinamen
       const row=document.createElement('div');row.setAttribute('data-fs-protname','1');row.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 14px;';
       const l=document.createElement('span');l.style.cssText='font-size:var(--fs13,13px);color:var(--text2);width:112px;flex-shrink:0;';l.textContent='Name';
-      row.append(l,_inp(bericht.protName,'Besichtigung – z. B. Besichtigung Wohnung 2. OG',v=>{bericht.protName=v;hdrT.textContent='💧 '+_fsTitel(bericht);},false));
+      row.append(l,_inp(bericht.protName,'Besichtigung – z. B. Besichtigung Wohnung 2. OG',v=>{bericht.protName=v;hdrT.textContent='🔍 '+_fsTitel(bericht);},false));
       return row;
     })();
-    w.append(...(bericht.schlank?[nameZeile]:[]).concat([bei],bericht.schlank?[]:[_feld('Lage','lage','z. B. Wohnung darüber, Keller')],[zeitKn,zz],hinweisVb?[hinweisVb]:[],uebVb?[uebVb]:[])); // F23: Besichtigung 2 ohne Lage · F26: mit Name
+    w.append(...(bericht.schlank?[nameZeile,_vbKopfB2()]:[]).concat([bei],bericht.schlank?[]:[_feld('Lage','lage','z. B. Wohnung darüber, Keller')],[zeitKn,zz],hinweisVb?[hinweisVb]:[],uebVb?[uebVb]:[])); // F23: Besichtigung 2 ohne Lage · F26: mit Name
       if(_vbZeitAuf){
       const datRow=document.createElement('div');datRow.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 14px;border-top:1px solid var(--border);';
       const dl=document.createElement('span');dl.style.cssText='font-size:var(--fs13,13px);color:var(--text2);width:112px;flex-shrink:0;';dl.textContent='Datum';
       datRow.append(dl,_inp(bericht.datum,'TT.MM.JJJJ',v=>{bericht.datum=v;},false));
       w.append(datRow,_feld('Beginn','beginn','hh:mm'),_feld('Ende','ende','hh:mm'));
       }
-    if(bericht.schlank)w.appendChild(_teilAnwesende()); // F24: Besichtigung 2: wer ist noch vor Ort (Name und Rolle; Kontakte der Karte zum Antippen); steht im PDF unter „Anwesend“
+    if(bericht.schlank)w.append(_vbWetterB2(),_teilAnwesende()); // F47: Wetter vor „Anwesend“ · F24: Besichtigung 2: wer ist noch vor Ort (Name und Rolle; Kontakte der Karte zum Antippen); steht im PDF unter „Anwesend“
     return w;
   }
   // F22: „Gemeldet und vorgefunden“ – der Satz aus der Meldung (Anlass) und ob es so vorgefunden wurde
   function _teilGemeldetVb(){
     const w=document.createElement('div');w.setAttribute('data-fs-gemeldet','1');
     w.appendChild(_feld('Anlass','anlass','z. B. Schaden an der Decke im Wohnzimmer'));
+    if(bericht.schlank){const hq=_fsVbAnlassHerkunft(bericht);if(hq){const hd=_bgInfo(hq);hd.setAttribute('data-fs-anlassherkunft','1');w.appendChild(hd);}} /* F47 */
     const wi=_bgInfo('So wurde der Schaden gemeldet. Bestätige, ob du es so vorgefunden hast – nur Feststellung, keine Ursache.');w.appendChild(wi);
     const wahl=document.createElement('div');wahl.style.cssText='display:flex;flex-wrap:wrap;gap:6px;padding:4px 14px 8px;';
     [['wie','✓ wie gemeldet vorgefunden'],['abw','≠ abweichend vorgefunden']].forEach(x=>{
@@ -1753,6 +1878,15 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const ab=document.createElement('div');ab.style.cssText='padding:0 14px 10px;';
       ab.appendChild(_bgTextFeld(bericht.meldungAbw,'Was war anders, z. B. nicht im Wohnzimmer, sondern im Flur …',v=>{bericht.meldungAbw=v;},2));
       w.appendChild(ab);
+    }
+    if(bericht.schlank){ /* F47: Vorgeschichte laut Auftraggeber – zugeklappt (nur Anzeige), steht im PDF als „nicht selbst festgestellt“ */
+      const vgAuf=_fsVgAuf.has(bericht),vgDa=!!String(bericht.vorgeschichte||'').trim();
+      const vk=document.createElement('button');vk.type='button';vk.setAttribute('data-fs-vgkopf','1');vk.setAttribute('aria-expanded',vgAuf?'true':'false');
+      vk.style.cssText=S_KNOPF+'display:flex;align-items:center;gap:8px;width:calc(100% - 28px);margin:4px 14px 10px;min-height:var(--fsh44,44px);text-align:left;border:1.5px solid var(--fs-krd,var(--border));background:var(--fs-kfl,transparent);color:var(--text);';
+      vk.textContent=(vgAuf?'▾ ':'▸ ')+'Vorgeschichte laut Auftraggeber'+(vgAuf?'':(vgDa?' · ausgefüllt':' · freiwillig'));
+      vk.onclick=()=>{if(_fsVgAuf.has(bericht))_fsVgAuf.delete(bericht);else _fsVgAuf.add(bericht);_neuBauen();};
+      w.appendChild(vk);
+      if(vgAuf)w.appendChild(_teilVorgeschichteVb());
     }
     return w;
   }
@@ -1819,7 +1953,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   function _teilUmgebungVb(){
     if(!Array.isArray(bericht.vbUmgebung))bericht.vbUmgebung=[];
     const w=document.createElement('div');w.setAttribute('data-fs-umgebung','1');w.style.cssText='padding:8px 14px 10px;';
-    w.appendChild(_bgInfo(bericht.schlank?'Tippe an, was du angesehen hast: ✓ nichts Auffälliges · ⚠ auffällig (legt eine neue Stelle an). Nicht angetippt = nicht angesehen, steht nicht im Bericht.':'Gehe die Umgebung der Stelle ab und halte fest, was du geprüft hast: ✓ ohne Auffälligkeit · ⚠ auffällig (legt eine neue Stelle an) · ∅ nicht geprüft. Nur Feststellungen, keine Ursache.'));
+    w.appendChild(_bgInfo(bericht.schlank?'Tippe an, was du angesehen hast: ✓ nichts festgestellt · ⚠ festgestellt (legt eine neue Stelle an) · ∅ nicht geprüft (mit Grund, z. B. kein Zugang). Nicht angetippt = steht nicht im PDF.':'Gehe die Umgebung der Stelle ab und halte fest, was du geprüft hast: ✓ ohne Auffälligkeit · ⚠ auffällig (legt eine neue Stelle an) · ∅ nicht geprüft. Nur Feststellungen, keine Ursache.'));
     // F23: die Vorschläge stehen in einem eigenen Behälter; er füllt sich neu, sobald im Feld „Wo?“ getippt wird (Frank: sonst erscheinen sie erst nach dem nächsten Neuaufbau)
     const vz=document.createElement('div');vz.setAttribute('data-fs-umgvorschlaege','1');
     const fuelleVorschlaege=function(){
@@ -1830,7 +1964,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
         const vc=document.createElement('div');vc.style.cssText='display:flex;flex-wrap:wrap;gap:4px;margin:6px 0;';
         const neuZeile=v=>{bericht.vbUmgebung.push({text:v.text,bereich:v.bereich,status:'',grund:'',stelle:false});};
         vs.forEach(v=>{const c=document.createElement('button');c.type='button';c.textContent='＋ '+(beide?(v.bereich==='aussen'?'Außen: ':'Innen: '):'')+v.text;c.setAttribute('data-fs-umgvorschlag',v.text);
-          c.style.cssText='padding:4px 9px;min-height:var(--fsh,34px);border-radius:14px;font-size:var(--fs12,12px);cursor:pointer;font-family:inherit;border:1px dashed var(--border);background:transparent;color:var(--text2);';
+          c.style.cssText='padding:4px 9px;min-height:var(--fsh,34px);border-radius:14px;font-size:var(--fs12,12px);cursor:pointer;font-family:inherit;border:1px solid var(--border);background:transparent;color:var(--text2);'; /* F47: nichts mehr gestrichelt */
           c.onclick=()=>{neuZeile(v);scheduleSave();_neuBauen();};vc.appendChild(c);});
         const alle=document.createElement('button');alle.type='button';alle.textContent='＋ alle '+vs.length+' übernehmen';alle.setAttribute('data-fs-umgalle','1');
         alle.style.cssText='padding:4px 10px;min-height:var(--fsh,34px);border-radius:14px;font-size:var(--fs12,12px);font-weight:700;cursor:pointer;font-family:inherit;border:1.5px solid '+FS_FARBE+';background:rgba(31,95,139,.1);color:var(--text);';
@@ -1847,7 +1981,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const nm=document.createElement('div');nm.style.cssText='flex:1;min-width:0;font-size:var(--fs14,14px);font-weight:700;color:var(--text);';nm.textContent=(bericht.schlank?(r.bereich==='aussen'?'🌤 ':'🏠 '):'')+(r.text||'(ohne Text)');
       kz.append(nm,_bgXKnopf('Zeile entfernen',()=>{if(r.status&&!confirm('Zeile „'+(r.text||'')+'" entfernen?'))return;bericht.vbUmgebung.splice(ri,1);scheduleSave();_neuBauen();}));
       const wahl=document.createElement('div');wahl.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;';
-      [['ok','✓ ohne Auffälligkeit'],['auff','⚠ auffällig']].concat(bericht.schlank?[]:[['nicht','∅ nicht geprüft']]).forEach(x=>{ // F23: Besichtigung 2 nur ✓ / ⚠
+      (bericht.schlank?[['ok','✓ nichts festgestellt'],['auff','⚠ festgestellt'],['nicht','∅ nicht geprüft']]:[['ok','✓ ohne Auffälligkeit'],['auff','⚠ auffällig'],['nicht','∅ nicht geprüft']]).forEach(x=>{ // F23 · F47: auch hier „nicht geprüft“, neutrale Wörter
         const c=_chip(x[1],r.status===x[0],()=>{
           r.status=r.status===x[0]?'':x[0];
           let tm='';
@@ -1861,9 +1995,15 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const eg=document.createElement('div');eg.style.cssText='display:flex;gap:6px;margin-top:8px;';
     const ei=_inp('','Eigene Zeile, z. B. Heizungsrohr im Flur',()=>{},false);ei.setAttribute('data-fs-umgeigen','1');
     const eb=document.createElement('button');eb.type='button';eb.textContent='＋ Zeile';eb.setAttribute('data-fs-umgeigenneu','1');
-    eb.style.cssText=S_KNOPF+'min-height:var(--fsh44,44px);flex-shrink:0;border:1.5px dashed '+FS_FARBE+';background:rgba(31,95,139,.08);color:var(--text);';
+    eb.style.cssText=S_KNOPF+'min-height:var(--fsh44,44px);flex-shrink:0;border:1.5px solid '+FS_FARBE+';background:rgba(31,95,139,.08);color:var(--text);'; /* F47: nicht mehr gestrichelt */
     eb.onclick=()=>{const t=String(ei.value||'').trim();if(!t)return;bericht.vbUmgebung.push({text:t,bereich:(bericht.schlank&&!_fsB2Sichtbar(bericht,'innen'))?'aussen':'innen',status:'',grund:'',stelle:false});scheduleSave();_neuBauen();};
-    eg.append(ei,eb);w.appendChild(eg);
+    if(bericht.schlank&&_fsB2Sichtbar(bericht,'innen')&&_fsB2Sichtbar(bericht,'aussen')){ /* F47: bei Innen UND Außen fragt die eigene Zeile, wohin sie gehört (vorher immer „innen“) */
+      eb.textContent='＋ Innen';
+      const ea=eb.cloneNode(false);ea.textContent='＋ Außen';ea.setAttribute('data-fs-umgeigenneu','aussen');
+      ea.onclick=()=>{const tx=String(ei.value||'').trim();if(!tx)return;bericht.vbUmgebung.push({text:tx,bereich:'aussen',status:'',grund:'',stelle:false});scheduleSave();_neuBauen();};
+      eg.append(ei,eb,ea);
+    }else eg.append(ei,eb);
+    w.appendChild(eg);
     return w;
   }
   // F24, F28: Besichtigung 2 – Feststellungen INNEN (Raum als Überschrift) und AUSSEN (Bereich als Überschrift); Haken zum Ein-/Ausblenden; Innen zuerst.
@@ -1924,7 +2064,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       lb.style.cssText=S_KNOPF+'flex:1 1 120px;min-width:0;min-height:var(--fsh44,44px);border:1.5px solid '+farbe+';background:'+(pin?'rgba(46,125,79,.15)':'var(--fs-lbfl,rgba(217,72,15,.08))')+';color:var(--text);font-weight:700;';
       lb.onclick=()=>_fsLuftbildFenster(bericht,t,s,()=>_neuBauen());
       const se=_fsSeiteText(s.seite);
-      const fl=_fsFotoLeiste(bericht,{text:_fsVbBezeichnung(bericht,s,si+1)+(se?' – Seite '+se:'')+(String(s.ort||'').trim()?' – '+String(s.ort).trim():''),fotoRefs:s.fotoRefs},'Fotos zu dieser Stelle',false,lb);
+      const fl=_fsFotoLeiste(bericht,{text:_fsVbBezeichnung(bericht,s,si+1)+(se?' – '+_fsSeiteMitWort(s.seite):'')+(String(s.ort||'').trim()?' – '+String(s.ort).trim():''),fotoRefs:s.fotoRefs},'Fotos zu dieser Stelle',false,lb);
       k.append(kz,ortI,sb,tx,fl);
       return k;
     };
@@ -1986,8 +2126,13 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       if(!_fsB2Sichtbar(bericht,typ))return;
       const farbe=typ==='aussen'?'#d9480f':FS_FARBE;
       const sek=document.createElement('div');sek.setAttribute('data-fs-b2teil',typ);
-      const th=document.createElement('div');th.style.cssText='font-size:var(--fs17,17px);font-weight:700;color:var(--text);margin:14px 0 4px;padding-bottom:3px;border-bottom:3px solid '+farbe+';';th.textContent=typ==='innen'?'🏠 Innen':'🌤 Außen';
+      const teilZu=_fsTeilZu(bericht,typ); /* F47: Überschrift antippen klappt den Teil zu – nur Anzeige, im PDF bleibt alles */
+      const th=document.createElement('button');th.type='button';th.setAttribute('data-fs-b2teilkopf',typ);th.setAttribute('aria-expanded',teilZu?'false':'true');
+      th.style.cssText='display:block;width:100%;text-align:left;cursor:pointer;font-family:inherit;background:transparent;border:none;border-bottom:3px solid '+farbe+';font-size:var(--fs17,17px);font-weight:700;color:var(--text);margin:14px 0 4px;padding:0 0 3px;min-height:var(--fsh,40px);';
+      th.textContent=(teilZu?'▸ ':'▾ ')+(typ==='innen'?'🏠 Innen':'🌤 Außen')+(teilZu?' · '+_fsTeilKurz(bericht,typ):'');
+      th.onclick=()=>{_fsTeilZuSetzen(bericht,typ,!teilZu);_neuBauen();};
       sek.appendChild(th);
+      if(teilZu){w.appendChild(sek);return;}
       _fsVbRaumGruppen(bericht,typ).forEach(gr=>{
         const box=document.createElement('div');box.setAttribute('data-fs-raumgruppe',gr.raum);box.setAttribute('data-fs-typ',typ);box.style.cssText='margin:10px 0 4px;';
         const rk=document.createElement('div');rk.style.cssText='display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:2px 0 4px;border-bottom:2px solid '+farbe+';';
@@ -2046,12 +2191,40 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     });
     return w;
   }
+  /* F47: „📝 Notizen“ (Frank 09.10.2026: „Feld für allgemeine Notizen … beides auswählbar“) – je Notiz „📄 im PDF“ (steht unter „Bemerkungen“)
+     oder „🔒 nur für mich“ (nie im PDF); eine neue Notiz startet „nur für mich“, damit nichts ungewollt ins PDF kommt */
+  function _teilNotizenB2(){
+    if(!Array.isArray(bericht.notizen))bericht.notizen=[];
+    const w=document.createElement('div');w.setAttribute('data-fs-notizen','1');w.style.cssText='padding:8px 14px 10px;';
+    w.appendChild(_bgInfo('„📄 im PDF“ steht im PDF unter „Bemerkungen“. „🔒 nur für mich“ siehst nur du – im Formular und am PC, nie im PDF.'));
+    bericht.notizen.forEach((n,ni)=>{
+      const k=document.createElement('div');k.setAttribute('data-fs-notiz',String(ni));
+      k.style.cssText='margin:8px 0;padding:8px 10px 10px;border:1.5px solid var(--border);border-left:var(--fs-kante,4px) solid '+(n.pdf===true?FS_FARBE:'#6b7480')+';border-radius:10px;background:var(--fs-karte,var(--bg2));';
+      const tx=_bgTextFeld(n.text,'Notiz …',v=>{n.text=v;},3);
+      const zl=document.createElement('div');zl.style.cssText='display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px;';
+      [[true,'📄 im PDF'],[false,'🔒 nur für mich']].forEach(([wert,txt])=>{const c=_chip(txt,(n.pdf===true)===wert,()=>{if((n.pdf===true)===wert)return;n.pdf=wert;scheduleSave();_neuBauen();});c.setAttribute('data-fs-notizpdf',wert?'ja':'nein');zl.appendChild(c);});
+      const sp=document.createElement('span');sp.style.cssText='flex:1;';zl.appendChild(sp);
+      zl.appendChild(_bgXKnopf('Notiz entfernen',()=>{if(String(n.text||'').trim()&&!confirm('Notiz entfernen?'))return;bericht.notizen.splice(ni,1);scheduleSave();_neuBauen();}));
+      k.append(tx,zl);w.appendChild(k);
+    });
+    const plus=_chip('＋ Notiz',false,()=>{
+      bericht.notizen.push({id:'nz_'+Date.now(),text:'',pdf:false});scheduleSave();_neuBauen();
+      const e=body.querySelector('[data-fs-notiz="'+(bericht.notizen.length-1)+'"] textarea');if(e){try{e.scrollIntoView({block:'center'});}catch(_e){}e.focus();}
+    });plus.setAttribute('data-fs-notizneu','1');
+    w.appendChild(plus);
+    return w;
+  }
   // F23: Besichtigung 2 – ein Abschnitt „Feststellungen“: Stellen (wo · was · Fotos) und darunter „Umgebung abgehen“
   function _teilFeststellungenB2(){
     const w=document.createElement('div');
     w.appendChild(_teilVbStellenB2());
     const h=document.createElement('div');h.setAttribute('data-fs-b2umgebung','1');h.style.cssText='font-size:var(--fs14,14px);font-weight:700;color:var(--text);padding:8px 14px 0;border-top:1px solid var(--border);margin-top:6px;';h.textContent='Umgebung abgehen';
-    w.append(h,_teilUmgebungVb());
+    const umgAuf=_fsUmgAuf.has(bericht); /* F47: „Umgebung abgehen“ startet zugeklappt – nur Anzeige */
+    h.textContent=(umgAuf?'▾ ':'▸ ')+'Umgebung abgehen'+(umgAuf?'':' · '+_fsUmgKurz(bericht));
+    h.setAttribute('role','button');h.setAttribute('aria-expanded',umgAuf?'true':'false');h.style.cursor='pointer';h.style.minHeight='var(--fsh,40px)';h.style.paddingBottom='8px';
+    h.onclick=()=>{if(_fsUmgAuf.has(bericht))_fsUmgAuf.delete(bericht);else _fsUmgAuf.add(bericht);_neuBauen();};
+    w.append(h);
+    if(umgAuf)w.append(_teilUmgebungVb());
     return w;
   }
   // F22: Ergebnis der Eingrenzung – entsteht von selbst, nichts auszufüllen; steht so im PDF
@@ -2732,6 +2905,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
 
   _neuBauen();
 
+  try{if(bericht.schlank&&!(typeof DeviceOrientationEvent!=='undefined'&&typeof DeviceOrientationEvent.requestPermission==='function'))_fsKompassStart();}catch(e){} /* F47: hier, VOR dem Rücksprung für Handy/Tablet – der Start am Ende (F29) wurde dort nie erreicht */
   /* Fußleiste – F9: nur am PC. Handy und Tablet erstellen kein PDF (Frank 02.10.2026: Prüfen und Weiterbearbeiten am Rechner). */
   if(!_fsAmPc()){
     body.style.paddingBottom='24px';
@@ -3197,7 +3371,7 @@ const FS_VB_TITEL='Vorabbesichtigung';
    Dieselbe Art wie die Vorabbesichtigung (art:'vorab'), aber mit Kennzeichen b.schlank=true: Vor Ort · Gemeldet / vorgefunden · Feststellungen mit Umgebung ·
    Fotos (der Stelle zugeordnet) · Raumskizze. Keine Vorgeschichte, keine Karte/Versicherung/Einzelpunkte/Wetter-Abschnitte, keine Raum-/Merkmal-Knöpfe, kein Messwert-Feld,
    Umgebung nur ✓ / ⚠. Daten und PDF teilen sich mit der Vorabbesichtigung (vbStellen, vbUmgebung, meldungStatus). Die Vorabbesichtigung selbst bleibt unverändert. */
-const FS_B2_TITEL='Besichtigung';
+const FS_B2_TITEL='Vorabbesichtigung'; /* F47: aus „Besichtigung 2“ wird die Vorabbesichtigung (Frank 09.10.2026) */
 /* F26: Besichtigung 2 hat einen NAMEN (b.protName, Frank 03.10.2026: „kann ich den Namen des Protokolls ändern – auch PDF und Namen“): Liste an der Karte, PDF-Titel, Dateiname.
    Leer = „Besichtigung“ (in der Liste dann wie bisher der Kartenname). Der Dateiname wird auf Buchstaben/Ziffern/Unterstrich gekürzt (Pfadlänge, ⛔ 218-Wächter). */
 function _fsB2Name(b){const n=String((b&&b.protName)||'').replace(/\s+/g,' ').trim();return n||FS_B2_TITEL;}
@@ -3209,8 +3383,8 @@ function _fsDateiSlug(text,max){
 function _fsProtokollUmbenennen(bi){
   try{
     const t=currentTask();const b=t&&Array.isArray(t.pruefberichte)?t.pruefberichte[bi]:null;
-    if(!b||!b.schlank){toast('Nur die Besichtigung 2 lässt sich umbenennen','info',3500);return;}
-    const neu=prompt('Name des Protokolls (leer = „Besichtigung“)',String(b.protName||'').trim());
+    if(!b||!b.schlank){toast('Dieses Protokoll lässt sich nicht umbenennen','info',3500);return;}
+    const neu=prompt('Name des Protokolls (leer = „Vorabbesichtigung“)',String(b.protName||'').trim());
     if(neu===null)return;
     b.protName=String(neu).replace(/\s+/g,' ').trim();
     scheduleSave();
@@ -3219,8 +3393,8 @@ function _fsProtokollUmbenennen(bi){
     toast('✓ Name: '+_fsB2Name(b),'success',3000);
   }catch(e){console.warn('[Besichtigung] Umbenennen:',e);}
 }
-const FS_B2_BLOECKE=[{k:'vorort',t:'Vor Ort',c:'Vor Ort'},{k:'gemeldet',t:'Gemeldet / vorgefunden',c:'Gemeldet'},{k:'stellen',t:'Feststellungen',c:'Feststellungen'},{k:'fotos',t:'Fotos',c:'Fotos'},{k:'raeume',t:'Raumskizze (innen)',c:'Skizze innen'}]; /* F35: der Abschnitt gehört zu „Innen“ */
-const FS_B2_STANDARD_ZU=['raeume']; // alles andere offen (wie im Entwurf), nur die Raumskizze startet zugeklappt
+const FS_B2_BLOECKE=[{k:'vorort',t:'Vor Ort',c:'Vor Ort'},{k:'gemeldet',t:'Gemeldet / vorgefunden',c:'Gemeldet'},{k:'stellen',t:'Feststellungen',c:'Feststellungen'},{k:'notizen',t:'📝 Notizen',c:'Notizen'},{k:'fotos',t:'Fotos',c:'Fotos'},{k:'raeume',t:'Raumskizze (innen)',c:'Skizze innen'}]; /* F47: Notizen */ /* F35: der Abschnitt gehört zu „Innen“ */
+const FS_B2_STANDARD_ZU=['raeume','notizen']; /* F47: Notizen starten zugeklappt */ // alles andere offen (wie im Entwurf), nur die Raumskizze startet zugeklappt
 const FS_VB_BLOECKE=[{k:'vorort',t:'Vor Ort',c:'Vor Ort'},{k:'gemeldet',t:'Gemeldet und vorgefunden',c:'Gemeldet'},{k:'stellen',t:'Feststellungen – Stelle für Stelle',c:'Stellen'},{k:'umgebung',t:'Umgebung abgehen (Eingrenzen)',c:'Umgebung'},{k:'ergebnis',t:'Ergebnis der Eingrenzung',c:'Ergebnis'},{k:'fotos',t:'Fotos',c:'Fotos'},{k:'vorgeschichte',t:'Vorgeschichte laut Auftraggeber',c:'Vorgeschichte'},{k:'karte',t:'Kartendaten (aus der Karte)',c:'Karte'},{k:'versich',t:'Versicherung, Zugang, Ansprechpartner',c:'Versicherung'},{k:'fest',t:'Einzelpunkte zum Antippen',c:'Einzelpunkte'},{k:'angaben',t:'Vorgeschichte – Fragen (frühere Fassung)',c:'Fragen'},{k:'termin',t:'Termin und Wetter',c:'Wetter'},{k:'raeume',t:'Raumskizze',c:'Skizze'}]; // F20
 const FS_VB_STANDARD_ZU=['vorort','gemeldet','stellen','umgebung','ergebnis','fotos','vorgeschichte','karte','versich','fest','angaben','termin','raeume']; // F20, F22 (Frank: „alle immer zugeklappt“): alle Abschnitte starten zugeklappt, Aufklappen merkt sich das Gerät je Protokoll („a:…“)
 const FS_VB_SEKTIONEN=[
@@ -3344,8 +3518,8 @@ function _fsVbErgebnisZeilen(b){
   const tx=r=>((b&&b.schlank&&r.bereich==='aussen')?'Außen: ':'')+String(r.text).trim(); // F28
   const ok=z.filter(r=>r.status==='ok').map(tx),auff=z.filter(r=>r.status==='auff').map(tx),nicht=z.filter(r=>r.status==='nicht').map(r=>tx(r)+(String(r.grund||'').trim()?' ('+String(r.grund).trim()+')':''));
   if(st.length&&!(b&&b.schlank))out.push('Schaden zeigt sich an: '+st.join('; ')+'.'); // F23: bei Besichtigung 2 stehen die Stellen gleich darunter
-  if(ok.length)out.push('Geprüft, ohne Auffälligkeit: '+ok.join(', ')+'.');
-  if(auff.length)out.push('Geprüft, auffällig: '+auff.join(', ')+'.');
+  if(ok.length)out.push((b&&b.schlank?'Geprüft, nichts festgestellt: ':'Geprüft, ohne Auffälligkeit: ')+ok.join(', ')+'.'); // F47
+  if(auff.length)out.push((b&&b.schlank?'Geprüft, festgestellt: ':'Geprüft, auffällig: ')+auff.join(', ')+'.'); // F47
   if(nicht.length)out.push('Nicht geprüft: '+nicht.join(', ')+'.');
   return out;
 }
@@ -3747,7 +3921,14 @@ function _fsLuftbildFenster(bericht,t,s,beiAenderung){
    je Raum/Bereich „alle zu / alle auf“. Hat das Protokoll nur EINE Stelle, ist sie offen. Nur Anzeige (nicht im Protokoll, geht nicht auf andere Geräte), Eingaben bleiben erhalten. */
 /* F35: AUFRÄUMEN (Frank 04.10.2026, Foto vom Tablet: „Würdest du das als übersichtlich bezeichnen?“ → Entwurf besichtigung2_aufraeumen_entwurf.html → „bau alles“). */
 /* „Stelle n“ – die Nummer wie in der vollen Bezeichnung („Außen – Dach, Stelle 2“ → „Stelle 2“); PDF, Foto-Unterschrift und Legende behalten die volle Bezeichnung */
-function _fsStelleNrText(b,s){return 'Stelle '+(_fsAsNummer(b,s)||1);}
+function _fsStelleNrText(b,s){
+  if(b&&b.schlank&&s&&!_fsVbStelleGefuelltS(s)){ /* F47: noch leere Stellen zählen hinter den ausgefüllten weiter – zwei neue hießen sonst beide „Stelle 2“ */
+    const ty=_fsVbTyp(s),r=_fsVbRaumName(s),gr=(Array.isArray(b.vbStellen)?b.vbStellen:[]).filter(x=>x&&_fsVbTyp(x)===ty&&_fsVbRaumName(x)===r);
+    const li=gr.filter(x=>!_fsVbStelleGefuelltS(x)).indexOf(s);
+    if(li>=0)return 'Stelle '+(gr.filter(_fsVbStelleGefuelltS).length+li+1); /* gehört die Stelle (noch) nicht zum Protokoll: wie bisher */
+  }
+  return 'Stelle '+(_fsAsNummer(b,s)||1);
+}
 /* Abschnitte der Besichtigung 2: die Raumskizze gehört zu „Innen“ – ist Innen ausgeblendet, entfällt der Abschnitt (die Außenskizze sitzt beim Bereich) */
 function _fsB2Bloecke(b){return FS_B2_BLOECKE.filter(x=>x.k!=='raeume');} /* F36: die Skizze sitzt innen wie außen beim Raum/Bereich – der eigene Abschnitt entfällt in Besichtigung 2 */
 /* Auswahl „weiterer Raum/Bereich“: Namen, die es schon gibt, stehen nicht mehr in der Liste (dafür gibt es dort „＋ Stelle“) */
@@ -3780,7 +3961,7 @@ function _fsStelleKurz(b,s,nr,kurz){
   const t=[kurz?_fsStelleNrText(b,s):_fsVbBezeichnung(b,s,nr)]; /* F35: kurz = nur „Stelle n“ (im Formular unter der Überschrift des Raums/Bereichs) */
   const wo=kuerzen(s&&s.ort,38),tx=kuerzen(s&&s.text,38);
   if(wo)t.push(wo);else if(tx)t.push(tx);
-  const se=_fsSeiteText(s&&s.seite);if(se)t.push('Seite '+se);
+  const se=_fsSeiteMitWort(s&&s.seite);if(se)t.push(se); /* F47 */
   if(_fsVbPinOk(s))t.push('📍');
   if(_fsAsMarkeOk(s))t.push('✏'); /* F33: steht in einer Außenskizze */
   const nf=((s&&Array.isArray(s.fotoRefs))?s.fotoRefs:[]).filter(r=>((b&&b.fotos)||[]).some(f=>_fsRefPasst(f,r))).length;
@@ -4049,7 +4230,7 @@ const FS_VB_ROLLEN={mieter:'Mieter',eigentuemer:'Eigentümer',hausverwaltung:'Ha
 function _fsVbKontakte(t){
   return ((t&&Array.isArray(t.kontakte))?t.kontakte:[]).filter(k=>k&&String(k.name||k.firma||'').trim()).map(k=>{
     const name=String(k.name||k.firma).trim(),rolle=FS_VB_ROLLEN[k.rolle]||String(k.rolle||'').trim()||'Kontakt',tel=String(k.tel||k.tel2||'').trim();
-    return {text:rolle+': '+name,name,kontakt:name+(tel?', '+tel:'')};
+    return {text:rolle+': '+name,name,kontakt:name+(tel?', '+tel:''),rk:String(k.rolle||'')}; /* F47: rk = Rolle aus der Karte */
   });
 }
 // F18: Datum TT.MM.JJJJ → JJJJ-MM-TT (Format der Termine in der Karte); ungültig → ''
@@ -4063,7 +4244,7 @@ function _fsVbIso(datum){
 // F18: Beschreibung des Termins in der Karte (und damit des Outlook-Betreffs): „Vorabbesichtigung – Eigentümer“
 function _fsVbTerminText(bericht){
   const rolle=String((bericht&&bericht.kopf&&bericht.kopf.besuchBei)||'').split(':')[0].trim();
-  return (bericht&&bericht.schlank?'Besichtigung':'Vorabbesichtigung')+(rolle?' – '+rolle:''); // F23
+  return 'Vorabbesichtigung'+(rolle?' – '+rolle:''); // F23 · F47: seit der Vereinigung heißen beide so
 }
 // Datum (TT.MM.JJJJ) und Uhrzeit (hh:mm) von jetzt – für die „Ich bin jetzt hier“-Knöpfe
 function _fsVbJetzt(){
@@ -4087,6 +4268,141 @@ function _fsVbAnlassAusKarte(t){
   let s=q.replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
   if(!s)s=_fsVbAnlassAusMail(t); // F19
   return s.length>300?s.slice(0,297)+'...':s;
+}
+/* ══ F47: VORABBESICHTIGUNG VEREINT (Frank 09.10.2026, Entwurf Claude-Code\Entwurf_Vorabbesichtigung-vereint_2026-10-09.html, „bau mir dieses Formular“) ══
+   Aus „Besichtigung 2“ wird die Vorabbesichtigung (Daten unverändert: art 'vorab' + schlank). Dazu: Name aus dem Anlass, du selbst unter „Anwesend“,
+   Auftraggeber und Objekt sichtbar, Wetter, Vorgeschichte, „nicht geprüft“, Notizen, Ende in der Formular-Liste nachtragen. Nur Anzeige-Zustände merkt das Gerät. */
+// Woher der Anlass beim Anlegen kam – dieselbe Reihenfolge wie _fsVbAnlassAusKarte
+function _fsVbAnlassQuelle(t){
+  if(String((t&&t.schadensbild)||'').trim())return 'aus der Karte: Schadensbild';
+  if(String((t&&t.desc)||'').split('[E-Mail-Import')[0].replace(/<[^>]*>/g,' ').trim())return 'aus der Karte: Beschreibung';
+  if(_fsVbAnlassAusMail(t))return 'aus der Anfrage-Mail';
+  return '';
+}
+// Herkunft nur zeigen, solange der Anlass noch der Vorschlag ist
+function _fsVbAnlassHerkunft(b){
+  const k=(b&&b.kopf)||{},q=String(k.anlassQuelle||'').trim();
+  if(!q)return '';
+  return String(k.anlass||'').replace(/\s+/g,' ').trim()===String(k.anlassVorschlag||'').replace(/\s+/g,' ').trim()?q:'';
+}
+// Name aus dem Anlass: höchstens 40 Zeichen, am Wortende gekürzt, ohne Schlusspunkt
+function _fsNameAusAnlass(a){
+  let s=String(a||'').replace(/\s+/g,' ').trim().replace(/[.!?:;,\s]+$/,'');
+  if(s.length<=40)return s;
+  const cut=s.slice(0,41),i=cut.lastIndexOf(' ');
+  return (i>=15?cut.slice(0,i):s.slice(0,40)).replace(/[.!?:;,\s–-]+$/,'');
+}
+// Beim Anlegen: Name aus dem Anlass, du selbst unter „Anwesend“ (Name merkt sich das Gerät), Herkunft des Anlasses
+function _fsVbVorbelegen(b,t){
+  if(!b||!b.kopf)return b;
+  const a=String(b.kopf.anlass||'').trim();
+  if(a){b.kopf.anlassVorschlag=a;b.kopf.anlassQuelle=_fsVbAnlassQuelle(t);}
+  if(b.schlank&&!String(b.protName||'').trim())b.protName=_fsNameAusAnlass(a);
+  const ich=String(b.kopf.pruefer||'').trim();
+  if(ich&&Array.isArray(b.anwesende)&&!b.anwesende.some(p=>p&&String(p.name||'').trim().toLowerCase()===ich.toLowerCase()))b.anwesende.push({name:ich,rolle:'Aufgenommen von'});
+  return b;
+}
+// Auswahl „Auftraggeber“: Hausverwaltung, Rechnungsanschrift, dann Eigentümer/Auftraggeber aus den Kontakten, danach die übrigen Kontakte
+function _fsAuftraggeberWahl(t){
+  const out=[],dazu=n=>{n=String(n||'').replace(/\s+/g,' ').trim();if(n&&out.indexOf(n)<0)out.push(n);};
+  dazu(t&&t.hausverwaltung);
+  const rech=t&&t.rechnungsanschrift;dazu((typeof rech==='string')?rech.split(/\r?\n|,/)[0]:(rech&&(rech.name||rech.firma)));
+  const ks=(t&&Array.isArray(t.kontakte))?t.kontakte:[];
+  ks.filter(k=>k&&['hausverwaltung','eigentuemer','ag','privatkunde'].indexOf(k.rolle)>=0).forEach(k=>dazu(_fsKontaktName(k)));
+  ks.forEach(k=>dazu(_fsKontaktName(k)));
+  return out;
+}
+// Auswahl „Anwesend“: alle Kontakte der Karte mit passender Rolle, dazu du selbst (Aufgenommen von)
+function _fsAnwesendWahl(t,ich){
+  const out=[],da=n=>out.some(x=>x.name.toLowerCase()===n.toLowerCase());
+  ((t&&Array.isArray(t.kontakte))?t.kontakte:[]).forEach(k=>{const n=_fsKontaktName(k);if(n&&!da(n))out.push({name:n,rolle:FS_B2_KONTAKTROLLEN[k&&k.rolle]||''});});
+  const i=String(ich||'').trim();if(i&&!da(i))out.push({name:i,rolle:'Aufgenommen von'});
+  return out;
+}
+// „Besichtigung bei“: nur Personen, in deren Wohnung man sein kann (Frank: „Mieter oder Eigentümer“) – keine Hausverwaltung, kein Auftraggeber, kein Handwerker; ohne Rolle bleibt sichtbar
+function _fsVbBeiPerson(k){return !!k&&['mieter','eigentuemer','privatkunde',''].indexOf(String(k.rk||''))>=0;}
+// „Seite Nord“, aber nur „Hofseite“ / „Straßenseite“ / „Giebel“ (vorher „Seite Hofseite“)
+function _fsSeiteMitWort(k){const t=_fsSeiteText(k);if(!t)return '';return FS_B2_SEITENEXTRA.indexOf(String(k||'').trim())>=0?t:'Seite '+t;}
+// Innen/Außen zuklappen – nur Anzeige, je Protokoll im Gerät
+const _fsTeilZuMerk=new WeakMap();
+function _fsTeilZu(b,typ){const m=b&&_fsTeilZuMerk.get(b);return !!(m&&m[typ]);}
+function _fsTeilZuSetzen(b,typ,zu){if(!b||typeof b!=='object')return;const m=_fsTeilZuMerk.get(b)||{};m[typ]=!!zu;_fsTeilZuMerk.set(b,m);}
+function _fsTeilKurz(b,typ){
+  const g=_fsVbRaumGruppen(b,typ).length,n=_fsVbStellenGefuellt(b).filter(x=>_fsVbTyp(x.s)===typ).length;
+  return g+' '+(typ==='innen'?(g===1?'Raum':'Räume'):(g===1?'Bereich':'Bereiche'))+' · '+n+' '+(n===1?'Stelle':'Stellen');
+}
+// „Umgebung abgehen“ und „Vorgeschichte“ aufgeklappt – nur Anzeige
+const _fsUmgAuf=new WeakSet(),_fsVgAuf=new WeakSet();
+function _fsUmgKurz(b){
+  const z=((b&&Array.isArray(b.vbUmgebung))?b.vbUmgebung:[]).filter(r=>r&&String(r.text||'').trim()).length,g=_fsVbUmgebungZeilen(b).length;
+  return z?g+' von '+z+' abgegangen':'freiwillig';
+}
+// Wetter in einer Zeile (Formular und Word): „bedeckt, außen 12,4 °C / 78 % r. F., letzter Regen vor 2 Tagen“
+function _fsWetterKurz(k){
+  if(!k)return '';
+  const wt=[];
+  if(String(k.wetter||'').trim())wt.push(String(k.wetter).trim());
+  const aT=_fsZahl(k.aussenT),aF=_fsZahl(k.aussenRf);
+  if(aT!==null||aF!==null)wt.push('außen '+(aT!==null?_fsEins(aT)+' °C':'–')+(aF!==null?' / '+_fsEins(aF)+' % r. F.':''));
+  if(String(k.letzterRegen||'').trim())wt.push('letzter Regen '+String(k.letzterRegen).trim());
+  return wt.join(', ');
+}
+// Zeit in der Formular-Liste: „10:00–10:40“ · „⏱ seit 10:00 · Ende fehlt“ · „⚠ Zeit prüfen“
+function _fsVbListeZeit(b){
+  if(!_fsIstVorab(b))return {text:'',endeFehlt:false};
+  const s=_fsVbZeitStatus((b&&b.kopf)||{});
+  if(s.art==='ok')return {text:s.b+'–'+s.e,endeFehlt:false};
+  if(s.art==='endeFehlt')return {text:'⏱ seit '+s.b+' · Ende fehlt',endeFehlt:true,beginn:s.b};
+  if(s.art==='endeVor'||s.art==='endeUngueltig')return {text:'⚠ Zeit prüfen',endeFehlt:false};
+  return {text:'',endeFehlt:false};
+}
+/* „🏁 Ende eintragen“ – aus der Formular-Liste, ohne das Formular zu öffnen (Frank 09.10.2026: „manchmal vergesse ich Fertig zu klicken“).
+   PAM schlägt nichts vor und trägt nichts von selbst ein: „Ende jetzt“ nur am Tag des Protokolls, sonst nur die Uhrzeit von Hand; Ende vor Beginn geht nicht. */
+function _fsVbEndeFenster(bericht,fertig){
+  if(!bericht||!bericht.kopf)return;
+  const alt=document.getElementById('_fsVbEnde');if(alt)alt.remove();
+  const k=bericht.kopf,beg=_fsVbUhr(k.beginn),j=_fsVbJetzt(),heute=!!_fsVbIso(bericht.datum)&&_fsVbIso(bericht.datum)===_fsVbIso(j.datum);
+  const ov=document.createElement('div');ov.id='_fsVbEnde';_fsSichtAn(ov);
+  ov.style.cssText='position:fixed;inset:0;z-index:1000090;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
+  const box=document.createElement('div');box.style.cssText='background:var(--bg);color:var(--text);border-radius:14px;padding:18px;max-width:420px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.5);box-sizing:border-box;';
+  const weg=()=>{document.removeEventListener('keydown',taste,true);ov.remove();};
+  const taste=e=>{if(e.key==='Escape'){e.stopImmediatePropagation();e.preventDefault();weg();}};
+  document.addEventListener('keydown',taste,true);
+  ov.addEventListener('click',e=>{if(e.target===ov)weg();});
+  const el=(tag,stil,text)=>{const e=document.createElement(tag);if(stil)e.style.cssText=stil;if(text!=null)e.textContent=text;return e;};
+  box.appendChild(el('div','font-size:var(--fs18,18px);font-weight:700;margin-bottom:4px;','🏁 Ende eintragen'));
+  box.appendChild(el('div','font-size:var(--fs13,13px);color:var(--text2);margin-bottom:12px;line-height:1.4;','„'+_fsTitel(bericht)+'“ · '+(String(bericht.datum||'').trim()||'ohne Datum')+(beg?' · Beginn '+beg:'')));
+  const meld=el('div','display:none;margin-top:8px;padding:7px 10px;border-radius:8px;background:rgba(230,126,34,.16);font-size:var(--fs13,13px);','');
+  const setzen=uhr=>{
+    const u=_fsVbUhr(uhr);
+    if(!u){meld.textContent='Bitte eine Uhrzeit eingeben, z. B. 10:40.';meld.style.display='block';return;}
+    if(beg&&u<=beg){meld.textContent='Das Ende muss nach dem Beginn ('+beg+') liegen.';meld.style.display='block';return;}
+    k.ende=u;scheduleSave();weg();
+    try{toast('✓ Ende '+u+' Uhr eingetragen – nur im Protokoll','success',3500);}catch(e){}
+    if(typeof fertig==='function')fertig();
+  };
+  const KN='display:block;width:100%;min-height:var(--fsh44,48px);border-radius:10px;font-size:var(--fs16,16px);font-weight:700;cursor:pointer;font-family:inherit;color:var(--text);border:2px solid #1f5f8b;background:transparent;';
+  if(heute&&(!beg||j.uhr>beg)){const bj=el('button',KN,'🏁 Ende jetzt: '+j.uhr);bj.type='button';bj.setAttribute('data-fs-endejetzt','1');bj.onclick=()=>setzen(j.uhr);box.appendChild(bj);}
+  const zr=el('div','display:flex;gap:8px;align-items:center;margin-top:10px;','');
+  zr.appendChild(el('span','font-size:var(--fs14,14px);flex-shrink:0;',heute?'oder Uhrzeit:':'Uhrzeit:'));
+  const inp=document.createElement('input');inp.type='text';inp.inputMode='numeric';inp.placeholder='hh:mm';inp.autocomplete='off';inp.setAttribute('data-fs-endefeld','1');
+  inp.style.cssText='flex:1 1 90px;min-width:0;min-height:var(--fsh,42px);padding:6px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--bg3);color:var(--text);font-size:var(--fs16,16px);font-family:inherit;box-sizing:border-box;';
+  inp.addEventListener('keydown',e=>{if(e.key==='Enter')setzen(inp.value);});
+  const ok=el('button','flex-shrink:0;min-height:var(--fsh,42px);padding:6px 14px;border-radius:8px;border:2px solid #1f5f8b;background:transparent;color:var(--text);font-size:var(--fs15,15px);font-weight:700;cursor:pointer;font-family:inherit;','✓ Eintragen');ok.type='button';ok.setAttribute('data-fs-endeok','1');ok.onclick=()=>setzen(inp.value);
+  zr.append(inp,ok);box.append(zr,meld);
+  if(!heute)box.appendChild(el('div','font-size:var(--fs12,12px);color:var(--text2);margin-top:8px;line-height:1.4;','Das Protokoll ist nicht von heute – „Ende jetzt“ gibt es deshalb nicht.'));
+  const ab=el('button','display:block;margin:14px 0 0 auto;min-height:var(--fsh,40px);padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text2);font-size:var(--fs14,14px);cursor:pointer;font-family:inherit;','Abbrechen');ab.type='button';ab.onclick=weg;
+  box.appendChild(ab);ov.appendChild(box);document.body.appendChild(ov);
+  try{inp.focus();}catch(e){}
+}
+// Aufruf aus der Formular-Liste (PC und Handy): Listenplatz der offenen Karte
+function _fsVbEndeNachtragen(bi){
+  try{
+    const t=currentTask();const b=t&&Array.isArray(t.pruefberichte)?t.pruefberichte[bi]:null;
+    if(!b||!_fsIstVorab(b)){toast('Protokoll nicht gefunden','info',3000);return;}
+    _fsVervollstaendigen(b);
+    _fsVbEndeFenster(b,()=>{if(typeof renderPruefberichteDesktop==='function')renderPruefberichteDesktop();else if(typeof renderDetail==='function')renderDetail(t);});
+  }catch(e){console.warn('[Vorabbesichtigung] Ende nachtragen:',e);}
 }
 const FS_BG_MERK_KEY='pam_fs_aufgenommen';
 function _fsIstBegehung(b){return !!b&&b.fassung==='begehung';}
@@ -4571,7 +4887,7 @@ function _fsBgMessfensterZeigen(b,tab0){
 // Bildunterschrift im PDF: wozu gehört das Foto – Raum, Wand, Messstelle (mit der gedruckten Nummer), Feststellung
 function _fsBgFotoZuordnung(b,f){
   const teile=[];
-  if(typeof _fsVbStellenGefuellt==='function')_fsVbStellenGefuellt(b).forEach(x=>{if((x.s.fotoRefs||[]).some(r=>_fsRefPasst(f,r))){const o=b.schlank?String(x.s.ort||'').trim():_fsVbOrtVoll(x.s);teile.push(_fsVbBezeichnung(b,x.s,x.nr)+((b.schlank&&_fsSeiteText(x.s.seite))?' – Seite '+_fsSeiteText(x.s.seite):'')+(o?' – '+o:''));}}); // F21, F22, F24, F28
+  if(typeof _fsVbStellenGefuellt==='function')_fsVbStellenGefuellt(b).forEach(x=>{if((x.s.fotoRefs||[]).some(r=>_fsRefPasst(f,r))){const o=b.schlank?String(x.s.ort||'').trim():_fsVbOrtVoll(x.s);teile.push(_fsVbBezeichnung(b,x.s,x.nr)+((b.schlank&&_fsSeiteText(x.s.seite))?' – '+_fsSeiteMitWort(x.s.seite):'')+(o?' – '+o:''));}}); // F21, F22, F24, F28
   ((b&&b.raeume)||[]).forEach(r=>{
     if(!r)return;
     const name=String(r.name||'').trim()||'Raum';
@@ -5247,7 +5563,7 @@ async function _fsMobPdfBg(bericht,task){
       const rows=[];
       if(hat(k.auftraggeber))rows.push(['Auftraggeber',String(k.auftraggeber).trim()]);
       if(objekt)rows.push(['Objekt',objekt]);
-      if(hat(k.nutzer))rows.push(['Nutzer',String(k.nutzer).trim()]);
+      if(hat(k.nutzer)&&!bericht.schlank)rows.push(['Nutzer',String(k.nutzer).trim()]); /* F47: steht schon bei „Besichtigung bei“ */
       if(hat(k.anlass))rows.push(['Anlass',String(k.anlass).trim()]);
       if(vorab){ // F16: Versicherung, Zugang, Ansprechpartner; kein Umfangstext (Franks Wahl)
         if(hat(k.besuchBei))rows.push(['Besichtigung bei',String(k.besuchBei).trim()]); // F17
@@ -5255,7 +5571,7 @@ async function _fsMobPdfBg(bericht,task){
         if(hat(k.versicherung))rows.push(['Versicherung',String(k.versicherung).trim()]);
         if(hat(k.schadennr))rows.push(['Schadennummer',String(k.schadennr).trim()]);
         if(hat(k.zugang))rows.push(['Zugang',String(k.zugang).trim()]);
-        if(hat(k.ansprechpartner))rows.push(['Ansprechpartner',String(k.ansprechpartner).trim()]);
+        if(hat(k.ansprechpartner)&&!bericht.schlank)rows.push(['Ansprechpartner',String(k.ansprechpartner).trim()]); /* F47: steht schon bei „Besichtigung bei“ */
       }
       tabelle2(rows);
       if(!vorab)absatz('Umfang: '+FS_BG_UMFANG,{groesse:8.5,farbe:[70,70,70],abstand:5});
@@ -5382,7 +5698,7 @@ async function _fsMobPdfBg(bericht,task){
               _fsVbRaumGruppen(bericht,typ).forEach(g=>g.stellen.forEach(({s})=>{
                 const x=vbs.find(v=>v.s===s);if(!x)return;
                 const st=_fsVbStelleSatz(Object.assign({},s,{raum:''})),pk=lbp.find(q=>q.s===s),se=_fsSeiteText(s.seite);
-                zeilen.push(_fsVbBezeichnung(bericht,s,x.nr)+' · '+(st||'Stelle')+(se?' – Seite '+se:'')+fotoHinweis(s.fotoRefs)+(pk?' – Luftbild Nr. '+pk.n:'')+((_fsAsMarkeOk(s)&&_fsAsListe(bericht).some(k=>k.id===s.skz.k))?' – Skizze „'+(String((_fsAsListe(bericht).find(k=>k.id===s.skz.k)||{}).name||'').trim()||'Außen')+'“':'')); /* F33 */
+                zeilen.push(_fsVbBezeichnung(bericht,s,x.nr)+' · '+(st||'Stelle')+(se?' – '+_fsSeiteMitWort(s.seite):'')+fotoHinweis(s.fotoRefs)+(pk?' – Luftbild Nr. '+pk.n:'')+((_fsAsMarkeOk(s)&&_fsAsListe(bericht).some(k=>k.id===s.skz.k))?' – Skizze „'+(String((_fsAsListe(bericht).find(k=>k.id===s.skz.k)||{}).name||'').trim()||'Außen')+'“':'')); /* F33 */
               }));
               if(zeilen.length){unterTitel(typ==='innen'?'Feststellungen innen':'Feststellungen außen');zeilen.forEach(z=>absatz(z,{einzug:3,abstand:1.5}));y+=3;}
             });
@@ -5438,6 +5754,12 @@ async function _fsMobPdfBg(bericht,task){
         });
         y+=2;
       }
+    }
+
+    // F47: Bemerkungen – nur Notizen mit „im PDF“ (Vorabbesichtigung)
+    {
+      const nz=(bericht.schlank&&Array.isArray(bericht.notizen))?bericht.notizen.filter(n=>n&&n.pdf===true&&hat(n.text)):[];
+      if(nz.length){abschnitt('Bemerkungen');nz.forEach(n=>absatz(String(n.text).trim(),{abstand:3}));y+=2;}
     }
 
     // 7 · Zusammenfassung der Feststellungen
@@ -7588,7 +7910,7 @@ function _fsListeZeile(b,t){
   }
   if(b.vorlage==='feuchte'&&b.fassung==='begehung'&&b.art==='vorab'){ // F16
     const bei=String((b.kopf&&b.kopf.besuchBei)||'').trim(),lg=String((b.kopf&&b.kopf.lage)||'').trim(); // F17: bei wem – so sind zwei Besuche an einer Karte zu unterscheiden
-    return {kurz:b.schlank?'BESICHT':'VORAB',lang:b.schlank?'Besichtigung':'Vorabbesichtigung vor der Schadenaufnahme',name:(b.schlank&&String(b.protName||'').trim())||kartenname||String(b.titel||(b.schlank?'Besichtigung':'Vorabbesichtigung')),sub:[bei,lg].filter(Boolean).join(' · ')};
+    return {kurz:'VORAB',lang:b.schlank?'Vorabbesichtigung':'Vorabbesichtigung (frühere Fassung)',name:(b.schlank&&String(b.protName||'').trim())||kartenname||String(b.titel||'Vorabbesichtigung'),sub:[bei,lg].filter(Boolean).join(' · ')}; /* F47 */
   }
   if(b.vorlage==='feuchte'&&b.fassung==='begehung'){
     const keller=b.art==='keller';
