@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F49';
+const PAM_FORMULARE_VERSION='F50';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -492,7 +492,8 @@ const FS_HILFE_VB=[
     'Erst Innen oder Außen, dann einen Raum bzw. Bereich wählen und darin „＋ Stelle“.',
     'Je Stelle: Wo? · Seite (freiwillig; 🧭 misst sie, erst „Seite übernehmen“ trägt sie ein) · Was siehst du? · 📷 Foto · 🛰 Luftbild.',
     'Weitere Stellen im selben Raum oder Bereich: dort „＋ Stelle“. Eine zweite Wand als eigene Gruppe: „＋ anderer Bereich“ mit eigenem Namen.',
-    '„＋ Skizze“: innen Raum von oben, Wand von vorn oder Decke von unten; außen Wand von vorn oder Dachfläche von oben.',
+    '„＋ Skizze“: innen Raum von oben, Wand von vorn oder Decke von unten; außen Wand von vorn oder Dachfläche von oben. „▭ quer / ▯ hoch“ stellt die Fläche um.',
+    '„✏ Einzeichnen“ → „✏ Zeichnen“: Freihand, Linie, Pfeil, Rechteck, Kreis, Text, Radierer. Kurz antippen wählt ein Teil aus: ziehen = verschieben, Farbe antippen = umfärben, „🗑 Löschen“. Ein gewählter Stempel hat Griffe □ – daran Breite und Höhe ziehen.',
     'Die Überschrift „🏠 Innen“ oder „🌤 Außen“ antippen klappt den Teil zu – im PDF bleibt alles.'
   ]],
   ['Umgebung abgehen',[
@@ -2110,12 +2111,16 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
         k.appendChild(kopf);
         if(!auf){wr.appendChild(k);return;}
         const bild=document.createElement('img');bild.setAttribute('data-fs-asbild',sk.id);bild.alt='Skizze außen';
-        bild.style.cssText='display:block;width:100%;max-width:560px;margin:8px 0 4px;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer;';
+        bild.style.cssText='display:block;width:100%;max-width:'+(sk.hoch?'340':'560')+'px;margin:8px 0 4px;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer;'; /* F50: hoch schmaler */
         const zeichne=()=>{const u=_fsBgSkizzeBild(bericht,_fsAsPseudoRaum(sk));if(u)bild.src=u;};
         const oeffnen=()=>_fsBgEinzeichnenZeigen(bericht,_fsAsPseudoRaum(sk),()=>{_neuBauen();});
         const nm=_inp(sk.name,'Name der Skizze, z. B. Wand Straßenseite',v=>{sk.name=v;zeichne();},false);nm.setAttribute('data-fs-asname',sk.id);
         const fz=document.createElement('div');fz.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 2px;';
         _fsAsFlaechen(sk).forEach(f=>{const c=_chip(f.t,sk.aussen===f.k,()=>{if(sk.aussen===f.k)return;if(_fsBgStempelAnzahl(sk)&&!confirm('Die gesetzten Stempel bleiben stehen, passen aber zur anderen Ansicht. Trotzdem wechseln?'))return;sk.aussen=f.k;scheduleSave();_neuBauen();});c.setAttribute('data-fs-asflaeche',f.k);c.style.minHeight='var(--fsh,38px)';fz.appendChild(c);});
+        { /* F50: quer oder hoch – Stempel, Striche und Nummern bleiben an ihrer Stelle im Verhältnis zur Fläche */
+          const tz=document.createElement('span');tz.style.cssText='width:1px;align-self:stretch;background:var(--border);margin:0 2px;';fz.appendChild(tz);
+          [['quer','▭ quer'],['hoch','▯ hoch']].forEach(([lk,lt])=>{const an=(lk==='hoch')===!!sk.hoch;const c=_chip(lt,an,()=>{if(an)return;sk.hoch=lk==='hoch';scheduleSave();_neuBauen();});c.setAttribute('data-fs-aslage',lk);c.style.minHeight='var(--fsh,38px)';fz.appendChild(c);});
+        }
         k.append(nm,fz);
         if(sk.aussen==='dach'){
           const ol=document.createElement('div');ol.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin-top:6px;';ol.textContent='Oben in der Skizze ist (freiwillig):';
@@ -4106,7 +4111,7 @@ function _fsAsRingLage(q,W,H){
 }
 /* Was liegt an dieser Stelle der Fläche (Bildpunkte)? {s, teil:'ring'|'ziel'} – der Kreis geht vor, die oberste Marke gewinnt; null = nichts. Großzügig, damit der Finger trifft. */
 function _fsAsTreffer(b,sk,px,py){
-  const W=FS_BG_SKIZZE_W,H=FS_BG_SKIZZE_H,l=_fsAsMarken(b,sk);
+  const M=_fsSkMasse(sk),W=M.W,H=M.H,l=_fsAsMarken(b,sk); // F50: quer oder hoch
   for(let i=l.length-1;i>=0;i--){
     const L=_fsAsRingLage(l[i],W,H);
     if(Math.hypot(L.x-px,L.y-py)<=FS_AS_PIN_R+12)return {s:l[i].s,teil:'ring'};
@@ -4123,7 +4128,7 @@ function _fsAsStelleNeu(b,sk,ort){
 }
 /* sel = im Zeichenfenster gewählte Stelle (blauer Ring um den Kreis), lose = sie lässt sich gerade verschieben (gestrichelter Griff an der Pfeilspitze) – beides nie im gespeicherten Bild */
 function _fsAsMarkenZeichnen(g,b,sk,sel,lose){
-  const W=FS_BG_SKIZZE_W,H=FS_BG_SKIZZE_H,R=FS_AS_PIN_R;
+  const M=_fsSkMasse(sk),W=M.W,H=M.H,R=FS_AS_PIN_R; // F50: quer oder hoch
   _fsAsMarken(b,sk).forEach(q=>{
     const L=_fsAsRingLage(q,W,H),dx=Math.cos(L.ang*Math.PI/180),dy=-Math.sin(L.ang*Math.PI/180),nx=-dy,ny=dx;
     const sx=L.x-dx*R,sy=L.y-dy*R,ex=L.px+dx*20,ey=L.py+dy*20;
@@ -4143,13 +4148,13 @@ function _fsAsMarkenZeichnen(g,b,sk,sel,lose){
 }
 /* Zeichnet die Außenskizze auf die 900×640-Fläche: Viereck, Name, Ränder, Stempel, Striche, Marken (opt.ohneMarken: ohne – das Zeichenfenster legt sie live darüber) */
 function _fsAsZeichnen(g,b,sk,opt){
-  const W=FS_BG_SKIZZE_W,H=FS_BG_SKIZZE_H,x0=130,y0=100,w=640,h=440,dach=!!sk&&sk.aussen==='dach';
+  const M=_fsSkMasse(sk),W=M.W,H=M.H,x0=M.hoch?100:130,y0=M.hoch?130:100,w=M.hoch?440:640,h=M.hoch?640:440,dach=!!sk&&sk.aussen==='dach'; // F50: hoch = 640×900, die Fläche steht senkrecht
   g.fillStyle='#ffffff';g.fillRect(0,0,W,H);
   g.fillStyle=_fsAsFarbe(sk);g.fillRect(x0,y0,w,h);
   g.strokeStyle='#222222';g.lineWidth=6;g.lineCap='square';
   g.beginPath();g.moveTo(x0,y0);g.lineTo(x0+w,y0);g.lineTo(x0+w,y0+h);g.lineTo(x0,y0+h);g.lineTo(x0,y0);g.stroke();
   g.textBaseline='middle';g.fillStyle='#1c1c1e';g.font='bold 30px sans-serif';g.textAlign='left';
-  g.fillText(_fsBgSkizzeKuerzen((sk&&sk.name)||(_fsAsTyp(sk)==='innen'?'Raum':'Außen'),36)+' – '+_fsAsAnsicht(sk),24,32);
+  g.fillText(_fsBgSkizzeKuerzen((sk&&sk.name)||(_fsAsTyp(sk)==='innen'?'Raum':'Außen'),M.hoch?24:36)+' – '+_fsAsAnsicht(sk),24,32);
   const rd=_fsAsRaender(sk);
   g.font='24px sans-serif';g.fillStyle='#555555';
   g.textAlign='center';if(rd[0])g.fillText(rd[0],x0+w/2,y0-24);if(rd[2])g.fillText(rd[2],x0+w/2,y0+h+28);
@@ -5150,6 +5155,9 @@ function _fsBgFotoZuordnung(b,f){
    Drehung 0: W1 liegt unten, dann im Uhrzeigersinn W2 links, W3 oben, W4 rechts; jede Drehung schiebt alle um eine Seite im Uhrzeigersinn weiter.
    ⛔ Nur Bezeichnungen und Programm in dieser öffentlichen Datei. */
 const FS_BG_SKIZZE_W=900,FS_BG_SKIZZE_H=640;
+/* F50: Skizze quer oder hoch (Frank 09.10.2026). Nur die neuen Skizzen (innen/außen, Feld „aussen“) können hoch stehen – dann 640×900; die Raumskizze bleibt quer.
+   Striche, Teile, Stempel und Nummern liegen als Anteile der Fläche: beim Umstellen bleiben sie an ihrer Stelle im Verhältnis zur Fläche. */
+function _fsSkMasse(sk){const hoch=!!(sk&&sk.aussen&&sk.hoch);return {W:hoch?FS_BG_SKIZZE_H:FS_BG_SKIZZE_W,H:hoch?FS_BG_SKIZZE_W:FS_BG_SKIZZE_H,hoch:hoch};}
 const FS_BG_SEITEN=['unten','links','oben','rechts'];
 function _fsBgSkizzeMasse(r){
   const zahl=v=>{const n=_fsZahl(v);return (n!==null&&n>0)?n:null;};
@@ -5260,7 +5268,8 @@ const FS_BG_STRICH_NAMEN=['schwarz','rot','grün'];
 const FS_BG_STRICHE_MAX=4000;
 function _fsBgStricheAnzahl(sk){return ((sk&&Array.isArray(sk.striche))?sk.striche:[]).reduce((a,s)=>a+((s&&Array.isArray(s.p))?s.p.length:0),0);}
 // Pixel-Punkte der 900×640-Fläche → Anteile 0…1 (3 Stellen), Punkte näher als 3 px am vorigen entfallen, Unbrauchbares entfällt
-function _fsBgStrichVereinfachen(pts){
+function _fsBgStrichVereinfachen(pts,W,H){
+  W=W||FS_BG_SKIZZE_W;H=H||FS_BG_SKIZZE_H; // F50: Fläche der Skizze (hoch = 640×900)
   const out=[];let lx=null,ly=null;
   (Array.isArray(pts)?pts:[]).forEach(p=>{
     if(!Array.isArray(p))return;
@@ -5268,14 +5277,14 @@ function _fsBgStrichVereinfachen(pts){
     if(!isFinite(x)||!isFinite(y))return;
     if(lx!==null&&Math.hypot(x-lx,y-ly)<3)return;
     lx=x;ly=y;
-    out.push([Math.round(Math.max(0,Math.min(1,x/FS_BG_SKIZZE_W))*1000)/1000,Math.round(Math.max(0,Math.min(1,y/FS_BG_SKIZZE_H))*1000)/1000]);
+    out.push([Math.round(Math.max(0,Math.min(1,x/W))*1000)/1000,Math.round(Math.max(0,Math.min(1,y/H))*1000)/1000]);
   });
   return out;
 }
 // Strich anfügen; false, wenn nichts übrig bleibt oder die Obergrenze überschritten würde
 function _fsBgStrichDazu(sk,farbe,pts){
   if(!sk)return false;
-  const p=_fsBgStrichVereinfachen(pts);
+  const M=_fsSkMasse(sk),p=_fsBgStrichVereinfachen(pts,M.W,M.H);
   if(!p.length)return false;
   if(!Array.isArray(sk.striche))sk.striche=[];
   if(_fsBgStricheAnzahl(sk)+p.length>FS_BG_STRICHE_MAX)return false;
@@ -5286,17 +5295,113 @@ function _fsBgStrichZurueck(sk){if(sk&&Array.isArray(sk.striche)&&sk.striche.len
 function _fsBgStricheLoeschen(sk){if(sk)sk.striche=[];return sk;}
 // Striche auf den Zeichenbereich g (gleiche Fläche wie die Skizze); ein einzelner Punkt wird ein Tupfer
 function _fsBgStricheZeichnen(g,r){
-  const sk=(r&&r.skizze)||{},W=FS_BG_SKIZZE_W,H=FS_BG_SKIZZE_H;
-  (Array.isArray(sk.striche)?sk.striche:[]).forEach(s=>{
-    const p=((s&&Array.isArray(s.p))?s.p:[]).filter(q=>Array.isArray(q)&&isFinite(+q[0])&&isFinite(+q[1]));
-    if(!p.length)return;
-    g.strokeStyle=FS_BG_STRICH_FARBEN.indexOf(s.f)>=0?s.f:FS_BG_STRICH_FARBEN[0];g.lineWidth=5;g.lineCap='round';g.lineJoin='round';
-    g.beginPath();g.moveTo(p[0][0]*W,p[0][1]*H);
-    if(p.length===1)g.lineTo(p[0][0]*W+0.1,p[0][1]*H);
-    else for(let i=1;i<p.length;i++)g.lineTo(p[i][0]*W,p[i][1]*H);
-    g.stroke();
-  });
+  const sk=(r&&r.skizze)||{},M=_fsSkMasse(sk);
+  (Array.isArray(sk.striche)?sk.striche:[]).forEach(s=>_fsBgStrichMalen(g,s,M.W,M.H));
 }
+/* ── F50: Werkzeuge wie beim Foto-Malen (Frank 09.10.2026) ─────────────────────────────────────────────────────────────────
+   Jedes Teil bleibt einzeln: antippen = auswählen, ziehen = verschieben, Farbe antippen = umfärben, „🗑 Löschen“ oder Radierer = weg. Nichts wird ins Bild
+   gebrannt (anders als beim Foto). Ein Teil liegt in sk.striche wie die Freihand-Striche: {f, p:[[x,y],[x,y]], w:'linie'|'pfeil'|'rechteck'|'kreis'}
+   bzw. {f, p:[[x,y]], w:'text', txt}; ohne w = Freihand-Strich wie bisher. x/y als Anteil der Fläche. */
+const FS_SK_FORMEN=['linie','pfeil','rechteck','kreis','text'];
+const FS_SK_WERKZEUGE=[{k:'frei',n:'✎ Freihand'},{k:'linie',n:'／ Linie'},{k:'pfeil',n:'➚ Pfeil'},{k:'rechteck',n:'▭ Rechteck'},{k:'kreis',n:'◯ Kreis'},{k:'text',n:'T Text'},{k:'radierer',n:'⌫ Radierer'}];
+// Ein Teil zeichnen (W/H = Fläche in Bildpunkten); ein einzelner Freihand-Punkt wird ein Tupfer
+function _fsBgStrichMalen(g,s,W,H){
+  const p=((s&&Array.isArray(s.p))?s.p:[]).filter(q=>Array.isArray(q)&&isFinite(+q[0])&&isFinite(+q[1]));
+  if(!p.length)return;
+  const f=FS_BG_STRICH_FARBEN.indexOf(s.f)>=0?s.f:FS_BG_STRICH_FARBEN[0],w=FS_SK_FORMEN.indexOf(s.w)>=0?s.w:'';
+  g.strokeStyle=f;g.lineWidth=5;g.lineCap='round';g.lineJoin='round';
+  const x1=p[0][0]*W,y1=p[0][1]*H,x2=(p[1]||p[0])[0]*W,y2=(p[1]||p[0])[1]*H;
+  if(w==='text'){ /* farbiger Text mit weißem Rand, damit er über Linien lesbar bleibt */
+    const tx=String(s.txt||'');if(!tx)return;
+    g.font='bold 28px sans-serif';g.textAlign='center';g.textBaseline='middle';
+    if(typeof g.strokeText==='function'){g.lineWidth=6;g.strokeStyle='#ffffff';g.strokeText(tx,x1,y1);}
+    g.fillStyle=f;g.fillText(tx,x1,y1);
+    return;
+  }
+  if(w==='linie'||w==='pfeil'){
+    g.beginPath();g.moveTo(x1,y1);g.lineTo(x2,y2);g.stroke();
+    if(w==='pfeil'){const a=Math.atan2(y2-y1,x2-x1),L=26;g.fillStyle=f;g.beginPath();g.moveTo(x2,y2);g.lineTo(x2-L*Math.cos(a-0.45),y2-L*Math.sin(a-0.45));g.lineTo(x2-L*Math.cos(a+0.45),y2-L*Math.sin(a+0.45));g.closePath();g.fill();}
+    return;
+  }
+  if(w==='rechteck'){g.strokeRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));return;}
+  if(w==='kreis'){ /* Ellipse im aufgezogenen Rahmen */
+    const cx=(x1+x2)/2,cy=(y1+y2)/2,rx=Math.max(2,Math.abs(x2-x1)/2),ry=Math.max(2,Math.abs(y2-y1)/2);
+    g.beginPath();
+    if(typeof g.ellipse==='function')g.ellipse(cx,cy,rx,ry,0,0,Math.PI*2);else{g.save();g.translate(cx,cy);g.scale(rx,ry);g.arc(0,0,1,0,Math.PI*2);g.restore();}
+    g.stroke();
+    return;
+  }
+  g.beginPath();g.moveTo(p[0][0]*W,p[0][1]*H);
+  if(p.length===1)g.lineTo(p[0][0]*W+0.1,p[0][1]*H);
+  else for(let i=1;i<p.length;i++)g.lineTo(p[i][0]*W,p[i][1]*H);
+  g.stroke();
+}
+// Linie, Pfeil, Rechteck oder Kreis anfügen (a/e = Anfang/Ende in Bildpunkten); zu kurz (unter 8 px) oder zu viel → false
+function _fsBgFormDazu(sk,farbe,w,a,e){
+  if(!sk||FS_SK_FORMEN.indexOf(w)<0||w==='text'||!Array.isArray(a)||!Array.isArray(e))return false;
+  if(!(Math.hypot((+e[0])-(+a[0]),(+e[1])-(+a[1]))>=8))return false;
+  const M=_fsSkMasse(sk),p=_fsBgStrichVereinfachen([a,e],M.W,M.H);
+  if(p.length<2)return false;
+  if(!Array.isArray(sk.striche))sk.striche=[];
+  if(_fsBgStricheAnzahl(sk)+p.length>FS_BG_STRICHE_MAX)return false;
+  sk.striche.push({f:FS_BG_STRICH_FARBEN.indexOf(farbe)>=0?farbe:FS_BG_STRICH_FARBEN[0],p:p,w:w});
+  return true;
+}
+// Text an die Stelle pt (Bildpunkte); eine Zeile, höchstens 30 Zeichen; leer → false
+function _fsBgSkTextDazu(sk,farbe,pt,txt){
+  const tx=String(txt==null?'':txt).replace(/\s+/g,' ').trim().slice(0,FS_BG_STEMPEL_TEXT_MAX);
+  if(!sk||!tx||!Array.isArray(pt))return false;
+  const M=_fsSkMasse(sk),p=_fsBgStrichVereinfachen([pt],M.W,M.H);
+  if(!p.length)return false;
+  if(!Array.isArray(sk.striche))sk.striche=[];
+  if(_fsBgStricheAnzahl(sk)+1>FS_BG_STRICHE_MAX)return false;
+  sk.striche.push({f:FS_BG_STRICH_FARBEN.indexOf(farbe)>=0?farbe:FS_BG_STRICH_FARBEN[0],p:p,w:'text',txt:tx});
+  return true;
+}
+// Rahmen eines Teils in Bildpunkten {x,y,w,h} – für den Auswahlrahmen; null, wenn nichts da ist
+function _fsBgStrichRahmen(s,W,H){
+  const p=((s&&Array.isArray(s.p))?s.p:[]).filter(q=>Array.isArray(q)&&isFinite(+q[0])&&isFinite(+q[1]));
+  if(!p.length)return null;
+  if(s.w==='text'){const bw=Math.max(30,String(s.txt||'').length*16+10);return {x:p[0][0]*W-bw/2,y:p[0][1]*H-20,w:bw,h:40};}
+  let x1=Infinity,y1=Infinity,x2=-Infinity,y2=-Infinity;
+  p.forEach(q=>{x1=Math.min(x1,q[0]*W);x2=Math.max(x2,q[0]*W);y1=Math.min(y1,q[1]*H);y2=Math.max(y2,q[1]*H);});
+  return {x:x1,y:y1,w:x2-x1,h:y2-y1};
+}
+// Abstand eines Punktes von einer Strecke (Bildpunkte)
+function _fsSkAbstand(px,py,x1,y1,x2,y2){const dx=x2-x1,dy=y2-y1,l=dx*dx+dy*dy;let t=l?((px-x1)*dx+(py-y1)*dy)/l:0;t=Math.max(0,Math.min(1,t));return Math.hypot(px-(x1+t*dx),py-(y1+t*dy));}
+// Welches Teil liegt hier (Bildpunkte)? Das oberste (zuletzt gezeichnete) gewinnt; −1 = keines. 16 px Rand für den Finger; Rechteck und Kreis zählen am Rand
+function _fsBgStrichTreffer(sk,px,py){
+  const l=(sk&&Array.isArray(sk.striche))?sk.striche:[],M=_fsSkMasse(sk),W=M.W,H=M.H,T=16;
+  for(let i=l.length-1;i>=0;i--){
+    const s=l[i];if(!s)continue;
+    const p=(Array.isArray(s.p)?s.p:[]).filter(q=>Array.isArray(q)&&isFinite(+q[0])&&isFinite(+q[1])).map(q=>[q[0]*W,q[1]*H]);
+    if(!p.length)continue;
+    if(s.w==='text'){const r=_fsBgStrichRahmen(s,W,H);if(r&&px>=r.x-T&&px<=r.x+r.w+T&&py>=r.y-T&&py<=r.y+r.h+T)return i;continue;}
+    if(s.w==='rechteck'&&p.length>1){
+      const xa=Math.min(p[0][0],p[1][0]),xb=Math.max(p[0][0],p[1][0]),ya=Math.min(p[0][1],p[1][1]),yb=Math.max(p[0][1],p[1][1]);
+      if(Math.min(_fsSkAbstand(px,py,xa,ya,xb,ya),_fsSkAbstand(px,py,xb,ya,xb,yb),_fsSkAbstand(px,py,xb,yb,xa,yb),_fsSkAbstand(px,py,xa,yb,xa,ya))<=T)return i;
+      continue;
+    }
+    if(s.w==='kreis'&&p.length>1){
+      const cx=(p[0][0]+p[1][0])/2,cy=(p[0][1]+p[1][1])/2,rx=Math.max(2,Math.abs(p[1][0]-p[0][0])/2),ry=Math.max(2,Math.abs(p[1][1]-p[0][1])/2);
+      if(Math.abs(Math.hypot((px-cx)/rx,(py-cy)/ry)-1)*Math.min(rx,ry)<=T)return i;
+      continue;
+    }
+    if(p.length===1){if(Math.hypot(px-p[0][0],py-p[0][1])<=T)return i;continue;}
+    for(let j=1;j<p.length;j++)if(_fsSkAbstand(px,py,p[j-1][0],p[j-1][1],p[j][0],p[j][1])<=T)return i;
+  }
+  return -1;
+}
+// Teil verschieben um dx/dy Bildpunkte, bezogen auf seine Lage beim Anfassen (orig); es bleibt ganz auf der Fläche
+function _fsBgStrichVerschieben(s,orig,dx,dy,W,H){
+  if(!s||!Array.isArray(orig)||!orig.length||!isFinite(+dx)||!isFinite(+dy))return false;
+  const xs=orig.map(q=>+q[0]),ys=orig.map(q=>+q[1]);
+  const ax=Math.max(-Math.min.apply(null,xs),Math.min(1-Math.max.apply(null,xs),dx/(W||FS_BG_SKIZZE_W)));
+  const ay=Math.max(-Math.min.apply(null,ys),Math.min(1-Math.max.apply(null,ys),dy/(H||FS_BG_SKIZZE_H)));
+  s.p=orig.map(q=>[Math.round((+q[0]+ax)*1000)/1000,Math.round((+q[1]+ay)*1000)/1000]);
+  return true;
+}
+function _fsBgStrichWeg(sk,i){if(!sk||!Array.isArray(sk.striche)||!sk.striche[i])return false;sk.striche.splice(i,1);return true;}
 /* ── F7: Stempel (Tür, Fenster, Schrank, Heizkörper) in der Raumskizze ─────────────────────────────────────────────────
    Frank (01.10.2026): „Stempel für Tür oder Fenster, die ich dahin klicken kann – und verschieben.“ Ein Stempel ist ein GEGENSTAND, kein gemalter Strich:
    raum.skizze.stempel = [{t:'tuer'|'fenster'|'schrank'|'heiz', x, y (Mitte, Anteil 0…1 der 900×640-Fläche), r (0/90/180/270 Grad), s (Größe 0,5…2)}].
@@ -5335,7 +5440,8 @@ function _fsBgStempelBox(st){
   const s=Math.max(0.5,Math.min(2,(+st.s)||1));
   if(m.leiste)return {w:m.w*s,h:m.h,oy:0};
   if(st.t==='text')return {w:_fsBgStempelTextBreite(st.txt)*s,h:m.h*s,oy:0};
-  return {w:m.w*s,h:m.h*s,oy:(m.oy||0)*s};
+  const bx=_fsBgStempelFaktor(st.bx),by=_fsBgStempelFaktor(st.by); /* F50: frei in Breite/Höhe gezogen */
+  return {w:m.w*s*bx,h:m.h*s*by,oy:(m.oy||0)*s*by};
 }
 // Mitte verschieben (Anteile 0…1, 3 Stellen); der Stempel bleibt auf der Fläche
 function _fsBgStempelBewegen(st,x,y){
@@ -5362,6 +5468,32 @@ function _fsBgStempelWeg(sk,i){
   if(!sk||!Array.isArray(sk.stempel)||!sk.stempel[i])return false;
   sk.stempel.splice(i,1);return true;
 }
+/* F50: Stempel frei ziehen (Frank: „Stempel frei in Breite und Höhe ziehen“, z. B. ein Fenster von oben so lang wie das echte). Griffe an Ecken und
+   Seiten ändern Breite (bx) und Höhe (by) getrennt, die Mitte bleibt. Leisten (Dachrinne …) haben Griffe nur an den Enden und ändern die Länge (s).
+   Der Text-Stempel hat keine Griffe (Schrift würde verzerrt) – dort bleiben „Größer/Kleiner“. Faktoren 0,2…8. */
+function _fsBgStempelFaktor(v){const n=+v;return (isFinite(n)&&n>0)?Math.max(0.2,Math.min(8,n)):1;}
+// lx/ly = Zeiger in Bildpunkten, bezogen auf die Mitte des Stempels und schon zurückgedreht; griff = n · s · e · w · ne · nw · se · sw bzw. l · r (Leiste)
+function _fsBgStempelGriffZiehen(st,griff,lx,ly){
+  const m=FS_BG_STEMPEL_MASSE[st&&st.t];
+  if(!m||st.t==='text'||!isFinite(+lx)||!isFinite(+ly))return false;
+  const s=Math.max(0.5,Math.min(2,(+st.s)||1));
+  if(m.leiste){if(griff!=='l'&&griff!=='r')return false;st.s=Math.round(Math.max(0.5,Math.min(2,2*Math.abs(lx)/m.w))*100)/100;return true;}
+  if(!/^(n|s|e|w|ne|nw|se|sw)$/.test(String(griff||'')))return false;
+  const oy=(m.oy||0)*s*_fsBgStempelFaktor(st.by);
+  if(/[ew]/.test(griff))st.bx=Math.round(Math.max(0.2,Math.min(8,Math.min(FS_BG_SKIZZE_W,2*Math.abs(lx))/(m.w*s)))*100)/100;
+  if(/[ns]/.test(griff))st.by=Math.round(Math.max(0.2,Math.min(8,Math.min(FS_BG_SKIZZE_W,2*Math.abs(ly-oy))/(m.h*s)))*100)/100;
+  return true;
+}
+// Griffe eines Stempels: [{k, x, y}] in Bildpunkten der Fläche (gedreht wie der Stempel); Text-Stempel: keine
+function _fsBgStempelGriffe(st,W,H){
+  const m=FS_BG_STEMPEL_MASSE[st&&st.t],bx=_fsBgStempelBox(st);
+  if(!m||!bx||st.t==='text'||!isFinite(+st.x)||!isFinite(+st.y))return [];
+  const a=((+st.r)||0)*Math.PI/180,cx=st.x*(W||FS_BG_SKIZZE_W),cy=st.y*(H||FS_BG_SKIZZE_H);
+  const pk=(lx,ly)=>({x:cx+lx*Math.cos(a)-ly*Math.sin(a),y:cy+lx*Math.sin(a)+ly*Math.cos(a)});
+  const hw=bx.w/2,hh=bx.h/2,oy=bx.oy;
+  const l=m.leiste?[['l',-hw,0],['r',hw,0]]:[['nw',-hw,oy-hh],['n',0,oy-hh],['ne',hw,oy-hh],['e',hw,oy],['se',hw,oy+hh],['s',0,oy+hh],['sw',-hw,oy+hh],['w',-hw,oy]];
+  return l.map(q=>Object.assign({k:q[0]},pk(q[1],q[2])));
+}
 // Welcher Stempel liegt an dieser Stelle (Pixel der 900×640-Fläche)? Der oberste (zuletzt gesetzte) gewinnt, −1 = keiner. 14 px Rand, damit man mit dem Finger trifft.
 function _fsBgStempelTreffer(sk,px,py){
   const l=(sk&&Array.isArray(sk.stempel))?sk.stempel:[];
@@ -5369,7 +5501,7 @@ function _fsBgStempelTreffer(sk,px,py){
     const st=l[i],m=_fsBgStempelBox(st); /* F41 */
     if(!m)continue;
     const a=-((+st.r)||0)*Math.PI/180;
-    const dx=px-st.x*FS_BG_SKIZZE_W,dy=py-st.y*FS_BG_SKIZZE_H;
+    const M=_fsSkMasse(sk),dx=px-st.x*M.W,dy=py-st.y*M.H; // F50: quer oder hoch
     const lx=dx*Math.cos(a)-dy*Math.sin(a),ly=dx*Math.sin(a)+dy*Math.cos(a);
     if(Math.abs(lx)<=m.w/2+14&&Math.abs(ly-m.oy)<=m.h/2+14)return i;
   }
@@ -5377,13 +5509,21 @@ function _fsBgStempelTreffer(sk,px,py){
 }
 // Zeichnet die Stempel auf den Zeichenbereich g (gleiche Fläche wie die Skizze). Ohne Stempel: keine Aufrufe.
 function _fsBgStempelZeichnen(g,r){
-  const sk=(r&&r.skizze)||{},W=FS_BG_SKIZZE_W,H=FS_BG_SKIZZE_H;
+  const sk=(r&&r.skizze)||{},M=_fsSkMasse(sk),W=M.W,H=M.H; // F50: quer oder hoch
   (Array.isArray(sk.stempel)?sk.stempel:[]).forEach(st=>{
     if(!st||!FS_BG_STEMPEL_MASSE[st.t]||!isFinite(+st.x)||!isFinite(+st.y))return;
     if(st.t==='text'&&!String(st.txt||'').trim())return;
     const s=Math.max(0.5,Math.min(2,(+st.s)||1)),leiste=!!FS_BG_STEMPEL_MASSE[st.t].leiste,L=FS_BG_STEMPEL_MASSE[st.t].w*s; /* F41: L = Länge einer Leiste */
+    const sx=(leiste||st.t==='text')?s:s*_fsBgStempelFaktor(st.bx),sy=(leiste||st.t==='text')?s:s*_fsBgStempelFaktor(st.by); /* F50: frei in Breite/Höhe */
     g.save();
-    g.translate(st.x*W,st.y*H);g.rotate(((+st.r)||0)*Math.PI/180);if(!leiste)g.scale(s,s);
+    g.translate(st.x*W,st.y*H);g.rotate(((+st.r)||0)*Math.PI/180);if(!leiste)g.scale(sx,sy);
+    let _zurueck=null;
+    if(!leiste&&Math.abs(sx-sy)>1e-6){ /* F50: gedehnt – die Fläche wächst, die Linien bleiben gleich dick (Pfad gedehnt, Strich ungedehnt) */
+      const oS=g.stroke,oR=g.strokeRect,eS=Object.prototype.hasOwnProperty.call(g,'stroke'),eR=Object.prototype.hasOwnProperty.call(g,'strokeRect');
+      const strich=function(){g.scale(1/sx,1/sy);const lw=g.lineWidth;g.lineWidth=lw*s;oS.call(g);g.lineWidth=lw;g.scale(sx,sy);};
+      g.stroke=strich;g.strokeRect=function(x,y,w,h){g.beginPath();g.rect(x,y,w,h);strich();};
+      _zurueck=()=>{if(eS)g.stroke=oS;else delete g.stroke;if(eR)g.strokeRect=oR;else delete g.strokeRect;};
+    }
     g.lineCap='butt';g.lineJoin='miter';
     if(st.t==='tuer'){ // Lücke in der Wand, Türblatt und Schwenkbogen (nach oben, bei Drehung 0)
       g.strokeStyle='#ffffff';g.lineWidth=24;g.beginPath();g.moveTo(-55,0);g.lineTo(55,0);g.stroke();
@@ -5462,13 +5602,14 @@ function _fsBgStempelZeichnen(g,r){
       [-30,-10,10,30].forEach(x=>{g.moveTo(x,-11);g.lineTo(x,11);});
       g.stroke();
     }
+    if(_zurueck)_zurueck();
     g.restore();
   });
 }
 // Bild der Skizze als data:-Adresse (JPEG) – null, wenn kein Zeichenbereich verfügbar ist. opt.hl = Wand, die orange hervorgehoben wird (nur Anzeige)
 function _fsBgSkizzeBild(b,r,opt){
   try{
-    const cv=document.createElement('canvas');cv.width=FS_BG_SKIZZE_W;cv.height=FS_BG_SKIZZE_H;
+    const M=_fsSkMasse(r&&r.skizze),cv=document.createElement('canvas');cv.width=M.W;cv.height=M.H; // F50: quer oder hoch
     const g=cv.getContext('2d');
     if(!g)return null;
     _fsBgSkizzeZeichnen(g,b,r,opt);
@@ -5481,7 +5622,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
   const sk=r&&r.skizze;
   if(!sk||!sk.an)return;
   const alt=document.getElementById('_fsEinzeichnen');if(alt){alt.remove();return;}
-  const W=FS_BG_SKIZZE_W,H=FS_BG_SKIZZE_H;
+  const M=_fsSkMasse(sk),W=M.W,H=M.H; // F50: quer oder hoch
   const unterlage=_fsBgSkizzeBild(b,Object.assign({},r,{skizze:Object.assign({},sk,{striche:[],stempel:[]})}),{ohneMarken:true}); // die Zeichnung ohne Striche und Stempel (F33: und ohne Stellen-Nummern), die kommen live darüber
   if(!unterlage){toast('Einzeichnen geht hier nicht (kein Zeichenbereich)','error',4000);return;}
   const ov=document.createElement('div');ov.id='_fsEinzeichnen';_fsSichtAn(ov);
@@ -5503,6 +5644,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
   ov.append(kopf,leiste,feld,fuss);
   const g=cv.getContext('2d');
   const bild=new Image();let bildDa=false;
+  let werkzeug='frei',selT=-1,ziehT=null,entwurf=null,griffZieh=null;const verlauf=[]; /* F50: Werkzeug · angetipptes Teil · Teil verschieben · Vorschau der Form · Stempel-Griff · Rückgängig-Verlauf (nur in diesem Fenster) */
   let modus=sk.aussen?'stelle':'zeichnen',farbe=FS_BG_STRICH_FARBEN[0],aktiv=null,zieh=null,sel=-1,stiftGesehen=false,selS=null,ziehS=null,loseS=false,festGesagtS=false,neuText=null; /* F34: loseS = gewählte Nummer lässt sich verschieben; neuText = Beschreibung einer neuen Stelle, die auf den Tipp in die Skizze wartet */ /* F33: Außenskizze beginnt bei „Stellen“; selS = gewählte Stelle, ziehS = Marke wird gezogen */
   const neu=()=>{
     g.fillStyle='#ffffff';g.fillRect(0,0,W,H);
@@ -5516,7 +5658,11 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
       g.strokeStyle='#1f5f8b';g.lineWidth=3;g.setLineDash([10,7]);
       g.strokeRect(-m.w/2-8,m.oy-m.h/2-8,m.w+16,m.h+16);
       g.setLineDash([]);g.restore();
+      _fsBgStempelGriffe(st,W,H).forEach(q=>{g.fillStyle='#ffffff';g.fillRect(q.x-10,q.y-10,20,20);g.strokeStyle='#1f5f8b';g.lineWidth=3;g.strokeRect(q.x-10,q.y-10,20,20);}); /* F50: Griffe für Breite/Höhe */
     }
+    const tl=(modus==='zeichnen'&&selT>=0&&Array.isArray(sk.striche))?sk.striche[selT]:null,tr=tl?_fsBgStrichRahmen(tl,W,H):null; /* F50: angetipptes Teil */
+    if(tr){g.save();g.strokeStyle='#1f5f8b';g.lineWidth=3;if(typeof g.setLineDash==='function')g.setLineDash([10,7]);g.strokeRect(tr.x-12,tr.y-12,tr.w+24,tr.h+24);if(typeof g.setLineDash==='function')g.setLineDash([]);g.restore();}
+    if(entwurf)_fsBgStrichMalen(g,entwurf,W,H); /* F50: die Form, die gerade aufgezogen wird */
   };
   bild.onload=()=>{bildDa=true;neu();};
   bild.src=unterlage;
@@ -5526,11 +5672,15 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
     x.onclick=fn;return x;
   };
   const RAND='border:2px solid var(--fs-krd,var(--border));background:var(--fs-kfl,transparent);';
+  /* F50: Rückgängig über einen Verlauf (auch Verschieben, Umfärben, Löschen); ist er leer, nimmt ↶ wie bisher den neuesten Strich zurück */
+  const merken=()=>{verlauf.push(JSON.stringify(Array.isArray(sk.striche)?sk.striche:[]));if(verlauf.length>40)verlauf.shift();};
+  const rueck=()=>{if(verlauf.length){sk.striche=JSON.parse(verlauf.pop());selT=-1;return true;}if(_fsBgStrichZurueck(sk)){selT=-1;return true;}return false;};
+  const radieren=p=>{const i=_fsBgStrichTreffer(sk,p[0],p[1]);if(i<0)return;merken();if(_fsBgStrichWeg(sk,i)){selT=-1;scheduleSave();neu();leisteBauen();}};
   const leisteBauen=()=>{
     leiste.innerHTML='';
     (sk.aussen?[['stelle','① Stellen'],['stempel','▣ Stempel'],['zeichnen','✏ Zeichnen']]:[['zeichnen','✏ Zeichnen'],['stempel','▣ Stempel']]).forEach(([k,txt])=>{
       const an=modus===k;
-      leiste.appendChild(knopf(txt,'border:3px solid '+(an?'var(--fs-krd,'+FS_FARBE+')':'var(--border)')+';background:'+(an?'var(--fs-can,rgba(31,95,139,.18))':'var(--fs-cfl,transparent)')+';',()=>{modus=k;sel=-1;loseS=false;neuText=null;neu();leisteBauen();},['data-fs-ez-modus',k]));
+      leiste.appendChild(knopf(txt,'border:3px solid '+(an?'var(--fs-krd,'+FS_FARBE+')':'var(--border)')+';background:'+(an?'var(--fs-can,rgba(31,95,139,.18))':'var(--fs-cfl,transparent)')+';',()=>{modus=k;sel=-1;selT=-1;loseS=false;neuText=null;neu();leisteBauen();},['data-fs-ez-modus',k]));
     });
     const trenn=document.createElement('span');trenn.style.cssText='width:1px;align-self:stretch;background:var(--border);';leiste.appendChild(trenn);
     if(modus==='stelle'){ /* F33: Stellen des Bereichs als Nummern in die Skizze setzen */
@@ -5558,19 +5708,30 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
         :loseS?selName+' ist lose: Pfeilspitze oder Kreis ziehen oder an die richtige Stelle tippen – dann „✓ Fest“'
         :selName+' ist fest (🔒) – „✥ Verschieben“ macht sie lose';
       leiste.appendChild(z);
-    }else if(modus==='zeichnen'){
-      FS_BG_STRICH_FARBEN.forEach((f,i)=>{
-        const an=f===farbe;
-        leiste.appendChild(knopf(FS_BG_STRICH_NAMEN[i],'border:3px solid '+(an?'var(--fs-krd,'+FS_FARBE+')':'var(--border)')+';background:var(--fs-cfl,transparent);border-left:14px solid '+f+';',()=>{farbe=f;leisteBauen();},['data-fs-ez-farbe',String(i)]));
+    }else if(modus==='zeichnen'){ /* F50: Werkzeuge wie beim Foto-Malen; jedes Teil bleibt einzeln */
+      FS_SK_WERKZEUGE.forEach(x=>{
+        const an=werkzeug===x.k;
+        leiste.appendChild(knopf(x.n,'border:3px solid '+(an?'var(--fs-krd,'+FS_FARBE+')':'var(--border)')+';background:'+(an?'var(--fs-can,rgba(31,95,139,.18))':'var(--fs-cfl,transparent)')+';',()=>{werkzeug=x.k;if(x.k==='radierer')selT=-1;neu();leisteBauen();},['data-fs-ez-wz',x.k]));
       });
-      leiste.appendChild(knopf('↶ Rückgängig',RAND,()=>{if(_fsBgStrichZurueck(sk)){scheduleSave();neu();leisteBauen();}},['data-fs-ez-zurueck','1']));
+      const trenn2=document.createElement('span');trenn2.style.cssText='width:1px;align-self:stretch;background:var(--border);';leiste.appendChild(trenn2);
+      const teil=(selT>=0&&Array.isArray(sk.striche))?sk.striche[selT]:null;
+      FS_BG_STRICH_FARBEN.forEach((f,i)=>{
+        const an=f===(teil?teil.f:farbe);
+        leiste.appendChild(knopf(FS_BG_STRICH_NAMEN[i],'border:3px solid '+(an?'var(--fs-krd,'+FS_FARBE+')':'var(--border)')+';background:var(--fs-cfl,transparent);border-left:14px solid '+f+';',()=>{farbe=f;if(teil&&teil.f!==f){merken();teil.f=f;scheduleSave();neu();}leisteBauen();},['data-fs-ez-farbe',String(i)]));
+      });
+      leiste.appendChild(knopf('↶ Rückgängig',RAND,()=>{if(rueck()){scheduleSave();neu();leisteBauen();}},['data-fs-ez-zurueck','1']));
+      if(teil){
+        if(teil.w==='text')leiste.appendChild(knopf('Text ändern',RAND,()=>{const tx=prompt('Text in der Skizze (höchstens '+FS_BG_STEMPEL_TEXT_MAX+' Zeichen)',String(teil.txt||''));if(tx===null)return;const t2=String(tx).replace(/\s+/g,' ').trim().slice(0,FS_BG_STEMPEL_TEXT_MAX);if(!t2){toast('Der Text ist leer – zum Entfernen „🗑 Löschen“ antippen','info',3500);return;}merken();teil.txt=t2;scheduleSave();neu();},['data-fs-ez-teiltext','1']));
+        leiste.appendChild(knopf('🗑 Löschen',RAND+'color:var(--red);',()=>{merken();if(_fsBgStrichWeg(sk,selT)){selT=-1;scheduleSave();neu();leisteBauen();}},['data-fs-ez-teilweg','1']));
+      }
       leiste.appendChild(knopf('Alle Striche löschen',RAND+'color:var(--red);',()=>{
         if(!_fsBgStricheAnzahl(sk))return;
-        if(!confirm('Alle von Hand gezeichneten Striche in diesem Raum löschen? Die Stempel bleiben.'))return;
-        _fsBgStricheLoeschen(sk);scheduleSave();neu();leisteBauen();
+        if(!confirm('Alles Gezeichnete löschen (Striche, Linien, Pfeile, Rechtecke, Kreise, Texte)? Die Stempel und Nummern bleiben.'))return;
+        merken();_fsBgStricheLoeschen(sk);selT=-1;scheduleSave();neu();leisteBauen();
       },['data-fs-ez-loeschen','1']));
       const z=document.createElement('span');z.setAttribute('data-fs-ez-zaehler','1');z.style.cssText='font-size:var(--fs13,13px);color:var(--text2);';
-      const n=(sk.striche||[]).length;z.textContent=n+' Strich'+(n===1?'':'e');
+      const n=(sk.striche||[]).length;
+      z.textContent=n+' Teil'+(n===1?'':'e')+' – '+(teil?'angetippt: ziehen = verschieben, Farbe antippen = umfärben':werkzeug==='radierer'?'ein Teil antippen oder darüberwischen = löschen':werkzeug==='text'?'in die Skizze tippen, dann den Text eingeben':'zeichnen · kurz antippen = ein Teil auswählen');
       leiste.appendChild(z);
     }else{
       _fsStempelListe(sk).forEach(x=>{ /* F33: die Außenskizze hat eigene Stempel */
@@ -5594,7 +5755,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
       }
       const z=document.createElement('span');z.setAttribute('data-fs-ez-zaehler','1');z.style.cssText='font-size:var(--fs13,13px);color:var(--text2);';
       const n=_fsBgStempelAnzahl(sk);
-      z.textContent=n+' Stempel'+(st?' – ziehen zum Verschieben':' – antippen oder oben einen setzen');
+      z.textContent=n+' Stempel'+(st?' – ziehen zum Verschieben'+(st.t==='text'?'':' · an den Griffen □ Breite/Höhe ziehen'):' – antippen oder oben einen setzen'); /* F50 */
       leiste.appendChild(z);
     }
   };
@@ -5622,16 +5783,36 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
       return;
     }
     if(modus==='stempel'){ // Stempel antippen = auswählen, ziehen = verschieben; daneben tippen = nichts mehr ausgewählt
+      const stA=(sel>=0&&Array.isArray(sk.stempel))?sk.stempel[sel]:null; /* F50: zuerst die Griffe des gewählten Stempels */
+      const gr=stA?_fsBgStempelGriffe(stA,W,H).find(q=>Math.hypot(q.x-p[0],q.y-p[1])<=26):null;
+      if(gr){griffZieh={id:e.pointerId,k:gr.k,bewegt:false};return;}
       const i=_fsBgStempelTreffer(sk,p[0],p[1]);
       sel=i;
       if(i>=0){const st=sk.stempel[i];zieh={id:e.pointerId,dx:st.x*W-p[0],dy:st.y*H-p[1],bewegt:false};}
       neu();leisteBauen();
       return;
     }
-    aktiv={id:e.pointerId,pts:[p]};
+    /* F50: Zeichnen – das angetippte Teil ziehen = verschieben; sonst mit dem gewählten Werkzeug */
+    if(selT>=0&&werkzeug!=='radierer'&&Array.isArray(sk.striche)&&sk.striche[selT]&&_fsBgStrichTreffer(sk,p[0],p[1])===selT){
+      ziehT={id:e.pointerId,a:p,orig:(sk.striche[selT].p||[]).map(q=>q.slice()),vorher:JSON.stringify(sk.striche),bewegt:false};return;
+    }
+    aktiv={id:e.pointerId,pts:[p],wz:werkzeug,weg:0,live:false};
+    if(werkzeug==='radierer')radieren(p);
   });
   cv.addEventListener('pointermove',e=>{
     if(ziehS&&e.pointerId===ziehS.id){e.preventDefault();const p=pos(e),zs=ziehS.s;if(ziehS.teil==='ring'){const tx=zs.skz.x*W,ty=zs.skz.y*H;if(_fsAsRingSetzen(zs,Math.atan2(-(p[1]-ty),p[0]-tx)*180/Math.PI,Math.hypot(p[0]-tx,p[1]-ty)))neu();}else if(_fsAsMarkeSetzen(sk,zs,p[0]/W,p[1]/H))neu();return;} /* F33, F34: Kreis ziehen = Richtung/Länge, sonst die Stelle */
+    if(griffZieh&&e.pointerId===griffZieh.id){ /* F50: Stempel an einem Griff in Breite/Höhe ziehen */
+      e.preventDefault();
+      const p=pos(e),st=sk.stempel[sel];
+      if(st){const a=-((+st.r)||0)*Math.PI/180,dx=p[0]-st.x*W,dy=p[1]-st.y*H;if(_fsBgStempelGriffZiehen(st,griffZieh.k,dx*Math.cos(a)-dy*Math.sin(a),dx*Math.sin(a)+dy*Math.cos(a))){griffZieh.bewegt=true;neu();}}
+      return;
+    }
+    if(ziehT&&e.pointerId===ziehT.id){ /* F50: Teil verschieben */
+      e.preventDefault();
+      const p=pos(e),tl=sk.striche[selT];
+      if(tl&&_fsBgStrichVerschieben(tl,ziehT.orig,p[0]-ziehT.a[0],p[1]-ziehT.a[1],W,H)){ziehT.bewegt=true;neu();}
+      return;
+    }
     if(zieh&&e.pointerId===zieh.id){
       e.preventDefault();
       const p=pos(e),st=sk.stempel[sel];
@@ -5642,22 +5823,52 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
     e.preventDefault();
     const p=pos(e),q=aktiv.pts[aktiv.pts.length-1];
     aktiv.pts.push(p);
+    aktiv.weg=Math.max(aktiv.weg||0,Math.hypot(p[0]-aktiv.pts[0][0],p[1]-aktiv.pts[0][1])); /* F50 */
+    if(aktiv.wz==='radierer'){radieren(p);return;}
+    if(aktiv.wz&&aktiv.wz!=='frei'){if(aktiv.wz!=='text'){entwurf={f:farbe,w:aktiv.wz,p:[[aktiv.pts[0][0]/W,aktiv.pts[0][1]/H],[p[0]/W,p[1]/H]]};neu();}return;}
+    if(aktiv.weg<8)return; /* kurz angetippt ist vielleicht eine Auswahl – gezeichnet wird erst ab 8 px */
     g.strokeStyle=farbe;g.lineWidth=5;g.lineCap='round';g.lineJoin='round';
+    if(!aktiv.live){aktiv.live=true;g.beginPath();g.moveTo(aktiv.pts[0][0],aktiv.pts[0][1]);aktiv.pts.forEach(t=>g.lineTo(t[0],t[1]));g.stroke();return;}
     g.beginPath();g.moveTo(q[0],q[1]);g.lineTo(p[0],p[1]);g.stroke(); // Livespur; das gespeicherte Bild entsteht beim Loslassen
   });
   const ende=e=>{
     if(ziehS&&e.pointerId===ziehS.id){ziehS=null;scheduleSave();neu();leisteBauen();return;} /* F33 */
     if(zieh&&e.pointerId===zieh.id){const z=zieh;zieh=null;if(z.bewegt)scheduleSave();neu();return;}
+    if(griffZieh&&e.pointerId===griffZieh.id){const z=griffZieh;griffZieh=null;if(z.bewegt)scheduleSave();neu();return;} /* F50 */
+    if(ziehT&&e.pointerId===ziehT.id){const z=ziehT;ziehT=null;if(z.bewegt){verlauf.push(z.vorher);if(verlauf.length>40)verlauf.shift();scheduleSave();}neu();leisteBauen();return;} /* F50 */
     if(!aktiv||e.pointerId!==aktiv.id)return;
-    const a=aktiv;aktiv=null;
-    const ok=_fsBgStrichDazu(sk,farbe,a.pts);
-    if(ok)scheduleSave();
-    else if(a.pts.length)toast('Genug eingezeichnet – bitte einen Strich zurücknehmen oder alle Striche löschen','info',3500);
+    const a=aktiv;aktiv=null;entwurf=null;
+    const p0=a.pts[0],wz=a.wz||'frei';
+    if(wz==='radierer'){neu();leisteBauen();return;}
+    if((a.weg||0)<8){ /* F50: kurz angetippt = ein Teil auswählen; Text-Werkzeug: Text hierher */
+      const i=_fsBgStrichTreffer(sk,p0[0],p0[1]);
+      if(i>=0){selT=i;const tl=sk.striche[i];if(tl&&FS_BG_STRICH_FARBEN.indexOf(tl.f)>=0)farbe=tl.f;neu();leisteBauen();return;}
+      if(selT>=0){selT=-1;neu();leisteBauen();return;}
+      if(wz==='text'){
+        const tx=prompt('Text in der Skizze, z. B. „feucht“ (höchstens '+FS_BG_STEMPEL_TEXT_MAX+' Zeichen)','');
+        if(tx!==null&&String(tx).trim()){merken();if(_fsBgSkTextDazu(sk,farbe,p0,tx)){selT=sk.striche.length-1;scheduleSave();}else verlauf.pop();}
+        neu();leisteBauen();return;
+      }
+      if(wz!=='frei'){neu();leisteBauen();return;}
+    }
+    if(wz==='text'){neu();leisteBauen();return;}
+    merken();
+    const ok=wz==='frei'?_fsBgStrichDazu(sk,farbe,a.pts):_fsBgFormDazu(sk,farbe,wz,p0,a.pts[a.pts.length-1]);
+    if(ok){selT=-1;scheduleSave();}
+    else{verlauf.pop();if(wz==='frei'&&a.pts.length)toast('Genug eingezeichnet – bitte einen Strich zurücknehmen oder alle Striche löschen','info',3500);}
     neu();leisteBauen();
   };
   cv.addEventListener('pointerup',ende);
   cv.addEventListener('pointercancel',ende);
-  const schliessen=()=>{ov.remove();if(typeof fertig==='function'){try{fertig();}catch(x){console.warn('[Feuchte] Einzeichnen:',x);}}};
+  /* F50: am PC löscht die Entf-Taste das angetippte Teil bzw. den gewählten Stempel */
+  const taste=e=>{
+    if(e.key!=='Delete')return;
+    const z=e.target;if(z&&(z.tagName==='INPUT'||z.tagName==='TEXTAREA'))return;
+    if(modus==='zeichnen'&&selT>=0){merken();if(_fsBgStrichWeg(sk,selT)){selT=-1;scheduleSave();neu();leisteBauen();}e.preventDefault();}
+    else if(modus==='stempel'&&sel>=0){if(_fsBgStempelWeg(sk,sel)){sel=-1;scheduleSave();neu();leisteBauen();}e.preventDefault();}
+  };
+  document.addEventListener('keydown',taste,true);
+  const schliessen=()=>{document.removeEventListener('keydown',taste,true);ov.remove();if(typeof fertig==='function'){try{fertig();}catch(x){console.warn('[Feuchte] Einzeichnen:',x);}}};
   zu.onclick=schliessen;fb.onclick=schliessen;
   leisteBauen();
   document.body.appendChild(ov);
@@ -5952,7 +6163,7 @@ async function _fsMobPdfBg(bericht,task){
               if(!_fsAsBenutzt(bericht,sk)||!_fsB2Sichtbar(bericht,_fsAsTyp(sk)))continue;
               const url=_fsBgSkizzeBild(bericht,_fsAsPseudoRaum(sk));
               if(!url)continue;
-              const sw=120,sh=sw*FS_BG_SKIZZE_H/FS_BG_SKIZZE_W;
+              const skM=_fsSkMasse(sk),sw=skM.hoch?84:120,sh=sw*skM.H/skM.W; /* F50: hoch schmaler, damit es auf die Seite passt */
               if(y+sh+18>285){doc.addPage();y=M;}
               unterTitel('Skizze '+(_fsAsTyp(sk)==='innen'?'innen':'außen')+' – '+(hat(sk.name)?String(sk.name).trim():(_fsAsTyp(sk)==='innen'?'Raum':'Außen')));
               try{doc.addImage(url,'JPEG',M,y,sw,sh);}catch(e){console.warn('[Skizze außen]',e);}
