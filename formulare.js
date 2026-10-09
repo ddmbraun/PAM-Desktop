@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F48';
+const PAM_FORMULARE_VERSION='F49';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -480,7 +480,7 @@ const FS_HILFE_VB=[
   ['Vor Ort',[
     'Name, Auftraggeber und Objekt kommen aus der Karte. Prüfen und bei Bedarf ändern – „↻ Aus der Karte neu holen“ holt sie neu.',
     '„Besichtigung bei“: die Person antippen, in deren Wohnung du bist (Mieter oder Eigentümer).',
-    'Bei Ankunft „📍 Ich bin jetzt hier“, am Schluss „🏁 Fertig“. Vergessen? In der Formular-Liste der Karte steht dann „Ende fehlt“ – dort mit 🏁 nachtragen.',
+    'Bei Ankunft „📍 Ich bin jetzt hier“, am Schluss „🏁 Fertig“. Solange es läuft, steht oben in der Karte „⏱ … läuft seit …“ – 🏁 dort trägt das Ende ein. Vergessen? Ab dem nächsten Tag steht in der Formular-Liste „Ende fehlt“ (orange) – dort mit 🏁 nachtragen.',
     '„🌤 Wetter holen“ nimmt das Wetter zur Beginn-Zeit vom Wetterdienst (Standort nötig) – im PDF steht „nicht vor Ort gemessen“.',
     'Am PC: „📅 Zeit in Termin übertragen“ setzt die Zeit in den Termin der Karte – auch aus der Formular-Liste (⋯).'
   ]],
@@ -501,8 +501,8 @@ const FS_HILFE_VB=[
   ]],
   ['Notizen, Fotos, PDF',[
     '📝 Notizen: „📄 im PDF“ steht unter „Bemerkungen“, „🔒 nur für mich“ siehst nur du.',
-    'Fotos: einmal antippen = ins PDF ja oder nein, zweimal = groß. 📌 markiert Stellen im Foto.',
-    'Das PDF erstellst du am PC (Karte → Formulare → ⋯ → „PDF neu erstellen“). Nur Feststellungen – keine Ursache, keine Empfehlung.'
+    'Fotos: einmal antippen = ins PDF ja oder nein, zweimal = groß. Reihenfolge: ‹ › oder ✥ festhalten und ziehen (am PC das Foto ziehen). 📌 markiert Stellen im Foto. Im PDF 2 (groß) oder 4 Fotos je Seite.',
+    'Das PDF erstellst du am PC (Karte → Formulare → ⋯ → „PDF neu erstellen“). „👁 Vorschau“ (PC unten, Tablet oben) zeigt es vorher, ohne es abzulegen. Nur Feststellungen – keine Ursache, keine Empfehlung.'
   ]]
 ];
 function _fsHilfeZeigen(b){
@@ -1009,7 +1009,7 @@ function _fsWordAufbau(b,task){
   const fotoText=f=>{const zu=_fsBgFotoZuordnung(b,f),fpl=_fsFpLegende(f);return (zu||'')+(fpl?(zu?'. ':'')+'Markiert: '+fpl:'');};
   const fotosVon=refs=>{const l=[];(Array.isArray(refs)?refs:[]).forEach(r=>{const f=alle.find(x=>_fsRefPasst(x,r));if(f&&l.indexOf(f)<0)l.push(f);});return l;};
   { /* Vor Ort */
-    const z=[],zt=_fsBgZeitText(k),aw=_fsBgAnwesendText(b);
+    const z=[],zt=_fsBgZeitText(k),aw=_fsBgAnwesendZeilen(b); /* F49: eine Zeile je Person */
     if(hat(b.datum)||zt)z.push(['Datum, Zeit',[hat(b.datum)?String(b.datum).trim():'',zt].filter(Boolean).join(', ')]);
     if(hat(k.besuchBei))z.push(['Besichtigung bei',String(k.besuchBei).trim()]);
     if(aw)z.push(['Anwesend',aw]);
@@ -1183,6 +1183,12 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   hilfeBtn.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:40px;height:40px;border-radius:8px;font-size:var(--fs18,18px);cursor:pointer;flex-shrink:0;';
   hilfeBtn.onclick=()=>_fsHilfeZeigen();
   hdr.append(closeBtn,hdrMeta,hilfeBtn,statsEl,_fsGrauKnoepfe()); /* F46: Hintergrund 1–4, nur im hellen Modus zu sehen */
+  if(!_fsAmPc()&&_fsIstBegehung(bericht)){ /* F49: „👁 Vorschau“ am Tablet – oben, weil es dort keine Fußleiste gibt; legt nichts ab */
+    const vb=document.createElement('button');vb.type='button';vb.textContent='👁';vb.title='Vorschau – das PDF ansehen, nichts wird abgelegt';vb.setAttribute('aria-label','Vorschau');vb.setAttribute('data-fs-vorschau','1');
+    vb.style.cssText=hilfeBtn.style.cssText;
+    vb.onclick=async()=>{if(vb.disabled)return;vb.disabled=true;vb.textContent='⏳';try{await _fsVorschau(bericht,t);}finally{vb.disabled=false;vb.textContent='👁';}};
+    hdr.insertBefore(vb,hilfeBtn);
+  }
 
   const body=document.createElement('div');
   body.style.cssText='flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:0 0 96px;';
@@ -1495,8 +1501,8 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     w.appendChild(_kopfZeile('Fotos'));
     const info=document.createElement('div');info.style.cssText='padding:6px 14px;font-size:var(--fs12,12px);color:var(--text2);';
     info.textContent=_fsAmPc()
-      ?'Klick = im PDF ✓ · Doppelklick oder 👁 = groß ansehen · ✏ = bemalen und beschriften (das Original bleibt) · ‹ › = Reihenfolge · ✕ = aus dem Protokoll entfernen (in Drive bleibt es)'
-      :'Antippen = im PDF ✓ · zweimal antippen = groß ansehen';
+      ?'Klick = im PDF ✓ · Doppelklick oder 👁 = groß ansehen · ✏ = bemalen und beschriften (das Original bleibt) · ziehen oder ‹ › = Reihenfolge · ✕ = aus dem Protokoll entfernen (in Drive bleibt es)'
+      :'Antippen = im PDF ✓ · zweimal antippen = groß ansehen · ‹ › oder ✥ festhalten und ziehen = Reihenfolge';
     const grid=document.createElement('div');grid.style.cssText='display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:0 14px 8px;';
     grid.id='_wpMobFotoGrid'; // derselbe Name wie im Wartungsprotokoll: der Foto-Dialog zieht die Miniaturen hierüber nach
     _wpMobRenderFotos(bericht,grid);
@@ -1510,7 +1516,20 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       mk('📷 Kamera','border:1.5px dashed var(--accent2);background:var(--fs-kfl,transparent);color:var(--text);',()=>_wpMobFotoAufnehmen(bericht,grid,true)),
       mk('🖼 Galerie','border:1.5px solid var(--border);background:var(--bg3);color:var(--text);',()=>_wpMobFotoAufnehmen(bericht,grid,false)),
       mk('☁ Drive','border:1.5px dashed var(--green);background:var(--fs-kfl,transparent);color:var(--text);',()=>_wpMobLadeDriveFotos(bericht,grid)));
-    w.append(info,grid,kr);
+    const jeSeite=_fsIstBegehung(bericht)?(()=>{ /* F49: Fotos im PDF – 2 je Seite (groß) oder 4 je Seite; das Gerät merkt sich die letzte Wahl fürs nächste Protokoll */
+      const r=document.createElement('div');r.setAttribute('data-fs-fotosjeseite','1');r.style.cssText='display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:2px 14px 8px;';
+      const l=document.createElement('span');l.style.cssText='font-size:var(--fs13,13px);color:var(--text2);';l.textContent='Im PDF:';r.appendChild(l);
+      const kn=[];
+      [[2,'▯ 2 je Seite (groß)'],[4,'▦ 4 je Seite']].forEach(([n,txt])=>{
+        const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute('data-fs-jeseite',String(n));
+        b._mal=()=>{const an=_fsFotosJeSeite(bericht)===n;b.setAttribute('aria-pressed',an?'true':'false');
+          b.style.cssText=S_KNOPF+'min-height:var(--fsh,40px);border:1.5px solid '+(an?FS_FARBE:'var(--border)')+';background:'+(an?'rgba(31,95,139,.14)':'transparent')+';color:var(--text);'+(an?'':'font-weight:500;');};
+        b._mal();kn.push(b);
+        b.onclick=()=>{_fsFotosJeSeiteSetzen(bericht,n);scheduleSave();kn.forEach(x=>x._mal());};
+        r.appendChild(b);
+      });
+      return r;})():null;
+    w.append(...[info,jeSeite,grid,kr].filter(Boolean));
     return w;
   }
 
@@ -1836,11 +1855,11 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const zb=document.createElement('button');zb.type='button';zb.textContent=_vbZeitAuf?'▲ fertig':'✏ ändern';zb.setAttribute('data-fs-zeitaendern','1');
       zb.style.cssText=S_KNOPF+'min-height:var(--fsh,40px);border:1px solid var(--fs-krd,var(--border));background:var(--fs-kfl,transparent);color:var(--text);';zb.onclick=()=>{_vbZeitAuf=!_vbZeitAuf;_neuBauen();};
       zz.append(zt,zb);
-      /* F45: Hinweis, wenn das Ende fehlt oder nicht zum Beginn passt */
-      const hinweisVb=(()=>{const tx=_fsVbZeitHinweis(bericht.kopf);if(!tx)return null;
-        const h=document.createElement('div');h.setAttribute('data-fs-zeithinweis','1');
-        h.style.cssText='margin:0 14px 8px;padding:7px 10px;border-radius:8px;background:rgba(230,126,34,.16);color:var(--text);font-size:var(--fs13,13px);line-height:1.45;';
-        h.textContent=tx;return h;})();
+      /* F45: Hinweis, wenn das Ende fehlt oder nicht zum Beginn passt · F49: am Tag des Protokolls ruhig „⏱ läuft seit …“ (blau), orange erst ab dem Folgetag */
+      const hinweisVb=(()=>{const hz=_fsVbZeitHinweisB(bericht);if(!hz)return null;
+        const h=document.createElement('div');h.setAttribute('data-fs-zeithinweis','1');h.setAttribute('data-fs-zeitart',hz.art);
+        h.style.cssText='margin:0 14px 8px;padding:7px 10px;border-radius:8px;background:'+(hz.art==='laeuft'?'rgba(31,95,139,.12)':'rgba(230,126,34,.16)')+';color:var(--text);font-size:var(--fs13,13px);line-height:1.45;';
+        h.textContent=hz.text;return h;})();
       /* F45: nur am PC – die Zeit auf Knopfdruck in einen vorhandenen Termin der Karte übertragen (die Knöpfe oben legen keinen Termin mehr an) */
       const uebVb=(()=>{if(!_fsAmPc()||typeof _pamVbZeitStand!=='function'||typeof _pamVbZeitUebertragen!=='function')return null;
         const st=_pamVbZeitStand(bericht,t);const r=document.createElement('div');r.style.cssText='padding:0 14px 8px;';
@@ -2941,6 +2960,12 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     wordBtn.onclick=async()=>{wordBtn.disabled=true;const alt=wordBtn.textContent;wordBtn.textContent='⏳ Word …';try{await window._pamBesichtigungWord(bericht,t);}finally{wordBtn.disabled=false;wordBtn.textContent=alt;}};
     footer.append(pdfBtn,wordBtn,openBtn,shareBtn);
   }else footer.append(pdfBtn,openBtn,shareBtn);
+  if(_fsIstBegehung(bericht)){ /* F49: „👁 Vorschau“ – das PDF ansehen, ohne es abzulegen */
+    const vorBtn=document.createElement('button');vorBtn.type='button';vorBtn.textContent='👁 Vorschau';vorBtn.setAttribute('data-fs-vorschau','1');vorBtn.title='Das PDF ansehen – nichts kommt nach Drive, nichts wird ersetzt';
+    vorBtn.style.cssText='padding:12px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:var(--fs15,15px);font-weight:600;cursor:pointer;color:var(--text);';
+    vorBtn.onclick=async()=>{vorBtn.disabled=true;const alt=vorBtn.textContent;vorBtn.textContent='⏳ Vorschau …';try{await _fsVorschau(bericht,t);}finally{vorBtn.disabled=false;vorBtn.textContent=alt;}};
+    footer.insertBefore(vorBtn,pdfBtn.nextSibling);
+  }
   ov.append(hdr,body,footer);
   document.body.appendChild(ov);
   /* F28: die Frage „Innen · Außen · Beides“ kommt VOR dem Anlegen; am PC das Fenster schweben lassen und die Liste auffrischen, weil der Aufrufer schon fertig ist */
@@ -3775,7 +3800,14 @@ function _fsLuftbildFenster(bericht,t,s,beiAenderung){
   const pinGps=aknopf('📌 Pin an meinem Standort','data-fs-lbpingps');pinGps.style.display='none';pinGps.style.background='rgba(217,72,15,.9)';pinGps.style.borderStyle='solid'; // F27: erscheint, sobald der Standort gefunden ist
   const zumPin=aknopf('🎯 Zum Pin','data-fs-lbzumpin');zumPin.style.display='none'; /* F34: stellt die Karte wieder auf den Pin */
   akt.append(gps,suche,zumPin,pinGps);
-  kopf.append(ti,weg,fertig,eb,akt,info);
+  /* F49: „🔎 Adresse suchen“ öffnet ein Suchfeld – die Adresse steht schon drin und lässt sich ändern (z. B. die Hausnummer daneben) */
+  const lbSuchZeile=document.createElement('div');lbSuchZeile.setAttribute('data-fs-lbsuchzeile','1');lbSuchZeile.style.cssText='display:none;flex-wrap:wrap;gap:6px;width:100%;align-items:center;';
+  const lbSuchFeld=document.createElement('input');lbSuchFeld.type='text';lbSuchFeld.autocomplete='off';lbSuchFeld.placeholder='Straße Hausnummer, Ort';lbSuchFeld.setAttribute('data-fs-lbsuchfeld','1');lbSuchFeld.setAttribute('aria-label','Adresse');
+  lbSuchFeld.style.cssText='flex:1 1 180px;min-width:0;min-height:var(--fsh,38px);padding:6px 10px;border-radius:10px;border:none;background:#fff;color:#1f2937;font-size:var(--fs16,16px);font-family:inherit;box-sizing:border-box;';
+  const lbSuchKnopf=document.createElement('button');lbSuchKnopf.type='button';lbSuchKnopf.textContent='🔎 Suchen';lbSuchKnopf.setAttribute('data-fs-lbsuchen','1');
+  lbSuchKnopf.style.cssText='flex-shrink:0;padding:6px 14px;min-height:var(--fsh,38px);border-radius:10px;border:none;background:#fff;color:#1f5f8b;font-size:var(--fs14,14px);font-weight:700;cursor:pointer;font-family:inherit;';
+  lbSuchZeile.append(lbSuchFeld,lbSuchKnopf);
+  kopf.append(ti,weg,fertig,eb,akt,lbSuchZeile,info);
   // F27: Karte in einem Rahmen mit Fadenkreuz (Bildmitte), Hinweis „Noch kein Pin“ und dem großen Knopf „📌 Pin hier setzen“
   const mapWrap=document.createElement('div');mapWrap.style.cssText='position:relative;flex:1;min-height:0;';
   const mapEl=document.createElement('div');mapEl.style.cssText='position:absolute;inset:0;';
@@ -3895,14 +3927,21 @@ function _fsLuftbildFenster(bericht,t,s,beiAenderung){
     if(_fsLbGpsUngenau(gpsPos.acc)&&!confirm('Der Standort ist nur auf etwa ± '+(isFinite(gpsPos.acc)?Math.round(gpsPos.acc):'?')+' m genau.\n\nTrotzdem den Pin dorthin setzen?\n\nGenauer geht es mit dem Kreuz: Karte schieben, bis es auf der Stelle liegt.'))return;
     setzePin(gpsPos.la,gpsPos.lo);
   }; // F27: Pin genau an den Standort des Geräts
-  suche.onclick=async()=>{
-    if(!adr){toast('Im Protokoll und an der Karte steht keine Adresse','info',4000);return;}
-    suche.disabled=true;suche.textContent='🔎 suche …';
-    const r=await _fsLbGeocode(adr);
-    suche.disabled=false;suche.textContent='🔎 Adresse suchen';
-    if(r&&document.getElementById('_fsLbOverlay')===ov)map.setView([r.lat,r.lon],19);
-    else if(!r)toast('Adresse „'+adr+'“ nicht gefunden','info',5000);
+  suche.onclick=()=>{ /* F49: Suchfeld auf/zu – vorbelegt mit der Adresse aus dem Protokoll, sonst der der Karte */
+    const auf=lbSuchZeile.style.display==='none';lbSuchZeile.style.display=auf?'flex':'none';
+    if(auf){if(!lbSuchFeld.value)lbSuchFeld.value=adr;try{lbSuchFeld.focus();lbSuchFeld.select();}catch(e){}}
   };
+  const lbSuchen=async()=>{
+    const q=String(lbSuchFeld.value||'').trim();
+    if(!q){toast('Bitte eine Adresse eingeben, z. B. Straße Hausnummer, Ort','info',4000);return;}
+    lbSuchKnopf.disabled=true;lbSuchKnopf.textContent='🔎 suche …';
+    const r=await _fsLbGeocode(q);
+    lbSuchKnopf.disabled=false;lbSuchKnopf.textContent='🔎 Suchen';
+    if(r&&document.getElementById('_fsLbOverlay')===ov){map.setView([r.lat,r.lon],19);lbSuchZeile.style.display='none';}
+    else if(!r)toast('Adresse „'+q+'“ nicht gefunden – anders schreiben, z. B. mit Ort','info',5000);
+  };
+  lbSuchKnopf.onclick=lbSuchen;
+  lbSuchFeld.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();lbSuchen();}});
   const zu=()=>{
     try{const c=map.getCenter(),neuA={lat:Math.round(c.lat*1e6)/1e6,lon:Math.round(c.lng*1e6)/1e6,zoom:map.getZoom()};if(!_fsLbAnsichtGleich(bericht.luftbildAnsicht,neuA)){bericht.luftbildAnsicht=neuA;scheduleSave();}}catch(e){} /* F31: nur wenn der Ausschnitt sich geändert hat */ // F27: Ausschnitt merken (auch ohne Pin)
     gpsStopp();try{map.remove();}catch(e){}ov.remove();document.removeEventListener('keydown',taste,true);if(typeof beiAenderung==='function')beiAenderung();
@@ -4356,12 +4395,194 @@ function _fsWetterKurz(k){
   if(String(k.letzterRegen||'').trim())wt.push('letzter Regen '+String(k.letzterRegen).trim());
   return wt.join(', ');
 }
+/* ── F49 (Frank 09.10.2026, Vorab-Runde 2, Schritt 1) ───────────────────────────────────────────────
+   Zeit: Am Tag des Protokolls läuft die Besichtigung noch – ruhig „⏱ läuft seit 15:03 (0:12 h)“. Orange „Ende fehlt“ erst ab dem
+   Folgetag (dann wurde „Fertig“ wirklich vergessen). Gilt im Formular, in der Formular-Liste und im Schild oben in der Karte. */
+function _fsVbDauer(von,bis){
+  const a=_fsVbUhr(von),e=_fsVbUhr(bis);if(!a||!e)return '';
+  const m=(+e.slice(0,2)*60+ +e.slice(3))-(+a.slice(0,2)*60+ +a.slice(3));
+  if(m<0)return '';
+  return Math.floor(m/60)+':'+('0'+(m%60)).slice(-2)+' h';
+}
+// Beginn steht, Ende fehlt, und das Protokoll ist von heute
+function _fsVbLaeuftHeute(b){
+  if(_fsVbZeitStatus((b&&b.kopf)||{}).art!=='endeFehlt')return false;
+  const iso=_fsVbIso(b&&b.datum);
+  return !!iso&&iso===_fsVbIso(_fsVbJetzt().datum);
+}
+// Hinweis unter der Zeitzeile: {art:'laeuft'|'warn',text} oder null
+function _fsVbZeitHinweisB(b){
+  const k=(b&&b.kopf)||{};
+  if(_fsVbLaeuftHeute(b)){const s=_fsVbZeitStatus(k),d=_fsVbDauer(s.b,_fsVbJetzt().uhr);return {art:'laeuft',text:'⏱ läuft seit '+s.b+(d?' ('+d+')':'')+' – am Schluss „🏁 Fertig“'};}
+  const tx=_fsVbZeitHinweis(k);
+  return tx?{art:'warn',text:tx}:null;
+}
+// Alle begonnenen, nicht beendeten Vorabbesichtigungen einer Karte: [{bi,beginn,heute,datum,name}]
+function _fsVbLaufende(t){
+  const l=[];
+  ((t&&Array.isArray(t.pruefberichte))?t.pruefberichte:[]).forEach((b,bi)=>{
+    if(!_fsIstVorab(b))return;
+    const s=_fsVbZeitStatus(b.kopf||{});if(s.art!=='endeFehlt')return;
+    const n=_fsTitel(b);
+    l.push({bi:bi,beginn:s.b,heute:_fsVbLaeuftHeute(b),datum:String(b.datum||'').trim(),name:n==='Vorabbesichtigung'?n:'Vorabbesichtigung „'+n+'“'});
+  });
+  return l;
+}
+/* Schild oben in der Karte (PC neben „Task:“, Handy unter der Erstellt-Zeile): je laufender Vorabbesichtigung eines; 🏁 öffnet „Ende eintragen“.
+   Ist das Ende eingetragen, verschwindet es. el = Behälter der App, anzeige = 'flex' | 'inline-flex'. Gibt die Anzahl zurück. */
+function _fsVbLaeuftSchild(el,t,anzeige){
+  if(!el)return 0;
+  el.innerHTML='';
+  const l=_fsVbLaufende(t);
+  if(!l.length){el.style.display='none';return 0;}
+  l.forEach(x=>{
+    const F=x.heute?'#1f5f8b':'#b25e00';
+    const s=document.createElement('span');s.setAttribute('data-fs-vblaeuft',x.heute?'heute':'alt');
+    s.style.cssText='display:inline-flex;align-items:center;gap:6px;max-width:100%;min-width:0;padding:2px 3px 2px 10px;border-radius:12px;border:1px solid '+F+';background:'+(x.heute?'rgba(31,95,139,.12)':'rgba(230,126,34,.14)')+';color:var(--text);font-size:calc(12px * var(--modal-scale,1));font-weight:700;white-space:nowrap;box-sizing:border-box;';
+    const tx=document.createElement('span');tx.style.cssText='overflow:hidden;text-overflow:ellipsis;min-width:0;';
+    tx.textContent=x.heute?'⏱ '+x.name+' läuft seit '+x.beginn:'⚠ '+x.name+' vom '+(x.datum||'?')+' – Ende fehlt';
+    s.title=tx.textContent+' – 🏁 trägt das Ende ein';
+    const b=document.createElement('button');b.type='button';b.textContent='🏁';b.title='Ende eintragen';b.setAttribute('aria-label','Ende eintragen');b.setAttribute('data-fs-vblaeuft-ende',String(x.bi));
+    b.style.cssText='flex-shrink:0;padding:1px 9px;border-radius:10px;border:1px solid '+F+';background:var(--bg,#fff);color:var(--text);font-size:calc(13px * var(--modal-scale,1));line-height:1.4;cursor:pointer;font-family:inherit;';
+    b.onclick=e=>{e.stopPropagation();_fsVbEndeNachtragen(x.bi);};
+    s.append(tx,b);el.appendChild(s);
+  });
+  el.style.flexWrap='wrap';el.style.alignItems='center';el.style.gap='6px';el.style.minWidth='0';el.style.maxWidth='100%'; /* schmaler Bildschirm: der Name wird gekürzt („…“), 🏁 bleibt sichtbar */
+  el.style.display=anzeige||'flex';
+  return l.length;
+}
+/* „👁 Vorschau“: genau das PDF, das „📄 PDF erstellen“ baut – aber nichts kommt nach Drive, nichts wird ersetzt, „📂 Öffnen“ bleibt beim
+   zuletzt abgelegten PDF. Am PC im großen Fenster, am Tablet über „👁 Öffnen“ (dasselbe Öffnen wie bei Dateien am Zettel). */
+let _fsVorschauModus=false;
+async function _fsVorschau(bericht,task){
+  if(!_fsIstBegehung(bericht)||typeof _fsMobPdfBg!=='function')return null;
+  _fsVorschauModus=true;
+  try{return await _fsMobPdfBg(bericht,task);}finally{_fsVorschauModus=false;}
+}
+function _fsVorschauFenster(blob,name){
+  const alt=document.getElementById('_fsVorschau');if(alt)alt.remove();
+  const url=URL.createObjectURL(blob),amPc=_fsAmPc();
+  const ov=document.createElement('div');ov.id='_fsVorschau';_fsSichtAn(ov);
+  ov.style.cssText='position:fixed;inset:0;z-index:1000095;background:rgba(0,0,0,.6);display:flex;flex-direction:column;';
+  const kopf=document.createElement('div');kopf.style.cssText='display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 14px;background:#1f5f8b;color:#fff;flex-shrink:0;';
+  const ti=document.createElement('div');ti.style.cssText='flex:1 1 200px;min-width:0;font-size:var(--fs15,15px);font-weight:700;';ti.textContent='👁 Vorschau – nicht abgelegt';
+  const kn=(txt,attr)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute(attr,'1');b.style.cssText='padding:8px 14px;min-height:var(--fsh,40px);border-radius:10px;border:1.5px solid rgba(255,255,255,.85);background:transparent;color:#fff;font-size:var(--fs14,14px);font-weight:700;cursor:pointer;font-family:inherit;';return b;};
+  const oeffnen=()=>{if(typeof _dateiBlobOeffnen==='function')_dateiBlobOeffnen(blob,name);else window.open(url,'_blank');};
+  const weg=()=>{document.removeEventListener('keydown',taste,true);ov.remove();setTimeout(()=>{try{URL.revokeObjectURL(url);}catch(e){}},60000);};
+  const taste=e=>{if(e.key==='Escape'){e.stopImmediatePropagation();e.preventDefault();weg();}};
+  document.addEventListener('keydown',taste,true);
+  const zu=kn('✕ Schließen','data-fs-vorschauzu');zu.onclick=weg;
+  if(amPc){const auf=kn('↗ Im neuen Tab','data-fs-vorschauauf');auf.onclick=oeffnen;kopf.append(ti,auf,zu);}else kopf.append(ti,zu);
+  ov.appendChild(kopf);
+  if(amPc){
+    const fr=document.createElement('iframe');fr.title='Vorschau';fr.src=url;fr.setAttribute('data-fs-vorschaubild','1');
+    fr.style.cssText='flex:1;min-height:0;width:100%;border:none;background:#fff;';
+    ov.appendChild(fr);
+  }else{
+    const box=document.createElement('div');box.style.cssText='margin:auto;max-width:420px;width:calc(100% - 32px);background:var(--bg);color:var(--text);border-radius:14px;padding:18px;box-sizing:border-box;text-align:center;line-height:1.45;';
+    const tx=document.createElement('div');tx.style.cssText='font-size:var(--fs15,15px);margin-bottom:12px;';tx.textContent='Die Vorschau ist fertig. Nichts wurde abgelegt.';
+    const gross=document.createElement('button');gross.type='button';gross.textContent='👁 Vorschau öffnen';gross.setAttribute('data-fs-vorschauauf','1');
+    gross.style.cssText='display:block;width:100%;min-height:var(--fsh44,48px);border-radius:10px;border:none;background:#1f5f8b;color:#fff;font-size:var(--fs16,16px);font-weight:700;cursor:pointer;font-family:inherit;';
+    gross.onclick=oeffnen;
+    const hw=document.createElement('div');hw.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin-top:10px;';hw.textContent='Zurück ins Protokoll mit „✕ Schließen“.';
+    box.append(tx,gross,hw);ov.appendChild(box);
+    ov.addEventListener('click',e=>{if(e.target===ov)weg();});
+  }
+  document.body.appendChild(ov);
+  return ov;
+}
+/* Fotos im PDF: 2 je Seite (groß, ein Foto je Zeile) oder 4 je Seite (bisher). Gilt je Protokoll; das Gerät merkt sich die letzte Wahl
+   für das nächste neue Protokoll (am PC an beiden Rechnern gleich: PAM Desktop teilt den Schlüssel). Ohne Angabe: 4. */
+const FS_FOTOS_JE_SEITE_KEY='pam_fs_fotos_je_seite';
+function _fsFotosJeSeite(b){return (b&&+b.fotosJeSeite===2)?2:4;}
+function _fsFotosJeSeiteMerk(){try{return +localStorage.getItem(FS_FOTOS_JE_SEITE_KEY)===2?2:4;}catch(e){return 4;}}
+function _fsFotosJeSeiteSetzen(b,n){n=+n===2?2:4;if(b)b.fotosJeSeite=n;try{localStorage.setItem(FS_FOTOS_JE_SEITE_KEY,String(n));}catch(e){}return n;}
+/* Aufnahmezeit am Foto im PDF – aus dem Dateinamen: „20261009_152412“ (PAM beim Hochladen, Android-Kamera) oder „2026-10-09-15-24-12“.
+   Der LETZTE Zeitstempel zählt: PAM setzt seinen eigenen vor den Originalnamen; steht im Originalnamen einer, ist das die echte Aufnahme.
+   Gleicher Tag wie das Protokoll → „15:24“, sonst „08.10. 15:24“; nichts gefunden → leer (dann steht keine Zeit da). */
+function _fsFotoZeit(f,datum){
+  const s=String((f&&f.uploadName)||'')+' '+String((f&&f.name)||'');
+  const re=/(\d{4})(\d{2})(\d{2})[_-](\d{2})(\d{2})(\d{2})|(\d{4})-(\d{2})-(\d{2})[-_ ](\d{2})[-.](\d{2})[-.](\d{2})/g;
+  let m,z=null;
+  while((m=re.exec(s))){
+    const v=m[1]?m.slice(1,7):m.slice(7,13),n=v.map(Number);
+    if(n[0]<2000||n[0]>2099||n[1]<1||n[1]>12||n[2]<1||n[2]>31||n[3]>23||n[4]>59||n[5]>59){re.lastIndex=m.index+1;continue;}
+    z={iso:v[0]+'-'+v[1]+'-'+v[2],tag:v[2]+'.'+v[1]+'.',uhr:v[3]+':'+v[4]};
+  }
+  if(!z)return '';
+  const pi=_fsVbIso(datum);
+  return (pi&&pi===z.iso)?z.uhr:z.tag+' '+z.uhr;
+}
+// Anwesende im PDF und im Word untereinander – eine Zeile je Person „Name – Rolle“; ohne Liste der alte Freitext
+function _fsBgAnwesendZeilen(b){
+  const l=(b&&Array.isArray(b.anwesende))?b.anwesende.filter(p=>p&&String(p.name||'').trim()):[];
+  if(l.length)return l.map(p=>String(p.name).trim()+(String(p.rolle||'').trim()?' – '+String(p.rolle).trim():'')).join('\n');
+  return String((b&&b.kopf&&b.kopf.anwesend)||'').trim();
+}
+/* Fotos ziehen und verschieben (Frank: „ich dachte, ich kann das einfach so verschieben“) – zusätzlich zu ‹ ›.
+   Maus: das Foto selbst ziehen (ab 8 px Weg; darunter bleibt es ein Klick). Finger/Stift: nur am Griff ✥ (touch-action:none) – sonst
+   ginge das Blättern verloren. Ziel = das Foto unter dem Zeiger: das gezogene rückt an dessen Platz, die anderen rutschen nach.
+   Die Klick-Sperre danach verhindert, dass das Loslassen „ins PDF ja/nein“ umschaltet. Zellen tragen data-fs-fotozelle = Platz. */
+function _fsFotoVerschieben(fotos,von,nach){
+  if(!Array.isArray(fotos)||von===nach||!(von>=0)||!(nach>=0)||von>=fotos.length||nach>=fotos.length)return false;
+  const x=fotos.splice(von,1)[0];fotos.splice(nach,0,x);return true;
+}
+function _fsFotoZiehenAn(grid,fotos,neu){
+  if(!grid)return;
+  grid._fsZieh={fotos:fotos,neu:neu};
+  if(grid._fsZiehAn)return;
+  grid._fsZiehAn=true;
+  let sperreBis=0;
+  grid.addEventListener('click',e=>{if(Date.now()<sperreBis){e.stopPropagation();e.preventDefault();}},true);
+  grid.addEventListener('pointerdown',e=>{
+    if(e.button!==undefined&&e.button!==0)return;
+    const ziel0=e.target&&e.target.closest?e.target:null;if(!ziel0)return;
+    const griff=ziel0.closest('[data-fs-ziehgriff]'),zelle=ziel0.closest('[data-fs-fotozelle]');
+    if(!zelle||!grid.contains(zelle))return;
+    if(e.pointerType!=='mouse'&&!griff)return;
+    if(!griff&&ziel0.closest('button'))return;
+    const von=+zelle.getAttribute('data-fs-fotozelle'),sx=e.clientX,sy=e.clientY,id=e.pointerId;
+    let zieht=false,geist=null,ziel=null,auswahlAlt='';
+    const zellen=()=>Array.from(grid.querySelectorAll('[data-fs-fotozelle]'));
+    const markieren=z=>{zellen().forEach(c=>{c.style.outline=(z&&c===z&&z!==zelle)?'3px dashed #1f5f8b':'';c.style.outlineOffset='2px';});};
+    const roll=(()=>{let p=grid.parentElement;while(p&&p!==document.body){const o=getComputedStyle(p).overflowY;if(o==='auto'||o==='scroll')return p;p=p.parentElement;}return null;})();
+    const bewegen=ev=>{
+      if(ev.pointerId!==id)return;
+      const dx=ev.clientX-sx,dy=ev.clientY-sy;
+      if(!zieht){
+        if(Math.abs(dx)+Math.abs(dy)<8)return;
+        zieht=true;
+        const r=zelle.getBoundingClientRect();geist=zelle.cloneNode(true);geist.removeAttribute('data-fs-fotozelle');
+        geist.style.position='fixed';geist.style.left=r.left+'px';geist.style.top=r.top+'px';geist.style.width=r.width+'px';geist.style.height=r.height+'px';
+        geist.style.opacity='.85';geist.style.pointerEvents='none';geist.style.zIndex='1000099';geist.style.boxShadow='0 8px 24px rgba(0,0,0,.45)';geist.style.margin='0';
+        geist._x=r.left;geist._y=r.top;document.body.appendChild(geist);zelle.style.opacity='.35';
+        auswahlAlt=document.body.style.userSelect;document.body.style.userSelect='none';
+      }
+      if(ev.cancelable)ev.preventDefault();
+      geist.style.left=(geist._x+dx)+'px';geist.style.top=(geist._y+dy)+'px';
+      const unter=document.elementFromPoint(ev.clientX,ev.clientY);
+      const z=unter&&unter.closest?unter.closest('[data-fs-fotozelle]'):null;
+      ziel=(z&&grid.contains(z))?z:null;markieren(ziel);
+      if(roll){const rr=roll.getBoundingClientRect();if(ev.clientY<rr.top+50)roll.scrollTop-=14;else if(ev.clientY>rr.bottom-50)roll.scrollTop+=14;}
+    };
+    const loslassen=ev=>{
+      if(ev.pointerId!==id)return;
+      document.removeEventListener('pointermove',bewegen,true);document.removeEventListener('pointerup',loslassen,true);document.removeEventListener('pointercancel',loslassen,true);
+      if(!zieht)return;
+      sperreBis=Date.now()+400;
+      if(geist)geist.remove();zelle.style.opacity='';markieren(null);document.body.style.userSelect=auswahlAlt;
+      const zz=grid._fsZieh||{},nach=ziel?+ziel.getAttribute('data-fs-fotozelle'):-1;
+      if(ev.type==='pointerup'&&nach>=0&&_fsFotoVerschieben(zz.fotos,von,nach)){try{scheduleSave();}catch(_e){}if(typeof zz.neu==='function')zz.neu();}
+    };
+    document.addEventListener('pointermove',bewegen,true);document.addEventListener('pointerup',loslassen,true);document.addEventListener('pointercancel',loslassen,true);
+  });
+}
 // Zeit in der Formular-Liste: „10:00–10:40“ · „⏱ seit 10:00 · Ende fehlt“ · „⚠ Zeit prüfen“
 function _fsVbListeZeit(b){
   if(!_fsIstVorab(b))return {text:'',endeFehlt:false};
   const s=_fsVbZeitStatus((b&&b.kopf)||{});
   if(s.art==='ok')return {text:s.b+'–'+s.e,endeFehlt:false};
-  if(s.art==='endeFehlt')return {text:'⏱ seit '+s.b+' · Ende fehlt',endeFehlt:true,beginn:s.b};
+  if(s.art==='endeFehlt'){const l=_fsVbLaeuftHeute(b);return {text:l?'⏱ läuft seit '+s.b:'⏱ seit '+s.b+' · Ende fehlt',endeFehlt:true,laeuft:l,beginn:s.b};} /* F49: am Tag des Protokolls ruhig, orange erst ab dem Folgetag */
   if(s.art==='endeVor'||s.art==='endeUngueltig')return {text:'⚠ Zeit prüfen',endeFehlt:false};
   return {text:'',endeFehlt:false};
 }
@@ -4434,6 +4655,7 @@ function _fsBgUmstellen(b){
   const keller=b.art==='keller',vorab=b.art==='vorab'; // F16: vorab = Vorabbesichtigung
   b.fassung='begehung';
   b.titel=vorab?(b.schlank?FS_B2_TITEL:FS_VB_TITEL):FS_BG_TITEL+(keller?' Keller':' Wohnung');
+  b.fotosJeSeite=_fsFotosJeSeiteMerk(); // F49: Fotos im PDF – die letzte Wahl dieses Geräts (2 groß / 4 je Seite)
   Object.assign(b.kopf,{anlass:'',beginn:'',ende:'',geraetLuft:'',geraetOberflaeche:'',geraetBauteil:'',pruefer:_fsBgMerkName()});
   if(vorab)Object.assign(b.kopf,{versicherung:'',schadennr:'',zugang:'',ansprechpartner:'',besuchBei:'',lage:'',nutzer:''}); // F17: Nutzer wählt Frank je Besuch („Besichtigung bei“), nicht alle Mieter der Karte
   b.anwesende=[];
@@ -5591,7 +5813,7 @@ async function _fsMobPdfBg(bericht,task){
       const rows=[];
       if(hat(bericht.datum))rows.push(['Datum',String(bericht.datum)]);
       const zt=_fsBgZeitText(k);if(zt)rows.push(['Beginn / Ende',zt]);
-      const aw=_fsBgAnwesendText(bericht);if(aw)rows.push(['Anwesend',aw]);
+      const aw=_fsBgAnwesendZeilen(bericht);if(aw)rows.push(['Anwesend',aw]); /* F49: eine Zeile je Person */
       const wt=[];
       if(hat(k.wetter))wt.push(String(k.wetter).trim());
       const aT=_fsZahl(k.aussenT),aF=_fsZahl(k.aussenRf);
@@ -5736,7 +5958,8 @@ async function _fsMobPdfBg(bericht,task){
               try{doc.addImage(url,'JPEG',M,y,sw,sh);}catch(e){console.warn('[Skizze außen]',e);}
               y+=sh+2;
               const mk=_fsAsMarken(bericht,sk);
-              absatz('Nicht maßstäblich, Ansicht '+_fsAsAnsicht(sk)+'.'+(mk.length?' Nummern: '+mk.map(q=>q.n+' = '+q.label+(hat(q.s.ort)?' ('+String(q.s.ort).trim()+')':'')).join(' · ')+'.':''),{groesse:7.5,farbe:[100,100,100],abstand:4});
+              mk.forEach(q=>absatz(q.n+' = '+q.label+(hat(q.s.ort)?' – '+String(q.s.ort).trim():''),{groesse:9,einzug:3,abstand:0.8})); /* F49: je Nummer eine Zeile, 9 pt schwarz, direkt unter der Skizze */
+              absatz('Nicht maßstäblich, Ansicht '+_fsAsAnsicht(sk)+'.',{groesse:7.5,farbe:[100,100,100],abstand:4});
             }
           }
         } // F21, F24
@@ -5779,7 +6002,8 @@ async function _fsMobPdfBg(bericht,task){
 
     // 8 · Fotos
     if(fotoList.length){
-      const iW=85,iH=115;let col=0,erste=true,zeileH=0;
+      const zwei=_fsFotosJeSeite(bericht)===2; // F49: „2 je Seite (groß)“ – ein Foto je Zeile, über die ganze Breite, mittig
+      const iW=zwei?W-2*M:85,iH=zwei?120:115;let col=0,erste=true,zeileH=0;
       for(let fi=0;fi<fotoList.length;fi++){
         const f=fotoList[fi];
         setSaveInd('saving','PDF: Foto '+(fi+1)+'/'+fotoList.length+' …');
@@ -5790,17 +6014,18 @@ async function _fsMobPdfBg(bericht,task){
           if(y+iH+10>285){doc.addPage();y=M;}
           zeileH=0;
         }
-        const x=col===0?M:M+iW+12;
         let w=iW,h=iW*d.h/d.w;if(h>iH){h=iH;w=iH*d.w/d.h;}
+        const x=zwei?M+(iW-w)/2:(col===0?M:M+iW+12),capW=zwei?Math.max(w,90):iW;
         try{doc.addImage(d.dataUrl,'JPEG',x,y,w,h);}catch(e){console.warn('[Feuchte] Bild:',e);}
         const zu=_fsBgFotoZuordnung(bericht,f);
         doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(90,90,90);
         const fpl=_fsFpLegende(f); /* F37: „Markiert: 1 = Schaden · 2 = undicht“ */
-        const cap=doc.splitTextToSize('Foto '+(fi+1)+(zu?' – '+zu:'')+(fpl?' – Markiert: '+fpl:''),iW).slice(0,fpl?7:3); // F2c: die Unterschrift nennt Raum, Wand und Messstelle – bis zu drei Zeilen statt nur der ersten
+        const fz=_fsFotoZeit(f,bericht.datum); /* F49: Aufnahmezeit aus dem Dateinamen */
+        const cap=doc.splitTextToSize('Foto '+(fi+1)+(fz?' · '+fz:'')+(zu?' – '+zu:'')+(fpl?' – Markiert: '+fpl:''),capW).slice(0,fpl?7:3); // F2c: die Unterschrift nennt Raum, Wand und Messstelle – bis zu drei Zeilen statt nur der ersten
         doc.text(cap,x,y+h+3.5);
         zeileH=Math.max(zeileH,h+(cap.length-1)*3);
-        if(col===1)y+=zeileH+9;
-        col=(col+1)%2;
+        if(zwei||col===1)y+=zeileH+9;
+        col=zwei?0:(col+1)%2;
       }
       if(col===1)y+=zeileH+9;
       setSaveInd('saved','');
@@ -5813,14 +6038,16 @@ async function _fsMobPdfBg(bericht,task){
     doc.setFontSize(7.5);doc.setTextColor(90,90,90);doc.setFont('helvetica','normal');
     doc.text('Ort, Datum',M,y+12);doc.text('Unterschrift'+(hat(k.pruefer)?' ('+String(k.pruefer).trim()+')':''),W-M-70,y+12);
 
-    const pages=doc.internal.getNumberOfPages();
+    const pages=doc.internal.getNumberOfPages(),jetzt=_fsVbJetzt(); // F49: „erstellt TT.MM.JJJJ hh:mm“ links in der Fußzeile
     for(let p=1;p<=pages;p++){
       doc.setPage(p);doc.setFontSize(8);doc.setTextColor(150,150,150);
       doc.text('Seite '+p+' von '+pages,W/2,292,{align:'center'});
       doc.text('sv-fb.de',W-M,292,{align:'right'});
+      doc.text('erstellt '+jetzt.datum+' '+jetzt.uhr,M,292);
     }
 
     const blob=doc.output('blob');
+    if(_fsVorschauModus){_fsVorschauFenster(blob,'Vorschau_'+_fsPdfName(bericht,new Date()));return blob;} /* F49: 👁 Vorschau – nichts nach Drive, nichts ersetzt */
     _fsPdfBlobs[bericht.id]=blob;
     const name=_fsPdfName(bericht,new Date());
     toast('✓ PDF erstellt – mit „📂 Öffnen" ansehen','success',4000);
