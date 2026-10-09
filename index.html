@@ -10554,7 +10554,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-08 · #1149'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-08-b1149) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-09 · #1150'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-09-b1150) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -51363,7 +51363,87 @@ function _kAdrToggle(btn){
   // 'grid' und nicht '' – bei '' fiele die Box auf den Standard zurück und die drei
   // Felder stünden untereinander statt nebeneinander.
   box.style.display=auf?'grid':'none';
+  // b1150: beim Aufklappen frisch nachsehen, welche Quelle die Karte gerade hergibt
+  if(auf&&typeof _kAdrQuellenSync==='function')_kAdrQuellenSync(entry);
   if(auf){const f=box.querySelector('.k-strasse');if(f)f.focus();}
+}
+/* b1150 (Wunsch Frank, 09.10.2026): Anschrift am Ansprechpartner per Klick aus der Karte.
+   Gemessen an workboard.json: von 146 Ansprechpartnern trug genau einer eine Anschrift –
+   Mieter, Eigentümer und alle 17 Hausverwaltungen waren leer, obwohl die Karte sie kennt.
+   Zwei Quellen, beide stehen schon auf der Karte:
+   · „🏠 vom Objekt"  – das Feld Adresse (tAdr), zerlegt mit `_adrParseObjAddr` (b512)
+   · „🧾 aus Rechnungsanschrift" – deren letzte Zeilen. Bei 12 der 17 Karten mit Hausverwaltung
+     steht dort die c/o-Zeile der Verwaltung und darunter deren Anschrift.
+   ⛔ PAM wählt NICHT nach der Rolle aus – Frank klickt, was passt. Ein Knopf erscheint nur,
+   wenn seine Quelle etwas hergibt; der Klick liest die Quelle trotzdem frisch, sie kann sich
+   seit dem Aufklappen geändert haben.
+   ⛔ Nie still überschreiben (Lehre b874): steht schon eine ANDERE Anschrift da, fragt PAM. */
+function _kAdrAusObjekt(){
+  const el=document.getElementById('tAdr');
+  const s=el?String(el.value||'').trim():'';
+  if(!s)return null;
+  const a=_adrParseObjAddr(s);
+  return (a.strasse||a.plz||a.ort)?a:null;
+}
+function _kAdrAusRa(){
+  const el=document.getElementById('tRaText');
+  const z=_raZeilen(el?el.value:'');
+  if(!z.length)return null;
+  const letzte=z[z.length-1];
+  if(!/\b\d{5}\b/.test(letzte))return null;   // ohne Postleitzahl am Schluss ist es keine Anschrift
+  const a=_adrParseObjAddr(letzte);
+  // Normalfall: Straße in der Zeile davor. Steht alles in einer Zeile, hat der Zerleger sie schon.
+  if(!a.strasse){ if(z.length<2)return null; a.strasse=z[z.length-2]; }
+  return a;
+}
+function _kAdrQuellenSync(entry){
+  if(!entry)return;
+  const o=_kAdrAusObjekt(),r=_kAdrAusRa();
+  // Dieselbe Anschrift zweimal anzubieten verwirrt nur – dann reicht 🏠.
+  const rZeigen=!!r&&!(o&&_kAdrText(o)===_kAdrText(r));
+  const bo=entry.querySelector('.k-adr-obj'),br=entry.querySelector('.k-adr-ra'),zeile=entry.querySelector('.k-adr-quellen');
+  if(bo){bo.style.display=o?'':'none';bo.title=o?('Objektadresse eintragen: '+_kAdrText(o)):'';}
+  if(br){br.style.display=rZeigen?'':'none';br.title=rZeigen?('Aus der Rechnungsanschrift eintragen: '+_kAdrText(r)):'';}
+  if(zeile)zeile.style.display=(o||rZeigen)?'flex':'none';
+}
+function _kAdrFelder(entry){
+  const f={strasse:entry.querySelector('.k-strasse'),plz:entry.querySelector('.k-plz'),ort:entry.querySelector('.k-ort')};
+  return (f.strasse&&f.plz&&f.ort)?f:null;
+}
+function _kAdrUebernehmen(btn,quelle){
+  const entry=(btn&&btn.closest)?btn.closest('.kontakt-entry'):null;if(!entry)return false;
+  const ausRa=(quelle==='ra');
+  const a=ausRa?_kAdrAusRa():_kAdrAusObjekt();
+  if(!a){
+    showToast(ausRa?'In der Rechnungsanschrift steht keine Straße mit Postleitzahl':'Auf der Karte steht keine Adresse','info',3500);
+    _kAdrQuellenSync(entry);return false;
+  }
+  const f=_kAdrFelder(entry);if(!f)return false;
+  const alt=_kAdrText({strasse:f.strasse.value,plz:f.plz.value,ort:f.ort.value}),neu=_kAdrText(a);
+  if(alt===neu){showToast('📍 Diese Anschrift steht schon drin','info',2500);return false;}
+  if(alt&&!confirm('Beim Ansprechpartner steht schon eine ANDERE Anschrift.\n\nJetzt:\n'+alt
+    +'\n\nNeu ('+(ausRa?'aus der Rechnungsanschrift':'vom Objekt')+'):\n'+neu
+    +'\n\nErsetzen?\nAbbrechen = die jetzige bleibt stehen.'))return false;
+  f.strasse.value=a.strasse||'';f.plz.value=a.plz||'';f.ort.value=a.ort||'';
+  _kAdrSync(entry);
+  scheduleTaskFieldSave();
+  showToast('📍 Anschrift eingetragen: '+neu,'success',3000);
+  return true;
+}
+/* b1150 Zusatz: Der Haken „🏠 wohnt im Objekt" (nur Eigentümer, b916) trägt die Objektadresse
+   ein – NUR wenn die Anschrift des Eigentümers noch ganz leer ist. Eine vorhandene bleibt ohne
+   Rückfrage stehen; Haken weg nimmt nichts weg. Der Kasten klappt auf, damit man sieht, was kam. */
+function _kWioAdr(cb){
+  if(!cb||!cb.checked)return false;
+  const entry=cb.closest?cb.closest('.kontakt-entry'):null;if(!entry)return false;
+  const f=_kAdrFelder(entry);if(!f)return false;
+  if(_kAdrText({strasse:f.strasse.value,plz:f.plz.value,ort:f.ort.value}))return false;
+  const a=_kAdrAusObjekt();if(!a)return false;
+  f.strasse.value=a.strasse||'';f.plz.value=a.plz||'';f.ort.value=a.ort||'';
+  const box=entry.querySelector('.k-adr-box');if(box)box.style.display='grid';
+  _kAdrSync(entry);_kAdrQuellenSync(entry);
+  showToast('🏠 Objektadresse beim Eigentümer eingetragen: '+_kAdrText(a),'success',3000);
+  return true;
 }
 
 /* ── b759: Rechnungsanschrift ────────────────────────────────────────────────────
@@ -51659,6 +51739,7 @@ function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2,adr,wohntImObjekt)
   const hatAdr=!!(aStr.trim()||aPlz.trim()||aOrt.trim());
   const div=document.createElement('div');div.className='kontakt-entry';
   const fs='font-size:11px;padding:3px 6px;';
+  const qb='padding:3px 9px;font-size:11px;border:1px solid var(--border);background:var(--bg3);color:var(--text);border-radius:5px;cursor:pointer;';   // b1150
   /* b842: `hausverwaltung` war in der Beschriftungstabelle darüber vorhanden, fehlte
      aber in dieser Auswahl - die Rolle war also NIRGENDS von Hand wählbar, obwohl das
      VBS sie setzt. Ein so angelegter Kontakt rutschte in „✏️ Andere…" und stand dort
@@ -51681,7 +51762,7 @@ function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2,adr,wohntImObjekt)
     +'<label style="display:flex;align-items:center;gap:4px;font-size:10px;color:#1a56c4;cursor:pointer;margin-left:6px;" title="Dieser Kontakt wird auf Mobil als Anruf-Button angezeigt">'
     +'<input type="checkbox" class="k-anruf"'+(anrufKontakt?' checked':'')+' style="width:13px;height:13px;accent-color:#1a56c4;cursor:pointer;" onchange="_updateMapsBtn();scheduleTaskFieldSave()">📞 Anruf</label>'
     +'<label class="k-wio-box" style="display:'+(rolle==='eigentuemer'?'flex':'none')+';align-items:center;gap:4px;font-size:10px;color:#15803d;cursor:pointer;margin-left:6px;white-space:nowrap;" title="Der Eigentümer wohnt selbst im Objekt">'
-    +'<input type="checkbox" class="k-wio"'+(wohntImObjekt?' checked':'')+' style="width:13px;height:13px;accent-color:#15803d;cursor:pointer;" onchange="scheduleTaskFieldSave()">🏠 wohnt im Objekt</label>'
+    +'<input type="checkbox" class="k-wio"'+(wohntImObjekt?' checked':'')+' style="width:13px;height:13px;accent-color:#15803d;cursor:pointer;" onchange="_kWioAdr(this);scheduleTaskFieldSave()">🏠 wohnt im Objekt</label>'
     +'<button type="button" class="k-adr-btn" style="padding:2px 6px;font-size:11px;background:transparent;border:none;cursor:pointer;opacity:'+(hatAdr?'1':'0.4')+';" onclick="_kAdrToggle(this)" title="'+(hatAdr?('Anschrift: '+_kAdrText({strasse:aStr,plz:aPlz,ort:aOrt}).replace(/"/g,'&quot;')+'  (klicken zum Bearbeiten)'):'Anschrift eintragen')+'">📍</button>'
     +'<button type="button" class="gk-create-btn" style="padding:2px 6px;font-size:11px;background:#1a56c4;color:#fff;border:none;border-radius:4px;cursor:pointer;" onclick="_showGKPreview(this.closest(\'.kontakt-entry\'))" title="Kontakt in Google Kontakte anlegen">👤+</button>'
     +'<button type="button" class="adr-save-btn" style="padding:2px 6px;font-size:11px;background:#15803d;color:#fff;border:none;border-radius:4px;cursor:pointer;" onclick="_adrBookAddFromKontakt(this.closest(\'.kontakt-entry\'))" title="Diesen Kontakt ins Adressbuch speichern">✅</button>'
@@ -51706,6 +51787,11 @@ function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2,adr,wohntImObjekt)
     +'<div class="modal-field" style="margin:0"><label style="font-size:10px">Straße + Nr.</label><input type="text" class="k-strasse" value="'+aStr.replace(/"/g,'&quot;')+'" placeholder="Hauptstraße 1" style="'+fs+'" oninput="scheduleTaskFieldSave();_kAdrSync(this.closest(\'.kontakt-entry\'))" autocomplete="off"></div>'
     +'<div class="modal-field" style="margin:0"><label style="font-size:10px">PLZ</label><input type="text" class="k-plz" value="'+aPlz.replace(/"/g,'&quot;')+'" placeholder="99084" style="'+fs+'" oninput="scheduleTaskFieldSave();_kAdrSync(this.closest(\'.kontakt-entry\'))" autocomplete="off"></div>'
     +'<div class="modal-field" style="margin:0"><label style="font-size:10px">Ort</label><input type="text" class="k-ort" value="'+aOrt.replace(/"/g,'&quot;')+'" placeholder="Erfurt" style="'+fs+'" oninput="scheduleTaskFieldSave();_kAdrSync(this.closest(\'.kontakt-entry\'))" autocomplete="off"></div>'
+    // b1150: Anschrift aus der Karte holen – sichtbar macht sie erst _kAdrQuellenSync, je nach Quelle
+    +'<div class="k-adr-quellen" style="display:none;grid-column:1/-1;gap:6px;flex-wrap:wrap;">'
+    +'<button type="button" class="k-adr-obj" style="display:none;'+qb+'" onclick="_kAdrUebernehmen(this,\'obj\')">🏠 vom Objekt</button>'
+    +'<button type="button" class="k-adr-ra" style="display:none;'+qb+'" onclick="_kAdrUebernehmen(this,\'ra\')">🧾 aus Rechnungsanschrift</button>'
+    +'</div>'
     +'</div>';
   const telInput=div.querySelector('.k-tel');
   const telLink=div.querySelector('.tel-call-btn');
@@ -51722,6 +51808,9 @@ function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2,adr,wohntImObjekt)
     tel2Link.classList.toggle('disabled',!v);
   });
   c.appendChild(div);
+  // b1150: Ist der Kasten schon offen (Anschrift vorhanden), die Knöpfe gleich passend zeigen.
+  // ⛔ typeof-Wache: Prüfsuiten führen addKontaktPTP ohne Umgebung aus (test_b678).
+  if(typeof _kAdrQuellenSync==='function')_kAdrQuellenSync(div);
   updateKontaktePTPTitle();
 }
 function renderKontaktePTP(kontakte){
@@ -57635,10 +57724,11 @@ async function _plzAusTabelleKnopf(){
   if(!roh){showToast("\u26A0 Erst eine Adresse eintragen","error",5000);return;}
   await _plzLaden();
   if(!_plzTab||!_plzTab.size){showToast("\u26A0 Die Stra\u00dfentabelle ist nicht geladen \u2013 einmal neu laden","error",7000);return;}
-  /* ⛔ Kein eigenes Zerlegen: `_adrParseObjAddr` macht das seit b678 an SIEBEN
-     Stellen – am 01.09.2026 nachgezählt; hier stand jahrelang „fünf".
+  /* ⛔ Kein eigenes Zerlegen: `_adrParseObjAddr` macht das an NEUN Stellen –
+     am 01.09.2026 waren es sieben (hier stand jahrelang „fünf"), b1150 brachte
+     🏠/🧾 am Ansprechpartner dazu.
      ⛔ Deshalb bleibt die Funktion unangetastet: eine Änderung dort träfe alle
-     sieben Wege auf einmal. Die Nachhilfe steht daneben (`_plzOrtAusAdresse`). */
+     neun Wege auf einmal. Die Nachhilfe steht daneben (`_plzOrtAusAdresse`). */
   const p=_adrParseObjAddr(roh);
   if(p.plz){showToast("Die Adresse hat schon eine Postleitzahl","info",5000);return;}
   let strasse=p.strasse,ort=p.ort,erkannt="";
