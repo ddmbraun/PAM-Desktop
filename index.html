@@ -10571,7 +10571,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-10 · #1165'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-10-b1165) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-10 · #1166'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-10-b1166) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -38370,7 +38370,9 @@ async function _msLoadEmailThread(){
       // #383: Konversation gefunden, aber 0 Mails geladen → kein falscher Erfolgs-Toast,
       // bestehenden Verlauf NICHT mit leerer Liste überschreiben (deutet auf Token-/Konto-Problem)
       if(stEl)stEl.textContent='⚠ 0 Mails';
-      showToast('⚠ Konversation gefunden, aber 0 Mails geladen (Token-/Konto-Problem?) – bitte erneut versuchen','warning',6000);
+      // b1166: der haeufigste Grund ist nicht das Konto, sondern eine Mail im Papierkorb / verschoben (neue Kennung) – Befund Frank 10.10.2026
+      if(typeof _msLetztesErgebnis!=='undefined')_msLetztesErgebnis={id:task.id,art:'leer',ts:Date.now()};
+      showToast('⚠ In Outlook keine abgeschickte Mail dieser Unterhaltung gefunden – liegt sie im Papierkorb („Gelöschte Elemente“), wurde sie verschoben oder ist der Entwurf noch nicht abgeschickt? Die Kopien in der Ablage bleiben.','warning',9000);
       return;
     }
     // b858: Messhilfe - zeigt in der Browser-Konsole, welche Absenderadresse Graph
@@ -38395,9 +38397,11 @@ async function _msLoadEmailThread(){
     if(_mld.warnung)showToast(_mld.warnung.text,_mld.warnung.art,_mld.warnung.dauer);
   }catch(e){
     if(stEl)stEl.textContent='⚠ Fehler';
+    if(typeof _msLetztesErgebnis!=='undefined')_msLetztesErgebnis={id:(task&&task.id)||'',art:'fehler',ts:Date.now()};   // b1166
     showToast('⚠ '+e.message,'error',6000);
   }
 }
+var _msLetztesErgebnis=null;   // b1166: wie das letzte Outlook-Laden ausging – {id, art:'leer'|'fehler', ts}; liest _pepNachsehen
 
 // ── b1056: „🔎 Mehr Mails suchen" ─────────────────────────────────────────────
 // WARUM: `_msLoadEmailThread` holt nur die EINE Outlook-Unterhaltung der Karte (Unterhaltungs-ID).
@@ -40319,6 +40323,25 @@ async function _pamAnhaengeDran(H,draftId,liste){
   }
   return fehl;
 }
+/* b1166: eine NEUE Mail aus PAM (✉ am Kontakt, ✉ Termin mitteilen, ✉ Dokument senden …) ist fuer Outlook eine eigene
+   Unterhaltung – „✉ Outlook“ holte sie nie in den Verlauf der Karte (Befund Frank 10.10.2026, Testakte 15:26). Ihre
+   Kennung kommt deshalb zu msMessageIds; ist die Mail abgeschickt, findet _msLoadEmailThread ueber die Kennung ihre
+   Unterhaltung. Hat die Karte noch keine Unterhaltung, wird diese ihre. Geaendert wird die Karte in boards (findTaskById) –
+   saveTaskData liest msMessageIds von dort – und, falls ein Fenster mit eigener Kopie arbeitet (E-Mail-Fenster), auch dort. */
+function _pamMailAnKarte(task,erg){
+  const mid=String((erg&&erg.internetMessageId)||'').replace(/^<|>$/g,'').trim();
+  if(!task||!task.id||!mid)return false;
+  const t=((typeof findTaskById==='function')&&findTaskById(task.id))||task;
+  let neu=false;
+  [t,task].forEach(function(x){
+    if(!Array.isArray(x.msMessageIds))x.msMessageIds=[];
+    if(x.msMessageIds.indexOf(mid)<0){x.msMessageIds.push(mid);neu=true;}
+    if(!x.msMessageId)x.msMessageId=mid;
+    if(!x.msConversationId&&erg.conversationId)x.msConversationId=erg.conversationId;
+  });
+  if(neu){try{if(typeof autoSave==='function')autoSave();}catch(e){console.warn('[b1166] Mail an Karte speichern:',e);}}
+  return neu;
+}
 async function _pamOutlookEntwurf(token,opt){
   const H={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
   const r1=await fetch('https://graph.microsoft.com/v1.0/me/messages',{method:'POST',headers:H,
@@ -40329,7 +40352,8 @@ async function _pamOutlookEntwurf(token,opt){
   // b1143: bis b1142 stand hier die 3-MB-Grenze je Datei (die Upload-Adresse auf outlook.office.com war nicht in der Gästeliste).
   // Frank 08.10.2026: größere Dateien sollen mit – zusammen bis 20 MB. Zu Großes wird weiter gemeldet, nicht still verschluckt.
   const fehl=await _pamAnhaengeDran(H,draft.id,opt.anhaenge||[]);
-  return {id:draft.id,link:draft.webLink||('https://outlook.office.com/mail/drafts/id/'+draft.id),fehl:fehl};
+  return {id:draft.id,link:draft.webLink||('https://outlook.office.com/mail/drafts/id/'+draft.id),fehl:fehl,
+    internetMessageId:String(draft.internetMessageId||'').replace(/^<|>$/g,''),conversationId:String(draft.conversationId||'')};   // b1166: fuer _pamMailAnKarte
 }
 // Fix #372: Nach createReply NICHT mehr automatisch Outlook Web öffnen (Wunsch Frank:
 // Option 3). Stattdessen anklickbarer Toast – Klick öffnet den Entwurf im Web,
@@ -40418,6 +40442,7 @@ async function _pamAntwortEntwurf(task,an,betreff,text,hinweis,anhaenge,bleibt){
     const opt={to:an||'',subj:betreff||'',body:text||''};
     if(anhaenge&&anhaenge.length)opt.anhaenge=anhaenge;   // b1053: nur wenn welche gewählt sind – sonst wie bisher
     const erg=await _pamOutlookEntwurf(tok,opt);
+    if(typeof _pamMailAnKarte==='function')_pamMailAnKarte(task,erg);   // b1166: abgeschickt holt „📬 Öffnen“ sie in den Verlauf
     _pamShowDraftToast(erg.link,hinweis||'✅ Antwort-Entwurf (als neue Mail) liegt in Outlook unter <b>Entwürfe</b>',bleibt===true);
     if(erg.fehl&&erg.fehl.length)showToast('⚠ Nicht angehängt (bitte in Outlook selbst anhängen): '+erg.fehl.join(', '),'warning',12000);
     return 'ok';
@@ -59906,12 +59931,34 @@ function _pepStandText(task,ohneLauf){
   // ohneLauf: der Mail-Block der Karte wird MITTEN im Laden neu gezeichnet (_msRenderThread) - dort nur die Uhrzeit, nie „⏳“
   if(!ohneLauf&&_pepHoltGerade[task.id])return '⏳ Schaue in Outlook nach …';
   const z=_pepZeitText(_pepNachgesehenLesen(task.id));
+  // b1166: war das letzte Nachsehen erfolglos (juenger als der letzte Erfolg), sagt der Stand das – mit der wahrscheinlichen Ursache
+  const fv=(typeof _pepFehlLesen==='function')?_pepFehlLesen(task.id):null,zok=_pepNachgesehenLesen(task.id);
+  if(fv&&_pepOutlookAngemeldet()&&(!zok||new Date(fv.ts)>new Date(zok))){
+    const zt=_pepZeitText(fv.ts);
+    return fv.art==='leer'?('In Outlook nichts gefunden ('+zt+') – Mail im Papierkorb, verschoben oder Entwurf noch nicht abgeschickt?'):('In Outlook nachgesehen ohne Ergebnis ('+zt+') – siehe Meldung');
+  }
   if(!_pepOutlookAngemeldet())return 'Outlook nicht angemeldet – gezeigt wird der gespeicherte Stand'+(z?' (nachgesehen: '+z+')':'');
   return z?'In Outlook nachgesehen: '+z:'In Outlook noch nicht nachgesehen';
 }
+/* b1166: auch ein ERFOLGLOSES Nachsehen wird gemerkt (nur dieser Rechner) – sonst kam bei einer Mail, die in Outlook
+   im Papierkorb liegt, bei jedem Oeffnen dieselbe Warnung. art: 'leer' = Unterhaltung ohne abgeschickte Mail, sonst 'fehler'. */
+const _PEP_FEHL_KEY='pam_ms_fehlversuch_v1';
+function _pepFehlLesen(id){
+  try{const m=JSON.parse(localStorage.getItem(_PEP_FEHL_KEY)||'{}');return (m&&id&&m[id])||null;}catch(e){return null;}
+}
+function _pepFehlMerken(id,art){
+  if(!id)return;
+  try{
+    const m=JSON.parse(localStorage.getItem(_PEP_FEHL_KEY)||'{}')||{};
+    m[id]={ts:new Date().toISOString(),art:art||'fehler'};
+    const k=Object.keys(m);
+    if(k.length>400)k.sort(function(a,b){return String(m[a].ts).localeCompare(String(m[b].ts));}).slice(0,k.length-400).forEach(function(x){delete m[x];});
+    localStorage.setItem(_PEP_FEHL_KEY,JSON.stringify(m));
+  }catch(e){}
+}
 function _pepStandZeigen(task){
   const el=document.getElementById('pepStand');
-  if(el)el.textContent=_pepStandText(task);
+  if(el){el.textContent=_pepStandText(task);el.title=el.textContent;}   // b1166: ganzer Text beim Darueberfahren, falls die Zeile abgeschnitten ist
 }
 function _pepMailSchluessel(task){
   return ((task&&task.msThreadMessages)||[]).map(function(m){return (m&&(m.id||m.internetMessageId))||'';}).join('|');
@@ -59923,12 +59970,19 @@ async function _pepNachsehen(task,ov,taskOverride,zeigeAusgeblendete){
   if(_pepHoltGerade[task.id])return;
   const zuletzt=_pepNachgesehenLesen(task.id);
   if(zuletzt&&(Date.now()-new Date(zuletzt).getTime())<_PEP_PAUSE_MS)return;
+  const fvAlt=(typeof _pepFehlLesen==='function')?_pepFehlLesen(task.id):null;   // b1166: nach einem Fehlversuch ebenfalls 5 Minuten Ruhe
+  if(fvAlt&&(Date.now()-new Date(fvAlt.ts).getTime())<_PEP_PAUSE_MS)return;
   if(typeof _msLoadEmailThread!=='function')return;
   _pepHoltGerade[task.id]=true;
   const vorher=_pepMailSchluessel(findTaskById(task.id)||task);
   _pepStandZeigen(task);
+  if(typeof _msLetztesErgebnis!=='undefined')_msLetztesErgebnis=null;   // b1166: kein Ergebnis von frueher mitnehmen
   try{await _msLoadEmailThread();}catch(e){console.warn('[b1163] Nachsehen:',e);}
   finally{delete _pepHoltGerade[task.id];}
+  if(_pepNachgesehenLesen(task.id)===zuletzt&&typeof _pepFehlMerken==='function'){   // b1166: kein neuer Erfolg → Fehlversuch
+    const erg=(typeof _msLetztesErgebnis!=='undefined'&&_msLetztesErgebnis&&_msLetztesErgebnis.id===task.id)?_msLetztesErgebnis.art:'fehler';
+    _pepFehlMerken(task.id,erg);
+  }
   const neu=findTaskById(task.id)||task;
   if(!ov||!ov.isConnected)return;   // Fenster schon zu - der Mail-Block der Karte ist ueber _msRenderThread neu gezeichnet
   if(_pepMailSchluessel(neu)!==vorher){ov.remove();_openPamEmailPreview(0,taskOverride?(findTaskById(task.id)||taskOverride):taskOverride,zeigeAusgeblendete);return;}
@@ -60192,6 +60246,7 @@ async function _pepLoadPreview(m,task,previewEl){
         +'<div><strong>Von:</strong> '+_escHtml(from)+'</div>'
         +(dateLabel?'<div><strong>Datum:</strong> '+_escHtml(dateLabel)+'</div>':'')
       +'</div>'
+      +(m.ablageStatt404?'<div class="pep-ablage-hinweis" style="margin:4px 0;padding:5px 9px;border-radius:7px;background:rgba(230,126,34,.16);font-size:12px;color:var(--text1);">📁 Kopie aus der Ablage – in Outlook ist die Mail unter ihrer Kennung nicht mehr da (Papierkorb oder verschoben?)</div>':'')   // b1166
       +_pamMailAnhangChipsHtml(task,d.messageId||d.internetMessageId||'')
       +'<div class="pep-preview-actions">'
         +'<button class="pep-open-btn pep-reply-btn" title="Antworten – auf diese Mail, mit Verlauf, mit Vorlage, Termin mitteilen, Dokument senden, Verlauf drucken" onclick="_pepAntwortMenu(this,\''+_jsa(task.id)+'\',\''+_jsa(m.type)+'\','+m.idx+')">↩ Antworten ▾</button>'
@@ -60214,7 +60269,14 @@ async function _pepLoadPreview(m,task,previewEl){
     if(d._cachedBodyHtml){_ri(d._cachedBodyHtml);return;}
     if(m.type==='ms'&&d.id&&typeof msToken!=='undefined'&&msToken){
       const r=await fetch('https://graph.microsoft.com/v1.0/me/messages/'+d.id+'?$select=body',{headers:{Authorization:'Bearer '+msToken}});
-      if(!r.ok)throw new Error('Graph '+r.status);
+      if(!r.ok){
+        // b1166: unter dieser Kennung nicht mehr in Outlook (Papierkorb oder verschoben → neue Kennung) – dann die abgelegte
+        // Zwillings-Mail (.eml) zeigen statt nur „⚠ Graph 404“ (Befund Frank 10.10.2026, Testakte)
+        const _kz=d.messageId||d.internetMessageId||'';
+        const _zw=(r.status===404&&_kz)?((task.emailOriginals||[]).find(function(o){return o&&o.fileId&&o.messageId===_kz;})):null;
+        if(_zw&&typeof gdriveToken!=='undefined'&&gdriveToken)return _pepLoadPreview({type:'eml',data:_zw,idx:(task.emailOriginals||[]).indexOf(_zw),ablageStatt404:true},task,previewEl);
+        throw new Error(r.status===404?'In Outlook unter dieser Kennung nicht gefunden – liegt die Mail im Papierkorb („Gelöschte Elemente“) oder wurde sie verschoben? Eine Kopie in der Ablage gibt es zu dieser Mail nicht.':'Graph '+r.status);
+      }
       const data=await r.json();
       // b904: Text-Mails MIT dem <pre>-Mantel merken – beim zweiten Öffnen kam der rohe Text sonst ohne Zeilenumbrüche (Befund Frank 04.09.)
       d._cachedBodyHtml=(data.body&&data.body.contentType==='html')?((data.body&&data.body.content)||''):'<pre style="white-space:pre-wrap;">'+_escHtml((data.body&&data.body.content)||'')+'</pre>';
