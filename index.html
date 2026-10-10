@@ -7631,6 +7631,9 @@ body.dark .mv2-kurzinfo-box textarea::placeholder{color:#9A8A50;}
 .pep-card-dir.ein{background:#E0F2FE;color:#0369A1;}
 .pep-card-dir.aus{background:#E6F4EA;color:#15803D;}
 .pep-open-btn.pep-reply-btn{background:var(--accent);color:#fff;border-color:var(--accent);}
+/* b1164: „✉“ am Ansprechpartner – gebaut wie der 📞-Knopf daneben */
+.k-mail-btn{display:inline-flex;align-items:center;justify-content:center;width:36px;height:38px;border-radius:7px;background:rgba(55,138,221,.1);color:var(--accent);font-size:16px;flex-shrink:0;border:1px solid rgba(55,138,221,.35);cursor:pointer;padding:0;}
+.k-mail-btn:hover{background:rgba(55,138,221,.25);}
 .pep-card-meta{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--text2);}
 .pep-card-type{font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;text-transform:uppercase;letter-spacing:.04em;}
 .pep-card-type.ms{background:#E0F2FE;color:#0369A1;}
@@ -10568,7 +10571,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-10 · #1163'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-10-b1163) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-10 · #1164'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-10-b1164) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -40620,7 +40623,7 @@ async function _mvEntwurf(task,ziel,text,betreffEigen,anhDocs){
   let anh={liste:[],fehl:[]};
   if(anhDocs&&anhDocs.length){showToast('📎 Dokumente werden geholt…','info',4000);anh=await _mvAnhaengeLaden(anhDocs);}
   if(!ziel||ziel.art!=='antwort'||!ziel.msg||!ziel.msg.id){
-    const okNeu=(await _pamAntwortEntwurf(task,ziel&&ziel.an,eigen||_pamAwBetreff(ziel&&ziel.betreff),text,neuHinweis,anh.liste))==='ok';
+    const okNeu=(await _pamAntwortEntwurf(task,ziel&&ziel.an,eigen||((ziel&&ziel.kontakt)?String(ziel.betreff||''):_pamAwBetreff(ziel&&ziel.betreff)),text,neuHinweis,anh.liste))==='ok';   // b1164: an einen Kontakt ohne „AW:“
     if(okNeu&&anh.fehl.length)showToast('⚠ Nicht angehängt (bitte in Outlook selbst anhängen): '+anh.fehl.join(', '),'warning',12000);
     return okNeu;
   }
@@ -40664,7 +40667,26 @@ async function _mvEntwurf(task,ziel,text,betreffEigen,anhDocs){
 // ── Vorlagen: Fenster (Antworten + Verwalten) ─────────────────────────────────
 // Knöpfe per addEventListener, nicht als onclick-Text: pruefen.js [3/6] liest jeden
 // onclick-Text der Datei, und die Kennungen hier entstehen erst zur Laufzeit.
-function _mvOeffnen(which){
+/* b1164: „✉“ am Ansprechpartner (Frank 10.10.2026) – neue Mail an GENAU diesen Kontakt im bekannten Vorlagen-Fenster,
+   mit einer Vorlage oder „✎ Freier Text“; am Ende ein Entwurf in Outlook (PAM verschickt nichts). */
+function _kMailNeu(btn){
+  const zeile=btn&&btn.closest?btn.closest('.kontakt-entry'):null;
+  if(!zeile)return;
+  const adr=String((zeile.querySelector('.k-email')||{}).value||'').trim();
+  const name=String((zeile.querySelector('.k-name')||{}).value||'').trim();
+  if(!_tmAdrOk(adr)){showToast('Bitte zuerst eine gültige E-Mail-Adresse beim Kontakt eintragen.','warning',4000);return;}
+  const tid=(document.getElementById('taskId')||{}).value||'';
+  const task=tid?findTaskById(tid):null;
+  if(!task){showToast('Bitte die Karte erst speichern – danach geht „✉“ am Kontakt.','warning',5000);return;}
+  _mvOeffnen('pam',{art:'neu',kontakt:true,an:adr,name:name,betreff:task.title||''});
+}
+// b1164: bei einer neuen Mail an einen Kontakt steht oben „✎ Freier Text“ – nur die Anrede und der Gruss sind vorbelegt
+function _mvMitFrei(liste,ziel){
+  if(!ziel||!ziel.kontakt)return liste;
+  const anrede=(typeof _tmAnrede==='function')?_tmAnrede(ziel.name||''):'Sehr geehrte Damen und Herren';
+  return [{id:'_frei',name:'✎ Freier Text',ts:'',weg:null,betreff:'',text:anrede+',\n\n\n\nMit freundlichen Grüßen\n{Firma}'}].concat(liste||[]);
+}
+function _mvOeffnen(which,zielVorgabe){
   if(typeof _pamCloseAbsenderPopup==='function'){_pamCloseAbsenderPopup('pam');_pamCloseAbsenderPopup('pop');_pamCloseAbsenderPopup('em');}
   let task=null;
   if(which==='em'){task=(typeof _emCurrentTask!=='undefined')?_emCurrentTask:null;}
@@ -40677,7 +40699,8 @@ function _mvOeffnen(which){
       const k=getKontaktePTP();if(k&&k.length)kontakte=k;
     }
   }catch(e){}
-  const st={task:task,werte:_mvWerte(task,kontakte),ziel:_mvZiel(task),liste:[],grund:'',laedt:true,
+  const st={task:task,werte:_mvWerte(task,kontakte),ziel:(zielVorgabe&&typeof zielVorgabe==='object')?zielVorgabe:_mvZiel(task),   // b1164: Mail-Fenster / ✉ am Kontakt geben das Ziel vor
+    liste:[],grund:'',laedt:true,
     modus:'antwort',wahl:'',gefuellt:'',taWert:'',betrGef:'',betrWert:'',anh:{},edit:null,editSauber:true};
   const alt=document.getElementById('_mvOverlay');if(alt)alt.remove();
   const ov=document.createElement('div');
@@ -40728,7 +40751,7 @@ function _mvOeffnen(which){
   function zeichne(){
     box.innerHTML='';
     const kopf=el('div','display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap;');
-    kopf.appendChild(el('div','flex:1;font-weight:700;font-size:15px;','✉ Antwort mit Vorlage'));
+    kopf.appendChild(el('div','flex:1;font-weight:700;font-size:15px;',(st.ziel&&st.ziel.kontakt)?('✉ Neue Mail an '+(st.ziel.name||st.ziel.an)):'✉ Antwort mit Vorlage'));   // b1164
     kopf.appendChild(knopf('✕','background:none;border:none;color:var(--text2);font-size:18px;cursor:pointer;padding:0 4px;',zu,'Schließen'));
     box.appendChild(kopf);
     if(st.laedt){box.appendChild(el('div','padding:40px;text-align:center;color:var(--text2);','⏳ Vorlagen werden geladen …'));return;}
@@ -40743,6 +40766,7 @@ function _mvOeffnen(which){
     zeile('An:',z.an?((z.name?z.name+' ':'')+'<'+z.an+'>'):'– keine Adresse gefunden, bitte in Outlook eintragen');
     zeile('Postfach:',verb?(st.task.msAccount==='2'&&typeof msUserEmail2!=='undefined'&&msUserEmail2?msUserEmail2:((typeof msUserEmail!=='undefined'&&msUserEmail)||'Outlook')):'–');
     if(z.art==='antwort')zeile('Antwort auf:',z.betreff||'(ohne Betreff)');
+    else if(z.kontakt)zeile('Neue Mail:',(z.betreff||'(ohne Betreff)')+'  (an diesen Ansprechpartner – keine Antwort auf eine Mail)');   // b1164
     else zeile('Neue Mail:',_pamAwBetreff(z.betreff)+'  (die Mail liegt nur als Datei in der Karte – deshalb nicht im Outlook-Verlauf)');
     box.appendChild(info);
     if(!verb)box.appendChild(el('div','margin:10px 16px 0;padding:8px 10px;border-radius:7px;background:rgba(192,57,43,.14);color:var(--text1);font-size:12px;font-weight:600;','⛔ Outlook ist in PAM nicht verbunden – bitte oben 📨 verbinden. Den Text kannst du trotzdem kopieren.'));
@@ -40754,7 +40778,7 @@ function _mvOeffnen(which){
       _mtOeffnen({id:st.wahl}).then(function(erg){
         if(!erg||!erg.liste||document.getElementById('_mvOverlay')!==ov)return;
         const unveraendert=(st.taWert===st.gefuellt&&st.betrWert===st.betrGef);
-        st.liste=_mvSichtbar(erg.liste);st.grund='';
+        st.liste=_mvMitFrei(_mvSichtbar(erg.liste),st.ziel);st.grund='';   // b1164: „✎ Freier Text“ bleibt oben
         if(!st.liste.some(function(x){return x.id===st.wahl;}))waehle(st.liste[0]?st.liste[0].id:'');
         else if(unveraendert)waehle(st.wahl);
         zeichne();
@@ -40765,7 +40789,7 @@ function _mvOeffnen(which){
     const v=st.liste.find(function(x){return x.id===st.wahl;});
     // b1053: Betreff – leer lassen = wie bisher (Antwort-Betreff „RE:/AW: …")
     const inB=document.createElement('input');inB.type='text';inB.value=st.betrWert||'';
-    inB.placeholder='Betreff leer lassen = Antwort-Betreff wie bisher';
+    inB.placeholder=(st.ziel&&st.ziel.kontakt)?'Betreff leer lassen = Name der Karte':'Betreff leer lassen = Antwort-Betreff wie bisher';   // b1164
     inB.style.cssText=FELD+'padding:7px 9px;font-size:13px;';
     inB.addEventListener('input',function(){st.betrWert=inB.value;});
     rechts.appendChild(el('div','font-size:11px;font-weight:700;color:var(--text2);','Betreff'));
@@ -40848,10 +40872,11 @@ function _mvOeffnen(which){
   zeichne();
   _mvLaden().then(function(erg){
     if(document.getElementById('_mvOverlay')!==ov)return;
-    if(erg.ok)st.liste=_mvSichtbar(erg.liste);
-    else{st.liste=_mvSichtbar(MV_VORGABE);st.grund='Vorlagen aus Google Drive nicht lesbar ('+erg.grund+') – gezeigt wird nur die Standardvorlage, Speichern geht gerade nicht.';}
+    if(erg.ok)st.liste=_mvMitFrei(_mvSichtbar(erg.liste),st.ziel);   // b1164
+    else{st.liste=_mvMitFrei(_mvSichtbar(MV_VORGABE),st.ziel);st.grund='Vorlagen aus Google Drive nicht lesbar ('+erg.grund+') – gezeigt wird nur die Standardvorlage, Speichern geht gerade nicht.';}
     st.laedt=false;
     let letzte='';try{letzte=localStorage.getItem('pam_mv_letzte')||'';}catch(e){}
+    if(st.ziel&&st.ziel.kontakt)letzte='_frei';   // b1164: neue Mail an einen Kontakt beginnt mit freiem Text
     waehle(st.liste.some(function(x){return x.id===letzte;})?letzte:(st.liste[0]?st.liste[0].id:''));
     zeichne();
   });
@@ -51987,7 +52012,10 @@ function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2,adr,wohntImObjekt)
     +'<input type="tel" class="k-tel" value="'+tel.replace(/"/g,'&quot;')+'" style="flex:1;'+fs+'" placeholder="0361 / 123456" oninput="scheduleTaskFieldSave()" autocomplete="off">'
     +'<a class="tel-call-btn'+(tel?'':' disabled')+'" href="'+(tel?'tel:'+tel:'#')+'" onclick="_pamWahlAusKasten(this,\'.k-tel\')"><span style="font-size:15px">📞</span></a>'
     +'</div></div>'
-    +'<div class="modal-field" style="margin:0"><label style="font-size:10px">E-Mail</label><input type="email" class="k-email" value="'+email.replace(/"/g,'&quot;')+'" placeholder="max@beispiel.de" style="'+fs+'" oninput="scheduleTaskFieldSave()" autocomplete="off"></div>'
+    +'<div class="modal-field" style="margin:0"><label style="font-size:10px">E-Mail</label><div style="display:flex;gap:3px;">'   // b1164: ✉ daneben
+    +'<input type="email" class="k-email" value="'+email.replace(/"/g,'&quot;')+'" placeholder="max@beispiel.de" style="flex:1;'+fs+'" oninput="scheduleTaskFieldSave()" autocomplete="off">'
+    +'<button type="button" class="k-mail-btn" onclick="_kMailNeu(this)" title="Neue Mail an diesen Kontakt – mit Vorlage oder freiem Text, als Entwurf in Outlook">✉</button>'
+    +'</div></div>'
     +'<div class="modal-field" style="margin:0"><label style="font-size:10px">Tel. 2</label><div style="display:flex;gap:3px;">'
     +'<input type="tel" class="k-tel2" value="'+tel2.replace(/"/g,'&quot;')+'" style="flex:1;'+fs+'" placeholder="0172 / 123456" oninput="scheduleTaskFieldSave()" autocomplete="off">'
     +'<a class="tel2-call-btn'+(tel2?'':' disabled')+'" href="'+(tel2?'tel:'+tel2:'#')+'" onclick="_pamWahlAusKasten(this,\'.k-tel2\')"><span style="font-size:15px">📞</span></a>'
@@ -59970,6 +59998,49 @@ function _openPamEmailPreview(startIdx,taskOverride,zeigeAusgeblendete){
    Gmail-Mail: das vorhandene Gmail-Antwortfenster. .eml-Ablage: nur ein leeres
    Mailfenster an den Absender - aus der Datei laesst sich kein Postfach-Entwurf
    bauen, und das sagt die Meldung ehrlich dazu. */
+/* b1164: „↩ Antworten ▾“ im Mail-Fenster – dieselben Wege wie am Absender in der Karte, dazu Termin und Dokument
+   (Frank 10.10.2026: „hier komm ich nicht zu den Vorlagen“). Antworten und „Mit Vorlage“ gehen an die Mail, die
+   gerade offen ist - nicht automatisch an die neueste. Eine selbst GESENDETE Mail taugt dafuer nicht als Ziel: dann
+   gilt fuer „Mit Vorlage“ wie in der Karte die neueste eingegangene (_mvZiel). Verlauf, Vorlage, Dokument und Drucken
+   arbeiten mit der OFFENEN Karte - fuer eine andere Karte stehen sie nicht im Menue. */
+function _pepAntwortMenu(btn,taskId,typ,idx){
+  const alt=document.getElementById('_pepAwMenu');
+  if(alt){const war=alt._knopf===btn;alt.remove();if(war)return;}
+  const task=findTaskById(taskId);
+  if(!task){showToast('⚠ Karte nicht gefunden','error',3000);return;}
+  const liste=typ==='ms'?(task.msThreadMessages||[]):typ==='gmail'?(task.gmailThreadMessages||[]):(task.emailOriginals||[]);
+  const d=liste[idx]||{};
+  const offen=((document.getElementById('taskId')||{}).value||'')===taskId;
+  const eingang=!!(typ==='ms'&&d.id&&d.direction!=='gesendet');
+  const name=eingang?String(d.fromName||''):'';
+  const adr=eingang&&typeof _pamAdresseAus==='function'?_pamAdresseAus(d.from||''):'';
+  const eintraege=[
+    {sym:'↩',text:'Antworten',titel:'Auf genau diese Mail antworten',tu:function(){_pepAntworten(taskId,typ,idx);}},
+    {sym:'📋',text:'Mit Verlauf',titel:'Antwort mit dem ganzen Verlauf der Karte als Zitat',nur:offen,tu:function(){_pamEmailAntwortenMitVerlauf();}},
+    {sym:'✉',text:'Mit Vorlage …',titel:eingang?'Vorlage als Antwort auf diese Mail':'Vorlage als Antwort auf die neueste eingegangene Mail der Karte',nur:offen,
+      tu:function(){_mvOeffnen('pam',eingang?{art:'antwort',msg:d,an:adr,name:name,betreff:d.subject||task.title||''}:null);}},
+    {sym:'📅',text:'Termin mitteilen …',titel:'Einen Termin dieser Karte per Mail mitteilen – den Termin wählst du im Fenster',tu:function(){_tmAusAnrufliste(taskId,name);}},
+    {sym:'📎',text:'Dokument senden …',titel:'Dokumente dieser Karte per Mail senden – im Fenster anhaken',nur:offen,tu:function(){_dsOeffnen({task:task,art:'ul',vorwahl:adr});}},
+    {sym:'🖨',text:'Verlauf drucken',titel:'Den Mail-Verlauf der Karte drucken',nur:offen,tu:function(){_pamVerlaufDrucken();}}
+  ].filter(function(e){return e.nur!==false;});
+  const m=document.createElement('div');m.id='_pepAwMenu';m._knopf=btn;
+  m.style.cssText='position:fixed;z-index:11050;background:var(--bg2);border:0.5px solid var(--border);border-radius:8px;padding:5px;min-width:210px;box-shadow:0 6px 20px rgba(0,0,0,.18);';
+  eintraege.forEach(function(e,i){
+    const b=document.createElement('button');b.type='button';b.title=e.titel;b.textContent=e.sym+' '+e.text;
+    b.style.cssText='display:flex;align-items:center;gap:7px;width:100%;padding:7px 10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;margin-bottom:3px;'
+      +(i===0?'background:var(--accent);color:#fff;border:none;':'background:transparent;color:var(--text1);border:0.5px solid var(--border);');
+    b.addEventListener('click',function(ev){ev.stopPropagation();zu();e.tu();});
+    m.appendChild(b);
+  });
+  document.body.appendChild(m);
+  const r=btn.getBoundingClientRect();
+  m.style.left=Math.max(8,Math.min(r.left,window.innerWidth-m.offsetWidth-8))+'px';
+  m.style.top=Math.max(8,Math.min(r.bottom+4,window.innerHeight-m.offsetHeight-8))+'px';
+  function zu(){m.remove();document.removeEventListener('mousedown',daneben,true);document.removeEventListener('keydown',taste,true);}
+  function daneben(ev){if(!m.isConnected||(!m.contains(ev.target)&&ev.target!==btn))zu();}
+  function taste(ev){if(ev.key==='Escape'&&m.isConnected){ev.stopImmediatePropagation();zu();}}   // Esc schliesst erst das Menue, nicht das Fenster
+  setTimeout(function(){document.addEventListener('mousedown',daneben,true);document.addEventListener('keydown',taste,true);},0);
+}
 function _pepAntworten(taskId,typ,idx){
   const task=findTaskById(taskId);
   if(!task){showToast('⚠ Task nicht gefunden','error',3000);return;}
@@ -60012,7 +60083,7 @@ async function _pepLoadPreview(m,task,previewEl){
       +'</div>'
       +_pamMailAnhangChipsHtml(task,d.messageId||d.internetMessageId||'')
       +'<div class="pep-preview-actions">'
-        +'<button class="pep-open-btn pep-reply-btn" title="Auf genau diese Mail antworten" onclick="_pepAntworten(\''+_jsa(task.id)+'\',\''+_jsa(m.type)+'\','+m.idx+')">↩ Antworten</button>'
+        +'<button class="pep-open-btn pep-reply-btn" title="Antworten – auf diese Mail, mit Verlauf, mit Vorlage, Termin mitteilen, Dokument senden, Verlauf drucken" onclick="_pepAntwortMenu(this,\''+_jsa(task.id)+'\',\''+_jsa(m.type)+'\','+m.idx+')">↩ Antworten ▾</button>'
         +'<button class="pep-open-btn" onclick="'+fullBtn+'">⛶ Vollbild öffnen</button>'
         +(m.type==='eml'&&d.fileId?'<button class="pep-open-btn" onclick="_downloadEmailOrig(\''+_jsa(d.fileId)+'\',\''+_jsa(d.name||'email.eml')+'\')">⬇ Herunterladen</button>':'')
       +'</div>'
