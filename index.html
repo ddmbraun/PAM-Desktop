@@ -10596,7 +10596,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-10 · #1168'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-10-b1168) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-10 · #1169'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-10-b1169) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -35001,6 +35001,7 @@ function _lbNachOeffnen(){
   if(auf)_lbInfoZeichnen();
 }
 function _lbInfoSchliessen(){
+  try{if(typeof _lbInfoEntwurfRetten==='function')_lbInfoEntwurfRetten();}catch(e){}   // b1169: nichts Angefangenes geht beim Schließen verloren
   _lbFolge=null;_lbInfoTok++;_lbInfoLetzteAdresse='';
   const p=document.getElementById('lbInfoPanel');if(p)p.innerHTML='';
 }
@@ -35119,6 +35120,7 @@ function _lbInfoStelleText(st){
 }
 function _lbInfoZeichnen(){
   const p=document.getElementById('lbInfoPanel');if(!p)return;
+  if(typeof _lbInfoEntwurfRetten==='function')_lbInfoEntwurfRetten();   // b1169: angefangener Text wird gespeichert, bevor der Block neu entsteht (Weiterblättern, Ort korrigiert)
   const a=_lbInfoAktuell();
   const tok=++_lbInfoTok;
   _lbInfoLetzteAdresse='';
@@ -35160,13 +35162,11 @@ function _lbInfoZeichnen(){
     h+='<h4>Leistung</h4><div>'+esc(ref.leistung||'Leistung')+(ref.datum?' · '+esc(_lbTsText(ref.datum)):'')+'</div>'
       +'<div class="hinweis"><a href="#" onclick="event.preventDefault();_lbInfoZurHerkunft()">zur Leistung ↗</a></div>';
   }
-  const liste=_fnListe(a.key).slice().sort(function(x,y){return String(x.ts||'').localeCompare(String(y.ts||''));});
-  h+='<h4>Notizen</h4>'
-    +(liste.length?liste.map(function(n){return '<div class="lb-info-notiz"><span class="z">'+esc(_lbTsText(n.ts))+'</span><span class="t">'+esc(n.text||'')+'</span><button type="button" title="Notiz entfernen" onclick="_lbInfoNotizWeg(\''+_jsa(n.id||'')+'\')">✕</button></div>';}).join('')
-      :'<div class="hinweis" style="margin-bottom:5px;">Noch keine Notiz zu diesem Foto.</div>')
-    +'<textarea id="lbiNotiz" placeholder="Notiz zum Foto …"></textarea>'
-    +'<div style="margin-top:4px;display:flex;justify-content:flex-end;"><button type="button" class="lb-info-knopf" onclick="_lbInfoNotizAnlegen()">＋ Notiz</button></div>'
-    +'<div class="hinweis" style="margin-top:6px;">Notizen gehören zur Karte und gelten an beiden Rechnern. Das Handy zeigt sie (noch) nicht.</div>';
+  // b1169: Enter speichert; was im Feld steht, wird auch beim Verlassen des Feldes, Weiterblättern und Schließen gespeichert
+  h+='<h4>Notizen</h4><div id="lbiNotizListe">'+_lbInfoNotizListeHtml(a.key)+'</div>'
+    +'<textarea id="lbiNotiz" data-key="'+esc(a.key)+'" placeholder="Notiz zum Foto … – Enter speichert" onkeydown="_lbInfoNotizTaste(event)" onblur="_lbInfoEntwurfRetten()"></textarea>'
+    +'<div style="margin-top:4px;display:flex;justify-content:flex-end;align-items:center;gap:8px;"><span class="hinweis">Enter speichert</span><button type="button" class="lb-info-knopf" onclick="_lbInfoNotizAnlegen()">💾 Notiz speichern</button></div>'
+    +'<div class="hinweis" style="margin-top:6px;">Was im Feld steht, wird auch gespeichert, wenn du woanders hinklickst, weiterblätterst oder schließt. Notizen gehören zur Karte und gelten an beiden Rechnern. Das Handy zeigt sie (noch) nicht.</div>';
   p.innerHTML=h;
   if(!video&&a.datei)_lbInfoDatenFuellen(a,tok);
   else if(!a.datei)['lbiAufnahme','lbiKamera','lbiGroesse','lbiOrt'].forEach(function(id){const el=document.getElementById(id);if(el)el.textContent='–';});
@@ -35245,17 +35245,44 @@ function _fnEntfernen(key,nid){
   if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
   return true;
 }
+/* b1169 (Frank 10.10.2026: „hab was reingeschrieben, Enter gedrückt – hat nicht gespeichert“, danach Ort geändert → Text weg):
+   Enter speichert sofort (keine Umschalt-Taste, eine Notiz = eine Zeile – Franks Wahl); was im Feld steht, wird außerdem gespeichert,
+   wenn das Feld verlassen wird (Klick woanders, Ort korrigieren), beim Weiterblättern und beim Schließen. Dabei wird NUR die Notizliste
+   neu gezeichnet – würde der ganze Block neu entstehen, ginge der Klick auf den Knopf, mit dem man das Feld verlassen hat, ins Leere. */
+var _lbNotizZuletzt=0;
+function _lbInfoNotizListeHtml(key){
+  const liste=_fnListe(key).slice().sort(function(x,y){return String(x.ts||'').localeCompare(String(y.ts||''));});
+  return liste.length?liste.map(function(n){return '<div class="lb-info-notiz"><span class="z">'+esc(_lbTsText(n.ts))+'</span><span class="t">'+esc(n.text||'')+'</span><button type="button" title="Notiz entfernen" onclick="_lbInfoNotizWeg(\''+_jsa(n.id||'')+'\')">✕</button></div>';}).join('')
+    :'<div class="hinweis" style="margin-bottom:5px;">Noch keine Notiz zu diesem Foto.</div>';
+}
+function _lbInfoNotizListeAuffrischen(key){const el=document.getElementById('lbiNotizListe');if(el)el.innerHTML=_lbInfoNotizListeHtml(key);}
+// angefangener Text → Notiz. Sie gehört zu dem Foto, für das das Feld gezeichnet wurde (data-key) – nicht unbedingt zum gerade offenen
+function _lbInfoEntwurfRetten(){
+  const ta=document.getElementById('lbiNotiz');if(!ta)return false;
+  const text=String(ta.value||'').trim();if(!text)return false;
+  const key=String((ta.getAttribute&&ta.getAttribute('data-key'))||'');if(!key)return false;
+  if(_fnAnlegen(key,text,'notiz')){
+    ta.value='';_lbNotizZuletzt=Date.now();
+    const a=_lbInfoAktuell();if(a&&a.key===key)_lbInfoNotizListeAuffrischen(key);
+    showToast('✓ Notiz gespeichert','success',2000);
+    return true;
+  }
+  showToast('⚠ Notiz nicht gespeichert – ist die Karte offen?','error',5000);
+  return false;
+}
+function _lbInfoNotizTaste(e){
+  if(e&&e.key==='Enter'&&!e.isComposing){e.preventDefault();_lbInfoEntwurfRetten();}
+}
 function _lbInfoNotizAnlegen(){
-  const a=_lbInfoAktuell(),ta=document.getElementById('lbiNotiz');
-  if(!a||!ta)return;
-  if(!String(ta.value||'').trim()){showToast('Bitte erst einen Text schreiben.','info',3000);return;}
-  if(_fnAnlegen(a.key,ta.value,'notiz')){showToast('✓ Notiz gespeichert','success',2000);_lbInfoZeichnen();}
-  else showToast('⚠ Notiz nicht gespeichert – ist die Karte offen?','error',5000);
+  if(_lbInfoEntwurfRetten())return;
+  const ta=document.getElementById('lbiNotiz');
+  // Mausklick auf den Knopf: das Feld hat beim Verlassen schon gespeichert → keine zweite Meldung
+  if(ta&&!String(ta.value||'').trim()&&Date.now()-_lbNotizZuletzt>1500)showToast('Bitte erst einen Text schreiben.','info',3000);
 }
 function _lbInfoNotizWeg(nid){
   const a=_lbInfoAktuell();if(!a)return;
   if(!confirm('Diese Notiz entfernen?'))return;
-  if(_fnEntfernen(a.key,nid))_lbInfoZeichnen();
+  if(_fnEntfernen(a.key,nid))_lbInfoNotizListeAuffrischen(a.key);
 }
 // 📍 Ort korrigieren: alter Ort aus der Datei (vor dem Schreiben) und danach als Notiz ans Foto
 async function _fnOrtVorher(f){
