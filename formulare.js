@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F54';
+const PAM_FORMULARE_VERSION='F55';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -350,7 +350,7 @@ function _fsVervollstaendigen(b){
       if(typeof b.protName!=='string')b.protName='';if(typeof b.vorgeschichte!=='string')b.vorgeschichte='';if(typeof b.meldungStatus!=='string')b.meldungStatus='';if(typeof b.meldungAbw!=='string')b.meldungAbw='';
       ['besuchBei','lage','bereich','untersuchung'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';}); /* F54: Bereich, Untersuchung */
       if(!Array.isArray(b.notizen))b.notizen=[];b.notizen=b.notizen.filter(n=>n&&typeof n==='object');b.notizen.forEach(n=>{if(typeof n.text!=='string')n.text=String(n.text==null?'':n.text);n.pdf=n.pdf===true;if(typeof n.id!=='string'||!n.id)n.id='nz_'+Math.random().toString(36).slice(2,9);}); /* F53: Notizen auch im Begehungsprotokoll */
-      if(!Array.isArray(b.bgStellen))b.bgStellen=[];b.bgStellen=b.bgStellen.filter(s=>s&&typeof s==='object');b.bgStellen.forEach(s=>{if(!Array.isArray(s.merkmale))s.merkmale=[];if(!Array.isArray(s.fotoRefs))s.fotoRefs=[];['art','raum','wand','lage','breite','hoehe','notiz'].forEach(k=>{if(typeof s[k]!=='string')s[k]=String(s[k]==null?'':s[k]);});if(typeof s.id!=='string'||!s.id)s.id='bs_'+Math.random().toString(36).slice(2,9);}); /* F54: Stellen */
+      if(!Array.isArray(b.bgStellen))b.bgStellen=[];b.bgStellen=b.bgStellen.filter(s=>s&&typeof s==='object');b.bgStellen.forEach(s=>{if(!Array.isArray(s.merkmale))s.merkmale=[];if(!Array.isArray(s.fotoRefs))s.fotoRefs=[];['art','raum','wand','wand2','lage','breite','hoehe','notiz'].forEach(k=>{if(typeof s[k]!=='string')s[k]=String(s[k]==null?'':s[k]);});s.ecke=!!s.ecke; /* F55 */if(typeof s.id!=='string'||!s.id)s.id='bs_'+Math.random().toString(36).slice(2,9);}); /* F54: Stellen */
     }
     ['vorOrtWetter','vorOrtT','vorOrtRf','vorOrtUhr','vorOrtGeraet','wetterOrt','wetterOrtArt'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';}); /* F52: Wetter „selbst vor Ort“ · wofür der Wetterdienst geholt wurde */
   }
@@ -466,9 +466,23 @@ const FS_HILFE_BG={
   'Messstellen benennen':[ // F4: Messplan statt Namen vergeben
     'Erst Räume, Wände (Art) und Wandfotos anlegen: bei „Räume“ antippst du einen Raum, im Raum stehen Klima, Wände, Skizze und Messplan. Beim „Messplan“ schaltest du je Wand „wird gemessen“ oder „wird nicht gemessen“ und trägst die Höhen ein (Standard 10, 50, 100 cm).',
     'Dann in der Reihenfolge des Messplans messen: Raum für Raum, W1 bis W4, an jeder Wand von der ersten bis zur letzten Höhe – jedes Mal gleich. Jede Messung einzeln in testo speichern und exportieren (siehe oben).',
-    'Danach „📋 Messungen nach Messplan zuordnen“: PAM legt die Messungen nach ihrer Uhrzeit der Reihe nach auf die Plan-Zeilen. Du prüfst mit dem Wandfoto, nimmst mit „✕ Messung weglassen“ eine überzählige heraus, markierst eine ausgelassene Stelle mit „↷ Hier nicht gemessen“ und übernimmst.',
-    'Trotec-Werte trägst du bei der Messstelle von Hand unter „Bauteil (Digits)“ ein.',
+    'Danach am PC „📋 Messungen nach Messplan zuordnen“: die erste Messung je Raum wird das Raumklima, PAM legt die übrigen nach ihrer Uhrzeit der Reihe nach auf die Plan-Zeilen. Du prüfst mit dem Wandfoto, nimmst mit „✕ Messung weglassen“ eine überzählige heraus, markierst eine ausgelassene Stelle mit „↷ Hier nicht gemessen“ und übernimmst.',
+    'Trotec-Werte tippst du am Handy in die „📋 Messliste“ (Digits je Zeile, Abgrenzung je Wand, Vergleichsstelle trocken je Raum) – beim Zuordnen am PC gehen sie in die Messstellen.', /* F55 */
     'An jeder Wand „📷 Fotos zu W…“ bei Raumklima: ganze Wand mit Zollstock.'
+  ],
+  'testo 605i (Luft) und 805i (Oberfläche)':[ /* F55: Franks Ablauf vom 10.10.2026 – ohne Fotos, ohne Namen */
+    'Beide Fühler einschalten, in der testo Smart App verbinden, dann „Schimmelindikation“ starten. Unter „Messparameter“ muss bei Luft „testo 605i“ stehen.',
+    'Je Raum zuerst das Raumklima: 605i in der Raummitte, etwa 5 Minuten liegen lassen, Messung speichern. PAM nimmt beim Zuordnen die erste Messung je Raum als Klima.',
+    'Dann die Wände in der Reihenfolge der Messliste (10 / 50 / 100 cm, von unten nach oben): Laser auf den Punkt, speichern – kein Foto, kein Name.',
+    'Am Ende: Menü ☰ → Messdaten → alle Messungen auswählen → Export → JSON (nicht CSV) → Google Drive → „testo-Eingang“. Stern oder Verknüpfung „0_Messungen“ oben in „Meine Ablage“ hilft beim Finden.',
+    'Im Büro am PC: bei „Räume“ „📋 Messungen nach Messplan zuordnen“ – kontrollieren, übernehmen.'
+  ],
+  'Trotec BM31WP (Bauteilfeuchte in Digits)':[ /* F55: keine Trotec-App, Werte in die Messliste */
+    'Keine Trotec-App mehr: Gerät an die Wand, Wert ablesen, in PAM in der „📋 Messliste“ in die Zeile tippen – „weiter“ springt zur nächsten.',
+    'Zuerst eine trockene Stelle messen (hoch an der Wand) → in der Messliste „Vergleichsstelle trocken“ je Raum.',
+    'Gerade und fest andrücken, 8–10 cm Abstand zu Ecken und Kanten. 3× messen, den mittleren Wert eintippen.',
+    'Je Wand zum Schluss die Abgrenzung: feucht bis … cm hoch, … cm breit – daraus wird die Größe der Stelle (Karte „＋ Stelle“) vorbelegt.',
+    'Salze und Metall machen die Zahl zu hoch, raue Flächen zu niedrig. Digits sind Vergleichswerte, keine Prozent Wasser.'
   ],
   'Abhaken':[
     'Tippe den Satz an, der stimmt. Er steht später wörtlich im PDF. Was du offen lässt, steht nicht im PDF.',
@@ -2611,7 +2625,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   function _bgRaumListe(){
     const w=document.createElement('div');
     w.appendChild(_bgInfo('Tippe einen Raum an: darin findest du Klima, Wände mit Fotos, Skizze und Messplan. Neue Räume legst du hier an, wenn du im Raum stehst. Ein neuer Raum hat gleich W1 (Außenwand) und W2–W4 (Innenwand).'));
-    w.appendChild(_bgSchrittHinweis('Am Tablet zuerst – Raum für Raum vorbereiten','Zu jedem Raum: Klima, Wände mit Fotos, Skizze, Messplan (Höhen je Wand). Danach misst du am Handy mit der „Messliste“. Zurück am Tablet ordnest du die Messungen zu.'));
+    w.appendChild(_bgSchrittHinweis('Vor Ort am Handy – Raum für Raum vorbereiten','Zu jedem Raum: Wände mit Fotos, Messplan (Höhen je Wand). Dann testo-Durchgang, dann die Trotec-Werte in der „Messliste“. Am PC ordnest du die Messungen zu – die erste je Raum wird das Raumklima.')); /* F55 */
     const plan=_fsBgMessplan(bericht);
     const erl=plan.filter(p=>_fsBgPlanErledigt(bericht,p)).length;
     const kn=document.createElement('div');kn.style.cssText='display:flex;flex-wrap:wrap;gap:8px;padding:2px 10px 8px;';
@@ -3042,9 +3056,17 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       if(s.wand&&!wandOpt.some(o=>o[0]===s.wand))wandOpt.push([s.wand,s.wand]);
       const ws=document.createElement('select');ws.style.cssText=S_INP+'flex:1 1 130px;width:auto;';ws.setAttribute('data-fs-bgwand','1');
       [['','– Wand –']].concat(wandOpt).forEach(([v,t2])=>{const o=document.createElement('option');o.value=v;o.textContent=t2;ws.appendChild(o);});
-      ws.value=s.wand||'';ws.onchange=()=>{s.wand=ws.value;scheduleSave();};
+      ws.value=s.wand||'';ws.onchange=()=>{s.wand=ws.value;if(!String(s.breite||'').trim()&&!String(s.hoehe||'').trim()){const w2=_fsBgWandVon(bericht,s.raum,s.wand);if(w2){s.breite=String(w2.abgrenzBreit||'').trim();s.hoehe=String(w2.abgrenzHoch||'').trim();}}scheduleSave();_neuBauen();}; /* F55: Größe aus der Abgrenzung der Wand (Messliste) vorbelegen */
+      const ek=_chip('Ecke',!!s.ecke,()=>{s.ecke=!s.ecke;if(!s.ecke)s.wand2='';scheduleSave();_neuBauen();});ek.setAttribute('data-fs-bgecke','1'); /* F55 (Frank „a merken“): Stelle in der Ecke zweier Wände */
+      let ws2=null;
+      if(s.ecke){
+        ws2=document.createElement('select');ws2.style.cssText=S_INP+'flex:1 1 130px;width:auto;';ws2.setAttribute('data-fs-bgwand2','1');
+        const opt2=wandOpt.filter(o=>o[0]!==s.wand&&o[0]!=='Boden'&&o[0]!=='Decke');if(s.wand2&&!opt2.some(o=>o[0]===s.wand2))opt2.push([s.wand2,s.wand2]);
+        [['','– zweite Wand –']].concat(opt2).forEach(([v,t2])=>{const o=document.createElement('option');o.value=v;o.textContent=t2;ws2.appendChild(o);});
+        ws2.value=s.wand2||'';ws2.onchange=()=>{s.wand2=ws2.value;scheduleSave();_neuBauen();};
+      }
       const lage=_inp(s.lage,'Lage, z. B. unten, Ecke zu W3',v=>{s.lage=v;},false);lage.style.flex='1 1 150px';lage.style.width='auto';lage.setAttribute('data-fs-bglage','1');
-      zWo.append(rs,ws,lage);k.appendChild(zWo);
+      zWo.append(rs,ws,ek);if(ws2)zWo.appendChild(ws2);zWo.appendChild(lage);k.appendChild(zWo);
       const zGr=zeile('Größe');
       const bI=_inp(s.breite,'Breite',v=>{s.breite=v;},true);bI.style.width='90px';bI.style.flex='0 0 90px';bI.setAttribute('data-fs-bgbreite','1');
       const hI=_inp(s.hoehe,'Höhe',v=>{s.hoehe=v;},true);hI.style.width='90px';hI.style.flex='0 0 90px';hI.setAttribute('data-fs-bghoehe','1');
@@ -3589,7 +3611,7 @@ const FS_BG_KELLER=[
    Je Stelle eine Karte: Was (vier Arten) · Wo (Raum, Wand, Lage) · Größe Breite × Höhe cm (z. B. mit dem Trotec abgegrenzt) · Merkmale · Fotos. Im PDF ein Feststellungssatz. */
 const FS_BG_STELLE_ARTEN=[{k:'feucht',t:'feuchte Stelle, kein Schimmel',s:'feuchte Stelle ohne Schimmel'},{k:'nass',t:'nasse Stelle / Wasser',s:'nasse Stelle bzw. stehendes Wasser'},{k:'alt',t:'alte Verfärbung, trocken',s:'ältere Verfärbung, heute trocken'},{k:'schimmel',t:'Schimmel sichtbar',s:'Schimmel sichtbar'}];
 const FS_BG_STELLE_MERKMALE=['Salzrand','Putz / Farbe lose','Fleck / Verfärbung','nass glänzend','Geruch','Rand sichtbar','Tapete löst sich'];
-function _fsBgFeuchtStelleNeu(){return {id:'bs_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),art:'',raum:'',wand:'',lage:'',breite:'',hoehe:'',merkmale:[],fotoRefs:[],notiz:''};}
+function _fsBgFeuchtStelleNeu(){return {id:'bs_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),art:'',raum:'',wand:'',wand2:'',ecke:false,lage:'',breite:'',hoehe:'',merkmale:[],fotoRefs:[],notiz:''};} /* F55: wand2/ecke */
 function _fsBgFeuchtStelleGefuellt(s){return !!s&&(!!String(s.art||'').trim()||!!String(s.raum||'').trim()||!!String(s.lage||'').trim()||(Array.isArray(s.merkmale)&&s.merkmale.length>0)||_fsZahl(s.breite)!==null||_fsZahl(s.hoehe)!==null);}
 // Satz fürs PDF: „Kellerraum, W2 (Außenwand), unten: feuchte Stelle ohne Schimmel, ca. 40 × 30 cm, Salzrand, Putz / Farbe lose.“ – nur Feststellung
 function _fsBgFeuchtStelleSatz(b,s){
@@ -3598,7 +3620,9 @@ function _fsBgFeuchtStelleSatz(b,s){
   const raum=String(s.raum||'').trim(),wandK=String(s.wand||'').trim();
   const r=((b&&Array.isArray(b.raeume))?b.raeume:[]).find(x=>x&&String(x.name||'').trim()===raum);
   const wd=(r&&Array.isArray(r.waende))?r.waende.find(w=>w&&w.k===wandK):null;
-  const wo=[raum,wandK?wandK+((wd&&String(wd.art||'').trim())?' ('+String(wd.art).trim()+')':''):'',String(s.lage||'').trim()].filter(Boolean).join(', ');
+  const wand2K=String(s.wand2||'').trim(),wd2=(s.ecke&&wand2K&&r&&Array.isArray(r.waende))?r.waende.find(w=>w&&w.k===wand2K):null,artVon=w=>(w&&String(w.art||'').trim())?String(w.art).trim():''; /* F55: Ecke zweier Wände */
+  const wandText=(s.ecke&&wandK&&wand2K)?'Ecke '+wandK+'/'+wand2K+((artVon(wd)&&artVon(wd2))?' ('+(artVon(wd)===artVon(wd2)?'beide '+artVon(wd):artVon(wd)+' / '+artVon(wd2))+')':''):(wandK?wandK+(artVon(wd)?' ('+artVon(wd)+')':''):'');
+  const wo=[raum,wandText,String(s.lage||'').trim()].filter(Boolean).join(', ');
   const b1=_fsZahl(s.breite),h1=_fsZahl(s.hoehe),cm=v=>_fsEins(v).replace(/,0$/,'');
   const gr=(b1!==null&&h1!==null)?'ca. '+cm(b1)+' × '+cm(h1)+' cm':b1!==null?'ca. '+cm(b1)+' cm breit':h1!==null?'ca. '+cm(h1)+' cm hoch':'';
   const teile=[art?art.s:'',gr].concat(Array.isArray(s.merkmale)?s.merkmale.map(m=>String(m||'').trim()):[]).filter(Boolean);
@@ -5321,13 +5345,62 @@ function _fsBgPlanErledigt(b,p){
 }
 // Eine testo-Messung mit dieser Messzeit (Millisekunden) ist im Protokoll schon eingelesen – fängt doppelt geteilte Dateien („… (1).tjf“), die unter anderem Namen liegen
 function _fsTestoZeitSchonDa(b,zeit){
-  return !!zeit&&((b&&b.stellen)||[]).some(s=>s&&s.testo&&s.testo.zeit===zeit);
+  return !!zeit&&(((b&&b.stellen)||[]).some(s=>s&&s.testo&&s.testo.zeit===zeit)||((b&&b.raeume)||[]).some(r=>r&&r.klimaTesto&&r.klimaTesto.zeit===zeit)); /* F55: auch Raumklima */
 }
 // Vorschlag nach Reihenfolge: die n-te Messung (nach Zeit sortiert) gehört zur n-ten offenen Plan-Zeile. Reine Funktion.
 function _fsBgPlanVorschlag(planOffen,messungen){
   const p=Array.isArray(planOffen)?planOffen:[],m=Array.isArray(messungen)?messungen:[],n=Math.min(p.length,m.length);
   const paare=[];for(let i=0;i<n;i++)paare.push({plan:p[i],m:m[i]});
   return {paare:paare,ohnePlan:m.slice(n),ohneMessung:p.slice(n)};
+}
+// F55: Je Raum zuerst das Raumklima – vor die erste offene Plan-Zeile jedes Raums kommt eine Klima-Zeile (Nr „K“), solange der Raum noch kein Klima hat. Reine Funktion.
+function _fsBgPlanMitKlima(b,planOffen){
+  const out=[],gesehen=new Set();
+  (Array.isArray(planOffen)?planOffen:[]).forEach(p=>{
+    if(p&&!gesehen.has(p.raum)){
+      gesehen.add(p.raum);
+      const r=((b&&b.raeume)||[]).find(x=>x&&x.name===p.raum);
+      if(r&&_fsZahl(r.t)===null&&_fsZahl(r.rf)===null&&!r.klimaTesto)out.push({nr:'K',klima:true,raum:p.raum,wand:'',hoehe:'',art:'',fotoRefs:Array.isArray(r.fotoRefs)?r.fotoRefs:[]});
+    }
+    out.push(p);
+  });
+  return out;
+}
+// F55: Trotec-Werte aus der Messliste (am Handy getippt): je Wand und Höhe die Digits (wand.digits[Höhe]), je Wand die Abgrenzung (abgrenzHoch/abgrenzBreit cm), je Raum die Vergleichsstelle trocken (raum.vglDigits)
+function _fsBgWandVon(b,raumName,wandK){const r=((b&&b.raeume)||[]).find(x=>x&&x.name===raumName);return (r&&Array.isArray(r.waende))?(r.waende.find(w=>w&&w.k===wandK)||null):null;}
+function _fsBgDigitsFuerPlan(b,p){
+  const w=p?_fsBgWandVon(b,p.raum,p.wand):null,r=((b&&b.raeume)||[]).find(x=>x&&p&&x.name===p.raum);
+  const mf=(w&&w.digits&&typeof w.digits==='object')?String(w.digits[String(p.hoehe)]||'').trim():'';
+  return {mf:mf,mv:r?String(r.vglDigits||'').trim():''};
+}
+function _fsBgDigitsSetzen(b,p,wert){
+  const w=p?_fsBgWandVon(b,p.raum,p.wand):null;if(!w)return false;
+  if(!w.digits||typeof w.digits!=='object')w.digits={};
+  const v=String(wert===null||wert===undefined?'':wert).trim();
+  if(v)w.digits[String(p.hoehe)]=v;else delete w.digits[String(p.hoehe)];
+  return true;
+}
+function _fsBgDigitsUebernehmen(b,st,p){
+  const d=_fsBgDigitsFuerPlan(b,p);
+  if(d.mf&&_fsZahl(st.mf)===null)st.mf=d.mf;
+  if(d.mv&&_fsZahl(st.mfVergleich)===null)st.mfVergleich=d.mv;
+  return st;
+}
+// F55: Abgrenzung je Wand fürs PDF – „Kellerraum W2 (Außenwand): feucht bis ca. 60 cm hoch, ca. 120 cm breit“ (nur benutzte Räume)
+function _fsBgAbgrenzungZeilen(b){
+  const out=[];
+  ((b&&b.raeume)||[]).forEach(r=>{
+    if(!r||!_fsBgRaumBenutzt(b,r))return;
+    (Array.isArray(r.waende)?r.waende:[]).forEach(w=>{
+      if(!w||!w.k)return;
+      const h=_fsZahl(w.abgrenzHoch),br=_fsZahl(w.abgrenzBreit);
+      if(h===null&&br===null)return;
+      const cm=v=>_fsEins(v).replace(/,0$/,'');
+      const t=[h!==null?'bis ca. '+cm(h)+' cm hoch':'',br!==null?'ca. '+cm(br)+' cm breit':''].filter(Boolean).join(', ');
+      out.push(String(r.name||'').trim()+' '+w.k+(String(w.art||'').trim()?' ('+String(w.art).trim()+')':'')+': feucht '+t);
+    });
+  });
+  return out;
 }
 // Doppelt geteilte Dateien heißen „… (1).tjf“: beim Zusammenfassen gleicher Messzeiten soll die Datei ohne Nummer gewinnen (sie landet als Kopie im Auftragsordner). Reihenfolge sonst unverändert.
 function _fsTestoOriginaleZuerst(liste){
@@ -5343,12 +5416,12 @@ function _fsBgStelleAusPlan(m,p){
 // Merkzettel „So misst du“ – steht im Formular beim Messplan (Text erst beim Aufruf gebaut, weil er den testo-Exportweg nennt)
 function _fsBgMessregeln(){
   return [
-    'Immer in der Reihenfolge des Messplans messen: Raum für Raum, W1 bis W4, an jeder Wand von der ersten bis zur letzten Höhe – jedes Mal gleich.',
-    'Erst am Tablet Räume, Wände, Höhen und Wandfotos anlegen, dann am Handy messen. Ändert sich der Plan nach dem Messen, stimmt die Zuordnung nicht mehr.',
-    'Jede Messung einzeln speichern. '+(typeof FS_TESTO_JSON_WEG==='string'?FS_TESTO_JSON_WEG:''),
+    'Immer in der Reihenfolge des Messplans messen: Raum für Raum, je Raum zuerst das Raumklima, dann W1 bis W4, an jeder Wand von der ersten bis zur letzten Höhe – jedes Mal gleich.',
+    'Vor Ort am Handy Räume, Wände, Höhen und Wandfotos anlegen, dann messen. Ändert sich der Plan nach dem Messen, stimmt die Zuordnung nicht mehr.',
+    'Jede Messung einzeln speichern – ohne Foto, ohne Namen. '+(typeof FS_TESTO_JSON_WEG==='string'?FS_TESTO_JSON_WEG:''),
     'Nichts überspringen. Hast du eine Stelle ausgelassen oder eine Messung doppelt gespeichert, merk dir die Nummer – du korrigierst es später in der Kontrollliste („Hier nicht gemessen“ oder „Messung weglassen“).',
-    'Trotec-Werte trägst du bei der Messstelle von Hand ein (Bauteil, Digits). Ein Trotec-Import kommt später.',
-    'Danach am Tablet bei „Räume“ „📋 Messungen nach Messplan zuordnen“ antippen: PAM schlägt die Wände der Reihe nach vor, du prüfst mit dem Wandfoto und übernimmst.'
+    'Trotec-Werte tippst du am Handy in die „📋 Messliste“ (Digits je Zeile, Abgrenzung je Wand, Vergleichsstelle trocken je Raum) – sie gehen beim Zuordnen am PC in die Messstellen.',
+    'Am PC bei „Räume“ „📋 Messungen nach Messplan zuordnen“ antippen: die erste Messung je Raum wird das Raumklima, die Wände folgen der Reihe nach; du prüfst mit dem Wandfoto und übernimmst.'
   ];
 }
 /* ══ F4a: GROSSES FENSTER „Messliste und Ablauf“ ═══════════════════════════════════════════════════════════════════
@@ -5357,18 +5430,18 @@ function _fsBgMessregeln(){
    Gedächtnisstütze, gilt nur auf DIESEM Gerät (localStorage) und steht NICHT im Protokoll – Handy und Tablet kommen sich nicht in die Quere.
    ⛔ Nur Programm und Bezeichnungen in dieser öffentlichen Datei. */
 const FS_BG_MESSSTAND_KEY='pam_fs_messstand';
-// Der Ablauf in drei Blöcken: am Tablet vorbereiten · am Handy messen · zurück am Tablet zuordnen
+// Der Ablauf in drei Blöcken (F55, Franks Ablauf 10.10.2026): am Handy vor Ort vorbereiten · am Handy messen (testo, dann Trotec) · am PC zuordnen
 function _fsBgAblauf(){
   return [
-    {k:'tablet',titel:'AM TABLET – zuerst, alles Vorbereitende',zeilen:[
-      '1 · Räume anlegen (bei „Räume“ mit „＋ Raum“).',
-      '2 · Im Raum bei „Wände“ prüfen (Außenwand oder Innenwand) und Wandfotos anhängen.',
-      '3 · Im Raum bei „Messplan“ prüfen: Höhen je Wand; Wände, die du nicht misst, abschalten („wird nicht gemessen“), ganze Räume mit „Raum nicht messen“.',
-      'Danach das Tablet weglegen – am Plan ändert sich nichts mehr.']},
-    {k:'handy',titel:'AM HANDY – nur messen',zeilen:[
-      '4 · Mit testo und Trotec in der Reihenfolge der Messliste messen. Jede testo-Messung einzeln speichern und teilen. Die „📋 Messliste“ zeigt dir, was als Nächstes dran ist.']},
-    {k:'zurueck',titel:'ZURÜCK AM TABLET',zeilen:[
-      '5 · „📋 Messungen nach Messplan zuordnen“ antippen, kontrollieren, übernehmen. Die Trotec-Werte trägst du dabei von Hand bei den Messstellen ein.']}
+    {k:'vorort',titel:'AM HANDY VOR ORT – vorbereiten',zeilen:[
+      '1 · Räume anlegen (bei „Räume“ mit „＋ Raum“, der Nachbarkeller als eigener Raum).',
+      '2 · Im Raum bei „Wände“ prüfen (Außenwand oder Innenwand) und Wandfotos machen.',
+      '3 · Im Raum bei „Messplan“: Höhen je Wand; Wände, die du nicht misst, abschalten („wird nicht gemessen“), ganze Räume mit „Raum nicht messen“. Danach ändert sich am Plan nichts mehr.']},
+    {k:'messen',titel:'AM HANDY – messen: erst testo, dann Trotec',zeilen:[
+      '4 · testo und Trotec in der Reihenfolge der Messliste. testo-App: je Raum zuerst das Raumklima (605i in der Raummitte, 5 Minuten), dann die Wände (10 / 50 / 100 cm, von unten nach oben). Jede Messung speichern – kein Foto, kein Name. Am Ende alle auswählen → Export JSON → Google Drive „testo-Eingang“.',
+      '5 · Zurück in PAM, „📋 Messliste“: Trotec an die Wand, Digits in die Zeile tippen – „weiter“ springt zur nächsten. Je Wand zum Schluss die Abgrenzung (bis … cm hoch, … cm breit), je Raum die Vergleichsstelle trocken.']},
+    {k:'pc',titel:'AM PC – Büro-Tag',zeilen:[
+      '6 · Bei „Räume“ „📋 Messungen nach Messplan zuordnen“ antippen: PAM holt die testo-Messungen aus Drive, die erste je Raum wird das Raumklima, die Trotec-Werte aus der Messliste stehen schon dabei. Kontrollieren, übernehmen – dann Stellen anlegen, Vorschau, PDF.']}
   ];
 }
 // zuletzt gemessene Nummer auf DIESEM Gerät (je Protokoll); 0 = noch nichts
@@ -5454,7 +5527,7 @@ function _fsBgMessfensterZeigen(b,tab0){
     const kl=(txt,css)=>{const d=document.createElement('div');d.textContent=txt;d.style.cssText=css;karte.appendChild(d);};
     if(!st.gesamt){
       kl('Noch kein Messplan','font-size:22px;font-weight:700;');
-      kl('Am Tablet bei „Räume“ Räume mit Wänden anlegen, dann im Raum bei „Messplan“ die Höhen prüfen.','font-size:17px;line-height:1.5;margin-top:6px;');
+      kl('Bei „Räume“ Räume mit Wänden anlegen, dann im Raum bei „Messplan“ die Höhen prüfen.','font-size:17px;line-height:1.5;margin-top:6px;'); /* F55: vor Ort am Handy */
     }else if(st.naechste){
       const p=st.naechste;
       kl('Als Nächstes','font-size:16px;color:var(--text2);');
@@ -5464,7 +5537,7 @@ function _fsBgMessfensterZeigen(b,tab0){
       kl(st.fertig+' von '+st.gesamt+' gemessen','font-size:16px;color:var(--text2);margin-top:8px;');
     }else{
       kl('Alles gemessen ✓','font-size:26px;font-weight:700;');
-      kl('Zurück am Tablet: „📋 Messungen nach Messplan zuordnen“ antippen.','font-size:18px;line-height:1.5;margin-top:6px;');
+      kl('Am PC (Büro-Tag): „📋 Messungen nach Messplan zuordnen“ antippen – die Trotec-Werte aus dieser Liste gehen mit.','font-size:18px;line-height:1.5;margin-top:6px;'); /* F55 */
     }
     inhalt.appendChild(karte);
     // F5: Räume einzeln zuklappen (Standard: nur der Raum mit „Als Nächstes“ ist offen; gemerkt je Gerät); im offenen Raum die Skizze mit der nächsten Wand
@@ -5478,6 +5551,14 @@ function _fsBgMessfensterZeigen(b,tab0){
         knopf('▾ Alle auf',KLEIN,()=>{raumNamen.forEach(n=>_fsBgRaumZuSetzen(FS_BG_RAUMZU_KEY,b.id,n,0));zeige();},['data-fs-mf-alleauf','1']));
       inhalt.appendChild(ak);
     }
+    const eingabe=(wert,ph,attr,onIn)=>{ /* F55: große Eingabe für Trotec-Werte (eine Hand Gerät, eine Hand Handy) */
+      const i=document.createElement('input');i.type='text';i.inputMode='decimal';i.autocomplete='off';i.placeholder=ph;i.setAttribute(attr[0],attr[1]);i.setAttribute('aria-label',ph);
+      i.value=wert||'';i.style.cssText='width:96px;min-height:48px;font-size:22px;font-weight:700;text-align:right;border:2px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text);padding:0 8px;flex-shrink:0;font-family:inherit;';
+      i.onclick=e=>e.stopPropagation();i.onpointerdown=e=>e.stopPropagation();
+      i.oninput=()=>{onIn(i.value);scheduleSave();};
+      i.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();i.blur();}};
+      return i;
+    };
     raumNamen.forEach(rn=>{
       const zl=st.zeilen.filter(z=>z.p.raum===rn);
       const offen=_fsBgRaumOffen(zuMap,rn,!!st.naechste&&st.naechste.raum===rn);
@@ -5503,16 +5584,45 @@ function _fsBgMessfensterZeigen(b,tab0){
           inhalt.appendChild(nt);
         }
       }
-      zl.forEach(z=>{
+      zl.forEach((z,zi)=>{
         const istNaechste=st.naechste&&st.naechste.nr===z.p.nr;
-        const row=knopf('', 'display:flex;align-items:center;gap:12px;width:100%;box-sizing:border-box;min-height:60px;padding:10px 14px;margin:0 0 8px;font-size:20px;text-align:left;color:var(--text);'
-          +'border:'+(istNaechste?'3px':'2px')+' solid '+(istNaechste?FS_FARBE:'var(--border)')+';background:'+(istNaechste?'rgba(31,95,139,.18)':'var(--bg2)')+';'+(z.fertig?'opacity:.55;':''),
-          ()=>{const jetzt=_fsBgMessstandLesen(b.id);_fsBgMessstandSetzen(b.id,jetzt===z.p.nr?z.p.nr-1:z.p.nr);zeige();},['data-fs-mf-zeile',String(z.p.nr)]);
+        const row=document.createElement('div');row.setAttribute('data-fs-mf-zeile',String(z.p.nr));row.setAttribute('role','button'); /* F55: Zeile mit Eingabefeld (vorher ein Knopf) */
+        row.style.cssText='display:flex;align-items:center;gap:10px;width:100%;box-sizing:border-box;min-height:60px;padding:8px 10px 8px 14px;margin:0 0 8px;font-size:20px;text-align:left;color:var(--text);border-radius:12px;cursor:pointer;'
+          +'border:'+(istNaechste?'3px':'2px')+' solid '+(istNaechste?FS_FARBE:'var(--border)')+';background:'+(istNaechste?'rgba(31,95,139,.18)':'var(--bg2)')+';'+(z.fertig?'opacity:.7;':'');
+        row.onclick=()=>{const jetzt=_fsBgMessstandLesen(b.id);_fsBgMessstandSetzen(b.id,jetzt===z.p.nr?z.p.nr-1:z.p.nr);zeige();};
         const nr=document.createElement('span');nr.textContent=String(z.p.nr);nr.style.cssText='min-width:40px;font-weight:700;';
         const tx=document.createElement('span');tx.textContent=z.p.wand+(z.p.art?' '+z.p.art:'')+' · '+z.p.hoehe+' cm';tx.style.cssText='flex:1;min-width:0;';
-        const hk=document.createElement('span');hk.textContent=z.fertig?'✓':'';hk.style.cssText='font-weight:700;font-size:24px;';
-        row.append(nr,tx,hk);inhalt.appendChild(row);
+        const dg=eingabe(_fsBgDigitsFuerPlan(b,z.p).mf,'Digits',['data-fs-mf-digits',String(z.p.nr)],v=>_fsBgDigitsSetzen(b,z.p,v)); /* F55: Trotec-Wert je Zeile */
+        dg.onchange=()=>{ // „weiter“: die Zeile gilt als gemessen, die nächste Eingabe bekommt den Fokus
+          if(!String(dg.value).trim())return;
+          if(_fsBgMessstandLesen(b.id)<z.p.nr)_fsBgMessstandSetzen(b.id,z.p.nr);
+          zeige();
+          const nx=ov.querySelector('[data-fs-mf-digits="'+(z.p.nr+1)+'"]');if(nx){try{nx.focus();nx.scrollIntoView({block:'center'});}catch(e){}}
+        };
+        const hk=document.createElement('span');hk.textContent=z.fertig?'✓':'';hk.style.cssText='font-weight:700;font-size:24px;min-width:26px;';
+        row.append(nr,tx,dg,hk);inhalt.appendChild(row);
+        const naechsteZeile=zl[zi+1];
+        if(!naechsteZeile||naechsteZeile.p.wand!==z.p.wand){ /* F55: nach der letzten Höhe der Wand – Abgrenzung mit dem Trotec */
+          const w=_fsBgWandVon(b,z.p.raum,z.p.wand);
+          if(w){
+            const ab=document.createElement('div');ab.setAttribute('data-fs-mf-abgrenzung',z.p.raum+'|'+z.p.wand);
+            ab.style.cssText='display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:-2px 0 12px;padding:8px 12px;border-radius:10px;border:1.5px dashed var(--border);font-size:16px;color:var(--text2);';
+            const l=document.createElement('span');l.textContent=z.p.wand+' Abgrenzung: feucht bis';l.style.cssText='flex:1 1 150px;';
+            const h=eingabe(w.abgrenzHoch,'hoch',['data-fs-mf-abhoch',z.p.raum+'|'+z.p.wand],v=>{w.abgrenzHoch=String(v).trim();});
+            const br=eingabe(w.abgrenzBreit,'breit',['data-fs-mf-abbreit',z.p.raum+'|'+z.p.wand],v=>{w.abgrenzBreit=String(v).trim();});
+            const u1=document.createElement('span');u1.textContent='cm hoch,';const u2=document.createElement('span');u2.textContent='cm breit';
+            ab.append(l,h,u1,br,u2);inhalt.appendChild(ab);
+          }
+        }
       });
+      if(ro){ /* F55: Vergleichsstelle trocken je Raum (Digits an einer trockenen Stelle, hoch an der Wand) */
+        const vg=document.createElement('div');vg.setAttribute('data-fs-mf-vergleich',rn);
+        vg.style.cssText='display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 12px;padding:8px 12px;border-radius:10px;border:1.5px dashed var(--border);font-size:16px;color:var(--text2);';
+        const l=document.createElement('span');l.textContent='Vergleichsstelle trocken ('+rn+'):';l.style.cssText='flex:1 1 180px;';
+        const e=eingabe(ro.vglDigits,'Digits',['data-fs-mf-vgl',rn],v=>{ro.vglDigits=String(v).trim();});
+        const u=document.createElement('span');u.textContent='Digits';
+        vg.append(l,e,u);inhalt.appendChild(vg);
+      }
     });
     const weiter=knopf('✓ Gemessen, weiter','flex:2;min-height:64px;font-size:20px;font-weight:700;border:none;background:'+FS_FARBE+';color:#fff;'+(st.naechste?'':'opacity:.45;'),
       ()=>{
@@ -6538,6 +6648,7 @@ async function _fsMobPdfBg(bericht,task){
           const vgl=[];
           if(!stellen.some(x=>x.st.referenz))(bericht.stellen||[]).forEach(st=>{const v=_fsZahl(st&&st.mfVergleich);if(v!==null){const s=_fsEins(v);if(vgl.indexOf(s)<0)vgl.push(s);}});
           if(vgl.length)absatz('Vergleichsstelle (trockene Stelle): '+vgl.join(' / ')+' Digits.',{groesse:8,farbe:[70,70,70],abstand:1});
+          const abgr=_fsBgAbgrenzungZeilen(bericht);if(abgr.length)absatz('Abgrenzung mit dem Bauteilfeuchte-Gerät: '+abgr.join('; ')+'.',{groesse:8,farbe:[70,70,70],abstand:1}); /* F55 */
           absatz('Einzelmessungen zum Zeitpunkt der Begehung (Momentaufnahme). Bauteilfeuchte in Digits: Vergleichswerte des Geräts, keine Masse-%.',{groesse:7.5,farbe:[100,100,100],abstand:5});
         }
       }
@@ -6783,7 +6894,7 @@ function _fsRaumAuffuellen(bericht,raumName,m){
   return true;
 }
 function _fsTestoSchonDa(bericht,dateiName){
-  return !!dateiName&&((bericht&&bericht.stellen)||[]).some(st=>st&&st.testo&&st.testo.datei===dateiName);
+  return !!dateiName&&(((bericht&&bericht.stellen)||[]).some(st=>st&&st.testo&&st.testo.datei===dateiName)||((bericht&&bericht.raeume)||[]).some(r=>r&&r.klimaTesto&&r.klimaTesto.datei===dateiName)); /* F55: auch Raumklima */
 }
 function _fsTestoInfoText(st,w){
   const te=(st&&st.testo)||{};
@@ -6821,6 +6932,13 @@ async function _fsTestoListe(ordnerId){
   const d=await r.json();
   return (d&&d.files)||[];
 }
+// F55: testo-Dateien, die beim Teilen oben in „Meine Ablage“ gelandet sind (falscher Zielordner am Handy) – nur lesen, mit Hinweis in der Kontrollliste
+async function _fsTestoListeOben(){
+  const q="'root' in parents and trashed=false and (name contains '.tjf' or name contains '.json')";
+  const r=await _fsDriveGet('https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q)+'&fields=files(id,name,mimeType,size,createdTime)&orderBy=createdTime%20desc&pageSize=50');
+  const d=await r.json();
+  return ((d&&d.files)||[]).filter(f=>/\.(tjf|json)$/i.test(f.name||'')).map(f=>Object.assign({},f,{oben:true}));
+}
 async function _fsDriveText(id){return await (await _fsDriveGet('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(id)+'?alt=media')).text();}
 async function _fsDriveBlob(id){return await (await _fsDriveGet('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(id)+'?alt=media')).blob();}
 // v293: KOPIE als neue Datei hochladen. Verschieben ging nicht – PAM Mobil darf Dateien, die die Drive-App angelegt hat,
@@ -6828,12 +6946,13 @@ async function _fsDriveBlob(id){return await (await _fsDriveGet('https://www.goo
 async function _fsDriveKopieHochladen(inhalt,name,mime,ordnerId){
   if(inhalt===null||inhalt===undefined||!name||!ordnerId)return null;
   const blob=(inhalt instanceof Blob)?inhalt:new Blob([String(inhalt)],{type:mime||'application/octet-stream'});
-  const r=await _uploadMitGeduld(signal=>{
+  const senden=signal=>{
     const form=new FormData();
     form.append('metadata',new Blob([JSON.stringify({name:name,parents:[ordnerId],mimeType:mime||blob.type||'application/octet-stream'})],{type:'application/json'}));
     form.append('file',blob);
     return fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{method:'POST',headers:{Authorization:'Bearer '+gdriveToken},body:form,signal:signal});
-  },{bytes:blob.size,name:name,folderId:ordnerId});
+  };
+  const r=(typeof _uploadMitGeduld==='function')?await _uploadMitGeduld(senden,{bytes:blob.size,name:name,folderId:ordnerId}):await senden(undefined); /* F55: am PC ohne Warteschlange */
   const j=await r.json();
   return (j&&j.id)||null;
 }
@@ -6960,7 +7079,7 @@ function _fsTestoNurCsv(dateien){
     return {datei:n,text:m?m[3]+'.'+m[2]+'.'+m[1]+', '+m[4]+':'+m[5]+' Uhr':n};
   });
 }
-const FS_TESTO_JSON_WEG='In der testo-App: Menü ☰ → Messdaten → Messung öffnen → Export → Bilder anhaken → JSON (nicht CSV) → Google Drive → „'+FS_TESTO_ORDNER+'".';
+const FS_TESTO_JSON_WEG='In der testo-App: Menü ☰ → Messdaten → alle Messungen auswählen → Export → JSON (nicht CSV) → Google Drive → „'+FS_TESTO_ORDNER+'" (Stern oder Verknüpfung „0_Messungen“ oben in „Meine Ablage“ hilft beim Finden).'; /* F55: alle auf einmal, ohne Fotos */
 
 async function _fsTestoEinlesen(bericht,t,neuBauen){
   if(!(typeof tokenValid==='function'&&tokenValid())){toast('Drive nicht verbunden – zum Einlesen bitte mit Empfang anmelden','error',5000);return;}
@@ -7154,10 +7273,12 @@ async function _fsTestoEinlesen(bericht,t,neuBauen){
    „Ältere laden“ holt auch die davor; doppelt geteilte Dateien mit gleicher Messzeit zählen einmal), sortiert sie nach Messzeit und legt sie der
    Reihe nach auf die offenen Plan-Zeilen. ⛔ Nichts wird eingetragen, bevor Frank in der Kontrollliste bestätigt. „Messung weglassen“ und
    „Hier nicht gemessen“ rücken die Reihenfolge zurecht. Ablauf je Messung wie beim Einlesen (Messbild mit Messpunkt, Kopie in den Auftragsordner);
-   das Raumklima des Raums wird dabei NICHT aus der ersten Wandmessung gefüllt. Nur am Tablet (braucht Gerätespeicher und Upload-Warteschlange). */
+   F55 (Frank 10.10.2026, „baue B“): die ERSTE Messung je Raum ist das Raumklima (Zeile „K“, 605i in der Raummitte); läuft auch am PC (Büro-Tag) – dort ohne
+   Messbild. Trotec-Werte, die am Handy in der Messliste getippt wurden (Digits je Zeile, Vergleichsstelle je Raum), gehen in die Messstellen mit.
+   Dateien, die beim Teilen oben in „Meine Ablage“ gelandet sind, werden mitgelesen (nur lesen, mit Hinweis). */
 async function _fsTestoPlanZuordnen(bericht,t,neuBauen){
-  if(typeof _mobPhotoSave!=='function'||typeof _uploadMitGeduld!=='function'){toast('📋 Messungen bitte am Tablet zuordnen','info',5000);return;}
-  if(!(typeof tokenValid==='function'&&tokenValid())){toast('Drive nicht verbunden – zum Einlesen bitte mit Empfang anmelden','error',5000);return;}
+  const amGeraet=typeof _mobPhotoSave==='function'&&typeof _uploadMitGeduld==='function'; /* F55: auch am PC – ohne Gerätespeicher kein Messbild, die Kopie in den Auftragsordner läuft dann über fetch */
+  if(!(typeof tokenValid==='function'&&tokenValid())){toast('Drive nicht verbunden – zum Einlesen bitte mit Empfang anmelden','error',5000);return;} /* F55: gilt am PC wie am Tablet */
   if(!_fsBgMessplan(bericht).length){toast('Erst den Messplan anlegen: Räume mit Wänden anlegen (bei „Räume“), Höhen je Wand im Raum bei „Messplan“','info',6000);return;}
   const KNOPF='padding:9px 12px;border-radius:8px;font-size:var(--fs14,14px);cursor:pointer;font-weight:600;font-family:inherit;';
   const GID='_fsTestoPlanSheet';const alt=document.getElementById(GID);if(alt)alt.remove();
@@ -7177,9 +7298,10 @@ async function _fsTestoPlanZuordnen(bericht,t,neuBauen){
   box.append(kopf,inhalt,fuss);ov.appendChild(box);document.body.appendChild(ov);
   const info=txt=>{inhalt.innerHTML='';const d=document.createElement('div');d.style.cssText='font-size:var(--fs15,15px);color:var(--text);padding:12px 0;line-height:1.5;';d.textContent=txt;inhalt.appendChild(d);fuss.innerHTML='';};
 
-  let messungen=[],nurCsv=[],doppelt=0,unlesbar=[],abgeschnitten=false,aeltere=false,mitBild=true;
+  let messungen=[],nurCsv=[],doppelt=0,unlesbar=[],abgeschnitten=false,aeltere=false,mitBild=amGeraet;
   const weg=new Set(),aus=new Set(); // weg: Messungen (Nummer in messungen), die nicht verwendet werden; aus: Plan-Zeilen, an denen nicht gemessen wurde
-  const schluessel=p=>p.raum+'|'+p.wand+'|'+p.hoehe;
+  const schluessel=p=>p.raum+'|'+(p.klima?'klima':p.wand)+'|'+p.hoehe;
+  const zid=p=>p.klima?'K:'+p.raum:String(p.nr); /* F55: Kennung der Zeile (Raumklima „K:Raum“) */
   const zeitHMS=ms=>{const s=ms?_fsZeitText(ms):'';return s?s.slice(11):'';};
   const fmt=(x,e)=>x===null||x===undefined?'–':_fsEins(x)+e;
 
@@ -7190,6 +7312,7 @@ async function _fsTestoPlanZuordnen(bericht,t,neuBauen){
       ordnerId=await _fsTestoOrdnerId();
       if(!ordnerId){info('Ordner „'+FS_TESTO_ORDNER+'“ nicht gefunden. Bitte in Google Drive unter 00_App-Daten anlegen und die testo-Dateien dorthin teilen.');return false;}
       dateien=await _fsTestoListe(ordnerId);
+      try{dateien=dateien.concat(await _fsTestoListeOben());}catch(e){console.warn('[testo] Meine Ablage:',e);} /* F55: beim Teilen falsch abgelegte Dateien mitlesen */
     }catch(e){console.warn('[testo] Liste:',e);info('Google Drive nicht erreichbar ('+(e.message||e)+'). Bitte mit Empfang erneut versuchen.');return false;}
     const start=Date.parse(bericht.createdAt||'');
     const seit=(!alle&&isFinite(start))?start:0;
@@ -7208,7 +7331,7 @@ async function _fsTestoPlanZuordnen(bericht,t,neuBauen){
         const text=await _fsDriveText(f.id);
         const m=_fsTestoLesen(text,bildNamen);
         if(!m.ok){unlesbar.push(f.name);continue;}
-        m.datei=f.name;m.dateiId=f.id;m.text=text;
+        m.datei=f.name;m.dateiId=f.id;m.text=text;m.oben=!!f.oben; /* F55 */
         m.bildDatei=bilder.find(b=>b.name===m.bild)||null;
         if(_fsTestoSchonDa(bericht,f.name)||_fsTestoZeitSchonDa(bericht,m.zeit))continue; // schon in diesem Protokoll
         if(_fsTestoEingelesenIn(typeof _alleTaskListen==='function'?_alleTaskListen():[],f.name))continue; // schon an einer Karte eingelesen
@@ -7232,7 +7355,7 @@ async function _fsTestoPlanZuordnen(bericht,t,neuBauen){
 
   const zeige=()=>{
     inhalt.innerHTML='';fuss.innerHTML='';
-    const plan=_fsBgMessplan(bericht).filter(p=>!_fsBgPlanErledigt(bericht,p));
+    const plan=_fsBgPlanMitKlima(bericht,_fsBgMessplan(bericht).filter(p=>!_fsBgPlanErledigt(bericht,p))); /* F55: je Raum zuerst das Raumklima */
     const aktiv=plan.filter(p=>!aus.has(schluessel(p)));
     const ms=messungen.filter(m=>!weg.has(m._i));
     const v=_fsBgPlanVorschlag(aktiv,ms);
@@ -7247,6 +7370,7 @@ async function _fsTestoPlanZuordnen(bericht,t,neuBauen){
     if(unlesbar.length)warnung('⚠ '+(unlesbar.length===1?'1 Datei':unlesbar.length+' Dateien')+' im Ordner '+(unlesbar.length===1?'ist':'sind')+' keine lesbare testo-Messung und '+(unlesbar.length===1?'fehlt':'fehlen')+' hier: '+unlesbar.slice(0,4).join(' · ')+(unlesbar.length>4?' …':''),true);
     if(abgeschnitten)warnung('⚠ Im Ordner liegen mehr als 80 Messungen – gezeigt werden nur die neuesten 80.',true);
     if(doppelt)warnung('ℹ '+doppelt+' doppelt geteilte Datei'+(doppelt===1?'':'en')+' (gleiche Messzeit) zählt'+(doppelt===1?'':'en')+' nur einmal.',false);
+    const obenN=ms.filter(m=>m.oben).length;if(obenN)warnung('ℹ '+obenN+' Messung'+(obenN===1?' lag':'en lagen')+' oben in „Meine Ablage“ statt in „'+FS_TESTO_ORDNER+'“ (beim Teilen falscher Ordner) – hier mit dabei. In Google Drive nach „'+FS_TESTO_ORDNER+'“ verschieben, damit es übersichtlich bleibt.',false); /* F55 */
     if(!plan.length)warnung('Alle Plan-Zeilen sind schon zugeordnet. Neue Wände oder Höhen legst du oben im Messplan an.',false);
     if(v.ohnePlan.length)warnung('⚠ '+v.ohnePlan.length+' Messung'+(v.ohnePlan.length===1?'':'en')+' mehr als Plan-Zeilen (unten grau) – sie werden nicht übernommen. Hast du eine Messung doppelt gespeichert, lass sie oben bei der Zeile weg.',true);
     if(v.ohneMessung.length&&ms.length)warnung('ℹ '+v.ohneMessung.length+' Plan-Zeile'+(v.ohneMessung.length===1?'':'n')+' noch ohne Messung – weiter messen und später noch einmal zuordnen.',false);
@@ -7254,29 +7378,30 @@ async function _fsTestoPlanZuordnen(bericht,t,neuBauen){
 
     plan.forEach(p=>{
       const k=schluessel(p),istAus=aus.has(k),m=paarVon.get(k)||null;
-      const row=document.createElement('div');row.setAttribute('data-fs-planzeile',String(p.nr));
+      const row=document.createElement('div');row.setAttribute('data-fs-planzeile',zid(p));if(p.klima)row.setAttribute('data-fs-planklima',p.raum); /* F55 */
       row.style.cssText='margin:0 0 8px;padding:10px 12px;border-radius:10px;border:2px solid '+(m?FS_FARBE:'var(--border)')+';background:'+(m?'rgba(31,95,139,.10)':'var(--bg2)')+';'+((istAus||!m)?'opacity:.75;':'');
       const top=document.createElement('div');top.style.cssText='display:flex;align-items:center;gap:10px;';
-      const nr=document.createElement('span');nr.textContent=String(p.nr);
+      const nr=document.createElement('span');nr.textContent=p.klima?'K':String(p.nr);
       nr.style.cssText='min-width:30px;height:30px;border-radius:15px;background:'+FS_FARBE+';color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:var(--fs14,14px);flex-shrink:0;padding:0 4px;box-sizing:border-box;';
       const ort=document.createElement('div');ort.style.cssText='flex:1;min-width:0;font-size:var(--fs16,16px);font-weight:700;line-height:1.3;';
-      ort.textContent=p.raum+' – '+p.wand+(p.art?' ('+p.art+')':'')+', '+p.hoehe+' cm';
+      ort.textContent=p.klima?'Raumklima · '+p.raum+' (erste Messung im Raum, 605i in der Raummitte)':p.raum+' – '+p.wand+(p.art?' ('+p.art+')':'')+', '+p.hoehe+' cm'; /* F55 */
       top.append(nr,ort);
       const fi=(bericht.fotos||[]).findIndex(f=>(p.fotoRefs||[]).some(r=>_fsRefPasst(f,r)));
       if(fi>=0){const img=document.createElement('img');img.alt='Foto dieser Wand';img.style.cssText='width:56px;height:56px;object-fit:cover;border-radius:8px;flex-shrink:0;background:var(--bg3);';_fsMiniaturQuelle(bericht.fotos[fi],img);top.appendChild(img);}
       row.appendChild(top);
+      const dgt=p.klima?null:_fsBgDigitsFuerPlan(bericht,p);if(dgt&&dgt.mf){const d=document.createElement('div');d.setAttribute('data-fs-plandigits',zid(p));d.style.cssText='font-size:var(--fs13,13px);margin-top:4px;color:var(--text2);';d.textContent='Trotec aus der Messliste: '+dgt.mf+' Digits'+(dgt.mv?' · Vergleich trocken '+dgt.mv:'');row.appendChild(d);} /* F55 */
       if(m){
-        const z=document.createElement('div');z.setAttribute('data-fs-planmessung',String(p.nr));z.style.cssText='font-size:var(--fs14,14px);margin-top:6px;line-height:1.4;';z.textContent=messText(m);row.appendChild(z);
+        const z=document.createElement('div');z.setAttribute('data-fs-planmessung',zid(p));z.style.cssText='font-size:var(--fs14,14px);margin-top:6px;line-height:1.4;';z.textContent=messText(m);row.appendChild(z);
         (m.warnungen||[]).forEach(hw=>{const d=document.createElement('div');d.style.cssText='font-size:var(--fs13,13px);font-weight:700;margin-top:4px;padding-left:8px;border-left:4px solid var(--orange);';d.textContent='⚠ '+hw;row.appendChild(d);});
         const br=document.createElement('div');br.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;';
-        const bw=document.createElement('button');bw.type='button';bw.textContent='✕ Messung weglassen';bw.setAttribute('data-fs-planweg',String(p.nr));bw.style.cssText=knopfStil('var(--border)');
+        const bw=document.createElement('button');bw.type='button';bw.textContent='✕ Messung weglassen';bw.setAttribute('data-fs-planweg',zid(p));bw.style.cssText=knopfStil('var(--border)');
         bw.onclick=()=>{weg.add(m._i);zeige();};
-        const bn=document.createElement('button');bn.type='button';bn.textContent='↷ Hier nicht gemessen';bn.setAttribute('data-fs-planaus',String(p.nr));bn.style.cssText=knopfStil('var(--border)');
+        const bn=document.createElement('button');bn.type='button';bn.textContent='↷ Hier nicht gemessen';bn.setAttribute('data-fs-planaus',zid(p));bn.style.cssText=knopfStil('var(--border)');
         bn.onclick=()=>{aus.add(k);zeige();};
         br.append(bw,bn);row.appendChild(br);
       }else if(istAus){
         const z=document.createElement('div');z.style.cssText='font-size:var(--fs14,14px);margin-top:6px;';z.textContent='Hier nicht gemessen – übersprungen';row.appendChild(z);
-        const bz=document.createElement('button');bz.type='button';bz.textContent='↶ Doch gemessen';bz.setAttribute('data-fs-planzurueck',String(p.nr));bz.style.cssText=knopfStil('var(--border)')+'margin-top:8px;';
+        const bz=document.createElement('button');bz.type='button';bz.textContent='↶ Doch gemessen';bz.setAttribute('data-fs-planzurueck',zid(p));bz.style.cssText=knopfStil('var(--border)')+'margin-top:8px;';
         bz.onclick=()=>{aus.delete(k);zeige();};
         row.appendChild(bz);
       }else{
@@ -7288,6 +7413,12 @@ async function _fsTestoPlanZuordnen(bericht,t,neuBauen){
       const row=document.createElement('div');row.style.cssText='margin:0 0 8px;padding:10px 12px;border-radius:10px;border:2px dashed var(--border);background:var(--bg2);opacity:.75;font-size:var(--fs14,14px);line-height:1.4;';
       row.textContent='Keine Plan-Zeile mehr, wird nicht übernommen: '+messText(m);inhalt.appendChild(row);
     });
+    const nurTrotec=plan.filter(p=>!p.klima&&!aus.has(schluessel(p))&&!paarVon.get(schluessel(p))&&_fsBgDigitsFuerPlan(bericht,p).mf); /* F55: Zeilen mit Trotec-Wert, aber ohne testo-Messung */
+    if(nurTrotec.length){
+      const b=document.createElement('button');b.type='button';b.setAttribute('data-fs-plannurtrotec','1');b.textContent='Nur Trotec-Werte übernehmen – '+nurTrotec.length+' Zeile'+(nurTrotec.length===1?'':'n')+' ohne testo-Messung';b.style.cssText=knopfStil('var(--border)')+'width:100%;margin:0 0 8px;';
+      b.onclick=()=>{if(!confirm(nurTrotec.length+' Messstelle'+(nurTrotec.length===1?'':'n')+' nur mit dem Trotec-Wert anlegen (ohne Luft und Oberfläche)?'))return;nurTrotec.forEach(p=>{const st={text:'',raum:p.raum,wand:p.wand,hoehe:p.hoehe,ts:'',luftT:'',luftRf:'',mf:'',mfVergleich:'',befund:[],notiz:'',fotoRefs:[],referenz:false,zeit:''};_fsBgDigitsUebernehmen(bericht,st,p);bericht.stellen.push(st);});scheduleSave();try{neuBauen();}catch(e){}zeige();};
+      inhalt.appendChild(b);
+    }
     if(weg.size){
       const b=document.createElement('button');b.type='button';b.textContent='↶ '+weg.size+' weggelassene Messung'+(weg.size===1?'':'en')+' zurückholen';b.style.cssText=knopfStil('var(--border)')+'width:100%;margin:0 0 8px;';
       b.onclick=()=>{weg.clear();zeige();};inhalt.appendChild(b);
@@ -7297,7 +7428,7 @@ async function _fsTestoPlanZuordnen(bericht,t,neuBauen){
       b.onclick=async()=>{aeltere=true;if(await laden(true))zeige();};inhalt.appendChild(b);
     }
 
-    if(v.paare.some(pr=>pr.m.bildDatei)){
+    if(amGeraet&&v.paare.some(pr=>pr.m.bildDatei)){ /* F55: Messbild nur am Tablet */
       const lab=document.createElement('label');lab.style.cssText='display:flex;align-items:center;gap:10px;font-size:var(--fs14,14px);min-height:var(--fsh44,44px);';
       const cb=document.createElement('input');cb.type='checkbox';cb.checked=mitBild;cb.style.cssText='width:22px;height:22px;flex-shrink:0;';
       cb.onchange=()=>{mitBild=cb.checked;};
@@ -7316,17 +7447,28 @@ async function _fsTestoPlanZuordnen(bericht,t,neuBauen){
     if(!paare.length)return;
     knopf.disabled=true;
     const ziel=_extractFolderIdMob((t&&t.dokOrdner)||'')||_extractFolderIdMob((t&&t.gdrive)||'')||_extractFolderIdMob((t&&t.gdriveOrdner)||'');
-    let n=0,bildN=0,kopiert=0,fehler=0;
+    let n=0,bildN=0,kopiert=0,fehler=0,klimaN=0;
     for(const pr of paare){
       const m=pr.m,p=pr.plan;
       knopf.textContent='⏳ '+(n+fehler+1)+' von '+paare.length+' …';
       try{
+        if(p.klima){ /* F55: erste Messung je Raum = Raumklima (keine Messstelle) */
+          const r=(bericht.raeume||[]).find(x=>x&&x.name===p.raum);
+          if(r){
+            if(m.luftT!==null)r.t=_fsEins(m.luftT);if(m.luftRf!==null)r.rf=_fsEins(m.luftRf);
+            const z=m.zeit?_fsZeitText(m.zeit):'';if(z&&!String(r.zeit||'').trim())r.zeit=z.slice(11,16);
+            r.klimaTesto={datei:m.datei||'',zeit:m.zeit||null};
+            if(ziel){try{const kid=await _fsDriveKopieHochladen(m.text,m.datei,'application/json',ziel);if(kid){r.klimaTesto.kopieId=kid;kopiert++;}}catch(e){console.warn('[testo] Kopie Klima:',e);}}
+          }
+          scheduleSave();n++;klimaN++;continue;
+        }
         const st=_fsBgStelleAusPlan(m,p);
+        _fsBgDigitsUebernehmen(bericht,st,p); /* F55: Trotec-Wert und Vergleichsstelle aus der Messliste */
         bericht.stellen.push(st);
         scheduleSave();
         n++;
         const nr=bericht.stellen.length;
-        if(m.bildDatei&&mitBild){
+        if(m.bildDatei&&mitBild&&amGeraet){
           try{
             const blob=await _fsDriveBlob(m.bildDatei.id);
             m.bildBlob=blob;
@@ -7377,7 +7519,7 @@ async function _fsTestoPlanZuordnen(bericht,t,neuBauen){
     ov.remove();
     try{neuBauen();}catch(e){console.warn('[testo] neu aufbauen:',e);}
     if(bericht.fotos.some(f=>f&&f.localKey&&!f.driveId)&&typeof _mobRetryPendingUploads==='function'){try{_mobRetryPendingUploads();}catch(e){console.warn('[testo] Upload:',e);}}
-    toast('✓ '+n+' Messung'+(n===1?'':'en')+' nach Messplan zugeordnet'
+    toast('✓ '+n+' Messung'+(n===1?'':'en')+' nach Messplan zugeordnet'+(klimaN?' · Raumklima '+klimaN+'×':'') /* F55 */
       +(bildN?' · '+bildN+' Messbild'+(bildN===1?'':'er'):'')
       +(ziel?(kopiert?' · Kopie im Auftragsordner':''):' · ⚠ kein Drive-Ordner an der Karte – keine Kopie beim Auftrag')
       +(fehler?' · '+fehler+' Fehler':''),fehler?'error':'success',6000);
