@@ -10555,7 +10555,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-10 · #1157'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-10-b1157) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-10 · #1158'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-10-b1158) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -22869,7 +22869,7 @@ async function _kalPushJetzt(taskId,idx){
   try{
     await _msPushTermin(task,t);
     t._pamDirty=false;
-    try{ const openId=(document.getElementById('taskId')||{}).value||''; if(openId===task.id && Array.isArray(taskAusserhausTermine) && taskAusserhausTermine[idx]){ taskAusserhausTermine[idx].outlookEventId=t.outlookEventId; taskAusserhausTermine[idx]._pamDirty=false; if(document.getElementById('ausserhausTermineList'))renderAusserhausTermine(); } }catch(e){}
+    try{ const _ak=_ahArbeitskopie(task,t,idx); if(_ak){ _ahPushSpiegeln(_ak,t,null); if(document.getElementById('ausserhausTermineList'))renderAusserhausTermine(); } }catch(e){}   // b1158: mit gesendetem Betreff/Zeitstempel
     try{autoSave();}catch(e){console.warn('[KAL]',e);}
     renderKalender(true);
     showToast('✅ In Outlook: '+(t._pushedSubject||_msTerminSubject(task,t)),'success',4500);   // b1148: so wie es in Outlook steht
@@ -22989,7 +22989,8 @@ async function _kalSyncStatus(manual){
         // Vergleich sie jetzt ALLE als "in Outlook geaendert" melden, obwohl dort niemand war.
         // Deshalb gilt auch die alte Schreibweise als unveraendert.
         const _altSubj=_msTerminSubject(task,t,true).trim();
-        const _metaChg=(!!_outSubj&&_outSubj!==(_baseSubj||'').trim()&&_outSubj!==_altSubj)||(_outLoc!==(_baseLoc||'').trim());
+        const _metaChg=(!!_outSubj&&_outSubj!==(_baseSubj||'').trim()&&_outSubj!==_altSubj&&_outSubj!==((typeof _ahSubjGesendet==='function'&&typeof task!=='undefined'&&typeof t!=='undefined')?_ahSubjGesendet(task,t):''))||(_outLoc!==(_baseLoc||'').trim());   // b1158: auch der Betreff nach b1147-Art (⏳ vorn) ist „so wie gesendet“
+        if(!_metaChg&&_outSubj&&t._pushedSubject==null){ t._pushedSubject=_outSubj; t._pushedLocation=_outLoc; changed=true; }   // b1158: gemerkten Stand nachlernen, wenn er beim Speichern verloren ging
         if(_metaChg){ if(!t.outlookMetaChanged||t.outlookSubject!==_outSubj||t.outlookLocation!==_outLoc){ t.outlookMetaChanged=true; t.outlookSubject=_outSubj; t.outlookLocation=_outLoc; changed=true; metaCount++; } else { metaCount++; } }
         else if(t.outlookMetaChanged){ t.outlookMetaChanged=false; delete t.outlookSubject; delete t.outlookLocation; changed=true; }
         // Phase 4 – externe Zeitänderung aus Outlook übernehmen
@@ -23245,7 +23246,44 @@ async function _msPushTermin(task,t){
 // Funktion nichts zurueck UND fing jeden Fehler selbst ab - der Aufrufer im Wochenraster
 // konnte gar nicht erkennen, ob etwas angekommen ist, und meldete blind Erfolg.
 // b1135: nurDiese (freiwillig) = Prüffunktion je Termin – die Runde „nachziehen“ schreibt nur offene Termine ab heute
+// ══ b1158 (Befund 10.10.2026: von/bis am PC geändert, Outlook behielt den Zwischenstand, PAM hielt den Termin für gesendet) ══
+// Ein Push läuft asynchron. Bis b1157 setzte der FERTIGE Push _pamDirty=false in die offene Arbeitskopie – auch wenn dort
+// inzwischen weiter getippt worden war (jeder Tastendruck in von/bis speichert nach 1 s und sendet). Die zweite Änderung
+// ging dann nie nach Outlook. Jetzt: Fingerabdruck dessen, was gesendet wurde; der Merker fällt in der Arbeitskopie nur,
+// wenn sie noch genau diesen Stand hat – sonst wird noch einmal gespeichert (= noch einmal gesendet). Während ein Push
+// läuft, trägt auch die Arbeitskopie „wird gerade geschrieben“, damit ein Zwischen-Speichern keinen zweiten Push startet.
+// Außerdem wandern _pushedSubject, _pushedLocation, outlookLastModified und outlookWebLink mit in die Arbeitskopie – bisher
+// blieben sie in der Board-Kopie und gingen beim nächsten Speichern mit offener Karte verloren (Folge: der Abgleich verglich
+// gegen den Betreff OHNE ⏳ und meldete an jedem Fenster-Termin fälschlich „ℹ Outlook geändert“).
+// ⛔ Ein aus der Datei mitgebrachtes _pamPushing:true (Seite während eines Pushs neu geladen) sperrte den Termin bis b1157 für
+//    immer – jetzt gilt der Merker nur mit Zeitstempel und höchstens 2 Minuten.
+function _ahPushFp(t){ t=t||{}; return ['date','von','bis','beschreibung','betreff'].map(function(k){return String(t[k]==null?'':t[k]);}).join('|'); }
+function _ahPushLaeuft(t){ return !!(t&&t._pamPushing&&typeof t._pamPushingSeit==='number'&&(Date.now()-t._pamPushingSeit)<120000); }
+function _ahArbeitskopie(task,t,i){
+  try{
+    const openId=(document.getElementById('taskId')||{}).value||'';
+    if(!task||!openId||String(openId)!==String(task.id)||typeof taskAusserhausTermine==='undefined'||!Array.isArray(taskAusserhausTermine))return null;
+    if(t&&t.tid){ const x=taskAusserhausTermine.filter(function(y){return y&&y.tid===t.tid;})[0]; if(x)return x; }
+    return taskAusserhausTermine[i]||null;
+  }catch(e){ return null; }
+}
+function _ahPushSpiegeln(a,t,fp){
+  if(!a||!t)return false;
+  if(t.outlookEventId)a.outlookEventId=t.outlookEventId;
+  a.outlookDeleted=false;
+  if(t.outlookWebLink)a.outlookWebLink=t.outlookWebLink;
+  if(t.outlookLastModified)a.outlookLastModified=t.outlookLastModified;
+  if(t._pushedSubject!=null)a._pushedSubject=t._pushedSubject;
+  if(t._pushedLocation!=null)a._pushedLocation=t._pushedLocation;
+  if(t.outlookFahrtHinId)a.outlookFahrtHinId=t.outlookFahrtHinId;
+  if(t.outlookFahrtRueckId)a.outlookFahrtRueckId=t.outlookFahrtRueckId;
+  a.outlookMetaChanged=false; delete a.outlookSubject; delete a.outlookLocation;
+  if(fp==null||_ahPushFp(a)===fp){ a._pamDirty=false; return true; }
+  return false;   // seit dem Senden weiter getippt → Merker bleibt, der nächste Speichervorgang schreibt erneut
+}
+function _ahSubjGesendet(task,t){ try{ return (typeof _msOutlookBetreff==='function')?String(_msOutlookBetreff(task,t)||'').trim():''; }catch(e){ return ''; } }
 async function _msAutoPushTermine(task,nurDiese){
+  let nochmal=false;   // b1158: Arbeitskopie seit dem Senden weiter getippt → noch einmal speichern
   const bilanz={gepusht:0,fehler:0,unvollstaendig:0,ohneToken:false};
   if(!msToken){ bilanz.ohneToken=true; return bilanz; }
   if(!task||!Array.isArray(task.ausserhausTermine))return bilanz;
@@ -23253,32 +23291,32 @@ async function _msAutoPushTermine(task,nurDiese){
   let changed=false;
   for(let i=0;i<task.ausserhausTermine.length;i++){
     const t=task.ausserhausTermine[i];
+    if(t&&t._pamPushing&&typeof _ahPushLaeuft==='function'&&!_ahPushLaeuft(t))t._pamPushing=false;   // b1158: aus der Datei mitgebracht oder älter als 2 min → hinfällig
     if(!t||!t._pamDirty||t._pamPushing)continue;
     if(typeof nurDiese==='function'&&!nurDiese(t))continue; // b1135
     // Unvollstaendig heisst: Datum, Uhrzeit oder Bezeichnung fehlt. Das wurde bisher still
     // uebersprungen - jetzt zaehlt es, damit der Aufrufer es sagen kann.
     if(!_msTerminComplete(t)){ bilanz.unvollstaendig++; continue; }
-    t._pamPushing=true;
+    const fp=(typeof _ahPushFp==='function')?_ahPushFp(t):null, ak=(typeof _ahArbeitskopie==='function')?_ahArbeitskopie(task,t,i):null;   // b1158: was gesendet wird + der Eintrag in der offenen Arbeitskopie
+    t._pamPushing=true; t._pamPushingSeit=Date.now(); if(ak&&ak!==t){ ak._pamPushing=true; ak._pamPushingSeit=t._pamPushingSeit; }
     try{
       await _msPushTermin(task,t);
       t._pamDirty=false; changed=true; bilanz.gepusht++;
-      // in offene Arbeitskopie spiegeln (per Index)
-      if(openId===task.id && Array.isArray(taskAusserhausTermine) && taskAusserhausTermine[i]){
-        taskAusserhausTermine[i].outlookEventId=t.outlookEventId;
-        taskAusserhausTermine[i].outlookDeleted=false;
-        taskAusserhausTermine[i]._pamDirty=false;
-      }
+      // b1158: in die offene Arbeitskopie spiegeln – Merker nur weg, wenn dort seit dem Senden nichts weiter getippt wurde
+      if(ak&&ak!==t&&typeof _ahPushSpiegeln==='function'&&!_ahPushSpiegeln(ak,t,fp))nochmal=true;
     }catch(e){
       bilanz.fehler++;
       console.warn('[KAL] Auto-Push fehlgeschlagen:',e);
       showToast('⚠ Outlook: Termin nicht übernommen – '+(e.message||e),'warning',5000);
-    }finally{ t._pamPushing=false; }
+    }finally{ t._pamPushing=false; delete t._pamPushingSeit; if(ak&&ak!==t){ ak._pamPushing=false; delete ak._pamPushingSeit; } }
   }
   if(changed){
     try{scheduleSave();}catch(e){}
     if(document.getElementById('ausserhausTermineList'))renderAusserhausTermine();
     if(currentView==='kalender'||(typeof _kalSchwebAn!=='undefined'&&_kalSchwebAn))renderKalender(true); // b1081
   }
+  // b1158: NACH scheduleSave – beide teilen sich autoSaveTimer (scheduleSave würde den Karten-Speichervorgang sonst wieder wegräumen; Browserprobe b1158: Push #2 kam erst 5 s später aus anderem Anlass)
+  if(nochmal){ try{ if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave(); }catch(e){} }
   return bilanz;
 }
 // ══ b1135: markierte Termine von selbst nach Outlook (Befund Termine Teil B3, PC-Teil; Frank 08.10.2026: „bau“) ══
@@ -23393,8 +23431,9 @@ function openOutlookTermin(i){
     tags:(((document.getElementById('taskTagsInput')||{}).value)||'').split(',').map(s=>s.trim()).filter(Boolean),
     adresse:((document.getElementById('tAdr')||{}).value||'').trim() };
   showToast('⏳ Schreibe Termin nach Outlook…','info',3000);
+  const _fp=_ahPushFp(t);   // b1158
   _msPushTermin(task,t).then(()=>{
-    t._pamDirty=false;
+    _ahPushSpiegeln(t,t,_fp);   // b1158: Merker nur weg, wenn seit dem Senden nichts weiter getippt wurde – sonst sendet das Speichern gleich erneut
     scheduleTaskFieldSave();
     renderAusserhausTermine();
     if(currentView==='kalender'||(typeof _kalSchwebAn!=='undefined'&&_kalSchwebAn))renderKalender(true); // b1081
