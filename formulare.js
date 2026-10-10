@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F52';
+const PAM_FORMULARE_VERSION='F53';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -349,6 +349,7 @@ function _fsVervollstaendigen(b){
     if(b.art!=='vorab'){ /* F52: Begehungsprotokoll hat oben denselben Teil wie die Vorabbesichtigung – Name, Besichtigung bei, Gemeldet/vorgefunden, Vorgeschichte */
       if(typeof b.protName!=='string')b.protName='';if(typeof b.vorgeschichte!=='string')b.vorgeschichte='';if(typeof b.meldungStatus!=='string')b.meldungStatus='';if(typeof b.meldungAbw!=='string')b.meldungAbw='';
       ['besuchBei','lage'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';});
+      if(!Array.isArray(b.notizen))b.notizen=[];b.notizen=b.notizen.filter(n=>n&&typeof n==='object');b.notizen.forEach(n=>{if(typeof n.text!=='string')n.text=String(n.text==null?'':n.text);n.pdf=n.pdf===true;if(typeof n.id!=='string'||!n.id)n.id='nz_'+Math.random().toString(36).slice(2,9);}); /* F53: Notizen auch im Begehungsprotokoll */
     }
     ['vorOrtWetter','vorOrtT','vorOrtRf','vorOrtUhr','vorOrtGeraet','wetterOrt','wetterOrtArt'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';}); /* F52: Wetter „selbst vor Ort“ · wofür der Wetterdienst geholt wurde */
   }
@@ -1028,13 +1029,13 @@ function _fsWordAufbau(b,task){
   const fotoText=f=>{const zu=_fsBgFotoZuordnung(b,f),fpl=_fsFpLegende(f);return (zu||'')+(fpl?(zu?'. ':'')+'Markiert: '+fpl:'');};
   const fotosVon=refs=>{const l=[];(Array.isArray(refs)?refs:[]).forEach(r=>{const f=alle.find(x=>_fsRefPasst(x,r));if(f&&l.indexOf(f)<0)l.push(f);});return l;};
   { /* Vor Ort */
-    const z=[],zt=_fsBgZeitText(k),aw=_fsBgAnwesendZeilen(b); /* F49: eine Zeile je Person */
+    const z=[],zt=_fsBgZeitText(k),aw=_fsBgAnwesendZeilen(b); /* F49: eine Zeile je Person · F53: getrennt in „Aufgenommen / gemessen von“ und „Vor Ort“ (aw bleibt für ältere Prüfungen) */
+    z.push(['Aufgenommen / gemessen von',_fsIchZeile(b)||'nicht eingetragen']); /* F53 (Frank 10.10.2026): zuerst du, dann die anderen, dann Datum/Zeit */
+    z.push(['Vor Ort',_fsBgVorOrtZeilen(b)||(aw&&!_fsIchName(b)?aw:'niemand weiter vor Ort')]);
     if(hat(b.datum)||zt)z.push(['Datum, Zeit',[hat(b.datum)?String(b.datum).trim():'',zt].filter(Boolean).join(', ')]);
     if(hat(k.besuchBei))z.push(['Besichtigung bei',String(k.besuchBei).trim()]);
-    if(aw)z.push(['Anwesend',aw]);
-    {const wt=_fsWetterKurz(k),q=_fsBgWetterQuelle(k);if(wt)z.push([q?'Wetter laut Wetterdienst':'Wetter (von Hand eingetragen)',wt+(q?' ('+q.replace(/^Angabe des Wetterdienstes /,'').replace(/\.$/,'')+')':'')]);
+    if(b.wetterImPdf!==false){const wt=_fsWetterKurz(k),q=_fsBgWetterQuelle(k);if(wt)z.push([q?'Wetter laut Wetterdienst':'Wetter (von Hand eingetragen)',wt+(q?' ('+q.replace(/^Angabe des Wetterdienstes /,'').replace(/\.$/,'')+')':'')]);
      const vo=_fsVorOrtKurz(k);if(vo)z.push(['Außen vor Ort gemessen',vo]);if(hat(k.vorOrtWetter))z.push(['Wetter vor Ort gesehen',String(k.vorOrtWetter).trim()]);} /* F47 · F52: getrennt nach Herkunft */
-    if(hat(k.pruefer))z.push(['Aufgenommen von',String(k.pruefer).trim()]);
     if(z.length){B.push({a:'kapitel',t:'Vor Ort'});B.push({a:'tabelle',z:z});}
   }
   { /* Gemeldet und vorgefunden */
@@ -1229,7 +1230,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const row=document.createElement('div');
     row.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 14px;border-top:1px solid var(--border);';
     const l=document.createElement('span');l.style.cssText='font-size:var(--fs13,13px);color:var(--text2);width:112px;flex-shrink:0;';l.textContent=label;
-    const i=_inp(bericht.kopf[key],ph,v=>{bericht.kopf[key]=v;if(key==='aussenT'||key==='aussenRf'||key==='vorOrtT'||key==='vorOrtRf')_fsWerteNeu();if(key==='pruefer'&&bericht.fassung==='begehung'&&typeof _fsBgMerkName==='function')_fsBgMerkName(v);},zahl);
+    const i=_inp(bericht.kopf[key],ph,v=>{bericht.kopf[key]=v;if(key==='aussenT'||key==='aussenRf'||key==='vorOrtT'||key==='vorOrtRf')_fsWerteNeu();if(key==='vorOrtGeraet'&&typeof _fsVorOrtGeraetMerk==='function')_fsVorOrtGeraetMerk(v);if(key==='pruefer'&&bericht.fassung==='begehung'&&typeof _fsBgMerkName==='function')_fsBgMerkName(v);},zahl);
     row.append(l,(key==='anlass'&&typeof _fsKlappFeld==='function')?_fsKlappFeld(bericht.kopf[key],ph,v=>{bericht.kopf[key]=v;if(key==='anlass'&&_fsVbNameNachAnlass(bericht,v)){hdrT.textContent=_fsTitelIcon(bericht)+_fsTitel(bericht);const ni=body.querySelector('[data-fs-protname] input');if(ni)ni.value=bericht.protName;}scheduleSave();},S_INP,['data-fs-klappfeld',key]):i);return row; /* F44: „Anlass“ bleibt eine Zeile und klappt beim Antippen auf */
   }
   function _chip(label,an,fn){
@@ -1243,7 +1244,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     body.innerHTML='';_vbUmgFuellen=null; // F23
     if(_fsIstVorab(bericht)&&bericht.schlank&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_bgBlock('vorort',_teilVorOrtVb),_bgBlock('gemeldet',_teilGemeldetVb),_bgBlock('stellen',_teilFeststellungenB2),_bgBlock('notizen',_teilNotizenB2),_bgBlock('fotos',_teilFotos,'Fotos')); // F23: Besichtigung 2 · F38: ohne den Abschnitt „Räume“ (seit F36 sitzt die Skizze beim Raum; der Balken stand noch da und hieß „raeume“)
     else if(_fsIstVorab(bericht)&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_bgBlock('vorort',_teilVorOrtVb),_bgBlock('gemeldet',_teilGemeldetVb),_bgBlock('stellen',_teilStellenBlockVb),_bgBlock('umgebung',_teilUmgebungVb),_bgBlock('ergebnis',_teilErgebnisVb),_bgBlock('fotos',_teilFotos,'Fotos'),_bgBlock('vorgeschichte',_teilVorgeschichteVb),_bgBlock('karte',_teilKarteVb),_bgBlock('versich',_teilVersichVb),_bgBlock('fest',_teilChecklistenBg,'Feststellungen vor Ort'),...(_vbAltAngaben()?[_bgBlock('angaben',_teilAngabenBg,'Angaben der Nutzer (nicht selbst festgestellt)')]:[]),_bgBlock('termin',_teilTerminBg),_bgBlock('raeume',_teilRaeumeBg,'Räume')); // F20: „Vor Ort“ offen, der Rest zugeklappt
-    else if(bericht.fassung==='begehung'&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_bgBlock('vorort',_teilVorOrtVb),_bgBlock('gemeldet',_teilGemeldetVb),_bgBlock('geraete',_teilGeraeteBg),_bgBlock('raeume',_teilRaeumeBg,'Räume'),_bgBlock('fest',_teilChecklistenBg,'Feststellungen vor Ort'),_bgBlock('angaben',_teilAngabenBg,'Angaben der Nutzer (nicht selbst festgestellt)'),_bgBlock('fazit',_teilZusammenfassungBg,'Zusammenfassung der Feststellungen'),_bgBlock('fotos',_teilFotos,'Fotos')); // F2b: zuklappbar, Leiste oben · F52: oben derselbe Teil wie die Vorabbesichtigung („Vor Ort“, „Gemeldet / vorgefunden“) statt Auftrag/Ortstermin
+    else if(bericht.fassung==='begehung'&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_bgBlock('vorort',_teilVorOrtVb),_bgBlock('gemeldet',_teilGemeldetVb),_bgBlock('geraete',_teilGeraeteBg),_bgBlock('raeume',_teilRaeumeBg,'Räume'),_bgBlock('fest',_teilChecklistenBg,'Feststellungen vor Ort'),_bgBlock('angaben',_teilAngabenBg,'Angaben der Nutzer (nicht selbst festgestellt)'),_bgBlock('fazit',_teilZusammenfassungBg,'Zusammenfassung der Feststellungen'),_bgBlock('notizen',_teilNotizenB2),_bgBlock('fotos',_teilFotos,'Fotos')); // F53: Notizen · F2b: zuklappbar, Leiste oben · F52: oben derselbe Teil wie die Vorabbesichtigung („Vor Ort“, „Gemeldet / vorgefunden“) statt Auftrag/Ortstermin
     else{
       body.append(_teilErgebnis(),_teilKopf(),_teilRaeume(),_teilStellen(),_teilChecklisten(),_teilBewertung(),_teilFotos()); // v294: Ergebnis oben
       if(typeof _teilUmwandeln==='function'&&body.firstChild&&typeof body.insertBefore==='function')body.insertBefore(_teilUmwandeln(),body.firstChild); // F2a: Hinweis zum Umwandeln ganz oben
@@ -1665,6 +1666,21 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const kopf=document.createElement('div');kopf.style.cssText='font-size:var(--fs13,13px);color:var(--text2);margin-bottom:6px;';kopf.textContent='Anwesend – Person und Rolle';
     w.appendChild(kopf);
     const wahl=_fsAnwesendWahl(t,bericht.kopf.pruefer);
+    if(!String(bericht.kopf.pruefer||'').trim()){ /* F53 (Frank 10.10.2026: „Wo stehe ich als Messender?“): ohne gemerkten Namen stand er nirgends – einmal eintippen, das Gerät merkt ihn */
+      const wb=document.createElement('div');wb.setAttribute('data-fs-ichfehlt','1');
+      wb.style.cssText='margin:0 0 8px;padding:8px 10px;border-radius:8px;background:rgba(230,126,34,.16);border-left:4px solid #b25e00;font-size:var(--fs14,14px);color:var(--text);line-height:1.4;';
+      const wt=document.createElement('div');wt.textContent='⚠ Dein Name fehlt – dieses Gerät kennt ihn noch nicht. Einmal eintippen, dann steht er in jedem Protokoll als „Aufgenommen / gemessen von“.';
+      const wz=document.createElement('div');wz.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;';
+      const wi=document.createElement('input');wi.type='text';wi.autocomplete='off';wi.placeholder='Dein Name';wi.value=_fsBgMerkName();wi.style.cssText=S_INP+'flex:1 1 160px;width:auto;';wi.setAttribute('data-fs-ichname','1');
+      const ws=document.createElement('select');ws.style.cssText=S_INP+'flex:0 1 190px;width:auto;';ws.setAttribute('data-fs-ichrolle','1');
+      const mr=_fsBgMerkRolle();FS_ICH_ROLLEN.concat(FS_ICH_ROLLEN.indexOf(mr)<0?[mr]:[]).forEach(r=>{const o=document.createElement('option');o.value=r;o.textContent=r;ws.appendChild(o);});ws.value=mr;
+      const wk=document.createElement('button');wk.type='button';wk.textContent='✓ merken';wk.setAttribute('data-fs-ichmerken','1');wk.style.cssText=S_KNOPF+'min-height:var(--fsh,40px);border:1.5px solid #b25e00;background:transparent;color:var(--text);';
+      wk.onclick=()=>{const n=String(wi.value||'').replace(/\s+/g,' ').trim();if(!n){toast('Bitte den Namen eintippen','info',3000);return;}
+        bericht.kopf.pruefer=n;_fsBgMerkName(n);_fsBgMerkRolle(ws.value);
+        if(!bericht.anwesende.some(p=>p&&String(p.name||'').trim().toLowerCase()===n.toLowerCase()))bericht.anwesende.push({name:n,rolle:ws.value});
+        scheduleSave();_neuBauen();toast('✓ '+n+' – das Gerät merkt sich den Namen','success',3000);};
+      wz.append(wi,ws,wk);wb.append(wt,wz);w.appendChild(wb);
+    }
     const ichMerken=q=>{ /* F48 · F51: „Aufgenommen von“, „Besichtigt von“, „Techniker“ – oder ein eigenes Wort bei deinem Namen – merkt sich das Gerät mit Namen und Bezeichnung */
       const n=String((q&&q.name)||'').trim(),r=String((q&&q.rolle)||'').trim();if(!n||!r)return;
       const ich=FS_ICH_ROLLEN.indexOf(r)>=0||(FS_B2_ROLLEN.indexOf(r)<0&&n.toLowerCase()===_fsBgMerkName().toLowerCase());
@@ -1710,7 +1726,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   /* ── F2b: Bedienung – jeder Abschnitt lässt sich zuklappen, oben eine Leiste zum Springen ──────────────
      Gemerkt wird je GERÄT im Browser-Speicher (wie bei den Feststellungs-Abschnitten), NICHT am Protokoll – sonst käme es
      aufs andere Gerät mit. Das PDF zeigt immer alles. Standard: alles aufgeklappt. */
-  function _bgStdZu(k){return k==='skizze'||(_fsIstVorab(bericht)&&(bericht.schlank?FS_B2_STANDARD_ZU:FS_VB_STANDARD_ZU).indexOf(k)>=0);} // F20: Standard zu – wie die Raumskizze
+  function _bgStdZu(k){return k==='skizze'||(k==='notizen'&&_fsGemeinsamerKopf(bericht))||(_fsIstVorab(bericht)&&(bericht.schlank?FS_B2_STANDARD_ZU:FS_VB_STANDARD_ZU).indexOf(k)>=0);} // F20: Standard zu – wie die Raumskizze
   function _bgZu(k){const l=_fsZuLesen(bericht.id);return _bgStdZu(k)?l.indexOf('a:'+k)<0:l.indexOf('b:'+k)>=0;}
   function _bgZuMehrere(keys,zu){ // Schlüssel: „b:…“ = zu; nur die Raumskizze ist Standard zu und merkt sich das Aufklappen als „a:skizze“
     const norm=keys.filter(k=>!_bgStdZu(k)).map(k=>'b:'+k);
@@ -1890,33 +1906,60 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   }
   /* F47: „🌤 Wetter holen“ in „Vor Ort“ – Wetterdienst zur Beginn-Zeit (Standort nötig), im PDF mit „nicht vor Ort gemessen“ */
   /* F52 (Frank 09.10.2026: „automatisch geholt oder von mir ermittelt – wichtig für die Beurteilung“): ZWEI Kästen. „🌐 Wetterdienst“ = geholt für die Objekt-Adresse,
-     nicht überschreibbar (nur ↻ neu holen / ✕ entfernen). „📏 Selbst vor Ort“ = was du misst oder siehst. Beide dürfen dastehen; im PDF stehen sie getrennt. */
+     nicht überschreibbar (nur ↻ neu holen / ✕ entfernen). „📏 Selbst vor Ort“ = was du misst oder siehst. Beide dürfen dastehen; im PDF stehen sie getrennt.
+     F53 (Frank 10.10.2026): beide Kästen starten ZUGEKLAPPT (Kopf antippen, Kurzzeile), Schalter „📄 im PDF / 🔒 nicht im PDF“ (gilt für beide), Gerät fest vorbelegt. */
   function _vbWetterB2(){
     const w=document.createElement('div');w.setAttribute('data-fs-vbwetter','1');w.style.cssText='padding:8px 14px;border-top:1px solid var(--border);';
     const holeW=_fsWetterHolen;
-    const k=bericht.kopf,txt=_fsWetterKurz(k),q=_fsBgWetterQuelle(k);
-    const kasten=()=>{const d=document.createElement('div');d.style.cssText='border:1.5px solid var(--border);border-radius:10px;padding:8px 10px;background:var(--fs-karte,var(--bg2));';return d;};
-    const kopf=(sym,titel,klein)=>{const h=document.createElement('div');h.style.cssText='font-size:var(--fs14,14px);font-weight:700;color:var(--text);margin-bottom:4px;';h.textContent=sym+' '+titel;const s=document.createElement('span');s.style.cssText='font-weight:400;color:var(--text2);font-size:var(--fs12,12px);';s.textContent=' – '+klein;h.appendChild(s);return h;};
+    const k=bericht.kopf,txt=_fsWetterKurz(k),q=_fsBgWetterQuelle(k),imPdf=bericht.wetterImPdf!==false,auf=_fsWetterAufLesen(bericht);
+    const kasten=(key,sym,titel,kurz)=>{
+      const d=document.createElement('div');d.style.cssText='border:1.5px solid var(--border);border-radius:10px;padding:4px 10px 6px;background:var(--fs-karte,var(--bg2));';
+      const h=document.createElement('button');h.type='button';h.setAttribute('data-fs-wetterkopf',key);h.setAttribute('aria-expanded',auf[key]?'true':'false');
+      h.style.cssText='display:flex;align-items:center;gap:8px;width:100%;min-height:var(--fsh,40px);padding:4px 0;border:none;background:transparent;color:var(--text);text-align:left;cursor:pointer;font-family:inherit;font-size:var(--fs14,14px);font-weight:700;';
+      const pf=document.createElement('span');pf.textContent=auf[key]?'▾':'▸';pf.style.cssText='width:14px;flex-shrink:0;';
+      const tt=document.createElement('span');tt.textContent=sym+' '+titel;tt.style.flexShrink='0';
+      const ku=document.createElement('span');ku.setAttribute('data-fs-wetterkurz',key);ku.style.cssText='flex:1;min-width:0;font-weight:400;color:var(--text2);font-size:var(--fs13,13px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';ku.textContent='· '+kurz;
+      h.append(pf,tt,ku);
+      h.onclick=()=>{_fsWetterAufSetzen(bericht,key,!auf[key]);_neuBauen();};
+      d.appendChild(h);return d;
+    };
     const kn=(txt2,attr,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=txt2;b.setAttribute(attr,'1');b.style.cssText=S_KNOPF+'min-height:var(--fsh,40px);border:1.5px solid var(--fs-krd,'+FS_FARBE+');background:var(--fs-kfl,transparent);color:var(--text);';b.onclick=fn;return b;};
-    const d1=kasten();d1.setAttribute('data-fs-wetterdienst','1');
-    d1.appendChild(kopf('🌐','Wetterdienst','automatisch, nicht vor Ort gemessen'));
-    const tx=document.createElement('div');tx.style.cssText='font-size:var(--fs14,14px);color:'+(txt?'var(--text)':'var(--text2)')+';line-height:1.4;';
-    tx.textContent=txt||'Wetter noch nicht geholt (freiwillig)';d1.appendChild(tx);
-    if(txt){const qd=document.createElement('div');qd.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin-top:2px;';qd.textContent=q?q.replace(/^Angabe des Wetterdienstes /,'Quelle: '):'von Hand eingetragen (älteres Protokoll) – so steht es auch im PDF';d1.appendChild(qd);}
-    const z1=document.createElement('div');z1.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;';
-    z1.appendChild(kn(txt?'↻ neu holen':'🌤 Wetter holen','data-fs-vbwetterknopf',()=>holeW(bericht,_neuBauen)));
-    if(txt)z1.appendChild(kn('✕ entfernen','data-fs-wetterweg',()=>{if(!confirm('Wetterdienst-Angaben aus dem Protokoll entfernen? Deine eigene Messung bleibt.'))return;_fsWetterDienstLeeren(k);scheduleSave();_neuBauen();}));
-    d1.appendChild(z1);
-    const h1=document.createElement('div');h1.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin-top:4px;line-height:1.4;';h1.textContent=(txt&&!q)?'Aus dem älteren Protokoll von Hand. Zum Ersetzen „↻ neu holen“ (holt für die Objekt-Adresse) – was du selbst misst oder siehst, gehört in den Kasten darunter.':'Geholt für die Objekt-Adresse. Diese Werte lassen sich nicht überschreiben – was du selbst misst oder siehst, gehört in den Kasten darunter.';d1.appendChild(h1);
-    const d2=kasten();d2.setAttribute('data-fs-vorortwetter','1');d2.style.marginTop='8px';
-    d2.appendChild(kopf('📏','Selbst vor Ort','von dir gemessen oder gesehen, freiwillig'));
-    const feld2=(label,key,ph,zahl)=>{const r=_feld(label,key,ph,zahl);r.style.padding='4px 0';r.style.borderTop='none';return r;};
-    d2.append(feld2('Wetter gesehen','vorOrtWetter','z. B. Nieselregen, Fassade nass'),feld2('Außen °C','vorOrtT','z. B. 11,8',true),feld2('Außen % rF','vorOrtRf','z. B. 84',true));
-    const ur=feld2('gemessen um','vorOrtUhr','hh:mm');const ui=ur.querySelector?ur.querySelector('input'):null;
-    const jetzt=kn('jetzt','data-fs-vorortjetzt',()=>{k.vorOrtUhr=_fsVbJetzt().uhr;if(ui)ui.value=k.vorOrtUhr;scheduleSave();});jetzt.style.minHeight='var(--fsh,36px)';jetzt.style.flexShrink='0';ur.appendChild(jetzt);
-    d2.appendChild(ur);
-    d2.appendChild(feld2('Gerät','vorOrtGeraet',String(k.geraetLuft||'').trim()||'z. B. testo 605i'));
-    const td=document.createElement('div');td.setAttribute('data-fs-aussen','1');td.style.cssText='padding:2px 0 0 122px;font-size:var(--fs13,13px);color:var(--text2);';d2.appendChild(td);
+    const klein=t2=>{const e=document.createElement('div');e.style.cssText='font-size:var(--fs12,12px);color:var(--text2);line-height:1.4;';e.textContent=t2;return e;};
+    const ortKurz=(k.wetterOrtArt==='objekt'&&String(k.wetterOrt||'').trim())?' · für '+String(k.wetterOrt).trim():(k.wetterOrtArt==='geraet'?' · für den Gerätestandort':'');
+    const d1=kasten('dienst','🌐','Wetterdienst',(txt?txt+ortKurz:'noch nicht geholt')+(imPdf?'':' · 🔒 nicht im PDF'));
+    d1.setAttribute('data-fs-wetterdienst','1');
+    if(auf.dienst){
+      const i1=document.createElement('div');i1.setAttribute('data-fs-wetterinhalt','dienst');
+      i1.appendChild(klein('automatisch, nicht vor Ort gemessen'));
+      const tx=document.createElement('div');tx.style.cssText='font-size:var(--fs14,14px);color:'+(txt?'var(--text)':'var(--text2)')+';line-height:1.4;margin-top:4px;';
+      tx.textContent=txt||'Wetter noch nicht geholt (freiwillig)';i1.appendChild(tx);
+      if(txt){const qd=klein(q?q.replace(/^Angabe des Wetterdienstes /,'Quelle: '):'von Hand eingetragen (älteres Protokoll) – so steht es auch im PDF');qd.style.marginTop='2px';i1.appendChild(qd);}
+      const z1=document.createElement('div');z1.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;';
+      z1.appendChild(kn(txt?'↻ neu holen':'🌤 Wetter holen','data-fs-vbwetterknopf',()=>holeW(bericht,_neuBauen)));
+      if(txt)z1.appendChild(kn('✕ entfernen','data-fs-wetterweg',()=>{if(!confirm('Wetterdienst-Angaben aus dem Protokoll entfernen? Deine eigene Messung bleibt.'))return;_fsWetterDienstLeeren(k);scheduleSave();_neuBauen();}));
+      i1.appendChild(z1);
+      const h1=klein((txt&&!q)?'Aus dem älteren Protokoll von Hand. Zum Ersetzen „↻ neu holen“ (holt für die Objekt-Adresse) – was du selbst misst oder siehst, gehört in den Kasten darunter.':'Geholt für die Objekt-Adresse. Diese Werte lassen sich nicht überschreiben – was du selbst misst oder siehst, gehört in den Kasten darunter.');h1.style.marginTop='4px';i1.appendChild(h1);
+      const sw=document.createElement('div');sw.style.cssText='display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;';
+      [[true,'📄 im PDF'],[false,'🔒 nicht im PDF']].forEach(([wert,t2])=>{const c=_chip(t2,imPdf===wert,()=>{if(imPdf===wert)return;bericht.wetterImPdf=wert;scheduleSave();_neuBauen();});c.setAttribute('data-fs-wetterpdf',wert?'ja':'nein');sw.appendChild(c);});
+      sw.appendChild(klein('gilt für beide Kästen – das Wetter bleibt im Protokoll'));
+      i1.appendChild(sw);d1.appendChild(i1);
+    }
+    const vo=_fsVorOrtKurz(k),gs=String(k.vorOrtWetter||'').trim();
+    const d2=kasten('vorOrt','📏','Selbst vor Ort',[gs,vo].filter(Boolean).join(' · ')||'noch leer');
+    d2.setAttribute('data-fs-vorortwetter','1');d2.style.marginTop='8px';
+    if(auf.vorOrt){
+      if(!String(k.vorOrtGeraet||'').trim())k.vorOrtGeraet=_fsVorOrtGeraetVorschlag(k); /* F53: Gerät fest vorbelegt (Frank 10.10.2026: „ich hab ja kein anderes“) */
+      const i2=document.createElement('div');i2.setAttribute('data-fs-wetterinhalt','vorOrt');
+      i2.appendChild(klein('von dir gemessen oder gesehen, freiwillig'));
+      const feld2=(label,key,ph,zahl)=>{const r=_feld(label,key,ph,zahl);r.style.padding='4px 0';r.style.borderTop='none';return r;};
+      i2.append(feld2('Wetter gesehen','vorOrtWetter','z. B. Nieselregen, Fassade nass'),feld2('Außen °C','vorOrtT','z. B. 11,8',true),feld2('Außen % rF','vorOrtRf','z. B. 84',true));
+      const ur=feld2('gemessen um','vorOrtUhr','hh:mm');const ui=ur.querySelector?ur.querySelector('input'):null;
+      const jetzt=kn('jetzt','data-fs-vorortjetzt',()=>{k.vorOrtUhr=_fsVbJetzt().uhr;if(ui)ui.value=k.vorOrtUhr;scheduleSave();});jetzt.style.minHeight='var(--fsh,36px)';jetzt.style.flexShrink='0';ur.appendChild(jetzt);
+      i2.appendChild(ur);
+      i2.appendChild(feld2('Gerät','vorOrtGeraet','z. B. testo 605i'));
+      const td=document.createElement('div');td.setAttribute('data-fs-aussen','1');td.style.cssText='padding:2px 0 0 122px;font-size:var(--fs13,13px);color:var(--text2);';i2.appendChild(td);
+      d2.appendChild(i2);
+    }
     w.append(d1,d2);
     return w;
   }
@@ -1924,7 +1967,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const w=document.createElement('div');w.setAttribute('data-fs-vorort','1');
     const gk=_fsGemeinsamerKopf(bericht); /* F52: Vorabbesichtigung und Begehungsprotokoll – derselbe Teil */
       const bei=document.createElement('div');bei.setAttribute('data-fs-besuchbei','1');bei.style.cssText='padding:6px 14px 8px;border-top:1px solid var(--border);';
-      const bl=document.createElement('div');bl.style.cssText='font-size:var(--fs13,13px);color:var(--text2);margin-bottom:6px;';bl.textContent='Besichtigung bei – wähle den Kontakt für diesen Besuch';bei.appendChild(bl);
+      const bl=document.createElement('div');bl.style.cssText='font-size:var(--fs13,13px);color:var(--text2);margin-bottom:6px;';bl.textContent='Besichtigung bei – eins antippen: die Person, bei der du bist – oder, wenn niemand: das Objekt'; /* F53 (Frank 10.10.2026) */bei.appendChild(bl);
       const chips=document.createElement('div');chips.style.cssText='display:flex;flex-wrap:wrap;gap:6px;';
       /* F51 (Frank 09.10.2026): die Anschrift der Person steht dabei, wenn sie vom Objekt abweicht · „🏠 Objekt“ für Besichtigungen ohne Mieter (z. B. Luke im
          Treppenhaus) · ein gespeicherter Wert, den es als Knopf nicht (mehr) gibt, bleibt sichtbar und lässt sich mit ✕ wegnehmen (vorher stand er unsichtbar im PDF) */
@@ -1938,9 +1981,9 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
           bericht.kopf.besuchBei=an?'':txt;bericht.kopf.nutzer=an?'':k.name;bericht.kopf.ansprechpartner=an?'':k.kontakt;
           scheduleSave();_neuBauen();}));
       });
-      if(objAdr){
+      if(objAdr&&!(akt&&akt.indexOf(FS_VB_BEI_OBJEKT)!==0)){ /* F53 Variante b (Frank 10.10.2026): ist eine Person gewählt, verschwindet der 🏠-Knopf */
         const txt=FS_VB_BEI_OBJEKT+objAdr;if(akt===txt)gezeigt=true;
-        const c=_chip('🏠 '+txt,akt===txt,()=>{const an=String(bericht.kopf.besuchBei||'').trim()===txt;bericht.kopf.besuchBei=an?'':txt;bericht.kopf.nutzer='';bericht.kopf.ansprechpartner='';scheduleSave();_neuBauen();});
+        const c=_chip(akt===txt?'🏠 '+txt:'🏠 niemand – nur das Objekt',akt===txt,()=>{const an=String(bericht.kopf.besuchBei||'').trim()===txt;bericht.kopf.besuchBei=an?'':txt;bericht.kopf.nutzer='';bericht.kopf.ansprechpartner='';scheduleSave();_neuBauen();});
         c.setAttribute('data-fs-beiobjekt','1');chips.appendChild(c);
       }
       if(!akt&&!bericht.schlank&&String(bericht.kopf.nutzer||'').trim()){ /* F52: älteres Begehungsprotokoll – der getippte Nutzer bleibt sichtbar (und im PDF), bis eine Person gewählt ist */
@@ -3432,7 +3475,7 @@ const FS_BG_ROLLEN=['Nutzer','Mieter Nachbarkeller','Vertreter Auftraggeber','Au
 const FS_B2_ROLLEN=['Eigentümer','Eigentümer (wohnt vor Ort)','Mieter','Mieterin','Mieter Nachbarkeller','Handwerker','Vertreter','Aufgenommen von','Besichtigt von','Techniker','Sonstige']; /* F51: „Besichtigt von“, „Techniker“ (Frank 09.10.2026: „irgendwas, was mich bezeichnet“) */
 const FS_B2_KONTAKTROLLEN={mieter:'Mieter',eigentuemer:'Eigentümer',hausverwaltung:'Vertreter',ag:'Vertreter',privatkunde:'Vertreter',handwerker:'Handwerker'};
 // F2b: die zuklappbaren Abschnitte des Begehungsprotokolls (k = Schlüssel, t = Überschrift, c = Kurzname in der Sprungleiste)
-const FS_BG_BLOECKE=[{k:'vorort',t:'Vor Ort',c:'Vor Ort'},{k:'gemeldet',t:'Gemeldet / vorgefunden',c:'Gemeldet'},{k:'geraete',t:'Messgeräte',c:'Geräte'},{k:'raeume',t:'Räume',c:'Räume'},{k:'fest',t:'Feststellungen vor Ort',c:'Feststellungen'},{k:'angaben',t:'Angaben der Nutzer (nicht selbst festgestellt)',c:'Angaben'},{k:'fazit',t:'Zusammenfassung der Feststellungen',c:'Zusammenfassung'},{k:'fotos',t:'Fotos',c:'Fotos'}];
+const FS_BG_BLOECKE=[{k:'vorort',t:'Vor Ort',c:'Vor Ort'},{k:'gemeldet',t:'Gemeldet / vorgefunden',c:'Gemeldet'},{k:'geraete',t:'Messgeräte',c:'Geräte'},{k:'raeume',t:'Räume',c:'Räume'},{k:'fest',t:'Feststellungen vor Ort',c:'Feststellungen'},{k:'angaben',t:'Angaben der Nutzer (nicht selbst festgestellt)',c:'Angaben'},{k:'fazit',t:'Zusammenfassung der Feststellungen',c:'Zusammenfassung'},{k:'notizen',t:'📝 Notizen',c:'Notizen'},{k:'fotos',t:'Fotos',c:'Fotos'}]; /* F53: Notizen auch hier */
 const FS_BG_GERAETE={
   luft:'testo 605i – Lufttemperatur und relative Luftfeuchte',
   oberflaeche:'testo 805i – Oberflächentemperatur, berührungslos (Infrarot)',
@@ -3596,6 +3639,14 @@ function _fsVorOrtKurz(k){
   const uhr=_fsVbUhr(k.vorOrtUhr),ger=String(k.vorOrtGeraet||k.geraetLuft||'').trim();
   return (t!==null?_fsEins(t)+' °C':'–')+(rf!==null?' / '+_fsEins(rf)+' % r. F.':'')+(uhr?' um '+uhr+' Uhr':'')+(ger?' ('+ger+')':'');
 }
+// F53: Wetter-Kästen auf/zu – nur Anzeige, je Protokoll im Gerät; Standard: beide zu (Frank 10.10.2026)
+const _fsWetterAufMerk=new WeakMap();
+function _fsWetterAufLesen(b){const m=(b&&typeof b==='object'&&_fsWetterAufMerk.get(b))||{};return {dienst:!!m.dienst,vorOrt:!!m.vorOrt};}
+function _fsWetterAufSetzen(b,key,auf){if(!b||typeof b!=='object')return;const m=_fsWetterAufMerk.get(b)||{};m[key]=!!auf;_fsWetterAufMerk.set(b,m);}
+// F53: Gerät für „Selbst vor Ort“ (Frank: „ich hab ja kein anderes“): Luft-Gerät aus „Messgeräte“ (Kurzname vor „ – “) → zuletzt benutztes (Gerät merkt sich, am PC an beiden Rechnern gleich) → testo 605i
+const FS_VORORT_GERAET_KEY='pam_fs_vorort_geraet';
+function _fsVorOrtGeraetMerk(neu){try{if(typeof neu==='string'){const v=neu.replace(/\s+/g,' ').trim().slice(0,40);if(v)localStorage.setItem(FS_VORORT_GERAET_KEY,v);return v;}return String(localStorage.getItem(FS_VORORT_GERAET_KEY)||'').trim();}catch(e){return '';}}
+function _fsVorOrtGeraetVorschlag(k){const l=String((k&&k.geraetLuft)||'').split(' – ')[0].trim();return l||_fsVorOrtGeraetMerk()||'testo 605i';}
 // F52: „✕ entfernen“ im Wetterdienst-Kasten – nimmt nur die Wetterdienst-Felder heraus, die eigene Messung bleibt
 function _fsWetterDienstLeeren(k){if(!k)return;['wetter','aussenT','aussenRf','letzterRegen','wetterQuelle','wetterAbruf','wetterStunde','wetterOrt','wetterOrtArt'].forEach(x=>{k[x]='';});}
 /* F21: Feststellungen „Stelle für Stelle“ (Frank 02.10.2026: ein Schaden hält sich nicht an Schubladen – innen die feuchte Decke, außen die Kehle).
@@ -4599,36 +4650,84 @@ async function _fsVorschau(bericht,task){
   _fsVorschauModus=true;
   try{return await _fsMobPdfBg(bericht,task);}finally{_fsVorschauModus=false;}
 }
+/* F53 (Frank 10.10.2026, „4 b“): die Vorschau bleibt in PAM – die Seiten werden mit pdf.js (liegt wie formulare.js in beiden Apps: pdfjs.min.js + pdfjs.worker.min.js)
+   als Bilder gezeichnet; ‹ › blättern, − ＋ Größe, „✕ Schließen“ führt ins Formular zurück. Am PC dazu „↗ Im neuen Tab“, am Tablet „📂 Im PDF-Programm“ (der alte Weg).
+   Lädt pdf.js nicht (nicht hochgeladen, erster Aufruf ohne Netz), bleibt der alte Weg als Knopf. PC und Tablet gleich (Frank: „beides“). */
+const FS_PDFJS_DATEI='pdfjs.min.js',FS_PDFJS_WORKER='pdfjs.worker.min.js';
+function _fsPdfjsLaden(){
+  if(window.pdfjsLib&&window.pdfjsLib.getDocument)return Promise.resolve(window.pdfjsLib);
+  if(window._fsPdfjsWartet)return window._fsPdfjsWartet;
+  window._fsPdfjsWartet=new Promise((res,rej)=>{
+    const s=document.createElement('script');s.src=FS_PDFJS_DATEI;s.async=true;
+    s.onload=()=>{try{window.pdfjsLib.GlobalWorkerOptions.workerSrc=FS_PDFJS_WORKER;res(window.pdfjsLib);}catch(e){window._fsPdfjsWartet=null;rej(e);}};
+    s.onerror=()=>{window._fsPdfjsWartet=null;rej(new Error('pdf.js nicht geladen'));};
+    document.head.appendChild(s);
+  });
+  return window._fsPdfjsWartet;
+}
+// Seiten eines PDF-Blobs zeichnen: zeichne(canvas, nr, anzahl) je Seite; Breite in CSS-Pixeln (scharf durch devicePixelRatio)
+async function _fsPdfSeitenBilder(blob,breite,zeichne){
+  const lib=await _fsPdfjsLaden();
+  const daten=new Uint8Array(await blob.arrayBuffer());
+  const doc=await lib.getDocument({data:daten}).promise;
+  const dpr=Math.min(3,window.devicePixelRatio||1);
+  for(let n=1;n<=doc.numPages;n++){
+    const page=await doc.getPage(n);
+    const v1=page.getViewport({scale:1}),scale=breite/v1.width,vp=page.getViewport({scale:scale*dpr});
+    const cv=document.createElement('canvas');cv.width=Math.round(vp.width);cv.height=Math.round(vp.height);
+    await page.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise;
+    zeichne(cv,n,doc.numPages);
+  }
+  try{await doc.destroy();}catch(e){}
+  return doc.numPages;
+}
 function _fsVorschauFenster(blob,name){
   const alt=document.getElementById('_fsVorschau');if(alt)alt.remove();
   const url=URL.createObjectURL(blob),amPc=_fsAmPc();
   const ov=document.createElement('div');ov.id='_fsVorschau';_fsSichtAn(ov);
-  ov.style.cssText='position:fixed;inset:0;z-index:1000095;background:rgba(0,0,0,.6);display:flex;flex-direction:column;';
-  const kopf=document.createElement('div');kopf.style.cssText='display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 14px;background:#1f5f8b;color:#fff;flex-shrink:0;';
-  const ti=document.createElement('div');ti.style.cssText='flex:1 1 200px;min-width:0;font-size:var(--fs15,15px);font-weight:700;';ti.textContent='👁 Vorschau – nicht abgelegt';
-  const kn=(txt,attr)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute(attr,'1');b.style.cssText='padding:8px 14px;min-height:var(--fsh,40px);border-radius:10px;border:1.5px solid rgba(255,255,255,.85);background:transparent;color:#fff;font-size:var(--fs14,14px);font-weight:700;cursor:pointer;font-family:inherit;';return b;};
+  ov.style.cssText='position:fixed;inset:0;z-index:1000095;background:rgba(0,0,0,.72);display:flex;flex-direction:column;';
+  const kopf=document.createElement('div');kopf.style.cssText='display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 12px;background:#1f5f8b;color:#fff;flex-shrink:0;';
+  const ti=document.createElement('div');ti.style.cssText='flex:1 1 160px;min-width:0;font-size:var(--fs15,15px);font-weight:700;';ti.textContent='👁 Vorschau – nicht abgelegt';
+  const seiteInfo=document.createElement('span');seiteInfo.setAttribute('data-fs-vorschauseite','1');seiteInfo.style.cssText='font-size:var(--fs13,13px);font-weight:400;opacity:.9;';ti.appendChild(seiteInfo);
+  const kn=(txt,attr)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute(attr,'1');b.style.cssText='padding:6px 12px;min-height:var(--fsh,40px);border-radius:10px;border:1.5px solid rgba(255,255,255,.85);background:transparent;color:#fff;font-size:var(--fs14,14px);font-weight:700;cursor:pointer;font-family:inherit;';return b;};
   const oeffnen=()=>{if(typeof _dateiBlobOeffnen==='function')_dateiBlobOeffnen(blob,name);else window.open(url,'_blank');};
   const weg=()=>{document.removeEventListener('keydown',taste,true);ov.remove();setTimeout(()=>{try{URL.revokeObjectURL(url);}catch(e){}},60000);};
   const taste=e=>{if(e.key==='Escape'){e.stopImmediatePropagation();e.preventDefault();weg();}};
   document.addEventListener('keydown',taste,true);
+  const zurueck=kn('‹','data-fs-vorschauzurueck'),weiter=kn('›','data-fs-vorschauweiter'),kleiner=kn('−','data-fs-vorschaukleiner'),groesser=kn('＋','data-fs-vorschaugroesser');
+  const auf=kn(amPc?'↗ Im neuen Tab':'📂 Im PDF-Programm','data-fs-vorschauauf');auf.onclick=oeffnen;
   const zu=kn('✕ Schließen','data-fs-vorschauzu');zu.onclick=weg;
-  if(amPc){const auf=kn('↗ Im neuen Tab','data-fs-vorschauauf');auf.onclick=oeffnen;kopf.append(ti,auf,zu);}else kopf.append(ti,zu);
+  kopf.append(ti,zurueck,weiter,kleiner,groesser,auf,zu);
   ov.appendChild(kopf);
-  if(amPc){
-    const fr=document.createElement('iframe');fr.title='Vorschau';fr.src=url;fr.setAttribute('data-fs-vorschaubild','1');
-    fr.style.cssText='flex:1;min-height:0;width:100%;border:none;background:#fff;';
-    ov.appendChild(fr);
-  }else{
-    const box=document.createElement('div');box.style.cssText='margin:auto;max-width:420px;width:calc(100% - 32px);background:var(--bg);color:var(--text);border-radius:14px;padding:18px;box-sizing:border-box;text-align:center;line-height:1.45;';
-    const tx=document.createElement('div');tx.style.cssText='font-size:var(--fs15,15px);margin-bottom:12px;';tx.textContent='Die Vorschau ist fertig. Nichts wurde abgelegt.';
-    const gross=document.createElement('button');gross.type='button';gross.textContent='👁 Vorschau öffnen';gross.setAttribute('data-fs-vorschauauf','1');
-    gross.style.cssText='display:block;width:100%;min-height:var(--fsh44,48px);border-radius:10px;border:none;background:#1f5f8b;color:#fff;font-size:var(--fs16,16px);font-weight:700;cursor:pointer;font-family:inherit;';
-    gross.onclick=oeffnen;
-    const hw=document.createElement('div');hw.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin-top:10px;';hw.textContent='Zurück ins Protokoll mit „✕ Schließen“.';
-    box.append(tx,gross,hw);ov.appendChild(box);
-    ov.addEventListener('click',e=>{if(e.target===ov)weg();});
-  }
+  const flaeche=document.createElement('div');flaeche.setAttribute('data-fs-vorschauflaeche','1');
+  flaeche.style.cssText='flex:1;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;padding:10px 0 30px;';
+  ov.appendChild(flaeche);
+  let zoom=1,seiten=[],anzahl=0;
+  const breiteBasis=()=>Math.max(240,Math.min(900,(ov.clientWidth||window.innerWidth||800)-24));
+  const aktuelle=()=>{const mitte=flaeche.scrollTop+flaeche.clientHeight/2;let i=0;seiten.forEach((cv,j)=>{if(cv.offsetTop<=mitte)i=j;});return i;};
+  const zeichnen=async()=>{
+    flaeche.innerHTML='';seiten=[];anzahl=0;
+    const warte=document.createElement('div');warte.style.cssText='color:#fff;text-align:center;padding:30px;font-size:var(--fs15,15px);';warte.textContent='⏳ Seiten werden gezeichnet …';flaeche.appendChild(warte);
+    try{
+      const br=Math.round(breiteBasis()*zoom);
+      anzahl=await _fsPdfSeitenBilder(blob,br,(cv,n,ges)=>{
+        if(warte.parentNode)warte.remove();
+        cv.setAttribute('data-fs-vorschaubild',String(n));cv.style.cssText='display:block;margin:0 auto 12px;width:'+br+'px;max-width:none;height:auto;background:#fff;box-shadow:0 4px 16px rgba(0,0,0,.5);';
+        flaeche.appendChild(cv);seiten.push(cv);seiteInfo.textContent=' · Seite 1 von '+ges;
+      });
+    }catch(e){console.warn('[Vorschau] pdf.js:',e);
+      flaeche.innerHTML='';const box=document.createElement('div');box.style.cssText='margin:20px auto;max-width:420px;width:calc(100% - 32px);background:var(--bg);color:var(--text);border-radius:14px;padding:18px;box-sizing:border-box;text-align:center;line-height:1.45;';
+      const tx=document.createElement('div');tx.style.cssText='font-size:var(--fs15,15px);margin-bottom:12px;';tx.textContent='Die Seitenansicht konnte nicht geladen werden (pdf.js fehlt oder beim ersten Mal kein Netz). Die Vorschau lässt sich trotzdem öffnen:';
+      const gross=document.createElement('button');gross.type='button';gross.textContent='👁 Vorschau öffnen';gross.setAttribute('data-fs-vorschauersatz','1');gross.style.cssText='display:block;width:100%;min-height:var(--fsh44,48px);border-radius:10px;border:none;background:#1f5f8b;color:#fff;font-size:var(--fs16,16px);font-weight:700;cursor:pointer;font-family:inherit;';gross.onclick=oeffnen;
+      box.append(tx,gross);flaeche.appendChild(box);
+    }
+  };
+  flaeche.addEventListener('scroll',()=>{if(anzahl)seiteInfo.textContent=' · Seite '+(aktuelle()+1)+' von '+anzahl;});
+  const springe=d=>{if(!seiten.length)return;const i=Math.min(seiten.length-1,Math.max(0,aktuelle()+d));try{flaeche.scrollTo({top:seiten[i].offsetTop-10,behavior:'smooth'});}catch(e){flaeche.scrollTop=seiten[i].offsetTop-10;}};
+  zurueck.onclick=()=>springe(-1);weiter.onclick=()=>springe(1);
+  groesser.onclick=()=>{zoom=Math.min(3,zoom*1.25);zeichnen();};kleiner.onclick=()=>{zoom=Math.max(0.5,zoom/1.25);zeichnen();};
   document.body.appendChild(ov);
+  zeichnen();
   return ov;
 }
 /* Fotos im PDF: 2 je Seite (groß, ein Foto je Zeile) oder 4 je Seite (bisher). Gilt je Protokoll; das Gerät merkt sich die letzte Wahl
@@ -4652,6 +4751,20 @@ function _fsFotoZeit(f,datum){
   if(!z)return '';
   const pi=_fsVbIso(datum);
   return (pi&&pi===z.iso)?z.uhr:z.tag+' '+z.uhr;
+}
+// F53 (Frank 10.10.2026: „ich muss als Messender in der Tabelle stehen“): du selbst („Name – Bezeichnung“) und die anderen vor Ort – getrennt
+function _fsIchName(b){return String((b&&b.kopf&&b.kopf.pruefer)||'').replace(/\s+/g,' ').trim();}
+function _fsIstIch(b,p){const n=_fsIchName(b);return !!n&&!!p&&String(p.name||'').replace(/\s+/g,' ').trim().toLowerCase()===n.toLowerCase();}
+function _fsIchZeile(b){
+  const n=_fsIchName(b);if(!n)return '';
+  const z=((b&&Array.isArray(b.anwesende))?b.anwesende:[]).find(p=>_fsIstIch(b,p));
+  const r=String((z&&z.rolle)||'').trim();
+  return n+(r?' – '+r:'');
+}
+function _fsBgVorOrtZeilen(b){
+  const l=((b&&Array.isArray(b.anwesende))?b.anwesende:[]).filter(p=>p&&String(p.name||'').trim()&&!_fsIstIch(b,p));
+  if(l.length)return l.map(p=>String(p.name).trim()+(String(p.rolle||'').trim()?' – '+String(p.rolle).trim():'')).join('\n');
+  return String((b&&b.kopf&&b.kopf.anwesend)||'').trim();
 }
 // Anwesende im PDF und im Word untereinander – eine Zeile je Person „Name – Rolle“; ohne Liste der alte Freitext
 function _fsBgAnwesendZeilen(b){
@@ -4738,6 +4851,7 @@ function _fsNochOffen(b,t,amPc){
   if(gk&&!hat(k.besuchBei))l.push({k:'bei',text:'Besichtigung bei',block:'vorort',sel:'[data-fs-besuchbei]'});
   if(!hat(k.auftraggeber))l.push({k:'auftraggeber',text:'Auftraggeber',block:ab,sel:gk?'[data-fs-vbkopf]':''});
   if(!hat(k.objektAdresse))l.push({k:'objekt',text:'Objekt-Adresse',block:ab,sel:gk?'[data-fs-vbkopf]':''});
+  if(gk&&!hat(k.pruefer))l.push({k:'ich',text:'Dein Name',block:'vorort',sel:'[data-fs-ichfehlt]'}); /* F53: ohne gemerkten Namen stand Frank nirgends im Protokoll */
   if(!hat(k.anlass))l.push({k:'anlass',text:'Gemeldet',block:gk?'gemeldet':'auftrag',sel:'[data-fs-klappfeld="anlass"]'});
   else if(gk&&b.meldungStatus!=='wie'&&b.meldungStatus!=='abw')l.push({k:'vorgefunden',text:'Vorgefunden: wie gemeldet / abweichend',block:'gemeldet',sel:''});
   const fotos=(Array.isArray(b.fotos)?b.fotos:[]).filter(Boolean);
@@ -4852,7 +4966,7 @@ function _fsBgUmstellen(b){
   Object.assign(b.kopf,{anlass:'',beginn:'',ende:'',geraetLuft:'',geraetOberflaeche:'',geraetBauteil:'',pruefer:_fsBgMerkName()});
   if(vorab)Object.assign(b.kopf,{versicherung:'',schadennr:'',zugang:'',ansprechpartner:'',besuchBei:'',lage:'',nutzer:''}); // F17: Nutzer wählt Frank je Besuch („Besichtigung bei“), nicht alle Mieter der Karte
   Object.assign(b.kopf,{vorOrtWetter:'',vorOrtT:'',vorOrtRf:'',vorOrtUhr:'',vorOrtGeraet:'',wetterOrt:'',wetterOrtArt:''}); /* F52: Wetter „selbst vor Ort“ getrennt vom Wetterdienst */
-  if(!vorab){Object.assign(b.kopf,{besuchBei:'',lage:'',nutzer:''});b.protName='';b.vorgeschichte='';b.meldungStatus='';b.meldungAbw='';} /* F52 (Frank 09.10.2026: „genau so wie bei der Vorabbesichtigung“): Nutzer über „Besichtigung bei“, Name aus dem Anlass */
+  if(!vorab){Object.assign(b.kopf,{besuchBei:'',lage:'',nutzer:''});b.protName='';b.vorgeschichte='';b.meldungStatus='';b.meldungAbw='';b.notizen=[];} /* F52 (Frank 09.10.2026: „genau so wie bei der Vorabbesichtigung“): Nutzer über „Besichtigung bei“, Name aus dem Anlass */
   if(typeof _fsVbJetzt==='function')b.datum=_fsVbJetzt().datum; /* F52: Datum zweistellig („09.10.2026“) wie „📍 Ich bin jetzt hier“ – vorher „9.10.2026“ */
   b.anwesende=[];
   if(vorab){b.schadenbild='';b.vorgeschichte='';b.vbStellen=[];b.vbUmgebung=[];b.meldungStatus='';b.meldungAbw='';b.luftbildEbene='';b.luftbildAnsicht=null;} // F19, F20, F21, F22, F24, F27
@@ -5647,7 +5761,7 @@ function _fsBgStempelDrehen(st){
   if(!st)return false;
   const r=(((parseInt(st.r,10)||0)%360)+360)%360,m=FS_BG_STEMPEL_MASSE[st.t];
   if(st.t==='text'){const f=[0,315,270,45];st.r=f[(f.indexOf(r)+1)%4];return true;} /* F41: waagerecht · schräg steigend · senkrecht (von unten nach oben) · schräg fallend – nie auf dem Kopf */
-  st.r=(r+((m&&m.leiste)?45:90))%360; /* F41: Leisten in 45-Grad-Schritten, alles andere wie bisher 90 */
+  st.r=(r+45)%360; /* F41: Leisten in 45-Grad-Schritten · F53 (Frank 10.10.2026): alle Stempel in 45° (acht Tipps für einmal rum); m bleibt für die Maße */
   return true;
 }
 // Größe um einen Schritt ändern (z. B. 0,25 oder −0,25), zwischen 0,5 und 2
@@ -6217,9 +6331,14 @@ async function _fsMobPdfBg(bericht,task){
     // 2 · Ortstermin
     {
       const rows=[];
+      if(_fsGemeinsamerKopf(bericht)){ /* F53 (Frank 10.10.2026): erst die Beteiligten – du selbst immer, dann „Vor Ort“ –, danach Datum und Zeit */
+        rows.push(['Aufgenommen / gemessen von',_fsIchZeile(bericht)||'nicht eingetragen']);
+        rows.push(['Vor Ort',_fsBgVorOrtZeilen(bericht)||'niemand weiter vor Ort']);
+      }
       if(hat(bericht.datum))rows.push(['Datum',String(bericht.datum)]);
       const zt=_fsBgZeitText(k);if(zt)rows.push(['Beginn / Ende',zt]);
-      const aw=_fsBgAnwesendZeilen(bericht);if(aw)rows.push(['Anwesend',aw]); /* F49: eine Zeile je Person */
+      if(!_fsGemeinsamerKopf(bericht)){const aw=_fsBgAnwesendZeilen(bericht);if(aw)rows.push(['Anwesend',aw]);} /* F49: eine Zeile je Person (frühere Fassungen) */
+      if(bericht.wetterImPdf!==false){ /* F53: Schalter „🔒 nicht im PDF“ nimmt beide Wetter-Kästen heraus */
       const wt=[];
       if(hat(k.wetter))wt.push(String(k.wetter).trim());
       const aT=_fsZahl(k.aussenT),aF=_fsZahl(k.aussenRf);
@@ -6231,6 +6350,7 @@ async function _fsMobPdfBg(bericht,task){
       }
       const vo=_fsVorOrtKurz(k);if(vo)rows.push(['Außen vor Ort gemessen',vo]);
       if(hat(k.vorOrtWetter))rows.push(['Wetter vor Ort gesehen',String(k.vorOrtWetter).trim()]);
+      }
       if(rows.length){abschnitt('Ortstermin');tabelle2(rows);}
     }
 
@@ -6398,7 +6518,7 @@ async function _fsMobPdfBg(bericht,task){
 
     // F47: Bemerkungen – nur Notizen mit „im PDF“ (Vorabbesichtigung)
     {
-      const nz=(bericht.schlank&&Array.isArray(bericht.notizen))?bericht.notizen.filter(n=>n&&n.pdf===true&&hat(n.text)):[];
+      const nz=(_fsGemeinsamerKopf(bericht)&&Array.isArray(bericht.notizen))?bericht.notizen.filter(n=>n&&n.pdf===true&&hat(n.text)):[]; /* F53: auch Begehungsprotokoll */
       if(nz.length){abschnitt('Bemerkungen');nz.forEach(n=>absatz(String(n.text).trim(),{abstand:3}));y+=2;}
     }
 
@@ -6635,9 +6755,8 @@ function _fsMessbildErstellen(blob,w,punkt,unterzeile){
         const g=cv.getContext('2d');
         g.drawImage(img,0,0,W,H);
         const b=Math.min(W,H),rand=Math.round(b*0.03),kw=Math.round((W-3*rand)/2),lh=Math.round(b*0.05),vh=Math.round(b*0.09);
-        const ampelFarbe=w.ampel==='gruen'?'#2e9e4f':w.ampel==='gelb'?'#d99a00':w.ampel==='rot'?'#d0342c':'#8a8a8a';
+        /* F53 (Frank 09./10.10.2026, „nur Feststellungen“): kein gerechneter Wert, keine Ampelfarbe im Foto – nur, was das Gerät gemessen hat */
         const kaesten=[
-          ['Oberflächenfeuchtigkeit',w.ofRf===null?'–':_fsEins(w.ofRf)+' %rF',ampelFarbe,'#ffffff'],
           ['Oberflächentemperatur',w.ts===null?'–':_fsEins(w.ts)+' °C','rgba(255,255,255,.88)','#1c1c1e'],
           ['Umgebungsfeuchtigkeit',w.rf===null?'–':_fsEins(w.rf)+' %rF','rgba(255,255,255,.88)','#1c1c1e'],
           ['Umgebungstemperatur',w.T===null?'–':_fsEins(w.T)+' °C','rgba(255,255,255,.88)','#1c1c1e']
