@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F51';
+const PAM_FORMULARE_VERSION='F52';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -235,7 +235,7 @@ function _fsBewertungenFuer(b){return _fsIstKeller(b)?FS_KELLER_BEWERTUNGEN:FS_B
 function _fsRaumVorschlaege(b){return _fsIstKeller(b)?FS_KELLER_RAEUME:FS_RAUM_VORSCHLAEGE;}
 function _fsTitel(b){
   if(b&&b.fassung==='begehung'&&b.art==='vorab')return b.schlank?_fsB2Name(b):'Vorabbesichtigung'; // F16, F23, F26: Besichtigung 2 trägt den Namen, den Frank vergeben hat
-  if(b&&b.fassung==='begehung')return 'Begehungsprotokoll'+(b.art==='keller'?' Keller':' Wohnung'); // F2a (bewusst ohne Hilfsnamen: alte Prüfungen schneiden diese Funktion einzeln aus)
+  if(b&&b.fassung==='begehung'){const n=String(b.protName||'').replace(/\s+/g,' ').trim();return n||'Begehungsprotokoll'+(b.art==='keller'?' Keller':' Wohnung');} // F2a (bewusst ohne Hilfsnamen: alte Prüfungen schneiden diese Funktion einzeln aus) · F52: eigener Name wie bei der Vorabbesichtigung
   return _fsIstKeller(b)?FS_KELLER_TITEL:'Feuchte- und Schimmelprotokoll';
 }
 
@@ -277,7 +277,7 @@ function _fsStelleWerte(bericht,st){
   let grenzeTs=null; // v294: Schimmelgrenze = Oberflächentemperatur, bei der die Oberfläche 80 % erreicht
   if(T!==null&&rf!==null&&rf>0&&rf<=100){const ga=Math.log(rf/80)+17.62*T/(243.12+T);grenzeTs=243.12*ga/(17.62-ga);}
   const reserve=(grenzeTs!==null&&ts!==null)?ts-grenzeTs:null;
-  const ta=_fsZahl(bericht&&bericht.kopf&&bericht.kopf.aussenT);
+  const kk=(bericht&&bericht.kopf)||{},ta=_fsZahl(kk.vorOrtT)!==null?_fsZahl(kk.vorOrtT):_fsZahl(kk.aussenT); // F52: die eigene Außenmessung geht vor dem Wetterdienst
   const frsi=(T!==null&&ta!==null&&ts!==null&&(T-ta)>=10)?(ts-ta)/(T-ta):null;
   const mf=_fsZahl(st&&st.mf),mv=_fsZahl(st&&st.mfVergleich);
   const faktor=(mf!==null&&mv!==null&&mv>0)?mf/mv:null;
@@ -346,6 +346,11 @@ function _fsVervollstaendigen(b){
       }
       b.vbStellen.forEach(s=>{if(s&&s.pin!==undefined&&s.pin!==null&&!(isFinite(+s.pin.lat)&&isFinite(+s.pin.lon)))s.pin=null;});} // F22: Eingrenzen · F24: Luftbild-Pin je Stelle
     if(b.art==='vorab')['versicherung','schadennr','zugang','ansprechpartner','besuchBei','lage'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';}); // F16
+    if(b.art!=='vorab'){ /* F52: Begehungsprotokoll hat oben denselben Teil wie die Vorabbesichtigung – Name, Besichtigung bei, Gemeldet/vorgefunden, Vorgeschichte */
+      if(typeof b.protName!=='string')b.protName='';if(typeof b.vorgeschichte!=='string')b.vorgeschichte='';if(typeof b.meldungStatus!=='string')b.meldungStatus='';if(typeof b.meldungAbw!=='string')b.meldungAbw='';
+      ['besuchBei','lage'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';});
+    }
+    ['vorOrtWetter','vorOrtT','vorOrtRf','vorOrtUhr','vorOrtGeraet','wetterOrt','wetterOrtArt'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';}); /* F52: Wetter „selbst vor Ort“ · wofür der Wetterdienst geholt wurde */
   }
   return b;
 }
@@ -369,7 +374,7 @@ function _fsPdfName(bericht,zeit){
     const rolle=String((bericht.kopf&&bericht.kopf.besuchBei)||'').split(':')[0].replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/Ä/g,'Ae').replace(/Ö/g,'Oe').replace(/Ü/g,'Ue').replace(/ß/g,'ss').replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,16);
     return (bericht.schlank?(_fsDateiSlug(bericht.protName,30)||'Vorabbesichtigung'):'Vorabbesichtigung')+(rolle?'_'+rolle:'')+(datum?'_'+datum:'')+uhr+'.pdf'; // F23, F26
   }
-  if(bericht&&bericht.fassung==='begehung')return 'Begehung'+(bericht.art==='keller'?'_Keller':'_Wohnung')+(datum?'_'+datum:'')+uhr+'.pdf'; // F2a: kurzer Name (Pfadlänge)
+  if(bericht&&bericht.fassung==='begehung')return ((typeof _fsDateiSlug==='function'?_fsDateiSlug(bericht.protName,30):'')||'Begehung'+(bericht.art==='keller'?'_Keller':'_Wohnung'))+(datum?'_'+datum:'')+uhr+'.pdf'; // F2a: kurzer Name (Pfadlänge) · F52: eigener Name wie bei der Vorabbesichtigung
   return 'Feuchteprotokoll'+(bericht&&bericht.art==='keller'?'_Keller':'')+(datum?'_'+datum:'')+uhr+'.pdf';
 }
 
@@ -453,7 +458,7 @@ const FS_HILFE=[
 const FS_HILFE_BG={
   'Vorbereitung':[ // F6: Räume statt Raumklima
     'Messgeräte 10 Minuten im Keller liegen lassen – kalt/warm verfälscht die Werte.',
-    'Das Protokoll darf vorher angelegt sein. Am Termin „🌤 Wetter holen“ antippen (Standort nötig) oder Wetter, letzten Regen, Außen °C und % rF selbst eintragen.',
+    'Das Protokoll darf vorher angelegt sein. Bei „Vor Ort“: „📍 Ich bin jetzt hier“ zum Beginn, „🏁 Fertig“ am Ende. Wetter: „🌤 Wetter holen“ holt den Wetterdienst für die Objekt-Adresse (nicht überschreibbar); was du selbst misst oder siehst, kommt in „📏 Selbst vor Ort“ – im PDF stehen beide getrennt.',
     'Bei „Räume“ den Raum anlegen (z. B. „＋ Kellerraum“), antippen und bei „Klima“ Temperatur und Luftfeuchte eintragen – der Taupunkt steht dann daneben.'
   ],
   'Messstellen benennen':[ // F4: Messplan statt Namen vergeben
@@ -564,7 +569,7 @@ function _fsKopfAusKarte(t){
 function _fsKopfErgaenzen(bericht,t){
   if(!bericht||!bericht.kopf)return 0;
   const v=_fsKopfAusKarte(t);let n=0;
-  if(bericht.art==='vorab'&&typeof _fsVbAnlassAusKarte==='function'){const a=_fsVbAnlassAusKarte(t);if(a)v.anlass=a;delete v.nutzer;} // F17: Nutzer nur über „Besichtigung bei“ // F16: Anlass = Beschreibung der Karte (Vorschlag)
+  if((bericht.art==='vorab'||bericht.fassung==='begehung')&&typeof _fsVbAnlassAusKarte==='function'){const a=_fsVbAnlassAusKarte(t);if(a)v.anlass=a;delete v.nutzer;} // F52: auch Begehungsprotokoll // F17: Nutzer nur über „Besichtigung bei“ // F16: Anlass = Beschreibung der Karte (Vorschlag)
   Object.keys(v).forEach(key=>{if(v[key]&&!String(bericht.kopf[key]||'').trim()){bericht.kopf[key]=v[key];n++;}});
   return n;
 }
@@ -575,7 +580,7 @@ const FS_KOPF_NAMEN={auftraggeber:'Auftraggeber',objektAdresse:'Objekt',auftragN
 function _fsKopfAbweichungen(bericht,t){
   if(!bericht||!bericht.kopf)return [];
   const v=_fsKopfAusKarte(t);
-  if(bericht.art==='vorab')delete v.nutzer;
+  if(bericht.art==='vorab'||bericht.fassung==='begehung')delete v.nutzer; /* F52: auch Begehungsprotokoll – der Nutzer kommt aus „Besichtigung bei“ */
   return Object.keys(FS_KOPF_NAMEN).filter(k=>k in v).filter(k=>{const alt=String(bericht.kopf[k]||'').trim(),neu=String(v[k]||'').trim();return alt&&neu&&alt!==neu;})
     .map(k=>({key:k,name:FS_KOPF_NAMEN[k],alt:String(bericht.kopf[k]).trim(),neu:String(v[k]).trim()}));
 }
@@ -945,11 +950,12 @@ function _fsWetterStunde(d,datum,beginn){
   return {time:key,temperature_2m:wert(h.temperature_2m),relative_humidity_2m:wert(h.relative_humidity_2m),weather_code:wert(h.weather_code),stunde:p(std)+':00'};
 }
 function _fsWetterHolen(bericht,neuBauen){
-  if(!navigator.geolocation){toast('📍 Standort nicht verfügbar','error');return;}
-  toast('🌤 Standort und Wetter werden geholt …','info',3000);
-  navigator.geolocation.getCurrentPosition(async pos=>{
+  /* F52 (Frank 09.10.2026): Das Wetter gehört zum OBJEKT, nicht zum Gerät – erst die Objekt-Adresse suchen (Photon, wie beim Luftbild); nur ohne Adresse oder
+     Treffer der Standort des Geräts (am PC im Büro wäre das sonst das Büro-Wetter). Wofür geholt wurde, steht im Protokoll (wetterOrt) und im PDF. */
+  const adr=String((bericht&&bericht.kopf&&bericht.kopf.objektAdresse)||'').trim();
+  const laden=async(lat0,lon0,ort,ortArt)=>{
     try{
-      const lat=pos.coords.latitude.toFixed(4),lon=pos.coords.longitude.toFixed(4);
+      const lat=(+lat0).toFixed(4),lon=(+lon0).toFixed(4);
       const r=await fetch('https://api.open-meteo.com/v1/forecast?latitude='+lat+'&longitude='+lon
         +'&current=temperature_2m,relative_humidity_2m,weather_code&daily=precipitation_sum&past_days=7&forecast_days=1&timezone=auto');
       if(!r.ok)throw new Error('HTTP '+r.status);
@@ -970,14 +976,24 @@ function _fsWetterHolen(bericht,neuBauen){
       bericht.kopf.wetterQuelle='Open-Meteo '+new Date().toLocaleString('de-DE',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
       bericht.kopf.wetterAbruf=new Date().toISOString(); // F2a: Abrufzeit für die Quellenangabe im PDF
       bericht.kopf.wetterStunde=stunde?stunde.stunde:''; // F2a: „08:00" = Stundenwert zur Beginn-Zeit, leer = aktueller Wert zum Abruf
+      bericht.kopf.wetterOrt=ort;bericht.kopf.wetterOrtArt=ortArt; // F52: wofür geholt – die Objekt-Adresse oder der Standort des Geräts
       scheduleSave();
       try{neuBauen();}catch(e){console.warn('[Feuchte] neu aufbauen:',e);}
-      toast('✓ '+[w.wetter,w.aussenT?w.aussenT+' °C':'',w.aussenRf?w.aussenRf+' %':''].filter(Boolean).join(' · '),'success',4000);
+      toast('✓ '+[w.wetter,w.aussenT?w.aussenT+' °C':'',w.aussenRf?w.aussenRf+' %':''].filter(Boolean).join(' · ')+(ortArt==='objekt'?' – für die Objekt-Adresse':' – für den Standort des Geräts'),'success',4000);
     }catch(e){console.warn('[Feuchte] Wetter:',e);toast('Wetter nicht abrufbar: '+(e.message||e),'error',5000);}
-  },err=>{
-    const m={1:'Standort-Zugriff verweigert – bitte in den Einstellungen erlauben.',2:'Standort nicht verfügbar – bitte nochmal versuchen.',3:'Zeitüberschreitung – bitte nochmal versuchen.'};
-    toast('📍 '+(m[err&&err.code]||'Standort-Fehler'),'error',5000);
-  },{timeout:15000,maximumAge:300000,enableHighAccuracy:false});
+  };
+  const geraet=()=>{
+    if(!navigator.geolocation){toast('📍 Standort nicht verfügbar'+(adr?' – und die Objekt-Adresse wurde nicht gefunden':''),'error',5000);return;}
+    toast('🌤 Standort und Wetter werden geholt …','info',3000);
+    navigator.geolocation.getCurrentPosition(pos=>laden(pos.coords.latitude,pos.coords.longitude,'','geraet'),err=>{
+      const m={1:'Standort-Zugriff verweigert – bitte in den Einstellungen erlauben.',2:'Standort nicht verfügbar – bitte nochmal versuchen.',3:'Zeitüberschreitung – bitte nochmal versuchen.'};
+      toast('📍 '+(m[err&&err.code]||'Standort-Fehler'),'error',5000);
+    },{timeout:15000,maximumAge:300000,enableHighAccuracy:false});
+  };
+  if(adr&&typeof _fsLbGeocode==='function'){
+    toast('🌤 Wetter für die Objekt-Adresse wird geholt …','info',3000);
+    _fsLbGeocode(adr).then(p=>{if(p)laden(p.lat,p.lon,adr,'objekt');else geraet();}).catch(()=>geraet());
+  }else geraet();
 }
 
 // Ergebnis-Kasten oben im Formular – Farbe nur im Rand, Schrift bleibt lesbar
@@ -1016,7 +1032,8 @@ function _fsWordAufbau(b,task){
     if(hat(b.datum)||zt)z.push(['Datum, Zeit',[hat(b.datum)?String(b.datum).trim():'',zt].filter(Boolean).join(', ')]);
     if(hat(k.besuchBei))z.push(['Besichtigung bei',String(k.besuchBei).trim()]);
     if(aw)z.push(['Anwesend',aw]);
-    {const wt=_fsWetterKurz(k);if(wt)z.push(['Wetter',wt+' (Wetterdienst, nicht vor Ort gemessen)']);} /* F47 */
+    {const wt=_fsWetterKurz(k),q=_fsBgWetterQuelle(k);if(wt)z.push([q?'Wetter laut Wetterdienst':'Wetter (von Hand eingetragen)',wt+(q?' ('+q.replace(/^Angabe des Wetterdienstes /,'').replace(/\.$/,'')+')':'')]);
+     const vo=_fsVorOrtKurz(k);if(vo)z.push(['Außen vor Ort gemessen',vo]);if(hat(k.vorOrtWetter))z.push(['Wetter vor Ort gesehen',String(k.vorOrtWetter).trim()]);} /* F47 · F52: getrennt nach Herkunft */
     if(hat(k.pruefer))z.push(['Aufgenommen von',String(k.pruefer).trim()]);
     if(z.length){B.push({a:'kapitel',t:'Vor Ort'});B.push({a:'tabelle',z:z});}
   }
@@ -1152,6 +1169,9 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
         _fsZuMehrere(bericht.id,['b:termin','b:raeume'],true);
       }catch(e){console.warn('[Vorabbesichtigung] Start:',e);}
     }
+    else if(typeof _fsGemeinsamerKopf==='function'&&_fsGemeinsamerKopf(bericht)){ /* F52: Begehungsprotokoll – Anlass aus der Karte, Name aus dem Anlass, du selbst unter „Anwesend“ (wie die Vorabbesichtigung) */
+      try{_fsKopfErgaenzen(bericht,t);_fsVbVorbelegen(bericht,t);}catch(e){console.warn('[Begehungsprotokoll] Start:',e);}
+    }
     t.pruefberichte.push(bericht);
     scheduleSave();
   }
@@ -1209,8 +1229,8 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const row=document.createElement('div');
     row.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 14px;border-top:1px solid var(--border);';
     const l=document.createElement('span');l.style.cssText='font-size:var(--fs13,13px);color:var(--text2);width:112px;flex-shrink:0;';l.textContent=label;
-    const i=_inp(bericht.kopf[key],ph,v=>{bericht.kopf[key]=v;if(key==='aussenT'||key==='aussenRf')_fsWerteNeu();if(key==='pruefer'&&bericht.fassung==='begehung'&&typeof _fsBgMerkName==='function')_fsBgMerkName(v);},zahl);
-    row.append(l,(key==='anlass'&&typeof _fsKlappFeld==='function')?_fsKlappFeld(bericht.kopf[key],ph,v=>{bericht.kopf[key]=v;if(key==='anlass'&&_fsVbNameNachAnlass(bericht,v)){hdrT.textContent='🔍 '+_fsTitel(bericht);const ni=body.querySelector('[data-fs-protname] input');if(ni)ni.value=bericht.protName;}scheduleSave();},S_INP,['data-fs-klappfeld',key]):i);return row; /* F44: „Anlass“ bleibt eine Zeile und klappt beim Antippen auf */
+    const i=_inp(bericht.kopf[key],ph,v=>{bericht.kopf[key]=v;if(key==='aussenT'||key==='aussenRf'||key==='vorOrtT'||key==='vorOrtRf')_fsWerteNeu();if(key==='pruefer'&&bericht.fassung==='begehung'&&typeof _fsBgMerkName==='function')_fsBgMerkName(v);},zahl);
+    row.append(l,(key==='anlass'&&typeof _fsKlappFeld==='function')?_fsKlappFeld(bericht.kopf[key],ph,v=>{bericht.kopf[key]=v;if(key==='anlass'&&_fsVbNameNachAnlass(bericht,v)){hdrT.textContent=_fsTitelIcon(bericht)+_fsTitel(bericht);const ni=body.querySelector('[data-fs-protname] input');if(ni)ni.value=bericht.protName;}scheduleSave();},S_INP,['data-fs-klappfeld',key]):i);return row; /* F44: „Anlass“ bleibt eine Zeile und klappt beim Antippen auf */
   }
   function _chip(label,an,fn){
     const b=document.createElement('button');b.type='button';b.textContent=label;
@@ -1223,7 +1243,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     body.innerHTML='';_vbUmgFuellen=null; // F23
     if(_fsIstVorab(bericht)&&bericht.schlank&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_bgBlock('vorort',_teilVorOrtVb),_bgBlock('gemeldet',_teilGemeldetVb),_bgBlock('stellen',_teilFeststellungenB2),_bgBlock('notizen',_teilNotizenB2),_bgBlock('fotos',_teilFotos,'Fotos')); // F23: Besichtigung 2 · F38: ohne den Abschnitt „Räume“ (seit F36 sitzt die Skizze beim Raum; der Balken stand noch da und hieß „raeume“)
     else if(_fsIstVorab(bericht)&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_bgBlock('vorort',_teilVorOrtVb),_bgBlock('gemeldet',_teilGemeldetVb),_bgBlock('stellen',_teilStellenBlockVb),_bgBlock('umgebung',_teilUmgebungVb),_bgBlock('ergebnis',_teilErgebnisVb),_bgBlock('fotos',_teilFotos,'Fotos'),_bgBlock('vorgeschichte',_teilVorgeschichteVb),_bgBlock('karte',_teilKarteVb),_bgBlock('versich',_teilVersichVb),_bgBlock('fest',_teilChecklistenBg,'Feststellungen vor Ort'),...(_vbAltAngaben()?[_bgBlock('angaben',_teilAngabenBg,'Angaben der Nutzer (nicht selbst festgestellt)')]:[]),_bgBlock('termin',_teilTerminBg),_bgBlock('raeume',_teilRaeumeBg,'Räume')); // F20: „Vor Ort“ offen, der Rest zugeklappt
-    else if(bericht.fassung==='begehung'&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_teilKopfBg(),_bgBlock('raeume',_teilRaeumeBg,'Räume'),_bgBlock('fest',_teilChecklistenBg,'Feststellungen vor Ort'),_bgBlock('angaben',_teilAngabenBg,'Angaben der Nutzer (nicht selbst festgestellt)'),_bgBlock('fazit',_teilZusammenfassungBg,'Zusammenfassung der Feststellungen'),_bgBlock('fotos',_teilFotos,'Fotos')); // F2b: zuklappbar, Leiste oben
+    else if(bericht.fassung==='begehung'&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_bgBlock('vorort',_teilVorOrtVb),_bgBlock('gemeldet',_teilGemeldetVb),_bgBlock('geraete',_teilGeraeteBg),_bgBlock('raeume',_teilRaeumeBg,'Räume'),_bgBlock('fest',_teilChecklistenBg,'Feststellungen vor Ort'),_bgBlock('angaben',_teilAngabenBg,'Angaben der Nutzer (nicht selbst festgestellt)'),_bgBlock('fazit',_teilZusammenfassungBg,'Zusammenfassung der Feststellungen'),_bgBlock('fotos',_teilFotos,'Fotos')); // F2b: zuklappbar, Leiste oben · F52: oben derselbe Teil wie die Vorabbesichtigung („Vor Ort“, „Gemeldet / vorgefunden“) statt Auftrag/Ortstermin
     else{
       body.append(_teilErgebnis(),_teilKopf(),_teilRaeume(),_teilStellen(),_teilChecklisten(),_teilBewertung(),_teilFotos()); // v294: Ergebnis oben
       if(typeof _teilUmwandeln==='function'&&body.firstChild&&typeof body.insertBefore==='function')body.insertBefore(_teilUmwandeln(),body.firstChild); // F2a: Hinweis zum Umwandeln ganz oben
@@ -1239,7 +1259,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   }
   function _fsWerteNeu(){
     const a=body.querySelector('[data-fs-aussen]');
-    if(a){const td=_fsTaupunkt(bericht.kopf.aussenT,bericht.kopf.aussenRf);a.textContent=td===null?'':'Taupunkt außen '+_fsEins(td)+' °C';}
+    if(a){const aw=_fsAussenWerte(bericht.kopf),td=(aw.t!==null&&aw.rf!==null)?_fsTaupunkt(aw.t,aw.rf):null;a.textContent=td===null?'':'Taupunkt außen '+_fsEins(td)+' °C'+(aw.quelle==='vorOrt'?' (deine Messung)':' (Wetterdienst)');} /* F52: eigene Messung geht vor */
     body.querySelectorAll('[data-fs-raum]').forEach(el=>{
       const r=bericht.raeume[+el.getAttribute('data-fs-raum')];
       const td=r?_fsTaupunkt(r.t,r.rf):null;
@@ -1589,7 +1609,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   }
 
   function _teilAnwesende(){
-    if(bericht.schlank)return _teilAnwesendeB2(); /* F47 */
+    if(_fsGemeinsamerKopf(bericht))return _teilAnwesendeB2(); /* F47 · F52: auch Begehungsprotokoll */
     const w=document.createElement('div');w.setAttribute('data-fs-anwesende','1');
     w.style.cssText='padding:6px 14px 8px;border-top:1px solid var(--border);';
     const kopf=document.createElement('div');kopf.style.cssText='font-size:var(--fs13,13px);color:var(--text2);margin-bottom:6px;';kopf.textContent='Anwesend – Name und Rolle';
@@ -1869,29 +1889,47 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     return w;
   }
   /* F47: „🌤 Wetter holen“ in „Vor Ort“ – Wetterdienst zur Beginn-Zeit (Standort nötig), im PDF mit „nicht vor Ort gemessen“ */
+  /* F52 (Frank 09.10.2026: „automatisch geholt oder von mir ermittelt – wichtig für die Beurteilung“): ZWEI Kästen. „🌐 Wetterdienst“ = geholt für die Objekt-Adresse,
+     nicht überschreibbar (nur ↻ neu holen / ✕ entfernen). „📏 Selbst vor Ort“ = was du misst oder siehst. Beide dürfen dastehen; im PDF stehen sie getrennt. */
   function _vbWetterB2(){
-    const w=document.createElement('div');w.setAttribute('data-fs-vbwetter','1');w.style.cssText='display:flex;align-items:flex-start;gap:10px;padding:8px 14px;border-top:1px solid var(--border);';
+    const w=document.createElement('div');w.setAttribute('data-fs-vbwetter','1');w.style.cssText='padding:8px 14px;border-top:1px solid var(--border);';
     const holeW=_fsWetterHolen;
-    const k=bericht.kopf,txt=_fsWetterKurz(k);
-    const b=document.createElement('button');b.type='button';b.textContent=txt?'🌤 neu holen':'🌤 Wetter holen';b.setAttribute('data-fs-vbwetterknopf','1');
-    b.style.cssText=S_KNOPF+'flex-shrink:0;min-height:var(--fsh44,44px);border:1.5px solid var(--fs-krd,'+FS_FARBE+');background:var(--fs-kfl,transparent);color:var(--text);';
-    b.onclick=()=>holeW(bericht,_neuBauen);
-    const tx=document.createElement('div');tx.style.cssText='flex:1;min-width:0;font-size:var(--fs14,14px);color:'+(txt?'var(--text)':'var(--text2)')+';line-height:1.4;';
-    tx.textContent=txt||'Wetter noch nicht geholt (freiwillig)';
-    const q=_fsBgWetterQuelle(k);
-    if(q){const qd=document.createElement('div');qd.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin-top:2px;';qd.textContent=q.replace(/^Angabe des Wetterdienstes /,'Quelle: ');tx.appendChild(qd);}
-    w.append(b,tx);
+    const k=bericht.kopf,txt=_fsWetterKurz(k),q=_fsBgWetterQuelle(k);
+    const kasten=()=>{const d=document.createElement('div');d.style.cssText='border:1.5px solid var(--border);border-radius:10px;padding:8px 10px;background:var(--fs-karte,var(--bg2));';return d;};
+    const kopf=(sym,titel,klein)=>{const h=document.createElement('div');h.style.cssText='font-size:var(--fs14,14px);font-weight:700;color:var(--text);margin-bottom:4px;';h.textContent=sym+' '+titel;const s=document.createElement('span');s.style.cssText='font-weight:400;color:var(--text2);font-size:var(--fs12,12px);';s.textContent=' – '+klein;h.appendChild(s);return h;};
+    const kn=(txt2,attr,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=txt2;b.setAttribute(attr,'1');b.style.cssText=S_KNOPF+'min-height:var(--fsh,40px);border:1.5px solid var(--fs-krd,'+FS_FARBE+');background:var(--fs-kfl,transparent);color:var(--text);';b.onclick=fn;return b;};
+    const d1=kasten();d1.setAttribute('data-fs-wetterdienst','1');
+    d1.appendChild(kopf('🌐','Wetterdienst','automatisch, nicht vor Ort gemessen'));
+    const tx=document.createElement('div');tx.style.cssText='font-size:var(--fs14,14px);color:'+(txt?'var(--text)':'var(--text2)')+';line-height:1.4;';
+    tx.textContent=txt||'Wetter noch nicht geholt (freiwillig)';d1.appendChild(tx);
+    if(txt){const qd=document.createElement('div');qd.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin-top:2px;';qd.textContent=q?q.replace(/^Angabe des Wetterdienstes /,'Quelle: '):'von Hand eingetragen (älteres Protokoll) – so steht es auch im PDF';d1.appendChild(qd);}
+    const z1=document.createElement('div');z1.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;';
+    z1.appendChild(kn(txt?'↻ neu holen':'🌤 Wetter holen','data-fs-vbwetterknopf',()=>holeW(bericht,_neuBauen)));
+    if(txt)z1.appendChild(kn('✕ entfernen','data-fs-wetterweg',()=>{if(!confirm('Wetterdienst-Angaben aus dem Protokoll entfernen? Deine eigene Messung bleibt.'))return;_fsWetterDienstLeeren(k);scheduleSave();_neuBauen();}));
+    d1.appendChild(z1);
+    const h1=document.createElement('div');h1.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin-top:4px;line-height:1.4;';h1.textContent=(txt&&!q)?'Aus dem älteren Protokoll von Hand. Zum Ersetzen „↻ neu holen“ (holt für die Objekt-Adresse) – was du selbst misst oder siehst, gehört in den Kasten darunter.':'Geholt für die Objekt-Adresse. Diese Werte lassen sich nicht überschreiben – was du selbst misst oder siehst, gehört in den Kasten darunter.';d1.appendChild(h1);
+    const d2=kasten();d2.setAttribute('data-fs-vorortwetter','1');d2.style.marginTop='8px';
+    d2.appendChild(kopf('📏','Selbst vor Ort','von dir gemessen oder gesehen, freiwillig'));
+    const feld2=(label,key,ph,zahl)=>{const r=_feld(label,key,ph,zahl);r.style.padding='4px 0';r.style.borderTop='none';return r;};
+    d2.append(feld2('Wetter gesehen','vorOrtWetter','z. B. Nieselregen, Fassade nass'),feld2('Außen °C','vorOrtT','z. B. 11,8',true),feld2('Außen % rF','vorOrtRf','z. B. 84',true));
+    const ur=feld2('gemessen um','vorOrtUhr','hh:mm');const ui=ur.querySelector?ur.querySelector('input'):null;
+    const jetzt=kn('jetzt','data-fs-vorortjetzt',()=>{k.vorOrtUhr=_fsVbJetzt().uhr;if(ui)ui.value=k.vorOrtUhr;scheduleSave();});jetzt.style.minHeight='var(--fsh,36px)';jetzt.style.flexShrink='0';ur.appendChild(jetzt);
+    d2.appendChild(ur);
+    d2.appendChild(feld2('Gerät','vorOrtGeraet',String(k.geraetLuft||'').trim()||'z. B. testo 605i'));
+    const td=document.createElement('div');td.setAttribute('data-fs-aussen','1');td.style.cssText='padding:2px 0 0 122px;font-size:var(--fs13,13px);color:var(--text2);';d2.appendChild(td);
+    w.append(d1,d2);
     return w;
   }
   function _teilVorOrtVb(){
     const w=document.createElement('div');w.setAttribute('data-fs-vorort','1');
+    const gk=_fsGemeinsamerKopf(bericht); /* F52: Vorabbesichtigung und Begehungsprotokoll – derselbe Teil */
       const bei=document.createElement('div');bei.setAttribute('data-fs-besuchbei','1');bei.style.cssText='padding:6px 14px 8px;border-top:1px solid var(--border);';
       const bl=document.createElement('div');bl.style.cssText='font-size:var(--fs13,13px);color:var(--text2);margin-bottom:6px;';bl.textContent='Besichtigung bei – wähle den Kontakt für diesen Besuch';bei.appendChild(bl);
       const chips=document.createElement('div');chips.style.cssText='display:flex;flex-wrap:wrap;gap:6px;';
       /* F51 (Frank 09.10.2026): die Anschrift der Person steht dabei, wenn sie vom Objekt abweicht · „🏠 Objekt“ für Besichtigungen ohne Mieter (z. B. Luke im
          Treppenhaus) · ein gespeicherter Wert, den es als Knopf nicht (mehr) gibt, bleibt sichtbar und lässt sich mit ✕ wegnehmen (vorher stand er unsichtbar im PDF) */
       const objAdr=String(bericht.kopf.objektAdresse||(t&&t.adresse)||'').trim(),akt=String(bericht.kopf.besuchBei||'').trim();
-      const personen=_fsVbKontakte(t).filter(k=>!bericht.schlank||_fsVbBeiPerson(k));
+      const personen=_fsVbKontakte(t).filter(k=>!gk||_fsVbBeiPerson(k));
       let gezeigt=false;
       personen.forEach(k=>{
         const txt=_fsVbBeiText(k,objAdr);if(akt===txt)gezeigt=true;
@@ -1904,6 +1942,12 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
         const txt=FS_VB_BEI_OBJEKT+objAdr;if(akt===txt)gezeigt=true;
         const c=_chip('🏠 '+txt,akt===txt,()=>{const an=String(bericht.kopf.besuchBei||'').trim()===txt;bericht.kopf.besuchBei=an?'':txt;bericht.kopf.nutzer='';bericht.kopf.ansprechpartner='';scheduleSave();_neuBauen();});
         c.setAttribute('data-fs-beiobjekt','1');chips.appendChild(c);
+      }
+      if(!akt&&!bericht.schlank&&String(bericht.kopf.nutzer||'').trim()){ /* F52: älteres Begehungsprotokoll – der getippte Nutzer bleibt sichtbar (und im PDF), bis eine Person gewählt ist */
+        const nu=String(bericht.kopf.nutzer).trim();
+        const c=_chip('Nutzer: '+nu+'  ✕',true,()=>{if(!confirm('„'+nu+'“ als Nutzer wegnehmen?'))return;bericht.kopf.nutzer='';scheduleSave();_neuBauen();});
+        c.setAttribute('data-fs-beialt','1');c.title='Aus dem älteren Protokoll – antippen zum Wegnehmen';
+        chips.insertBefore(c,chips.firstChild);
       }
       if(akt&&!gezeigt){
         const c=_chip(akt+'  ✕',true,()=>{if(!confirm('„'+akt+'“ bei „Besichtigung bei“ wegnehmen?'))return;bericht.kopf.besuchBei='';bericht.kopf.nutzer='';bericht.kopf.ansprechpartner='';scheduleSave();_neuBauen();});
@@ -1940,24 +1984,24 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const nameZeile=(()=>{ // F26: Name des Protokolls (Besichtigung 2) – erscheint in der Liste an der Karte, im PDF und im Dateinamen
       const row=document.createElement('div');row.setAttribute('data-fs-protname','1');row.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 14px;';
       const l=document.createElement('span');l.style.cssText='font-size:var(--fs13,13px);color:var(--text2);width:112px;flex-shrink:0;';l.textContent='Name';
-      row.append(l,_inp(bericht.protName,'leer = Vorabbesichtigung – z. B. Wohnung 2. OG',v=>{bericht.protName=v;hdrT.textContent='🔍 '+_fsTitel(bericht);bericht.protNameAuto=false;},false)); /* F48: grauer Text; selbst getippt = PAM zieht nicht mehr nach */
+      row.append(l,_inp(bericht.protName,'leer = '+_fsStandardTitel(bericht)+' – z. B. Wohnung 2. OG',v=>{bericht.protName=v;hdrT.textContent=_fsTitelIcon(bericht)+_fsTitel(bericht);bericht.protNameAuto=false;},false)); /* F52: beide Protokolle · F48: grauer Text; selbst getippt = PAM zieht nicht mehr nach */
       return row;
     })();
-    w.append(...(bericht.schlank?[nameZeile,_vbKopfB2()]:[]).concat([bei],bericht.schlank?[]:[_feld('Lage','lage','z. B. Wohnung darüber, Keller')],[zeitKn,zz],hinweisVb?[hinweisVb]:[],uebVb?[uebVb]:[])); // F23: Besichtigung 2 ohne Lage · F26: mit Name
+    w.append(...(gk?[nameZeile,_vbKopfB2()]:[]).concat([bei],gk?[]:[_feld('Lage','lage','z. B. Wohnung darüber, Keller')],[zeitKn,zz],hinweisVb?[hinweisVb]:[],uebVb?[uebVb]:[])); // F23: Besichtigung 2 ohne Lage · F26: mit Name
       if(_vbZeitAuf){
       const datRow=document.createElement('div');datRow.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 14px;border-top:1px solid var(--border);';
       const dl=document.createElement('span');dl.style.cssText='font-size:var(--fs13,13px);color:var(--text2);width:112px;flex-shrink:0;';dl.textContent='Datum';
       datRow.append(dl,_inp(bericht.datum,'TT.MM.JJJJ',v=>{bericht.datum=v;},false));
       w.append(datRow,_feld('Beginn','beginn','hh:mm'),_feld('Ende','ende','hh:mm'));
       }
-    if(bericht.schlank)w.append(_vbWetterB2(),_teilAnwesende()); // F47: Wetter vor „Anwesend“ · F24: Besichtigung 2: wer ist noch vor Ort (Name und Rolle; Kontakte der Karte zum Antippen); steht im PDF unter „Anwesend“
+    if(gk)w.append(_vbWetterB2(),_teilAnwesende()); // F52: beide · F47: Wetter vor „Anwesend“ · F24: Besichtigung 2: wer ist noch vor Ort (Name und Rolle; Kontakte der Karte zum Antippen); steht im PDF unter „Anwesend“
     return w;
   }
   // F22: „Gemeldet und vorgefunden“ – der Satz aus der Meldung (Anlass) und ob es so vorgefunden wurde
   function _teilGemeldetVb(){
     const w=document.createElement('div');w.setAttribute('data-fs-gemeldet','1');
     w.appendChild(_feld('Anlass','anlass','z. B. Schaden an der Decke im Wohnzimmer'));
-    if(bericht.schlank){const hq=_fsVbAnlassHerkunft(bericht);if(hq){const hd=_bgInfo(hq);hd.setAttribute('data-fs-anlassherkunft','1');w.appendChild(hd);}} /* F47 */
+    if(_fsGemeinsamerKopf(bericht)){const hq=_fsVbAnlassHerkunft(bericht);if(hq){const hd=_bgInfo(hq);hd.setAttribute('data-fs-anlassherkunft','1');w.appendChild(hd);}} /* F47 */
     const wi=_bgInfo('So wurde der Schaden gemeldet. Bestätige, ob du es so vorgefunden hast – nur Feststellung, keine Ursache.');w.appendChild(wi);
     const wahl=document.createElement('div');wahl.style.cssText='display:flex;flex-wrap:wrap;gap:6px;padding:4px 14px 8px;';
     [['wie','✓ wie gemeldet vorgefunden'],['abw','≠ abweichend vorgefunden']].forEach(x=>{
@@ -1969,7 +2013,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       ab.appendChild(_bgTextFeld(bericht.meldungAbw,'Was war anders, z. B. nicht im Wohnzimmer, sondern im Flur …',v=>{bericht.meldungAbw=v;},2));
       w.appendChild(ab);
     }
-    if(bericht.schlank){ /* F47: Vorgeschichte laut Auftraggeber – zugeklappt (nur Anzeige), steht im PDF als „nicht selbst festgestellt“ */
+    if(_fsGemeinsamerKopf(bericht)){ /* F52: beide · F47: Vorgeschichte laut Auftraggeber – zugeklappt (nur Anzeige), steht im PDF als „nicht selbst festgestellt“ */
       const vgAuf=_fsVgAuf.has(bericht),vgDa=!!String(bericht.vorgeschichte||'').trim();
       const vk=document.createElement('button');vk.type='button';vk.setAttribute('data-fs-vgkopf','1');vk.setAttribute('aria-expanded',vgAuf?'true':'false');
       vk.style.cssText=S_KNOPF+'display:flex;align-items:center;gap:8px;width:calc(100% - 28px);margin:4px 14px 10px;min-height:var(--fsh44,44px);text-align:left;border:1.5px solid var(--fs-krd,var(--border));background:var(--fs-kfl,transparent);color:var(--text);';
@@ -3385,10 +3429,10 @@ const FS_BG_TITEL='Begehungsprotokoll';
 const FS_BG_UMFANG='Dieses Protokoll hält den vorgefundenen Zustand und die Messwerte zum Zeitpunkt der Begehung fest. Eine Bewertung der Ursachen und Empfehlungen zur Beseitigung sind nicht Gegenstand dieses Protokolls.';
 const FS_BG_ROLLEN=['Nutzer','Mieter Nachbarkeller','Vertreter Auftraggeber','Aufgenommen von','Besichtigt von','Techniker','Sonstige']; /* F51 */
 // F25 (Frank 03.10.2026): Rollen bei „Anwesend“ in Besichtigung 2 – ohne „Nutzer“ und „Mieter Nachbarkeller“, „Vertreter“ statt „Vertreter Auftraggeber"; die Begehungsprotokolle behalten FS_BG_ROLLEN
-const FS_B2_ROLLEN=['Eigentümer','Eigentümer (wohnt vor Ort)','Mieter','Mieterin','Handwerker','Vertreter','Aufgenommen von','Besichtigt von','Techniker','Sonstige']; /* F51: „Besichtigt von“, „Techniker“ (Frank 09.10.2026: „irgendwas, was mich bezeichnet“) */
+const FS_B2_ROLLEN=['Eigentümer','Eigentümer (wohnt vor Ort)','Mieter','Mieterin','Mieter Nachbarkeller','Handwerker','Vertreter','Aufgenommen von','Besichtigt von','Techniker','Sonstige']; /* F51: „Besichtigt von“, „Techniker“ (Frank 09.10.2026: „irgendwas, was mich bezeichnet“) */
 const FS_B2_KONTAKTROLLEN={mieter:'Mieter',eigentuemer:'Eigentümer',hausverwaltung:'Vertreter',ag:'Vertreter',privatkunde:'Vertreter',handwerker:'Handwerker'};
 // F2b: die zuklappbaren Abschnitte des Begehungsprotokolls (k = Schlüssel, t = Überschrift, c = Kurzname in der Sprungleiste)
-const FS_BG_BLOECKE=[{k:'auftrag',t:'Auftrag und Umfang',c:'Auftrag'},{k:'termin',t:'Ortstermin',c:'Termin'},{k:'geraete',t:'Messgeräte',c:'Geräte'},{k:'raeume',t:'Räume',c:'Räume'},{k:'fest',t:'Feststellungen vor Ort',c:'Feststellungen'},{k:'angaben',t:'Angaben der Nutzer (nicht selbst festgestellt)',c:'Angaben'},{k:'fazit',t:'Zusammenfassung der Feststellungen',c:'Zusammenfassung'},{k:'fotos',t:'Fotos',c:'Fotos'}];
+const FS_BG_BLOECKE=[{k:'vorort',t:'Vor Ort',c:'Vor Ort'},{k:'gemeldet',t:'Gemeldet / vorgefunden',c:'Gemeldet'},{k:'geraete',t:'Messgeräte',c:'Geräte'},{k:'raeume',t:'Räume',c:'Räume'},{k:'fest',t:'Feststellungen vor Ort',c:'Feststellungen'},{k:'angaben',t:'Angaben der Nutzer (nicht selbst festgestellt)',c:'Angaben'},{k:'fazit',t:'Zusammenfassung der Feststellungen',c:'Zusammenfassung'},{k:'fotos',t:'Fotos',c:'Fotos'}];
 const FS_BG_GERAETE={
   luft:'testo 605i – Lufttemperatur und relative Luftfeuchte',
   oberflaeche:'testo 805i – Oberflächentemperatur, berührungslos (Infrarot)',
@@ -3483,14 +3527,14 @@ function _fsDateiSlug(text,max){
 function _fsProtokollUmbenennen(bi){
   try{
     const t=currentTask();const b=t&&Array.isArray(t.pruefberichte)?t.pruefberichte[bi]:null;
-    if(!b||!b.schlank){toast('Dieses Protokoll lässt sich nicht umbenennen','info',3500);return;}
-    const neu=prompt('Name des Protokolls (leer = „Vorabbesichtigung“)',String(b.protName||'').trim());
+    if(!_fsGemeinsamerKopf(b)){toast('Dieses Protokoll lässt sich nicht umbenennen','info',3500);return;} /* F52: auch Begehungsprotokoll */
+    const neu=prompt('Name des Protokolls (leer = „'+_fsStandardTitel(b)+'“)',String(b.protName||'').trim());
     if(neu===null)return;
     b.protName=String(neu).replace(/\s+/g,' ').trim();
     scheduleSave();
     if(typeof renderPruefberichteDesktop==='function')renderPruefberichteDesktop();
     else if(typeof renderDetail==='function')renderDetail(t);
-    toast('✓ Name: '+_fsB2Name(b),'success',3000);
+    toast('✓ Name: '+_fsTitel(b),'success',3000);
   }catch(e){console.warn('[Besichtigung] Umbenennen:',e);}
 }
 const FS_B2_BLOECKE=[{k:'vorort',t:'Vor Ort',c:'Vor Ort'},{k:'gemeldet',t:'Gemeldet / vorgefunden',c:'Gemeldet'},{k:'stellen',t:'Feststellungen',c:'Feststellungen'},{k:'notizen',t:'📝 Notizen',c:'Notizen'},{k:'fotos',t:'Fotos',c:'Fotos'},{k:'raeume',t:'Raumskizze (innen)',c:'Skizze innen'}]; /* F47: Notizen */ /* F35: der Abschnitt gehört zu „Innen“ */
@@ -3532,6 +3576,28 @@ const FS_VB_ANGABEN=[
   {k:'V5.5',q:'Was hat sich zuletzt geändert?'}
 ];
 function _fsIstVorab(b){return !!b&&b.fassung==='begehung'&&b.art==='vorab';}
+/* F52 (Frank 09.10.2026: „die ersten Sachen genau so wie bei der Vorabbesichtigung“): Vorabbesichtigung UND Begehungsprotokoll Wohnung/Keller haben oben
+   denselben Teil – „Vor Ort“ (Name, Auftraggeber, Objekt, Besichtigung bei, 📍/🏁, Wetter, Anwesend) und „Gemeldet / vorgefunden“. Im Programm ist es derselbe
+   Teil (_teilVorOrtVb, _teilGemeldetVb). Nur die frühere Vorab-Fassung (ohne schlank) bleibt, wie sie war. */
+function _fsGemeinsamerKopf(b){return !!b&&b.fassung==='begehung'&&(b.schlank===true||b.art!=='vorab');}
+function _fsStandardTitel(b){return (b&&b.art==='vorab')?'Vorabbesichtigung':'Begehungsprotokoll '+((b&&b.art==='keller')?'Keller':'Wohnung');} // ohne eigenen Namen
+function _fsTitelIcon(b){return _fsIstVorab(b)?'🔍 ':'💧 ';}
+// F52: Außenwerte fürs Rechnen (Taupunkt außen): die eigene Messung vor Ort geht vor, sonst der Wetterdienst
+function _fsAussenWerte(k){
+  k=k||{};const vt=_fsZahl(k.vorOrtT),vf=_fsZahl(k.vorOrtRf);
+  if(vt!==null&&vf!==null)return {t:vt,rf:vf,quelle:'vorOrt'};
+  const t=_fsZahl(k.aussenT),rf=_fsZahl(k.aussenRf);
+  return {t:t,rf:rf,quelle:(t!==null||rf!==null)?'dienst':''};
+}
+// F52: „11,8 °C / 84,0 % r. F. um 10:12 Uhr (testo 605i)“ – nur, was eingetragen ist; Gerät ersatzweise das Luft-Messgerät
+function _fsVorOrtKurz(k){
+  k=k||{};const t=_fsZahl(k.vorOrtT),rf=_fsZahl(k.vorOrtRf);
+  if(t===null&&rf===null)return '';
+  const uhr=_fsVbUhr(k.vorOrtUhr),ger=String(k.vorOrtGeraet||k.geraetLuft||'').trim();
+  return (t!==null?_fsEins(t)+' °C':'–')+(rf!==null?' / '+_fsEins(rf)+' % r. F.':'')+(uhr?' um '+uhr+' Uhr':'')+(ger?' ('+ger+')':'');
+}
+// F52: „✕ entfernen“ im Wetterdienst-Kasten – nimmt nur die Wetterdienst-Felder heraus, die eigene Messung bleibt
+function _fsWetterDienstLeeren(k){if(!k)return;['wetter','aussenT','aussenRf','letzterRegen','wetterQuelle','wetterAbruf','wetterStunde','wetterOrt','wetterOrtArt'].forEach(x=>{k[x]='';});}
 /* F21: Feststellungen „Stelle für Stelle“ (Frank 02.10.2026: ein Schaden hält sich nicht an Schubladen – innen die feuchte Decke, außen die Kehle).
    bericht.vbStellen=[{ort, merkmale:[…], text, fotoRefs:[…]}]. Merkmale sind kurze Feststellungen zum Antippen, keine Ursache. PDF: „1 · Ort: Merkmale – Text (Foto 1, 2)“. */
 const FS_VB_MERKMALE=['nass','feucht','Schimmel','Verfärbung / Fleck','Riss','Putz / Farbe abgeplatzt','Laub / verstopft','undicht / offen','Geruch'];
@@ -4358,7 +4424,7 @@ function _fsVbIso(datum){
 // F18: Beschreibung des Termins in der Karte (und damit des Outlook-Betreffs): „Vorabbesichtigung – Eigentümer“
 function _fsVbTerminText(bericht){
   const rolle=String((bericht&&bericht.kopf&&bericht.kopf.besuchBei)||'').split(':')[0].trim();
-  return 'Vorabbesichtigung'+(rolle?' – '+rolle:''); // F23 · F47: seit der Vereinigung heißen beide so
+  return ((bericht&&bericht.fassung==='begehung'&&bericht.art!=='vorab')?'Begehung '+(bericht.art==='keller'?'Keller':'Wohnung'):'Vorabbesichtigung')+(rolle?' – '+rolle:''); // F23 · F47: seit der Vereinigung heißen beide so · F52: auch Begehungsprotokoll
 }
 // Datum (TT.MM.JJJJ) und Uhrzeit (hh:mm) von jetzt – für die „Ich bin jetzt hier“-Knöpfe
 function _fsVbJetzt(){
@@ -4411,7 +4477,7 @@ function _fsVbVorbelegen(b,t){
   if(!b||!b.kopf)return b;
   const a=String(b.kopf.anlass||'').trim();
   if(a){b.kopf.anlassVorschlag=a;b.kopf.anlassQuelle=_fsVbAnlassQuelle(t);}
-  if(b.schlank&&!String(b.protName||'').trim())b.protName=_fsNameAusAnlass(a);if(b.schlank&&String(b.protName||'').trim())b.protNameAuto=true; /* F48: von PAM gesetzt – darf beim Ändern des Anlasses nachziehen */
+  const gk=_fsGemeinsamerKopf(b);if(gk&&!String(b.protName||'').trim())b.protName=_fsNameAusAnlass(a);if(gk&&String(b.protName||'').trim())b.protNameAuto=true; /* F52: auch Begehungsprotokoll */ /* F48: von PAM gesetzt – darf beim Ändern des Anlasses nachziehen */
   const ich=String(b.kopf.pruefer||'').trim();
   if(ich&&Array.isArray(b.anwesende)&&!b.anwesende.some(p=>p&&String(p.name||'').trim().toLowerCase()===ich.toLowerCase()))b.anwesende.push({name:ich,rolle:_fsBgMerkRolle()}); /* F51: deine zuletzt gewählte Bezeichnung */
   return b;
@@ -4419,7 +4485,7 @@ function _fsVbVorbelegen(b,t){
 /* F48: Name aus dem Anlass NACHZIEHEN (Frank 09.10.2026: Karte ohne Schadensbild → Name blieb leer). Nur wenn der Name leer ist oder von PAM stammt
    (protNameAuto); einen selbst eingetippten Namen ändert PAM nie. Gibt true zurück, wenn der Name gesetzt wurde. */
 function _fsVbNameNachAnlass(b,anlass){
-  if(!b||!b.schlank)return false;
+  if(!_fsGemeinsamerKopf(b))return false; /* F52: auch Begehungsprotokoll */
   if(String(b.protName||'').trim()&&b.protNameAuto!==true)return false;
   b.protName=_fsNameAusAnlass(anlass);b.protNameAuto=!!b.protName;
   return true;
@@ -4495,10 +4561,10 @@ function _fsVbZeitHinweisB(b){
 function _fsVbLaufende(t){
   const l=[];
   ((t&&Array.isArray(t.pruefberichte))?t.pruefberichte:[]).forEach((b,bi)=>{
-    if(!_fsIstVorab(b))return;
+    if(!_fsIstBegehung(b))return; /* F52: auch Begehungsprotokoll */
     const s=_fsVbZeitStatus(b.kopf||{});if(s.art!=='endeFehlt')return;
-    const n=_fsTitel(b);
-    l.push({bi:bi,beginn:s.b,heute:_fsVbLaeuftHeute(b),datum:String(b.datum||'').trim(),name:n==='Vorabbesichtigung'?n:'Vorabbesichtigung „'+n+'“'});
+    const n=_fsTitel(b),std=_fsStandardTitel(b);
+    l.push({bi:bi,beginn:s.b,heute:_fsVbLaeuftHeute(b),datum:String(b.datum||'').trim(),name:n===std?n:(_fsIstVorab(b)?'Vorabbesichtigung':'Begehungsprotokoll')+' „'+n+'“'});
   });
   return l;
 }
@@ -4665,15 +4731,15 @@ function _fsVbBeiText(k,objAdr){const a=String((k&&k.adr)||'').trim();return Str
    Umgebung, Anwesend) steht nie drin. „Ende fehlt“ erst ab dem Tag nach dem Protokoll (am selben Tag läuft es). amPc: am PC keine Meldung „nicht in Drive“. */
 function _fsNochOffen(b,t,amPc){
   const l=[];if(!b||b.fassung!=='begehung')return l;
-  const k=b.kopf||{},hat=v=>!!String(v==null?'':v).trim(),vorab=_fsIstVorab(b),zb=vorab?'vorort':'termin',ab=vorab?'vorort':'auftrag';
+  const k=b.kopf||{},hat=v=>!!String(v==null?'':v).trim(),vorab=_fsIstVorab(b),gk=vorab||_fsGemeinsamerKopf(b),zb=gk?'vorort':'termin',ab=gk?'vorort':'auftrag'; /* F52: Begehungsprotokoll hat denselben Kopf */
   const s=_fsVbZeitStatus(k);
   if(s.art==='ohne')l.push({k:'beginn',text:'Beginn fehlt',block:zb,sel:'[data-fs-zeitzeile]'});
   else if(s.art==='endeFehlt'&&!_fsVbLaeuftHeute(b))l.push({k:'ende',text:'Ende fehlt',block:zb,sel:'[data-fs-zeitzeile]'});
-  if(vorab&&!hat(k.besuchBei))l.push({k:'bei',text:'Besichtigung bei',block:'vorort',sel:'[data-fs-besuchbei]'});
-  if(!hat(k.auftraggeber))l.push({k:'auftraggeber',text:'Auftraggeber',block:ab,sel:vorab?'[data-fs-vbkopf]':''});
-  if(!hat(k.objektAdresse))l.push({k:'objekt',text:'Objekt-Adresse',block:ab,sel:vorab?'[data-fs-vbkopf]':''});
-  if(!hat(k.anlass))l.push({k:'anlass',text:'Gemeldet',block:vorab?'gemeldet':'auftrag',sel:'[data-fs-klappfeld="anlass"]'});
-  else if(vorab&&b.meldungStatus!=='wie'&&b.meldungStatus!=='abw')l.push({k:'vorgefunden',text:'Vorgefunden: wie gemeldet / abweichend',block:'gemeldet',sel:''});
+  if(gk&&!hat(k.besuchBei))l.push({k:'bei',text:'Besichtigung bei',block:'vorort',sel:'[data-fs-besuchbei]'});
+  if(!hat(k.auftraggeber))l.push({k:'auftraggeber',text:'Auftraggeber',block:ab,sel:gk?'[data-fs-vbkopf]':''});
+  if(!hat(k.objektAdresse))l.push({k:'objekt',text:'Objekt-Adresse',block:ab,sel:gk?'[data-fs-vbkopf]':''});
+  if(!hat(k.anlass))l.push({k:'anlass',text:'Gemeldet',block:gk?'gemeldet':'auftrag',sel:'[data-fs-klappfeld="anlass"]'});
+  else if(gk&&b.meldungStatus!=='wie'&&b.meldungStatus!=='abw')l.push({k:'vorgefunden',text:'Vorgefunden: wie gemeldet / abweichend',block:'gemeldet',sel:''});
   const fotos=(Array.isArray(b.fotos)?b.fotos:[]).filter(Boolean);
   if(vorab){
     const st=_fsVbStellenGefuellt(b);
@@ -4691,7 +4757,7 @@ function _fsNochOffen(b,t,amPc){
 }
 // Zeit in der Formular-Liste: „10:00–10:40“ · „⏱ seit 10:00 · Ende fehlt“ · „⚠ Zeit prüfen“
 function _fsVbListeZeit(b){
-  if(!_fsIstVorab(b))return {text:'',endeFehlt:false};
+  if(!_fsIstBegehung(b))return {text:'',endeFehlt:false}; /* F52: auch Begehungsprotokoll */
   const s=_fsVbZeitStatus((b&&b.kopf)||{});
   if(s.art==='ok')return {text:s.b+'–'+s.e,endeFehlt:false};
   if(s.art==='endeFehlt'){const l=_fsVbLaeuftHeute(b);return {text:l?'⏱ läuft seit '+s.b:'⏱ seit '+s.b+' · Ende fehlt',endeFehlt:true,laeuft:l,beginn:s.b};} /* F49: am Tag des Protokolls ruhig, orange erst ab dem Folgetag */
@@ -4741,7 +4807,7 @@ function _fsVbEndeFenster(bericht,fertig){
 function _fsVbEndeNachtragen(bi){
   try{
     const t=currentTask();const b=t&&Array.isArray(t.pruefberichte)?t.pruefberichte[bi]:null;
-    if(!b||!_fsIstVorab(b)){toast('Protokoll nicht gefunden','info',3000);return;}
+    if(!b||!_fsIstBegehung(b)){toast('Protokoll nicht gefunden','info',3000);return;} /* F52: auch Begehungsprotokoll */
     _fsVervollstaendigen(b);
     _fsVbEndeFenster(b,()=>{if(typeof renderPruefberichteDesktop==='function')renderPruefberichteDesktop();else if(typeof renderDetail==='function')renderDetail(t);});
   }catch(e){console.warn('[Vorabbesichtigung] Ende nachtragen:',e);}
@@ -4785,6 +4851,9 @@ function _fsBgUmstellen(b){
   b.fotosJeSeite=_fsFotosJeSeiteMerk(); // F49: Fotos im PDF – die letzte Wahl dieses Geräts (2 groß / 4 je Seite)
   Object.assign(b.kopf,{anlass:'',beginn:'',ende:'',geraetLuft:'',geraetOberflaeche:'',geraetBauteil:'',pruefer:_fsBgMerkName()});
   if(vorab)Object.assign(b.kopf,{versicherung:'',schadennr:'',zugang:'',ansprechpartner:'',besuchBei:'',lage:'',nutzer:''}); // F17: Nutzer wählt Frank je Besuch („Besichtigung bei“), nicht alle Mieter der Karte
+  Object.assign(b.kopf,{vorOrtWetter:'',vorOrtT:'',vorOrtRf:'',vorOrtUhr:'',vorOrtGeraet:'',wetterOrt:'',wetterOrtArt:''}); /* F52: Wetter „selbst vor Ort“ getrennt vom Wetterdienst */
+  if(!vorab){Object.assign(b.kopf,{besuchBei:'',lage:'',nutzer:''});b.protName='';b.vorgeschichte='';b.meldungStatus='';b.meldungAbw='';} /* F52 (Frank 09.10.2026: „genau so wie bei der Vorabbesichtigung“): Nutzer über „Besichtigung bei“, Name aus dem Anlass */
+  if(typeof _fsVbJetzt==='function')b.datum=_fsVbJetzt().datum; /* F52: Datum zweistellig („09.10.2026“) wie „📍 Ich bin jetzt hier“ – vorher „9.10.2026“ */
   b.anwesende=[];
   if(vorab){b.schadenbild='';b.vorgeschichte='';b.vbStellen=[];b.vbUmgebung=[];b.meldungStatus='';b.meldungAbw='';b.luftbildEbene='';b.luftbildAnsicht=null;} // F19, F20, F21, F22, F24, F27
   b.sektionen=(vorab?FS_VB_SEKTIONEN:keller?FS_BG_KELLER:FS_BG_WOHNUNG).map(s=>({titel:s.titel,items:s.items.map(_fsBgItem)}));
@@ -6060,7 +6129,8 @@ function _fsBgWetterQuelle(k){
   if(isFinite(d.getTime())){
     const p=n=>('0'+n).slice(-2);
     const stunde=String((k&&k.wetterStunde)||'').trim();
-    return 'Angabe des Wetterdienstes Open-Meteo'+(stunde?' (Wert der Stunde '+stunde+' Uhr)':'')+', abgerufen am '+p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear()+' um '+p(d.getHours())+':'+p(d.getMinutes())+' Uhr – nicht vor Ort gemessen.';
+    const ort=String((k&&k.wetterOrt)||'').trim(),ortText=(k&&k.wetterOrtArt==='geraet')?' für den Standort des Geräts beim Abruf':(ort?' für '+ort:''); /* F52: wofür geholt */
+    return 'Angabe des Wetterdienstes Open-Meteo'+ortText+(stunde?' (Wert der Stunde '+stunde+' Uhr)':'')+', abgerufen am '+p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear()+' um '+p(d.getHours())+':'+p(d.getMinutes())+' Uhr – nicht vor Ort gemessen.';
   }
   return 'Angabe des Wetterdienstes ('+q+') – nicht vor Ort gemessen.';
 }
@@ -6111,9 +6181,10 @@ async function _fsMobPdfBg(bericht,task){
     doc.setFillColor(...farbe);doc.rect(0,0,W,32,'F');
     doc.setTextColor(255,255,255);doc.setFontSize(16);doc.setFont('helvetica','bold');
     const vorab=_fsIstVorab(bericht); // F16
-    doc.text(vorab?(bericht.schlank?String(doc.splitTextToSize(_fsB2Name(bericht),W-2*M)[0]||FS_B2_TITEL):FS_VB_TITEL):FS_BG_TITEL,M,12); // F23, F26
+    const eigenerName=(!vorab&&String(bericht.protName||'').trim())?String(doc.splitTextToSize(_fsTitel(bericht),W-2*M)[0]||FS_BG_TITEL):''; /* F52: eigener Name des Begehungsprotokolls */
+    doc.text(vorab?(bericht.schlank?String(doc.splitTextToSize(_fsB2Name(bericht),W-2*M)[0]||FS_B2_TITEL):FS_VB_TITEL):(eigenerName||FS_BG_TITEL),M,12); // F23, F26
     doc.setFontSize(9);doc.setFont('helvetica','normal');
-    doc.text(vorab?(bericht.schlank?'Feststellungen vor Ort':'Feststellungen vor der Schadenaufnahme'):'Feststellungen vor Ort – Feuchte '+(keller?'im Keller':'in der Wohnung'),M,18);
+    doc.text(vorab?(bericht.schlank?'Feststellungen vor Ort':'Feststellungen vor der Schadenaufnahme'):(eigenerName?'Begehungsprotokoll '+(keller?'Keller':'Wohnung')+' · ':'')+'Feststellungen vor Ort – Feuchte '+(keller?'im Keller':'in der Wohnung'),M,18);
     const objekt=String(k.objektAdresse||(task&&task.adresse)||'').trim();
     if(objekt)doc.text(doc.splitTextToSize('Objekt: '+objekt,W-2*M)[0],M,24);
     doc.text('Datum: '+(hat(bericht.datum)?bericht.datum:'–')+(k.auftragNr?' · Auftrag: '+k.auftragNr:''),M,29.5);
@@ -6129,15 +6200,15 @@ async function _fsMobPdfBg(bericht,task){
       const rows=[];
       if(hat(k.auftraggeber))rows.push(['Auftraggeber',String(k.auftraggeber).trim()]);
       if(objekt)rows.push(['Objekt',objekt]);
-      if(hat(k.nutzer)&&!bericht.schlank)rows.push(['Nutzer',String(k.nutzer).trim()]); /* F47: steht schon bei „Besichtigung bei“ */
+      if(hat(k.nutzer)&&!(_fsGemeinsamerKopf(bericht)&&hat(k.besuchBei)))rows.push(['Nutzer',String(k.nutzer).trim()]); /* F47: steht schon bei „Besichtigung bei“ · F52: auch Begehungsprotokoll; ohne gewählte Person bleibt der getippte Nutzer (ältere Protokolle) */
       if(hat(k.anlass))rows.push(['Anlass',String(k.anlass).trim()]);
-      if(vorab){ // F16: Versicherung, Zugang, Ansprechpartner; kein Umfangstext (Franks Wahl)
+      if(vorab||_fsGemeinsamerKopf(bericht)){ // F16: Versicherung, Zugang, Ansprechpartner; kein Umfangstext (Franks Wahl) · F52: „Besichtigung bei“ auch im Begehungsprotokoll
         if(hat(k.besuchBei))rows.push(['Besichtigung bei',String(k.besuchBei).trim()]); // F17
         if(hat(k.lage))rows.push(['Lage',String(k.lage).trim()]); // F17
         if(hat(k.versicherung))rows.push(['Versicherung',String(k.versicherung).trim()]);
         if(hat(k.schadennr))rows.push(['Schadennummer',String(k.schadennr).trim()]);
         if(hat(k.zugang))rows.push(['Zugang',String(k.zugang).trim()]);
-        if(hat(k.ansprechpartner)&&!bericht.schlank)rows.push(['Ansprechpartner',String(k.ansprechpartner).trim()]); /* F47: steht schon bei „Besichtigung bei“ */
+        if(hat(k.ansprechpartner)&&!_fsGemeinsamerKopf(bericht))rows.push(['Ansprechpartner',String(k.ansprechpartner).trim()]); /* F47: steht schon bei „Besichtigung bei“ */
       }
       tabelle2(rows);
       if(!vorab)absatz('Umfang: '+FS_BG_UMFANG,{groesse:8.5,farbe:[70,70,70],abstand:5});
@@ -6154,10 +6225,12 @@ async function _fsMobPdfBg(bericht,task){
       const aT=_fsZahl(k.aussenT),aF=_fsZahl(k.aussenRf);
       if(aT!==null||aF!==null)wt.push('außen '+(aT!==null?_fsEins(aT)+' °C':'–')+(aF!==null?' / '+_fsEins(aF)+' % r. F.':''));
       if(hat(k.letzterRegen))wt.push('letzter Regen '+String(k.letzterRegen).trim());
-      if(wt.length){
+      if(wt.length){ /* F52: getrennt – was der Wetterdienst sagt und was du selbst vor Ort gemessen hast (Frank: „wichtig für die Beurteilung“) */
         const q=_fsBgWetterQuelle(k);
-        rows.push(['Wetter',wt.join(', ')+(q?'\n'+q:'')]);
+        rows.push([q?'Wetter laut Wetterdienst':'Wetter (von Hand eingetragen)',wt.join(', ')+(q?'\n'+q:'')]);
       }
+      const vo=_fsVorOrtKurz(k);if(vo)rows.push(['Außen vor Ort gemessen',vo]);
+      if(hat(k.vorOrtWetter))rows.push(['Wetter vor Ort gesehen',String(k.vorOrtWetter).trim()]);
       if(rows.length){abschnitt('Ortstermin');tabelle2(rows);}
     }
 
@@ -6249,7 +6322,7 @@ async function _fsMobPdfBg(bericht,task){
       });
       const sbText=(vorab&&hat(bericht.schadenbild))?String(bericht.schadenbild).trim():''; // F19
       const vbs=(vorab&&typeof _fsVbStellenGefuellt==='function')?_fsVbStellenGefuellt(bericht):[]; // F21
-      const mzl=vorab?_fsVbMeldungZeile(bericht):'',erg=vorab?_fsVbErgebnisZeilen(bericht):[]; // F22
+      const mzl=(vorab||_fsGemeinsamerKopf(bericht))?_fsVbMeldungZeile(bericht):'',erg=vorab?_fsVbErgebnisZeilen(bericht):[]; // F22 · F52: „Gemeldet … vorgefunden“ auch im Begehungsprotokoll
       if(gruppen.length||sbText||vbs.length||mzl||erg.length){
         abschnitt('Feststellungen vor Ort');
         if(mzl){absatz(mzl,{abstand:3});y+=1;} // F22
@@ -6311,10 +6384,10 @@ async function _fsMobPdfBg(bericht,task){
     // 6 · Angaben der Nutzer
     {
       const an=(bericht.angaben||[]).filter(a=>a&&hat(a.text));
-      const vgText=(vorab&&hat(bericht.vorgeschichte))?String(bericht.vorgeschichte).trim():''; // F20
+      const vgText=((vorab||_fsGemeinsamerKopf(bericht))&&hat(bericht.vorgeschichte))?String(bericht.vorgeschichte).trim():''; // F20 · F52: auch Begehungsprotokoll
       if(an.length||vgText){
         abschnitt(vorab?'Vorgeschichte laut Auftraggeber (nicht selbst festgestellt)':'Angaben der Nutzer (nicht selbst festgestellt)');
-        if(vgText)absatz(vgText,{abstand:3}); // F20
+        if(vgText)absatz((vorab?'':'Laut Auftraggeber: ')+vgText,{abstand:3}); // F20 · F52: im Begehungsprotokoll mit Herkunft
         an.forEach(a=>{
           if(hat(a.q))absatz(String(a.q).trim(),{groesse:8,farbe:[100,100,100],abstand:0.5});
           absatz('Laut '+(hat(a.von)?String(a.von).trim():(vorab?'Auftraggeber':'Nutzer'))+': '+String(a.text).trim(),{einzug:3,abstand:3});
@@ -8486,7 +8559,7 @@ function _fsListeZeile(b,t){
   if(b.vorlage==='feuchte'&&b.fassung==='begehung'){
     const keller=b.art==='keller';
     const info=(typeof _fsBgListeInfo==='function')?_fsBgListeInfo(b):{raeume:''};
-    return {kurz:keller?'BEG-KELLER':'BEG-WHG',lang:keller?'Begehungsprotokoll Keller':'Begehungsprotokoll Wohnung',name:kartenname||String(b.titel||'Begehungsprotokoll'),sub:info.raeume||''};
+    return {kurz:keller?'BEG-KELLER':'BEG-WHG',lang:keller?'Begehungsprotokoll Keller':'Begehungsprotokoll Wohnung',name:String(b.protName||'').trim()||kartenname||String(b.titel||'Begehungsprotokoll'),sub:info.raeume||''}; /* F52: eigener Name zuerst */
   }
   return null;
 }
