@@ -7345,6 +7345,16 @@ body.dark .mv2-kurzinfo-box textarea::placeholder{color:#9A8A50;}
 .foto-desktop-thumb:hover{transform:scale(1.03);box-shadow:0 4px 18px rgba(0,0,0,.4);}
 .foto-desktop-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
 .foto-desktop-thumb.fallback::before{content:'🖼️';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:32px;color:var(--text2);}
+/* b1172: Vorschaubild kam auch beim zweiten Weg nicht → „↻ nochmal“ auf der Kachel; Kachelgröße klein/mittel/groß (je Rechner) */
+.foto-gallery-thumb.fallback::before{content:'🖼️';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:40px;color:#94a3b8;}
+.foto-desktop-thumb .foto-nochmal,.foto-gallery-thumb .foto-nochmal{position:absolute;left:50%;top:72%;transform:translate(-50%,-50%);z-index:4;padding:3px 10px;border-radius:12px;border:none;background:rgba(0,0,0,.72);color:#fff;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;}
+.foto-desktop-thumb .foto-nochmal:hover,.foto-gallery-thumb .foto-nochmal:hover{background:var(--accent);}
+.foto-kachel-wahl{display:inline-flex;margin-left:8px;border:1px solid var(--border);border-radius:6px;overflow:hidden;vertical-align:middle;}
+.foto-kachel-knopf{padding:2px 7px;border:none;background:var(--bg3);color:var(--text2);font-size:10.5px;cursor:pointer;}
+.foto-kachel-knopf+.foto-kachel-knopf{border-left:1px solid var(--border);}
+.foto-kachel-knopf.an{background:var(--accent);color:#fff;font-weight:600;}
+#fotoListDesktop.kachel-k .foto-desktop-grid{grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:4px;}
+#fotoListDesktop.kachel-g .foto-desktop-grid{grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;}
 .foto-desktop-thumb .foto-del{position:absolute;top:4px;right:4px;background:rgba(0,0,0,.65);color:#fff;border:none;width:22px;height:22px;border-radius:11px;font-size:12px;cursor:pointer;z-index:2;}
 .foto-desktop-thumb .foto-edit{position:absolute;top:4px;right:30px;background:rgba(0,0,0,.65);color:#fff;border:none;width:22px;height:22px;border-radius:11px;font-size:11px;cursor:pointer;z-index:2;display:flex;align-items:center;justify-content:center;}
 .foto-desktop-thumb .foto-edit:hover{background:rgba(106,138,255,.85);}
@@ -10613,7 +10623,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-10 · #1171'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-10-b1171) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-11 · #1172'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-11-b1172) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -25182,7 +25192,7 @@ function _btbFotoTile(x){
   const id=(f.editedDriveId||f.driveId||'');
   const safeId=String(id).replace(/[^A-Za-z0-9_\-]/g,'');
   const cached=id?_desktopFotoBlobCache.get(id):null;
-  const thumb=f.thumbnailLink||f.thumbnail||_hvBildCacheLookup(id)||'';
+  const thumb=((typeof _fotoFrischUrl==='function')&&_fotoFrischUrl(id,400))||f.thumbnailLink||f.thumbnail||_hvBildCacheLookup(id)||'';   // b1172: frische Vorschau zuerst
   const dId=safeId?'data-foto-id="'+safeId+'" ':'';
   const srcAttr=cached?('src="'+esc(cached)+'" '+dId):(thumb?('src="'+esc(thumb)+'" '+dId):dId);
   const zeit=_btbZeit(x.d);
@@ -32129,28 +32139,191 @@ async function loadDesktopFotoThumb(imgEl,driveId){
   if(url){imgEl.src=url;imgEl.style.display='';}
   else{imgEl.style.display='none';const p=imgEl.parentElement;if(p)p.classList.add('fallback');}
 }
-// Fallback wenn thumbnailLink abgelaufen: Auth-Fetch nachladen
-function _desktopThumbFallback(img){
-  if(img.dataset.fbDone==='1')return; // kein Loop
-  img.dataset.fbDone='1';
-  const id=img.getAttribute('data-foto-id');
-  if(id&&(gdriveToken||PAM_NOTBETRIEB)){ // b887: im Notbetrieb übernimmt der Helfer
-    img.removeAttribute('onerror');
-    // b581: durch die b579-Warteschlange. Vorher feuerten hier (Bautagebuch + Foto-Sektion)
-    // bei vielen abgelaufenen Vorschau-Adressen ALLE Vollbild-Nachladungen gleichzeitig –
-    // derselbe ERR_INSUFFICIENT_RESOURCES-Sturm wie im Foto-Eingang vor b579, und der riss
-    // auch die Hover-Abrufe mit. b579-Merkregel: die Schlange gehört vor jede Massen-Nachladung.
-    _pamLadeSchlange(()=>_fetchDesktopFotoBlob(id).then(u=>{
-      if(u){img.src=u;img.style.display='';}
-      else{img.style.display='none';if(img.parentElement)img.parentElement.classList.add('fallback');}
-    }));
-  } else {
-    img.style.display='none';
-    if(img.parentElement)img.parentElement.classList.add('fallback');
+/* ══ b1172 (Frank 11.10.2026 „baue 1“): Fotos laden zuverlässig – auch bei 200 Fotos an einer Karte ══
+   Befund 10.10. (Karte mit 206 Fotos): die gespeicherten Vorschau-Adressen (thumbnailLink) laufen nach einiger Zeit ab (403);
+   dann lud jede Kachel das GANZE Original (alt=media), die Galerie und das Foto-Fenster sogar alle auf einmal ohne Warteschlange;
+   scheiterte das, blieb die Kachel für immer leer.
+   Jetzt: (1) beim Öffnen einer Karte EINE Abfrage je Drive-Ordner (Foto-Ordner + Unterordner) holt frische Vorschau-Adressen in
+   _hvThumbCache (derselbe Speicher wie die Hover-Vorschau, 30 Minuten) – nicht dauerhaft gespeichert (Frank). (2) Jede Kachel lädt
+   in Stufen: gespeicherte/frische Vorschau → frische Vorschau (einzeln, über die Warteschlange) → das Original (wie bisher, über die
+   Warteschlange) → „↻ nochmal“. Galerie und Foto-Fenster nehmen ebenfalls die Vorschau (groß genug für die Kacheln); das Original
+   kommt erst in der Großansicht. (3) Herkunft am eigenen Foto: 📧 aus Mail (Kennung der Mail), 💬 WhatsApp (Dateiname),
+   📱 vom PAM-Handy (Name „JJJJMMTT_hhmmss_…“, den PAM Mobil beim Hochladen vergibt). (4) Kachelgröße klein/mittel/groß in der
+   Foto-Sektion der Karte – gilt an DIESEM Rechner (wie Zoom und Fenstergrößen; Laptop und PC haben verschiedene Bildschirme). */
+var _fotoFrischKarte='',_fotoFrischZeit=0,_fotoFrischPromise=null;
+const _FOTO_KACHEL_KEY='pam_foto_kachel_v1';
+function _fotoGr(u,px){return String(u||'').replace(/=s\d+(-c)?$/,'=s'+px);}
+// frische Vorschau-Adresse aus dem Speicher (sonst leer)
+function _fotoFrischUrl(id,px){
+  const c=id?_hvThumbCache[id]:null;
+  return (c&&c.u&&(Date.now()-c.ts)<_HV_CACHE_MS)?_fotoGr(c.u,px):'';
+}
+// frische Vorschau-Adresse holen: erst die laufende Ordner-Abfrage abwarten, dann Speicher, dann einzeln bei Drive (_hvThumb)
+async function _fotoVorschauFrisch(id){
+  try{if(_fotoFrischPromise)await _fotoFrischPromise;}catch(e){}
+  const c=_hvThumbCache[id];
+  if(c&&c.u&&(Date.now()-c.ts)<_HV_CACHE_MS)return c.u;
+  if(typeof gdriveToken==='undefined'||!gdriveToken||(typeof gdriveTokenValid==='function'&&!gdriveTokenValid()))return '';
+  try{const u=await _hvThumb(id);return (u&&u.indexOf('drive.google.com/thumbnail')<0)?u:'';}catch(e){return '';}   // die Cookie-Notlösung lädt private Dateien nicht
+}
+// beim Öffnen einer Karte: eine Abfrage je Ordner statt einer je Foto (nicht öfter als alle 20 Minuten je Karte)
+function _fotoFrischHolen(){
+  const tid=(document.getElementById('taskId')||{}).value||'';
+  if(!tid)return null;
+  if(_fotoFrischPromise)return _fotoFrischPromise;
+  if(_fotoFrischKarte===tid&&(Date.now()-_fotoFrischZeit)<20*60*1000)return null;
+  if(typeof gdriveToken==='undefined'||!gdriveToken||(typeof gdriveTokenValid==='function'&&!gdriveTokenValid()))return null;
+  const rootId=(typeof _getDriveFotoFolderId==='function')?_getDriveFotoFolderId():'';
+  if(!rootId)return null;
+  _fotoFrischKarte=tid;_fotoFrischZeit=Date.now();   // auch nach einem Fehler nicht sofort noch einmal
+  const p=(async function(){
+    const liste=async function(q){
+      let out=[],tok='';
+      do{
+        const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q)
+          +'&fields=nextPageToken,files(id,mimeType,thumbnailLink)&pageSize=1000'+(tok?'&pageToken='+encodeURIComponent(tok):''),
+          {headers:{Authorization:'Bearer '+gdriveToken}});
+        if(!r.ok)throw new Error('Drive '+r.status);
+        const j=await r.json();
+        out=out.concat(j.files||[]);tok=j.nextPageToken||'';
+      }while(tok);
+      return out;
+    };
+    const oben=await liste("'"+rootId+"' in parents and trashed=false");
+    let alle=oben.slice();
+    const ordner=oben.filter(function(f){return f&&f.mimeType==='application/vnd.google-apps.folder';});
+    for(const o of ordner){try{alle=alle.concat(await liste("'"+o.id+"' in parents and trashed=false"));}catch(e){}}   // nacheinander – kein Lade-Sturm
+    const jetzt=Date.now();let n=0;
+    alle.forEach(function(f){if(f&&f.id&&f.thumbnailLink){_hvThumbCache[f.id]={u:String(f.thumbnailLink).replace(/=s\d+(-c)?$/,'=s1000'),ts:jetzt};n++;}});
+    return n;
+  })();
+  _fotoFrischPromise=p;
+  p.then(function(){if(((document.getElementById('taskId')||{}).value||'')===tid)_fotoFrischAnwenden();},function(e){console.warn('[b1172] frische Vorschaubilder:',e);})
+    .then(function(){if(_fotoFrischPromise===p)_fotoFrischPromise=null;});
+  return p;
+}
+// nach der Ordner-Abfrage: Kacheln, die noch nichts zeigen, bekommen die frische Vorschau (Karte, Bautagebuch, Galerie, Foto-Fenster)
+function _fotoFrischAnwenden(){
+  const jeBild=function(img,attr,px){
+    if(img.complete&&img.naturalWidth>0)return;   // zeigt schon ein Bild
+    const u=_fotoFrischUrl(img.getAttribute(attr),px);
+    if(!u||u===img.getAttribute('src'))return;
+    img.dataset.ls='1';img.style.display='';
+    const t=img.parentElement;
+    if(t){t.classList.remove('fallback');const b=t.querySelector('.foto-nochmal');if(b)b.remove();}
+    img.src=u;
+  };
+  try{document.querySelectorAll('#fotoListDesktop img[data-foto-id], #taskNotizList img[data-foto-id]').forEach(function(i){jeBild(i,'data-foto-id',400);});}catch(e){}
+  try{document.querySelectorAll('#fotoGalleryGrid img[data-foto-id-gal]').forEach(function(i){jeBild(i,'data-foto-id-gal',800);});}catch(e){}
+  try{if(typeof _pfwOffen==='function'&&_pfwOffen())Array.prototype.forEach.call(_pfwWin.document.querySelectorAll('#pfwRaster img[data-foto-id-gal]'),function(i){jeBild(i,'data-foto-id-gal',800);});}catch(e){}
+}
+/* Laden in Stufen (data-ls am Bild): ''/fehlt → 1 frische Vorschau → 2 das Original → 3 aufgegeben („↻ nochmal“).
+   Aufgerufen als onerror der Kachel und wenn sie ohne Bild entsteht. attr = data-foto-id (Karte, Bautagebuch) bzw. data-foto-id-gal
+   (Galerie, Foto-Fenster); px = Größe der Vorschau. */
+function _fotoBildStufe(img,attr,px){
+  if(!img)return;
+  const id=img.getAttribute(attr);
+  const st=img.dataset.ls||'';
+  const mitDrive=(typeof gdriveToken!=='undefined'&&!!gdriveToken)||(typeof PAM_NOTBETRIEB!=='undefined'&&!!PAM_NOTBETRIEB);   // b887: im Notbetrieb liefert der Helfer
+  if(!id||!mitDrive||st==='3'){img.dataset.ls='3';_fotoKachelFehlt(img);return;}
+  if(st===''){
+    img.dataset.ls='1';
+    _pamLadeSchlange(function(){return _fotoVorschauFrisch(id).then(function(u){
+      const g=u?_fotoGr(u,px):'';
+      if(!g){_fotoBildStufe(img,attr,px);return;}   // keine Vorschau zu haben → Original
+      if(g!==img.getAttribute('src')){img.style.display='';img.src=g;return;}
+      // dieselbe Vorschau steht schon drin (z. B. von der Ordner-Abfrage): nur wenn GENAU sie gescheitert ist, weiter zum Original –
+      // lädt sie noch, entscheidet ihr onerror (Probe 11.10.: sonst kam unnötig das ganze Original)
+      if(img.complete&&!img.naturalWidth)_fotoBildStufe(img,attr,px);
+    });});
+    return;
   }
+  if(st==='1'){
+    img.dataset.ls='2';
+    // b581-Merkregel: die Schlange gehört vor jede Massen-Nachladung
+    _pamLadeSchlange(function(){return _fetchDesktopFotoBlob(id).then(function(u){
+      if(u&&u!==img.getAttribute('src')){img.style.display='';img.src=u;}
+      else{img.dataset.ls='3';_fotoKachelFehlt(img);}
+    });});
+    return;
+  }
+  img.dataset.ls='3';_fotoKachelFehlt(img);
+}
+function _fotoKachelFehlt(img){
+  img.style.display='none';
+  const t=img.parentElement;if(!t)return;
+  t.classList.add('fallback');
+  // „↻ nochmal“ nur an den Kacheln der Foto-Sektion, der Galerie und des Foto-Fensters (Bautagebuch: wie bisher nur der Platzhalter)
+  if(!t.classList.contains('foto-desktop-thumb')&&!t.classList.contains('foto-gallery-thumb'))return;
+  if(t.querySelector('.foto-nochmal'))return;
+  const b=(img.ownerDocument||document).createElement('button');
+  b.type='button';b.className='foto-nochmal';b.textContent='↻ nochmal';b.title='Vorschaubild noch einmal laden';
+  b.setAttribute('onclick','event.stopPropagation();_fotoNochmal(this)');
+  t.appendChild(b);
+}
+function _fotoNochmal(btn){
+  const t=btn&&btn.parentElement;if(!t)return;
+  const img=t.querySelector('img[data-foto-id],img[data-foto-id-gal]');
+  btn.remove();t.classList.remove('fallback');
+  if(!img)return;
+  const gal=img.hasAttribute('data-foto-id-gal');
+  const id=img.getAttribute(gal?'data-foto-id-gal':'data-foto-id');
+  if(id)delete _hvThumbCache[id];   // die gemerkte Adresse war offenbar nicht gut – neu fragen
+  delete img.dataset.ls;img.removeAttribute('src');img.style.display='';
+  _fotoBildStufe(img,gal?'data-foto-id-gal':'data-foto-id',gal?800:400);
+}
+// Galerie und Foto-Fenster: Bild-Merkmale der Kachel – Original im Speicher, sonst frische, sonst gespeicherte Vorschau
+// (alt = gespeicherte Vorschau-Adresse; bei bemalten Fotos leer, sie zeigt das Original)
+function _galBildAttr(id,alt){
+  if(!id)return '';
+  const safeId=String(id).replace(/[^A-Za-z0-9_\-]/g,'');   // wie überall (test_b1050): nur A–Z a–z 0–9 _ -
+  if(!safeId)return '';
+  const cached=_desktopFotoBlobCache.get(id);
+  const frisch=_fotoFrischUrl(id,800);
+  const gesp=(alt&&String(alt).slice(0,5)!=='blob:')?_fotoGr(alt,800):'';
+  const src=cached||frisch||gesp;
+  return (src?'src="'+esc(src)+'" ':'')+'data-foto-id-gal="'+safeId+'" '+((cached||frisch)?'data-ls="1" ':'');
+}
+function _galBildFehler(img){_fotoBildStufe(img,'data-foto-id-gal',800);}
+// nach dem Zeichnen: Kacheln ohne Bild holen ihre Vorschau – der Reihe nach über die Warteschlange
+function _galBilderLaden(grid){
+  Array.prototype.forEach.call(grid.querySelectorAll('img[data-foto-id-gal]'),function(img){
+    if(img.getAttribute('src'))return;
+    _fotoBildStufe(img,'data-foto-id-gal',800);
+  });
+}
+// Herkunft eines EIGENEN Fotos
+function _fotoHerkunftArt(f){
+  if(!f)return '';
+  if(f.messageId||f.fromEmail)return 'mail';
+  const n=String(f.name||'');
+  if(/whatsapp/i.test(n)||/(^|[-_ ])WA\d{3,}/i.test(n))return 'whatsapp';
+  if(/^\d{8}_\d{6}_./.test(n)&&!/^\d{8}_\d{6}_\d{1,3}\.\w+$/.test(n))return 'handy';   // PAM Mobil: „JJJJMMTT_hhmmss_<Originalname>“ (nicht: Serienbild „…_001.jpg“)
+  return '';
+}
+function _fotoHerkunftZeichen(art){return art==='mail'?'📧':art==='whatsapp'?'💬':art==='handy'?'📱':'';}
+function _fotoHerkunftWort(art){return art==='mail'?'aus Mail':art==='whatsapp'?'per WhatsApp':art==='handy'?'vom PAM-Handy hochgeladen':'';}
+function _fotoZeichen(f){const a=_fotoHerkunftArt(f);return a?(_fotoHerkunftZeichen(a)+' '):'';}
+function _fotoZeichenOhneMail(f){const a=_fotoHerkunftArt(f);return (a&&a!=='mail')?(_fotoHerkunftZeichen(a)+' '):'';}
+// Kachelgröße in der Foto-Sektion der Karte
+function _fotoKachelGroesse(){try{const v=localStorage.getItem(_FOTO_KACHEL_KEY);return (v==='k'||v==='g')?v:'m';}catch(e){return 'm';}}
+function _fotoKachelWahlHtml(){
+  const g=_fotoKachelGroesse();
+  const k=function(w,txt,tit){return '<button type="button" class="foto-kachel-knopf'+(g===w?' an':'')+'" onclick="event.stopPropagation();_fotoKachelSetzen(\''+_jsa(w)+'\')" title="'+tit+'">'+txt+'</button>';};
+  return '<span class="foto-kachel-wahl" title="Größe der Kacheln – gilt an diesem Rechner">'
+    +k('k','klein','Kleine Kacheln – mehr Fotos auf einen Blick')+k('m','mittel','Mittlere Kacheln (wie bisher)')+k('g','groß','Große Kacheln')+'</span>';
+}
+function _fotoKachelSetzen(w){
+  try{localStorage.setItem(_FOTO_KACHEL_KEY,(w==='k'||w==='g')?w:'m');}catch(e){}
+  try{renderFotoListDesktop();}catch(e){}
+}
+// Vorschaubild abgelaufen oder nicht ladbar: weiter in Stufen (b1172), am Ende „↻ nochmal“ statt einer leeren Kachel
+function _desktopThumbFallback(img){
+  _fotoBildStufe(img,'data-foto-id',400);
 }
 function hydrateDesktopFotoThumbs(){
   if(!gdriveTokenValid()&&!PAM_NOTBETRIEB)return; // Kein gültiger Token → keine 401-Requests (b887: im Notbetrieb liefert der Helfer)
+  if(typeof _fotoFrischHolen==='function'){try{_fotoFrischHolen();}catch(e){}}   // b1172: frische Vorschau-Adressen – eine Abfrage je Ordner
   document.querySelectorAll('#fotoListDesktop img[data-foto-id], #taskNotizList img[data-foto-id]').forEach(img=>{ // b515: auch Bautagebuch-Leiste
     if(img.dataset.hydrated==='1')return;
     // Performance-Fix (#310): Wenn bereits eine schnelle Drive-Vorschau (thumbnailLink) als src
@@ -32160,6 +32333,8 @@ function hydrateDesktopFotoThumbs(){
     const srcAttr=img.getAttribute('src')||'';
     if(srcAttr && !srcAttr.endsWith(window.location.href)){img.dataset.hydrated='1';return;}
     const id=img.getAttribute('data-foto-id');
+    // b1172: ohne gespeichertes Vorschaubild zuerst die frische Vorschau (klein), das Original erst, wenn es die nicht gibt
+    if(id&&typeof _fotoBildStufe==='function'){img.dataset.hydrated='1';_fotoBildStufe(img,'data-foto-id',400);return;}
     if(id){img.dataset.hydrated='1';_pamLadeSchlange(()=>loadDesktopFotoThumb(img,id));} // b581: gebremst, s. _desktopThumbFallback
   });
 }
@@ -32347,6 +32522,7 @@ function _fotoTsBackfillKick(){
 function renderFotoListDesktop(){
   const el=document.getElementById('fotoListDesktop');
   if(!el)return;
+  if(typeof _fotoKachelGroesse==='function'&&el.classList){const _kg=_fotoKachelGroesse();el.classList.toggle('kachel-k',_kg==='k');el.classList.toggle('kachel-g',_kg==='g');}   // b1172: Kachelgröße
   _feDeskBtnRefresh(); // b530: „📥 Foto-Eingang (N)"-Knopf ein-/ausblenden + Zähler
   const badge=document.getElementById('tFotoCountBadge');
   // b630: Verweise auf die Dateien der wiederkehrenden Leistungen. Sie stehen NICHT
@@ -32431,7 +32607,7 @@ function renderFotoListDesktop(){
     const safeId=String(id).replace(/[^A-Za-z0-9_\-]/g,'');
     // Priorität: 1. BlobCache 2. thumbnailLink (Desktop-Format) / thumbnail (Mobile-Format) 3. hv-bild Cache 4. lazy Drive API
     // COMPAT-FIX: Mobile speichert 'thumbnail', Desktop speichert 'thumbnailLink' – beide lesen.
-    const thumbSrc=f.thumbnailLink||f.thumbnail||_hvBildCacheLookup(id)||'';
+    const thumbSrc=((typeof _fotoFrischUrl==='function')&&_fotoFrischUrl(id,400))||f.thumbnailLink||f.thumbnail||_hvBildCacheLookup(id)||'';   // b1172: frische Vorschau zuerst
     // data-foto-id immer setzen (auch wenn thumbSrc vorhanden) → Fallback-Fetch wenn URL abläuft
     const dId=safeId?'data-foto-id="'+safeId+'" ':'';
     const srcAttr=cached?('src="'+esc(cached)+'" '+dId):(thumbSrc?('src="'+esc(thumbSrc)+'" '+dId):(dId));
@@ -32454,8 +32630,9 @@ function renderFotoListDesktop(){
     // im Tooltip. Bewusst kein eigenes Badge: oben rechts sitzen drei Knoepfe, oben
     // links 360°- und „bearb."-Marke, unten die Beschriftung – es ist kein Platz frei.
     const _herk=_fotoHerkunft(f);
-    const _hPre=_herk?'📧 ':'';
-    const tip=(caption?(caption+' — '+name):name)+(_herk?(' · '+_herk):'');
+    // b1172: 💬 WhatsApp / 📱 PAM-Handy genauso vor der Beschriftung (📧 Mail mit Datum wie bisher)
+    const _hPre=_herk?'📧 ':''+((typeof _fotoZeichenOhneMail==='function')?_fotoZeichenOhneMail(f):'');
+    const tip=(caption?(caption+' — '+name):name)+(_herk?(' · '+_herk):'')+((!_herk&&typeof _fotoHerkunftArt==='function'&&_fotoHerkunftArt(f))?(' · '+_fotoHerkunftWort(_fotoHerkunftArt(f))):'');
     const bottomLabel=caption
       ?'<div class="foto-caption" title="'+esc(caption)+(_herk?(' · '+_herk):'')+'">'+_hPre+esc(caption)+'</div>'
       :'<div class="foto-name">'+_hPre+esc(name)+'</div>';
@@ -32505,6 +32682,7 @@ function renderFotoListDesktop(){
   el.innerHTML='<div class="foto-desktop-wrap'+(_fotoExpanded?' expanded':'')+'">'
     +'<div class="foto-desktop-wrap-label" style="position:sticky;top:0;background:var(--bg3);z-index:1;padding-bottom:6px;">'+(function(){var c=_fvCounts(taskFotos);return c.v?('📷 Drive-Medien ('+c.f+' Foto'+(c.f!==1?'s':'')+' · 🎬 '+c.v+' Video'+(c.v!==1?'s':'')+')'):('📷 Drive-Fotos ('+taskFotos.length+' Stück)');})()
       +'<button onclick="startFotoSelectMode()" title="Mehrere Fotos auswählen – dann PDF erstellen, Kopie an eine andere Karte oder verschieben" style="margin-left:10px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);font-size:11px;cursor:pointer">☑ Fotos auswählen …</button>'+'<button onclick="createPdfAllFotos()" style="margin-left:6px;padding:3px 10px;border-radius:6px;border:none;background:var(--accent);color:#fff;font-size:11px;font-weight:600;cursor:pointer">📄 Alle als PDF</button>'+'<button onclick="_fdkOeffnen()" title="Word-Startdokument vorne, Fotoseiten hinten – ein Dokument (b734)" style="margin-left:6px;padding:3px 10px;border-radius:6px;border:1px solid var(--accent);background:var(--bg3);color:var(--accent);font-size:11px;font-weight:600;cursor:pointer">📚 Fotodokumentation…</button>'
+      +((typeof _fotoKachelWahlHtml==='function')?_fotoKachelWahlHtml():'')   // b1172: Kachelgröße klein/mittel/groß
       +(gdriveToken?'':'<span style="margin-left:8px;font-size:10px;color:var(--red);opacity:.8">⚠ Drive verbinden für Vorschau</span>')
     +'</div>'
     +pdfBar
@@ -32950,7 +33128,7 @@ function _galMitVerweisen(eigeneHtml,nEigene){
       const bearb=(f.fo&&f.fo.editedDriveId)?'<span style="position:absolute;top:7px;right:7px;background:var(--accent);color:#fff;font-size:9px;padding:2px 5px;border-radius:4px;font-weight:700;">✏ bearb.</span>':'';
       // b1170: kein title mehr – beim Drüberfahren kommt das Schild (_galInfoZeigen), es sagt auch „Doppelklick: groß“
       html+='<div class="foto-gallery-thumb gal-ref" data-gr="'+id+'" onclick="_galRefClick(\''+_jsa(id)+'\',this)">'
-        +'<img '+srcAttr+'alt="" loading="lazy" onerror="this.style.display=\'none\'" id="galRefImg'+(k++)+'">'
+        +'<img '+((typeof _galBildAttr==='function')?_galBildAttr(id,(f.fo&&f.fo.editedDriveId)?'':((f.fo&&(f.fo.thumbnailLink||f.fo.thumbnail))||f.thumbnailLink||f.thumbnail||'')):srcAttr)+'alt="" loading="lazy" onerror="_galBildFehler(this)" id="galRefImg'+(k++)+'">'
         +'<span class="gal-marke">'+esc(marke)+'</span>'+bearb+(typeof _galNotizZeichen==='function'?_galNotizZeichen(f.fo||f):'')
         +'<div class="gal-name">'+esc(f.caption||f.name||'Foto')+'</div>'
         +'</div>';
@@ -33034,7 +33212,7 @@ function _galInfoZeigen(k){
   _galInfoEl=el;
   const f=g.f,ref=g.ref||{};
   let herkunft;
-  if(g.art==='eigen')herkunft='📷 Foto der Karte';
+  if(g.art==='eigen')herkunft='📷 Foto der Karte'+((typeof _fotoHerkunftArt==='function'&&_fotoHerkunftArt(f))?' · '+_fotoHerkunftWort(_fotoHerkunftArt(f)):'');   // b1172
   else if(g.art==='wp')herkunft='📋 '+(ref.berichtArt||'Protokoll')+(ref.berichtDatum?' · '+ref.berichtDatum:'')+(ref.berichtName?' — '+ref.berichtName:'');
   else if(g.art==='dp')herkunft='🗺 Dachplan-Pin '+String(ref.pinNr!=null?ref.pinNr:'?')+(ref.pinTitel?' — '+ref.pinTitel:'');
   else herkunft='🔁 '+(ref.leistung||'Leistung')+(ref.datum?' · '+_lbTsText(ref.datum):'');
@@ -33100,17 +33278,14 @@ function _renderGalleryGrid(grid){
     const editedBadge=f.editedDriveId?'<span style="position:absolute;top:7px;right:7px;background:var(--accent);color:#fff;font-size:9px;padding:2px 5px;border-radius:4px;font-weight:700;">✏ bearb.</span>':'';
     return '<div class="foto-gallery-thumb'+(sel?' selected':'')+'" data-gi="'+i+'" onclick="_galThumbClick('+i+',this)">'
       +'<div class="gal-check">'+(sel?'✓':'')+'</div>'
-      +'<img '+srcAttr+'alt="" loading="lazy" onerror="this.style.display=\'none\'" id="galImg'+i+'">'
+      +'<img '+((typeof _galBildAttr==='function')?_galBildAttr(id,f.editedDriveId?'':(f.thumbnailLink||f.thumbnail||'')):srcAttr)+'alt="" loading="lazy" onerror="_galBildFehler(this)" id="galImg'+i+'">'   // b1172: Vorschau statt Original
       +editedBadge+(typeof _galNotizZeichen==='function'?_galNotizZeichen(f):'')   // b1170: 📝 Zahl der Notizen
-      +'<div class="gal-name">'+esc(f.caption||f.name||'Foto')+'</div>'
+      +'<div class="gal-name">'+((typeof _fotoZeichen==='function')?_fotoZeichen(f):'')+esc(f.caption||f.name||'Foto')+'</div>'   // b1172: 📧 💬 📱 Herkunft
       +'</div>';
   }).join('');
   grid.innerHTML=_galMitVerweisen(items,(taskFotos||[]).length);   // b1162: Verweis-Fotos dahinter, je Herkunft eine Gruppe
-  // Thumbnails nachladen
-  grid.querySelectorAll('img[data-foto-id-gal]').forEach(img=>{
-    const id=img.getAttribute('data-foto-id-gal');
-    if(id)_fetchDesktopFotoBlob(id).then(url=>{if(url)img.src=url;});
-  });
+  // Vorschaubilder nachladen – b1172: der Reihe nach über die Warteschlange, nicht mehr alle Originale auf einmal
+  if(typeof _galBilderLaden==='function')_galBilderLaden(grid);
 }
 function _galThumbClick(i,el){
   // Einfachklick → Auswahl; Doppelklick → Vollbild
@@ -35159,7 +35334,8 @@ const _PFW_NAME='pam_fotofenster';
 const _PFW_PLATZ_KEY='pam_fotofenster_platz_v1';
 // Namen, die die Knöpfe IM Fenster aufrufen – dort zeigen sie auf die Funktionen hier (immer im Rahmen des Fensters)
 const _PFW_WEITER=['_lbInfoNotizTaste','_lbInfoEntwurfRetten','_lbInfoNotizAnlegen','_lbInfoNotizWeg','_lbInfoOrtKorrigieren','_lbInfoZeitUebernehmen','_lbInfoZurHerkunft',
-  '_deskGpsUseTaskAdr','_deskGpsResolveInput','_deskGpsSave','_pfwBlaettern','_pfwMalen','_pfwDrive','_pfwInfoUmschalten','_pfwZurUebersicht'];
+  '_deskGpsUseTaskAdr','_deskGpsResolveInput','_deskGpsSave','_pfwBlaettern','_pfwMalen','_pfwDrive','_pfwInfoUmschalten','_pfwZurUebersicht',
+  '_galBildFehler','_fotoNochmal'];   // b1172: Kachel lädt in Stufen, „↻ nochmal“
 const _PFW_CSS='html,body{margin:0;height:100%;overflow:hidden;background:#0d0d14;}'
   +'#pfwWurzel{position:fixed;inset:0;display:flex;flex-direction:column;background:rgba(0,0,0,.96);color:#fff;}'
   +'.pfw-kopf{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:12px 18px;border-bottom:1px solid rgba(255,255,255,.12);flex-shrink:0;}'
@@ -35345,9 +35521,9 @@ function _pfwRasterHtml(eig){
     const srcAttr=cached?'src="'+esc(cached)+'" ':(safeId?'data-foto-id-gal="'+safeId+'" ':'');
     const bearb=(f&&f.editedDriveId)?'<span style="position:absolute;top:7px;right:7px;background:var(--accent);color:#fff;font-size:9px;padding:2px 5px;border-radius:4px;font-weight:700;">✏ bearb.</span>':'';
     return '<div class="foto-gallery-thumb" data-gi="'+i+'">'
-      +'<img '+srcAttr+'alt="" loading="lazy" onerror="this.style.display=\'none\'">'
+      +'<img '+((typeof _galBildAttr==='function')?_galBildAttr(id,(f&&!f.editedDriveId&&(f.thumbnailLink||f.thumbnail))||''):srcAttr)+'alt="" loading="lazy" onerror="_galBildFehler(this)">'
       +bearb+_galNotizZeichen(f)
-      +'<div class="gal-name">'+esc((f&&(f.caption||f.name))||'Foto')+'</div></div>';
+      +'<div class="gal-name">'+((typeof _fotoZeichen==='function')?_fotoZeichen(f):'')+esc((f&&(f.caption||f.name))||'Foto')+'</div></div>';
   }).join('');
   return _galMitVerweisen(items,eig.length);
 }
@@ -35382,7 +35558,7 @@ function _pfwZeichnenKern(){
       const refs=_galRefListe(),n={tu:0,dp:0,wp:0};refs.forEach(function(r){n[r.art]++;});
       zahl.textContent='· '+eig.length+(refs.length?' eigene':(eig.length===1?' Foto':' Fotos'))+(n.tu?' · '+n.tu+' Leistung':'')+(n.dp?' · '+n.dp+' Dachplan':'')+(n.wp?' · '+n.wp+' Protokoll':'');
     }
-    Array.prototype.forEach.call(grid.querySelectorAll('img[data-foto-id-gal]'),function(img){const id=img.getAttribute('data-foto-id-gal');if(id)_fetchDesktopFotoBlob(id).then(function(u){if(u)img.src=u;});});
+    if(typeof _galBilderLaden==='function')_galBilderLaden(grid);   // b1172: Vorschaubilder der Reihe nach statt aller Originale
   }
   _galInfoAnbinden(grid);
   if(!grid._pfwDbl){grid._pfwDbl=true;grid.addEventListener('dblclick',function(e){const k=(e.target&&e.target.closest)?e.target.closest('.foto-gallery-thumb'):null;if(k)_pfwGrossAuf(k);});}
@@ -35756,7 +35932,7 @@ function _lbInfoZeichnen(){
   const f=a.f,r=a.r,eigen=a.art==='eigen',ref=(r&&r.ref)||{};
   const video=(typeof _isVideo==='function')&&_isVideo(f.mimeType,f.name);
   let herkunft;
-  if(eigen)herkunft='📷 Foto der Karte · '+esc(f.name||'');
+  if(eigen)herkunft='📷 Foto der Karte · '+esc(f.name||'')+((typeof _fotoHerkunftArt==='function'&&_fotoHerkunftArt(f))?' · '+esc(_fotoHerkunftWort(_fotoHerkunftArt(f))):'');   // b1172
   else if(a.art==='wartung')herkunft='📋 '+esc(ref.berichtArt||'Protokoll')+(ref.berichtDatum?' · '+esc(ref.berichtDatum):'')+(ref.berichtName?' — '+esc(ref.berichtName):'');
   else if(a.art==='dachplan')herkunft='🗺 Dachplan-Pin '+esc(String(ref.pinNr!=null?ref.pinNr:'?'))+(ref.pinLbl?' · '+esc(ref.pinLbl):'')+(ref.pinTitel?' — '+esc(ref.pinTitel):'');
   else herkunft='🔁 '+esc(ref.leistung||'Leistung')+(ref.datum?' · '+esc(_lbTsText(ref.datum)):'');
