@@ -10628,7 +10628,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-11 · #1176'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-11-b1176) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-11 · #1177'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-11-b1177) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -31762,13 +31762,210 @@ function _formularPdfInDrive(doc,name,t){
   }catch(e){console.warn('[Formular] Drive-Upload:',e);}
 }
 
+// ══ b1177: FORMULAR LÖSCHEN – erst fragen, was aus den Fotos wird ═══════════════════════════════════════════════════
+// Frank 11.10.2026: „Was passiert mit diesen Bildern, wenn ich das Formular lösche – bleiben die trotzdem?“ Bis b1176 nahm
+// „Löschen“ nur das Formular weg: die Fotos lagen weiter in Drive, waren in PAM aber nirgends mehr zu sehen (sie stehen nur
+// in bericht.fotos, nicht in der Fotoliste der Karte). Jetzt fragt ein Fenster: „🖼 Fotos behalten“ (→ Fotoliste der Karte,
+// mit Bildunterschrift, ohne Doppel) oder „🗑 Fotos in den Papierkorb“ (Drive-Papierkorb, 30 Tage zurückholbar); das PDF nur
+// auf Wunsch (Kästchen, nicht angehakt – Franks Wahl „1 ja“). Eine dritte Wahl „nur in Drive lassen“ gibt es bewusst NICHT
+// (Frank „2 nein“): nichts soll mehr unsichtbar werden. Was nicht in den Papierkorb darf (fremde Datei, 403), noch nicht in
+// Drive liegt (Foto noch auf dem Tablet) oder gerade nicht ging, kommt in die Fotoliste. Fotos, die in der Karte noch an
+// anderer Stelle stecken (Fotoliste, anderes Formular, Dachplan, Notiz), bleiben beim Papierkorb unberührt.
+// Ohne Fotos bleibt es bei der einfachen Frage – jetzt mit dem richtigen Namen statt immer „Gesamten Prüfbericht löschen?“.
+// ⛔ Gelöscht wird weiter NUR in _pruefDesktopDelete / _wpDelete (Löschvermerk VOR dem Herausnehmen, test_b1033). Das Fenster
+//    ruft sie nach getaner Arbeit mit _pamFormWegFrei auf, damit sie nicht ein zweites Mal fragen.
+// ⚠ Bewusst Zeilenkommentare (Lehre b764: neue Stern-Schrägstrich-Paare verschieben den Phantom-Kommentar der Prüfsuiten).
+let _pamFormWegFrei=null;
+function _pamFormWegFotos(b){return (b&&Array.isArray(b.fotos))?b.fotos.filter(function(f){return !!f;}):[];}
+function _pamFormWegPdfId(b){return String((b&&(b.pdfDriveId||b.driveFileId))||'');}
+// Der Name wie in der Formular-Liste (Vorabbesichtigung, Begehungsprotokoll Wohnung, REP-Auftrag …) – dieselbe Regel wie am Handy (v389).
+function _pamFormWegName(b,t){
+  if(!b)return 'Formular';
+  let lz=null,nm='';
+  try{lz=(typeof _fsListeZeile==='function')?_fsListeZeile(b,t):null;}catch(e){}
+  try{nm=(b.vorlage==='feuchte'&&typeof _fsTitel==='function')?String(_fsTitel(b)||''):'';}catch(e){}
+  const was=(lz&&lz.lang)||(b.vorlage==='wartungsprotokoll'?(b.art==='rep'?'REP-Auftrag':'Wartungsprotokoll'):(b.vorlage==='feuchte'?'Feuchteprotokoll':'Prüfbericht'));
+  return was+(nm&&nm!==was?' „'+nm+'“':'');
+}
+// Steht das Foto schon in der Fotoliste? Verglichen wird jede Kennung: Original, bemalte Fassung, Gerätespeicher des Tablets.
+function _pamFormFotoSchonDa(liste,f){
+  const ids=[f&&f.driveId,f&&f.editedDriveId].filter(function(x){return !!x;}).map(String);
+  const lk=String((f&&f.localKey)||'');
+  return (Array.isArray(liste)?liste:[]).some(function(e){
+    if(!e)return false;
+    if(lk&&String(e.localKey||'')===lk)return true;
+    return [e.driveId,e.editedDriveId].some(function(x){return !!x&&ids.indexOf(String(x))>=0;});
+  });
+}
+// Formular-Foto → Eintrag der Fotoliste (Gegenstück zu _pamFormFotoEintrag). Bemalte Fassung und Bildunterschrift gehen mit.
+function _pamFormFotoAlsKarte(f){
+  const e={driveId:f.driveId||null,name:f.name||'Foto',mimeType:f.mimeType||'image/jpeg',caption:String(f.caption||'')};
+  const th=f.thumbnailLink||f.thumbnail||'';if(th&&String(th).slice(0,5)!=='blob:')e.thumbnailLink=th;
+  if(f.editedDriveId){e.editedDriveId=f.editedDriveId;if(f.editedName)e.editedName=f.editedName;}
+  if(f.ts)e.ts=f.ts;
+  if(f.localKey){e.localKey=f.localKey;if(f.uploadName)e.uploadName=f.uploadName;} // liegt noch auf dem Tablet – dort lädt es die Fotoliste nach
+  return e;
+}
+// Wird ein Foto in der Karte außerhalb DIESES Formulars gebraucht? Wie _pamFormFotoVerwendet, aber die Karte nur EINMAL gelesen
+// (ein Formular kann 200 Fotos tragen).
+function _pamFormWegAnderswo(t,b){
+  let s='';
+  try{
+    const c=Object.assign({},t||{});
+    c.pruefberichte=(Array.isArray(c.pruefberichte)?c.pruefberichte:[]).filter(function(x){return x!==b;});
+    if(typeof taskFotos!=='undefined'&&Array.isArray(taskFotos))c.fotos=taskFotos.slice(); // die offene Karte: der ungespeicherte Stand zählt
+    s=JSON.stringify(c);
+  }catch(e){s='';}
+  return function(f){
+    const ids=[f&&f.driveId,f&&f.editedDriveId].filter(function(x){return !!x;}).map(String);
+    return !!s&&ids.some(function(id){return s.indexOf('"'+id+'"')>=0;});
+  };
+}
+function _pamFormWegNachher(){
+  try{if(typeof renderFotoListDesktop==='function')renderFotoListDesktop();}catch(e){console.warn('[Formular löschen] Fotoliste:',e);} // die Kacheln „gehört zum Protokoll“ verschwinden, Übernommenes erscheint
+  try{if(typeof renderAttachList==='function')renderAttachList();}catch(e){}
+}
+// Das Fenster. weiter = _pruefDesktopDelete oder _wpDelete – dort wird nach getaner Arbeit gelöscht.
+function _pamFormWegFenster(t,b,weiter){
+  const alt=document.getElementById('_pamFormWegOv');if(alt)alt.remove();
+  if(!t||!b||typeof weiter!=='function')return;
+  const tid=String(t.id||'');
+  const fotos=_pamFormWegFotos(b),pdf=_pamFormWegPdfId(b),drive=(typeof _ztlAnhTokenOk==='function')&&_ztlAnhTokenOk();
+  const anderswo=_pamFormWegAnderswo(t,b),anders=fotos.filter(anderswo).length;
+  const pdfBeiDok=!!pdf&&(typeof taskAttachments!=='undefined'&&Array.isArray(taskAttachments))&&taskAttachments.some(function(a){return (typeof _pamDokDriveId==='function')&&_pamDokDriveId(a)===pdf;});
+  const ov=document.createElement('div');ov.id='_pamFormWegOv';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000003;display:flex;align-items:center;justify-content:center;';
+  const bx=document.createElement('div');
+  bx.style.cssText='background:var(--bg2);border-radius:12px;padding:18px 20px;width:min(520px,94vw);box-shadow:0 8px 40px rgba(0,0,0,.5);color:var(--text);';
+  const ti=document.createElement('div');ti.style.cssText='font-size:15px;font-weight:700;margin-bottom:4px;';
+  ti.textContent=_pamFormWegName(b,t)+(b.datum?' vom '+b.datum:'')+' löschen?';
+  const info=document.createElement('div');info.style.cssText='font-size:13px;color:var(--text2);margin-bottom:4px;';
+  info.textContent='Im Formular '+(fotos.length===1?'ist 1 Foto':'sind '+fotos.length+' Fotos')+'.'+(pdf?(pdfBeiDok?' Das PDF bleibt bei den Dokumenten.':' Das PDF bleibt in Google Drive.'):'');
+  bx.append(ti,info);
+  let zu=null;
+  const taste=function(e){if(e.key==='Escape'){e.stopPropagation();zu();}};
+  zu=function(){document.removeEventListener('keydown',taste,true);ov.remove();};
+  const kaestchen={checked:false};
+  const knopf=function(text,unter,stil,art){
+    const k=document.createElement('button');k.type='button';k.setAttribute('data-formweg',art);
+    k.style.cssText='display:block;width:100%;text-align:left;margin:8px 0 0;padding:10px 12px;border-radius:8px;cursor:pointer;font-family:inherit;color:var(--text);'+stil;
+    const t1=document.createElement('div');t1.style.cssText='font-size:14px;font-weight:700;';t1.textContent=text;
+    const t2=document.createElement('div');t2.style.cssText='font-size:12px;color:var(--text2);margin-top:2px;';t2.textContent=unter;
+    k.append(t1,t2);
+    k.onclick=function(){const mitPdf=!!kaestchen.checked;zu();if(art!=='abbruch')_pamFormWegAusfuehren(tid,b,art,mitPdf,weiter);};
+    return k;
+  };
+  if(anders){const wz=document.createElement('div');wz.setAttribute('data-formweg-hinweis','1');wz.style.cssText='font-size:12px;margin:6px 0 0;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);';
+    wz.textContent='ℹ '+(anders===1?'1 Foto wird':anders+' Fotos werden')+' in der Karte noch an anderer Stelle gebraucht (Fotoliste, anderes Formular, Dachplan oder Notiz) – '+(anders===1?'es bleibt':'sie bleiben')+' beim Papierkorb liegen.';bx.appendChild(wz);}
+  bx.appendChild(knopf('🖼 Formular löschen · Fotos behalten','Die Fotos kommen in die normale Fotoliste der Karte – mit ihren Bildunterschriften.','border:2px solid #1f6fd1;background:rgba(31,111,209,.10);','behalten'));
+  if(drive){
+    bx.appendChild(knopf('🗑 Formular löschen · Fotos in den Papierkorb','Drive-Papierkorb – 30 Tage zurückholbar, nie endgültig. Was PAM nicht wegwerfen darf, kommt in die Fotoliste.','border:2px solid #b45309;background:rgba(180,83,9,.10);','papierkorb'));
+    if(pdf){
+      const lb=document.createElement('label');lb.style.cssText='display:flex;gap:8px;align-items:center;font-size:12px;color:var(--text2);margin:6px 0 0 4px;cursor:pointer;';
+      const cb=document.createElement('input');cb.type='checkbox';cb.setAttribute('data-formweg-pdf','1');cb.onchange=function(){kaestchen.checked=cb.checked;};
+      lb.append(cb,document.createTextNode('PDF auch in den Papierkorb'));bx.appendChild(lb);
+    }
+  }else{
+    const h=document.createElement('div');h.style.cssText='font-size:12px;color:var(--text2);margin-top:8px;';
+    h.textContent='Der Papierkorb geht gerade nicht – Drive ist nicht verbunden. „Fotos behalten“ geht trotzdem.';bx.appendChild(h);
+  }
+  bx.appendChild(knopf('Abbrechen','Nichts löschen – das Formular bleibt.','border:1px solid var(--border);background:transparent;','abbruch'));
+  ov.appendChild(bx);document.body.appendChild(ov);
+  ov.addEventListener('click',function(e){if(e.target===ov)zu();});
+  document.addEventListener('keydown',taste,true);
+}
+// Warte-Schild, solange Drive arbeitet – darunter lässt sich nichts anklicken (sonst könnte inzwischen eine andere Karte aufgehen).
+function _pamFormWegWarten(n){
+  const ov=document.createElement('div');ov.id='_pamFormWegWarte';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000003;display:flex;align-items:center;justify-content:center;';
+  const bx=document.createElement('div');bx.style.cssText='background:var(--bg2);color:var(--text);border-radius:12px;padding:16px 20px;font-size:14px;font-weight:600;box-shadow:0 8px 40px rgba(0,0,0,.5);';
+  bx.textContent='⏳ Fotos kommen in den Papierkorb …';
+  ov.appendChild(bx);document.body.appendChild(ov);
+  return {stand:function(i){bx.textContent='⏳ Fotos kommen in den Papierkorb … '+i+' von '+n;},zu:function(){ov.remove();}};
+}
+// Führt die Wahl aus: art 'behalten' | 'papierkorb'. b = das Formular (nicht sein Platz – der kann sich während des Wartens verschieben).
+async function _pamFormWegAusfuehren(tid,b,art,mitPdf,weiter){
+  const karte=function(){return (String((document.getElementById('taskId')||{}).value||'')===tid&&typeof findTaskById==='function')?findTaskById(tid):null;};
+  const platz=function(t){const l=(t&&Array.isArray(t.pruefberichte))?t.pruefberichte:[];let i=l.indexOf(b);if(i<0&&b&&b.id!=null)i=l.findIndex(function(x){return x&&String(x.id)===String(b.id);});return i;};
+  let t=karte(),i=platz(t);
+  if(!t||i<0){showToast('Das Formular ist nicht mehr offen – es wurde nichts gelöscht','warning',6000);return false;}
+  const bb=t.pruefberichte[i],name=_pamFormWegName(bb,t),fotos=_pamFormWegFotos(bb);
+  if(typeof taskFotos==='undefined'||!Array.isArray(taskFotos))taskFotos=[];
+  const erg={liste:0,schonDa:0,korb:0,anders:0,ohneDrive:0,fremd:[],fehler:0,pdf:''};
+  const inListe=function(f){if(_pamFormFotoSchonDa(taskFotos,f)){erg.schonDa++;return;}taskFotos.push(_pamFormFotoAlsKarte(f));erg.liste++;};
+  if(art==='behalten'){
+    fotos.forEach(inListe);
+  }else if(art==='papierkorb'){
+    const anderswo=_pamFormWegAnderswo(t,bb),gebraucht=fotos.map(anderswo); // vor dem ersten Eintragen lesen – sonst zählte Übernommenes als „woanders“
+    const ws=_pamFormWegWarten(fotos.length);
+    try{
+      for(let k=0;k<fotos.length;k++){
+        const f=fotos[k];ws.stand(k+1);
+        if(gebraucht[k]){erg.anders++;continue;}
+        const fid=String(f.driveId||'');
+        if(!fid){erg.ohneDrive++;inListe(f);continue;} // noch nicht in Drive (liegt auf dem Tablet) → Fotoliste, das Tablet lädt es dorthin nach
+        const r=await _ztlAnhPapierkorb(fid);
+        if(r==='ok'||r==='weg'){
+          erg.korb++;
+          if(f.editedDriveId&&String(f.editedDriveId)!==fid){ // die bemalte Fassung geht mit – sie stammt immer von PAM
+            const r2=await _ztlAnhPapierkorb(String(f.editedDriveId));
+            if(r2!=='ok'&&r2!=='weg')console.warn('[Formular löschen] bemalte Fassung:',r2);
+          }
+        }else{
+          if(r==='HTTP 403')erg.fremd.push(f);else{erg.fehler++;console.warn('[Formular löschen] Papierkorb:',r);}
+          inListe(f);
+        }
+      }
+      const pid=mitPdf?_pamFormWegPdfId(bb):'';
+      if(pid){
+        const r=await _ztlAnhPapierkorb(pid);
+        if(r==='ok'||r==='weg'){
+          erg.pdf='korb';
+          if(typeof taskAttachments!=='undefined'&&Array.isArray(taskAttachments))for(let j=taskAttachments.length-1;j>=0;j--){if(typeof _pamDokDriveId==='function'&&_pamDokDriveId(taskAttachments[j])===pid)taskAttachments.splice(j,1);}
+        }else erg.pdf='blieb';
+      }
+    }finally{ws.zu();}
+  }else return false;
+  t=karte();i=platz(t);
+  if(!t||i<0){
+    _pamFormWegNachher();
+    if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
+    showToast('⚠ Das Formular war inzwischen nicht mehr da – '+(erg.korb?erg.korb+' Fotos liegen im Papierkorb, ':'')+'die übrigen stehen in der Fotoliste','warning',9000);
+    return false;
+  }
+  _pamFormWegFrei=t.pruefberichte[i];
+  weiter(i);
+  const teile=[(art==='behalten'?'✓ ':'🗑 ')+name+' gelöscht'];
+  if(art==='behalten'){
+    if(erg.liste)teile.push(erg.liste===1?'1 Foto steht jetzt in der Fotoliste der Karte':erg.liste+' Fotos stehen jetzt in der Fotoliste der Karte');
+    if(erg.schonDa)teile.push(erg.schonDa===1?'1 stand schon dort':erg.schonDa+' standen schon dort');
+  }else{
+    if(erg.korb)teile.push(erg.korb===1?'1 Foto liegt im Drive-Papierkorb (30 Tage zurückholbar)':erg.korb+' Fotos liegen im Drive-Papierkorb (30 Tage zurückholbar)');
+    if(erg.anders)teile.push(erg.anders===1?'1 wird in der Karte noch gebraucht und bleibt':erg.anders+' werden in der Karte noch gebraucht und bleiben');
+    if(erg.liste){
+      const warum=[];
+      if(erg.fremd.length)warum.push(erg.fremd.length+' durfte PAM nicht wegwerfen');
+      if(erg.ohneDrive)warum.push(erg.ohneDrive+' noch nicht in Drive');
+      if(erg.fehler)warum.push(erg.fehler+' ging gerade nicht');
+      teile.push((erg.liste===1?'1 Foto steht jetzt in der Fotoliste':erg.liste+' Fotos stehen jetzt in der Fotoliste')+(warum.length?' ('+warum.join(', ')+')':''));
+    }
+    if(erg.pdf==='korb')teile.push('das PDF liegt im Papierkorb');
+    else if(erg.pdf==='blieb')teile.push('das PDF ließ sich nicht wegwerfen und bleibt');
+  }
+  showToast(teile.join(' · '),(erg.fehler||erg.pdf==='blieb')?'warning':'success',9000);
+  if(erg.fremd.length&&typeof _pamWegNichtErlaubt==='function'){const f0=erg.fremd[0];_pamWegNichtErlaubt(erg.fremd.length===1?(f0.name||'Das Foto'):erg.fremd.length+' Fotos aus dem Formular',String(f0.driveId||''));}
+  return true;
+}
 function _pruefDesktopDelete(idx){
   const t=findTaskById((document.getElementById('taskId')||{}).value||'');if(!t||!t.pruefberichte)return;
-  if(!confirm('Gesamten Prüfbericht löschen? (Alle Daten und Checkpunkte)'))return;
+  const frei=!!t.pruefberichte[idx]&&_pamFormWegFrei===t.pruefberichte[idx];_pamFormWegFrei=null; // b1177: das Fenster hat schon gefragt
+  if(!frei&&_pamFormWegFotos(t.pruefberichte[idx]).length){_pamFormWegFenster(t,t.pruefberichte[idx],_pruefDesktopDelete);return;} // b1177: Fotos im Formular → erst fragen, was aus ihnen wird
+  if(!frei&&!confirm(_pamFormWegName(t.pruefberichte[idx],t)+' löschen?'))return; // b1177: das richtige Wort statt immer „Gesamten Prüfbericht löschen?“
   if(typeof _pbGrabstein==='function')_pbGrabstein(t,t.pruefberichte[idx]); // b1033: Löschvermerk – sonst holt der Abgleich das Formular vom anderen Gerät zurück
   t.pruefberichte.splice(idx,1);
   scheduleTaskFieldSave();
   renderPruefberichteDesktop();
+  _pamFormWegNachher(); // b1177
 }
 async function _pruefDesktopDeletePdf(idx){
   const t=findTaskById((document.getElementById('taskId')||{}).value||'');
@@ -31819,9 +32016,12 @@ async function _wpFotoMalen(f,vomOriginal,danach){
 }
 function _wpDelete(idx){
   const t=findTaskById((document.getElementById('taskId')||{}).value||'');if(!t||!t.pruefberichte)return;
-  if(!confirm((t.pruefberichte[idx]&&t.pruefberichte[idx].art==='rep'?'REP-Auftrag':'Wartungsprotokoll')+' löschen?'))return; // F42/b1111
+  const frei=!!t.pruefberichte[idx]&&_pamFormWegFrei===t.pruefberichte[idx];_pamFormWegFrei=null; // b1177: das Fenster hat schon gefragt
+  if(!frei&&_pamFormWegFotos(t.pruefberichte[idx]).length){_pamFormWegFenster(t,t.pruefberichte[idx],_wpDelete);return;} // b1177: Fotos im Protokoll → erst fragen, was aus ihnen wird
+  if(!frei&&!confirm((t.pruefberichte[idx]&&t.pruefberichte[idx].art==='rep'?'REP-Auftrag':'Wartungsprotokoll')+' löschen?'))return; // F42/b1111
   if(typeof _pbGrabstein==='function')_pbGrabstein(t,t.pruefberichte[idx]); // b1033: Löschvermerk (wie _pruefDesktopDelete)
   t.pruefberichte.splice(idx,1);scheduleTaskFieldSave();renderPruefberichteDesktop();
+  _pamFormWegNachher(); // b1177
 }
 /* ══════════════════════════════════════════════════════════════════════════ */
 
