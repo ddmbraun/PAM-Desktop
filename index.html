@@ -10628,7 +10628,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-11 · #1178'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-11-b1178) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-11 · #1181'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-11-b1181) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -50123,6 +50123,8 @@ function _pamDokMenuEintraege(a){
   }
   // b1173: als ERSTER Eintrag einer Datei – dieselbe Ansicht wie die schwarze Vorschau, ohne Google-Seite und ohne Kopie im Download-Ordner
   if(!(typeof _pamIstWebLink==='function'&&_pamIstWebLink(a))&&(a.fileId||a.data))e.push({sym:'🪟',text:'Im eigenen Fenster öffnen',titel:'Im eigenen Fenster öffnen – z. B. auf dem zweiten Bildschirm; mehrere Dokumente gehen gleichzeitig',ruf:'_pdwAusZeile'});
+  // b1180: Word/Excel in Drive – statt „🪟 Im eigenen Fenster“ (zeigte dort nur „⬇ Herunterladen“) die echte Datei bearbeiten
+  if(typeof _pamOfficeWeg==='function'&&_pamOfficeWeg(a)){e=e.filter(function(x){return x.ruf!=='_pdwAusZeile';});e.push({sym:'📝',text:'In '+(_pamIstOffice(a)==='excel'?'Excel':'Word')+' bearbeiten',titel:'Die echte Datei öffnen, keine Kopie – Pfad kopieren, im Explorer einfügen, mit Strg+S speichern',ruf:'_pamOfficeAusZeile'});}
   if(a.url)e.push({sym:'☁',text:'In Google Drive öffnen',titel:'In Google Drive öffnen (im Browser)',ruf:'_pamDokDriveOeffnen'});
   e.push({sym:'⬇',text:'Herunterladen',titel:'Die Datei auf diesen Rechner laden',ruf:'downloadAttach'});
   // b775: es landet als Entwurf in Outlook – geschickt wird nichts.
@@ -50937,6 +50939,45 @@ function _check360Local(imgEl){
     _deskInitPannellum(src);
   }
 }
+/* ══ b1180 (Frank 11.10.2026 „baue“, Teil 2): Word/Excel aus Drive NICHT mehr herunterladen, sondern die ECHTE Datei bearbeiten ══
+   Befund 11.10.: Klick auf eine Word-Zeile lud sofort eine Kopie in „Downloads“ (Name aus Zahlen und Buchstaben), Word öffnete
+   diese Kopie – Änderungen landeten nicht im Auftrag. Am selben Tag gemessen: über den Windows-Pfad (G:) öffnet Word die echte
+   Datei, Strg+S speichert zurück, Drive lädt selbst hoch (Fotodoku, GM-Gutachten, fremder Mail-Anhang – alle drei geprüft).
+   Jetzt: Zeilen-Klick (schwarze Vorschau), 🪟, ⋯ → „📝 In Word bearbeiten“ und das E-Mail-Fenster zeigen bei Word/Excel das
+   Pfad-Fenster. Kopiert wird erst beim Klick auf „📋 Pfad kopieren“ – ein Bild vom Fenster dazwischen verdrängt den Pfad dann
+   nicht mehr (Befund 11.10.). „⬇ Herunterladen“ bleibt im ⋯-Menü. Nicht in Drive, Link, Notbetrieb: alles wie bisher. */
+function _pamIstOffice(a){
+  const n=String((a&&(a.name||a.filename))||'').toLowerCase(),t=String((a&&(a.type||a.mimeType))||'').toLowerCase();
+  if(/\.(docx|docm|doc|dotx|dotm|rtf)$/.test(n)||/wordprocessingml|msword|ms-word/.test(t))return 'word';
+  if(/\.(xlsx|xlsm|xls|xltx|xltm)$/.test(n)||/spreadsheetml|ms-excel/.test(t))return 'excel';
+  return '';
+}
+// Drive-Kennung, wenn der Weg über den Pfad gilt – sonst '' (dann bleibt alles wie bisher)
+function _pamOfficeWeg(a){
+  if(!a||!_pamIstOffice(a))return '';
+  if(typeof _pamIstWebLink==='function'&&_pamIstWebLink(a))return '';
+  if(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB)return '';
+  return String(a.fileId||(typeof _pamExtractFileId==='function'?_pamExtractFileId(a.url||''):'')||'');
+}
+async function _pamOfficeBearbeiten(a){
+  const fid=_pamOfficeWeg(a);if(!fid)return false;
+  const prog=_pamIstOffice(a)==='excel'?'Excel':'Word';
+  if(typeof gdriveToken==='undefined'||!gdriveToken){showToast('⚠ Google Drive ist nicht verbunden – bitte zuerst oben rechts anmelden, dann noch einmal klicken.','warning',7000);return true;}
+  let erg;
+  try{showToast('⏳ Pfad wird ermittelt…','info',3000);erg=await _pamDrivePfad(fid);}
+  catch(e){console.warn('[b1180] Pfad:',e);showToast('⚠ '+((e&&e.message)||'Pfad nicht ermittelbar')+' – eine Kopie gibt es über ⋯ → „⬇ Herunterladen“','error',8000);return true;}
+  _pamPfadFenster(erg.pfad,false,erg.geteilt,{fileId:fid,titel:'📝 In '+prog+' bearbeiten',knopf:'📋 Pfad kopieren',ohneWord:true,
+    hinweis:'Das ist die echte Datei, keine Kopie. Klick auf „📋 Pfad kopieren“, dann im Explorer: Win+E, Strg+L, Strg+V, Enter – '+prog+' öffnet die Datei. Mit Strg+S speichern, Drive lädt sie von selbst wieder hoch.',
+    danach:function(neu){if(typeof _pamNameNachziehen==='function')_pamNameNachziehen(fid,neu);}});
+  return true;
+}
+// ⋯-Menü der Dokument-Zeile: Listenplatz in taskAttachments
+function _pamOfficeAusZeile(i){
+  const a=(typeof taskAttachments!=='undefined'&&taskAttachments)?taskAttachments[i]:null;
+  if(!a){showToast('Zu dieser Zeile gibt es keine Datei mehr – bitte 🔄 Aktualisieren drücken','warning',5000);return;}
+  _pamOfficeBearbeiten(a);
+}
+
 function openPreview(i){
   const a=taskAttachments[i];
   if(!a){console.warn('[PTP] openPreview: kein Anhang bei Index',i);return;}
@@ -50946,6 +50987,8 @@ function openPreview(i){
   _openAttachLightbox(a);
 }
 function _openAttachLightbox(a){
+  // b1180: Word/Excel aus Drive – nicht herunterladen, sondern den Weg zur ECHTEN Datei zeigen
+  if(typeof _pamOfficeWeg==='function'&&_pamOfficeWeg(a)){_pamOfficeBearbeiten(a);return;}
   // Altes Popup entfernen falls vorhanden
   const old=document.getElementById('_attachLbOverlay');
   if(old)old.remove();
@@ -51160,6 +51203,7 @@ function _pdwAufraeumen(){_pdwListe=_pdwListe.filter(function(w){try{return !!w&
 // öffnet ein Dokument im eigenen Fenster (oder holt das schon offene nach vorn)
 function _pdwOeffnen(a){
   if(!a)return false;
+  if(typeof _pamOfficeWeg==='function'&&_pamOfficeWeg(a)){_pamOfficeBearbeiten(a);return true;}   // b1180: Word/Excel → echte Datei statt „⬇ Herunterladen“-Fenster
   if(!_pdwZugriff(a)){showToast('⚠ Das Dokument lässt sich gerade nicht laden – Google Drive ist nicht verbunden. Bitte zuerst anmelden.','warning',7000);return false;}
   _pdwAufraeumen();
   const name=_pdwName(a);
@@ -67155,6 +67199,7 @@ function _emAnhOeffnen(f){
   // Betreff und trägt keine Endung - daran allein kann die Vorschau eine Mail
   // nicht erkennen.
   var d={name:f.name||'Datei',fileId:_emAnhFileId(f),url:f.url||'',istMail:_emAnhIstMail(f)};
+  if(!d.istMail&&typeof _pamOfficeWeg==='function'&&_pamOfficeWeg(d)){_pamOfficeBearbeiten(d);return;}   // b1180: Word/Excel → echte Datei, keine Kopie
   if(!d.fileId&&!d.url){
     // Ohne beides kann die große Vorschau nichts holen – dann das alte kleine
     // Fenster, das auch eingebettete Daten anzeigen kann.
@@ -67339,6 +67384,14 @@ function _emRenderAttachPanel(allFiles){
         kopie.className='em-anh-tool';kopie.textContent='⧉';kopie.title='Kopie in einen anderen Task legen (das Original bleibt hier)';
         kopie.onclick=function(e){e.stopPropagation();_emDateiKopieren(f);};
         btn.appendChild(kopie);
+        // b1180: Word/Excel – „📝“ zeigt den Weg zur echten Datei (wie der Klick auf die Zeile)
+        var _offD={name:f.name,fileId:_emAnhFileId(f),url:f.url||''};
+        if(typeof _pamOfficeWeg==='function'&&_pamOfficeWeg(_offD)){
+          var bearb=document.createElement('span');
+          bearb.className='em-anh-tool';bearb.textContent='📝';bearb.title='In '+(_pamIstOffice(_offD)==='excel'?'Excel':'Word')+' bearbeiten – die echte Datei, keine Kopie';
+          bearb.onclick=function(e){e.stopPropagation();_pamOfficeBearbeiten(_offD);};
+          btn.appendChild(bearb);
+        }
       }
       var auge=document.createElement('span');
       auge.className='em-anh-auge';auge.textContent='👁';
@@ -73111,7 +73164,11 @@ function _fdkGliederung(docXml,stylesXml){
     }else if(name==='w:tbl'){
       // b1023: PAM-Foto-Kasten am Namensschild erkennen (w:tblDescription „pamfdk:<Kennung>") – kein Ziel
       const mkK=teil.match(/<w:tblDescription\b[^>]*\bw:val="pamfdk:([^"]*)"/);
+      // b1179: Word im Kompatibilitätsmodus wirft beim Speichern tblDescription/tblCaption weg, das Schild am Bild (descr am wp:docPr)
+      // bleibt (gemessen 11.10.2026). Ersatzweise daran erkennen – aber nur, wenn GENAU EIN Bild der Tabelle ein Schild trägt.
+      const mkB=mkK?null:((teil.match(/<wp:docPr\b[^>]*\bdescr="pamfdk:[^"]*"/g)||[]).length===1?teil.match(/<wp:docPr\b[^>]*\bdescr="pamfdk:([^"]*)"/):null);
       if(mkK){art='pamfoto';id=ent(mkK[1]);hatBild=teil.indexOf('<w:drawing')>=0||teil.indexOf('<w:pict')>=0;text=textVon(teil);}
+      else if(mkB){art='pamfoto';id=ent(mkB[1]);hatBild=true;text=textVon(teil);}
       else{art='tabelle';text=textVon(teil)||'Tabelle';}
     }else if(name==='w:sdt'){
       if(/Table of Contents|TOC \\/.test(teil))continue;   // Inhaltsverzeichnis als Inhaltssteuerelement
@@ -73121,6 +73178,7 @@ function _fdkGliederung(docXml,stylesXml){
     const k=zaehl.get(fp)||0;zaehl.set(fp,k+1);
     out.push({i:out.length,art:art,text:text.length>160?text.substring(0,157).trim()+' …':text,fp:fp,k:k,n:n,start:start,ende:ende});
     if(art==='pamfoto'){out[out.length-1].id=id;out[out.length-1].hatBild=hatBild;}   // b1023
+    if(art!=='pamfoto'&&art!=='foto'&&art!=='bild'&&typeof _fdkAbbAbsaetze==='function'){const _nA=_fdkAbbAbsaetze(teil).length;if(_nA)out[out.length-1].abb=_nA;}   // b1181: eigene Bildunterschriften im Baustein
   }
   return out;
 }
@@ -73215,6 +73273,45 @@ function _fdkAbbNummerSetzen(xml,nr){
   });
   if(ok)neu=neu.replace(/(<(?:wp:docPr|pic:cNvPr)\b[^>]*\bname=")Abb\. \d+(")/g,function(g,a,z){return a+'Abb. '+nr+z;});
   return {xml:ok?neu:String(xml||''),ok:ok};
+}
+/* b1181 (Frank 11.10.2026 „ja von oben zählen“): Die Bildunterschriften des Startdokuments selbst („Abb. 3: Luftbild …“ aus dem
+   Besichtigungsprotokoll) zählen mit – alle „Abb. N“ laufen von oben nach unten in EINER Reihe. Befund 11.10.: Das Protokoll hatte
+   Abb. 1–3, PAM zählte seine Fotos trotzdem ab 1 → „Abb. 1“ bis „Abb. 3“ standen zweimal im Dokument.
+   Eigene Bildunterschrift = Absatz, dessen Text mit „Abb. <Zahl>“ beginnt. NICHT: Verzeichnis-Zeilen (lässt _fdkGliederung aus),
+   Absätze mit SEQ-Feld (die zählt Word selbst), Text in Textfeldern. „siehe Abb. 2“ mitten im Text bleibt, wie es ist. */
+function _fdkIstAbbZeile(p){
+  p=String(p||'');
+  if(/<w:txbxContent\b/.test(p)||/SEQ\s/.test(p))return false;
+  const t=(p.match(/<w:t(?:\s[^>]*)?>[^<]*<\/w:t>/g)||[]).map(function(x){return x.replace(/<[^>]+>/g,'');}).join('').replace(/&amp;/g,'&').trim();
+  return /^Abb\.\s*\d+\b/.test(t);
+}
+// Absätze mit eigener Bildunterschrift in einem Baustein (Absatz oder Tabelle), in Dokumentreihenfolge – {start, ende} im Baustein
+function _fdkAbbAbsaetze(teil){
+  teil=String(teil||'');if(/<w:txbxContent\b/.test(teil))return [];
+  const out=[];const re=/<w:p(?=[\s>])(?:[^>\/]|\/(?!>))*>(?:(?!<\/w:p>)[\s\S])*?<\/w:p>/g;let m;
+  while((m=re.exec(teil)))if(_fdkIstAbbZeile(m[0]))out.push({start:m.index,ende:m.index+m[0].length});
+  return out;
+}
+/* Alle „Abb. N“ von oben nach unten neu zählen: PAM-Kästen (am Schild erkannt) und die eigenen Bildunterschriften des
+   Startdokuments. Ein Kasten, dessen Zeile in Word ganz ersetzt wurde (kein „Abb.“), behält wie bisher seinen Platz im Zähler. */
+function _fdkDurchzaehlen(docXml,startNr,stylesXml){
+  const xml=String(docXml||'');
+  const gl=_fdkGliederung(xml,stylesXml||'');
+  let nr=parseInt(startNr,10);if(!(nr>0))nr=1;
+  const edits=[];let eigene=0;
+  gl.forEach(function(it){
+    const teil=xml.substring(it.start,it.ende);
+    if(it.art==='pamfoto'){if(!it.hatBild)return;const r=_fdkAbbNummerSetzen(teil,nr);nr++;if(r.ok&&r.xml!==teil)edits.push({start:it.start,ende:it.ende,xml:r.xml});return;}
+    if(!it.abb)return;
+    const abs=_fdkAbbAbsaetze(teil);if(!abs.length)return;
+    let neu='',pos=0;
+    abs.forEach(function(a){neu+=teil.substring(pos,a.start)+_fdkAbbNummerSetzen(teil.substring(a.start,a.ende),nr).xml;pos=a.ende;nr++;eigene++;});
+    neu+=teil.substring(pos);
+    if(neu!==teil)edits.push({start:it.start,ende:it.ende,xml:neu});
+  });
+  let out=xml;
+  edits.slice().reverse().forEach(function(e){out=out.substring(0,e.start)+e.xml+out.substring(e.ende);});
+  return {xml:out,eigene:eigene,naechste:nr};
 }
 /* b1024: Zeilen heilen, die Frank in die alte 7-Punkt-Abstandszeile getippt hat (b1023 setzte hinter jeden Kasten einen
    Absatz mit w:line="140" exact und 1-Punkt-Schrift; Word quetscht getippten Text darin – „jopojopj" sah aus wie „lobolobi",
@@ -73443,11 +73540,15 @@ function _fdkOrtsterminAusFotos(bilder){
 /* Leeres Word-Dokument (A4 hoch, 2 cm Rand, Arial 11) für „ohne Startdokument". */
 async function _fdkLeeresDocx(JZ){
   const zip=new JZ();
-  zip.file('[Content_Types].xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="jpg" ContentType="image/jpeg"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>');
+  zip.file('[Content_Types].xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="jpg" ContentType="image/jpeg"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/></Types>');
   zip.file('_rels/.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
-  zip.file('word/_rels/document.xml.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>');
+  zip.file('word/_rels/document.xml.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rIdPamEinst" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/></Relationships>');
   zip.file('word/styles.xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="22"/><w:szCs w:val="22"/><w:lang w:val="de-DE"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="120" w:line="264" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Standard"><w:name w:val="Normal"/><w:qFormat/></w:style></w:styles>');
   zip.file('word/document.xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="709" w:footer="709" w:gutter="0"/></w:sectPr></w:body></w:document>');
+  // b1179: Einstellungen mit Word-Format 15 (aktuell). Ohne settings.xml öffnet Word die Datei im Kompatibilitätsmodus (Word 2007)
+  // und wirft beim Speichern nach „Weiter“ das Namensschild am Kasten weg (tblDescription/tblCaption) – gemessen 11.10.2026.
+  // Kennung bewusst ohne Ziffer: _fdkDocxBauen zählt nur rId<Zahl>, die Bilder bleiben rId2, rId3 …
+  zip.file('word/settings.xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat></w:settings>');
   return zip;
 }
 /* KERN: Startdokument (ArrayBuffer/Uint8Array oder null) + Bilder
@@ -73603,6 +73704,12 @@ async function _fdkDocxBauen(startBuf,bilder,opt){
       }catch(e){console.warn('[b759] Kopf-/Fußzeile '+p+':',e);}
     }
   }
+  // b1181: alle „Abb. N“ von oben nach unten in EINER Reihe – die eigenen Bildunterschriften des Startdokuments zählen mit
+  let _dzEigene=0;
+  if(startBuf&&typeof _fdkDurchzaehlen==='function'){
+    let _dzSt='';try{const sp=zip.file('word/styles.xml');if(sp)_dzSt=await sp.async('string');}catch(e){}
+    const _dz=_fdkDurchzaehlen(docXml,opt.startNr,_dzSt);docXml=_dz.xml;_dzEigene=_dz.eigene;
+  }
   zip.file('word/document.xml',docXml);
   zip.file(relsPfad,rels);
   zip.file('[Content_Types].xml',ct);
@@ -73610,6 +73717,7 @@ async function _fdkDocxBauen(startBuf,bilder,opt){
   if(opt.taskId&&typeof _fdkArbeitSchreiben==='function')await _fdkArbeitSchreiben(zip,'t:'+opt.taskId);
   opt.ergebnis={platzhalter:platz,leer:leer,hinten:(ra?ra.hinten:rest.length),proSeite:proSeite,felder:feldZahl,imText:imText,verloren:verloren,
     arbeit:ra?{neu:ra.neu,verschoben:ra.verschoben,entfernt:ra.entfernt,geblieben:ra.geblieben,fremd:ra.fremd,leerWeg:ra.leerWeg,nummerFehlt:ra.nummerFehlt,nachladen:ra.nachladen,geheilt:ra.geheilt||0}:null};
+  if(opt.ergebnis)opt.ergebnis.eigeneAbb=_dzEigene;   // b1181
   return await zip.generateAsync({type:'uint8array',compression:'DEFLATE',compressionOptions:{level:6},mimeType:_FDK_MIME_DOCX});
 }
 
@@ -74706,6 +74814,7 @@ function _fdkNummernGutachten(S,startNr){
   S.gl.items.forEach(function(it){
     if(it.art==='bild')return;   // b1023: eigenes Bild zählt nicht
     if(it.art==='pamfoto'){if(!it.hatBild)return;if(it.id==='plan'){if(!S.planMoeglich||planHaken)nr++;return;}if(it.fremd)nr++;return;}   // b1023: fremde Kästen zählen mit, bekannte hängen am Absatz
+    if(it.abb)nr+=it.abb;   // b1181: eigene Bildunterschriften des Startdokuments zählen mit (wie im Word)
     if(it.art==='foto'){
       if(plan&&!planDa&&!it.n){planDa=true;nr++;return;}
       let k=null;
