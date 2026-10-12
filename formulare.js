@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F58';
+const PAM_FORMULARE_VERSION='F59';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -1109,7 +1109,7 @@ function _fsWordAufbau(b,task){
       const x=vbs.find(v=>v.s===s);if(!x)return;
       teil.push({a:'unter',t:_fsVbBezeichnung(b,s,x.nr)});
       const z=[],se=_fsSeiteText(s.seite);
-      if(hat(s.ort))z.push(['Wo',String(s.ort).trim()]);
+      if(hat(_fsVbWo(s)))z.push(['Wo',_fsVbWo(s)]); /* F59 */
       if(se)z.push(['Seite',se]);
       if(hat(s.text))z.push(['Festgestellt',String(s.text).trim()]);
       if(z.length)teil.push({a:'tabelle',z:z});
@@ -2317,8 +2317,21 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       lb.style.cssText=S_KNOPF+'flex:1 1 120px;min-width:0;min-height:var(--fsh44,44px);border:1.5px solid '+farbe+';background:'+(pin?'rgba(46,125,79,.15)':'var(--fs-lbfl,rgba(217,72,15,.08))')+';color:var(--text);font-weight:700;';
       lb.onclick=()=>_fsLuftbildFenster(bericht,t,s,()=>_neuBauen());
       const se=_fsSeiteText(s.seite);
-      const fl=_fsFotoLeiste(bericht,{text:_fsVbBezeichnung(bericht,s,si+1)+(se?' – '+_fsSeiteMitWort(s.seite):'')+(String(s.ort||'').trim()?' – '+String(s.ort).trim():''),fotoRefs:s.fotoRefs},'Fotos zu dieser Stelle',false,lb);
-      k.append(kz,ortI,sb,tx,fl);
+      const fl=_fsFotoLeiste(bericht,{text:_fsVbBezeichnung(bericht,s,si+1)+(se?' – '+_fsSeiteMitWort(s.seite):'')+(_fsVbWo(s)?' – '+_fsVbWo(s):''),fotoRefs:s.fotoRefs},'Fotos zu dieser Stelle',false,lb); /* F59 */
+      /* F59: Bauteil antippen statt tippen; „Ecke“ blendet die zweite Fläche ein */
+      const bt=document.createElement('div');bt.setAttribute('data-fs-vbbauteil','1');bt.style.cssText='margin:8px 0 2px;';
+      const btl=document.createElement('div');btl.style.cssText='font-size:var(--fs12,12px);color:var(--text2);';btl.textContent='Bauteil (freiwillig)';bt.appendChild(btl);
+      const btListe=typ==='aussen'?FS_VB_BAUTEILE_AUS:FS_VB_BAUTEILE_IN;
+      const btZeile=(feld,mitEcke)=>{
+        const z=document.createElement('div');z.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin:4px 0;';
+        if(feld==='bauteil2'){const l2=document.createElement('span');l2.style.cssText='font-size:var(--fs12,12px);color:var(--text2);align-self:center;';l2.textContent='zweite Fläche:';z.appendChild(l2);}
+        btListe.forEach(n=>{const c=_chip(n,s[feld]===n,()=>{s[feld]=s[feld]===n?'':n;scheduleSave();_neuBauen();});c.setAttribute('data-fs-vbbauteilknopf',feld+':'+n);c.style.minHeight='var(--fsh,38px)';c.style.padding='4px 12px';z.appendChild(c);});
+        if(mitEcke){const ek=_chip('Ecke',!!s.ecke,()=>{s.ecke=!s.ecke;if(!s.ecke)s.bauteil2='';scheduleSave();_neuBauen();});ek.setAttribute('data-fs-vbecke','1');ek.style.minHeight='var(--fsh,38px)';ek.style.padding='4px 12px';z.appendChild(ek);}
+        return z;
+      };
+      bt.appendChild(btZeile('bauteil',true));
+      if(s.ecke)bt.appendChild(btZeile('bauteil2',false));
+      k.append(kz,ortI,bt,sb,tx,fl);
       return k;
     };
     /* F33: AUSSENSKIZZE je Bereich (Frank 03.10.2026: „bei Raumskizze kann ich nur Räume auswählen, wenn ich aber draußen die Skizze machen will …“ → Entwurf → „bau“).
@@ -3828,9 +3841,20 @@ function _fsVbPinOk(s){return !!s&&!!s.pin&&isFinite(+s.pin.lat)&&isFinite(+s.pi
 function _fsVbStelleGefuelltS(s){return !!s&&(!!String(s.ort||'').trim()||!!String(s.text||'').trim()||(Array.isArray(s.merkmale)&&s.merkmale.length>0)||(Array.isArray(s.fotoRefs)&&s.fotoRefs.length>0)||_fsVbPinOk(s)||_fsAsMarkeOk(s));}
 function _fsVbStellenGefuellt(b){const f=(b&&b.schlank)?_fsVbStelleGefuelltS:_fsVbStelleGefuellt;const out=[];((b&&Array.isArray(b.vbStellen))?b.vbStellen:[]).forEach(s=>{if(f(s)&&_fsB2Sichtbar(b,_fsVbTyp(s)))out.push({s,nr:out.length+1});});return out;} // F28: ausgeblendeter Teil zählt nicht
 // F22: Raum und Bauteil zusammen – „Wohnzimmer, Decke“; steht der Raum schon im Bauteil-Feld (ältere Protokolle), wird er nicht doppelt gesetzt
+/* F59: Bauteil-Knöpfe der Vorabbesichtigung (Frank 12.10.2026: „Ecke und Außenwand auswählen wie bei den anderen Formularen“). Felder der Stelle: bauteil, ecke, bauteil2 (nur wenn ecke). Nur Feststellung. */
+const FS_VB_BAUTEILE_IN=['Außenwand','Innenwand','Decke','Boden'];
+const FS_VB_BAUTEILE_AUS=['Fassade','Sockel','Dach','Kehle','Attika','Fenster'];
+function _fsVbBauteilText(s){
+  if(!s)return '';
+  const a=String(s.bauteil||'').trim(),b=s.ecke?String(s.bauteil2||'').trim():'';
+  if(s.ecke)return (a&&b)?'Ecke '+a+' / '+b:(a?'Ecke '+a:'Ecke');
+  return a;
+}
+// „Ecke Außenwand / Decke, linke Seite“ – Bauteil-Knöpfe und freies Feld „Wo?“ zusammen
+function _fsVbWo(s){const bt=_fsVbBauteilText(s),o=String((s&&s.ort)||'').trim();return bt&&o?bt+', '+o:(bt||o);}
 function _fsVbOrtVoll(s){
   if(!s)return '';
-  const r=String(s.raum||'').trim(),o=String(s.ort||'').trim();
+  const r=String(s.raum||'').trim(),o=_fsVbWo(s);
   if(!r)return o;
   if(o&&o.toLowerCase().indexOf(r.toLowerCase())===0)return o;
   return o?r+', '+o:r;
@@ -4358,7 +4382,7 @@ function _fsStelleSetzen(s,auf){if(!s)return;if(auf){_fsStelleAuf.add(s);_fsStel
 function _fsStelleKurz(b,s,nr,kurz){
   const kuerzen=(x,n)=>{x=String(x||'').trim().replace(/\s+/g,' ');return x.length>n?x.slice(0,n-1)+'…':x;};
   const t=[kurz?_fsStelleNrText(b,s):_fsVbBezeichnung(b,s,nr)]; /* F35: kurz = nur „Stelle n“ (im Formular unter der Überschrift des Raums/Bereichs) */
-  const wo=kuerzen(s&&s.ort,38),tx=kuerzen(s&&s.text,38);
+  const wo=kuerzen(_fsVbWo(s),38),tx=kuerzen(s&&s.text,38); /* F59 */
   if(wo)t.push(wo);else if(tx)t.push(tx);
   const se=_fsSeiteMitWort(s&&s.seite);if(se)t.push(se); /* F47 */
   if(_fsVbPinOk(s))t.push('📍');
@@ -5701,7 +5725,7 @@ function _fsBgMessfensterZeigen(b,tab0){
 function _fsBgFotoZuordnung(b,f,kurz){ /* F57: kurz = nur das Objekt der Stelle (ihr eigener Text), ohne Bereich, Seite und Blickrichtung – für die Unterschrift im PDF */
   const teile=[];
   ((b&&Array.isArray(b.bgStellen))?b.bgStellen:[]).forEach((s,i)=>{if(s&&(s.fotoRefs||[]).some(x=>_fsRefPasst(f,x)))teile.push('Stelle '+(i+1)+(String(s.raum||'').trim()?' ('+String(s.raum).trim()+')':''));}); /* F54 */
-  if(typeof _fsVbStellenGefuellt==='function')_fsVbStellenGefuellt(b).forEach(x=>{if((x.s.fotoRefs||[]).some(r=>_fsRefPasst(f,r))){const o=b.schlank?String(x.s.ort||'').trim():_fsVbOrtVoll(x.s);teile.push(kurz?(o||_fsVbBezeichnung(b,x.s,x.nr)):_fsVbBezeichnung(b,x.s,x.nr)+((b.schlank&&_fsSeiteText(x.s.seite))?' – '+_fsSeiteMitWort(x.s.seite):'')+(o?' – '+o:''));}}); // F21, F22, F24, F28
+  if(typeof _fsVbStellenGefuellt==='function')_fsVbStellenGefuellt(b).forEach(x=>{if((x.s.fotoRefs||[]).some(r=>_fsRefPasst(f,r))){const o=b.schlank?_fsVbWo(x.s):_fsVbOrtVoll(x.s); /* F59 */teile.push(kurz?(o||_fsVbBezeichnung(b,x.s,x.nr)):_fsVbBezeichnung(b,x.s,x.nr)+((b.schlank&&_fsSeiteText(x.s.seite))?' – '+_fsSeiteMitWort(x.s.seite):'')+(o?' – '+o:''));}}); // F21, F22, F24, F28
   ((b&&b.raeume)||[]).forEach(r=>{
     if(!r)return;
     const name=String(r.name||'').trim()||'Raum';
