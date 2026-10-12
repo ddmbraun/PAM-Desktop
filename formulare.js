@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F59';
+const PAM_FORMULARE_VERSION='F60';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -1119,7 +1119,7 @@ function _fsWordAufbau(b,task){
     _fsAsListe(b).forEach(sk=>{ /* Skizzen des Teils – nur, wenn etwas eingezeichnet ist */
       if(_fsAsTyp(sk)!==typ||!_fsAsBenutzt(b,sk))return;
       const mk=_fsAsMarken(b,sk),nm=hat(sk.name)?String(sk.name).trim():(typ==='innen'?'Raum':'Außen');
-      const tx='Skizze '+nm+', Ansicht '+_fsAsAnsicht(sk)+' (nicht maßstäblich).'+(mk.length?' '+mk.map(q=>q.n+' = '+q.label+(hat(q.s.ort)?' ('+String(q.s.ort).trim()+')':'')).join(' · '):'');
+      const tx='Skizze '+nm+', Ansicht '+_fsAsAnsicht(sk)+' (nicht maßstäblich).'+(mk.length?' '+mk.map(q=>q.n+' = '+q.label+(hat(_fsVbWo(q.s))?' ('+_fsVbWo(q.s)+')':'')).join(' · '):''); /* F60: mit Bauteil */
       teil.push({a:'unter',t:'Skizze '+(typ==='innen'?'innen':'außen')+' – '+nm});
       teil.push({a:'skizze',sk:sk,t:tx,ersatz:'Die Skizze „'+nm+'“ konnte nicht als Bild eingefügt werden.'});
     });
@@ -2378,7 +2378,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
         ez.style.cssText=S_KNOPF+'display:block;width:100%;min-height:48px;margin:4px 0;border:1.5px solid #d9480f;background:rgba(217,72,15,.08);color:var(--text);text-align:left;';
         ez.onclick=oeffnen;k.appendChild(ez);
         const mk=_fsAsMarken(bericht,sk);
-        if(mk.length){const lg=document.createElement('div');lg.setAttribute('data-fs-aslegende',sk.id);lg.style.cssText='font-size:var(--fs14,14px);color:var(--text);margin:6px 0 2px;';mk.forEach(q=>{const z=document.createElement('div');z.style.cssText='padding:2px 0;';const nf=(Array.isArray(q.s.fotoRefs)?q.s.fotoRefs:[]).filter(r=>(bericht.fotos||[]).some(f=>_fsRefPasst(f,r))).length;z.textContent=q.n+' = '+q.label+(String(q.s.ort||'').trim()?' · '+String(q.s.ort).trim():'')+(nf?' · 📷 '+nf:'');lg.appendChild(z);});k.appendChild(lg);}
+        if(mk.length){const lg=document.createElement('div');lg.setAttribute('data-fs-aslegende',sk.id);lg.style.cssText='font-size:var(--fs14,14px);color:var(--text);margin:6px 0 2px;';mk.forEach(q=>{const z=document.createElement('div');z.style.cssText='padding:2px 0;';const nf=(Array.isArray(q.s.fotoRefs)?q.s.fotoRefs:[]).filter(r=>(bericht.fotos||[]).some(f=>_fsRefPasst(f,r))).length;z.textContent=q.n+' = '+q.label+(_fsVbWo(q.s)?' · '+_fsVbWo(q.s):'')+(nf?' · 📷 '+nf:'');lg.appendChild(z);});k.appendChild(lg);}
         else{const hi=document.createElement('div');hi.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin:4px 0;';hi.textContent='Noch keine Stelle in der Skizze – „Einzeichnen“ antippen, oben eine Stelle wählen und in die Skizze tippen.';k.appendChild(hi);}
         const nh=document.createElement('div');nh.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin:4px 0;line-height:1.4;';nh.textContent='Nicht maßstäblich. Die Nummern sind die Stellen dieses Bereichs – ihre Fotos hängen an der Stelle. Im PDF steht die Skizze nur, wenn etwas eingezeichnet ist.';k.appendChild(nh);
         const weg=document.createElement('button');weg.type='button';weg.setAttribute('data-fs-asweg',sk.id);weg.textContent='✕ Skizze entfernen';
@@ -3843,7 +3843,7 @@ function _fsVbStellenGefuellt(b){const f=(b&&b.schlank)?_fsVbStelleGefuelltS:_fs
 // F22: Raum und Bauteil zusammen – „Wohnzimmer, Decke“; steht der Raum schon im Bauteil-Feld (ältere Protokolle), wird er nicht doppelt gesetzt
 /* F59: Bauteil-Knöpfe der Vorabbesichtigung (Frank 12.10.2026: „Ecke und Außenwand auswählen wie bei den anderen Formularen“). Felder der Stelle: bauteil, ecke, bauteil2 (nur wenn ecke). Nur Feststellung. */
 const FS_VB_BAUTEILE_IN=['Außenwand','Innenwand','Decke','Boden'];
-const FS_VB_BAUTEILE_AUS=['Fassade','Sockel','Dach','Kehle','Attika','Fenster'];
+const FS_VB_BAUTEILE_AUS=['Außenwand','Innenwand','Fassade','Sockel','Dach','Kehle','Attika','Fenster']; // F60: Außenwand/Innenwand auch außen (Frank 12.10.2026)
 function _fsVbBauteilText(s){
   if(!s)return '';
   const a=String(s.bauteil||'').trim(),b=s.ecke?String(s.bauteil2||'').trim():'';
@@ -6350,7 +6350,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
       }
       if(selS)leiste.appendChild(knopf('Beschreibung ändern',RAND,()=>{const tx=prompt('Beschreibung der Stelle '+_fsAsNummer(b,selS)+' (Wo?)',String(selS.ort||''));if(tx===null)return;selS.ort=String(tx).trim();scheduleSave();neu();leisteBauen();},['data-fs-ez-stelletext','1']));
       const z=document.createElement('span');z.setAttribute('data-fs-ez-zaehler','1');z.style.cssText='font-size:var(--fs13,13px);color:var(--text2);';
-      const selName=selS?'Stelle '+_fsAsNummer(b,selS)+(String(selS.ort||'').trim()?' („'+_fsBgSkizzeKuerzen(selS.ort,30)+'“)':''):'';
+      const selName=selS?'Stelle '+_fsAsNummer(b,selS)+(_fsVbWo(selS)?' („'+_fsBgSkizzeKuerzen(_fsVbWo(selS),30)+'“)':''):''; /* F60 */
       z.textContent=neuText!==null?'Neue Stelle'+(neuText.trim()?' („'+_fsBgSkizzeKuerzen(neuText,30)+'“)':'')+': jetzt in die Skizze tippen, wo sie ist'
         :!ls.length?'Noch keine Stelle in diesem Bereich – „＋ neue Stelle“ antippen.'
         :!selS?'Oben eine Stelle wählen oder „＋ neue Stelle“ antippen'
@@ -6837,7 +6837,7 @@ async function _fsMobPdfBg(bericht,task){
               try{doc.addImage(url,'JPEG',M,y,sw,sh);}catch(e){console.warn('[Skizze außen]',e);}
               y+=sh+2;
               const mk=_fsAsMarken(bericht,sk);
-              mk.forEach(q=>absatz(q.n+' = '+q.label+(hat(q.s.ort)?' – '+String(q.s.ort).trim():''),{groesse:9,einzug:3,abstand:0.8})); /* F49: je Nummer eine Zeile, 9 pt schwarz, direkt unter der Skizze */
+              mk.forEach(q=>absatz(q.n+' = '+q.label+(hat(_fsVbWo(q.s))?' – '+_fsVbWo(q.s):''),{groesse:9,einzug:3,abstand:0.8})); /* F49: je Nummer eine Zeile, 9 pt schwarz, direkt unter der Skizze */
               absatz('Nicht maßstäblich, Ansicht '+_fsAsAnsicht(sk)+'.',{groesse:7.5,farbe:[100,100,100],abstand:4});
             }
           }
