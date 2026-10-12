@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F55';
+const PAM_FORMULARE_VERSION='F56';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -327,7 +327,7 @@ function _fsVervollstaendigen(b){
     if(b.art==='vorab'&&typeof b.vorgeschichte!=='string')b.vorgeschichte=''; // F20
     if(b.art==='vorab'){if(!Array.isArray(b.vbStellen))b.vbStellen=[];b.vbStellen.forEach(s=>{if(!s)return;if(!Array.isArray(s.merkmale))s.merkmale=[];if(!Array.isArray(s.fotoRefs))s.fotoRefs=[];if(typeof s.ort!=='string')s.ort='';if(typeof s.text!=='string')s.text='';['raum','messwert','geraet'].forEach(k=>{if(typeof s[k]!=='string')s[k]='';});}); // F21, F22
       if(!Array.isArray(b.vbUmgebung))b.vbUmgebung=[];b.vbUmgebung.forEach(r=>{if(!r)return;if(typeof r.text!=='string')r.text='';if(typeof r.status!=='string')r.status='';if(typeof r.grund!=='string')r.grund='';});
-      if(typeof b.meldungStatus!=='string')b.meldungStatus='';if(typeof b.meldungAbw!=='string')b.meldungAbw='';
+      if(typeof b.meldungStatus!=='string')b.meldungStatus='';if(typeof b.meldungAbw!=='string')b.meldungAbw='';if(typeof b.meldungNein!=='string')b.meldungNein=''; /* F56 */
       if(typeof b.luftbildEbene!=='string')b.luftbildEbene='';if(b.schlank&&typeof b.protName!=='string')b.protName='';
       if(b.luftbildAnsicht!==undefined&&b.luftbildAnsicht!==null&&!_fsLbAnsichtOk(b.luftbildAnsicht))b.luftbildAnsicht=null; /* F27: zuletzt gesehener Kartenausschnitt */
       (b.fotos||[]).forEach(f=>{if(f&&f.blick!==undefined&&!(typeof f.blick==='number'&&isFinite(f.blick)))delete f.blick;}); /* F29 */
@@ -347,12 +347,12 @@ function _fsVervollstaendigen(b){
       b.vbStellen.forEach(s=>{if(s&&s.pin!==undefined&&s.pin!==null&&!(isFinite(+s.pin.lat)&&isFinite(+s.pin.lon)))s.pin=null;});} // F22: Eingrenzen · F24: Luftbild-Pin je Stelle
     if(b.art==='vorab')['versicherung','schadennr','zugang','ansprechpartner','besuchBei','lage'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';}); // F16
     if(b.art!=='vorab'){ /* F52: Begehungsprotokoll hat oben denselben Teil wie die Vorabbesichtigung – Name, Besichtigung bei, Gemeldet/vorgefunden, Vorgeschichte */
-      if(typeof b.protName!=='string')b.protName='';if(typeof b.vorgeschichte!=='string')b.vorgeschichte='';if(typeof b.meldungStatus!=='string')b.meldungStatus='';if(typeof b.meldungAbw!=='string')b.meldungAbw='';
+      if(typeof b.protName!=='string')b.protName='';if(typeof b.vorgeschichte!=='string')b.vorgeschichte='';if(typeof b.meldungStatus!=='string')b.meldungStatus='';if(typeof b.meldungAbw!=='string')b.meldungAbw='';if(typeof b.meldungNein!=='string')b.meldungNein=''; /* F56 */
       ['besuchBei','lage','bereich','untersuchung'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';}); /* F54: Bereich, Untersuchung */
       if(!Array.isArray(b.notizen))b.notizen=[];b.notizen=b.notizen.filter(n=>n&&typeof n==='object');b.notizen.forEach(n=>{if(typeof n.text!=='string')n.text=String(n.text==null?'':n.text);n.pdf=n.pdf===true;if(typeof n.id!=='string'||!n.id)n.id='nz_'+Math.random().toString(36).slice(2,9);}); /* F53: Notizen auch im Begehungsprotokoll */
       if(!Array.isArray(b.bgStellen))b.bgStellen=[];b.bgStellen=b.bgStellen.filter(s=>s&&typeof s==='object');b.bgStellen.forEach(s=>{if(!Array.isArray(s.merkmale))s.merkmale=[];if(!Array.isArray(s.fotoRefs))s.fotoRefs=[];['art','raum','wand','wand2','lage','breite','hoehe','notiz'].forEach(k=>{if(typeof s[k]!=='string')s[k]=String(s[k]==null?'':s[k]);});s.ecke=!!s.ecke; /* F55 */if(typeof s.id!=='string'||!s.id)s.id='bs_'+Math.random().toString(36).slice(2,9);}); /* F54: Stellen */
     }
-    ['vorOrtWetter','vorOrtT','vorOrtRf','vorOrtUhr','vorOrtGeraet','wetterOrt','wetterOrtArt'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';}); /* F52: Wetter „selbst vor Ort“ · wofür der Wetterdienst geholt wurde */
+    ['vorOrtWetter','vorOrtT','vorOrtRf','vorOrtUhr','vorOrtGeraet','wetterOrt','wetterOrtArt','wetterTag'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';}); /* F52: Wetter „selbst vor Ort“ · wofür der Wetterdienst geholt wurde */
   }
   return b;
 }
@@ -928,7 +928,7 @@ function _fsFotoLeiste(bericht,it,label,kompakt,vorne){ // kompakt: nur 📷 (+Z
 }
 
 // Open-Meteo-Antwort auswerten (reine Funktion). Niederschlag ab 0,2 mm zählt als Regen.
-function _fsWetterAuswerten(d){
+function _fsWetterAuswerten(d,bezug){ /* F56: bezug = Wert eines gewählten, zurückliegenden Tags – „heute/gestern“ wird dann „am Tag selbst/am Vortag“ */
   const c=(d&&d.current)||{};
   const temp=(typeof c.temperature_2m==='number'&&isFinite(c.temperature_2m))?c.temperature_2m:null;
   const rh=(typeof c.relative_humidity_2m==='number'&&isFinite(c.relative_humidity_2m))?c.relative_humidity_2m:null;
@@ -942,9 +942,9 @@ function _fsWetterAuswerten(d){
   if(hi>=0){
     for(let i=hi;i>=0;i--){
       const v=Number(mm[i]);
-      if(isFinite(v)&&v>=0.2){const ab=hi-i;letzterRegen=(ab===0?'heute':ab===1?'gestern':'vor '+ab+' Tagen')+', '+_fsEins(v)+' mm';break;}
+      if(isFinite(v)&&v>=0.2){const ab=hi-i;letzterRegen=(ab===0?(bezug?'am Tag selbst':'heute'):ab===1?(bezug?'am Vortag':'gestern'):'vor '+ab+' Tagen')+', '+_fsEins(v)+' mm';break;}
     }
-    if(!letzterRegen)letzterRegen='in den letzten '+hi+' Tagen kein Regen';
+    if(!letzterRegen)letzterRegen=bezug?(hi>0?'in den '+hi+' Tagen davor kein Regen':'am Tag selbst kein Regen'):'in den letzten '+hi+' Tagen kein Regen';
   }
   return {wetter,aussenT:temp===null?'':_fsEins(temp),aussenRf:rh===null?'':_fsEins(rh),letzterRegen};
 }
@@ -965,37 +965,77 @@ function _fsWetterStunde(d,datum,beginn){
   const wert=a=>(Array.isArray(a)&&typeof a[i]==='number'&&isFinite(a[i]))?a[i]:undefined;
   return {time:key,temperature_2m:wert(h.temperature_2m),relative_humidity_2m:wert(h.relative_humidity_2m),weather_code:wert(h.weather_code),stunde:p(std)+':00'};
 }
-function _fsWetterHolen(bericht,neuBauen){
+/* F56 (Frank 12.10.2026, P49): Das Wetter für einen ZURÜCKLIEGENDEN Tag – wer es vergessen hat und das Protokoll später am PC ausfüllt.
+   Derselbe Wetterdienst und dieselbe Adresse (api.open-meteo.com, „start_date/end_date“). Gemessen am 12.10.2026: Stundenwerte gibt es dort bis etwa 74 Tage zurück (ab 75 Tagen kommt „null“) –
+   deshalb Grenze 70 Tage; ältere Tage bitte von Hand eintragen (das Wetterarchiv hat eine andere Adresse und müsste erst in der Sicherheitsliste der Apps freigegeben werden). */
+const FS_WETTER_ZURUECK_MAX=70;
+/* wahl = {datum:'TT.MM.JJJJ', uhr:'hh:mm'}. null = leer, heute oder später (dann wie bisher „jetzt“); {ungueltig:true} = Datum nicht lesbar;
+   sonst {tag, iso, uhr, zurueck} – uhr leer oder unlesbar = 12:00, zurueck = Tage vor heute. Reine Funktion (jetzt nur für die Prüfung). */
+function _fsWetterWahl(wahl,jetzt){
+  const roh=String((wahl&&wahl.datum)||'').trim();
+  if(!roh)return null;
+  const dm=/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(roh);
+  if(!dm)return {ungueltig:true};
+  const t=new Date(+dm[3],+dm[2]-1,+dm[1]);
+  if(t.getFullYear()!==+dm[3]||t.getMonth()!==+dm[2]-1||t.getDate()!==+dm[1])return {ungueltig:true};
+  const j=(jetzt instanceof Date)?jetzt:new Date(),heute=new Date(j.getFullYear(),j.getMonth(),j.getDate());
+  const zurueck=Math.round((heute.getTime()-t.getTime())/86400000);
+  if(zurueck<=0)return null;
+  const p=n=>('0'+n).slice(-2),um=/^(\d{1,2}):(\d{2})$/.exec(String((wahl&&wahl.uhr)||'').trim());
+  const uhr=(um&&+um[1]<=23&&+um[2]<=59)?p(+um[1])+':'+um[2]:'12:00';
+  return {tag:p(t.getDate())+'.'+p(t.getMonth()+1)+'.'+t.getFullYear(),iso:t.getFullYear()+'-'+p(t.getMonth()+1)+'-'+p(t.getDate()),uhr:uhr,zurueck:zurueck};
+}
+/* Abfrage-Adresse für den gewählten Tag: bis zu 7 Tage davor (für „letzter Regen“, soweit der Wetterdienst sie noch hat) bis zum Folgetag (Stundenwert nach 23:30) */
+function _fsWetterUrlTag(lat,lon,wz){
+  const p=n=>('0'+n).slice(-2),iso=d=>d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()),m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(wz.iso);
+  const y=+m[1],mo=+m[2]-1,tg=+m[3],vorn=7;
+  return 'https://api.open-meteo.com/v1/forecast?latitude='+lat+'&longitude='+lon+'&hourly=temperature_2m,relative_humidity_2m,weather_code&daily=precipitation_sum'
+    +'&start_date='+iso(new Date(y,mo,tg-vorn))+'&end_date='+iso(new Date(y,mo,tg+1))+'&timezone=auto';
+}
+/* Was in „Wetter für den Tag“ steht – je Protokoll gemerkt, nicht gespeichert; leer = Datum des Protokolls und Beginn-Uhrzeit (sonst 12:00) */
+const _fsWetterWahlMerk=new WeakMap();
+function _fsWetterWahlLesen(bericht){
+  const m=_fsWetterWahlMerk.get(bericht)||{};
+  const beginn=String((bericht&&bericht.kopf&&bericht.kopf.beginn)||'').trim();
+  return {datum:m.datum!==undefined?m.datum:String((bericht&&bericht.datum)||'').trim(),uhr:m.uhr!==undefined?m.uhr:(/^\d{1,2}:\d{2}$/.test(beginn)?beginn:'')};
+}
+function _fsWetterWahlSetzen(bericht,feld,wert){const m=_fsWetterWahlMerk.get(bericht)||{};if(m.datum===undefined)m.datum=_fsWetterWahlLesen(bericht).datum;if(m.uhr===undefined)m.uhr=_fsWetterWahlLesen(bericht).uhr;m[feld]=wert;_fsWetterWahlMerk.set(bericht,m);}
+function _fsWetterHolen(bericht,neuBauen,wahl){
+  const wz=_fsWetterWahl(wahl); /* F56: gewählter, zurückliegender Tag – null = „jetzt“ wie bisher */
+  if(wz&&wz.ungueltig){toast('Datum bitte so schreiben: TT.MM.JJJJ','error',5000);return;}
+  if(wz&&wz.zurueck>FS_WETTER_ZURUECK_MAX){toast('Der Wetterdienst liefert nur die letzten gut zwei Monate – für den '+wz.tag+' bitte das Wetter von Hand eintragen','error',7000);return;}
   /* F52 (Frank 09.10.2026): Das Wetter gehört zum OBJEKT, nicht zum Gerät – erst die Objekt-Adresse suchen (Photon, wie beim Luftbild); nur ohne Adresse oder
      Treffer der Standort des Geräts (am PC im Büro wäre das sonst das Büro-Wetter). Wofür geholt wurde, steht im Protokoll (wetterOrt) und im PDF. */
   const adr=String((bericht&&bericht.kopf&&bericht.kopf.objektAdresse)||'').trim();
   const laden=async(lat0,lon0,ort,ortArt)=>{
     try{
       const lat=(+lat0).toFixed(4),lon=(+lon0).toFixed(4);
-      const r=await fetch('https://api.open-meteo.com/v1/forecast?latitude='+lat+'&longitude='+lon
+      const r=await fetch(wz?_fsWetterUrlTag(lat,lon,wz):'https://api.open-meteo.com/v1/forecast?latitude='+lat+'&longitude='+lon
         +'&current=temperature_2m,relative_humidity_2m,weather_code&daily=precipitation_sum&past_days=7&forecast_days=1&timezone=auto');
       if(!r.ok)throw new Error('HTTP '+r.status);
       let daten=await r.json();
       let stunde=null; // F2a: Begehungsprotokoll mit Beginn-Uhrzeit: Wert der Stunde des Termins statt „jetzt" (passt zu den Messungen)
-      if(bericht.fassung==='begehung'&&typeof _fsWetterStunde==='function'&&/^\d{1,2}:\d{2}$/.test(String(bericht.kopf.beginn||'').trim())){
+      if(wz){stunde=_fsWetterStunde(daten,wz.tag,wz.uhr);if(!stunde||(stunde.temperature_2m===undefined&&stunde.relative_humidity_2m===undefined&&stunde.weather_code===undefined))throw new Error('für den '+wz.tag+' um '+wz.uhr+' Uhr liefert der Wetterdienst keine Werte');daten=Object.assign({},daten,{current:stunde});} /* F56 */
+      else if(bericht.fassung==='begehung'&&typeof _fsWetterStunde==='function'&&/^\d{1,2}:\d{2}$/.test(String(bericht.kopf.beginn||'').trim())){
         try{
           const rs=await fetch('https://api.open-meteo.com/v1/forecast?latitude='+lat+'&longitude='+lon+'&hourly=temperature_2m,relative_humidity_2m,weather_code&past_days=7&forecast_days=1&timezone=auto');
           if(rs.ok)stunde=_fsWetterStunde(await rs.json(),bericht.datum,bericht.kopf.beginn);
         }catch(e){console.warn('[Feuchte] Wetter zur Beginn-Zeit:',e);}
         if(stunde)daten=Object.assign({},daten,{current:stunde});
       }
-      const w=_fsWetterAuswerten(daten);
+      const w=_fsWetterAuswerten(daten,!!wz);
       if(w.wetter)bericht.kopf.wetter=w.wetter;
       if(w.aussenT)bericht.kopf.aussenT=w.aussenT;
       if(w.aussenRf)bericht.kopf.aussenRf=w.aussenRf;
       if(w.letzterRegen)bericht.kopf.letzterRegen=w.letzterRegen;
       bericht.kopf.wetterQuelle='Open-Meteo '+new Date().toLocaleString('de-DE',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
       bericht.kopf.wetterAbruf=new Date().toISOString(); // F2a: Abrufzeit für die Quellenangabe im PDF
+      bericht.kopf.wetterTag=wz?wz.tag:''; // F56: gewählter Tag (leer = Wert zum Abruf)
       bericht.kopf.wetterStunde=stunde?stunde.stunde:''; // F2a: „08:00" = Stundenwert zur Beginn-Zeit, leer = aktueller Wert zum Abruf
       bericht.kopf.wetterOrt=ort;bericht.kopf.wetterOrtArt=ortArt; // F52: wofür geholt – die Objekt-Adresse oder der Standort des Geräts
       scheduleSave();
       try{neuBauen();}catch(e){console.warn('[Feuchte] neu aufbauen:',e);}
-      toast('✓ '+[w.wetter,w.aussenT?w.aussenT+' °C':'',w.aussenRf?w.aussenRf+' %':''].filter(Boolean).join(' · ')+(ortArt==='objekt'?' – für die Objekt-Adresse':' – für den Standort des Geräts'),'success',4000);
+      toast('✓ '+[w.wetter,w.aussenT?w.aussenT+' °C':'',w.aussenRf?w.aussenRf+' %':''].filter(Boolean).join(' · ')+(wz?' – Wert vom '+wz.tag+', '+stunde.stunde+' Uhr':'')+(ortArt==='objekt'?' – für die Objekt-Adresse':' – für den Standort des Geräts'),'success',4000);
     }catch(e){console.warn('[Feuchte] Wetter:',e);toast('Wetter nicht abrufbar: '+(e.message||e),'error',5000);}
   };
   const geraet=()=>{
@@ -1058,6 +1098,7 @@ function _fsWordAufbau(b,task){
     if(hat(k.anlass))z.push(['Gemeldet',String(k.anlass).trim().replace(/\s+/g,' ')]);
     if(z.length&&b.meldungStatus==='wie')z.push(['Vorgefunden','wie gemeldet']);
     if(z.length&&b.meldungStatus==='abw'){const w=String(b.meldungAbw||'').trim().replace(/\s+/g,' ');z.push(['Vorgefunden','abweichend'+(w?': '+w:'')]);}
+    if(z.length&&b.meldungStatus==='nein'){const w=String(b.meldungNein||'').trim().replace(/\s+/g,' ');z.push(['Vorgefunden','Prüfung konnte nicht erfolgen'+(w?': '+w:'')]);} /* F56 */
     if(z.length){B.push({a:'kapitel',t:'Gemeldet und vorgefunden'});B.push({a:'tabelle',z:z});}
   }
   const vbs=_fsVbStellenGefuellt(b);
@@ -1757,7 +1798,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const gef=arr=>arr.filter(x=>String(kf[x]||'').trim()).length;
     const plural=(n,e,m)=>n+' '+(n===1?e:m);
     if(k==='vorort')return [String(bericht.datum||'').trim(),_fsBgZeitText(kf),String(kf.besuchBei||'').trim()].filter(Boolean).join(' · ')||'noch leer'; // F20, F22: Stellen und Fotos haben eigene Abschnitte
-    if(k==='gemeldet')return bericht.meldungStatus==='wie'?'wie gemeldet':bericht.meldungStatus==='abw'?'abweichend':(String(kf.anlass||'').trim()?'noch nicht bestätigt':'noch leer'); // F22
+    if(k==='gemeldet')return bericht.meldungStatus==='wie'?'wie gemeldet':bericht.meldungStatus==='abw'?'abweichend':bericht.meldungStatus==='nein'?'nicht prüfbar':(String(kf.anlass||'').trim()?'noch nicht bestätigt':'noch leer'); // F22
     if(k==='stellen'){const n=_fsVbStellenGefuellt(bericht).length;return n?plural(n,'Stelle','Stellen'):'noch keine Stelle';} // F22
     if(k==='umgebung'){const z=(bericht.vbUmgebung||[]).filter(r=>r&&String(r.text||'').trim()),g=_fsVbUmgebungZeilen(bericht).length;return z.length?g+' von '+z.length+' abgegangen':'noch leer';} // F22
     if(k==='ergebnis'){const n=_fsVbErgebnisZeilen(bericht).length;return n?'entsteht aus Stellen und Umgebung':'noch leer';} // F22
@@ -1950,8 +1991,15 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const tx=document.createElement('div');tx.style.cssText='font-size:var(--fs14,14px);color:'+(txt?'var(--text)':'var(--text2)')+';line-height:1.4;margin-top:4px;';
       tx.textContent=txt||'Wetter noch nicht geholt (freiwillig)';i1.appendChild(tx);
       if(txt){const qd=klein(q?q.replace(/^Angabe des Wetterdienstes /,'Quelle: '):'von Hand eingetragen (älteres Protokoll) – so steht es auch im PDF');qd.style.marginTop='2px';i1.appendChild(qd);}
+      { /* F56: „Wetter für den Tag“ – vorbelegt mit Datum und Beginn des Protokolls; heute = wie bisher „jetzt“, ein früherer Tag = Wert dieser Stunde */
+        const wl=_fsWetterWahlLesen(bericht),wr=document.createElement('div');wr.setAttribute('data-fs-wetterwahl','1');wr.style.cssText='display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px;';
+        const wlb=klein('Wetter für den Tag');wlb.style.flexShrink='0';
+        const wd=_inp(wl.datum,'TT.MM.JJJJ',v=>_fsWetterWahlSetzen(bericht,'datum',v));wd.setAttribute('data-fs-wetterdatum','1');wd.style.width='130px';wd.style.flex='0 0 auto';wd.setAttribute('aria-label','Datum, für das der Wetterdienst geholt wird');
+        const wu=_inp(wl.uhr,'hh:mm',v=>_fsWetterWahlSetzen(bericht,'uhr',v));wu.setAttribute('data-fs-wetteruhr','1');wu.style.width='80px';wu.style.flex='0 0 auto';wu.setAttribute('aria-label','Uhrzeit, für die der Wetterdienst geholt wird');
+        wr.append(wlb,wd,wu,klein('Uhr (leer = 12:00) · bis ca. 2 Monate zurück'));i1.appendChild(wr);
+      }
       const z1=document.createElement('div');z1.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;';
-      z1.appendChild(kn(txt?'↻ neu holen':'🌤 Wetter holen','data-fs-vbwetterknopf',()=>holeW(bericht,_neuBauen)));
+      z1.appendChild(kn(txt?'↻ neu holen':'🌤 Wetter holen','data-fs-vbwetterknopf',()=>holeW(bericht,_neuBauen,_fsWetterWahlLesen(bericht))));
       if(txt)z1.appendChild(kn('✕ entfernen','data-fs-wetterweg',()=>{if(!confirm('Wetterdienst-Angaben aus dem Protokoll entfernen? Deine eigene Messung bleibt.'))return;_fsWetterDienstLeeren(k);scheduleSave();_neuBauen();}));
       i1.appendChild(z1);
       const h1=klein((txt&&!q)?'Aus dem älteren Protokoll von Hand. Zum Ersetzen „↻ neu holen“ (holt für die Objekt-Adresse) – was du selbst misst oder siehst, gehört in den Kasten darunter.':'Geholt für die Objekt-Adresse. Diese Werte lassen sich nicht überschreiben – was du selbst misst oder siehst, gehört in den Kasten darunter.');h1.style.marginTop='4px';i1.appendChild(h1);
@@ -2070,7 +2118,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     if(_fsGemeinsamerKopf(bericht)){const hq=_fsVbAnlassHerkunft(bericht);if(hq){const hd=_bgInfo(hq);hd.setAttribute('data-fs-anlassherkunft','1');w.appendChild(hd);}} /* F47 */
     const wi=_bgInfo('So wurde der Schaden gemeldet. Bestätige, ob du es so vorgefunden hast – nur Feststellung, keine Ursache.');w.appendChild(wi);
     const wahl=document.createElement('div');wahl.style.cssText='display:flex;flex-wrap:wrap;gap:6px;padding:4px 14px 8px;';
-    [['wie','✓ wie gemeldet vorgefunden'],['abw','≠ abweichend vorgefunden']].forEach(x=>{
+    [['wie','✓ wie gemeldet vorgefunden'],['abw','≠ abweichend vorgefunden'],['nein','⊘ Prüfung konnte nicht erfolgen']].forEach(x=>{
       const c=_chip(x[1],bericht.meldungStatus===x[0],()=>{bericht.meldungStatus=bericht.meldungStatus===x[0]?'':x[0];scheduleSave();_neuBauen();});
       c.setAttribute('data-fs-meldung',x[0]);wahl.appendChild(c);});
     w.appendChild(wahl);
@@ -2078,6 +2126,11 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const ab=document.createElement('div');ab.style.cssText='padding:0 14px 10px;';
       ab.appendChild(_bgTextFeld(bericht.meldungAbw,'Was war anders, z. B. nicht im Wohnzimmer, sondern im Flur …',v=>{bericht.meldungAbw=v;},2));
       w.appendChild(ab);
+    }
+    if(bericht.meldungStatus==='nein'){ /* F56: Prüfung nicht möglich – Grund freiwillig, nur Feststellung */
+      const nb=document.createElement('div');nb.setAttribute('data-fs-meldungnein','1');nb.style.cssText='padding:0 14px 10px;';
+      nb.appendChild(_bgTextFeld(bericht.meldungNein,'Warum nicht, z. B. Balkon nicht zugänglich, Wohnung verschlossen … (freiwillig)',v=>{bericht.meldungNein=v;},2));
+      w.appendChild(nb);
     }
     if(_fsGemeinsamerKopf(bericht)){ /* F52: beide · F47: Vorgeschichte laut Auftraggeber – zugeklappt (nur Anzeige), steht im PDF als „nicht selbst festgestellt“ */
       const vgAuf=_fsVgAuf.has(bericht),vgDa=!!String(bericht.vorgeschichte||'').trim();
@@ -3762,7 +3815,7 @@ const FS_VORORT_GERAET_KEY='pam_fs_vorort_geraet';
 function _fsVorOrtGeraetMerk(neu){try{if(typeof neu==='string'){const v=neu.replace(/\s+/g,' ').trim().slice(0,40);if(v)localStorage.setItem(FS_VORORT_GERAET_KEY,v);return v;}return String(localStorage.getItem(FS_VORORT_GERAET_KEY)||'').trim();}catch(e){return '';}}
 function _fsVorOrtGeraetVorschlag(k){const l=String((k&&k.geraetLuft)||'').split(' – ')[0].trim();return l||_fsVorOrtGeraetMerk()||'testo 605i';}
 // F52: „✕ entfernen“ im Wetterdienst-Kasten – nimmt nur die Wetterdienst-Felder heraus, die eigene Messung bleibt
-function _fsWetterDienstLeeren(k){if(!k)return;['wetter','aussenT','aussenRf','letzterRegen','wetterQuelle','wetterAbruf','wetterStunde','wetterOrt','wetterOrtArt'].forEach(x=>{k[x]='';});}
+function _fsWetterDienstLeeren(k){if(!k)return;['wetter','aussenT','aussenRf','letzterRegen','wetterQuelle','wetterAbruf','wetterStunde','wetterOrt','wetterOrtArt','wetterTag'].forEach(x=>{k[x]='';});}
 /* F21: Feststellungen „Stelle für Stelle“ (Frank 02.10.2026: ein Schaden hält sich nicht an Schubladen – innen die feuchte Decke, außen die Kehle).
    bericht.vbStellen=[{ort, merkmale:[…], text, fotoRefs:[…]}]. Merkmale sind kurze Feststellungen zum Antippen, keine Ursache. PDF: „1 · Ort: Merkmale – Text (Foto 1, 2)“. */
 const FS_VB_MERKMALE=['nass','feucht','Schimmel','Verfärbung / Fleck','Riss','Putz / Farbe abgeplatzt','Laub / verstopft','undicht / offen','Geruch'];
@@ -3860,6 +3913,7 @@ function _fsVbMeldungZeile(b){
   if(!b||!a)return '';
   if(b.meldungStatus==='wie')return 'Gemeldet: '+a+(/[.!?]$/.test(a)?'':'.')+' Vorgefunden wie gemeldet.';
   if(b.meldungStatus==='abw'){const w=String(b.meldungAbw||'').trim().replace(/\s+/g,' ');return 'Gemeldet: '+a+(/[.!?]$/.test(a)?'':'.')+' Abweichend vorgefunden'+(w?': '+w:'.');}
+  if(b.meldungStatus==='nein'){const w=String(b.meldungNein||'').trim().replace(/\s+/g,' ');return 'Gemeldet: '+a+(/[.!?]$/.test(a)?'':'.')+' Prüfung konnte nicht erfolgen'+(w?': '+w+(/[.!?]$/.test(w)?'':'.'):'.');} /* F56 */
   return '';
 }
 /* F24: BESICHTIGUNG 2 – Raum als Überschrift, Luftbild-Markierung je Stelle (Frank 03.10.2026: „Wohnzimmer, dann Stelle 1, Stelle 2“; „von außen die Stelle kennzeichnen … ich muss das richtige Luftbild auswählen können, mal ist Google besser, mal die anderen“).
@@ -4969,7 +5023,7 @@ function _fsNochOffen(b,t,amPc){
   if(!hat(k.objektAdresse))l.push({k:'objekt',text:'Objekt-Adresse',block:ab,sel:gk?'[data-fs-vbkopf]':''});
   if(gk&&!hat(k.pruefer))l.push({k:'ich',text:'Dein Name',block:'vorort',sel:'[data-fs-ichfehlt]'}); /* F53: ohne gemerkten Namen stand Frank nirgends im Protokoll */
   if(!hat(k.anlass))l.push({k:'anlass',text:'Gemeldet',block:gk?'gemeldet':'auftrag',sel:'[data-fs-klappfeld="anlass"]'});
-  else if(gk&&b.meldungStatus!=='wie'&&b.meldungStatus!=='abw')l.push({k:'vorgefunden',text:'Vorgefunden: wie gemeldet / abweichend',block:'gemeldet',sel:''});
+  else if(gk&&b.meldungStatus!=='wie'&&b.meldungStatus!=='abw'&&b.meldungStatus!=='nein')l.push({k:'vorgefunden',text:'Vorgefunden: wie gemeldet / abweichend / nicht prüfbar',block:'gemeldet',sel:''});
   const fotos=(Array.isArray(b.fotos)?b.fotos:[]).filter(Boolean);
   if(vorab){
     const st=_fsVbStellenGefuellt(b);
@@ -5095,11 +5149,11 @@ function _fsBgUmstellen(b){
   b.fotosJeSeite=_fsFotosJeSeiteMerk(); // F49: Fotos im PDF – die letzte Wahl dieses Geräts (2 groß / 4 je Seite)
   Object.assign(b.kopf,{anlass:'',beginn:'',ende:'',geraetLuft:'',geraetOberflaeche:'',geraetBauteil:'',pruefer:_fsBgMerkName()});
   if(vorab)Object.assign(b.kopf,{versicherung:'',schadennr:'',zugang:'',ansprechpartner:'',besuchBei:'',lage:'',nutzer:''}); // F17: Nutzer wählt Frank je Besuch („Besichtigung bei“), nicht alle Mieter der Karte
-  Object.assign(b.kopf,{vorOrtWetter:'',vorOrtT:'',vorOrtRf:'',vorOrtUhr:'',vorOrtGeraet:'',wetterOrt:'',wetterOrtArt:''}); /* F52: Wetter „selbst vor Ort“ getrennt vom Wetterdienst */
-  if(!vorab){Object.assign(b.kopf,{besuchBei:'',lage:'',nutzer:'',bereich:'',untersuchung:''});b.protName='';b.vorgeschichte='';b.meldungStatus='';b.meldungAbw='';b.notizen=[];b.bgStellen=[];} /* F54: Bereich, Untersuchung, Stellen */ /* F52 (Frank 09.10.2026: „genau so wie bei der Vorabbesichtigung“): Nutzer über „Besichtigung bei“, Name aus dem Anlass */
+  Object.assign(b.kopf,{vorOrtWetter:'',vorOrtT:'',vorOrtRf:'',vorOrtUhr:'',vorOrtGeraet:'',wetterOrt:'',wetterOrtArt:'',wetterTag:''}); /* F52: Wetter „selbst vor Ort“ getrennt vom Wetterdienst */
+  if(!vorab){Object.assign(b.kopf,{besuchBei:'',lage:'',nutzer:'',bereich:'',untersuchung:''});b.protName='';b.vorgeschichte='';b.meldungStatus='';b.meldungAbw='';b.meldungNein='';b.notizen=[];b.bgStellen=[];} /* F54: Bereich, Untersuchung, Stellen */ /* F52 (Frank 09.10.2026: „genau so wie bei der Vorabbesichtigung“): Nutzer über „Besichtigung bei“, Name aus dem Anlass */
   if(typeof _fsVbJetzt==='function')b.datum=_fsVbJetzt().datum; /* F52: Datum zweistellig („09.10.2026“) wie „📍 Ich bin jetzt hier“ – vorher „9.10.2026“ */
   b.anwesende=[];
-  if(vorab){b.schadenbild='';b.vorgeschichte='';b.vbStellen=[];b.vbUmgebung=[];b.meldungStatus='';b.meldungAbw='';b.luftbildEbene='';b.luftbildAnsicht=null;} // F19, F20, F21, F22, F24, F27
+  if(vorab){b.schadenbild='';b.vorgeschichte='';b.vbStellen=[];b.vbUmgebung=[];b.meldungStatus='';b.meldungAbw='';b.meldungNein='';b.luftbildEbene='';b.luftbildAnsicht=null;} // F19, F20, F21, F22, F24, F27
   b.sektionen=(vorab?FS_VB_SEKTIONEN:keller?FS_BG_KELLER:FS_BG_WOHNUNG).map(s=>({titel:s.titel,items:s.items.map(_fsBgItem)}));
   b.angaben=(vorab?[]:keller?FS_BG_KELLER_ANGABEN:FS_BG_WOHNUNG_ANGABEN).map(_fsBgAngabe); // F20: Vorabbesichtigung hat ein Textfeld „Vorgeschichte“ statt Fragen
   return b;
@@ -6461,7 +6515,8 @@ function _fsBgWetterQuelle(k){
     const p=n=>('0'+n).slice(-2);
     const stunde=String((k&&k.wetterStunde)||'').trim();
     const ort=String((k&&k.wetterOrt)||'').trim(),ortText=(k&&k.wetterOrtArt==='geraet')?' für den Standort des Geräts beim Abruf':(ort?' für '+ort:''); /* F52: wofür geholt */
-    return 'Angabe des Wetterdienstes Open-Meteo'+ortText+(stunde?' (Wert der Stunde '+stunde+' Uhr)':'')+', abgerufen am '+p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear()+' um '+p(d.getHours())+':'+p(d.getMinutes())+' Uhr – nicht vor Ort gemessen.';
+    const tag=String((k&&k.wetterTag)||'').trim(); /* F56: nachträglich für einen früheren Tag geholt */
+    return 'Angabe des Wetterdienstes Open-Meteo'+ortText+(tag?' (Wert vom '+tag+(stunde?', '+stunde+' Uhr':'')+')':(stunde?' (Wert der Stunde '+stunde+' Uhr)':''))+', '+(tag?'nachträglich ':'')+'abgerufen am '+p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear()+' um '+p(d.getHours())+':'+p(d.getMinutes())+' Uhr – nicht vor Ort gemessen.';
   }
   return 'Angabe des Wetterdienstes ('+q+') – nicht vor Ort gemessen.';
 }
