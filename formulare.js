@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F56';
+const PAM_FORMULARE_VERSION='F57';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -5698,10 +5698,10 @@ function _fsBgMessfensterZeigen(b,tab0){
   document.body.appendChild(ov);
 }
 // Bildunterschrift im PDF: wozu gehört das Foto – Raum, Wand, Messstelle (mit der gedruckten Nummer), Feststellung
-function _fsBgFotoZuordnung(b,f){
+function _fsBgFotoZuordnung(b,f,kurz){ /* F57: kurz = nur das Objekt der Stelle (ihr eigener Text), ohne Bereich, Seite und Blickrichtung – für die Unterschrift im PDF */
   const teile=[];
   ((b&&Array.isArray(b.bgStellen))?b.bgStellen:[]).forEach((s,i)=>{if(s&&(s.fotoRefs||[]).some(x=>_fsRefPasst(f,x)))teile.push('Stelle '+(i+1)+(String(s.raum||'').trim()?' ('+String(s.raum).trim()+')':''));}); /* F54 */
-  if(typeof _fsVbStellenGefuellt==='function')_fsVbStellenGefuellt(b).forEach(x=>{if((x.s.fotoRefs||[]).some(r=>_fsRefPasst(f,r))){const o=b.schlank?String(x.s.ort||'').trim():_fsVbOrtVoll(x.s);teile.push(_fsVbBezeichnung(b,x.s,x.nr)+((b.schlank&&_fsSeiteText(x.s.seite))?' – '+_fsSeiteMitWort(x.s.seite):'')+(o?' – '+o:''));}}); // F21, F22, F24, F28
+  if(typeof _fsVbStellenGefuellt==='function')_fsVbStellenGefuellt(b).forEach(x=>{if((x.s.fotoRefs||[]).some(r=>_fsRefPasst(f,r))){const o=b.schlank?String(x.s.ort||'').trim():_fsVbOrtVoll(x.s);teile.push(kurz?(o||_fsVbBezeichnung(b,x.s,x.nr)):_fsVbBezeichnung(b,x.s,x.nr)+((b.schlank&&_fsSeiteText(x.s.seite))?' – '+_fsSeiteMitWort(x.s.seite):'')+(o?' – '+o:''));}}); // F21, F22, F24, F28
   ((b&&b.raeume)||[]).forEach(r=>{
     if(!r)return;
     const name=String(r.name||'').trim()||'Raum';
@@ -5723,7 +5723,16 @@ function _fsBgFotoZuordnung(b,f){
     if(it&&it.text&&(it.fotoRefs||[]).some(r=>_fsRefPasst(f,r)))teile.push(it.text);
   }));
   const bl=(teile.length&&f&&typeof f.blick==='number'&&isFinite(f.blick))?' – Blick nach '+_fsBlickWort(f.blick):''; // F29: Blickrichtung des Fotos
-  return teile.join(' · ')+bl;
+  return teile.join(' · ')+(kurz?'':bl);
+}
+/* F57 (Frank 12.10.2026: „kein Datum, keine Uhrzeit … nur das Objekt, und wenn ich eine Beschriftung hinzugefügt habe“; „das Foto muss nur sagen, was es zeigt oder was der Pin sagt“):
+   Text hinter „Foto N – “ im PDF. Hat ein Pin Text, steht NUR das (ein einziger Pin am Foto: der Text allein; mehrere: „1 = Ablaufrinne · 2 = Gully“, die Nummern bleiben, damit man sie im Bild zuordnen kann).
+   Sonst das Objekt der Stelle (ihr eigener Text; ohne Text die Bezeichnung „Außen – Balkon, Stelle 1“). Beides zusammen nie. Ohne Stelle und ohne Pin-Text: leer (nur „Foto N“). Kein Datum, keine Uhrzeit, keine Blickrichtung. Reine Funktion. */
+function _fsBgFotoUnterschrift(b,f){
+  const pins=_fsFpListe(f),txt=p=>String((p&&p.t)||'').trim().replace(/\s+/g,' ');
+  const mit=pins.map((p,i)=>({n:i+1,t:txt(p)})).filter(x=>x.t);
+  if(mit.length)return (pins.length===1)?mit[0].t:mit.map(x=>x.n+' = '+x.t).join(' · ');
+  return _fsBgFotoZuordnung(b,f,true);
 }
 /* ══ F3: RAUMSKIZZE – PAM zeichnet den Raum von oben ═══════════════════════════════════════════════════════
    Rechteck-Raum mit den Wänden W1–W4 (Art steht dabei), Tür und Fenster je Wand und den Messstellen als nummerierte Punkte an ihrer Wand
@@ -6824,11 +6833,9 @@ async function _fsMobPdfBg(bericht,task){
         let w=iW,h=iW*d.h/d.w;if(h>iH){h=iH;w=iH*d.w/d.h;}
         const x=zwei?M+(iW-w)/2:(col===0?M:M+iW+12),capW=zwei?Math.max(w,90):iW;
         try{doc.addImage(d.dataUrl,'JPEG',x,y,w,h);}catch(e){console.warn('[Feuchte] Bild:',e);}
-        const zu=_fsBgFotoZuordnung(bericht,f);
+        const ut=_fsBgFotoUnterschrift(bericht,f); /* F57: nur was der Pin sagt, sonst das Objekt der Stelle – kein Datum, keine Uhrzeit */
         doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(90,90,90);
-        const fpl=_fsFpLegende(f); /* F37: „Markiert: 1 = Schaden · 2 = undicht“ */
-        const fz=_fsFotoZeit(f,bericht.datum); /* F49: Aufnahmezeit aus dem Dateinamen */
-        const cap=doc.splitTextToSize('Foto '+(fi+1)+(fz?' · '+fz:'')+(zu?' – '+zu:'')+(fpl?' – Markiert: '+fpl:''),capW).slice(0,fpl?7:3); // F2c: die Unterschrift nennt Raum, Wand und Messstelle – bis zu drei Zeilen statt nur der ersten
+        const cap=doc.splitTextToSize('Foto '+(fi+1)+(ut?' – '+ut:''),capW).slice(0,6); // F2c: die Unterschrift nennt Raum, Wand und Messstelle – bis zu drei Zeilen statt nur der ersten
         doc.text(cap,x,y+h+3.5);
         zeileH=Math.max(zeileH,h+(cap.length-1)*3);
         if(zwei||col===1)y+=zeileH+9;
