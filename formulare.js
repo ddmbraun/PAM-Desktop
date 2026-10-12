@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F57';
+const PAM_FORMULARE_VERSION='F58';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -5725,14 +5725,53 @@ function _fsBgFotoZuordnung(b,f,kurz){ /* F57: kurz = nur das Objekt der Stelle 
   const bl=(teile.length&&f&&typeof f.blick==='number'&&isFinite(f.blick))?' – Blick nach '+_fsBlickWort(f.blick):''; // F29: Blickrichtung des Fotos
   return teile.join(' · ')+(kurz?'':bl);
 }
-/* F57 (Frank 12.10.2026: „kein Datum, keine Uhrzeit … nur das Objekt, und wenn ich eine Beschriftung hinzugefügt habe“; „das Foto muss nur sagen, was es zeigt oder was der Pin sagt“):
-   Text hinter „Foto N – “ im PDF. Hat ein Pin Text, steht NUR das (ein einziger Pin am Foto: der Text allein; mehrere: „1 = Ablaufrinne · 2 = Gully“, die Nummern bleiben, damit man sie im Bild zuordnen kann).
-   Sonst das Objekt der Stelle (ihr eigener Text; ohne Text die Bezeichnung „Außen – Balkon, Stelle 1“). Beides zusammen nie. Ohne Stelle und ohne Pin-Text: leer (nur „Foto N“). Kein Datum, keine Uhrzeit, keine Blickrichtung. Reine Funktion. */
-function _fsBgFotoUnterschrift(b,f){
+/* F57/F58 (Frank 12.10.2026: „kein Datum, keine Uhrzeit … nur das Objekt, und wenn ich eine Beschriftung hinzugefügt habe“; „das Foto muss nur sagen, was es zeigt oder was der Pin sagt“;
+   F58: „kann man den Pin 1 auch als Runde 1 davor schreiben“, Stichwort A „Stelle:“, „nur Pin-Text“):
+   Text hinter „Foto N – “ im PDF. Hat ein Pin Text, steht NUR das – jeder Text mit dem orangen Kreis und der Nummer SEINES Pins davor (wie im Foto; auch bei einem einzelnen Pin).
+   Sonst der eigene Text der Stelle mit dem Stichwort „Stelle: “ (ohne Text die Bezeichnung „Außen – Balkon, Stelle 1“). Beides zusammen nie. Ohne Stelle und ohne Pin-Text nur „Foto N“.
+   Kein Datum, keine Uhrzeit, keine Blickrichtung. Teile = reine Funktion {art:'pin',pins:[{n,t}]} | {art:'stelle',text} | {art:'ort',text} (Raum/Wand/Messstelle im Begehungsprotokoll, ohne Stichwort) | {art:''}. */
+function _fsBgFotoUnterschriftTeile(b,f){
   const pins=_fsFpListe(f),txt=p=>String((p&&p.t)||'').trim().replace(/\s+/g,' ');
   const mit=pins.map((p,i)=>({n:i+1,t:txt(p)})).filter(x=>x.t);
-  if(mit.length)return (pins.length===1)?mit[0].t:mit.map(x=>x.n+' = '+x.t).join(' · ');
-  return _fsBgFotoZuordnung(b,f,true);
+  if(mit.length)return {art:'pin',pins:mit};
+  const z=_fsBgFotoZuordnung(b,f,true);
+  if(!z)return {art:''};
+  const istStelle=(typeof _fsVbStellenGefuellt==='function')&&!!f&&_fsVbStellenGefuellt(b).some(x=>(x.s.fotoRefs||[]).some(r=>_fsRefPasst(f,r)));
+  return {art:istStelle?'stelle':'ort',text:z};
+}
+/* Textform derselben Unterschrift (Ersatz, wenn das PDF-Werkzeug keine Kreise zeichnen kann, und für die Prüfungen): „(1) Ablauf hinter der Wand“, „Stelle: Ablaufrinne vorm Balkon“ */
+function _fsBgFotoUnterschrift(b,f){
+  const u=_fsBgFotoUnterschriftTeile(b,f);
+  if(u.art==='pin')return u.pins.map(x=>'('+x.n+') '+x.t).join(' · ');
+  if(u.art==='stelle')return 'Stelle: '+u.text;
+  return u.art==='ort'?u.text:'';
+}
+/* F58: zeichnet „Foto N – …“ in die PDF-Seite; y = Grundlinie der ersten Zeile. Pin-Texte mit Kreis (orange wie im Foto, weiße Nummer, Zeilenumbruch von Hand, damit der Kreis nie allein am Zeilenende steht).
+   Kann das Werkzeug keine Kreise oder keine Textbreite, bleibt die Textform. Gibt die Zahl der Zeilen zurück (höchstens maxZ). */
+function _fsBgFotoCapZeichnen(doc,x,y,capW,fi,u,maxZ){
+  const kopf='Foto '+(fi+1),lh=3,max=maxZ||6;
+  if(!u||u.art!=='pin'||typeof doc.circle!=='function'||typeof doc.getTextWidth!=='function'){
+    const rest=(u&&u.art==='pin')?u.pins.map(q=>'('+q.n+') '+q.t).join(' · '):(u&&u.art==='stelle')?'Stelle: '+u.text:(u&&u.art==='ort')?u.text:'';
+    const cap=doc.splitTextToSize(kopf+(rest?' – '+rest:''),capW).slice(0,max);doc.text(cap,x,y);return cap.length;
+  }
+  const R=1.35,luft=doc.getTextWidth(' '),rechts=x+capW;let cx=x,zl=0,voll=false;
+  const umbruch=()=>{if(zl+1>=max){voll=true;return;}zl++;cx=x;};
+  const wort=w=>{if(voll||!w)return;const ww=doc.getTextWidth(w);if(cx>x&&cx+ww>rechts)umbruch();if(voll)return;doc.text(w,cx,y+zl*lh);cx+=ww+luft;};
+  String(kopf+' –').split(' ').forEach(wort);
+  u.pins.forEach((q,i)=>{
+    if(voll)return;
+    if(cx>x&&cx+2*R+luft>rechts)umbruch();
+    if(voll)return;
+    const yb=y+zl*lh;
+    doc.setFillColor(217,72,15);doc.circle(cx+R,yb-1.0,R,'F');
+    doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(q.n>9?4.5:6);
+    doc.text(String(q.n),cx+R,yb-0.25,{align:'center'});
+    doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(90,90,90);
+    cx+=2*R+1.2;
+    String(q.t).split(' ').forEach(wort);
+    if(i<u.pins.length-1)cx+=luft*1.5;
+  });
+  return zl+1;
 }
 /* ══ F3: RAUMSKIZZE – PAM zeichnet den Raum von oben ═══════════════════════════════════════════════════════
    Rechteck-Raum mit den Wänden W1–W4 (Art steht dabei), Tür und Fenster je Wand und den Messstellen als nummerierte Punkte an ihrer Wand
@@ -6833,11 +6872,10 @@ async function _fsMobPdfBg(bericht,task){
         let w=iW,h=iW*d.h/d.w;if(h>iH){h=iH;w=iH*d.w/d.h;}
         const x=zwei?M+(iW-w)/2:(col===0?M:M+iW+12),capW=zwei?Math.max(w,90):iW;
         try{doc.addImage(d.dataUrl,'JPEG',x,y,w,h);}catch(e){console.warn('[Feuchte] Bild:',e);}
-        const ut=_fsBgFotoUnterschrift(bericht,f); /* F57: nur was der Pin sagt, sonst das Objekt der Stelle – kein Datum, keine Uhrzeit */
+        const ut=_fsBgFotoUnterschriftTeile(bericht,f); /* F57/F58: nur was der Pin sagt (mit Kreis und Nummer), sonst „Stelle: …“ – kein Datum, keine Uhrzeit */
         doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(90,90,90);
-        const cap=doc.splitTextToSize('Foto '+(fi+1)+(ut?' – '+ut:''),capW).slice(0,6); // F2c: die Unterschrift nennt Raum, Wand und Messstelle – bis zu drei Zeilen statt nur der ersten
-        doc.text(cap,x,y+h+3.5);
-        zeileH=Math.max(zeileH,h+(cap.length-1)*3);
+        const capZ=_fsBgFotoCapZeichnen(doc,x,y+h+3.5,capW,fi,ut,6);
+        zeileH=Math.max(zeileH,h+(capZ-1)*3);
         if(zwei||col===1)y+=zeileH+9;
         col=zwei?0:(col+1)%2;
       }
