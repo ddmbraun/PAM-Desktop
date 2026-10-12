@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F60';
+const PAM_FORMULARE_VERSION='F61';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -4407,7 +4407,7 @@ function _fsAsTyp(sk){return (sk&&sk.typ==='innen')?'innen':'aussen';}
 function _fsAsFlaechen(sk){return _fsAsTyp(sk)==='innen'?FS_AS_FLAECHEN_INNEN:FS_AS_FLAECHEN;}
 function _fsAsAnsicht(sk){const k=sk&&sk.aussen;return (k==='dach'||k==='raum')?'von oben':k==='decke'?'von unten':'von vorn';}
 function _fsAsFarbe(sk){const k=sk&&sk.aussen;return k==='dach'?'#f1f1ee':k==='raum'?'#eef4f9':k==='decke'?'#f4f4f4':'#faf7f0';}
-const FS_AS_STEMPEL={wand:[{t:'afenster',n:'Fenster'},{t:'atuer',n:'Tür'},{t:'fbank',n:'Fensterbank'},{t:'rohr',n:'Fallrohr'},{t:'rinne',n:'Dachrinne'},{t:'text',n:'Text'}],dach:[{t:'dfenster',n:'Dachfenster'},{t:'schorn',n:'Schornstein'},{t:'gully',n:'Ablauf'},{t:'kuppel',n:'Lichtkuppel'},{t:'rinne',n:'Dachrinne'},{t:'wandan',n:'Wandanschluss'},{t:'pult',n:'Pult'},{t:'text',n:'Text'}],
+const FS_AS_STEMPEL={wand:[{t:'afenster',n:'Fenster'},{t:'atuer',n:'Tür'},{t:'fbank',n:'Fensterbank'},{t:'rohr',n:'Fallrohr'},{t:'rinne',n:'Dachrinne'},{t:'text',n:'Text'}],dach:[{t:'dfenster',n:'Dachfenster'},{t:'schorn',n:'Schornstein'},{t:'gully',n:'Ablauf'},{t:'kuppel',n:'Lichtkuppel'},{t:'rinne',n:'Dachrinne'},{t:'wandan',n:'Wandanschluss'},{t:'pult',n:'Pult'},{t:'bfenster',n:'Fenster'},{t:'btuer',n:'Tür'},{t:'bruest',n:'Brüstung'},{t:'text',n:'Text'}],
   raum:[{t:'tuer',n:'Tür'},{t:'fenster',n:'Fenster'},{t:'schrank',n:'Schrank'},{t:'heiz',n:'Heizkörper'},{t:'text',n:'Text'}],iwand:[{t:'afenster',n:'Fenster'},{t:'atuer',n:'Tür'},{t:'heiz',n:'Heizkörper'},{t:'steck',n:'Steckdose'},{t:'text',n:'Text'}],decke:[{t:'lampe',n:'Lampe'},{t:'dfenster',n:'Dachfenster'},{t:'text',n:'Text'}]}; /* F36: zweite Zeile = innen */
 const FS_AS_MAX=12;
 const _fsAsAuf=new WeakSet(); /* welche Skizzen im Formular aufgeklappt sind – nur Anzeige */
@@ -6063,14 +6063,17 @@ const FS_BG_STEMPEL=[{t:'tuer',n:'Tür'},{t:'fenster',n:'Fenster'},{t:'schrank',
 // Größe bei Maßstab 1 auf der 900×640-Fläche (w × h) und Versatz der Trefferfläche (oy): die Tür liegt mit ihrer Lücke auf der Wand, der Schwenkbogen oberhalb
 const FS_BG_STEMPEL_MASSE={tuer:{w:110,h:110,oy:-55},fenster:{w:120,h:18,oy:0},schrank:{w:110,h:56,oy:0},heiz:{w:100,h:22,oy:0},
   afenster:{w:90,h:110,oy:0},atuer:{w:80,h:150,oy:0},fbank:{w:120,h:14,oy:0},rohr:{w:16,h:200,oy:0},dfenster:{w:100,h:80,oy:0},schorn:{w:60,h:60,oy:0},gully:{w:44,h:44,oy:0},kuppel:{w:90,h:90,oy:0},steck:{w:36,h:36,oy:0},lampe:{w:60,h:60,oy:0},
-  rinne:{w:320,h:16,oy:0,leiste:1},wandan:{w:320,h:22,oy:0,leiste:1},pult:{w:320,h:18,oy:0,leiste:1},text:{w:120,h:40,oy:0}}; /* F41: dritte Zeile = Dachkanten als Leisten (Dachrinne, Wandanschluss, Pult – „Größe“ ändert nur die LÄNGE, 160…640) und Text · F33: zweite Zeile = Außenskizze (Wand von vorn, Dachfläche von oben) */
+  bfenster:{w:100,h:26,oy:0},btuer:{w:90,h:116,oy:45},bruest:{w:300,h:22,oy:0},rinne:{w:320,h:16,oy:0,leiste:1},wandan:{w:320,h:22,oy:0,leiste:1},pult:{w:320,h:18,oy:0,leiste:1},text:{w:120,h:40,oy:0}}; /* F41: dritte Zeile = Dachkanten als Leisten (Dachrinne, Wandanschluss, Pult – „Größe“ ändert nur die LÄNGE, 160…640) und Text · F33: zweite Zeile = Außenskizze (Wand von vorn, Dachfläche von oben) */
 const FS_BG_STEMPEL_MAX=60;
+/* F61: Stempel mit änderbarem Wort im Inneren (Frank 12.10.2026: Fenster, Tür, Brüstung bei „Balkon von oben“; „das Wort änderbar“). Vorbelegt, Feld txt wie beim Text-Stempel. */
+const FS_BG_STEMPEL_BESCHR={bfenster:'Fenster',btuer:'Tür',bruest:'Brüstung'};
 function _fsBgStempelAnzahl(sk){return (sk&&Array.isArray(sk.stempel))?sk.stempel.length:0;}
 // Neuen Stempel in die Mitte der Skizze setzen; gibt seinen Platz zurück, -1 bei unbekannter Art oder voller Skizze
 function _fsBgStempelNeu(sk,art,txt){
   if(!sk||!FS_BG_STEMPEL_MASSE[art]||_fsBgStempelAnzahl(sk)>=FS_BG_STEMPEL_MAX)return -1;
   const neu={t:art,x:0.5,y:0.5,r:0,s:1};
   if(art==='text'&&!_fsBgStempelTextSetzen(neu,txt))return -1; /* F41: ein Text-Stempel ohne Text entsteht nicht */
+  if(FS_BG_STEMPEL_BESCHR[art]&&!_fsBgStempelTextSetzen(neu,txt))neu.txt=FS_BG_STEMPEL_BESCHR[art]; /* F61: ohne eigenes Wort das vorbelegte */
   if(!Array.isArray(sk.stempel))sk.stempel=[];
   sk.stempel.push(neu);
   return sk.stempel.length-1;
@@ -6157,6 +6160,15 @@ function _fsBgStempelTreffer(sk,px,py){
   }
   return -1;
 }
+/* F61: Wort im Stempel – nie gedehnt, nie auf dem Kopf (ab 90° bis 270° gedreht wird es umgedreht), auf die Stempelbreite gestaucht */
+function _fsBgStempelBeschriften(g,st,s,sx,sy,mw){
+  const tx=String(st&&st.txt||'').trim();if(!tx)return;
+  const r=(((parseInt(st.r,10)||0)%360)+360)%360;
+  g.save();g.scale(1/sx,1/sy);if(r>90&&r<=270)g.rotate(Math.PI);
+  g.fillStyle='#111111';g.font='bold '+Math.max(10,Math.round(20*s))+'px sans-serif';g.textAlign='center';g.textBaseline='middle';
+  g.fillText(tx,0,1,Math.max(16,mw*sx-10));
+  g.restore();
+}
 // Zeichnet die Stempel auf den Zeichenbereich g (gleiche Fläche wie die Skizze). Ohne Stempel: keine Aufrufe.
 function _fsBgStempelZeichnen(g,r){
   const sk=(r&&r.skizze)||{},M=_fsSkMasse(sk),W=M.W,H=M.H; // F50: quer oder hoch
@@ -6239,6 +6251,24 @@ function _fsBgStempelZeichnen(g,r){
       g.fillStyle='#f3f3f3';g.fillRect(-L/2,-9,L,18);
       g.strokeStyle='#333333';g.lineWidth=2;g.strokeRect(-L/2,-9,L,18);
       g.lineWidth=7;g.beginPath();g.moveTo(-L/2,-6);g.lineTo(L/2,-6);g.stroke();
+    }else if(st.t==='bfenster'){ /* F61: Fenster von oben (Balkon) – blau, Wort im Stempel */
+      g.fillStyle='#cfe6ff';g.fillRect(-50,-13,100,26);
+      g.strokeStyle='#1f5f8b';g.lineWidth=3;g.strokeRect(-50,-13,100,26);
+      _fsBgStempelBeschriften(g,st,s,sx,sy,100);
+    }else if(st.t==='btuer'){ /* F61: Tür von oben – gelb, Türblatt und Schwenkbogen nach unten (bei Drehung 0) */
+      g.fillStyle='#ffe9b8';g.fillRect(-45,-13,90,26);
+      g.strokeStyle='#8a5a2b';g.lineWidth=3;g.strokeRect(-45,-13,90,26);
+      g.beginPath();g.moveTo(-45,13);g.lineTo(-45,103);g.stroke();
+      const ldT=typeof g.setLineDash==='function';if(ldT)g.setLineDash([8,6]);
+      g.lineWidth=2;g.beginPath();g.arc(-45,13,90,0,Math.PI/2,false);g.stroke();
+      if(ldT)g.setLineDash([]);
+      _fsBgStempelBeschriften(g,st,s,sx,sy,90);
+    }else if(st.t==='bruest'){ /* F61: Brüstung – grau, gestrichelter Rand */
+      g.fillStyle='#ececec';g.fillRect(-150,-11,300,22);
+      const ldB=typeof g.setLineDash==='function';if(ldB)g.setLineDash([14,6]);
+      g.strokeStyle='#333333';g.lineWidth=3;g.strokeRect(-150,-11,300,22);
+      if(ldB)g.setLineDash([]);
+      _fsBgStempelBeschriften(g,st,s,sx,sy,300);
     }else if(st.t==='text'){ /* Text – schwarz auf weißem Grund, damit er über Linien lesbar bleibt */
       const tx=String(st.txt||''),bw=_fsBgStempelTextBreite(tx);
       g.fillStyle='#ffffff';g.fillRect(-bw/2,-20,bw,40);
@@ -6401,6 +6431,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
         leiste.appendChild(knopf(lst?'Länger':'Größer',RAND,()=>{if(_fsBgStempelGroesse(st,0.25)){scheduleSave();neu();}},['data-fs-ez-gross','1']));
         leiste.appendChild(knopf(lst?'Kürzer':'Kleiner',RAND,()=>{if(_fsBgStempelGroesse(st,-0.25)){scheduleSave();neu();}},['data-fs-ez-klein','1']));
         if(st.t==='text')leiste.appendChild(knopf('Text ändern',RAND,()=>{const tx=prompt('Text in der Skizze (höchstens '+FS_BG_STEMPEL_TEXT_MAX+' Zeichen)',String(st.txt||''));if(tx===null)return;if(_fsBgStempelTextSetzen(st,tx)){scheduleSave();neu();}else toast('Der Text ist leer – zum Entfernen „Löschen“ antippen','info',3500);},['data-fs-ez-sttext','1']));
+        if(FS_BG_STEMPEL_BESCHR[st.t])leiste.appendChild(knopf('Wort ändern',RAND,()=>{const tx=prompt('Wort im Stempel (höchstens '+FS_BG_STEMPEL_TEXT_MAX+' Zeichen), z. B. „Fenster links“ oder „Tür 2“',String(st.txt||''));if(tx===null)return;if(!_fsBgStempelTextSetzen(st,tx))st.txt=FS_BG_STEMPEL_BESCHR[st.t];scheduleSave();neu();},['data-fs-ez-stwort','1'])); /* F61: leer = das vorbelegte Wort */
         leiste.appendChild(knopf('Löschen',RAND+'color:var(--red);',()=>{if(_fsBgStempelWeg(sk,sel)){sel=-1;scheduleSave();neu();leisteBauen();}},['data-fs-ez-stweg','1']));
       }
       const z=document.createElement('span');z.setAttribute('data-fs-ez-zaehler','1');z.style.cssText='font-size:var(--fs13,13px);color:var(--text2);';
