@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F66';
+const PAM_FORMULARE_VERSION='F67';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -6057,6 +6057,20 @@ function _fsBgStrichVerschieben(s,orig,dx,dy,W,H){
   return true;
 }
 function _fsBgStrichWeg(sk,i){if(!sk||!Array.isArray(sk.striche)||!sk.striche[i])return false;sk.striche.splice(i,1);return true;}
+/* ── F67: Stempel antippen = verschieben, Griffe nur außerhalb (Frank 13.10.2026 am Tablet: „die Tür lässt sich nur in der Mitte verschieben, weil die Kästchen so groß sind“).
+   Gemessen: bei einem schon gewählten Stempel griffen die Griffe (Fangbereich 44 Bildpunkte seit F65) bei Tür 99 %, Fenster, Ablauf, Lichtkuppel 100 % der Fläche.
+   Regel jetzt: liegt der Finger IN der Fläche des gewählten Stempels, ist es immer Verschieben; ein Griff greift nur außerhalb der Fläche (Ring von 44 Bildpunkten). */
+function _fsBgStempelInnen(st,px,py,W,H){
+  const m=_fsBgStempelBox(st);if(!m||!isFinite(+st.x)||!isFinite(+st.y))return false;
+  const a=-((+st.r)||0)*Math.PI/180,dx=px-st.x*(W||FS_BG_SKIZZE_W),dy=py-st.y*(H||FS_BG_SKIZZE_H);
+  const lx=dx*Math.cos(a)-dy*Math.sin(a),ly=dx*Math.sin(a)+dy*Math.cos(a);
+  return Math.abs(lx)<=m.w/2&&Math.abs(ly-m.oy)<=m.h/2;
+}
+// Welcher Griff des gewählten Stempels liegt unter dem Finger (Bildpunkte)? null, wenn der Finger IN der Fläche liegt (dann: verschieben) oder kein Griff nahe ist
+function _fsBgStempelGriffTreffer(st,px,py,W,H){
+  if(!st||_fsBgStempelInnen(st,px,py,W,H))return null;
+  return _fsBgStempelGriffe(st,W,H).find(q=>Math.hypot(q.x-px,q.y-py)<=44)||null; /* 44 wie seit F65 */
+}
 /* ── F66: ZOOM IM ZEICHENFENSTER (Frank 13.10.2026 am Tablet: „das Bild kann ich nicht größer ziehen“ → „lieber zoomen“) ─────────────────────
    Zwei Finger auf der Fläche = größer/kleiner und schieben (der Punkt zwischen den Fingern bleibt unter den Fingern); am PC die Knöpfe 🔍− · 🔍+ · ⊡.
    Die Zeichenfläche bleibt 900×640 Bildpunkte, nur ihre Darstellung wächst (1…4-fach), das Sichtfeld rollt. Zeichnen, Stempel, Nummern, Umriss unverändert. */
@@ -6819,7 +6833,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
     }
     if(modus==='stempel'){ // Stempel antippen = auswählen, ziehen = verschieben; daneben tippen = nichts mehr ausgewählt
       const stA=(sel>=0&&Array.isArray(sk.stempel))?sk.stempel[sel]:null; /* F50: zuerst die Griffe des gewählten Stempels */
-      const gr=stA?_fsBgStempelGriffe(stA,W,H).find(q=>Math.hypot(q.x-p[0],q.y-p[1])<=44):null; /* F65: 44 statt 26 px */
+      const gr=stA?_fsBgStempelGriffTreffer(stA,p[0],p[1],W,H):null; /* F65: 44 statt 26 px · F67: nur außerhalb der Fläche, innen = verschieben */
       if(gr){griffZieh={id:e.pointerId,k:gr.k,bewegt:false};return;}
       const i=_fsBgStempelTreffer(sk,p[0],p[1]);
       sel=i;
