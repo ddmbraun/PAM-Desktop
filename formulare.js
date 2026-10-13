@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F62';
+const PAM_FORMULARE_VERSION='F65';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -4545,6 +4545,7 @@ function _fsAsZeichnen(g,b,sk,opt){
   const r=_fsAsPseudoRaum(sk);
   _fsBgStempelZeichnen(g,r);
   _fsBgStricheZeichnen(g,r);
+  _fsStempelLegende(g,sk,W,H); /* F65: Legende der Stempel unten links */
   if(!(opt&&opt.ohneMarken))_fsAsMarkenZeichnen(g,b,sk,null);
 }
 const _fsKompass={grad:null,zeit:0,laeuft:false,h:null};
@@ -6056,6 +6057,58 @@ function _fsBgStrichVerschieben(s,orig,dx,dy,W,H){
   return true;
 }
 function _fsBgStrichWeg(sk,i){if(!sk||!Array.isArray(sk.striche)||!sk.striche[i])return false;sk.striche.splice(i,1);return true;}
+/* ── F65: LEGENDE DER STEMPEL + Stempel ohne Ziehen dehnen (Frank 13.10.2026: „die anderen wissen nicht, was welches Zeichen bedeutet“;
+   „am Tablet funktioniert das mit dem Ziehen nicht“ → „bau beides“) ──────────────────────────────────────────────────────────────
+   Legende unten links im Bild der neuen Skizzen (innen/außen, Feld „aussen“): je benutzte Stempelart das Symbol klein und daneben der Name;
+   bei Stempeln mit eigenem Wort (Fenster/Tür/Brüstung, F61) je Wort ein Eintrag; Text-Stempel nie (erklären sich selbst). Höchstens zwei Zeilen,
+   rechts bleibt Platz für „Fläche ≈ …“ (F62). Weil sie im Bild liegt, steht sie auch im PDF, in Word und in der Vorschau. */
+function _fsStempelName(sk,st){
+  if(!st)return '';
+  if(FS_BG_STEMPEL_BESCHR[st.t]&&String(st.txt||'').trim())return String(st.txt).trim();
+  const l=_fsStempelListe(sk).find(x=>x.t===st.t)||FS_BG_STEMPEL.find(x=>x.t===st.t)||Object.keys(FS_AS_STEMPEL).reduce((f,k)=>f||FS_AS_STEMPEL[k].find(x=>x.t===st.t)||null,null);
+  return l?l.n:String(st.t||'');
+}
+// Einträge der Legende: [{t, name}] – jede Art einmal, mit eigenem Wort je Wort einmal; Text-Stempel und Unbekanntes nie
+function _fsStempelLegendeEintraege(sk){
+  const out=[],gesehen={};
+  ((sk&&Array.isArray(sk.stempel))?sk.stempel:[]).forEach(st=>{
+    if(!st||st.t==='text'||!FS_BG_STEMPEL_MASSE[st.t])return;
+    const name=_fsStempelName(sk,st),k=st.t+'|'+name;
+    if(gesehen[k])return;gesehen[k]=true;out.push({t:st.t,name:name});
+  });
+  return out;
+}
+// Zeichnet die Legende unten links (Bildpunkte W×H); nichts, wenn kein Stempel da ist
+function _fsStempelLegende(g,sk,W,H){
+  const l=_fsStempelLegendeEintraege(sk);if(!l.length)return;
+  const f=(sk&&sk.aussen==='dach')?_fsUmFlaeche(sk,W,H):null;
+  const mess=t=>{try{const m=(typeof g.measureText==='function')?g.measureText(t):null;if(m&&isFinite(+m.width)&&+m.width>0)return +m.width;}catch(x){}return t.length*11;};
+  g.font='bold 20px sans-serif';
+  const rechts=f?W-24-mess('Fläche ≈ '+_fsUmFmt(f.A)+' m² · Umfang '+_fsUmFmt(f.U)+' m')-30:W-24;
+  let x=24,y=H-26,zeile=0;
+  for(let i=0;i<l.length;i++){
+    const e=l[i],bx=_fsBgStempelBox({t:e.t,s:1})||{w:40,h:24,oy:0},k=Math.min(40/Math.max(bx.w,1),24/Math.max(bx.h,1),1);
+    g.font='bold 20px sans-serif';
+    const name=e.name,br=48+mess(name)+22;
+    if(x+br>rechts&&x>24){zeile++;if(zeile>1){g.fillStyle='#555555';g.textAlign='left';g.textBaseline='middle';g.fillText('…',x,y);return;}x=24;y-=30;}
+    if(typeof g.save==='function'){
+      g.save();g.translate(x+22,y-(bx.oy||0)*k);g.scale(k,k);
+      _fsBgStempelZeichnen(g,{skizze:{aussen:sk&&sk.aussen,hoch:!!(sk&&sk.hoch),stempel:[{t:e.t,x:0,y:0,r:0,s:1,txt:''}]}});
+      g.restore();
+    }
+    g.font='bold 20px sans-serif';g.fillStyle='#1c1c1e';g.textAlign='left';g.textBaseline='middle';g.fillText(name,x+48,y);
+    x+=br;
+  }
+}
+/* F65: Stempel ohne Ziehen dehnen – Knöpfe „Breiter/Schmaler“ (bx) und „Höher/Niedriger“ (by), Schritt ×1,25 bzw. ×0,8, Grenzen 0,2…8 wie an den Griffen;
+   nicht für Leisten (dort Länger/Kürzer) und nicht für Text (Schrift würde verzerrt) */
+function _fsBgStempelDehnen(st,achse,faktor){
+  const m=FS_BG_STEMPEL_MASSE[st&&st.t];
+  if(!m||m.leiste||st.t==='text'||!isFinite(+faktor)||+faktor<=0||(achse!=='b'&&achse!=='h'))return false;
+  const k=achse==='b'?'bx':'by';
+  st[k]=Math.round(Math.max(0.2,Math.min(8,_fsBgStempelFaktor(st[k])*(+faktor)))*100)/100;
+  return true;
+}
 /* ── F62: UMRISS – Ecke für Ecke mit festen Kanten, Maße in Meter, Fläche und Umfang (Frank 13.10.2026, Entwurf → „bau“) ────────────────────────
    Nur in der Draufsicht „Dachfläche/Balkon von oben“ (sk.aussen==='dach'), EIN Umriss je Skizze:
    sk.umriss = {ecken:[[x,y],…] (Anteile 0…1 der Fläche, 3 Stellen), zu (geschlossen), masse:{'0':'4,10',…} (getippte Längen in m je Kante,
@@ -6099,7 +6152,8 @@ function _fsUmRasten(u,p,W,H){
 function _fsUmNaheEcke(u,p,W,H){const e=_fsUmPx(u,W,H);for(let i=0;i<e.length;i++)if(Math.hypot(e[i][0]-p[0],e[i][1]-p[1])<=22)return i;return -1;}
 function _fsUmNaheKante(u,p,W,H){
   if(!u||!u.zu)return -1;const e=_fsUmPx(u,W,H),n=e.length;if(n<2)return -1;
-  for(let i=0;i<n;i++){const a=e[i],b=e[(i+1)%n];if(_fsSkAbstand(p[0],p[1],a[0],a[1],b[0],b[1])<=14)return i;}
+  for(let i=0;i<n;i++){const a=e[i],b=e[(i+1)%n];if(_fsSkAbstand(p[0],p[1],a[0],a[1],b[0],b[1])<=26)return i;} /* F63: 26 px statt 14 – mit dem Finger treffen */
+  for(let i=0;i<n;i++){const a=e[i],b=e[(i+1)%n],mx=(a[0]+b[0])/2,my=(a[1]+b[1])/2;if(Math.abs(p[0]-mx)<=50&&Math.abs(p[1]-my)<=20)return i;} /* F63: Tipp auf das Maß-Schild zählt für die Kante */
   return -1;
 }
 // Neue Ecke am Ende (Bildpunkte, wird eingerastet); doppelt an derselben Stelle oder über der Obergrenze → false
@@ -6112,7 +6166,20 @@ function _fsUmEckeDazu(u,p,W,H){
   u.ecken.push([_fsUmRund(q[0]/W),_fsUmRund(q[1]/H)]);return true;
 }
 function _fsUmEckeSetzen(u,i,p,W,H){if(!u||!Array.isArray(u.ecken)||!u.ecken[i]||!Array.isArray(p))return false;u.ecken[i]=[_fsUmRund(p[0]/W),_fsUmRund(p[1]/H)];return true;}
-function _fsUmSchliessen(u){if(!u||u.zu||_fsUmEcken(u).length<3)return false;u.zu=true;return true;}
+function _fsUmSchliessen(u,W,H){if(!u||u.zu||_fsUmEcken(u).length<3)return false;if(W&&H)_fsUmSchlussGerade(u,W,H);u.zu=true;return true;} /* F63: mit W,H rastet die Schluss-Kante ein */
+/* F63: Beim Schließen rastet auch die Schluss-Kante ein (Frank 13.10.2026: „die 3-Meter-Seite gerade bekommen“): die letzte Ecke rückt auf den Schnittpunkt
+   ihrer Kante (eingerastete Richtung von der vorletzten Ecke) mit der Schluss-Kante (eingerastete Richtung in die erste Ecke). Nur mit Einrasten, nur wenn
+   die Richtungen sich schneiden, der Schnittpunkt höchstens 160 px entfernt liegt und auf der Fläche bleibt; sonst bleibt alles, wie es war. */
+function _fsUmSchlussGerade(u,W,H){
+  if(!u||u.rast===false||!W||!H)return false;const e=_fsUmPx(u,W,H),n=e.length;if(n<3)return false;
+  const a=e[n-2],l=e[n-1],f=e[0],R=Math.PI/4;
+  const w1=Math.round(Math.atan2(l[1]-a[1],l[0]-a[0])/R)*R,w2=Math.round(Math.atan2(f[1]-l[1],f[0]-l[0])/R)*R;
+  const d1=[Math.cos(w1),Math.sin(w1)],d2=[Math.cos(w2),Math.sin(w2)];
+  const det=d1[0]*(-d2[1])-d1[1]*(-d2[0]);if(Math.abs(det)<1e-6)return false; /* gleiche Richtung: kein Schnittpunkt */
+  const rx=f[0]-a[0],ry=f[1]-a[1],t=(rx*(-d2[1])-ry*(-d2[0]))/det,nx=a[0]+t*d1[0],ny=a[1]+t*d1[1];
+  if(!isFinite(nx)||!isFinite(ny)||Math.hypot(nx-l[0],ny-l[1])>160||nx<0||nx>W||ny<0||ny>H)return false;
+  u.ecken[n-1]=[_fsUmRund(nx/W),_fsUmRund(ny/H)];return true;
+}
 // Rückgängig: geschlossen → wieder offen; offen → letzte Ecke weg (ihr Maß mit)
 function _fsUmZurueck(u){
   if(!u)return false;
@@ -6224,7 +6291,7 @@ function _fsUmHinweis(sk,W,H,st){
   const ms=_fsUmMasse(u,W,H),f=_fsUmFlaeche(sk,W,H),fehlt=ms.filter(q=>q&&q.art==='bild').length,ger=ms.filter(q=>q&&q.art==='gerechnet').length;
   let t=ne+' Ecken';
   if(f)t+=' · Fläche ≈ '+_fsUmFmt(f.A)+' m² · Umfang '+_fsUmFmt(f.U)+' m';
-  t+=fehlt?' · '+fehlt+' Kante'+(fehlt===1?'':'n')+' ohne Maß (rot „~“ = nur aus dem Bild) – Kante antippen = Maß in Meter; je Richtung darf eine fehlen, die rechnet PAM':' · alle Kanten haben ein Maß';
+  t+=fehlt?' · '+fehlt+' Kante'+(fehlt===1?'':'n')+' ohne Maß (rot „~“ = nur aus dem Bild) – auf das rote Schild tippen und die gemessene Länge in Meter eingeben; je Richtung darf eine fehlen, die rechnet PAM':' · alle Kanten haben ein Maß';
   if(ger)t+=' · '+ger+' Maß'+(ger===1?'':'e')+' gerechnet (grau „≈“)';
   if(ger&&u.rast===false)t+=' ⚠ ohne Einrasten nur so genau wie der Strich – besser alle Kanten selbst eintippen';
   if(f&&f.schluss>0.02)t+=' ⚠ die Maße gehen um '+_fsUmFmt(f.schluss)+' m nicht auf – die letzte Kante nimmt den Unterschied';
@@ -6260,7 +6327,8 @@ function _fsUmZeichnen(g,sk,W,H,opt){
   if(fenster){
     const mag=!u.zu&&!!opt.maus&&_fsUmMagnet(u,opt.maus,W,H);
     e.forEach((q,i)=>{const an=u.zu&&i===opt.sel;g.beginPath();g.arc(q[0],q[1],(i===0&&mag)?16:an?10:(u.zu?7:(i===0?10:6)),0,Math.PI*2);g.fillStyle=(an||(i===0&&!u.zu))?'#d9480f':'#1f5f8b';g.fill();g.strokeStyle='#ffffff';g.lineWidth=2;g.stroke();});
-  }else{
+  }
+  { /* F64: Fläche und Umfang auch im Zeichenfenster im Bild (Frank 13.10.2026: „ich möchte sie lieber im Bild sehen“) */
     const f=_fsUmFlaeche(sk,W,H);
     if(f){g.font='bold 22px sans-serif';g.textAlign='right';g.textBaseline='middle';g.fillStyle='#1c1c1e';g.fillText('Fläche ≈ '+_fsUmFmt(f.A)+' m² · Umfang '+_fsUmFmt(f.U)+' m',W-24,H-26);}
   }
@@ -6547,6 +6615,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
     if(sk.aussen==='dach'&&_fsUmDa(sk))_fsUmZeichnen(g,sk,W,H,modus==='umriss'?{sel:selU,maus:mausU}:null); /* F62: Umriss live, unter Stempeln und Strichen */
     _fsBgStempelZeichnen(g,r);
     _fsBgStricheZeichnen(g,r);
+    if(sk.aussen)_fsStempelLegende(g,sk,W,H); /* F65 */
     if(sk.aussen)_fsAsMarkenZeichnen(g,b,sk,modus==='stelle'?selS:null,modus==='stelle'&&loseS); /* F33, F34 */
     const st=(modus==='stempel'&&sel>=0&&Array.isArray(sk.stempel))?sk.stempel[sel]:null,m=st?_fsBgStempelBox(st):null; /* F41 */
     if(st&&m){ // Auswahlrahmen – nur hier im Fenster, nicht im gespeicherten Bild
@@ -6554,7 +6623,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
       g.strokeStyle='#1f5f8b';g.lineWidth=3;g.setLineDash([10,7]);
       g.strokeRect(-m.w/2-8,m.oy-m.h/2-8,m.w+16,m.h+16);
       g.setLineDash([]);g.restore();
-      _fsBgStempelGriffe(st,W,H).forEach(q=>{g.fillStyle='#ffffff';g.fillRect(q.x-10,q.y-10,20,20);g.strokeStyle='#1f5f8b';g.lineWidth=3;g.strokeRect(q.x-10,q.y-10,20,20);}); /* F50: Griffe für Breite/Höhe */
+      _fsBgStempelGriffe(st,W,H).forEach(q=>{g.fillStyle='#ffffff';g.fillRect(q.x-16,q.y-16,32,32);g.strokeStyle='#1f5f8b';g.lineWidth=3;g.strokeRect(q.x-16,q.y-16,32,32);}); /* F65: Griffe 32 px – mit dem Finger am Tablet */ /* F50: Griffe für Breite/Höhe */
     }
     const tl=(modus==='zeichnen'&&selT>=0&&Array.isArray(sk.striche))?sk.striche[selT]:null,tr=tl?_fsBgStrichRahmen(tl,W,H):null; /* F50: angetipptes Teil */
     if(tr){g.save();g.strokeStyle='#1f5f8b';g.lineWidth=3;if(typeof g.setLineDash==='function')g.setLineDash([10,7]);g.strokeRect(tr.x-12,tr.y-12,tr.w+24,tr.h+24);if(typeof g.setLineDash==='function')g.setLineDash([]);g.restore();}
@@ -6634,7 +6703,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
       const AN=(an)=>'border:3px solid '+(an?'var(--fs-krd,'+FS_FARBE+')':'var(--border)')+';background:'+(an?'var(--fs-can,rgba(31,95,139,.18))':'var(--fs-cfl,transparent)')+';';
       leiste.appendChild(knopf('⌗ Einrasten 90°/45°'+(rastAn?' ✓':''),AN(rastAn),()=>{_fsUmHolen(sk).rast=!rastAn;_fsUmNachziehen(sk,W,H);scheduleSave();neu();leisteBauen();},['data-fs-ez-umrast','1']));
       leiste.appendChild(knopf('↔ Nach Maßen strecken'+(streckAn?' ✓':''),AN(streckAn),()=>{_fsUmHolen(sk).strecken=!streckAn;_fsUmNachziehen(sk,W,H);scheduleSave();neu();leisteBauen();},['data-fs-ez-umstreck','1']));
-      if(!zuU&&ne>=3)leiste.appendChild(knopf('✓ Schließen',RAND,()=>{if(_fsUmSchliessen(_fsUmHolen(sk))){_fsUmNachziehen(sk,W,H);mausU=null;scheduleSave();neu();leisteBauen();}},['data-fs-ez-umzu','1']));
+      if(!zuU&&ne>=3)leiste.appendChild(knopf('✓ Schließen',RAND,()=>{if(_fsUmSchliessen(_fsUmHolen(sk),W,H)){_fsUmNachziehen(sk,W,H);mausU=null;scheduleSave();neu();leisteBauen();}},['data-fs-ez-umzu','1']));
       if(ne)leiste.appendChild(knopf('↶ Rückgängig',RAND,()=>{const uu=_fsUmHolen(sk);if(_fsUmZurueck(uu)){if(!_fsUmEcken(uu).length)_fsUmWeg(sk);selU=-1;eckeNeuU=false;scheduleSave();neu();leisteBauen();}},['data-fs-ez-umzurueck','1']));
       if(zuU)leiste.appendChild(knopf('＋ Ecke auf Kante',AN(eckeNeuU),()=>{eckeNeuU=!eckeNeuU;neu();leisteBauen();},['data-fs-ez-umeckeneu','1']));
       if(zuU&&selU>=0&&ne>3)leiste.appendChild(knopf('✕ Ecke löschen',RAND+'color:var(--red);',()=>{if(_fsUmEckeWeg(_fsUmHolen(sk),selU)){selU=-1;_fsUmNachziehen(sk,W,H);scheduleSave();neu();leisteBauen();}},['data-fs-ez-umeckeweg','1']));
@@ -6659,6 +6728,9 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
         const lst=!!(FS_BG_STEMPEL_MASSE[st.t]||{}).leiste; /* F41: bei einer Leiste ändert sich nur die Länge */
         leiste.appendChild(knopf(lst?'Länger':'Größer',RAND,()=>{if(_fsBgStempelGroesse(st,0.25)){scheduleSave();neu();}},['data-fs-ez-gross','1']));
         leiste.appendChild(knopf(lst?'Kürzer':'Kleiner',RAND,()=>{if(_fsBgStempelGroesse(st,-0.25)){scheduleSave();neu();}},['data-fs-ez-klein','1']));
+        if(!lst&&st.t!=='text'){ /* F65: dehnen ohne Ziehen (Frank: am Tablet klappt das Ziehen nicht) */
+          [['b',1.25,'Breiter','data-fs-ez-breiter'],['b',0.8,'Schmaler','data-fs-ez-schmaler'],['h',1.25,'Höher','data-fs-ez-hoeher'],['h',0.8,'Niedriger','data-fs-ez-niedriger']].forEach(([a,f,n,d])=>leiste.appendChild(knopf(n,RAND,()=>{if(_fsBgStempelDehnen(st,a,f)){scheduleSave();neu();}},[d,'1'])));
+        }
         if(st.t==='text')leiste.appendChild(knopf('Text ändern',RAND,()=>{const tx=prompt('Text in der Skizze (höchstens '+FS_BG_STEMPEL_TEXT_MAX+' Zeichen)',String(st.txt||''));if(tx===null)return;if(_fsBgStempelTextSetzen(st,tx)){scheduleSave();neu();}else toast('Der Text ist leer – zum Entfernen „Löschen“ antippen','info',3500);},['data-fs-ez-sttext','1']));
         if(FS_BG_STEMPEL_BESCHR[st.t])leiste.appendChild(knopf('Wort ändern',RAND,()=>{const tx=prompt('Wort im Stempel (höchstens '+FS_BG_STEMPEL_TEXT_MAX+' Zeichen), z. B. „Fenster links“ oder „Tür 2“',String(st.txt||''));if(tx===null)return;if(!_fsBgStempelTextSetzen(st,tx))st.txt=FS_BG_STEMPEL_BESCHR[st.t];scheduleSave();neu();},['data-fs-ez-stwort','1'])); /* F61: leer = das vorbelegte Wort */
         leiste.appendChild(knopf('Löschen',RAND+'color:var(--red);',()=>{if(_fsBgStempelWeg(sk,sel)){sel=-1;scheduleSave();neu();leisteBauen();}},['data-fs-ez-stweg','1']));
@@ -6695,7 +6767,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
     if(modus==='umriss'){ /* F62: Umriss – offen: Ecke setzen / nachziehen / schließen; geschlossen: Ecke anfassen, Kante antippen = Maß, „＋ Ecke auf Kante“ */
       const u=_fsUmHolen(sk);
       if(!u.zu){
-        if(_fsUmEcken(u).length>=3&&_fsUmMagnet(u,p,W,H)){_fsUmSchliessen(u);_fsUmNachziehen(sk,W,H);neuU=null;mausU=null;scheduleSave();neu();leisteBauen();return;}
+        if(_fsUmEcken(u).length>=3&&_fsUmMagnet(u,p,W,H)){_fsUmSchliessen(u,W,H);_fsUmNachziehen(sk,W,H);neuU=null;mausU=null;scheduleSave();neu();leisteBauen();return;}
         const i=_fsUmNaheEcke(u,p,W,H);
         if(i>0){ziehU={id:e.pointerId,i:i,bewegt:false};selU=i;neu();return;}
         neuU={id:e.pointerId};mausU=p;neu();return;
@@ -6713,7 +6785,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
     }
     if(modus==='stempel'){ // Stempel antippen = auswählen, ziehen = verschieben; daneben tippen = nichts mehr ausgewählt
       const stA=(sel>=0&&Array.isArray(sk.stempel))?sk.stempel[sel]:null; /* F50: zuerst die Griffe des gewählten Stempels */
-      const gr=stA?_fsBgStempelGriffe(stA,W,H).find(q=>Math.hypot(q.x-p[0],q.y-p[1])<=26):null;
+      const gr=stA?_fsBgStempelGriffe(stA,W,H).find(q=>Math.hypot(q.x-p[0],q.y-p[1])<=44):null; /* F65: 44 statt 26 px */
       if(gr){griffZieh={id:e.pointerId,k:gr.k,bewegt:false};return;}
       const i=_fsBgStempelTreffer(sk,p[0],p[1]);
       sel=i;
@@ -6771,7 +6843,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
       if(ziehU&&e.pointerId===ziehU.id){const z=ziehU;ziehU=null;if(z.bewegt){_fsUmNachziehen(sk,W,H);scheduleSave();}neu();leisteBauen();return;}
       if(neuU&&e.pointerId===neuU.id){
         neuU=null;const u=_fsUmHolen(sk),p=pos(e);
-        if(_fsUmEcken(u).length>=3&&_fsUmMagnet(u,p,W,H)){_fsUmSchliessen(u);_fsUmNachziehen(sk,W,H);}
+        if(_fsUmEcken(u).length>=3&&_fsUmMagnet(u,p,W,H)){_fsUmSchliessen(u,W,H);_fsUmNachziehen(sk,W,H);}
         else if(!_fsUmEckeDazu(u,p,W,H)){if(_fsUmEcken(u).length>=FS_UM_MAX)toast('Genug Ecken – höchstens '+FS_UM_MAX,'info',3000);}
         if(!_fsUmEcken(u).length)_fsUmWeg(sk);
         mausU=null;scheduleSave();neu();leisteBauen();return;
