@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F65';
+const PAM_FORMULARE_VERSION='F66';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -6057,6 +6057,11 @@ function _fsBgStrichVerschieben(s,orig,dx,dy,W,H){
   return true;
 }
 function _fsBgStrichWeg(sk,i){if(!sk||!Array.isArray(sk.striche)||!sk.striche[i])return false;sk.striche.splice(i,1);return true;}
+/* ── F66: ZOOM IM ZEICHENFENSTER (Frank 13.10.2026 am Tablet: „das Bild kann ich nicht größer ziehen“ → „lieber zoomen“) ─────────────────────
+   Zwei Finger auf der Fläche = größer/kleiner und schieben (der Punkt zwischen den Fingern bleibt unter den Fingern); am PC die Knöpfe 🔍− · 🔍+ · ⊡.
+   Die Zeichenfläche bleibt 900×640 Bildpunkte, nur ihre Darstellung wächst (1…4-fach), das Sichtfeld rollt. Zeichnen, Stempel, Nummern, Umriss unverändert. */
+function _fsEzPassend(fw,fh,W,H){const k=Math.min((+fw||1)/(W||FS_BG_SKIZZE_W),(+fh||1)/(H||FS_BG_SKIZZE_H));return {w:Math.max(50,Math.floor((W||FS_BG_SKIZZE_W)*k)),h:Math.max(36,Math.floor((H||FS_BG_SKIZZE_H)*k))};}
+function _fsEzZoomFaktor(z0,d0,d){const z=((+z0)||1)*((+d)||1)/Math.max(1,(+d0)||1);return Math.round(Math.max(1,Math.min(4,isFinite(z)?z:1))*100)/100;}
 /* ── F65: LEGENDE DER STEMPEL + Stempel ohne Ziehen dehnen (Frank 13.10.2026: „die anderen wissen nicht, was welches Zeichen bedeutet“;
    „am Tablet funktioniert das mit dem Ziehen nicht“ → „bau beides“) ──────────────────────────────────────────────────────────────
    Legende unten links im Bild der neuen Skizzen (innen/außen, Feld „aussen“): je benutzte Stempelart das Symbol klein und daneben der Name;
@@ -6595,10 +6600,38 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
   const ti=document.createElement('div');ti.style.cssText='font-size:var(--fs16,16px);font-weight:700;color:#fff;flex:1;min-width:0;';ti.textContent='✏ Einzeichnen – '+(String(r.name||'').trim()||'Raum');
   kopf.append(zu,ti);
   const leiste=document.createElement('div');leiste.style.cssText='display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border);flex-shrink:0;';
-  const feld=document.createElement('div');feld.style.cssText='flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px;background:var(--bg3);';
+  const feld=document.createElement('div');feld.style.cssText='flex:1;min-height:0;display:flex;overflow:auto;padding:8px;background:var(--bg3);'; /* F66: rollt, wenn die Fläche vergrößert ist */
   const cv=document.createElement('canvas');cv.width=W;cv.height=H;cv.setAttribute('data-fs-ez-flaeche','1');
-  cv.style.cssText='display:block;max-width:100%;max-height:100%;width:auto;height:auto;background:#fff;border:1px solid var(--border);touch-action:none;cursor:crosshair;';
+  cv.style.cssText='display:block;margin:auto;flex-shrink:0;background:#fff;border:1px solid var(--border);touch-action:none;cursor:crosshair;'; /* F66: Größe setzt zoomSetzen (kein max-width mehr, sonst könnte sie nicht wachsen) */
   feld.appendChild(cv);
+  /* F66: Zoom – Darstellungsgröße der Fläche; basis = passend ins Sichtfeld, zoomF = 1…4; zwei Finger = pinch */
+  let zoomF=1,basis=null,pinch=null;const zeiger=new Map();
+  const passend=()=>_fsEzPassend(Math.max(100,feld.clientWidth-16),Math.max(100,feld.clientHeight-16),W,H);
+  const zoomAnzeige=document.createElement('span');zoomAnzeige.setAttribute('data-fs-ez-zoom','1');zoomAnzeige.style.cssText='color:#fff;font-size:var(--fs13,13px);min-width:44px;text-align:center;';
+  const zoomSetzen=(z,fx,fy,sx,sy)=>{ /* fx/fy = Punkt der Fläche (Anteil 0…1), der nach dem Zoom bei sx/sy (Bildpunkte im Sichtfeld) liegen soll; ohne: die Mitte bleibt die Mitte */
+    if(!basis)basis=passend();
+    if(fx==null){const rc=cv.getBoundingClientRect(),fr=feld.getBoundingClientRect();fx=0.5;fy=0.5;sx=rc.left-fr.left+rc.width/2;sy=rc.top-fr.top+rc.height/2;}
+    zoomF=Math.round(Math.max(1,Math.min(4,+z||1))*100)/100;
+    cv.style.width=Math.round(basis.w*zoomF)+'px';cv.style.height=Math.round(basis.h*zoomF)+'px';
+    feld.scrollLeft=Math.max(0,8+fx*basis.w*zoomF-sx);feld.scrollTop=Math.max(0,8+fy*basis.h*zoomF-sy);
+    zoomAnzeige.textContent=Math.round(zoomF*100)+' %';
+  };
+  const pinchStart=()=>{ /* zweiter Finger: alles Angefangene fallen lassen, ab jetzt nur Zoom und Schieben */
+    const p=[...zeiger.values()],rc=cv.getBoundingClientRect(),m=[(p[0][0]+p[1][0])/2,(p[0][1]+p[1][1])/2];
+    pinch={d0:Math.max(1,Math.hypot(p[0][0]-p[1][0],p[0][1]-p[1][1])),z0:zoomF,fx:(m[0]-rc.left)/Math.max(1,rc.width),fy:(m[1]-rc.top)/Math.max(1,rc.height)};
+    aktiv=null;entwurf=null;ziehT=null;zieh=null;griffZieh=null;ziehS=null;ziehU=null;neuU=null;mausU=null;neu();
+  };
+  const pinchMove=()=>{
+    if(!pinch||zeiger.size<2)return;
+    const p=[...zeiger.values()],fr=feld.getBoundingClientRect(),m=[(p[0][0]+p[1][0])/2,(p[0][1]+p[1][1])/2];
+    zoomSetzen(_fsEzZoomFaktor(pinch.z0,pinch.d0,Math.hypot(p[0][0]-p[1][0],p[0][1]-p[1][1])),pinch.fx,pinch.fy,m[0]-fr.left,m[1]-fr.top);
+  };
+  const zoomKnopf=(txt,fn,attr)=>{const x=document.createElement('button');x.type='button';x.textContent=txt;x.setAttribute(attr,'1');x.setAttribute('aria-label',txt==='⊡'?'Passend':txt==='🔍+'?'Größer':'Kleiner');x.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;min-width:44px;height:44px;border-radius:8px;font-size:var(--fs18,18px);cursor:pointer;flex-shrink:0;font-family:inherit;';x.onclick=fn;return x;};
+  const zoomBox=document.createElement('div');zoomBox.style.cssText='display:flex;align-items:center;gap:4px;flex-shrink:0;';
+  zoomBox.append(zoomKnopf('🔍−',()=>zoomSetzen(zoomF/1.25),'data-fs-ez-zoomweniger'),zoomAnzeige,zoomKnopf('🔍+',()=>zoomSetzen(zoomF*1.25),'data-fs-ez-zoommehr'),zoomKnopf('⊡',()=>{basis=passend();zoomSetzen(1);},'data-fs-ez-zoompassend'));
+  kopf.appendChild(zoomBox);
+  const groesse=()=>{basis=passend();zoomSetzen(zoomF);};
+  window.addEventListener('resize',groesse);
   const fuss=document.createElement('div');fuss.style.cssText='flex-shrink:0;padding:10px 14px 14px;border-top:1px solid var(--border);';
   const fb=document.createElement('button');fb.type='button';fb.textContent='✓ Fertig';fb.setAttribute('data-fs-ez-fertig','1');
   fb.style.cssText='width:100%;min-height:56px;border-radius:12px;border:none;background:'+FS_FARBE+';color:#fff;font-size:var(--fs18,18px);font-weight:700;font-family:inherit;cursor:pointer;';
@@ -6744,6 +6777,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
   const pos=e=>{const rc=cv.getBoundingClientRect();return [(e.clientX-rc.left)/rc.width*W,(e.clientY-rc.top)/rc.height*H];};
   cv.addEventListener('pointerdown',e=>{
     if(e.pointerType==='pen')stiftGesehen=true;
+    if(e.pointerType==='touch'){zeiger.set(e.pointerId,[e.clientX,e.clientY]);if(zeiger.size>=2){e.preventDefault();try{cv.setPointerCapture(e.pointerId);}catch(x){}pinchStart();return;}} /* F66: zwei Finger = Zoom */
     if(e.pointerType==='touch'&&stiftGesehen)return; // mit Stift: Handballen und Finger zählen nicht
     e.preventDefault();
     try{cv.setPointerCapture(e.pointerId);}catch(x){}
@@ -6801,6 +6835,8 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
     if(werkzeug==='radierer')radieren(p);
   });
   cv.addEventListener('pointermove',e=>{
+    if(e.pointerType==='touch'&&zeiger.has(e.pointerId))zeiger.set(e.pointerId,[e.clientX,e.clientY]); /* F66 */
+    if(pinch){e.preventDefault();pinchMove();return;}
     if(modus==='umriss'){ /* F62 */
       if(ziehU&&e.pointerId===ziehU.id){e.preventDefault();const p=pos(e),u=_fsUmLesen(sk);if(u&&_fsUmEckeSetzen(u,ziehU.i,p,W,H)){ziehU.bewegt=true;neu();}return;}
       if(neuU&&e.pointerId===neuU.id){e.preventDefault();mausU=pos(e);neu();return;}
@@ -6839,6 +6875,8 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
     g.beginPath();g.moveTo(q[0],q[1]);g.lineTo(p[0],p[1]);g.stroke(); // Livespur; das gespeicherte Bild entsteht beim Loslassen
   });
   const ende=e=>{
+    if(e.pointerType==='touch')zeiger.delete(e.pointerId); /* F66 */
+    if(pinch){if(zeiger.size<2)pinch=null;return;}
     if(modus==='umriss'){ /* F62 */
       if(ziehU&&e.pointerId===ziehU.id){const z=ziehU;ziehU=null;if(z.bewegt){_fsUmNachziehen(sk,W,H);scheduleSave();}neu();leisteBauen();return;}
       if(neuU&&e.pointerId===neuU.id){
@@ -6887,10 +6925,11 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
     else if(modus==='umriss'&&selU>=0){const u=_fsUmLesen(sk);if(u&&_fsUmEckeWeg(u,selU)){selU=-1;_fsUmNachziehen(sk,W,H);scheduleSave();neu();leisteBauen();}e.preventDefault();} /* F62 */
   };
   document.addEventListener('keydown',taste,true);
-  const schliessen=()=>{document.removeEventListener('keydown',taste,true);ov.remove();if(typeof fertig==='function'){try{fertig();}catch(x){console.warn('[Feuchte] Einzeichnen:',x);}}};
+  const schliessen=()=>{window.removeEventListener('resize',groesse); /* F66 */document.removeEventListener('keydown',taste,true);ov.remove();if(typeof fertig==='function'){try{fertig();}catch(x){console.warn('[Feuchte] Einzeichnen:',x);}}};
   zu.onclick=schliessen;fb.onclick=schliessen;
   leisteBauen();
   document.body.appendChild(ov);
+  zoomSetzen(1); /* F66: passend ins Sichtfeld, 100 % */
 }
 function _fsBgSektionKurz(sek){
   let da=0,offen=0;
