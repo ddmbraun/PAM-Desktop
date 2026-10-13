@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F61';
+const PAM_FORMULARE_VERSION='F62';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -1119,7 +1119,7 @@ function _fsWordAufbau(b,task){
     _fsAsListe(b).forEach(sk=>{ /* Skizzen des Teils – nur, wenn etwas eingezeichnet ist */
       if(_fsAsTyp(sk)!==typ||!_fsAsBenutzt(b,sk))return;
       const mk=_fsAsMarken(b,sk),nm=hat(sk.name)?String(sk.name).trim():(typ==='innen'?'Raum':'Außen');
-      const tx='Skizze '+nm+', Ansicht '+_fsAsAnsicht(sk)+' (nicht maßstäblich).'+(mk.length?' '+mk.map(q=>q.n+' = '+q.label+(hat(_fsVbWo(q.s))?' ('+_fsVbWo(q.s)+')':'')).join(' · '):''); /* F60: mit Bauteil */
+      const tx='Skizze '+nm+', Ansicht '+_fsAsAnsicht(sk)+' (nicht maßstäblich).'+(_fsUmZeile(sk)?' '+_fsUmZeile(sk)+'.':'')+(mk.length?' '+mk.map(q=>q.n+' = '+q.label+(hat(_fsVbWo(q.s))?' ('+_fsVbWo(q.s)+')':'')).join(' · '):''); /* F60: mit Bauteil */
       teil.push({a:'unter',t:'Skizze '+(typ==='innen'?'innen':'außen')+' – '+nm});
       teil.push({a:'skizze',sk:sk,t:tx,ersatz:'Die Skizze „'+nm+'“ konnte nicht als Bild eingefügt werden.'});
     });
@@ -2374,7 +2374,8 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
           k.append(ol,oc);
         }
         bild.onclick=oeffnen;zeichne();k.appendChild(bild);
-        const ez=document.createElement('button');ez.type='button';ez.setAttribute('data-fs-aszeichnen',sk.id);ez.textContent='✏ Einzeichnen – Stellen als Nummern, Stempel, Striche';
+        if(sk.aussen==='dach'&&_fsUmDa(sk)){const uz=document.createElement('div');uz.setAttribute('data-fs-asumriss',sk.id);uz.style.cssText='font-size:var(--fs14,14px);color:var(--text);margin:2px 0 4px;';uz.textContent=_fsUmZeile(sk)||('Umriss: '+(_fsUmLesen(sk).zu?'geschlossen – Maße an den Kanten eintippen, dann rechnet PAM Fläche und Umfang':'noch offen – im Zeichenfenster schließen'));k.appendChild(uz);} /* F62 */
+        const ez=document.createElement('button');ez.type='button';ez.setAttribute('data-fs-aszeichnen',sk.id);ez.textContent='✏ Einzeichnen – Stellen als Nummern, Stempel, Striche';if(sk.aussen==='dach')ez.textContent+=', Umriss'; /* F62 */
         ez.style.cssText=S_KNOPF+'display:block;width:100%;min-height:48px;margin:4px 0;border:1.5px solid #d9480f;background:rgba(217,72,15,.08);color:var(--text);text-align:left;';
         ez.onclick=oeffnen;k.appendChild(ez);
         const mk=_fsAsMarken(bericht,sk);
@@ -4444,7 +4445,7 @@ function _fsAsWeg(b,sk){
   (Array.isArray(b.vbStellen)?b.vbStellen:[]).forEach(s=>{if(_fsAsMarkeOk(s)&&s.skz.k===sk.id)s.skz=null;});
   return true;
 }
-function _fsAsBenutzt(b,sk){return _fsBgStempelAnzahl(sk)>0||_fsBgStricheAnzahl(sk)>0||_fsAsMarken(b,sk).length>0;}
+function _fsAsBenutzt(b,sk){return _fsBgStempelAnzahl(sk)>0||_fsBgStricheAnzahl(sk)>0||_fsAsMarken(b,sk).length>0||_fsUmDa(sk);} /* F62: auch mit Umriss */
 /* Beschriftung der vier Ränder [oben, rechts, unten, links]: Wand fest; Dach nur, wenn „oben ist …“ gewählt wurde (dann im Uhrzeigersinn weiter) */
 function _fsAsRaender(sk){
   if(sk&&(sk.aussen==='raum'||sk.aussen==='decke'))return ['Wand 3','Wand 4','Wand 1','Wand 2']; /* F36: Raum von oben / Decke von unten – Wand 1 liegt unten */
@@ -4461,6 +4462,7 @@ function _fsAsKurz(b,sk){
   if(nm)t.push(nm+' Stelle'+(nm===1?'':'n'));
   if(ns)t.push(ns+' Stempel');
   if(nl)t.push(nl+' Strich'+(nl===1?'':'e'));
+  if(_fsUmDa(sk))t.push(_fsUmKurz(sk)); /* F62 */
   if(t.length===1)t.push('noch leer');
   return t.join(' · ');
 }
@@ -4525,8 +4527,9 @@ function _fsAsMarkenZeichnen(g,b,sk,sel,lose){
   });
 }
 /* Zeichnet die Außenskizze auf die 900×640-Fläche: Viereck, Name, Ränder, Stempel, Striche, Marken (opt.ohneMarken: ohne – das Zeichenfenster legt sie live darüber) */
+function _fsAsBlatt(M){return {x0:(M&&M.hoch)?100:130,y0:(M&&M.hoch)?130:100,w:(M&&M.hoch)?440:640,h:(M&&M.hoch)?640:440};} /* F62: das Blatt (blasses Rechteck) der Skizze in Bildpunkten */
 function _fsAsZeichnen(g,b,sk,opt){
-  const M=_fsSkMasse(sk),W=M.W,H=M.H,x0=M.hoch?100:130,y0=M.hoch?130:100,w=M.hoch?440:640,h=M.hoch?640:440,dach=!!sk&&sk.aussen==='dach'; // F50: hoch = 640×900, die Fläche steht senkrecht
+  const M=_fsSkMasse(sk),W=M.W,H=M.H,BL=_fsAsBlatt(M),x0=BL.x0,y0=BL.y0,w=BL.w,h=BL.h,dach=!!sk&&sk.aussen==='dach'; // F50: hoch = 640×900, die Fläche steht senkrecht
   g.fillStyle='#ffffff';g.fillRect(0,0,W,H);
   g.fillStyle=_fsAsFarbe(sk);g.fillRect(x0,y0,w,h);
   g.strokeStyle='#222222';g.lineWidth=6;g.lineCap='square';
@@ -4538,6 +4541,7 @@ function _fsAsZeichnen(g,b,sk,opt){
   g.textAlign='center';if(rd[0])g.fillText(rd[0],x0+w/2,y0-24);if(rd[2])g.fillText(rd[2],x0+w/2,y0+h+28);
   g.textAlign='right';if(rd[3])g.fillText(rd[3],x0-14,y0+h/2);
   g.textAlign='left';if(rd[1])g.fillText(rd[1],x0+w+14,y0+h/2);
+  if(dach&&_fsUmDa(sk)&&!(opt&&opt.ohneUmriss))_fsUmZeichnen(g,sk,W,H,null); /* F62: der Umriss liegt unter Stempeln, Strichen und Nummern */
   const r=_fsAsPseudoRaum(sk);
   _fsBgStempelZeichnen(g,r);
   _fsBgStricheZeichnen(g,r);
@@ -6052,6 +6056,216 @@ function _fsBgStrichVerschieben(s,orig,dx,dy,W,H){
   return true;
 }
 function _fsBgStrichWeg(sk,i){if(!sk||!Array.isArray(sk.striche)||!sk.striche[i])return false;sk.striche.splice(i,1);return true;}
+/* ── F62: UMRISS – Ecke für Ecke mit festen Kanten, Maße in Meter, Fläche und Umfang (Frank 13.10.2026, Entwurf → „bau“) ────────────────────────
+   Nur in der Draufsicht „Dachfläche/Balkon von oben“ (sk.aussen==='dach'), EIN Umriss je Skizze:
+   sk.umriss = {ecken:[[x,y],…] (Anteile 0…1 der Fläche, 3 Stellen), zu (geschlossen), masse:{'0':'4,10',…} (getippte Längen in m je Kante,
+   Kante i = Ecke i → Ecke i+1), rast (Kanten rasten auf 90°/45°), strecken (die Form folgt den Maßen)}.
+   Die Zahl gilt, nicht der Strich: getippte Maße rührt PAM nie an; fehlende Maße rechnet es aus dem Schluss des Umrisses (Σ m·cos = 0, Σ m·sin = 0 –
+   je Richtung darf eine Kante fehlen); Fläche (Schnürsenkelformel) und Umfang kommen aus den Maßen, nie aus dem Bild. Gehen alle getippten Maße nicht auf,
+   nimmt die letzte Kante den Unterschied. Der Blatt-Rahmen bleibt blass stehen (Frank 13.10.2026: „Blattrahmen bleibt blass“). */
+const FS_UM_MAX=40,FS_UM_BLATT_M=10; /* höchstens 40 Ecken; solange kein Maß getippt ist, gilt: das Blatt ist 10 m breit */
+function _fsUmLesen(sk){const u=sk&&sk.umriss;return (u&&typeof u==='object'&&Array.isArray(u.ecken))?u:null;}
+function _fsUmHolen(sk){
+  if(!sk)return null;
+  let u=_fsUmLesen(sk);
+  if(!u){u={ecken:[],zu:false,masse:{},rast:true,strecken:true};sk.umriss=u;}
+  if(u.rast!==false)u.rast=true;if(u.strecken!==false)u.strecken=true;if(!u.masse||typeof u.masse!=='object')u.masse={};
+  return u;
+}
+function _fsUmEcken(u){return ((u&&Array.isArray(u.ecken))?u.ecken:[]).filter(q=>Array.isArray(q)&&isFinite(+q[0])&&isFinite(+q[1]));}
+function _fsUmDa(sk){const u=_fsUmLesen(sk);return !!u&&_fsUmEcken(u).length>0;}
+function _fsUmWeg(sk){if(sk&&sk.umriss){sk.umriss=null;return true;}return false;}
+function _fsUmRund(v){return Math.round(Math.max(0,Math.min(1,v))*1000)/1000;}
+function _fsUmPx(u,W,H){return _fsUmEcken(u).map(q=>[(+q[0])*W,(+q[1])*H]);}
+function _fsUmFmt(v){return (Math.round(v*100)/100).toFixed(2).replace('.',',');}
+// Richtung der Kante i (Bogenmaß, Bildpunkte); mit Einrasten auf 45°-Schritte gerundet
+function _fsUmWinkel(u,i,W,H){
+  const p=_fsUmPx(u,W,H),n=p.length;if(n<2)return 0;
+  const a=p[i%n],b=p[(i+1)%n];let w=Math.atan2(b[1]-a[1],b[0]-a[0]);
+  if(u.rast!==false)w=Math.round(w/(Math.PI/4))*(Math.PI/4);
+  return w;
+}
+// Magnet: nahe der ersten Ecke (ab 3 Ecken) zieht die Vorschau dorthin – so lässt sich der Umriss immer schließen, auch mit Einrasten
+function _fsUmMagnet(u,p,W,H){const e=_fsUmPx(u,W,H);return e.length>=3&&Math.hypot(e[0][0]-p[0],e[0][1]-p[1])<=26;}
+// Einen Punkt (Bildpunkte) an die letzte Ecke anlegen: Magnet vor Einrasten; mit Einrasten springt die Kante auf 0/45/90°
+function _fsUmRasten(u,p,W,H){
+  const e=_fsUmPx(u,W,H);if(!e.length)return [+p[0],+p[1]];
+  if(_fsUmMagnet(u,p,W,H))return e[0].slice();
+  if(u.rast===false)return [+p[0],+p[1]];
+  const a=e[e.length-1],dx=p[0]-a[0],dy=p[1]-a[1],l=Math.hypot(dx,dy);if(l<2)return [+p[0],+p[1]];
+  const w=Math.round(Math.atan2(dy,dx)/(Math.PI/4))*(Math.PI/4);
+  return [a[0]+Math.cos(w)*l,a[1]+Math.sin(w)*l];
+}
+function _fsUmNaheEcke(u,p,W,H){const e=_fsUmPx(u,W,H);for(let i=0;i<e.length;i++)if(Math.hypot(e[i][0]-p[0],e[i][1]-p[1])<=22)return i;return -1;}
+function _fsUmNaheKante(u,p,W,H){
+  if(!u||!u.zu)return -1;const e=_fsUmPx(u,W,H),n=e.length;if(n<2)return -1;
+  for(let i=0;i<n;i++){const a=e[i],b=e[(i+1)%n];if(_fsSkAbstand(p[0],p[1],a[0],a[1],b[0],b[1])<=14)return i;}
+  return -1;
+}
+// Neue Ecke am Ende (Bildpunkte, wird eingerastet); doppelt an derselben Stelle oder über der Obergrenze → false
+function _fsUmEckeDazu(u,p,W,H){
+  if(!u||u.zu||!Array.isArray(p))return false;
+  if(!Array.isArray(u.ecken))u.ecken=[];
+  if(u.ecken.length>=FS_UM_MAX)return false;
+  const q=_fsUmRasten(u,p,W,H),e=_fsUmPx(u,W,H);
+  if(e.length&&Math.hypot(q[0]-e[e.length-1][0],q[1]-e[e.length-1][1])<8)return false;
+  u.ecken.push([_fsUmRund(q[0]/W),_fsUmRund(q[1]/H)]);return true;
+}
+function _fsUmEckeSetzen(u,i,p,W,H){if(!u||!Array.isArray(u.ecken)||!u.ecken[i]||!Array.isArray(p))return false;u.ecken[i]=[_fsUmRund(p[0]/W),_fsUmRund(p[1]/H)];return true;}
+function _fsUmSchliessen(u){if(!u||u.zu||_fsUmEcken(u).length<3)return false;u.zu=true;return true;}
+// Rückgängig: geschlossen → wieder offen; offen → letzte Ecke weg (ihr Maß mit)
+function _fsUmZurueck(u){
+  if(!u)return false;
+  if(u.zu){u.zu=false;return true;}
+  if(Array.isArray(u.ecken)&&u.ecken.length){u.ecken.pop();const n=u.ecken.length;Object.keys(u.masse||{}).forEach(k=>{if(+k>=n-1)delete u.masse[k];});return true;}
+  return false;
+}
+// Maße hängen an Kanten-Nummern: beim Löschen einer Ecke verschmelzen zwei Kanten (beide Maße weg), beim Einfügen teilt sich eine (ihr Maß weg)
+function _fsUmMasseUmhaengen(u,fn){const alt=(u&&u.masse)||{},neu={};Object.keys(alt).forEach(k=>{const j=fn(+k);if(j>=0&&alt[k])neu[j]=alt[k];});u.masse=neu;}
+function _fsUmEckeWeg(u,i){
+  const n=_fsUmEcken(u).length;if(!u||!u.zu||n<=3||!u.ecken[i])return false;
+  const vor=(i-1+n)%n;
+  _fsUmMasseUmhaengen(u,k=>(k===i||k===vor)?-1:(k>i?k-1:k));
+  u.ecken.splice(i,1);return true;
+}
+// Neue Ecke auf der Kante k (nahe p); liefert die Nummer der neuen Ecke oder −1
+function _fsUmEckeEinfuegen(u,k,p,W,H){
+  const e=_fsUmPx(u,W,H),n=e.length;if(!u||!u.zu||n<2||!e[k]||n>=FS_UM_MAX||!Array.isArray(p))return -1;
+  const a=e[k],b=e[(k+1)%n],vx=b[0]-a[0],vy=b[1]-a[1],L=(vx*vx+vy*vy)||1;
+  let t=((p[0]-a[0])*vx+(p[1]-a[1])*vy)/L;t=Math.max(0.05,Math.min(0.95,t));
+  _fsUmMasseUmhaengen(u,j=>j===k?-1:(j>k?j+1:j));
+  u.ecken.splice(k+1,0,[_fsUmRund((a[0]+vx*t)/W),_fsUmRund((a[1]+vy*t)/H)]);
+  return k+1;
+}
+// Maß einer Kante in Meter setzen (Text wie getippt, „3,20“); leer = Maß weg; keine Zahl oder ≤ 0 → false
+function _fsUmMassSetzen(u,i,text){
+  if(!u)return false;if(!u.masse||typeof u.masse!=='object')u.masse={};
+  const s=String(text==null?'':text).trim().replace('.',',');
+  if(!s){delete u.masse[i];return true;}
+  const v=_fsZahl(s);if(v===null||!(v>0))return false;
+  u.masse[i]=s;return true;
+}
+// Maßstab Meter je Bildpunkt: aus den getippten Kanten; ohne ein Maß gilt: das Blatt (640 bzw. 440 Bildpunkte breit) ist 10 m breit
+function _fsUmMassstab(u,W,H){
+  const e=_fsUmPx(u,W,H),n=e.length;let m=0,px=0;
+  for(let i=0;i<n;i++){
+    const v=_fsZahl(u&&u.masse?u.masse[i]:null);if(v===null||!(v>0))continue;
+    if(!(u&&u.zu)&&i>=n-1)continue;
+    const a=e[i],b=e[(i+1)%n],l=Math.hypot(b[0]-a[0],b[1]-a[1]);if(l>1){m+=v;px+=l;}
+  }
+  return px>0?m/px:FS_UM_BLATT_M/(W<H?440:640);
+}
+/* Alle Maße je Kante: {m, art:'getippt'|'gerechnet'|'bild'}. Getippt gilt immer. Fehlende rechnet PAM aus dem Schluss des geschlossenen Umrisses
+   (höchstens zwei Unbekannte – je Richtung eine); was dann noch fehlt, kommt nur aus dem Bild („~“). Beim offenen Umriss gibt es keine Schluss-Kante. */
+function _fsUmMasse(u,W,H){
+  const e=_fsUmPx(u,W,H),n=e.length,out=[];if(!u||n<2)return out;
+  const kanten=u.zu?n:n-1,unb=[];
+  for(let i=0;i<kanten;i++){const v=_fsZahl(u.masse?u.masse[i]:null);if(v!==null&&v>0)out.push({m:v,art:'getippt'});else{out.push(null);unb.push(i);}}
+  if(u.zu&&unb.length&&unb.length<=2){
+    let sx=0,sy=0;
+    for(let i=0;i<n;i++)if(out[i]){const w=_fsUmWinkel(u,i,W,H);sx+=out[i].m*Math.cos(w);sy+=out[i].m*Math.sin(w);}
+    const cs=unb.map(i=>{const w=_fsUmWinkel(u,i,W,H);return [Math.cos(w),Math.sin(w)];});
+    let loes=null;
+    if(unb.length===1){const cx=cs[0][0],cy=cs[0][1];if(Math.abs(cx)>=Math.abs(cy)){if(Math.abs(cx)>1e-6)loes=[-sx/cx];}else if(Math.abs(cy)>1e-6)loes=[-sy/cy];}
+    else{const det=cs[0][0]*cs[1][1]-cs[1][0]*cs[0][1];if(Math.abs(det)>1e-6)loes=[(-sx*cs[1][1]+sy*cs[1][0])/det,(-sy*cs[0][0]+sx*cs[0][1])/det];}
+    if(loes&&loes.every(v=>isFinite(v)&&v>0.005))unb.forEach((i,k)=>{out[i]={m:Math.round(loes[k]*1000)/1000,art:'gerechnet'};});
+  }
+  const ms=_fsUmMassstab(u,W,H);
+  for(let i=0;i<kanten;i++)if(!out[i]){const a=e[i],b=e[(i+1)%n];out[i]={m:Math.hypot(b[0]-a[0],b[1]-a[1])*ms,art:'bild'};}
+  return out;
+}
+function _fsUmAlleBekannt(ms){return Array.isArray(ms)&&ms.length>0&&ms.every(x=>x&&x.art!=='bild');}
+function _fsUmMasseVon(sk,W,H){const u=_fsUmLesen(sk);if(!u)return [];if(!W){const M=_fsSkMasse(sk);W=M.W;H=M.H;}return _fsUmMasse(u,W,H);}
+// Die Form aus Richtungen + Maßen ablaufen (Meter); die letzte Kante schließt zur ersten Ecke
+function _fsUmLauf(u,ms,W,H){const n=_fsUmEcken(u).length,p=[[0,0]];for(let i=0;i<n-1;i++){const w=_fsUmWinkel(u,i,W,H);p.push([p[i][0]+ms[i].m*Math.cos(w),p[i][1]+ms[i].m*Math.sin(w)]);}return p;}
+/* Fläche (m²) und Umfang (m) aus den Maßen; null, solange der Umriss offen ist oder ein Maß nur aus dem Bild käme.
+   schluss = um wie viel Meter die getippten Maße nicht aufgehen (die letzte Kante nimmt den Unterschied) */
+function _fsUmFlaeche(sk,W,H){
+  const u=_fsUmLesen(sk);if(!u||!u.zu)return null;
+  if(!W){const M=_fsSkMasse(sk);W=M.W;H=M.H;}
+  const n=_fsUmEcken(u).length,ms=_fsUmMasse(u,W,H);if(n<3||!_fsUmAlleBekannt(ms))return null;
+  const p=_fsUmLauf(u,ms,W,H);
+  let A=0;for(let i=0;i<n;i++){const a=p[i],b=p[(i+1)%n];A+=a[0]*b[1]-b[0]*a[1];}
+  let x=0,y=0;for(let i=0;i<n;i++){const w=_fsUmWinkel(u,i,W,H);x+=ms[i].m*Math.cos(w);y+=ms[i].m*Math.sin(w);}
+  return {A:Math.abs(A)/2,U:ms.reduce((s,q)=>s+q.m,0),schluss:Math.hypot(x,y),gerechnet:ms.filter(q=>q.art==='gerechnet').length};
+}
+// Eine Zeile für Formular, Word und PDF – leer, solange die Fläche nicht feststeht
+function _fsUmZeile(sk){
+  const f=_fsUmFlaeche(sk);if(!f)return '';
+  let t='Umriss: Fläche ≈ '+_fsUmFmt(f.A)+' m², Umfang '+_fsUmFmt(f.U)+' m';
+  if(f.gerechnet)t+=' ('+f.gerechnet+' Maß'+(f.gerechnet===1?'':'e')+' gerechnet)';
+  if(f.schluss>0.02)t+=' – die Maße gehen um '+_fsUmFmt(f.schluss)+' m nicht auf';
+  return t;
+}
+function _fsUmKurz(sk){const u=_fsUmLesen(sk);if(!u||!_fsUmDa(sk))return '';const f=_fsUmFlaeche(sk);return f?'Umriss ≈ '+_fsUmFmt(f.A)+' m²':u.zu?'Umriss':'Umriss (offen)';}
+// Gesperrt = geschlossen, „strecken“ an und alle Maße getippt oder gerechnet: die Zahlen bestimmen die Form, Ecken lassen sich nicht ziehen
+function _fsUmGesperrt(sk,W,H){const u=_fsUmLesen(sk);if(!u||!u.zu||u.strecken===false)return false;if(!W){const M=_fsSkMasse(sk);W=M.W;H=M.H;}return _fsUmAlleBekannt(_fsUmMasse(u,W,H));}
+// Form nach den Maßen strecken: aus Richtungen + Maßen neu aufbauen und ins Blatt einpassen; false, wenn nichts zu tun ist
+function _fsUmStrecken(sk,W,H){
+  const u=_fsUmLesen(sk);if(!u||!u.zu||u.strecken===false)return false;
+  if(!W){const M=_fsSkMasse(sk);W=M.W;H=M.H;}
+  const n=_fsUmEcken(u).length,ms=_fsUmMasse(u,W,H);if(n<3||!_fsUmAlleBekannt(ms))return false;
+  const p=_fsUmLauf(u,ms,W,H);
+  const xs=p.map(q=>q[0]),ys=p.map(q=>q[1]),mx=Math.min.apply(null,xs),my=Math.min.apply(null,ys),mw=Math.max.apply(null,xs)-mx,mh=Math.max.apply(null,ys)-my;
+  if(!(mw>0)&&!(mh>0))return false;
+  const BL=_fsAsBlatt({hoch:W<H}),s=Math.min((BL.w-60)/Math.max(mw,1e-6),(BL.h-60)/Math.max(mh,1e-6));
+  const ox=BL.x0+(BL.w-mw*s)/2-mx*s,oy=BL.y0+(BL.h-mh*s)/2-my*s;
+  u.ecken=p.map(q=>[_fsUmRund((q[0]*s+ox)/W),_fsUmRund((q[1]*s+oy)/H)]);
+  return true;
+}
+// Nach jeder Änderung: ein Umriss mit weniger als 3 Ecken ist offen; dann die Form nach den Maßen strecken
+function _fsUmNachziehen(sk,W,H){const u=_fsUmLesen(sk);if(!u)return false;if(u.zu&&_fsUmEcken(u).length<3)u.zu=false;return _fsUmStrecken(sk,W,H);}
+// Hinweiszeile im Zeichenfenster (st.sel = angetippte Ecke, st.eckeNeu = „＋ Ecke auf Kante“ wartet auf den Tipp)
+function _fsUmHinweis(sk,W,H,st){
+  const u=_fsUmLesen(sk),ne=u?_fsUmEcken(u).length:0;st=st||{};
+  if(!ne)return 'Auf das Blatt tippen, um die erste Ecke zu setzen – Ecke für Ecke, die Kanten bleiben gerade.';
+  if(!u.zu)return ne+' Ecke'+(ne===1?'':'n')+' · nächste Ecke tippen (oder drücken, ziehen, loslassen) · gesetzte Ecke anfassen = nachziehen'+(ne>=3?' · zum Schließen nahe an die erste Ecke (orange), sie zieht die Linie an':'');
+  if(st.eckeNeu)return 'Auf die Kante tippen, wo die neue Ecke hin soll – danach ziehen.';
+  const ms=_fsUmMasse(u,W,H),f=_fsUmFlaeche(sk,W,H),fehlt=ms.filter(q=>q&&q.art==='bild').length,ger=ms.filter(q=>q&&q.art==='gerechnet').length;
+  let t=ne+' Ecken';
+  if(f)t+=' · Fläche ≈ '+_fsUmFmt(f.A)+' m² · Umfang '+_fsUmFmt(f.U)+' m';
+  t+=fehlt?' · '+fehlt+' Kante'+(fehlt===1?'':'n')+' ohne Maß (rot „~“ = nur aus dem Bild) – Kante antippen = Maß in Meter; je Richtung darf eine fehlen, die rechnet PAM':' · alle Kanten haben ein Maß';
+  if(ger)t+=' · '+ger+' Maß'+(ger===1?'':'e')+' gerechnet (grau „≈“)';
+  if(ger&&u.rast===false)t+=' ⚠ ohne Einrasten nur so genau wie der Strich – besser alle Kanten selbst eintippen';
+  if(f&&f.schluss>0.02)t+=' ⚠ die Maße gehen um '+_fsUmFmt(f.schluss)+' m nicht auf – die letzte Kante nimmt den Unterschied';
+  t+=_fsUmGesperrt(sk,W,H)?' · 🔒 die Zahlen bestimmen die Form – Kante antippen = Maß ändern, Ecke antippen + ✕ = löschen':' · Ecke ziehen = nachbessern · Kante antippen = Maß';
+  return t;
+}
+// Maß-Schild an einer Kante (weißer Kasten, farbige Zahl)
+function _fsUmSchild(g,x,y,tx,farbe){
+  g.font='bold 17px sans-serif';g.textAlign='center';g.textBaseline='middle';
+  let bw=tx.length*10+10;try{const mt=(typeof g.measureText==='function')?g.measureText(tx):null;if(mt&&isFinite(+mt.width)&&+mt.width>0)bw=+mt.width+10;}catch(x){}
+  g.fillStyle='#ffffff';g.fillRect(x-bw/2,y-11,bw,22);g.fillStyle=farbe;g.fillText(tx,x,y);
+}
+/* Zeichnet den Umriss: Fläche, Kanten, Maß-Schilder (blau = getippt · grau „≈“ = gerechnet · rot „~“ = nur aus dem Bild, nur im Zeichenfenster),
+   im gespeicherten Bild unten rechts Fläche und Umfang. opt nur im Zeichenfenster: {sel: angetippte Ecke, maus: Vorschau-Punkt} – dann auch die Ecken */
+function _fsUmZeichnen(g,sk,W,H,opt){
+  const u=_fsUmLesen(sk),e=_fsUmPx(u,W,H),n=e.length;if(!u||!n)return;
+  const fenster=!!opt;
+  if(typeof g.save==='function')g.save();
+  g.beginPath();g.moveTo(e[0][0],e[0][1]);for(let i=1;i<n;i++)g.lineTo(e[i][0],e[i][1]);
+  if(u.zu){g.closePath();g.fillStyle='rgba(31,95,139,.12)';g.fill();}
+  g.strokeStyle='#1c1c1e';g.lineWidth=5;g.lineJoin='round';g.lineCap='round';g.stroke();
+  if(fenster&&!u.zu&&opt.maus){
+    const p=_fsUmRasten(u,opt.maus,W,H),a=e[n-1];
+    g.strokeStyle='#1f5f8b';g.lineWidth=5;if(typeof g.setLineDash==='function')g.setLineDash([8,6]);
+    g.beginPath();g.moveTo(a[0],a[1]);g.lineTo(p[0],p[1]);g.stroke();if(typeof g.setLineDash==='function')g.setLineDash([]);
+    const l=Math.hypot(p[0]-a[0],p[1]-a[1]);if(l>8)_fsUmSchild(g,(a[0]+p[0])/2,(a[1]+p[1])/2,'~ '+_fsUmFmt(l*_fsUmMassstab(u,W,H))+' m','#1f5f8b');
+  }
+  _fsUmMasse(u,W,H).forEach((q,i)=>{
+    if(!q||(!fenster&&q.art==='bild'))return;
+    const a=e[i],b=e[(i+1)%n],tx=(q.art==='gerechnet'?'≈ ':q.art==='bild'?'~ ':'')+_fsUmFmt(q.m)+' m';
+    _fsUmSchild(g,(a[0]+b[0])/2,(a[1]+b[1])/2,tx,q.art==='getippt'?'#1f5f8b':q.art==='gerechnet'?'#777777':'#d9480f');
+  });
+  if(fenster){
+    const mag=!u.zu&&!!opt.maus&&_fsUmMagnet(u,opt.maus,W,H);
+    e.forEach((q,i)=>{const an=u.zu&&i===opt.sel;g.beginPath();g.arc(q[0],q[1],(i===0&&mag)?16:an?10:(u.zu?7:(i===0?10:6)),0,Math.PI*2);g.fillStyle=(an||(i===0&&!u.zu))?'#d9480f':'#1f5f8b';g.fill();g.strokeStyle='#ffffff';g.lineWidth=2;g.stroke();});
+  }else{
+    const f=_fsUmFlaeche(sk,W,H);
+    if(f){g.font='bold 22px sans-serif';g.textAlign='right';g.textBaseline='middle';g.fillStyle='#1c1c1e';g.fillText('Fläche ≈ '+_fsUmFmt(f.A)+' m² · Umfang '+_fsUmFmt(f.U)+' m',W-24,H-26);}
+  }
+  if(typeof g.restore==='function')g.restore();
+}
 /* ── F7: Stempel (Tür, Fenster, Schrank, Heizkörper) in der Raumskizze ─────────────────────────────────────────────────
    Frank (01.10.2026): „Stempel für Tür oder Fenster, die ich dahin klicken kann – und verschieben.“ Ein Stempel ist ein GEGENSTAND, kein gemalter Strich:
    raum.skizze.stempel = [{t:'tuer'|'fenster'|'schrank'|'heiz', x, y (Mitte, Anteil 0…1 der 900×640-Fläche), r (0/90/180/270 Grad), s (Größe 0,5…2)}].
@@ -6303,7 +6517,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
   if(!sk||!sk.an)return;
   const alt=document.getElementById('_fsEinzeichnen');if(alt){alt.remove();return;}
   const M=_fsSkMasse(sk),W=M.W,H=M.H; // F50: quer oder hoch
-  const unterlage=_fsBgSkizzeBild(b,Object.assign({},r,{skizze:Object.assign({},sk,{striche:[],stempel:[]})}),{ohneMarken:true}); // die Zeichnung ohne Striche und Stempel (F33: und ohne Stellen-Nummern), die kommen live darüber
+  const unterlage=_fsBgSkizzeBild(b,Object.assign({},r,{skizze:Object.assign({},sk,{striche:[],stempel:[],umriss:null})}),{ohneMarken:true}); // die Zeichnung ohne Striche und Stempel (F33: und ohne Stellen-Nummern), die kommen live darüber
   if(!unterlage){toast('Einzeichnen geht hier nicht (kein Zeichenbereich)','error',4000);return;}
   const ov=document.createElement('div');ov.id='_fsEinzeichnen';_fsSichtAn(ov);
   ov.style.cssText='position:fixed;inset:0;z-index:99999;background:var(--bg);color:var(--text);display:flex;flex-direction:column;';
@@ -6325,10 +6539,12 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
   const g=cv.getContext('2d');
   const bild=new Image();let bildDa=false;
   let werkzeug='frei',selT=-1,ziehT=null,entwurf=null,griffZieh=null;const verlauf=[]; /* F50: Werkzeug · angetipptes Teil · Teil verschieben · Vorschau der Form · Stempel-Griff · Rückgängig-Verlauf (nur in diesem Fenster) */
-  let modus=sk.aussen?'stelle':'zeichnen',farbe=FS_BG_STRICH_FARBEN[0],aktiv=null,zieh=null,sel=-1,stiftGesehen=false,selS=null,ziehS=null,loseS=false,festGesagtS=false,neuText=null; /* F34: loseS = gewählte Nummer lässt sich verschieben; neuText = Beschreibung einer neuen Stelle, die auf den Tipp in die Skizze wartet */ /* F33: Außenskizze beginnt bei „Stellen“; selS = gewählte Stelle, ziehS = Marke wird gezogen */
+  let modus=sk.aussen?'stelle':'zeichnen',farbe=FS_BG_STRICH_FARBEN[0],aktiv=null,zieh=null,sel=-1,stiftGesehen=false,selS=null,ziehS=null,loseS=false,festGesagtS=false,neuText=null;
+  let selU=-1,ziehU=null,neuU=null,mausU=null,eckeNeuU=false; /* F62: Umriss – angetippte Ecke · Ecke wird gezogen · neue Ecke wird gezogen · Vorschau-Punkt · „＋ Ecke auf Kante“ wartet */ /* F34: loseS = gewählte Nummer lässt sich verschieben; neuText = Beschreibung einer neuen Stelle, die auf den Tipp in die Skizze wartet */ /* F33: Außenskizze beginnt bei „Stellen“; selS = gewählte Stelle, ziehS = Marke wird gezogen */
   const neu=()=>{
     g.fillStyle='#ffffff';g.fillRect(0,0,W,H);
     if(bildDa)g.drawImage(bild,0,0,W,H);
+    if(sk.aussen==='dach'&&_fsUmDa(sk))_fsUmZeichnen(g,sk,W,H,modus==='umriss'?{sel:selU,maus:mausU}:null); /* F62: Umriss live, unter Stempeln und Strichen */
     _fsBgStempelZeichnen(g,r);
     _fsBgStricheZeichnen(g,r);
     if(sk.aussen)_fsAsMarkenZeichnen(g,b,sk,modus==='stelle'?selS:null,modus==='stelle'&&loseS); /* F33, F34 */
@@ -6358,9 +6574,9 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
   const radieren=p=>{const i=_fsBgStrichTreffer(sk,p[0],p[1]);if(i<0)return;merken();if(_fsBgStrichWeg(sk,i)){selT=-1;scheduleSave();neu();leisteBauen();}};
   const leisteBauen=()=>{
     leiste.innerHTML='';
-    (sk.aussen?[['stelle','① Stellen'],['stempel','▣ Stempel'],['zeichnen','✏ Zeichnen']]:[['zeichnen','✏ Zeichnen'],['stempel','▣ Stempel']]).forEach(([k,txt])=>{
+    (sk.aussen?[['stelle','① Stellen'],['stempel','▣ Stempel'],['zeichnen','✏ Zeichnen']].concat(sk.aussen==='dach'?[['umriss','⬠ Umriss']]:[]):[['zeichnen','✏ Zeichnen'],['stempel','▣ Stempel']]).forEach(([k,txt])=>{ /* F62: Umriss nur in der Draufsicht */
       const an=modus===k;
-      leiste.appendChild(knopf(txt,'border:3px solid '+(an?'var(--fs-krd,'+FS_FARBE+')':'var(--border)')+';background:'+(an?'var(--fs-can,rgba(31,95,139,.18))':'var(--fs-cfl,transparent)')+';',()=>{modus=k;sel=-1;selT=-1;loseS=false;neuText=null;neu();leisteBauen();},['data-fs-ez-modus',k]));
+      leiste.appendChild(knopf(txt,'border:3px solid '+(an?'var(--fs-krd,'+FS_FARBE+')':'var(--border)')+';background:'+(an?'var(--fs-can,rgba(31,95,139,.18))':'var(--fs-cfl,transparent)')+';',()=>{modus=k;sel=-1;selT=-1;loseS=false;neuText=null;selU=-1;neuU=null;mausU=null;eckeNeuU=false;neu();leisteBauen();},['data-fs-ez-modus',k]));
     });
     const trenn=document.createElement('span');trenn.style.cssText='width:1px;align-self:stretch;background:var(--border);';leiste.appendChild(trenn);
     if(modus==='stelle'){ /* F33: Stellen des Bereichs als Nummern in die Skizze setzen */
@@ -6413,6 +6629,19 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
       const n=(sk.striche||[]).length;
       z.textContent=n+' Teil'+(n===1?'':'e')+' – '+(teil?'angetippt: ziehen = verschieben, Farbe antippen = umfärben':werkzeug==='radierer'?'ein Teil antippen oder darüberwischen = löschen':werkzeug==='text'?'in die Skizze tippen, dann den Text eingeben':'zeichnen · kurz antippen = ein Teil auswählen');
       leiste.appendChild(z);
+    }else if(modus==='umriss'){ /* F62: Umriss Ecke für Ecke – nur „Dachfläche/Balkon von oben“ */
+      const u=_fsUmLesen(sk),ne=u?_fsUmEcken(u).length:0,zuU=!!(u&&u.zu),rastAn=!u||u.rast!==false,streckAn=!u||u.strecken!==false;
+      const AN=(an)=>'border:3px solid '+(an?'var(--fs-krd,'+FS_FARBE+')':'var(--border)')+';background:'+(an?'var(--fs-can,rgba(31,95,139,.18))':'var(--fs-cfl,transparent)')+';';
+      leiste.appendChild(knopf('⌗ Einrasten 90°/45°'+(rastAn?' ✓':''),AN(rastAn),()=>{_fsUmHolen(sk).rast=!rastAn;_fsUmNachziehen(sk,W,H);scheduleSave();neu();leisteBauen();},['data-fs-ez-umrast','1']));
+      leiste.appendChild(knopf('↔ Nach Maßen strecken'+(streckAn?' ✓':''),AN(streckAn),()=>{_fsUmHolen(sk).strecken=!streckAn;_fsUmNachziehen(sk,W,H);scheduleSave();neu();leisteBauen();},['data-fs-ez-umstreck','1']));
+      if(!zuU&&ne>=3)leiste.appendChild(knopf('✓ Schließen',RAND,()=>{if(_fsUmSchliessen(_fsUmHolen(sk))){_fsUmNachziehen(sk,W,H);mausU=null;scheduleSave();neu();leisteBauen();}},['data-fs-ez-umzu','1']));
+      if(ne)leiste.appendChild(knopf('↶ Rückgängig',RAND,()=>{const uu=_fsUmHolen(sk);if(_fsUmZurueck(uu)){if(!_fsUmEcken(uu).length)_fsUmWeg(sk);selU=-1;eckeNeuU=false;scheduleSave();neu();leisteBauen();}},['data-fs-ez-umzurueck','1']));
+      if(zuU)leiste.appendChild(knopf('＋ Ecke auf Kante',AN(eckeNeuU),()=>{eckeNeuU=!eckeNeuU;neu();leisteBauen();},['data-fs-ez-umeckeneu','1']));
+      if(zuU&&selU>=0&&ne>3)leiste.appendChild(knopf('✕ Ecke löschen',RAND+'color:var(--red);',()=>{if(_fsUmEckeWeg(_fsUmHolen(sk),selU)){selU=-1;_fsUmNachziehen(sk,W,H);scheduleSave();neu();leisteBauen();}},['data-fs-ez-umeckeweg','1']));
+      if(ne)leiste.appendChild(knopf('Umriss löschen',RAND+'color:var(--red);',()=>{if(!confirm('Den Umriss mit allen Ecken und Maßen löschen? Stempel, Striche und Nummern bleiben.'))return;_fsUmWeg(sk);selU=-1;eckeNeuU=false;mausU=null;scheduleSave();neu();leisteBauen();},['data-fs-ez-umweg','1']));
+      const z=document.createElement('span');z.setAttribute('data-fs-ez-zaehler','1');z.style.cssText='font-size:var(--fs13,13px);color:var(--text2);';
+      z.textContent=_fsUmHinweis(sk,W,H,{sel:selU,eckeNeu:eckeNeuU});
+      leiste.appendChild(z);
     }else{
       _fsStempelListe(sk).forEach(x=>{ /* F33: die Außenskizze hat eigene Stempel */
         leiste.appendChild(knopf('+ '+x.n,'border:2px solid '+FS_FARBE+';background:rgba(31,95,139,.10);',()=>{
@@ -6463,6 +6692,25 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
       neu();
       return;
     }
+    if(modus==='umriss'){ /* F62: Umriss – offen: Ecke setzen / nachziehen / schließen; geschlossen: Ecke anfassen, Kante antippen = Maß, „＋ Ecke auf Kante“ */
+      const u=_fsUmHolen(sk);
+      if(!u.zu){
+        if(_fsUmEcken(u).length>=3&&_fsUmMagnet(u,p,W,H)){_fsUmSchliessen(u);_fsUmNachziehen(sk,W,H);neuU=null;mausU=null;scheduleSave();neu();leisteBauen();return;}
+        const i=_fsUmNaheEcke(u,p,W,H);
+        if(i>0){ziehU={id:e.pointerId,i:i,bewegt:false};selU=i;neu();return;}
+        neuU={id:e.pointerId};mausU=p;neu();return;
+      }
+      if(eckeNeuU){const k=_fsUmNaheKante(u,p,W,H);if(k>=0){const j=_fsUmEckeEinfuegen(u,k,p,W,H);if(j>=0){selU=j;ziehU={id:e.pointerId,i:j,bewegt:false};eckeNeuU=false;scheduleSave();}}neu();leisteBauen();return;}
+      const i=_fsUmNaheEcke(u,p,W,H);
+      if(i>=0){selU=i;if(!_fsUmGesperrt(sk,W,H))ziehU={id:e.pointerId,i:i,bewegt:false};neu();leisteBauen();return;}
+      selU=-1;
+      const k=_fsUmNaheKante(u,p,W,H);
+      if(k>=0){
+        const v=prompt('Länge dieser Kante in Meter (z. B. 3,20). Leer lassen = Maß löschen, PAM rechnet es dann, wenn es kann.',String((u.masse&&u.masse[k])||''));
+        if(v!==null){if(_fsUmMassSetzen(u,k,v)){_fsUmNachziehen(sk,W,H);scheduleSave();}else toast('Bitte eine Länge in Meter eingeben, z. B. 3,20','info',3000);}
+      }
+      neu();leisteBauen();return;
+    }
     if(modus==='stempel'){ // Stempel antippen = auswählen, ziehen = verschieben; daneben tippen = nichts mehr ausgewählt
       const stA=(sel>=0&&Array.isArray(sk.stempel))?sk.stempel[sel]:null; /* F50: zuerst die Griffe des gewählten Stempels */
       const gr=stA?_fsBgStempelGriffe(stA,W,H).find(q=>Math.hypot(q.x-p[0],q.y-p[1])<=26):null;
@@ -6481,6 +6729,12 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
     if(werkzeug==='radierer')radieren(p);
   });
   cv.addEventListener('pointermove',e=>{
+    if(modus==='umriss'){ /* F62 */
+      if(ziehU&&e.pointerId===ziehU.id){e.preventDefault();const p=pos(e),u=_fsUmLesen(sk);if(u&&_fsUmEckeSetzen(u,ziehU.i,p,W,H)){ziehU.bewegt=true;neu();}return;}
+      if(neuU&&e.pointerId===neuU.id){e.preventDefault();mausU=pos(e);neu();return;}
+      const u=_fsUmLesen(sk);if(u&&!u.zu&&_fsUmEcken(u).length){mausU=pos(e);neu();} /* am PC folgt die Vorschau der Maus */
+      return;
+    }
     if(ziehS&&e.pointerId===ziehS.id){e.preventDefault();const p=pos(e),zs=ziehS.s;if(ziehS.teil==='ring'){const tx=zs.skz.x*W,ty=zs.skz.y*H;if(_fsAsRingSetzen(zs,Math.atan2(-(p[1]-ty),p[0]-tx)*180/Math.PI,Math.hypot(p[0]-tx,p[1]-ty)))neu();}else if(_fsAsMarkeSetzen(sk,zs,p[0]/W,p[1]/H))neu();return;} /* F33, F34: Kreis ziehen = Richtung/Länge, sonst die Stelle */
     if(griffZieh&&e.pointerId===griffZieh.id){ /* F50: Stempel an einem Griff in Breite/Höhe ziehen */
       e.preventDefault();
@@ -6513,6 +6767,17 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
     g.beginPath();g.moveTo(q[0],q[1]);g.lineTo(p[0],p[1]);g.stroke(); // Livespur; das gespeicherte Bild entsteht beim Loslassen
   });
   const ende=e=>{
+    if(modus==='umriss'){ /* F62 */
+      if(ziehU&&e.pointerId===ziehU.id){const z=ziehU;ziehU=null;if(z.bewegt){_fsUmNachziehen(sk,W,H);scheduleSave();}neu();leisteBauen();return;}
+      if(neuU&&e.pointerId===neuU.id){
+        neuU=null;const u=_fsUmHolen(sk),p=pos(e);
+        if(_fsUmEcken(u).length>=3&&_fsUmMagnet(u,p,W,H)){_fsUmSchliessen(u);_fsUmNachziehen(sk,W,H);}
+        else if(!_fsUmEckeDazu(u,p,W,H)){if(_fsUmEcken(u).length>=FS_UM_MAX)toast('Genug Ecken – höchstens '+FS_UM_MAX,'info',3000);}
+        if(!_fsUmEcken(u).length)_fsUmWeg(sk);
+        mausU=null;scheduleSave();neu();leisteBauen();return;
+      }
+      return;
+    }
     if(ziehS&&e.pointerId===ziehS.id){ziehS=null;scheduleSave();neu();leisteBauen();return;} /* F33 */
     if(zieh&&e.pointerId===zieh.id){const z=zieh;zieh=null;if(z.bewegt)scheduleSave();neu();return;}
     if(griffZieh&&e.pointerId===griffZieh.id){const z=griffZieh;griffZieh=null;if(z.bewegt)scheduleSave();neu();return;} /* F50 */
@@ -6547,6 +6812,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
     const z=e.target;if(z&&(z.tagName==='INPUT'||z.tagName==='TEXTAREA'))return;
     if(modus==='zeichnen'&&selT>=0){merken();if(_fsBgStrichWeg(sk,selT)){selT=-1;scheduleSave();neu();leisteBauen();}e.preventDefault();}
     else if(modus==='stempel'&&sel>=0){if(_fsBgStempelWeg(sk,sel)){sel=-1;scheduleSave();neu();leisteBauen();}e.preventDefault();}
+    else if(modus==='umriss'&&selU>=0){const u=_fsUmLesen(sk);if(u&&_fsUmEckeWeg(u,selU)){selU=-1;_fsUmNachziehen(sk,W,H);scheduleSave();neu();leisteBauen();}e.preventDefault();} /* F62 */
   };
   document.addEventListener('keydown',taste,true);
   const schliessen=()=>{document.removeEventListener('keydown',taste,true);ov.remove();if(typeof fertig==='function'){try{fertig();}catch(x){console.warn('[Feuchte] Einzeichnen:',x);}}};
@@ -6869,6 +7135,7 @@ async function _fsMobPdfBg(bericht,task){
               y+=sh+2;
               const mk=_fsAsMarken(bericht,sk);
               mk.forEach(q=>absatz(q.n+' = '+q.label+(hat(_fsVbWo(q.s))?' – '+_fsVbWo(q.s):''),{groesse:9,einzug:3,abstand:0.8})); /* F49: je Nummer eine Zeile, 9 pt schwarz, direkt unter der Skizze */
+              if(_fsUmZeile(sk))absatz(_fsUmZeile(sk),{groesse:9,einzug:3,abstand:0.8}); /* F62: Fläche und Umfang des Umrisses */
               absatz('Nicht maßstäblich, Ansicht '+_fsAsAnsicht(sk)+'.',{groesse:7.5,farbe:[100,100,100],abstand:4});
             }
           }
