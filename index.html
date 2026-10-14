@@ -8803,7 +8803,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
                  „📎 RE ablegen" ist freiwillig: lädt über handleFileAttach in die Dokumente und markiert
                  die neue Datei mit re:true – daran hängt die 📎 im Abzeichen auf der Karte. -->
             <label class="b869-nur-auftrag" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;" title="Auftrag ist abgearbeitet – auf der Karte steht dann „✅ Abgearbeitet“ (und „🧾 RE offen“, solange der Haken RE fehlt)">
-              <input type="checkbox" id="taskAbgearbeitetCb" onchange="_pamAbgReChange()" style="width:13px;height:13px;cursor:pointer;accent-color:#3B6D11;">
+              <input type="checkbox" id="taskAbgearbeitetCb" onchange="_pamAbgReChange(this)" style="width:13px;height:13px;cursor:pointer;accent-color:#3B6D11;">
               <span style="font-size:calc(11px * var(--modal-scale,1));font-weight:600;color:#3B6D11;">✅ Abgearbeitet</span>
             </label>
             <label class="b869-nur-auftrag" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;" title="Rechnung ist geschrieben">
@@ -8819,6 +8819,9 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
               <span style="font-size:calc(11px * var(--modal-scale,1));font-weight:600;color:#7A4FB5;">📱 Am Handy ausblenden</span>
             </label>
           </div>
+          <!-- b1201 (Frank 14.10.2026): nach dem Anhaken „✅ Abgearbeitet" fragt PAM, ob die Karte ins Board
+               „Rechnungen" soll. Nur eine FRAGE – verschoben wird erst auf Klick. Gezeichnet von _pamAbgFrageZeichnen. -->
+          <div id="taskAbgFrage" style="flex-basis:100%;display:none;flex-wrap:wrap;align-items:center;gap:8px;margin-top:4px;padding:5px 10px;border-radius:7px;background:#EAF3DE;border:1px solid #97C459;"></div>
         </div>
         <div class="mv2-size-ctrl" style="gap:4px;">
           <span style="font-size:10px;color:var(--text2);white-space:nowrap;" title="Linke Seite">◧</span>
@@ -10676,7 +10679,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-14 · #1200'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-14-b1200) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-14 · #1201'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-14-b1201) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -12380,10 +12383,62 @@ function _pamAbgReZeichnen(){
   if(hw)hw.style.display=(abg&&abg.checked&&!(re&&re.checked))?'inline-flex':'none';
   const kn=document.getElementById('taskReAblegenBtn');
   if(kn)kn.textContent=_pamHatReDatei(taskAttachments)?'📎 RE abgelegt ✓':'📎 RE ablegen';
+  if(typeof _pamAbgFrageZeichnen==='function')_pamAbgFrageZeichnen(); // b1201
 }
-function _pamAbgReChange(){
+function _pamAbgReChange(cb){
+  // b1201: nur das ANHAKEN von „Abgearbeitet" stellt die Frage „ins Board Rechnungen?" – Abhaken nimmt sie weg
+  if(cb&&cb.id==='taskAbgearbeitetCb')_pamAbgFrageOffen=!!cb.checked;
   _pamAbgReZeichnen();
   scheduleTaskFieldSave();
+}
+// ══ b1201: Frage „Karte ins Board Rechnungen verschieben?" (Wunsch Frank 14.10.2026) ═════
+// Erscheint nach dem Anhaken von „✅ Abgearbeitet". Drei Knöpfe: ↗ Verschieben (Board
+// „Rechnungen", Spalte „Rechung erstellen" – Franks Schreibweise; fehlt sie, die erste Spalte) ·
+// ↗ Anderes Board … (das vorhandene Fenster von „↗ Task verschieben") · Nein, hier lassen.
+// ⛔ PAM verschiebt NIE von selbst – nur auf Klick. Keine Frage, wenn die Karte schon im Board
+//    „Rechnungen" liegt oder es das Board nicht (mehr) gibt.
+// ⛔ Verschoben wird über _doMoveTask – derselbe Weg wie „↗ Task verschieben" (speichert, schließt).
+var _PAM_RE_BOARD='Rechnungen';
+var _PAM_RE_SPALTE='Rechung erstellen';
+var _pamAbgFrageOffen=false;
+function _pamAbgFrageZiel(){
+  if(typeof boards==='undefined'||!boards||!boards[_PAM_RE_BOARD])return null;
+  const qb=_pamGespeichertInBoard||currentBoard;
+  if(qb===_PAM_RE_BOARD)return null;
+  const sp=getBoardStatuses(_PAM_RE_BOARD)||[];
+  return {board:_PAM_RE_BOARD,spalte:sp.indexOf(_PAM_RE_SPALTE)>=0?_PAM_RE_SPALTE:(sp[0]||'')};
+}
+function _pamAbgFrageZeichnen(){
+  const el=document.getElementById('taskAbgFrage');
+  if(!el)return;
+  const ziel=_pamAbgFrageOffen?_pamAbgFrageZiel():null;
+  if(!ziel){el.style.display='none';el.innerHTML='';return;}
+  const knopf='font-size:calc(11px * var(--modal-scale,1));font-weight:600;padding:2px 10px;border-radius:6px;cursor:pointer;white-space:nowrap;';
+  el.innerHTML='<span style="font-size:calc(11px * var(--modal-scale,1));color:#27500A;">✅ Abgearbeitet – Karte ins Board <b>'+esc(ziel.board)+'</b>'
+    +(ziel.spalte?', Spalte <b>'+esc(ziel.spalte)+'</b>':'')+' verschieben?</span>'
+    +'<span style="display:inline-flex;gap:6px;margin-left:auto;">'
+    +'<button type="button" onclick="_pamAbgVerschieben()" title="Karte jetzt ins Board „'+esc(ziel.board)+'“ verschieben – das Fenster schließt sich" style="'+knopf+'background:#3B6D11;color:#fff;border:1px solid #3B6D11;">↗ Verschieben</button>'
+    +'<button type="button" onclick="_pamAbgAnderesBoard()" title="Board und Spalte selbst wählen (wie „↗ Task verschieben“)" style="'+knopf+'background:#fff;color:#27500A;border:1px solid #97C459;">↗ Anderes Board …</button>'
+    +'<button type="button" onclick="_pamAbgFrageNein()" title="Karte bleibt, wo sie ist" style="'+knopf+'background:transparent;color:#27500A;border:1px solid #97C459;">Nein, hier lassen</button>'
+    +'</span>';
+  el.style.display='flex';
+}
+function _pamAbgVerschieben(){
+  const ziel=_pamAbgFrageZiel();
+  const id=(document.getElementById('taskId')||{}).value||'';
+  _pamAbgFrageOffen=false;
+  _pamAbgFrageZeichnen();
+  if(!ziel||!id)return;
+  _doMoveTask(id,ziel.board,ziel.spalte||undefined);
+}
+function _pamAbgAnderesBoard(){
+  _pamAbgFrageOffen=false;
+  _pamAbgFrageZeichnen();
+  moveTaskToBoard();
+}
+function _pamAbgFrageNein(){
+  _pamAbgFrageOffen=false;
+  _pamAbgFrageZeichnen();
 }
 function _pamReAblegen(){
   const i=document.getElementById('taskReDateiInput');
@@ -58314,6 +58369,7 @@ function openNewTaskModal(){
   const _ausfNEl=document.getElementById('taskInAusfuehrungCb');if(_ausfNEl)_ausfNEl.checked=false; // b863: neuer Task erbt keinen Ausführungs-Haken vom zuvor geöffneten
   const _abgNEl=document.getElementById('taskAbgearbeitetCb');if(_abgNEl)_abgNEl.checked=false; // b1200: neuer Task erbt die zwei Haken nicht
   const _reNEl=document.getElementById('taskReGeschriebenCb');if(_reNEl)_reNEl.checked=false; // b1200
+  _pamAbgFrageOffen=false; // b1201: die Frage „ins Board Rechnungen?" gehört zur Karte, an der gerade angehakt wurde
   const _mobAusNEl=document.getElementById('taskMobilAusblendenCb');if(_mobAusNEl)_mobAusNEl.checked=false; // b726: neuer Task erbt keinen Handy-Haken vom zuvor geöffneten
   const _hvKaNEl=document.getElementById('tHvKarteAus');if(_hvKaNEl)_hvKaNEl.checked=false; // b1126: neuer Task erbt den 🏢-Haken nicht
   _syncHdrAktCb();
@@ -69015,6 +69071,7 @@ function openEditTaskModal(id){
   const _ausfCb=document.getElementById('taskInAusfuehrungCb');if(_ausfCb)_ausfCb.checked=!!(task.inAusfuehrung); // b863
   const _abgCb=document.getElementById('taskAbgearbeitetCb');if(_abgCb)_abgCb.checked=!!(task.abgearbeitet); // b1200
   const _reCb=document.getElementById('taskReGeschriebenCb');if(_reCb)_reCb.checked=!!(task.reGeschrieben); // b1200
+  _pamAbgFrageOffen=false; // b1201: beim Öffnen nie fragen – nur direkt nach dem Anhaken
   _syncHdrAktCb();
   if(typeof _pamAbgReZeichnen==='function')_pamAbgReZeichnen(); // b1200
   const _aeEl=document.getElementById('taskAnfrageEingangDatum');if(_aeEl)_aeEl.value=task.anfrageEingangDatum||'';
