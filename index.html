@@ -8795,6 +8795,24 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
               <input type="checkbox" id="_hdrAusfCb" onchange="_hdrAktChange('ausf')" style="width:13px;height:13px;cursor:pointer;accent-color:#0F6E56;">
               <span style="font-size:calc(11px * var(--modal-scale,1));font-weight:600;color:#0F6E56;">🔨 In Ausführung</span>
             </label>
+            <!-- b1200 (Wunsch Frank 14.10.2026): „✅ Abgearbeitet" + „🧾 RE geschrieben" – Franks eigene Merker,
+                 PAM setzt sie NIE von selbst (auch nicht beim Hochladen einer Rechnung).
+                 ⛔ Anders als die Haken davor gibt es KEIN verstecktes Gegenstück in #tTermAktZeile: diese
+                 zwei Kästchen sind selbst die Wahrheit – saveTaskData liest #taskAbgearbeitetCb /
+                 #taskReGeschriebenCb, das Laden füllt sie, der neue Task setzt sie zurück (b591-Falle).
+                 „📎 RE ablegen" ist freiwillig: lädt über handleFileAttach in die Dokumente und markiert
+                 die neue Datei mit re:true – daran hängt die 📎 im Abzeichen auf der Karte. -->
+            <label class="b869-nur-auftrag" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;" title="Auftrag ist abgearbeitet – auf der Karte steht dann „✅ Abgearbeitet“ (und „🧾 RE offen“, solange der Haken RE fehlt)">
+              <input type="checkbox" id="taskAbgearbeitetCb" onchange="_pamAbgReChange()" style="width:13px;height:13px;cursor:pointer;accent-color:#3B6D11;">
+              <span style="font-size:calc(11px * var(--modal-scale,1));font-weight:600;color:#3B6D11;">✅ Abgearbeitet</span>
+            </label>
+            <label class="b869-nur-auftrag" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none;" title="Rechnung ist geschrieben">
+              <input type="checkbox" id="taskReGeschriebenCb" onchange="_pamAbgReChange()" style="width:13px;height:13px;cursor:pointer;accent-color:#3B6D11;">
+              <span style="font-size:calc(11px * var(--modal-scale,1));font-weight:600;color:#3B6D11;">🧾 RE geschrieben</span>
+            </label>
+            <span id="taskReOffenHinweis" title="Abgearbeitet, aber der Haken „🧾 RE geschrieben“ fehlt noch" style="display:none;align-items:center;font-size:calc(10px * var(--modal-scale,1));font-weight:700;padding:1px 6px;border-radius:4px;background:#FAEEDA;color:#854F0B;border:1px solid #EF9F27;white-space:nowrap;">🧾 RE offen</span>
+            <button type="button" id="taskReAblegenBtn" class="b869-nur-auftrag" onclick="_pamReAblegen()" title="Freiwillig: Rechnung vom Rechner auswählen – sie wird in die Dokumente dieser Karte hochgeladen und als Rechnung markiert (📎 am Abzeichen). Den Haken setzt du selbst." style="padding:1px 8px;border-radius:5px;border:0.5px solid #97C459;background:#EAF3DE;color:#27500A;font-size:calc(10px * var(--modal-scale,1));font-weight:600;cursor:pointer;white-space:nowrap;">📎 RE ablegen</button>
+            <input type="file" id="taskReDateiInput" style="display:none;" onchange="_pamReDateiGewaehlt(event)">
             <!-- b726: Handy-Sichtschalter – Kästchen nur im Objektfenster sichtbar (CSS .ptp-immo-mode) -->
             <label id="taskMobilAusblendenWrap" style="display:none;align-items:center;gap:5px;cursor:pointer;user-select:none;" title="Dieses Objekt in der Board-Liste am Handy ausblenden. Alle Haken eines Boards auf einmal lösen: + → Projekte verwalten">
               <input type="checkbox" id="taskMobilAusblendenCb" onchange="scheduleTaskFieldSave()" style="width:13px;height:13px;cursor:pointer;accent-color:#7A4FB5;">
@@ -10658,7 +10676,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-13 · #1199'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-13-b1199) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-14 · #1200'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-14-b1200) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -12344,6 +12362,45 @@ function _syncHdrAktCb(){
     if(h&&t)h.checked=t.checked;
   }
   if(typeof _ausfFrageZeichnen==='function')_ausfFrageZeichnen(); // b1009
+}
+// ══ b1200: „✅ Abgearbeitet" + „🧾 RE geschrieben" (Wunsch Frank 14.10.2026) ═══════════
+// „Ich möchte sehen, ob ein Auftrag abgearbeitet ist und ob die Rechnung geschrieben ist."
+// Zwei Haken, die NUR Frank setzt. Auf der Karte: ✅ Abgearbeitet · 🧾 RE offen (gelb,
+// solange abgearbeitet ohne RE) · 🧾 RE geschrieben (grün) – mit 📎, wenn eine Datei als
+// Rechnung abgelegt ist (Anhang mit re:true). Das Wort Rechnung heißt überall „RE" (Frank).
+// ⛔ Hat NICHTS mit dem Rechnungsstand der wiederkehrenden Leistungen (turnusListe, „RE fehlt")
+//    zu tun – der bleibt, wie er ist.
+function _pamHatReDatei(atts){
+  return (atts||[]).some(function(a){return !!(a&&a.re);});
+}
+function _pamAbgReZeichnen(){
+  const abg=document.getElementById('taskAbgearbeitetCb');
+  const re=document.getElementById('taskReGeschriebenCb');
+  const hw=document.getElementById('taskReOffenHinweis');
+  if(hw)hw.style.display=(abg&&abg.checked&&!(re&&re.checked))?'inline-flex':'none';
+  const kn=document.getElementById('taskReAblegenBtn');
+  if(kn)kn.textContent=_pamHatReDatei(taskAttachments)?'📎 RE abgelegt ✓':'📎 RE ablegen';
+}
+function _pamAbgReChange(){
+  _pamAbgReZeichnen();
+  scheduleTaskFieldSave();
+}
+function _pamReAblegen(){
+  const i=document.getElementById('taskReDateiInput');
+  if(i)i.click();
+}
+// Lädt über den normalen Weg der 📎-Ablagezone (handleFileAttach → Dokumente-Ordner) und
+// markiert danach jede NEU hinzugekommene Datei als Rechnung. Den Haken setzt PAM nicht.
+async function _pamReDateiGewaehlt(e){
+  if(!e||!e.target||!e.target.files||!e.target.files.length)return;
+  if(!Array.isArray(taskAttachments))taskAttachments=[];
+  const liste=taskAttachments;
+  const vorher=liste.slice();
+  await handleFileAttach(e);
+  let neu=0;
+  liste.forEach(function(a){if(a&&vorher.indexOf(a)<0){a.re=true;neu++;}});
+  if(neu){renderAttachList();scheduleTaskFieldSave();}
+  _pamAbgReZeichnen();
 }
 // ══ b1009: Hilfe beim Haken „🔨 In Ausführung" ═══════════════════════════════
 // Haken („läuft") und Datum („wann") bleiben getrennt (b863). PAM schaltet NICHT selbst um,
@@ -14512,6 +14569,8 @@ function saveTaskData(){
     mobilAusblenden:!!(document.getElementById('taskMobilAusblendenCb')?.checked), // b726: Handy-Sichtschalter – MUSS in dieser Liste stehen (b591-Falle)
     besichtigungOffen:!!(document.getElementById('taskBesichtigungOffenCb')?.checked),
     inAusfuehrung:!!(document.getElementById('taskInAusfuehrungCb')?.checked), // b863: MUSS in dieser Liste stehen (b591-Falle), sonst wird der Haken nie gespeichert
+    abgearbeitet:!!(document.getElementById('taskAbgearbeitetCb')?.checked), // b1200: MUSS in dieser Liste stehen (b591-Falle)
+    reGeschrieben:!!(document.getElementById('taskReGeschriebenCb')?.checked), // b1200: dito
     ortstermin:(document.getElementById('taskOrtsterminInput')?document.getElementById('taskOrtsterminInput').value:''),
     tags:document.getElementById('taskTagsInput').value.split(',').map(s=>s.trim()).filter(Boolean),
     source:document.getElementById('taskSourceInput').value.trim(),
@@ -18625,8 +18684,15 @@ function taskCardHTML(task){
   // b949: gefüllt wie „In Ausführung“ – es soll auffallen, dass hier noch etwas fehlt.
   // Steht bewusst NEBEN „📋 Erteilt“: erst das Datum, dann der fehlende Termin.
   const _terminFehltBadge=(typeof _pamTerminFehlt==='function'&&_pamTerminFehlt(task))?`<span style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:#993C1D;color:#fff;white-space:nowrap;" title="Auftrag ist erteilt, aber noch kein Ausführungstermin eingetragen">📅 Termin fehlt</span>`:'';
-  const _ausfBadge=task.inAusfuehrung?`<span style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:#0F6E56;color:#fff;white-space:nowrap;">🔨 In Ausführung</span>`:'';
-  const _statusChips=[_planenBadge,_terminFehltBadge,_ausfBadge,_anrufOffenBadge,_besichtigungOffenBadge].filter(Boolean).join(''); // b489: immer sichtbare Status-Knoepfe (pam-neu); b864: Ausführung dazu
+  // b1200: „🔨 In Ausführung" weicht dem „✅ Abgearbeitet" – NUR das Abzeichen; der Haken selbst bleibt, wie Frank ihn gesetzt hat.
+  const _ausfBadge=(task.inAusfuehrung&&!task.abgearbeitet)?`<span style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:#0F6E56;color:#fff;white-space:nowrap;">🔨 In Ausführung</span>`:'';
+  // b1200 (Frank 14.10.2026): Abgearbeitet + RE. Gelb „RE offen" erscheint von selbst, solange abgearbeitet ohne RE-Haken;
+  // 📎 = eine Datei ist als Rechnung abgelegt (Anhang re:true). Setzen tut PAM keinen der beiden Haken.
+  const _abgBadge=task.abgearbeitet?`<span style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:#3B6D11;color:#fff;white-space:nowrap;" title="Auftrag ist abgearbeitet">✅ Abgearbeitet</span>`:'';
+  const _reBadge=task.reGeschrieben
+    ?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:#EAF3DE;color:#27500A;border:1px solid #97C459;white-space:nowrap;" title="${_pamHatReDatei(task.attachments)?'RE geschrieben und in den Dokumenten abgelegt':'RE geschrieben'}">🧾 RE geschrieben${_pamHatReDatei(task.attachments)?' 📎':''}</span>`
+    :(task.abgearbeitet?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:#FAEEDA;color:#854F0B;border:1px solid #EF9F27;white-space:nowrap;" title="Abgearbeitet, aber der Haken „RE geschrieben“ fehlt noch">🧾 RE offen</span>`:'');
+  const _statusChips=[_planenBadge,_terminFehltBadge,_ausfBadge,_abgBadge,_reBadge,_anrufOffenBadge,_besichtigungOffenBadge].filter(Boolean).join(''); // b489: immer sichtbare Status-Knoepfe (pam-neu); b864: Ausführung dazu
   const _linksBadge=hasLinks?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:#E6F1FB;color:#185FA5;border:1px solid #B5D4F4;white-space:nowrap;cursor:pointer;" title="Link öffnen" onclick="event.stopPropagation();_openTaskLink('${_jsa(task.id)}')">🔗 Links ${(task.links||[]).length}</span>`:'';
   const _zeitBadge=_gesamtMins>0?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:#FAEEDA;color:#854F0B;border:1px solid #FAC775;white-space:nowrap;">⏱ ${_fmtBadge(_gesamtMins)}</span>`:'';
   const _bauBadge=bauTotal>0?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;color:#e67e22;background:rgba(230,126,34,.12);border:1px solid rgba(230,126,34,.3);white-space:nowrap;">🔄 ${bauTotal}</span>`:'';
@@ -18771,7 +18837,7 @@ function taskCardHTML(task){
     ${_pamNeu?`<div class="pam-neu-head"><button class="pam-neu-toggle" onclick="event.stopPropagation();this.closest('.task-card').classList.toggle('pam-neu-open')"><span class="pnt-a">▾ Details anzeigen</span><span class="pnt-b">▴ Details ausblenden</span></button>${isEmailBoard?(_angelegtKopf?`<div class="pam-neu-acts">${_angelegtKopf}</div>`:''):`<div class="pam-neu-acts">${_auftragKopfBtn}${_tuJahrKopf}${_tuRgJahrKopf}${_mobilAusBadge}${_angelegtKopf}${_uebBtn}${_mapsLink}${_telLink}${task.owner?`<span class="pam-neu-owner">${esc(task.owner)}</span>`:''}</div>`}</div>`:''}
     <div class="task-card-toprow">
       ${_boardBadge}${_emailSenderBadge}
-      ${isEmailBoard?[_taskStatusBadge,_eMailDateBadge,_angelegtBadge,_emTerminBadges,_emAnhBadge,_emFotosBadge,_vidBadge,(_pamNeu?'':_anrufOffenBadge),(_pamNeu?'':_besichtigungOffenBadge)].filter(Boolean).join(''):[_taskStatusBadge,(task.gmAkte?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:#EEEDFE;color:#3C3489;border:1px solid #AFA9EC;white-space:nowrap;">📂 GM ${esc(_gmNr(task.gmAkte))}</span>`:''),(_pamNeu?'':_planenBadge),(_pamNeu?'':_ausfBadge),(_pamNeu?'':_mobilAusBadge),_anfrBadge,_erteiltBadge,_repBadge,_kstBadge,_angelegtBadge,_emlBadge,_pdfBadge,_anhBadge,_fotosBadge,_vidBadge,(_pamNeu?'':_anrufOffenBadge),(_pamNeu?'':_besichtigungOffenBadge),_linksBadge,_zeitBadge,_bauBadge].filter(Boolean).join('')}
+      ${isEmailBoard?[_taskStatusBadge,_eMailDateBadge,_angelegtBadge,_emTerminBadges,_emAnhBadge,_emFotosBadge,_vidBadge,(_pamNeu?'':_anrufOffenBadge),(_pamNeu?'':_besichtigungOffenBadge)].filter(Boolean).join(''):[_taskStatusBadge,(task.gmAkte?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:#EEEDFE;color:#3C3489;border:1px solid #AFA9EC;white-space:nowrap;">📂 GM ${esc(_gmNr(task.gmAkte))}</span>`:''),(_pamNeu?'':_planenBadge),(_pamNeu?'':_ausfBadge),(_pamNeu?'':_abgBadge),(_pamNeu?'':_reBadge),(_pamNeu?'':_mobilAusBadge),_anfrBadge,_erteiltBadge,_repBadge,_kstBadge,_angelegtBadge,_emlBadge,_pdfBadge,_anhBadge,_fotosBadge,_vidBadge,(_pamNeu?'':_anrufOffenBadge),(_pamNeu?'':_besichtigungOffenBadge),_linksBadge,_zeitBadge,_bauBadge].filter(Boolean).join('')}
     </div>
     <div class="pam-namerow" style="display:flex;align-items:center;gap:6px;">
       <div class="task-card-title" style="flex:1;min-width:0;margin:0;background:#fff;color:#111;border:1px solid #111;border-radius:5px;padding:3px 8px;">${esc(displayTitle)}</div>
@@ -30731,6 +30797,7 @@ function _aicEicSvg(type,name){
   return `<svg viewBox="0 0 68 68" xmlns="http://www.w3.org/2000/svg"><rect width="68" height="68" rx="8" fill="#eceff1"/><rect x="13" y="6" width="29" height="42" rx="3" fill="#546e7a"/><path d="M42 6 L42 18 L53 18 Z" fill="#90a4ae"/><rect x="13" y="48" width="42" height="14" rx="3" fill="#37474f"/><line x1="18" y1="20" x2="36" y2="20" stroke="rgba(255,255,255,0.4)" stroke-width="1.5"/><line x1="18" y1="26" x2="36" y2="26" stroke="rgba(255,255,255,0.4)" stroke-width="1.5"/><line x1="18" y1="32" x2="36" y2="32" stroke="rgba(255,255,255,0.4)" stroke-width="1.5"/></svg>`;
 }
 function renderAttachList(){
+  if(typeof _pamAbgReZeichnen==='function')_pamAbgReZeichnen(); // b1200: „RE offen" + „📎 RE abgelegt ✓" folgen der geöffneten Karte
   const galBtn=document.getElementById('attachGalBtn');
   const ti=document.getElementById('tAnhangTitle');
   const total=taskAttachments?taskAttachments.length:0;
@@ -58245,6 +58312,8 @@ function openNewTaskModal(){
   const _anrufNEl=document.getElementById('taskAnrufOffenCb');if(_anrufNEl)_anrufNEl.checked=false;
   const _besiNEl=document.getElementById('taskBesichtigungOffenCb');if(_besiNEl)_besiNEl.checked=false;
   const _ausfNEl=document.getElementById('taskInAusfuehrungCb');if(_ausfNEl)_ausfNEl.checked=false; // b863: neuer Task erbt keinen Ausführungs-Haken vom zuvor geöffneten
+  const _abgNEl=document.getElementById('taskAbgearbeitetCb');if(_abgNEl)_abgNEl.checked=false; // b1200: neuer Task erbt die zwei Haken nicht
+  const _reNEl=document.getElementById('taskReGeschriebenCb');if(_reNEl)_reNEl.checked=false; // b1200
   const _mobAusNEl=document.getElementById('taskMobilAusblendenCb');if(_mobAusNEl)_mobAusNEl.checked=false; // b726: neuer Task erbt keinen Handy-Haken vom zuvor geöffneten
   const _hvKaNEl=document.getElementById('tHvKarteAus');if(_hvKaNEl)_hvKaNEl.checked=false; // b1126: neuer Task erbt den 🏢-Haken nicht
   _syncHdrAktCb();
@@ -68944,7 +69013,10 @@ function openEditTaskModal(id){
   const _mobAusCb=document.getElementById('taskMobilAusblendenCb');if(_mobAusCb)_mobAusCb.checked=!!(task.mobilAusblenden); // b726: nur befüllen – Ansehen ändert nichts
   const _besiCb=document.getElementById('taskBesichtigungOffenCb');if(_besiCb)_besiCb.checked=!!(task.besichtigungOffen);
   const _ausfCb=document.getElementById('taskInAusfuehrungCb');if(_ausfCb)_ausfCb.checked=!!(task.inAusfuehrung); // b863
+  const _abgCb=document.getElementById('taskAbgearbeitetCb');if(_abgCb)_abgCb.checked=!!(task.abgearbeitet); // b1200
+  const _reCb=document.getElementById('taskReGeschriebenCb');if(_reCb)_reCb.checked=!!(task.reGeschrieben); // b1200
   _syncHdrAktCb();
+  if(typeof _pamAbgReZeichnen==='function')_pamAbgReZeichnen(); // b1200
   const _aeEl=document.getElementById('taskAnfrageEingangDatum');if(_aeEl)_aeEl.value=task.anfrageEingangDatum||'';
   const _esInp=document.getElementById('taskEmailSenderInput');if(_esInp)_esInp.value=task.emailSender||'';
   // taskEmailSenderRow bleibt immer versteckt (Anzeige erfolgt über pamAbsenderCard)
