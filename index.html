@@ -6616,6 +6616,9 @@ body.pamf-ohnefilter .pamf-nurtasks{display:none !important;}
 .kanban-col.collapsed .kanban-col-header{flex-direction:column;align-items:center;padding:8px 4px;gap:6px;height:100%;justify-content:flex-start;cursor:pointer;}
 .kanban-col.collapsed .kanban-col-header:hover{background:rgba(108,99,255,0.06);border-radius:8px;}
 .kanban-col.collapsed .col-collapse-btn{font-size:10px;padding:2px;min-width:unset;width:auto;}
+/* b1215: auch der Kopf einer OFFENEN Spalte ist ein Schalter (Klick = zuklappen) – Knöpfe und Greifrand ausgenommen */
+.kanban > .kanban-col:not(.collapsed) > .kanban-col-header{cursor:pointer;border-radius:8px 8px 0 0;}
+.kanban > .kanban-col:not(.collapsed) > .kanban-col-header:hover{background:rgba(108,99,255,0.05);}
 .kanban-col-header{padding:12px 14px 8px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
 .kanban-col-title{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;}
 .kanban-col-count{font-size:11px;color:var(--text2);background:var(--bg4);padding:1px 7px;border-radius:10px;}
@@ -10703,7 +10706,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-15 · #1214'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-15-b1214) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-15 · #1215'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-15-b1215) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -24010,6 +24013,67 @@ function toggleColCollapse(status){
   else if(_zulSpalte[currentBoard]===status)_spalteVergessen(currentBoard);
   renderKanban();
 }
+// ══════════════════════════════════════════════════════════════════════════
+// b1215 – Spaltenkopf anklicken = auf/zu. Frank 15.10.2026: „Klick auf die schmale
+// Leiste klappt auf, Klick in die freie Fläche im Kopf klappt zu."
+// Bis b1214 ging das nur über die kleinen Pfeile ◀ ▶ – obwohl die zugeklappte Leiste
+// beim Drüberfahren schon Hand und Tönung zeigte und damit mehr versprach.
+// ⛔ Ausgenommen sind alle Knöpfe im Kopf (A-Z, KST, HV, ◀ ▶ tun weiter nur das Ihre),
+//    der Greifrand zum Breiterziehen (dieselbe Zone wie beim Ziehen: rechts −12 … +8 px,
+//    test_b1215 hält beide Zahlen gleich) und jede Bewegung über 4 px zwischen Drücken
+//    und Loslassen – das war Ziehen, kein Klick.
+// ⛔ Entschieden wird nach dem, was man SIEHT: Hält der Filter eine gemerkt zugeklappte
+//    Spalte offen (b900), klappt der Klick sie nicht scheinbar „auf" und verstellt den
+//    gemerkten Zustand nicht – es kommt nur ein kurzer Hinweis.
+// ⛔ Ein Doppelklick zählt einmal (detail>1), sonst ginge die Spalte zu und gleich wieder auf.
+// Geschaltet wird über toggleColCollapse – genau so, als hätte Frank auf ◀/▶ geklickt (Merker b632).
+var _b1215Druck=null;
+function _b1215Kopf(el){
+  var kopf=(el&&el.closest)?el.closest('.kanban-col-header'):null;
+  if(!kopf)return null;
+  var col=kopf.parentElement;
+  if(!col||!col.classList||!col.classList.contains('kanban-col'))return null; // „☰ Alle" ist kanban-col-alle → bleibt draußen
+  var k=col.parentElement;
+  if(!k||!k.classList||!k.classList.contains('kanban')||!k.closest||!k.closest('#mainContent'))return null;
+  return {kopf:kopf,col:col};
+}
+function _b1215AmRand(x,y){
+  var treffer=false;
+  document.querySelectorAll('.kanban-col').forEach(function(c){
+    if(c.classList.contains('collapsed'))return;
+    var r=c.getBoundingClientRect();
+    if(x>=r.right-12&&x<=r.right+8&&y>=r.top&&y<=r.bottom)treffer=true;
+  });
+  return treffer;
+}
+function _b1215KopfDruck(e){
+  _b1215Druck=null;
+  if(!e||e.button!==0)return;
+  var h=_b1215Kopf(e.target);
+  if(!h)return;
+  _b1215Druck={kopf:h.kopf,x:e.clientX,y:e.clientY,rand:_b1215AmRand(e.clientX,e.clientY)};
+}
+function _b1215KopfKlick(e){
+  var d=_b1215Druck;
+  _b1215Druck=null;
+  if(!e||e.button!==0||e.detail>1)return;
+  var h=_b1215Kopf(e.target);
+  if(!h)return;
+  if(e.target.closest('button,input,select,textarea,a,label'))return;
+  if(!d||d.kopf!==h.kopf||d.rand)return;
+  if(Math.abs(e.clientX-d.x)>4||Math.abs(e.clientY-d.y)>4)return;
+  // ⛔ „⚠ Ohne Spalte" bleibt draußen: ein Warnhinweis, kein Arbeitsort (b622/b632). Dazu tragen ihre
+  //    Pfeile ◀ ▶ einen verdorbenen Schlüssel (das Null-Zeichen wird im onclick-Attribut zum Ersatzzeichen) –
+  //    eine per Kopf-Klick zugeklappte Sammelspalte ginge über ▶ nicht wieder auf. Eigener Punkt, nicht hier.
+  if(h.col.getAttribute('data-pamsp-ohne')==='1')return;
+  var key=h.col.getAttribute('data-pamsp');
+  if(key===null||key===undefined)return;
+  if(h.col.classList.contains('collapsed')===!!collapsedCols[key]){toggleColCollapse(key);return;}
+  // sichtbar offen, aber gemerkt zu: der Filter hält sie offen (b900)
+  if(typeof showToast==='function')showToast('Diese Spalte bleibt offen, solange der Filter darin Treffer zeigt.','info',2500);
+}
+document.addEventListener('mousedown',_b1215KopfDruck,true);
+document.addEventListener('click',_b1215KopfKlick);
 // ══════════════════════════════════════════════════════════════════════════
 // b1122 – Knopf „▤" neben „⊞ Übersicht": alle Spalten des Boards mit ihrer Zahl.
 // Anlass (Frank, 07.10.2026, Bild vom Board „Aufträge"): Am Laptop laufen Spalten
