@@ -10703,7 +10703,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-15 · #1208'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-15-b1208) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-15 · #1209'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-15-b1209) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -34094,13 +34094,14 @@ async function _galInfoDatenFuellen(datei,tok,el,k){
   const D=(el&&el.ownerDocument)||document;   // b1171: Schild im Foto-Fenster
   const setz=function(id,html){const z=D.getElementById(id);if(z)z.innerHTML=html;};
   if(!d){setz('galInfoAufnahme','<span class="h">nicht lesbar</span>');setz('galInfoOrt','<span class="h">nicht lesbar</span>');return;}
-  setz('galInfoAufnahme',d.datum?esc(_lbExifDatumText(d.datum)):'<span class="h">nicht im Foto</span>');
+  setz('galInfoAufnahme',d.datum?esc(_lbExifDatumText(d.datum))+(typeof _fotoZeitZusatz==='function'?_fotoZeitZusatz(d,'h'):''):'<span class="h">nicht im Foto</span>');   // b1209
   if(!d.gps){setz('galInfoOrt','<span class="h">nicht im Foto</span>');_galInfoLage(el,k);return;}
   const koord=d.gps.lat.toFixed(5)+', '+d.gps.lon.toFixed(5);
-  setz('galInfoOrt',esc(koord));
+  const genau=(typeof _fotoGenauZusatz==='function')?_fotoGenauZusatz(d,'h'):'';   // b1209: „± 15 m“
+  setz('galInfoOrt',esc(koord)+genau);
   let adr='';try{adr=(typeof _deskReverseGeocode==='function')?await _deskReverseGeocode(d.gps.lat,d.gps.lon):'';}catch(e){}
   if(tok!==_galInfoTok)return;
-  if(adr)setz('galInfoOrt',esc(adr));
+  if(adr)setz('galInfoOrt',esc(adr)+genau);
   _galInfoLage(el,k);
 }
 function openFotoGallery(){
@@ -36818,15 +36819,27 @@ async function _fotoExifDaten(id){
   const sauber=function(v){return String(v||'').split(nul).join('').trim();};
   const d={datum:sauber(ex[piexif.ExifIFD.DateTimeOriginal]||z[piexif.ImageIFD.DateTime]),
     kamera:(sauber(z[piexif.ImageIFD.Make])+' '+sauber(z[piexif.ImageIFD.Model])).trim(),
-    breite:ex[piexif.ExifIFD.PixelXDimension]||'',hoehe:ex[piexif.ExifIFD.PixelYDimension]||'',gps:null};
+    breite:ex[piexif.ExifIFD.PixelXDimension]||'',hoehe:ex[piexif.ExifIFD.PixelYDimension]||'',gps:null,
+    software:sauber(z[piexif.ImageIFD.Software]),genau:null};   // b1209: „PAM Mobil …“ = Zeit vom Handy nachgetragen (v413); genau = Ort auf ± Meter
   const la=g[piexif.GPSIFD.GPSLatitude],lo=g[piexif.GPSIFD.GPSLongitude];
   if(la&&lo){
     const dms=function(x){return x[0][0]/x[0][1]+(x[1][0]/x[1][1])/60+(x[2][0]/x[2][1])/3600;};
     const lat=dms(la)*(g[piexif.GPSIFD.GPSLatitudeRef]==='S'?-1:1),lon=dms(lo)*(g[piexif.GPSIFD.GPSLongitudeRef]==='W'?-1:1);
     if(isFinite(lat)&&isFinite(lon)&&(Math.abs(lat)>0.0001||Math.abs(lon)>0.0001))d.gps={lat:lat,lon:lon};   // 0,0 = leerer GPS-Block (b478)
+    const ge=g[piexif.GPSIFD.GPSHPositioningError];
+    if(d.gps&&ge){const v=Array.isArray(ge[0])?ge[0][0]/ge[0][1]:ge[0]/ge[1];if(isFinite(v)&&v>0)d.genau=v;}
   }
   _lbExifCache.set(id,d);
   return d;
+}
+// b1209: Zusätze zu „Aufnahme“ und „Ort“ in Schild und „ℹ Info“ – leer, wenn nichts zu sagen ist (dann bleibt die Anzeige wie bisher)
+function _fotoZeitZusatz(d,kl){
+  return (d&&d.datum&&/^PAM Mobil/.test(String(d.software||'')))?' <span class="'+kl+'" style="white-space:nowrap;">(von PAM eingetragen)</span>':'';   // nowrap: bricht im 290-px-Schild als Ganzes um
+}
+function _fotoGenauZusatz(d,kl){
+  const v=d?Number(d.genau):NaN;
+  if(!(v>0&&isFinite(v)))return '';
+  return ' <span class="'+kl+'" style="white-space:nowrap;">± '+(v<10?String(Math.round(v*10)/10).replace('.',','):String(Math.round(v)))+' m</span>';
 }
 // Protokoll-Foto: an welcher Stelle / in welchem Raum hängt es? (fotoRefs tragen die Kennung des Fotos)
 function _lbInfoStelle(b,fo){
@@ -36911,7 +36924,7 @@ async function _lbInfoDatenFuellen(a,tok,D){
   if(tok!==_lbInfoTok)return;   // inzwischen anderes Foto
   const setz=function(id,html){const el=D.getElementById(id);if(el)el.innerHTML=html;};
   if(!d){['lbiAufnahme','lbiKamera','lbiGroesse','lbiOrt'].forEach(function(id){setz(id,'<span class="hinweis">nicht lesbar</span>');});return;}
-  setz('lbiAufnahme',d.datum?esc(_lbExifDatumText(d.datum)):'<span class="hinweis">nicht im Foto</span>');
+  setz('lbiAufnahme',d.datum?esc(_lbExifDatumText(d.datum))+(typeof _fotoZeitZusatz==='function'?_fotoZeitZusatz(d,'hinweis'):''):'<span class="hinweis">nicht im Foto</span>');   // b1209
   setz('lbiKamera',d.kamera?esc(d.kamera):'<span class="hinweis">–</span>');
   setz('lbiGroesse',(d.breite&&d.hoehe)?esc(d.breite+' × '+d.hoehe):'<span class="hinweis">–</span>');
   if(a.art==='eigen'&&d.datum){const zh=D.getElementById('lbiZeitHinweis');if(zh)zh.textContent=(a.f.ts?'':'Noch keine Zeit im Bautagebuch – oben setzen. ')+'Ändert nur die Einordnung im Bautagebuch – im Foto steht weiter: '+_lbExifDatumText(d.datum)+'.';}
@@ -36920,11 +36933,12 @@ async function _lbInfoDatenFuellen(a,tok,D){
   if(!gps){setz('lbiOrt','<span class="hinweis">nicht im Foto gespeichert</span>');return;}
   const q=D.getElementById('lbiOrtQ');if(q)q.textContent=quelle;
   const koord=gps.lat.toFixed(5)+', '+gps.lon.toFixed(5);
-  setz('lbiOrt','<span class="hinweis">'+esc(koord)+'</span>');
+  const genau=(quelle==='Datei'&&typeof _fotoGenauZusatz==='function')?_fotoGenauZusatz(d,'hinweis'):'';   // b1209: „± 15 m“ – nur für den Ort aus dem Foto
+  setz('lbiOrt','<span class="hinweis">'+esc(koord)+'</span>'+genau);
   let adr='';try{adr=(typeof _deskReverseGeocode==='function')?await _deskReverseGeocode(gps.lat,gps.lon):'';}catch(e){}
   if(tok!==_lbInfoTok)return;
   const url='https://maps.google.com/?q='+gps.lat.toFixed(6)+','+gps.lon.toFixed(6);
-  setz('lbiOrt','<a href="'+url+'" target="_blank" rel="noopener" style="color:var(--accent);">'+esc(adr||koord)+' 🗺</a>'+(quelle==='Karte'?'<div class="hinweis">Foto ohne Ort – vom Handy erfasster Standort der Karte</div>':''));
+  setz('lbiOrt','<a href="'+url+'" target="_blank" rel="noopener" style="color:var(--accent);">'+esc(adr||koord)+' 🗺</a>'+genau+(quelle==='Karte'?'<div class="hinweis">Foto ohne Ort – vom Handy erfasster Standort der Karte</div>':''));
   if(quelle==='Datei')_lbInfoLetzteAdresse=adr||koord;
 }
 function _lbInfoZeitUebernehmen(){
