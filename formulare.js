@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F71';
+const PAM_FORMULARE_VERSION='F72';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -8226,7 +8226,7 @@ const FS_WP_SEKTIONEN=[
     'Bewuchs vorhanden?' /* F71: Ja/Nein */
   ]},
   {titel:'2. Sicherheitseinrichtungen',items:[
-    'Fest montierte Anschlusspunkte',
+    'Fest montierte Anschlagpunkte – nur augenscheinlich', /* F72: Tippfehler (Anschluss-) weg; die Sachkundigenprüfung steht in einem eigenen Prüfprotokoll (Frank) */
     'Geländer',
     'Sicherheitsseile'
   ]},
@@ -8302,7 +8302,9 @@ function _fsWpArbNeu(dachart){const q=(dachart==='steil')?FS_WP_ARBEITEN_STEIL:F
    KEINE neue Datenform – Zählen, Farben, Liste und PDF-Spalten bleiben; im PDF steht zusätzlich „Nein“/„Ja“ vor der Bemerkung. Alte Protokolle behalten ihre Texte (ohne „?“ → OK/Mängel).
    Eigener Punkt: {text,status:'offen',massnahmen:'',fotoRefs:[],eigen:true} in sektionen[i].items – bleibt bei seiner Liste (Umschalten parkt ihn mit), steht im PDF und in der Zählung
    wie jeder Punkt, gilt nur für dieses Protokoll. Gleicher Text zweimal in einer Liste wird abgelehnt (Groß/Klein egal – die Foto-Zuordnung läuft über den Text).
-   kopf.dachrand = Liste aus „Attika (ca. 40 cm hoch)“ · „nur Ortgangblech“ · „Ohne“ (Flachdach; mehr nicht – Frank). */
+   kopf.dachrand = Liste (Flachdach) – seit F72: „Attika“ (+ kopf.attikaHoehe in cm, von Hand) · „Dachrandabschluss (Blech/Profil)“ · „Traufe mit Rinne“ · „Ohne“ (F71-Namen werden beim Öffnen umbenannt).
+   F72 außerdem: bei Fragen steht Ja direkt neben Nein; kopf.pruefprotokollAnschlag (vorhanden · nicht gesehen · keine Anlage, nur EIN Chip) + fester PDF-Satz zu den Anschlageinrichtungen;
+   „+ Foto“ an jedem Punkt (Fotos im PDF zu jedem Punkt mit Fotos); Kostenstelle beim Anlegen wie der REP-Auftrag (Schlagwort, sonst Nummer im Titel – nicht mehr Rep.-/Kunden-Nr.). */
 function _fsWpIstFrage(text){return /\?\s*$/.test(String(text||''));}
 function _fsWpTextKurz(text){return String(text||'').replace(/\s+/g,' ').trim();}
 function _fsWpEigenerPunkt(b,sek,text){
@@ -8341,9 +8343,9 @@ function _fsWpNeuerBericht(t,wahl){
     createdAt:new Date().toISOString(),
     kopf:{
       auftraggeber:(t&&t.hausverwaltung)||'',
-      kostenstelle:(t&&(t.repNr||t.kundenNr))||'',
+      kostenstelle:(()=>{const tags=((t&&Array.isArray(t.tags))?t.tags:[]).map(x=>String(x||'').trim()).filter(Boolean);const m=/(?:^|\D)(2\d{5})(?!\d)/.exec(String((t&&t.title)||''));return tags.length?tags.join(', '):(m?m[1]:'');})(), /* F72: wie der REP-Auftrag – Schlagwort der Karte, sonst die Nummer im Titel; vorher stand hier die Rep.-/Kunden-Nr. (Frank 15.10.2026) */
       objektAdresse:(t&&(t.adresse||t.title))||'',
-      abdichtung:[],oberflaechenschutz:[],entwaesserung:[],dachrand:[],sicherheit:[], /* F71: dachrand */
+      abdichtung:[],oberflaechenschutz:[],entwaesserung:[],dachrand:[],attikaHoehe:'',pruefprotokollAnschlag:[],sicherheit:[], /* F71: dachrand · F72: Attika-Höhe, Prüfprotokoll Anschlageinrichtung */
       eindeckung:[],firstausbildung:[],unterkonstruktion:[],klempner:[],sparren:'',latten:''
     },
     sektionen:_fsWpSekNeu(dachart),wartArbeiten:_fsWpArbNeu(dachart),
@@ -8355,7 +8357,9 @@ function _fsWpNeuerBericht(t,wahl){
 // Alte oder halbleere Protokolle ergänzen, nichts überschreiben
 function _fsWpVervollstaendigen(b){
   if(!b.kopf||typeof b.kopf!=='object')b.kopf={};
-  ['abdichtung','oberflaechenschutz','entwaesserung','dachrand','sicherheit','eindeckung','firstausbildung','unterkonstruktion','klempner'] /* F71: dachrand */.forEach(k=>{if(!Array.isArray(b.kopf[k]))b.kopf[k]=[];});
+  ['abdichtung','oberflaechenschutz','entwaesserung','dachrand','pruefprotokollAnschlag','sicherheit','eindeckung','firstausbildung','unterkonstruktion','klempner'] /* F71: dachrand · F72: pruefprotokollAnschlag */.forEach(k=>{if(!Array.isArray(b.kopf[k]))b.kopf[k]=[];});
+  if(typeof b.kopf.attikaHoehe!=='string')b.kopf.attikaHoehe=(b.kopf.attikaHoehe===undefined||b.kopf.attikaHoehe===null)?'':String(b.kopf.attikaHoehe); /* F72 */
+  b.kopf.dachrand=b.kopf.dachrand.map(x=>x==='Attika (ca. 40 cm hoch)'?'Attika':x==='nur Ortgangblech'?'Dachrandabschluss (Blech/Profil)':x); /* F72: die F71-Namen (eine Stunde live) umbenennen, nichts geht verloren */
   if(!Array.isArray(b.sektionen))b.sektionen=[];
   b.sektionen.forEach(s=>{if(!Array.isArray(s.items))s.items=[];s.items.forEach(it=>{if(!Array.isArray(it.fotoRefs))it.fotoRefs=[];});});
   if(!Array.isArray(b.fotos))b.fotos=[];
@@ -8468,6 +8472,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
     {v:'np',label:'n. prüfbar',sym:'⊘ n. prüfb.',col:'#7a4b00',bg:'#fff3cd'} /* F70: nicht prüfbar – mit Grund */
   ];
   const istMangel=it=>it.status==='mangel'||it.status==='repariert';
+  const fotoOffen=new WeakSet(); /* F72: Punkte, an denen „+ Foto“ angetippt wurde (nur solange das Formular offen ist; mit Fotos bleibt die Leiste ohnehin auf) */
   /* F71: Schadens-Frage („… vorhanden?“) – OK heißt „Nein“, Mängel heißt „Ja“; Status, Farben und Zählen bleiben */
   const _istFrage=it=>(typeof _fsWpIstFrage==='function')&&_fsWpIstFrage(it&&it.text);
   const _sym=(it,s)=>_istFrage(it)?(s.v==='ok'?'✓ Nein':s.v==='mangel'?'⚠ Ja':s.sym):s.sym;
@@ -8523,7 +8528,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
       inp.oninput=()=>{bericht.kopf[key]=inp.value;scheduleSave();};
       row.append(lbl,inp);return row;
     }
-    function _mcg(label,key,opts){
+    function _mcg(label,key,opts,einzel,nach){ /* F72: einzel = nur EIN Chip zugleich; nach = wird nach jedem Antippen gerufen */
       const wrap=document.createElement('div');
       wrap.style.cssText='padding:8px 14px;border-top:1px solid var(--border);';
       const lbl=document.createElement('div');lbl.style.cssText='font-size:var(--fs11,11px);color:var(--text2);margin-bottom:6px;';lbl.textContent=label;
@@ -8535,12 +8540,9 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
         btn.style.cssText='padding:6px 12px;border-radius:14px;font-size:var(--fs12,12px);cursor:pointer;font-family:inherit;border:1px solid '+(on?FS_WP_FARBE:'var(--border)')+';background:'+(on?'rgba(26,92,58,.12)':'transparent')+';color:'+(on?FS_WP_FARBE:'var(--text2)')+';';
         btn.onclick=()=>{
           const arr=bericht.kopf[key];const idx=arr.indexOf(opt);
-          if(idx>=0)arr.splice(idx,1);else arr.push(opt);
-          const on2=arr.includes(opt);
-          btn.style.borderColor=on2?FS_WP_FARBE:'var(--border)';
-          btn.style.background=on2?'rgba(26,92,58,.12)':'transparent';
-          btn.style.color=on2?FS_WP_FARBE:'var(--text2)';
-          scheduleSave();
+          if(einzel){arr.length=0;if(idx<0)arr.push(opt);}else if(idx>=0)arr.splice(idx,1);else arr.push(opt); /* F72 */
+          row.querySelectorAll('button').forEach(b2=>{const on2=arr.includes(b2.textContent);b2.style.borderColor=on2?FS_WP_FARBE:'var(--border)';b2.style.background=on2?'rgba(26,92,58,.12)':'transparent';b2.style.color=on2?FS_WP_FARBE:'var(--text2)';});
+          scheduleSave();if(typeof nach==='function')nach();
         };
         row.appendChild(btn);
       });
@@ -8551,20 +8553,25 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
       _mf('Kostenstelle','kostenstelle','z.B. 250133'),
       _mf('Objektadresse','objektAdresse','aus Task')
     );
+    const hoeheRow=_mf('Attika-Höhe (cm)','attikaHoehe','z. B. 25');hoeheRow.setAttribute('data-wp-attika-hoehe','1'); /* F72: Höhe von Hand (Frank: „die ist ja nicht 40 cm hoch“) – nur sichtbar, wenn „Attika“ gewählt ist */
+    hoeheRow.style.display=(Array.isArray(bericht.kopf.dachrand)&&bericht.kopf.dachrand.includes('Attika'))?'flex':'none';
     if(_dachart()==='steil')kopfSek.append( /* F70: Dachaufbau Steildach nach Franks „Checkliste Steildach“ */
       _mcg('Dacheindeckung','eindeckung',['Beton','Tonziegel','Biberschwanz','Schiefer','Wellplatten','Bitumenwellplatte']),
       _mcg('Firstausbildung','firstausbildung',['Mörtel','Schaum','Firstband','Andere']),
       _mf('Sparrenquerschnitt','sparren','z. B. 8/14'),
       _mf('Lattenquerschnitt','latten','z. B. 3/5'),
       _mcg('Unterkonstruktion','unterkonstruktion',['Unterspannbahn vorhanden','ohne / unbekannt']),
-      _mcg('Klempnerarbeiten','klempner',['Zink','Kupfer','PVC'])
+      _mcg('Klempnerarbeiten','klempner',['Zink','Kupfer','PVC']),
+      _mcg('Prüfprotokoll Anschlageinrichtung','pruefprotokollAnschlag',['vorhanden','nicht gesehen','keine Anlage'],true) /* F72: nur Vermerk – die Sachkundigenprüfung ist nicht Teil dieses Protokolls */
     );
     else kopfSek.append(
       _mcg('Art der Flachdachabdichtung','abdichtung',['Bitumen','Kunststoff','Flüssigkunststoff','EPDM']),
       _mcg('Oberflächenschutz','oberflaechenschutz',['Ohne','Kies','Gründach extensiv','Gründach intensiv']),
       _mcg('Dachentwässerung','entwaesserung',['Gully','Dachrinne','Notüberlauf']),
-      _mcg('Dachrand','dachrand',['Attika (ca. 40 cm hoch)','nur Ortgangblech','Ohne']), /* F71: Attika vorhanden (ca. 40 cm hoch) oder nur Ortgangblech? (Frank 15.10.2026) */
-      _mcg('Sicherheitseinrichtungen','sicherheit',['Ohne','Fest montierte Anschlagpunkte','Geländer','Sicherheitsseile'])
+      _mcg('Dachrand','dachrand',['Attika','Dachrandabschluss (Blech/Profil)','Traufe mit Rinne','Ohne'],false,()=>{hoeheRow.style.display=bericht.kopf.dachrand.includes('Attika')?'flex':'none';}), /* F71 · F72: Höhe von Hand, „Dachrandabschluss“ statt „Ortgangblech“, „Traufe mit Rinne“ (Frank 15.10.2026) */
+      hoeheRow,
+      _mcg('Sicherheitseinrichtungen','sicherheit',['Ohne','Fest montierte Anschlagpunkte','Geländer','Sicherheitsseile']),
+      _mcg('Prüfprotokoll Anschlageinrichtung','pruefprotokollAnschlag',['vorhanden','nicht gesehen','keine Anlage'],true) /* F72: nur Vermerk – die Sachkundigenprüfung ist nicht Teil dieses Protokolls (Frank: „nur OK, augenscheinlich“) */
     );
     body.appendChild(kopfSek);
 
@@ -8578,6 +8585,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
       sek.items.forEach(it=>{
         if(!Array.isArray(it.fotoRefs))it.fotoRefs=[];
         const defs=statDef.filter(s=>s.v!=='repariert'||_art()!=='inspektion'||it.status==='repariert'); /* F70: Inspektion ohne „Rep.“ – ein schon gesetztes Rep. bleibt sichtbar */
+        if(_istFrage(it)){const iN=defs.findIndex(s=>s.v==='nv'),iJ=defs.findIndex(s=>s.v==='mangel');if(iN>=0&&iJ>iN){const ja=defs.splice(iJ,1)[0];defs.splice(iN,0,ja);}} /* F72: bei Fragen Ja direkt neben Nein – Nein · Ja · N/V · (Rep.) · n. prüfb. (Frank 15.10.2026); Zustands-Punkte unverändert */
         const rowBg=()=>it.status==='mangel'?'rgba(192,57,43,.06)':it.status==='repariert'?'rgba(41,128,185,.06)':it.status==='ok'?'rgba(26,122,60,.05)':it.status==='np'?'rgba(217,164,0,.09)':'transparent';
         const row=document.createElement('div');row.setAttribute('data-wp-punkt','1');
         row.style.cssText='padding:10px 14px;border-bottom:1px solid var(--border);border-radius:6px;margin:2px 0;background:'+rowBg()+';transition:background .2s;';
@@ -8602,11 +8610,14 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
         const fotoRefArea=document.createElement('div');fotoRefArea.className='wpm-foto-refs';
         const grundWrap=document.createElement('div');grundWrap.className='wpm-grund';
         const mBtn=document.createElement('button');mBtn.type='button';mBtn.textContent='+ Bemerkung';
+        const fBtn=document.createElement('button');fBtn.type='button';fBtn.textContent='+ Foto';fBtn.setAttribute('data-wp-foto-plus','1'); /* F72: Foto auch bei OK / N/V / nicht prüfbar (Frank: „OK plus Foto“) */
         const zeigen=()=>{
           const m=istMangel(it);
           massnWrap.style.display=(m||it.massnahmen)?'block':'none';
-          fotoRefArea.style.display=m?'block':'none';
+          const fotoAuf=m||fotoOffen.has(it)||(Array.isArray(it.fotoRefs)&&it.fotoRefs.length>0); /* F72 */
+          fotoRefArea.style.display=fotoAuf?'block':'none';
           mBtn.style.display=(!m&&!it.massnahmen&&massnWrap.style.display==='none')?'':'none';
+          fBtn.style.display=fotoAuf?'none':'';
           grundWrap.style.display=it.status==='np'?'block':'none';
         };
         defs.forEach(s=>{
@@ -8652,7 +8663,9 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
         grundWrap.append(gTxt,gChips,gIn);
         mBtn.style.cssText='margin-top:5px;font-size:var(--fs11,11px);padding:4px 10px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;font-family:inherit;';
         mBtn.onclick=()=>{massnWrap.style.display='block';mBtn.style.display='none';massnIn.focus();};
-        row.append(txt,btnRow,grundWrap,mBtn,massnWrap,fotoRefArea);
+        fBtn.style.cssText=mBtn.style.cssText+'margin-left:6px;';
+        fBtn.onclick=()=>{fotoOffen.add(it);zeigen();};
+        row.append(txt,btnRow,grundWrap,mBtn,fBtn,massnWrap,fotoRefArea);
         zeigen();
         sekDiv.appendChild(row);
       });
@@ -8829,19 +8842,28 @@ async function _fsWpPdf(bericht,task){
       ['Dacheindeckung',lst(k.eindeckung)],
       ['Firstausbildung',lst(k.firstausbildung)],
       ['Unterkonstruktion',[k.unterkonstruktion&&k.unterkonstruktion.length?k.unterkonstruktion.join(', '):'',k.sparren?'Sparren '+k.sparren:'',k.latten?'Latten '+k.latten:''].filter(Boolean).join(' · ')||'–'],
-      ['Klempnerarbeiten',lst(k.klempner)]
+      ['Klempnerarbeiten',lst(k.klempner)],
+      ['Prüfprotokoll Anschlageinr.',lst(k.pruefprotokollAnschlag)] /* F72 */
     ]:[
       ['Abdichtung',(k.abdichtung&&k.abdichtung.length?k.abdichtung.join(', '):'–')],
       ['Oberflächenschutz',(k.oberflaechenschutz&&k.oberflaechenschutz.length?k.oberflaechenschutz.join(', '):'–')],
       ['Entwässerung',(k.entwaesserung&&k.entwaesserung.length?k.entwaesserung.join(', '):'–')],
-      ['Dachrand',lst(k.dachrand)], /* F71 */
-      ['Sicherheitseinrichtungen',(k.sicherheit&&k.sicherheit.length?k.sicherheit.join(', '):'–')]
+      ['Dachrand',(k.dachrand&&k.dachrand.length?k.dachrand.map(x=>(x==='Attika'&&k.attikaHoehe)?('Attika, ca. '+k.attikaHoehe+' cm'):x).join(', '):'–')], /* F71 · F72: Attika-Höhe */
+      ['Sicherheitseinrichtungen',(k.sicherheit&&k.sicherheit.length?k.sicherheit.join(', '):'–')],
+      ['Prüfprotokoll Anschlageinr.',lst(k.pruefprotokollAnschlag)] /* F72 */
     ];
     doc.autoTable({startY:y,body:dachRows,theme:'grid',margin:{left:M,right:M},
       bodyStyles:{fontSize:8,minCellHeight:6},
       columnStyles:{0:{fontStyle:'bold',cellWidth:55,fillColor:[245,245,245]},1:{cellWidth:127}}
     });
-    y=doc.lastAutoTable.finalY+6;
+    y=doc.lastAutoTable.finalY+2;
+    { /* F72: fester Satz – Anschlageinrichtungen nur augenscheinlich, die Sachkundigenprüfung steht in einem eigenen Prüfprotokoll (Frank 15.10.2026) */
+      const pp=(k.pruefprotokollAnschlag&&k.pruefprotokollAnschlag[0])||'';
+      const satz=(pp==='keine Anlage')?'Anschlageinrichtungen: keine Anlage vorhanden.':('Anschlageinrichtungen nur augenscheinlich geprüft – die Sachkundigenprüfung ist nicht Bestandteil dieses Protokolls.'+(pp?' Prüfprotokoll: '+pp+'.':''));
+      doc.setFontSize(7.5);doc.setFont('helvetica','italic');doc.setTextColor(90,90,90);
+      const zl=doc.splitTextToSize(satz,W-2*M);doc.text(zl,M,y+2);y+=zl.length*3.4+5;
+      doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);
+    }
 
     /* Zustandsprüfung */
     doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(0,0,0);
@@ -8878,7 +8900,7 @@ async function _fsWpPdf(bericht,task){
       });
       y=doc.lastAutoTable.finalY+4;
       // Mängel-Fotos (mit dem Prüfpunkt verknüpfte Fotos) direkt nach dem Abschnitt
-      const mangelItems=sek.items.filter(it=>(it.status==='mangel'||it.status==='repariert')&&it.fotoRefs&&it.fotoRefs.length);
+      const mangelItems=sek.items.filter(it=>it.fotoRefs&&it.fotoRefs.length); /* F72: Fotos zu JEDEM Punkt mit Fotos, auch OK / N/V (Frank: „OK plus Foto“) */
       for(const it of mangelItems){
         const liste=_fsZeilenFotos(fotos,it.fotoRefs).map(z=>z.f);
         if(!liste.length)continue;
