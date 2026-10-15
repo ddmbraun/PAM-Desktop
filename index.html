@@ -10702,7 +10702,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-15 · #1205'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-15-b1205) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-15 · #1206'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-15-b1206) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -22001,6 +22001,8 @@ function _kalRow(x){
   // K1: nur „↗ Task" bleibt dauerhaft sichtbar – alle weiteren Aktionen wandern ins ⋯-Menü
   const menu=[];
   if(x.outlookEventId&&!x.deletedInOutlook)menu.push('<button onclick="_kalOpenOutlook(\''+id+'\','+x.idx+')" title="Diesen Termin in Outlook öffnen">📆 In Outlook öffnen</button>');
+  // b1206: Verbindung lösen, ohne in Outlook etwas anzufassen – der Weg, wenn zwei Karten am selben Outlook-Termin hängen (Befund 260095/260051)
+  if(x.outlookEventId&&!x.deletedInOutlook)menu.push('<button onclick="_kalVerknuepfungLoesen(\''+id+'\','+x.idx+')" title="Verbindung zu diesem Outlook-Termin lösen. In Outlook bleibt er unverändert stehen; in PAM gilt der Termin danach als „● nicht sync“ – Ändern oder Löschen in PAM berührt Outlook dann nicht mehr.">🔗 Verknüpfung lösen (Outlook bleibt)</button>');
   // b909: Termin ohne Outlook-Eintrag direkt von hier nachtragen. Vorher führte der einzige
   // Weg über Auftrag öffnen → Termine & Zeiterfassung → ⋯ → 📆 Outlook; im Kalender stand
   // zwar „● nicht sync", aber kein Knopf, der etwas dagegen tun konnte.
@@ -23194,6 +23196,47 @@ function _kalMetaSoLassen(taskId,idx){
   try{autoSave();}catch(e){console.warn('[KAL]',e);}
   renderKalender(true);
   showToast('✓ Hinweis abgehakt – PAM merkt sich den Outlook-Stand, in Outlook wurde nichts geändert','success',4500);
+}
+// ══ b1206 (Frank 15.10.2026 „baue a und c“ – Befund: Karte 260095 und die archivierte 260051 hingen am SELBEN Outlook-Termin) ══
+// Beide Löschwege (🗑 in der Karte = removeAusserhausTermin, 🗑 im Kalender = _kalDeleteTermin) löschen bei verbundenem Outlook den
+// Outlook-Termin mit – bei einer Doppel-Verknüpfung also den echten Termin der ANDEREN Karte; ein Löschvermerk (b1140) täte später
+// dasselbe. Deshalb:
+// A  ⋯-Menü im Kalender „🔗 Verknüpfung lösen (Outlook bleibt)“: nimmt dem Termin nur die Verbindung (Nummer, Link, Zeitstempel,
+//    Fahrt-Nummern, gemerkter Betreff, Schilder). In Outlook wird NICHTS gelöscht oder geändert; in PAM gilt er danach als „● nicht sync“.
+//    Ein Löschvermerk mit dieser Nummer an derselben Karte wird mit entfernt – sonst löschte er nach dem Lösen den fremden Termin doch.
+// C  „⧉ Duplizieren“ kopiert die Termine ohne Verknüpfung (neue Kennung, kein Löschvermerk) – „📆 Outlook“ schreibt sie als eigene Termine.
+// ⛔ Keine der drei Funktionen spricht mit Outlook (kein fetch, kein _msDeleteEvent) und setzt keinen Merker (_pamDirty) – der nächste
+//    Speichervorgang schreibt also NICHTS nach Outlook. Probedaten nur „Teststraße 5 · 260999“.
+function _ahOutlookLoesen(t){
+  if(!t||typeof t!=='object')return false;
+  const hatte=!!(t.outlookEventId||t.outlookFahrtHinId||t.outlookFahrtRueckId||t.outlookWebLink);
+  ['outlookEventId','outlookWebLink','outlookLastModified','outlookFahrtHinId','outlookFahrtRueckId','_pushedSubject','_pushedLocation',
+   'outlookSubject','outlookLocation','outlookZeitAnders','_pamPushing','_pamPushingSeit'].forEach(function(k){ delete t[k]; });
+  t.outlookMetaChanged=false; t.outlookDeleted=false; t._pamDirty=false;
+  return hatte;
+}
+function _kalVerknuepfungLoesen(taskId,idx){
+  let task=(typeof findTaskById==='function')?findTaskById(taskId):null;
+  if(!task&&typeof archivedTasks!=='undefined'&&Array.isArray(archivedTasks)){ task=archivedTasks.filter(function(x){return x&&x.id===taskId;})[0]||null; }
+  const t=(task&&Array.isArray(task.ausserhausTermine))?task.ausserhausTermine[idx]:null;
+  if(!t){ showToast('⚠ Termin nicht gefunden','warning',4000); return false; }
+  if(!t.outlookEventId){ showToast('ℹ Dieser Termin ist nicht mit Outlook verknüpft','info',3500); return false; }
+  const oid=String(t.outlookEventId);
+  if(!confirm('Verknüpfung zu Outlook lösen?\n\n„'+(t.beschreibung||'Termin')+'“'+(t.date?' · '+t.date:'')+'\n\nIn Outlook bleibt der Termin unverändert stehen'+((t.outlookFahrtHinId||t.outlookFahrtRueckId)?' (auch die Fahrt-Einträge)':'')+'.\nIn PAM gilt er danach als „● nicht sync“ – Ändern oder Löschen in PAM berührt Outlook dann nicht mehr.'))return false;
+  _ahOutlookLoesen(t);
+  if(Array.isArray(task.ausserhausGeloescht))task.ausserhausGeloescht=task.ausserhausGeloescht.filter(function(g){return !(g&&g.oid===oid);});
+  try{ const ak=(typeof _ahArbeitskopie==='function')?_ahArbeitskopie(task,t,idx):null; if(ak&&ak!==t)_ahOutlookLoesen(ak); }catch(e){}
+  try{autoSave();}catch(e){console.warn('[KAL]',e);}
+  renderKalender(true);
+  ((typeof _ahToastLang==='function')?_ahToastLang:showToast)('🔗 Verknüpfung gelöst – in Outlook bleibt der Termin stehen; in PAM gilt er jetzt als „● nicht sync“ (📆 schreibt ihn bei Bedarf als eigenen Termin)','success',7000);
+  return true;
+}
+function _ahKopieOhneOutlook(copy){
+  if(!copy||!Array.isArray(copy.ausserhausTermine))return 0;
+  let n=0;
+  copy.ausserhausTermine.forEach(function(t){ if(!t||typeof t!=='object')return; if(_ahOutlookLoesen(t))n++; if(typeof _ahTidNeu==='function')t.tid=_ahTidNeu(); });
+  delete copy.ausserhausGeloescht;   // Löschvermerke gehören zum Original
+  return n;
 }
 function _kalRemoveTermin(taskId,idx){
   const task=findTaskById(taskId); if(!task||!Array.isArray(task.ausserhausTermine)||!task.ausserhausTermine[idx])return;
@@ -69487,6 +69530,8 @@ function duplicateTask(){
   copy.id=generateId();
   copy.createdAt=new Date().toISOString(); // b620: die Kopie entsteht JETZT – sonst erbt sie das Datum des Originals
   copy.title=(orig.title||'')+'  (Kopie)';
+  // b1206: Termine der Kopie OHNE Outlook-Verknüpfung – sonst hängen zwei Karten am selben Outlook-Termin (Befund 260095/260051, 15.10.2026)
+  const _ohneOl=(typeof _ahKopieOhneOutlook==='function')?_ahKopieOhneOutlook(copy):0;
   const _kb=_pamGespeichertInBoard||currentBoard; // b975: Kopie gehört zum Board des Originals
   if(!boards[_kb])boards[_kb]=[];
   // Kopie direkt nach Original einfügen
@@ -69494,7 +69539,7 @@ function duplicateTask(){
   if(idx>=0) boards[_kb].splice(idx+1,0,copy);
   else boards[_kb].push(copy);
   render();autoSave();
-  showToast('✓ Task dupliziert – Kopie geöffnet','success',2500);
+  ((typeof _ahToastLang==='function')?_ahToastLang:showToast)('✓ Task dupliziert – Kopie geöffnet'+(_ohneOl>0?' · '+_ohneOl+' Termin'+(_ohneOl>1?'e':'')+' ohne Outlook-Verknüpfung (📆 Outlook schreibt sie als eigene Termine)':''),'success',_ohneOl>0?6500:2500);   // b1206
   // Kopie direkt öffnen
   setTimeout(()=>openEditTaskModal(copy.id),80);
 }
