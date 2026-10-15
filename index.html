@@ -8316,6 +8316,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
 .tzl-olzeit{font-size:11px;font-weight:700;color:#8a4b00;background:#ffe3c2;border-radius:5px;padding:0 5px;margin-right:6px;white-space:nowrap;cursor:help;}
 .kalw-card.olzeit{box-shadow:inset 0 0 0 2px #e6a23c;}
 .kal-badge-meta{font-size:10px;font-weight:700;color:#0078d4;white-space:nowrap;cursor:help;}
+.kal-btn.kal-btn-meta{color:#0078d4;font-weight:700;}   /* b1205: „✓ so lassen“ neben „ℹ Outlook weicht ab“ */
 /* b914: Kennzeichen für Termine aus dem Archiv – bewusst gedeckt, nicht alarmierend. */
 .kal-badge-archiv{font-size:10px;font-weight:700;color:#92400e;background:#FEF3C7;border-radius:4px;padding:0 5px;white-space:nowrap;cursor:help;}
 .kal-menu-wrap{position:relative;flex-shrink:0;}
@@ -10701,7 +10702,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-15 · #1204'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-15-b1204) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-15 · #1205'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-15-b1205) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -21992,7 +21993,8 @@ function _kalRow(x){
   const statusTitle=x.deletedInOutlook?'⚠ In Outlook gelöscht':(x.outlookEventId?'✓ In Outlook vorhanden':'● Noch nicht nach Outlook geschrieben');
   const id=_jsa(x.taskId);
   const ks=x.kostenstelle?'<span class="kal-kst-chip">'+esc(x.kostenstelle)+'</span>':'';
-  const metaBadge=x.outlookMetaChanged?(' <span class="kal-badge-meta" title="In Outlook geändert — '+_escHtml(x.outlookSubject||'')+(x.outlookLocation?(' | Ort: '+_escHtml(x.outlookLocation)):'')+'">ℹ Outlook geändert</span>'):'';
+  // b1205: „weicht ab“ statt „geändert“ – meist wurde die Karte in PAM umbenannt, nicht der Termin in Outlook (Befund 15.10.2026)
+  const metaBadge=x.outlookMetaChanged?(' <span class="kal-badge-meta" title="Outlook weicht von PAM ab — in Outlook steht: '+_escHtml(x.outlookSubject||'')+(x.outlookLocation?(' | Ort: '+_escHtml(x.outlookLocation)):'')+' — PAM schreibt nichts von selbst. „✓ so lassen“ nimmt den Hinweis weg, „📆 Outlook“ in der Karte schreibt den PAM-Stand nach Outlook.">ℹ Outlook weicht ab</span>'):'';
   // b914: Archivierte deutlich kennzeichnen – sonst sehen sie aus wie laufende Aufträge.
   const zeitBadge=(x.outlookZeitAnders&&typeof _ahZeitAndersSchild==='function')?(' '+_ahZeitAndersSchild({date:x.date,outlookZeitAnders:x.outlookZeitAnders},'kal-badge-zeit')):'';   // b1159
   const archivBadge=x.archiviert?(' <span class="kal-badge-archiv" title="Der Auftrag liegt im Archiv. Der Termin steht weiter in Outlook.">📦 archiviert</span>'):'';
@@ -22018,6 +22020,7 @@ function _kalRow(x){
     + (x.deletedInOutlook
         ?'<span class="kal-badge-del" title="Der verknüpfte Outlook-Termin existiert nicht mehr – Aktionen im ⋯-Menü">⚠ in Outlook gelöscht</span>'
         :'<span class="kal-status-dot" title="'+statusTitle+'"></span>')
+    + (x.outlookMetaChanged?'<button class="kal-btn kal-btn-meta" onclick="_kalMetaSoLassen(\''+id+'\','+x.idx+')" title="Hinweis „ℹ Outlook weicht ab“ abhaken: PAM merkt sich, was jetzt in Outlook steht. In Outlook wird nichts geändert.">✓ so lassen</button>':'')   // b1205
     + '<button class="kal-btn" onclick="_kalFahrtDialog(\''+id+'\','+x.idx+',\'fahrt\')" title="Hin-/Rückfahrtzeit setzen – wird vor bzw. nach dem Termin geblockt. Öffnet auch Fahrt-Bezeichnung und Outlook-Name.">🚗'+((x.fahrt||x.fahrtR)?(x.fahrt===x.fahrtR?(' '+x.fahrt+'′'):(' '+x.fahrt+'/'+x.fahrtR+'′')):'')+'</button>'
     + '<button class="kal-btn" onclick="_kalOpenTask(\''+id+'\')" title="Task öffnen">↗ Task</button>'
     + '<div class="kal-menu-wrap">'
@@ -23173,6 +23176,25 @@ function _kalKeepDeleted(taskId,idx){
   renderKalender(true);
   showToast('Termin behalten – gilt jetzt als „● nicht sync" (kann per 📆 neu geschrieben werden)','info',4500);
 }
+// b1205 (Befund 15.10.2026, Frank „ja baue“): Knopf „✓ so lassen“ am Schild „ℹ Outlook weicht ab“ – Frank hakt den Hinweis SELBST ab.
+// PAM merkt sich, was jetzt in Outlook steht, als abgestimmten Stand (_pushedSubject/_pushedLocation) – dann meldet der Abgleich
+// diesen Termin nicht mehr, bis sich Outlook wieder ändert. ⛔ Nach Outlook wird NICHTS geschrieben (kein _pamDirty, kein fetch);
+// wer den PAM-Stand in Outlook haben will, nimmt weiter „📆 Outlook“ in der Karte. Archivierte Karten zeigt der Kalender mit dem
+// Schalter „Archiv“ – findTaskById kennt nur die Boards, deshalb zusätzlich archivedTasks.
+function _kalMetaSoLassen(taskId,idx){
+  let task=(typeof findTaskById==='function')?findTaskById(taskId):null;
+  if(!task&&typeof archivedTasks!=='undefined'&&Array.isArray(archivedTasks))task=archivedTasks.filter(function(x){return x&&x.id===taskId;})[0]||null;
+  const t=(task&&Array.isArray(task.ausserhausTermine))?task.ausserhausTermine[idx]:null;
+  if(!t||!t.outlookMetaChanged){ showToast('ℹ An diesem Termin steht kein Outlook-Hinweis','info',3000); return; }
+  const s=String(t.outlookSubject||'').trim(), o=String(t.outlookLocation||'').trim();
+  const setze=function(a){ a._pushedSubject=s; a._pushedLocation=o; a.outlookMetaChanged=false; delete a.outlookSubject; delete a.outlookLocation; };
+  setze(t);
+  // Karte gerade offen → Arbeitskopie mitnehmen, sonst holt das nächste Speichern das Schild zurück (_b717Merge)
+  try{ const ak=(typeof _ahArbeitskopie==='function')?_ahArbeitskopie(task,t,idx):null; if(ak&&ak!==t)setze(ak); }catch(e){}
+  try{autoSave();}catch(e){console.warn('[KAL]',e);}
+  renderKalender(true);
+  showToast('✓ Hinweis abgehakt – PAM merkt sich den Outlook-Stand, in Outlook wurde nichts geändert','success',4500);
+}
 function _kalRemoveTermin(taskId,idx){
   const task=findTaskById(taskId); if(!task||!Array.isArray(task.ausserhausTermine)||!task.ausserhausTermine[idx])return;
   const bez=(task.ausserhausTermine[idx].beschreibung||'Termin');
@@ -23257,9 +23279,10 @@ async function _kalSyncStatus(manual){
         // Vergleich sie jetzt ALLE als "in Outlook geaendert" melden, obwohl dort niemand war.
         // Deshalb gilt auch die alte Schreibweise als unveraendert.
         const _altSubj=_msTerminSubject(task,t,true).trim();
-        const _metaChg=(!!_outSubj&&_outSubj!==(_baseSubj||'').trim()&&_outSubj!==_altSubj&&_outSubj!==((typeof _ahSubjGesendet==='function'&&typeof task!=='undefined'&&typeof t!=='undefined')?_ahSubjGesendet(task,t):''))||(_outLoc!==(_baseLoc||'').trim());   // b1158: auch der Betreff nach b1147-Art (⏳ vorn) ist „so wie gesendet“
+        const _metaChg=(!!_outSubj&&_outSubj!==(_baseSubj||'').trim()&&_outSubj!==_altSubj&&_outSubj!==((typeof _ahSubjGesendet==='function'&&typeof task!=='undefined'&&typeof t!=='undefined')?_ahSubjGesendet(task,t):'')&&_outSubj!==((typeof _msTerminSubject==='function'&&typeof task!=='undefined'&&typeof t!=='undefined')?String(_msTerminSubject(task,t)||'').trim():''))||(_outLoc!==(_baseLoc||'').trim());   // b1158: auch der Betreff nach b1147-Art (⏳ vorn) ist „so wie gesendet“ · b1205: ebenso der aktuelle PAM-Betreff (gemerkter Stand kann veraltet sein)
         if(!_metaChg&&_outSubj&&t._pushedSubject==null){ t._pushedSubject=_outSubj; t._pushedLocation=_outLoc; changed=true; }   // b1158: gemerkten Stand nachlernen, wenn er beim Speichern verloren ging
-        if(_metaChg){ if(!t.outlookMetaChanged||t.outlookSubject!==_outSubj||t.outlookLocation!==_outLoc){ t.outlookMetaChanged=true; t.outlookSubject=_outSubj; t.outlookLocation=_outLoc; changed=true; metaCount++; } else { metaCount++; } }
+        // b1205: gezählt (= Meldung) wird nur eine NEUE Abweichung. Bis b1204 zählte auch jede schon bekannte mit – die Meldung kam bei jedem Abgleich wieder.
+        if(_metaChg){ if(!t.outlookMetaChanged||t.outlookSubject!==_outSubj||t.outlookLocation!==_outLoc){ t.outlookMetaChanged=true; t.outlookSubject=_outSubj; t.outlookLocation=_outLoc; changed=true; metaCount++; } }
         else if(t.outlookMetaChanged){ t.outlookMetaChanged=false; delete t.outlookSubject; delete t.outlookLocation; changed=true; }
         // b1159: Zeit in Outlook ≠ PAM, Outlook nicht neuer → Schild (siehe _ahZeitAnders); geschrieben wird NICHTS
         if(typeof _ahZeitAnders==='function'){
@@ -23289,7 +23312,7 @@ async function _kalSyncStatus(manual){
     }));
     if(changed){try{autoSave();}catch(e){console.warn('[KAL]',e);}}
     if(pulled>0)showToast('↩ '+pulled+' Termin'+(pulled>1?'e':'')+' aus Outlook aktualisiert (Zeit)','info',4000);
-    if(metaCount>0)showToast('ℹ '+metaCount+' Termin'+(metaCount>1?'e':'')+' in Outlook geändert (Betreff/Ort) – siehe „ℹ Outlook geändert"','info',5000);
+    if(metaCount>0)((typeof _ahToastLang==='function')?_ahToastLang:showToast)('ℹ '+metaCount+' Termin'+(metaCount>1?'e':'')+': Outlook weicht von PAM ab (Betreff/Ort) – Schild „ℹ Outlook weicht ab“ im Kalender (☰ Liste)','info',6000);   // b1205: nur neue, ehrlicher Text
     if(zeitAnders>0)showToast('⚠ '+zeitAnders+' Termin'+(zeitAnders>1?'e':'')+': Outlook hat eine andere Zeit als PAM – Schild am Termin, „📆 Outlook“ schreibt die PAM-Zeit','warning',8000);   // b1159
     if(manual && pulled===0)showToast('✓ Kalender aktualisiert'+(metaCount>0?'':' – keine Zeitänderungen'),'success',2500);
     if(currentView==='kalender'||(typeof _kalSchwebAn!=='undefined'&&_kalSchwebAn))renderKalender(true); // b1081
