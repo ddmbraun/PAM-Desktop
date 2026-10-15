@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F73';
+const PAM_FORMULARE_VERSION='F74';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -394,6 +394,10 @@ function _fsPdfName(bericht,zeit){
   if(bericht&&bericht.vorlage==='wartungsprotokoll'&&bericht.art==='rep'){ /* F42: REP-Auftrag – Straße (gekürzt wegen der Pfadlänge) + Datum + Uhrzeit */
     const slug=String((bericht.kopf&&bericht.kopf.objektAdresse)||'').split(',')[0].replace(/[^a-zA-Z0-9]/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,'').slice(0,30);
     return 'REP-Auftrag'+(slug?'_'+slug:'')+(datum?'_'+datum:'')+uhr+'.pdf';
+  }
+  if(bericht&&bericht.vorlage==='wartungsprotokoll'&&bericht.art==='anschlag'){ /* F74: Prüfprotokoll Anschlageinrichtung – Straße (gekürzt) + Datum + Uhrzeit */
+    const slug=String((bericht.kopf&&bericht.kopf.objektAdresse)||'').split(',')[0].replace(/[^a-zA-Z0-9]/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,'').slice(0,30);
+    return 'Pruefprotokoll-Anschlageinrichtung'+(slug?'_'+slug:'')+(datum?'_'+datum:'')+uhr+'.pdf';
   }
   if(bericht&&bericht.vorlage==='wartungsprotokoll'){ // F10: Name wie am PC bisher (Adresse gekürzt wegen der Pfadlänge) + Uhrzeit
     const slug=String((bericht.kopf&&bericht.kopf.objektAdresse)||'').split(',')[0].replace(/[^a-zA-Z0-9]/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,'').slice(0,30);
@@ -8363,7 +8367,7 @@ function _fsWpVervollstaendigen(b){
   if(!Array.isArray(b.sektionen))b.sektionen=[];
   b.sektionen.forEach(s=>{if(!Array.isArray(s.items))s.items=[];s.items.forEach(it=>{if(!Array.isArray(it.fotoRefs))it.fotoRefs=[];});});
   if(!Array.isArray(b.fotos))b.fotos=[];
-  if(b.art!=='rep'){ /* F70: Abhakliste „Wartungsarbeiten“ – alte Protokolle bekommen sie leer, nichts Vorhandenes wird überschrieben */
+  if(b.art!=='rep'&&b.art!=='anschlag'){ /* F70: Abhakliste „Wartungsarbeiten“ – alte Protokolle bekommen sie leer, nichts Vorhandenes wird überschrieben */
     if(!Array.isArray(b.wartArbeiten))b.wartArbeiten=(typeof _fsWpArbNeu==='function')?_fsWpArbNeu(String(b.dachart||'').toLowerCase()==='steil'?'steil':'flach'):[];
     b.wartArbeiten.forEach(a=>{if(a&&typeof a.notiz!=='string')a.notiz='';});
   }
@@ -8418,6 +8422,7 @@ function _fsWpWahl(cb){
 function _openWartungsprotokollMobil(existingIdx,wahl){
   const t=currentTask();if(!t)return;
   if(typeof existingIdx==='number'&&t.pruefberichte&&t.pruefberichte[existingIdx]&&t.pruefberichte[existingIdx].art==='rep'&&typeof _openRepAuftrag==='function')return _openRepAuftrag(existingIdx); /* F42: der REP-Auftrag hat sein eigenes, kurzes Formular */
+  if(typeof existingIdx==='number'&&t.pruefberichte&&t.pruefberichte[existingIdx]&&t.pruefberichte[existingIdx].art==='anschlag'&&typeof _openAnschlagProtokoll==='function')return _openAnschlagProtokoll(existingIdx); /* F74: Prüfprotokoll Anschlageinrichtung – eigenes Formular */
   if(!t.pruefberichte)t.pruefberichte=[];
   let bericht;
   if(typeof existingIdx==='number'&&t.pruefberichte[existingIdx]&&t.pruefberichte[existingIdx].vorlage==='wartungsprotokoll'){
@@ -8477,6 +8482,23 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
   let wpFilter='alle';const wpZu=new Set();let wpKopfZu=false;
   const _passt=it=>wpFilter==='offen'?!(it.status&&it.status!=='offen'):wpFilter==='maengel'?(it.status==='mangel'||it.status==='repariert'||it.status==='np'):wpFilter==='fotos'?(Array.isArray(it.fotoRefs)&&it.fotoRefs.length>0):true;
   const _wpLeisteNeu=()=>{const sc=body.scrollTop;_wpMobRender();body.scrollTop=sc;};
+  /* F74: unter „Prüfprotokoll Anschlageinrichtung“ – entweder „🪝 selbst prüfen“ (legt das eigene Prüfprotokoll an und öffnet es) oder die Verknüpfungszeile zum vorhandenen */
+  const _anZeile=()=>{
+    const w=document.createElement('div');w.setAttribute('data-wp-anschlag','1');w.style.cssText='padding:6px 14px 10px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:8px;align-items:center;';
+    const idx=(bericht.anschlagId&&Array.isArray(t.pruefberichte))?t.pruefberichte.findIndex(x=>x&&x.id===bericht.anschlagId&&x.art==='anschlag'):-1;
+    const stil='padding:8px 12px;min-height:36px;border-radius:10px;border:1px solid #1f4e79;background:rgba(31,78,121,.08);color:#1f4e79;font-size:var(--fs13,13px);font-weight:600;cursor:pointer;font-family:inherit;';
+    if(idx>=0){
+      const an=t.pruefberichte[idx];let tot=0,frei=0;(an.punkte||[]).forEach(p=>{tot++;if(p&&p.ergebnis==='frei')frei++;});
+      const b=document.createElement('button');b.type='button';b.setAttribute('data-wp-anschlag-oeffnen','1');b.textContent='📄 Prüfprotokoll vom '+(an.datum||'')+' · '+frei+' von '+tot+' freigegeben · öffnen';b.style.cssText=stil;
+      b.onclick=()=>{if(typeof _openAnschlagProtokoll==='function'){ov.remove();_openAnschlagProtokoll(idx);}};w.appendChild(b);
+    }else{
+      const b=document.createElement('button');b.type='button';b.setAttribute('data-wp-anschlag-neu','1');b.textContent='🪝 selbst prüfen – Prüfprotokoll anlegen';b.style.cssText=stil;
+      b.onclick=()=>{if(typeof _openAnschlagProtokoll!=='function')return;ov.remove();_openAnschlagProtokoll(undefined,bericht);};
+      const h=document.createElement('span');h.style.cssText='font-size:var(--fs11,11px);color:var(--text2);';h.textContent='eigenes Formular, eigenes PDF – hier erscheint danach nur die Verknüpfung';
+      w.append(b,h);
+    }
+    return w;
+  };
   function _filterZeile(){
     const w=document.createElement('div');w.setAttribute('data-wp-leiste','1');
     w.style.cssText='position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:6px;padding:6px 14px;background:var(--bg2);border-bottom:1px solid var(--border);';
@@ -8587,7 +8609,8 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
       _mf('Lattenquerschnitt','latten','z. B. 3/5'),
       _mcg('Unterkonstruktion','unterkonstruktion',['Unterspannbahn vorhanden','ohne / unbekannt']),
       _mcg('Klempnerarbeiten','klempner',['Zink','Kupfer','PVC']),
-      _mcg('Prüfprotokoll Anschlageinrichtung','pruefprotokollAnschlag',['vorhanden','nicht gesehen','keine Anlage'],true) /* F72: nur Vermerk – die Sachkundigenprüfung ist nicht Teil dieses Protokolls */
+      _mcg('Prüfprotokoll Anschlageinrichtung','pruefprotokollAnschlag',['vorhanden','nicht gesehen','keine Anlage'],true), /* F72: nur Vermerk – die Sachkundigenprüfung ist nicht Teil dieses Protokolls */
+      _anZeile() /* F74 */
     );
     else kopfSek.append(
       _mcg('Art der Flachdachabdichtung','abdichtung',['Bitumen','Kunststoff','Flüssigkunststoff','EPDM']),
@@ -8596,7 +8619,8 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
       _mcg('Dachrand','dachrand',['Attika','Dachrandabschluss (Blech/Profil)','Traufe mit Rinne','Ohne'],false,()=>{hoeheRow.style.display=bericht.kopf.dachrand.includes('Attika')?'flex':'none';}), /* F71 · F72: Höhe von Hand, „Dachrandabschluss“ statt „Ortgangblech“, „Traufe mit Rinne“ (Frank 15.10.2026) */
       hoeheRow,
       _mcg('Sicherheitseinrichtungen','sicherheit',['Ohne','Fest montierte Anschlagpunkte','Geländer','Sicherheitsseile']),
-      _mcg('Prüfprotokoll Anschlageinrichtung','pruefprotokollAnschlag',['vorhanden','nicht gesehen','keine Anlage'],true) /* F72: nur Vermerk – die Sachkundigenprüfung ist nicht Teil dieses Protokolls (Frank: „nur OK, augenscheinlich“) */
+      _mcg('Prüfprotokoll Anschlageinrichtung','pruefprotokollAnschlag',['vorhanden','nicht gesehen','keine Anlage'],true), /* F72: nur Vermerk – die Sachkundigenprüfung ist nicht Teil dieses Protokolls (Frank: „nur OK, augenscheinlich“) */
+      _anZeile() /* F74 */
     );
     } /* F73 */
     body.appendChild(kopfSek);
@@ -8845,6 +8869,7 @@ function _fsWpHakenZeichnen(doc,d,art){
 // Fotos über _fsFotoFuerPdf: die bemalte Fassung zuerst (_shrBytes), auf 1600 px verkleinert.
 async function _fsWpPdf(bericht,task){
   if(bericht&&bericht.art==='rep'&&typeof _fsRaPdf==='function')return _fsRaPdf(bericht,task); /* F42: der REP-Auftrag hat sein eigenes PDF */
+  if(bericht&&bericht.art==='anschlag'&&typeof _fsAnPdf==='function')return _fsAnPdf(bericht,task); /* F74 */
   if(!window.jspdf){toast('PDF-Bibliothek lädt noch …','error');return null;}
   try{
     _fsWpVervollstaendigen(bericht);
@@ -8895,6 +8920,10 @@ async function _fsWpPdf(bericht,task){
       doc.setFontSize(7.5);doc.setFont('helvetica','italic');doc.setTextColor(90,90,90);
       const zl=doc.splitTextToSize(satz,W-2*M);doc.text(zl,M,y+2);y+=zl.length*3.4+5;
       doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);
+    }
+    { /* F74: Verknüpfung zum Prüfprotokoll Anschlageinrichtung (eigenes Dokument) – nur diese eine Zeile */
+      const an=(bericht.anschlagId&&Array.isArray(t.pruefberichte))?t.pruefberichte.find(x=>x&&x.id===bericht.anschlagId&&x.art==='anschlag'):null;
+      if(an){let fr=0,tot=0;(an.punkte||[]).forEach(p=>{tot++;if(p&&p.ergebnis==='frei')fr++;});doc.setFontSize(7.5);doc.setFont('helvetica','italic');doc.setTextColor(90,90,90);doc.text('Prüfprotokoll Anschlageinrichtung vom '+(an.datum||'')+' (PAM, eigenes Dokument): '+fr+' von '+tot+' Anschlagpunkten freigegeben.',M,y+1);y+=5;doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);}
     }
 
     /* Zustandsprüfung */
@@ -9033,6 +9062,392 @@ async function _fsWpPdf(bericht,task){
     toast('PDF-Fehler: '+e.message,'error');
     return null;
   }
+}
+
+/* ══ F74: PRÜFPROTOKOLL ANSCHLAGEINRICHTUNG (Sekuranten) – eigenes Formular, aus dem Dachprotokoll heraus angestoßen ════════════════════════════
+   Frank 15.10.2026 (OFFENE_PUNKTE P69): „doch ein extra Formular … im Wartungsprotokoll einfach anklicken, dass das extra ausgeführt wird“ · „nimm deine Vorschläge, aber nicht mit
+   unserem eigentlichen Protokoll durcheinander“. Nur Feststellungen; PAM gibt KEINEN Prüfumfang vor – der steht in der Anleitung des jeweiligen Herstellers.
+   Daten: bericht.vorlage==='wartungsprotokoll' UND bericht.art==='anschlag' (wie der REP-Auftrag: Liste, Öffnen, PDF, Löschen und Abgleich laufen über die Wartungsprotokoll-Wege,
+   _openWartungsprotokollMobil / _fsWpPdf / _fsPdfName / _fsListeZeile verzweigen am Anfang). kopf{objektAdresse,haus,auftraggeber,kostenstelle,anlass,pruefer,qualifikation,beginn,ende,
+   witterung,anlageArt,hersteller,herstellerUnbekannt,montagejahr,lage[],unterlagen{anleitung,montagedoku,konformitaet,letztePruefung},letztePruefungDatum}, punkte[]{nr,typ,serie,kennz,
+   verformung,korrosion,lose,seilLose,seilEnd,seilDaempfer,durchgang,befest,pruefart[],drehmoment,ergebnis,bemerkung,fotoRefs[]}, gesamt, maengel, plakette, plaketteNr, naechste,
+   vonWpId (das Dachprotokoll, aus dem es angelegt wurde), fotos[]. Im Dachprotokoll steht umgekehrt bericht.anschlagId. Der Qualifikationssatz des Prüfers liegt zusätzlich in
+   localStorage FS_AN_QUALI_KEY (PC: geteilte Einstellung, PAM_GETEILT_KEYS) und wird in JEDES Protokoll kopiert – das PDF behält, was beim Prüfen galt.
+   ⛔ Keine Namen, keine Adressen, kein Prüfumfang in dieser Datei. Unterschrift (Schritt 3), Dachplan-Pins und Kalender-Termin (Schritt 2) sind bewusst noch nicht gebaut. */
+const FS_AN_FARBE='#1f4e79';
+const FS_AN_ANLASS=['jährliche Prüfung','Erstprüfung / Übernahme','nach Absturz / Beschädigung','Sonderprüfung'];
+const FS_AN_ARTEN=['Einzelanschlagpunkte','Seilsystem','Schienensystem','Seitenschutz / Geländer'];
+const FS_AN_MONTAGE=['bis 2015','ab 2016','unbekannt'];
+const FS_AN_LAGE=['Dachplan der Karte (Pins)','Montagedokumentation (Grundriss)'];
+const FS_AN_PRUEFART=['Sicht','Rüttel-/Torsionsprobe','Drehmoment','Zugprobe durch Fachfirma'];
+const FS_AN_UNTERLAGEN=[['anleitung','Herstelleranleitung (Gebrauch / Montage / Prüfung)'],['montagedoku','Montagedokumentation'],['konformitaet','Übereinstimmungs- / Konformitätserklärung'],['letztePruefung','Nachweis der letzten Prüfung']];
+const FS_AN_FRAGEN=[['verformung','Verformung oder Beschädigung vorhanden?'],['korrosion','Korrosion vorhanden?'],['lose','Lose Teile / lockere Befestigung vorhanden?']];
+const FS_AN_SEIL=[['seilLose','Seil lose oder Spannung zu gering?'],['seilEnd','Endverbindungen / Spannschloss beschädigt oder locker?'],['seilDaempfer','Falldämpfer ausgelöst oder Zwischenhalter beschädigt?']];
+const FS_AN_QUALI_KEY='pam_fs_anschlag_quali';
+const FS_AN_WORT={ja:'Ja',nein:'Nein',nv:'N/V',np:'n. prüfb.',ok:'OK',mangel:'Mangel',ne:'nicht einsehbar',na:'nicht angefordert',frei:'freigegeben',gesperrt:'nicht freigegeben',teilweise:'teilweise',lesbar:'lesbar',fehlt:'unleserlich / fehlt',keine:'keine Plakette'};
+function _fsAnWort(v){return FS_AN_WORT[v]||(v?String(v):'–');}
+function _fsIstAnschlag(b){return !!b&&b.vorlage==='wartungsprotokoll'&&b.art==='anschlag';}
+function _fsAnKostenstelle(t){const tags=((t&&Array.isArray(t.tags))?t.tags:[]).map(x=>String(x||'').trim()).filter(Boolean);const m=/(?:^|\D)(2\d{5})(?!\d)/.exec(String((t&&t.title)||''));return tags.length?tags.join(', '):(m?m[1]:'');}
+// Vorschlag „nächste Prüfung“: genau ein Jahr später (Herstellerangabe geht vor – das Feld bleibt änderbar)
+function _fsAnPlus12(datum){const m=/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(String(datum||'').trim());if(!m)return '';return ('0'+m[1]).slice(-2)+'.'+('0'+m[2]).slice(-2)+'.'+(+m[3]+1);}
+function _fsAnPunktNeu(nr){return {nr:nr,typ:'',serie:'',kennz:'',verformung:'',korrosion:'',lose:'',seilLose:'',seilEnd:'',seilDaempfer:'',durchgang:'',befest:'',pruefart:[],drehmoment:'',ergebnis:'',bemerkung:'',fotoRefs:[]};}
+function _fsAnVervollstaendigen(b){
+  if(!b)return b;
+  if(!b.kopf||typeof b.kopf!=='object')b.kopf={};
+  const k=b.kopf;
+  ['objektAdresse','haus','auftraggeber','kostenstelle','anlass','pruefer','qualifikation','beginn','ende','witterung','anlageArt','hersteller','montagejahr','letztePruefungDatum'].forEach(f=>{if(typeof k[f]!=='string')k[f]=(k[f]===undefined||k[f]===null)?'':String(k[f]);});
+  if(!Array.isArray(k.lage))k.lage=[];
+  k.herstellerUnbekannt=!!k.herstellerUnbekannt;
+  if(!k.unterlagen||typeof k.unterlagen!=='object')k.unterlagen={};
+  FS_AN_UNTERLAGEN.forEach(u=>{if(typeof k.unterlagen[u[0]]!=='string')k.unterlagen[u[0]]='';});
+  if(!Array.isArray(b.punkte))b.punkte=[];
+  b.punkte.forEach((p,i)=>{const n=_fsAnPunktNeu(i+1);Object.keys(n).forEach(f=>{if(p[f]===undefined||p[f]===null)p[f]=n[f];});p.nr=i+1;if(!Array.isArray(p.pruefart))p.pruefart=[];if(!Array.isArray(p.fotoRefs))p.fotoRefs=[];});
+  ['gesamt','maengel','plakette','plaketteNr','naechste','vonWpId','datum'].forEach(f=>{if(typeof b[f]!=='string')b[f]=(b[f]===undefined||b[f]===null)?'':String(b[f]);});
+  if(!Array.isArray(b.fotos))b.fotos=[];
+  if(!Array.isArray(b.sektionen))b.sektionen=[];
+  if(!b.titel)b.titel='Prüfprotokoll Anschlageinrichtung';
+  if(!b.id)b.id='an_'+Date.now();
+  return b;
+}
+// Neues Protokoll aus der Karte; wp = das Dachprotokoll, aus dem heraus angelegt wird (übernimmt Datum und – wenn eindeutig – die Anlagenart aus den Sicherheitseinrichtungen)
+function _fsAnNeuerBericht(t,wp){
+  const h=new Date(),p=n=>('0'+n).slice(-2);
+  const allg=(typeof _fsKopfAusKarte==='function')?(_fsKopfAusKarte(t)||{}):{};
+  let quali='',pruefer='';try{quali=String(localStorage.getItem(FS_AN_QUALI_KEY)||'').trim();pruefer=String(localStorage.getItem('pam_fs_aufgenommen')||'').trim();}catch(e){}
+  const datum=String((wp&&wp.datum)||'').trim()||(p(h.getDate())+'.'+p(h.getMonth()+1)+'.'+h.getFullYear());
+  const b={id:'an_'+Date.now(),vorlage:'wartungsprotokoll',art:'anschlag',titel:'Prüfprotokoll Anschlageinrichtung',datum,createdAt:h.toISOString(),
+    kopf:{objektAdresse:String((t&&(t.adresse||t.title))||'').trim(),haus:'',auftraggeber:String(allg.auftraggeber||(t&&t.hausverwaltung)||'').trim(),kostenstelle:_fsAnKostenstelle(t),
+      anlass:FS_AN_ANLASS[0],pruefer,qualifikation:quali,beginn:'',ende:'',witterung:'',anlageArt:'',hersteller:'',herstellerUnbekannt:false,montagejahr:'',lage:[],unterlagen:{},letztePruefungDatum:''},
+    punkte:[],gesamt:'',maengel:'',plakette:'',plaketteNr:'',naechste:_fsAnPlus12(datum),vonWpId:String((wp&&wp.id)||''),fotos:[],sektionen:[]};
+  if(wp&&wp.kopf&&Array.isArray(wp.kopf.sicherheit)){const s=wp.kopf.sicherheit;if(s.indexOf('Fest montierte Anschlagpunkte')>=0)b.kopf.anlageArt='Einzelanschlagpunkte';else if(s.indexOf('Sicherheitsseile')>=0)b.kopf.anlageArt='Seilsystem';else if(s.indexOf('Geländer')>=0)b.kopf.anlageArt='Seitenschutz / Geländer';}
+  return _fsAnVervollstaendigen(b);
+}
+function _fsAnZaehlen(b){const z={frei:0,gesperrt:0,np:0,offen:0,tot:0};((b&&b.punkte)||[]).forEach(p=>{z.tot++;if(p.ergebnis==='frei')z.frei++;else if(p.ergebnis==='gesperrt')z.gesperrt++;else if(p.ergebnis==='np')z.np++;else z.offen++;});return z;}
+function _fsAnZusammenfassung(b){const z=_fsAnZaehlen(b);return z.tot+' Punkte · '+z.frei+' freigegeben · '+z.gesperrt+' nicht freigegeben · '+z.np+' nicht prüfbar · '+z.offen+' offen';}
+// Vorschlag für das Gesamtergebnis – Frank bestätigt, PAM setzt nichts von selbst
+function _fsAnGesamtVorschlag(b){const z=_fsAnZaehlen(b);if(!z.tot||z.offen>0)return '';if(z.gesperrt===0&&z.np===0)return 'frei';if(z.frei===0&&z.np===0)return 'gesperrt';return 'teilweise';}
+// Zeilen auf n auffüllen (nie kürzen); gibt zurück, wie viele dazukamen
+function _fsAnPunkteAuffuellen(b,n){n=Math.max(0,Math.min(200,parseInt(n,10)||0));let dazu=0;while(b.punkte.length<n){b.punkte.push(_fsAnPunktNeu(b.punkte.length+1));dazu++;}return dazu;}
+function _fsAnPunktWeg(b,p){const i=b.punkte.indexOf(p);if(i<0)return false;b.punkte.splice(i,1);b.punkte.forEach((q,j)=>{q.nr=j+1;});return true;}
+function _fsAnPunktTitel(p){return 'Anschlagpunkt '+p.nr+(p.typ?' · '+p.typ:'')+(p.ergebnis?' · '+(p.ergebnis==='frei'?'✓ ':p.ergebnis==='gesperrt'?'⛔ ':'⊘ ')+_fsAnWort(p.ergebnis):' · offen');}
+
+/* Das Formular – PC, Handy und Tablet (eine Fassung). existingIdx = vorhandenes Protokoll aus der Liste; vonWp = Dachprotokoll, aus dem „🪝 selbst prüfen“ kam. */
+function _openAnschlagProtokoll(existingIdx,vonWp){
+  const t=currentTask();if(!t)return;
+  if(!t.pruefberichte)t.pruefberichte=[];
+  let bericht,neuAngelegt=false;
+  if(typeof existingIdx==='number'&&_fsIstAnschlag(t.pruefberichte[existingIdx])){
+    bericht=t.pruefberichte[existingIdx];
+  }else if(vonWp&&vonWp.anschlagId&&t.pruefberichte.some(x=>x&&x.id===vonWp.anschlagId&&x.art==='anschlag')){
+    bericht=t.pruefberichte.find(x=>x&&x.id===vonWp.anschlagId&&x.art==='anschlag'); /* schon angelegt → nur öffnen */
+  }else{
+    bericht=_fsAnNeuerBericht(t,vonWp);neuAngelegt=true;
+    t.pruefberichte.push(bericht);
+    if(vonWp){vonWp.anschlagId=bericht.id;}
+    scheduleSave();
+  }
+  _fsAnVervollstaendigen(bericht);
+
+  const GID='_wpMobOverlay';const old=document.getElementById(GID);if(old)old.remove(); /* derselbe Fenstername wie das Dachprotokoll: die PC-Umgebung richtet das Fenster darüber aus */
+  if(typeof _pbOffenMerken==='function')_pbOffenMerken(t,bericht,GID,function(){_anRender();_anStats();});
+  const ov=document.createElement('div');ov.id=GID;ov.setAttribute('data-fs-anschlag','1');
+  if(typeof _fsSichtAn==='function')_fsSichtAn(ov);
+  ov.style.cssText='position:fixed;inset:0;z-index:99998;display:flex;flex-direction:column;background:var(--bg);color:var(--text);';
+  ov._wpBericht=bericht;
+
+  const hdr=document.createElement('div');
+  hdr.style.cssText='background:'+FS_AN_FARBE+';padding:12px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0;';
+  const closeBtn=document.createElement('button');closeBtn.type='button';closeBtn.textContent='←';closeBtn.setAttribute('aria-label','Prüfprotokoll schließen');closeBtn.setAttribute('data-an-zu-knopf','1');
+  closeBtn.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:44px;height:44px;border-radius:8px;font-size:var(--fs18,18px);cursor:pointer;flex-shrink:0;';
+  closeBtn.onclick=()=>{ov.remove();try{const ct=currentTask();if(ct)renderDetail(ct);}catch(e){console.warn('[Anschlag] zurück:',e);}};
+  const hdrMeta=document.createElement('div');hdrMeta.style.cssText='flex:1;min-width:0;';
+  const hdrT=document.createElement('div');hdrT.style.cssText='font-size:var(--fs15,15px);font-weight:700;color:#fff;';hdrT.textContent='🪝 Prüfprotokoll Anschlageinrichtung';
+  const hdrS=document.createElement('div');hdrS.style.cssText='font-size:var(--fs11,11px);color:rgba(255,255,255,.75);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';hdrS.textContent=t.adresse||t.title||'Objektadresse';
+  hdrMeta.append(hdrT,hdrS);
+  const datumEl=document.createElement('input');datumEl.type='text';datumEl.value=bericht.datum||'';datumEl.placeholder='TT.MM.JJJJ';datumEl.autocomplete='off';datumEl.setAttribute('aria-label','Datum');datumEl.setAttribute('data-an-datum','1');
+  datumEl.style.cssText='width:104px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:6px;padding:7px 8px;color:#fff;font-size:var(--fs14,14px);font-family:inherit;flex-shrink:0;';
+  datumEl.oninput=()=>{bericht.datum=datumEl.value;scheduleSave();};
+  hdr.append(closeBtn,hdrMeta,datumEl);
+
+  const statsEl=document.createElement('div');statsEl.id='_anStats';
+  statsEl.style.cssText='padding:7px 14px;background:var(--bg3);border-bottom:1px solid var(--border);flex-shrink:0;font-size:var(--fs12,12px);font-weight:600;color:'+FS_AN_FARBE+';';
+  function _anStats(){statsEl.textContent=_fsAnZusammenfassung(bericht);}
+
+  const body=document.createElement('div');
+  body.style.cssText='flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:0 0 90px;';
+  /* Leiste und Klappen – wie im Dachprotokoll (F73); nur im offenen Formular, nichts davon wird gespeichert */
+  let anFilter='alle';const anZu=new Set();let anKopfZu=false,anAnlageZu=false;
+  const _anPasst=p=>anFilter==='offen'?!p.ergebnis:anFilter==='gesperrt'?(p.ergebnis==='gesperrt'||p.ergebnis==='np'):anFilter==='fotos'?(Array.isArray(p.fotoRefs)&&p.fotoRefs.length>0):true;
+  const _anNeu=()=>{const sc=body.scrollTop;_anRender();body.scrollTop=sc;_anStats();};
+  const FELD='flex:1;min-width:0;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 8px;font-size:var(--fs14,14px);color:var(--text);font-family:inherit;';
+  const chipStil=an=>'padding:7px 12px;min-height:34px;border-radius:14px;font-size:var(--fs12,12px);cursor:pointer;font-family:inherit;border:1px solid '+(an?FS_AN_FARBE:'var(--border)')+';background:'+(an?'rgba(31,78,121,.12)':'transparent')+';color:'+(an?FS_AN_FARBE:'var(--text2)')+';font-weight:'+(an?'700':'400')+';';
+  const statStil=(an,col,bg)=>'padding:9px 4px;border-radius:8px;font-size:var(--fs11,11px);font-weight:700;cursor:pointer;font-family:inherit;border:2px solid '+(an?col:'var(--border)')+';background:'+(an?bg:'transparent')+';color:'+(an?col:'var(--text2)')+';';
+  const STAT={ok:['#1a7a3c','#e6f5ec'],nein:['#1a7a3c','#e6f5ec'],ja:['#c0392b','#fdecea'],mangel:['#c0392b','#fdecea'],nv:['#6b7680','var(--bg3)'],np:['#7a4b00','#fff3cd'],ne:['#7a4b00','#fff3cd'],frei:['#1a7a3c','#e6f5ec'],gesperrt:['#c0392b','#fdecea'],teilweise:['#7a4b00','#fff3cd'],lesbar:['#1a7a3c','#e6f5ec'],fehlt:['#c0392b','#fdecea'],na:['#6b7680','var(--bg3)'],keine:['#6b7680','var(--bg3)']};
+  function abschnitt(titel,attr){const s=document.createElement('div');s.style.cssText='padding:12px 14px 6px;border-top:1px solid var(--border);';if(attr)s.setAttribute(attr,'1');const h=document.createElement('div');h.style.cssText='font-size:var(--fs12,12px);font-weight:700;color:'+FS_AN_FARBE+';border-left:3px solid '+FS_AN_FARBE+';padding-left:8px;margin-bottom:8px;';h.textContent=titel;s.appendChild(h);s._kopf=h;return s;}
+  function zeile(label,attr){const r=document.createElement('div');r.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 0;flex-wrap:wrap;';if(attr)r.setAttribute(attr,'1');const l=document.createElement('span');l.style.cssText='font-size:var(--fs12,12px);color:var(--text2);min-width:150px;flex-shrink:0;';l.textContent=label;r.appendChild(l);return r;}
+  function feld(obj,key,label,platzhalter,attr){const r=zeile(label,attr);const i=document.createElement('input');i.type='text';i.value=obj[key]||'';i.placeholder=platzhalter||'';i.autocomplete='off';i.style.cssText=FELD;i.setAttribute('data-an-feld',key);i.oninput=()=>{obj[key]=i.value;scheduleSave();};r.appendChild(i);return r;}
+  // Chips: einzel = nur EIN Wert (obj[key] = Text), sonst Liste; werte = [[wert,text],…] oder Texte
+  function chips(obj,key,label,werte,einzel,attr,nach){
+    const r=zeile(label,attr);const row=document.createElement('div');row.style.cssText='display:flex;flex-wrap:wrap;gap:6px;flex:1;';
+    const paare=werte.map(w=>Array.isArray(w)?w:[w,w]);
+    const ist=v=>einzel?obj[key]===v:(Array.isArray(obj[key])&&obj[key].indexOf(v)>=0);
+    const faerben=()=>row.querySelectorAll('button').forEach(b=>{const an=ist(b.getAttribute('data-an-wert'));b.style.cssText=chipStil(an);b.setAttribute('aria-pressed',String(an));});
+    paare.forEach(([v,txt])=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute('data-an-chip',key);b.setAttribute('data-an-wert',v);
+      b.onclick=()=>{if(einzel){obj[key]=(obj[key]===v)?'':v;}else{if(!Array.isArray(obj[key]))obj[key]=[];const i=obj[key].indexOf(v);if(i>=0)obj[key].splice(i,1);else obj[key].push(v);}faerben();scheduleSave();if(typeof nach==='function')nach();};
+      row.appendChild(b);});
+    faerben();r.appendChild(row);return r;
+  }
+  // Status-Knöpfe einer Frage: werte = [[wert,text],…]; nochmal antippen = zurück auf leer
+  function status(obj,key,frage,werte,attr,nach){
+    const w=document.createElement('div');w.setAttribute(attr||'data-an-frage',key);w.style.cssText='padding:6px 0;';
+    const f=document.createElement('div');f.style.cssText='font-size:var(--fs13,13px);font-weight:500;margin-bottom:6px;';f.textContent=frage;
+    const row=document.createElement('div');row.style.cssText='display:grid;grid-template-columns:repeat('+werte.length+',1fr);gap:5px;';
+    const faerben=()=>row.querySelectorAll('button').forEach(b=>{const v=b.getAttribute('data-an-status');const an=obj[key]===v;const c=STAT[v]||['#555','var(--bg3)'];b.style.cssText=statStil(an,c[0],c[1]);});
+    werte.forEach(([v,txt])=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute('data-an-status',v);b.onclick=()=>{obj[key]=(obj[key]===v)?'':v;faerben();scheduleSave();if(typeof nach==='function')nach();};row.appendChild(b);});
+    faerben();w.append(f,row);return w;
+  }
+  const FRAGE_W=[['nein','✓ Nein'],['ja','⚠ Ja'],['nv','– N/V'],['np','⊘ n. prüfb.']];
+  const ZUSTAND_W=[['ok','✓ OK'],['mangel','⚠ Mangel'],['nv','– N/V'],['np','⊘ n. prüfb.']];
+  function _anLeiste(){
+    const w=document.createElement('div');w.setAttribute('data-an-leiste','1');
+    w.style.cssText='position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:6px;padding:6px 14px;background:var(--bg2);border-bottom:1px solid var(--border);';
+    const mk=(txt,key,an,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute('data-an-filter',key);b.setAttribute('aria-pressed',String(!!an));b.style.cssText=chipStil(an);b.onclick=fn;return b;};
+    const alleZu=anKopfZu&&anAnlageZu&&bericht.punkte.length>0&&bericht.punkte.every(p=>anZu.has(p));
+    const setz=f=>{anFilter=(anFilter===f)?'alle':f;anZu.clear();_anNeu();};
+    w.append(
+      mk('▸ Alles zu','zu',alleZu,()=>{bericht.punkte.forEach(p=>anZu.add(p));anKopfZu=true;anAnlageZu=true;_anNeu();}),
+      mk('▾ Alles auf','auf',false,()=>{anZu.clear();anKopfZu=false;anAnlageZu=false;anFilter='alle';_anNeu();}),
+      mk('Nur offene','offen',anFilter==='offen',()=>setz('offen')),
+      mk('Gesperrt / nicht prüfbar','gesperrt',anFilter==='gesperrt',()=>setz('gesperrt')),
+      mk('Fotos','fotos',anFilter==='fotos',()=>setz('fotos'))
+    );
+    return w;
+  }
+  function klappKopf(s,zu,fn,attr){s._kopf.textContent=(zu?'▸ ':'▾ ')+s._kopf.textContent;s._kopf.style.cursor='pointer';s._kopf.setAttribute(attr,'1');s._kopf.setAttribute('data-an-zu',zu?'1':'0');s._kopf.onclick=fn;}
+
+  function _anRender(){
+    body.innerHTML='';
+    body.appendChild(_anLeiste());
+    const k=bericht.kopf;
+    /* ── Verknüpfung zum Dachprotokoll ── */
+    if(bericht.vonWpId){
+      const idx=t.pruefberichte.findIndex(x=>x&&x.id===bericht.vonWpId&&x.vorlage==='wartungsprotokoll'&&x.art!=='anschlag');
+      const v=document.createElement('div');v.setAttribute('data-an-vonwp','1');v.style.cssText='padding:8px 14px;font-size:var(--fs12,12px);color:var(--text2);display:flex;gap:8px;align-items:center;flex-wrap:wrap;';
+      v.textContent=idx>=0?('zum Dachprotokoll vom '+(t.pruefberichte[idx].datum||'')):'das zugehörige Dachprotokoll gibt es an dieser Karte nicht mehr';
+      if(idx>=0){const b=document.createElement('button');b.type='button';b.textContent='🏠 öffnen';b.setAttribute('data-an-vonwp-oeffnen','1');b.style.cssText=chipStil(false);b.onclick=()=>{if(typeof _openWartungsprotokollMobil==='function'){ov.remove();_openWartungsprotokollMobil(idx);}};v.appendChild(b);}
+      body.appendChild(v);
+    }
+    /* ── Auftrag ── */
+    const kS=abschnitt('Auftrag und Prüfer');klappKopf(kS,anKopfZu,()=>{anKopfZu=!anKopfZu;_anNeu();},'data-an-kopf');
+    if(!anKopfZu){
+      kS.appendChild(feld(k,'objektAdresse','Objekt','aus der Karte'));
+      const hausChips=(typeof _fsHausChips==='function')?_fsHausChips(bericht,t):[];
+      if(hausChips.length){ /* F68-Muster: Hausnummern aus dem Objekt als Knöpfe, mehrere gehen; gespeichert als Text „8 · 9“ */
+        const hz=zeile('Haus / Eingang','data-an-haus');const row=document.createElement('div');row.style.cssText='display:flex;flex-wrap:wrap;gap:6px;flex:1;';
+        const tk=()=>String(k.haus||'').split(/\s*·\s*/).map(x=>x.trim()).filter(Boolean);
+        const faerben=()=>row.querySelectorAll('button').forEach(b=>{const an=tk().indexOf(b.textContent)>=0;b.style.cssText=chipStil(an);});
+        hausChips.forEach(h=>{const b=document.createElement('button');b.type='button';b.textContent=h;b.setAttribute('data-an-hausknopf',h);b.onclick=()=>{const l=tk();const i=l.indexOf(h);if(i>=0)l.splice(i,1);else l.push(h);k.haus=l.join(' · ');faerben();scheduleSave();};row.appendChild(b);});
+        faerben();hz.appendChild(row);kS.appendChild(hz);
+      }else kS.appendChild(feld(k,'haus','Haus / Eingang','z. B. 9 – Eingang links'));
+      kS.appendChild(feld(k,'auftraggeber','Eigentümer / Betreiber','aus der Karte'));
+      kS.appendChild(feld(k,'kostenstelle','Kostenstelle','Schlagwort der Karte'));
+      kS.appendChild(chips(k,'anlass','Anlass',FS_AN_ANLASS,true,'data-an-anlass'));
+      kS.appendChild(feld(k,'pruefer','Prüfer','Name'));
+      const q=feld(k,'qualifikation','Qualifikation (steht im PDF)','z. B. Sachkundige Person für Anschlageinrichtungen nach DGUV Grundsatz 312-906, Lehrgang vom …, Auffrischung …','data-an-quali');
+      q.querySelector('input').oninput=function(){k.qualifikation=this.value;try{localStorage.setItem(FS_AN_QUALI_KEY,this.value);}catch(e){}scheduleSave();};
+      kS.appendChild(q);
+      const qh=document.createElement('div');qh.style.cssText='font-size:var(--fs11,11px);color:var(--text2);margin:-2px 0 6px 160px;';qh.textContent='einmal eintragen – PAM merkt sich den Satz für das nächste Protokoll (am PC an beiden Rechnern gleich); bleibt er leer, lässt das PDF ihn weg.';kS.appendChild(qh);
+      const z=zeile('Beginn / Ende','data-an-zeit');
+      [['beginn','Beginn'],['ende','Ende']].forEach(([key,lbl])=>{const i=document.createElement('input');i.type='text';i.value=k[key]||'';i.placeholder=lbl+' hh:mm';i.autocomplete='off';i.style.cssText=FELD+'max-width:120px;';i.setAttribute('data-an-feld',key);i.oninput=()=>{k[key]=i.value;scheduleSave();};
+        const j=document.createElement('button');j.type='button';j.textContent='jetzt';j.setAttribute('data-an-jetzt',key);j.style.cssText=chipStil(false);j.onclick=()=>{k[key]=(typeof _fsVbJetzt==='function')?_fsVbJetzt().uhr:'';i.value=k[key];scheduleSave();};z.append(i,j);});
+      kS.appendChild(z);
+      kS.appendChild(feld(k,'witterung','Witterung / Zugang','z. B. trocken, 12 °C, Zugang über Dachausstieg'));
+    }
+    body.appendChild(kS);
+    /* ── Anlage ── */
+    const aS=abschnitt('Die Anlage');klappKopf(aS,anAnlageZu,()=>{anAnlageZu=!anAnlageZu;_anNeu();},'data-an-anlage');
+    if(!anAnlageZu){
+      aS.appendChild(chips(k,'anlageArt','Art der Anlage',FS_AN_ARTEN,true,'data-an-art',()=>_anNeu()));
+      const hz=feld(k,'hersteller','Hersteller / System','z. B. vom Typenschild');
+      const nb=document.createElement('button');nb.type='button';nb.textContent='nicht erkennbar';nb.setAttribute('data-an-hersteller-unbekannt','1');nb.style.cssText=chipStil(k.herstellerUnbekannt);nb.onclick=()=>{k.herstellerUnbekannt=!k.herstellerUnbekannt;nb.style.cssText=chipStil(k.herstellerUnbekannt);scheduleSave();};hz.appendChild(nb);aS.appendChild(hz);
+      aS.appendChild(chips(k,'montagejahr','Montagejahr',FS_AN_MONTAGE,true,'data-an-montage'));
+      const nz=zeile('Anschlagpunkte anlegen','data-an-anzahl');const ni=document.createElement('input');ni.type='number';ni.min='0';ni.max='200';ni.value=bericht.punkte.length||'';ni.placeholder='Anzahl';ni.style.cssText=FELD+'max-width:90px;';ni.setAttribute('data-an-anzahl-feld','1');
+      const nk=document.createElement('button');nk.type='button';nk.textContent='Zeilen anlegen';nk.setAttribute('data-an-anzahl-knopf','1');nk.style.cssText=chipStil(true);
+      nk.onclick=()=>{const dazu=_fsAnPunkteAuffuellen(bericht,ni.value);if(dazu){scheduleSave();_anNeu();}else toast('Zeilen gibt es schon – weniger werden nur über ✕ am Punkt','info');};
+      const nh=document.createElement('span');nh.style.cssText='font-size:var(--fs11,11px);color:var(--text2);';nh.textContent='füllt nur auf, löscht nie';
+      nz.append(ni,nk,nh);aS.appendChild(nz);
+      aS.appendChild(chips(k,'lage','Lage der Punkte',FS_AN_LAGE,false,'data-an-lage'));
+    }
+    body.appendChild(aS);
+    /* ── Unterlagen ── */
+    if(!anAnlageZu){
+      const uS=abschnitt('Unterlagen – vorgelegt?','data-an-unterlagen');
+      const uh=document.createElement('div');uh.style.cssText='font-size:var(--fs11,11px);color:var(--text2);margin-bottom:4px;';uh.textContent='Es wird nur festgehalten, was dir vorlag.';uS.appendChild(uh);
+      FS_AN_UNTERLAGEN.forEach(([key,lbl])=>{const r=zeile(lbl);const w=status(k.unterlagen,key,'',[['ja','ja'],['nein','nein'],['na','nicht angefordert']],'data-an-unterlage');w.style.flex='1';w.firstElementChild.remove();r.appendChild(w);uS.appendChild(r);});
+      uS.appendChild(feld(k,'letztePruefungDatum','Datum der letzten Prüfung','TT.MM.JJJJ oder „unbekannt“'));
+      body.appendChild(uS);
+    }
+    /* ── Anschlagpunkte ── */
+    const pS=abschnitt('Anschlagpunkte ('+bericht.punkte.length+')','data-an-punkte');
+    const seil=k.anlageArt==='Seilsystem';
+    bericht.punkte.forEach(p=>{
+      if(!_anPasst(p))return;
+      const zu=anZu.has(p);
+      const card=document.createElement('div');card.setAttribute('data-an-punkt',String(p.nr));card.setAttribute('data-an-zu',zu?'1':'0');
+      card.style.cssText='border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin:6px 0;background:'+(p.ergebnis==='gesperrt'?'rgba(192,57,43,.06)':p.ergebnis==='frei'?'rgba(26,122,60,.05)':p.ergebnis==='np'?'rgba(217,164,0,.09)':'var(--bg2)')+';';
+      const ti=document.createElement('div');ti.style.cssText='display:flex;align-items:center;gap:8px;font-weight:700;font-size:var(--fs13,13px);cursor:pointer;';ti.setAttribute('data-an-punkt-kopf','1');
+      const nr=document.createElement('span');nr.style.cssText='background:'+FS_AN_FARBE+';color:#fff;border-radius:50%;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;font-size:var(--fs12,12px);flex-shrink:0;';nr.textContent=String(p.nr);
+      const tt=document.createElement('span');tt.style.flex='1';tt.textContent=_fsAnPunktTitel(p).replace(/^Anschlagpunkt \d+/,'Anschlagpunkt');
+      const pf=document.createElement('span');pf.textContent=zu?'▸':'▾';
+      ti.append(nr,tt,pf);ti.onclick=()=>{if(anZu.has(p))anZu.delete(p);else anZu.add(p);_anNeu();};
+      card.appendChild(ti);
+      if(zu){pS.appendChild(card);return;}
+      const inh=document.createElement('div');inh.style.cssText='margin-top:6px;';
+      const kn=document.createElement('div');kn.style.cssText='display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 6px;';
+      const weg=document.createElement('button');weg.type='button';weg.textContent='✕ Punkt entfernen';weg.setAttribute('data-an-punkt-weg','1');weg.style.cssText=chipStil(false);
+      weg.onclick=()=>{if(!confirm('Anschlagpunkt '+p.nr+' aus diesem Protokoll entfernen?'+((p.fotoRefs&&p.fotoRefs.length)?' Die Fotos bleiben im Protokoll, nur die Zuordnung geht weg.':'')))return;if(_fsAnPunktWeg(bericht,p)){anZu.delete(p);scheduleSave();_anNeu();}};
+      kn.appendChild(weg);inh.appendChild(kn);
+      const tz=zeile('Typ / Bezeichnung');const ti1=document.createElement('input');ti1.type='text';ti1.value=p.typ||'';ti1.placeholder='z. B. Einzelanschlagpunkt Typ …';ti1.autocomplete='off';ti1.style.cssText=FELD;ti1.setAttribute('data-an-feld','typ');ti1.oninput=()=>{p.typ=ti1.value;scheduleSave();};
+      const ti2=document.createElement('input');ti2.type='text';ti2.value=p.serie||'';ti2.placeholder='Serien-Nr. (Typenschild)';ti2.autocomplete='off';ti2.style.cssText=FELD+'max-width:200px;';ti2.setAttribute('data-an-feld','serie');ti2.oninput=()=>{p.serie=ti2.value;scheduleSave();};
+      tz.append(ti1,ti2);inh.appendChild(tz);
+      inh.appendChild(status(p,'kennz','Kennzeichnung am Punkt',[['lesbar','lesbar'],['fehlt','unleserlich / fehlt']],'data-an-frage',()=>{}));
+      FS_AN_FRAGEN.concat(seil?FS_AN_SEIL:[]).forEach(([key,frage])=>inh.appendChild(status(p,key,frage,FRAGE_W,'data-an-frage')));
+      inh.appendChild(status(p,'durchgang','Dichtung / Abdichtung am Dachdurchgang',ZUSTAND_W,'data-an-frage'));
+      inh.appendChild(status(p,'befest','Befestigung geprüft nach Herstelleranleitung?',[['ja','Ja'],['nein','Nein'],['ne','nicht einsehbar']],'data-an-frage'));
+      const pa=chips(p,'pruefart','Art der Prüfung',FS_AN_PRUEFART,false,'data-an-pruefart');
+      const dm=document.createElement('input');dm.type='text';dm.value=p.drehmoment||'';dm.placeholder='z. B. 20 Nm';dm.autocomplete='off';dm.style.cssText=FELD+'max-width:110px;flex:0 1 110px;';dm.setAttribute('data-an-feld','drehmoment');dm.oninput=()=>{p.drehmoment=dm.value;scheduleSave();};pa.appendChild(dm);inh.appendChild(pa);
+      inh.appendChild(status(p,'ergebnis','Ergebnis dieses Punkts',[['frei','✓ freigegeben'],['gesperrt','⛔ nicht freigegeben (gesperrt)'],['np','⊘ nicht prüfbar']],'data-an-ergebnis',()=>_anNeu()));
+      inh.appendChild(feld(p,'bemerkung','Bemerkung / Grund','Feststellung; Grund bei nicht prüfbar …'));
+      const fl=document.createElement('div');fl.style.cssText='margin-top:4px;';fl.appendChild(_fsFotoLeiste(bericht,p,'Foto zu diesem Punkt'));inh.appendChild(fl);
+      card.appendChild(inh);pS.appendChild(card);
+    });
+    const plus=document.createElement('button');plus.type='button';plus.textContent='＋ weiterer Anschlagpunkt';plus.setAttribute('data-an-punkt-neu','1');plus.style.cssText=chipStil(true)+'min-height:40px;margin-top:4px;';
+    plus.onclick=()=>{_fsAnPunkteAuffuellen(bericht,bericht.punkte.length+1);scheduleSave();_anNeu();};
+    pS.appendChild(plus);body.appendChild(pS);
+    /* ── Ergebnis ── */
+    const eS=abschnitt('Ergebnis und Abschluss','data-an-ergebnis-block');
+    const zs=document.createElement('div');zs.setAttribute('data-an-summe','1');zs.style.cssText='font-size:var(--fs13,13px);font-weight:700;color:'+FS_AN_FARBE+';margin-bottom:4px;';zs.textContent=_fsAnZusammenfassung(bericht);eS.appendChild(zs);
+    const vs=_fsAnGesamtVorschlag(bericht);
+    eS.appendChild(chips(bericht,'gesamt','Gesamtergebnis',[['frei','Anlage freigegeben'],['teilweise','teilweise (gesperrte / nicht geprüfte Punkte sind markiert)'],['gesperrt','Anlage nicht freigegeben']],true,'data-an-gesamt'));
+    const vh=document.createElement('div');vh.setAttribute('data-an-vorschlag','1');vh.style.cssText='font-size:var(--fs11,11px);color:var(--text2);margin:-2px 0 6px 160px;';vh.textContent=vs?('Vorschlag aus den Punkten: '+_fsAnWort(vs)+' – du bestätigst, PAM setzt nichts von selbst.'):'Vorschlag kommt, wenn alle Punkte ein Ergebnis haben.';eS.appendChild(vh);
+    const mz=zeile('Festgestellte Mängel');const mTA=document.createElement('textarea');mTA.rows=3;mTA.value=bericht.maengel||'';mTA.placeholder='Nr., Feststellung … (keine Empfehlung)';mTA.style.cssText=FELD+'resize:vertical;';mTA.setAttribute('data-an-feld','maengel');mTA.oninput=()=>{bericht.maengel=mTA.value;scheduleSave();};mz.appendChild(mTA);eS.appendChild(mz);
+    const pz=chips(bericht,'plakette','Prüfplakette',[['ja','angebracht / erneuert'],['keine','keine Plakette']],true,'data-an-plakette');
+    const pn=document.createElement('input');pn.type='text';pn.value=bericht.plaketteNr||'';pn.placeholder='Plaketten-Nr. / Text';pn.autocomplete='off';pn.style.cssText=FELD+'max-width:200px;flex:0 1 200px;';pn.setAttribute('data-an-feld','plaketteNr');pn.oninput=()=>{bericht.plaketteNr=pn.value;scheduleSave();};pz.appendChild(pn);eS.appendChild(pz);
+    const nz=feld(bericht,'naechste','Nächste Prüfung bis','TT.MM.JJJJ');const nh=document.createElement('span');nh.style.cssText='font-size:var(--fs11,11px);color:var(--text2);';nh.textContent='Vorschlag: ein Jahr (Herstellerangabe geht vor)';nz.appendChild(nh);eS.appendChild(nz);
+    const uh=document.createElement('div');uh.style.cssText='font-size:var(--fs11,11px);color:var(--text2);margin-top:6px;';uh.textContent='Unterschrift des Prüfers und Dachplan-Pins kommen in den nächsten Bauschritten.';eS.appendChild(uh);
+    body.appendChild(eS);
+    /* ── Fotos (wie im Dachprotokoll: am PC die PC-Werkzeuge, sonst Kamera · Galerie · Drive) ── */
+    const fotoSek=document.createElement('div');fotoSek.style.cssText='border-top:1px solid var(--border);';
+    const fHdr=document.createElement('div');fHdr.style.cssText='padding:10px 14px 4px;font-size:var(--fs12,12px);font-weight:700;color:'+FS_AN_FARBE+';border-left:3px solid '+FS_AN_FARBE+';padding-left:17px;';fHdr.textContent='Fotos';
+    const fInfo=document.createElement('div');fInfo.style.cssText='padding:0 14px 8px;font-size:var(--fs11,11px);color:var(--text2);';
+    fInfo.textContent=_fsAmPc()?'Klick = im PDF ✓ · Doppelklick oder 👁 = groß ansehen · ✏ = bemalen · ✕ = aus dem Protokoll entfernen (in Drive bleibt es).':'Antippen = im PDF ✓ · zweimal antippen = groß ansehen.';
+    const fotoGrid=document.createElement('div');fotoGrid.style.cssText='display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:0 14px 8px;';fotoGrid.id='_wpMobFotoGrid';
+    if(typeof _wpMobRenderFotos==='function')_wpMobRenderFotos(bericht,fotoGrid);
+    const fotoBtnRow=document.createElement('div');fotoBtnRow.style.cssText='display:flex;gap:8px;padding:0 14px 14px;';
+    const mkF=(txt,stil,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.style.cssText='flex:1;padding:10px;border-radius:8px;font-size:var(--fs13,13px);cursor:pointer;font-weight:600;font-family:inherit;'+stil;b.onclick=fn;return b;};
+    if(_fsAmPc()){
+      fotoBtnRow.append(mkF('📁 Fotos vom PC','border:1.5px solid var(--border);background:var(--bg3);color:var(--text);',()=>_wpMobFotoAufnehmen(bericht,fotoGrid,false)),mkF('🖼 Fotos der Karte','border:1.5px dashed #34a853;background:rgba(52,168,83,.06);color:var(--text);',()=>_wpMobLadeDriveFotos(bericht,fotoGrid)));
+    }else fotoBtnRow.append(mkF('📷 Kamera','border:1.5px dashed var(--accent);background:rgba(108,99,255,.06);color:var(--accent);',()=>_wpMobFotoAufnehmen(bericht,fotoGrid,true)),mkF('🖼 Galerie','border:1.5px solid var(--border);background:var(--bg3);color:var(--text);',()=>_wpMobFotoAufnehmen(bericht,fotoGrid,false)),mkF('☁ Drive','border:1.5px dashed #34a853;background:rgba(52,168,83,.06);color:#1a7a40;',()=>_wpMobLadeDriveFotos(bericht,fotoGrid)));
+    fotoSek.append(fHdr,fInfo,fotoGrid,fotoBtnRow);body.appendChild(fotoSek);
+  }
+  _anRender();_anStats();
+
+  if(!_fsAmPc()){body.style.paddingBottom='24px';ov.append(hdr,statsEl,body);document.body.appendChild(ov);return;}
+  const footer=document.createElement('div');
+  footer.style.cssText='position:fixed;bottom:0;left:0;right:0;padding:12px 14px;background:var(--bg2);border-top:1px solid var(--border);display:flex;gap:10px;z-index:99999;';
+  const pdfBtn=document.createElement('button');pdfBtn.type='button';pdfBtn.textContent='📄 PDF erstellen';pdfBtn.setAttribute('data-an-pdf','1');
+  pdfBtn.style.cssText='flex:1;padding:12px;background:'+FS_AN_FARBE+';color:#fff;border:none;border-radius:8px;font-size:var(--fs15,15px);font-weight:700;cursor:pointer;';
+  pdfBtn.onclick=async()=>{pdfBtn.disabled=true;const alt=pdfBtn.textContent;pdfBtn.textContent='⏳ PDF wird erstellt …';try{await _fsAnPdf(bericht,t);}finally{pdfBtn.disabled=false;pdfBtn.textContent=alt;}};
+  const openBtn=document.createElement('button');openBtn.type='button';openBtn.textContent='📂 Öffnen';openBtn.style.cssText='padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:var(--fs15,15px);font-weight:600;cursor:pointer;color:var(--text);';openBtn.onclick=()=>_fsPdfOeffnen(bericht);
+  footer.append(pdfBtn,openBtn);
+  ov.append(hdr,statsEl,body,footer);
+  document.body.appendChild(ov);
+  if(vonWp&&typeof _pamFormUeberlagerungPc==='function'){try{_pamFormUeberlagerungPc(ov);if(typeof renderPruefberichteDesktop==='function')renderPruefberichteDesktop();}catch(e){console.warn('[F74] Rahmen:',e);}} /* aus dem Dachprotokoll heraus: der PC-Rahmen kommt hier, nicht vom Menü */
+}
+
+/* Das PDF – ein eigenes Dokument für den Betreiber. Nur Feststellungen. */
+async function _fsAnPdf(bericht,task){
+  if(!window.jspdf){toast('PDF-Bibliothek lädt noch …','error');return null;}
+  try{
+    _fsAnVervollstaendigen(bericht);
+    const t=task||{},k=bericht.kopf;
+    const {jsPDF}=window.jspdf;
+    const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+    const W=210,M=14,farbe=[31,78,121];let y=M;
+    const kap=txt=>{if(y>255){doc.addPage();y=M;}doc.setFillColor(230,238,247);doc.rect(M,y,W-2*M,7,'F');doc.setFontSize(9);doc.setFont('helvetica','bold');doc.setTextColor(31,78,121);doc.text(txt,M+2,y+5);y+=10;doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);};
+    const w=_fsAnWort;
+    /* Kopf */
+    doc.setFillColor(...farbe);doc.rect(0,0,W,36,'F');doc.setTextColor(255,255,255);
+    doc.setFontSize(17);doc.setFont('helvetica','bold');doc.text('Prüfprotokoll Anschlageinrichtung',M,12);
+    doc.setFontSize(9);doc.setFont('helvetica','normal');
+    doc.text('Objekt: '+(k.objektAdresse||t.adresse||'–')+(k.haus?' · '+((typeof _fsHausText==='function')?_fsHausText(k.haus):k.haus):''),M,19);
+    doc.text('Eigentümer / Betreiber: '+(k.auftraggeber||'–')+(k.kostenstelle?' · Kostenstelle: '+k.kostenstelle:''),M,24);
+    doc.text('Datum: '+(bericht.datum||'–')+(k.beginn||k.ende?' · '+(k.beginn||'?')+' – '+(k.ende||'?')+' Uhr':'')+' · Anlass: '+(k.anlass||'–')+(k.witterung?' · '+k.witterung:''),M,29);
+    doc.text('Prüfer: '+(k.pruefer||'–'),M,34);
+    y=42;doc.setTextColor(0,0,0);
+    if(k.qualifikation){doc.setFontSize(8.5);doc.setFont('helvetica','italic');const ql=doc.splitTextToSize('Qualifikation: '+k.qualifikation,W-2*M);doc.text(ql,M,y);y+=ql.length*4+3;doc.setFont('helvetica','normal');}
+    /* Anlage */
+    kap('Anlage');
+    const lst=a=>(Array.isArray(a)&&a.length)?a.join(', '):'–';
+    doc.autoTable({startY:y,theme:'grid',margin:{left:M,right:M},bodyStyles:{fontSize:8,minCellHeight:6},columnStyles:{0:{fontStyle:'bold',cellWidth:55,fillColor:[245,245,245]},1:{cellWidth:127}},
+      body:[['Art der Anlage',k.anlageArt||'–'],['Hersteller / System',k.herstellerUnbekannt?('nicht erkennbar'+(k.hersteller?' ('+k.hersteller+')':'')):(k.hersteller||'–')],['Montagejahr',k.montagejahr||'–'],['Anzahl Anschlagpunkte',String(bericht.punkte.length)],['Lage der Punkte',lst(k.lage)]]});
+    y=doc.lastAutoTable.finalY+6;
+    /* Unterlagen */
+    kap('Unterlagen – vorgelegt?');
+    doc.autoTable({startY:y,theme:'grid',margin:{left:M,right:M},bodyStyles:{fontSize:8,minCellHeight:6},columnStyles:{0:{fontStyle:'bold',cellWidth:95,fillColor:[245,245,245]},1:{cellWidth:87}},
+      body:FS_AN_UNTERLAGEN.map(([key,lbl])=>[lbl,w(k.unterlagen[key])+(key==='letztePruefung'&&k.letztePruefungDatum?' · letzte Prüfung: '+k.letztePruefungDatum:'')])});
+    y=doc.lastAutoTable.finalY+6;
+    /* Punkte */
+    kap('Anschlagpunkte – Feststellungen');
+    const seil=k.anlageArt==='Seilsystem';
+    const bem=p=>{const teile=[];if(seil){teile.push('Seil: lose/Spannung '+w(p.seilLose)+' · Endverb. '+w(p.seilEnd)+' · Dämpfer/Halter '+w(p.seilDaempfer));}if(p.pruefart&&p.pruefart.length)teile.push('Prüfung: '+p.pruefart.join(', ')+(p.drehmoment?' '+p.drehmoment:''));if(p.bemerkung)teile.push(p.bemerkung);return teile.join(' · ');};
+    doc.autoTable({startY:y,theme:'grid',margin:{left:M,right:M},
+      head:[['Nr.','Typ / Serien-Nr.','Kennz.','Verformung?','Korrosion?','Lose?','Durchgang','Befestigung n. Anleitung','Ergebnis','Bemerkung']],
+      body:bericht.punkte.map(p=>[String(p.nr),[p.typ,p.serie].filter(Boolean).join(' / ')||'–',w(p.kennz),w(p.verformung),w(p.korrosion),w(p.lose),w(p.durchgang),w(p.befest),w(p.ergebnis),bem(p)]),
+      headStyles:{fillColor:farbe,fontSize:6,fontStyle:'bold',cellPadding:1},bodyStyles:{fontSize:7,minCellHeight:6},
+      columnStyles:{0:{cellWidth:8,halign:'center'},1:{cellWidth:30},2:{cellWidth:14},3:{cellWidth:17},4:{cellWidth:17},5:{cellWidth:12},6:{cellWidth:15},7:{cellWidth:20},8:{cellWidth:20},9:{cellWidth:29}},
+      didParseCell:d=>{if(d.section==='body'&&d.column.index===8){const v=d.cell.raw;if(v==='nicht freigegeben'){d.cell.styles.textColor=[192,57,43];d.cell.styles.fontStyle='bold';}else if(v==='freigegeben')d.cell.styles.textColor=[26,122,60];}}
+    });
+    y=doc.lastAutoTable.finalY+6;
+    if(!bericht.punkte.length){doc.setFontSize(8);doc.text('Keine Anschlagpunkte eingetragen.',M,y);y+=6;}
+    /* Ergebnis */
+    kap('Ergebnis');
+    const z=_fsAnZaehlen(bericht);
+    const erg=[['Zusammenfassung',_fsAnZusammenfassung(bericht)],['Gesamtergebnis',bericht.gesamt?w(bericht.gesamt):'– (nicht bestätigt)'],['Prüfplakette',bericht.plakette?((bericht.plakette==='ja'?'angebracht / erneuert':w(bericht.plakette))+(bericht.plaketteNr?' · '+bericht.plaketteNr:'')):'–'],['Nächste Prüfung bis',bericht.naechste||'–']];
+    const wp=(bericht.vonWpId&&Array.isArray(t.pruefberichte))?t.pruefberichte.find(x=>x&&x.id===bericht.vonWpId):null;
+    if(wp)erg.push(['Dachprotokoll','vom '+(wp.datum||'')+' an derselben Karte (eigenes Dokument)']);
+    doc.autoTable({startY:y,theme:'grid',margin:{left:M,right:M},bodyStyles:{fontSize:8,minCellHeight:6},columnStyles:{0:{fontStyle:'bold',cellWidth:55,fillColor:[245,245,245]},1:{cellWidth:127}},body:erg});
+    y=doc.lastAutoTable.finalY+6;
+    if(bericht.maengel){kap('Festgestellte Mängel');doc.setFontSize(9);const ml=doc.splitTextToSize(bericht.maengel,W-2*M);doc.text(ml,M,y);y+=ml.length*4.5+4;}
+    /* Fotos je Punkt, dann Fotodokumentation */
+    const fotos=bericht.fotos||[];const bildCache=new Map();
+    const bildLaden=async f=>{if(!bildCache.has(f))bildCache.set(f,await _fsFotoFuerPdf(f));return bildCache.get(f);};
+    for(const p of bericht.punkte.filter(q=>q.fotoRefs&&q.fotoRefs.length)){
+      const liste=_fsZeilenFotos(fotos,p.fotoRefs).map(x=>x.f);if(!liste.length)continue;
+      if(y>265){doc.addPage();y=M;}
+      doc.setFontSize(8);doc.setFont('helvetica','italic');doc.setTextColor(100,100,100);doc.text('Fotos zu: Anschlagpunkt '+p.nr+(p.typ?' · '+p.typ:''),M,y);y+=4;doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);
+      let col=0;for(const f of liste){const pf=await bildLaden(f);if(!pf||!pf.dataUrl)continue;if(y+42+8>285){doc.addPage();y=M;}doc.addImage(pf.dataUrl,'JPEG',M+(col*59),y,55,42);col++;if(col>=3){y+=48;col=0;}}
+      if(col>0)y+=48;
+    }
+    const fotoList=fotos.filter(f=>f&&f.inReport===true&&(f.editedDriveId||f.driveId||f.localUrl||f.localKey)); /* F74: eigene Schreibweise – test_f10 ankert die Zeile des Dachprotokolls */
+    if(fotoList.length){
+      let col=0,erstes=true,links=null;
+      for(const f of fotoList){const pf=await bildLaden(f);if(!pf||!pf.dataUrl)continue;const iW=85,iH=62;
+        if(col===0){if(y+iH+12>285){doc.addPage();y=M;}if(erstes){kap('Fotodokumentation');erstes=false;}doc.addImage(pf.dataUrl,'JPEG',M,y,iW,iH);links=f;}
+        else{doc.addImage(pf.dataUrl,'JPEG',M+iW+6,y,iW,iH);doc.setFontSize(7);doc.setTextColor(100,100,100);doc.text(doc.splitTextToSize((links&&links.name)||'',iW),M,y+iH+3);doc.text(doc.splitTextToSize(f.name||'',iW),M+iW+6,y+iH+3);doc.setTextColor(0,0,0);y+=iH+10;}
+        col=(col+1)%2;}
+      if(col===1){doc.setFontSize(7);doc.setTextColor(100,100,100);doc.text(doc.splitTextToSize((links&&links.name)||'',85),M,y+62+3);doc.setTextColor(0,0,0);y+=72;}
+    }
+    const pages=doc.internal.getNumberOfPages();
+    for(let p=1;p<=pages;p++){doc.setPage(p);doc.setFontSize(8);doc.setTextColor(150,150,150);doc.text('Seite '+p+' von '+pages,W/2,292,{align:'center'});doc.text('sv-fb.de',W-M,292,{align:'right'});}
+    const blob=doc.output('blob');
+    _fsPdfBlobs[bericht.id]=blob;
+    const name=_fsPdfName(bericht,new Date());
+    toast('✓ Prüfprotokoll PDF erstellt','success',4000);
+    const inDrive=await _fsPdfNachDrive(blob,name,bericht,task);
+    if(!inDrive){const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);}
+    return blob;
+  }catch(e){console.error('[Anschlag] PDF:',e);toast('PDF-Fehler: '+e.message,'error');return null;}
 }
 
 /* ══ F42: REP-AUFTRAG (Reparaturauftrag) – ein kurzes Blatt für vor Ort ═══════════════════════════════════════════════
@@ -9928,6 +10343,11 @@ function _fsListeZeile(b,t){
   if(b.vorlage==='wartungsprotokoll'&&b.art==='rep'){ /* F42: REP-Auftrag – Kürzel REP, klein darunter Rep.-Nr. und der Anfang der Arbeiten */
     const adr=String((b.kopf&&b.kopf.objektAdresse)||'').trim(),rn=String((b.kopf&&b.kopf.repNr)||'').trim(),arb=String(b.arbeiten||'').replace(/\s+/g,' ').trim();
     return {kurz:'REP',lang:'REP-Auftrag',name:kartenname||adr||'REP-Auftrag',sub:[rn?'Rep.-Nr. '+rn:'',arb.length>50?arb.slice(0,50)+' …':arb,(b.unterschrift&&Array.isArray(b.unterschrift.striche)&&b.unterschrift.striche.length)?'unterschrieben':''].filter(Boolean).join(' · ')};
+  }
+  if(b.vorlage==='wartungsprotokoll'&&b.art==='anschlag'){ /* F74: Prüfprotokoll Anschlageinrichtung – Kürzel PP-ANSCHLAG, klein: Hersteller, Punkte, Gesamtergebnis */
+    const k=b.kopf||{};let tot=0,frei=0,ges=0;(Array.isArray(b.punkte)?b.punkte:[]).forEach(p=>{tot++;if(p&&p.ergebnis==='frei')frei++;else if(p&&p.ergebnis==='gesperrt')ges++;});
+    const gw={frei:'freigegeben',gesperrt:'nicht freigegeben',teilweise:'teilweise'};
+    return {kurz:'PP-ANSCHLAG',lang:'Prüfprotokoll Anschlageinrichtung',name:kartenname||String(k.objektAdresse||'').trim()||'Prüfprotokoll Anschlageinrichtung',sub:[k.hersteller?String(k.hersteller):'',tot?tot+' Punkte · '+frei+' freigegeben'+(ges?' · '+ges+' gesperrt':''):'',b.gesamt?(gw[b.gesamt]||b.gesamt):''].filter(Boolean).join(' · ')};
   }
   if(b.vorlage==='wartungsprotokoll'){
     const steil=String(b.dachart||'').toLowerCase()==='steil',insp=String(b.wpArt||'').toLowerCase()==='inspektion'; /* F70: Dachinspektion */
