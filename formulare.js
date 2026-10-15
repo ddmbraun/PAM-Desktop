@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F67';
+const PAM_FORMULARE_VERSION='F68';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -345,10 +345,10 @@ function _fsVervollstaendigen(b){
         if(!Array.isArray(b.notizen))b.notizen=[];b.notizen=b.notizen.filter(n=>n&&typeof n==='object');b.notizen.forEach(n=>{if(typeof n.text!=='string')n.text=String(n.text==null?'':n.text);n.pdf=n.pdf===true;if(typeof n.id!=='string'||!n.id)n.id='nz_'+Math.random().toString(36).slice(2,9);}); /* F47: Notizen – je Notiz „im PDF“ oder „nur für mich“ */
       }
       b.vbStellen.forEach(s=>{if(s&&s.pin!==undefined&&s.pin!==null&&!(isFinite(+s.pin.lat)&&isFinite(+s.pin.lon)))s.pin=null;});} // F22: Eingrenzen · F24: Luftbild-Pin je Stelle
-    if(b.art==='vorab')['versicherung','schadennr','zugang','ansprechpartner','besuchBei','lage'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';}); // F16
+    if(b.art==='vorab')['versicherung','schadennr','zugang','ansprechpartner','besuchBei','lage','haus','hausAdrNein'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';}); // F16 · F68: Haus / Eingang
     if(b.art!=='vorab'){ /* F52: Begehungsprotokoll hat oben denselben Teil wie die Vorabbesichtigung – Name, Besichtigung bei, Gemeldet/vorgefunden, Vorgeschichte */
       if(typeof b.protName!=='string')b.protName='';if(typeof b.vorgeschichte!=='string')b.vorgeschichte='';if(typeof b.meldungStatus!=='string')b.meldungStatus='';if(typeof b.meldungAbw!=='string')b.meldungAbw='';if(typeof b.meldungNein!=='string')b.meldungNein=''; /* F56 */
-      ['besuchBei','lage','bereich','untersuchung'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';}); /* F54: Bereich, Untersuchung */
+      ['besuchBei','lage','bereich','untersuchung','haus','hausAdrNein'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';}); /* F54: Bereich, Untersuchung */
       if(!Array.isArray(b.notizen))b.notizen=[];b.notizen=b.notizen.filter(n=>n&&typeof n==='object');b.notizen.forEach(n=>{if(typeof n.text!=='string')n.text=String(n.text==null?'':n.text);n.pdf=n.pdf===true;if(typeof n.id!=='string'||!n.id)n.id='nz_'+Math.random().toString(36).slice(2,9);}); /* F53: Notizen auch im Begehungsprotokoll */
       if(!Array.isArray(b.bgStellen))b.bgStellen=[];b.bgStellen=b.bgStellen.filter(s=>s&&typeof s==='object');b.bgStellen.forEach(s=>{if(!Array.isArray(s.merkmale))s.merkmale=[];if(!Array.isArray(s.fotoRefs))s.fotoRefs=[];['art','raum','wand','wand2','lage','breite','hoehe','notiz'].forEach(k=>{if(typeof s[k]!=='string')s[k]=String(s[k]==null?'':s[k]);});s.ecke=!!s.ecke; /* F55 */if(typeof s.id!=='string'||!s.id)s.id='bs_'+Math.random().toString(36).slice(2,9);}); /* F54: Stellen */
     }
@@ -500,6 +500,7 @@ const FS_HILFE_BG={
 const FS_HILFE_VB=[
   ['Vor Ort',[
     'Name, Auftraggeber und Objekt kommen aus der Karte. Prüfen und bei Bedarf ändern – „↻ Aus der Karte neu holen“ holt sie neu.',
+    '„Haus / Eingang“ unter dem Objekt: Bei Objekten mit mehreren Hausnummern erscheinen Knöpfe (z. B. 7 · 8 · 9) – antippen wählt, mehrere gehen. „✎ andere …“ ist für Freitext, z. B. „9 – Eingang links“. Die Objekt-Adresse bleibt, wie sie ist; bei genau einem Haus bietet PAM „Übernehmen“ an. Das Feld gilt nur für dieses Protokoll.',
     '„Besichtigung bei“: die Person antippen, in deren Wohnung du bist (Mieter oder Eigentümer).',
     'Bei Ankunft „📍 Ich bin jetzt hier“, am Schluss „🏁 Fertig“. Solange es läuft, steht oben in der Karte „⏱ … läuft seit …“ – 🏁 dort trägt das Ende ein. Vergessen? Ab dem nächsten Tag steht in der Formular-Liste „Ende fehlt“ (orange) – dort mit 🏁 nachtragen.',
     '„📋 Noch offen“ oben im Formular erinnert, was noch fehlt – antippen springt hin. Nur eine Erinnerung: PAM prüft nichts, im PDF steht es nicht.',
@@ -580,6 +581,73 @@ function _fsKopfAusKarte(t){
   const auftragNr=[vm?vm[1]:'',(t&&t.repNr)?'Rep '+t.repNr:''].filter(Boolean).join(' · ')||String((t&&t.kundenNr)||'');
   const objektAdresse=String((t&&(t.adresse||t.objektName))||'').trim();
   return {auftraggeber,nutzer,auftragNr,objektAdresse};
+}
+// ── F68 (Frank 15.10.2026): „Haus / Eingang“ im Kopf von Vorabbesichtigung und Begehungsprotokoll ───────────────────────────────────────────
+// Anlass: Sammelobjekte (z. B. „Musterweg 7,8,9“ – bei 37 von 43 Objekten) – im Protokoll stand nur EINE Adresse, ein Feld für das Haus gab es nicht.
+// Reine Rechnung ohne Seite (Prüfung test_f68). ⛔ Nie raten: was nicht sicher lesbar ist, ergibt KEINE Knöpfe (dann bleibt das Freitextfeld).
+// ⛔ Die Objekt-Adresse ändert sich NIE von selbst – nur über das Angebot „Übernehmen“ (_fsHausAngebot). Das Feld gilt nur für dieses Protokoll.
+// Zerlegt eine Adresse oder einen Objekt-Titel: Straße · Hausnummern · Ortsname ohne PLZ (tail) · PLZ und Ort (rest). ok=false → nichts Sicheres gefunden.
+function _fsHausSplit(text){
+  let s=String(text==null?'':text).replace(/\s+/g,' ').trim(),rest='';
+  const ks=/\s*\(\d+\)\s*$/.exec(s);                           // ZUERST die Kostenstelle „(25403)“ am Ende eines Objekt-Titels – sonst hielte die PLZ-Suche sie für eine PLZ
+  if(ks)s=s.slice(0,ks.index).trim();
+  const mp=/(,?\s*\b\d{5}\b.*)$/.exec(s);                      // PLZ und Ort bleiben unberührt hinten
+  if(mp){rest=mp[1].trim();s=s.slice(0,mp.index).trim();}
+  const aus={strasse:s,nr:[],tail:'',rest:rest,ok:false};
+  const m=/^(.*?[A-Za-zÄÖÜäöüß.])\s+(\d[\d ,.\-–\/a-zA-ZÄÖÜäöüß]*)$/.exec(s);
+  if(!m)return aus;
+  const nr=[];let tail='',letzte='',fehler=false;
+  m[2].split(/\s*,\s*/).filter(Boolean).forEach(tk=>{
+    if(fehler)return;
+    if(tail){fehler=true;return;}                              // nach einem Ortsnamen darf keine Nummer mehr kommen
+    let r;
+    if((r=/^(\d+)\s*[-–]\s*(\d+)(?:\s+(.+))?$/.exec(tk))){    // „7-9“
+      const a=+r[1],b=+r[2];
+      if(b<a||b-a>20){fehler=true;return;}
+      for(let i=a;i<=b;i++)nr.push(String(i));
+      letzte=String(b);if(r[3])tail=r[3];return;
+    }
+    if((r=/^(\d+)([a-zA-Z]?)(?:\s+(.+))?$/.exec(tk))){        // „7“ · „7a“
+      nr.push(r[1]+r[2].toLowerCase());letzte=r[1];if(r[3])tail=r[3];return;
+    }
+    if(letzte&&(r=/^([a-zA-Z])(?:\s+(.+))?$/.exec(tk))){       // „86a,b,c“: der Buchstabe gehört zur letzten Zahl
+      nr.push(letzte+r[1].toLowerCase());if(r[2])tail=r[2];return;
+    }
+    if(nr.length&&/^[A-Za-zÄÖÜäöüß]/.test(tk)){tail=tk;return;} // Ortsname ohne PLZ: „… 12, Erfurt“
+    fehler=true;
+  });
+  const eind=nr.filter((x,i)=>nr.indexOf(x)===i);
+  if(fehler||!eind.length)return aus;
+  return {strasse:m[1].trim(),nr:eind,tail:tail,rest:rest,ok:true};
+}
+function _fsHausNummern(text){return _fsHausSplit(text).nr;}
+// Die Auswahlknöpfe: Hausnummern aus dem Objekt-Namen der Karte, sonst aus ihrer Adresse, sonst aus der Protokoll-Adresse (die Quelle mit den meisten Nummern gewinnt).
+// Nur bei MEHREREN Nummern – bei einer einzigen gibt es nichts auszuwählen.
+function _fsHausChips(bericht,t){
+  const k=(bericht&&bericht.kopf)||{};let beste=[];
+  [t&&t.objektName,t&&t.adresse,k.objektAdresse].forEach(q=>{const n=_fsHausNummern(q);if(n.length>beste.length)beste=n;});
+  return beste.length>1?beste:[];
+}
+function _fsHausTokens(haus){return String(haus==null?'':haus).split(/\s*·\s*/).map(x=>x.trim()).filter((x,i,a)=>x&&a.indexOf(x)===i);}
+// Anzeige in Liste und Word: „Haus 9“ · „Haus 8 · 9“ · „Hinterhaus“ (beginnt der Eintrag mit einer Zahl, steht „Haus“ davor)
+function _fsHausText(haus){const tk=_fsHausTokens(haus);if(!tk.length)return '';return (/^\d/.test(tk[0])?'Haus ':'')+tk.join(' · ');}
+function _fsHausNr(token){const m=/^(\d+[a-zA-Z]?)(?![a-zA-Z0-9])/.exec(String(token==null?'':token).trim());return m?m[1].toLowerCase():'';}
+// Die Adresse mit genau EINER Hausnummer: „Musterweg 7-9, 99999 Musterstadt“ + „9“ → „Musterweg 9, 99999 Musterstadt“. '' = nicht sicher machbar.
+function _fsHausAdresse(adr,token){
+  const nr=_fsHausNr(token),p=_fsHausSplit(adr);
+  if(!nr||!p.ok||!p.strasse)return '';
+  let rest=p.rest;if(rest&&!/^,/.test(rest))rest=', '+rest;
+  return p.strasse+' '+nr+(p.tail?', '+p.tail:'')+rest;
+}
+// Knopf antippen: gewählt ↔ nicht gewählt; die Reihenfolge folgt der Knopf-Reihe. alle = alle Knöpfe, tokens = die gewählten.
+function _fsHausToggle(alle,tokens,x){return alle.filter(y=>y===x?tokens.indexOf(y)<0:tokens.indexOf(y)>=0);}
+// Angebot „Objekt-Adresse für dieses Haus“: nur bei genau EINEM gewählten Haus, nur wenn die Adresse dadurch anders wird, nicht nach „Nein, so lassen“.
+function _fsHausAngebot(bericht,t){
+  const k=(bericht&&bericht.kopf)||{},tk=_fsHausTokens(k.haus);
+  if(tk.length!==1)return null;
+  const basis=String(k.objektAdresse||(t&&t.adresse)||'').trim(),neu=_fsHausAdresse(basis,tk[0]);
+  if(!neu||neu===basis||String(k.hausAdrNein||'')===String(k.haus||''))return null;
+  return {neu:neu,text:'Mit '+_fsHausText(k.haus)+' kann die Objekt-Adresse so lauten:'};
 }
 // Nur leere Felder füllen – was Frank schon eingetragen hat, bleibt stehen. Gibt die Zahl der gefüllten Felder zurück.
 function _fsKopfErgaenzen(bericht,t){
@@ -1077,7 +1145,7 @@ function _fsErgebnisZeigen(el,bericht){
 function _fsWordSkizzeBild(b,sk){try{return _fsBgSkizzeBild(b,_fsAsPseudoRaum(sk))||'';}catch(e){console.warn('[Word] Skizze:',e);return '';}}
 function _fsWordAufbau(b,task){
   const k=(b&&b.kopf)||{},hat=v=>!(v===null||v===undefined||String(v).trim()==='');
-  const out={titel:_fsB2Name(b),objekt:String(k.objektAdresse||(task&&task.adresse)||'').trim(),auftraggeber:String((task&&task.rechnungsanschrift)||k.auftraggeber||'').trim(),
+  const out={titel:_fsB2Name(b),objekt:[String(k.objektAdresse||(task&&task.adresse)||'').trim(),(typeof _fsHausText==='function'?_fsHausText(k.haus):'')].filter(Boolean).join(' · '),auftraggeber:String((task&&task.rechnungsanschrift)||k.auftraggeber||'').trim(),
     auftragNr:String(k.auftragNr||'').trim(),datum:String((b&&b.datum)||'').trim(),pruefer:String(k.pruefer||'').trim(),bloecke:[]};
   if(!b)return out;
   const B=out.bloecke,alle=(Array.isArray(b.fotos)?b.fotos:[]).filter(f=>f&&f.inReport),drin=[];
@@ -1931,6 +1999,39 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
      Zugeklappt (Standard, aufklappbar): Kartendaten, Versicherung/Zugang, Einzelpunkte, Termin/Wetter, Raumskizze. Daten und PDF unverändert. */
   let _vbZeitAuf=false; // Datum/Beginn/Ende zum Ändern aufgeklappt (nur Anzeige)
   let _vbUmgFuellen=null; // F23: füllt die Umgebungs-Vorschläge neu (gesetzt von _teilUmgebungVb, solange der Abschnitt aufgebaut ist)
+  /* F68 (Frank 15.10.2026): „Haus / Eingang“ unter „Objekt“ – Knöpfe aus den Hausnummern des Objekts (_fsHausChips), dazu Freitext; gilt nur für DIESES Protokoll.
+     ⛔ Die Objekt-Adresse ändert sich nie von selbst: bei genau EINEM gewählten Haus erscheint nur das Angebot „Übernehmen“ (_fsHausAngebot). Die Rechnung steht in den reinen Funktionen _fsHaus… (Prüfung test_f68). */
+  function _vbHausZeile(){
+    const k=bericht.kopf,w=document.createElement('div');w.setAttribute('data-fs-haus','1');
+    const tokens=_fsHausTokens(k.haus),vor=_fsHausChips(bericht,t),alle=vor.concat(tokens.filter(x=>vor.indexOf(x)<0));
+    const setze=neu=>{k.haus=neu.join(' · ');scheduleSave();_neuBauen();};
+    const row=document.createElement('div');row.style.cssText='display:flex;align-items:flex-start;gap:10px;padding:6px 14px;border-top:1px solid var(--border);';
+    const l=document.createElement('span');l.style.cssText='font-size:var(--fs13,13px);color:var(--text2);width:112px;flex-shrink:0;padding-top:8px;';l.textContent='Haus / Eingang';
+    const cw=document.createElement('div');cw.style.cssText='flex:1;min-width:0;display:flex;flex-wrap:wrap;gap:6px;';
+    alle.forEach(x=>{const gew=tokens.indexOf(x)>=0,c=_chip(x,gew,()=>setze(_fsHausToggle(alle,tokens,x)));c.setAttribute('data-fs-haus-chip',x);c.setAttribute('aria-pressed',gew?'true':'false');cw.appendChild(c);});
+    const fr=_chip('✎ andere …',false,()=>{
+      const n=prompt('Haus / Eingang – z. B. „9 – Eingang links“ oder „Hinterhaus“','');
+      if(n===null)return;
+      const c=String(n).replace(/\s*·\s*/g,' ').replace(/\s+/g,' ').trim();
+      if(c)setze(tokens.indexOf(c)>=0?tokens:tokens.concat([c]));
+    });
+    fr.setAttribute('data-fs-haus-frei','1');fr.style.borderStyle='dashed';cw.appendChild(fr);
+    row.append(l,cw);w.appendChild(row);
+    const ang=_fsHausAngebot(bericht,t);
+    if(ang){
+      const a=document.createElement('div');a.setAttribute('data-fs-haus-angebot','1');
+      a.style.cssText='margin:2px 14px 8px;padding:9px 12px;border-radius:10px;border:1.5px solid var(--fs-krd,'+FS_FARBE+');background:var(--fs-can,rgba(31,95,139,.12));font-size:var(--fs13,13px);color:var(--text);';
+      const tx=document.createElement('div');tx.appendChild(document.createTextNode(ang.text+' '));
+      const bf=document.createElement('b');bf.textContent=ang.neu;tx.appendChild(bf);
+      const bt=document.createElement('div');bt.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;';
+      const ja=_chip('Übernehmen',true,()=>{k.objektAdresse=ang.neu;hdrS.textContent=(k.objektAdresse||t.adresse||t.title||'')+' · '+(bericht.datum||'');scheduleSave();_neuBauen();});
+      ja.setAttribute('data-fs-haus-ja','1');
+      const nein=_chip('Nein, so lassen',false,()=>{k.hausAdrNein=k.haus;scheduleSave();_neuBauen();});
+      nein.setAttribute('data-fs-haus-nein','1');
+      bt.append(ja,nein);a.append(tx,bt);w.appendChild(a);
+    }
+    return w;
+  }
   function _vbAltAngaben(){return (bericht.angaben||[]).some(a=>a&&String(a.text||'').trim());} // Protokolle aus F16–F19 mit beantworteten Fragen
   /* F47: Auftraggeber (Auswahl: Hausverwaltung, sonst Eigentümer …) und Objekt sichtbar in „Vor Ort“, darunter die Auftrags-Nr. und „↻ Aus der Karte neu holen“
      (vorher druckte das PDF diese Angaben, ohne dass sie im Formular zu sehen waren) */
@@ -1958,7 +2059,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     rb.style.cssText=S_KNOPF+'min-height:var(--fsh,36px);border:1px solid var(--fs-krd,var(--border));background:var(--fs-kfl,transparent);color:var(--text);';
     rb.onclick=()=>_ausKarteKlick();
     nr.append(nt,rb);
-    w.append(row,ob,nr);
+    w.append(row,ob,_vbHausZeile(),nr); // F68: Haus / Eingang direkt unter „Objekt“
     return w;
   }
   /* F47: „🌤 Wetter holen“ in „Vor Ort“ – Wetterdienst zur Beginn-Zeit (Standort nötig), im PDF mit „nicht vor Ort gemessen“ */
@@ -7080,6 +7181,7 @@ async function _fsMobPdfBg(bericht,task){
       const rows=[];
       if(hat(k.auftraggeber))rows.push(['Auftraggeber',String(k.auftraggeber).trim()]);
       if(objekt)rows.push(['Objekt',objekt]);
+      if(hat(k.haus))rows.push(['Haus / Eingang',String(k.haus).trim()]); // F68 (gespeichert ist schon „8 · 9“)
       if(hat(k.nutzer)&&!(_fsGemeinsamerKopf(bericht)&&hat(k.besuchBei)))rows.push(['Nutzer',String(k.nutzer).trim()]); /* F47: steht schon bei „Besichtigung bei“ · F52: auch Begehungsprotokoll; ohne gewählte Person bleibt der getippte Nutzer (ältere Protokolle) */
       if(hat(k.anlass))rows.push(['Anlass',String(k.anlass).trim()]);
       if(vorab||_fsGemeinsamerKopf(bericht)){ // F16: Versicherung, Zugang, Ansprechpartner; kein Umfangstext (Franks Wahl) · F52: „Besichtigung bei“ auch im Begehungsprotokoll
@@ -9475,12 +9577,12 @@ function _fsListeZeile(b,t){
   }
   if(b.vorlage==='feuchte'&&b.fassung==='begehung'&&b.art==='vorab'){ // F16
     const bei=String((b.kopf&&b.kopf.besuchBei)||'').trim(),lg=String((b.kopf&&b.kopf.lage)||'').trim(); // F17: bei wem – so sind zwei Besuche an einer Karte zu unterscheiden
-    return {kurz:'VORAB',lang:b.schlank?'Vorabbesichtigung':'Vorabbesichtigung (frühere Fassung)',name:(b.schlank&&String(b.protName||'').trim())||kartenname||String(b.titel||'Vorabbesichtigung'),sub:[bei,lg].filter(Boolean).join(' · ')}; /* F47 */
+    return {kurz:'VORAB',lang:b.schlank?'Vorabbesichtigung':'Vorabbesichtigung (frühere Fassung)',name:(b.schlank&&String(b.protName||'').trim())||kartenname||String(b.titel||'Vorabbesichtigung'),sub:[(typeof _fsHausText==='function'?_fsHausText(b.kopf&&b.kopf.haus):''),bei,lg].filter(Boolean).join(' · ')}; /* F47 */
   }
   if(b.vorlage==='feuchte'&&b.fassung==='begehung'){
     const keller=b.art==='keller';
     const info=(typeof _fsBgListeInfo==='function')?_fsBgListeInfo(b):{raeume:''};
-    return {kurz:keller?'BEG-KELLER':'BEG-WHG',lang:keller?'Begehungsprotokoll Keller':'Begehungsprotokoll Wohnung',name:String(b.protName||'').trim()||kartenname||String(b.titel||'Begehungsprotokoll'),sub:info.raeume||''}; /* F52: eigener Name zuerst */
+    return {kurz:keller?'BEG-KELLER':'BEG-WHG',lang:keller?'Begehungsprotokoll Keller':'Begehungsprotokoll Wohnung',name:String(b.protName||'').trim()||kartenname||String(b.titel||'Begehungsprotokoll'),sub:[(typeof _fsHausText==='function'?_fsHausText(b.kopf&&b.kopf.haus):''),info.raeume||''].filter(Boolean).join(' · ')}; /* F52: eigener Name zuerst */
   }
   return null;
 }
