@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F70';
+const PAM_FORMULARE_VERSION='F71';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -8219,11 +8219,11 @@ async function _fsTestoPlanZuordnen(bericht,t,neuBauen){
 const FS_WP_FARBE='#1a5c3a';
 const FS_WP_SEKTIONEN=[
   {titel:'1. Sichtprüfung der Dachhaut',items:[
-    'Risse oder Blasenbildung',
-    'Mechanische Beschädigungen',
+    'Risse oder Blasenbildung vorhanden?', /* F71: Ja/Nein (Frank) */
+    'Mechanische Beschädigungen vorhanden?', /* F71: Ja/Nein (Frank) */
     'Zustand des Oberflächenschutzes (Kies, Begrünung)',
-    'Sichtprüfung auf Schmutzablagerungen',
-    'Sichtprüfung auf Bewuchs'
+    'Schmutzablagerungen vorhanden?', /* F71: Ja/Nein */
+    'Bewuchs vorhanden?' /* F71: Ja/Nein */
   ]},
   {titel:'2. Sicherheitseinrichtungen',items:[
     'Fest montierte Anschlusspunkte',
@@ -8240,7 +8240,8 @@ const FS_WP_SEKTIONEN=[
     'Sichtprüfung aller Silikonfugen',
     'Sichtprüfung der Dachrandbleche',
     'Sichtprüfung Mauerabdeckungen',
-    'Sichtprüfung Anschlüsse (Attika, Wand, Aufbauten)'
+    'Sichtprüfung Attika', /* F71: eigener Punkt (Frank: „Attika drin lassen“); N/V = gibt es nicht */
+    'Sichtprüfung Anschlüsse (Wand, Aufbauten)'
   ]},
   {titel:'5. Aufbauten / Sicherheitsausstattung',items:[
     'Lichtkuppeln / Dachausstieg',
@@ -8260,9 +8261,9 @@ const FS_WP_SEKTIONEN=[
    (alte Prüfsätze schneiden sie einzeln aus). */
 const FS_WP_SEKTIONEN_STEIL=[
   {titel:'1. Sichtprüfung der Dacheindeckung',items:[
-    'Sichtbare Schäden an der Dacheindeckung',
-    'Moos, Algen und Bewuchs',
-    'Gelöste Teile der Eindeckung',
+    'Sichtbare Schäden an der Dacheindeckung vorhanden?', /* F71: Ja/Nein */
+    'Moos, Algen oder Bewuchs vorhanden?', /* F71: Ja/Nein */
+    'Gelöste Teile der Eindeckung vorhanden?', /* F71: Ja/Nein */
     'Mörtelfugen an First und Grat (komplett)',
     'Ortgang und Traufe'
   ]},
@@ -8296,6 +8297,27 @@ function _fsWpArt(b){return String((b&&b.wpArt)||'').toLowerCase()==='inspektion
 function _fsWpTitelText(b){return (_fsWpArt(b)==='inspektion'?'Dachinspektion ':'Wartungsprotokoll ')+(_fsWpDachart(b)==='steil'?'Steildach':'Flachdach');}
 function _fsWpSekNeu(dachart){const q=(dachart==='steil')?FS_WP_SEKTIONEN_STEIL:FS_WP_SEKTIONEN;return q.map(s=>({titel:s.titel,items:s.items.map(text=>({text,status:'offen',massnahmen:''}))}));}
 function _fsWpArbNeu(dachart){const q=(dachart==='steil')?FS_WP_ARBEITEN_STEIL:FS_WP_ARBEITEN_FLACH;return q.map(text=>({text,ok:false,notiz:''}));}
+/* ══ F71: Dachrand · „Sichtprüfung Attika“ · Ja/Nein bei Schadens-Fragen · „＋ eigener Punkt“ (Frank 15.10.2026, OFFENE_PUNKTE P65 „AUFTRAG F71“) ═══════════════
+   Schadens-Frage: endet der Text eines Prüfpunkts mit „?“ („Risse oder Blasenbildung vorhanden?“), heißen die Knöpfe „Nein“ (= Status ok, grün) und „Ja“ (= Status mangel, rot).
+   KEINE neue Datenform – Zählen, Farben, Liste und PDF-Spalten bleiben; im PDF steht zusätzlich „Nein“/„Ja“ vor der Bemerkung. Alte Protokolle behalten ihre Texte (ohne „?“ → OK/Mängel).
+   Eigener Punkt: {text,status:'offen',massnahmen:'',fotoRefs:[],eigen:true} in sektionen[i].items – bleibt bei seiner Liste (Umschalten parkt ihn mit), steht im PDF und in der Zählung
+   wie jeder Punkt, gilt nur für dieses Protokoll. Gleicher Text zweimal in einer Liste wird abgelehnt (Groß/Klein egal – die Foto-Zuordnung läuft über den Text).
+   kopf.dachrand = Liste aus „Attika (ca. 40 cm hoch)“ · „nur Ortgangblech“ · „Ohne“ (Flachdach; mehr nicht – Frank). */
+function _fsWpIstFrage(text){return /\?\s*$/.test(String(text||''));}
+function _fsWpTextKurz(text){return String(text||'').replace(/\s+/g,' ').trim();}
+function _fsWpEigenerPunkt(b,sek,text){
+  text=_fsWpTextKurz(text);
+  if(!b||!sek||!Array.isArray(sek.items)||!text)return null;
+  const k=text.toLowerCase();
+  if(((b.sektionen)||[]).some(s=>((s&&s.items)||[]).some(it=>it&&_fsWpTextKurz(it.text).toLowerCase()===k)))return null;
+  const it={text,status:'offen',massnahmen:'',fotoRefs:[],eigen:true};
+  sek.items.push(it);return it;
+}
+function _fsWpEigenerPunktWeg(sek,it){
+  if(!sek||!Array.isArray(sek.items)||!it||!it.eigen)return false;
+  const i=sek.items.indexOf(it);if(i<0)return false;
+  sek.items.splice(i,1);return true;
+}
 // Dachart wechseln: die aktive Liste wird geparkt (nicht gelöscht), die andere kommt zurück oder wird neu angelegt. true = es hat sich etwas geändert.
 function _fsWpUmschalten(b,dachart){
   dachart=(dachart==='steil')?'steil':'flach';
@@ -8321,7 +8343,7 @@ function _fsWpNeuerBericht(t,wahl){
       auftraggeber:(t&&t.hausverwaltung)||'',
       kostenstelle:(t&&(t.repNr||t.kundenNr))||'',
       objektAdresse:(t&&(t.adresse||t.title))||'',
-      abdichtung:[],oberflaechenschutz:[],entwaesserung:[],sicherheit:[],
+      abdichtung:[],oberflaechenschutz:[],entwaesserung:[],dachrand:[],sicherheit:[], /* F71: dachrand */
       eindeckung:[],firstausbildung:[],unterkonstruktion:[],klempner:[],sparren:'',latten:''
     },
     sektionen:_fsWpSekNeu(dachart),wartArbeiten:_fsWpArbNeu(dachart),
@@ -8333,7 +8355,7 @@ function _fsWpNeuerBericht(t,wahl){
 // Alte oder halbleere Protokolle ergänzen, nichts überschreiben
 function _fsWpVervollstaendigen(b){
   if(!b.kopf||typeof b.kopf!=='object')b.kopf={};
-  ['abdichtung','oberflaechenschutz','entwaesserung','sicherheit','eindeckung','firstausbildung','unterkonstruktion','klempner'].forEach(k=>{if(!Array.isArray(b.kopf[k]))b.kopf[k]=[];});
+  ['abdichtung','oberflaechenschutz','entwaesserung','dachrand','sicherheit','eindeckung','firstausbildung','unterkonstruktion','klempner'] /* F71: dachrand */.forEach(k=>{if(!Array.isArray(b.kopf[k]))b.kopf[k]=[];});
   if(!Array.isArray(b.sektionen))b.sektionen=[];
   b.sektionen.forEach(s=>{if(!Array.isArray(s.items))s.items=[];s.items.forEach(it=>{if(!Array.isArray(it.fotoRefs))it.fotoRefs=[];});});
   if(!Array.isArray(b.fotos))b.fotos=[];
@@ -8446,6 +8468,9 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
     {v:'np',label:'n. prüfbar',sym:'⊘ n. prüfb.',col:'#7a4b00',bg:'#fff3cd'} /* F70: nicht prüfbar – mit Grund */
   ];
   const istMangel=it=>it.status==='mangel'||it.status==='repariert';
+  /* F71: Schadens-Frage („… vorhanden?“) – OK heißt „Nein“, Mängel heißt „Ja“; Status, Farben und Zählen bleiben */
+  const _istFrage=it=>(typeof _fsWpIstFrage==='function')&&_fsWpIstFrage(it&&it.text);
+  const _sym=(it,s)=>_istFrage(it)?(s.v==='ok'?'✓ Nein':s.v==='mangel'?'⚠ Ja':s.sym):s.sym;
   const _dachart=()=>(typeof _fsWpDachart==='function')?_fsWpDachart(bericht):'flach';
   const _art=()=>(typeof _fsWpArt==='function')?_fsWpArt(bericht):'wartung';
   const _titelNeu=()=>{hdrT.textContent='🏠 '+((typeof _fsWpTitelText==='function')?_fsWpTitelText(bericht):'Wartungsprotokoll Flachdach');};
@@ -8538,6 +8563,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
       _mcg('Art der Flachdachabdichtung','abdichtung',['Bitumen','Kunststoff','Flüssigkunststoff','EPDM']),
       _mcg('Oberflächenschutz','oberflaechenschutz',['Ohne','Kies','Gründach extensiv','Gründach intensiv']),
       _mcg('Dachentwässerung','entwaesserung',['Gully','Dachrinne','Notüberlauf']),
+      _mcg('Dachrand','dachrand',['Attika (ca. 40 cm hoch)','nur Ortgangblech','Ohne']), /* F71: Attika vorhanden (ca. 40 cm hoch) oder nur Ortgangblech? (Frank 15.10.2026) */
       _mcg('Sicherheitseinrichtungen','sicherheit',['Ohne','Fest montierte Anschlagpunkte','Geländer','Sicherheitsseile'])
     );
     body.appendChild(kopfSek);
@@ -8558,6 +8584,18 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
         const txt=document.createElement('div');
         txt.style.cssText='font-size:var(--fs13,13px);color:var(--text);line-height:1.35;margin-bottom:8px;font-weight:500;';
         txt.textContent=it.text;
+        if(it.eigen){ /* F71: eigener Punkt – ✕ nimmt ihn mit Rückfrage wieder heraus */
+          txt.textContent='';txt.style.display='flex';txt.style.gap='8px';txt.style.alignItems='flex-start';
+          const tS=document.createElement('span');tS.style.flex='1';tS.textContent=it.text;
+          const weg=document.createElement('button');weg.type='button';weg.textContent='✕';weg.title='Eigenen Punkt entfernen';weg.setAttribute('data-wp-eigen-weg','1');
+          weg.style.cssText='flex-shrink:0;min-width:32px;height:28px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;font-family:inherit;';
+          weg.onclick=()=>{
+            if(!confirm('Eigenen Punkt „'+it.text+'“ aus diesem Protokoll entfernen?'+((it.fotoRefs&&it.fotoRefs.length)?' Die Fotos bleiben im Protokoll, nur die Zuordnung zu diesem Punkt geht weg.':'')))return;
+            if(typeof _fsWpEigenerPunktWeg!=='function'||!_fsWpEigenerPunktWeg(sek,it))return;
+            scheduleSave();const sc=body.scrollTop;_wpMobRender();body.scrollTop=sc;_wpMobStats();
+          };
+          txt.append(tS,weg);
+        }
         const btnRow=document.createElement('div');
         btnRow.style.cssText='display:grid;grid-template-columns:repeat('+defs.length+',1fr);gap:5px;';
         const massnWrap=document.createElement('div');massnWrap.className='wpm-mw';
@@ -8572,7 +8610,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
           grundWrap.style.display=it.status==='np'?'block':'none';
         };
         defs.forEach(s=>{
-          const btn=document.createElement('button');btn.type='button';btn.textContent=s.sym;btn.setAttribute('data-wp-status',s.v);
+          const btn=document.createElement('button');btn.type='button';btn.textContent=_sym(it,s);btn.setAttribute('data-wp-status',s.v);
           const on=it.status===s.v;
           btn.style.cssText='padding:9px 4px;border-radius:8px;font-size:var(--fs11,11px);font-weight:700;cursor:pointer;font-family:inherit;border:2px solid '+(on?s.col:'var(--border)')+';background:'+(on?s.bg:'transparent')+';color:'+(on?s.col:'var(--text2)')+';box-shadow:'+(on?'0 1px 4px '+s.col+'44':'none')+';';
           btn.onclick=()=>{
@@ -8618,6 +8656,22 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
         zeigen();
         sekDiv.appendChild(row);
       });
+      /* F71: „＋ eigener Punkt“ – ein leeres Feld am Ende jedes Abschnitts (Frank: „zum Beispiel bei Aufbauten, wenn Lüfter drin ist … ein Plus“); endet der Text mit „?“ → Nein/Ja */
+      const eigRow=document.createElement('div');eigRow.setAttribute('data-wp-eigen-zeile','1');eigRow.style.cssText='display:flex;gap:6px;padding:8px 14px;align-items:center;';
+      const eigIn=document.createElement('input');eigIn.type='text';eigIn.setAttribute('data-wp-eigen-text','1');eigIn.placeholder='＋ eigener Punkt (z. B. Lüfter) …';eigIn.autocomplete='off';
+      eigIn.style.cssText='flex:1;min-width:0;background:var(--bg3);border:1px dashed var(--border);border-radius:7px;padding:8px 10px;font-size:var(--fs14,14px);color:var(--text);font-family:inherit;';
+      const eigBtn=document.createElement('button');eigBtn.type='button';eigBtn.textContent='＋';eigBtn.setAttribute('data-wp-eigen-plus','1');eigBtn.title='Eigenen Punkt anlegen';
+      eigBtn.style.cssText='flex-shrink:0;min-width:44px;min-height:40px;border-radius:8px;border:1px solid '+FS_WP_FARBE+';background:rgba(26,92,58,.10);color:'+FS_WP_FARBE+';font-size:var(--fs18,18px);font-weight:700;cursor:pointer;font-family:inherit;';
+      const eigAnlegen=()=>{
+        const text=String(eigIn.value||'').replace(/\s+/g,' ').trim();
+        if(!text)return;
+        const neu=(typeof _fsWpEigenerPunkt==='function')?_fsWpEigenerPunkt(bericht,sek,text):null;
+        if(!neu){toast('„'+text+'“ steht schon in dieser Prüfliste','info');return;}
+        scheduleSave();const sc=body.scrollTop;_wpMobRender();body.scrollTop=sc;_wpMobStats();
+      };
+      eigBtn.onclick=eigAnlegen;
+      eigIn.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();eigAnlegen();}};
+      eigRow.append(eigIn,eigBtn);sekDiv.appendChild(eigRow);
       body.appendChild(sekDiv);
     });
 
@@ -8780,6 +8834,7 @@ async function _fsWpPdf(bericht,task){
       ['Abdichtung',(k.abdichtung&&k.abdichtung.length?k.abdichtung.join(', '):'–')],
       ['Oberflächenschutz',(k.oberflaechenschutz&&k.oberflaechenschutz.length?k.oberflaechenschutz.join(', '):'–')],
       ['Entwässerung',(k.entwaesserung&&k.entwaesserung.length?k.entwaesserung.join(', '):'–')],
+      ['Dachrand',lst(k.dachrand)], /* F71 */
       ['Sicherheitseinrichtungen',(k.sicherheit&&k.sicherheit.length?k.sicherheit.join(', '):'–')]
     ];
     doc.autoTable({startY:y,body:dachRows,theme:'grid',margin:{left:M,right:M},
@@ -8802,7 +8857,9 @@ async function _fsWpPdf(bericht,task){
       doc.autoTable({startY:y,
         head:[(art==='inspektion')?['Prüfpunkt','OK','N/V','Mängel','n. prüfb.','Bemerkung']:['Prüfpunkt','OK','N/V','Mängel','Rep.','n. prüfb.','Bemerkung / Ausgeführt']], /* F70 */
         body:sek.items.map(it=>{
-          const bem=(it.status==='np')?('nicht prüfbar: '+(it.grund||'kein Grund angegeben')+(it.massnahmen?' · '+it.massnahmen:'')):(it.massnahmen||'');
+          const bemRoh=(it.status==='np')?('nicht prüfbar: '+(it.grund||'kein Grund angegeben')+(it.massnahmen?' · '+it.massnahmen:'')):(it.massnahmen||'');
+          const ja=/\?\s*$/.test(String(it.text||''))?(it.status==='ok'?'Nein':it.status==='mangel'?'Ja':''):''; /* F71: Schadens-Frage – „Nein“/„Ja“ vor der Bemerkung, sonst läse der Haken unter OK bei „Risse vorhanden?“ falsch herum */
+          const bem=ja?(ja+(bemRoh?' · '+bemRoh:'')):bemRoh;
           const mg=(it.status==='mangel'||(art==='inspektion'&&it.status==='repariert'))?'✓':'';
           return (art==='inspektion')
             ?[it.text,it.status==='ok'?'✓':'',it.status==='nv'?'✓':'',mg,it.status==='np'?'✓':'',bem]
