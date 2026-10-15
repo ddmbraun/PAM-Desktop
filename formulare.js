@@ -1,9 +1,32 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F68';
+const PAM_FORMULARE_VERSION='F69';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
+/* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
+   Am PC kann das Feuchte-/Begehungsprotokoll (_fsMobOverlay) in einem EIGENEN Browserfenster stehen (PAM Desktop b1208, Knopf „🪟“ in der
+   Kopfleiste, z. B. für den zweiten Bildschirm). PAM Desktop trägt dann in window._fsFensterDok das Dokument dieses Fensters ein. Alles, was das
+   Protokoll aufmacht – Hilfe, Messliste, Skizze einzeichnen, Vorschau, Foto markieren, Ende eintragen, Messpunkt, Messplan-Zuordnung –, die
+   Rückfragen (Ja/Nein, Eingabe) und die Tasten (Esc, Entf) folgen dem Protokoll dorthin. Am Handy/Tablet und ohne eigenes Fenster ist alles wie
+   bisher: _fsDok() ist document, _fsFrage/_fsEingabe sind confirm/prompt. Bewusst im Hauptfenster bleiben: das Luftbild (die Karte hängt am
+   Hauptfenster) und der Maler. ⛔ Nur die Feuchte-Familie nutzt die Helfer; Wartungsprotokoll, REP-Auftrag und Prüfbericht bleiben unverändert. */
+function _fsDok(b){
+  try{
+    if(typeof document==='undefined')return null;
+    if(typeof window==='undefined')return document;
+    const f=window._fsFensterDok;if(!f||f===document)return document;
+    const w=f.defaultView;if(!w||w.closed)return document;
+    const ov=f.getElementById('_fsMobOverlay');if(!ov)return document;
+    if(b&&ov._fsBericht&&ov._fsBericht!==b)return document; /* ein anderes Protokoll steht dort – dann gilt das Hauptfenster */
+    return f;
+  }catch(e){return document;}
+}
+function _fsWin(b){try{const d=_fsDok(b);return (d&&d.defaultView)||window;}catch(e){return window;}}
+function _fsById(id){const e=document.getElementById(id);if(e)return e;const d=_fsDok();return (d&&d!==document)?d.getElementById(id):null;}
+function _fsAnhaengen(el,b){const d=_fsDok(b);((d&&d.body)?d.body:document.body).appendChild(el);return el;}
+function _fsFrage(text,b){const w=_fsWin(b);if(w&&typeof w.confirm==='function')return w.confirm(text);return (typeof confirm==='function')?confirm(text):false;} /* Rückfall: Prüfumgebungen stellen confirm/prompt als Globale, nicht am window */
+function _fsEingabe(text,vorgabe,b){const w=_fsWin(b);const p=(w&&typeof w.prompt==='function')?w.prompt.bind(w):((typeof prompt==='function')?prompt:null);if(!p)return null;return (vorgabe===undefined)?p(text):p(text,vorgabe);}
 /* ── F38: SICHTBARKEIT ──────────────────────────────────────────────────────────────────────────────────────────────
    Rückmeldung vom Tablet (04.10.2026): Schrift und Knöpfe zu klein, Knöpfe im Dunkeln nur dünne Umrisse, Hinweistexte in leeren Feldern zu blass.
    Lösung ohne Umbau der vielen Einzel-Stile: das Protokoll-Fenster und seine Unterfenster (Skizze einzeichnen, Foto markieren, Luftbild, Auswahl
@@ -33,6 +56,7 @@ function _fsSichtIstHell(farbe){
 }
 function _fsSichtStil(){
   if(typeof document==='undefined'||typeof document.getElementById!=='function'||typeof document.createElement!=='function')return;
+  try{const d=_fsDok();if(d&&d!==document&&!d.getElementById('_fsSichtStil')){const s2=d.createElement('style');s2.id='_fsSichtStil';s2.textContent=_fsSichtCss();const z2=d.head||d.body;if(z2&&typeof z2.appendChild==='function')z2.appendChild(s2);}}catch(e){} /* F69: auch das eigene Formular-Fenster am PC */
   if(document.getElementById('_fsSichtStil'))return;
   const st=document.createElement('style');st.id='_fsSichtStil';st.textContent=_fsSichtCss();
   const ziel=document.head||document.body;if(ziel&&typeof ziel.appendChild==='function')ziel.appendChild(st);
@@ -80,8 +104,11 @@ function _fsGrauWaehlen(stufe){
   stufe=(stufe>=1&&stufe<=4)?stufe:1;
   try{localStorage.setItem(FS_GRAU_KEY,String(stufe));}catch(e){console.warn('[Hintergrund]',e);}
   try{
-    document.querySelectorAll('.fs-sicht').forEach(el=>_fsGrauSetzen(el,stufe));
-    document.querySelectorAll('[data-fs-grauwahl] button').forEach(b=>b.setAttribute('aria-pressed',String(+b.getAttribute('data-fs-grau')===stufe)));
+    const doks=[document];try{const d=_fsDok();if(d&&d!==document)doks.push(d);}catch(e){} /* F69: auch das eigene Formular-Fenster am PC */
+    doks.forEach(d=>{
+      d.querySelectorAll('.fs-sicht').forEach(el=>_fsGrauSetzen(el,stufe));
+      d.querySelectorAll('[data-fs-grauwahl] button').forEach(b=>b.setAttribute('aria-pressed',String(+b.getAttribute('data-fs-grau')===stufe)));
+    });
   }catch(e){console.warn('[Hintergrund]',e);}
   return stufe;
 }
@@ -531,8 +558,8 @@ const FS_HILFE_VB=[
   ]]
 ];
 function _fsHilfeZeigen(b){
-  const alt=document.getElementById('_fsHilfe');if(alt){alt.remove();return;}
-  if(!b){try{b=(document.getElementById('_fsMobOverlay')||{})._fsBericht;}catch(e){b=null;}} // F2a: das offene Protokoll (Knopf ruft ohne Angabe auf)
+  const alt=_fsById('_fsHilfe');if(alt){alt.remove();return;}
+  if(!b){try{b=(_fsById('_fsMobOverlay')||{})._fsBericht;}catch(e){b=null;}} // F2a: das offene Protokoll (Knopf ruft ohne Angabe auf)
   const bg=!!b&&b.fassung==='begehung'&&typeof FS_HILFE_BG!=='undefined';
   const ov=document.createElement('div');ov.id='_fsHilfe';
   ov.style.cssText='position:fixed;inset:0;z-index:99999;background:var(--bg);display:flex;flex-direction:column;';
@@ -554,7 +581,7 @@ function _fsHilfeZeigen(b){
     inhalt.append(h,ol);
   });
   ov.append(kopf,inhalt);
-  document.body.appendChild(ov);
+  _fsAnhaengen(ov,b); /* F69 */
 }
 
 /* ══ v294: AUSFÜLLHILFEN UND ERGEBNIS (Wunsch Frank 14.09.2026) ═══════════════════════════════
@@ -821,7 +848,7 @@ async function _fsFpEinbrennen(d,f){
 /* Das Fenster „Foto markieren“: Foto groß, „📌 Pin setzen“ → ins Foto tippen → Beschriftung. Ein gesetzter Pin ist fest; „✥ Verschieben“ macht den gewählten lose
    (Pfeilspitze oder Kreis ziehen, oder an die richtige Stelle tippen). Darunter die Liste „1 = Schaden …“. Dasselbe Fenster am Tablet und am PC. fertig() beim Schließen. */
 function _fsFotoPinsFenster(bericht,f,fertig){
-  const alt=document.getElementById('_fsFotoPins');if(alt)alt.remove();
+  const alt=_fsById('_fsFotoPins');if(alt)alt.remove();
   if(!f)return;
   const ov=document.createElement('div');ov.id='_fsFotoPins';_fsSichtAn(ov);
   ov.style.cssText='position:fixed;inset:0;z-index:100060;background:var(--bg);color:var(--text);display:flex;flex-direction:column;';
@@ -857,7 +884,7 @@ function _fsFotoPinsFenster(bericht,f,fertig){
     x.onclick=fn;return x;
   };
   const RAND='border:2px solid var(--fs-krd,var(--border));background:var(--fs-kfl,transparent);';
-  const beschriften=i=>{const p=pins()[i];if(!p)return;const tx=prompt('Beschriftung für Pin '+(i+1)+'\n(z. B. Schaden, undicht)',String(p.t||''));if(tx===null)return;_fsFpText(p,tx);scheduleSave();alles();};
+  const beschriften=i=>{const p=pins()[i];if(!p)return;const tx=_fsEingabe('Beschriftung für Pin '+(i+1)+'\n(z. B. Schaden, undicht)',String(p.t||''));if(tx===null)return;_fsFpText(p,tx);scheduleSave();alles();};
   const leisteBauen=()=>{
     leiste.innerHTML='';
     leiste.appendChild(knopf('📌 Pin setzen','border:3px solid '+(setzen?'#d9480f':'var(--border)')+';background:'+(setzen?'rgba(217,72,15,.16)':'var(--fs-cfl,transparent)')+';',()=>{setzen=!setzen;if(setzen){sel=-1;lose=false;}alles();},['data-fs-fp-setzen','1']));
@@ -865,7 +892,7 @@ function _fsFotoPinsFenster(bericht,f,fertig){
     if(p){
       leiste.appendChild(knopf('Beschriftung ändern',RAND,()=>beschriften(sel),['data-fs-fp-text','1']));
       leiste.appendChild(knopf(lose?'✓ Fest':'✥ Verschieben','border:3px solid '+(lose?'#2e7d4f':'var(--border)')+';background:'+(lose?'rgba(46,125,79,.16)':'var(--fs-cfl,transparent)')+';',()=>{lose=!lose;alles();},['data-fs-fp-lose','1']));
-      leiste.appendChild(knopf('Entfernen',RAND+'color:var(--red);',()=>{if(String(p.t||'').trim()&&!confirm('Pin '+(sel+1)+' („'+String(p.t).trim()+'“) entfernen?'))return;if(_fsFpWeg(f,sel)){sel=-1;lose=false;scheduleSave();alles();}},['data-fs-fp-weg','1']));
+      leiste.appendChild(knopf('Entfernen',RAND+'color:var(--red);',()=>{if(String(p.t||'').trim()&&!_fsFrage('Pin '+(sel+1)+' („'+String(p.t).trim()+'“) entfernen?'))return;if(_fsFpWeg(f,sel)){sel=-1;lose=false;scheduleSave();alles();}},['data-fs-fp-weg','1']));
     }
     const z=document.createElement('span');z.setAttribute('data-fs-fp-hinweis','1');z.style.cssText='font-size:var(--fs13,13px);color:var(--text2);flex:1 1 200px;';
     z.textContent=setzen?'Jetzt ins Foto tippen, wo der Pin hin soll'
@@ -895,7 +922,7 @@ function _fsFotoPinsFenster(bericht,f,fertig){
       const i=_fsFpNeu(f,p[0]/W,p[1]/H,'');
       if(i<0){toast('Genug Pins auf diesem Foto – bitte einen entfernen','info',3500);return;}
       setzen=false;sel=i;lose=false;scheduleSave();alles();
-      setTimeout(()=>{if(document.getElementById('_fsFotoPins')===ov)beschriften(i);},80);
+      setTimeout(()=>{if(_fsById('_fsFotoPins')===ov)beschriften(i);},80);
       return;
     }
     const tr=_fsFpTreffer(f,p[0],p[1],W,H);
@@ -921,13 +948,13 @@ function _fsFotoPinsFenster(bericht,f,fertig){
   const schliessen=()=>{ov.remove();if(typeof fertig==='function'){try{fertig();}catch(x){console.warn('[Foto-Pins]',x);}}};
   zu.onclick=schliessen;fb.onclick=schliessen;
   alles();
-  document.body.appendChild(ov);
+  _fsAnhaengen(ov,bericht); /* F69 */
   /* Das Foto in guter Auflösung holen (derselbe Weg wie fürs PDF: Gerätespeicher, sonst Drive); klappt das nicht, die Miniatur */
   (async()=>{
     let d=null;try{d=await _fsFotoFuerPdf(f);}catch(e){d=null;}
-    if(document.getElementById('_fsFotoPins')!==ov)return;
+    if(_fsById('_fsFotoPins')!==ov)return;
     const im=new Image();
-    im.onload=()=>{if(document.getElementById('_fsFotoPins')!==ov)return;const nw=im.naturalWidth||900,nh=im.naturalHeight||640,k=Math.min(1,1600/nw);W=Math.max(1,Math.round(nw*k));H=Math.max(1,Math.round(nh*k));cv.width=W;cv.height=H;bild=im;geladen=true;zeichne();};
+    im.onload=()=>{if(_fsById('_fsFotoPins')!==ov)return;const nw=im.naturalWidth||900,nh=im.naturalHeight||640,k=Math.min(1,1600/nw);W=Math.max(1,Math.round(nw*k));H=Math.max(1,Math.round(nh*k));cv.width=W;cv.height=H;bild=im;geladen=true;zeichne();};
     im.onerror=()=>{geladen=true;zeichne();};
     if(d&&d.dataUrl)im.src=d.dataUrl;else{geladen=true;zeichne();_fsMiniaturQuelle(f,im);}
   })();
@@ -960,7 +987,7 @@ function _fsFotoLeiste(bericht,it,label,kompakt,vorne){ // kompakt: nur 📷 (+Z
       if(typeof f.blick==='number'&&isFinite(f.blick)){ /* F29: Kennzeichen „Blick nach …“ am Foto; antippen entfernt es */
         const bk=document.createElement('button');bk.type='button';bk.setAttribute('data-fs-blick','1');bk.textContent='↗ '+FS_B2_SEITEN[Math.round((((f.blick%360)+360)%360)/45)%8];bk.title='Blick nach '+_fsBlickWort(f.blick)+' ('+Math.round(f.blick)+'°) – antippen zum Entfernen';
         bk.style.cssText='position:absolute;left:2px;bottom:2px;min-width:30px;height:20px;border-radius:10px;border:none;background:rgba(31,95,139,.9);color:#fff;font-size:var(--fs11,11px);font-weight:700;line-height:20px;padding:0 6px;cursor:pointer;';
-        bk.onclick=e=>{e.stopPropagation();if(confirm('Blickrichtung (Blick nach '+_fsBlickWort(f.blick)+') am Foto entfernen?')){delete f.blick;scheduleSave();neu();}};
+        bk.onclick=e=>{e.stopPropagation();if(_fsFrage('Blickrichtung (Blick nach '+_fsBlickWort(f.blick)+') am Foto entfernen?')){delete f.blick;scheduleSave();neu();}};
         th.appendChild(bk);
       }
       if(bericht.schlank){ /* F37: „📌“ an der Miniatur öffnet das Foto zum Markieren; mit Pins steht ihre Anzahl dabei */
@@ -1218,6 +1245,8 @@ function _fsWordAufbau(b,task){
 }
 function _fsPdfOeffnen(bericht){
   const blob=_fsPdfBlobs[bericht.id];
+  const w=_fsWin(bericht); /* F69: steht das Protokoll im eigenen Fenster, öffnet DIESES den Tab (dort wurde geklickt – sonst hält der Browser ihn für ein ungefragtes Pop-up) */
+  if(w!==window){try{if(blob){w.open(URL.createObjectURL(blob),'_blank');return 'geraet';}if(bericht.pdfDriveId){w.open('https://drive.google.com/file/d/'+encodeURIComponent(bericht.pdfDriveId)+'/view','_blank');return 'drive';}}catch(e){}}
   if(blob&&typeof _dateiBlobOeffnen==='function'){_dateiBlobOeffnen(blob,bericht.pdfName||_fsPdfName(bericht));return 'geraet';}
   if(bericht.pdfDriveId){window.open('https://drive.google.com/file/d/'+encodeURIComponent(bericht.pdfDriveId)+'/view','_blank');return 'drive';}
   toast('Noch kein PDF – bitte zuerst „📄 PDF erstellen"','info',3500);
@@ -1302,7 +1331,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   }
   _fsVervollstaendigen(bericht);
 
-  const GID='_fsMobOverlay';const old=document.getElementById(GID);if(old)old.remove();
+  const GID='_fsMobOverlay';const old=_fsById(GID);if(old)old.remove(); /* F69: auch im eigenen Fenster */
   if(typeof _pbOffenMerken==='function')_pbOffenMerken(t,bericht,GID,function(){_neuBauen();}); // v306: nach Neuladen/Zusammenführen an den frischen Stand hängen, bei jüngerer Fassung von drüben neu zeichnen
   const ov=document.createElement('div');ov.id=GID;
   ov.style.cssText='position:fixed;inset:0;z-index:99998;display:flex;flex-direction:column;background:var(--bg);';
@@ -1404,7 +1433,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const n=_fsKopfErgaenzen(bericht,t);
     const ab=(typeof _fsKopfAbweichungen==='function')?_fsKopfAbweichungen(bericht,t):[];
     let m=0;
-    if(ab.length&&confirm('Diese Angaben weichen von der Karte ab:\n\n'+ab.map(x=>x.name+'\n   im Protokoll: '+x.alt+'\n   in der Karte: '+x.neu).join('\n\n')+'\n\nOK = aus der Karte übernehmen\nAbbrechen = so lassen')){ab.forEach(x=>{bericht.kopf[x.key]=x.neu;});m=ab.length;}
+    if(ab.length&&_fsFrage('Diese Angaben weichen von der Karte ab:\n\n'+ab.map(x=>x.name+'\n   im Protokoll: '+x.alt+'\n   in der Karte: '+x.neu).join('\n\n')+'\n\nOK = aus der Karte übernehmen\nAbbrechen = so lassen')){ab.forEach(x=>{bericht.kopf[x.key]=x.neu;});m=ab.length;}
     scheduleSave();_neuBauen();
     const teile=[n?n+(n===1?' Feld':' Felder')+' ergänzt':'',m?m+(m===1?' Feld':' Felder')+' aus der Karte übernommen':''].filter(Boolean);
     toast(teile.length?'✓ '+teile.join(', '):(ab.length?'ℹ Nichts geändert – das Protokoll behält seine Angaben':'ℹ Nichts zu übernehmen – alles wie in der Karte'),'info',3500);
@@ -1463,7 +1492,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       td.style.cssText='font-size:var(--fs14,14px);color:var(--text);text-align:center;';
       const x=document.createElement('button');x.type='button';x.textContent='✕';x.title='Raum entfernen';
       x.style.cssText='width:var(--fsh,40px);height:var(--fsh,40px);border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--red);font-size:var(--fs15,15px);cursor:pointer;';
-      x.onclick=()=>{if(!confirm('Raum „'+(r.name||'ohne Namen')+'" entfernen?'))return;bericht.raeume.splice(ri,1);scheduleSave();_neuBauen();};
+      x.onclick=()=>{if(!_fsFrage('Raum „'+(r.name||'ohne Namen')+'" entfernen?'))return;bericht.raeume.splice(ri,1);scheduleSave();_neuBauen();};
       row.append(nameI,tI,fI,td,x);
       w.appendChild(row);
     });
@@ -1475,7 +1504,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       chips.appendChild(_chip('＋ '+n,false,()=>{bericht.raeume.push({name:n,t:'',rf:''});scheduleSave();_neuBauen();}));
     });
     chips.appendChild(_chip('＋ anderer Raum',false,()=>{
-      const n=prompt('Name des Raums:');
+      const n=_fsEingabe('Name des Raums:');
       if(n&&n.trim()){bericht.raeume.push({name:n.trim(),t:'',rf:''});scheduleSave();_neuBauen();}
     }));
     w.appendChild(chips);
@@ -1500,7 +1529,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       txtI.setAttribute('data-fs-stellentext',String(si));
       const x=document.createElement('button');x.type='button';x.textContent='✕';x.title='Messstelle entfernen';
       x.style.cssText='width:var(--fsh,40px);height:var(--fsh,40px);border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--red);font-size:var(--fs15,15px);cursor:pointer;flex-shrink:0;';
-      x.onclick=()=>{if(!confirm('Messstelle '+(si+1)+' entfernen?'))return;bericht.stellen.splice(si,1);scheduleSave();_neuBauen();};
+      x.onclick=()=>{if(!_fsFrage('Messstelle '+(si+1)+' entfernen?'))return;bericht.stellen.splice(si,1);scheduleSave();_neuBauen();};
       top.append(nr,txtI,x);
 
       const sel=document.createElement('select');
@@ -1617,7 +1646,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       });
       const frei=document.createElement('button');frei.type='button';frei.textContent='＋ Freier Eintrag';
       frei.style.cssText=S_KNOPF+'display:block;width:calc(100% - 28px);margin:8px 14px;border:1px dashed var(--border);background:transparent;color:var(--text2);';
-      frei.onclick=()=>{const tx=prompt('Prüfpunkt:');if(tx&&tx.trim()){sek.items.push({text:tx.trim(),status:'offen',notiz:''});scheduleSave();_neuBauen();}};
+      frei.onclick=()=>{const tx=_fsEingabe('Prüfpunkt:');if(tx&&tx.trim()){sek.items.push({text:tx.trim(),status:'offen',notiz:''});scheduleSave();_neuBauen();}};
       w.appendChild(frei);
       const ein=document.createElement('button');ein.type='button';ein.textContent='▲ Abschnitt einklappen';ein.setAttribute('data-fs-einklappen',String(si)); // v304
       ein.style.cssText=S_KNOPF+'display:block;width:calc(100% - 28px);margin:0 14px 12px;border:1.5px solid var(--fs-krd,'+FS_FARBE+');background:var(--fs-kfl,transparent);color:var(--text);';
@@ -1712,7 +1741,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const b=document.createElement('button');b.type='button';b.textContent='🔄 In Begehungsprotokoll umwandeln';b.setAttribute('data-fs-umwandeln-knopf','1');
     b.style.cssText=S_KNOPF+'margin-top:8px;min-height:var(--fsh44,44px);border:1.5px solid var(--fs-krd,'+FS_FARBE+');background:var(--fs-kfl,transparent);color:var(--text);';
     b.onclick=()=>{
-      if(!confirm('In Begehungsprotokoll umwandeln?\n\nAlle Eingaben, Fotos und Messwerte bleiben erhalten. Im PDF stehen künftig nur Feststellungen: Ampel, Ergebnis, Taupunkt-Werte, Ursache und Empfehlungen entfallen (sie bleiben in den Daten). Einige Punkte müssen neu beantwortet werden.'))return;
+      if(!_fsFrage('In Begehungsprotokoll umwandeln?\n\nAlle Eingaben, Fotos und Messwerte bleiben erhalten. Im PDF stehen künftig nur Feststellungen: Ampel, Ergebnis, Taupunkt-Werte, Ursache und Empfehlungen entfallen (sie bleiben in den Daten). Einige Punkte müssen neu beantwortet werden.'))return;
       const r=_fsZuBegehung(bericht);
       scheduleSave();
       hdrT.textContent='💧 '+_fsTitel(bericht);
@@ -1758,7 +1787,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
         if(sel.value==='__eigen'){const r=_fsRolleEintippen(p.rolle);if(r){p.rolle=r;scheduleSave();}_neuBauen();return;} /* F51 */
         p.rolle=sel.value;scheduleSave();_neuBauen();
       };
-      const x=_bgXKnopf('Person entfernen',()=>{if(String(p.name||'').trim()&&!confirm('„'+String(p.name).trim()+'" entfernen?'))return;bericht.anwesende.splice(pi,1);scheduleSave();_neuBauen();});
+      const x=_bgXKnopf('Person entfernen',()=>{if(String(p.name||'').trim()&&!_fsFrage('„'+String(p.name).trim()+'" entfernen?'))return;bericht.anwesende.splice(pi,1);scheduleSave();_neuBauen();});
       row.append(n,sel,x);w.appendChild(row);
     });
     const chips=document.createElement('div');chips.style.cssText='display:flex;flex-wrap:wrap;gap:6px;padding-top:2px;';
@@ -1821,7 +1850,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       opts.forEach(o=>{const e=document.createElement('option');e.value=o.w;e.textContent=o.t;ps.appendChild(e);});
       ps.value=name;
       ps.onchange=()=>{
-        if(ps.value==='__frei'){const n=prompt('Name der Person',name);if(n!==null&&n.trim()){p.name=n.replace(/\s+/g,' ').trim();ichMerken(p);scheduleSave();}_neuBauen();return;}
+        if(ps.value==='__frei'){const n=_fsEingabe('Name der Person',name);if(n!==null&&n.trim()){p.name=n.replace(/\s+/g,' ').trim();ichMerken(p);scheduleSave();}_neuBauen();return;}
         p.name=ps.value;const x=wahl.find(q=>q.name===ps.value);if(x&&x.rolle)p.rolle=x.rolle;ichMerken(p);scheduleSave();_neuBauen();
       };
       const sel=document.createElement('select');sel.style.cssText=S_INP;
@@ -1834,7 +1863,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
         if(sel.value==='__eigen'){const r=_fsRolleEintippen(p.rolle);if(r){p.rolle=r;ichMerken(p);scheduleSave();}_neuBauen();return;} /* F51: eigenes Wort, z. B. Bautechniker */
         p.rolle=sel.value;ichMerken(p);scheduleSave();_neuBauen();
       };
-      const x=_bgXKnopf('Person entfernen',()=>{if(String(p.name||'').trim()&&!confirm('„'+String(p.name).trim()+'" entfernen?'))return;bericht.anwesende.splice(pi,1);scheduleSave();_neuBauen();});
+      const x=_bgXKnopf('Person entfernen',()=>{if(String(p.name||'').trim()&&!_fsFrage('„'+String(p.name).trim()+'" entfernen?'))return;bericht.anwesende.splice(pi,1);scheduleSave();_neuBauen();});
       row.append(ps,sel,x);w.appendChild(row);
     });
     const chips=document.createElement('div');chips.style.cssText='display:flex;flex-wrap:wrap;gap:6px;padding-top:2px;';
@@ -2010,7 +2039,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const cw=document.createElement('div');cw.style.cssText='flex:1;min-width:0;display:flex;flex-wrap:wrap;gap:6px;';
     alle.forEach(x=>{const gew=tokens.indexOf(x)>=0,c=_chip(x,gew,()=>setze(_fsHausToggle(alle,tokens,x)));c.setAttribute('data-fs-haus-chip',x);c.setAttribute('aria-pressed',gew?'true':'false');cw.appendChild(c);});
     const fr=_chip('✎ andere …',false,()=>{
-      const n=prompt('Haus / Eingang – z. B. „9 – Eingang links“ oder „Hinterhaus“','');
+      const n=_fsEingabe('Haus / Eingang – z. B. „9 – Eingang links“ oder „Hinterhaus“','');
       if(n===null)return;
       const c=String(n).replace(/\s*·\s*/g,' ').replace(/\s+/g,' ').trim();
       if(c)setze(tokens.indexOf(c)>=0?tokens:tokens.concat([c]));
@@ -2048,7 +2077,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     opt('__frei','✎ anderen Auftraggeber eintippen …');
     sel.value=akt;
     sel.onchange=()=>{
-      if(sel.value==='__frei'){const n=prompt('Auftraggeber',akt);if(n!==null&&n.trim()){bericht.kopf.auftraggeber=n.replace(/\s+/g,' ').trim();scheduleSave();}_neuBauen();return;}
+      if(sel.value==='__frei'){const n=_fsEingabe('Auftraggeber',akt);if(n!==null&&n.trim()){bericht.kopf.auftraggeber=n.replace(/\s+/g,' ').trim();scheduleSave();}_neuBauen();return;}
       bericht.kopf.auftraggeber=sel.value;scheduleSave();
     };
     row.append(l,sel);
@@ -2101,7 +2130,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       }
       const z1=document.createElement('div');z1.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;';
       z1.appendChild(kn(txt?'↻ neu holen':'🌤 Wetter holen','data-fs-vbwetterknopf',()=>holeW(bericht,_neuBauen,_fsWetterWahlLesen(bericht))));
-      if(txt)z1.appendChild(kn('✕ entfernen','data-fs-wetterweg',()=>{if(!confirm('Wetterdienst-Angaben aus dem Protokoll entfernen? Deine eigene Messung bleibt.'))return;_fsWetterDienstLeeren(k);scheduleSave();_neuBauen();}));
+      if(txt)z1.appendChild(kn('✕ entfernen','data-fs-wetterweg',()=>{if(!_fsFrage('Wetterdienst-Angaben aus dem Protokoll entfernen? Deine eigene Messung bleibt.'))return;_fsWetterDienstLeeren(k);scheduleSave();_neuBauen();}));
       i1.appendChild(z1);
       const h1=klein((txt&&!q)?'Aus dem älteren Protokoll von Hand. Zum Ersetzen „↻ neu holen“ (holt für die Objekt-Adresse) – was du selbst misst oder siehst, gehört in den Kasten darunter.':'Geholt für die Objekt-Adresse. Diese Werte lassen sich nicht überschreiben – was du selbst misst oder siehst, gehört in den Kasten darunter.');h1.style.marginTop='4px';i1.appendChild(h1);
       const sw=document.createElement('div');sw.style.cssText='display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;';
@@ -2160,12 +2189,12 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       }
       if(!akt&&!bericht.schlank&&String(bericht.kopf.nutzer||'').trim()){ /* F52: älteres Begehungsprotokoll – der getippte Nutzer bleibt sichtbar (und im PDF), bis eine Person gewählt ist */
         const nu=String(bericht.kopf.nutzer).trim();
-        const c=_chip('Nutzer: '+nu+'  ✕',true,()=>{if(!confirm('„'+nu+'“ als Nutzer wegnehmen?'))return;bericht.kopf.nutzer='';scheduleSave();_neuBauen();});
+        const c=_chip('Nutzer: '+nu+'  ✕',true,()=>{if(!_fsFrage('„'+nu+'“ als Nutzer wegnehmen?'))return;bericht.kopf.nutzer='';scheduleSave();_neuBauen();});
         c.setAttribute('data-fs-beialt','1');c.title='Aus dem älteren Protokoll – antippen zum Wegnehmen';
         chips.insertBefore(c,chips.firstChild);
       }
       if(akt&&!gezeigt){
-        const c=_chip(akt+'  ✕',true,()=>{if(!confirm('„'+akt+'“ bei „Besichtigung bei“ wegnehmen?'))return;bericht.kopf.besuchBei='';bericht.kopf.nutzer='';bericht.kopf.ansprechpartner='';scheduleSave();_neuBauen();});
+        const c=_chip(akt+'  ✕',true,()=>{if(!_fsFrage('„'+akt+'“ bei „Besichtigung bei“ wegnehmen?'))return;bericht.kopf.besuchBei='';bericht.kopf.nutzer='';bericht.kopf.ansprechpartner='';scheduleSave();_neuBauen();});
         c.setAttribute('data-fs-beialt','1');c.title='Gespeichert, steht aber nicht (mehr) unter den Kontakten – antippen zum Wegnehmen';
         chips.insertBefore(c,chips.firstChild);
       }
@@ -2176,7 +2205,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       zeitKn.append(
         zk('📍 Ich bin jetzt hier (Datum + Uhrzeit)',()=>{const j=_fsVbJetzt();bericht.datum=j.datum;bericht.kopf.beginn=j.uhr;scheduleSave();hdrS.textContent=(bericht.kopf.objektAdresse||t.adresse||t.title||'')+' · '+(bericht.datum||'');_neuBauen();toast('✓ Datum '+j.datum+', Beginn '+j.uhr+' Uhr eingetragen – nur im Protokoll','success',3500);},'data-fs-jetzt-beginn'),
         zk('🏁 Fertig (Ende jetzt)',()=>{const j=_fsVbJetzt();const tag=String(bericht.datum||'').trim();
-          if(tag&&_fsVbIso(tag)!==_fsVbIso(j.datum)&&!confirm(_fsVbFertigFrage(tag,j))){ /* F47: „9.10.2026“ und „09.10.2026“ sind derselbe Tag */_vbZeitAuf=true;_neuBauen();toast('Bitte das Ende von Hand eintragen (Feld „Ende“)','info',4000);return;}
+          if(tag&&_fsVbIso(tag)!==_fsVbIso(j.datum)&&!_fsFrage(_fsVbFertigFrage(tag,j))){ /* F47: „9.10.2026“ und „09.10.2026“ sind derselbe Tag */_vbZeitAuf=true;_neuBauen();toast('Bitte das Ende von Hand eintragen (Feld „Ende“)','info',4000);return;}
           bericht.kopf.ende=j.uhr;scheduleSave();_neuBauen();toast('✓ Ende '+j.uhr+' Uhr eingetragen – nur im Protokoll','success',3500);},'data-fs-jetzt-ende'));
       const zz=document.createElement('div');zz.setAttribute('data-fs-zeitzeile','1');zz.style.cssText='display:flex;align-items:center;gap:10px;padding:2px 14px 8px;font-size:var(--fs14,14px);color:var(--text);';
       const zt=document.createElement('span');zt.style.cssText='flex:1;min-width:0;';const ztx=_fsBgZeitText(bericht.kopf);
@@ -2273,13 +2302,13 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       k.style.cssText='margin:8px 0;padding:8px 10px 10px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg2);';
       const kz=document.createElement('div');kz.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:6px;';
       const nr=document.createElement('div');nr.style.cssText='flex:1;font-size:var(--fs14,14px);font-weight:700;color:var(--text);';nr.textContent='Stelle '+(si+1);
-      kz.append(nr,_bgXKnopf('Stelle entfernen',()=>{if(_fsVbStelleGefuellt(s)&&!confirm('Stelle '+(si+1)+' entfernen? Die Fotos bleiben im Protokoll.'))return;bericht.vbStellen.splice(si,1);scheduleSave();_neuBauen();}));
+      kz.append(nr,_bgXKnopf('Stelle entfernen',()=>{if(_fsVbStelleGefuellt(s)&&!_fsFrage('Stelle '+(si+1)+' entfernen? Die Fotos bleiben im Protokoll.'))return;bericht.vbStellen.splice(si,1);scheduleSave();_neuBauen();}));
       // Raum (aus der Standardliste und den Räumen der Raumskizze)
       const cur=String(s.raum||'').trim();
       const rn=FS_VB_RAEUME.slice();(bericht.raeume||[]).forEach(r=>{const n=String((r&&r.name)||'').trim();if(n&&rn.indexOf(n)<0)rn.push(n);});if(cur&&rn.indexOf(cur)<0)rn.push(cur);
       const rc=document.createElement('div');rc.setAttribute('data-fs-vbraeume',String(si));rc.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 4px;';
       rn.forEach(n=>{const c=_chip(n,cur===n,()=>{s.raum=cur===n?'':n;scheduleSave();_neuBauen();});c.setAttribute('data-fs-vbraum',n);rc.appendChild(c);});
-      const eig=_chip('＋ anderer Raum',false,()=>{const n=prompt('Name des Raums');if(n&&n.trim()){s.raum=n.trim();scheduleSave();_neuBauen();}});eig.setAttribute('data-fs-vbraumneu','1');rc.appendChild(eig);
+      const eig=_chip('＋ anderer Raum',false,()=>{const n=_fsEingabe('Name des Raums');if(n&&n.trim()){s.raum=n.trim();scheduleSave();_neuBauen();}});eig.setAttribute('data-fs-vbraumneu','1');rc.appendChild(eig);
       // Bauteil
       const ortI=_inp(s.ort,bericht.schlank?'Wo? z. B. Wohnzimmer, Decke':'Bauteil / Ort, z. B. Decke, an der Kehle',v=>{s.ort=v;if(_vbUmgFuellen){try{_vbUmgFuellen();}catch(_e){}}},false);ortI.setAttribute('data-fs-vbort',String(si)); /* F23: Vorschläge der Umgebung laufen mit */
       const oc=document.createElement('div');oc.style.cssText='display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 4px;';
@@ -2333,7 +2362,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       k.style.cssText='margin:6px 0;padding:8px 10px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg2);';
       const kz=document.createElement('div');kz.style.cssText='display:flex;align-items:center;gap:8px;';
       const nm=document.createElement('div');nm.style.cssText='flex:1;min-width:0;font-size:var(--fs14,14px);font-weight:700;color:var(--text);';nm.textContent=(bericht.schlank?(r.bereich==='aussen'?'🌤 ':'🏠 '):'')+(r.text||'(ohne Text)');
-      kz.append(nm,_bgXKnopf('Zeile entfernen',()=>{if(r.status&&!confirm('Zeile „'+(r.text||'')+'" entfernen?'))return;bericht.vbUmgebung.splice(ri,1);scheduleSave();_neuBauen();}));
+      kz.append(nm,_bgXKnopf('Zeile entfernen',()=>{if(r.status&&!_fsFrage('Zeile „'+(r.text||'')+'" entfernen?'))return;bericht.vbUmgebung.splice(ri,1);scheduleSave();_neuBauen();}));
       const wahl=document.createElement('div');wahl.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;';
       (bericht.schlank?[['ok','✓ nichts festgestellt'],['auff','⚠ festgestellt'],['nicht','∅ nicht geprüft']]:[['ok','✓ ohne Auffälligkeit'],['auff','⚠ auffällig'],['nicht','∅ nicht geprüft']]).forEach(x=>{ // F23 · F47: auch hier „nicht geprüft“, neutrale Wörter
         const c=_chip(x[1],r.status===x[0],()=>{
@@ -2387,7 +2416,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       nr.textContent=(offen?'▾ ':'▸ ')+(offen?_fsStelleNrText(bericht,s):_fsStelleKurz(bericht,s,si+1,true)); /* F35: der Raum/Bereich steht in der Überschrift darüber – hier nur „Stelle n“ */
       nr.title=_fsVbBezeichnung(bericht,s,si+1);
       nr.onclick=()=>{_fsStelleSetzen(s,!offen);_neuBauen();};
-      kz.append(nr,_bgXKnopf('Stelle entfernen',()=>{if(_fsVbStelleGefuelltS(s)&&!confirm(_fsVbBezeichnung(bericht,s,si+1)+' entfernen? Die Fotos bleiben im Protokoll.'))return;bericht.vbStellen.splice(si,1);scheduleSave();_neuBauen();}));
+      kz.append(nr,_bgXKnopf('Stelle entfernen',()=>{if(_fsVbStelleGefuelltS(s)&&!_fsFrage(_fsVbBezeichnung(bericht,s,si+1)+' entfernen? Die Fotos bleiben im Protokoll.'))return;bericht.vbStellen.splice(si,1);scheduleSave();_neuBauen();}));
       if(!offen){k.append(kz);return k;} /* F30: zugeklappt = nur die Zeile */
       const ortI=_inp(s.ort,typ==='aussen'?'Wo? z. B. Kehle über dem Wohnzimmer, linke Ecke':'Wo? z. B. Decke, Eckbereich Wand 1 / Wand 2',v=>{s.ort=v;if(_vbUmgFuellen){try{_vbUmgFuellen();}catch(_e){}}},false);ortI.setAttribute('data-fs-vbort',String(si));
       // Seite (freiwillig): Himmelsrichtung oder Straßenseite/Hofseite/Giebel; Kompassnadel misst als Vorschlag
@@ -2462,7 +2491,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
         const oeffnen=()=>_fsBgEinzeichnenZeigen(bericht,_fsAsPseudoRaum(sk),()=>{_neuBauen();});
         const nm=_inp(sk.name,'Name der Skizze, z. B. Wand Straßenseite',v=>{sk.name=v;zeichne();},false);nm.setAttribute('data-fs-asname',sk.id);
         const fz=document.createElement('div');fz.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 2px;';
-        _fsAsFlaechen(sk).forEach(f=>{const c=_chip(f.t,sk.aussen===f.k,()=>{if(sk.aussen===f.k)return;if(_fsBgStempelAnzahl(sk)&&!confirm('Die gesetzten Stempel bleiben stehen, passen aber zur anderen Ansicht. Trotzdem wechseln?'))return;sk.aussen=f.k;scheduleSave();_neuBauen();});c.setAttribute('data-fs-asflaeche',f.k);c.style.minHeight='var(--fsh,38px)';fz.appendChild(c);});
+        _fsAsFlaechen(sk).forEach(f=>{const c=_chip(f.t,sk.aussen===f.k,()=>{if(sk.aussen===f.k)return;if(_fsBgStempelAnzahl(sk)&&!_fsFrage('Die gesetzten Stempel bleiben stehen, passen aber zur anderen Ansicht. Trotzdem wechseln?'))return;sk.aussen=f.k;scheduleSave();_neuBauen();});c.setAttribute('data-fs-asflaeche',f.k);c.style.minHeight='var(--fsh,38px)';fz.appendChild(c);});
         { /* F50: quer oder hoch – Stempel, Striche und Nummern bleiben an ihrer Stelle im Verhältnis zur Fläche */
           const tz=document.createElement('span');tz.style.cssText='width:1px;align-self:stretch;background:var(--border);margin:0 2px;';fz.appendChild(tz);
           [['quer','▭ quer'],['hoch','▯ hoch']].forEach(([lk,lt])=>{const an=(lk==='hoch')===!!sk.hoch;const c=_chip(lt,an,()=>{if(an)return;sk.hoch=lk==='hoch';scheduleSave();_neuBauen();});c.setAttribute('data-fs-aslage',lk);c.style.minHeight='var(--fsh,38px)';fz.appendChild(c);});
@@ -2485,7 +2514,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
         const nh=document.createElement('div');nh.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin:4px 0;line-height:1.4;';nh.textContent='Nicht maßstäblich. Die Nummern sind die Stellen dieses Bereichs – ihre Fotos hängen an der Stelle. Im PDF steht die Skizze nur, wenn etwas eingezeichnet ist.';k.appendChild(nh);
         const weg=document.createElement('button');weg.type='button';weg.setAttribute('data-fs-asweg',sk.id);weg.textContent='✕ Skizze entfernen';
         weg.style.cssText=S_KNOPF+'display:block;width:100%;margin-top:6px;border:1px solid var(--border);background:transparent;color:var(--text2);';
-        weg.onclick=()=>{if(_fsAsBenutzt(bericht,sk)&&!confirm('Skizze „'+(String(sk.name||'').trim()||'Außen')+'“ entfernen? Stempel, Striche und die Nummern in der Skizze gehen verloren. Die Stellen und ihre Fotos bleiben.'))return;_fsAsWeg(bericht,sk);scheduleSave();_neuBauen();};
+        weg.onclick=()=>{if(_fsAsBenutzt(bericht,sk)&&!_fsFrage('Skizze „'+(String(sk.name||'').trim()||'Außen')+'“ entfernen? Stempel, Striche und die Nummern in der Skizze gehen verloren. Die Stellen und ihre Fotos bleiben.'))return;_fsAsWeg(bericht,sk);scheduleSave();_neuBauen();};
         k.appendChild(weg);wr.appendChild(k);
       });
       const neuK=document.createElement('button');neuK.type='button';neuK.setAttribute('data-fs-asneu',bereich);neuK.textContent='＋ Skizze für '+(bereich||(typ==='innen'?'diesen Raum':'Außen'));
@@ -2511,7 +2540,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
         const rn=document.createElement('div');rn.style.cssText='flex:1;min-width:0;font-size:var(--fs16,16px);font-weight:700;color:var(--text);';rn.textContent=gr.raum||(typ==='aussen'?'Außen':'Ohne Raum');
         const re=document.createElement('button');re.type='button';re.textContent='✎';re.title=typ==='aussen'?'Bereich umbenennen':'Raum umbenennen';re.setAttribute('aria-label',re.title);re.setAttribute('data-fs-raumumbenennen',gr.raum); /* F35: kleines Stift-Symbol statt großem Knopf */
         re.style.cssText=S_KNOPF+'min-height:var(--fsh,40px);min-width:var(--fsh,44px);padding:4px 8px;font-size:var(--fs17,17px);border:1.5px solid var(--fs-krd,transparent);background:var(--fs-kfl,transparent);color:var(--text);'; /* F38: ein richtiger Knopf mit Rahmen */
-        re.onclick=()=>{const n=prompt('Neuer Name für „'+(gr.raum||'Ohne Raum')+'“',gr.raum);if(n===null)return;const nn=String(n).trim();_fsAsListe(bericht).forEach(k=>{if(_fsAsTyp(k)===typ&&k.bereich===gr.raum)k.bereich=nn;});gr.stellen.forEach(x=>{x.s.raum=nn;});scheduleSave();_neuBauen();}; /* F33: die Skizzen des Bereichs gehen mit */
+        re.onclick=()=>{const n=_fsEingabe('Neuer Name für „'+(gr.raum||'Ohne Raum')+'“',gr.raum);if(n===null)return;const nn=String(n).trim();_fsAsListe(bericht).forEach(k=>{if(_fsAsTyp(k)===typ&&k.bereich===gr.raum)k.bereich=nn;});gr.stellen.forEach(x=>{x.s.raum=nn;});scheduleSave();_neuBauen();}; /* F33: die Skizzen des Bereichs gehen mit */
         if(gr.stellen.length>1){ /* F30: alle zuklappen / aufklappen */
           const anyAuf=gr.stellen.some(x=>_fsStelleOffen(bericht,x.s));
           const ak=document.createElement('button');ak.type='button';ak.setAttribute('data-fs-gruppealle',gr.raum);ak.textContent=anyAuf?'▾ alle zu':'▸ alle auf';
@@ -2549,7 +2578,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const namen=(typ==='innen'?FS_B2_RAEUME:FS_B2_BEREICHE).slice();
       if(typ==='innen')(bericht.raeume||[]).forEach(r=>{const n=String((r&&r.name)||'').trim();if(n&&namen.indexOf(n)<0)namen.push(n);});
       _fsWeitereNamen(namen,daNamen).forEach(n=>{const c=_chip('＋ '+n,false,()=>{_fsWeiterSetzen(bericht,typ,false);neueStelle(typ,n);});c.setAttribute(typ==='innen'?'data-fs-raumneu':'data-fs-bereichneu',n);rc.appendChild(c);});
-      const eig=_chip(typ==='innen'?'＋ anderer Raum':'＋ anderer Bereich',false,()=>{const n=prompt(typ==='innen'?'Name des Raums':'Name des Bereichs');if(n&&n.trim()){_fsWeiterSetzen(bericht,typ,false);neueStelle(typ,n.trim());}});eig.setAttribute('data-fs-raumneuname',typ);rc.appendChild(eig);
+      const eig=_chip(typ==='innen'?'＋ anderer Raum':'＋ anderer Bereich',false,()=>{const n=_fsEingabe(typ==='innen'?'Name des Raums':'Name des Bereichs');if(n&&n.trim()){_fsWeiterSetzen(bericht,typ,false);neueStelle(typ,n.trim());}});eig.setAttribute('data-fs-raumneuname',typ);rc.appendChild(eig);
       if(vorhanden){ /* F35: gibt es schon einen Raum/Bereich, steht die Auswahl hinter EINEM Knopf; beim leeren Protokoll bleibt sie offen (kein zusätzlicher Tipp) */
         const wk=document.createElement('button');wk.type='button';wk.setAttribute('data-fs-weiter',typ);
         const wText=()=>'＋ weiterer '+(typ==='innen'?'Raum':'Bereich')+(_fsWeiterOffen(bericht,typ)?' ▾':' ▸');
@@ -2576,7 +2605,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const zl=document.createElement('div');zl.style.cssText='display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px;';
       [[true,'📄 im PDF'],[false,'🔒 nur für mich']].forEach(([wert,txt])=>{const c=_chip(txt,(n.pdf===true)===wert,()=>{if((n.pdf===true)===wert)return;n.pdf=wert;scheduleSave();_neuBauen();});c.setAttribute('data-fs-notizpdf',wert?'ja':'nein');zl.appendChild(c);});
       const sp=document.createElement('span');sp.style.cssText='flex:1;';zl.appendChild(sp);
-      zl.appendChild(_bgXKnopf('Notiz entfernen',()=>{if(String(n.text||'').trim()&&!confirm('Notiz entfernen?'))return;bericht.notizen.splice(ni,1);scheduleSave();_neuBauen();}));
+      zl.appendChild(_bgXKnopf('Notiz entfernen',()=>{if(String(n.text||'').trim()&&!_fsFrage('Notiz entfernen?'))return;bericht.notizen.splice(ni,1);scheduleSave();_neuBauen();}));
       k.append(tx,zl);w.appendChild(k);
     });
     const plus=_chip('＋ Notiz',false,()=>{
@@ -2732,7 +2761,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     td.style.cssText='font-size:var(--fs14,14px);color:var(--text);text-align:center;';
     const x=document.createElement('button');x.type='button';x.textContent='✕';x.title='Raum entfernen';
     x.style.cssText='width:var(--fsh,40px);height:var(--fsh,40px);border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--red);font-size:var(--fs15,15px);cursor:pointer;';
-    x.onclick=()=>{if(!confirm('Raum „'+(r.name||'ohne Namen')+'" mit allen Wänden entfernen?'))return;bericht.raeume.splice(ri,1);_bgRaumSel=null;scheduleSave();_neuBauen();};
+    x.onclick=()=>{if(!_fsFrage('Raum „'+(r.name||'ohne Namen')+'" mit allen Wänden entfernen?'))return;bericht.raeume.splice(ri,1);_bgRaumSel=null;scheduleSave();_neuBauen();};
     row.append(nameI,tI,fI,td,x);
     const r2=document.createElement('div');r2.style.cssText='display:grid;grid-template-columns:96px minmax(0,1fr);gap:6px;padding:0 14px 6px;align-items:center;';
     r2.append(_inp(r.zeit,'hh:mm',v=>{r.zeit=v;},false),_inp(r.bedingung,'Bedingungen, z. B. Heizlüfter in Betrieb',v=>{r.bedingung=v;},false));
@@ -2760,7 +2789,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
         aI.value=cur;
         aI.onchange=()=>{
           if(aI.value==='__andere'){
-            const n=prompt('Art der Wand:',(cur&&FS_BG_WANDARTEN.indexOf(cur)<0)?cur:'');
+            const n=_fsEingabe('Art der Wand:',(cur&&FS_BG_WANDARTEN.indexOf(cur)<0)?cur:'');
             if(n===null||!n.trim()){aI.value=cur;return;}
             wd.art=n.trim();
           }else wd.art=aI.value;
@@ -2771,7 +2800,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       }
       const fl=_fsFotoLeiste(bericht,{text:(r.name||'Raum')+', '+wd.k,fotoRefs:wd.fotoRefs},'Fotos zu '+wd.k,true);fl.style.marginTop='0';
       const wx=_bgXKnopf(wd.k+' entfernen',()=>{
-        if(!confirm(wd.k+' entfernen? Die Zuordnung der Messstellen und Fotos zu dieser Wand geht verloren (die Fotos selbst bleiben).'))return;
+        if(!_fsFrage(wd.k+' entfernen? Die Zuordnung der Messstellen und Fotos zu dieser Wand geht verloren (die Fotos selbst bleiben).'))return;
         r.waende.splice(wi,1);
         bericht.stellen.forEach(st=>{if(st.raum===r.name&&st.wand===wd.k)st.wand='';});
         scheduleSave();_neuBauen();
@@ -2833,7 +2862,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       chips.appendChild(_chip('＋ '+n,false,()=>{bericht.raeume.push(_fsBgRaumMitWaenden(n));_bgRaumSel=bericht.raeume.length-1;_bgRaumTab='klima';scheduleSave();_neuBauen();}));
     });
     chips.appendChild(_chip('＋ anderer Raum',false,()=>{
-      const n=prompt('Name des Raums:');
+      const n=_fsEingabe('Name des Raums:');
       if(n&&n.trim()){bericht.raeume.push(_fsBgRaumMitWaenden(n.trim()));_bgRaumSel=bericht.raeume.length-1;_bgRaumTab='klima';scheduleSave();_neuBauen();}
     }));
     w.appendChild(chips);
@@ -2880,7 +2909,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     else w.appendChild(_bgRaumKlima(r,_bgRaumSel));
     const loe=document.createElement('button');loe.type='button';loe.textContent='🗑 Raum löschen';loe.setAttribute('data-fs-raumloeschen','1'); // F22: beschriftet statt nur ✕ in der Klima-Zeile
     loe.style.cssText=S_KNOPF+'display:block;margin:12px 14px;min-height:var(--fsh44,44px);border:1.5px solid var(--red);background:transparent;color:var(--red);';
-    loe.onclick=()=>{if(!confirm('Raum „'+(String(r.name||'').trim()||'ohne Namen')+'" mit allen Wänden entfernen?'))return;bericht.raeume.splice(_bgRaumSel,1);_bgRaumSel=null;scheduleSave();_neuBauen();};
+    loe.onclick=()=>{if(!_fsFrage('Raum „'+(String(r.name||'').trim()||'ohne Namen')+'" mit allen Wänden entfernen?'))return;bericht.raeume.splice(_bgRaumSel,1);_bgRaumSel=null;scheduleSave();_neuBauen();};
     w.appendChild(loe);
     return w;
   }
@@ -2989,7 +3018,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       txtI.setAttribute('data-fs-stellentext',String(si));
       const x=document.createElement('button');x.type='button';x.textContent='✕';x.title='Messstelle entfernen';
       x.style.cssText='width:var(--fsh,40px);height:var(--fsh,40px);border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--red);font-size:var(--fs15,15px);cursor:pointer;flex-shrink:0;';
-      x.onclick=()=>{if(!confirm('Messstelle '+(si+1)+' entfernen?'))return;bericht.stellen.splice(si,1);scheduleSave();_neuBauen();};
+      x.onclick=()=>{if(!_fsFrage('Messstelle '+(si+1)+' entfernen?'))return;bericht.stellen.splice(si,1);scheduleSave();_neuBauen();};
       top.append(nr,txtI,x);
 
       const sel=document.createElement('select');
@@ -3060,7 +3089,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
           s2.onchange=()=>{
             if(s2.value==='')return;
             const zi=+s2.value;
-            if(!confirm('Die testo-Messung in Stelle '+(zi+1)+' übernehmen? Diese Zeile entfällt, leere Felder der Stelle werden gefüllt, als Uhrzeit gilt die der testo-Messung.')){s2.value='';return;}
+            if(!_fsFrage('Die testo-Messung in Stelle '+(zi+1)+' übernehmen? Diese Zeile entfällt, leere Felder der Stelle werden gefüllt, als Uhrzeit gilt die der testo-Messung.')){s2.value='';return;}
             if(_fsBgZusammenfuehren(bericht,si,zi)){scheduleSave();_neuBauen();toast('✓ Zusammengeführt','success',3000);}
           };
           zusammen.appendChild(s2);
@@ -3117,7 +3146,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const dreh=document.createElement('button');dreh.type='button';dreh.setAttribute('data-fs-skizze-dreh','1');dreh.textContent='↻ Drehen';
     dreh.style.cssText=S_KNOPF+'min-height:var(--fsh44,44px);border:1.5px solid var(--fs-krd,'+FS_FARBE+');background:var(--fs-kfl,transparent);color:var(--text);';
     dreh.onclick=()=>{
-      if((_fsBgStricheAnzahl(sk)||_fsBgStempelAnzahl(sk))&&!confirm('Die eingezeichneten Striche und Stempel drehen nicht mit. Trotzdem drehen?'))return; // F5/F7
+      if((_fsBgStricheAnzahl(sk)||_fsBgStempelAnzahl(sk))&&!_fsFrage('Die eingezeichneten Striche und Stempel drehen nicht mit. Trotzdem drehen?'))return; // F5/F7
       sk.dreh=((parseInt(sk.dreh,10)||0)+1)%4;scheduleSave();neuZeichnen();
     };
     masse.append(_bgLabelFeld('Länge W1/W3 (m)',_inp(sk.l,'z. B. 4,5',v=>{sk.l=v;neuZeichnen();},true)),_bgLabelFeld('Breite W2/W4 (m)',_inp(sk.b,'z. B. 3,2',v=>{sk.b=v;neuZeichnen();},true)),dreh);
@@ -3145,7 +3174,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const weg=document.createElement('button');weg.type='button';weg.textContent='✕ Skizze für diesen Raum entfernen';
     weg.style.cssText=S_KNOPF+'display:block;width:calc(100% - 28px);margin:8px 14px 12px;border:1px solid var(--border);background:transparent;color:var(--text2);';
     weg.onclick=()=>{
-      if(!confirm('Skizze für „'+(String(r.name||'').trim()||'diesen Raum')+'" entfernen? Wände, Türen und Fenster bleiben erhalten, sie steht dann nicht mehr im PDF.'+((_fsBgStricheAnzahl(sk)||_fsBgStempelAnzahl(sk))?' Die eingezeichneten Striche und Stempel gehen verloren.':'')))return;
+      if(!_fsFrage('Skizze für „'+(String(r.name||'').trim()||'diesen Raum')+'" entfernen? Wände, Türen und Fenster bleiben erhalten, sie steht dann nicht mehr im PDF.'+((_fsBgStricheAnzahl(sk)||_fsBgStempelAnzahl(sk))?' Die eingezeichneten Striche und Stempel gehen verloren.':'')))return;
       r.skizze=null;scheduleSave();_neuBauen();
     };
     w.appendChild(weg);
@@ -3159,7 +3188,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     if(it.frei){ // eigener Satz
       const top=document.createElement('div');top.style.cssText='display:flex;align-items:center;gap:8px;';
       const tx=_inp(it.text,'Feststellung als Satz',v=>{it.text=v;},false);
-      top.append(tx,_bgXKnopf('Eintrag entfernen',()=>{if(String(it.text||'').trim()&&!confirm('Eintrag entfernen?'))return;const ix=sek.items.indexOf(it);if(ix>=0)sek.items.splice(ix,1);scheduleSave();_neuBauen();}));
+      top.append(tx,_bgXKnopf('Eintrag entfernen',()=>{if(String(it.text||'').trim()&&!_fsFrage('Eintrag entfernen?'))return;const ix=sek.items.indexOf(it);if(ix>=0)sek.items.splice(ix,1);scheduleSave();_neuBauen();}));
       const nz=document.createElement('div');nz.style.cssText='display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:6px;';
       const n=_inp(it.notiz,'Anmerkung …',v=>{it.notiz=v;},false);n.style.flex='1 1 180px';n.style.minWidth='0';
       const fl=_fsFotoLeiste(bericht,it,'Foto zu diesem Punkt',true);fl.style.marginTop='0';fl.style.flex='0 1 auto';
@@ -3210,7 +3239,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       k.style.cssText='margin:6px 0 10px;padding:8px 10px 10px;border:1.5px solid var(--border);border-left:var(--fs-kante,4px) solid '+FS_FARBE+';border-radius:10px;background:var(--fs-karte,var(--bg2));';
       const kopf=document.createElement('div');kopf.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:4px;';
       const tt=document.createElement('span');tt.style.cssText='font-weight:700;flex:1;';tt.textContent='Stelle '+(si+1);
-      kopf.append(tt,_bgXKnopf('Stelle entfernen',()=>{if(_fsBgFeuchtStelleGefuellt(s)&&!confirm('Stelle '+(si+1)+' entfernen?'))return;bericht.bgStellen.splice(si,1);scheduleSave();_neuBauen();}));
+      kopf.append(tt,_bgXKnopf('Stelle entfernen',()=>{if(_fsBgFeuchtStelleGefuellt(s)&&!_fsFrage('Stelle '+(si+1)+' entfernen?'))return;bericht.bgStellen.splice(si,1);scheduleSave();_neuBauen();}));
       k.appendChild(kopf);
       const zArt=zeile('Was');
       FS_BG_STELLE_ARTEN.forEach(a=>{const c=_chip(a.t,s.art===a.k,()=>{s.art=s.art===a.k?'':a.k;scheduleSave();_neuBauen();});c.setAttribute('data-fs-bgart',a.k);zArt.appendChild(c);});
@@ -3243,7 +3272,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const zM=zeile('Merkmale');
       if(!Array.isArray(s.merkmale))s.merkmale=[];
       FS_BG_STELLE_MERKMALE.concat(s.merkmale.filter(m=>FS_BG_STELLE_MERKMALE.indexOf(m)<0)).forEach(m=>{const an=s.merkmale.indexOf(m)>=0;const c=_chip(m,an,()=>{if(an)s.merkmale.splice(s.merkmale.indexOf(m),1);else s.merkmale.push(m);scheduleSave();_neuBauen();});c.setAttribute('data-fs-bgmerkmal',m);zM.appendChild(c);});
-      zM.appendChild(_chip('✎ anderes …',false,()=>{const t2=prompt('Merkmal:');if(t2&&t2.trim()){s.merkmale.push(t2.replace(/\s+/g,' ').trim());scheduleSave();_neuBauen();}}));
+      zM.appendChild(_chip('✎ anderes …',false,()=>{const t2=_fsEingabe('Merkmal:');if(t2&&t2.trim()){s.merkmale.push(t2.replace(/\s+/g,' ').trim());scheduleSave();_neuBauen();}}));
       k.appendChild(zM);
       const nz=_inp(s.notiz,'Anmerkung (freiwillig)',v=>{s.notiz=v;},false);nz.style.marginTop='4px';nz.setAttribute('data-fs-bgnotiz','1');k.appendChild(nz);
       k.appendChild(_fsFotoLeiste(bericht,{text:'Stelle '+(si+1),fotoRefs:s.fotoRefs},'Fotos zu dieser Stelle',false));
@@ -3294,7 +3323,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       }
       const frei=document.createElement('button');frei.type='button';frei.textContent='＋ Freier Eintrag';
       frei.style.cssText=S_KNOPF+'display:block;width:calc(100% - 28px);margin:8px 14px;border:1px dashed var(--border);background:transparent;color:var(--text2);';
-      frei.onclick=()=>{const tx=prompt('Feststellung als ganzer Satz:');if(tx&&tx.trim()){sek.items.push({frei:true,text:tx.trim(),notiz:'',status:'mangel',fotoRefs:[]});scheduleSave();_neuBauen();}};
+      frei.onclick=()=>{const tx=_fsEingabe('Feststellung als ganzer Satz:');if(tx&&tx.trim()){sek.items.push({frei:true,text:tx.trim(),notiz:'',status:'mangel',fotoRefs:[]});scheduleSave();_neuBauen();}};
       w.appendChild(frei);
       const ein=document.createElement('button');ein.type='button';ein.textContent='▲ Abschnitt einklappen';ein.setAttribute('data-fs-einklappen',String(si));
       ein.style.cssText=S_KNOPF+'display:block;width:calc(100% - 28px);margin:0 14px 12px;border:1.5px solid var(--fs-krd,'+FS_FARBE+');background:var(--fs-kfl,transparent);color:var(--text);';
@@ -3315,7 +3344,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const top=document.createElement('div');top.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:6px;';
       const q=document.createElement('div');q.style.cssText='flex:1;min-width:0;font-size:var(--fs14,14px);font-weight:600;color:var(--text);';q.textContent=a.q||'';
       top.appendChild(q);
-      if(a.frei)top.appendChild(_bgXKnopf('Angabe entfernen',()=>{if(String(a.text||'').trim()&&!confirm('Angabe entfernen?'))return;bericht.angaben.splice(ai,1);scheduleSave();_neuBauen();}));
+      if(a.frei)top.appendChild(_bgXKnopf('Angabe entfernen',()=>{if(String(a.text||'').trim()&&!_fsFrage('Angabe entfernen?'))return;bericht.angaben.splice(ai,1);scheduleSave();_neuBauen();}));
       row.append(top,_bgTextFeld(a.text,'Was wurde gesagt …',v=>{a.text=v;},2));
       const opts=namen.slice();if(a.von&&opts.indexOf(a.von)<0)opts.push(a.von);
       if(opts.length){
@@ -3328,7 +3357,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     });
     const add=document.createElement('button');add.type='button';add.textContent='＋ Weitere Angabe';
     add.style.cssText=S_KNOPF+'display:block;width:calc(100% - 28px);margin:8px 14px 12px;border:1px dashed var(--border);background:transparent;color:var(--text2);';
-    add.onclick=()=>{const q=prompt('Wozu? (Frage oder Thema der Angabe)');if(q&&q.trim()){bericht.angaben.push({k:'frei'+Date.now(),q:q.trim(),text:'',von:'',frei:true});scheduleSave();_neuBauen();}};
+    add.onclick=()=>{const q=_fsEingabe('Wozu? (Frage oder Thema der Angabe)');if(q&&q.trim()){bericht.angaben.push({k:'frei'+Date.now(),q:q.trim(),text:'',von:'',frei:true});scheduleSave();_neuBauen();}};
     w.appendChild(add);
     return w;
   }
@@ -4268,6 +4297,7 @@ async function _fsLbGeocode(adresse){
 function _fsLuftbildFenster(bericht,t,s,beiAenderung){
   if(typeof L==='undefined'||!L||typeof L.map!=='function'){toast('Das Luftbild braucht einmal Internet zum Laden','error');return;}
   const old=document.getElementById('_fsLbOverlay');if(old)old.remove();
+  if(_fsDok(bericht)!==document){try{toast('🛰 Das Luftbild geht im PAM-Hauptfenster auf (die Karte braucht es dort)','info',5000);}catch(e){}try{window.focus();}catch(e){}} /* F69: bleibt bewusst im Hauptfenster */
   const ov=document.createElement('div');ov.id='_fsLbOverlay';_fsSichtAn(ov);
   ov.style.cssText='position:fixed;inset:0;z-index:100001;display:flex;flex-direction:column;background:var(--bg);';
   const kopf=document.createElement('div');kopf.style.cssText='background:#1f5f8b;color:#fff;padding:8px 10px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;flex-shrink:0;';
@@ -4653,7 +4683,7 @@ const _fsKompass={grad:null,zeit:0,laeuft:false,h:null};
 function _fsKompassStart(){
   if(_fsKompass.laeuft||typeof window==='undefined'||typeof window.addEventListener!=='function')return false;
   const h=ev=>{
-    if(typeof document!=='undefined'&&typeof document.getElementById==='function'&&!document.getElementById('_fsMobOverlay')){_fsKompassStop();return;}
+    if(typeof document!=='undefined'&&typeof document.getElementById==='function'&&!_fsById('_fsMobOverlay')){_fsKompassStop();return;}
     let g=null;
     if(typeof ev.webkitCompassHeading==='number'&&isFinite(ev.webkitCompassHeading))g=Math.round(ev.webkitCompassHeading)%360;
     else if(ev.absolute===true){const k=_fsKompassRichtung(ev.alpha,ev.beta,ev.gamma);if(k)g=k.grad;}
@@ -4982,7 +5012,7 @@ async function _fsPdfSeitenBilder(blob,breite,zeichne){
   return doc.numPages;
 }
 function _fsVorschauFenster(blob,name){
-  const alt=document.getElementById('_fsVorschau');if(alt)alt.remove();
+  const alt=_fsById('_fsVorschau');if(alt)alt.remove();const dk=_fsDok(),dw=_fsWin(); /* F69: das Fenster, in dem das Protokoll steht */
   const url=URL.createObjectURL(blob),amPc=_fsAmPc();
   const ov=document.createElement('div');ov.id='_fsVorschau';_fsSichtAn(ov);
   ov.style.cssText='position:fixed;inset:0;z-index:1000095;background:rgba(0,0,0,.72);display:flex;flex-direction:column;';
@@ -4990,10 +5020,10 @@ function _fsVorschauFenster(blob,name){
   const ti=document.createElement('div');ti.style.cssText='flex:1 1 160px;min-width:0;font-size:var(--fs15,15px);font-weight:700;';ti.textContent='👁 Vorschau – nicht abgelegt';
   const seiteInfo=document.createElement('span');seiteInfo.setAttribute('data-fs-vorschauseite','1');seiteInfo.style.cssText='font-size:var(--fs13,13px);font-weight:400;opacity:.9;';ti.appendChild(seiteInfo);
   const kn=(txt,attr)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute(attr,'1');b.style.cssText='padding:6px 12px;min-height:var(--fsh,40px);border-radius:10px;border:1.5px solid rgba(255,255,255,.85);background:transparent;color:#fff;font-size:var(--fs14,14px);font-weight:700;cursor:pointer;font-family:inherit;';return b;};
-  const oeffnen=()=>{if(typeof _dateiBlobOeffnen==='function')_dateiBlobOeffnen(blob,name);else window.open(url,'_blank');};
-  const weg=()=>{document.removeEventListener('keydown',taste,true);ov.remove();setTimeout(()=>{try{URL.revokeObjectURL(url);}catch(e){}},60000);};
+  const oeffnen=()=>{if(dw!==window){try{dw.open(url,'_blank');return;}catch(e){}} /* F69: dort öffnen, wo geklickt wurde – sonst hält der Browser den Tab für ein ungefragtes Pop-up */if(typeof _dateiBlobOeffnen==='function')_dateiBlobOeffnen(blob,name);else window.open(url,'_blank');};
+  const weg=()=>{document.removeEventListener('keydown',taste,true);if(dk!==document)dk.removeEventListener('keydown',taste,true);ov.remove();setTimeout(()=>{try{URL.revokeObjectURL(url);}catch(e){}},60000);};
   const taste=e=>{if(e.key==='Escape'){e.stopImmediatePropagation();e.preventDefault();weg();}};
-  document.addEventListener('keydown',taste,true);
+  document.addEventListener('keydown',taste,true);if(dk!==document)dk.addEventListener('keydown',taste,true); /* F69 */
   const zurueck=kn('‹','data-fs-vorschauzurueck'),weiter=kn('›','data-fs-vorschauweiter'),kleiner=kn('−','data-fs-vorschaukleiner'),groesser=kn('＋','data-fs-vorschaugroesser');
   const auf=kn(amPc?'↗ Im neuen Tab':'📂 Im PDF-Programm','data-fs-vorschauauf');auf.onclick=oeffnen;
   const zu=kn('✕ Schließen','data-fs-vorschauzu');zu.onclick=weg;
@@ -5003,7 +5033,7 @@ function _fsVorschauFenster(blob,name){
   flaeche.style.cssText='flex:1;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;padding:10px 0 30px;';
   ov.appendChild(flaeche);
   let zoom=1,seiten=[],anzahl=0;
-  const breiteBasis=()=>Math.max(240,Math.min(900,(ov.clientWidth||window.innerWidth||800)-24));
+  const breiteBasis=()=>Math.max(240,Math.min(900,(ov.clientWidth||dw.innerWidth||800)-24));
   const aktuelle=()=>{const mitte=flaeche.scrollTop+flaeche.clientHeight/2;let i=0;seiten.forEach((cv,j)=>{if(cv.offsetTop<=mitte)i=j;});return i;};
   const zeichnen=async()=>{
     flaeche.innerHTML='';seiten=[];anzahl=0;
@@ -5026,7 +5056,7 @@ function _fsVorschauFenster(blob,name){
   const springe=d=>{if(!seiten.length)return;const i=Math.min(seiten.length-1,Math.max(0,aktuelle()+d));try{flaeche.scrollTo({top:seiten[i].offsetTop-10,behavior:'smooth'});}catch(e){flaeche.scrollTop=seiten[i].offsetTop-10;}};
   zurueck.onclick=()=>springe(-1);weiter.onclick=()=>springe(1);
   groesser.onclick=()=>{zoom=Math.min(3,zoom*1.25);zeichnen();};kleiner.onclick=()=>{zoom=Math.max(0.5,zoom/1.25);zeichnen();};
-  document.body.appendChild(ov);
+  _fsAnhaengen(ov); /* F69 */
   zeichnen();
   return ov;
 }
@@ -5095,10 +5125,11 @@ function _fsFotoZiehenAn(grid,fotos,neu){
     if(e.pointerType!=='mouse'&&!griff)return;
     if(!griff&&ziel0.closest('button'))return;
     const von=+zelle.getAttribute('data-fs-fotozelle'),sx=e.clientX,sy=e.clientY,id=e.pointerId;
+    const dk=(grid.ownerDocument&&grid.ownerDocument.body)?grid.ownerDocument:document; /* F69: das Dokument, in dem das Raster steht (eigenes Fenster am PC) */
     let zieht=false,geist=null,ziel=null,auswahlAlt='';
     const zellen=()=>Array.from(grid.querySelectorAll('[data-fs-fotozelle]'));
     const markieren=z=>{zellen().forEach(c=>{c.style.outline=(z&&c===z&&z!==zelle)?'3px dashed #1f5f8b':'';c.style.outlineOffset='2px';});};
-    const roll=(()=>{let p=grid.parentElement;while(p&&p!==document.body){const o=getComputedStyle(p).overflowY;if(o==='auto'||o==='scroll')return p;p=p.parentElement;}return null;})();
+    const roll=(()=>{let p=grid.parentElement;while(p&&p!==dk.body){const o=getComputedStyle(p).overflowY;if(o==='auto'||o==='scroll')return p;p=p.parentElement;}return null;})();
     const bewegen=ev=>{
       if(ev.pointerId!==id)return;
       const dx=ev.clientX-sx,dy=ev.clientY-sy;
@@ -5108,26 +5139,26 @@ function _fsFotoZiehenAn(grid,fotos,neu){
         const r=zelle.getBoundingClientRect();geist=zelle.cloneNode(true);geist.removeAttribute('data-fs-fotozelle');
         geist.style.position='fixed';geist.style.left=r.left+'px';geist.style.top=r.top+'px';geist.style.width=r.width+'px';geist.style.height=r.height+'px';
         geist.style.opacity='.85';geist.style.pointerEvents='none';geist.style.zIndex='1000099';geist.style.boxShadow='0 8px 24px rgba(0,0,0,.45)';geist.style.margin='0';
-        geist._x=r.left;geist._y=r.top;document.body.appendChild(geist);zelle.style.opacity='.35';
-        auswahlAlt=document.body.style.userSelect;document.body.style.userSelect='none';
+        geist._x=r.left;geist._y=r.top;dk.body.appendChild(geist);zelle.style.opacity='.35';
+        auswahlAlt=dk.body.style.userSelect;dk.body.style.userSelect='none';
       }
       if(ev.cancelable)ev.preventDefault();
       geist.style.left=(geist._x+dx)+'px';geist.style.top=(geist._y+dy)+'px';
-      const unter=document.elementFromPoint(ev.clientX,ev.clientY);
+      const unter=dk.elementFromPoint(ev.clientX,ev.clientY);
       const z=unter&&unter.closest?unter.closest('[data-fs-fotozelle]'):null;
       ziel=(z&&grid.contains(z))?z:null;markieren(ziel);
       if(roll){const rr=roll.getBoundingClientRect();if(ev.clientY<rr.top+50)roll.scrollTop-=14;else if(ev.clientY>rr.bottom-50)roll.scrollTop+=14;}
     };
     const loslassen=ev=>{
       if(ev.pointerId!==id)return;
-      document.removeEventListener('pointermove',bewegen,true);document.removeEventListener('pointerup',loslassen,true);document.removeEventListener('pointercancel',loslassen,true);
+      dk.removeEventListener('pointermove',bewegen,true);dk.removeEventListener('pointerup',loslassen,true);dk.removeEventListener('pointercancel',loslassen,true);
       if(!zieht)return;
       sperreBis=Date.now()+400;
-      if(geist)geist.remove();zelle.style.opacity='';markieren(null);document.body.style.userSelect=auswahlAlt;
+      if(geist)geist.remove();zelle.style.opacity='';markieren(null);dk.body.style.userSelect=auswahlAlt;
       const zz=grid._fsZieh||{},nach=ziel?+ziel.getAttribute('data-fs-fotozelle'):-1;
       if(ev.type==='pointerup'&&nach>=0&&_fsFotoVerschieben(zz.fotos,von,nach)){try{scheduleSave();}catch(_e){}if(typeof zz.neu==='function')zz.neu();}
     };
-    document.addEventListener('pointermove',bewegen,true);document.addEventListener('pointerup',loslassen,true);document.addEventListener('pointercancel',loslassen,true);
+    dk.addEventListener('pointermove',bewegen,true);dk.addEventListener('pointerup',loslassen,true);dk.addEventListener('pointercancel',loslassen,true);
   });
 }
 /* ── F51 (Frank 09.10.2026, „baue“) ────────────────────────────────────────────────────────────────────────────────────────
@@ -5182,14 +5213,14 @@ function _fsVbListeZeit(b){
    PAM schlägt nichts vor und trägt nichts von selbst ein: „Ende jetzt“ nur am Tag des Protokolls, sonst nur die Uhrzeit von Hand; Ende vor Beginn geht nicht. */
 function _fsVbEndeFenster(bericht,fertig){
   if(!bericht||!bericht.kopf)return;
-  const alt=document.getElementById('_fsVbEnde');if(alt)alt.remove();
+  const alt=_fsById('_fsVbEnde');if(alt)alt.remove();const dk=_fsDok(bericht); /* F69 */
   const k=bericht.kopf,beg=_fsVbUhr(k.beginn),j=_fsVbJetzt(),heute=!!_fsVbIso(bericht.datum)&&_fsVbIso(bericht.datum)===_fsVbIso(j.datum);
   const ov=document.createElement('div');ov.id='_fsVbEnde';_fsSichtAn(ov);
   ov.style.cssText='position:fixed;inset:0;z-index:1000090;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;';
   const box=document.createElement('div');box.style.cssText='background:var(--bg);color:var(--text);border-radius:14px;padding:18px;max-width:420px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.5);box-sizing:border-box;';
-  const weg=()=>{document.removeEventListener('keydown',taste,true);ov.remove();};
+  const weg=()=>{document.removeEventListener('keydown',taste,true);if(dk!==document)dk.removeEventListener('keydown',taste,true);ov.remove();};
   const taste=e=>{if(e.key==='Escape'){e.stopImmediatePropagation();e.preventDefault();weg();}};
-  document.addEventListener('keydown',taste,true);
+  document.addEventListener('keydown',taste,true);if(dk!==document)dk.addEventListener('keydown',taste,true); /* F69 */
   ov.addEventListener('click',e=>{if(e.target===ov)weg();});
   const el=(tag,stil,text)=>{const e=document.createElement(tag);if(stil)e.style.cssText=stil;if(text!=null)e.textContent=text;return e;};
   box.appendChild(el('div','font-size:var(--fs18,18px);font-weight:700;margin-bottom:4px;','🏁 Ende eintragen'));
@@ -5214,7 +5245,7 @@ function _fsVbEndeFenster(bericht,fertig){
   zr.append(inp,ok);box.append(zr,meld);
   if(!heute)box.appendChild(el('div','font-size:var(--fs12,12px);color:var(--text2);margin-top:8px;line-height:1.4;','Das Protokoll ist nicht von heute – „Ende jetzt“ gibt es deshalb nicht.'));
   const ab=el('button','display:block;margin:14px 0 0 auto;min-height:var(--fsh,40px);padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text2);font-size:var(--fs14,14px);cursor:pointer;font-family:inherit;','Abbrechen');ab.type='button';ab.onclick=weg;
-  box.appendChild(ab);ov.appendChild(box);document.body.appendChild(ov);
+  box.appendChild(ab);ov.appendChild(box);_fsAnhaengen(ov,bericht); /* F69 */
   try{inp.focus();}catch(e){}
 }
 // Aufruf aus der Formular-Liste (PC und Handy): Listenplatz der offenen Karte
@@ -5247,7 +5278,7 @@ function _fsBgMerkRolle(neu){
 }
 // „✎ eigene Bezeichnung …“: eine Zeile, höchstens 30 Zeichen; Abbrechen oder leer → ''
 function _fsRolleEintippen(alt){
-  const r=prompt('Eigene Bezeichnung, z. B. Bautechniker (höchstens 30 Zeichen)',String(alt||''));
+  const r=_fsEingabe('Eigene Bezeichnung, z. B. Bautechniker (höchstens 30 Zeichen)',String(alt||''));
   return r===null?'':String(r).replace(/\s+/g,' ').trim().slice(0,30);
 }
 function _fsBgItem(d){
@@ -5666,7 +5697,7 @@ function _fsBgRaumZuSetzen(key,id,raum,wert){
 function _fsBgRaumOffen(map,raum,standard){const v=map&&map[raum];return v===1?false:(v===0?true:!!standard);}
 // Das Fenster. tab0: 'liste' (Messliste, auch am Handy) oder 'ablauf' (So misst du). Zweiter Aufruf schließt es wieder.
 function _fsBgMessfensterZeigen(b,tab0){
-  const alt=document.getElementById('_fsMessfenster');if(alt){alt.remove();return;}
+  const alt=_fsById('_fsMessfenster');if(alt){alt.remove();return;}
   let tab=(tab0==='ablauf')?'ablauf':'liste';
   const ov=document.createElement('div');ov.id='_fsMessfenster';
   ov.style.cssText='position:fixed;inset:0;z-index:99999;background:var(--bg);color:var(--text);display:flex;flex-direction:column;';
@@ -5821,11 +5852,11 @@ function _fsBgMessfensterZeigen(b,tab0){
       },['data-fs-mf-weiter','1']);
     weiter.disabled=!st.naechste;
     const vonVorn=knopf('↺ von vorn','flex:1;min-height:64px;font-size:17px;font-weight:700;border:2px solid var(--border);background:transparent;color:var(--text);',
-      ()=>{if(confirm('Die Markierung „gemessen“ auf diesem Gerät zurücksetzen?')){_fsBgMessstandSetzen(b.id,0);zeige();}},['data-fs-mf-vonvorn','1']);
+      ()=>{if(_fsFrage('Die Markierung „gemessen“ auf diesem Gerät zurücksetzen?')){_fsBgMessstandSetzen(b.id,0);zeige();}},['data-fs-mf-vonvorn','1']);
     fuss.append(weiter,vonVorn);
   };
   zeige();
-  document.body.appendChild(ov);
+  _fsAnhaengen(ov,b); /* F69 */
 }
 // Bildunterschrift im PDF: wozu gehört das Foto – Raum, Wand, Messstelle (mit der gedruckten Nummer), Feststellung
 function _fsBgFotoZuordnung(b,f,kurz){ /* F57: kurz = nur das Objekt der Stelle (ihr eigener Text), ohne Bereich, Seite und Blickrichtung – für die Unterschrift im PDF */
@@ -6703,7 +6734,8 @@ function _fsBgSkizzeBild(b,r,opt){
 function _fsBgEinzeichnenZeigen(b,r,fertig){
   const sk=r&&r.skizze;
   if(!sk||!sk.an)return;
-  const alt=document.getElementById('_fsEinzeichnen');if(alt){alt.remove();return;}
+  const alt=_fsById('_fsEinzeichnen');if(alt){alt.remove();return;}
+  const dk=_fsDok(b),dw=_fsWin(b); /* F69: Tasten und Fenstergröße des Fensters, in dem das Protokoll steht */
   const M=_fsSkMasse(sk),W=M.W,H=M.H; // F50: quer oder hoch
   const unterlage=_fsBgSkizzeBild(b,Object.assign({},r,{skizze:Object.assign({},sk,{striche:[],stempel:[],umriss:null})}),{ohneMarken:true}); // die Zeichnung ohne Striche und Stempel (F33: und ohne Stellen-Nummern), die kommen live darüber
   if(!unterlage){toast('Einzeichnen geht hier nicht (kein Zeichenbereich)','error',4000);return;}
@@ -6746,7 +6778,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
   zoomBox.append(zoomKnopf('🔍−',()=>zoomSetzen(zoomF/1.25),'data-fs-ez-zoomweniger'),zoomAnzeige,zoomKnopf('🔍+',()=>zoomSetzen(zoomF*1.25),'data-fs-ez-zoommehr'),zoomKnopf('⊡',()=>{basis=passend();zoomSetzen(1);},'data-fs-ez-zoompassend'));
   kopf.appendChild(zoomBox);
   const groesse=()=>{basis=passend();zoomSetzen(zoomF);};
-  window.addEventListener('resize',groesse);
+  window.addEventListener('resize',groesse);if(dw!==window)dw.addEventListener('resize',groesse); /* F69 */
   const fuss=document.createElement('div');fuss.style.cssText='flex-shrink:0;padding:10px 14px 14px;border-top:1px solid var(--border);';
   const fb=document.createElement('button');fb.type='button';fb.textContent='✓ Fertig';fb.setAttribute('data-fs-ez-fertig','1');
   fb.style.cssText='width:100%;min-height:56px;border-radius:12px;border:none;background:'+FS_FARBE+';color:#fff;font-size:var(--fs18,18px);font-weight:700;font-family:inherit;cursor:pointer;';
@@ -6805,13 +6837,13 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
         leiste.appendChild(knopf('Stelle '+nr+(hier?' ✓':woanders?' (andere Skizze)':''),'border:3px solid '+(an?'#d9480f':'var(--border)')+';background:'+(an?'rgba(217,72,15,.16)':'var(--fs-cfl,transparent)')+';',()=>{selS=s;loseS=false;neuText=null;neu();leisteBauen();},['data-fs-ez-stelle',String(nr)]));
       });
       /* F34: neue Stelle gleich hier anlegen – erst die kurze Beschreibung, dann in die Skizze tippen */
-      leiste.appendChild(knopf('＋ neue Stelle','border:2px dashed #d9480f;background:'+(neuText!==null?'rgba(217,72,15,.16)':'var(--fs-cfl,transparent)')+';',()=>{const tx=prompt('Neue Stelle in „'+(sk.bereich||'Außen')+'“ – wo ist sie?\n(kurze Beschreibung, z. B. Riss unter der Traufe)','');if(tx===null)return;neuText=String(tx);selS=null;loseS=false;neu();leisteBauen();},['data-fs-ez-stelleneu','1']));
+      leiste.appendChild(knopf('＋ neue Stelle','border:2px dashed #d9480f;background:'+(neuText!==null?'rgba(217,72,15,.16)':'var(--fs-cfl,transparent)')+';',()=>{const tx=_fsEingabe('Neue Stelle in „'+(sk.bereich||'Außen')+'“ – wo ist sie?\n(kurze Beschreibung, z. B. Riss unter der Traufe)','');if(tx===null)return;neuText=String(tx);selS=null;loseS=false;neu();leisteBauen();},['data-fs-ez-stelleneu','1']));
       const selHier=!!selS&&_fsAsMarkeOk(selS)&&selS.skz.k===sk.id;
       if(selHier){
         leiste.appendChild(knopf(loseS?'✓ Fest':'✥ Verschieben','border:3px solid '+(loseS?'#2e7d4f':'var(--border)')+';background:'+(loseS?'rgba(46,125,79,.16)':'var(--fs-cfl,transparent)')+';',()=>{loseS=!loseS;neu();leisteBauen();},['data-fs-ez-stellelose','1']));
         leiste.appendChild(knopf('Aus Skizze nehmen',RAND+'color:var(--red);',()=>{if(_fsAsMarkeWeg(selS)){loseS=false;scheduleSave();neu();leisteBauen();}},['data-fs-ez-stelleweg','1']));
       }
-      if(selS)leiste.appendChild(knopf('Beschreibung ändern',RAND,()=>{const tx=prompt('Beschreibung der Stelle '+_fsAsNummer(b,selS)+' (Wo?)',String(selS.ort||''));if(tx===null)return;selS.ort=String(tx).trim();scheduleSave();neu();leisteBauen();},['data-fs-ez-stelletext','1']));
+      if(selS)leiste.appendChild(knopf('Beschreibung ändern',RAND,()=>{const tx=_fsEingabe('Beschreibung der Stelle '+_fsAsNummer(b,selS)+' (Wo?)',String(selS.ort||''));if(tx===null)return;selS.ort=String(tx).trim();scheduleSave();neu();leisteBauen();},['data-fs-ez-stelletext','1']));
       const z=document.createElement('span');z.setAttribute('data-fs-ez-zaehler','1');z.style.cssText='font-size:var(--fs13,13px);color:var(--text2);';
       const selName=selS?'Stelle '+_fsAsNummer(b,selS)+(_fsVbWo(selS)?' („'+_fsBgSkizzeKuerzen(_fsVbWo(selS),30)+'“)':''):''; /* F60 */
       z.textContent=neuText!==null?'Neue Stelle'+(neuText.trim()?' („'+_fsBgSkizzeKuerzen(neuText,30)+'“)':'')+': jetzt in die Skizze tippen, wo sie ist'
@@ -6834,12 +6866,12 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
       });
       leiste.appendChild(knopf('↶ Rückgängig',RAND,()=>{if(rueck()){scheduleSave();neu();leisteBauen();}},['data-fs-ez-zurueck','1']));
       if(teil){
-        if(teil.w==='text')leiste.appendChild(knopf('Text ändern',RAND,()=>{const tx=prompt('Text in der Skizze (höchstens '+FS_BG_STEMPEL_TEXT_MAX+' Zeichen)',String(teil.txt||''));if(tx===null)return;const t2=String(tx).replace(/\s+/g,' ').trim().slice(0,FS_BG_STEMPEL_TEXT_MAX);if(!t2){toast('Der Text ist leer – zum Entfernen „🗑 Löschen“ antippen','info',3500);return;}merken();teil.txt=t2;scheduleSave();neu();},['data-fs-ez-teiltext','1']));
+        if(teil.w==='text')leiste.appendChild(knopf('Text ändern',RAND,()=>{const tx=_fsEingabe('Text in der Skizze (höchstens '+FS_BG_STEMPEL_TEXT_MAX+' Zeichen)',String(teil.txt||''));if(tx===null)return;const t2=String(tx).replace(/\s+/g,' ').trim().slice(0,FS_BG_STEMPEL_TEXT_MAX);if(!t2){toast('Der Text ist leer – zum Entfernen „🗑 Löschen“ antippen','info',3500);return;}merken();teil.txt=t2;scheduleSave();neu();},['data-fs-ez-teiltext','1']));
         leiste.appendChild(knopf('🗑 Löschen',RAND+'color:var(--red);',()=>{merken();if(_fsBgStrichWeg(sk,selT)){selT=-1;scheduleSave();neu();leisteBauen();}},['data-fs-ez-teilweg','1']));
       }
       leiste.appendChild(knopf('Alle Striche löschen',RAND+'color:var(--red);',()=>{
         if(!_fsBgStricheAnzahl(sk))return;
-        if(!confirm('Alles Gezeichnete löschen (Striche, Linien, Pfeile, Rechtecke, Kreise, Texte)? Die Stempel und Nummern bleiben.'))return;
+        if(!_fsFrage('Alles Gezeichnete löschen (Striche, Linien, Pfeile, Rechtecke, Kreise, Texte)? Die Stempel und Nummern bleiben.'))return;
         merken();_fsBgStricheLoeschen(sk);selT=-1;scheduleSave();neu();leisteBauen();
       },['data-fs-ez-loeschen','1']));
       const z=document.createElement('span');z.setAttribute('data-fs-ez-zaehler','1');z.style.cssText='font-size:var(--fs13,13px);color:var(--text2);';
@@ -6855,7 +6887,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
       if(ne)leiste.appendChild(knopf('↶ Rückgängig',RAND,()=>{const uu=_fsUmHolen(sk);if(_fsUmZurueck(uu)){if(!_fsUmEcken(uu).length)_fsUmWeg(sk);selU=-1;eckeNeuU=false;scheduleSave();neu();leisteBauen();}},['data-fs-ez-umzurueck','1']));
       if(zuU)leiste.appendChild(knopf('＋ Ecke auf Kante',AN(eckeNeuU),()=>{eckeNeuU=!eckeNeuU;neu();leisteBauen();},['data-fs-ez-umeckeneu','1']));
       if(zuU&&selU>=0&&ne>3)leiste.appendChild(knopf('✕ Ecke löschen',RAND+'color:var(--red);',()=>{if(_fsUmEckeWeg(_fsUmHolen(sk),selU)){selU=-1;_fsUmNachziehen(sk,W,H);scheduleSave();neu();leisteBauen();}},['data-fs-ez-umeckeweg','1']));
-      if(ne)leiste.appendChild(knopf('Umriss löschen',RAND+'color:var(--red);',()=>{if(!confirm('Den Umriss mit allen Ecken und Maßen löschen? Stempel, Striche und Nummern bleiben.'))return;_fsUmWeg(sk);selU=-1;eckeNeuU=false;mausU=null;scheduleSave();neu();leisteBauen();},['data-fs-ez-umweg','1']));
+      if(ne)leiste.appendChild(knopf('Umriss löschen',RAND+'color:var(--red);',()=>{if(!_fsFrage('Den Umriss mit allen Ecken und Maßen löschen? Stempel, Striche und Nummern bleiben.'))return;_fsUmWeg(sk);selU=-1;eckeNeuU=false;mausU=null;scheduleSave();neu();leisteBauen();},['data-fs-ez-umweg','1']));
       const z=document.createElement('span');z.setAttribute('data-fs-ez-zaehler','1');z.style.cssText='font-size:var(--fs13,13px);color:var(--text2);';
       z.textContent=_fsUmHinweis(sk,W,H,{sel:selU,eckeNeu:eckeNeuU});
       leiste.appendChild(z);
@@ -6863,7 +6895,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
       _fsStempelListe(sk).forEach(x=>{ /* F33: die Außenskizze hat eigene Stempel */
         leiste.appendChild(knopf('+ '+x.n,'border:2px solid '+FS_FARBE+';background:rgba(31,95,139,.10);',()=>{
           let tx; /* F41: der Text-Stempel fragt zuerst nach dem Text */
-          if(x.t==='text'){tx=prompt('Text in der Skizze – z. B. eine Länge „12,50 m“ (höchstens '+FS_BG_STEMPEL_TEXT_MAX+' Zeichen)','');if(tx===null||!String(tx).trim())return;}
+          if(x.t==='text'){tx=_fsEingabe('Text in der Skizze – z. B. eine Länge „12,50 m“ (höchstens '+FS_BG_STEMPEL_TEXT_MAX+' Zeichen)','');if(tx===null||!String(tx).trim())return;}
           if(_fsBgStempelAnzahl(sk)>=FS_BG_STEMPEL_MAX){toast('Genug Stempel in diesem Raum – bitte einen löschen','info',3500);return;}
           const i=_fsBgStempelNeu(sk,x.t,tx);
           if(i<0){toast('Genug Stempel in diesem Raum – bitte einen löschen','info',3500);return;}
@@ -6879,8 +6911,8 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
         if(!lst&&st.t!=='text'){ /* F65: dehnen ohne Ziehen (Frank: am Tablet klappt das Ziehen nicht) */
           [['b',1.25,'Breiter','data-fs-ez-breiter'],['b',0.8,'Schmaler','data-fs-ez-schmaler'],['h',1.25,'Höher','data-fs-ez-hoeher'],['h',0.8,'Niedriger','data-fs-ez-niedriger']].forEach(([a,f,n,d])=>leiste.appendChild(knopf(n,RAND,()=>{if(_fsBgStempelDehnen(st,a,f)){scheduleSave();neu();}},[d,'1'])));
         }
-        if(st.t==='text')leiste.appendChild(knopf('Text ändern',RAND,()=>{const tx=prompt('Text in der Skizze (höchstens '+FS_BG_STEMPEL_TEXT_MAX+' Zeichen)',String(st.txt||''));if(tx===null)return;if(_fsBgStempelTextSetzen(st,tx)){scheduleSave();neu();}else toast('Der Text ist leer – zum Entfernen „Löschen“ antippen','info',3500);},['data-fs-ez-sttext','1']));
-        if(FS_BG_STEMPEL_BESCHR[st.t])leiste.appendChild(knopf('Wort ändern',RAND,()=>{const tx=prompt('Wort im Stempel (höchstens '+FS_BG_STEMPEL_TEXT_MAX+' Zeichen), z. B. „Fenster links“ oder „Tür 2“',String(st.txt||''));if(tx===null)return;if(!_fsBgStempelTextSetzen(st,tx))st.txt=FS_BG_STEMPEL_BESCHR[st.t];scheduleSave();neu();},['data-fs-ez-stwort','1'])); /* F61: leer = das vorbelegte Wort */
+        if(st.t==='text')leiste.appendChild(knopf('Text ändern',RAND,()=>{const tx=_fsEingabe('Text in der Skizze (höchstens '+FS_BG_STEMPEL_TEXT_MAX+' Zeichen)',String(st.txt||''));if(tx===null)return;if(_fsBgStempelTextSetzen(st,tx)){scheduleSave();neu();}else toast('Der Text ist leer – zum Entfernen „Löschen“ antippen','info',3500);},['data-fs-ez-sttext','1']));
+        if(FS_BG_STEMPEL_BESCHR[st.t])leiste.appendChild(knopf('Wort ändern',RAND,()=>{const tx=_fsEingabe('Wort im Stempel (höchstens '+FS_BG_STEMPEL_TEXT_MAX+' Zeichen), z. B. „Fenster links“ oder „Tür 2“',String(st.txt||''));if(tx===null)return;if(!_fsBgStempelTextSetzen(st,tx))st.txt=FS_BG_STEMPEL_BESCHR[st.t];scheduleSave();neu();},['data-fs-ez-stwort','1'])); /* F61: leer = das vorbelegte Wort */
         leiste.appendChild(knopf('Löschen',RAND+'color:var(--red);',()=>{if(_fsBgStempelWeg(sk,sel)){sel=-1;scheduleSave();neu();leisteBauen();}},['data-fs-ez-stweg','1']));
       }
       const z=document.createElement('span');z.setAttribute('data-fs-ez-zaehler','1');z.style.cssText='font-size:var(--fs13,13px);color:var(--text2);';
@@ -6927,7 +6959,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
       selU=-1;
       const k=_fsUmNaheKante(u,p,W,H);
       if(k>=0){
-        const v=prompt('Länge dieser Kante in Meter (z. B. 3,20). Leer lassen = Maß löschen, PAM rechnet es dann, wenn es kann.',String((u.masse&&u.masse[k])||''));
+        const v=_fsEingabe('Länge dieser Kante in Meter (z. B. 3,20). Leer lassen = Maß löschen, PAM rechnet es dann, wenn es kann.',String((u.masse&&u.masse[k])||''));
         if(v!==null){if(_fsUmMassSetzen(u,k,v)){_fsUmNachziehen(sk,W,H);scheduleSave();}else toast('Bitte eine Länge in Meter eingeben, z. B. 3,20','info',3000);}
       }
       neu();leisteBauen();return;
@@ -7016,7 +7048,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
       if(i>=0){selT=i;const tl=sk.striche[i];if(tl&&FS_BG_STRICH_FARBEN.indexOf(tl.f)>=0)farbe=tl.f;neu();leisteBauen();return;}
       if(selT>=0){selT=-1;neu();leisteBauen();return;}
       if(wz==='text'){
-        const tx=prompt('Text in der Skizze, z. B. „feucht“ (höchstens '+FS_BG_STEMPEL_TEXT_MAX+' Zeichen)','');
+        const tx=_fsEingabe('Text in der Skizze, z. B. „feucht“ (höchstens '+FS_BG_STEMPEL_TEXT_MAX+' Zeichen)','');
         if(tx!==null&&String(tx).trim()){merken();if(_fsBgSkTextDazu(sk,farbe,p0,tx)){selT=sk.striche.length-1;scheduleSave();}else verlauf.pop();}
         neu();leisteBauen();return;
       }
@@ -7039,11 +7071,11 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
     else if(modus==='stempel'&&sel>=0){if(_fsBgStempelWeg(sk,sel)){sel=-1;scheduleSave();neu();leisteBauen();}e.preventDefault();}
     else if(modus==='umriss'&&selU>=0){const u=_fsUmLesen(sk);if(u&&_fsUmEckeWeg(u,selU)){selU=-1;_fsUmNachziehen(sk,W,H);scheduleSave();neu();leisteBauen();}e.preventDefault();} /* F62 */
   };
-  document.addEventListener('keydown',taste,true);
-  const schliessen=()=>{window.removeEventListener('resize',groesse); /* F66 */document.removeEventListener('keydown',taste,true);ov.remove();if(typeof fertig==='function'){try{fertig();}catch(x){console.warn('[Feuchte] Einzeichnen:',x);}}};
+  document.addEventListener('keydown',taste,true);if(dk!==document)dk.addEventListener('keydown',taste,true); /* F69 */
+  const schliessen=()=>{window.removeEventListener('resize',groesse); /* F66 */document.removeEventListener('keydown',taste,true);if(dw!==window)dw.removeEventListener('resize',groesse);if(dk!==document)dk.removeEventListener('keydown',taste,true); /* F69 */ov.remove();if(typeof fertig==='function'){try{fertig();}catch(x){console.warn('[Feuchte] Einzeichnen:',x);}}};
   zu.onclick=schliessen;fb.onclick=schliessen;
   leisteBauen();
-  document.body.appendChild(ov);
+  _fsAnhaengen(ov,b); /* F69 */
   zoomSetzen(1); /* F66: passend ins Sichtfeld, 100 % */
 }
 function _fsBgSektionKurz(sek){
@@ -7680,7 +7712,7 @@ function _fsMessbildErstellen(blob,w,punkt,unterzeile){
 // Messpunkt antippen – liefert {x,y} (Anteil im Bild) oder null („Ohne Punkt")
 function _fsMesspunktWaehlen(bildUrl,titel){
   return new Promise(res=>{
-    const alt=document.getElementById('_fsMesspunktOverlay');if(alt)alt.remove();
+    const alt=_fsById('_fsMesspunktOverlay');if(alt)alt.remove();
     const ov=document.createElement('div');ov.id='_fsMesspunktOverlay';
     ov.style.cssText='position:fixed;inset:0;z-index:100001;background:#000;display:flex;flex-direction:column;';
     const kopf=document.createElement('div');
@@ -7713,7 +7745,7 @@ function _fsMesspunktWaehlen(bildUrl,titel){
     ok.onclick=()=>{if(punkt)fertig(punkt);};
     fuss.append(ohne,ok);
     ov.append(kopf,feld,fuss);
-    document.body.appendChild(ov);
+    _fsAnhaengen(ov); /* F69 */
   });
 }
 
@@ -7795,7 +7827,7 @@ async function _fsTestoEinlesen(bericht,t,neuBauen){
   raumOptionen(letzterRaum);
   raumSel.onchange=()=>{
     if(raumSel.value!=='__neu')return;
-    const n=prompt('Name des Raums:');
+    const n=_fsEingabe('Name des Raums:');
     if(n&&n.trim()){const name=n.trim();if(!bericht.raeume.some(r=>r.name===name)){bericht.raeume.push({name,t:'',rf:''});scheduleSave();}raumOptionen(name);}
     else raumOptionen(letzterRaum);
   };
@@ -7930,7 +7962,7 @@ async function _fsTestoPlanZuordnen(bericht,t,neuBauen){
   if(!(typeof tokenValid==='function'&&tokenValid())){toast('Drive nicht verbunden – zum Einlesen bitte mit Empfang anmelden','error',5000);return;} /* F55: gilt am PC wie am Tablet */
   if(!_fsBgMessplan(bericht).length){toast('Erst den Messplan anlegen: Räume mit Wänden anlegen (bei „Räume“), Höhen je Wand im Raum bei „Messplan“','info',6000);return;}
   const KNOPF='padding:9px 12px;border-radius:8px;font-size:var(--fs14,14px);cursor:pointer;font-weight:600;font-family:inherit;';
-  const GID='_fsTestoPlanSheet';const alt=document.getElementById(GID);if(alt)alt.remove();
+  const GID='_fsTestoPlanSheet';const alt=_fsById(GID);if(alt)alt.remove();
   const ov=document.createElement('div');ov.id=GID;
   ov.style.cssText='position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;';
   const box=document.createElement('div');
@@ -7944,7 +7976,7 @@ async function _fsTestoPlanZuordnen(bericht,t,neuBauen){
   kopf.append(ti,zu);
   const inhalt=document.createElement('div');inhalt.style.cssText='flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:10px 14px;';
   const fuss=document.createElement('div');fuss.style.cssText='padding:10px 14px 14px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;';
-  box.append(kopf,inhalt,fuss);ov.appendChild(box);document.body.appendChild(ov);
+  box.append(kopf,inhalt,fuss);ov.appendChild(box);_fsAnhaengen(ov,bericht); /* F69 */
   const info=txt=>{inhalt.innerHTML='';const d=document.createElement('div');d.style.cssText='font-size:var(--fs15,15px);color:var(--text);padding:12px 0;line-height:1.5;';d.textContent=txt;inhalt.appendChild(d);fuss.innerHTML='';};
 
   let messungen=[],nurCsv=[],doppelt=0,unlesbar=[],abgeschnitten=false,aeltere=false,mitBild=amGeraet;
@@ -8065,7 +8097,7 @@ async function _fsTestoPlanZuordnen(bericht,t,neuBauen){
     const nurTrotec=plan.filter(p=>!p.klima&&!aus.has(schluessel(p))&&!paarVon.get(schluessel(p))&&_fsBgDigitsFuerPlan(bericht,p).mf); /* F55: Zeilen mit Trotec-Wert, aber ohne testo-Messung */
     if(nurTrotec.length){
       const b=document.createElement('button');b.type='button';b.setAttribute('data-fs-plannurtrotec','1');b.textContent='Nur Trotec-Werte übernehmen – '+nurTrotec.length+' Zeile'+(nurTrotec.length===1?'':'n')+' ohne testo-Messung';b.style.cssText=knopfStil('var(--border)')+'width:100%;margin:0 0 8px;';
-      b.onclick=()=>{if(!confirm(nurTrotec.length+' Messstelle'+(nurTrotec.length===1?'':'n')+' nur mit dem Trotec-Wert anlegen (ohne Luft und Oberfläche)?'))return;nurTrotec.forEach(p=>{const st={text:'',raum:p.raum,wand:p.wand,hoehe:p.hoehe,ts:'',luftT:'',luftRf:'',mf:'',mfVergleich:'',befund:[],notiz:'',fotoRefs:[],referenz:false,zeit:''};_fsBgDigitsUebernehmen(bericht,st,p);bericht.stellen.push(st);});scheduleSave();try{neuBauen();}catch(e){}zeige();};
+      b.onclick=()=>{if(!_fsFrage(nurTrotec.length+' Messstelle'+(nurTrotec.length===1?'':'n')+' nur mit dem Trotec-Wert anlegen (ohne Luft und Oberfläche)?'))return;nurTrotec.forEach(p=>{const st={text:'',raum:p.raum,wand:p.wand,hoehe:p.hoehe,ts:'',luftT:'',luftRf:'',mf:'',mfVergleich:'',befund:[],notiz:'',fotoRefs:[],referenz:false,zeit:''};_fsBgDigitsUebernehmen(bericht,st,p);bericht.stellen.push(st);});scheduleSave();try{neuBauen();}catch(e){}zeige();};
       inhalt.appendChild(b);
     }
     if(weg.size){
