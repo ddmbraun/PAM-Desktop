@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F72';
+const PAM_FORMULARE_VERSION='F73';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -397,7 +397,7 @@ function _fsPdfName(bericht,zeit){
   }
   if(bericht&&bericht.vorlage==='wartungsprotokoll'){ // F10: Name wie am PC bisher (Adresse gekürzt wegen der Pfadlänge) + Uhrzeit
     const slug=String((bericht.kopf&&bericht.kopf.objektAdresse)||'').split(',')[0].replace(/[^a-zA-Z0-9]/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,'').slice(0,30);
-    return ((typeof _fsWpArt==='function'&&_fsWpArt(bericht)==='inspektion')?'Dachinspektion':'Wartungsprotokoll')+(slug?'_'+slug:'')+(datum?'_'+datum:'')+uhr+'.pdf'; /* F70 */
+    return 'Dachprotokoll_'+((typeof _fsWpArt==='function'&&_fsWpArt(bericht)==='inspektion')?'Inspektion':'Wartung')+(slug?'_'+slug:'')+(datum?'_'+datum:'')+uhr+'.pdf'; /* F70 · F73: Dachprotokoll_Wartung_… / Dachprotokoll_Inspektion_… */
   }
   if(bericht&&bericht.fassung==='begehung'&&bericht.art==='vorab'){ // F16, F17: mit der Rolle, bei wem es war (Eigentuemer, Mieter, …)
     const rolle=String((bericht.kopf&&bericht.kopf.besuchBei)||'').split(':')[0].replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/Ä/g,'Ae').replace(/Ö/g,'Oe').replace(/Ü/g,'Ue').replace(/ß/g,'ss').replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,16);
@@ -8294,7 +8294,7 @@ const FS_WP_ARBEITEN_STEIL=['Rinnen / Fallrohre gereinigt','Laubfang gereinigt',
 const FS_WP_GRUENDE=['nicht zugänglich','Schnee / Eis','Nässe','abgesperrt','Absturzgefahr ohne Sicherung','kein Zugang zum Dachboden'];
 function _fsWpDachart(b){return String((b&&b.dachart)||'').toLowerCase()==='steil'?'steil':'flach';}
 function _fsWpArt(b){return String((b&&b.wpArt)||'').toLowerCase()==='inspektion'?'inspektion':'wartung';}
-function _fsWpTitelText(b){return (_fsWpArt(b)==='inspektion'?'Dachinspektion ':'Wartungsprotokoll ')+(_fsWpDachart(b)==='steil'?'Steildach':'Flachdach');}
+function _fsWpTitelText(b){return 'Dachprotokoll – '+(_fsWpArt(b)==='inspektion'?'Inspektion ':'Wartung ')+(_fsWpDachart(b)==='steil'?'Steildach':'Flachdach');} /* F73: ein Wort überall (Frank: „ich komm da durcheinander“) */
 function _fsWpSekNeu(dachart){const q=(dachart==='steil')?FS_WP_SEKTIONEN_STEIL:FS_WP_SEKTIONEN;return q.map(s=>({titel:s.titel,items:s.items.map(text=>({text,status:'offen',massnahmen:''}))}));}
 function _fsWpArbNeu(dachart){const q=(dachart==='steil')?FS_WP_ARBEITEN_STEIL:FS_WP_ARBEITEN_FLACH;return q.map(text=>({text,ok:false,notiz:''}));}
 /* ══ F71: Dachrand · „Sichtprüfung Attika“ · Ja/Nein bei Schadens-Fragen · „＋ eigener Punkt“ (Frank 15.10.2026, OFFENE_PUNKTE P65 „AUFTRAG F71“) ═══════════════
@@ -8338,7 +8338,7 @@ function _fsWpNeuerBericht(t,wahl){
   const b={
     id:'wp_'+Date.now(),vorlage:'wartungsprotokoll',
     dachart,wpArt,
-    titel:'Wartungsprotokoll Flachdach',
+    titel:'Dachprotokoll – Wartung Flachdach', /* F73 (wird gleich über _fsWpTitelText gesetzt) */
     datum:dd+'.'+mm+'.'+yyyy,
     createdAt:new Date().toISOString(),
     kopf:{
@@ -8442,7 +8442,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
   closeBtn.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:40px;height:40px;border-radius:8px;font-size:var(--fs18,18px);cursor:pointer;flex-shrink:0;';
   closeBtn.onclick=()=>{ov.remove();try{const ct=currentTask();if(ct)renderDetail(ct);}catch(e){console.warn('[Wartung] zurück:',e);}};
   const hdrMeta=document.createElement('div');hdrMeta.style.cssText='flex:1;min-width:0;';
-  const hdrT=document.createElement('div');hdrT.style.cssText='font-size:var(--fs15,15px);font-weight:700;color:#fff;';hdrT.textContent='🏠 '+((typeof _fsWpTitelText==='function')?_fsWpTitelText(bericht):'Wartungsprotokoll Flachdach');
+  const hdrT=document.createElement('div');hdrT.style.cssText='font-size:var(--fs15,15px);font-weight:700;color:#fff;';hdrT.textContent='🏠 '+((typeof _fsWpTitelText==='function')?_fsWpTitelText(bericht):'Dachprotokoll – Wartung Flachdach');
   const hdrS=document.createElement('div');hdrS.style.cssText='font-size:var(--fs11,11px);color:rgba(255,255,255,.75);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';hdrS.textContent=t.adresse||t.title||'Objektadresse';
   hdrMeta.append(hdrT,hdrS);
   const datumEl=document.createElement('input');datumEl.type='text';datumEl.value=bericht.datum||'';datumEl.placeholder='TT.MM.JJJJ';datumEl.autocomplete='off';datumEl.setAttribute('aria-label','Datum');
@@ -8473,12 +8473,33 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
   ];
   const istMangel=it=>it.status==='mangel'||it.status==='repariert';
   const fotoOffen=new WeakSet(); /* F72: Punkte, an denen „+ Foto“ angetippt wurde (nur solange das Formular offen ist; mit Fotos bleibt die Leiste ohnehin auf) */
+  /* F73: Zuklapp-Leiste – Vorbild Vorabbesichtigung (Frank 15.10.2026: „die Felder alle zuklappen, auswählen wie bei Vorab“). Nur im offenen Formular, nichts davon wird gespeichert. */
+  let wpFilter='alle';const wpZu=new Set();let wpKopfZu=false;
+  const _passt=it=>wpFilter==='offen'?!(it.status&&it.status!=='offen'):wpFilter==='maengel'?(it.status==='mangel'||it.status==='repariert'||it.status==='np'):wpFilter==='fotos'?(Array.isArray(it.fotoRefs)&&it.fotoRefs.length>0):true;
+  const _wpLeisteNeu=()=>{const sc=body.scrollTop;_wpMobRender();body.scrollTop=sc;};
+  function _filterZeile(){
+    const w=document.createElement('div');w.setAttribute('data-wp-leiste','1');
+    w.style.cssText='position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:6px;padding:6px 14px;background:var(--bg2);border-bottom:1px solid var(--border);';
+    const mk=(txt,key,an,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute('data-wp-filter',key);b.setAttribute('aria-pressed',String(!!an));
+      b.style.cssText='padding:7px 12px;min-height:34px;border-radius:14px;font-size:var(--fs12,12px);cursor:pointer;font-family:inherit;border:1px solid '+(an?FS_WP_FARBE:'var(--border)')+';background:'+(an?'rgba(26,92,58,.14)':'transparent')+';color:'+(an?FS_WP_FARBE:'var(--text2)')+';font-weight:'+(an?'700':'400')+';';
+      b.onclick=fn;return b;};
+    const alleZu=wpKopfZu&&bericht.sektionen.every(s=>wpZu.has(s.titel));
+    const setzFilter=f=>{wpFilter=(wpFilter===f)?'alle':f;wpZu.clear();_wpLeisteNeu();};
+    w.append(
+      mk('▸ Alles zu','zu',alleZu,()=>{bericht.sektionen.forEach(s=>wpZu.add(s.titel));wpKopfZu=true;_wpLeisteNeu();}),
+      mk('▾ Alles auf','auf',false,()=>{wpZu.clear();wpKopfZu=false;wpFilter='alle';_wpLeisteNeu();}),
+      mk('Nur offene','offen',wpFilter==='offen',()=>setzFilter('offen')),
+      mk('Nur Mängel','maengel',wpFilter==='maengel',()=>setzFilter('maengel')),
+      mk('Fotos','fotos',wpFilter==='fotos',()=>setzFilter('fotos'))
+    );
+    return w;
+  }
   /* F71: Schadens-Frage („… vorhanden?“) – OK heißt „Nein“, Mängel heißt „Ja“; Status, Farben und Zählen bleiben */
   const _istFrage=it=>(typeof _fsWpIstFrage==='function')&&_fsWpIstFrage(it&&it.text);
   const _sym=(it,s)=>_istFrage(it)?(s.v==='ok'?'✓ Nein':s.v==='mangel'?'⚠ Ja':s.sym):s.sym;
   const _dachart=()=>(typeof _fsWpDachart==='function')?_fsWpDachart(bericht):'flach';
   const _art=()=>(typeof _fsWpArt==='function')?_fsWpArt(bericht):'wartung';
-  const _titelNeu=()=>{hdrT.textContent='🏠 '+((typeof _fsWpTitelText==='function')?_fsWpTitelText(bericht):'Wartungsprotokoll Flachdach');};
+  const _titelNeu=()=>{hdrT.textContent='🏠 '+((typeof _fsWpTitelText==='function')?_fsWpTitelText(bericht):'Dachprotokoll – Wartung Flachdach');};
   /* F70: die zwei Schalter oben im Protokoll – Dachart und Art; die andere Prüfliste wird ausgeblendet (geparkt), nicht gelöscht */
   function _wahlZeile(){
     const w=document.createElement('div');w.setAttribute('data-wp-wahl','1');
@@ -8511,13 +8532,16 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
   function _wpMobRender(){
     body.innerHTML='';
     body.appendChild(_wahlZeile());
+    body.appendChild(_filterZeile()); /* F73 */
 
     /* ── Auftragsdaten & Dachaufbau ── */
     const kopfSek=document.createElement('div');
     kopfSek.style.cssText='background:var(--bg2);border-bottom:1px solid var(--border);';
     const kopfHdr=document.createElement('div');
     kopfHdr.style.cssText='padding:10px 14px 6px;font-size:var(--fs11,11px);font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;';
-    kopfHdr.textContent='Auftragsdaten & Dachaufbau';
+    kopfHdr.textContent=(wpKopfZu?'▸ ':'▾ ')+'Auftragsdaten & Dachaufbau'; /* F73: antippen klappt den Kopf zu/auf */
+    kopfHdr.style.cursor='pointer';kopfHdr.setAttribute('data-wp-kopf','1');kopfHdr.setAttribute('data-wp-zu',wpKopfZu?'1':'0');
+    kopfHdr.onclick=()=>{wpKopfZu=!wpKopfZu;_wpLeisteNeu();};
     kopfSek.appendChild(kopfHdr);
     function _mf(label,key,placeholder){
       const row=document.createElement('div');
@@ -8548,6 +8572,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
       });
       wrap.append(lbl,row);return wrap;
     }
+    if(!wpKopfZu){ /* F73: Kopf zugeklappt → nur die Kopfzeile */
     kopfSek.append(
       _mf('Auftraggeber','auftraggeber','aus Task'),
       _mf('Kostenstelle','kostenstelle','z.B. 250133'),
@@ -8573,6 +8598,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
       _mcg('Sicherheitseinrichtungen','sicherheit',['Ohne','Fest montierte Anschlagpunkte','Geländer','Sicherheitsseile']),
       _mcg('Prüfprotokoll Anschlageinrichtung','pruefprotokollAnschlag',['vorhanden','nicht gesehen','keine Anlage'],true) /* F72: nur Vermerk – die Sachkundigenprüfung ist nicht Teil dieses Protokolls (Frank: „nur OK, augenscheinlich“) */
     );
+    } /* F73 */
     body.appendChild(kopfSek);
 
     /* ── Zustandsprüfung ── */
@@ -8580,9 +8606,15 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
       const sekDiv=document.createElement('div');
       const sekHdr=document.createElement('div');
       sekHdr.style.cssText='padding:8px 14px;font-size:var(--fs12,12px);font-weight:700;color:'+FS_WP_FARBE+';background:rgba(26,92,58,.08);border-bottom:1px solid var(--border);border-top:1px solid var(--border);border-left:3px solid '+FS_WP_FARBE+';';
-      sekHdr.textContent=sek.titel;
+      const zu=wpZu.has(sek.titel); /* F73: Abschnitt zu-/aufklappen; zugeklappt zeigt die Kopfzeile die Zählung */
+      const zs=(()=>{let ok=0,mg=0,np=0,of=0;sek.items.forEach(it=>{if(it.status==='ok')ok++;else if(it.status==='mangel'||it.status==='repariert')mg++;else if(it.status==='np')np++;else of++;});return [ok?ok+' OK':'',mg?mg+' Mängel':'',np?np+' n. prüfb.':'',of?of+' offen':''].filter(Boolean).join(' · ');})();
+      sekHdr.textContent=(zu?'▸ ':'▾ ')+sek.titel+(zu?'  –  '+(zs||'leer'):'');
+      sekHdr.style.cursor='pointer';sekDiv.setAttribute('data-wp-abschnitt','1');sekDiv.setAttribute('data-wp-zu',zu?'1':'0');
+      sekHdr.onclick=()=>{if(wpZu.has(sek.titel))wpZu.delete(sek.titel);else wpZu.add(sek.titel);_wpLeisteNeu();};
       sekDiv.appendChild(sekHdr);
+      if(zu){body.appendChild(sekDiv);return;}
       sek.items.forEach(it=>{
+        if(!_passt(it))return; /* F73: Leiste „Nur offene / Nur Mängel / Fotos“ */
         if(!Array.isArray(it.fotoRefs))it.fotoRefs=[];
         const defs=statDef.filter(s=>s.v!=='repariert'||_art()!=='inspektion'||it.status==='repariert'); /* F70: Inspektion ohne „Rep.“ – ein schon gesetztes Rep. bleibt sichtbar */
         if(_istFrage(it)){const iN=defs.findIndex(s=>s.v==='nv'),iJ=defs.findIndex(s=>s.v==='mangel');if(iN>=0&&iJ>iN){const ja=defs.splice(iJ,1)[0];defs.splice(iN,0,ja);}} /* F72: bei Fragen Ja direkt neben Nein – Nein · Ja · N/V · (Rep.) · n. prüfb. (Frank 15.10.2026); Zustands-Punkte unverändert */
@@ -8786,7 +8818,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
     const blob=_fsPdfBlobs[bericht.id];
     if(navigator.share&&blob){
       const file=new File([blob],bericht.pdfName||_fsPdfName(bericht),{type:'application/pdf'});
-      try{await navigator.share({title:(typeof _fsWpTitelText==='function')?_fsWpTitelText(bericht):'Wartungsprotokoll Flachdach',files:[file]});}
+      try{await navigator.share({title:(typeof _fsWpTitelText==='function')?_fsWpTitelText(bericht):'Dachprotokoll – Wartung Flachdach',files:[file]});}
       catch(e){if(e.name!=='AbortError')toast('Teilen fehlgeschlagen','error');}
     }else{toast('Bitte zuerst PDF erstellen','info');}
   };
@@ -8816,7 +8848,7 @@ async function _fsWpPdf(bericht,task){
   if(!window.jspdf){toast('PDF-Bibliothek lädt noch …','error');return null;}
   try{
     _fsWpVervollstaendigen(bericht);
-    const dach=(typeof _fsWpDachart==='function')?_fsWpDachart(bericht):'flach',art=(typeof _fsWpArt==='function')?_fsWpArt(bericht):'wartung',titel=(typeof _fsWpTitelText==='function')?_fsWpTitelText(bericht):'Wartungsprotokoll Flachdach'; /* F70 */
+    const dach=(typeof _fsWpDachart==='function')?_fsWpDachart(bericht):'flach',art=(typeof _fsWpArt==='function')?_fsWpArt(bericht):'wartung',titel=(typeof _fsWpTitelText==='function')?_fsWpTitelText(bericht):'Dachprotokoll – Wartung Flachdach'; /* F70 */
     const t=task||{};
     const {jsPDF}=window.jspdf;
     const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
@@ -8987,7 +9019,7 @@ async function _fsWpPdf(bericht,task){
     const blob=doc.output('blob');
     _fsPdfBlobs[bericht.id]=blob;
     const name=_fsPdfName(bericht,new Date());
-    toast('✓ '+(art==='inspektion'?'Dachinspektion':'Wartungsprotokoll')+' PDF erstellt','success',4000);
+    toast('✓ Dachprotokoll PDF erstellt','success',4000); /* F73 */
     const inDrive=await _fsPdfNachDrive(blob,name,bericht,task);
     if(!inDrive){ // ohne Drive bleibt nur das Gerät: dann herunterladen
       const url=URL.createObjectURL(blob);
@@ -9901,7 +9933,7 @@ function _fsListeZeile(b,t){
     const steil=String(b.dachart||'').toLowerCase()==='steil',insp=String(b.wpArt||'').toLowerCase()==='inspektion'; /* F70: Dachinspektion */
     const adr=String((b.kopf&&(b.kopf.objektAdresse||b.kopf.adresse))||'').trim();
     const name=kartenname||adr||String(b.titel||'Wartungsprotokoll');
-    return {kurz:(insp?'DI-':'WP-')+(steil?'STEILDA':'FLADA'),lang:(insp?'Dachinspektion ':'Wartungsprotokoll ')+(steil?'Steildach':'Flachdach'),name,sub:(adr&&adr!==name)?adr:''};
+    return {kurz:'DP-'+(insp?'I-':'W-')+(steil?'STEIL':'FLADA'),lang:'Dachprotokoll – '+(insp?'Inspektion ':'Wartung ')+(steil?'Steildach':'Flachdach'),name,sub:(adr&&adr!==name)?adr:''}; /* F73: DP-W-FLADA · DP-I-FLADA · DP-W-STEIL · DP-I-STEIL (Franks Abkürzungen) */
   }
   if(b.vorlage==='feuchte'&&b.fassung==='begehung'&&b.art==='vorab'){ // F16
     const bei=String((b.kopf&&b.kopf.besuchBei)||'').trim(),lg=String((b.kopf&&b.kopf.lage)||'').trim(); // F17: bei wem – so sind zwei Besuche an einer Karte zu unterscheiden
