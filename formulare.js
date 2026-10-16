@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F80';
+const PAM_FORMULARE_VERSION='F81';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -8789,6 +8789,28 @@ async function _fsPvPdfFeldFotos(doc,b,y,M,W){
   doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);
   return y;
 }
+/* ── F81: NUMMERIERTE MÄNGELLISTE (M1, M2 …) FÜR DACH- UND PV-PROTOKOLL + VERKNÜPFUNG DACHPROTOKOLL ↔ PV-PROTOKOLL ──────────────────
+   Frank 16.10.2026 („P73 erst fertig machen“, Entwurf Claude-Code\Entwurf_PV-Protokoll_Schritt3_2026-10-16.html, „ja bau“ / „passt“): jeder Punkt auf „Mängel“
+   (bei Fragen „Ja“) oder „Rep.“ bekommt von selbst eine Nummer in der Reihenfolge der Liste – im Formular als Marke „M1“ vor dem Text, im PDF als eigener
+   Block „Mängel (nummeriert)“ nach der Sichtprüfung. Die Nummer wird nie gespeichert, sondern immer aus dem Stand gerechnet (ändert sich ein Status, rücken
+   die Nummern nach). Dieselben Nummern kommen in F82 auf die Dachskizze. Nur Feststellungen, keine Bewertung. Reine Rechnung ohne Bildschirm. */
+function _fsWpMaengel(b){
+  const out=[];let nr=0;
+  const fotos=(b&&Array.isArray(b.fotos))?b.fotos:[];
+  ((b&&Array.isArray(b.sektionen))?b.sektionen:[]).forEach(sek=>((sek&&Array.isArray(sek.items))?sek.items:[]).forEach(it=>{
+    if(!it||(it.status!=='mangel'&&it.status!=='repariert'))return;
+    nr++;
+    const frage=/\?\s*$/.test(String(it.text||''));
+    const nrs=(typeof _fsZeilenFotos==='function')?_fsZeilenFotos(fotos,it.fotoRefs).map(z=>z.nr):[];
+    out.push({nr,it,sek:String((sek&&sek.titel)||'').trim(),text:String(it.text||'').trim(),frage,status:it.status,bem:String(it.massnahmen||'').trim(),fotoNrs:nrs});
+  }));
+  return out;
+}
+function _fsWpMangelNr(b,it){if(!it)return 0;const m=_fsWpMaengel(b).find(x=>x.it===it);return m?m.nr:0;}
+// Zeile fürs PDF: „M1 · 1. Module – Schäden … vorhanden? Ja · Nest unter Modul 3 (Fotos 2, 3)“ – als Tabellenzeile [Nr., Prüfpunkt, Bemerkung, Fotos]
+function _fsWpMangelZeile(m){
+  return ['M'+m.nr,(m.sek?m.sek+' – ':'')+m.text+(m.frage?' Ja':''),(m.bem||'')+(m.status==='repariert'?((m.bem?' · ':'')+'Rep. erledigt'):'')||'–',m.fotoNrs.length?m.fotoNrs.join(', '):'–'];
+}
 // Frage beim Anlegen: Flachdach | Steildach · Wartung | Inspektion (wie die Frage Innen/Außen bei der Besichtigung 2). cb(null) = abgebrochen. Merkt die letzte Wahl nur als Vorauswahl. F75: art 'pv' → Überschrift „☀ PV-Protokoll“.
 function _fsWpWahl(cb){
   const formArt=arguments[1]; /* F75: zweites Argument 'pv' → Überschrift „☀ PV-Protokoll“ (die Signatur bleibt, ältere Prüfungen ankern sie) */
@@ -8897,6 +8919,37 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
   let wpFilter='alle';const wpZu=new Set();let wpKopfZu=false;
   const _passt=it=>wpFilter==='offen'?!(it.status&&it.status!=='offen'):wpFilter==='maengel'?(it.status==='mangel'||it.status==='repariert'||it.status==='np'):wpFilter==='fotos'?(Array.isArray(it.fotoRefs)&&it.fotoRefs.length>0):true;
   const _wpLeisteNeu=()=>{const sc=body.scrollTop;_wpMobRender();body.scrollTop=sc;};
+  /* F81: Mängel-Nummern M1, M2 … an den Punkten nachführen (nach jedem Status-Wechsel), ohne die Seite neu zu zeichnen */
+  try{if(!document.getElementById('_wpMangelCss')){const st=document.createElement('style');st.id='_wpMangelCss';st.textContent='[data-wp-mangelnr]::before{content:attr(data-nr);}';document.head.appendChild(st);}}catch(e){} /* F81: die Nummer steht im Attribut, der Punkt-Text bleibt sauber */
+  const _wpNummernNeu=()=>{if(typeof _fsWpMangelNr!=='function')return;body.querySelectorAll('[data-wp-mangelnr]').forEach(e=>{const n=_fsWpMangelNr(bericht,e._wpItem);e.setAttribute('data-nr',n?'M'+n:'');e.style.display=n?'inline-block':'none';});};
+  /* F81: im Dachprotokoll – „☀ PV-Protokoll anlegen“ (legt das PV-Protokoll derselben Karte an, Dachart/Art übernommen, beide kennen sich) oder die Verknüpfungszeile zum vorhandenen; Muster: _anZeile (F74) */
+  const _pvVerknuepfung=()=>{
+    const w=document.createElement('div');w.setAttribute('data-wp-pv','1');w.style.cssText='padding:6px 14px 10px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:8px;align-items:center;';
+    const idx=(bericht.pvId&&Array.isArray(t.pruefberichte))?t.pruefberichte.findIndex(x=>x&&x.id===bericht.pvId&&x.art==='pv'):-1;
+    const stil='padding:8px 12px;min-height:36px;border-radius:10px;border:1px solid #b45309;background:rgba(180,83,9,.08);color:#b45309;font-size:var(--fs13,13px);font-weight:600;cursor:pointer;font-family:inherit;';
+    if(idx>=0){
+      const pvB=t.pruefberichte[idx];const mz=(typeof _fsWpMaengel==='function')?_fsWpMaengel(pvB).length:0;
+      const b=document.createElement('button');b.type='button';b.setAttribute('data-wp-pv-oeffnen','1');b.textContent='☀ PV-Protokoll vom '+(pvB.datum||'')+' · '+mz+' '+(mz===1?'Mangel':'Mängel')+' · öffnen';b.style.cssText=stil;
+      b.onclick=()=>{ov.remove();_openWartungsprotokollMobil(idx);};w.appendChild(b);
+    }else{
+      const b=document.createElement('button');b.type='button';b.setAttribute('data-wp-pv-neu','1');b.textContent='☀ PV-Anlage auf dem Dach – PV-Protokoll anlegen';b.style.cssText=stil;
+      b.onclick=()=>{
+        const neu=_fsWpNeuerBericht(t,{dachart:_dachart(),wpArt:_art(),art:'pv'});neu.vonWpId=String(bericht.id||'');bericht.pvId=String(neu.id||'');
+        t.pruefberichte.push(neu);scheduleSave();ov.remove();_openWartungsprotokollMobil(t.pruefberichte.length-1);
+      };
+      const h=document.createElement('span');h.style.cssText='font-size:var(--fs11,11px);color:var(--text2);';h.textContent='eigenes Formular, eigenes PDF – hier erscheint danach nur die Verknüpfung';
+      w.append(b,h);
+    }
+    return w;
+  };
+  /* F81: im PV-Protokoll – zurück zum Dachprotokoll, aus dem es angelegt wurde */
+  const _wpDachVerknuepfung=()=>{
+    const idx=(bericht.vonWpId&&Array.isArray(t.pruefberichte))?t.pruefberichte.findIndex(x=>x&&x.id===bericht.vonWpId&&x.vorlage==='wartungsprotokoll'&&!x.art):-1;
+    const v=document.createElement('div');v.setAttribute('data-pv-vonwp','1');v.style.cssText='padding:8px 14px;font-size:var(--fs12,12px);color:var(--text2);display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--border);';
+    v.textContent=idx>=0?('zum Dachprotokoll vom '+(t.pruefberichte[idx].datum||'')):'das zugehörige Dachprotokoll gibt es an dieser Karte nicht mehr';
+    if(idx>=0){const b=document.createElement('button');b.type='button';b.textContent='🏠 öffnen';b.setAttribute('data-pv-vonwp-oeffnen','1');b.style.cssText='padding:6px 12px;min-height:32px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--text);font-size:var(--fs12,12px);cursor:pointer;font-family:inherit;';b.onclick=()=>{ov.remove();_openWartungsprotokollMobil(idx);};v.appendChild(b);}
+    return v;
+  };
   /* F74: unter „Prüfprotokoll Anschlageinrichtung“ – entweder „🪝 selbst prüfen“ (legt das eigene Prüfprotokoll an und öffnet es) oder die Verknüpfungszeile zum vorhandenen */
   const _anZeile=()=>{
     const w=document.createElement('div');w.setAttribute('data-wp-anschlag','1');w.style.cssText='padding:6px 14px 10px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:8px;align-items:center;';
@@ -9128,7 +9181,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
       return teile;
     }
     if(!wpKopfZu){ /* F73: Kopf zugeklappt → nur die Kopfzeile */
-    if(_istPv()){kopfSek.append(..._pvKopfTeile());}else{ /* F75: PV-Protokoll – eigener Kopf */
+    if(_istPv()){kopfSek.append(..._pvKopfTeile());if(bericht.vonWpId)kopfSek.appendChild(_wpDachVerknuepfung());}else{ /* F81 */ /* F75: PV-Protokoll – eigener Kopf */
     kopfSek.append(
       _mf('Auftraggeber','auftraggeber','aus Task'),
       _mf('Kostenstelle','kostenstelle','z.B. 250133'),
@@ -9144,7 +9197,8 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
       _mcg('Unterkonstruktion','unterkonstruktion',['Unterspannbahn vorhanden','ohne / unbekannt']),
       _mcg('Klempnerarbeiten','klempner',['Zink','Kupfer','PVC']),
       _mcg('Prüfprotokoll Anschlageinrichtung','pruefprotokollAnschlag',['vorhanden','nicht gesehen','keine Anlage'],true), /* F72: nur Vermerk – die Sachkundigenprüfung ist nicht Teil dieses Protokolls */
-      _anZeile() /* F74 */
+      _anZeile() /* F74 */,
+      _pvVerknuepfung() /* F81 */
     );
     else kopfSek.append(
       _mcg('Art der Flachdachabdichtung','abdichtung',['Bitumen','Kunststoff','Flüssigkunststoff','EPDM']),
@@ -9154,7 +9208,8 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
       hoeheRow,
       _mcg('Sicherheitseinrichtungen','sicherheit',['Ohne','Fest montierte Anschlagpunkte','Geländer','Sicherheitsseile']),
       _mcg('Prüfprotokoll Anschlageinrichtung','pruefprotokollAnschlag',['vorhanden','nicht gesehen','keine Anlage'],true), /* F72: nur Vermerk – die Sachkundigenprüfung ist nicht Teil dieses Protokolls (Frank: „nur OK, augenscheinlich“) */
-      _anZeile() /* F74 */
+      _anZeile() /* F74 */,
+      _pvVerknuepfung() /* F81 */
     );
     } /* F75 */
     } /* F73 */
@@ -9196,6 +9251,12 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
           };
           txt.append(tS,weg);
         }
+        { /* F81: Mängel-Nummer M1, M2 … (dieselbe Nummer wie im PDF-Block „Mängel (nummeriert)“ und ab F82 auf der Dachskizze) */
+          const nrB=document.createElement('span');nrB.setAttribute('data-wp-mangelnr','1');nrB._wpItem=it;
+          nrB.style.cssText='display:inline-block;background:#b3261e;color:#fff;border-radius:10px;padding:0 7px;font-weight:700;font-size:var(--fs11,11px);line-height:18px;margin-right:6px;vertical-align:middle;flex-shrink:0;';
+          const n=(typeof _fsWpMangelNr==='function')?_fsWpMangelNr(bericht,it):0;nrB.setAttribute('data-nr',n?'M'+n:'');nrB.style.display=n?'inline-block':'none';
+          txt.insertBefore(nrB,txt.firstChild||null);
+        }
         const btnRow=document.createElement('div');
         btnRow.style.cssText='display:grid;grid-template-columns:repeat('+defs.length+',1fr);gap:5px;';
         const massnWrap=document.createElement('div');massnWrap.className='wpm-mw';
@@ -9219,7 +9280,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
           btn.onclick=()=>{
             it.status=it.status===s.v?'offen':s.v;
             row.style.background=rowBg();
-            scheduleSave();_wpMobStats();
+            scheduleSave();_wpMobStats();_wpNummernNeu(); /* F81 */
             btnRow.querySelectorAll('button').forEach((b2,bi)=>{
               const s2=defs[bi];const on2=it.status===s2.v;
               b2.style.borderColor=on2?s2.col:'var(--border)';
@@ -9466,6 +9527,10 @@ async function _fsWpPdf(bericht,task){
       const an=(bericht.anschlagId&&Array.isArray(t.pruefberichte))?t.pruefberichte.find(x=>x&&x.id===bericht.anschlagId&&x.art==='anschlag'):null;
       if(an){let fr=0,tot=0;(an.punkte||[]).forEach(p=>{tot++;if(p&&p.ergebnis==='frei')fr++;});doc.setFontSize(7.5);doc.setFont('helvetica','italic');doc.setTextColor(90,90,90);doc.text('Prüfprotokoll Anschlageinrichtung vom '+(an.datum||'')+' (PAM, eigenes Dokument): '+fr+' von '+tot+' Anschlagpunkten freigegeben.',M,y+1);y+=5;doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);}
     }
+    { /* F81: Verknüpfung zum PV-Protokoll (eigenes Dokument) – nur diese eine Zeile */
+      const pvB=(bericht.pvId&&Array.isArray(t.pruefberichte))?t.pruefberichte.find(x=>x&&x.id===bericht.pvId&&x.art==='pv'):null;
+      if(pvB){const mz=(typeof _fsWpMaengel==='function')?_fsWpMaengel(pvB).length:0;doc.setFontSize(7.5);doc.setFont('helvetica','italic');doc.setTextColor(90,90,90);doc.text('PV-Protokoll vom '+(pvB.datum||'')+' (PAM, eigenes Dokument): '+mz+' '+(mz===1?'Mangel':'Mängel')+'.',M,y+1);y+=5;doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);}
+    }
     } /* F75 */
 
     /* Zustandsprüfung */
@@ -9534,6 +9599,14 @@ async function _fsWpPdf(bericht,task){
     }
     /* F70: Nicht geprüft (mit Grund) – es steht schwarz auf weiß, was nicht beurteilt werden konnte */
     const kap=txt=>{if(y>255){doc.addPage();y=M;}doc.setFillColor(230,244,235);doc.rect(M,y,W-2*M,7,'F');doc.setFontSize(9);doc.setFont('helvetica','bold');doc.setTextColor(26,92,58);doc.text(txt,M+2,y+5);y+=10;doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);};
+    { /* F81: nummerierte Mängelliste – dieselben Nummern wie im Formular (und ab F82 auf der Dachskizze); nur Feststellungen */
+      const ml=(typeof _fsWpMaengel==='function')?_fsWpMaengel(bericht):[];
+      kap('Mängel (nummeriert)');
+      if(ml.length&&typeof _fsWpMangelZeile==='function'){
+        doc.autoTable({startY:y,head:[['Nr.','Prüfpunkt','Bemerkung','Fotos']],body:ml.map(_fsWpMangelZeile),theme:'grid',margin:{left:M,right:M},headStyles:{fillColor:farbe,fontSize:7.5,fontStyle:'bold'},bodyStyles:{fontSize:8,minCellHeight:7},columnStyles:{0:{cellWidth:12},1:{cellWidth:82},2:{cellWidth:68},3:{cellWidth:20}}});
+        y=doc.lastAutoTable.finalY+6;
+      }else{doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);doc.text('Keine Mängel festgestellt.',M,y+2);y+=8;}
+    }
     const npListe=[];
     (bericht.sektionen||[]).forEach(sek=>(sek.items||[]).forEach(it=>{if(it.status==='np')npListe.push([it.text,it.grund||'kein Grund angegeben']);}));
     if(npListe.length){
