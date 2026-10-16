@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F75';
+const PAM_FORMULARE_VERSION='F76';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -5068,12 +5068,34 @@ function _fsVorschauFenster(blob,name){
   zeichnen();
   return ov;
 }
-/* Fotos im PDF: 2 je Seite (groß, ein Foto je Zeile) oder 4 je Seite (bisher). Gilt je Protokoll; das Gerät merkt sich die letzte Wahl
+/* Fotos im PDF: 2 je Seite (groß; Querformat allein in der Zeile, zwei Hochformat nebeneinander) oder 4 je Seite. Gilt je Protokoll; das Gerät merkt sich die letzte Wahl
    für das nächste neue Protokoll (am PC an beiden Rechnern gleich: PAM Desktop teilt den Schlüssel). Ohne Angabe: 4. */
 const FS_FOTOS_JE_SEITE_KEY='pam_fs_fotos_je_seite';
 function _fsFotosJeSeite(b){return (b&&+b.fotosJeSeite===2)?2:4;}
 function _fsFotosJeSeiteMerk(){try{return +localStorage.getItem(FS_FOTOS_JE_SEITE_KEY)===2?2:4;}catch(e){return 4;}}
 function _fsFotosJeSeiteSetzen(b,n){n=+n===2?2:4;if(b)b.fotosJeSeite=n;try{localStorage.setItem(FS_FOTOS_JE_SEITE_KEY,String(n));}catch(e){}return n;}
+/* F76: Fotos im PDF enger. Zwei Fotos einer Reihe bekommen dieselbe Höhe und füllen zusammen die Breite (FS_FOTO_LUFT mm dazwischen) –
+   so bleibt neben einem Hochformat kein Loch unter dem Querformat. „2 je Seite“: nur zwei Hochformat-Fotos teilen sich eine Reihe
+   (fast so groß wie allein), Querformat bleibt allein über die ganze Breite. d = {w,h} in Pixeln; M = linker Rand, B = nutzbare Breite (mm). */
+const FS_FOTO_LUFT=6;
+function _fsFotoIstHoch(d){return !!(d&&d.h>d.w);}
+function _fsFotoReihe(zwei,ds,M,B){ /* → {h, teile:[{x,w,capW}]} in mm */
+  const L=FS_FOTO_LUFT,maxH=zwei?120:115,r=d=>(d&&d.w>0&&d.h>0)?d.w/d.h:4/3;
+  if(ds.length===2){
+    const ra=r(ds[0]),rb=r(ds[1]),h=Math.min(maxH,(B-L)/(ra+rb)),x0=M+(B-(ra+rb)*h-L)/2;
+    return {h,teile:[{x:x0,w:ra*h,capW:ra*h},{x:x0+ra*h+L,w:rb*h,capW:rb*h}]};
+  }
+  const ra=r(ds[0]);let w=zwei?B:(B-L)/2,h=w/ra;if(h>maxH){h=maxH;w=h*ra;}
+  return {h,teile:[{x:zwei?M+(B-w)/2:M,w,capW:zwei?Math.max(w,90):w}]};
+}
+/* Dürfen zwei Fotos nebeneinander? „2 je Seite“: nur zwei Hochformat-Fotos. „4 je Seite“: ja – außer eins würde dadurch schmaler als die
+   Hälfte seiner früheren Breite (85 mm Spalte, höchstens 115 mm hoch), z. B. ein Panorama neben einem Hochformat. */
+function _fsFotoPaarPasst(zwei,a,b,M,B){
+  if(!(a&&b&&a.w>0&&a.h>0&&b.w>0&&b.h>0))return false;
+  if(zwei)return _fsFotoIstHoch(a)&&_fsFotoIstHoch(b);
+  const R=_fsFotoReihe(false,[a,b],M,B);
+  return [a,b].every((d,i)=>R.teile[i].w>=0.5*Math.min(85,115*d.w/d.h));
+}
 /* Aufnahmezeit am Foto im PDF – aus dem Dateinamen: „20261009_152412“ (PAM beim Hochladen, Android-Kamera) oder „2026-10-09-15-24-12“.
    Der LETZTE Zeitstempel zählt: PAM setzt seinen eigenen vor den Originalnamen; steht im Originalnamen einer, ist das die echte Aufnahme.
    Gleicher Tag wie das Protokoll → „15:24“, sonst „08.10. 15:24“; nichts gefunden → leer (dann steht keine Zeit da). */
@@ -7446,29 +7468,33 @@ async function _fsMobPdfBg(bericht,task){
 
     // 8 · Fotos
     if(fotoList.length){
-      const zwei=_fsFotosJeSeite(bericht)===2; // F49: „2 je Seite (groß)“ – ein Foto je Zeile, über die ganze Breite, mittig
-      const iW=zwei?W-2*M:85,iH=zwei?120:115;let col=0,erste=true,zeileH=0;
+      const zwei=_fsFotosJeSeite(bericht)===2; // F49: „2 je Seite (groß)“ – Querformat allein über die ganze Breite, mittig · F76: zwei Hochformat nebeneinander
+      const B=W-2*M;let erste=true,offen=null; /* F76: eine Reihe = ein oder zwei Fotos, gleich hoch (_fsFotoReihe); Seitenwechsel nach der echten Höhe; höchstens zwei geladene Fotos auf einmal */
+      const reihe=r=>{
+        const R=_fsFotoReihe(zwei,r.map(q=>q.d),M,B),h=R.h;
+        if(erste){if(y+9+h+10>285){doc.addPage();y=M;}abschnitt('Fotos');erste=false;}
+        else if(y+h+10>285){doc.addPage();y=M;}
+        let zeileH=h;
+        r.forEach((q,i)=>{
+          const f=q.f,fi=q.fi,d=q.d,x=R.teile[i].x,w=R.teile[i].w,capW=R.teile[i].capW;
+          try{doc.addImage(d.dataUrl,'JPEG',x,y,w,h);}catch(e){console.warn('[Feuchte] Bild:',e);}
+          const ut=_fsBgFotoUnterschriftTeile(bericht,f); /* F57/F58: nur was der Pin sagt (mit Kreis und Nummer), sonst „Stelle: …“ – kein Datum, keine Uhrzeit */
+          doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(90,90,90);
+          const capZ=_fsBgFotoCapZeichnen(doc,x,y+h+3.5,capW,fi,ut,6);
+          zeileH=Math.max(zeileH,h+(capZ-1)*3);
+        });
+        y+=zeileH+9;
+      };
       for(let fi=0;fi<fotoList.length;fi++){
         const f=fotoList[fi];
         setSaveInd('saving','PDF: Foto '+(fi+1)+'/'+fotoList.length+' …');
         const d=await _fsFpEinbrennen(await _fsFotoFuerPdf(f),f); /* F37: Foto-Pins fürs PDF daraufgezeichnet (das Original bleibt unverändert) */
         if(!d)continue;
-        if(col===0){
-          if(erste){if(y+9+iH+10>285){doc.addPage();y=M;}abschnitt('Fotos');erste=false;}
-          if(y+iH+10>285){doc.addPage();y=M;}
-          zeileH=0;
-        }
-        let w=iW,h=iW*d.h/d.w;if(h>iH){h=iH;w=iH*d.w/d.h;}
-        const x=zwei?M+(iW-w)/2:(col===0?M:M+iW+12),capW=zwei?Math.max(w,90):iW;
-        try{doc.addImage(d.dataUrl,'JPEG',x,y,w,h);}catch(e){console.warn('[Feuchte] Bild:',e);}
-        const ut=_fsBgFotoUnterschriftTeile(bericht,f); /* F57/F58: nur was der Pin sagt (mit Kreis und Nummer), sonst „Stelle: …“ – kein Datum, keine Uhrzeit */
-        doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(90,90,90);
-        const capZ=_fsBgFotoCapZeichnen(doc,x,y+h+3.5,capW,fi,ut,6);
-        zeileH=Math.max(zeileH,h+(capZ-1)*3);
-        if(zwei||col===1)y+=zeileH+9;
-        col=zwei?0:(col+1)%2;
+        const e={f,d,fi};
+        if(offen){if(_fsFotoPaarPasst(zwei,offen.d,d,M,B)){reihe([offen,e]);offen=null;continue;}reihe([offen]);offen=null;}
+        if(zwei&&!_fsFotoIstHoch(d))reihe([e]);else offen=e;
       }
-      if(col===1)y+=zeileH+9;
+      if(offen)reihe([offen]);
       setSaveInd('saved','');
     }
 
