@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F78';
+const PAM_FORMULARE_VERSION='F79';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -756,6 +756,7 @@ function _fsFotoZuordnung(bericht,f){
   ((bericht&&bericht.sektionen)||[]).forEach(sek=>((sek&&sek.items)||[]).forEach(it=>{
     if(it&&it.text&&(it.fotoRefs||[]).some(r=>_fsRefPasst(f,r)))teile.push(it.text);
   }));
+  ((bericht&&bericht.kopf&&Array.isArray(bericht.kopf.pvFelder))?bericht.kopf.pvFelder:[]).forEach(fd=>{if(fd&&Array.isArray(fd.fotoRefs)&&fd.fotoRefs.some(r=>_fsRefPasst(f,r)))teile.push('Modulfeld '+(String(fd.name||'').trim()||'ohne Namen'));}); /* F79 */
   return teile.join(' · ');
 }
 function _fsMiniaturQuelle(f,img){
@@ -8546,6 +8547,7 @@ function _fsPvVervollstaendigen(b){
   if(!Array.isArray(k.pvFelder))k.pvFelder=[];
   k.pvFelder=k.pvFelder.filter(f=>f&&typeof f==='object').map(f=>{const o={name:String(f.name==null?'':f.name),richtung:String(f.richtung==null?'':f.richtung),neigung:String(f.neigung==null?'':f.neigung)};
     if(f.gemessen===true){o.gemessen=true;['richtungGrad','neigungGrad'].forEach(g=>{if(typeof f[g]==='number'&&isFinite(f[g]))o[g]=f[g];});} /* F78: 🧭-Messung bleibt erhalten */
+    if(Array.isArray(f.fotoRefs)&&f.fotoRefs.length)o.fotoRefs=f.fotoRefs.filter(x=>typeof x==='string'); /* F79: Fotos am Modulfeld */
     return o;});
   if(!k.pvUnterlagen||typeof k.pvUnterlagen!=='object')k.pvUnterlagen={};
   FS_PV_UNTERLAGEN.forEach(u=>{if(typeof k.pvUnterlagen[u[0]]!=='string')k.pvUnterlagen[u[0]]='';});
@@ -8589,7 +8591,7 @@ function _openPvProtokoll(existingIdx){
   _fsWpWahl(w=>{if(w)_openWartungsprotokollMobil(undefined,Object.assign({art:'pv'},w));},'pv');
 }
 // PDF: Kopf des PV-Protokolls unter der grünen Kopfzeile – Vor Ort · Anlage · nur festgestellt (nichts gemessen) · Unterlagen. Gibt das neue y zurück.
-function _fsPvPdfKopf(doc,b,t,y,M,W,farbe){
+function _fsPvPdfKopf(doc,b,t,y,M,W,farbe,teil){ /* F79: teil 'anlage' = Vor Ort + Anlage, 'rest' = nur vorhanden + Unterlagen, ohne = alles */
   const k=b.kopf||{},lst=a=>(Array.isArray(a)&&a.length?a.join(', '):'–'),tx=s=>(String(s||'').trim()||'–');
   const tab=(titel,rows)=>{
     if(y>250){doc.addPage();y=M;}
@@ -8600,6 +8602,7 @@ function _fsPvPdfKopf(doc,b,t,y,M,W,farbe){
   const steil=_fsWpDachart(b)==='steil';
   const wetter=[String(k.wetter||'').trim(),k.aussenT?k.aussenT+' °C':'',k.aussenRf?k.aussenRf+' % rF':''].filter(Boolean).join(' · ');
   const quelle=(typeof _fsBgWetterQuelle==='function')?String(_fsBgWetterQuelle(k)||''):'';
+  if(teil!=='rest'){ /* F79 */
   tab('Vor Ort:',[
     ['Anlass',tx(k.anlass)],
     ['Besichtigung bei',tx(k.besuchBei)],
@@ -8621,6 +8624,8 @@ function _fsPvPdfKopf(doc,b,t,y,M,W,farbe){
     ['Errichter / Elektrobetrieb (lt. Betreiber)',tx(k.pvErrichter)]
   );
   tab('Anlage:',anlage);
+  } /* F79 */
+  if(teil!=='anlage'){ /* F79 */
   const bl=(Array.isArray(k.pvBlitzschutz)&&k.pvBlitzschutz[0])||'',er=(Array.isArray(k.pvErdung)&&k.pvErdung[0])||'';
   tab('Nur festgestellt, ob vorhanden – nichts gemessen:',[
     ['Blitzschutzanlage',bl==='Ja'?'vorhanden (Sichtkontrolle, keine Funktionsprüfung)':bl==='Nein'?'nicht vorhanden':bl||'–'],
@@ -8628,6 +8633,7 @@ function _fsPvPdfKopf(doc,b,t,y,M,W,farbe){
   ]);
   const u=k.pvUnterlagen||{};
   tab('Unterlagen:',FS_PV_UNTERLAGEN.map(x=>[x[1],(u[x[0]]||'–')+((x[0]==='pruefprotokoll'&&u[x[0]]==='gesehen'&&String(k.pvPruefprotokollDatum||'').trim())?' (vom '+String(k.pvPruefprotokollDatum).trim()+')':'')]));
+  } /* F79 */
   return y;
 }
 /* ── F78: PV-PROTOKOLL SCHRITT 2 – 🧭 RICHTUNG UND NEIGUNG JE MODULFELD MIT HANDY/TABLET ─────────────────────────────────────────
@@ -8749,6 +8755,35 @@ function _fsPvMessPanel(f,anker,opt){
   ab.onclick=()=>{stopp();p.remove();};
   start();
   return p;
+}
+/* ── F79: PV-PROTOKOLL – „+ FOTO“ AN JEDER MODULFELD-ZEILE, DIE BILDER KOMMEN IM PDF ZUR ANLAGE ──────────────────────────────────
+   Frank 16.10.2026 („baue ein „+ Foto“ an jeder Modulfeld-Zeile im PV-Protokoll, das Bild kommt im PDF zur Anlage“): dieselbe Foto-Leiste wie an den
+   Prüfpunkten (F72: erst „+ Foto“, dann die Leiste; mit Fotos bleibt sie offen), die Verweise liegen am Modulfeld (f.fotoRefs, wie it.fotoRefs am Punkt).
+   Im PDF stehen die Bilder direkt nach der Tabelle „Anlage“ („Fotos zum Modulfeld: Süd“), vor „Nur festgestellt, ob vorhanden“ – dafür zeichnet
+   _fsPvPdfKopf auf Wunsch nur den Teil bis „Anlage“ (teil 'anlage') oder den Rest (teil 'rest'); ohne teil wie bisher alles. */
+async function _fsPvPdfFeldFotos(doc,b,y,M,W){
+  const k=(b&&b.kopf)||{},fotos=(b&&Array.isArray(b.fotos))?b.fotos:[];
+  const felder=(Array.isArray(k.pvFelder)?k.pvFelder:[]).filter(f=>f&&Array.isArray(f.fotoRefs)&&f.fotoRefs.length);
+  for(const f of felder){
+    const liste=_fsZeilenFotos(fotos,f.fotoRefs).map(z=>z.f);
+    if(!liste.length)continue;
+    if(y>265){doc.addPage();y=M;}
+    doc.setFontSize(8);doc.setFont('helvetica','italic');doc.setTextColor(100,100,100);
+    doc.text('Fotos zum Modulfeld: '+(String(f.name||'').trim()||'ohne Namen'),M,y);y+=4;
+    let col=0;
+    for(const fo of liste){
+      const pf=await _fsFotoFuerPdf(fo);
+      if(!pf||!pf.dataUrl)continue;
+      const iW=55,iH=42;
+      if(y+iH+8>285){doc.addPage();y=M;}
+      doc.addImage(pf.dataUrl,'JPEG',M+(col*(iW+4)),y,iW,iH);
+      col++;
+      if(col>=3){y+=iH+6;col=0;}
+    }
+    if(col>0)y+=42+6;
+  }
+  doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);
+  return y;
 }
 // Frage beim Anlegen: Flachdach | Steildach · Wartung | Inspektion (wie die Frage Innen/Außen bei der Besichtigung 2). cb(null) = abgebrochen. Merkt die letzte Wahl nur als Vorauswahl. F75: art 'pv' → Überschrift „☀ PV-Protokoll“.
 function _fsWpWahl(cb){
@@ -9050,7 +9085,17 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
             messen.onclick=()=>{_fsPvMessPanel(f,huelle,{speichern:()=>scheduleSave(),fertig:()=>_wpLeisteNeu()});};
             r.appendChild(messen);
           }
-          r.appendChild(weg);huelle.appendChild(r);w.appendChild(huelle);
+          r.appendChild(weg);huelle.appendChild(r);
+          { /* F79: „+ Foto“ am Modulfeld – wie am Prüfpunkt (F72): erst der Knopf, dann die Leiste; mit Fotos bleibt sie offen. Das Bild kommt im PDF zur Anlage. */
+            const fZ=document.createElement('div');fZ.setAttribute('data-pv-feld-fotos','1');fZ.style.cssText='display:none;margin-top:2px;';
+            const fB=document.createElement('button');fB.type='button';fB.textContent='+ Foto';fB.setAttribute('data-pv-feld-foto-plus','1');fB.title='Foto zu diesem Modulfeld – kommt im PDF zur Anlage';
+            fB.style.cssText='margin-top:4px;font-size:var(--fs11,11px);padding:4px 10px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;font-family:inherit;';
+            const fZeig=()=>{const auf=fotoOffen.has(f)||(Array.isArray(f.fotoRefs)&&f.fotoRefs.length>0);fZ.style.display=auf?'block':'none';fB.style.display=auf?'none':'';
+              if(auf&&!fZ.children.length&&typeof _fsFotoLeiste==='function'){if(!Array.isArray(f.fotoRefs))f.fotoRefs=[];const nm=String(f.name||'').trim();fZ.appendChild(_fsFotoLeiste(bericht,{text:'Modulfeld'+(nm?' „'+nm+'“':''),fotoRefs:f.fotoRefs},'Fotos zum Modulfeld'+(nm?' „'+nm+'“':'')));}};
+            fB.onclick=()=>{fotoOffen.add(f);fZeig();};
+            huelle.append(fB,fZ);fZeig();
+          }
+          w.appendChild(huelle);
         });
         const plus=document.createElement('button');plus.type='button';plus.textContent='＋ Modulfeld';plus.setAttribute('data-pv-feld-plus','1');
         plus.style.cssText='padding:6px 12px;border-radius:14px;font-size:var(--fs12,12px);cursor:pointer;font-family:inherit;border:1px dashed '+FS_WP_FARBE+';background:transparent;color:'+FS_WP_FARBE+';';
@@ -9373,7 +9418,7 @@ async function _fsWpPdf(bericht,task){
     doc.text('Datum: '+bericht.datum+((pv&&k.beginn)?' · '+k.beginn+(k.ende?'–'+k.ende:'')+' Uhr':'')+(bericht.techniker?(pv?' · Aufgenommen von: ':' · Techniker: ')+bericht.techniker:'')+(k.kostenstelle?' · Kostenstelle: '+k.kostenstelle:''),M,29);
     y=38;
 
-    if(pv&&typeof _fsPvPdfKopf==='function'){y=_fsPvPdfKopf(doc,bericht,t,y,M,W,farbe);}else{ /* F75: PV-Protokoll – Vor Ort, Anlage, nur vorhanden, Unterlagen statt Dachaufbau */
+    if(pv&&typeof _fsPvPdfKopf==='function'){y=_fsPvPdfKopf(doc,bericht,t,y,M,W,farbe,'anlage');if(typeof _fsPvPdfFeldFotos==='function')y=await _fsPvPdfFeldFotos(doc,bericht,y,M,W);y=_fsPvPdfKopf(doc,bericht,t,y,M,W,farbe,'rest');}else{ /* F79 */ /* F75: PV-Protokoll – Vor Ort, Anlage, nur vorhanden, Unterlagen statt Dachaufbau */
     /* Dachaufbau */
     doc.setTextColor(0,0,0);doc.setFontSize(9);doc.setFont('helvetica','bold');
     doc.text('Dachaufbau:',M,y);y+=5;
