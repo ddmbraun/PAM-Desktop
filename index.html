@@ -10706,7 +10706,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-16 · #1219'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-16-b1219) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-16 · #1220'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-16-b1220) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -49395,6 +49395,159 @@ function _b659FeldNachziehen(taskId,feldId,wert){
   }catch(e){console.warn('[b659] Feld nachziehen:',e);return false;}
 }
 
+// ══ b1220 Teil A: neue Ordner nach „Auftrag erstellen“ in ALLE offenen Fassungen der Karte ziehen ══
+// Das Kartenfenster legt beim Speichern seine Felder über die Karte (saveTaskData → _b717Merge), das
+// E-Mail-Fenster schreibt seine Arbeitskopie komplett zurück (_emFlushToLive). Beide kannten die neuen
+// Ordner nicht und holten die alten zurück – der alte Ordner lag da schon im Papierkorb, und alles
+// Neue (Fotos, Mails, Protokolle) landete dort (Befund 16.10.2026, fünf Karten).
+function _b1220OrdnerNachziehen(t,mitNas){
+  if(!t||!t.id)return;
+  const F={gdriveOrdner:'tGDOrdner',gdrive:'tGD',emailOrdner:'tEmailOrdner',dokOrdner:'tDokOrdner'};
+  if(mitNas)F.nas='tNAS';
+  Object.keys(F).forEach(function(k){try{_b659FeldNachziehen(t.id,F[k],t[k]||'');}catch(e){}});
+  // Die Karte kann inzwischen als NEUES Objekt in boards[] stehen (saveTaskData legt die Maske über eine Kopie)
+  try{
+    const live=(typeof findTaskById==='function')?findTaskById(t.id):null;
+    if(live&&live!==t)Object.keys(F).forEach(function(k){live[k]=t[k];});
+  }catch(e){console.warn('[b1220] Karte nachziehen:',e);}
+  // E-Mail-Fenster: Arbeitskopie mitziehen, sonst schreibt _emFlushToLive die alten Ordner zurück
+  try{
+    if(typeof _emCurrentTask!=='undefined'&&_emCurrentTask&&_emCurrentTask.id===t.id&&_emCurrentTask!==t){
+      Object.keys(F).forEach(function(k){_emCurrentTask[k]=t[k];});
+      if(typeof _emUpdateFolderLink==='function')_emUpdateFolderLink();
+    }
+  }catch(e){console.warn('[b1220] E-Mail-Fenster nachziehen:',e);}
+}
+
+// ══ b1220 Teil B: Wächter „Ordner im Drive-Papierkorb“ ══
+// Beim Öffnen einer Karte fragt PAM bei Drive nach, ob einer ihrer Ordner im Papierkorb liegt → rotes
+// Band im Kartenfenster (E-Mail-Fenster: Meldung). Solche Ordner kommen auf eine Sperrliste; die Wache
+// vor fetch hält dann jeden Drive-Aufruf an, der eine Datei IN so einen Ordner legen würde (neu anlegen,
+// kopieren, verschieben). Alles andere – auch das Speichern von workboard.json – geht unverändert durch.
+// PAM repariert nichts selbst (Frank entscheidet).
+var _b1220Gesperrt=new Set();
+var _b1220Cache={};
+var _b1220Lauf=0;
+var _b1220MeldungZeit=0;
+function _b1220OrdnerIds(t){
+  const ids=[];
+  ['gdriveOrdner','gdrive','dokOrdner','emailOrdner'].forEach(function(k){
+    const m=/folders\/([A-Za-z0-9_-]+)/.exec(String((t&&t[k])||''));
+    if(m&&ids.indexOf(m[1])<0)ids.push(m[1]);
+  });
+  return ids;
+}
+function _b1220BandAus(){const b=document.getElementById('_b1220Band');if(b)b.style.display='none';}
+function _b1220BandAn(liste){
+  let b=document.getElementById('_b1220Band');
+  if(!b){
+    const hdr=document.getElementById('modalDragHandle');
+    if(!hdr||!hdr.parentNode)return;
+    b=document.createElement('div');
+    b.id='_b1220Band';
+    b.style.cssText='display:none;margin:6px 12px 0;padding:8px 12px;border-radius:8px;border:2px solid #C0392B;background:#FDECEA;color:#7B1A10;font-size:calc(12.5px * var(--modal-scale,1));line-height:1.45;';
+    b.addEventListener('mousedown',function(ev){ev.stopPropagation();});
+    hdr.parentNode.insertBefore(b,hdr.nextSibling);
+  }
+  const e=(typeof _escHtml==='function')?_escHtml:function(s){return String(s);};
+  const namen=liste.map(function(x){return '„'+e(x.name||x.id)+'“';}).join(', ');
+  b.innerHTML='<b>⚠ Der Ordner dieser Karte liegt im Google-Drive-Papierkorb</b> ('+namen+').<br>'
+    +'Neue Fotos und Dateien würden dort landen und nach 30 Tagen gelöscht – PAM lädt deshalb nichts mehr dorthin hoch. '
+    +'Bitte den Ordner in Drive wiederherstellen (drive.google.com → Papierkorb) oder Claude Bescheid geben.';
+  b.style.display='block';
+}
+async function _b1220PapierkorbPruefen(t,art){
+  try{await _b1220PapierkorbPruefenInnen(t,art);}catch(e){console.warn('[b1220] Papierkorb-Prüfung:',e);}
+}
+async function _b1220PapierkorbPruefenInnen(t,art){
+  if(!t||typeof gdriveToken==='undefined'||!gdriveToken)return;
+  const lauf=++_b1220Lauf, kartenId=t.id;
+  if(art!=='meldung')_b1220BandAus();
+  const ids=_b1220OrdnerIds(t);
+  if(!ids.length)return;
+  const imPapierkorb=[];
+  for(const id of ids){
+    let c=_b1220Cache[id];
+    if(!c||c.trashed||(Date.now()-c.zeit)>600000){
+      try{
+        const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(id)+'?fields=id,name,trashed',{headers:{Authorization:'Bearer '+gdriveToken}});
+        if(!r.ok)continue;   // nicht lesbar: keine Aussage, kein Band
+        const j=await r.json();
+        c={trashed:!!j.trashed,name:j.name||'',zeit:Date.now()};
+        _b1220Cache[id]=c;
+      }catch(e){continue;}
+    }
+    if(c.trashed){imPapierkorb.push({id:id,name:c.name});_b1220Gesperrt.add(id);}
+    else _b1220Gesperrt.delete(id);
+  }
+  if(lauf!==_b1220Lauf||!imPapierkorb.length)return;
+  if(art==='meldung'){
+    if(typeof showToast==='function')showToast('⚠ Der Ordner dieser Karte liegt im Google-Drive-Papierkorb („'+imPapierkorb[0].name+'“) – PAM lädt nichts mehr dorthin hoch. Ordner in Drive wiederherstellen oder Claude Bescheid geben.','error',15000);
+    return;
+  }
+  if(((document.getElementById('taskId')||{}).value||'')!==kartenId)return;
+  _b1220BandAn(imPapierkorb);
+}
+// Ordner-Kennungen aus "parents":[…] im Text (bei multipart steht die Beschreibung VOR dem Inhalt → erster Treffer)
+function _b1220ParentsAusText(s){
+  const m=/"parents"\s*:\s*\[([^\]]*)\]/.exec(String(s||''));
+  return m?(m[1].match(/[A-Za-z0-9_-]{10,}/g)||[]):[];
+}
+// In welche Ordner würde dieser Drive-Aufruf eine Datei legen? Nur neu anlegen/kopieren (POST) und
+// verschieben (addParents). Ändern bestehender Dateien (z. B. workboard.json) liefert [] – nie gesperrt.
+async function _b1220ZielOrdner(url,init){
+  const u=String(url||''), m=String((init&&init.method)||'GET').toUpperCase();
+  const ids=[];
+  if(m==='PATCH'||m==='POST'){
+    const q=/[?&]addParents=([^&#]+)/.exec(u);
+    if(q)decodeURIComponent(q[1]).split(',').forEach(function(x){if(x.trim())ids.push(x.trim());});
+  }
+  const neu=m==='POST'&&(/^https:\/\/www\.googleapis\.com\/upload\/drive\/v3\/files(\?|$)/.test(u)
+    ||/^https:\/\/www\.googleapis\.com\/drive\/v3\/files(\?|$)/.test(u)
+    ||/^https:\/\/www\.googleapis\.com\/drive\/v3\/files\/[^/?]+\/copy/.test(u));
+  const b=init&&init.body;
+  if(neu&&b!=null){
+    const anfang=async function(x){
+      if(typeof x==='string')return x.slice(0,20000);
+      if(x&&typeof x.slice==='function'&&typeof x.size==='number')return await x.slice(0,20000).text();
+      if(x instanceof ArrayBuffer||(typeof ArrayBuffer!=='undefined'&&ArrayBuffer.isView&&ArrayBuffer.isView(x)))return new TextDecoder().decode((x.buffer?new Uint8Array(x.buffer,x.byteOffset||0,Math.min(x.byteLength,20000)):new Uint8Array(x,0,Math.min(x.byteLength,20000))));
+      return '';
+    };
+    if(typeof FormData!=='undefined'&&b instanceof FormData){
+      for(const paar of b.entries()){
+        const v=paar[1];
+        if(typeof v==='string'||(v&&/json/i.test(v.type||''))){_b1220ParentsAusText(await anfang(v)).forEach(function(x){ids.push(x);});}
+      }
+    }else{
+      _b1220ParentsAusText(await anfang(b)).forEach(function(x){ids.push(x);});
+    }
+  }
+  return ids;
+}
+(function(){
+  if(typeof window==='undefined'||typeof window.fetch!=='function'||window._b1220EchtesFetch)return;
+  const echt=window.fetch;
+  window._b1220EchtesFetch=echt;
+  window.fetch=async function(input,init){
+    if(_b1220Gesperrt.size){
+      try{
+        const url=(typeof input==='string')?input:((input&&input.url)||'');
+        const ziele=await _b1220ZielOrdner(url,init||{});
+        const treffer=ziele.filter(function(id){return _b1220Gesperrt.has(id);});
+        if(treffer.length){
+          console.warn('[b1220] angehalten – Zielordner im Drive-Papierkorb:',treffer,url);
+          if(Date.now()-_b1220MeldungZeit>4000){
+            _b1220MeldungZeit=Date.now();
+            if(typeof showToast==='function')showToast('⛔ Nicht hochgeladen: Der Ordner liegt im Google-Drive-Papierkorb. Erst in Drive wiederherstellen oder Claude Bescheid geben.','error',12000);
+          }
+          return new Response(JSON.stringify({error:{code:409,message:'b1220: Zielordner liegt im Drive-Papierkorb – nicht ausgeführt'}}),{status:409,statusText:'Ordner im Papierkorb',headers:{'Content-Type':'application/json'}});
+        }
+      }catch(e){console.warn('[b1220] Wache:',e);}
+    }
+    return (init===undefined)?echt.call(window,input):echt.call(window,input,init);
+  };
+})();
+
 // Eigenes Fenster statt prompt(): der Vorschlag soll markiert im Feld stehen
 // (sofort lostippen überschreibt ihn), und der bisherige Titel bleibt daneben
 // sichtbar. Beide Ausgänge lösen sauber auf – die Lehre aus _b657FrageNeuanlage,
@@ -49563,6 +49716,8 @@ async function _pamTaskZuAuftrag(task,vonBoard){
     try{task.nas=String(_nasBasis).replace(/[\\/]+$/,'')+'\\'+name;}
     catch(e){console.warn('[b652] NAS-Pfad:',e);}
   }
+  // b1220: die neuen Ordner auch ins offene Karten-/E-Mail-Fenster ziehen – sonst holt deren nächstes Speichern die alten zurück
+  if(typeof _b1220OrdnerNachziehen==='function')_b1220OrdnerNachziehen(task,!!_nasBasis);
 
   // b657: HIER speichern – nicht erst unten im Board-Callback. Die Ordner sind an
   // dieser Stelle in Drive fertig angelegt; wird die Board-Frage abgebrochen
@@ -58698,6 +58853,7 @@ function openModal(){
 }
 function closeModal(){
   clearTimeout(autoSaveTimer); // Ausstehenden Auto-Save-Timer stoppen (verhindert Überschreiben beim Tab-Wechsel)
+  if(typeof _b1220BandAus==='function')_b1220BandAus(); // b1220
   const _isNewTask = !(document.getElementById('taskId')?.value);
   // Nur speichern wenn User etwas geändert hat ODER es ein neuer Task ist.
   // Ohne Änderung würde saveTaskData() den T0-Stand zurückschreiben und
@@ -63292,6 +63448,7 @@ async function _pepLoadPreview(m,task,previewEl){
 
 function openEmailTaskModal(task,board){
   _emCurrentTask=JSON.parse(JSON.stringify(task)); // #376: Arbeitskopie – nicht direkt am Live-Objekt
+  if(typeof _b1220PapierkorbPruefen==='function')_b1220PapierkorbPruefen(task,'meldung'); // b1220
   _emDirty=false;
   // Fix #368: Snapshot für den Konflikt-Merge – nur tatsächlich geänderte Felder
   // gewinnen gegen zwischenzeitliche Handy-Änderungen (analog _taskModalSnapshot)
@@ -69575,6 +69732,7 @@ function openEditTaskModal(id){
   _pamActiveTaskId=task.id; // globaler Fallback für _msLoadEmailThread etc.
   _pamHighlightTaskId=task.id; // zuletzt geöffneter Task bleibt auf dem Board markiert, bis ein anderer geöffnet wird
   _pamCurrentTask=task;     // Fallback-Task-Objekt wenn findTaskById fehlschlägt
+  if(typeof _b1220PapierkorbPruefen==='function')_b1220PapierkorbPruefen(task); // b1220: Ordner im Drive-Papierkorb? → Band
   document.getElementById('taskTitleInput').value=(task.title||'').replace(/[-_]+/g,' ').replace(/\s+/g,' ').trim();
   document.getElementById('taskDescInput').value=task.desc||'';
   _kiSetzen(task.kurzinfo||''); // b946: Kurzinfo füllen + Zeile in den richtigen Zustand bringen
