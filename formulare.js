@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F81';
+const PAM_FORMULARE_VERSION='F82';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -4549,7 +4549,7 @@ function _fsAsTyp(sk){return (sk&&sk.typ==='innen')?'innen':'aussen';}
 function _fsAsFlaechen(sk){return _fsAsTyp(sk)==='innen'?FS_AS_FLAECHEN_INNEN:FS_AS_FLAECHEN;}
 function _fsAsAnsicht(sk){const k=sk&&sk.aussen;return (k==='dach'||k==='raum')?'von oben':k==='decke'?'von unten':'von vorn';}
 function _fsAsFarbe(sk){const k=sk&&sk.aussen;return k==='dach'?'#f1f1ee':k==='raum'?'#eef4f9':k==='decke'?'#f4f4f4':'#faf7f0';}
-const FS_AS_STEMPEL={wand:[{t:'afenster',n:'Fenster'},{t:'atuer',n:'Tür'},{t:'fbank',n:'Fensterbank'},{t:'rohr',n:'Fallrohr'},{t:'rinne',n:'Dachrinne'},{t:'text',n:'Text'}],dach:[{t:'dfenster',n:'Dachfenster'},{t:'schorn',n:'Schornstein'},{t:'gully',n:'Ablauf'},{t:'kuppel',n:'Lichtkuppel'},{t:'rinne',n:'Dachrinne'},{t:'wandan',n:'Wandanschluss'},{t:'pult',n:'Pult'},{t:'bfenster',n:'Fenster'},{t:'btuer',n:'Tür'},{t:'bruest',n:'Brüstung'},{t:'text',n:'Text'}],
+const FS_AS_STEMPEL={wand:[{t:'afenster',n:'Fenster'},{t:'atuer',n:'Tür'},{t:'fbank',n:'Fensterbank'},{t:'rohr',n:'Fallrohr'},{t:'rinne',n:'Dachrinne'},{t:'text',n:'Text'}],dach:[{t:'dfenster',n:'Dachfenster'},{t:'schorn',n:'Schornstein'},{t:'gully',n:'Ablauf'},{t:'kuppel',n:'Lichtkuppel'},{t:'pvfeld',n:'☀ PV-Feld'},{t:'gaube',n:'Gaube'},{t:'durchdr',n:'Durchdringung'},{t:'rinne',n:'Dachrinne'},{t:'wandan',n:'Wandanschluss'},{t:'pult',n:'Pult'},{t:'schneefang',n:'Schneefang'},{t:'first',n:'First/Grat'},{t:'bfenster',n:'Fenster'},{t:'btuer',n:'Tür'},{t:'bruest',n:'Brüstung'},{t:'text',n:'Text'}],
   raum:[{t:'tuer',n:'Tür'},{t:'fenster',n:'Fenster'},{t:'schrank',n:'Schrank'},{t:'heiz',n:'Heizkörper'},{t:'text',n:'Text'}],iwand:[{t:'afenster',n:'Fenster'},{t:'atuer',n:'Tür'},{t:'heiz',n:'Heizkörper'},{t:'steck',n:'Steckdose'},{t:'text',n:'Text'}],decke:[{t:'lampe',n:'Lampe'},{t:'dfenster',n:'Dachfenster'},{t:'text',n:'Text'}]}; /* F36: zweite Zeile = innen */
 const FS_AS_MAX=12;
 const _fsAsAuf=new WeakSet(); /* welche Skizzen im Formular aufgeklappt sind – nur Anzeige */
@@ -4566,9 +4566,10 @@ function _fsAsNeu(b,bereich,typ){
 }
 function _fsAsMarkeOk(s){return !!s&&!!s.skz&&typeof s.skz.k==='string'&&!!s.skz.k&&isFinite(+s.skz.x)&&isFinite(+s.skz.y);}
 /* Stellen, die in dieser Skizze stehen können: außen, im selben Bereich */
-function _fsAsStellen(b,sk){return ((b&&Array.isArray(b.vbStellen))?b.vbStellen:[]).filter(s=>s&&sk&&_fsVbTyp(s)===_fsAsTyp(sk)&&_fsVbRaumName(s)===sk.bereich);}
-function _fsAsNummer(b,s){const m=/Stelle ([0-9]+)$/.exec(_fsVbBezeichnung(b,s,0));return m?+m[1]:0;}
-function _fsAsMarken(b,sk){return _fsAsStellen(b,sk).filter(s=>_fsAsMarkeOk(s)&&s.skz.k===sk.id).map(s=>({s:s,n:_fsAsNummer(b,s),x:+s.skz.x,y:+s.skz.y,ang:_fsAsRing(s.skz).ang,len:_fsAsRing(s.skz).len,label:_fsVbBezeichnung(b,s,0)}));}
+function _fsAsStellen(b,sk){if(typeof _fsAsIstWp==='function'&&_fsAsIstWp(b))return sk?_fsWpMaengel(b).map(m=>m.it):[]; /* F82: Dach-/PV-Protokoll – die Mängel */return ((b&&Array.isArray(b.vbStellen))?b.vbStellen:[]).filter(s=>s&&sk&&_fsVbTyp(s)===_fsAsTyp(sk)&&_fsVbRaumName(s)===sk.bereich);}
+function _fsAsNummer(b,s){if(typeof _fsAsIstWp==='function'&&_fsAsIstWp(b))return _fsWpMangelNr(b,s); /* F82 */const m=/Stelle ([0-9]+)$/.exec(_fsVbBezeichnung(b,s,0));return m?+m[1]:0;}
+function _fsAsMarken(b,sk){const wp=(typeof _fsAsIstWp==='function')&&_fsAsIstWp(b); /* F82: im Dach-/PV-Protokoll heißen die Marken M1, M2 … */
+  return _fsAsStellen(b,sk).filter(s=>_fsAsMarkeOk(s)&&s.skz.k===sk.id).map(s=>{const n=_fsAsNummer(b,s);return {s:s,n:n,x:+s.skz.x,y:+s.skz.y,ang:_fsAsRing(s.skz).ang,len:_fsAsRing(s.skz).len,label:wp?'M'+n:_fsVbBezeichnung(b,s,0),kurz:wp?'M'+n:String(n)};});}
 /* Marke setzen oder verschieben (Anteile 0…1, 3 Stellen, bleibt auf der Fläche); eine Stelle steht damit nur noch in DIESER Skizze */
 function _fsAsMarkeSetzen(sk,s,x,y){
   if(!sk||!sk.id||!s||!isFinite(+x)||!isFinite(+y))return false;
@@ -4584,6 +4585,7 @@ function _fsAsWeg(b,sk){
   const i=b.aussenSkizzen.indexOf(sk);if(i<0)return false;
   b.aussenSkizzen.splice(i,1);
   (Array.isArray(b.vbStellen)?b.vbStellen:[]).forEach(s=>{if(_fsAsMarkeOk(s)&&s.skz.k===sk.id)s.skz=null;});
+  if(typeof _fsAsIstWp==='function'&&_fsAsIstWp(b))_fsWpAlleItems(b).forEach(it=>{if(_fsAsMarkeOk(it)&&it.skz.k===sk.id)it.skz=null;}); /* F82: auch die Mängel-Marken */
   return true;
 }
 function _fsAsBenutzt(b,sk){return _fsBgStempelAnzahl(sk)>0||_fsBgStricheAnzahl(sk)>0||_fsAsMarken(b,sk).length>0||_fsUmDa(sk);} /* F62: auch mit Umriss */
@@ -4663,8 +4665,9 @@ function _fsAsMarkenZeichnen(g,b,sk,sel,lose){
     }
     g.fillStyle='#d9480f';g.beginPath();g.arc(L.x,L.y,R,0,Math.PI*2);g.fill();
     g.strokeStyle='#ffffff';g.lineWidth=4;g.beginPath();g.arc(L.x,L.y,R,0,Math.PI*2);g.stroke();
-    g.fillStyle='#ffffff';g.font='bold 28px sans-serif';g.textAlign='center';g.textBaseline='middle';
-    g.fillText(String(q.n),L.x,L.y+1);
+    const kz=(q.kurz!==undefined&&q.kurz!==null)?String(q.kurz):String(q.n); /* F82: „M1“ im Dach-/PV-Protokoll */
+    g.fillStyle='#ffffff';g.font='bold '+(kz.length>2?22:28)+'px sans-serif';g.textAlign='center';g.textBaseline='middle';
+    g.fillText(kz,L.x,L.y+1);
   });
 }
 /* Zeichnet die Außenskizze auf die 900×640-Fläche: Viereck, Name, Ränder, Stempel, Striche, Marken (opt.ohneMarken: ohne – das Zeichenfenster legt sie live darüber) */
@@ -6538,10 +6541,10 @@ const FS_BG_STEMPEL=[{t:'tuer',n:'Tür'},{t:'fenster',n:'Fenster'},{t:'schrank',
 // Größe bei Maßstab 1 auf der 900×640-Fläche (w × h) und Versatz der Trefferfläche (oy): die Tür liegt mit ihrer Lücke auf der Wand, der Schwenkbogen oberhalb
 const FS_BG_STEMPEL_MASSE={tuer:{w:110,h:110,oy:-55},fenster:{w:120,h:18,oy:0},schrank:{w:110,h:56,oy:0},heiz:{w:100,h:22,oy:0},
   afenster:{w:90,h:110,oy:0},atuer:{w:80,h:150,oy:0},fbank:{w:120,h:14,oy:0},rohr:{w:16,h:200,oy:0},dfenster:{w:100,h:80,oy:0},schorn:{w:60,h:60,oy:0},gully:{w:44,h:44,oy:0},kuppel:{w:90,h:90,oy:0},steck:{w:36,h:36,oy:0},lampe:{w:60,h:60,oy:0},
-  bfenster:{w:100,h:26,oy:0},btuer:{w:90,h:116,oy:45},bruest:{w:300,h:22,oy:0},rinne:{w:320,h:16,oy:0,leiste:1},wandan:{w:320,h:22,oy:0,leiste:1},pult:{w:320,h:18,oy:0,leiste:1},text:{w:120,h:40,oy:0}}; /* F41: dritte Zeile = Dachkanten als Leisten (Dachrinne, Wandanschluss, Pult – „Größe“ ändert nur die LÄNGE, 160…640) und Text · F33: zweite Zeile = Außenskizze (Wand von vorn, Dachfläche von oben) */
+  bfenster:{w:100,h:26,oy:0},btuer:{w:90,h:116,oy:45},bruest:{w:300,h:22,oy:0},rinne:{w:320,h:16,oy:0,leiste:1},wandan:{w:320,h:22,oy:0,leiste:1},pult:{w:320,h:18,oy:0,leiste:1},pvfeld:{w:200,h:120,oy:0},gaube:{w:120,h:90,oy:0},durchdr:{w:36,h:36,oy:0},schneefang:{w:320,h:14,oy:0,leiste:1},first:{w:320,h:12,oy:0,leiste:1},text:{w:120,h:40,oy:0}}; /* F82: ☀ PV-Feld, Gaube, Durchdringung; Schneefang und First/Grat als Leisten · F41: dritte Zeile = Dachkanten als Leisten (Dachrinne, Wandanschluss, Pult – „Größe“ ändert nur die LÄNGE, 160…640) und Text · F33: zweite Zeile = Außenskizze (Wand von vorn, Dachfläche von oben) */
 const FS_BG_STEMPEL_MAX=60;
 /* F61: Stempel mit änderbarem Wort im Inneren (Frank 12.10.2026: Fenster, Tür, Brüstung bei „Balkon von oben“; „das Wort änderbar“). Vorbelegt, Feld txt wie beim Text-Stempel. */
-const FS_BG_STEMPEL_BESCHR={bfenster:'Fenster',btuer:'Tür',bruest:'Brüstung'};
+const FS_BG_STEMPEL_BESCHR={bfenster:'Fenster',btuer:'Tür',bruest:'Brüstung',pvfeld:'PV-Feld'}; /* F82: PV-Feld mit Namen */
 function _fsBgStempelAnzahl(sk){return (sk&&Array.isArray(sk.stempel))?sk.stempel.length:0;}
 // Neuen Stempel in die Mitte der Skizze setzen; gibt seinen Platz zurück, -1 bei unbekannter Art oder voller Skizze
 function _fsBgStempelNeu(sk,art,txt){
@@ -6744,6 +6747,26 @@ function _fsBgStempelZeichnen(g,r){
       g.strokeStyle='#333333';g.lineWidth=3;g.strokeRect(-150,-11,300,22);
       if(ldB)g.setLineDash([]);
       _fsBgStempelBeschriften(g,st,s,sx,sy,300);
+    }else if(st.t==='pvfeld'){ /* F82: ☀ PV-Feld von oben – blaues Rechteck mit Modulraster, Name und Maße innen */
+      g.fillStyle='#2b4c7e';g.fillRect(-100,-60,200,120);
+      g.strokeStyle='#dbe7ff';g.lineWidth=1.5;g.beginPath();for(let x=-75;x<=75;x+=25){g.moveTo(x,-60);g.lineTo(x,60);}for(let yy=-30;yy<=30;yy+=30){g.moveTo(-100,yy);g.lineTo(100,yy);}g.stroke();
+      g.strokeStyle='#102a4c';g.lineWidth=4;g.strokeRect(-100,-60,200,120);
+      if(typeof _fsPvStempelBeschriften==='function')_fsPvStempelBeschriften(g,st,s,sx,sy);
+    }else if(st.t==='gaube'){ /* F82: Gaube von oben – Rechteck mit Walm- und Firstlinie */
+      g.fillStyle='#e8ddc8';g.fillRect(-60,-45,120,90);
+      g.strokeStyle='#5c4a2e';g.lineWidth=4;g.strokeRect(-60,-45,120,90);
+      g.lineWidth=3;g.beginPath();g.moveTo(-60,-45);g.lineTo(0,0);g.lineTo(60,-45);g.moveTo(0,0);g.lineTo(0,45);g.stroke();
+    }else if(st.t==='durchdr'){ /* F82: Durchdringung (Rohr, Antenne) – Kreis mit Punkt */
+      g.fillStyle='#ffffff';g.beginPath();g.arc(0,0,18,0,Math.PI*2);g.fill();
+      g.strokeStyle='#333333';g.lineWidth=4;g.beginPath();g.arc(0,0,18,0,Math.PI*2);g.stroke();
+      g.fillStyle='#333333';g.beginPath();g.arc(0,0,6,0,Math.PI*2);g.fill();
+    }else if(st.t==='schneefang'){ /* F82: Schneefang – Leiste mit Rundstäben */
+      g.fillStyle='#ffffff';g.fillRect(-L/2,-7,L,14);
+      g.strokeStyle='#333333';g.lineWidth=2;g.strokeRect(-L/2,-7,L,14);
+      g.fillStyle='#333333';for(let x=-L/2+12;x<L/2;x+=24){g.beginPath();g.arc(x,0,4,0,Math.PI*2);g.fill();}
+    }else if(st.t==='first'){ /* F82: First/Grat – dicke Linie mit kurzen Querstrichen */
+      g.strokeStyle='#333333';g.lineWidth=6;g.beginPath();g.moveTo(-L/2,0);g.lineTo(L/2,0);g.stroke();
+      g.lineWidth=2;g.beginPath();for(let x=-L/2+10;x<L/2;x+=20){g.moveTo(x,-6);g.lineTo(x,6);}g.stroke();
     }else if(st.t==='text'){ /* Text – schwarz auf weißem Grund, damit er über Linien lesbar bleibt */
       const tx=String(st.txt||''),bw=_fsBgStempelTextBreite(tx);
       g.fillStyle='#ffffff';g.fillRect(-bw/2,-20,bw,40);
@@ -6773,7 +6796,7 @@ function _fsBgSkizzeBild(b,r,opt){
 }
 // Das Zeichenfenster: die Skizze groß, zwei Arten zu arbeiten – „Zeichnen“ (Freihand mit Finger oder Stift) und „Stempel“ (Tür, Fenster, Schrank, Heizkörper
 // setzen, mit dem Finger ziehen, drehen, größer/kleiner, löschen). Zweiter Aufruf schließt es. fertig() wird beim Schließen gerufen.
-function _fsBgEinzeichnenZeigen(b,r,fertig){
+function _fsBgEinzeichnenZeigen(b,r,fertig,opt){ /* F82: opt.stelle = diesen Mangel-Punkt gleich wählen („📍 markieren“) */
   const sk=r&&r.skizze;
   if(!sk||!sk.an)return;
   const alt=_fsById('_fsEinzeichnen');if(alt){alt.remove();return;}
@@ -6831,6 +6854,8 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
   let werkzeug='frei',selT=-1,ziehT=null,entwurf=null,griffZieh=null;const verlauf=[]; /* F50: Werkzeug · angetipptes Teil · Teil verschieben · Vorschau der Form · Stempel-Griff · Rückgängig-Verlauf (nur in diesem Fenster) */
   let modus=sk.aussen?'stelle':'zeichnen',farbe=FS_BG_STRICH_FARBEN[0],aktiv=null,zieh=null,sel=-1,stiftGesehen=false,selS=null,ziehS=null,loseS=false,festGesagtS=false,neuText=null;
   let selU=-1,ziehU=null,neuU=null,mausU=null,eckeNeuU=false; /* F62: Umriss – angetippte Ecke · Ecke wird gezogen · neue Ecke wird gezogen · Vorschau-Punkt · „＋ Ecke auf Kante“ wartet */ /* F34: loseS = gewählte Nummer lässt sich verschieben; neuText = Beschreibung einer neuen Stelle, die auf den Tipp in die Skizze wartet */ /* F33: Außenskizze beginnt bei „Stellen“; selS = gewählte Stelle, ziehS = Marke wird gezogen */
+  const wp=(typeof _fsAsIstWp==='function')&&_fsAsIstWp(b); /* F82: Dach-/PV-Protokoll – die Marken sind die Mängel M1, M2 …; „＋ neue Stelle“ und „Beschreibung ändern“ gibt es dort nicht */
+  if(opt&&opt.stelle&&sk.aussen){modus='stelle';selS=opt.stelle;} /* F82 */
   const neu=()=>{
     g.fillStyle='#ffffff';g.fillRect(0,0,W,H);
     if(bildDa)g.drawImage(bild,0,0,W,H);
@@ -6876,21 +6901,21 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
       if(!selS&&neuText===null)selS=ls.find(s=>!_fsAsMarkeOk(s))||null;
       ls.forEach(s=>{
         const hier=_fsAsMarkeOk(s)&&s.skz.k===sk.id,woanders=_fsAsMarkeOk(s)&&s.skz.k!==sk.id,an=selS===s,nr=_fsAsNummer(b,s);
-        leiste.appendChild(knopf('Stelle '+nr+(hier?' ✓':woanders?' (andere Skizze)':''),'border:3px solid '+(an?'#d9480f':'var(--border)')+';background:'+(an?'rgba(217,72,15,.16)':'var(--fs-cfl,transparent)')+';',()=>{selS=s;loseS=false;neuText=null;neu();leisteBauen();},['data-fs-ez-stelle',String(nr)]));
+        leiste.appendChild(knopf((wp?'M':'Stelle ')+nr+(hier?' ✓':woanders?' (andere Skizze)':''),'border:3px solid '+(an?'#d9480f':'var(--border)')+';background:'+(an?'rgba(217,72,15,.16)':'var(--fs-cfl,transparent)')+';',()=>{selS=s;loseS=false;neuText=null;neu();leisteBauen();},['data-fs-ez-stelle',String(nr)]));
       });
       /* F34: neue Stelle gleich hier anlegen – erst die kurze Beschreibung, dann in die Skizze tippen */
-      leiste.appendChild(knopf('＋ neue Stelle','border:2px dashed #d9480f;background:'+(neuText!==null?'rgba(217,72,15,.16)':'var(--fs-cfl,transparent)')+';',()=>{const tx=_fsEingabe('Neue Stelle in „'+(sk.bereich||'Außen')+'“ – wo ist sie?\n(kurze Beschreibung, z. B. Riss unter der Traufe)','');if(tx===null)return;neuText=String(tx);selS=null;loseS=false;neu();leisteBauen();},['data-fs-ez-stelleneu','1']));
+      if(!wp)leiste.appendChild(knopf('＋ neue Stelle','border:2px dashed #d9480f;background:'+(neuText!==null?'rgba(217,72,15,.16)':'var(--fs-cfl,transparent)')+';',()=>{const tx=_fsEingabe('Neue Stelle in „'+(sk.bereich||'Außen')+'“ – wo ist sie?\n(kurze Beschreibung, z. B. Riss unter der Traufe)','');if(tx===null)return;neuText=String(tx);selS=null;loseS=false;neu();leisteBauen();},['data-fs-ez-stelleneu','1']));
       const selHier=!!selS&&_fsAsMarkeOk(selS)&&selS.skz.k===sk.id;
       if(selHier){
         leiste.appendChild(knopf(loseS?'✓ Fest':'✥ Verschieben','border:3px solid '+(loseS?'#2e7d4f':'var(--border)')+';background:'+(loseS?'rgba(46,125,79,.16)':'var(--fs-cfl,transparent)')+';',()=>{loseS=!loseS;neu();leisteBauen();},['data-fs-ez-stellelose','1']));
         leiste.appendChild(knopf('Aus Skizze nehmen',RAND+'color:var(--red);',()=>{if(_fsAsMarkeWeg(selS)){loseS=false;scheduleSave();neu();leisteBauen();}},['data-fs-ez-stelleweg','1']));
       }
-      if(selS)leiste.appendChild(knopf('Beschreibung ändern',RAND,()=>{const tx=_fsEingabe('Beschreibung der Stelle '+_fsAsNummer(b,selS)+' (Wo?)',String(selS.ort||''));if(tx===null)return;selS.ort=String(tx).trim();scheduleSave();neu();leisteBauen();},['data-fs-ez-stelletext','1']));
+      if(selS&&!wp)leiste.appendChild(knopf('Beschreibung ändern',RAND,()=>{const tx=_fsEingabe('Beschreibung der Stelle '+_fsAsNummer(b,selS)+' (Wo?)',String(selS.ort||''));if(tx===null)return;selS.ort=String(tx).trim();scheduleSave();neu();leisteBauen();},['data-fs-ez-stelletext','1']));
       const z=document.createElement('span');z.setAttribute('data-fs-ez-zaehler','1');z.style.cssText='font-size:var(--fs13,13px);color:var(--text2);';
-      const selName=selS?'Stelle '+_fsAsNummer(b,selS)+(_fsVbWo(selS)?' („'+_fsBgSkizzeKuerzen(_fsVbWo(selS),30)+'“)':''):''; /* F60 */
+      const selName=!selS?'':wp?'M'+_fsAsNummer(b,selS)+' („'+_fsBgSkizzeKuerzen(String(selS.text||''),30)+'“)':'Stelle '+_fsAsNummer(b,selS)+(_fsVbWo(selS)?' („'+_fsBgSkizzeKuerzen(_fsVbWo(selS),30)+'“)':''); /* F60 · F82 */
       z.textContent=neuText!==null?'Neue Stelle'+(neuText.trim()?' („'+_fsBgSkizzeKuerzen(neuText,30)+'“)':'')+': jetzt in die Skizze tippen, wo sie ist'
-        :!ls.length?'Noch keine Stelle in diesem Bereich – „＋ neue Stelle“ antippen.'
-        :!selS?'Oben eine Stelle wählen oder „＋ neue Stelle“ antippen'
+        :!ls.length?(wp?'Noch kein Mangel im Protokoll – erst einen Punkt auf „⚠ Mängel“ setzen, dann dort „📍 markieren“ antippen.':'Noch keine Stelle in diesem Bereich – „＋ neue Stelle“ antippen.')
+        :!selS?(wp?'Oben einen Mangel (M1, M2 …) wählen, dann in die Skizze tippen':'Oben eine Stelle wählen oder „＋ neue Stelle“ antippen')
         :!selHier?selName+': in die Skizze tippen, wo sie ist'
         :loseS?selName+' ist lose: Pfeilspitze oder Kreis ziehen oder an die richtige Stelle tippen – dann „✓ Fest“'
         :selName+' ist fest (🔒) – „✥ Verschieben“ macht sie lose';
@@ -6938,9 +6963,11 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
         leiste.appendChild(knopf('+ '+x.n,'border:2px solid '+FS_FARBE+';background:rgba(31,95,139,.10);',()=>{
           let tx; /* F41: der Text-Stempel fragt zuerst nach dem Text */
           if(x.t==='text'){tx=_fsEingabe('Text in der Skizze – z. B. eine Länge „12,50 m“ (höchstens '+FS_BG_STEMPEL_TEXT_MAX+' Zeichen)','');if(tx===null||!String(tx).trim())return;}
+          let pvWahl=null;if(x.t==='pvfeld'&&typeof _fsPvStempelWahl==='function'){pvWahl=_fsPvStempelWahl(b,sk);if(!pvWahl)return;tx=pvWahl.txt;} /* F82: ☀ PV-Feld – Modulfeld wählen oder Name und Maße eingeben */
           if(_fsBgStempelAnzahl(sk)>=FS_BG_STEMPEL_MAX){toast('Genug Stempel in diesem Raum – bitte einen löschen','info',3500);return;}
           const i=_fsBgStempelNeu(sk,x.t,tx);
           if(i<0){toast('Genug Stempel in diesem Raum – bitte einen löschen','info',3500);return;}
+          if(pvWahl&&typeof _fsPvStempelEinrichten==='function')_fsPvStempelEinrichten(b,sk,sk.stempel[i],pvWahl,W,H); /* F82 */
           sel=i;scheduleSave();neu();leisteBauen();
         },['data-fs-ez-neu',x.t]));
       });
@@ -6954,6 +6981,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
           [['b',1.25,'Breiter','data-fs-ez-breiter'],['b',0.8,'Schmaler','data-fs-ez-schmaler'],['h',1.25,'Höher','data-fs-ez-hoeher'],['h',0.8,'Niedriger','data-fs-ez-niedriger']].forEach(([a,f,n,d])=>leiste.appendChild(knopf(n,RAND,()=>{if(_fsBgStempelDehnen(st,a,f)){scheduleSave();neu();}},[d,'1'])));
         }
         if(st.t==='text')leiste.appendChild(knopf('Text ändern',RAND,()=>{const tx=_fsEingabe('Text in der Skizze (höchstens '+FS_BG_STEMPEL_TEXT_MAX+' Zeichen)',String(st.txt||''));if(tx===null)return;if(_fsBgStempelTextSetzen(st,tx)){scheduleSave();neu();}else toast('Der Text ist leer – zum Entfernen „Löschen“ antippen','info',3500);},['data-fs-ez-sttext','1']));
+        if(st.t==='pvfeld'&&typeof _fsPvStempelMasseAendern==='function')leiste.appendChild(knopf('Maße ändern',RAND,()=>{if(_fsPvStempelMasseAendern(b,sk,st,W,H)){scheduleSave();neu();leisteBauen();}},['data-fs-ez-pvmasse','1'])); /* F82: Länge × Breite des PV-Felds */
         if(FS_BG_STEMPEL_BESCHR[st.t])leiste.appendChild(knopf('Wort ändern',RAND,()=>{const tx=_fsEingabe('Wort im Stempel (höchstens '+FS_BG_STEMPEL_TEXT_MAX+' Zeichen), z. B. „Fenster links“ oder „Tür 2“',String(st.txt||''));if(tx===null)return;if(!_fsBgStempelTextSetzen(st,tx))st.txt=FS_BG_STEMPEL_BESCHR[st.t];scheduleSave();neu();},['data-fs-ez-stwort','1'])); /* F61: leer = das vorbelegte Wort */
         leiste.appendChild(knopf('Löschen',RAND+'color:var(--red);',()=>{if(_fsBgStempelWeg(sk,sel)){sel=-1;scheduleSave();neu();leisteBauen();}},['data-fs-ez-stweg','1']));
       }
@@ -6979,7 +7007,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig){
       }
       const tr=_fsAsTreffer(b,sk,p[0],p[1]);
       if(tr&&tr.s!==selS){selS=tr.s;loseS=false;neu();leisteBauen();return;} /* andere Nummer angetippt = auswählen, nichts bewegen */
-      if(!selS){toast('Erst oben eine Stelle wählen oder „＋ neue Stelle“ antippen','info',3000);return;}
+      if(!selS){toast(wp?'Erst oben einen Mangel wählen':'Erst oben eine Stelle wählen oder „＋ neue Stelle“ antippen','info',3000);return;}
       if(!(_fsAsMarkeOk(selS)&&selS.skz.k===sk.id)){_fsAsMarkeSetzen(sk,selS,p[0]/W,p[1]/H);loseS=false;scheduleSave();neu();leisteBauen();return;} /* erstes Setzen – danach fest */
       if(!loseS){if(!festGesagtS){festGesagtS=true;toast('Die Nummer ist fest – zum Ändern „✥ Verschieben“ antippen','info',3500);}return;} /* F34: fest = Tippen verrückt nichts */
       ziehS={id:e.pointerId,s:selS,teil:(tr&&tr.teil==='ring')?'ring':'ziel'};
@@ -8540,7 +8568,7 @@ function _fsPvArbNeu(dachart){const q=(dachart==='steil')?FS_PV_ARBEITEN_STEIL:F
 function _fsPvGruende(){return FS_WP_GRUENDE.concat(FS_PV_GRUENDE_ZUSATZ);}
 function _fsPvRepErlaubt(text){return FS_PV_REP.indexOf(String(text||'').replace(/\s+/g,' ').trim())>=0;}
 function _fsPvUeblich(eindeckung){const e=Array.isArray(eindeckung)?eindeckung[0]:eindeckung;return (e&&FS_PV_UEBLICH[e])?FS_PV_UEBLICH[e].slice():[];}
-function _fsPvFeldNeu(name){return {name:String(name||''),richtung:'',neigung:''};}
+function _fsPvFeldNeu(name){return {name:String(name||''),richtung:'',neigung:'',laenge:'',breite:''};} /* F82: Maße */
 function _fsPvKopfNeu(){return {haus:'',anlass:'',besuchBei:'',beginn:'',ende:'',wetter:'',besichtigtVon:[],pvArt:[],eindeckung:[],pvBefestigung:[],abdichtung:[],pvLagesicherung:[],pvModule:'',pvKwp:'',pvFelder:[],pvSeit:'',pvSeitQuelle:[],pvHersteller:'',pvTypenschilder:[],pvErrichter:'',pvBlitzschutz:[],pvErdung:[],pvUnterlagen:{},pvPruefprotokollDatum:''};}
 function _fsPvVervollstaendigen(b){
   if(!b)return b;
@@ -8549,7 +8577,7 @@ function _fsPvVervollstaendigen(b){
   ['besichtigtVon','pvArt','eindeckung','pvBefestigung','abdichtung','pvLagesicherung','pvSeitQuelle','pvTypenschilder','pvBlitzschutz','pvErdung'].forEach(f=>{if(!Array.isArray(k[f]))k[f]=[];});
   ['haus','anlass','besuchBei','beginn','ende','wetter','pvModule','pvKwp','pvSeit','pvHersteller','pvErrichter','pvPruefprotokollDatum'].forEach(f=>{if(typeof k[f]!=='string')k[f]=(k[f]===undefined||k[f]===null)?'':String(k[f]);});
   if(!Array.isArray(k.pvFelder))k.pvFelder=[];
-  k.pvFelder=k.pvFelder.filter(f=>f&&typeof f==='object').map(f=>{const o={name:String(f.name==null?'':f.name),richtung:String(f.richtung==null?'':f.richtung),neigung:String(f.neigung==null?'':f.neigung)};
+  k.pvFelder=k.pvFelder.filter(f=>f&&typeof f==='object').map(f=>{const o={name:String(f.name==null?'':f.name),richtung:String(f.richtung==null?'':f.richtung),neigung:String(f.neigung==null?'':f.neigung),laenge:String(f.laenge==null?'':f.laenge),breite:String(f.breite==null?'':f.breite)}; /* F82: Maße */
     if(f.gemessen===true){o.gemessen=true;['richtungGrad','neigungGrad'].forEach(g=>{if(typeof f[g]==='number'&&isFinite(f[g]))o[g]=f[g];});} /* F78: 🧭-Messung bleibt erhalten */
     if(Array.isArray(f.fotoRefs)&&f.fotoRefs.length)o.fotoRefs=f.fotoRefs.filter(x=>typeof x==='string'); /* F79: Fotos am Modulfeld */
     return o;});
@@ -8572,7 +8600,8 @@ function _fsPvVorbelegen(b,t){
   const k=b.kopf,qk=q.kopf,J=x=>JSON.parse(JSON.stringify(x));
   ['pvArt','eindeckung','pvBefestigung','abdichtung','pvLagesicherung','pvSeitQuelle'].forEach(f=>{if(Array.isArray(qk[f])&&qk[f].length)k[f]=J(qk[f]);});
   ['pvModule','pvKwp','pvSeit','pvHersteller','pvErrichter'].forEach(f=>{if(typeof qk[f]==='string'&&qk[f].trim())k[f]=qk[f];});
-  if(Array.isArray(qk.pvFelder)&&qk.pvFelder.length)k.pvFelder=J(qk.pvFelder).map(f=>({name:String(f.name||''),richtung:String(f.richtung||''),neigung:String(f.neigung||'')}));
+  if(Array.isArray(qk.pvFelder)&&qk.pvFelder.length)k.pvFelder=J(qk.pvFelder).map(f=>({name:String(f.name||''),richtung:String(f.richtung||''),neigung:String(f.neigung||''),laenge:String(f.laenge||''),breite:String(f.breite||'')})); /* F82: Maße mit */
+  if(Array.isArray(q.aussenSkizzen)&&q.aussenSkizzen.length)b.aussenSkizzen=J(q.aussenSkizzen).filter(x=>x&&x.id).map(x=>Object.assign({},x,{id:'as'+Date.now().toString(36)+Math.random().toString(36).slice(2,6)})); /* F82: die Dachskizze mit – ohne Mängel-Marken, die hängen an den Punkten des alten Protokolls */
   return true;
 }
 // Aus einem frisch angelegten Dachprotokoll (_fsWpNeuerBericht) ein PV-Protokoll machen: Art, eigene Listen, eigener Kopf, Vorbelegung aus dem letzten PV-Protokoll der Karte
@@ -8615,7 +8644,7 @@ function _fsPvPdfKopf(doc,b,t,y,M,W,farbe,teil){ /* F79: teil 'anlage' = Vor Ort
     ['Besichtigt von',lst(k.besichtigtVon)]
   ]);
   const felder=(Array.isArray(k.pvFelder)?k.pvFelder:[]).filter(f=>f&&(String(f.name||'').trim()||String(f.richtung||'').trim()||String(f.neigung||'').trim()))
-    .map(f=>[String(f.name||'').trim(),[f.richtung?'ca. '+String(f.richtung).trim():'',f.neigung?'Neigung ca. '+String(f.neigung).trim():''].filter(Boolean).join(', ')].filter(Boolean).join(': ')+(f.gemessen===true?' (mit Handy gemessen)':' (von Hand)')); /* F78: Quelle je Feld */
+    .map(f=>[String(f.name||'').trim(),[f.richtung?'ca. '+String(f.richtung).trim():'',f.neigung?'Neigung ca. '+String(f.neigung).trim():''].filter(Boolean).join(', ')].filter(Boolean).join(': ')+(f.gemessen===true?' (mit Handy gemessen)':' (von Hand)')+((typeof _fsPvFeldMasseText==='function'&&_fsPvFeldMasseText(f))?' · '+_fsPdfOhneUngefaehr(_fsPvFeldMasseText(f)):'')); /* F78: Quelle je Feld · F82: Maße (im PDF „ca.“ statt „≈“) */
   const anlage=[['Art der Anlage',lst(k.pvArt)]];
   if(steil)anlage.push(['Dacheindeckung',lst(k.eindeckung)],['Befestigung am Dach',lst(k.pvBefestigung)]);
   else anlage.push(['Abdichtung',lst(k.abdichtung)],['Lagesicherung',lst(k.pvLagesicherung)]);
@@ -8627,6 +8656,7 @@ function _fsPvPdfKopf(doc,b,t,y,M,W,farbe,teil){ /* F79: teil 'anlage' = Vor Ort
     ['Typenschilder fotografiert',lst(k.pvTypenschilder)],
     ['Errichter / Elektrobetrieb (lt. Betreiber)',tx(k.pvErrichter)]
   );
+  { const g=(typeof _fsPvFelderFlaeche==='function')?_fsPvFelderFlaeche(b):null;if(g){const iS=anlage.findIndex(r=>r[0]==='In Betrieb seit');anlage.splice(iS<0?anlage.length:iS,0,['Modulfläche (Länge × Breite)','ca. '+_fsUmFmt(g.A)+' m² ('+g.n+' Feld'+(g.n===1?'':'er')+')']);} } /* F82 */
   tab('Anlage:',anlage);
   } /* F79 */
   if(teil!=='anlage'){ /* F79 */
@@ -8789,6 +8819,134 @@ async function _fsPvPdfFeldFotos(doc,b,y,M,W){
   doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);
   return y;
 }
+/* ── F82: DACHSKIZZE IM DACH- UND PV-PROTOKOLL + ☀ PV-FELD MIT MASSEN + „📍 MARKIEREN“ ───────────────────────────────────────────────────────────
+   Frank 16.10.2026 („P73 erst fertig machen“ → Entwurf Schritt 3 → „ja bau“ / „passt“): eine Außenskizze „Dachfläche von oben“ je Dach- und PV-Protokoll –
+   dasselbe Zeichenfenster wie in der Vorabbesichtigung (⬠ Umriss mit Maßen, Stempel, Striche, Zoom, Legende). Neue Stempel auf dem Dach: ☀ PV-Feld (Rechteck mit
+   Name und Länge × Breite → m²; im PV-Protokoll aus dem Modulfeld), Gaube, Schneefang, First/Grat, Durchdringung. Die Marken in der Skizze sind hier die Mängel
+   M1, M2 … (_fsWpMaengel, F81) – gesetzt über „📍 markieren“ am Punkt; die Nummer wird nie gespeichert, sie wird jedes Mal gerechnet. Jedes Modulfeld bekommt
+   Länge und Breite (m) mit Fläche. Nur Feststellungen, keine Bewertung. */
+function _fsAsIstWp(b){return !!b&&b.vorlage==='wartungsprotokoll'&&typeof _fsWpMaengel==='function';}
+function _fsWpAlleItems(b){const out=[];((b&&Array.isArray(b.sektionen))?b.sektionen:[]).forEach(s=>((s&&Array.isArray(s.items))?s.items:[]).forEach(it=>{if(it)out.push(it);}));return out;}
+// Die eine Dachskizze des Protokolls (Außenskizze „Dachfläche von oben“) – oder null
+function _fsWpSkizze(b){return ((typeof _fsAsListe==='function')?_fsAsListe(b):[]).find(k=>k&&k.aussen==='dach')||null;}
+function _fsWpSkizzeNeu(b){if(!b)return null;const alt=_fsWpSkizze(b);if(alt)return alt;const sk=_fsAsNeu(b,'Dach','aussen');if(sk)sk.name='Dach';return sk;}
+function _fsWpSkizzeWeg(b){const sk=_fsWpSkizze(b);return !!sk&&_fsAsWeg(b,sk);}
+// Legende unter der Skizze: „M1 = 1. Module – Verschmutzung … vorhanden? Ja“, nach Nummer
+function _fsWpSkizzeLegende(b,sk){
+  if(!_fsAsIstWp(b)||!sk)return [];
+  const ml=_fsWpMaengel(b);
+  return _fsAsMarken(b,sk).slice().sort((p,q)=>p.n-q.n).map(q=>{const m=ml.find(x=>x.it===q.s);return m?('M'+m.nr+' = '+(m.sek?m.sek+' – ':'')+m.text+(m.frage?' Ja':'')):('M'+q.n);});
+}
+// Maße je Modulfeld (Länge, Breite in m, Komma erlaubt) → Fläche
+function _fsPvFeldFlaeche(f){const l=_fsZahl(f&&f.laenge),b=_fsZahl(f&&f.breite);if(l===null||b===null||!(l>0)||!(b>0))return null;return Math.round(l*b*100)/100;}
+function _fsPvFeldMasseText(f){const l=_fsZahl(f&&f.laenge),b=_fsZahl(f&&f.breite);if(l===null&&b===null)return '';const A=_fsPvFeldFlaeche(f);return (l!==null?_fsUmFmt(l):'?')+' × '+(b!==null?_fsUmFmt(b):'?')+' m'+(A!==null?' (≈ '+_fsUmFmt(A)+' m²)':'');}
+// Fürs PDF: „≈“ kann die Standardschrift von jsPDF nicht (der ganze Satz würde unlesbar), dort steht „ca.“; „×“ und „²“ gehen
+function _fsPdfOhneUngefaehr(s){return String(s==null?'':s).replace(/≈/g,'ca.');}
+function _fsPvFelderFlaeche(b){let s=0,n=0;((b&&b.kopf&&Array.isArray(b.kopf.pvFelder))?b.kopf.pvFelder:[]).forEach(f=>{const A=_fsPvFeldFlaeche(f);if(A!==null){s+=A;n++;}});return n?{A:Math.round(s*100)/100,n:n}:null;}
+// Zeile „Länge m · Breite m · ≈ m²“ unter der Modulfeld-Zeile (Formular); speichern() nach jeder Eingabe
+function _fsPvMasseZeile(f,speichern){
+  const r=document.createElement('div');r.setAttribute('data-pv-feld-masse','1');r.style.cssText='display:flex;gap:6px;align-items:center;margin-top:4px;';
+  const fl=document.createElement('span');fl.setAttribute('data-pv-feld-flaeche','1');fl.style.cssText='flex:1;min-width:0;font-size:var(--fs12,12px);color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+  const zeig=()=>{const A=_fsPvFeldFlaeche(f);fl.textContent=A!==null?'≈ '+_fsUmFmt(A)+' m²':'';};
+  [['laenge','Länge m'],['breite','Breite m']].forEach(([k,ph])=>{
+    const i=document.createElement('input');i.type='text';i.inputMode='decimal';i.value=String(f[k]||'');i.placeholder=ph;i.autocomplete='off';i.setAttribute('data-pv-feld-'+k,'1');i.setAttribute('aria-label',ph);
+    i.style.cssText='width:28%;min-width:0;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 8px;font-size:var(--fs14,14px);color:var(--text);font-family:inherit;';
+    i.oninput=()=>{f[k]=i.value;zeig();if(typeof speichern==='function')speichern();};
+    r.appendChild(i);
+  });
+  r.appendChild(fl);zeig();return r;
+}
+// ☀ PV-Feld-Stempel: txt = Name, lb = [Länge, Breite] in m, pvn = Name des verbundenen Modulfelds (nur im PV-Protokoll; über den Namen, damit ein gelöschtes Feld nicht das nächste erwischt)
+function _fsPvStempelMasseText(st){const lb=(st&&Array.isArray(st.lb))?st.lb:null;if(!lb)return '';const l=_fsZahl(lb[0]),b=_fsZahl(lb[1]);if(l===null||b===null||!(l>0)||!(b>0))return '';return _fsUmFmt(l)+' × '+_fsUmFmt(b)+' m ≈ '+_fsUmFmt(Math.round(l*b*100)/100)+' m²';}
+// Name und Maße im Stempel (weiß auf blau) – wie _fsBgStempelBeschriften: ungedehnt, bei Drehung über Kopf umgedreht
+function _fsPvStempelBeschriften(g,st,s,sx,sy){
+  const name=String((st&&st.txt)||'').trim(),masse=_fsPvStempelMasseText(st);
+  if(!name&&!masse)return;
+  const r=(((parseInt(st.r,10)||0)%360)+360)%360,mw=Math.max(40,200*sx-16);
+  g.save();g.scale(1/sx,1/sy);if(r>90&&r<=270)g.rotate(Math.PI);
+  g.fillStyle='#ffffff';g.textAlign='center';g.textBaseline='middle';
+  if(name){g.font='bold '+Math.max(11,Math.round(22*s))+'px sans-serif';g.fillText('☀ '+name,0,masse?-14*s:1,mw);}
+  if(masse){g.font=Math.max(10,Math.round(17*s))+'px sans-serif';g.fillText(masse,0,name?16*s:1,mw);}
+  g.restore();
+}
+// „8,5 x 4,2“ → [8.5, 4.2]; sonst null
+function _fsPvMasseLesen(s){const m=/^\s*(\d+(?:[.,]\d+)?)\s*[x×*]\s*(\d+(?:[.,]\d+)?)\s*m?\s*$/i.exec(String(s||''));if(!m)return null;const l=_fsZahl(m[1]),b=_fsZahl(m[2]);return (l!==null&&b!==null&&l>0&&b>0)?[l,b]:null;}
+// Welches PV-Feld? Im PV-Protokoll mit Modulfeldern: Nummer aus der Liste (Name und Maße kommen vom Modulfeld); sonst Name und Maße frei. null = abgebrochen
+function _fsPvStempelWahl(b,sk){
+  const felder=((b&&b.kopf&&Array.isArray(b.kopf.pvFelder))?b.kopf.pvFelder:[]).map((f,i)=>({f:f,i:i})).filter(x=>x.f&&String(x.f.name||'').trim());
+  if(felder.length){
+    const liste=felder.map((x,k)=>(k+1)+' = '+String(x.f.name).trim()+(_fsPvFeldMasseText(x.f)?' – '+_fsPvFeldMasseText(x.f):'')).join('\n');
+    const a=_fsEingabe('Welches Modulfeld ist das PV-Feld?\n'+liste+'\n\nNummer eingeben – leer = ein PV-Feld ohne Modulfeld (Name und Maße frei)','1',b);
+    if(a===null)return null;
+    const n=parseInt(String(a).trim(),10);
+    if(isFinite(n)&&n>=1&&n<=felder.length)return {txt:String(felder[n-1].f.name).trim(),pvi:felder[n-1].i,lb:null};
+  }
+  const nm=_fsEingabe('Name des PV-Felds (z. B. Süd, Garage)','PV-Feld',b);if(nm===null)return null;
+  const mz=_fsEingabe('Länge × Breite des PV-Felds in m (z. B. 8,5 x 4,2) – leer = ohne Maße','',b);if(mz===null)return null;
+  return {txt:String(nm).trim()||'PV-Feld',pvi:-1,lb:_fsPvMasseLesen(mz)};
+}
+// Frisch gesetzter PV-Feld-Stempel: Verbindung zum Modulfeld oder eigene Maße, dann die Größe im Maßstab
+function _fsPvStempelEinrichten(b,sk,st,wahl,W,H){
+  if(!st||st.t!=='pvfeld'||!wahl)return false;
+  if(wahl.pvi>=0){st.pvn=String(wahl.txt||'').trim();_fsPvStempelAbgleich(b,sk);}
+  else if(wahl.lb&&wahl.lb[0]>0&&wahl.lb[1]>0)st.lb=[wahl.lb[0],wahl.lb[1]];
+  _fsPvStempelMassSetzen(sk,st,W,H);
+  return true;
+}
+// Breite/Höhe des Stempels aus Länge × Breite im Maßstab des Umrisses (ohne getippte Maße: das Blatt ist FS_UM_BLATT_M breit); ohne Maße bleibt er, wie er ist
+function _fsPvStempelMassSetzen(sk,st,W,H){
+  const lb=(st&&st.t==='pvfeld'&&Array.isArray(st.lb))?st.lb:null;if(!lb||!(+lb[0]>0)||!(+lb[1]>0)||!FS_BG_STEMPEL_MASSE.pvfeld)return false;
+  if(!W||!H){const Mm=_fsSkMasse(sk);W=Mm.W;H=Mm.H;}
+  const u=_fsUmLesen(sk),ms=(u&&_fsUmDa(sk))?_fsUmMassstab(u,W,H):FS_UM_BLATT_M/(W<H?440:640); /* m je Bildpunkt */
+  if(!(ms>0))return false;
+  const bw=FS_BG_STEMPEL_MASSE.pvfeld.w,bh=FS_BG_STEMPEL_MASSE.pvfeld.h;
+  st.s=1;st.bx=Math.round(Math.max(0.2,Math.min(8,(+lb[0]/ms)/bw))*100)/100;st.by=Math.round(Math.max(0.2,Math.min(8,(+lb[1]/ms)/bh))*100)/100;
+  return true;
+}
+// Maße der PV-Feld-Stempel aus den Modulfeldern nachziehen (pvn = Name); ein leerer Name bekommt den des Modulfelds; ein gelöschtes oder umbenanntes Modulfeld löst die Verbindung
+function _fsPvStempelAbgleich(b,sk){
+  const felder=(b&&b.kopf&&Array.isArray(b.kopf.pvFelder))?b.kopf.pvFelder:[];let n=0;
+  ((sk&&Array.isArray(sk.stempel))?sk.stempel:[]).forEach(st=>{
+    if(!st||st.t!=='pvfeld'||typeof st.pvn!=='string')return;
+    const f=felder.find(x=>x&&String(x.name||'').trim()===st.pvn);if(!f){delete st.pvn;return;}
+    if(!String(st.txt||'').trim())st.txt=String(f.name||'').trim()||'PV-Feld';
+    const l=_fsZahl(f.laenge),br=_fsZahl(f.breite);
+    if(l!==null&&br!==null&&l>0&&br>0)st.lb=[l,br];else delete st.lb;
+    n++;
+  });
+  return n;
+}
+// „Maße ändern“ am PV-Feld-Stempel im Zeichenfenster: neue Länge × Breite, Größe neu; beim verbundenen Modulfeld auch dessen Felder
+function _fsPvStempelMasseAendern(b,sk,st,W,H){
+  if(!st||st.t!=='pvfeld')return false;
+  const alt=(Array.isArray(st.lb)&&st.lb.length===2)?_fsUmFmt(+st.lb[0])+' x '+_fsUmFmt(+st.lb[1]):'';
+  const a=_fsEingabe('Länge × Breite des PV-Felds in m (z. B. 8,5 x 4,2) – leer = ohne Maße',alt,b);if(a===null)return false;
+  const lb=_fsPvMasseLesen(a);
+  if(String(a).trim()&&!lb){toast('Maße bitte als Länge x Breite, z. B. 8,5 x 4,2','info',3500);return false;}
+  if(lb)st.lb=lb;else delete st.lb;
+  if(typeof st.pvn==='string'){const f=((b&&b.kopf&&Array.isArray(b.kopf.pvFelder))?b.kopf.pvFelder:[]).find(x=>x&&String(x.name||'').trim()===st.pvn);if(f){f.laenge=lb?String(lb[0]).replace('.',','):'';f.breite=lb?String(lb[1]).replace('.',','):'';}}
+  if(lb)_fsPvStempelMassSetzen(sk,st,W,H);
+  return true;
+}
+// PDF: die Dachskizze (nach Dachaufbau bzw. Anlage) mit Legende – nur, wenn etwas gezeichnet ist. Gibt das neue y zurück.
+function _fsWpPdfSkizze(doc,b,y,M,W){
+  const sk=_fsWpSkizze(b);if(!sk||!_fsAsBenutzt(b,sk))return y;
+  _fsPvStempelAbgleich(b,sk);
+  const url=_fsBgSkizzeBild(b,_fsAsPseudoRaum(sk));if(!url)return y;
+  const skM=_fsSkMasse(sk),sw=skM.hoch?84:120,sh=sw*skM.H/skM.W;
+  if(y+sh+18>285){doc.addPage();y=M;}
+  doc.setTextColor(0,0,0);doc.setFontSize(9);doc.setFont('helvetica','bold');doc.text('Dachskizze (von oben):',M,y);y+=4;
+  try{doc.addImage(url,'JPEG',M,y,sw,sh);}catch(e){console.warn('[Dachskizze]',e);}
+  y+=sh+2;
+  doc.setFont('helvetica','normal');doc.setFontSize(8);
+  const zeilen=_fsWpSkizzeLegende(b,sk);
+  const uz=_fsUmZeile(sk);if(uz)zeilen.push(uz);
+  const pvA=_fsPvFelderFlaeche(b);if(pvA)zeilen.push('PV-Felder: ca. '+_fsUmFmt(pvA.A)+' m² ('+pvA.n+' Feld'+(pvA.n===1?'':'er')+', aus Länge × Breite)');
+  zeilen.map(_fsPdfOhneUngefaehr).forEach(z=>{const zl=doc.splitTextToSize(z,W-2*M-3);if(y+zl.length*3.6>285){doc.addPage();y=M;}doc.text(zl,M+3,y+2);y+=zl.length*3.6+0.8;});
+  doc.setFontSize(7.5);doc.setTextColor(100,100,100);doc.text('Nicht maßstäblich, Ansicht von oben.',M,y+2);y+=6;
+  doc.setTextColor(0,0,0);doc.setFontSize(9);
+  return y;
+}
 /* ── F81: NUMMERIERTE MÄNGELLISTE (M1, M2 …) FÜR DACH- UND PV-PROTOKOLL + VERKNÜPFUNG DACHPROTOKOLL ↔ PV-PROTOKOLL ──────────────────
    Frank 16.10.2026 („P73 erst fertig machen“, Entwurf Claude-Code\Entwurf_PV-Protokoll_Schritt3_2026-10-16.html, „ja bau“ / „passt“): jeder Punkt auf „Mängel“
    (bei Fragen „Ja“) oder „Rep.“ bekommt von selbst eine Nummer in der Reihenfolge der Liste – im Formular als Marke „M1“ vor dem Text, im PDF als eigener
@@ -8920,8 +9078,52 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
   const _passt=it=>wpFilter==='offen'?!(it.status&&it.status!=='offen'):wpFilter==='maengel'?(it.status==='mangel'||it.status==='repariert'||it.status==='np'):wpFilter==='fotos'?(Array.isArray(it.fotoRefs)&&it.fotoRefs.length>0):true;
   const _wpLeisteNeu=()=>{const sc=body.scrollTop;_wpMobRender();body.scrollTop=sc;};
   /* F81: Mängel-Nummern M1, M2 … an den Punkten nachführen (nach jedem Status-Wechsel), ohne die Seite neu zu zeichnen */
+  try{if(!document.getElementById('_wpSkizzeCss')){const st=document.createElement('style');st.id='_wpSkizzeCss';st.textContent='[data-wp-skizze-mark]::before{content:attr(data-txt);}';document.head.appendChild(st);}}catch(e){} /* F82: die Beschriftung von „📍 markieren“ per CSS – der Punkt-Text bleibt sauber */
   try{if(!document.getElementById('_wpMangelCss')){const st=document.createElement('style');st.id='_wpMangelCss';st.textContent='[data-wp-mangelnr]::before{content:attr(data-nr);}';document.head.appendChild(st);}}catch(e){} /* F81: die Nummer steht im Attribut, der Punkt-Text bleibt sauber */
-  const _wpNummernNeu=()=>{if(typeof _fsWpMangelNr!=='function')return;body.querySelectorAll('[data-wp-mangelnr]').forEach(e=>{const n=_fsWpMangelNr(bericht,e._wpItem);e.setAttribute('data-nr',n?'M'+n:'');e.style.display=n?'inline-block':'none';});};
+  const _wpNummernNeu=()=>{if(typeof _fsWpMangelNr!=='function')return;body.querySelectorAll('[data-wp-mangelnr]').forEach(e=>{const n=_fsWpMangelNr(bericht,e._wpItem);e.setAttribute('data-nr',n?'M'+n:'');e.style.display=n?'inline-block':'none';});body.querySelectorAll('[data-wp-skizze-mark]').forEach(e=>_wpMarkKnopfSetzen(e)); /* F82 */};
+  /* F82: „🗺 Dachskizze“ im Kopf – eine Außenskizze „Dachfläche von oben“ je Protokoll (Werkzeug der Vorabbesichtigung): Umriss mit Maßen, Stempel (☀ PV-Feld, Gaube, Schneefang, First/Grat, Durchdringung …), Mängel als Nummern M1, M2 … */
+  const _wpSkizzeOeffnen=(sk,it)=>{if(typeof _fsPvStempelAbgleich==='function')_fsPvStempelAbgleich(bericht,sk);_fsBgEinzeichnenZeigen(bericht,_fsAsPseudoRaum(sk),()=>{scheduleSave();_wpLeisteNeu();},it?{stelle:it}:null);};
+  const _wpMarkieren=it=>{let sk=_fsWpSkizze(bericht);if(!sk){sk=_fsWpSkizzeNeu(bericht);if(!sk){toast('Genug Skizzen in diesem Protokoll','info',3000);return;}scheduleSave();}_wpSkizzeOeffnen(sk,it);};
+  const _wpMarkKnopfSetzen=mk=>{const it=mk._wpItem,n=(typeof _fsWpMangelNr==='function')?_fsWpMangelNr(bericht,it):0;const sk=(typeof _fsWpSkizze==='function')?_fsWpSkizze(bericht):null;const drin=!!sk&&!!it&&!!it.skz&&it.skz.k===sk.id;mk.style.display=n?'inline-block':'none';mk.setAttribute('data-txt',drin?'📍 in der Skizze':'📍 markieren');mk.title=drin?'Die Nummer steht in der Dachskizze – antippen zum Verschieben':'Die Nummer in die Dachskizze setzen';};
+  const _wpSkizzeZeile=()=>{
+    const w=document.createElement('div');w.setAttribute('data-wp-skizze','1');w.style.cssText='padding:8px 14px 10px;border-top:1px solid var(--border);';
+    if(typeof _fsWpSkizze!=='function'||typeof _fsBgEinzeichnenZeigen!=='function')return w;
+    const l=document.createElement('div');l.style.cssText='font-size:var(--fs11,11px);color:var(--text2);margin-bottom:6px;';l.textContent='🗺 Dachskizze (Dachfläche von oben) – Umriss mit Maßen, Stempel, Mängel als Nummern';w.appendChild(l);
+    const sk=_fsWpSkizze(bericht);
+    const KN='display:block;width:100%;min-height:44px;margin:4px 0;border-radius:10px;font-size:var(--fs13,13px);font-weight:600;cursor:pointer;font-family:inherit;text-align:left;padding:8px 12px;';
+    if(!sk){
+      const nb=document.createElement('button');nb.type='button';nb.setAttribute('data-wp-skizze-neu','1');nb.textContent='＋ Dachskizze anlegen';nb.style.cssText=KN+'border:1.5px solid #d9480f;background:rgba(217,72,15,.08);color:var(--text);';
+      nb.onclick=()=>{const n=_fsWpSkizzeNeu(bericht);if(!n){toast('Genug Skizzen in diesem Protokoll','info',3000);return;}scheduleSave();_wpSkizzeOeffnen(n,null);};
+      w.appendChild(nb);return w;
+    }
+    if(typeof _fsPvStempelAbgleich==='function')_fsPvStempelAbgleich(bericht,sk);
+    const bild=document.createElement('img');bild.setAttribute('data-wp-skizze-bild','1');bild.alt='Dachskizze';
+    bild.style.cssText='display:block;width:100%;max-width:'+(sk.hoch?'340':'560')+'px;margin:4px 0;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer;';
+    const u=_fsBgSkizzeBild(bericht,_fsAsPseudoRaum(sk));if(u)bild.src=u;
+    bild.onclick=()=>_wpSkizzeOeffnen(sk,null);w.appendChild(bild);
+    const z=[];const uz=_fsUmZeile(sk);if(uz)z.push(uz);
+    const pvA=(typeof _fsPvFelderFlaeche==='function')?_fsPvFelderFlaeche(bericht):null;if(pvA)z.push('PV-Felder ≈ '+_fsUmFmt(pvA.A)+' m² ('+pvA.n+' Feld'+(pvA.n===1?'':'er')+', aus Länge × Breite)');
+    if(z.length){const uzd=document.createElement('div');uzd.setAttribute('data-wp-skizze-umriss','1');uzd.style.cssText='font-size:var(--fs13,13px);color:var(--text);margin:2px 0 4px;';uzd.textContent=z.join(' · ');w.appendChild(uzd);}
+    const lg=(typeof _fsWpSkizzeLegende==='function')?_fsWpSkizzeLegende(bericht,sk):[];
+    const ld=document.createElement('div');ld.setAttribute('data-wp-skizze-legende','1');ld.style.cssText='font-size:var(--fs12,12px);color:var(--text);margin:2px 0 4px;';
+    if(lg.length)lg.forEach(s=>{const d=document.createElement('div');d.style.padding='1px 0';d.textContent=s;ld.appendChild(d);});
+    else{ld.style.color='var(--text2)';ld.textContent='Noch kein Mangel in der Skizze – am Mangel-Punkt „📍 markieren“ antippen.';}
+    w.appendChild(ld);
+    const ez=document.createElement('button');ez.type='button';ez.setAttribute('data-wp-skizze-zeichnen','1');ez.textContent='✏ Einzeichnen – Umriss, ☀ PV-Feld und andere Stempel, Striche, Mängel-Nummern';ez.style.cssText=KN+'border:1.5px solid #d9480f;background:rgba(217,72,15,.08);color:var(--text);';
+    ez.onclick=()=>_wpSkizzeOeffnen(sk,null);w.appendChild(ez);
+    { /* „oben ist …“ wie in der Vorabbesichtigung – freiwillig, beschriftet die Ränder */
+      const oc=document.createElement('div');oc.style.cssText='display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0;';
+      const ol=document.createElement('span');ol.style.cssText='font-size:var(--fs11,11px);color:var(--text2);';ol.textContent='Oben in der Skizze ist:';oc.appendChild(ol);
+      FS_B2_SEITEN.forEach(kk=>{const c=document.createElement('button');c.type='button';c.textContent=kk;c.setAttribute('data-wp-skizze-oben',kk);const an=sk.oben===kk;
+        c.style.cssText='min-height:32px;padding:4px 10px;border-radius:14px;font-size:var(--fs12,12px);cursor:pointer;font-family:inherit;border:1.5px solid '+(an?FS_WP_FARBE:'var(--border)')+';background:'+(an?'rgba(26,92,58,.16)':'transparent')+';color:var(--text);font-weight:'+(an?'700':'400')+';';
+        c.onclick=()=>{sk.oben=sk.oben===kk?'':kk;scheduleSave();_wpLeisteNeu();};oc.appendChild(c);});
+      w.appendChild(oc);
+    }
+    const weg=document.createElement('button');weg.type='button';weg.setAttribute('data-wp-skizze-weg','1');weg.textContent='✕ Skizze entfernen';weg.style.cssText=KN+'border:1px solid var(--border);background:transparent;color:var(--text2);font-weight:400;min-height:36px;';
+    weg.onclick=()=>{if(_fsAsBenutzt(bericht,sk)&&!_fsFrage('Dachskizze entfernen? Umriss, Stempel, Striche und die Mängel-Nummern in der Skizze gehen verloren. Die Mängel selbst und ihre Fotos bleiben.',bericht))return;_fsWpSkizzeWeg(bericht);scheduleSave();_wpLeisteNeu();};
+    w.appendChild(weg);
+    return w;
+  };
   /* F81: im Dachprotokoll – „☀ PV-Protokoll anlegen“ (legt das PV-Protokoll derselben Karte an, Dachart/Art übernommen, beide kennen sich) oder die Verknüpfungszeile zum vorhandenen; Muster: _anZeile (F74) */
   const _pvVerknuepfung=()=>{
     const w=document.createElement('div');w.setAttribute('data-wp-pv','1');w.style.cssText='padding:6px 14px 10px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:8px;align-items:center;';
@@ -9149,6 +9351,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
             r.appendChild(messen);
           }
           r.appendChild(weg);huelle.appendChild(r);
+          if(typeof _fsPvMasseZeile==='function')huelle.appendChild(_fsPvMasseZeile(f,()=>scheduleSave())); /* F82: Länge × Breite → m² */
           { /* F79: „+ Foto“ am Modulfeld – wie am Prüfpunkt (F72): erst der Knopf, dann die Leiste; mit Fotos bleibt sie offen. Das Bild kommt im PDF zur Anlage. */
             const fZ=document.createElement('div');fZ.setAttribute('data-pv-feld-fotos','1');fZ.style.cssText='display:none;margin-top:2px;';
             const fB=document.createElement('button');fB.type='button';fB.textContent='+ Foto';fB.setAttribute('data-pv-feld-foto-plus','1');fB.title='Foto zu diesem Modulfeld – kommt im PDF zur Anlage';
@@ -9212,6 +9415,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
       _pvVerknuepfung() /* F81 */
     );
     } /* F75 */
+    kopfSek.appendChild(_wpSkizzeZeile()); /* F82: Dachskizze – Dach und PV */
     } /* F73 */
     body.appendChild(kopfSek);
 
@@ -9256,6 +9460,13 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
           nrB.style.cssText='display:inline-block;background:#b3261e;color:#fff;border-radius:10px;padding:0 7px;font-weight:700;font-size:var(--fs11,11px);line-height:18px;margin-right:6px;vertical-align:middle;flex-shrink:0;';
           const n=(typeof _fsWpMangelNr==='function')?_fsWpMangelNr(bericht,it):0;nrB.setAttribute('data-nr',n?'M'+n:'');nrB.style.display=n?'inline-block':'none';
           txt.insertBefore(nrB,txt.firstChild||null);
+        }
+        if(typeof _fsWpSkizze==='function'&&typeof _fsBgEinzeichnenZeigen==='function'){ /* F82: „📍 markieren“ – die Mangel-Nummer in die Dachskizze setzen (legt die Skizze an, wenn es noch keine gibt); nur an Mangel-Punkten sichtbar, Beschriftung per CSS (data-txt) */
+          const mk=document.createElement('button');mk.type='button';mk.setAttribute('data-wp-skizze-mark','1');mk._wpItem=it;
+          mk.style.cssText='display:none;margin-left:6px;vertical-align:middle;font-size:var(--fs11,11px);line-height:18px;padding:0 8px;border-radius:10px;border:1px solid #d9480f;background:transparent;color:#d9480f;cursor:pointer;font-family:inherit;flex-shrink:0;';
+          mk.onclick=()=>_wpMarkieren(it);
+          if(it.eigen&&txt.lastChild)txt.insertBefore(mk,txt.lastChild);else txt.appendChild(mk);
+          _wpMarkKnopfSetzen(mk);
         }
         const btnRow=document.createElement('div');
         btnRow.style.cssText='display:grid;grid-template-columns:repeat('+defs.length+',1fr);gap:5px;';
@@ -9532,6 +9743,7 @@ async function _fsWpPdf(bericht,task){
       if(pvB){const mz=(typeof _fsWpMaengel==='function')?_fsWpMaengel(pvB).length:0;doc.setFontSize(7.5);doc.setFont('helvetica','italic');doc.setTextColor(90,90,90);doc.text('PV-Protokoll vom '+(pvB.datum||'')+' (PAM, eigenes Dokument): '+mz+' '+(mz===1?'Mangel':'Mängel')+'.',M,y+1);y+=5;doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);}
     }
     } /* F75 */
+    if(typeof _fsWpPdfSkizze==='function')y=_fsWpPdfSkizze(doc,bericht,y,M,W); /* F82: Dachskizze nach Dachaufbau bzw. Anlage */
 
     /* Zustandsprüfung */
     doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(0,0,0);
