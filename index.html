@@ -9469,7 +9469,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
               <div class="modal-field" style="margin:0;width:fit-content;"><label>Kostenstelle</label><input type="text" id="taskTagsInput" placeholder="z.B. 260036" size="9" style="width:auto;height:28px;box-sizing:border-box;" oninput="scheduleTaskFieldSave();_updateHdrMeta()" autocomplete="off"></div>
               <div class="modal-field" style="margin:0;width:fit-content;"><label>Rep.-Nr.</label><input type="text" id="taskRepNr" placeholder="z.B. 3483" size="6" style="width:auto;height:28px;box-sizing:border-box;" oninput="scheduleTaskFieldSave();_updateHdrMeta()" autocomplete="off"></div>
               <div class="modal-field" style="margin:0;width:fit-content;"><label>Kunden-Nr.</label><input type="text" id="taskKundenNr" placeholder="z.B. 777" size="6" style="width:auto;height:28px;box-sizing:border-box;" oninput="scheduleTaskFieldSave()" autocomplete="off"></div>
-              <button type="button" onclick="document.getElementById('akteNachtragenInput').click()" title="Fehlende Daten aus Auftragsakte.txt in diesen Task laden" style="flex-shrink:0;height:28px;box-sizing:border-box;padding:0 9px;border-radius:6px;font-size:calc(12px * var(--modal-scale,1));font-weight:600;background:var(--bg3);border:1px solid var(--border);color:var(--text1);cursor:pointer;">📂 Akte</button>
+              <button type="button" onclick="document.getElementById('akteNachtragenInput').click()" title="Fehlende Daten aus der MF-dach-Datei oder der Auftragsakte.txt in diesen Task laden – überschreibt nichts" style="flex-shrink:0;height:28px;box-sizing:border-box;padding:0 9px;border-radius:6px;font-size:calc(12px * var(--modal-scale,1));font-weight:600;background:var(--bg3);border:1px solid var(--border);color:var(--text1);cursor:pointer;">📂 Akte</button>
               <input type="file" id="akteNachtragenInput" accept=".txt" style="display:none" onchange="loadAkteNachtragen(event)">
             </div>
           </div>
@@ -10706,7 +10706,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-16 · #1217'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-16-b1217) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-16 · #1218'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-16-b1218) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -27442,7 +27442,7 @@ function parseAuftragText(text){
   }
 }
 
-// ── AKTE NACHTRAGEN: Fehlende Felder im geöffneten Task aus Auftragsakte.txt laden ──
+// ── AKTE NACHTRAGEN: Fehlende Felder im geöffneten Task aus der MF-dach-Datei oder der Auftragsakte.txt laden ──
 function loadAkteNachtragen(e){
   const file=e.target.files[0];
   if(!file){return;}
@@ -27457,6 +27457,66 @@ function loadAkteNachtragen(e){
   };
   reader.readAsText(file,'windows-1252');
   e.target.value='';
+}
+
+// Wert aus der MF-dach-Datei (so, wie sie aus MF dach kommt). Gleiche Lesart wie AusASCII in
+// v03_Auftrag_anlegen_v3.vbs: Treffer des Suchbegriffs in einer Zeile, Wert bis Zeilenende bzw.
+// bis zum nächsten Tabulator. Ist der erste Treffer leer, kommt der nächste Suchbegriff dran –
+// mit jeden=true vorher noch der nächste Treffer desselben Begriffs.
+// Anders als im VBS gehen Treffer am Feldanfang vor (Zeilenanfang, nach Tabulator oder nach einer
+// Lücke aus mehreren Leerzeichen) – sonst fände „Mieter:“ auch „Telefon Mieter:“. Gibt es keinen
+// solchen Treffer, zählt wie im VBS jeder.
+function _mfAusDatei(text,begriffe,jeden){
+  const zeilen=String(text||'').replace(/\r/g,'').split('\n');
+  const amAnfang=(z,p)=>/(^[ \t]*|\t[ \t]*| {2,})$/.test(z.substring(0,p));
+  for(const b of begriffe){
+    const bl=b.toLowerCase();
+    for(const nurAnfang of [true,false]){
+      let gefunden=false;
+      for(const z of zeilen){
+        const p=z.toLowerCase().indexOf(bl);
+        if(p<0||(nurAnfang&&!amAnfang(z,p)))continue;
+        gefunden=true;
+        let v=z.substring(p+b.length).replace(/^[ \t]+/,'');
+        const tab=v.indexOf('\t');if(tab>=0)v=v.substring(0,tab);
+        v=v.trim();
+        if(v&&v.toLowerCase()!=='(noch offen)')return v;
+        if(!jeden)break;
+      }
+      if(gefunden)break;
+    }
+  }
+  return'';
+}
+// Mehrzeiliger Wert (Schadensbeschreibung) – wie AusASCII_Mehrzeilig im VBS: liest bis zur
+// Trennlinie (____ oder ---), zu einem Abschnittswort oder einem Verknüpfungsfeld; leere Zeilen
+// und Platzhalter „(hier …)“ werden übersprungen.
+function _mfAusDateiMehrzeilig(text,begriff){
+  const zeilen=String(text||'').replace(/\r/g,'').split('\n');
+  const bl=begriff.toLowerCase();
+  let ab=-1,rest='';
+  for(let i=0;i<zeilen.length;i++){
+    const p=zeilen[i].toLowerCase().indexOf(bl);
+    if(p>=0){ab=i;rest=zeilen[i].substring(p+begriff.length);break;}
+  }
+  if(ab<0)return'';
+  const ABSCHNITT=['AUFTRAG','OBJEKT','EIGENTUEMER','MIETER','KONTAKTPERSON','KONTAKTPERSON_AUFTRAGGEBER'];
+  const out=[];
+  for(let z of [rest].concat(zeilen.slice(ab+1))){
+    let zt=z.trim();
+    if(zt.indexOf('____')===0||zt.indexOf('---')===0)break;
+    if(zt==='VERKNUEPFUNGEN')break;
+    z=z.replace(/VERKNUEPFUNGEN/gi,'');zt=z.trim();
+    if(ABSCHNITT.indexOf(zt)>=0)break;
+    const halt=z.search(/Google_Drive_Link:|NAS_Auftragsordner:/i);
+    if(halt>=0){const vor=z.substring(0,halt).trim();if(vor)out.push(vor);break;}
+    if(!zt)continue;
+    if(/cookies/i.test(z))break;
+    if(/\(hier /i.test(z))continue;
+    out.push(zt);
+  }
+  const r=out.join('\n').trim();
+  return r.toLowerCase()==='(noch offen)'?'':r;
 }
 
 function _akteNachtragenFuellen(text){
@@ -27488,41 +27548,66 @@ function _akteNachtragenFuellen(text){
     }return'';
   };
 
-  const fill=(id,val)=>{
+  const schonDa=[];
+  const fill=(id,val,name)=>{
     if(!val)return false;
     const el=document.getElementById(id);
     if(!el)return false;
     const cur=(el.value||'').trim();
     if(cur===''||cur==='(noch offen)'){el.value=val;return true;}
+    // Nie überschreiben – steht in der Karte etwas anderes als in der Datei, nennt es die Meldung
+    if(name&&cur!==val)schonDa.push(name+': in der Karte „'+cur+'“, in der Datei „'+val+'“');
     return false;
   };
 
-  const kostenstelle = get('Auftrag_Kostenstelle');
-  const repNr        = get('Rep_Nr');
-  const kundenNr     = get('Kunden_Nr');
-  const hv           = get('Objekt_Hausverwaltung') || get('Auftraggeber');
-  const strasse      = get('Objekt_Strasse');
-  const schaden      = getML('Baustelle_Schadensbild');
+  // Welche Datei? Die Auftragsakte.txt (vom VBS geschrieben) hat Feldnamen mit Unterstrich – bei ihr
+  // bleibt alles wie bisher, mf() liefert dort nichts. Jede andere Datei wird wie die MF-dach-Datei
+  // gelesen, mit denselben Suchbegriffen wie im VBS.
+  const istAkte=/(^|\n)[ \t]*(Auftrag_Kostenstelle|Rep_Nr|Kunden_Nr|Objekt_Strasse|Baustelle_Schadensbild)[ \t]*:/i.test(text);
+  const mf=(begriffe,jeden)=>istAkte?'':_mfAusDatei(text,begriffe,jeden);
+  const mfML=begriff=>istAkte?'':_mfAusDateiMehrzeilig(text,begriff);
+  // Nummern: nur bis zu einer Lücke aus mehreren Leerzeichen (falls ein zweites Feld in derselben Zeile steht)
+  const mfNr=begriffe=>mf(begriffe).split(/\s{2,}/)[0].trim();
+  let mfHv=mf(['Hausverwaltung:'],true);
+  if(mfHv.toLowerCase().indexOf('c/o')===0)mfHv=mfHv.substring(3).trim();
+  if(/^(sonstiges|somstiges|unbekannt)$/i.test(mfHv))mfHv='';
+  // Namen: eine Telefonnummer oder Mailadresse ist kein Name (Rückfall auf ein falsches Feld)
+  const mfName=begriffe=>{const v=mf(begriffe);return(/@/.test(v)||/^[\d\s+().\/-]+$/.test(v))?'':v;};
+  let mfAg='';
+  const mfErteilt=mf(['Auftrag erteilt:']),mfAm=mfErteilt.indexOf(', am ');
+  if(mfAm>0)mfAg=mfErteilt.substring(0,mfAm).trim();
+  if(!mfAg)mfAg=mfName(['Ansprechpartner HV:','Auftraggeber:']);
+  const mfAdr=[mf(['Straße:','Strasse:']),mf(['PLZ/Ort:','PLZ/Ort '])].filter(Boolean).join(', ');
+  let mfSchaden=mfML('Schadensbeschreibung:')||mfML('Beschreibung / Schadensbild:')||mfML('Schaden:');
+  if(!mfSchaden){const bs=mf(['Baustelle / Schadensbild:']),k=bs.indexOf(',');if(k>=0)mfSchaden=bs.substring(k+1).trim();}
+  const mfDatum=(mf(['Datum:']).match(/^\d{2}\.\d{2}\.\d{4}/)||[''])[0];
+
+  const kostenstelle = get('Auftrag_Kostenstelle') || mfNr(['Kostenstelle:']);
+  const repNr        = get('Rep_Nr') || mfNr(['Rep.- Nr:','Rep.- Nr.:','Rep.-Nr.:','Rep.-Nr:','Rep.Nr:']);
+  const kundenNr     = get('Kunden_Nr') || mfNr(['Kunden - Nr.:','Kunden-Nr.:','Kunden Nr:']);
+  const hv           = get('Objekt_Hausverwaltung') || mfHv || get('Auftraggeber');
+  const strasse      = get('Objekt_Strasse') || mfAdr;
+  const schaden      = getML('Baustelle_Schadensbild') || mfSchaden;
   const nasOrdner    = get('NAS_Auftragsordner');
   const gdProj       = get('Google_Drive_Projektordner') || get('Google_Drive_Link');
   const gdFoto       = get('Google_Drive_Fotoordner');
   const gdEmail      = get('Google_Drive_Emailordner');
   const stammLink    = get('Stammblatt_Link');
-  const agName       = get('AG_Kontakt_Name');
-  const agTel        = get('AG_Kontakt_Tel');
-  const agEmail      = get('AG_Kontakt_Email');
-  const mieter       = get('Mieter_Name');
-  const mieterTel    = get('Mieter_Telefon');
-  const mieterEmail  = get('Mieter_Email');
-  const eig          = get('Eigentuemer_Name');
-  const eigTel       = get('Eigentuemer_Telefon');
-  const eigEmail     = get('Eigentuemer_Email');
-  const auftDatum    = get('Auftrag_Datum');
+  const agName       = get('AG_Kontakt_Name') || mfAg;
+  const agTel        = get('AG_Kontakt_Tel') || mf(['Telefon Ansprechpartner HV:','Telefon Ansprechpartner:','Telefon HV:']);
+  const agEmail      = get('AG_Kontakt_Email') || mf(['E-Mail Ansprechpartner HV:','E-Mail Ansprechpartner:','Email Ansprechpartner:']);
+  const mieter       = get('Mieter_Name') || mfName(['Mieter:','Mieter :','Mieter  :']);
+  const mieterTel    = get('Mieter_Telefon') || mf(['Mieter Telefon:','Telefon Mieter:','Tel. Mieter:']);
+  const mieterEmail  = get('Mieter_Email') || mf(['Mieter E-Mail:','E-Mail Mieter:','Email Mieter:']);
+  const eig          = get('Eigentuemer_Name') || mfName(['Eigentümer / WEG:','Eigentuemer / WEG:','Eigentuemer:']);
+  const eigTel       = get('Eigentuemer_Telefon') || mf(['Eigentümer / WEGTelefon:','Eigentümer / WEG Telefon:','Eigentuemer / WEGTelefon:','Eigentuemer / WEG Telefon:']);
+  const eigEmail     = get('Eigentuemer_Email') || mf(['Eigentümer / WEG E-Mail:','Eigentuemer / WEG E-Mail:']);
+  const auftDatum    = get('Auftrag_Datum') || mfDatum;
 
   let filled=[];
-  if(fill('taskTagsInput',kostenstelle)){filled.push('Kostenstelle');scheduleTaskFieldSave();_updateHdrMeta();}
-  if(fill('taskRepNr',repNr)){filled.push('Rep.-Nr.');scheduleTaskFieldSave();}
-  if(fill('taskKundenNr',kundenNr)){filled.push('Kunden-Nr.');scheduleTaskFieldSave();}
+  if(fill('taskTagsInput',kostenstelle,'Kostenstelle')){filled.push('Kostenstelle');scheduleTaskFieldSave();_updateHdrMeta();}
+  if(fill('taskRepNr',repNr,'Rep.-Nr.')){filled.push('Rep.-Nr.');scheduleTaskFieldSave();}
+  if(fill('taskKundenNr',kundenNr,'Kunden-Nr.')){filled.push('Kunden-Nr.');scheduleTaskFieldSave();}
   if(fill('tHV',hv))filled.push('Hausverwaltung');
   // b759: Rechnungsanschrift – erst das benannte Feld, sonst der Briefkopf-Block, der in
   // einer MF-dach-Akte ganz oben ohne Feldnamen steht.
@@ -27571,10 +27656,17 @@ function _akteNachtragenFuellen(text){
 
   try{scheduleTaskFieldSave();}catch(e){}
 
+  // Drei Fälle: etwas eingetragen · nichts erkannt (andere Datei) · alles Erkannte steht schon in der Karte
+  const quelle=istAkte?'Auftragsakte':'MF-dach-Datei';
+  const erkannt=[kostenstelle,repNr,kundenNr,hv,strasse,schaden,nasOrdner,gdProj,gdFoto,gdEmail,stammLink,agName,agTel,agEmail,mieter,mieterTel,mieterEmail,eig,eigTel,eigEmail,auftDatum].some(Boolean)
+    ||(typeof _raAnschriftAusText==='function'&&!!_raAnschriftAusText(text));
+  const hinweis=schonDa.length?'\n\nNicht überschrieben – bitte selbst ansehen:\n• '+schonDa.join('\n• '):'';
   if(filled.length>0){
-    alert('✅ Folgende Felder wurden aus der Auftragsakte eingetragen:\n\n• '+filled.join('\n• '));
+    alert('✅ Folgende Felder wurden aus der '+quelle+' eingetragen:\n\n• '+filled.join('\n• ')+hinweis);
+  }else if(!erkannt){
+    alert('⚠ In dieser Datei steht nichts, was sich eintragen ließe – nichts geändert.\n\nGebraucht wird die Datei aus MF dach (mit Zeilen wie „Rep.- Nr:“, „Kostenstelle:“, „Baustelle / Schadensbild:“) oder die Auftragsakte.txt.');
   }else{
-    alert('Alle Felder sind bereits befüllt — nichts geändert.');
+    alert('Alle Felder sind bereits befüllt — nichts geändert.'+hinweis);
   }
 }
 
