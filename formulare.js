@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F77';
+const PAM_FORMULARE_VERSION='F78';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -8544,7 +8544,9 @@ function _fsPvVervollstaendigen(b){
   ['besichtigtVon','pvArt','eindeckung','pvBefestigung','abdichtung','pvLagesicherung','pvSeitQuelle','pvTypenschilder','pvBlitzschutz','pvErdung'].forEach(f=>{if(!Array.isArray(k[f]))k[f]=[];});
   ['haus','anlass','besuchBei','beginn','ende','wetter','pvModule','pvKwp','pvSeit','pvHersteller','pvErrichter','pvPruefprotokollDatum'].forEach(f=>{if(typeof k[f]!=='string')k[f]=(k[f]===undefined||k[f]===null)?'':String(k[f]);});
   if(!Array.isArray(k.pvFelder))k.pvFelder=[];
-  k.pvFelder=k.pvFelder.filter(f=>f&&typeof f==='object').map(f=>({name:String(f.name==null?'':f.name),richtung:String(f.richtung==null?'':f.richtung),neigung:String(f.neigung==null?'':f.neigung)}));
+  k.pvFelder=k.pvFelder.filter(f=>f&&typeof f==='object').map(f=>{const o={name:String(f.name==null?'':f.name),richtung:String(f.richtung==null?'':f.richtung),neigung:String(f.neigung==null?'':f.neigung)};
+    if(f.gemessen===true){o.gemessen=true;['richtungGrad','neigungGrad'].forEach(g=>{if(typeof f[g]==='number'&&isFinite(f[g]))o[g]=f[g];});} /* F78: 🧭-Messung bleibt erhalten */
+    return o;});
   if(!k.pvUnterlagen||typeof k.pvUnterlagen!=='object')k.pvUnterlagen={};
   FS_PV_UNTERLAGEN.forEach(u=>{if(typeof k.pvUnterlagen[u[0]]!=='string')k.pvUnterlagen[u[0]]='';});
   if(!Array.isArray(b.sektionen)||!b.sektionen.length)b.sektionen=_fsPvSekNeu(_fsWpDachart(b));
@@ -8606,13 +8608,13 @@ function _fsPvPdfKopf(doc,b,t,y,M,W,farbe){
     ['Besichtigt von',lst(k.besichtigtVon)]
   ]);
   const felder=(Array.isArray(k.pvFelder)?k.pvFelder:[]).filter(f=>f&&(String(f.name||'').trim()||String(f.richtung||'').trim()||String(f.neigung||'').trim()))
-    .map(f=>[String(f.name||'').trim(),[f.richtung?'ca. '+String(f.richtung).trim():'',f.neigung?'Neigung ca. '+String(f.neigung).trim():''].filter(Boolean).join(', ')].filter(Boolean).join(': '));
+    .map(f=>[String(f.name||'').trim(),[f.richtung?'ca. '+String(f.richtung).trim():'',f.neigung?'Neigung ca. '+String(f.neigung).trim():''].filter(Boolean).join(', ')].filter(Boolean).join(': ')+(f.gemessen===true?' (mit Handy gemessen)':' (von Hand)')); /* F78: Quelle je Feld */
   const anlage=[['Art der Anlage',lst(k.pvArt)]];
   if(steil)anlage.push(['Dacheindeckung',lst(k.eindeckung)],['Befestigung am Dach',lst(k.pvBefestigung)]);
   else anlage.push(['Abdichtung',lst(k.abdichtung)],['Lagesicherung',lst(k.pvLagesicherung)]);
   anlage.push(
     ['Module / Leistung',[k.pvModule?'ca. '+String(k.pvModule).trim()+' Module':'',k.pvKwp?String(k.pvKwp).trim()+' kWp lt. Unterlagen':''].filter(Boolean).join(' · ')||'–'],
-    ['Ausrichtung / Neigung je Modulfeld',felder.length?felder.join(' · ')+' (von Hand eingetragen)':'–'],
+    ['Ausrichtung / Neigung je Modulfeld',felder.length?felder.join(' · '):'–'],
     ['In Betrieb seit',[tx(k.pvSeit),(Array.isArray(k.pvSeitQuelle)&&k.pvSeitQuelle[0])?k.pvSeitQuelle[0]:''].filter(x=>x&&x!=='–').join(' ')||'–'],
     ['Hersteller / Typ',tx(k.pvHersteller)],
     ['Typenschilder fotografiert',lst(k.pvTypenschilder)],
@@ -8627,6 +8629,126 @@ function _fsPvPdfKopf(doc,b,t,y,M,W,farbe){
   const u=k.pvUnterlagen||{};
   tab('Unterlagen:',FS_PV_UNTERLAGEN.map(x=>[x[1],(u[x[0]]||'–')+((x[0]==='pruefprotokoll'&&u[x[0]]==='gesehen'&&String(k.pvPruefprotokollDatum||'').trim())?' (vom '+String(k.pvPruefprotokollDatum).trim()+')':'')]));
   return y;
+}
+/* ── F78: PV-PROTOKOLL SCHRITT 2 – 🧭 RICHTUNG UND NEIGUNG JE MODULFELD MIT HANDY/TABLET ─────────────────────────────────────────
+   Frank 16.10.2026 („bau 2“, Entwurf Claude-Code\Entwurf_PV-Protokoll_Schritt2_Kompass_2026-10-16.html): Gerät flach auf das Modulglas, egal wie herum.
+   Aus den Sensorwinkeln (W3C alpha/beta/gamma) rechnet PAM die Neigung der Fläche und wohin sie „bergab“ zeigt; mit dem Kompass wird daraus die
+   Himmelsrichtung, in die das Modul schaut (Süd = 180°). iPhone liefert webkitCompassHeading (wohin die Oberkante zeigt, im Uhrzeigersinn), Android alpha
+   (absolut, gegen den Uhrzeigersinn) – beides kommt auf dieselbe Rechnung. Nur am Handy/Tablet (am PC gibt es keinen Kompass). Werte sind „ca.“ –
+   eine Feststellung, keine Vermessung. Rechnung und Bildschirm getrennt, damit sich die Rechnung ohne Gerät prüfen lässt (test_f78). */
+const FS_PV_MESS_FENSTER_MS=1200,FS_PV_MESS_MIN=6,FS_PV_RUHIG_NEIGUNG=1.5,FS_PV_RUHIG_RICHTUNG=4,FS_PV_FLACH_GRAD=3;
+// Lage des Geräts: Neigung der Fläche (0 = waagerecht) und Winkel „bergab“ am Gerät (0 = Oberkante, 90 = rechte Kante, im Uhrzeigersinn)
+function _fsPvLage(beta,gamma){
+  if(!(typeof beta==='number'&&isFinite(beta)&&typeof gamma==='number'&&isFinite(gamma)))return null;
+  const r=Math.PI/180,cB=Math.cos(beta*r),sB=Math.sin(beta*r),cG=Math.cos(gamma*r),sG=Math.sin(gamma*r);
+  const neigung=Math.acos(Math.max(-1,Math.min(1,cB*cG)))/r;
+  let bergab=Math.atan2(cB*sG,-sB)/r;if(bergab<0)bergab+=360;
+  return {neigung:Math.round(neigung*10)/10,bergab:Math.round(bergab)%360};
+}
+// Himmelsrichtung, in die die Fläche schaut (das aufwärts weisende Lot der Fläche, auf die Waagerechte gebracht); alpha wie W3C: 0 = Oberkante nach Norden, gegen den Uhrzeigersinn
+function _fsPvAzimut(alpha,beta,gamma){
+  if([alpha,beta,gamma].some(v=>typeof v!=='number'||!isFinite(v)))return null;
+  const r=Math.PI/180,a=alpha*r,b=beta*r,g=gamma*r;
+  const ost=Math.cos(a)*Math.sin(g)+Math.sin(a)*Math.sin(b)*Math.cos(g),nord=Math.sin(a)*Math.sin(g)-Math.cos(a)*Math.sin(b)*Math.cos(g);
+  if(Math.hypot(ost,nord)<1e-6)return null; /* waagerecht: keine Richtung */
+  let az=Math.atan2(ost,nord)/r;if(az<0)az+=360;
+  return Math.round(az)%360;
+}
+// iPhone: webkitCompassHeading (Oberkante, im Uhrzeigersinn) → derselbe alpha wie bei W3C (gegen den Uhrzeigersinn)
+function _fsPvAlphaAusHeading(heading){return (typeof heading==='number'&&isFinite(heading))?(((360-heading)%360)+360)%360:null;}
+// aus einem Sensor-Ereignis: Neigung, bergab, Richtung (nur mit Kompass und nur, wenn die Fläche nicht fast waagerecht liegt)
+function _fsPvSensorLesen(ev){
+  if(!ev)return null;
+  const lage=_fsPvLage(ev.beta,ev.gamma);if(!lage)return null;
+  let alpha=null;
+  if(typeof ev.webkitCompassHeading==='number'&&isFinite(ev.webkitCompassHeading))alpha=_fsPvAlphaAusHeading(ev.webkitCompassHeading);
+  else if(ev.absolute===true&&typeof ev.alpha==='number'&&isFinite(ev.alpha))alpha=ev.alpha;
+  const azimut=(alpha===null||lage.neigung<FS_PV_FLACH_GRAD)?null:_fsPvAzimut(alpha,ev.beta,ev.gamma);
+  return {neigung:lage.neigung,bergab:lage.bergab,azimut,kompass:alpha!==null,zeit:Date.now()};
+}
+// Mittel der Messungen im Zeitfenster (Richtung als Kreis-Mittel, 359° und 1° ergeben 0°); „ruhig“ = genug Werte und alle nah am Mittel
+function _fsPvMessMittel(liste,jetzt){
+  const t=(typeof jetzt==='number')?jetzt:Date.now();
+  const l=(Array.isArray(liste)?liste:[]).filter(m=>m&&typeof m.neigung==='number'&&isFinite(m.neigung)&&t-m.zeit<=FS_PV_MESS_FENSTER_MS);
+  if(!l.length)return null;
+  const neigung=l.reduce((a,m)=>a+m.neigung,0)/l.length;
+  const mitAz=l.filter(m=>typeof m.azimut==='number'&&isFinite(m.azimut));
+  let azimut=null;
+  if(mitAz.length){const r=Math.PI/180,sx=mitAz.reduce((a,m)=>a+Math.sin(m.azimut*r),0),sy=mitAz.reduce((a,m)=>a+Math.cos(m.azimut*r),0);azimut=Math.atan2(sx,sy)/r;if(azimut<0)azimut+=360;azimut=Math.round(azimut)%360;}
+  const abw=g=>{let d=Math.abs(g-azimut)%360;return d>180?360-d:d;};
+  const ruhig=l.length>=FS_PV_MESS_MIN&&l.every(m=>Math.abs(m.neigung-neigung)<=FS_PV_RUHIG_NEIGUNG)&&(azimut===null||mitAz.every(m=>abw(m.azimut)<=FS_PV_RUHIG_RICHTUNG));
+  return {neigung:Math.round(neigung),azimut,bergab:l[l.length-1].bergab,ruhig,anzahl:l.length,kompass:mitAz.length>0};
+}
+// Wort zur Richtung: 0 → Nord, 225 → Südwest (dieselben acht wie bei den Räumen im Begehungsprotokoll)
+function _fsPvRichtungWort(grad){
+  if(!(typeof grad==='number'&&isFinite(grad)))return '';
+  const g=((grad%360)+360)%360,acht=['N','NO','O','SO','S','SW','W','NW'];
+  const kurz=(typeof FS_B2_SEITEN!=='undefined'&&Array.isArray(FS_B2_SEITEN))?FS_B2_SEITEN[Math.round(g/45)%8]:acht[Math.round(g/45)%8];
+  const txt=(typeof FS_B2_SEITENTEXT!=='undefined'&&FS_B2_SEITENTEXT)?FS_B2_SEITENTEXT[kurz]:null;
+  return txt||{N:'Nord',NO:'Nordost',O:'Ost',SO:'Südost',S:'Süd',SW:'Südwest',W:'West',NW:'Nordwest'}[kurz]||kurz;
+}
+// Text für die Felder: „Südwest 225°“ und „32°“
+function _fsPvRichtungText(grad){return (typeof grad==='number'&&isFinite(grad))?(_fsPvRichtungWort(grad)+' '+(Math.round(grad)%360)+'°'):'';}
+function _fsPvNeigungText(grad){return (typeof grad==='number'&&isFinite(grad))?(Math.round(grad)+'°'):'';}
+// Messung in ein Modulfeld übernehmen; ohne Kompass nur die Neigung (die Richtung bleibt, wie sie war)
+function _fsPvFeldUebernehmen(f,m){
+  if(!f||typeof f!=='object'||!m||typeof m.neigung!=='number'||!isFinite(m.neigung))return false;
+  f.neigung=_fsPvNeigungText(m.neigung);f.neigungGrad=Math.round(m.neigung);
+  if(typeof m.azimut==='number'&&isFinite(m.azimut)){f.richtung=_fsPvRichtungText(m.azimut);f.richtungGrad=Math.round(m.azimut)%360;}
+  f.gemessen=true;return true;
+}
+// danach von Hand getippt → gilt wieder als „von Hand“
+function _fsPvFeldVonHand(f){if(!f||typeof f!=='object')return;f.gemessen=false;delete f.richtungGrad;delete f.neigungGrad;}
+/* Das Messfeld unter der Modulfeld-Zeile: Kompass und Lagesensor einschalten (iPhone fragt einmal um Erlaubnis – muss aus dem Antippen heraus passieren),
+   Werte mitteln, „✓ übernehmen“ erst, wenn sie ruhig stehen. „✕ abbrechen“ oder ein Neuzeichnen der Seite schaltet die Sensoren wieder ab.
+   Nur eines zugleich; opt.speichern / opt.fertig ruft das Formular (scheduleSave / neu zeichnen). */
+function _fsPvMessPanel(f,anker,opt){
+  if(!f||!anker||typeof document==='undefined'||typeof window==='undefined')return null;
+  const o=opt||{},wurzel=anker.parentElement||anker;
+  const alt=(wurzel&&typeof wurzel.querySelector==='function')?wurzel.querySelector('[data-pv-mess]'):null;
+  if(alt){try{if(typeof alt._fsPvStopp==='function')alt._fsPvStopp();}catch(e){}alt.remove();}
+  const F=(typeof FS_WP_FARBE!=='undefined')?FS_WP_FARBE:'#b45309';
+  const p=document.createElement('div');p.setAttribute('data-pv-mess','1');p.style.cssText='margin-top:6px;border:1.5px solid '+F+';border-radius:10px;padding:10px;background:var(--bg2,var(--bg3));';
+  const ti=document.createElement('div');ti.style.cssText='font-weight:700;color:'+F+';font-size:var(--fs14,14px);margin-bottom:4px;';ti.textContent='🧭 Modulfeld „'+String(f.name||'').trim()+'“ messen';
+  const hin=document.createElement('div');hin.style.cssText='font-size:var(--fs12,12px);color:var(--text2);line-height:1.4;margin-bottom:6px;';hin.textContent='Gerät flach auf das Modulglas legen – egal wie herum. PAM erkennt, wo bergab ist.';
+  const werte=document.createElement('div');werte.style.cssText='display:flex;gap:8px;margin:6px 0;';
+  const wert=(attr,unter)=>{const b=document.createElement('div');b.style.cssText='flex:1;min-width:0;background:var(--bg3);border-radius:8px;padding:8px;text-align:center;';const g=document.createElement('div');g.setAttribute(attr,'1');g.style.cssText='font-size:var(--fs20,20px);font-weight:700;color:var(--text);overflow-wrap:anywhere;';g.textContent='–';const u=document.createElement('div');u.style.cssText='font-size:var(--fs11,11px);color:var(--text2);';u.textContent=unter;b.append(g,u);werte.appendChild(b);return g;};
+  const wR=wert('data-pv-mess-richtung','Richtung (wohin das Modul schaut)'),wN=wert('data-pv-mess-neigung','Neigung');
+  const st=document.createElement('div');st.setAttribute('data-pv-mess-status','1');st.style.cssText='font-size:var(--fs12,12px);color:var(--text);min-height:18px;margin:4px 0;line-height:1.4;';st.textContent='Kompass sucht …';
+  const pfZ=document.createElement('div');pfZ.style.cssText='font-size:var(--fs12,12px);color:var(--text2);';pfZ.textContent='bergab am Gerät: ';
+  const pf=document.createElement('span');pf.setAttribute('data-pv-mess-pfeil','1');pf.style.cssText='display:inline-block;font-size:var(--fs16,16px);color:'+F+';';pf.textContent='▲';pfZ.appendChild(pf);
+  const kn=document.createElement('div');kn.style.cssText='display:flex;gap:8px;margin-top:8px;';
+  const bst='flex:1;min-height:var(--fsh,40px);border-radius:9px;border:1.5px solid var(--border);background:transparent;color:var(--text);font-size:var(--fs14,14px);font-family:inherit;cursor:pointer;';
+  const ok=document.createElement('button');ok.type='button';ok.setAttribute('data-pv-mess-ok','1');ok.textContent='✓ übernehmen';ok.disabled=true;ok.style.cssText=bst+'border-color:#1f7a3a;font-weight:700;opacity:.5;';
+  const ab=document.createElement('button');ab.type='button';ab.setAttribute('data-pv-mess-ab','1');ab.textContent='✕ abbrechen';ab.style.cssText=bst;
+  kn.append(ok,ab);p.append(ti,hin,werte,st,pfZ,kn);anker.appendChild(p);
+  const liste=[];let laeuft=false,kam=false,letztes=null;
+  const zeige=mm=>{letztes=mm;if(!mm)return;
+    wR.textContent=(typeof mm.azimut==='number')?_fsPvRichtungText(mm.azimut):(mm.neigung<FS_PV_FLACH_GRAD?'– (fast waagerecht)':(mm.kompass?'–':'– (kein Kompass)'));
+    wN.textContent=_fsPvNeigungText(mm.neigung);pf.style.transform='rotate('+mm.bergab+'deg)';
+    st.textContent=mm.ruhig?'✓ Werte stehen – übernehmen?':'ruhig halten …';ok.disabled=!mm.ruhig;ok.style.opacity=mm.ruhig?'1':'.5';};
+  const h=ev=>{if(!p.isConnected){stopp();return;}const m=_fsPvSensorLesen(ev);if(!m)return;kam=true;liste.push(m);while(liste.length>40)liste.shift();zeige(_fsPvMessMittel(liste));};
+  const stopp=()=>{if(!laeuft)return;laeuft=false;try{window.removeEventListener('deviceorientationabsolute',h,true);window.removeEventListener('deviceorientation',h,true);}catch(e){}};
+  p._fsPvStopp=stopp;
+  const start=async()=>{
+    try{
+      if(typeof DeviceOrientationEvent!=='undefined'&&typeof DeviceOrientationEvent.requestPermission==='function'){
+        const r=await DeviceOrientationEvent.requestPermission();
+        if(r!=='granted'){st.textContent='Der Zugriff auf die Bewegungssensoren wurde nicht erlaubt (iPhone: Einstellungen → Safari → Bewegung & Ausrichtung). Trage Richtung und Neigung von Hand ein.';return;}
+      }
+    }catch(e){st.textContent='Der Kompass lässt sich nicht einschalten. Trage Richtung und Neigung von Hand ein.';return;}
+    if(!p.isConnected)return;
+    laeuft=true;kam=false;
+    window.addEventListener('deviceorientationabsolute',h,true);window.addEventListener('deviceorientation',h,true);
+    setTimeout(()=>{if(laeuft&&!kam)st.textContent='Dieses Gerät meldet keinen Kompass (am PC gibt es keinen). Trage Richtung und Neigung von Hand ein.';},2500);
+  };
+  ok.onclick=()=>{if(!letztes||!letztes.ruhig)return;if(!_fsPvFeldUebernehmen(f,letztes))return;stopp();p.remove();
+    if(typeof o.speichern==='function')o.speichern();
+    if(typeof toast==='function')toast('✓ '+(String(f.name||'').trim()||'Modulfeld')+': '+[f.richtung,f.neigung?'Neigung '+f.neigung:''].filter(Boolean).join(', ')+' (ca.)','success',3000);
+    if(typeof o.fertig==='function')o.fertig();};
+  ab.onclick=()=>{stopp();p.remove();};
+  start();
+  return p;
 }
 // Frage beim Anlegen: Flachdach | Steildach · Wartung | Inspektion (wie die Frage Innen/Außen bei der Besichtigung 2). cb(null) = abgebrochen. Merkt die letzte Wahl nur als Vorauswahl. F75: art 'pv' → Überschrift „☀ PV-Protokoll“.
 function _fsWpWahl(cb){
@@ -8904,15 +9026,31 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
         teile.push(_pvZeile('Befestigung am Dach (★ = üblich)',bef,'data-pv-bef'));
       }else teile.push(_mcg('Abdichtung','abdichtung',FS_PV_ABDICHTUNG,true),_mcg('Lagesicherung','pvLagesicherung',FS_PV_LAGE,true));
       teile.push(_mf('Module (Anzahl, ca.)','pvModule','z. B. 24'),_mf('Leistung kWp (lt. Unterlagen)','pvKwp','z. B. 9,6'));
-      { /* Ausrichtung / Neigung je Modulfeld – Schritt 1: von Hand (ca.); 🧭 mit Richtung und Neigung kommt in Schritt 2 */
+      { /* Ausrichtung / Neigung je Modulfeld – F75: von Hand (ca.); F78: am Handy/Tablet 🧭 messen – Gerät flach auf das Modulglas, PAM rechnet Neigung und Richtung („bergab“) selbst */
         const w=document.createElement('div');w.setAttribute('data-pv-felder','1');w.style.cssText='padding:8px 14px;border-top:1px solid var(--border);';
-        const l=document.createElement('div');l.style.cssText='font-size:var(--fs11,11px);color:var(--text2);margin-bottom:6px;';l.textContent='Ausrichtung / Neigung je Modulfeld (ca., von Hand – z. B. Süd 185°, 35°)';w.appendChild(l);
-        const inp=(f,key,ph,breite)=>{const i=document.createElement('input');i.type='text';i.value=f[key]||'';i.placeholder=ph;i.autocomplete='off';i.setAttribute('data-pv-feld-'+key,'1');i.style.cssText='width:'+breite+';min-width:0;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 8px;font-size:var(--fs14,14px);color:var(--text);font-family:inherit;';i.oninput=()=>{f[key]=i.value;scheduleSave();};return i;};
+        const messbar=!_fsAmPc()&&typeof _fsPvMessPanel==='function';
+        const l=document.createElement('div');l.style.cssText='font-size:var(--fs11,11px);color:var(--text2);margin-bottom:6px;';l.textContent=messbar?'Ausrichtung / Neigung je Modulfeld (ca. – 🧭 messen oder von Hand, z. B. Süd 185°, 35°)':'Ausrichtung / Neigung je Modulfeld (ca., von Hand – z. B. Süd 185°, 35°)';w.appendChild(l);
+        const inp=(f,key,ph,breite,zeile)=>{const i=document.createElement('input');i.type='text';i.value=f[key]||'';i.placeholder=ph;i.autocomplete='off';i.setAttribute('data-pv-feld-'+key,'1');
+          const gem=key!=='name'&&f.gemessen===true;
+          i.style.cssText='width:'+breite+';min-width:0;background:var(--bg3);border:1px solid '+(gem?FS_WP_FARBE:'var(--border)')+';border-radius:6px;padding:7px 8px;font-size:var(--fs14,14px);color:var(--text);font-family:inherit;';
+          if(gem)i.title='mit dem Gerät gemessen (ca.)';
+          i.oninput=()=>{f[key]=i.value;
+            if(key!=='name'&&f.gemessen===true&&typeof _fsPvFeldVonHand==='function'){_fsPvFeldVonHand(f);zeile.removeAttribute('data-pv-feld-gemessen');['richtung','neigung'].forEach(kk=>{const e=zeile.querySelector('[data-pv-feld-'+kk+']');if(e){e.style.borderColor='var(--border)';e.title='';}});}
+            scheduleSave();};
+          return i;};
         k.pvFelder.forEach(f=>{
-          const r=document.createElement('div');r.setAttribute('data-pv-feld','1');r.style.cssText='display:flex;gap:6px;align-items:center;margin-bottom:6px;';
+          const huelle=document.createElement('div');huelle.setAttribute('data-pv-feld-huelle','1');huelle.style.cssText='margin-bottom:6px;';
+          const r=document.createElement('div');r.setAttribute('data-pv-feld','1');if(f.gemessen===true)r.setAttribute('data-pv-feld-gemessen','1');r.style.cssText='display:flex;gap:6px;align-items:center;';
           const weg=document.createElement('button');weg.type='button';weg.textContent='✕';weg.setAttribute('data-pv-feld-weg','1');weg.title='Modulfeld entfernen';weg.style.cssText='flex-shrink:0;min-width:32px;height:32px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;font-family:inherit;';
           weg.onclick=()=>{if(!confirm('Modulfeld „'+(f.name||'')+'“ entfernen?'))return;const i=k.pvFelder.indexOf(f);if(i>=0)k.pvFelder.splice(i,1);scheduleSave();_wpLeisteNeu();};
-          r.append(inp(f,'name','Feld (z. B. Süd, Ost)','34%'),inp(f,'richtung','Richtung (z. B. Süd 185°)','38%'),inp(f,'neigung','Neigung (z. B. 35°)','22%'),weg);w.appendChild(r);
+          r.append(inp(f,'name','Feld (z. B. Süd, Ost)',messbar?'28%':'34%',r),inp(f,'richtung','Richtung (z. B. Süd 185°)',messbar?'36%':'38%',r),inp(f,'neigung','Neigung (z. B. 35°)',messbar?'20%':'22%',r));
+          if(messbar){ /* F78: 🧭 nur am Handy/Tablet – am PC gibt es keinen Kompass */
+            const messen=document.createElement('button');messen.type='button';messen.textContent='🧭';messen.setAttribute('data-pv-feld-messen','1');messen.title='Richtung und Neigung mit dem Gerät messen – flach auf das Modulglas legen';
+            messen.style.cssText='flex-shrink:0;min-width:34px;height:32px;border-radius:6px;border:1.5px solid '+FS_WP_FARBE+';background:transparent;color:'+FS_WP_FARBE+';cursor:pointer;font-family:inherit;font-size:var(--fs15,15px);';
+            messen.onclick=()=>{_fsPvMessPanel(f,huelle,{speichern:()=>scheduleSave(),fertig:()=>_wpLeisteNeu()});};
+            r.appendChild(messen);
+          }
+          r.appendChild(weg);huelle.appendChild(r);w.appendChild(huelle);
         });
         const plus=document.createElement('button');plus.type='button';plus.textContent='＋ Modulfeld';plus.setAttribute('data-pv-feld-plus','1');
         plus.style.cssText='padding:6px 12px;border-radius:14px;font-size:var(--fs12,12px);cursor:pointer;font-family:inherit;border:1px dashed '+FS_WP_FARBE+';background:transparent;color:'+FS_WP_FARBE+';';
