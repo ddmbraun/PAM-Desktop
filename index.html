@@ -9469,7 +9469,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
               <div class="modal-field" style="margin:0;width:fit-content;"><label>Kostenstelle</label><input type="text" id="taskTagsInput" placeholder="z.B. 260036" size="9" style="width:auto;height:28px;box-sizing:border-box;" oninput="scheduleTaskFieldSave();_updateHdrMeta()" autocomplete="off"></div>
               <div class="modal-field" style="margin:0;width:fit-content;"><label>Rep.-Nr.</label><input type="text" id="taskRepNr" placeholder="z.B. 3483" size="6" style="width:auto;height:28px;box-sizing:border-box;" oninput="scheduleTaskFieldSave();_updateHdrMeta()" autocomplete="off"></div>
               <div class="modal-field" style="margin:0;width:fit-content;"><label>Kunden-Nr.</label><input type="text" id="taskKundenNr" placeholder="z.B. 777" size="6" style="width:auto;height:28px;box-sizing:border-box;" oninput="scheduleTaskFieldSave()" autocomplete="off"></div>
-              <button type="button" onclick="document.getElementById('akteNachtragenInput').click()" title="Fehlende Daten aus der MF-dach-Datei oder der Auftragsakte.txt in diesen Task laden – überschreibt nichts" style="flex-shrink:0;height:28px;box-sizing:border-box;padding:0 9px;border-radius:6px;font-size:calc(12px * var(--modal-scale,1));font-weight:600;background:var(--bg3);border:1px solid var(--border);color:var(--text1);cursor:pointer;">📂 Akte</button>
+              <button type="button" onclick="if(typeof _b1221AkteKnopf==='function')_b1221AkteKnopf();else document.getElementById('akteNachtragenInput').click();" title="Fehlende Daten aus der MF-dach-Datei oder der Auftragsakte.txt in diesen Task laden – überschreibt nichts" style="flex-shrink:0;height:28px;box-sizing:border-box;padding:0 9px;border-radius:6px;font-size:calc(12px * var(--modal-scale,1));font-weight:600;background:var(--bg3);border:1px solid var(--border);color:var(--text1);cursor:pointer;">📂 Akte</button>
               <input type="file" id="akteNachtragenInput" accept=".txt" style="display:none" onchange="loadAkteNachtragen(event)">
             </div>
           </div>
@@ -10706,7 +10706,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-16 · #1220'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-16-b1220) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-16 · #1221'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-16-b1221) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -27453,6 +27453,7 @@ function loadAkteNachtragen(e){
       const text=ev.target.result;
       if(!text)throw new Error('Datei leer');
       _akteNachtragenFuellen(text);
+      if(typeof _b1221OrdnerMitKst==='function')_b1221OrdnerMitKst(); // b1221: Kostenstelle in den Ordnernamen? (Rückfrage)
     }catch(err){alert('Fehler: '+err.message);}
   };
   reader.readAsText(file,'windows-1252');
@@ -27655,6 +27656,7 @@ function _akteNachtragenFuellen(text){
   }catch(e){}
 
   try{scheduleTaskFieldSave();}catch(e){}
+  try{if(typeof _updateHdrMeta==='function')_updateHdrMeta();}catch(e){} // b1221: Kopfzeile (Rep.-Nr. u. a.) sofort, nicht erst nach Schließen/Öffnen
 
   // Drei Fälle: etwas eingetragen · nichts erkannt (andere Datei) · alles Erkannte steht schon in der Karte
   const quelle=istAkte?'Auftragsakte':'MF-dach-Datei';
@@ -27668,6 +27670,148 @@ function _akteNachtragenFuellen(text){
   }else{
     alert('Alle Felder sind bereits befüllt — nichts geändert.'+hinweis);
   }
+}
+
+// ══ b1221 (P75 a): „📂 Akte“ sucht die Datei zuerst selbst im Ordner „Auftrag“ der Karte ══
+// Das Windows-Auswahlfenster öffnet den zuletzt benutzten Ordner – eine Webseite kann ihm keinen Startordner
+// vorgeben (Frank 16.10.2026: „findet es nicht den Weg dorthin, das muss ich suchen“). PAM darf in Drive lesen,
+// die NAS gleicht „Kunden“ in beide Richtungen mit Drive ab: eine in „Auftrag“ abgelegte Datei ist dort zu finden.
+// Ohne Drive-Verbindung, ohne Ordner an der Karte oder ohne .txt: Auswahlfenster wie bisher.
+async function _b1221AkteKnopf(){
+  const inp=document.getElementById('akteNachtragenInput');
+  const ausPC=function(){if(inp)inp.click();};
+  try{
+    const projekt=_extractFolderIdFromUrl(((document.getElementById('tGDOrdner')||{}).value||'').trim());
+    if(typeof gdriveToken==='undefined'||!gdriveToken||!projekt){ausPC();return;}
+    const dateien=await _b1221AkteDateienSuchen(projekt);
+    if(!dateien.length){
+      showToast('ℹ Im Ordner „Auftrag“ dieser Karte liegt keine .txt-Datei – bitte die Datei auswählen.','info',6000);
+      ausPC();return;
+    }
+    const wahl=await _b1221AkteWaehlen(dateien);
+    if(wahl==='pc'){ausPC();return;}
+    if(!wahl)return;
+    const text=await _b1221AkteLaden(wahl.id);
+    if(text==null){showToast('⚠ Die Datei ließ sich nicht aus Drive lesen – bitte vom PC auswählen.','error',7000);ausPC();return;}
+    _akteNachtragenFuellen(text);
+    await _b1221OrdnerMitKst();
+  }catch(e){console.warn('[b1221] Akte:',e);ausPC();}
+}
+// .txt-Dateien im Ordner „Auftrag“ (und im Projektordner selbst). ⛔ Die Drive-Suche „name contains“ prüft nur
+// Wortanfänge – die Endung wird deshalb hier gefiltert. MF-dach-Dateien zuerst, die Auftragsakte.txt danach,
+// je die neueste zuerst.
+async function _b1221AkteDateienSuchen(projektId){
+  const h={headers:{Authorization:'Bearer '+gdriveToken}};
+  const liste=async function(q){
+    const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q)+'&fields='+encodeURIComponent('files(id,name,mimeType,modifiedTime)')+'&pageSize=100',h);
+    if(!r.ok)return [];
+    return ((await r.json()).files)||[];
+  };
+  const unter=await liste("'"+projektId+"' in parents and trashed=false and mimeType='application/vnd.google-apps.folder' and name='Auftrag'");
+  const orte=unter.map(function(o){return {id:o.id,wo:'Auftrag'};}).concat([{id:projektId,wo:'Projektordner'}]);
+  const out=[];
+  for(const o of orte){
+    const f=await liste("'"+o.id+"' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'");
+    f.forEach(function(x){
+      if(!/\.txt$/i.test(x.name||'')||out.some(function(y){return y.id===x.id;}))return;
+      out.push({id:x.id,name:x.name,wo:o.wo,zeit:x.modifiedTime||'',akte:/^auftragsakte\.txt$/i.test(x.name||'')?1:0});
+    });
+  }
+  out.sort(function(a,b){return (a.akte-b.akte)||String(b.zeit).localeCompare(String(a.zeit));});
+  return out;
+}
+// Auswahl: eine Zeile je Datei mit „einlesen“, dazu „Vom PC wählen …“ und „Abbrechen“.
+// Rückgabe: die gewählte Datei · 'pc' · null (abgebrochen). Beide Ausgänge lösen sauber auf (Lehre b657).
+function _b1221AkteWaehlen(dateien){
+  return new Promise(function(resolve){
+    const e=(typeof _escHtml==='function')?_escHtml:function(s){return String(s);};
+    const zeit=function(z){try{const d=new Date(z);return isNaN(d)?'':d.toLocaleString('de-DE',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});}catch(x){return '';}};
+    const ov=document.createElement('div');
+    ov.id='_b1221AkteWahl';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100002;display:flex;align-items:center;justify-content:center;';
+    const zeilen=dateien.map(function(d,i){
+      return '<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-top:1px solid var(--border);">'
+        +'<div style="flex:1;min-width:0;"><div style="font-size:13px;font-weight:600;color:var(--text);overflow-wrap:anywhere;">📄 '+e(d.name)+'</div>'
+        +'<div style="font-size:11px;color:var(--text2);">'+(d.akte?'Auftragsakte · ':'')+'Ordner „'+e(d.wo)+'“'+(zeit(d.zeit)?' · '+zeit(d.zeit):'')+'</div></div>'
+        +'<button data-b1221="'+i+'" style="padding:6px 14px;border-radius:7px;border:1px solid var(--accent);background:var(--accent);color:#fff;font-size:13px;font-weight:700;cursor:pointer;">einlesen</button></div>';
+    }).join('');
+    ov.innerHTML='<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:18px 22px;min-width:360px;max-width:560px;box-shadow:0 8px 32px rgba(0,0,0,.5);">'
+      +'<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:8px;">📂 Akte einlesen – gefunden in Drive</div>'
+      +zeilen
+      +'<div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;">'
+      +'<button data-b1221="pc" style="padding:7px 14px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:13px;cursor:pointer;">Vom PC wählen …</button>'
+      +'<button data-b1221="nein" style="padding:7px 14px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:13px;cursor:pointer;">Abbrechen</button>'
+      +'</div></div>';
+    document.body.appendChild(ov);
+    const weg=function(v){try{ov.remove();}catch(x){}resolve(v);};
+    ov.addEventListener('click',function(ev){
+      if(ev.target===ov){weg(null);return;}
+      const k=ev.target&&ev.target.getAttribute&&ev.target.getAttribute('data-b1221');
+      if(k==null)return;
+      if(k==='pc')weg('pc');else if(k==='nein')weg(null);else weg(dateien[+k]||null);
+    });
+  });
+}
+// Inhalt aus Drive holen – als Windows-1252, genau wie das Einlesen vom PC (MF dach schreibt ANSI).
+async function _b1221AkteLaden(id){
+  try{
+    const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(id)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
+    if(!r.ok)return null;
+    return new TextDecoder('windows-1252').decode(await r.arrayBuffer());
+  }catch(e){console.warn('[b1221] Laden:',e);return null;}
+}
+
+// ══ b1221 (P75 d): Kostenstelle in den Ordnernamen – nur auf Rückfrage ══
+// PAM-Ordner heißen „Datum_Beschreibung“ (b971); beim Anlegen ist die Kostenstelle meist noch unbekannt.
+// Nach „📂 Akte“: steht eine Kostenstelle in der Karte und fehlt sie im Namen des Projektordners, fragt PAM
+// „2026-10-15_<Kst>_…?“. Umbenannt wird in Drive – die Kennung bleibt, alle Verknüpfungen bleiben heil, die NAS
+// folgt über den Abgleich. Der NAS-Pfad der Karte wird mitgezogen. Längenwächter wie beim Anlegen (b971).
+// Ordner, die PAM nicht selbst angelegt hat (VBS, GM), darf PAM nicht umbenennen → Hinweis statt Fehler.
+function _b1221NameMitKst(name,kst){
+  const n=String(name||''), k=String(kst||'').trim();
+  if(!k||n.indexOf(k)>=0)return n;
+  const m=/^(\d{4}[-.]\d{2}[-.]\d{2})_(.+)$/.exec(n);
+  if(!m)return n;
+  if(/^\d{4,8}_/.test(m[2]))return n;   // hinter dem Datum steht schon eine Nummer (VBS-Name) → nicht anfassen
+  return m[1]+'_'+k+'_'+m[2];
+}
+async function _b1221OrdnerMitKst(){
+  try{
+    const kst=String(((document.getElementById('taskTagsInput')||{}).value||'').split(',')[0]||'').trim();
+    const taskId=((document.getElementById('taskId')||{}).value||'');
+    const fid=_extractFolderIdFromUrl(((document.getElementById('tGDOrdner')||{}).value||'').trim());
+    if(!/^\d{4,8}$/.test(kst)||!fid||!taskId||typeof gdriveToken==='undefined'||!gdriveToken)return;
+    const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fid)+'?fields=id,name,trashed',{headers:{Authorization:'Bearer '+gdriveToken}});
+    if(!r.ok)return;
+    const j=await r.json();
+    const alt=String(j.name||'');
+    if(!alt||j.trashed)return;
+    const neu=_b1221NameMitKst(alt,kst);
+    if(neu===alt)return;
+    const nasEl=document.getElementById('tNAS');
+    const nas=String((nasEl&&nasEl.value)||'').trim();
+    const zeigtHin=!!nas&&nas.length>alt.length&&nas.slice(-alt.length)===alt&&/[\\/]/.test(nas.charAt(nas.length-alt.length-1));
+    const nasBasis=zeigtHin?nas.slice(0,nas.length-alt.length-1):'';
+    const max=(typeof _b652MaxOrdnerLaenge==='function')?_b652MaxOrdnerLaenge(nasBasis):90;
+    if(neu.length>max){
+      showToast('ℹ Kostenstelle nicht in den Ordnernamen übernommen – der Pfad würde zu lang ('+neu.length+' von höchstens '+max+' Zeichen).','info',8000);
+      return;
+    }
+    if(!confirm('Kostenstelle in den Ordnernamen übernehmen?\n\nBisher:  '+alt+'\nNeu:       '+neu+'\n\nFotos, Dokumente und Verknüpfungen bleiben erhalten. Der NAS-Pfad der Karte wird mitgezogen, die NAS folgt nach etwa einer Minute.'))return;
+    const p=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fid)+'?fields=id,name',{method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},body:JSON.stringify({name:neu})});
+    if(!p.ok){
+      if(p.status===403)showToast('ℹ PAM darf diesen Ordner nicht umbenennen (nicht von PAM angelegt). Bitte auf der NAS umbenennen und danach in der Karte „↓ aus Drive“.','info',10000);
+      else showToast('⚠ Umbenennen fehlgeschlagen ('+p.status+') – nichts geändert.','error',7000);
+      return;
+    }
+    if(zeigtHin){
+      const nasNeu=nas.slice(0,nas.length-alt.length)+neu;
+      if(nasEl)nasEl.value=nasNeu;
+      try{const t=findTaskById(taskId);if(t)t.nas=nasNeu;}catch(e){}
+      try{scheduleTaskFieldSave();}catch(e){}
+    }
+    showToast('✓ Ordner umbenannt: '+neu,'success',5000);
+  }catch(e){console.warn('[b1221] Ordner umbenennen:',e);}
 }
 
 function updateGcalModalBtn(){
