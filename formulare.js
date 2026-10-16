@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F82';
+const PAM_FORMULARE_VERSION='F83';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -6856,6 +6856,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig,opt){ /* F82: opt.stelle = diesen Man
   let selU=-1,ziehU=null,neuU=null,mausU=null,eckeNeuU=false; /* F62: Umriss – angetippte Ecke · Ecke wird gezogen · neue Ecke wird gezogen · Vorschau-Punkt · „＋ Ecke auf Kante“ wartet */ /* F34: loseS = gewählte Nummer lässt sich verschieben; neuText = Beschreibung einer neuen Stelle, die auf den Tipp in die Skizze wartet */ /* F33: Außenskizze beginnt bei „Stellen“; selS = gewählte Stelle, ziehS = Marke wird gezogen */
   const wp=(typeof _fsAsIstWp==='function')&&_fsAsIstWp(b); /* F82: Dach-/PV-Protokoll – die Marken sind die Mängel M1, M2 …; „＋ neue Stelle“ und „Beschreibung ändern“ gibt es dort nicht */
   if(opt&&opt.stelle&&sk.aussen){modus='stelle';selS=opt.stelle;} /* F82 */
+  else if(wp&&sk.aussen==='dach')modus=_fsUmDa(sk)?'stempel':'umriss'; /* F83: aus dem Kopf geöffnet – erst der Umriss, später die Stempel; „① Stellen“ nur über „📍 markieren“ (Frank: „bei solche Mangel wählen krieg ich nicht hin“) */
   const neu=()=>{
     g.fillStyle='#ffffff';g.fillRect(0,0,W,H);
     if(bildDa)g.drawImage(bild,0,0,W,H);
@@ -6889,6 +6890,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig,opt){ /* F82: opt.stelle = diesen Man
   const rueck=()=>{if(verlauf.length){sk.striche=JSON.parse(verlauf.pop());selT=-1;return true;}if(_fsBgStrichZurueck(sk)){selT=-1;return true;}return false;};
   const radieren=p=>{const i=_fsBgStrichTreffer(sk,p[0],p[1]);if(i<0)return;merken();if(_fsBgStrichWeg(sk,i)){selT=-1;scheduleSave();neu();leisteBauen();}};
   const leisteBauen=()=>{
+    try{const fst=dk.getElementById('_fsEzFotos');if(fst)fst.remove();}catch(e){} /* F83: der Foto-Streifen geht zu, sobald sich die Leiste ändert */
     leiste.innerHTML='';
     (sk.aussen?[['stelle','① Stellen'],['stempel','▣ Stempel'],['zeichnen','✏ Zeichnen']].concat(sk.aussen==='dach'?[['umriss','⬠ Umriss']]:[]):[['zeichnen','✏ Zeichnen'],['stempel','▣ Stempel']]).forEach(([k,txt])=>{ /* F62: Umriss nur in der Draufsicht */
       const an=modus===k;
@@ -6910,12 +6912,13 @@ function _fsBgEinzeichnenZeigen(b,r,fertig,opt){ /* F82: opt.stelle = diesen Man
         leiste.appendChild(knopf(loseS?'✓ Fest':'✥ Verschieben','border:3px solid '+(loseS?'#2e7d4f':'var(--border)')+';background:'+(loseS?'rgba(46,125,79,.16)':'var(--fs-cfl,transparent)')+';',()=>{loseS=!loseS;neu();leisteBauen();},['data-fs-ez-stellelose','1']));
         leiste.appendChild(knopf('Aus Skizze nehmen',RAND+'color:var(--red);',()=>{if(_fsAsMarkeWeg(selS)){loseS=false;scheduleSave();neu();leisteBauen();}},['data-fs-ez-stelleweg','1']));
       }
+      if(selS&&wp&&typeof _fsEzFotosZeigen==='function'){const nF=(typeof _fsWpPunktFotos==='function')?_fsWpPunktFotos(b,selS).length:0;leiste.appendChild(knopf('📷 Fotos'+(nF?' ('+nF+')':''),RAND,()=>{_fsEzFotosZeigen(b,selS,dk);},['data-fs-ez-fotos','1']));} /* F83: die Fotos des gewählten Mangels */
       if(selS&&!wp)leiste.appendChild(knopf('Beschreibung ändern',RAND,()=>{const tx=_fsEingabe('Beschreibung der Stelle '+_fsAsNummer(b,selS)+' (Wo?)',String(selS.ort||''));if(tx===null)return;selS.ort=String(tx).trim();scheduleSave();neu();leisteBauen();},['data-fs-ez-stelletext','1']));
       const z=document.createElement('span');z.setAttribute('data-fs-ez-zaehler','1');z.style.cssText='font-size:var(--fs13,13px);color:var(--text2);';
       const selName=!selS?'':wp?'M'+_fsAsNummer(b,selS)+' („'+_fsBgSkizzeKuerzen(String(selS.text||''),30)+'“)':'Stelle '+_fsAsNummer(b,selS)+(_fsVbWo(selS)?' („'+_fsBgSkizzeKuerzen(_fsVbWo(selS),30)+'“)':''); /* F60 · F82 */
       z.textContent=neuText!==null?'Neue Stelle'+(neuText.trim()?' („'+_fsBgSkizzeKuerzen(neuText,30)+'“)':'')+': jetzt in die Skizze tippen, wo sie ist'
         :!ls.length?(wp?'Noch kein Mangel im Protokoll – erst einen Punkt auf „⚠ Mängel“ setzen, dann dort „📍 markieren“ antippen.':'Noch keine Stelle in diesem Bereich – „＋ neue Stelle“ antippen.')
-        :!selS?(wp?'Oben einen Mangel (M1, M2 …) wählen, dann in die Skizze tippen':'Oben eine Stelle wählen oder „＋ neue Stelle“ antippen')
+        :!selS?(wp?'Mängel kommen über „📍 markieren“ am Punkt in die Skizze – oder oben eine Nummer antippen und dann in die Skizze tippen':'Oben eine Stelle wählen oder „＋ neue Stelle“ antippen')
         :!selHier?selName+': in die Skizze tippen, wo sie ist'
         :loseS?selName+' ist lose: Pfeilspitze oder Kreis ziehen oder an die richtige Stelle tippen – dann „✓ Fest“'
         :selName+' ist fest (🔒) – „✥ Verschieben“ macht sie lose';
@@ -7142,7 +7145,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig,opt){ /* F82: opt.stelle = diesen Man
     else if(modus==='umriss'&&selU>=0){const u=_fsUmLesen(sk);if(u&&_fsUmEckeWeg(u,selU)){selU=-1;_fsUmNachziehen(sk,W,H);scheduleSave();neu();leisteBauen();}e.preventDefault();} /* F62 */
   };
   document.addEventListener('keydown',taste,true);if(dk!==document)dk.addEventListener('keydown',taste,true); /* F69 */
-  const schliessen=()=>{window.removeEventListener('resize',groesse); /* F66 */document.removeEventListener('keydown',taste,true);if(dw!==window)dw.removeEventListener('resize',groesse);if(dk!==document)dk.removeEventListener('keydown',taste,true); /* F69 */ov.remove();if(typeof fertig==='function'){try{fertig();}catch(x){console.warn('[Feuchte] Einzeichnen:',x);}}};
+  const schliessen=()=>{try{const fst=dk.getElementById('_fsEzFotos');if(fst)fst.remove();}catch(e){} /* F83: der Foto-Streifen geht mit zu (vor den F66/F69-Lauschern – test_f50/f66 ankern den Rest der Zeile) */window.removeEventListener('resize',groesse); /* F66 */document.removeEventListener('keydown',taste,true);if(dw!==window)dw.removeEventListener('resize',groesse);if(dk!==document)dk.removeEventListener('keydown',taste,true); /* F69 */ov.remove();if(typeof fertig==='function'){try{fertig();}catch(x){console.warn('[Feuchte] Einzeichnen:',x);}}};
   zu.onclick=schliessen;fb.onclick=schliessen;
   leisteBauen();
   _fsAnhaengen(ov,b); /* F69 */
@@ -8819,6 +8822,43 @@ async function _fsPvPdfFeldFotos(doc,b,y,M,W){
   doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);
   return y;
 }
+/* ── F83: LEGENDE ANTIPPBAR + „📷 FOTOS“ IM ZEICHENFENSTER + START IN „⬠ UMRISS“ ─────────────────────────────────────────────────────────────
+   Frank 16.10.2026 nach dem Versuch mit F82 („bei solche Mangel wählen krieg ich nicht hin“, „auf M1 klicken und das Bild sehen“) → „Baue“:
+   1. Unter der Dachskizze ist jede Zeile „M1 = …“ ein Knopf – ein Tipp springt im Protokoll zum Punkt (dort Bemerkung und Fotos), dahinter „📷 n“.
+   2. Im Zeichenfenster gibt es zum gewählten Mangel den Knopf „📷 Fotos (n)“: ein Streifen mit den Miniaturen, Tipp = Großansicht der App.
+   3. Aus dem Kopf geöffnet startet das Zeichenfenster in „⬠ Umriss“ (solange keiner da ist) bzw. „▣ Stempel“; „① Stellen“ nur über „📍 markieren“.
+   Nur Feststellungen, keine Bewertung. */
+function _fsWpSkizzeLegendeEintraege(b,sk){
+  if(!_fsAsIstWp(b)||!sk)return [];
+  const ml=_fsWpMaengel(b);
+  return _fsAsMarken(b,sk).slice().sort((p,q)=>p.n-q.n).map(q=>{const m=ml.find(x=>x.it===q.s);return {nr:m?m.nr:q.n,it:q.s,text:m?((m.sek?m.sek+' – ':'')+m.text+(m.frage?' Ja':'')):'',fotos:m?m.fotoNrs.length:0};});
+}
+// Die Fotos eines Punkts in der Reihenfolge der Verweise: [{f, nr}] – nr = Nummer in der Fotoliste des Protokolls (wie im PDF); verwaiste Verweise fehlen
+function _fsWpPunktFotos(b,it){return _fsZeilenFotos((b&&Array.isArray(b.fotos))?b.fotos:[],it&&it.fotoRefs);}
+// Zeichenfenster: Streifen mit den Fotos des gewählten Mangels unten über der Fläche; zweiter Aufruf schließt ihn. Tipp auf ein Foto = Großansicht der App (_wpMobOpenFoto).
+function _fsEzFotosZeigen(b,it,dk){
+  dk=dk||((typeof _fsDok==='function')?_fsDok(b):document);
+  const alt=dk.getElementById('_fsEzFotos');if(alt){alt.remove();return null;}
+  const l=_fsWpPunktFotos(b,it),nr=_fsWpMangelNr(b,it);
+  const ov=dk.createElement('div');ov.id='_fsEzFotos';ov.setAttribute('data-fs-ez-fotos-streifen','1');
+  ov.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:100000;background:rgba(17,17,17,.94);color:#fff;padding:10px 56px 14px 14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;max-height:45vh;overflow:auto;';
+  const ti=dk.createElement('div');ti.setAttribute('data-fs-ez-fotos-titel','1');ti.style.cssText='flex:1 1 100%;font-size:var(--fs14,14px);font-weight:700;';
+  ti.textContent=l.length?('📷 '+l.length+' Foto'+(l.length===1?'':'s')+' zu M'+nr+' – antippen = groß'):('Noch kein Foto an M'+nr+' – Fotos hängen am Punkt im Protokoll („📷 Foto zu diesem Punkt“)');
+  const zu=dk.createElement('button');zu.type='button';zu.textContent='✕';zu.setAttribute('aria-label','Fotos schließen');zu.setAttribute('data-fs-ez-fotos-zu','1');
+  zu.style.cssText='position:absolute;top:8px;right:10px;width:36px;height:36px;border-radius:8px;border:none;background:rgba(255,255,255,.2);color:#fff;font-size:var(--fs18,18px);cursor:pointer;';
+  zu.onclick=()=>ov.remove();
+  ov.append(ti,zu);
+  l.forEach(e=>{
+    const th=dk.createElement('div');th.setAttribute('data-fs-ez-foto',String(e.nr));th.style.cssText='width:96px;height:96px;border-radius:8px;overflow:hidden;background:#333;position:relative;cursor:pointer;flex-shrink:0;';
+    const img=dk.createElement('img');img.alt='';img.style.cssText='width:100%;height:100%;object-fit:cover;pointer-events:none;';_fsMiniaturQuelle(e.f,img);
+    const lb=dk.createElement('span');lb.textContent='Foto '+e.nr;lb.style.cssText='position:absolute;left:4px;bottom:4px;background:rgba(0,0,0,.7);color:#fff;font-size:var(--fs11,11px);padding:1px 6px;border-radius:8px;pointer-events:none;';
+    th.append(img,lb);
+    th.onclick=()=>{if(typeof _wpMobOpenFoto==='function')_wpMobOpenFoto(b,e.nr-1);};
+    ov.appendChild(th);
+  });
+  dk.body.appendChild(ov);
+  return ov;
+}
 /* ── F82: DACHSKIZZE IM DACH- UND PV-PROTOKOLL + ☀ PV-FELD MIT MASSEN + „📍 MARKIEREN“ ───────────────────────────────────────────────────────────
    Frank 16.10.2026 („P73 erst fertig machen“ → Entwurf Schritt 3 → „ja bau“ / „passt“): eine Außenskizze „Dachfläche von oben“ je Dach- und PV-Protokoll –
    dasselbe Zeichenfenster wie in der Vorabbesichtigung (⬠ Umriss mit Maßen, Stempel, Striche, Zoom, Legende). Neue Stempel auf dem Dach: ☀ PV-Feld (Rechteck mit
@@ -9084,6 +9124,16 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
   /* F82: „🗺 Dachskizze“ im Kopf – eine Außenskizze „Dachfläche von oben“ je Protokoll (Werkzeug der Vorabbesichtigung): Umriss mit Maßen, Stempel (☀ PV-Feld, Gaube, Schneefang, First/Grat, Durchdringung …), Mängel als Nummern M1, M2 … */
   const _wpSkizzeOeffnen=(sk,it)=>{if(typeof _fsPvStempelAbgleich==='function')_fsPvStempelAbgleich(bericht,sk);_fsBgEinzeichnenZeigen(bericht,_fsAsPseudoRaum(sk),()=>{scheduleSave();_wpLeisteNeu();},it?{stelle:it}:null);};
   const _wpMarkieren=it=>{let sk=_fsWpSkizze(bericht);if(!sk){sk=_fsWpSkizzeNeu(bericht);if(!sk){toast('Genug Skizzen in diesem Protokoll','info',3000);return;}scheduleSave();}_wpSkizzeOeffnen(sk,it);};
+  /* F83: von der Legende unter der Skizze zum Punkt springen – Abschnitt aufklappen, Filter aufheben, hinscrollen, kurz hervorheben */
+  const _wpZumPunkt=it=>{
+    const m=(typeof _fsWpMaengel==='function')?_fsWpMaengel(bericht).find(x=>x.it===it):null;
+    let neuBau=false;if(m&&wpZu.has(m.sek)){wpZu.delete(m.sek);neuBau=true;}if(!_passt(it)){wpFilter='alle';neuBau=true;}
+    if(neuBau)_wpLeisteNeu();
+    const nb=Array.prototype.find.call(body.querySelectorAll('[data-wp-mangelnr]'),e=>e._wpItem===it);const row=nb?nb.closest('[data-wp-punkt]'):null;if(!row)return false;
+    try{const bb=body.getBoundingClientRect(),rr=row.getBoundingClientRect(),h=body.clientHeight||0;body.scrollTop=Math.max(0,body.scrollTop+(rr.top-bb.top)-Math.max(0,(h-rr.height)/2));}catch(e){try{row.scrollIntoView();}catch(x){}} /* direkt im Formular-Behälter, ohne Gleiten – im echten PAM blieb „smooth“ auf 0 stehen */
+    row.style.outline='3px solid #d9480f';row.style.outlineOffset='-3px';setTimeout(()=>{row.style.outline='';row.style.outlineOffset='';},1800);
+    return true;
+  };
   const _wpMarkKnopfSetzen=mk=>{const it=mk._wpItem,n=(typeof _fsWpMangelNr==='function')?_fsWpMangelNr(bericht,it):0;const sk=(typeof _fsWpSkizze==='function')?_fsWpSkizze(bericht):null;const drin=!!sk&&!!it&&!!it.skz&&it.skz.k===sk.id;mk.style.display=n?'inline-block':'none';mk.setAttribute('data-txt',drin?'📍 in der Skizze':'📍 markieren');mk.title=drin?'Die Nummer steht in der Dachskizze – antippen zum Verschieben':'Die Nummer in die Dachskizze setzen';};
   const _wpSkizzeZeile=()=>{
     const w=document.createElement('div');w.setAttribute('data-wp-skizze','1');w.style.cssText='padding:8px 14px 10px;border-top:1px solid var(--border);';
@@ -9106,7 +9156,11 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
     if(z.length){const uzd=document.createElement('div');uzd.setAttribute('data-wp-skizze-umriss','1');uzd.style.cssText='font-size:var(--fs13,13px);color:var(--text);margin:2px 0 4px;';uzd.textContent=z.join(' · ');w.appendChild(uzd);}
     const lg=(typeof _fsWpSkizzeLegende==='function')?_fsWpSkizzeLegende(bericht,sk):[];
     const ld=document.createElement('div');ld.setAttribute('data-wp-skizze-legende','1');ld.style.cssText='font-size:var(--fs12,12px);color:var(--text);margin:2px 0 4px;';
-    if(lg.length)lg.forEach(s=>{const d=document.createElement('div');d.style.padding='1px 0';d.textContent=s;ld.appendChild(d);});
+    const lgE=(typeof _fsWpSkizzeLegendeEintraege==='function')?_fsWpSkizzeLegendeEintraege(bericht,sk):null; /* F83: jede Zeile ein Knopf → zum Punkt, dahinter die Foto-Zahl */
+    if(lgE&&lgE.length)lgE.forEach(e=>{const d=document.createElement('button');d.type='button';d.setAttribute('data-wp-skizze-legende-m',String(e.nr));d._wpItem=e.it;d.textContent='M'+e.nr+' = '+e.text+(e.fotos?' · 📷 '+e.fotos:'');d.title='Zum Punkt im Protokoll springen (dort Bemerkung und Fotos)';
+      d.style.cssText='display:block;width:100%;text-align:left;padding:5px 8px;margin:2px 0;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:var(--fs12,12px);cursor:pointer;font-family:inherit;line-height:1.35;';
+      d.onclick=()=>_wpZumPunkt(e.it);ld.appendChild(d);});
+    else if(lg.length)lg.forEach(s=>{const d=document.createElement('div');d.style.padding='1px 0';d.textContent=s;ld.appendChild(d);});
     else{ld.style.color='var(--text2)';ld.textContent='Noch kein Mangel in der Skizze – am Mangel-Punkt „📍 markieren“ antippen.';}
     w.appendChild(ld);
     const ez=document.createElement('button');ez.type='button';ez.setAttribute('data-wp-skizze-zeichnen','1');ez.textContent='✏ Einzeichnen – Umriss, ☀ PV-Feld und andere Stempel, Striche, Mängel-Nummern';ez.style.cssText=KN+'border:1.5px solid #d9480f;background:rgba(217,72,15,.08);color:var(--text);';
