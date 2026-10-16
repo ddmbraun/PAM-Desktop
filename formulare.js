@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F79';
+const PAM_FORMULARE_VERSION='F80';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -17,8 +17,9 @@ function _fsDok(b){
     if(typeof window==='undefined')return document;
     const f=window._fsFensterDok;if(!f||f===document)return document;
     const w=f.defaultView;if(!w||w.closed)return document;
-    const ov=f.getElementById('_fsMobOverlay');if(!ov)return document;
-    if(b&&ov._fsBericht&&ov._fsBericht!==b)return document; /* ein anderes Protokoll steht dort – dann gilt das Hauptfenster */
+    const ov=f.getElementById('_fsMobOverlay')||f.getElementById('_wpMobOverlay');if(!ov)return document; /* F80: auch Dach-, PV- und Anschlag-Protokoll */
+    const ob=ov._fsBericht||ov._wpBericht;
+    if(b&&ob&&ob!==b)return document; /* ein anderes Protokoll steht dort – dann gilt das Hauptfenster */
     return f;
   }catch(e){return document;}
 }
@@ -4985,9 +4986,12 @@ function _fsVbLaeuftSchild(el,t,anzeige){
    zuletzt abgelegten PDF. Am PC im großen Fenster, am Tablet über „👁 Öffnen“ (dasselbe Öffnen wie bei Dateien am Zettel). */
 let _fsVorschauModus=false;
 async function _fsVorschau(bericht,task){
-  if(!_fsIstBegehung(bericht)||typeof _fsMobPdfBg!=='function')return null;
+  let fn=null;
+  if(_fsIstBegehung(bericht)&&typeof _fsMobPdfBg==='function')fn=_fsMobPdfBg;
+  else if(bericht&&bericht.vorlage==='wartungsprotokoll'&&bericht.art!=='rep'&&typeof _fsWpPdf==='function')fn=_fsWpPdf; /* F80: Dach-, PV- und Anschlag-Protokoll (_fsWpPdf verzweigt selbst) */
+  if(!fn)return null;
   _fsVorschauModus=true;
-  try{return await _fsMobPdfBg(bericht,task);}finally{_fsVorschauModus=false;}
+  try{return await fn(bericht,task);}finally{_fsVorschauModus=false;}
 }
 /* F53 (Frank 10.10.2026, „4 b“): die Vorschau bleibt in PAM – die Seiten werden mit pdf.js (liegt wie formulare.js in beiden Apps: pdfjs.min.js + pdfjs.worker.min.js)
    als Bilder gezeichnet; ‹ › blättern, − ＋ Größe, „✕ Schließen“ führt ins Formular zurück. Am PC dazu „↗ Im neuen Tab“, am Tablet „📂 Im PDF-Programm“ (der alte Weg).
@@ -8838,7 +8842,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
   }
   _fsWpVervollstaendigen(bericht);
 
-  const GID='_wpMobOverlay';const old=document.getElementById(GID);if(old)old.remove();
+  const GID='_wpMobOverlay';const old=_fsById(GID);if(old)old.remove(); /* F80: auch im eigenen Fenster */
   if(typeof _pbOffenMerken==='function')_pbOffenMerken(t,bericht,GID,function(){_wpMobRender();_wpMobStats();}); // v306: nach Neuladen/Zusammenführen wieder anhängen, bei jüngerer Fassung von drüben neu zeichnen
   const ov=document.createElement('div');ov.id=GID;
   ov.style.cssText='position:fixed;inset:0;z-index:99998;display:flex;flex-direction:column;background:var(--bg);';
@@ -8859,6 +8863,12 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
   datumEl.style.cssText='width:104px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:6px;padding:7px 8px;color:#fff;font-size:var(--fs14,14px);font-family:inherit;flex-shrink:0;';
   datumEl.oninput=()=>{bericht.datum=datumEl.value;scheduleSave();};
   hdr.append(closeBtn,hdrMeta,datumEl);
+  if(!_fsAmPc()&&typeof _fsVorschau==='function'){ /* F80: „👁 Vorschau“ am Tablet – oben, weil es dort keine Fußleiste gibt; legt nichts ab */
+    const vb=document.createElement('button');vb.type='button';vb.textContent='👁';vb.title='Vorschau – das PDF ansehen, nichts wird abgelegt';vb.setAttribute('aria-label','Vorschau');vb.setAttribute('data-fs-vorschau','1');
+    vb.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:40px;height:40px;border-radius:8px;font-size:var(--fs18,18px);cursor:pointer;flex-shrink:0;';
+    vb.onclick=async()=>{if(vb.disabled)return;vb.disabled=true;vb.textContent='⏳';try{await _fsVorschau(bericht,t);}finally{vb.disabled=false;vb.textContent='👁';}};
+    hdr.appendChild(vb);
+  }
 
   /* Zählleiste */
   const statsEl=document.createElement('div');statsEl.id='_wpMobStats';
@@ -9022,7 +9032,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
         const tokens=_fsHausTokens(k.haus),vor=_fsHausChips(bericht,t),alle=vor.concat(tokens.filter(x=>vor.indexOf(x)<0));
         const setze=neu=>{k.haus=neu.join(' · ');scheduleSave();_wpLeisteNeu();};
         const chips=alle.map(x=>_pvChip(x,tokens.indexOf(x)>=0,()=>setze(_fsHausToggle(alle,tokens,x)),'data-pv-haus-chip',x));
-        const fr=_pvChip('✎ andere …',false,()=>{const n=prompt('Haus / Eingang – z. B. „9 – Eingang links“ oder „Hinterhaus“','');if(n===null)return;const c=String(n).replace(/\s*·\s*/g,' ').replace(/\s+/g,' ').trim();if(c)setze(tokens.indexOf(c)>=0?tokens:tokens.concat([c]));},'data-pv-haus-frei');fr.style.borderStyle='dashed';
+        const fr=_pvChip('✎ andere …',false,()=>{const n=_fsEingabe('Haus / Eingang – z. B. „9 – Eingang links“ oder „Hinterhaus“','',bericht); /* F80 */if(n===null)return;const c=String(n).replace(/\s*·\s*/g,' ').replace(/\s+/g,' ').trim();if(c)setze(tokens.indexOf(c)>=0?tokens:tokens.concat([c]));},'data-pv-haus-frei');fr.style.borderStyle='dashed';
         teile.push(_pvZeile('Haus / Eingang',chips.concat([fr]),'data-pv-haus'));
       }
       teile.push(_mf('Anlass','anlass','z. B. jährliche Wartung lt. Vertrag'));
@@ -9077,7 +9087,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
           const huelle=document.createElement('div');huelle.setAttribute('data-pv-feld-huelle','1');huelle.style.cssText='margin-bottom:6px;';
           const r=document.createElement('div');r.setAttribute('data-pv-feld','1');if(f.gemessen===true)r.setAttribute('data-pv-feld-gemessen','1');r.style.cssText='display:flex;gap:6px;align-items:center;';
           const weg=document.createElement('button');weg.type='button';weg.textContent='✕';weg.setAttribute('data-pv-feld-weg','1');weg.title='Modulfeld entfernen';weg.style.cssText='flex-shrink:0;min-width:32px;height:32px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;font-family:inherit;';
-          weg.onclick=()=>{if(!confirm('Modulfeld „'+(f.name||'')+'“ entfernen?'))return;const i=k.pvFelder.indexOf(f);if(i>=0)k.pvFelder.splice(i,1);scheduleSave();_wpLeisteNeu();};
+          weg.onclick=()=>{if(!_fsFrage('Modulfeld „'+(f.name||'')+'“ entfernen?',bericht))return;const i=k.pvFelder.indexOf(f);if(i>=0)k.pvFelder.splice(i,1);scheduleSave();_wpLeisteNeu();};
           r.append(inp(f,'name','Feld (z. B. Süd, Ost)',messbar?'28%':'34%',r),inp(f,'richtung','Richtung (z. B. Süd 185°)',messbar?'36%':'38%',r),inp(f,'neigung','Neigung (z. B. 35°)',messbar?'20%':'22%',r));
           if(messbar){ /* F78: 🧭 nur am Handy/Tablet – am PC gibt es keinen Kompass */
             const messen=document.createElement('button');messen.type='button';messen.textContent='🧭';messen.setAttribute('data-pv-feld-messen','1');messen.title='Richtung und Neigung mit dem Gerät messen – flach auf das Modulglas legen';
@@ -9180,7 +9190,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
           const weg=document.createElement('button');weg.type='button';weg.textContent='✕';weg.title='Eigenen Punkt entfernen';weg.setAttribute('data-wp-eigen-weg','1');
           weg.style.cssText='flex-shrink:0;min-width:32px;height:28px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;font-family:inherit;';
           weg.onclick=()=>{
-            if(!confirm('Eigenen Punkt „'+it.text+'“ aus diesem Protokoll entfernen?'+((it.fotoRefs&&it.fotoRefs.length)?' Die Fotos bleiben im Protokoll, nur die Zuordnung zu diesem Punkt geht weg.':'')))return;
+            if(!_fsFrage('Eigenen Punkt „'+it.text+'“ aus diesem Protokoll entfernen?'+((it.fotoRefs&&it.fotoRefs.length)?' Die Fotos bleiben im Protokoll, nur die Zuordnung zu diesem Punkt geht weg.':''),bericht))return;
             if(typeof _fsWpEigenerPunktWeg!=='function'||!_fsWpEigenerPunktWeg(sek,it))return;
             scheduleSave();const sc=body.scrollTop;_wpMobRender();body.scrollTop=sc;_wpMobStats();
           };
@@ -9372,7 +9382,10 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
       catch(e){if(e.name!=='AbortError')toast('Teilen fehlgeschlagen','error');}
     }else{toast('Bitte zuerst PDF erstellen','info');}
   };
-  footer.append(pdfBtn,openBtn,shareBtn);
+  const vorBtn=document.createElement('button');vorBtn.type='button';vorBtn.textContent='👁 Vorschau';vorBtn.setAttribute('data-fs-vorschau','1');vorBtn.title='Das PDF ansehen – nichts kommt nach Drive, nichts wird ersetzt'; /* F80 */
+  vorBtn.style.cssText='padding:12px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:var(--fs15,15px);font-weight:600;cursor:pointer;color:var(--text);';
+  vorBtn.onclick=async()=>{vorBtn.disabled=true;const alt=vorBtn.textContent;vorBtn.textContent='⏳ Vorschau …';try{await _fsVorschau(bericht,t);}finally{vorBtn.disabled=false;vorBtn.textContent=alt;}};
+  footer.append(pdfBtn,vorBtn,openBtn,shareBtn);
   ov.append(hdr,statsEl,body,footer);
   document.body.appendChild(ov);
   if(wahl&&typeof _pamFormUeberlagerungPc==='function'){try{_pamFormUeberlagerungPc(ov);if(typeof renderPruefberichteDesktop==='function')renderPruefberichteDesktop();}catch(e){console.warn('[F70] Rahmen:',e);}} /* nach der Frage ist der Aufrufer (PC-Menü) schon fertig – Rahmen und Liste hier nachholen */
@@ -9583,6 +9596,7 @@ async function _fsWpPdf(bericht,task){
     }
 
     const blob=doc.output('blob');
+    if(typeof _fsVorschauModus!=='undefined'&&_fsVorschauModus&&typeof _fsVorschauFenster==='function'){_fsVorschauFenster(blob,'Vorschau_'+_fsPdfName(bericht,new Date()));return blob;} /* F80: 👁 Vorschau – nichts nach Drive, nichts ersetzt (typeof: ältere Prüfungen schneiden die Funktion einzeln aus) */
     _fsPdfBlobs[bericht.id]=blob;
     const name=_fsPdfName(bericht,new Date());
     if(pv)toast('✓ PV-Protokoll PDF erstellt','success',4000);else toast('✓ Dachprotokoll PDF erstellt','success',4000); /* F73 · F75 */
@@ -9685,7 +9699,7 @@ function _openAnschlagProtokoll(existingIdx,vonWp){
   }
   _fsAnVervollstaendigen(bericht);
 
-  const GID='_wpMobOverlay';const old=document.getElementById(GID);if(old)old.remove(); /* derselbe Fenstername wie das Dachprotokoll: die PC-Umgebung richtet das Fenster darüber aus */
+  const GID='_wpMobOverlay';const old=_fsById(GID);if(old)old.remove(); /* F80: auch im eigenen Fenster */ /* derselbe Fenstername wie das Dachprotokoll: die PC-Umgebung richtet das Fenster darüber aus */
   if(typeof _pbOffenMerken==='function')_pbOffenMerken(t,bericht,GID,function(){_anRender();_anStats();});
   const ov=document.createElement('div');ov.id=GID;ov.setAttribute('data-fs-anschlag','1');
   if(typeof _fsSichtAn==='function')_fsSichtAn(ov);
@@ -9705,6 +9719,12 @@ function _openAnschlagProtokoll(existingIdx,vonWp){
   datumEl.style.cssText='width:104px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:6px;padding:7px 8px;color:#fff;font-size:var(--fs14,14px);font-family:inherit;flex-shrink:0;';
   datumEl.oninput=()=>{bericht.datum=datumEl.value;scheduleSave();};
   hdr.append(closeBtn,hdrMeta,datumEl);
+  if(!_fsAmPc()&&typeof _fsVorschau==='function'){ /* F80: „👁 Vorschau“ am Tablet – oben, weil es dort keine Fußleiste gibt; legt nichts ab */
+    const vb=document.createElement('button');vb.type='button';vb.textContent='👁';vb.title='Vorschau – das PDF ansehen, nichts wird abgelegt';vb.setAttribute('aria-label','Vorschau');vb.setAttribute('data-fs-vorschau','1');
+    vb.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:40px;height:40px;border-radius:8px;font-size:var(--fs18,18px);cursor:pointer;flex-shrink:0;';
+    vb.onclick=async()=>{if(vb.disabled)return;vb.disabled=true;vb.textContent='⏳';try{await _fsVorschau(bericht,t);}finally{vb.disabled=false;vb.textContent='👁';}};
+    hdr.appendChild(vb);
+  }
 
   const statsEl=document.createElement('div');statsEl.id='_anStats';
   statsEl.style.cssText='padding:7px 14px;background:var(--bg3);border-bottom:1px solid var(--border);flex-shrink:0;font-size:var(--fs12,12px);font-weight:600;color:'+FS_AN_FARBE+';';
@@ -9842,7 +9862,7 @@ function _openAnschlagProtokoll(existingIdx,vonWp){
       const inh=document.createElement('div');inh.style.cssText='margin-top:6px;';
       const kn=document.createElement('div');kn.style.cssText='display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 6px;';
       const weg=document.createElement('button');weg.type='button';weg.textContent='✕ Punkt entfernen';weg.setAttribute('data-an-punkt-weg','1');weg.style.cssText=chipStil(false);
-      weg.onclick=()=>{if(!confirm('Anschlagpunkt '+p.nr+' aus diesem Protokoll entfernen?'+((p.fotoRefs&&p.fotoRefs.length)?' Die Fotos bleiben im Protokoll, nur die Zuordnung geht weg.':'')))return;if(_fsAnPunktWeg(bericht,p)){anZu.delete(p);scheduleSave();_anNeu();}};
+      weg.onclick=()=>{if(!_fsFrage('Anschlagpunkt '+p.nr+' aus diesem Protokoll entfernen?'+((p.fotoRefs&&p.fotoRefs.length)?' Die Fotos bleiben im Protokoll, nur die Zuordnung geht weg.':''),bericht))return;if(_fsAnPunktWeg(bericht,p)){anZu.delete(p);scheduleSave();_anNeu();}};
       kn.appendChild(weg);inh.appendChild(kn);
       const tz=zeile('Typ / Bezeichnung');const ti1=document.createElement('input');ti1.type='text';ti1.value=p.typ||'';ti1.placeholder='z. B. Einzelanschlagpunkt Typ …';ti1.autocomplete='off';ti1.style.cssText=FELD;ti1.setAttribute('data-an-feld','typ');ti1.oninput=()=>{p.typ=ti1.value;scheduleSave();};
       const ti2=document.createElement('input');ti2.type='text';ti2.value=p.serie||'';ti2.placeholder='Serien-Nr. (Typenschild)';ti2.autocomplete='off';ti2.style.cssText=FELD+'max-width:200px;';ti2.setAttribute('data-an-feld','serie');ti2.oninput=()=>{p.serie=ti2.value;scheduleSave();};
@@ -9896,7 +9916,10 @@ function _openAnschlagProtokoll(existingIdx,vonWp){
   pdfBtn.style.cssText='flex:1;padding:12px;background:'+FS_AN_FARBE+';color:#fff;border:none;border-radius:8px;font-size:var(--fs15,15px);font-weight:700;cursor:pointer;';
   pdfBtn.onclick=async()=>{pdfBtn.disabled=true;const alt=pdfBtn.textContent;pdfBtn.textContent='⏳ PDF wird erstellt …';try{await _fsAnPdf(bericht,t);}finally{pdfBtn.disabled=false;pdfBtn.textContent=alt;}};
   const openBtn=document.createElement('button');openBtn.type='button';openBtn.textContent='📂 Öffnen';openBtn.style.cssText='padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:var(--fs15,15px);font-weight:600;cursor:pointer;color:var(--text);';openBtn.onclick=()=>_fsPdfOeffnen(bericht);
-  footer.append(pdfBtn,openBtn);
+  const vorBtn=document.createElement('button');vorBtn.type='button';vorBtn.textContent='👁 Vorschau';vorBtn.setAttribute('data-fs-vorschau','1');vorBtn.title='Das PDF ansehen – nichts kommt nach Drive, nichts wird ersetzt'; /* F80 */
+  vorBtn.style.cssText='padding:12px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:var(--fs15,15px);font-weight:600;cursor:pointer;color:var(--text);';
+  vorBtn.onclick=async()=>{vorBtn.disabled=true;const alt=vorBtn.textContent;vorBtn.textContent='⏳ Vorschau …';try{await _fsVorschau(bericht,t);}finally{vorBtn.disabled=false;vorBtn.textContent=alt;}};
+  footer.append(pdfBtn,vorBtn,openBtn);
   ov.append(hdr,statsEl,body,footer);
   document.body.appendChild(ov);
   if(vonWp&&typeof _pamFormUeberlagerungPc==='function'){try{_pamFormUeberlagerungPc(ov);if(typeof renderPruefberichteDesktop==='function')renderPruefberichteDesktop();}catch(e){console.warn('[F74] Rahmen:',e);}} /* aus dem Dachprotokoll heraus: der PC-Rahmen kommt hier, nicht vom Menü */
@@ -9978,6 +10001,7 @@ async function _fsAnPdf(bericht,task){
     const pages=doc.internal.getNumberOfPages();
     for(let p=1;p<=pages;p++){doc.setPage(p);doc.setFontSize(8);doc.setTextColor(150,150,150);doc.text('Seite '+p+' von '+pages,W/2,292,{align:'center'});doc.text('sv-fb.de',W-M,292,{align:'right'});}
     const blob=doc.output('blob');
+    if(typeof _fsVorschauModus!=='undefined'&&_fsVorschauModus&&typeof _fsVorschauFenster==='function'){_fsVorschauFenster(blob,'Vorschau_'+_fsPdfName(bericht,new Date()));return blob;} /* F80: 👁 Vorschau – nichts nach Drive, nichts ersetzt (typeof: ältere Prüfungen schneiden die Funktion einzeln aus) */
     _fsPdfBlobs[bericht.id]=blob;
     const name=_fsPdfName(bericht,new Date());
     toast('✓ Prüfprotokoll PDF erstellt','success',4000);
