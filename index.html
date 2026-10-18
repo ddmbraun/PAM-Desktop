@@ -10714,7 +10714,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-18 · #1234'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-18-b1234) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-18 · #1235'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-18-b1235) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -16463,10 +16463,102 @@ function _pamHandyHinweisText(){
       : '⚠ Diese Ansicht ist vom Stand '+t+' – inzwischen hat ein anderes Gerät gespeichert';
   }catch(e){return '↻ Ein anderes Gerät hat gespeichert – die Änderungen kommen an, sobald dieses Fenster zu ist';}
 }
+// ══════════════════════════════════════════════════════════════════════════
+// b1235 – DIE BÄNDER OBEN STAPELN, UND MAN DARF SIE WEGKLICKEN
+//
+// Frank am 07.09.2026, direkt nach b934: „Unten drunter kam kurz irgendwas wie Speichern, war
+// aber nicht sichtbar weil es unten drunter war." Und am 18.10.2026: „Kann ich das gelbe oder
+// orange Fenster auch wegklicken?"
+//
+// Gemessen – DREI Bänder sitzen fix oben in der Mitte, alle auf top:0:
+//   _zweiFensterBanner   (orange, z 99998)  „Auch ein anderer Rechner arbeitet in PAM"
+//   pamHandyHinweisBand  (gelb,   z 99994)  „Diese Ansicht ist vom Stand …" + Knopf
+//   _pamDublettenBanner  (rot,    z 99997)  „N Karten liegen mehrfach in der Datei"
+// Geregelt war nur EIN Paar (b719: der Dubletten-Balken rutscht auf 34 px, wenn der orange
+// steht). Das gelbe Band stand in keiner Regel – und genau das verdeckte der orange, samt
+// seinem Knopf. Seit b977 gehen Klicks durch den orangen hindurch, der Knopf war also
+// bedienbar; zu SEHEN war er trotzdem nicht.
+// ⛔ Eine Paarregel je Band war die Falle: bei drei Bändern sind es drei Paare, bei vier sechs.
+//    Deshalb EINE Stelle, die von oben nach unten durchzählt – und alle drei rufen sie.
+// ⛔ Reihenfolge FEST: orange, gelb, Dubletten. Damit bleibt der häufige Fall (orange +
+//    Dubletten) genau dort, wo b719 ihn hatte.
+//
+// Wegklicken: ✕ nimmt die Meldung weg, aber NIE dauerhaft.
+// ⛔ Ein ✕, das die Warnung für immer abschaltet, ist eine Falle – einmal genervt weggeklickt,
+//    und Wochen später springt die Karten-Reihenfolge ohne Vorwarnung. Vorbild ist der
+//    Drive-Warnbalken (`_bannerDismissedUntil`): weggeklickt heißt Ruhe, nicht Abschaltung.
+//      gelb   → weg, bis ein NEUER Stand hereinkommt (gemerkt wird workboardLastModified)
+//      orange → 10 Minuten Ruhe, aber ein NEUER Fremdschreiber hebt sie sofort auf
+// ⛔ Beide Unterdrückungen haben zusätzlich eine harte Obergrenze (30 Min bzw. 10 Min). Ein
+//    Merker, der nie verfällt, ist genau die Art stiller Dauerzustand, die bei b789 zugeschlagen
+//    hat („Die Aufforderung ist nicht weggegangen") – nur in die andere Richtung.
+// ══════════════════════════════════════════════════════════════════════════
+const _PAM_BAENDER_OBEN=['_zweiFensterBanner','pamHandyHinweisBand','_pamDublettenBanner'];
+const _PAM_BAND_LUECKE=6;        // 28 px Bandhöhe + 6 = die 34 px, die b719 von Hand setzte
+const _PAM_BAND_RUHE_MS=600000;  // orange: 10 Minuten
+const _PAM_HINWEIS_RUHE_MS=1800000; // gelb: Obergrenze, falls sich der Stand nie ändert
+let _pamHinweisWeg=null;         // {marke, zeit} – Stand, zu dem das gelbe Band weggeklickt wurde
+let _pamZweiFensterWegAb=0;      // Zeitpunkt (eigene Uhr), zu dem der orange weggeklickt wurde
+function _pamBaenderStapeln(){
+  try{
+    let y=0;
+    for(const id of _PAM_BAENDER_OBEN){
+      const el=document.getElementById(id);
+      if(!el)continue;
+      el.style.top=y+'px';
+      y+=(el.offsetHeight||28)+_PAM_BAND_LUECKE;  // offsetHeight fehlt in Prüfumgebungen → 28
+    }
+  }catch(e){console.warn('[b1235] Baender stapeln:',e);}
+}
+function _pamStandMarke(){ try{ return workboardLastModified||''; }catch(e){ return ''; } }
+function _pamHinweisUnterdrueckt(){
+  try{
+    if(!_pamHinweisWeg)return false;
+    if((Date.now()-_pamHinweisWeg.zeit)>=_PAM_HINWEIS_RUHE_MS)return false;
+    return _pamHinweisWeg.marke===_pamStandMarke();
+  }catch(e){return false;}
+}
+function _pamZweiFensterUnterdrueckt(){
+  try{
+    if(!_pamZweiFensterWegAb)return false;
+    // Ein Fund NACH dem Wegklicken ist eine neue Lage – die darf das ✕ nicht mitverschlucken.
+    if(typeof _pamFremderSchreiber!=='undefined'&&_pamFremderSchreiber
+       &&_pamFremderSchreiber.bemerkt>_pamZweiFensterWegAb)return false;
+    return (Date.now()-_pamZweiFensterWegAb)<_PAM_BAND_RUHE_MS;
+  }catch(e){return false;}
+}
+// Das ✕ an ein Band hängen. Bewusst mit GENAU denselben DOM-Mitteln wie der vorhandene Knopf
+// (createElement/appendChild/style/textContent/onclick) – fremde Prüfumgebungen mit nachgebautem
+// DOM brauchen dadurch nichts Neues zu können.
+function _pamBandSchliesser(el,welches){
+  try{
+    if(!el||typeof el.appendChild!=='function')return;
+    const x=document.createElement('button');
+    x.type='button';
+    x.textContent='✕';
+    x.title=(welches==='zweifenster')
+      ? 'Für 10 Minuten ausblenden – kommt wieder, sobald der andere Rechner erneut speichert'
+      : 'Ausblenden – kommt wieder, sobald ein neuer Stand hereinkommt';
+    x.style.cssText='pointer-events:auto;cursor:pointer;flex-shrink:0;border:0;background:transparent;'+
+      'color:inherit;font-size:14px;font-weight:700;line-height:1;padding:2px 5px;border-radius:4px;opacity:.75;';
+    x.onclick=function(ev){
+      try{if(ev&&typeof ev.stopPropagation==='function')ev.stopPropagation();}catch(e){}
+      try{
+        if(welches==='zweifenster')_pamZweiFensterWegAb=Date.now();
+        else _pamHinweisWeg={marke:_pamStandMarke(),zeit:Date.now()};
+      }catch(e){}
+      try{if(typeof el.remove==='function')el.remove();}catch(e){}
+      try{_pamBaenderStapeln();}catch(e){}
+    };
+    el.appendChild(x);
+  }catch(e){console.warn('[b1235] Schliesser:',e);}
+}
 function _pamHandyHinweis(anzeigen){
   try{
+    // b1235: weggeklickt heisst Ruhe – und Ruhe heisst auch, dass ein stehendes Band geht.
+    if(anzeigen&&typeof _pamHinweisUnterdrueckt==='function'&&_pamHinweisUnterdrueckt())anzeigen=false;
     let el=document.getElementById('pamHandyHinweisBand');
-    if(!anzeigen){if(el)el.remove();return;}
+    if(!anzeigen){if(el){el.remove();if(typeof _pamBaenderStapeln==='function')_pamBaenderStapeln();}return;}
     if(el)return;
     el=document.createElement('div');
     el.id='pamHandyHinweisBand';
@@ -16489,7 +16581,15 @@ function _pamHandyHinweis(anzeigen){
       'color:#92400e;font-size:12px;font-weight:700;padding:3px 10px;border-radius:6px;white-space:nowrap;';
     _btn.onclick=_pamAnsichtNeuLaden;
     el.appendChild(_btn);
+    // b1235: ✕ und Stapeln stehen bewusst HIER am Ende. test_b977 misst ein 1400-Zeichen-Fenster
+    // ab `el.id='pamHandyHinweisBand'` und erwartet darin das `pointer-events:auto` des Knopfes –
+    // das sitzt bei 1060 Zeichen (dort gemessen und auskommentiert). Code DAVOR hätte es aus dem
+    // Fenster geschoben und zwei fremde Prüfungen rot gemacht, ohne dass am Band etwas fehlt.
+    // ⛔ Mit `typeof` abgesichert: zwei fremde Suiten schneiden diese Funktion aus und führen sie
+    //    ALLEIN aus (b974/b976-Entscheidung: eigenen Code robust machen, nie die fremde Suite anpassen).
+    if(typeof _pamBandSchliesser==='function')_pamBandSchliesser(el,'hinweis');
     document.body.appendChild(el);
+    if(typeof _pamBaenderStapeln==='function')_pamBaenderStapeln();
   }catch(e){console.warn('[b771] Hinweisband:',e);}
 }
 // b931: Knopf am Band – ERST sichern, DANN neu laden. Ein blankes location.reload() waere hier
@@ -18276,7 +18376,11 @@ function _pamDublettenBanner(anzahl){
     try{document.body.appendChild(b);}catch(e){return;}
   }
   // nicht auf dem Zwei-Fenster-Balken sitzen (der belegt oben die Mitte)
-  b.style.top=document.getElementById('_zweiFensterBanner')?'34px':'0';
+  // b1235: Das Stapeln liegt jetzt an einer Stelle – oben können DREI Bänder zusammenkommen,
+  // und eine Paarregel je Band war die nächste vergessene Kombination.
+  // ⛔ Der alte Ausdruck bleibt als Rückfall (b974/b976-Entscheidung).
+  if(typeof _pamBaenderStapeln==='function')_pamBaenderStapeln();
+  else b.style.top=document.getElementById('_zweiFensterBanner')?'34px':'0';
   const st=document.getElementById('_pamDublettenBannerText');
   if(st)st.textContent='⚠ '+anzahl+(anzahl===1?' Karte liegt':' Karten liegen')+' mehrfach in der Datei';
 }
@@ -60274,11 +60378,23 @@ function _zweiFensterBannerText(){
 }
 function _zweiFensterBanner(an){
   let b=document.getElementById('_zweiFensterBanner');
+  // b1235: weggeklickt heisst Ruhe – und Ruhe heisst auch, dass ein stehender Balken geht.
+  if(an&&typeof _pamZweiFensterUnterdrueckt==='function'&&_pamZweiFensterUnterdrueckt())an=false;
   if(!an){if(b){b.remove();_zweiFensterBannerNachziehen(false);}return;}
   // b934: Steht der Balken schon, aber die Ursache hat gewechselt (erst zweites Fenster hier,
   // dann zusaetzlich ein fremder Rechner), muss der Text nachgezogen werden. Bis b933 wurde er
   // einmal gesetzt und nie wieder angefasst – er haette dann dauerhaft das Falsche behauptet.
-  if(b){const _t=_zweiFensterBannerText();if(b.textContent!==_t)b.textContent=_t;return;}
+  // b1235: Der Text sitzt jetzt in einem eigenen Feld statt im Balken selbst. Grund: `textContent`
+  // am Balken loescht ALLE Kinder – jedes Nachziehen des Textes hätte das ✕ mitgerissen, und der
+  // Vergleich `b.textContent!==_t` hätte wegen des angehängten ✕ nie gepasst, also im 20-Sekunden-
+  // Takt neu geschrieben. Dieselbe Bauart wie beim gelben Band (Feld + Knopf) und beim
+  // Dubletten-Balken (`_pamDublettenBannerText`).
+  if(b){
+    const _t=_zweiFensterBannerText();
+    const _vorh=document.getElementById('_zweiFensterBannerTxt');
+    if(_vorh&&_vorh.textContent!==_t)_vorh.textContent=_t;
+    return;
+  }
   b=document.createElement('div');
   b.id='_zweiFensterBanner';
   // b977: `pointer-events:none` – derselbe Zusatz, den das gelbe Hinweisband seit b931 hat
@@ -60288,8 +60404,12 @@ function _zweiFensterBanner(an){
   // Befund Frank 09.09.2026 mit Bildschirmfoto; im Browser nachgemessen (elementFromPoint
   // traf den Balken, nicht den Knopf). Er hat keinen eigenen Knopf, also darf er die Klicks
   // vollständig durchreichen – anders als das gelbe Band, das seinen Knopf zurückholen muss.
-  b.style.cssText='position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:99998;background:#B54708;color:#fff;padding:6px 16px;border-radius:0 0 10px 10px;font-size:12.5px;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,.3);max-width:94%;text-align:center;pointer-events:none;';
-  b.textContent=_zweiFensterBannerText();
+  b.style.cssText='position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:99998;background:#B54708;color:#fff;padding:6px 16px;border-radius:0 0 10px 10px;font-size:12.5px;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,.3);max-width:94%;text-align:center;pointer-events:none;display:inline-flex;align-items:center;gap:8px;';
+  const _bTxt=document.createElement('span');
+  _bTxt.id='_zweiFensterBannerTxt';
+  _bTxt.textContent=_zweiFensterBannerText();
+  b.appendChild(_bTxt);
+  if(typeof _pamBandSchliesser==='function')_pamBandSchliesser(b,'zweifenster');
   try{document.body.appendChild(b);_zweiFensterBannerNachziehen(true);}catch(e){}
 }
 // b719: Dieser Balken kommt im 20-Sekunden-Takt, der Dubletten-Balken nur beim Laden.
@@ -60297,6 +60417,12 @@ function _zweiFensterBanner(an){
 // wäre nicht mehr anklickbar – und der Poll räumt das nicht auf, weil er bei unveränderter
 // Datei gar nicht erst lädt.
 function _zweiFensterBannerNachziehen(an){
+  // b1235: Das Stapeln liegt jetzt an EINER Stelle – es sind drei Bänder, nicht zwei (siehe den
+  // Block an _pamBaenderStapeln). Diese Funktion bleibt als Einstieg stehen: sie wird aus
+  // _zweiFensterBanner gerufen und ist in fremden Prüfumgebungen bereits bekannt.
+  // ⛔ Der alte Paar-Ausdruck bleibt als Rückfall – fremde Suiten führen diese Funktion allein aus
+  //    (b974/b976: eigenen Code robust machen, nie die fremde Suite anpassen).
+  if(typeof _pamBaenderStapeln==='function'){_pamBaenderStapeln();return;}
   try{const d=document.getElementById('_pamDublettenBanner');if(d)d.style.top=an?'34px':'0';}catch(e){}
 }
 
