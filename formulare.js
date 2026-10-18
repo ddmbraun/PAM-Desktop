@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F84';
+const PAM_FORMULARE_VERSION='F85';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -758,6 +758,8 @@ function _fsFotoZuordnung(bericht,f){
     if(it&&it.text&&(it.fotoRefs||[]).some(r=>_fsRefPasst(f,r)))teile.push(it.text);
   }));
   ((bericht&&bericht.kopf&&Array.isArray(bericht.kopf.pvFelder))?bericht.kopf.pvFelder:[]).forEach(fd=>{if(fd&&Array.isArray(fd.fotoRefs)&&fd.fotoRefs.some(r=>_fsRefPasst(f,r)))teile.push('Modulfeld '+(String(fd.name||'').trim()||'ohne Namen'));}); /* F79 */
+  ((bericht&&Array.isArray(bericht.punkte))?bericht.punkte:[]).forEach(p=>{if(p&&Array.isArray(p.fotoRefs)&&p.fotoRefs.some(r=>_fsRefPasst(f,r)))teile.push('Anschlagpunkt '+p.nr+(String(p.typ||'').trim()?' · '+String(p.typ).trim():''));}); /* F85: Prüfprotokoll */
+  if(bericht&&Array.isArray(bericht.planFotoRefs)&&bericht.planFotoRefs.some(r=>_fsRefPasst(f,r)))teile.push('Plan (Foto)'); /* F85 */
   return teile.join(' · ');
 }
 function _fsMiniaturQuelle(f,img){
@@ -866,7 +868,7 @@ function _fsFotoPinsFenster(bericht,f,fertig){
   const zu=document.createElement('button');zu.type='button';zu.textContent='←';zu.setAttribute('aria-label','Markieren beenden');zu.setAttribute('data-fs-fp-zu','1');
   zu.style.cssText='background:rgba(255,255,255,.2);border:none;color:#fff;width:44px;height:44px;border-radius:8px;font-size:20px;cursor:pointer;flex-shrink:0;';
   const ti=document.createElement('div');ti.style.cssText='font-size:var(--fs16,16px);font-weight:700;color:#fff;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-  const zuT=_fsBgFotoZuordnung(bericht,f);ti.textContent='📌 Foto markieren'+(zuT?' – '+zuT:'');
+  const zuT=(typeof _fsFotoZuordnungText==='function')?_fsFotoZuordnungText(bericht,f):_fsBgFotoZuordnung(bericht,f); /* F85: auch Prüfpunkt, Modulfeld, Anschlagpunkt, Plan */ti.textContent='📌 Foto markieren'+(zuT?' – '+zuT:'');
   kopf.append(zu,ti);
   const leiste=document.createElement('div');leiste.style.cssText='display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border);flex-shrink:0;';
   const feld=document.createElement('div');feld.style.cssText='flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px;background:var(--bg3);';
@@ -984,7 +986,7 @@ function _fsFotoLeiste(bericht,it,label,kompakt,vorne){ // kompakt: nur 📷 (+Z
       const f=fotos[fi];
       const th=document.createElement('div');th.setAttribute('data-fs-miniatur',String(ri));
       th.title=f.inReport?'Kommt ins PDF':'Nicht im PDF – unten bei „Fotos" antippen';
-      const unten=!!bericht.schlank; /* F38: Besichtigung 2 – größeres Vorschaubild, „📌“ und „✕“ stehen darunter statt über dem Bild */
+      const unten=(typeof _fsFpErlaubt==='function')?_fsFpErlaubt(bericht):!!bericht.schlank; /* F85: auch Dach-, PV- und Prüfprotokoll */ /* F38: Besichtigung 2 – größeres Vorschaubild, „📌“ und „✕“ stehen darunter statt über dem Bild */
       th.style.cssText='position:relative;width:'+(unten?'var(--fs-mini,76px)':'64px')+';height:'+(unten?'var(--fs-mini,76px)':'64px')+';border-radius:8px;overflow:hidden;cursor:pointer;flex-shrink:0;background:var(--bg3);border:2px solid '+(f.inReport?'#1a7a3c':'var(--border)')+';';
       const img=document.createElement('img');img.alt='';img.style.cssText='width:100%;height:100%;object-fit:cover;pointer-events:none;';
       _fsMiniaturQuelle(f,img);
@@ -1000,7 +1002,7 @@ function _fsFotoLeiste(bericht,it,label,kompakt,vorne){ // kompakt: nur 📷 (+Z
         bk.onclick=e=>{e.stopPropagation();if(_fsFrage('Blickrichtung (Blick nach '+_fsBlickWort(f.blick)+') am Foto entfernen?')){delete f.blick;scheduleSave();neu();}};
         th.appendChild(bk);
       }
-      if(bericht.schlank){ /* F37: „📌“ an der Miniatur öffnet das Foto zum Markieren; mit Pins steht ihre Anzahl dabei */
+      if(unten){ /* F85: auch im Dach-, PV- und Prüfprotokoll (_fsFpErlaubt) */ /* F37: „📌“ an der Miniatur öffnet das Foto zum Markieren; mit Pins steht ihre Anzahl dabei */
         const np=_fsFpListe(f).length;
         const pk=document.createElement('button');pk.type='button';pk.setAttribute('data-fs-fotopin','1');pk.textContent='📌'+(np?' '+np:'');pk.title='Im Foto markieren – Pins mit Beschriftung'+(np?' ('+_fsFpLegende(f)+')':'');pk.setAttribute('aria-label',pk.title);
         pk.style.cssText='position:absolute;left:2px;top:2px;min-width:30px;height:24px;border-radius:12px;border:none;background:'+(np?'rgba(217,72,15,.95)':'rgba(0,0,0,.65)')+';color:#fff;font-size:var(--fs12,12px);font-weight:700;line-height:24px;padding:0 6px;cursor:pointer;';
@@ -8456,6 +8458,8 @@ function _fsWpVervollstaendigen(b){
     b.wartArbeiten.forEach(a=>{if(a&&typeof a.notiz!=='string')a.notiz='';});
   }
   if(b.art==='pv'&&typeof _fsPvVervollstaendigen==='function')_fsPvVervollstaendigen(b); /* F75 */
+  if(!Array.isArray(b.planFotoRefs))b.planFotoRefs=[]; /* F85: „🗺 Plan (Foto)“ */
+  if(typeof _fsFpAufraeumen==='function')_fsFpAufraeumen(b); /* F85: Foto-Pins */
   if(!b.id)b.id='wp_'+Date.now();
   return b;
 }
@@ -8813,15 +8817,83 @@ async function _fsPvPdfFeldFotos(doc,b,y,M,W){
     for(const fo of liste){
       const pf=await _fsFotoFuerPdf(fo);
       if(!pf||!pf.dataUrl)continue;
+      const pfP=(typeof _fsFpEinbrennen==='function')?await _fsFpEinbrennen(pf,fo):pf; /* F85: Pins daraufgezeichnet */
       const iW=55,iH=42;
       if(y+iH+8>285){doc.addPage();y=M;}
-      doc.addImage(pf.dataUrl,'JPEG',M+(col*(iW+4)),y,iW,iH);
+      doc.addImage(pfP.dataUrl,'JPEG',M+(col*(iW+4)),y,iW,iH);
       col++;
       if(col>=3){y+=iH+6;col=0;}
     }
     if(col>0)y+=42+6;
+    if(typeof _fsFpPdfLegende==='function')y=_fsFpPdfLegende(doc,liste,y,M,W); /* F85: Markiert-Zeile (Modulfeld) */
   }
   doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);
+  return y;
+}
+/* ── F85: „📌 PINS IM FOTO“ AUCH IM DACH-, PV- UND PRÜFPROTOKOLL · „🗺 PLAN (FOTO)“ · P81 (DACHSKIZZE IM PRÜFPROTOKOLL NACH OBEN) ─────────────
+   Frank, 18.10.2026 (P84 Bauplan D, „baue D wie im Bauplan, P81 gleich mit“): „Wie kann ich einen Dachplan oder ein Bild als Vorlage verwenden …
+   wo sich die Sekuranten befinden?“ und „für Einbauteile, Gullys … in einem neuen Protokoll“.
+   1. „📌“ an den Foto-Leisten (Prüfpunkt, Modulfeld, Anschlagpunkt) – dasselbe Fenster „Foto markieren“ wie in der Vorabbesichtigung (F37).
+      _fsFpErlaubt entscheidet: schlank (Vorabbesichtigung) oder die Wartungsprotokoll-Familie ohne REP-Auftrag. Das Foto selbst bleibt unverändert.
+   2. „🗺 Plan (Foto)“ im Skizzen-Abschnitt (Dach, PV, Prüfprotokoll): ein Foto, ein Luftbild oder ein abfotografierter Plan aus den Fotos des Protokolls
+      (bericht.planFotoRefs – eine Foto-Leiste am Bericht), darauf die Pins. Im PDF direkt nach der Dachskizze mit „Markiert: 1 = …“ (_fsWpPdfPlan).
+   3. PDF: die Fotos zu Prüfpunkt, Modulfeld und Anschlagpunkt mit eingezeichneten Pins (_fsFpEinbrennen), darunter die Markiert-Zeile (_fsFpPdfLegende).
+      Vervollständigen räumt f.pins auf wie bei der Begehung (_fsFpAufraeumen).
+   4. P81: im Prüfprotokoll rückt die Dachskizze direkt unter „Lage der Punkte“ (vor die Unterlagen). Der Lage-Chip „Dachskizze (in diesem Protokoll)“
+      rollt zur Skizze oder fragt „Dachskizze jetzt anlegen?“ (das Zeichenfenster startet in „⬠ Umriss“); den Vermerk wegnehmen löscht nichts.
+      Hinweis unter „Zeilen anlegen“, dass „📍 markieren“ danach an jeder Punkt-Zeile steht.
+   Nicht dabei (P84 A + B, später): Plan als Unterlage hinter der Skizze, Skizze übernehmen von anderen Karten, Pin ↔ Punkt-Zeile.
+   Nur Feststellungen; ⛔ keine Kundendaten in dieser Datei. */
+function _fsFpErlaubt(b){return !!b&&(!!b.schlank||(b.vorlage==='wartungsprotokoll'&&b.art!=='rep'));}
+// Foto-Pins aufräumen: Unbrauchbares fällt heraus, höchstens FS_FP_MAX, die Beschriftung ist immer Text (dieselbe Regel wie in _fsVervollstaendigen, F37)
+function _fsFpAufraeumen(b){
+  ((b&&Array.isArray(b.fotos))?b.fotos:[]).forEach(f=>{
+    if(!f||f.pins===undefined)return;
+    const l=_fsFpListe(f).slice(0,FS_FP_MAX);
+    l.forEach(p=>{if(typeof p.t!=='string')p.t=String(p.t===null||p.t===undefined?'':p.t);});
+    f.pins=l;
+  });
+  return b;
+}
+// Die Fotos des Plans in der Reihenfolge der Verweise (verwaiste Verweise zählen nicht)
+function _fsWpPlanFotos(b){return _fsZeilenFotos((b&&Array.isArray(b.fotos))?b.fotos:[],b&&b.planFotoRefs).map(z=>z.f);}
+// „🗺 Plan (Foto)“ im Skizzen-Abschnitt: Hinweis + Foto-Leiste am Bericht (bericht.planFotoRefs); „📌“ an der Miniatur markiert die Stellen
+function _fsWpPlanZeile(b){
+  const w=document.createElement('div');w.setAttribute('data-wp-plan','1');w.style.cssText='margin-top:10px;padding-top:8px;border-top:1px dashed var(--border);';
+  const l=document.createElement('div');l.style.cssText='font-size:var(--fs11,11px);color:var(--text2);margin-bottom:4px;';
+  l.textContent='🗺 Plan (Foto) – ein Foto, ein Luftbild oder ein abfotografierter Plan; mit „📌“ darauf die Stellen markieren (Anschlagpunkte, Gullys, Einbauteile …). Kommt ins PDF direkt nach der Dachskizze.';
+  w.appendChild(l);
+  if(!Array.isArray(b.planFotoRefs))b.planFotoRefs=[];
+  if(typeof _fsFotoLeiste==='function')w.appendChild(_fsFotoLeiste(b,{text:'Plan (Foto)',fotoRefs:b.planFotoRefs},'Plan (Foto)'));
+  return w;
+}
+// PDF: der Plan mit eingezeichneten Pins direkt nach der Dachskizze, darunter „Markiert: 1 = …“. Gibt das neue y zurück.
+async function _fsWpPdfPlan(doc,b,y,M,W){
+  const liste=_fsWpPlanFotos(b);
+  for(let i=0;i<liste.length;i++){
+    const f=liste[i];let d=null;
+    try{d=await _fsFpEinbrennen(await _fsFotoFuerPdf(f),f);}catch(e){d=null;}
+    if(!d||!d.dataUrl)continue;
+    const r=(+d.w>0&&+d.h>0)?(+d.h/+d.w):0.75;let bw=120,bh=Math.round(bw*r*10)/10;if(bh>120){bh=120;bw=Math.round(bh/r*10)/10;}
+    if(y+bh+16>285){doc.addPage();y=M;}
+    doc.setTextColor(0,0,0);doc.setFontSize(9);doc.setFont('helvetica','bold');doc.text('Plan (Foto'+(liste.length>1?' '+(i+1)+' von '+liste.length:'')+'):',M,y);y+=4;
+    try{doc.addImage(d.dataUrl,'JPEG',M,y,bw,bh);}catch(e){console.warn('[Plan]',e);}
+    y+=bh+2;
+    doc.setFont('helvetica','normal');doc.setFontSize(8);
+    const lg=_fsFpLegende(f);
+    if(lg){const zl=doc.splitTextToSize('Markiert: '+lg,W-2*M-3);if(y+zl.length*3.6>285){doc.addPage();y=M;}doc.text(zl,M+3,y+2);y+=zl.length*3.6+0.8;}
+    doc.setFontSize(7.5);doc.setTextColor(100,100,100);doc.text('Nicht maßstäblich.',M,y+2);y+=6;
+    doc.setTextColor(0,0,0);doc.setFontSize(9);
+  }
+  return y;
+}
+// PDF: unter den Fotos eines Punkts die Markiert-Zeile je Foto mit Pins („Foto 2 – Markiert: 1 = …“; bei nur einem Foto ohne „Foto 1 –“). Gibt das neue y zurück.
+function _fsFpPdfLegende(doc,liste,y,M,W){
+  const l=Array.isArray(liste)?liste:[],mit=l.map((f,i)=>({i:i,lg:_fsFpLegende(f)})).filter(x=>x.lg);
+  if(!mit.length)return y;
+  doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(90,90,90);
+  mit.forEach(x=>{const zl=doc.splitTextToSize((l.length>1?'Foto '+(x.i+1)+' – ':'')+'Markiert: '+x.lg,W-2*M-3);if(y+zl.length*3.2>285){doc.addPage();y=M;}doc.text(zl,M+3,y);y+=zl.length*3.2+0.6;});
+  y+=2;doc.setTextColor(0,0,0);doc.setFontSize(8);
   return y;
 }
 /* ── F84: PRÜFPROTOKOLL ANSCHLAGEINRICHTUNG – DACHSKIZZE JE ANSCHLAGPUNKT + ERINNERUNG AN DIE NÄCHSTE PRÜFUNG ─────────────────────────────────
@@ -9199,7 +9271,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
     if(!sk){
       const nb=document.createElement('button');nb.type='button';nb.setAttribute('data-wp-skizze-neu','1');nb.textContent='＋ Dachskizze anlegen';nb.style.cssText=KN+'border:1.5px solid #d9480f;background:rgba(217,72,15,.08);color:var(--text);';
       nb.onclick=()=>{const n=_fsWpSkizzeNeu(bericht);if(!n){toast('Genug Skizzen in diesem Protokoll','info',3000);return;}scheduleSave();_wpSkizzeOeffnen(n,null);};
-      w.appendChild(nb);return w;
+      w.appendChild(nb);if(typeof _fsWpPlanZeile==='function')w.appendChild(_fsWpPlanZeile(bericht)); /* F85 */return w;
     }
     if(typeof _fsPvStempelAbgleich==='function')_fsPvStempelAbgleich(bericht,sk);
     const bild=document.createElement('img');bild.setAttribute('data-wp-skizze-bild','1');bild.alt='Dachskizze';
@@ -9231,6 +9303,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
     const weg=document.createElement('button');weg.type='button';weg.setAttribute('data-wp-skizze-weg','1');weg.textContent='✕ Skizze entfernen';weg.style.cssText=KN+'border:1px solid var(--border);background:transparent;color:var(--text2);font-weight:400;min-height:36px;';
     weg.onclick=()=>{if(_fsAsBenutzt(bericht,sk)&&!_fsFrage('Dachskizze entfernen? Umriss, Stempel, Striche und die Mängel-Nummern in der Skizze gehen verloren. Die Mängel selbst und ihre Fotos bleiben.',bericht))return;_fsWpSkizzeWeg(bericht);scheduleSave();_wpLeisteNeu();};
     w.appendChild(weg);
+    if(typeof _fsWpPlanZeile==='function')w.appendChild(_fsWpPlanZeile(bericht)); /* F85: „🗺 Plan (Foto)“ */
     return w;
   };
   /* F81: im Dachprotokoll – „☀ PV-Protokoll anlegen“ (legt das PV-Protokoll derselben Karte an, Dachart/Art übernommen, beide kennen sich) oder die Verknüpfungszeile zum vorhandenen; Muster: _anZeile (F74) */
@@ -9853,6 +9926,7 @@ async function _fsWpPdf(bericht,task){
     }
     } /* F75 */
     if(typeof _fsWpPdfSkizze==='function')y=_fsWpPdfSkizze(doc,bericht,y,M,W); /* F82: Dachskizze nach Dachaufbau bzw. Anlage */
+    if(typeof _fsWpPdfPlan==='function')y=await _fsWpPdfPlan(doc,bericht,y,M,W); /* F85: Plan (Foto) mit Pins nach der Skizze */
 
     /* Zustandsprüfung */
     doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(0,0,0);
@@ -9861,7 +9935,7 @@ async function _fsWpPdf(bericht,task){
     }
     const fotos=bericht.fotos||[];
     const bildCache=new Map();
-    const bildLaden=async f=>{if(!bildCache.has(f))bildCache.set(f,await _fsFotoFuerPdf(f));return bildCache.get(f);};
+    const bildLaden=async f=>{if(!bildCache.has(f)){const d=await _fsFotoFuerPdf(f);bildCache.set(f,(typeof _fsFpEinbrennen==='function')?await _fsFpEinbrennen(d,f):d);} /* F85: Pins daraufgezeichnet */return bildCache.get(f);};
     for(const sek of bericht.sektionen){
       if(y>265){doc.addPage();y=M;}
       doc.setFillColor(230,244,235);doc.rect(M,y,W-2*M,7,'F');
@@ -9909,6 +9983,7 @@ async function _fsWpPdf(bericht,task){
           if(col2>=3){y+=iH+6;col2=0;}
         }
         if(col2>0)y+=42+6;
+        if(typeof _fsFpPdfLegende==='function')y=_fsFpPdfLegende(doc,liste,y,M,W); /* F85: Markiert-Zeile (Prüfpunkt) */
       }
     }
 
@@ -10052,6 +10127,8 @@ function _fsAnVervollstaendigen(b){
   if(!Array.isArray(b.fotos))b.fotos=[];
   if(!Array.isArray(b.sektionen))b.sektionen=[];
   if(!Array.isArray(b.aussenSkizzen))b.aussenSkizzen=[]; /* F84: Dachskizze */
+  if(!Array.isArray(b.planFotoRefs))b.planFotoRefs=[]; /* F85: „🗺 Plan (Foto)“ */
+  if(typeof _fsFpAufraeumen==='function')_fsFpAufraeumen(b); /* F85: Foto-Pins */
   if(!b.titel)b.titel='Prüfprotokoll Anschlageinrichtung';
   if(!b.id)b.id='an_'+Date.now();
   return b;
@@ -10153,7 +10230,7 @@ function _openAnschlagProtokoll(existingIdx,vonWp){
     const ist=v=>einzel?obj[key]===v:(Array.isArray(obj[key])&&obj[key].indexOf(v)>=0);
     const faerben=()=>row.querySelectorAll('button').forEach(b=>{const an=ist(b.getAttribute('data-an-wert'));b.style.cssText=chipStil(an);b.setAttribute('aria-pressed',String(an));});
     paare.forEach(([v,txt])=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute('data-an-chip',key);b.setAttribute('data-an-wert',v);
-      b.onclick=()=>{if(einzel){obj[key]=(obj[key]===v)?'':v;}else{if(!Array.isArray(obj[key]))obj[key]=[];const i=obj[key].indexOf(v);if(i>=0)obj[key].splice(i,1);else obj[key].push(v);}faerben();scheduleSave();if(typeof nach==='function')nach();};
+      b.onclick=()=>{if(einzel){obj[key]=(obj[key]===v)?'':v;}else{if(!Array.isArray(obj[key]))obj[key]=[];const i=obj[key].indexOf(v);if(i>=0)obj[key].splice(i,1);else obj[key].push(v);}faerben();scheduleSave();if(typeof nach==='function')nach(v,ist(v));};
       row.appendChild(b);});
     faerben();r.appendChild(row);return r;
   }
@@ -10187,6 +10264,15 @@ function _openAnschlagProtokoll(existingIdx,vonWp){
 
   /* F84: „🗺 Dachskizze“ – eine Außenskizze „Dachfläche von oben“ im Prüfprotokoll (Werkzeug der Vorabbesichtigung); die Marken sind die Anschlagpunkte 1, 2, 3 … */
   const _anSkizzeOeffnen=(sk,p)=>{_fsBgEinzeichnenZeigen(bericht,_fsAsPseudoRaum(sk),()=>{scheduleSave();_anNeu();},p?{stelle:p}:null);};
+  const _anZurSkizze=()=>{ /* F85 (P81): Tipp auf den Lage-Chip „Dachskizze (in diesem Protokoll)“ – zur Skizze rollen; gibt es noch keine, nach Rückfrage anlegen (Zeichenfenster startet in „⬠ Umriss“) */
+    if(typeof _fsWpSkizze!=='function'||typeof _fsBgEinzeichnenZeigen!=='function')return false;
+    const sk=_fsWpSkizze(bericht);
+    if(!sk){if(!_fsFrage('Dachskizze jetzt anlegen?\n\nDas Zeichenfenster startet mit dem Umriss. Die Anschlagpunkte setzt du danach mit „📍 markieren“ an der Zeile des Punkts.',bericht))return false;const n=_fsWpSkizzeNeu(bericht);if(!n){toast('Genug Skizzen in diesem Protokoll','info',3000);return false;}scheduleSave();_anSkizzeOeffnen(n,null);return true;}
+    const s=body.querySelector('[data-an-skizze]');if(!s)return false;
+    try{const bb=body.getBoundingClientRect(),rr=s.getBoundingClientRect();body.scrollTop=Math.max(0,body.scrollTop+(rr.top-bb.top)-8);}catch(e){try{s.scrollIntoView();}catch(x){}}
+    s.style.outline='3px solid #d9480f';s.style.outlineOffset='-3px';setTimeout(()=>{s.style.outline='';s.style.outlineOffset='';},1800);
+    return true;
+  };
   const _anMarkieren=p=>{if(typeof _fsWpSkizzeNeu!=='function'||typeof _fsBgEinzeichnenZeigen!=='function')return;let sk=_fsWpSkizze(bericht);if(!sk){sk=_fsWpSkizzeNeu(bericht);if(!sk){toast('Genug Skizzen in diesem Protokoll','info',3000);return;}scheduleSave();}_anSkizzeOeffnen(sk,p);};
   const _anZumPunkt=p=>{ /* von der Legende zur Zeile des Punkts: aufklappen, Filter aufheben, hinscrollen, kurz hervorheben */
     let neuBau=false;if(anZu.has(p)){anZu.delete(p);neuBau=true;}if(!_anPasst(p)){anFilter='alle';neuBau=true;}
@@ -10205,7 +10291,7 @@ function _openAnschlagProtokoll(existingIdx,vonWp){
     if(!sk){
       const nb=document.createElement('button');nb.type='button';nb.setAttribute('data-an-skizze-neu','1');nb.textContent='＋ Dachskizze anlegen';nb.style.cssText=KN+'border:1.5px solid '+FS_AN_FARBE+';background:rgba(31,78,121,.08);color:var(--text);';
       nb.onclick=()=>{const n=_fsWpSkizzeNeu(bericht);if(!n){toast('Genug Skizzen in diesem Protokoll','info',3000);return;}scheduleSave();_anSkizzeOeffnen(n,null);};
-      s.appendChild(nb);return s;
+      s.appendChild(nb);if(typeof _fsWpPlanZeile==='function')s.appendChild(_fsWpPlanZeile(bericht)); /* F85 */return s;
     }
     const bild=document.createElement('img');bild.setAttribute('data-an-skizze-bild','1');bild.alt='Dachskizze';
     bild.style.cssText='display:block;width:100%;max-width:'+(sk.hoch?'340':'560')+'px;margin:4px 0;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer;';
@@ -10228,6 +10314,7 @@ function _openAnschlagProtokoll(existingIdx,vonWp){
     const weg=document.createElement('button');weg.type='button';weg.setAttribute('data-an-skizze-weg','1');weg.textContent='✕ Skizze entfernen';weg.style.cssText=KN+'border:1px solid var(--border);background:transparent;color:var(--text2);font-weight:400;min-height:36px;';
     weg.onclick=()=>{if(_fsAsBenutzt(bericht,sk)&&!_fsFrage('Dachskizze entfernen? Umriss, Stempel, Striche und die Nummern in der Skizze gehen verloren. Die Anschlagpunkte selbst und ihre Fotos bleiben.',bericht))return;_fsWpSkizzeWeg(bericht);scheduleSave();_anNeu();};
     s.appendChild(weg);
+    if(typeof _fsWpPlanZeile==='function')s.appendChild(_fsWpPlanZeile(bericht)); /* F85: „🗺 Plan (Foto)“ */
     return s;
   }
 
@@ -10282,17 +10369,19 @@ function _openAnschlagProtokoll(existingIdx,vonWp){
       nk.onclick=()=>{const dazu=_fsAnPunkteAuffuellen(bericht,ni.value);if(dazu){scheduleSave();_anNeu();}else toast('Zeilen gibt es schon – weniger werden nur über ✕ am Punkt','info');};
       const nh=document.createElement('span');nh.style.cssText='font-size:var(--fs11,11px);color:var(--text2);';nh.textContent='füllt nur auf, löscht nie';
       nz.append(ni,nk,nh);aS.appendChild(nz);
-      aS.appendChild(chips(k,'lage','Lage der Punkte',FS_AN_LAGE,false,'data-an-lage'));
+      const nh2=document.createElement('div');nh2.setAttribute('data-an-anzahl-hinweis','1');nh2.style.cssText='font-size:var(--fs11,11px);color:var(--text2);margin:-2px 0 6px 160px;';nh2.textContent='Jede Punkt-Zeile bekommt danach „📍 markieren“ – damit kommt die Nummer des Punkts in die Dachskizze gleich unter diesem Abschnitt.';aS.appendChild(nh2); /* F85 (P81) */
+      aS.appendChild(chips(k,'lage','Lage der Punkte',FS_AN_LAGE,false,'data-an-lage',(v,an)=>{if(an&&v===FS_AN_LAGE[0])_anZurSkizze();})); /* F85 (P81): der Chip führt zur Skizze */
     }
     body.appendChild(aS);
-    /* ── Unterlagen ── */
+    /* ── Dachskizze (F85 / P81: direkt unter „Lage der Punkte“, vor den Unterlagen), dann Unterlagen ── */
     if(!anAnlageZu){
+      body.appendChild(_anSkizzeZeile()); /* F84: die Dachskizze – klappt mit „Die Anlage“ zu */
+      /* ── Unterlagen ── */
       const uS=abschnitt('Unterlagen – vorgelegt?','data-an-unterlagen');
       const uh=document.createElement('div');uh.style.cssText='font-size:var(--fs11,11px);color:var(--text2);margin-bottom:4px;';uh.textContent='Es wird nur festgehalten, was dir vorlag.';uS.appendChild(uh);
       FS_AN_UNTERLAGEN.forEach(([key,lbl])=>{const r=zeile(lbl);const w=status(k.unterlagen,key,'',[['ja','ja'],['nein','nein'],['na','nicht angefordert']],'data-an-unterlage');w.style.flex='1';w.firstElementChild.remove();r.appendChild(w);uS.appendChild(r);});
       uS.appendChild(feld(k,'letztePruefungDatum','Datum der letzten Prüfung','TT.MM.JJJJ oder „unbekannt“'));
       body.appendChild(uS);
-      body.appendChild(_anSkizzeZeile()); /* F84: die Dachskizze – klappt mit „Die Anlage“ zu */
     }
     /* ── Anschlagpunkte ── */
     const pS=abschnitt('Anschlagpunkte ('+bericht.punkte.length+')','data-an-punkte');
@@ -10412,6 +10501,7 @@ async function _fsAnPdf(bericht,task){
       body:[['Art der Anlage',k.anlageArt||'–'],['Hersteller / System',k.herstellerUnbekannt?('nicht erkennbar'+(k.hersteller?' ('+k.hersteller+')':'')):(k.hersteller||'–')],['Montagejahr',k.montagejahr||'–'],['Anzahl Anschlagpunkte',String(bericht.punkte.length)],['Lage der Punkte',lst(k.lage)]]});
     y=doc.lastAutoTable.finalY+6;
     if(typeof _fsWpPdfSkizze==='function')y=_fsWpPdfSkizze(doc,bericht,y,M,W); /* F84: Dachskizze mit den Nummern der Anschlagpunkte */
+    if(typeof _fsWpPdfPlan==='function')y=await _fsWpPdfPlan(doc,bericht,y,M,W); /* F85: Plan (Foto) mit Pins nach der Skizze */
     /* Unterlagen */
     kap('Unterlagen – vorgelegt?');
     doc.autoTable({startY:y,theme:'grid',margin:{left:M,right:M},bodyStyles:{fontSize:8,minCellHeight:6},columnStyles:{0:{fontStyle:'bold',cellWidth:95,fillColor:[245,245,245]},1:{cellWidth:87}},
@@ -10442,13 +10532,14 @@ async function _fsAnPdf(bericht,task){
     if(bericht.maengel){kap('Festgestellte Mängel');doc.setFontSize(9);const ml=doc.splitTextToSize(bericht.maengel,W-2*M);doc.text(ml,M,y);y+=ml.length*4.5+4;}
     /* Fotos je Punkt, dann Fotodokumentation */
     const fotos=bericht.fotos||[];const bildCache=new Map();
-    const bildLaden=async f=>{if(!bildCache.has(f))bildCache.set(f,await _fsFotoFuerPdf(f));return bildCache.get(f);};
+    const bildLaden=async f=>{if(!bildCache.has(f)){const d=await _fsFotoFuerPdf(f);bildCache.set(f,(typeof _fsFpEinbrennen==='function')?await _fsFpEinbrennen(d,f):d);} /* F85: Pins daraufgezeichnet (Anschlagpunkt) */return bildCache.get(f);};
     for(const p of bericht.punkte.filter(q=>q.fotoRefs&&q.fotoRefs.length)){
       const liste=_fsZeilenFotos(fotos,p.fotoRefs).map(x=>x.f);if(!liste.length)continue;
       if(y>265){doc.addPage();y=M;}
       doc.setFontSize(8);doc.setFont('helvetica','italic');doc.setTextColor(100,100,100);doc.text('Fotos zu: Anschlagpunkt '+p.nr+(p.typ?' · '+p.typ:''),M,y);y+=4;doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);
       let col=0;for(const f of liste){const pf=await bildLaden(f);if(!pf||!pf.dataUrl)continue;if(y+42+8>285){doc.addPage();y=M;}doc.addImage(pf.dataUrl,'JPEG',M+(col*59),y,55,42);col++;if(col>=3){y+=48;col=0;}}
       if(col>0)y+=48;
+      if(typeof _fsFpPdfLegende==='function')y=_fsFpPdfLegende(doc,liste,y,M,W); /* F85: Markiert-Zeile (Anschlagpunkt) */
     }
     const fotoList=fotos.filter(f=>f&&f.inReport===true&&(f.editedDriveId||f.driveId||f.localUrl||f.localKey)); /* F74: eigene Schreibweise – test_f10 ankert die Zeile des Dachprotokolls */
     if(fotoList.length){
