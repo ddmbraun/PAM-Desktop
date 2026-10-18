@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F83';
+const PAM_FORMULARE_VERSION='F84';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -4566,10 +4566,11 @@ function _fsAsNeu(b,bereich,typ){
 }
 function _fsAsMarkeOk(s){return !!s&&!!s.skz&&typeof s.skz.k==='string'&&!!s.skz.k&&isFinite(+s.skz.x)&&isFinite(+s.skz.y);}
 /* Stellen, die in dieser Skizze stehen können: außen, im selben Bereich */
-function _fsAsStellen(b,sk){if(typeof _fsAsIstWp==='function'&&_fsAsIstWp(b))return sk?_fsWpMaengel(b).map(m=>m.it):[]; /* F82: Dach-/PV-Protokoll – die Mängel */return ((b&&Array.isArray(b.vbStellen))?b.vbStellen:[]).filter(s=>s&&sk&&_fsVbTyp(s)===_fsAsTyp(sk)&&_fsVbRaumName(s)===sk.bereich);}
-function _fsAsNummer(b,s){if(typeof _fsAsIstWp==='function'&&_fsAsIstWp(b))return _fsWpMangelNr(b,s); /* F82 */const m=/Stelle ([0-9]+)$/.exec(_fsVbBezeichnung(b,s,0));return m?+m[1]:0;}
+function _fsAsStellen(b,sk){if(typeof _fsIstAnschlag==='function'&&_fsIstAnschlag(b))return sk?(Array.isArray(b.punkte)?b.punkte:[]).filter(Boolean):[]; /* F84: Prüfprotokoll Anschlageinrichtung – die Anschlagpunkte */if(typeof _fsAsIstWp==='function'&&_fsAsIstWp(b))return sk?_fsWpMaengel(b).map(m=>m.it):[]; /* F82: Dach-/PV-Protokoll – die Mängel */return ((b&&Array.isArray(b.vbStellen))?b.vbStellen:[]).filter(s=>s&&sk&&_fsVbTyp(s)===_fsAsTyp(sk)&&_fsVbRaumName(s)===sk.bereich);}
+function _fsAsNummer(b,s){if(typeof _fsIstAnschlag==='function'&&_fsIstAnschlag(b))return (s&&isFinite(+s.nr))?+s.nr:0; /* F84: die Nummer des Anschlagpunkts */if(typeof _fsAsIstWp==='function'&&_fsAsIstWp(b))return _fsWpMangelNr(b,s); /* F82 */const m=/Stelle ([0-9]+)$/.exec(_fsVbBezeichnung(b,s,0));return m?+m[1]:0;}
 function _fsAsMarken(b,sk){const wp=(typeof _fsAsIstWp==='function')&&_fsAsIstWp(b); /* F82: im Dach-/PV-Protokoll heißen die Marken M1, M2 … */
-  return _fsAsStellen(b,sk).filter(s=>_fsAsMarkeOk(s)&&s.skz.k===sk.id).map(s=>{const n=_fsAsNummer(b,s);return {s:s,n:n,x:+s.skz.x,y:+s.skz.y,ang:_fsAsRing(s.skz).ang,len:_fsAsRing(s.skz).len,label:wp?'M'+n:_fsVbBezeichnung(b,s,0),kurz:wp?'M'+n:String(n)};});}
+  const an=(typeof _fsIstAnschlag==='function')&&_fsIstAnschlag(b); /* F84: im Prüfprotokoll Anschlageinrichtung die Nummern der Anschlagpunkte 1, 2, 3 … */
+  return _fsAsStellen(b,sk).filter(s=>_fsAsMarkeOk(s)&&s.skz.k===sk.id).map(s=>{const n=_fsAsNummer(b,s);return {s:s,n:n,x:+s.skz.x,y:+s.skz.y,ang:_fsAsRing(s.skz).ang,len:_fsAsRing(s.skz).len,label:an?'Anschlagpunkt '+n:wp?'M'+n:_fsVbBezeichnung(b,s,0),kurz:an?String(n):wp?'M'+n:String(n)};});}
 /* Marke setzen oder verschieben (Anteile 0…1, 3 Stellen, bleibt auf der Fläche); eine Stelle steht damit nur noch in DIESER Skizze */
 function _fsAsMarkeSetzen(sk,s,x,y){
   if(!sk||!sk.id||!s||!isFinite(+x)||!isFinite(+y))return false;
@@ -6855,6 +6856,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig,opt){ /* F82: opt.stelle = diesen Man
   let modus=sk.aussen?'stelle':'zeichnen',farbe=FS_BG_STRICH_FARBEN[0],aktiv=null,zieh=null,sel=-1,stiftGesehen=false,selS=null,ziehS=null,loseS=false,festGesagtS=false,neuText=null;
   let selU=-1,ziehU=null,neuU=null,mausU=null,eckeNeuU=false; /* F62: Umriss – angetippte Ecke · Ecke wird gezogen · neue Ecke wird gezogen · Vorschau-Punkt · „＋ Ecke auf Kante“ wartet */ /* F34: loseS = gewählte Nummer lässt sich verschieben; neuText = Beschreibung einer neuen Stelle, die auf den Tipp in die Skizze wartet */ /* F33: Außenskizze beginnt bei „Stellen“; selS = gewählte Stelle, ziehS = Marke wird gezogen */
   const wp=(typeof _fsAsIstWp==='function')&&_fsAsIstWp(b); /* F82: Dach-/PV-Protokoll – die Marken sind die Mängel M1, M2 …; „＋ neue Stelle“ und „Beschreibung ändern“ gibt es dort nicht */
+  const anP=(typeof _fsIstAnschlag==='function')&&_fsIstAnschlag(b); /* F84: Prüfprotokoll Anschlageinrichtung – die Marken sind die Anschlagpunkte 1, 2, 3 … (⛔ nicht „an“: so heißt in der Stellen-Leiste schon der gewählte Knopf) */
   if(opt&&opt.stelle&&sk.aussen){modus='stelle';selS=opt.stelle;} /* F82 */
   else if(wp&&sk.aussen==='dach')modus=_fsUmDa(sk)?'stempel':'umriss'; /* F83: aus dem Kopf geöffnet – erst der Umriss, später die Stempel; „① Stellen“ nur über „📍 markieren“ (Frank: „bei solche Mangel wählen krieg ich nicht hin“) */
   const neu=()=>{
@@ -6903,7 +6905,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig,opt){ /* F82: opt.stelle = diesen Man
       if(!selS&&neuText===null)selS=ls.find(s=>!_fsAsMarkeOk(s))||null;
       ls.forEach(s=>{
         const hier=_fsAsMarkeOk(s)&&s.skz.k===sk.id,woanders=_fsAsMarkeOk(s)&&s.skz.k!==sk.id,an=selS===s,nr=_fsAsNummer(b,s);
-        leiste.appendChild(knopf((wp?'M':'Stelle ')+nr+(hier?' ✓':woanders?' (andere Skizze)':''),'border:3px solid '+(an?'#d9480f':'var(--border)')+';background:'+(an?'rgba(217,72,15,.16)':'var(--fs-cfl,transparent)')+';',()=>{selS=s;loseS=false;neuText=null;neu();leisteBauen();},['data-fs-ez-stelle',String(nr)]));
+        leiste.appendChild(knopf((anP?'Punkt ':wp?'M':'Stelle ')+nr+(hier?' ✓':woanders?' (andere Skizze)':''),'border:3px solid '+(an?'#d9480f':'var(--border)')+';background:'+(an?'rgba(217,72,15,.16)':'var(--fs-cfl,transparent)')+';',()=>{selS=s;loseS=false;neuText=null;neu();leisteBauen();},['data-fs-ez-stelle',String(nr)]));
       });
       /* F34: neue Stelle gleich hier anlegen – erst die kurze Beschreibung, dann in die Skizze tippen */
       if(!wp)leiste.appendChild(knopf('＋ neue Stelle','border:2px dashed #d9480f;background:'+(neuText!==null?'rgba(217,72,15,.16)':'var(--fs-cfl,transparent)')+';',()=>{const tx=_fsEingabe('Neue Stelle in „'+(sk.bereich||'Außen')+'“ – wo ist sie?\n(kurze Beschreibung, z. B. Riss unter der Traufe)','');if(tx===null)return;neuText=String(tx);selS=null;loseS=false;neu();leisteBauen();},['data-fs-ez-stelleneu','1']));
@@ -6915,10 +6917,10 @@ function _fsBgEinzeichnenZeigen(b,r,fertig,opt){ /* F82: opt.stelle = diesen Man
       if(selS&&wp&&typeof _fsEzFotosZeigen==='function'){const nF=(typeof _fsWpPunktFotos==='function')?_fsWpPunktFotos(b,selS).length:0;leiste.appendChild(knopf('📷 Fotos'+(nF?' ('+nF+')':''),RAND,()=>{_fsEzFotosZeigen(b,selS,dk);},['data-fs-ez-fotos','1']));} /* F83: die Fotos des gewählten Mangels */
       if(selS&&!wp)leiste.appendChild(knopf('Beschreibung ändern',RAND,()=>{const tx=_fsEingabe('Beschreibung der Stelle '+_fsAsNummer(b,selS)+' (Wo?)',String(selS.ort||''));if(tx===null)return;selS.ort=String(tx).trim();scheduleSave();neu();leisteBauen();},['data-fs-ez-stelletext','1']));
       const z=document.createElement('span');z.setAttribute('data-fs-ez-zaehler','1');z.style.cssText='font-size:var(--fs13,13px);color:var(--text2);';
-      const selName=!selS?'':wp?'M'+_fsAsNummer(b,selS)+' („'+_fsBgSkizzeKuerzen(String(selS.text||''),30)+'“)':'Stelle '+_fsAsNummer(b,selS)+(_fsVbWo(selS)?' („'+_fsBgSkizzeKuerzen(_fsVbWo(selS),30)+'“)':''); /* F60 · F82 */
+      const selName=!selS?'':anP?'Punkt '+_fsAsNummer(b,selS)+(String(selS.typ||'').trim()?' („'+_fsBgSkizzeKuerzen(String(selS.typ||''),30)+'“)':''):wp?'M'+_fsAsNummer(b,selS)+' („'+_fsBgSkizzeKuerzen(String(selS.text||''),30)+'“)':'Stelle '+_fsAsNummer(b,selS)+(_fsVbWo(selS)?' („'+_fsBgSkizzeKuerzen(_fsVbWo(selS),30)+'“)':''); /* F60 · F82 */
       z.textContent=neuText!==null?'Neue Stelle'+(neuText.trim()?' („'+_fsBgSkizzeKuerzen(neuText,30)+'“)':'')+': jetzt in die Skizze tippen, wo sie ist'
-        :!ls.length?(wp?'Noch kein Mangel im Protokoll – erst einen Punkt auf „⚠ Mängel“ setzen, dann dort „📍 markieren“ antippen.':'Noch keine Stelle in diesem Bereich – „＋ neue Stelle“ antippen.')
-        :!selS?(wp?'Mängel kommen über „📍 markieren“ am Punkt in die Skizze – oder oben eine Nummer antippen und dann in die Skizze tippen':'Oben eine Stelle wählen oder „＋ neue Stelle“ antippen')
+        :!ls.length?(anP?'Noch kein Anschlagpunkt im Protokoll – erst „＋ weiterer Anschlagpunkt“ antippen, dann dort „📍 markieren“.':wp?'Noch kein Mangel im Protokoll – erst einen Punkt auf „⚠ Mängel“ setzen, dann dort „📍 markieren“ antippen.':'Noch keine Stelle in diesem Bereich – „＋ neue Stelle“ antippen.')
+        :!selS?(anP?'Anschlagpunkte kommen über „📍 markieren“ an der Zeile in die Skizze – oder oben eine Nummer antippen und dann in die Skizze tippen':wp?'Mängel kommen über „📍 markieren“ am Punkt in die Skizze – oder oben eine Nummer antippen und dann in die Skizze tippen':'Oben eine Stelle wählen oder „＋ neue Stelle“ antippen')
         :!selHier?selName+': in die Skizze tippen, wo sie ist'
         :loseS?selName+' ist lose: Pfeilspitze oder Kreis ziehen oder an die richtige Stelle tippen – dann „✓ Fest“'
         :selName+' ist fest (🔒) – „✥ Verschieben“ macht sie lose';
@@ -8822,6 +8824,57 @@ async function _fsPvPdfFeldFotos(doc,b,y,M,W){
   doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);
   return y;
 }
+/* ── F84: PRÜFPROTOKOLL ANSCHLAGEINRICHTUNG – DACHSKIZZE JE ANSCHLAGPUNKT + ERINNERUNG AN DIE NÄCHSTE PRÜFUNG ─────────────────────────────────
+   Frank, 17.10.2026 (P69 Schritt 2; Entwurf „Weg E“ – „es gibt auch Tasks, wo kein Objekt ist“ → „baue“):
+   1. Im Prüfprotokoll die „🗺 Dachskizze“ – dasselbe Zeichenfenster wie im Dachprotokoll (Umriss mit Maßen, Stempel, Striche, Zoom). Aus dem
+      Dachprotokoll angelegt, fragt PAM einmal, ob dessen Skizze übernommen wird (Umriss, Stempel, Striche – nicht die Mängel-Nummern). An jedem
+      Anschlagpunkt „📍 markieren“: die Nummer des Punkts (1, 2, 3 …) kommt in die Skizze (p.skz={k,x,y} am Punkt, wie die Mängel-Marken M1 …);
+      die Legende unter der Skizze ist antippbar; die Skizze steht im PDF nach „Anlage“. Die Adapter _fsAsStellen / _fsAsNummer / _fsAsMarken /
+      _fsWpAlleItems verzweigen über _fsIstAnschlag; _fsWpSkizzeLegende(…Eintraege) nehmen hier _fsAnSkizzeLegende(…Eintraege).
+   2. Erinnerung aus dem Protokoll selbst: _fsAnErinnerung liest „Nächste Prüfung bis“ – FS_AN_VORWARN_TAGE Tage vorher „bald“, nach dem Tag „ueber“.
+      PAM Desktop zeigt fällige Prüfungen in „Heute“ („🪝 Prüfungen“, auch an archivierten Karten); „🔕 nicht mehr erinnern“ merkt sich der PC in
+      den geteilten Einstellungen (_pamAnErinnerungAus / _pamAnErinnerungAusSetzen – nie in der Karte). Beim Anlegen fragt PAM am PC, ob es die
+      Folgeprüfung zu einem älteren Protokoll derselben Adresse ist (Kandidaten liefert die App: _pamAnFolgeKandidaten) → bericht.folgeVonId /
+      folgeVonDatum – nur im NEUEN Protokoll gespeichert, das alte (vielleicht archivierte) bleibt unberührt.
+   Nur Feststellungen; PAM hakt nichts ab – die Erinnerung geht nur auf Franks Klick weg. Kein Prüfumfang in dieser Datei. */
+const FS_AN_VORWARN_TAGE=28;
+// Datum TT.MM.JJJJ → JJJJ-MM-TT (nur echte Kalendertage), sonst ''
+function _fsAnDatumIso(s){const m=/^\s*(\d{1,2})\.(\d{1,2})\.(\d{4})\s*$/.exec(String(s||''));if(!m)return '';const d=new Date(+m[3],+m[2]-1,+m[1]);if(isNaN(d.getTime())||d.getMonth()!==+m[2]-1||d.getDate()!==+m[1])return '';return m[3]+'-'+('0'+m[2]).slice(-2)+'-'+('0'+m[1]).slice(-2);}
+function _fsAnIsoDe(iso){const p=String(iso||'').split('-');return p.length===3?(p[2]+'.'+p[1]+'.'+p[0]):'';}
+function _fsAnIsoTage(iso){const p=String(iso||'').split('-');return p.length===3?Math.round(Date.UTC(+p[0],+p[1]-1,+p[2])/86400000):null;}
+function _fsAnTageIso(n){const d=new Date(n*86400000);return d.getUTCFullYear()+'-'+('0'+(d.getUTCMonth()+1)).slice(-2)+'-'+('0'+d.getUTCDate()).slice(-2);}
+// heute: Date oder JJJJ-MM-TT (Prüfungen), sonst der Tag der Uhr des Geräts
+function _fsAnHeuteIso(h){if(typeof h==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(h))return h;const d=(h instanceof Date)?h:new Date();return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);}
+// Die Erinnerung eines Prüfprotokolls – reine Rechnung: {status 'kein'|'ok'|'bald'|'ueber', bis, bisIso, ab, abIso, tage (bis − heute; negativ = überschritten)}
+function _fsAnErinnerung(b,heute){
+  const bisIso=_fsAnDatumIso(b&&b.naechste);
+  if(!bisIso)return {status:'kein',bis:'',bisIso:'',ab:'',abIso:'',tage:null};
+  const tb=_fsAnIsoTage(bisIso),th=_fsAnIsoTage(_fsAnHeuteIso(heute)),tage=tb-th,abIso=_fsAnTageIso(tb-FS_AN_VORWARN_TAGE);
+  return {status:tage<0?'ueber':tage<=FS_AN_VORWARN_TAGE?'bald':'ok',bis:_fsAnIsoDe(bisIso),bisIso:bisIso,ab:_fsAnIsoDe(abIso),abIso:abIso,tage:tage};
+}
+// Der Satz unter „Nächste Prüfung bis“ im Formular
+function _fsAnErinnerungText(b,heute){
+  const e=_fsAnErinnerung(b,heute);
+  if(e.status==='kein')return '⚠ Datum nicht erkannt (TT.MM.JJJJ) – PAM kann dich an diese Prüfung nicht erinnern.';
+  if(e.status==='ueber')return '⚠ Prüfung bis '+e.bis+' – seit '+(-e.tage)+' Tag'+(e.tage===-1?'':'en')+' überschritten, steht in „Heute“ am PC.';
+  if(e.status==='bald')return '🔔 Prüfung bis '+e.bis+' – '+(e.tage===0?'heute fällig':'noch '+e.tage+' Tag'+(e.tage===1?'':'e'))+', steht in „Heute“ am PC.';
+  return '🔔 PAM erinnert dich ab '+e.ab+' in „Heute“ am PC ('+(FS_AN_VORWARN_TAGE/7)+' Wochen vorher) – egal ob die Karte dann noch offen oder archiviert ist.';
+}
+// Legende unter der Skizze: „Punkt 3 = Typ · Serien-Nr. · freigegeben“ – [{nr, it, text, fotos}], nach Nummer
+function _fsAnPunktLegendeText(p){return [String((p&&p.typ)||'').trim(),String((p&&p.serie)||'').trim(),(p&&p.ergebnis)?_fsAnWort(p.ergebnis):'offen'].filter(Boolean).join(' · ');}
+function _fsAnSkizzeLegendeEintraege(b,sk){
+  if(!_fsIstAnschlag(b)||!sk)return [];
+  return _fsAsMarken(b,sk).slice().sort((p,q)=>p.n-q.n).map(q=>({nr:q.n,it:q.s,text:_fsAnPunktLegendeText(q.s),fotos:_fsWpPunktFotos(b,q.s).length}));
+}
+function _fsAnSkizzeLegende(b,sk){return _fsAnSkizzeLegendeEintraege(b,sk).map(e=>'Punkt '+e.nr+' = '+e.text);}
+// Die Dachskizze des Dachprotokolls übernehmen – Umriss, Stempel, Striche, Ausrichtung; keine Marken (die hängen an den Punkten des Dachprotokolls). Nur, solange das Prüfprotokoll noch keine Skizze hat.
+function _fsAnSkizzeUebernehmen(b,wp){
+  if(!_fsIstAnschlag(b)||!wp||typeof _fsWpSkizze!=='function')return false;
+  const q=_fsWpSkizze(wp);if(!q||_fsWpSkizze(b))return false;
+  if(!Array.isArray(b.aussenSkizzen))b.aussenSkizzen=[];
+  const k=JSON.parse(JSON.stringify(q));k.id='as'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);k.name='Dach';
+  b.aussenSkizzen.push(k);return true;
+}
 /* ── F83: LEGENDE ANTIPPBAR + „📷 FOTOS“ IM ZEICHENFENSTER + START IN „⬠ UMRISS“ ─────────────────────────────────────────────────────────────
    Frank 16.10.2026 nach dem Versuch mit F82 („bei solche Mangel wählen krieg ich nicht hin“, „auf M1 klicken und das Bild sehen“) → „Baue“:
    1. Unter der Dachskizze ist jede Zeile „M1 = …“ ein Knopf – ein Tipp springt im Protokoll zum Punkt (dort Bemerkung und Fotos), dahinter „📷 n“.
@@ -8829,6 +8882,7 @@ async function _fsPvPdfFeldFotos(doc,b,y,M,W){
    3. Aus dem Kopf geöffnet startet das Zeichenfenster in „⬠ Umriss“ (solange keiner da ist) bzw. „▣ Stempel“; „① Stellen“ nur über „📍 markieren“.
    Nur Feststellungen, keine Bewertung. */
 function _fsWpSkizzeLegendeEintraege(b,sk){
+  if(typeof _fsAnSkizzeLegendeEintraege==='function'&&_fsIstAnschlag(b))return _fsAnSkizzeLegendeEintraege(b,sk); /* F84 */
   if(!_fsAsIstWp(b)||!sk)return [];
   const ml=_fsWpMaengel(b);
   return _fsAsMarken(b,sk).slice().sort((p,q)=>p.n-q.n).map(q=>{const m=ml.find(x=>x.it===q.s);return {nr:m?m.nr:q.n,it:q.s,text:m?((m.sek?m.sek+' – ':'')+m.text+(m.frage?' Ja':'')):'',fotos:m?m.fotoNrs.length:0};});
@@ -8839,11 +8893,11 @@ function _fsWpPunktFotos(b,it){return _fsZeilenFotos((b&&Array.isArray(b.fotos))
 function _fsEzFotosZeigen(b,it,dk){
   dk=dk||((typeof _fsDok==='function')?_fsDok(b):document);
   const alt=dk.getElementById('_fsEzFotos');if(alt){alt.remove();return null;}
-  const l=_fsWpPunktFotos(b,it),nr=_fsWpMangelNr(b,it);
+  const l=_fsWpPunktFotos(b,it),an=(typeof _fsIstAnschlag==='function')&&_fsIstAnschlag(b),nr=an?((it&&isFinite(+it.nr))?+it.nr:0):_fsWpMangelNr(b,it),nm=(an?'Punkt ':'M')+nr; /* F84: im Prüfprotokoll „Punkt 3“ */
   const ov=dk.createElement('div');ov.id='_fsEzFotos';ov.setAttribute('data-fs-ez-fotos-streifen','1');
   ov.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:100000;background:rgba(17,17,17,.94);color:#fff;padding:10px 56px 14px 14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;max-height:45vh;overflow:auto;';
   const ti=dk.createElement('div');ti.setAttribute('data-fs-ez-fotos-titel','1');ti.style.cssText='flex:1 1 100%;font-size:var(--fs14,14px);font-weight:700;';
-  ti.textContent=l.length?('📷 '+l.length+' Foto'+(l.length===1?'':'s')+' zu M'+nr+' – antippen = groß'):('Noch kein Foto an M'+nr+' – Fotos hängen am Punkt im Protokoll („📷 Foto zu diesem Punkt“)');
+  ti.textContent=l.length?('📷 '+l.length+' Foto'+(l.length===1?'':'s')+' zu '+nm+' – antippen = groß'):('Noch kein Foto an '+nm+' – Fotos hängen am Punkt im Protokoll („📷 Foto zu diesem Punkt“)');
   const zu=dk.createElement('button');zu.type='button';zu.textContent='✕';zu.setAttribute('aria-label','Fotos schließen');zu.setAttribute('data-fs-ez-fotos-zu','1');
   zu.style.cssText='position:absolute;top:8px;right:10px;width:36px;height:36px;border-radius:8px;border:none;background:rgba(255,255,255,.2);color:#fff;font-size:var(--fs18,18px);cursor:pointer;';
   zu.onclick=()=>ov.remove();
@@ -8866,13 +8920,14 @@ function _fsEzFotosZeigen(b,it,dk){
    M1, M2 … (_fsWpMaengel, F81) – gesetzt über „📍 markieren“ am Punkt; die Nummer wird nie gespeichert, sie wird jedes Mal gerechnet. Jedes Modulfeld bekommt
    Länge und Breite (m) mit Fläche. Nur Feststellungen, keine Bewertung. */
 function _fsAsIstWp(b){return !!b&&b.vorlage==='wartungsprotokoll'&&typeof _fsWpMaengel==='function';}
-function _fsWpAlleItems(b){const out=[];((b&&Array.isArray(b.sektionen))?b.sektionen:[]).forEach(s=>((s&&Array.isArray(s.items))?s.items:[]).forEach(it=>{if(it)out.push(it);}));return out;}
+function _fsWpAlleItems(b){if(typeof _fsIstAnschlag==='function'&&_fsIstAnschlag(b))return (Array.isArray(b.punkte)?b.punkte:[]).filter(Boolean); /* F84: im Prüfprotokoll sind die Anschlagpunkte die Punkte (Marken, „Skizze entfernen“) */const out=[];((b&&Array.isArray(b.sektionen))?b.sektionen:[]).forEach(s=>((s&&Array.isArray(s.items))?s.items:[]).forEach(it=>{if(it)out.push(it);}));return out;}
 // Die eine Dachskizze des Protokolls (Außenskizze „Dachfläche von oben“) – oder null
 function _fsWpSkizze(b){return ((typeof _fsAsListe==='function')?_fsAsListe(b):[]).find(k=>k&&k.aussen==='dach')||null;}
 function _fsWpSkizzeNeu(b){if(!b)return null;const alt=_fsWpSkizze(b);if(alt)return alt;const sk=_fsAsNeu(b,'Dach','aussen');if(sk)sk.name='Dach';return sk;}
 function _fsWpSkizzeWeg(b){const sk=_fsWpSkizze(b);return !!sk&&_fsAsWeg(b,sk);}
 // Legende unter der Skizze: „M1 = 1. Module – Verschmutzung … vorhanden? Ja“, nach Nummer
 function _fsWpSkizzeLegende(b,sk){
+  if(typeof _fsAnSkizzeLegende==='function'&&_fsIstAnschlag(b))return _fsAnSkizzeLegende(b,sk); /* F84 */
   if(!_fsAsIstWp(b)||!sk)return [];
   const ml=_fsWpMaengel(b);
   return _fsAsMarken(b,sk).slice().sort((p,q)=>p.n-q.n).map(q=>{const m=ml.find(x=>x.it===q.s);return m?('M'+m.nr+' = '+(m.sek?m.sek+' – ':'')+m.text+(m.frage?' Ja':'')):('M'+q.n);});
@@ -9963,12 +10018,12 @@ async function _fsWpPdf(bericht,task){
    verformung,korrosion,lose,seilLose,seilEnd,seilDaempfer,durchgang,befest,pruefart[],drehmoment,ergebnis,bemerkung,fotoRefs[]}, gesamt, maengel, plakette, plaketteNr, naechste,
    vonWpId (das Dachprotokoll, aus dem es angelegt wurde), fotos[]. Im Dachprotokoll steht umgekehrt bericht.anschlagId. Der Qualifikationssatz des Prüfers liegt zusätzlich in
    localStorage FS_AN_QUALI_KEY (PC: geteilte Einstellung, PAM_GETEILT_KEYS) und wird in JEDES Protokoll kopiert – das PDF behält, was beim Prüfen galt.
-   ⛔ Keine Namen, keine Adressen, kein Prüfumfang in dieser Datei. Unterschrift (Schritt 3), Dachplan-Pins und Kalender-Termin (Schritt 2) sind bewusst noch nicht gebaut. */
+   ⛔ Keine Namen, keine Adressen, kein Prüfumfang in dieser Datei. Unterschrift (Schritt 3) ist bewusst noch nicht gebaut; Dachskizze je Anschlagpunkt und die Erinnerung an die nächste Prüfung: F84 (aussenSkizzen[], p.skz, folgeVonId, folgeVonDatum). */
 const FS_AN_FARBE='#1f4e79';
 const FS_AN_ANLASS=['jährliche Prüfung','Erstprüfung / Übernahme','nach Absturz / Beschädigung','Sonderprüfung'];
 const FS_AN_ARTEN=['Einzelanschlagpunkte','Seilsystem','Schienensystem','Seitenschutz / Geländer'];
 const FS_AN_MONTAGE=['bis 2015','ab 2016','unbekannt'];
-const FS_AN_LAGE=['Dachplan der Karte (Pins)','Montagedokumentation (Grundriss)'];
+const FS_AN_LAGE=['Dachskizze (in diesem Protokoll)','Montagedokumentation (Grundriss)']; /* F84: die Skizze steckt im Protokoll (vorher „Dachplan der Karte (Pins)“ – alte Protokolle werden beim Öffnen umbenannt) */
 const FS_AN_PRUEFART=['Sicht','Rüttel-/Torsionsprobe','Drehmoment','Zugprobe durch Fachfirma'];
 const FS_AN_UNTERLAGEN=[['anleitung','Herstelleranleitung (Gebrauch / Montage / Prüfung)'],['montagedoku','Montagedokumentation'],['konformitaet','Übereinstimmungs- / Konformitätserklärung'],['letztePruefung','Nachweis der letzten Prüfung']];
 const FS_AN_FRAGEN=[['verformung','Verformung oder Beschädigung vorhanden?'],['korrosion','Korrosion vorhanden?'],['lose','Lose Teile / lockere Befestigung vorhanden?']];
@@ -9987,14 +10042,16 @@ function _fsAnVervollstaendigen(b){
   const k=b.kopf;
   ['objektAdresse','haus','auftraggeber','kostenstelle','anlass','pruefer','qualifikation','beginn','ende','witterung','anlageArt','hersteller','montagejahr','letztePruefungDatum'].forEach(f=>{if(typeof k[f]!=='string')k[f]=(k[f]===undefined||k[f]===null)?'':String(k[f]);});
   if(!Array.isArray(k.lage))k.lage=[];
+  k.lage=k.lage.map(x=>x==='Dachplan der Karte (Pins)'?'Dachskizze (in diesem Protokoll)':x); /* F84: der alte Name */
   k.herstellerUnbekannt=!!k.herstellerUnbekannt;
   if(!k.unterlagen||typeof k.unterlagen!=='object')k.unterlagen={};
   FS_AN_UNTERLAGEN.forEach(u=>{if(typeof k.unterlagen[u[0]]!=='string')k.unterlagen[u[0]]='';});
   if(!Array.isArray(b.punkte))b.punkte=[];
   b.punkte.forEach((p,i)=>{const n=_fsAnPunktNeu(i+1);Object.keys(n).forEach(f=>{if(p[f]===undefined||p[f]===null)p[f]=n[f];});p.nr=i+1;if(!Array.isArray(p.pruefart))p.pruefart=[];if(!Array.isArray(p.fotoRefs))p.fotoRefs=[];});
-  ['gesamt','maengel','plakette','plaketteNr','naechste','vonWpId','datum'].forEach(f=>{if(typeof b[f]!=='string')b[f]=(b[f]===undefined||b[f]===null)?'':String(b[f]);});
+  ['gesamt','maengel','plakette','plaketteNr','naechste','vonWpId','datum','folgeVonId','folgeVonDatum'].forEach(f=>{if(typeof b[f]!=='string')b[f]=(b[f]===undefined||b[f]===null)?'':String(b[f]);});
   if(!Array.isArray(b.fotos))b.fotos=[];
   if(!Array.isArray(b.sektionen))b.sektionen=[];
+  if(!Array.isArray(b.aussenSkizzen))b.aussenSkizzen=[]; /* F84: Dachskizze */
   if(!b.titel)b.titel='Prüfprotokoll Anschlageinrichtung';
   if(!b.id)b.id='an_'+Date.now();
   return b;
@@ -10008,7 +10065,7 @@ function _fsAnNeuerBericht(t,wp){
   const b={id:'an_'+Date.now(),vorlage:'wartungsprotokoll',art:'anschlag',titel:'Prüfprotokoll Anschlageinrichtung',datum,createdAt:h.toISOString(),
     kopf:{objektAdresse:String((t&&(t.adresse||t.title))||'').trim(),haus:'',auftraggeber:String(allg.auftraggeber||(t&&t.hausverwaltung)||'').trim(),kostenstelle:_fsAnKostenstelle(t),
       anlass:FS_AN_ANLASS[0],pruefer,qualifikation:quali,beginn:'',ende:'',witterung:'',anlageArt:'',hersteller:'',herstellerUnbekannt:false,montagejahr:'',lage:[],unterlagen:{},letztePruefungDatum:''},
-    punkte:[],gesamt:'',maengel:'',plakette:'',plaketteNr:'',naechste:_fsAnPlus12(datum),vonWpId:String((wp&&wp.id)||''),fotos:[],sektionen:[]};
+    punkte:[],gesamt:'',maengel:'',plakette:'',plaketteNr:'',naechste:_fsAnPlus12(datum),vonWpId:String((wp&&wp.id)||''),fotos:[],sektionen:[],aussenSkizzen:[],folgeVonId:'',folgeVonDatum:''}; /* F84 */
   if(wp&&wp.kopf&&Array.isArray(wp.kopf.sicherheit)){const s=wp.kopf.sicherheit;if(s.indexOf('Fest montierte Anschlagpunkte')>=0)b.kopf.anlageArt='Einzelanschlagpunkte';else if(s.indexOf('Sicherheitsseile')>=0)b.kopf.anlageArt='Seilsystem';else if(s.indexOf('Geländer')>=0)b.kopf.anlageArt='Seitenschutz / Geländer';}
   return _fsAnVervollstaendigen(b);
 }
@@ -10037,6 +10094,13 @@ function _openAnschlagProtokoll(existingIdx,vonWp){
     scheduleSave();
   }
   _fsAnVervollstaendigen(bericht);
+  if(neuAngelegt){ /* F84: beim Anlegen – Skizze aus dem Dachprotokoll? Folgeprüfung zu einem älteren Protokoll (Kandidaten liefert die App, nur PC)? Beides nur auf Franks Ja. */
+    const skWp=(vonWp&&typeof _fsWpSkizze==='function')?_fsWpSkizze(vonWp):null;
+    if(skWp&&_fsAsBenutzt(vonWp,skWp)&&_fsFrage('Dachskizze aus dem Dachprotokoll vom '+(vonWp.datum||'')+' übernehmen?\n\nUmriss, Stempel und Striche kommen mit – die Mängel-Nummern nicht. Die Anschlagpunkte setzt du danach mit „📍 markieren“.',bericht)){if(_fsAnSkizzeUebernehmen(bericht,vonWp))scheduleSave();}
+    if(typeof _pamAnFolgeKandidaten==='function'){try{const kand=_pamAnFolgeKandidaten(t,bericht)||[];const k=(kand.length&&kand[0]&&kand[0].b)?kand[0].b:null;
+      if(k&&_fsFrage('Ist das die Folgeprüfung zu „'+String((bericht.kopf&&bericht.kopf.objektAdresse)||t.adresse||t.title||'')+' – Prüfprotokoll vom '+(k.datum||'?')+'“ (fällig bis '+(k.naechste||'?')+')?\n\nDann verschwindet die alte Erinnerung aus „Heute“. Das neue Protokoll erinnert dich zu seinem eigenen Datum.',bericht)){bericht.folgeVonId=String(k.id||'');bericht.folgeVonDatum=String(k.datum||'');scheduleSave();}
+    }catch(e){console.warn('[F84] Folgeprüfung:',e);}}
+  }
 
   const GID='_wpMobOverlay';const old=_fsById(GID);if(old)old.remove(); /* F80: auch im eigenen Fenster */ /* derselbe Fenstername wie das Dachprotokoll: die PC-Umgebung richtet das Fenster darüber aus */
   if(typeof _pbOffenMerken==='function')_pbOffenMerken(t,bericht,GID,function(){_anRender();_anStats();});
@@ -10121,6 +10185,52 @@ function _openAnschlagProtokoll(existingIdx,vonWp){
   }
   function klappKopf(s,zu,fn,attr){s._kopf.textContent=(zu?'▸ ':'▾ ')+s._kopf.textContent;s._kopf.style.cursor='pointer';s._kopf.setAttribute(attr,'1');s._kopf.setAttribute('data-an-zu',zu?'1':'0');s._kopf.onclick=fn;}
 
+  /* F84: „🗺 Dachskizze“ – eine Außenskizze „Dachfläche von oben“ im Prüfprotokoll (Werkzeug der Vorabbesichtigung); die Marken sind die Anschlagpunkte 1, 2, 3 … */
+  const _anSkizzeOeffnen=(sk,p)=>{_fsBgEinzeichnenZeigen(bericht,_fsAsPseudoRaum(sk),()=>{scheduleSave();_anNeu();},p?{stelle:p}:null);};
+  const _anMarkieren=p=>{if(typeof _fsWpSkizzeNeu!=='function'||typeof _fsBgEinzeichnenZeigen!=='function')return;let sk=_fsWpSkizze(bericht);if(!sk){sk=_fsWpSkizzeNeu(bericht);if(!sk){toast('Genug Skizzen in diesem Protokoll','info',3000);return;}scheduleSave();}_anSkizzeOeffnen(sk,p);};
+  const _anZumPunkt=p=>{ /* von der Legende zur Zeile des Punkts: aufklappen, Filter aufheben, hinscrollen, kurz hervorheben */
+    let neuBau=false;if(anZu.has(p)){anZu.delete(p);neuBau=true;}if(!_anPasst(p)){anFilter='alle';neuBau=true;}
+    if(neuBau)_anNeu();
+    const row=Array.prototype.find.call(body.querySelectorAll('[data-an-punkt]'),e=>e.getAttribute('data-an-punkt')===String(p.nr));if(!row)return false;
+    try{const bb=body.getBoundingClientRect(),rr=row.getBoundingClientRect(),h=body.clientHeight||0;body.scrollTop=Math.max(0,body.scrollTop+(rr.top-bb.top)-Math.max(0,(h-rr.height)/2));}catch(e){try{row.scrollIntoView();}catch(x){}}
+    row.style.outline='3px solid #d9480f';row.style.outlineOffset='-3px';setTimeout(()=>{row.style.outline='';row.style.outlineOffset='';},1800);
+    return true;
+  };
+  function _anSkizzeZeile(){
+    const s=abschnitt('🗺 Dachskizze – Lage der Anschlagpunkte','data-an-skizze');
+    if(typeof _fsWpSkizze!=='function'||typeof _fsBgEinzeichnenZeigen!=='function')return s;
+    const l=document.createElement('div');l.style.cssText='font-size:var(--fs11,11px);color:var(--text2);margin-bottom:6px;';l.textContent='Dachfläche von oben – Umriss mit Maßen, Stempel, die Anschlagpunkte als Nummern (an der Zeile des Punkts „📍 markieren“).';s.appendChild(l);
+    const sk=_fsWpSkizze(bericht);
+    const KN='display:block;width:100%;min-height:44px;margin:4px 0;border-radius:10px;font-size:var(--fs13,13px);font-weight:600;cursor:pointer;font-family:inherit;text-align:left;padding:8px 12px;';
+    if(!sk){
+      const nb=document.createElement('button');nb.type='button';nb.setAttribute('data-an-skizze-neu','1');nb.textContent='＋ Dachskizze anlegen';nb.style.cssText=KN+'border:1.5px solid '+FS_AN_FARBE+';background:rgba(31,78,121,.08);color:var(--text);';
+      nb.onclick=()=>{const n=_fsWpSkizzeNeu(bericht);if(!n){toast('Genug Skizzen in diesem Protokoll','info',3000);return;}scheduleSave();_anSkizzeOeffnen(n,null);};
+      s.appendChild(nb);return s;
+    }
+    const bild=document.createElement('img');bild.setAttribute('data-an-skizze-bild','1');bild.alt='Dachskizze';
+    bild.style.cssText='display:block;width:100%;max-width:'+(sk.hoch?'340':'560')+'px;margin:4px 0;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer;';
+    const u=_fsBgSkizzeBild(bericht,_fsAsPseudoRaum(sk));if(u)bild.src=u;
+    bild.onclick=()=>_anSkizzeOeffnen(sk,null);s.appendChild(bild);
+    const uz=_fsUmZeile(sk);if(uz){const uzd=document.createElement('div');uzd.setAttribute('data-an-skizze-umriss','1');uzd.style.cssText='font-size:var(--fs13,13px);color:var(--text);margin:2px 0 4px;';uzd.textContent=uz;s.appendChild(uzd);}
+    const ld=document.createElement('div');ld.setAttribute('data-an-skizze-legende','1');ld.style.cssText='font-size:var(--fs12,12px);color:var(--text);margin:2px 0 4px;';
+    const lgE=_fsAnSkizzeLegendeEintraege(bericht,sk);
+    if(lgE.length)lgE.forEach(e=>{const d=document.createElement('button');d.type='button';d.setAttribute('data-an-skizze-legende-p',String(e.nr));d.textContent='Punkt '+e.nr+' = '+e.text+(e.fotos?' · 📷 '+e.fotos:'');d.title='Zur Zeile dieses Anschlagpunkts springen';
+      d.style.cssText='display:block;width:100%;text-align:left;padding:5px 8px;margin:2px 0;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:var(--fs12,12px);cursor:pointer;font-family:inherit;line-height:1.35;';
+      d.onclick=()=>_anZumPunkt(e.it);ld.appendChild(d);});
+    else{ld.style.color='var(--text2)';ld.textContent='Noch kein Anschlagpunkt in der Skizze – an der Zeile des Punkts „📍 markieren“ antippen.';}
+    s.appendChild(ld);
+    const ez=document.createElement('button');ez.type='button';ez.setAttribute('data-an-skizze-zeichnen','1');ez.textContent='✏ Einzeichnen – Umriss, Stempel, Striche, Nummern der Anschlagpunkte';ez.style.cssText=KN+'border:1.5px solid '+FS_AN_FARBE+';background:rgba(31,78,121,.08);color:var(--text);';
+    ez.onclick=()=>_anSkizzeOeffnen(sk,null);s.appendChild(ez);
+    { const oc=document.createElement('div');oc.style.cssText='display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0;';
+      const ol=document.createElement('span');ol.style.cssText='font-size:var(--fs11,11px);color:var(--text2);';ol.textContent='Oben in der Skizze ist:';oc.appendChild(ol);
+      FS_B2_SEITEN.forEach(kk=>{const c=document.createElement('button');c.type='button';c.textContent=kk;c.setAttribute('data-an-skizze-oben',kk);c.style.cssText=chipStil(sk.oben===kk);c.onclick=()=>{sk.oben=sk.oben===kk?'':kk;scheduleSave();_anNeu();};oc.appendChild(c);});
+      s.appendChild(oc); }
+    const weg=document.createElement('button');weg.type='button';weg.setAttribute('data-an-skizze-weg','1');weg.textContent='✕ Skizze entfernen';weg.style.cssText=KN+'border:1px solid var(--border);background:transparent;color:var(--text2);font-weight:400;min-height:36px;';
+    weg.onclick=()=>{if(_fsAsBenutzt(bericht,sk)&&!_fsFrage('Dachskizze entfernen? Umriss, Stempel, Striche und die Nummern in der Skizze gehen verloren. Die Anschlagpunkte selbst und ihre Fotos bleiben.',bericht))return;_fsWpSkizzeWeg(bericht);scheduleSave();_anNeu();};
+    s.appendChild(weg);
+    return s;
+  }
+
   function _anRender(){
     body.innerHTML='';
     body.appendChild(_anLeiste());
@@ -10182,6 +10292,7 @@ function _openAnschlagProtokoll(existingIdx,vonWp){
       FS_AN_UNTERLAGEN.forEach(([key,lbl])=>{const r=zeile(lbl);const w=status(k.unterlagen,key,'',[['ja','ja'],['nein','nein'],['na','nicht angefordert']],'data-an-unterlage');w.style.flex='1';w.firstElementChild.remove();r.appendChild(w);uS.appendChild(r);});
       uS.appendChild(feld(k,'letztePruefungDatum','Datum der letzten Prüfung','TT.MM.JJJJ oder „unbekannt“'));
       body.appendChild(uS);
+      body.appendChild(_anSkizzeZeile()); /* F84: die Dachskizze – klappt mit „Die Anlage“ zu */
     }
     /* ── Anschlagpunkte ── */
     const pS=abschnitt('Anschlagpunkte ('+bericht.punkte.length+')','data-an-punkte');
@@ -10202,6 +10313,7 @@ function _openAnschlagProtokoll(existingIdx,vonWp){
       const kn=document.createElement('div');kn.style.cssText='display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 6px;';
       const weg=document.createElement('button');weg.type='button';weg.textContent='✕ Punkt entfernen';weg.setAttribute('data-an-punkt-weg','1');weg.style.cssText=chipStil(false);
       weg.onclick=()=>{if(!_fsFrage('Anschlagpunkt '+p.nr+' aus diesem Protokoll entfernen?'+((p.fotoRefs&&p.fotoRefs.length)?' Die Fotos bleiben im Protokoll, nur die Zuordnung geht weg.':''),bericht))return;if(_fsAnPunktWeg(bericht,p)){anZu.delete(p);scheduleSave();_anNeu();}};
+      if(typeof _fsWpSkizze==='function'&&typeof _fsBgEinzeichnenZeigen==='function'){const sk0=_fsWpSkizze(bericht),drin=!!sk0&&_fsAsMarkeOk(p)&&p.skz.k===sk0.id;const mk=document.createElement('button');mk.type='button';mk.setAttribute('data-an-skizze-mark',String(p.nr));mk.setAttribute('data-an-drin',drin?'1':'0');mk.textContent=drin?'📍 in der Skizze':'📍 markieren';mk.title=drin?'Die Nummer steht in der Dachskizze – antippen zum Verschieben':'Die Nummer dieses Anschlagpunkts in die Dachskizze setzen';mk.style.cssText=chipStil(drin);mk.onclick=()=>_anMarkieren(p);kn.appendChild(mk);} /* F84 */
       kn.appendChild(weg);inh.appendChild(kn);
       const tz=zeile('Typ / Bezeichnung');const ti1=document.createElement('input');ti1.type='text';ti1.value=p.typ||'';ti1.placeholder='z. B. Einzelanschlagpunkt Typ …';ti1.autocomplete='off';ti1.style.cssText=FELD;ti1.setAttribute('data-an-feld','typ');ti1.oninput=()=>{p.typ=ti1.value;scheduleSave();};
       const ti2=document.createElement('input');ti2.type='text';ti2.value=p.serie||'';ti2.placeholder='Serien-Nr. (Typenschild)';ti2.autocomplete='off';ti2.style.cssText=FELD+'max-width:200px;';ti2.setAttribute('data-an-feld','serie');ti2.oninput=()=>{p.serie=ti2.value;scheduleSave();};
@@ -10230,7 +10342,15 @@ function _openAnschlagProtokoll(existingIdx,vonWp){
     const pz=chips(bericht,'plakette','Prüfplakette',[['ja','angebracht / erneuert'],['keine','keine Plakette']],true,'data-an-plakette');
     const pn=document.createElement('input');pn.type='text';pn.value=bericht.plaketteNr||'';pn.placeholder='Plaketten-Nr. / Text';pn.autocomplete='off';pn.style.cssText=FELD+'max-width:200px;flex:0 1 200px;';pn.setAttribute('data-an-feld','plaketteNr');pn.oninput=()=>{bericht.plaketteNr=pn.value;scheduleSave();};pz.appendChild(pn);eS.appendChild(pz);
     const nz=feld(bericht,'naechste','Nächste Prüfung bis','TT.MM.JJJJ');const nh=document.createElement('span');nh.style.cssText='font-size:var(--fs11,11px);color:var(--text2);';nh.textContent='Vorschlag: ein Jahr (Herstellerangabe geht vor)';nz.appendChild(nh);eS.appendChild(nz);
-    const uh=document.createElement('div');uh.style.cssText='font-size:var(--fs11,11px);color:var(--text2);margin-top:6px;';uh.textContent='Unterschrift des Prüfers und Dachplan-Pins kommen in den nächsten Bauschritten.';eS.appendChild(uh);
+    { /* F84: der Erinnerungs-Satz rechnet beim Tippen mit; am PC dazu „🔕 nicht mehr erinnern“ / „🔔 wieder einschalten“ (geteilte Einstellung der App, nie in der Karte) */
+      const er=document.createElement('div');er.setAttribute('data-an-erinnerung','1');er.style.cssText='font-size:var(--fs12,12px);border-radius:6px;padding:6px 9px;margin:2px 0 6px;';
+      const erNeu=()=>{const aus=(typeof _pamAnErinnerungAus==='function')&&_pamAnErinnerungAus(bericht.id);const e=_fsAnErinnerung(bericht);er.innerHTML='';er.setAttribute('data-an-erinnerung-stand',aus?'aus':e.status);
+        const s=document.createElement('span');s.textContent=(bericht.folgeVonDatum?'↩ Folgeprüfung zum Prüfprotokoll vom '+bericht.folgeVonDatum+' – dessen Erinnerung ist damit erledigt. ':'')+(aus?'🔕 Erinnerung für dieses Protokoll ausgeschaltet.':_fsAnErinnerungText(bericht));er.appendChild(s);
+        const rot=!aus&&(e.status==='kein'||e.status==='ueber');er.style.color=rot?'#9b2c1f':FS_AN_FARBE;er.style.background=rot?'rgba(155,44,31,.08)':'rgba(31,78,121,.08)';
+        if(typeof _pamAnErinnerungAusSetzen==='function'&&e.status!=='kein'){const k=document.createElement('button');k.type='button';k.setAttribute('data-an-erinnerung-knopf',aus?'an':'aus');k.textContent=aus?'🔔 wieder einschalten':'🔕 nicht mehr erinnern';k.title=aus?'Die Prüfung steht wieder in „Heute“, sobald sie fällig wird':'Diese Prüfung nicht mehr in „Heute“ zeigen (z. B. Anlage abgebaut) – im Protokoll wieder einschaltbar';k.style.cssText=chipStil(false)+'margin-left:8px;';k.onclick=()=>{if(_pamAnErinnerungAusSetzen(bericht,!aus))erNeu();};er.appendChild(k);}};
+      const ni=nz.querySelector('input');if(ni)ni.addEventListener('input',erNeu);erNeu();eS.appendChild(er);
+    }
+    const uh=document.createElement('div');uh.style.cssText='font-size:var(--fs11,11px);color:var(--text2);margin-top:6px;';uh.textContent='Unterschrift des Prüfers kommt in einem späteren Bauschritt.';eS.appendChild(uh);
     body.appendChild(eS);
     /* ── Fotos (wie im Dachprotokoll: am PC die PC-Werkzeuge, sonst Kamera · Galerie · Drive) ── */
     const fotoSek=document.createElement('div');fotoSek.style.cssText='border-top:1px solid var(--border);';
@@ -10291,6 +10411,7 @@ async function _fsAnPdf(bericht,task){
     doc.autoTable({startY:y,theme:'grid',margin:{left:M,right:M},bodyStyles:{fontSize:8,minCellHeight:6},columnStyles:{0:{fontStyle:'bold',cellWidth:55,fillColor:[245,245,245]},1:{cellWidth:127}},
       body:[['Art der Anlage',k.anlageArt||'–'],['Hersteller / System',k.herstellerUnbekannt?('nicht erkennbar'+(k.hersteller?' ('+k.hersteller+')':'')):(k.hersteller||'–')],['Montagejahr',k.montagejahr||'–'],['Anzahl Anschlagpunkte',String(bericht.punkte.length)],['Lage der Punkte',lst(k.lage)]]});
     y=doc.lastAutoTable.finalY+6;
+    if(typeof _fsWpPdfSkizze==='function')y=_fsWpPdfSkizze(doc,bericht,y,M,W); /* F84: Dachskizze mit den Nummern der Anschlagpunkte */
     /* Unterlagen */
     kap('Unterlagen – vorgelegt?');
     doc.autoTable({startY:y,theme:'grid',margin:{left:M,right:M},bodyStyles:{fontSize:8,minCellHeight:6},columnStyles:{0:{fontStyle:'bold',cellWidth:95,fillColor:[245,245,245]},1:{cellWidth:87}},
@@ -10315,6 +10436,7 @@ async function _fsAnPdf(bericht,task){
     const erg=[['Zusammenfassung',_fsAnZusammenfassung(bericht)],['Gesamtergebnis',bericht.gesamt?w(bericht.gesamt):'– (nicht bestätigt)'],['Prüfplakette',bericht.plakette?((bericht.plakette==='ja'?'angebracht / erneuert':w(bericht.plakette))+(bericht.plaketteNr?' · '+bericht.plaketteNr:'')):'–'],['Nächste Prüfung bis',bericht.naechste||'–']];
     const wp=(bericht.vonWpId&&Array.isArray(t.pruefberichte))?t.pruefberichte.find(x=>x&&x.id===bericht.vonWpId):null;
     if(wp)erg.push(['Dachprotokoll','vom '+(wp.datum||'')+' an derselben Karte (eigenes Dokument)']);
+    if(bericht.folgeVonDatum)erg.push(['Folgeprüfung zu','Prüfprotokoll vom '+bericht.folgeVonDatum+' (dessen Erinnerung ist damit erledigt)']); /* F84 */
     doc.autoTable({startY:y,theme:'grid',margin:{left:M,right:M},bodyStyles:{fontSize:8,minCellHeight:6},columnStyles:{0:{fontStyle:'bold',cellWidth:55,fillColor:[245,245,245]},1:{cellWidth:127}},body:erg});
     y=doc.lastAutoTable.finalY+6;
     if(bericht.maengel){kap('Festgestellte Mängel');doc.setFontSize(9);const ml=doc.splitTextToSize(bericht.maengel,W-2*M);doc.text(ml,M,y);y+=ml.length*4.5+4;}

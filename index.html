@@ -69,7 +69,7 @@ async function _clearCacheAndReload(){
 try{var _cs=+(localStorage.getItem('pam_card_scale')||100);document.documentElement.style.setProperty('--card-scale',(_cs/100).toFixed(2));}catch(e){}
 </script>
 <script src="https://accounts.google.com/gsi/client" defer onload="typeof gdriveInit==='function'?gdriveInit():(window._gsiPending=true)" onerror="window._gsiLoadError=true;window._gsiPending=false;typeof _driveSetStatus==='function'&&_driveSetStatus('⚠ Google-Dienst nicht erreichbar – Netzwerk oder Adblocker prüfen',false)"></script>
-<script src="formulare.js?v=F83" charset="utf-8"></script>
+<script src="formulare.js?v=F84" charset="utf-8"></script>
 <script>
 // ── EMAIL DROP-ZONE – Inline-Handler am Element, kein addEventListener nötig ──
 
@@ -10714,7 +10714,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-16 · #1229'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-16-b1229) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-17 · #1230'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-17-b1230) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -19085,6 +19085,7 @@ function _heuteSetFilter(key,val){
 var _pamRasterFilter={overdue:true,heute:true,ausf:true,turnus:true,post:true};
 var _pamRasterGrouped={overdue:[],heute:[],ausf:[],turnus:[],turnusAus:[]};
 _pamRasterGrouped.post=[]; // b801: getrennt ergänzt – test_b660 prüft das Startwert-Objekt wörtlich
+_pamRasterFilter.anschlag=true;_pamRasterGrouped.anschlag=[]; // b1230: 🪝 Prüfungen – aus demselben Grund getrennt ergänzt
 // b660: zeigt die abgewählten Leistungen zur Kontrolle mit ein. Bewusst NICHT
 // gespeichert – beim nächsten Öffnen ist die Übersicht wieder aufgeräumt.
 var _tuZeigeAbgewaehlt=false;
@@ -19270,6 +19271,98 @@ function _tuKachel(g){
   return h+'</div>';
 }
 function _pamOpenTaskFromHeute(id){ if(typeof openEditTaskModal==='function')openEditTaskModal(id); }
+// ══ b1230 (Formulare F84): „🪝 Prüfungen“ in „Heute“ – Erinnerung an die nächste Sachkundigenprüfung aus dem Prüfprotokoll Anschlageinrichtung ══
+// Frank 17.10.2026 (P69 Schritt 2, Entwurf „Weg E“: „es gibt auch Tasks, wo kein Objekt ist“): PAM liest „Nächste Prüfung bis“ aus ALLEN
+// Prüfprotokollen Anschlageinrichtung – an jeder Karte, mit oder ohne Objekt, auch im Archiv. Vier Wochen vorher (FS_AN_VORWARN_TAGE in
+// formulare.js, Rechnung _fsAnErinnerung) steht die Prüfung in „Heute“ unter „🪝 Prüfungen“, nach dem Datum rot. Weg geht sie NUR auf Franks
+// Klick: „✕ nicht mehr erinnern“ (Merkzettel pam_an_erinnerung_aus, über PAM_GETEILT_KEYS an beiden Rechnern gleich – bewusst NICHT an der
+// archivierten Karte: _archivMergeGerichtet behält je Rechner die eigene Fassung, die Änderung ginge am anderen Rechner verloren) oder die
+// Bestätigung „Folgeprüfung“ im NEUEN Protokoll (bericht.folgeVonId; die Frage stellt formulare.js, die Kandidaten liefert _pamAnFolgeKandidaten).
+// PAM hakt nichts ab. Nur am PC (Frank: „nur am PC“). Kein Prüfumfang, keine Bewertung.
+var _anErinnerungAusKey='pam_an_erinnerung_aus';
+function _anErinnerungAusListe(){try{var l=JSON.parse(localStorage.getItem(_anErinnerungAusKey)||'[]');return Array.isArray(l)?l.map(String):[];}catch(e){return [];}}
+function _pamAnErinnerungAus(id){return !!id&&_anErinnerungAusListe().indexOf(String(id))>=0;}
+// formulare.js ruft das aus dem Prüfprotokoll (🔕 / 🔔); die Kachel in „Heute“ ruft es nach ihrer Rückfrage
+function _pamAnErinnerungAusSetzen(b,aus){
+  if(!b||!b.id)return false;
+  var l=_anErinnerungAusListe().filter(function(x){return x!==String(b.id);});if(aus)l.push(String(b.id));
+  try{localStorage.setItem(_anErinnerungAusKey,JSON.stringify(l));}catch(e){return false;}
+  try{if(currentView==='heute'&&typeof renderHeute==='function')renderHeute();}catch(e){}
+  return true;
+}
+// Alle Prüfprotokolle Anschlageinrichtung – offene Karten aller Boards UND das Archiv: [{t,b,board,archiv}]
+function _anAlleProtokolle(){
+  var out=[];
+  Object.keys(boards||{}).forEach(function(bn){
+    if(bn.startsWith('_')||!Array.isArray(boards[bn]))return;
+    boards[bn].forEach(function(t){if(!t||!Array.isArray(t.pruefberichte))return;t.pruefberichte.forEach(function(b){if(b&&b.vorlage==='wartungsprotokoll'&&b.art==='anschlag')out.push({t:t,b:b,board:bn,archiv:false});});});
+  });
+  try{(archivedTasks||[]).forEach(function(t){if(!t||!Array.isArray(t.pruefberichte))return;t.pruefberichte.forEach(function(b){if(b&&b.vorlage==='wartungsprotokoll'&&b.art==='anschlag')out.push({t:t,b:b,board:t._archivProjekt||'',archiv:true});});});}catch(e){}
+  return out;
+}
+// Hat ein anderes Protokoll dieses als Vorgänger bestätigt („Folgeprüfung“)?
+function _anIstAbgeloest(id,alle){return !!id&&(alle||_anAlleProtokolle()).some(function(x){return x&&x.b&&String(x.b.folgeVonId||'')===String(id);});}
+// Läuft die Erinnerung noch? Datum lesbar, nicht ausgeschaltet, keine Folgeprüfung bestätigt
+function _anErinnerungAktiv(x,alle){if(typeof _fsAnErinnerung!=='function'||!x||!x.b)return false;return _fsAnErinnerung(x.b).status!=='kein'&&!_pamAnErinnerungAus(x.b.id)&&!_anIstAbgeloest(x.b.id,alle);}
+// Für „Heute“: fällig = bald (ab vier Wochen vorher) oder überschritten – nach Datum sortiert; heute = JJJJ-MM-TT (Prüfungen) oder die Uhr
+function _anSammleFaellige(heute){
+  if(typeof _fsAnErinnerung!=='function')return [];
+  var alle=_anAlleProtokolle();
+  return alle.filter(function(x){return _anErinnerungAktiv(x,alle);})
+    .map(function(x){x.er=_fsAnErinnerung(x.b,heute);return x;})
+    .filter(function(x){return x.er.status==='bald'||x.er.status==='ueber';})
+    .sort(function(a,b){return String(a.er.bisIso).localeCompare(String(b.er.bisIso));});
+}
+// Dieselbe Adresse? Straße und Nummer ohne PLZ/Ort, Groß/Klein und Leerzeichen egal
+function _anAdresseNorm(t){return String((t&&(t.adresse||t.title))||'').toLowerCase().replace(/\s+/g,' ').replace(/,\s*\d{5}\b.*$/,'').trim();}
+// Kandidaten für „Ist das die Folgeprüfung zu …?“ (formulare.js fragt beim Anlegen): andere Protokolle derselben Karte, desselben Objekts
+// oder derselben Adresse, deren Erinnerung noch läuft – neuestes zuerst
+function _pamAnFolgeKandidaten(task,bericht){
+  if(!task||!bericht)return [];
+  var alle=_anAlleProtokolle(),adr=_anAdresseNorm(task);
+  return alle.filter(function(x){
+    if(!x.b||x.b===bericht||String(x.b.id)===String(bericht.id))return false;
+    var gleich=x.t===task||String(x.t.id)===String(task.id)||(!!task.objektId&&x.t.objektId===task.objektId)||(!!adr&&_anAdresseNorm(x.t)===adr);
+    return gleich&&_anErinnerungAktiv(x,alle);
+  }).sort(function(a,b){return String(b.b.createdAt||b.b.datum||'').localeCompare(String(a.b.createdAt||a.b.datum||''));});
+}
+// Die Kennung aus einem Knopf oder der Kachel lesen (this im onclick) – eine durchgereichte Kennung bleibt, wie sie ist
+function _anKachelId(x){if(x&&typeof x==='object'&&typeof x.closest==='function'){var k=x.closest('[data-an-kachel]');return k?String(k.getAttribute('data-an-kachel')||''):'';}return String(x||'');}
+// Kopf und „🗂 zur Karte“ / „📦 im Archiv zeigen“: Karte öffnen bzw. ins Archiv springen (b954) – beides aus den Attributen der Kachel
+function _anKachelKarte(el){var k=(el&&typeof el==='object'&&typeof el.closest==='function')?el.closest('[data-an-kachel]'):null;if(!k)return;var tid=String(k.getAttribute('data-an-task')||'');if(!tid)return;if(k.getAttribute('data-an-archiv')==='1'){if(typeof _objAufArchivOeffnen==='function')_objAufArchivOeffnen(tid);}else if(typeof _pamOpenTaskFromHeute==='function')_pamOpenTaskFromHeute(tid);}
+function _anKachelPdf(id){
+  id=_anKachelId(id);
+  var x=_anAlleProtokolle().find(function(y){return y&&y.b&&String(y.b.id)===String(id);});
+  if(!x||!x.b.pdfDriveId){showToast('Zu dieser Prüfung liegt noch kein PDF in Drive – im Prüfprotokoll „📄 PDF erstellen“','info',5000);return;}
+  window.open('https://drive.google.com/file/d/'+encodeURIComponent(String(x.b.pdfDriveId))+'/view','_blank');
+}
+function _anKachelAus(id){
+  id=_anKachelId(id);
+  var x=_anAlleProtokolle().find(function(y){return y&&y.b&&String(y.b.id)===String(id);});if(!x)return;
+  if(!confirm('Nicht mehr an die Prüfung „'+(x.t.title||'')+'“ erinnern?\n\nPrüfprotokoll vom '+(x.b.datum||'?')+', fällig bis '+(x.b.naechste||'?')+'.\nIm Prüfprotokoll lässt sich die Erinnerung unter „Nächste Prüfung bis“ wieder einschalten (🔔).'))return;
+  _pamAnErinnerungAusSetzen(x.b,true);
+  showToast('🔕 Erinnerung ausgeschaltet – im Prüfprotokoll wieder einschaltbar','info',5000);
+}
+// Die Kachel in „Heute“ (nach den 🏠-Kacheln): Karte, fällig bis, letzte Prüfung, Knöpfe 📄 / 🗂 bzw. 📦 / ✕
+function _anKachel(x){
+  var t=x.t,b=x.b,er=x.er||{},ueber=er.status==='ueber',farbe=ueber?'#E24B4A':'#1f4e79';
+  var frei=0,tot=0;(b.punkte||[]).forEach(function(p){tot++;if(p&&p.ergebnis==='frei')frei++;});
+  var wann=ueber?('seit '+(-er.tage)+' Tag'+(er.tage===-1?'':'en')+' überschritten'):er.tage===0?'heute fällig':('noch '+er.tage+' Tag'+(er.tage===1?'':'e'));
+  var oeffnen="_anKachelKarte(this)"; // kein Wert im Klick-Text – Kennung und Archiv-Merkmal stehen als Attribute an der Kachel (Wächter test_b1049/b1050)
+  var KN='padding:3px 7px;border-radius:5px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:10px;font-weight:600;cursor:pointer;';
+  return '<div data-an-kachel="'+_escHtml(String(b.id||''))+'" data-an-task="'+_escHtml(String(t.id||''))+'" data-an-archiv="'+(x.archiv?'1':'0')+'" style="background:var(--bg2);border-radius:10px;border:1px solid var(--border);border-left:4px solid '+farbe+';padding:9px 10px;">'
+    +'<div style="display:flex;align-items:flex-start;gap:4px;margin-bottom:5px;cursor:pointer;" onclick="'+oeffnen+'" title="'+(x.archiv?'Karte im Archiv zeigen':'Karte öffnen')+'">'
+    +'<span style="width:7px;height:7px;border-radius:50%;background:'+farbe+';flex-shrink:0;margin-top:3px;display:inline-block;"></span>'
+    +'<span style="font-size:11px;font-weight:600;color:var(--text);line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">🪝 '+esc(t.title||'')+'</span></div>'
+    +'<div style="font-size:10px;color:var(--text2);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+(x.archiv?'📦 Karte im Archiv':'🏗 '+esc(x.board||''))+'</div>'
+    +'<div style="font-size:10px;font-weight:600;color:'+farbe+';line-height:1.35;">Prüfung Anschlageinrichtung fällig bis '+esc(er.bis||'')+' · '+wann+'</div>'
+    +'<div style="font-size:10px;color:var(--text2);margin:2px 0 6px;">letzte Prüfung '+esc(b.datum||'?')+' · '+tot+' Punkt'+(tot===1?'':'e')+(tot?' · '+frei+' freigegeben':'')+'</div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:4px;">'
+    +(b.pdfDriveId?'<button onclick="event.stopPropagation();_anKachelPdf(this)" style="'+KN+'" title="Das PDF der letzten Prüfung in Drive öffnen">📄 letztes Protokoll</button>':'')
+    +'<button onclick="event.stopPropagation();'+oeffnen+'" style="'+KN+'">'+(x.archiv?'📦 im Archiv zeigen':'🗂 zur Karte')+'</button>'
+    +'<button onclick="event.stopPropagation();_anKachelAus(this)" style="'+KN+'color:var(--text2);font-weight:400;" title="Diese Prüfung nicht mehr in „Heute“ zeigen (Rückfrage) – im Prüfprotokoll wieder einschaltbar">✕ nicht mehr erinnern</button>'
+    +'</div></div>';
+}
 function _pamToggleRasterFilter(key){
   _pamRasterFilter[key]=!_pamRasterFilter[key];
   renderHeute();
@@ -19337,6 +19430,10 @@ function _pamFilterTip(e,key){
         +'<div style="font-size:11px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:270px;">'+esc(t.title||'(kein Titel)')+'</div>'
         +'<div style="font-size:10px;color:var(--text2);margin-top:1px;">🔁 '+esc(item.l.name||'')+' · '+esc(_tuStatusText(item.l))+'</div>'
         +'</div>';
+      return;
+    }
+    if(item.er&&item.b){ // b1230: Prüfung Anschlageinrichtung – fällig bis
+      html+='<div style="padding:3px 0 4px;border-bottom:0.5px solid var(--border);">'+'<div style="font-size:11px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:270px;">'+esc(t.title||'(kein Titel)')+'</div>'+'<div style="font-size:10px;color:var(--text2);margin-top:1px;">🪝 fällig bis '+esc(item.er.bis||'')+(item.archiv?' · 📦 Archiv':'')+'</div>'+'</div>';
       return;
     }
     var _ftTip=t.freieTermine&&t.freieTermine.length?t.freieTermine:(t.freierTermin&&t.freierTermin.datum?[t.freierTermin]:[]);
@@ -20952,7 +21049,9 @@ function _pamHeuteRaster(listeAll, today, typFilter, terminFilter, postListe){
   // b801: E-Mail-Tasks MIT Frist (der Heute-Topf „Posteingang") bekommen eine eigene
   // Gruppe samt Knopf – bisher floss dieser Topf in die Kachel-Ansicht gar nicht ein.
   var _postL=(!typFilter||typFilter==='alle'||typFilter==='posteingang')?(postListe||[]):[];
-  if((!listeAll||!listeAll.length)&&!_postL.length)return'';
+  // b1230: fällige Prüfungen Anschlageinrichtung (formulare.js F84) – VOR der Leer-Prüfung, sonst fehlen sie an einem Tag ohne andere Termine (in der Browser-Probe gefunden); wie die Leistungen nur ohne Anruf-/Besichtigungs-Filter
+  var _anL=(typeof _anSammleFaellige==='function'&&!_heuteAktFilter&&(!typFilter||typFilter==='alle'||typFilter==='auftraege'))?_anSammleFaellige():[];
+  if((!listeAll||!listeAll.length)&&!_postL.length&&!_anL.length)return'';
   var _fD=function(d){if(!d)return'–';var p=d.split('-');return p[2]+'.'+p[1]+'.';};
   // Typ-Filter
   var liste2=listeAll.filter(function(item){
@@ -21007,6 +21106,7 @@ function _pamHeuteRaster(listeAll, today, typFilter, terminFilter, postListe){
   var _tuAlleF=(_heuteAktFilter||!(!typFilter||typFilter==='alle'||typFilter==='immobilien'))?[]:_tuSammleFaellige();
   grouped.turnus=_tuAlleF.filter(function(x){return !x.aus;});
   grouped.turnusAus=_tuAlleF.filter(function(x){return x.aus;});
+  grouped.anschlag=_anL; // b1230: oben gerechnet (vor der Leer-Prüfung)
   _pamRasterGrouped=grouped;
   var rf=_pamRasterFilter;
   function fBtn(key,label,color,cnt){
@@ -21039,6 +21139,7 @@ function _pamHeuteRaster(listeAll, today, typFilter, terminFilter, postListe){
     // b660: der Knopf bleibt auch dann stehen, wenn ALLE Leistungen abgewählt sind –
     // sonst wäre der Schalter „turnus" unerreichbar und das Einblenden liefe ins Leere.
     +((grouped.turnus.length||grouped.turnusAus.length)?fBtn('turnus','🏠 Objekte','#7F77DD',grouped.turnus.length):'')
+    +(grouped.anschlag.length?fBtn('anschlag','🪝 Prüfungen',grouped.anschlag.some(function(x){return x.er&&x.er.status==='ueber';})?'#E24B4A':'#1f4e79',grouped.anschlag.length):'') // b1230
     +(grouped.turnusAus.length
       ?'<button onclick="event.stopPropagation();_tuAbgewaehltToggle()" title="'+_escHtml(grouped.turnusAus.length+' Leistung(en) sind am Objekt abgewählt („in Heute" ohne Haken). Sie sind weder erledigt noch übersprungen – sie stehen hier nur nicht. Klick zeigt sie zur Kontrolle mit an.')+'" style="padding:3px 10px;border-radius:14px;font-size:10px;font-weight:600;cursor:pointer;white-space:nowrap;border:1.5px dashed var(--border);background:'+(_tuZeigeAbgewaehlt?'var(--bg4)':'var(--bg3)')+';color:var(--text2);">'
         +(_tuZeigeAbgewaehlt?'☑':'☐')+' '+grouped.turnusAus.length+' abgew\xe4hlt</button>'
@@ -21061,10 +21162,11 @@ function _pamHeuteRaster(listeAll, today, typFilter, terminFilter, postListe){
   // b660: die abgewählten kommen nur dazu, wenn beide Schalter dafür stehen –
   // der Objekte-Knopf an UND das Einblenden ausdrücklich angeklickt.
   var tuListe=rf.turnus?(_tuZeigeAbgewaehlt?grouped.turnus.concat(grouped.turnusAus):grouped.turnus):[];
+  var anListe=(rf.anschlag!==false)?grouped.anschlag:[]; // b1230
   var html='<div style="margin:0 0 12px;">';
   html+='<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text2);margin-bottom:6px;">Tages\xfcbersicht</div>';
   html+=filterBar;
-  if(!liste.length&&!tuListe.length){return html+'<div style="font-size:12px;color:var(--text2);padding:8px 0;">Keine Kacheln f\xfcr aktive Filter.</div></div>';}
+  if(!liste.length&&!tuListe.length&&!anListe.length){return html+'<div style="font-size:12px;color:var(--text2);padding:8px 0;">Keine Kacheln f\xfcr aktive Filter.</div></div>';}
   html+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;">';
   liste.forEach(function(item){
     var t=item.t,board=item.board;
@@ -21113,6 +21215,7 @@ function _pamHeuteRaster(listeAll, today, typFilter, terminFilter, postListe){
   // b611: Wartungs-Kacheln ans Ende – erst die echten Fristen, dann das,
   // was „mal wieder dran wäre". b617: gebündelt, eine Kachel je Objekt.
   _tuGruppiere(tuListe).forEach(function(g){ html+=_tuKachel(g); });
+  anListe.forEach(function(x){ html+=_anKachel(x); }); // b1230: 🪝 Prüfungen zuletzt
   html+='</div></div>';
   return html;
 }
@@ -72158,6 +72261,7 @@ const PAM_GETEILT_KEYS=[
   'pam_fs_fotos_je_seite',                                                                       // C3 Fotos im PDF: 2 groß / 4 je Seite (b1153/F49)
   'pam_fs_ich_rolle',                                                                            // C4 deine Bezeichnung unter „Anwesend“ (b1155/F51)
   'pam_fs_anschlag_quali',                                                                       // C5 Qualifikationssatz des Prüfers im Prüfprotokoll Anschlageinrichtung (b1214/F74: beide Rechner gleich)
+  'pam_an_erinnerung_aus',                                                                       // C6 „🔕 nicht mehr erinnern“ je Prüfprotokoll Anschlageinrichtung (b1230/F84: beide Rechner gleich, nie in der Karte)
   'pam_anrede_wahl_v1'                                                                           // D Anrede je Person in den Mail-Fenstern (b1165)
   ,'pam_gal_schild_v1'                                                                           // E „🏷 Info an/aus“ in Galerie + Foto-Fenster (b1175, Frank: beide Rechner)
 ];
