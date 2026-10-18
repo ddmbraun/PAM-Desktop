@@ -10714,7 +10714,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-18 · #1233'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-18-b1233) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-18 · #1234'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-18-b1234) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -28018,6 +28018,15 @@ function _mfRepDateiname(d,jetzt){
 }
 // Was aus der Karte in den Rep. kommt. Auftragskarte (Adresse/HV/Schadensbild/Rechnungsanschrift vorhanden) zuerst
 // aus ihren Feldern, Lücken aus „Auf einen Blick“; Mail-Karte nur aus „Auf einen Blick“.
+// ══ b1234: Absendername aus „Name <adresse>“ – mit Umlauten, Bindestrich, Schrägstrich, Komma (P86) ══
+// Vorher holte `[\w\s]+` nur ASCII-Buchstaben vor dem „<“: aus „Erika Müller <…>“ wurde „ller“ (gemessen 18.10.2026 an
+// vier Karten im Mail-Eingang). Jetzt gilt alles vor der Mailadresse als Name, Anführungszeichen außen weg. Ohne „<…>“
+// bleibt der Text, wie er ist (wie vorher).
+function _emNameAusAbsender(s){
+  const t=String(s||'').trim();
+  const m=/^\s*"?([^"<]*?)"?\s*<[^>]*>\s*$/.exec(t);
+  return m?m[1].trim():t;
+}
 function _mfRepAusKarte(task){
   const t=task||{}, ab=t._aufEinenBlick||{};
   const d={mieter:'',tel:'',tel2:'',mobil:'',email:'',lage:'',strasse:'',plz:'',ort:'',schaden:'',bv:'',objekt:'',hv:'',absender:'',absAdr:'',quelle:'',plzWoher:'',name:''};
@@ -28029,7 +28038,9 @@ function _mfRepAusKarte(task){
   const mK=kont.find(function(k){return k&&/^mieter$/i.test(String(k.rolle||''));})||null;
   if(mK){d.mieter=mK.name||'';d.tel=mK.tel||'';d.tel2=mK.tel2||'';d.email=mK.email||'';}
   else if(abKont[0]){d.mieter=abKont[0].name||'';d.tel=abKont[0].nr||'';}
-  d.absender=String(ab.absender||t.emailSenderName||'').trim();
+  // b1234: zuerst „Auf einen Blick“, dann der Name aus der Absenderzeile, erst zuletzt das Namensfeld (das war bei Umlauten abgeschnitten)
+  d.absender=String(ab.absender||((typeof _emNameAusAbsender==='function'&&/<[^>]*>/.test(String(t.emailSender||'')))?_emNameAusAbsender(t.emailSender):'')||t.emailSenderName||'').trim();
+  d.absRolle=String(ab.rolle||'').trim(); // b1234: für den Warnhinweis im Prüf-Fenster
   d.absAdr=String(ab.absAdr||((/<([^>]+)>/.exec(String(t.emailSender||''))||[])[1])||'').trim();
   if(istAuftrag){
     const a=_mfRepAdresseTeilen(t.adresse);
@@ -28183,6 +28194,9 @@ function _mfRepFenster(d){
     ov.innerHTML='<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:18px 22px;width:580px;max-width:96vw;max-height:92vh;overflow:auto;box-shadow:0 8px 32px rgba(0,0,0,.5);">'
       +'<div style="font-size:14px;font-weight:700;color:var(--text);">📄 Reparaturauftrag für MF dach</div>'
       +'<div style="font-size:12px;color:var(--text2);margin-top:4px;line-height:1.5;">Prüfen, bei Bedarf ändern, dann „Datei schreiben“. <b>Gelb</b> = fehlt noch. In MF dach wählst du danach Hausverwaltung und Ansprechpartner aus dem Kundenstamm'+(wer?' – hier: <b>'+e(wer)+'</b>'+(d.absAdr?' ('+e(d.absAdr)+')':''):'')+'.</div>'
+      // b1234: Warnhinweis – keine Adresse erkannt UND der Absender ist keine bekannte Hausverwaltung (P86). PAM entscheidet nichts.
+      +((!String(d.strasse||'').trim()&&!String(d.hv||'').trim()&&!/^(Hausverwaltung|Genossenschaft)$/i.test(String(d.absRolle||'')))
+        ?'<div data-mfrep-warn="1" style="margin-top:10px;padding:8px 10px;border-radius:8px;border:1px solid #e0a800;background:#fff3bf;color:#5c4400;font-size:12px;line-height:1.5;">⚠ In dieser Mail steht keine Adresse, und der Absender ist keine bekannte Hausverwaltung – <b>ist das wirklich ein Reparaturauftrag?</b> Wenn ja: Angaben eintragen und „Datei schreiben“. Sonst „Abbrechen“ – dann wird nichts geschrieben.</div>':'')
       +feld('lage','Zeile über der Anschrift (WEG …)',d.lage)
       +feld('strasse','Straße und Hausnummer (Baustelle)',d.strasse)
       +'<div style="display:flex;gap:10px;"><div style="width:120px;">'+feld('plz','PLZ',d.plz,d.plzWoher?'aus der '+d.plzWoher:'')+'</div><div style="flex:1;">'+feld('ort','Ort',d.ort,d.plzWoher?'aus der '+d.plzWoher:'')+'</div></div>'
@@ -64588,7 +64602,8 @@ function openEmailTaskModal(task,board){
   // Fix: Absendername auto-befüllen wenn leer
   if(!task.emailSenderName){
     let _fm=(task.emailOriginals||[])[0]||(task.gmailThreadMessages||[])[0]||(task.msThreadMessages||[])[0]||null;
-    let _autoName=_fm?(_fm.fromName||_fm.senderName||(_fm.from||_fm.sender||'').replace(/^.*?([\w\s]+)\s*<.*>$/,'$1').trim()||'')  :'';
+    // b1234: Name mit Umlauten, Bindestrich, Schrägstrich (vorher wurde aus „Erika Müller <…>“ nur „ller“, P86)
+    let _autoName=_fm?(_fm.fromName||_fm.senderName||((typeof _emNameAusAbsender==='function')?_emNameAusAbsender(_fm.from||_fm.sender||''):String(_fm.from||_fm.sender||'').trim())||'')  :'';
     if(_autoName&&_autoName!==task.emailSenderName){
       let _sn=document.getElementById('emSenderName');
       if(_sn&&!_sn.value.trim()){_sn.value=_autoName;_emScheduleSave();}
