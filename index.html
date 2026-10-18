@@ -10714,7 +10714,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-18 · #1232'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-18-b1232) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-18 · #1233'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-18-b1233) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -28132,8 +28132,9 @@ async function _mfRepHochladen(name,bytes){
 }
 // Vermerk als Bautagebuch-Zeile – am Live-Objekt UND an der Arbeitskopie des E-Mail-Fensters (#376: die Kopie
 // überschreibt beim Speichern das Live-Objekt; stünde die Zeile nur dort, wäre sie gleich wieder weg).
-function _mfRepVermerk(task,name,ersetzt){
-  const text=_MFREP_MARKE+name+(ersetzt?' (ersetzt)':'')+' · Ordner „'+MFREP_ORDNER+'“';
+function _mfRepVermerk(task,name,ersetzt,bv){
+  // b1233: das BV mit merken – daran findet die Rückmeldung aus MF dach (Kostenstelle, Rep.-Nr.) diese Karte wieder
+  const text=_MFREP_MARKE+name+(ersetzt?' (ersetzt)':'')+' · Ordner „'+MFREP_ORDNER+'“'+(String(bv||'').trim()?' · BV: '+String(bv).replace(/\s+/g,' ').trim():'');
   const ts=new Date().toISOString();
   const live=(task&&task.id&&typeof findTaskById==='function')?findTaskById(task.id):null;
   const ziel=live||task;
@@ -28192,6 +28193,9 @@ function _mfRepFenster(d){
       +'<textarea data-mfrep="schaden" rows="4" style="width:100%;box-sizing:border-box;padding:5px 7px;border:1px solid var(--border);border-radius:6px;font-size:13px;color:var(--text);background:var(--bg);'+(String(d.schaden||'').trim()?'':gelb)+'">'+e(d.schaden)+'</textarea>'
       +feld('bv','BV (Bauvorhaben) – steht im Rep. als erste Zeile unter „Beschreibung“ und kommt in die Zwischenablage; in MF: Bearbeiten → Textvariablen → Bauvorhaben → Strg+V',d.bv)
       +feld('name','Dateiname im Drive-Ordner „'+MFREP_ORDNER+'“',d.name)
+      // b1233: Häkchen „REP-Auftrag gleich mit anlegen“ (Frank 18.10.2026: standardmäßig an) + was mit der Karte passiert
+      +'<label style="display:flex;gap:8px;align-items:center;margin-top:12px;font-size:13px;color:var(--text);cursor:pointer;"><input type="checkbox" data-mfrep-chk="rep"'+(d.repAuftrag===false?'':' checked')+'> 🔧 REP-Auftrag in PAM gleich mit anlegen</label>'
+      +'<div style="font-size:11px;color:var(--text2);margin-top:6px;line-height:1.45;">Leere Felder der Karte (Adresse, Schadensbild, Mieter) werden mit diesen Angaben gefüllt. Kostenstelle, Kunden-Nr. und Rep.-Nr. holt PAM später aus MF dach (Werkzeug „MF-Rückmeldung“ am Büro-PC).</div>'
       +'<div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;">'
       +'<button data-mfrep-k="nein" style="padding:7px 14px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:13px;cursor:pointer;">Abbrechen</button>'
       +'<button data-mfrep-k="ja" style="padding:7px 14px;border-radius:7px;border:1px solid var(--accent);background:var(--accent);color:#fff;font-size:13px;font-weight:700;cursor:pointer;">📄 Datei schreiben</button>'
@@ -28205,6 +28209,7 @@ function _mfRepFenster(d){
       if(k==='nein'){weg(null);return;}
       const out=Object.assign({},d);
       ov.querySelectorAll('[data-mfrep]').forEach(function(el){out[el.getAttribute('data-mfrep')]=String(el.value||'').trim();});
+      const _chk=ov.querySelector('[data-mfrep-chk="rep"]');out.repAuftrag=!!(_chk&&_chk.checked); // b1233
       weg(out);
     });
   });
@@ -28229,12 +28234,284 @@ async function _mfRepKnopf(wo){
     const erg=await _mfRepHochladen(w.name,bytes);
     let kopiert=false;
     try{if(w.bv&&navigator.clipboard&&navigator.clipboard.writeText){await navigator.clipboard.writeText(w.bv);kopiert=true;}}catch(e){}
-    _mfRepVermerk(task,erg.name,erg.ersetzt);
+    _mfRepVermerk(task,erg.name,erg.ersetzt,w.bv);
     if(wo==='em')_mfRepStandZeichnen(task);
-    showToast('✓ Rep.-Datei geschrieben: '+erg.name+(erg.ersetzt?' (ersetzt)':'')+' · Ordner „'+MFREP_ORDNER+'“'+(kopiert?' · BV in der Zwischenablage':''),'success',8000);
+    // b1233 Teil 1: leere Kartenfelder füllen und den REP-Auftrag gleich mit anlegen (Frank 18.10.2026, Häkchen)
+    let gefuellt=[],rep='';
+    if(typeof _mfRepKarteFuellen==='function'){try{gefuellt=_mfRepKarteFuellen(task,w,wo)||[];}catch(e){console.warn('[b1233] Karte füllen:',e);}}
+    if(w.repAuftrag&&typeof _mfRepRepAuftrag==='function'){try{rep=_mfRepRepAuftrag(task,w,wo)||'';}catch(e){console.warn('[b1233] REP-Auftrag:',e);}}
+    showToast('✓ Rep.-Datei geschrieben: '+erg.name+(erg.ersetzt?' (ersetzt)':'')+' · Ordner „'+MFREP_ORDNER+'“'+(kopiert?' · BV in der Zwischenablage':'')
+      +(gefuellt.length?' · Karte: '+gefuellt.join(', '):'')+(rep==='neu'?' · 🔧 REP-Auftrag angelegt':(rep==='ergaenzt'?' · 🔧 REP-Auftrag ergänzt':'')),'success',9000);
   }catch(e){console.warn('[b1229] Rep. für MF dach:',e);showToast('⚠ Rep.-Datei nicht geschrieben: '+((e&&e.message)||e),'error',8000);}
 }
 
+// ══ b1233: „📄 Rep. für MF dach“ Teil 1 + 3 – Karte füllen, REP-Auftrag gleich mit anlegen, Rückmeldung aus MF dach ══
+// Frank 18.10.2026: „baue – Teil 1 bis 3 wie im Entwurf, Häkchen standardmäßig an, Werkzeug erstmal per Knopf, Rep.-Nr. nach
+// dem Drucken.“ Teil 1 (beim „Datei schreiben“): leere Kartenfelder (Adresse, Schadensbild, Mieter-Kontakt) aus dem Prüf-
+// Fenster füllen und – Häkchen – den „🔧 REP-Auftrag“ (formulare.js, F42) an der Karte anlegen bzw. den vorhandenen ergänzen;
+// nie einen zweiten. Teil 2 ist das Werkzeug „MF-Rückmeldung“ (Ordner 28, Doppelklick am Büro-PC): es liest die Rep.-Dateien
+// von MF dach NUR lesend und legt MF-Rueckmeldung.json in den Drive-Ordner „MF-Import“. Teil 3: Beim Öffnen einer Karte mit
+// Rep.-Vermerk sucht PAM dort den Rep. mit demselben BV und fragt, ob Kostenstelle, Kunden-Nr. und Rep.-Nr. übernommen werden
+// – nur LEERE Felder, nur auf Ja. Die Rep.-Nr. vergibt MF erst beim Drucken, Exportieren oder Umwandeln (vorher „$“).
+// ⛔ Das Kartenfenster legt beim Speichern seine Maske über die Karte, das E-Mail-Fenster schreibt seine Arbeitskopie komplett
+// zurück (_emFlushToLive) – darum Kartenfenster über die Maske, sonst ALLE Fassungen der Karte (Lehre b1220).
+// Nur erfundene Beispiele in diesen Kommentaren – index.html ist öffentlich.
+var MFRUECK_DATEI='MF-Rueckmeldung.json';
+var _mfRueckCache={zeit:0,daten:null};
+var _mfRueckNein={};
+function _mfRepAdresseZeile(w){
+  const s=String((w&&w.strasse)||'').trim();
+  const po=[String((w&&w.plz)||'').trim(),String((w&&w.ort)||'').trim()].filter(Boolean).join(' ');
+  return s?(po?s+', '+po:s):'';
+}
+function _mfRepKontaktDa(liste,name,tel,mail){
+  const norm=function(s){return String(s||'').trim().toLowerCase();}, nr=function(s){return norm(s).replace(/[^0-9+]/g,'');};
+  const n=norm(name),t=nr(tel),e=norm(mail);
+  if(!n&&!t&&!e)return true;
+  return (Array.isArray(liste)?liste:[]).some(function(k){
+    if(!k)return false;
+    return !!((n&&norm(k.name)===n)||(t&&(nr(k.tel)===t||nr(k.tel2)===t))||(e&&norm(k.email)===e));
+  });
+}
+// Alle Fassungen der Karte im Speicher: die übergebene, die in boards[] und die Arbeitskopie des E-Mail-Fensters.
+function _mfRepFassungen(task){
+  const raus=[];
+  const dazu=function(x){if(x&&raus.indexOf(x)<0)raus.push(x);};
+  dazu(task);
+  try{if(task&&task.id&&typeof findTaskById==='function')dazu(findTaskById(task.id));}catch(e){}
+  try{if(typeof _emCurrentTask!=='undefined'&&_emCurrentTask&&task&&_emCurrentTask.id===task.id)dazu(_emCurrentTask);}catch(e){}
+  return raus;
+}
+function _mfRepKartenfensterOffen(task){
+  const tid=(document.getElementById('taskId')||{}).value||'';
+  return !!(task&&task.id&&tid===task.id&&document.getElementById('tAdr'));
+}
+// Teil 1a: leere Kartenfelder füllen. Rückgabe: Liste der gefüllten Felder.
+function _mfRepKarteFuellen(task,w,wo){
+  const raus=[];
+  const adr=_mfRepAdresseZeile(w), sch=String((w&&w.schaden)||'').trim(), mie=String((w&&w.mieter)||'').trim();
+  const tel=String((w&&w.tel)||'').trim(), mob=String((w&&w.mobil)||'').trim(), mail=String((w&&w.email)||'').trim();
+  const t1=tel||mob, t2=(tel&&mob)?mob:'';
+  if(wo==='task'&&_mfRepKartenfensterOffen(task)){
+    // wie „📂 Akte“: nur leere Felder, Kontakt nur, wenn es ihn noch nicht gibt; dann sofort speichern (der REP-Auftrag liest die Karte)
+    const leer=function(id,wert,name){const el=document.getElementById(id);if(!el||!wert||String(el.value||'').trim())return;el.value=wert;raus.push(name);};
+    leer('tAdr',adr,'Adresse');
+    leer('tSch',sch,'Schadensbild');
+    if(mie&&typeof addKontaktPTP==='function'&&typeof _kontaktSchonDa==='function'&&!_kontaktSchonDa(mie,t1,mail)){
+      addKontaktPTP('mieter',mie,t1,mail,false,t2);raus.push('Mieter');
+    }
+    if(raus.length){
+      if(typeof saveTaskData==='function'){try{saveTaskData();}catch(e){console.warn('[b1233] Speichern:',e);}}
+      else if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
+    }
+    return raus;
+  }
+  const fass=_mfRepFassungen(task);
+  const setze=function(k,wert,name){if(!wert)return;let n=false;fass.forEach(function(z){if(!String(z[k]||'').trim()){z[k]=wert;n=true;}});if(n)raus.push(name);};
+  setze('adresse',adr,'Adresse');
+  setze('schadensbild',sch,'Schadensbild');
+  if(mie){
+    let n=false;
+    fass.forEach(function(z){
+      if(!Array.isArray(z.kontakte))z.kontakte=[];
+      if(!_mfRepKontaktDa(z.kontakte,mie,t1,mail)){z.kontakte.push({rolle:'mieter',name:mie,tel:t1,tel2:t2,email:mail});n=true;}
+    });
+    if(n)raus.push('Mieter');
+  }
+  if(raus.length&&typeof autoSave==='function')autoSave();
+  return raus;
+}
+// Teil 1b: Kopf des REP-Auftrags – Lücken aus dem Prüf-Fenster (nur leere Felder).
+function _mfRepRepKopf(b,w){
+  if(!b||!b.kopf)return 0;
+  const v={objektAdresse:_mfRepAdresseZeile(w),ansprechpartner:String((w&&w.mieter)||'').trim(),telefon:String((w&&(w.tel||w.mobil))||'').trim(),schadensbild:String((w&&w.schaden)||'').trim()};
+  let n=0;
+  Object.keys(v).forEach(function(k){if(v[k]&&!String(b.kopf[k]||'').trim()){b.kopf[k]=v[k];n++;}});
+  return n;
+}
+// REP-Auftrag an der Karte anlegen (wie „📋 Formulare → + → 🔧 REP-Auftrag“, nur ohne Fenster) oder den vorhandenen
+// ergänzen – nie einen zweiten. Rückgabe 'neu' | 'ergaenzt' | ''.
+function _mfRepRepAuftrag(task,w,wo){
+  if(typeof _fsRaNeuerBericht!=='function'||typeof _fsIstRep!=='function')return '';
+  const live=(task&&task.id&&typeof findTaskById==='function')?(findTaskById(task.id)||null):null;
+  const haupt=live||task;
+  if(!haupt)return '';
+  if(!Array.isArray(haupt.pruefberichte))haupt.pruefberichte=[];
+  const reps=haupt.pruefberichte.filter(function(b){return _fsIstRep(b);});
+  let erg='';
+  if(reps.length){
+    const b=reps[reps.length-1];
+    const n=((typeof _fsRaErgaenzen==='function')?_fsRaErgaenzen(b,haupt):0)+_mfRepRepKopf(b,w);
+    if(n)erg='ergaenzt';
+  }else{
+    const b=_fsRaNeuerBericht(haupt);
+    _mfRepRepKopf(b,w);
+    if(!b.mitarbeiter){try{const wer=String(localStorage.getItem('pam_fs_ra_mitarbeiter')||localStorage.getItem('pam_fs_aufgenommen')||'').trim();if(wer)b.mitarbeiter=wer;}catch(e){}}
+    haupt.pruefberichte.push(b);
+    erg='neu';
+  }
+  _mfRepFassungen(task).forEach(function(z){if(z!==haupt)z.pruefberichte=haupt.pruefberichte;});
+  if(erg){
+    if(typeof scheduleSave==='function')scheduleSave();else if(typeof autoSave==='function')autoSave();
+    if(wo==='task'){try{if(typeof renderPruefberichteDesktop==='function')renderPruefberichteDesktop();}catch(e){}}
+  }
+  return erg;
+}
+// ── Teil 3: Rückmeldung aus MF dach ──
+function _mfRueckNorm(s){return String(s||'').replace(/\s+/g,' ').trim().replace(/[.\s]+$/,'').toLowerCase();}
+// Welche BV hat PAM für diese Karte an MF dach geschickt? Steht im Vermerk „📄 Rep.-Datei für MF dach geschrieben: … · BV: …“.
+function _mfRueckBvs(task){
+  const raus=[];
+  ((task&&Array.isArray(task.notizVerlauf))?task.notizVerlauf:[]).forEach(function(z){
+    const t=(z&&typeof z.text==='string')?z.text:'';
+    if(t.indexOf(_MFREP_MARKE)!==0)return;
+    const i=t.indexOf(' · BV: ');
+    if(i<0)return;
+    const bv=_mfRueckNorm(t.slice(i+7));
+    if(bv&&raus.indexOf(bv)<0)raus.push(bv);
+  });
+  return raus;
+}
+// Der passende Rep. aus der Rückmeldung: gleiches BV; bei mehreren der zuletzt geänderte.
+function _mfRueckTreffer(task,daten){
+  const bvs=_mfRueckBvs(task);
+  if(!bvs.length||!daten||!Array.isArray(daten.reps))return null;
+  const passt=daten.reps.filter(function(r){return r&&bvs.indexOf(_mfRueckNorm(r.bv))>=0;});
+  if(!passt.length)return null;
+  passt.sort(function(a,b){return String(b.geaendert||'').localeCompare(String(a.geaendert||''));});
+  return passt[0];
+}
+// Was an der Karte steht – im offenen Kartenfenster aus der Maske (dort kann schon etwas getippt sein).
+function _mfRueckKartenwerte(task,wo){
+  if(wo==='task'&&_mfRepKartenfensterOffen(task)){
+    const g=function(id){return String((document.getElementById(id)||{}).value||'').trim();};
+    return {kst:g('taskTagsInput'),kundenNr:g('taskKundenNr'),repNr:g('taskRepNr')};
+  }
+  const t=task||{};
+  return {kst:(Array.isArray(t.tags)?t.tags:[]).map(function(x){return String(x||'').trim();}).filter(Boolean).join(', '),kundenNr:String(t.kundenNr||'').trim(),repNr:String(t.repNr||'').trim()};
+}
+// Was davon fehlt? Nur LEERE Felder – was an der Karte steht, bleibt. Rep.-Nr. nur, wenn MF sie schon vergeben hat (Ziffern).
+function _mfRueckVorschlag(werte,r){
+  if(!werte||!r)return null;
+  const v={};
+  if(String(r.kst||'').trim()&&!werte.kst)v.kst=String(r.kst).trim();
+  if(String(r.kundenNr||'').trim()&&!werte.kundenNr)v.kundenNr=String(r.kundenNr).trim();
+  if(/^\d+$/.test(String(r.repNr||'').trim())&&!werte.repNr)v.repNr=String(r.repNr).trim();
+  return Object.keys(v).length?v:null;
+}
+// MF-Rueckmeldung.json aus dem Drive-Ordner „MF-Import“ (30 s zwischengespeichert).
+async function _mfRueckLaden(){
+  if(_mfRueckCache.daten&&Date.now()-_mfRueckCache.zeit<30000)return _mfRueckCache.daten;
+  const ord=await _mfRepOrdner();
+  const q="name='"+MFRUECK_DATEI+"' and '"+ord+"' in parents and trashed=false";
+  const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q)+'&fields=files(id,modifiedTime)&orderBy=modifiedTime desc&pageSize=1',{headers:{Authorization:'Bearer '+gdriveToken}});
+  if(!r.ok)return null;
+  const j=await r.json();
+  const f=j&&j.files&&j.files[0];
+  if(!f){_mfRueckCache={zeit:Date.now(),daten:{reps:[]}};return _mfRueckCache.daten;}
+  const m=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(f.id)+'?alt=media',{headers:{Authorization:'Bearer '+gdriveToken}});
+  if(!m.ok)return null;
+  let daten=null;
+  try{daten=JSON.parse(await m.text());}catch(e){return null;}
+  if(!daten||!Array.isArray(daten.reps))return null;
+  _mfRueckCache={zeit:Date.now(),daten:daten};
+  return daten;
+}
+function _mfRueckFragen(r,v){
+  return new Promise(function(resolve){
+    const e=(typeof _escHtml==='function')?_escHtml:function(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');};
+    const alt=document.getElementById('_mfRueckFrage');if(alt)alt.remove();
+    const ov=document.createElement('div');
+    ov.id='_mfRueckFrage';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100003;display:flex;align-items:center;justify-content:center;padding:16px;';
+    const zeile=function(n,w){return '<div style="display:flex;gap:10px;font-size:13px;margin-top:6px;"><span style="width:110px;color:var(--text2);">'+n+'</span><b style="color:var(--text);">'+e(w)+'</b></div>';};
+    const ohneNr=!v.repNr&&!/^\d+$/.test(String(r.repNr||'').trim());
+    ov.innerHTML='<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:18px 22px;min-width:340px;max-width:520px;box-shadow:0 8px 32px rgba(0,0,0,.5);">'
+      +'<div style="font-size:14px;font-weight:700;color:var(--text);">📄 Aus MF dach übernehmen?</div>'
+      +'<div style="font-size:12px;color:var(--text2);margin-top:6px;line-height:1.5;">Zu dieser Karte gibt es in MF dach den Rep. <b>'+e(r.datei||'')+'</b>. Übernommen wird nur, was an der Karte noch leer ist.</div>'
+      +(v.kst?zeile('Kostenstelle',v.kst):'')+(v.kundenNr?zeile('Kunden-Nr.',v.kundenNr):'')+(v.repNr?zeile('Rep.-Nr.',v.repNr):'')
+      +(ohneNr?'<div data-mfrueck-ohnenr="1" style="font-size:11px;color:var(--text2);margin-top:10px;line-height:1.45;">Rep.-Nr.: noch keine – MF vergibt sie beim Drucken, Exportieren oder Umwandeln. Danach fragt PAM noch einmal.</div>':'')
+      +'<div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;">'
+      +'<button data-mfrueck="nein" style="padding:7px 14px;border-radius:7px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:13px;cursor:pointer;">Nicht jetzt</button>'
+      +'<button data-mfrueck="ja" style="padding:7px 14px;border-radius:7px;border:1px solid var(--accent);background:var(--accent);color:#fff;font-size:13px;font-weight:700;cursor:pointer;">✓ Übernehmen</button>'
+      +'</div></div>';
+    document.body.appendChild(ov);
+    const weg=function(x){try{ov.remove();}catch(err){}resolve(x);};
+    ov.addEventListener('click',function(ev){
+      if(ev.target===ov){weg(false);return;}
+      const k=ev.target&&ev.target.getAttribute&&ev.target.getAttribute('data-mfrueck');
+      if(k)weg(k==='ja');
+    });
+  });
+}
+// Übernehmen: Kartenfenster über die Maske (dann speichern), sonst alle Fassungen; danach den Kopf der REP-Aufträge
+// nachziehen (nur leere Felder). Rückgabe: Liste des Übernommenen.
+function _mfRueckUebernehmen(task,v,wo){
+  const raus=[];
+  if(wo==='task'&&_mfRepKartenfensterOffen(task)){
+    const leer=function(id,wert,name){const el=document.getElementById(id);if(!el||!wert||String(el.value||'').trim())return;el.value=wert;raus.push(name);};
+    leer('taskTagsInput',v.kst,'Kostenstelle');
+    leer('taskKundenNr',v.kundenNr,'Kunden-Nr.');
+    leer('taskRepNr',v.repNr,'Rep.-Nr.');
+    if(raus.length){
+      if(typeof saveTaskData==='function'){try{saveTaskData();}catch(e){console.warn('[b1233] Speichern:',e);}}
+      else if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
+      try{if(typeof _updateHdrMeta==='function')_updateHdrMeta();}catch(e){}
+    }
+  }else{
+    const fass=_mfRepFassungen(task);
+    let a=false,b=false,c=false;
+    fass.forEach(function(z){
+      if(v.kst&&!(Array.isArray(z.tags)?z.tags:[]).some(function(x){return String(x||'').trim();})){z.tags=[v.kst];a=true;}
+      if(v.kundenNr&&!String(z.kundenNr||'').trim()){z.kundenNr=v.kundenNr;b=true;}
+      if(v.repNr&&!String(z.repNr||'').trim()){z.repNr=v.repNr;c=true;}
+    });
+    if(a)raus.push('Kostenstelle');if(b)raus.push('Kunden-Nr.');if(c)raus.push('Rep.-Nr.');
+  }
+  try{
+    let n=0;
+    if(typeof _fsIstRep==='function'&&typeof _fsRaErgaenzen==='function'){
+      _mfRepFassungen(task).forEach(function(z){(Array.isArray(z.pruefberichte)?z.pruefberichte:[]).forEach(function(b){if(_fsIstRep(b))n+=_fsRaErgaenzen(b,z);});});
+    }
+    if(n)raus.push('REP-Auftrag');
+  }catch(e){console.warn('[b1233] REP-Kopf:',e);}
+  if(raus.length){if(typeof scheduleSave==='function')scheduleSave();else if(typeof autoSave==='function')autoSave();}
+  return raus;
+}
+// Beim Öffnen einer Karte (Kartenfenster 'task' / E-Mail-Fenster 'em'): nur bei Rep.-Vermerk mit BV und einer Lücke
+// bei Kostenstelle, Kunden-Nr. oder Rep.-Nr.; kurz warten, dann nachsehen. „Nicht jetzt“ gilt bis zum Neuladen.
+function _mfRueckBeimOeffnen(task,wo){
+  if(!task||!task.id||!_mfRueckBvs(task).length)return false;
+  const w=_mfRueckKartenwerte(task,wo);
+  if(w.kst&&w.kundenNr&&w.repNr)return false;
+  if(typeof gdriveToken==='undefined'||!gdriveToken)return false;
+  if(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB)return false;
+  const id=task.id;
+  setTimeout(function(){_mfRueckPruefen(id,wo).catch(function(e){console.warn('[b1233] MF-Rückmeldung:',e);});},1500);
+  return true;
+}
+async function _mfRueckPruefen(id,wo){
+  const offen=function(){
+    if(wo==='task')return ((document.getElementById('taskId')||{}).value||'')===id;
+    return typeof _emCurrentTask!=='undefined'&&!!_emCurrentTask&&_emCurrentTask.id===id;
+  };
+  const karte=function(){return (wo==='em')?_emCurrentTask:((typeof findTaskById==='function')?findTaskById(id):null);};
+  if(!offen()||!karte())return null;
+  const daten=await _mfRueckLaden();
+  if(!daten||!offen())return null;
+  const r=_mfRueckTreffer(karte(),daten);
+  if(!r)return null;
+  const v=_mfRueckVorschlag(_mfRueckKartenwerte(karte(),wo),r);
+  if(!v)return null;
+  const schl=id+'|'+(v.kst||'')+'|'+(v.kundenNr||'')+'|'+(v.repNr||'');
+  if(_mfRueckNein[schl])return null;
+  const ja=await _mfRueckFragen(r,v);
+  if(!ja){_mfRueckNein[schl]=1;return 'nein';}
+  if(!offen()||!karte())return null;
+  const raus=_mfRueckUebernehmen(karte(),v,wo);
+  if(raus.length&&typeof showToast==='function')showToast('✓ Aus MF dach übernommen: '+raus.join(', '),'success',6000);
+  return raus;
+}
 function updateGcalModalBtn(){
   const status=document.getElementById('taskStatusInput').value||'';
   const isAH=status.toLowerCase().includes('außerhaus');
@@ -64274,6 +64551,7 @@ function openEmailTaskModal(task,board){
   if(_gbtn)_gbtn.style.display=(typeof gmailToken!=='undefined'&&gmailToken)?'':'none';
   _emUpdateTop2();
   try{if(typeof _mfRepStandZeichnen==='function')_mfRepStandZeichnen(_emCurrentTask);}catch(e){} // b1229
+  try{if(typeof _mfRueckBeimOeffnen==='function')_mfRueckBeimOeffnen(_emCurrentTask,'em');}catch(e){} // b1233: Kostenstelle/Rep.-Nr. aus MF dach
   _renderEmailMailList();
   // Board-Task-Liste Badge initialisieren
   setTimeout(function(){_pamInitBoardTaskListBadge('em');}, 50);
@@ -70659,6 +70937,7 @@ function openEditTaskModal(id){
      also unabhaengig davon, ob die Felder oben schon gefuellt sind. */
   try{if(typeof _objZuordnungAnzeige==='function')_objZuordnungAnzeige();}catch(e){console.warn('[b820] Anzeige:',e);}
   openModal();
+  try{if(typeof _mfRueckBeimOeffnen==='function')_mfRueckBeimOeffnen(task,'task');}catch(e){console.warn('[b1233] MF-Rückmeldung:',e);} // b1233: Kostenstelle/Rep.-Nr. aus MF dach
   // Alle Sektionen bleiben beim Öffnen geschlossen (User öffnet selbst)
   }catch(err){
     console.error('openEditTaskModal Fehler:',err);
