@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F86';
+const PAM_FORMULARE_VERSION='F87';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -8824,9 +8824,9 @@ async function _fsPvPdfFeldFotos(doc,b,y,M,W){
       const pf=await _fsFotoFuerPdf(fo);
       if(!pf||!pf.dataUrl)continue;
       const pfP=(typeof _fsFpEinbrennen==='function')?await _fsFpEinbrennen(pf,fo):pf; /* F85: Pins daraufgezeichnet */
-      const iW=55,iH=42;
+      const iW=55,iH=42,bm=(typeof _fsPdfBildMass==='function')?_fsPdfBildMass(pfP,iW,iH):{w:iW,h:iH,dx:0,dy:0}; /* F87: Seitenverhältnis bleibt */
       if(y+iH+8>285){doc.addPage();y=M;}
-      doc.addImage(pfP.dataUrl,'JPEG',M+(col*(iW+4)),y,iW,iH);
+      doc.addImage(pfP.dataUrl,'JPEG',M+(col*(iW+4))+bm.dx,y+bm.dy,bm.w,bm.h);
       col++;
       if(col>=3){y+=iH+6;col=0;}
     }
@@ -8835,6 +8835,22 @@ async function _fsPvPdfFeldFotos(doc,b,y,M,W){
   }
   doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);
   return y;
+}
+/* ── F87: HOCHKANT-FOTOS IN DEN PDFS VON DACH-, PV- UND PRÜFPROTOKOLL BEHALTEN IHR SEITENVERHÄLTNIS ───────────────────────────────────────────
+   Frank, 19.10.2026 („baue“, beim Versuch zu F85: das hochkant aufgenommene Eckfoto sah im PDF doppelt so breit aus wie im Fenster). Bisher wurde
+   jedes Foto in einen festen Querkasten gezwängt – 55 × 42 mm an Prüfpunkt, Modulfeld und Anschlagpunkt, 85 × 62 mm in der Fotodokumentation –
+   und dabei gestaucht oder gedehnt. Jetzt rechnet _fsPdfBildMass das Foto in den Kasten hinein, ohne es zu verzerren: die lange Seite bekommt
+   das Kastenmaß, die andere folgt dem Seitenverhältnis, das Bild sitzt waagerecht mittig und oben im Kasten. Reihenhöhen, Spalten und
+   Beschriftungen bleiben, wie sie sind (ein 4:3-Foto quer ändert sich praktisch nicht). Ohne bekannte Bildmaße bleibt es beim Kasten.
+   Die Vorabbesichtigung rechnet seit F76 selbst (_fsFotoReihe) und ist unberührt. ⛔ Die PDF-Funktionen rufen den Helfer nur mit typeof-Wache –
+   ältere Prüfungen schneiden sie einzeln aus. */
+function _fsPdfBildMass(d,bw,bh){
+  bw=+bw;bh=+bh;
+  const r=(d&&+d.w>0&&+d.h>0)?(+d.w/+d.h):(bw/bh);
+  let w=bw,h=bw/r;
+  if(h>bh){h=bh;w=bh*r;}
+  w=Math.max(1,Math.round(w*10)/10);h=Math.max(1,Math.round(h*10)/10); /* nie unter 1 mm (test_f87: 1 × 9999 ergab 0) */
+  return {w:w,h:h,dx:Math.round((bw-w)/2*10)/10,dy:0};
 }
 /* ── F85: „📌 PINS IM FOTO“ AUCH IM DACH-, PV- UND PRÜFPROTOKOLL · „🗺 PLAN (FOTO)“ · P81 (DACHSKIZZE IM PRÜFPROTOKOLL NACH OBEN) ─────────────
    Frank, 18.10.2026 (P84 Bauplan D, „baue D wie im Bauplan, P81 gleich mit“): „Wie kann ich einen Dachplan oder ein Bild als Vorlage verwenden …
@@ -9982,9 +9998,9 @@ async function _fsWpPdf(bericht,task){
         for(const f of liste){
           const pf=await bildLaden(f);
           if(!pf||!pf.dataUrl)continue;
-          const iW=55,iH=42;
+          const iW=55,iH=42,bm=(typeof _fsPdfBildMass==='function')?_fsPdfBildMass(pf,iW,iH):{w:iW,h:iH,dx:0,dy:0}; /* F87: Seitenverhältnis bleibt */
           if(y+iH+8>285){doc.addPage();y=M;}
-          doc.addImage(pf.dataUrl,'JPEG',M+(col2*(iW+4)),y,iW,iH);
+          doc.addImage(pf.dataUrl,'JPEG',M+(col2*(iW+4))+bm.dx,y+bm.dy,bm.w,bm.h);
           col2++;
           if(col2>=3){y+=iH+6;col2=0;}
         }
@@ -10044,14 +10060,14 @@ async function _fsWpPdf(bericht,task){
         const f=fotoList[fi];
         const pf=await bildLaden(f);
         if(!pf||!pf.dataUrl){console.warn('[Wartung] Foto übersprungen:',f.name);continue;}
-        const iW=85,iH=62;
+        const iW=85,iH=62,bm=(typeof _fsPdfBildMass==='function')?_fsPdfBildMass(pf,iW,iH):{w:iW,h:iH,dx:0,dy:0}; /* F87: Seitenverhältnis bleibt */
         if(col===0){
           if(y+iH+12>285){doc.addPage();y=M;}
           if(erstes){doc.setFillColor(230,244,235);doc.rect(M,y,W-2*M,7,'F');doc.setFontSize(9);doc.setFont('helvetica','bold');doc.setTextColor(26,92,58);doc.text('Fotodokumentation',M+2,y+5);y+=10;erstes=false;}
-          doc.addImage(pf.dataUrl,'JPEG',M,y,iW,iH);
+          doc.addImage(pf.dataUrl,'JPEG',M+bm.dx,y+bm.dy,bm.w,bm.h); /* F87 */
           links=f; // Beschriftung der linken Spalte wird beim rechten Bild gesetzt
         }else{
-          doc.addImage(pf.dataUrl,'JPEG',M+iW+6,y,iW,iH);
+          doc.addImage(pf.dataUrl,'JPEG',M+iW+6+bm.dx,y+bm.dy,bm.w,bm.h); /* F87 */
           doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(100,100,100);
           doc.text(doc.splitTextToSize((links&&links.name)||'',iW),M,y+iH+3);
           doc.text(doc.splitTextToSize(f.name||'',iW),M+iW+6,y+iH+3);
@@ -10543,16 +10559,16 @@ async function _fsAnPdf(bericht,task){
       const liste=_fsZeilenFotos(fotos,p.fotoRefs).map(x=>x.f);if(!liste.length)continue;
       if(y>265){doc.addPage();y=M;}
       doc.setFontSize(8);doc.setFont('helvetica','italic');doc.setTextColor(100,100,100);doc.text('Fotos zu: Anschlagpunkt '+p.nr+(p.typ?' · '+p.typ:''),M,y);y+=4;doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);
-      let col=0;for(const f of liste){const pf=await bildLaden(f);if(!pf||!pf.dataUrl)continue;if(y+42+8>285){doc.addPage();y=M;}doc.addImage(pf.dataUrl,'JPEG',M+(col*59),y,55,42);col++;if(col>=3){y+=48;col=0;}}
+      let col=0;for(const f of liste){const pf=await bildLaden(f);if(!pf||!pf.dataUrl)continue;if(y+42+8>285){doc.addPage();y=M;}{const bm=(typeof _fsPdfBildMass==='function')?_fsPdfBildMass(pf,55,42):{w:55,h:42,dx:0,dy:0};doc.addImage(pf.dataUrl,'JPEG',M+(col*59)+bm.dx,y+bm.dy,bm.w,bm.h);} /* F87: Seitenverhältnis bleibt */col++;if(col>=3){y+=48;col=0;}}
       if(col>0)y+=48;
       if(typeof _fsFpPdfLegende==='function')y=_fsFpPdfLegende(doc,liste,y,M,W); /* F85: Markiert-Zeile (Anschlagpunkt) */
     }
     const fotoList=fotos.filter(f=>f&&f.inReport===true&&(f.editedDriveId||f.driveId||f.localUrl||f.localKey)); /* F74: eigene Schreibweise – test_f10 ankert die Zeile des Dachprotokolls */
     if(fotoList.length){
       let col=0,erstes=true,links=null;
-      for(const f of fotoList){const pf=await bildLaden(f);if(!pf||!pf.dataUrl)continue;const iW=85,iH=62;
-        if(col===0){if(y+iH+12>285){doc.addPage();y=M;}if(erstes){kap('Fotodokumentation');erstes=false;}doc.addImage(pf.dataUrl,'JPEG',M,y,iW,iH);links=f;}
-        else{doc.addImage(pf.dataUrl,'JPEG',M+iW+6,y,iW,iH);doc.setFontSize(7);doc.setTextColor(100,100,100);doc.text(doc.splitTextToSize((links&&links.name)||'',iW),M,y+iH+3);doc.text(doc.splitTextToSize(f.name||'',iW),M+iW+6,y+iH+3);doc.setTextColor(0,0,0);y+=iH+10;}
+      for(const f of fotoList){const pf=await bildLaden(f);if(!pf||!pf.dataUrl)continue;const iW=85,iH=62,bm=(typeof _fsPdfBildMass==='function')?_fsPdfBildMass(pf,iW,iH):{w:iW,h:iH,dx:0,dy:0}; /* F87: Seitenverhältnis bleibt */
+        if(col===0){if(y+iH+12>285){doc.addPage();y=M;}if(erstes){kap('Fotodokumentation');erstes=false;}doc.addImage(pf.dataUrl,'JPEG',M+bm.dx,y+bm.dy,bm.w,bm.h);links=f;}
+        else{doc.addImage(pf.dataUrl,'JPEG',M+iW+6+bm.dx,y+bm.dy,bm.w,bm.h);doc.setFontSize(7);doc.setTextColor(100,100,100);doc.text(doc.splitTextToSize((links&&links.name)||'',iW),M,y+iH+3);doc.text(doc.splitTextToSize(f.name||'',iW),M+iW+6,y+iH+3);doc.setTextColor(0,0,0);y+=iH+10;}
         col=(col+1)%2;}
       if(col===1){doc.setFontSize(7);doc.setTextColor(100,100,100);doc.text(doc.splitTextToSize((links&&links.name)||'',85),M,y+62+3);doc.setTextColor(0,0,0);y+=72;}
     }
