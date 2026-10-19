@@ -10416,6 +10416,8 @@ function _pamGuestSubmit(){
                stehen: bestehende Lade- und Anzeigewege sprechen sie an. -->
           <div style="display:flex;gap:5px;align-items:center;margin-top:3px;">
             <span style="flex:1;"></span>
+            <!-- b1239: „📦 Archivieren“ links neben „Löschen“ – Mail behalten, aus dem Eingang nehmen (Frank 19.10.2026, Entwurf Variante A) -->
+            <button class="em-action-btn" id="emArchivBtn" style="width:auto;margin:0;padding:5px 12px;font-size:11px;" onclick="_emArchivieren()" title="Mail behalten: die Karte kommt ins 📦 Archiv – Mails, Anhänge und Drive-Ordner bleiben, in Outlook ändert sich nichts">📦 Archivieren</button>
             <button class="em-action-btn danger" style="width:auto;margin:0;padding:5px 12px;font-size:11px;" onclick="_emDeleteTask()" title="Diesen Task l&ouml;schen">&#128465; L&ouml;schen</button>
           </div>
           <div id="emMehrMenu" style="display:none;">
@@ -10716,7 +10718,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-19 · #1238'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-19-b1238) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-19 · #1239'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-19-b1239) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -11147,7 +11149,7 @@ const SYNC_FILE_NAME='pam_workboard_sync.json';
 const SYNC_SOURCE='pam';
 // syncPollingId: früh deklariert
 // _ptpLastSyncReadAt: früh deklariert
-let filters = {archiv:false,spaeterBearbeiten:false,archivJahr:'',archivMonat:'',spaeterJahr:'',spaeterMonat:''}; // #444: tote Filter owner/ampel/tag entfernt
+let filters = {archiv:false,spaeterBearbeiten:false,archivJahr:'',archivMonat:'',archivArt:'',spaeterJahr:'',spaeterMonat:''}; // #444: tote Filter owner/ampel/tag entfernt · b1239: archivArt '' / 'mail' / 'ohne'
 // Archivierte Tasks liegen NICHT mehr im jeweiligen Projekt-Array (boards[k]), sondern hier,
 // damit sie ein Löschen des Ursprungsprojekts überleben (siehe archiveTask()/restoreTask()).
 let archivedTasks = [];
@@ -18664,6 +18666,8 @@ function getTasks(_ohneObjFilter,_ohneStatusFilter){
     t=archivedTasks.slice();
     if(filters.archivJahr)t=t.filter(x=>(x.archiviertAm||'').slice(0,4)===filters.archivJahr);
     if(filters.archivMonat)t=t.filter(x=>(x.archiviertAm||'').slice(5,7)===filters.archivMonat);
+    if(filters.archivArt==='mail')t=t.filter(_archivIstMail);              // b1239: Auswahl „Art“
+    else if(filters.archivArt==='ohne')t=t.filter(x=>!_archivIstMail(x));
   } else if(filters.spaeterBearbeiten){
     // Später-bearbeiten-Modus: alle so markierten Tasks aus ALLEN Boards sammeln
     t=[];
@@ -21806,11 +21810,18 @@ function renderKanban(){
       +'</select>'
       +'<select onchange="filters.archivMonat=this.value;render();" style="flex:1;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:13px;">'
       +'<option value="">Monat: alle</option>'+_monate.map(m=>'<option value="'+m[0]+'"'+(filters.archivMonat===m[0]?' selected':'')+'>'+m[1]+'</option>').join('')
+      +'</select>'
+      // b1239 (Frank 19.10.2026): „Art“ – Mails ein- und ausblenden (Mail = Karte aus einem E-Mail-Board, _archivIstMail)
+      +'<select id="archivArtSel" onchange="filters.archivArt=this.value;render();" title="Mails ein- oder ausblenden – „Mail“ = Karte aus dem E-Mail-Eingang oder aus „Angebote Lieferanten“" style="flex:1;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:13px;">'
+      +[['','Art: alle'],['mail','✉ nur Mails'],['ohne','ohne Mails']].map(a=>'<option value="'+a[0]+'"'+((filters.archivArt||'')===a[0]?' selected':'')+'>'+a[1]+'</option>').join('')
       +'</select></div>';
     const _wasSearchFocused=document.activeElement&&document.activeElement.id==='archivSearchInput';
     const _searchCursor=_wasSearchFocused?document.activeElement.selectionStart:null;
-    if(!tasks.length){mc.innerHTML='<div style="max-width:900px;margin:24px auto;padding:0 16px;">'+_filterRow+'<div style="text-align:center;padding:60px 20px;color:var(--text2);font-size:15px;">📦 Archiv ist leer</div></div>';}
-    else{mc.innerHTML='<div style="max-width:900px;margin:24px auto;padding:0 16px;">'+_filterRow+'<div style="font-size:13px;color:var(--text2);margin-bottom:16px;">'+tasks.length+' archivierte Task'+(tasks.length!==1?'s':'')+'</div>'+tasks.map(archiveCardHTML).join('')+'</div>';}
+    // b1239: „davon N Mails“ nur bei „Art: alle“. Leer nur wegen der Auswahl ≠ Archiv leer – sonst sähe eine Mail verloren aus.
+    const _nMail=filters.archivArt?0:tasks.filter(_archivIstMail).length;
+    const _leerText=archivedTasks.length?'📦 Nichts gefunden – Auswahl oben ändern':'📦 Archiv ist leer';
+    if(!tasks.length){mc.innerHTML='<div style="max-width:900px;margin:24px auto;padding:0 16px;">'+_filterRow+'<div style="text-align:center;padding:60px 20px;color:var(--text2);font-size:15px;">'+_leerText+'</div></div>';}
+    else{mc.innerHTML='<div style="max-width:900px;margin:24px auto;padding:0 16px;">'+_filterRow+'<div style="font-size:13px;color:var(--text2);margin-bottom:16px;">'+tasks.length+' archivierte Task'+(tasks.length!==1?'s':'')+(_nMail?' · davon '+_nMail+' Mail'+(_nMail!==1?'s':''):'')+'</div>'+tasks.map(archiveCardHTML).join('')+'</div>';}
     if(_wasSearchFocused){
       const _si=document.getElementById('archivSearchInput');
       if(_si){_si.focus();if(_searchCursor!=null)_si.setSelectionRange(_searchCursor,_searchCursor);}
@@ -24077,6 +24088,7 @@ function _pamOpenArchivedTask(taskId){
   filters.spaeterBearbeiten=false;
   filters.archivJahr='';
   filters.archivMonat='';
+  filters.archivArt=''; // b1239: sonst fehlt der Treffer, wenn „Art“ noch auf „nur Mails“/„ohne Mails“ stand
   searchQuery='';
   const btn=document.getElementById('archivFilterBtn');
   if(btn){btn.classList.add('active');btn.textContent='📦 Archiv ✓';}
@@ -29191,6 +29203,7 @@ function toggleArchivFilter(){
   if(filters.archiv){
     filters.spaeterBearbeiten=false;
     filters.archivJahr=String(new Date().getFullYear());
+    filters.archivArt=''; // b1239: „Art“ startet immer auf „alle“ – nie sieht eine Mail verloren aus
   }
   const btn=document.getElementById('archivFilterBtn');
   if(btn){btn.classList.toggle('active',filters.archiv);btn.textContent=filters.archiv?'📦 Archiv ✓':'📦 Archiv';}
@@ -29211,9 +29224,10 @@ function toggleSpaeterBearbeitenFilter(){
   render();
 }
 
-function archiveTask(taskId,evt){
+function archiveTask(taskId,evt,opt){
   if(evt)evt.stopPropagation();
-  if(!confirm('Task archivieren?\n\nDer Task wird ausgeblendet und kann jederzeit wiederhergestellt werden.\nDie Ordner auf NAS und Drive bleiben unverändert.'))return;
+  // b1239: opt {frage,meldung} = eigener Wortlaut für das E-Mail-Fenster (_emArchivieren); ohne opt alles wie bisher.
+  if(!confirm((opt&&opt.frage)||'Task archivieren?\n\nDer Task wird ausgeblendet und kann jederzeit wiederhergestellt werden.\nDie Ordner auf NAS und Drive bleiben unverändert.'))return;
   for(const bk of Object.keys(boards)){
     const idx=(boards[bk]||[]).findIndex(t=>t.id===taskId);
     if(idx>=0){
@@ -29246,7 +29260,7 @@ function archiveTask(taskId,evt){
         if(_offen&&_offen===taskId&&typeof closeModal==='function'){_taskModalDirty=false;closeModal();}
       }catch(e){console.warn('[b766] Task-Fenster schließen:',e);}
       render();autoSave();
-      showToast('📦 Task archiviert','success',2500);
+      showToast((opt&&opt.meldung)||'📦 Task archiviert','success',2500);
       return;
     }
   }
@@ -29728,9 +29742,34 @@ async function _mergeMoveFilesToMasterFolders(){
   }
 }
 
+// b1239 (Frank 19.10.2026): im Archiv gilt als „Mail“ eine Karte, die beim Archivieren in einem E-Mail-Board lag
+// (E_MAIL_Eingang, Angebote Lieferanten). Ein Auftrag, der aus einer Mail entstand, bleibt ein Auftrag.
+// Board gelöscht oder umbenannt → keine Mail (der Typ ist dann nicht mehr bekannt).
+function _archivIstMail(task){
+  const p=task&&task._archivProjekt;
+  return !!(p&&typeof boardTypes!=='undefined'&&boardTypes&&boardTypes[p]==='email');
+}
+// b1239: Mail-Karten haben keine Hausverwaltung und keine Adresse – im Archiv stand nur der Betreff. Dazu jetzt
+// „Absender · Datum“ der ersten Mail (dieselbe, die das E-Mail-Fenster oben zeigt). Name: Feld der Karte, sonst aus der
+// Absenderzeile der ersten Mail; die interne Exchange-Adresse zeigt _pamAbsLesbar nie (b1167).
+function _archivMailZeile(task){
+  if(!_archivIstMail(task))return '';
+  const fm=(task.emailOriginals||[])[0]||(task.msThreadMessages||[])[0]||(task.gmailThreadMessages||[])[0]||null;
+  let wer=String(task.emailSenderName||'').trim();
+  if(!wer&&fm)wer=String(fm.fromName||fm.senderName||'').trim();
+  if(!wer){
+    let roh=String((fm&&(fm.from||fm.sender))||task.emailSender||'');
+    if(typeof _pamAbsLesbar==='function')roh=_pamAbsLesbar(roh);
+    wer=String(typeof _emNameAusAbsender==='function'?_emNameAusAbsender(roh):roh).trim();
+  }
+  let wann='';
+  if(fm&&fm.date){const d=new Date(fm.date);if(!isNaN(d))wann=d.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'});}
+  return [wer,wann].filter(Boolean).join(' · ');
+}
 function archiveCardHTML(task){
   const _adr=(task.archiviertAm||'').split('-').reverse().join('.');
   const _proj=task._archivProjekt||'';
+  const _mz=(typeof _archivMailZeile==='function')?_archivMailZeile(task):''; // b1239: „✉ Absender · Datum“ nur bei Mail-Karten
   return`<div class="task-card" data-id="${esc(task.id)}" style="cursor:default;background:var(--bg3);border:1px solid var(--border);border-left:5px solid #888;border-radius:8px;padding:10px 12px;margin-bottom:8px;">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
       <span style="font-size:12px;font-weight:700;background:var(--bg4);color:var(--text2);padding:2px 7px;border-radius:4px;">📦 Archiviert${_adr?' am '+_adr:''}</span>
@@ -29743,6 +29782,7 @@ function archiveCardHTML(task){
     </div>
     <div style="font-size:13px;font-weight:600;margin-bottom:3px;">${esc(task.title||'')}</div>
     <div class="pam-clamp2" onclick="event.stopPropagation();this.classList.toggle('pam-clamp-open')" title="Klicken zum Ein-/Ausklappen" style="font-size:12px;color:var(--text2);">${[task.hausverwaltung,task.adresse,task.schadensbild].filter(Boolean).map(s=>esc(s)).join(' · ')}</div>
+    ${_mz?`<div style="font-size:12px;color:var(--text2);margin-top:2px;">✉ ${esc(_mz)}</div>`:''}
     ${task.repNr?`<div style="font-size:12px;color:var(--text2);margin-top:2px;">Rep. ${esc(task.repNr)}</div>`:''}
   </div>`;
 }
@@ -62869,6 +62909,7 @@ function _objAufArchivOeffnen(taskId,evt){
      Dieselbe Lehre wie in b710. */
   filters.archivJahr='';
   filters.archivMonat='';
+  filters.archivArt=''; // b1239: ebenso „Art“ – ein Auftrag fehlte sonst bei „nur Mails“
   searchQuery=t.title||'';
   /* ⛔ Die Archiv-Liste baut NUR renderKanban(). Ein Objekt oeffnet Frank aber meist
      aus der Objekte-Ansicht (currentView 'objekte'), auch 'heute' ist moeglich - von
@@ -67809,6 +67850,7 @@ function _pamGSClickArchiv(q){
   filters.spaeterBearbeiten=false;
   filters.archivJahr='';
   filters.archivMonat='';
+  filters.archivArt=''; // b1239: sonst fehlt der Treffer, wenn „Art“ noch auf „nur Mails“/„ohne Mails“ stand
   searchQuery=q||'';
   const btn=document.getElementById('archivFilterBtn');
   if(btn){btn.classList.add('active');btn.textContent='📦 Archiv ✓';}
@@ -71091,6 +71133,26 @@ function _emInBoardVerschieben(){
       render();
       showToast('Task nach „'+targetBoard+'" / Spalte „'+newStatus+'" verschoben.','success');
   });
+}
+
+// b1239 (Frank 19.10.2026 „baue“): „📦 Archivieren“ im E-Mail-Fenster – Mail behalten, aus dem Eingang nehmen.
+// Derselbe Weg wie der Knopf im Kartenfenster (archiveTask: Lösch-Marke #487, _archivProjekt, autoSave) – kein zweiter
+// Archiv-Weg. Zurück über 📦 Archiv → ↩ Wiederherstellen (kommt wieder in dieses Board).
+// ⛔ ZUERST speichern (Arbeitskopie → Karte, #376): _emFlushToLive schreibt nur in Karten, die noch im Board liegen –
+//    nach dem Archivieren ginge die zuletzt getippte Notiz still verloren.
+// ⛔ Fenster nur schließen, wenn die Karte wirklich weg ist – „Abbrechen“ lässt alles offen stehen.
+function _emArchivieren(){
+  if(!_emCurrentTask)return;
+  const _id=_emCurrentTask.id;if(!_id)return;
+  const _brd=_emCurrentBoard||currentBoard||'';
+  if(_emSaveTimer){clearTimeout(_emSaveTimer);_emSaveTimer=null;}
+  _emDoSave();
+  archiveTask(_id,null,{
+    frage:'Mail archivieren?\n\nDie Karte verschwindet aus „'+_brd+'“ und liegt danach unter 📦 Archiv.\nMails, Anhänge und der Drive-Ordner bleiben erhalten. In Outlook ändert sich nichts.\n\nZurückholen: 📦 Archiv → ↩ Wiederherstellen',
+    meldung:'📦 Mail archiviert – zu finden unter 📦 Archiv'
+  });
+  const _noch=Object.keys(boards).some(function(bk){return (boards[bk]||[]).some(function(x){return x&&x.id===_id;});});
+  if(!_noch)closeEmailTaskModal();
 }
 
 function _emDeleteTask(){
