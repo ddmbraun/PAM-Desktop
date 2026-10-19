@@ -10718,7 +10718,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-19 · #1239'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-19-b1239) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-19 · #1240'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-19-b1240) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -11153,6 +11153,12 @@ let filters = {archiv:false,spaeterBearbeiten:false,archivJahr:'',archivMonat:''
 // Archivierte Tasks liegen NICHT mehr im jeweiligen Projekt-Array (boards[k]), sondern hier,
 // damit sie ein Löschen des Ursprungsprojekts überleben (siehe archiveTask()/restoreTask()).
 let archivedTasks = [];
+// b1240 (P96, Frank 19.10.2026): Merkzettel für endgültig aus dem Archiv Gelöschtes – kurzer Text
+// 'ARCHIV_GELOESCHT|<Nummer>|<Zeitpunkt>', kein Objekt. Sie reisen IM Fach _archivedTasks mit: das Handy schreibt
+// nur bekannte Fächer zurück, reicht dieses aber unverändert durch; NAS-Leseansicht (26) und das Adressbuch-Skript (16)
+// überspringen alles, was kein Objekt ist. Sie halten den zweiten Rechner davon ab, die Karte zurückzuschreiben.
+// archivedTasks selbst enthält nur echte Karten (rund 30 Stellen lesen es).
+let _archivGeloescht = [];
 // Neue PAM Filter v2 (#331) – #444: _pamFTaskId (Einzeltask-Dropdown) + _pamFTerminText (in globale Suche integriert) entfernt
 let _pamFSpalte='';
 // 🔴 b882: Aus dem einen Knopf „📋 Planen" wird ein Auswahlkasten über ALLE FÜNF
@@ -17209,7 +17215,27 @@ function _archivMergeGerichtet(remoteArch,localArch,snapIds){
     if(snapIds&&snapIds.has(t.id))continue;     // lag beim letzten Abgleich schon hier → hier entnommen
     schonDa.add(t.id);out.push(t);
   }
-  return out;
+  return (typeof _archivMerkzettelAnwenden==='function')?_archivMerkzettelAnwenden(out,rem):out; // b1240
+}
+// b1240 (P96): Merkzettel „endgültig gelöscht“ – siehe _archivGeloescht. Text, kein Objekt (Begründung dort).
+function _archivIstMerkzettel(t){return typeof t==='string'&&t.indexOf('ARCHIV_GELOESCHT|')===0;}
+function _archivMerkzettelId(t){return _archivIstMerkzettel(t)?(t.split('|')[1]||''):'';}
+function _archivMerkzettel(id){return 'ARCHIV_GELOESCHT|'+id+'|'+new Date().toISOString();}
+// b1240: Archiv-Fach aus der Datei trennen – echte Karten und Merkzettel. Eine echte Karte, für die ein Merkzettel
+// existiert, fällt weg: „gelöscht“ gewinnt immer, gleich welches Gerät die volle Karte noch kennt.
+function _archivTrennen(arr){
+  const a=Array.isArray(arr)?arr:[];
+  const merk=[],weg=new Set();
+  for(const t of a){const id=_archivMerkzettelId(t);if(id&&!weg.has(id)){weg.add(id);merk.push(t);}}
+  return {echt:a.filter(t=>!_archivIstMerkzettel(t)&&!(t&&t.id&&weg.has(t.id))),merk:merk};
+}
+// b1240: nach dem gerichteten Zusammenführen – Merkzettel von BEIDEN Seiten vereinigen (auch solche, die der Schnappschuss
+// oben aussortiert hätte) und jede volle Karte mit derselben Nummer entfernen. Ohne das schrieb der zweite Rechner eine
+// hier endgültig gelöschte Karte wieder ins Archiv: bei gleicher Nummer gewinnt oben stets die hiesige Fassung.
+function _archivMerkzettelAnwenden(out,rem){
+  const tr=_archivTrennen(out.concat(Array.isArray(rem)?rem.filter(_archivIstMerkzettel):[]));
+  if(!tr.merk.length)return out;
+  return tr.echt.concat(tr.merk);
 }
 // b772: dieselbe Absicherung für die übrigen Listen in Block 2 (Auftrag Frank 23.08.).
 // ⛔ Die Kennung muss STABIL sein – sie darf sich nicht ändern, wenn man den Eintrag
@@ -18241,7 +18267,11 @@ function loadFromObject(data,herkunft){
   if(Array.isArray(data._archivedTasks))archivedTasks=data._archivedTasks.slice();
   else if(Array.isArray(archivedTasks)&&archivedTasks.length)_pamArchivFachFehltMelden(archivedTasks.length);
   else archivedTasks=[];
+  // b1240: Merkzettel (endgültig Gelöschtes) abtrennen – archivedTasks enthält danach nur echte Karten. Fehlt das Fach,
+  // bleiben die bisherigen Merkzettel stehen (wie das Archiv selbst, b787).
+  if(Array.isArray(data._archivedTasks)&&typeof _archivTrennen==='function'){const _tr=_archivTrennen(archivedTasks);archivedTasks=_tr.echt;_archivGeloescht=_tr.merk;}
   {const _knownIds=new Set(archivedTasks.map(t=>t.id));let _migrated=0;
+  if(typeof _archivGeloescht!=='undefined'&&Array.isArray(_archivGeloescht))_archivGeloescht.forEach(m=>{const _mid=_archivMerkzettelId(m);if(_mid)_knownIds.add(_mid);}); // b1240: gelöschte Nummer nie per Alt-Flag zurück ins Archiv
   Object.keys(boards).forEach(k=>{
     const still=[];
     (boards[k]||[]).forEach(t=>{
@@ -18569,6 +18599,7 @@ function buildSaveObject(){
   if(typeof _ahTidDaten==='function')_ahTidDaten(boards);   // b1140: Netz für Termine, die ohne Kennung dazukamen (z. B. Karte kopiert)
   const out={_statuses:statuses};
   out._archivedTasks=archivedTasks.slice(); // b787: IMMER, auch leer (Mobil v237 gleich; Näheres in CHANGES.md)
+  if(typeof _archivGeloescht!=='undefined'&&Array.isArray(_archivGeloescht)&&_archivGeloescht.length)out._archivedTasks=out._archivedTasks.concat(_archivGeloescht); // b1240: Merkzettel reisen im Fach mit
   if(Object.keys(boardStatuses).length)out._boardStatuses={...boardStatuses};
   if(Array.isArray(mobileBoards)&&mobileBoards.length)out._mobileBoards=mobileBoards.slice();
   if(Object.keys(mobileStatusFilter).length)out._mobileStatusFilter={...mobileStatusFilter};
@@ -29353,6 +29384,23 @@ function restoreSpaeterBearbeiten(taskId,evt){
 
 function deleteTaskPermanent(taskId,evt){
   if(evt)evt.stopPropagation();
+  // b1240 (P96, Frank 19.10.2026 „baue“): Der Knopf steht nur in der ARCHIV-Liste – bis b1239 suchte diese Funktion aber
+  // nur in den Boards und tat nach der Rückfrage nichts. Jetzt zuerst im Archiv. Dort bleibt ein Merkzettel
+  // (_archivGeloescht), damit der zweite Rechner die Karte beim Abgleich nicht zurückschreibt.
+  // ⛔ Drive, NAS und Outlook bleiben unberührt (Franks Antwort 1): Dateien können zu einer anderen Karte gehören –
+  //    bei den o2-Kopien vom Zusammenführen liegt die Mail im Ordner der Sammelkarte.
+  if(typeof archivedTasks!=='undefined'&&Array.isArray(archivedTasks)){
+    const _ai=archivedTasks.findIndex(t=>t&&t.id===taskId);
+    if(_ai>=0){
+      if(!confirm(_archivLoeschFrage(archivedTasks[_ai])))return;
+      archivedTasks.splice(_ai,1);
+      if(!_archivGeloescht.some(m=>_archivMerkzettelId(m)===taskId))_archivGeloescht.push(_archivMerkzettel(taskId));
+      _pamMarkTaskDeleted(taskId);
+      render();autoSave();
+      showToast('🗑 Aus dem Archiv gelöscht','success',2500);
+      return;
+    }
+  }
   if(!confirm('Task endgültig löschen?\n\nDieser Schritt kann NICHT rückgängig gemacht werden.\nDie Ordner auf NAS und Drive bleiben unverändert.'))return;
   for(const bk of Object.keys(boards)){
     const idx=(boards[bk]||[]).findIndex(t=>t.id===taskId);
@@ -29766,10 +29814,41 @@ function _archivMailZeile(task){
   if(fm&&fm.date){const d=new Date(fm.date);if(!isNaN(d))wann=d.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'});}
   return [wer,wann].filter(Boolean).join(' · ');
 }
+// b1240 (Frank 19.10.2026, Antwort 3): Kopie vom Zusammenführen (_executeMerge legt die aufgenommene Karte mit
+// zusammengefuehrtMit ins Archiv) – wo steckt der Inhalt jetzt? Sucht die Zielkarte in den Boards, dann im Archiv.
+function _archivMergeZiel(task){
+  const zid=task&&task.zusammengefuehrtMit;if(!zid)return null;
+  try{
+    for(const bk of Object.keys(boards||{})){
+      if(bk.startsWith('_')||!Array.isArray(boards[bk]))continue;
+      const z=boards[bk].find(t=>t&&t.id===zid);
+      if(z)return {titel:String(z.title||'(ohne Titel)'),wo:' (Board „'+bk+'“)'};
+    }
+    const za=(typeof archivedTasks!=='undefined'&&Array.isArray(archivedTasks))?archivedTasks.find(t=>t&&t.id===zid):null;
+    if(za)return {titel:String(za.title||'(ohne Titel)'),wo:' (im Archiv)'};
+  }catch(e){console.warn('[b1240] Zielkarte:',e);}
+  return {titel:'',wo:''};
+}
+function _archivMergeZeile(task){
+  const z=_archivMergeZiel(task);if(!z)return '';
+  return '🔀 Kopie vom Zusammenführen'+(z.titel?' – '+(_archivIstMail(task)?'die Mails stecken':'der Inhalt steckt')+' in: '+z.titel+z.wo:'');
+}
+// b1240: Rückfrage für „🗑 Endgültig löschen“ im Archiv – Titel, Hinweis auf Kopie vom Zusammenführen und auf
+// Arbeitszeiten (Franks Antwort 2: sie fallen aus „⏱ Zeiten“ heraus; gezählt wie dort, _pamZeitZeilen).
+function _archivLoeschFrage(task){
+  let s='Karte endgültig aus dem Archiv löschen?\n„'+String((task&&task.title)||'(ohne Titel)')+'“\n\nDas kann nicht rückgängig gemacht werden.\nDateien in Drive, Ordner auf der NAS und Mails in Outlook bleiben unverändert.';
+  const z=_archivMergeZiel(task);
+  if(z)s+='\n\nDiese Karte ist eine Kopie vom Zusammenführen'+(z.titel?' – '+(_archivIstMail(task)?'ihre Mails stecken':'ihr Inhalt steckt')+' weiter in „'+z.titel+'“'+z.wo:'')+'.';
+  let nZ=0;
+  try{if(typeof _pamZeitZeilen==='function')nZ=_pamZeitZeilen(task).filter(r=>typeof _pamZeitDauer!=='function'||_pamZeitDauer(r)>0).length;}catch(e){}
+  if(nZ)s+='\n\n⚠ An dieser Karte '+(nZ===1?'hängt 1 Zeiteintrag – er zählt':'hängen '+nZ+' Zeiteinträge – sie zählen')+' danach in „⏱ Zeiten“ nicht mehr mit.';
+  return s;
+}
 function archiveCardHTML(task){
   const _adr=(task.archiviertAm||'').split('-').reverse().join('.');
   const _proj=task._archivProjekt||'';
   const _mz=(typeof _archivMailZeile==='function')?_archivMailZeile(task):''; // b1239: „✉ Absender · Datum“ nur bei Mail-Karten
+  const _kz=(typeof _archivMergeZeile==='function')?_archivMergeZeile(task):''; // b1240: „🔀 Kopie vom Zusammenführen …“
   return`<div class="task-card" data-id="${esc(task.id)}" style="cursor:default;background:var(--bg3);border:1px solid var(--border);border-left:5px solid #888;border-radius:8px;padding:10px 12px;margin-bottom:8px;">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
       <span style="font-size:12px;font-weight:700;background:var(--bg4);color:var(--text2);padding:2px 7px;border-radius:4px;">📦 Archiviert${_adr?' am '+_adr:''}</span>
@@ -29783,6 +29862,7 @@ function archiveCardHTML(task){
     <div style="font-size:13px;font-weight:600;margin-bottom:3px;">${esc(task.title||'')}</div>
     <div class="pam-clamp2" onclick="event.stopPropagation();this.classList.toggle('pam-clamp-open')" title="Klicken zum Ein-/Ausklappen" style="font-size:12px;color:var(--text2);">${[task.hausverwaltung,task.adresse,task.schadensbild].filter(Boolean).map(s=>esc(s)).join(' · ')}</div>
     ${_mz?`<div style="font-size:12px;color:var(--text2);margin-top:2px;">✉ ${esc(_mz)}</div>`:''}
+    ${_kz?`<div style="font-size:12px;color:var(--text2);margin-top:2px;">${esc(_kz)}</div>`:''}
     ${task.repNr?`<div style="font-size:12px;color:var(--text2);margin-top:2px;">Rep. ${esc(task.repNr)}</div>`:''}
   </div>`;
 }
