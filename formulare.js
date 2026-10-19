@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F85';
+const PAM_FORMULARE_VERSION='F86';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -385,27 +385,33 @@ function _fsVervollstaendigen(b){
   return b;
 }
 function _fsPdfName(bericht,zeit){
+  /* F86 (P82, Frank 18.10.2026: „baue P82 mit Variante D“): Umlaute und ß im Dateinamen ausschreiben (ä → ae … ß → ss, wie _fsDateiSlug) –
+     vorher wurde in den fünf Zweigen unten jedes zu „_“ („Schloßbrücke“ → „Schlo_br_cke“). Ginge der Teil dadurch über 30 Zeichen, wird
+     „Strasse“ zu „Str“, damit die Hausnummer nicht abgeschnitten wird; ein „_“ am Ende fällt weg. ⛔ Steht bewusst IN der Funktion:
+     Prüfungen schneiden _fsPdfName einzeln aus – ein Helfer daneben fehlte dort, und sie prüften still den alten Weg. */
+  const _fsPnAsc=s=>String(s||'').replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/Ä/g,'Ae').replace(/Ö/g,'Oe').replace(/Ü/g,'Ue').replace(/ß/g,'ss');
+  const _fsPnTeil=(s,nicht)=>{const v=_fsPnAsc(s).replace(nicht,'_').replace(/_+/g,'_').replace(/^_+|_+$/g,'');return (v.length>30?v.replace(/(S|s)trasse(?=_|$)/g,'$1tr'):v).slice(0,30).replace(/_+$/g,'');};
   const d=String((bericht&&bericht.datum)||'').split('.');
   const datum=(d.length===3&&d[2])?(('0'+d[0]).slice(-2)+'-'+('0'+d[1]).slice(-2)+'-'+d[2]):'';
   const uhr=(zeit instanceof Date&&isFinite(zeit.getTime()))?'_'+('0'+zeit.getHours()).slice(-2)+('0'+zeit.getMinutes()).slice(-2):''; // v294
   if(bericht&&bericht.vorlage==='flachdach'){ // F13: Prüfbericht – Titel (gekürzt) + Datum + Uhrzeit
-    const slug=String(bericht.titel||'Pruefbericht').replace(/[^a-zA-Z0-9-]+/g,'_').replace(/^_+|_+$/g,'').slice(0,30)||'Pruefbericht';
+    const slug=_fsPnTeil(bericht.titel||'Pruefbericht',/[^a-zA-Z0-9-]+/g)||'Pruefbericht';
     return slug+(datum?'_'+datum:'')+uhr+'.pdf';
   }
   if(bericht&&bericht.vorlage==='wartungsprotokoll'&&bericht.art==='rep'){ /* F42: REP-Auftrag – Straße (gekürzt wegen der Pfadlänge) + Datum + Uhrzeit */
-    const slug=String((bericht.kopf&&bericht.kopf.objektAdresse)||'').split(',')[0].replace(/[^a-zA-Z0-9]/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,'').slice(0,30);
+    const slug=_fsPnTeil(String((bericht.kopf&&bericht.kopf.objektAdresse)||'').split(',')[0],/[^a-zA-Z0-9]/g);
     return 'REP-Auftrag'+(slug?'_'+slug:'')+(datum?'_'+datum:'')+uhr+'.pdf';
   }
   if(bericht&&bericht.vorlage==='wartungsprotokoll'&&bericht.art==='anschlag'){ /* F74: Prüfprotokoll Anschlageinrichtung – Straße (gekürzt) + Datum + Uhrzeit */
-    const slug=String((bericht.kopf&&bericht.kopf.objektAdresse)||'').split(',')[0].replace(/[^a-zA-Z0-9]/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,'').slice(0,30);
+    const slug=_fsPnTeil(String((bericht.kopf&&bericht.kopf.objektAdresse)||'').split(',')[0],/[^a-zA-Z0-9]/g);
     return 'Pruefprotokoll-Anschlageinrichtung'+(slug?'_'+slug:'')+(datum?'_'+datum:'')+uhr+'.pdf';
   }
   if(bericht&&bericht.vorlage==='wartungsprotokoll'&&bericht.art==='pv'){ /* F75: PV-Protokoll – PV-Protokoll_Wartung_… / PV-Protokoll_Inspektion_… */
-    const slug=String((bericht.kopf&&bericht.kopf.objektAdresse)||'').split(',')[0].replace(/[^a-zA-Z0-9]/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,'').slice(0,30);
+    const slug=_fsPnTeil(String((bericht.kopf&&bericht.kopf.objektAdresse)||'').split(',')[0],/[^a-zA-Z0-9]/g);
     return 'PV-Protokoll_'+((typeof _fsWpArt==='function'&&_fsWpArt(bericht)==='inspektion')?'Inspektion':'Wartung')+(slug?'_'+slug:'')+(datum?'_'+datum:'')+uhr+'.pdf';
   }
   if(bericht&&bericht.vorlage==='wartungsprotokoll'){ // F10: Name wie am PC bisher (Adresse gekürzt wegen der Pfadlänge) + Uhrzeit
-    const slug=String((bericht.kopf&&bericht.kopf.objektAdresse)||'').split(',')[0].replace(/[^a-zA-Z0-9]/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,'').slice(0,30);
+    const slug=_fsPnTeil(String((bericht.kopf&&bericht.kopf.objektAdresse)||'').split(',')[0],/[^a-zA-Z0-9]/g);
     return 'Dachprotokoll_'+((typeof _fsWpArt==='function'&&_fsWpArt(bericht)==='inspektion')?'Inspektion':'Wartung')+(slug?'_'+slug:'')+(datum?'_'+datum:'')+uhr+'.pdf'; /* F70 · F73: Dachprotokoll_Wartung_… / Dachprotokoll_Inspektion_… */
   }
   if(bericht&&bericht.fassung==='begehung'&&bericht.art==='vorab'){ // F16, F17: mit der Rolle, bei wem es war (Eigentuemer, Mieter, …)
