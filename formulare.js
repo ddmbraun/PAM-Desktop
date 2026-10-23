@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F87';
+const PAM_FORMULARE_VERSION='F88';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -7477,7 +7477,7 @@ async function _fsMobPdfBg(bericht,task){
               y+=sh+2;
               const mk=_fsAsMarken(bericht,sk);
               mk.forEach(q=>absatz(q.n+' = '+q.label+(hat(_fsVbWo(q.s))?' – '+_fsVbWo(q.s):''),{groesse:9,einzug:3,abstand:0.8})); /* F49: je Nummer eine Zeile, 9 pt schwarz, direkt unter der Skizze */
-              if(_fsUmZeile(sk))absatz(_fsUmZeile(sk),{groesse:9,einzug:3,abstand:0.8}); /* F62: Fläche und Umfang des Umrisses */
+              if(_fsUmZeile(sk))absatz((typeof _fsPdfOhneUngefaehr==='function')?_fsPdfOhneUngefaehr(_fsUmZeile(sk)):_fsUmZeile(sk),{groesse:9,einzug:3,abstand:0.8}); /* F62: Fläche und Umfang des Umrisses · F88: „≈“ → „ca.“ – die PDF-Schrift kennt das Zeichen nicht (P79) */
               absatz('Nicht maßstäblich, Ansicht '+_fsAsAnsicht(sk)+'.',{groesse:7.5,farbe:[100,100,100],abstand:4});
             }
           }
@@ -8444,7 +8444,8 @@ function _fsWpNeuerBericht(t,wahl){
       eindeckung:[],firstausbildung:[],unterkonstruktion:[],klempner:[],sparren:'',latten:''
     },
     sektionen:_fsWpSekNeu(dachart),wartArbeiten:_fsWpArbNeu(dachart),
-    maengelEmpfehlungen:'',fotos:[],techniker:''
+    maengelEmpfehlungen:'',fotos:[],techniker:(typeof _fsWpMerkName==='function')?_fsWpMerkName():'', /* F88: der Name, den sich das Gerät merkt (wie beim PV-Protokoll) */
+    namensRolle:(typeof _fsWpMerkRolle==='function')?_fsWpMerkRolle():'',unterschriftIch:null,unterschriftAg:null /* F88 */
   };
   if(wahl.art==='pv'&&typeof _fsPvEinrichten==='function')_fsPvEinrichten(b,t); /* F75: PV-Protokoll – eigene Listen, eigener Kopf, Vorbelegung aus dem letzten PV-Protokoll der Karte */
   b.titel=_fsWpTitelText(b);
@@ -8452,6 +8453,7 @@ function _fsWpNeuerBericht(t,wahl){
 }
 // Alte oder halbleere Protokolle ergänzen, nichts überschreiben
 function _fsWpVervollstaendigen(b){
+  if(typeof _fsWpSignAufraeumen==='function')_fsWpSignAufraeumen(b); /* F88 */
   if(!b.kopf||typeof b.kopf!=='object')b.kopf={};
   ['abdichtung','oberflaechenschutz','entwaesserung','dachrand','pruefprotokollAnschlag','sicherheit','eindeckung','firstausbildung','unterkonstruktion','klempner'] /* F71: dachrand · F72: pruefprotokollAnschlag */.forEach(k=>{if(!Array.isArray(b.kopf[k]))b.kopf[k]=[];});
   if(typeof b.kopf.attikaHoehe!=='string')b.kopf.attikaHoehe=(b.kopf.attikaHoehe===undefined||b.kopf.attikaHoehe===null)?'':String(b.kopf.attikaHoehe); /* F72 */
@@ -8835,6 +8837,144 @@ async function _fsPvPdfFeldFotos(doc,b,y,M,W){
   }
   doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);
   return y;
+}
+/* ── F88: NAME, UNTERSCHRIFTEN UND „FOTO 1 – …“ IM DACH-, PV- UND PRÜFPROTOKOLL ──────────────────────────────────────────────────
+   Frank, 22./23.10.2026 (Prüfauftrag „alle Formulare“ → Bauplan P107 → „baue a und b“):
+   1. Dach- und PV-Protokoll: der Name steht oben im Kopf (bericht.techniker), das Wort davor ist eine Auswahl (bericht.namensRolle:
+      Durchgeführt von · Geprüft von · Techniker · Aufgenommen von · eigene Bezeichnung). Das Gerät merkt sich die letzte Wahl (FS_WP_ROLLE_KEY,
+      am PC an allen Rechnern gleich) und den Namen (pam_fs_aufgenommen, wie bisher beim PV-Protokoll). Ältere Protokolle ohne Wahl behalten ihr
+      bisheriges Wort („Techniker“ bzw. „Aufgenommen von“). Im PDF steht der Name in einer eigenen Zeile im Kopf.
+   2. Unterschriften (Dach, PV, Prüfprotokoll Anschlageinrichtung): bericht.unterschriftIch (wer es durchgeführt hat) und bericht.unterschriftAg
+      (Auftraggeber / Betreiber vor Ort, freiwillig) = {striche, v, name, zeit} wie beim REP-Auftrag – dasselbe Fenster (_fsRaSignFenster mit
+      opt.feld). Im PDF nebeneinander nach dem letzten Prüfabschnitt, vor den Fotos; ohne Unterschrift eine leere Linie (dann auf Papier).
+   3. Fotodokumentation: unter jedem Foto „Foto N – …“ statt des Dateinamens – dieselbe Beschriftung wie in der Vorabbesichtigung
+      (_fsBgFotoCapZeichnen): Pin-Text mit Kreis, sonst wozu das Foto gehört (Prüfpunkt mit Mängel-Nr., Modulfeld, Anschlagpunkt, Plan), sonst nur
+      „Foto N“. N zählt nur in der Fotodokumentation. Kein Datum, keine Uhrzeit, kein Dateiname. */
+const FS_WP_NAMENSROLLEN=['Durchgeführt von','Geprüft von','Techniker','Aufgenommen von'];
+const FS_WP_ROLLE_KEY='pam_fs_wp_rolle';
+function _fsWpMerkRolle(neu){
+  try{
+    if(typeof neu==='string'){const v=neu.replace(/\s+/g,' ').trim().slice(0,30);if(v)localStorage.setItem(FS_WP_ROLLE_KEY,v);return v;}
+    return String(localStorage.getItem(FS_WP_ROLLE_KEY)||'').trim()||FS_WP_NAMENSROLLEN[0];
+  }catch(e){return FS_WP_NAMENSROLLEN[0];}
+}
+function _fsWpMerkName(){try{return String(localStorage.getItem('pam_fs_aufgenommen')||'').trim();}catch(e){return '';}}
+// Das Wort vor dem Namen: das gewählte, sonst (ältere Protokolle) das bisherige
+function _fsWpNamensRolle(b){
+  const r=String((b&&b.namensRolle)||'').replace(/\s+/g,' ').trim();
+  if(r)return r;
+  return ((typeof _fsIstPv==='function')&&_fsIstPv(b))?'Aufgenommen von':'Techniker';
+}
+const FS_WP_SIGN_FELDER=['unterschriftIch','unterschriftAg'];
+function _fsWpSignDa(b,feld){const u=b&&b[feld];return !!u&&Array.isArray(u.striche)&&u.striche.some(s=>Array.isArray(s)&&s.length>0);}
+// Kaputte oder leere Unterschriften fallen heraus (nichts anderes wird angefasst)
+function _fsWpSignAufraeumen(b){
+  if(!b||typeof b!=='object')return b;
+  FS_WP_SIGN_FELDER.forEach(f=>{if(b[f]!==undefined&&b[f]!==null&&!_fsWpSignDa(b,f))b[f]=null;});
+  if(b.namensRolle!==undefined&&typeof b.namensRolle!=='string')b.namensRolle='';
+  return b;
+}
+function _fsWpSignRolle(b){return ((typeof _fsIstAnschlag==='function')&&_fsIstAnschlag(b))?'Prüfer':_fsWpNamensRolle(b);}
+function _fsWpSignName(b){return String((((typeof _fsIstAnschlag==='function')&&_fsIstAnschlag(b))?(b&&b.kopf&&b.kopf.pruefer):(b&&b.techniker))||'').replace(/\s+/g,' ').trim();}
+// Namen zum Auswählen für das zweite Feld: Kontakte und Hausverwaltung der Karte (eintippen geht immer)
+function _fsWpSignVorschlaege(t){
+  const out=[];const dazu=s=>{const v=String(s||'').replace(/\s+/g,' ').trim();if(v&&out.indexOf(v)<0)out.push(v);};
+  ((t&&Array.isArray(t.kontakte))?t.kontakte:[]).forEach(k=>{if(k)dazu(k.name||k.firma);});
+  if(t)dazu(t.hausverwaltung);
+  return out.slice(0,30);
+}
+function _fsWpSignTitel(b){
+  const art=((typeof _fsIstAnschlag==='function')&&_fsIstAnschlag(b))?'Prüfprotokoll Anschlageinrichtung':((typeof _fsWpTitelText==='function')?_fsWpTitelText(b):'Dachprotokoll');
+  const adr=String((b&&b.kopf&&b.kopf.objektAdresse)||'').split(',')[0].trim();
+  return [art,adr].filter(Boolean).join(' · ');
+}
+// Abschnitt „✍ Unterschriften“ im Formular; neu = das Formular neu zeichnen
+function _fsWpUnterschriftenTeil(bericht,t,neu,farbe){
+  const s=document.createElement('div');s.setAttribute('data-wp-unterschriften','1');s.style.cssText='padding:12px 14px 14px;border-top:1px solid var(--border);';
+  const h=document.createElement('div');h.style.cssText='font-size:var(--fs12,12px);font-weight:700;color:'+(farbe||FS_WP_FARBE)+';margin-bottom:8px;';h.textContent='✍ Unterschriften';s.appendChild(h);
+  const KN='font-family:inherit;cursor:pointer;border-radius:8px;min-height:44px;padding:6px 14px;font-size:var(--fs14,14px);border:1.5px solid var(--border);background:var(--bg3);color:var(--text);';
+  const kn=(txt,attr,wert,stil,fn)=>{const k=document.createElement('button');k.type='button';k.textContent=txt;k.setAttribute(attr,wert);k.style.cssText=KN+(stil||'');k.onclick=fn;return k;};
+  const nachher=()=>{if(typeof neu==='function')neu();};
+  const frage=txt=>_fsFrage(txt,bericht); /* der Helfer fragt im richtigen Fenster (am PC auch im eigenen Fenster) */
+  [
+    {feld:'unterschriftIch',knopf:'✍ Ich unterschreibe',titel:'Unterschrift',etikett:()=>_fsWpSignRolle(bericht)+(_fsWpSignName(bericht)?': '+_fsWpSignName(bericht):''),name:()=>_fsWpSignName(bericht),vor:()=>[],weg:'Deine Unterschrift entfernen?'},
+    {feld:'unterschriftAg',knopf:'✍ Auftraggeber / Betreiber unterschreibt',titel:'Unterschrift Auftraggeber / Betreiber',etikett:()=>'Auftraggeber / Betreiber (freiwillig)',name:()=>'',vor:()=>_fsWpSignVorschlaege(t),weg:'Die Unterschrift des Auftraggebers / Betreibers entfernen?'}
+  ].forEach(d=>{
+    const box=document.createElement('div');box.setAttribute('data-wp-sign',d.feld);box.style.cssText='margin:0 0 12px;';
+    const lab=document.createElement('div');lab.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin-bottom:4px;';lab.textContent=d.etikett();box.appendChild(lab);
+    const oeffnen=()=>_fsRaSignFenster(bericht,nachher,{feld:d.feld,titel:d.titel,unter:(d.feld==='unterschriftIch'?d.etikett():'Auftraggeber / Betreiber')+' · '+_fsWpSignTitel(bericht),name:d.name(),vorschlaege:d.vor()});
+    if(_fsWpSignDa(bericht,d.feld)){
+      const u=bericht[d.feld];
+      const bild=document.createElement('canvas');bild.width=600;bild.height=180;bild.setAttribute('data-wp-signbild',d.feld);
+      bild.style.cssText='display:block;width:100%;max-width:360px;height:auto;background:#ffffff;border:2px solid var(--border);border-radius:8px;';
+      try{const g=bild.getContext('2d');if(g){g.fillStyle='#ffffff';g.fillRect(0,0,600,180);_fsRaSignZeichnen(g,u,20,12,560,156);}}catch(e){console.warn('[Unterschrift] zeigen:',e);}
+      const ut=document.createElement('div');ut.setAttribute('data-wp-signtext',d.feld);ut.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin:4px 0 6px;';ut.textContent=[u.name,_fsRaSignZeitText(u)].filter(Boolean).join(' · ');
+      const ur=document.createElement('div');ur.style.cssText='display:flex;gap:8px;flex-wrap:wrap;';
+      ur.append(kn('Neu unterschreiben','data-wp-signneu',d.feld,'',()=>{if(frage('Die vorhandene Unterschrift ersetzen?'))oeffnen();}),
+        kn('Entfernen','data-wp-signweg',d.feld,'color:var(--text2);',()=>{if(frage(d.weg)){bericht[d.feld]=null;scheduleSave();nachher();}}));
+      box.append(bild,ut,ur);
+    }else box.appendChild(kn(d.knopf,'data-wp-signknopf',d.feld,'width:100%;',oeffnen));
+    s.appendChild(box);
+  });
+  return s;
+}
+// Im PDF: Datum, dann zwei Unterschriften nebeneinander (wie beim REP-Auftrag) – ohne digitale Unterschrift eine leere Linie. Gibt das neue y zurück.
+function _fsWpPdfUnterschriften(doc,b,y,M,W){
+  if(!b)return y;
+  const B=W-2*M,bw=(B-20)/2;
+  if(y+40>285){doc.addPage();y=M;}
+  doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(0,0,0);
+  doc.text('Datum: '+(String(b.datum||'').trim()||'–'),M,y+4);
+  y+=28;
+  const n1=String((b.unterschriftIch&&b.unterschriftIch.name)||'').trim()||_fsWpSignName(b),n2=String((b.unterschriftAg&&b.unterschriftAg.name)||'').trim();
+  [{feld:'unterschriftIch',x:M,unter:_fsWpSignRolle(b)+': '+(n1||'–')},{feld:'unterschriftAg',x:M+bw+20,unter:'Auftraggeber / Betreiber'+(n2?': '+n2:'')}].forEach(f=>{
+    if(_fsWpSignDa(b,f.feld)){
+      const u=b[f.feld],L=_fsRaSignLage(u,f.x+2,y-19.5,bw-4,18.5);
+      if(typeof doc.setLineCap==='function')doc.setLineCap('round');
+      if(typeof doc.setLineJoin==='function')doc.setLineJoin('round');
+      doc.setDrawColor(0,0,0);doc.setLineWidth(0.4);
+      u.striche.forEach(st=>{
+        const p=_fsRaSignPunkte(st);
+        if(p.length===1){const a=L(p[0]);doc.line(a[0],a[1],a[0]+0.2,a[1]);}
+        for(let i=1;i<p.length;i++){const a=L(p[i-1]),c=L(p[i]);doc.line(a[0],a[1],c[0],c[1]);}
+      });
+      if(typeof doc.setLineCap==='function')doc.setLineCap('butt');
+      if(typeof doc.setLineJoin==='function')doc.setLineJoin('miter');
+    }
+    doc.setDrawColor(0,0,0);doc.setLineWidth(0.2);doc.line(f.x,y,f.x+bw,y);
+    doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(60,60,60);doc.text(doc.splitTextToSize(f.unter,bw),f.x,y+4.5);
+  });
+  doc.setTextColor(0,0,0);
+  return y+14;
+}
+// Was hinter „Foto N – “ steht: Pin-Texte (mit Kreis), sonst wozu das Foto gehört – gleiche Form wie _fsBgFotoUnterschriftTeile ({art:'pin'|'ort'|''})
+function _fsWpFotoUnterschriftTeile(b,f){
+  if(!b||!f)return {art:''};
+  const pins=(typeof _fsFpListe==='function')?_fsFpListe(f):[],txt=p=>String((p&&p.t)||'').trim().replace(/\s+/g,' ');
+  const mit=pins.map((p,i)=>({n:i+1,t:txt(p)})).filter(x=>x.t);
+  if(mit.length>0)return {art:'pin',pins:mit};
+  const passt=r=>_fsRefPasst(f,r);
+  if((typeof _fsIstAnschlag==='function')&&_fsIstAnschlag(b)){
+    for(const p of (Array.isArray(b.punkte)?b.punkte:[]))if(p&&(p.fotoRefs||[]).some(passt))return {art:'ort',text:'Anschlagpunkt '+String(p.nr==null?'':p.nr).trim()};
+  }
+  for(const fe of ((b.kopf&&Array.isArray(b.kopf.pvFelder))?b.kopf.pvFelder:[]))if(fe&&(fe.fotoRefs||[]).some(passt))return {art:'ort',text:('Modulfeld '+String(fe.name||'').trim()).trim()};
+  for(const sek of (Array.isArray(b.sektionen)?b.sektionen:[]))for(const it of ((sek&&sek.items)||[])){
+    if(it&&(it.fotoRefs||[]).some(passt)){const nr=(typeof _fsWpMangelNr==='function')?_fsWpMangelNr(b,it):0;return {art:'ort',text:(nr?'M'+nr+' · ':'')+String(it.text||'').trim()};}
+  }
+  if((Array.isArray(b.planFotoRefs)?b.planFotoRefs:[]).some(passt))return {art:'ort',text:'Plan'};
+  return {art:''};
+}
+// Zeichnet „Foto N – …“ unter ein Foto der Fotodokumentation; gibt die Zahl der Zeilen zurück (höchstens 3)
+function _fsWpFotoCap(doc,b,f,x,y,w,nr){
+  doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(90,90,90);
+  let n=1;
+  try{
+    const u=_fsWpFotoUnterschriftTeile(b,f);
+    if(typeof _fsBgFotoCapZeichnen==='function')n=_fsBgFotoCapZeichnen(doc,x,y,w,nr-1,u,3);
+    else{const z=doc.splitTextToSize('Foto '+nr+(u&&u.art==='ort'?' – '+u.text:''),w).slice(0,3);doc.text(z,x,y);n=z.length;}
+  }catch(e){console.warn('[Foto-Beschriftung]',e);doc.text('Foto '+nr,x,y);n=1;}
+  doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(0,0,0);
+  return Math.max(1,Math.min(3,+n||1));
 }
 /* ── F87: HOCHKANT-FOTOS IN DEN PDFS VON DACH-, PV- UND PRÜFPROTOKOLL BEHALTEN IHR SEITENVERHÄLTNIS ───────────────────────────────────────────
    Frank, 19.10.2026 („baue“, beim Versuch zu F85: das hochkant aufgenommene Eckfoto sah im PDF doppelt so breit aus wie im Fenster). Bisher wurde
@@ -9468,6 +9608,21 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
       });
       wrap.append(lbl,row);return wrap;
     }
+    function _wpNameZeile(){ /* F88: wer es durchgeführt hat – das Wort davor ist eine Auswahl (Frank, 23.10.2026), das Gerät merkt sich Wort und Namen */
+      const row=document.createElement('div');row.setAttribute('data-wp-name','1');
+      row.style.cssText='display:flex;align-items:center;padding:8px 14px;border-top:1px solid var(--border);gap:10px;flex-wrap:wrap;';
+      const akt=_fsWpNamensRolle(bericht);
+      const sel=document.createElement('select');sel.setAttribute('data-wp-namensrolle','1');sel.setAttribute('aria-label','Bezeichnung vor dem Namen');
+      sel.style.cssText='flex:0 0 auto;max-width:180px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:6px;font-size:var(--fs12,12px);color:var(--text);font-family:inherit;';
+      const liste=FS_WP_NAMENSROLLEN.slice();if(liste.indexOf(akt)<0)liste.push(akt);
+      liste.forEach(r=>{const o=document.createElement('option');o.value=r;o.textContent=r;if(r===akt)o.selected=true;sel.appendChild(o);});
+      {const o=document.createElement('option');o.textContent='✎ eigene Bezeichnung …';o.value='__eigen';sel.appendChild(o);}
+      sel.onchange=()=>{let v=sel.value;if(v==='__eigen'){v=_fsRolleEintippen('');if(!v){sel.value=akt;return;}}bericht.namensRolle=v;_fsWpMerkRolle(v);scheduleSave();_wpLeisteNeu();};
+      const inp=document.createElement('input');inp.type='text';inp.setAttribute('data-wp-techniker','1');inp.value=bericht.techniker||'';inp.placeholder='Name – das Gerät merkt ihn sich';inp.autocomplete='off';
+      inp.style.cssText='flex:1 1 160px;min-width:0;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 8px;font-size:var(--fs14,14px);color:var(--text);font-family:inherit;';
+      inp.oninput=()=>{bericht.techniker=inp.value;const v=String(inp.value||'').trim();if(v){try{localStorage.setItem('pam_fs_aufgenommen',v);}catch(e){}}scheduleSave();};
+      row.append(sel,inp);return row;
+    }
     /* F75: Kopf des PV-Protokolls – Vor Ort (wie Begehungsprotokoll / Vorabbesichtigung: Haus/Eingang, Anlass, Besichtigung bei, Beginn/Ende, Wetter), Besichtigt von,
        Anlage, „nur festgestellt, ob vorhanden“, Unterlagen. Nur hier, das Dachprotokoll bleibt unverändert. */
     function _pvZeile(label,inhalt,attr){
@@ -9487,6 +9642,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
     function _pvKopfTeile(){
       const k=bericht.kopf,teile=[];
       teile.push(_mf('Auftraggeber','auftraggeber','aus Task'),_mf('Kostenstelle','kostenstelle','z.B. 250133'),_mf('Objektadresse','objektAdresse','aus Task'));
+      teile.push(_wpNameZeile()); /* F88: der Name oben statt unten (vorher „Aufgenommen von“ am Ende) */
       { /* Haus / Eingang – wie F68: Knöpfe aus den Hausnummern des Objekts, dazu Freitext; gilt nur für dieses Protokoll */
         const tokens=_fsHausTokens(k.haus),vor=_fsHausChips(bericht,t),alle=vor.concat(tokens.filter(x=>vor.indexOf(x)<0));
         const setze=neu=>{k.haus=neu.join(' · ');scheduleSave();_wpLeisteNeu();};
@@ -9592,7 +9748,8 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
     kopfSek.append(
       _mf('Auftraggeber','auftraggeber','aus Task'),
       _mf('Kostenstelle','kostenstelle','z.B. 250133'),
-      _mf('Objektadresse','objektAdresse','aus Task')
+      _mf('Objektadresse','objektAdresse','aus Task'),
+      _wpNameZeile() /* F88: der Name oben statt unten (Frank, 23.10.2026: „wer“) */
     );
     const hoeheRow=_mf('Attika-Höhe (cm)','attikaHoehe','z. B. 25');hoeheRow.setAttribute('data-wp-attika-hoehe','1'); /* F72: Höhe von Hand (Frank: „die ist ja nicht 40 cm hoch“) – nur sichtbar, wenn „Attika“ gewählt ist */
     hoeheRow.style.display=(Array.isArray(bericht.kopf.dachrand)&&bericht.kopf.dachrand.includes('Attika'))?'flex':'none';
@@ -9794,14 +9951,8 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
     maengelSek.append(mHdr,mTA);
     body.appendChild(maengelSek);
 
-    /* ── Techniker ── */
-    const techSek=document.createElement('div');techSek.style.cssText='padding:0 14px 14px;';
-    const tl=document.createElement('div');tl.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin-bottom:4px;';tl.textContent=_istPv()?'Aufgenommen von':'Techniker'; /* F75 */
-    const ti=document.createElement('input');ti.type='text';ti.value=bericht.techniker||'';ti.placeholder=_istPv()?'Name – das Gerät merkt ihn sich':'Name Techniker';ti.autocomplete='off';
-    ti.style.cssText='width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:var(--fs14,14px);color:var(--text);font-family:inherit;';
-    ti.oninput=()=>{bericht.techniker=ti.value;if(_istPv()){try{localStorage.setItem('pam_fs_aufgenommen',ti.value);}catch(e){}}scheduleSave();}; /* F75: wie „Aufgenommen von“ im Begehungsprotokoll */
-    techSek.append(tl,ti);
-    body.appendChild(techSek);
+    /* ── F88: Unterschriften (der Name steht jetzt oben im Kopf) ── */
+    body.appendChild(_fsWpUnterschriftenTeil(bericht,t,_wpLeisteNeu,FS_WP_FARBE));
 
     /* ── Fotos (Raster und Knöpfe: am PC die PC-Werkzeuge, sonst Kamera · Galerie · Drive – dieselben Funktionsnamen wie beim Feuchteprotokoll) ── */
     const fotoSek=document.createElement('div');
@@ -9896,7 +10047,7 @@ async function _fsWpPdf(bericht,task){
     const W=210,M=14,farbe=[26,92,58];let y=M;
 
     /* Kopfzeile */
-    doc.setFillColor(...farbe);doc.rect(0,0,W,32,'F');
+    doc.setFillColor(...farbe);doc.rect(0,0,W,37,'F'); /* F88: eine Zeile mehr (Name) */
     doc.setTextColor(255,255,255);
     doc.setFontSize(17);doc.setFont('helvetica','bold');
     doc.text(titel,M,12);
@@ -9904,8 +10055,9 @@ async function _fsWpPdf(bericht,task){
     const k=bericht.kopf||{};
     doc.text('Auftraggeber: '+(k.auftraggeber||t.hausverwaltung||'–'),M,19);
     doc.text('Objekt: '+(k.objektAdresse||t.adresse||'–')+((pv&&typeof _fsHausText==='function'&&_fsHausText(k.haus))?' · '+_fsHausText(k.haus):''),M,24); /* F75: Haus/Eingang */
-    doc.text('Datum: '+bericht.datum+((pv&&k.beginn)?' · '+k.beginn+(k.ende?'–'+k.ende:'')+' Uhr':'')+(bericht.techniker?(pv?' · Aufgenommen von: ':' · Techniker: ')+bericht.techniker:'')+(k.kostenstelle?' · Kostenstelle: '+k.kostenstelle:''),M,29);
-    y=38;
+    doc.text('Datum: '+bericht.datum+((pv&&k.beginn)?' · '+k.beginn+(k.ende?'–'+k.ende:'')+' Uhr':'')+(k.kostenstelle?' · Kostenstelle: '+k.kostenstelle:''),M,29);
+    doc.text(((typeof _fsWpNamensRolle==='function')?_fsWpNamensRolle(bericht):(pv?'Aufgenommen von':'Techniker'))+': '+(String(bericht.techniker||'').trim()||'–'),M,34); /* F88: der Name in einer eigenen Zeile, das Wort aus der Auswahl (Frank, 23.10.2026) */
+    y=43;
 
     if(pv&&typeof _fsPvPdfKopf==='function'){y=_fsPvPdfKopf(doc,bericht,t,y,M,W,farbe,'anlage');if(typeof _fsPvPdfFeldFotos==='function')y=await _fsPvPdfFeldFotos(doc,bericht,y,M,W);y=_fsPvPdfKopf(doc,bericht,t,y,M,W,farbe,'rest');}else{ /* F79 */ /* F75: PV-Protokoll – Vor Ort, Anlage, nur vorhanden, Unterlagen statt Dachaufbau */
     /* Dachaufbau */
@@ -10051,31 +10203,33 @@ async function _fsWpPdf(bericht,task){
       doc.text(lines,M,y);y+=lines.length*4.5+4;
     }
 
+    if(typeof _fsWpPdfUnterschriften==='function')y=_fsWpPdfUnterschriften(doc,bericht,y,M,W); /* F88: Unterschriften vor den Fotos (Frank, 23.10.2026: beide) */
+
     /* Fotodokumentation – nur Fotos mit ✓ (inReport) */
     const fotoList=fotos.filter(f=>f.inReport&&(f.editedDriveId||f.driveId||f.localUrl||f.localKey));
     if(fotoList.length){
       toast('📷 Lade '+fotoList.length+' Foto'+(fotoList.length>1?'s':'')+' …','info',5000);
-      let col=0,erstes=true,links=null;
+      let col=0,erstes=true,nr=0,zl=1; /* F88: „Foto N – …“ unter jedem Foto statt des Dateinamens; N zählt nur hier (Frank, 23.10.2026: „nur in Foto“) */
       for(let fi=0;fi<fotoList.length;fi++){
         const f=fotoList[fi];
         const pf=await bildLaden(f);
         if(!pf||!pf.dataUrl){console.warn('[Wartung] Foto übersprungen:',f.name);continue;}
         const iW=85,iH=62,bm=(typeof _fsPdfBildMass==='function')?_fsPdfBildMass(pf,iW,iH):{w:iW,h:iH,dx:0,dy:0}; /* F87: Seitenverhältnis bleibt */
+        nr++;
+        const cap=x=>(typeof _fsWpFotoCap==='function')?_fsWpFotoCap(doc,bericht,f,x,y+iH+3,iW,nr):(doc.setFont('helvetica','normal'),doc.setFontSize(7),doc.setTextColor(100,100,100),doc.text(doc.splitTextToSize(f.name||'',iW),x,y+iH+3),1); /* F88 */
         if(col===0){
           if(y+iH+12>285){doc.addPage();y=M;}
           if(erstes){doc.setFillColor(230,244,235);doc.rect(M,y,W-2*M,7,'F');doc.setFontSize(9);doc.setFont('helvetica','bold');doc.setTextColor(26,92,58);doc.text('Fotodokumentation',M+2,y+5);y+=10;erstes=false;}
           doc.addImage(pf.dataUrl,'JPEG',M+bm.dx,y+bm.dy,bm.w,bm.h); /* F87 */
-          links=f; // Beschriftung der linken Spalte wird beim rechten Bild gesetzt
+          zl=cap(M);
         }else{
           doc.addImage(pf.dataUrl,'JPEG',M+iW+6+bm.dx,y+bm.dy,bm.w,bm.h); /* F87 */
-          doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(100,100,100);
-          doc.text(doc.splitTextToSize((links&&links.name)||'',iW),M,y+iH+3);
-          doc.text(doc.splitTextToSize(f.name||'',iW),M+iW+6,y+iH+3);
-          y+=iH+10;
+          zl=Math.max(zl,cap(M+iW+6));
+          y+=iH+7+zl*3;
         }
         col=(col+1)%2;
       }
-      if(col===1){doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(100,100,100);doc.text(doc.splitTextToSize((links&&links.name)||'',85),M,y+62+3);y+=62+10;}
+      if(col===1)y+=62+7+zl*3;
     }
 
     /* Seitenzahlen */
@@ -10135,6 +10289,7 @@ function _fsAnPlus12(datum){const m=/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(Strin
 function _fsAnPunktNeu(nr){return {nr:nr,typ:'',serie:'',kennz:'',verformung:'',korrosion:'',lose:'',seilLose:'',seilEnd:'',seilDaempfer:'',durchgang:'',befest:'',pruefart:[],drehmoment:'',ergebnis:'',bemerkung:'',fotoRefs:[]};}
 function _fsAnVervollstaendigen(b){
   if(!b)return b;
+  if(typeof _fsWpSignAufraeumen==='function')_fsWpSignAufraeumen(b); /* F88 */
   if(!b.kopf||typeof b.kopf!=='object')b.kopf={};
   const k=b.kopf;
   ['objektAdresse','haus','auftraggeber','kostenstelle','anlass','pruefer','qualifikation','beginn','ende','witterung','anlageArt','hersteller','montagejahr','letztePruefungDatum'].forEach(f=>{if(typeof k[f]!=='string')k[f]=(k[f]===undefined||k[f]===null)?'':String(k[f]);});
@@ -10219,7 +10374,8 @@ function _openAnschlagProtokoll(existingIdx,vonWp){
   hdrMeta.append(hdrT,hdrS);
   const datumEl=document.createElement('input');datumEl.type='text';datumEl.value=bericht.datum||'';datumEl.placeholder='TT.MM.JJJJ';datumEl.autocomplete='off';datumEl.setAttribute('aria-label','Datum');datumEl.setAttribute('data-an-datum','1');
   datumEl.style.cssText='width:104px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:6px;padding:7px 8px;color:#fff;font-size:var(--fs14,14px);font-family:inherit;flex-shrink:0;';
-  datumEl.oninput=()=>{bericht.datum=datumEl.value;scheduleSave();};
+  let anDatumGueltig=String(bericht.datum||'').trim(); /* F88: das zuletzt gültige Datum – „Nächste Prüfung bis“ geht mit, solange dort der Vorschlag dazu steht (oder nichts) */
+  datumEl.oninput=()=>{bericht.datum=datumEl.value;const neuN=_fsAnPlus12(datumEl.value);if(neuN){const alt=anDatumGueltig;anDatumGueltig=String(datumEl.value).trim();const nz=String(bericht.naechste||'').trim();if(neuN!==nz&&(!nz||nz===_fsAnPlus12(alt))){bericht.naechste=neuN;try{_anNeu();}catch(e){}}}scheduleSave();};
   hdr.append(closeBtn,hdrMeta,datumEl);
   if(!_fsAmPc()&&typeof _fsVorschau==='function'){ /* F80: „👁 Vorschau“ am Tablet – oben, weil es dort keine Fußleiste gibt; legt nichts ab */
     const vb=document.createElement('button');vb.type='button';vb.textContent='👁';vb.title='Vorschau – das PDF ansehen, nichts wird abgelegt';vb.setAttribute('aria-label','Vorschau');vb.setAttribute('data-fs-vorschau','1');
@@ -10461,8 +10617,8 @@ function _openAnschlagProtokoll(existingIdx,vonWp){
         if(typeof _pamAnErinnerungAusSetzen==='function'&&e.status!=='kein'){const k=document.createElement('button');k.type='button';k.setAttribute('data-an-erinnerung-knopf',aus?'an':'aus');k.textContent=aus?'🔔 wieder einschalten':'🔕 nicht mehr erinnern';k.title=aus?'Die Prüfung steht wieder in „Heute“, sobald sie fällig wird':'Diese Prüfung nicht mehr in „Heute“ zeigen (z. B. Anlage abgebaut) – im Protokoll wieder einschaltbar';k.style.cssText=chipStil(false)+'margin-left:8px;';k.onclick=()=>{if(_pamAnErinnerungAusSetzen(bericht,!aus))erNeu();};er.appendChild(k);}};
       const ni=nz.querySelector('input');if(ni)ni.addEventListener('input',erNeu);erNeu();eS.appendChild(er);
     }
-    const uh=document.createElement('div');uh.style.cssText='font-size:var(--fs11,11px);color:var(--text2);margin-top:6px;';uh.textContent='Unterschrift des Prüfers kommt in einem späteren Bauschritt.';eS.appendChild(uh);
     body.appendChild(eS);
+    body.appendChild(_fsWpUnterschriftenTeil(bericht,t,_anNeu,FS_AN_FARBE)); /* F88: Unterschriften (P69 Schritt 3, Teil Unterschrift) – Prüfer und freiwillig Auftraggeber / Betreiber */
     /* ── Fotos (wie im Dachprotokoll: am PC die PC-Werkzeuge, sonst Kamera · Galerie · Drive) ── */
     const fotoSek=document.createElement('div');fotoSek.style.cssText='border-top:1px solid var(--border);';
     const fHdr=document.createElement('div');fHdr.style.cssText='padding:10px 14px 4px;font-size:var(--fs12,12px);font-weight:700;color:'+FS_AN_FARBE+';border-left:3px solid '+FS_AN_FARBE+';padding-left:17px;';fHdr.textContent='Fotos';
@@ -10552,6 +10708,7 @@ async function _fsAnPdf(bericht,task){
     doc.autoTable({startY:y,theme:'grid',margin:{left:M,right:M},bodyStyles:{fontSize:8,minCellHeight:6},columnStyles:{0:{fontStyle:'bold',cellWidth:55,fillColor:[245,245,245]},1:{cellWidth:127}},body:erg});
     y=doc.lastAutoTable.finalY+6;
     if(bericht.maengel){kap('Festgestellte Mängel');doc.setFontSize(9);const ml=doc.splitTextToSize(bericht.maengel,W-2*M);doc.text(ml,M,y);y+=ml.length*4.5+4;}
+    if(typeof _fsWpPdfUnterschriften==='function')y=_fsWpPdfUnterschriften(doc,bericht,y,M,W); /* F88: Unterschriften (Prüfer und freiwillig Auftraggeber / Betreiber) vor den Fotos */
     /* Fotos je Punkt, dann Fotodokumentation */
     const fotos=bericht.fotos||[];const bildCache=new Map();
     const bildLaden=async f=>{if(!bildCache.has(f)){const d=await _fsFotoFuerPdf(f);bildCache.set(f,(typeof _fsFpEinbrennen==='function')?await _fsFpEinbrennen(d,f):d);} /* F85: Pins daraufgezeichnet (Anschlagpunkt) */return bildCache.get(f);};
@@ -10565,12 +10722,13 @@ async function _fsAnPdf(bericht,task){
     }
     const fotoList=fotos.filter(f=>f&&f.inReport===true&&(f.editedDriveId||f.driveId||f.localUrl||f.localKey)); /* F74: eigene Schreibweise – test_f10 ankert die Zeile des Dachprotokolls */
     if(fotoList.length){
-      let col=0,erstes=true,links=null;
+      let col=0,erstes=true,nr=0,zl=1; /* F88: „Foto N – …“ statt des Dateinamens; N zählt nur hier */
       for(const f of fotoList){const pf=await bildLaden(f);if(!pf||!pf.dataUrl)continue;const iW=85,iH=62,bm=(typeof _fsPdfBildMass==='function')?_fsPdfBildMass(pf,iW,iH):{w:iW,h:iH,dx:0,dy:0}; /* F87: Seitenverhältnis bleibt */
-        if(col===0){if(y+iH+12>285){doc.addPage();y=M;}if(erstes){kap('Fotodokumentation');erstes=false;}doc.addImage(pf.dataUrl,'JPEG',M+bm.dx,y+bm.dy,bm.w,bm.h);links=f;}
-        else{doc.addImage(pf.dataUrl,'JPEG',M+iW+6+bm.dx,y+bm.dy,bm.w,bm.h);doc.setFontSize(7);doc.setTextColor(100,100,100);doc.text(doc.splitTextToSize((links&&links.name)||'',iW),M,y+iH+3);doc.text(doc.splitTextToSize(f.name||'',iW),M+iW+6,y+iH+3);doc.setTextColor(0,0,0);y+=iH+10;}
+        nr++;const cap=x=>(typeof _fsWpFotoCap==='function')?_fsWpFotoCap(doc,bericht,f,x,y+iH+3,iW,nr):(doc.setFontSize(7),doc.setTextColor(100,100,100),doc.text(doc.splitTextToSize(f.name||'',iW),x,y+iH+3),1); /* F88 */
+        if(col===0){if(y+iH+12>285){doc.addPage();y=M;}if(erstes){kap('Fotodokumentation');erstes=false;}doc.addImage(pf.dataUrl,'JPEG',M+bm.dx,y+bm.dy,bm.w,bm.h);zl=cap(M);}
+        else{doc.addImage(pf.dataUrl,'JPEG',M+iW+6+bm.dx,y+bm.dy,bm.w,bm.h);zl=Math.max(zl,cap(M+iW+6));doc.setTextColor(0,0,0);y+=iH+7+zl*3;}
         col=(col+1)%2;}
-      if(col===1){doc.setFontSize(7);doc.setTextColor(100,100,100);doc.text(doc.splitTextToSize((links&&links.name)||'',85),M,y+62+3);doc.setTextColor(0,0,0);y+=72;}
+      if(col===1){doc.setTextColor(0,0,0);y+=62+7+zl*3;}
     }
     const pages=doc.internal.getNumberOfPages();
     for(let p=1;p<=pages;p++){doc.setPage(p);doc.setFontSize(8);doc.setTextColor(150,150,150);doc.text('Seite '+p+' von '+pages,W/2,292,{align:'center'});doc.text('sv-fb.de',W-M,292,{align:'right'});}
@@ -10990,14 +11148,15 @@ function _openRepAuftrag(existingIdx){
 
 /* F43: Das Unterschriftsfeld über den ganzen Bildschirm. Oben der Satz, den der Kunde bestätigt, dazwischen nur Schreibfläche, unten Name und Knöpfe.
    Mit Stift zählen Finger und Handballen nicht (wie beim Einzeichnen). fertig() wird nach „Übernehmen“ gerufen. */
-function _fsRaSignFenster(bericht,fertig){
-  const alt=document.getElementById('_fsRaSign');if(alt)alt.remove();
+function _fsRaSignFenster(bericht,fertig,opt){ /* F88: opt = {feld, titel, unter, name, vorschlaege} – ohne opt wie beim REP-Auftrag (Unterschrift Kunde in bericht.unterschrift) */
+  opt=opt||{};const sigFeld=opt.feld||'unterschrift';
+  const alt=(typeof _fsById==='function')?_fsById('_fsRaSign'):document.getElementById('_fsRaSign');if(alt)alt.remove();
   const fen=document.createElement('div');fen.id='_fsRaSign';
   if(typeof _fsSichtAn==='function')_fsSichtAn(fen);
   fen.style.cssText='position:fixed;inset:0;z-index:100000;background:var(--bg);color:var(--text);display:flex;flex-direction:column;';
   const kopf=document.createElement('div');kopf.style.cssText='background:'+FS_FARBE+';color:#fff;padding:10px 14px;flex-shrink:0;';
-  const k1=document.createElement('div');k1.style.cssText='font-size:var(--fs16,16px);font-weight:700;';k1.textContent='Ausführung und Lieferung bestätigt und abgenommen';
-  const k2=document.createElement('div');k2.style.cssText='font-size:var(--fs13,13px);opacity:.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';k2.textContent=['Unterschrift Kunde',_fsRaKurz(bericht)].filter(Boolean).join(' – ');
+  const k1=document.createElement('div');k1.style.cssText='font-size:var(--fs16,16px);font-weight:700;';k1.textContent=opt.titel||'Ausführung und Lieferung bestätigt und abgenommen';
+  const k2=document.createElement('div');k2.style.cssText='font-size:var(--fs13,13px);opacity:.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';k2.textContent=opt.unter||['Unterschrift Kunde',_fsRaKurz(bericht)].filter(Boolean).join(' – ');
   kopf.append(k1,k2);
   const feld=document.createElement('div');feld.style.cssText='flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px;background:var(--bg3);';
   const cv=document.createElement('canvas');cv.setAttribute('data-fs-ra-signfeld','1');
@@ -11005,7 +11164,8 @@ function _fsRaSignFenster(bericht,fertig){
   feld.appendChild(cv);
   const fuss=document.createElement('div');fuss.style.cssText='flex-shrink:0;padding:10px 14px 14px;border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap;align-items:center;';
   const nameEl=document.createElement('input');nameEl.type='text';nameEl.placeholder='Name in Druckbuchstaben';nameEl.autocomplete='off';nameEl.setAttribute('data-fs-ra-signname','1');
-  nameEl.value=(bericht.unterschrift&&bericht.unterschrift.name)||'';
+  nameEl.value=(bericht[sigFeld]&&bericht[sigFeld].name)||opt.name||'';
+  if(Array.isArray(opt.vorschlaege)&&opt.vorschlaege.length){const dl=document.createElement('datalist');dl.id='_fsRaSignVorschlaege';opt.vorschlaege.forEach(v=>{const o=document.createElement('option');o.value=String(v);dl.appendChild(o);});fen.appendChild(dl);nameEl.setAttribute('list',dl.id);} /* F88: Namen aus der Karte zum Auswählen, eintippen geht immer */
   nameEl.style.cssText='flex:1 1 200px;box-sizing:border-box;background:var(--bg3);border:2px solid var(--border);border-radius:8px;padding:9px 10px;font-size:var(--fs15,15px);color:var(--text);font-family:inherit;min-height:48px;';
   const kn=(txt,attr,stil,fn)=>{const k=document.createElement('button');k.type='button';k.textContent=txt;k.setAttribute(attr,'1');k.style.cssText='font-family:inherit;cursor:pointer;border-radius:10px;min-height:48px;padding:6px 16px;font-size:var(--fs15,15px);font-weight:700;'+stil;k.onclick=fn;return k;};
   const NEBEN='color:var(--text);border:2px solid var(--fs-krd,var(--border));background:var(--fs-kfl,transparent);';
@@ -11021,13 +11181,15 @@ function _fsRaSignFenster(bericht,fertig){
     kn('Abbrechen','data-fs-ra-signab',NEBEN,()=>fen.remove()),
     kn('Löschen','data-fs-ra-signleer',NEBEN,()=>{striche=[];aktiv=null;neu();}),
     kn('✓ Übernehmen','data-fs-ra-signok','color:#fff;border:none;background:'+FS_FARBE+';flex:1 1 160px;',()=>{
-      if(!_fsRaSignSetzen(bericht,striche,nameEl.value,new Date())){toast('Bitte erst im weißen Feld unterschreiben','info',3500);return;}
+      const ziel=(sigFeld==='unterschrift')?bericht:{}; /* F88: ein anderes Feld – erst in ein leeres Objekt, dann übernehmen */
+      if(!_fsRaSignSetzen(ziel,striche,nameEl.value,new Date())){toast('Bitte erst im weißen Feld unterschreiben','info',3500);return;}
+      if(ziel!==bericht)bericht[sigFeld]=ziel.unterschrift;
       scheduleSave();fen.remove();
       if(typeof fertig==='function'){try{fertig();}catch(e){console.warn('[REP-Auftrag] nach der Unterschrift:',e);}}
       toast('✓ Unterschrift übernommen','success',3000);
     }));
   fen.append(kopf,feld,fuss);
-  document.body.appendChild(fen);
+  if(typeof _fsAnhaengen==='function')_fsAnhaengen(fen,bericht);else document.body.appendChild(fen); /* F88: im eigenen PC-Fenster dort, wo das Protokoll steht */
   /* Zeichenfläche so breit wie hoch, wie das Feld gerade Platz hat (feste innere Größe – beim Drehen des Geräts wird nur gleichmäßig skaliert) */
   try{const rc=feld.getBoundingClientRect();if(rc&&rc.width>40&&rc.height>40)H=Math.max(300,Math.min(1600,Math.round(W*(rc.height-16)/(rc.width-16))));}catch(e){}
   cv.width=W;cv.height=H;
