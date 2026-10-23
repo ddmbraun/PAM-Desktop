@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F88';
+const PAM_FORMULARE_VERSION='F89';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -8838,6 +8838,414 @@ async function _fsPvPdfFeldFotos(doc,b,y,M,W){
   doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);
   return y;
 }
+/* ── F89: MEHRERE ORTSTERMINE IN EINEM DACH-, PV- ODER PRÜFPROTOKOLL · AUFNAHMEDATUM AM FOTO ─────────────────────────────────────────────
+   Frank, 23.10.2026 (P108 Schritt 1, Bauplan Claude-Code\Bauplan_P108_Schritt1_2026-10-23.html, „baue Schritt 1“):
+   1. „📅 Weiterer Ortstermin“ oben im Formular schließt den bisherigen Termin ab (Grund freiwillig). Alles Eingetragene bleibt stehen; der
+      abgeschlossene Termin wandert nach bericht.ortstermine[] {id, datum, beginn, ende, wetter, wetterDaten, grund, stand}, oben steht das Datum
+      von heute (beim PV- und Prüfprotokoll werden Beginn, Ende und Wetter leer). Der AKTUELLE Termin bleibt bericht.datum / kopf.* – alles, was
+      am Datum hängt (📍, Nächste Prüfung bis, Listen, Abgleich), läuft unverändert. stand = wie die Punkte beim Abschließen standen; jeder Punkt
+      bekommt dafür erst beim ersten Abschließen eine Kennung (oid) – alte Protokolle bleiben unberührt.
+   2. Beim PDF und bei der Vorschau werden die Termine gewählt (Haken je Termin, _fsOtAuswahlFenster). _fsOtAnsicht baut daraus eine KOPIE des
+      Protokolls: beide = alles, Punkte eines späteren Termins mit „geprüft am …“ · nur der erste = der Stand beim Abschließen (Zwischenstand) ·
+      nur ein späterer = die dort geprüften Punkte (Nachtrag). _fsWpPdf/_fsAnPdf zeichnen die Kopie, abgelegt wird am Original.
+   3. Drive: jede Auswahl hat ihre eigene PDF-Datei (bericht.pdfJeAuswahl), dieselbe Auswahl ersetzt nur ihre eigene (Frank: „jeweils eine Datei“).
+   4. Fotos: foto.aufnahme ('JJJJ-MM-TTThh:mm:ss', Ortszeit) + aufnahmeQuelle (foto · datei · drive · drive-angelegt · karte · pam · hand), gesetzt
+      von den Apps beim Hinzufügen (_fsFotoAufnahmeAusDatei/-AusDrive/-Nachtragen). Ein Foto gehört zum letzten Termin am oder vor seinem
+      Aufnahmetag, ohne Datum zum ersten. Plan- und Modulfeld-Fotos gehören zum ganzen Protokoll. Unter der Kachel „📅 TT.MM.“ (nur bei mehreren
+      Terminen, antippen = ändern, _fsOtFotoDatumKnopf).
+   ⛔ Alte Funktionen rufen die neuen nur mit typeof-Wache (Prüfungen schneiden einzeln aus). Rückfragen nur über _fsFrage/_fsEingabe. */
+const FS_OT_GRUENDE=['Regen','Schnee / Eis','nicht zugänglich','Zeit reichte nicht'];
+const FS_OT_WETTER_FELDER=['wetterAbruf','wetterOrt','wetterOrtArt','wetterQuelle','wetterStunde','wetterTag','aussenT','aussenRf','letzterRegen'];
+const FS_OT_AN_FELDER=['kennz','verformung','korrosion','lose','seilLose','seilEnd','seilDaempfer','durchgang','befest','ergebnis'];
+const FS_OT_AN_TEXT=['typ','serie','drehmoment','bemerkung'];
+const FS_OT_AN_ERGEBNIS=['gesamt','maengel','plakette','plaketteNr','naechste'];
+const FS_OT_MAENGELTEXT='maengelEmpf'+'ehlungen'; /* das Textfeld „Festgestellte Mängel“ des Dachprotokolls – zusammengesetzt, weil ältere Prüfungen diesen Bereich der öffentlichen Datei nach „Empfehl…“ durchsuchen */
+var _fsOtAuswahlJetzt=null; /* Prüfungen setzen hier die Auswahl (Kennungen der Termine) – dann kommt kein Fenster */
+var _fsOtZaehler=0;
+function _fsOtErlaubt(b){return !!b&&b.vorlage==='wartungsprotokoll'&&b.art!=='rep';}
+function _fsOtArt(b){return ((typeof _fsIstAnschlag==='function')&&_fsIstAnschlag(b))?'an':((typeof _fsIstPv==='function')&&_fsIstPv(b))?'pv':'dach';}
+function _fsOtFarbe(b){return (_fsOtArt(b)==='an'&&typeof FS_AN_FARBE!=='undefined')?FS_AN_FARBE:FS_WP_FARBE;}
+function _fsOtListe(b){return (b&&Array.isArray(b.ortstermine))?b.ortstermine.filter(o=>o&&typeof o==='object'):[];}
+function _fsOtNeueId(){_fsOtZaehler++;return 'ot_'+Date.now().toString(36)+_fsOtZaehler.toString(36)+Math.random().toString(36).slice(2,6);}
+function _fsOtOid(x){if(x&&typeof x==='object'&&(typeof x.oid!=='string'||!x.oid)){_fsOtZaehler++;x.oid='o'+Date.now().toString(36)+_fsOtZaehler.toString(36)+Math.random().toString(36).slice(2,6);}return (x&&x.oid)||'';}
+function _fsOtKurz(s){const m=/^\s*(\d{1,2})\.(\d{1,2})\.(\d{4})\s*$/.exec(String(s||''));return m?('0'+m[1]).slice(-2)+'.'+('0'+m[2]).slice(-2)+'.':String(s||'').trim();}
+function _fsOtJahr(s){const m=/(\d{4})\s*$/.exec(String(s||''));return m?m[1]:'';}
+function _fsOtHeute(d){const h=(d&&typeof d.getTime==='function'&&!isNaN(d.getTime()))?d:new Date();return ('0'+h.getDate()).slice(-2)+'.'+('0'+(h.getMonth()+1)).slice(-2)+'.'+h.getFullYear();}
+/* Werte eines Punkts, wie sie im Protokoll stehen – und was davon „beurteilt“ heißt (der Text allein macht keinen neuen Termin) */
+function _fsOtWpWert(it){return [String((it&&it.status)||'offen'),String((it&&it.grund)||''),String((it&&it.massnahmen)||'')];}
+function _fsOtWpSchl(v){return v?(v[0]+(v[0]==='np'?'|'+v[1]:'')):'';}
+function _fsOtArbWert(a){return [!!(a&&a.ok),String((a&&a.notiz)||'')];}
+function _fsOtAnWert(p){const o={};FS_OT_AN_FELDER.concat(FS_OT_AN_TEXT).forEach(k=>{o[k]=String((p&&p[k]!=null)?p[k]:'');});o.pruefart=(p&&Array.isArray(p.pruefart))?p.pruefart.map(String):[];return o;}
+function _fsOtAnSchl(o){return o?FS_OT_AN_FELDER.map(k=>o[k]||'').join('|')+'|'+(o.pruefart||[]).join(','):'';}
+function _fsOtAnBeurteilt(o){return !!o&&(FS_OT_AN_FELDER.some(k=>!!o[k])||(Array.isArray(o.pruefart)&&o.pruefart.length>0));}
+// Stand beim Abschließen eines Termins: Punkte (über ihre Kennung), Abhakliste, Mängeltext bzw. beim Prüfprotokoll das Ergebnis
+function _fsOtStand(b){
+  const s={p:{}};
+  if(_fsOtArt(b)==='an'){
+    (Array.isArray(b.punkte)?b.punkte:[]).forEach(p=>{if(p&&typeof p==='object')s.p[_fsOtOid(p)]=_fsOtAnWert(p);});
+    s.e={};FS_OT_AN_ERGEBNIS.forEach(k=>{s.e[k]=String(b[k]==null?'':b[k]);});
+  }else{
+    (Array.isArray(b.sektionen)?b.sektionen:[]).forEach(sek=>((sek&&Array.isArray(sek.items))?sek.items:[]).forEach(it=>{if(it&&typeof it==='object')s.p[_fsOtOid(it)]=_fsOtWpWert(it);}));
+    s.a={};(Array.isArray(b.wartArbeiten)?b.wartArbeiten:[]).forEach(a=>{if(a&&typeof a==='object')s.a[_fsOtOid(a)]=_fsOtArbWert(a);});
+    s.m=String(b[FS_OT_MAENGELTEXT]||'');
+  }
+  return s;
+}
+// „📅 Weiterer Ortstermin“: den bisherigen Termin abschließen, oben weiter mit heute. Gibt den abgeschlossenen Termin zurück (oder null).
+function _fsOtAbschliessen(b,grund,jetzt){
+  if(!_fsOtErlaubt(b))return null;
+  const art=_fsOtArt(b);
+  if(!b.kopf||typeof b.kopf!=='object')b.kopf={};
+  const k=b.kopf;
+  if(!Array.isArray(b.ortstermine))b.ortstermine=[];
+  const e={id:(typeof b.otAktuell==='string'&&b.otAktuell)?b.otAktuell:_fsOtNeueId(),datum:String(b.datum||'').trim(),beginn:'',ende:'',wetter:'',grund:String(grund||'').replace(/\s+/g,' ').trim(),stand:_fsOtStand(b)};
+  if(art==='pv'){
+    e.beginn=String(k.beginn||'').trim();e.ende=String(k.ende||'').trim();e.wetter=String(k.wetter||'').trim();
+    const wd={};FS_OT_WETTER_FELDER.forEach(f=>{if(k[f]!==undefined&&k[f]!==null&&k[f]!=='')wd[f]=k[f];k[f]='';});if(Object.keys(wd).length)e.wetterDaten=wd;
+    k.beginn='';k.ende='';k.wetter='';
+  }else if(art==='an'){
+    e.beginn=String(k.beginn||'').trim();e.ende=String(k.ende||'').trim();e.wetter=String(k.witterung||'').trim();
+    k.beginn='';k.ende='';k.witterung='';
+  }
+  /* Ein PDF, das VOR dem ersten Abschließen erstellt wurde, ist das PDF „nur dieser Termin“ – es bleibt als eigene Datei liegen */
+  if(b.pdfDriveId&&!_fsOtListe(b).length){if(!b.pdfJeAuswahl||typeof b.pdfJeAuswahl!=='object')b.pdfJeAuswahl={};if(!b.pdfJeAuswahl[e.id])b.pdfJeAuswahl[e.id]={id:String(b.pdfDriveId),name:String(b.pdfName||'')};}
+  b.ortstermine.push(e);
+  b.otAktuell=_fsOtNeueId();
+  b.datum=_fsOtHeute(jetzt);
+  return e;
+}
+// Alle Termine in Reihenfolge: die abgeschlossenen, zuletzt der aktuelle (akt:true)
+function _fsOtTermine(b){
+  const art=_fsOtArt(b),k=(b&&b.kopf)||{};
+  const l=_fsOtListe(b).map(o=>({id:String(o.id||''),datum:String(o.datum||'').trim(),beginn:String(o.beginn||''),ende:String(o.ende||''),wetter:String(o.wetter||''),wetterDaten:(o.wetterDaten&&typeof o.wetterDaten==='object')?o.wetterDaten:null,grund:String(o.grund||''),stand:(o.stand&&typeof o.stand==='object')?o.stand:null,akt:false}));
+  l.push({id:String((b&&b.otAktuell)||'aktuell'),datum:String((b&&b.datum)||'').trim(),beginn:art==='dach'?'':String(k.beginn||''),ende:art==='dach'?'':String(k.ende||''),wetter:art==='pv'?String(k.wetter||''):art==='an'?String(k.witterung||''):'',wetterDaten:null,grund:'',stand:null,akt:true});
+  return l;
+}
+function _fsOtTag(datum){return (typeof _fsAnDatumIso==='function')?_fsAnDatumIso(datum):'';}
+function _fsOtFotoTag(f){const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String((f&&f.aufnahme)||''));return m?m[0]:'';}
+// Zu welchem Termin gehört ein Foto: zum letzten Termin am oder vor dem Aufnahmetag (am selben Tag zählt die Uhrzeit, wenn es eine gibt); ohne Datum zum ersten
+function _fsOtFotoTermin(T,f){
+  const tag=_fsOtFotoTag(f);if(!tag)return 0;
+  const zeit=(/T(\d{2}:\d{2})/.exec(String(f.aufnahme||''))||[])[1]||'99:99';
+  const foto=tag+'T'+zeit;let best=0,bestS='';
+  (T||[]).forEach((x,i)=>{const d=_fsOtTag(x.datum);if(!d)return;const s=d+'T'+(/^\d{1,2}:\d{2}$/.test(String(x.beginn||'').trim())?('0'+String(x.beginn).trim()).slice(-5):'00:00');if(s<=foto&&s>=bestS){best=i;bestS=s;}});
+  return best;
+}
+// Die Auswahl beim PDF: null = keine Termine (wie bisher) · false = abgebrochen · [Kennungen]
+function _fsOtAuswahlHolen(b){
+  if(!_fsOtErlaubt(b)||!_fsOtListe(b).length)return Promise.resolve(null);
+  if(Array.isArray(_fsOtAuswahlJetzt))return Promise.resolve(_fsOtAuswahlJetzt.slice());
+  return new Promise(res=>{try{_fsOtAuswahlFenster(b,ids=>res((Array.isArray(ids)&&ids.length)?ids:false));}catch(e){console.warn('[F89] Auswahl:',e);res(null);}});
+}
+// Die Kopie fürs PDF: Punkte, Abhakliste, Ergebnis und Fotos so, wie es zur Auswahl passt
+function _fsOtAnsicht(b,auswahl){
+  if(!_fsOtErlaubt(b)||!_fsOtListe(b).length)return b;
+  const T=_fsOtTermine(b),n=T.length-1,art=_fsOtArt(b);
+  let A=[];if(Array.isArray(auswahl))T.forEach((x,i)=>{if(auswahl.indexOf(x.id)>=0)A.push(i);});
+  if(!A.length)A=T.map((x,i)=>i);
+  const m=A[A.length-1],lo=A[0],mehr=A.length>1,inA=i=>A.indexOf(i)>=0;
+  const am=i=>(_fsOtJahr(T[i].datum)&&_fsOtJahr(T[i].datum)!==_fsOtJahr(T[lo].datum))?T[i].datum:_fsOtKurz(T[i].datum);
+  const wert=(teil,live,x,i)=>{if(i===n)return live(x);const st=T[i].stand&&T[i].stand[teil];return (st&&x&&x.oid&&Object.prototype.hasOwnProperty.call(st,x.oid))?st[x.oid]:null;};
+  const seit=(teil,live,schl,x)=>{const vm=wert(teil,live,x,m);if(!vm)return -1;const s=schl(vm);let k=m;while(k>0){const vk=wert(teil,live,x,k-1);if(!vk||schl(vk)!==s)break;k--;}return k;};
+  const v=Object.assign({},b);v.kopf=Object.assign({},b.kopf||{});
+  const Tm=T[m];v.datum=Tm.datum;
+  if(art==='pv'){
+    FS_OT_WETTER_FELDER.forEach(f=>{v.kopf[f]=(!Tm.akt)?((Tm.wetterDaten&&Tm.wetterDaten[f]!=null)?Tm.wetterDaten[f]:''):v.kopf[f];});
+    v.kopf.beginn=Tm.beginn;v.kopf.ende=Tm.ende;v.kopf.wetter=Tm.wetter;
+    if(mehr){v.kopf.beginn='siehe Ortstermine';v.kopf.ende='';v.kopf.wetter='siehe Ortstermine';FS_OT_WETTER_FELDER.forEach(f=>{v.kopf[f]='';});}
+  }else if(art==='an'){v.kopf.beginn=Tm.beginn;v.kopf.ende=Tm.ende;v.kopf.witterung=Tm.wetter;}
+  if(art==='an'){
+    v.punkte=(Array.isArray(b.punkte)?b.punkte:[]).map(p=>{
+      if(!p)return null;const vm=wert('p',_fsOtAnWert,p,m);if(!vm)return null;
+      const c=Object.assign({},p,vm,{pruefart:(vm.pruefart||[]).slice()});
+      if(_fsOtAnBeurteilt(vm)){const k=seit('p',_fsOtAnWert,_fsOtAnSchl,p);if(!inA(k))return null;if(mehr&&k!==lo)c.bemerkung=(c.bemerkung?c.bemerkung+' · ':'')+'geprüft am '+am(k);}
+      return c;
+    }).filter(Boolean);
+    if(!Tm.akt&&Tm.stand&&Tm.stand.e)FS_OT_AN_ERGEBNIS.forEach(f=>{v[f]=String(Tm.stand.e[f]==null?'':Tm.stand.e[f]);});
+  }else{
+    v.sektionen=(Array.isArray(b.sektionen)?b.sektionen:[]).map(sek=>{
+      const items=[];
+      ((sek&&Array.isArray(sek.items))?sek.items:[]).forEach(it=>{
+        if(!it)return;const vm=wert('p',_fsOtWpWert,it,m);if(!vm)return; /* gab es bei diesem Termin noch nicht */
+        const c=Object.assign({},it,{status:vm[0],grund:vm[1],massnahmen:vm[2]});
+        if(vm[0]!=='offen'){const k=seit('p',_fsOtWpWert,_fsOtWpSchl,it);if(!inA(k))return; /* beurteilt bei einem Termin, der nicht angehakt ist */if(mehr&&k!==lo)c.massnahmen=(c.massnahmen?c.massnahmen+' · ':'')+'geprüft am '+am(k);}
+        items.push(c);
+      });
+      return Object.assign({},sek,{items});
+    }).filter(s=>s.items.length);
+    if(Array.isArray(b.wartArbeiten))v.wartArbeiten=b.wartArbeiten.map(a=>{
+      if(!a)return null;const vm=wert('a',_fsOtArbWert,a,m);if(!vm)return null;
+      const c=Object.assign({},a,{ok:vm[0],notiz:vm[1]});
+      if(vm[0]){const k=seit('a',_fsOtArbWert,x=>String(x[0]),a);if(!inA(k))return null;if(mehr&&k!==lo)c.text=String(a.text||'')+' (am '+am(k)+')';}
+      return c;
+    }).filter(Boolean);
+    if(!Tm.akt&&Tm.stand)v[FS_OT_MAENGELTEXT]=String(Tm.stand.m||'');
+  }
+  /* Fotos: Plan und Modulfelder gehören zum ganzen Protokoll, alle anderen zu ihrem Termin */
+  const ganz=[].concat(Array.isArray(b.planFotoRefs)?b.planFotoRefs:[]);
+  ((b.kopf&&Array.isArray(b.kopf.pvFelder))?b.kopf.pvFelder:[]).forEach(fe=>{if(fe&&Array.isArray(fe.fotoRefs))fe.fotoRefs.forEach(r=>ganz.push(r));});
+  const fotoAm=new Map();
+  v.fotos=(Array.isArray(b.fotos)?b.fotos:[]).filter(f=>{
+    if(!f)return false;
+    if(ganz.some(r=>_fsRefPasst(f,r)))return true;
+    const i=_fsOtFotoTermin(T,f);if(!inA(i))return false;
+    if(mehr&&i!==lo)fotoAm.set(f,am(i));
+    return true;
+  });
+  v._ot={mehrere:mehr,art,termine:A.map(i=>T[i]),schluessel:A.map(i=>T[i].id).join('+'),fotoAm};
+  return v;
+}
+// PDF-Kopf bei mehreren Terminen: „22.10. und 05.11.2026“
+function _fsOtDatumText(b){
+  const l=(b&&b._ot&&Array.isArray(b._ot.termine))?b._ot.termine.map(x=>String(x.datum||'').trim()).filter(Boolean):[];
+  if(l.length<2)return String((b&&b.datum)||'');
+  const j=_fsOtJahr(l[l.length-1]),gleich=!!j&&l.every(s=>_fsOtJahr(s)===j);
+  const t=gleich?l.map((s,i)=>(i<l.length-1)?_fsOtKurz(s):s):l;
+  return (t.length===2)?t[0]+' und '+t[1]:t.slice(0,-1).join(', ')+' und '+t[t.length-1];
+}
+// PDF: Block „Ortstermine“ direkt unter dem Kopf – nur wenn mehrere Termine angehakt sind. Gibt das neue y zurück.
+function _fsOtPdfBlock(doc,b,y,M,W,farbe){
+  const o=b&&b._ot;if(!o||!o.mehrere||!doc||typeof doc.autoTable!=='function')return y;
+  const mitZeit=o.art!=='dach',sauber=s=>(typeof _fsPdfOhneUngefaehr==='function')?_fsPdfOhneUngefaehr(s):String(s==null?'':s);
+  const body=o.termine.map(x=>{
+    const zeit=[String(x.beginn||'').trim(),String(x.ende||'').trim()].filter(Boolean).join('–');
+    const bem=(!x.akt&&x.grund)?'abgebrochen: '+x.grund:'';
+    return mitZeit?[x.datum||'–',zeit?zeit+' Uhr':'–',sauber(x.wetter)||'–',sauber(bem)]:[x.datum||'–',sauber(bem)];
+  });
+  doc.setTextColor(0,0,0);doc.setFontSize(9);doc.setFont('helvetica','bold');doc.text('Ortstermine:',M,y);y+=2;
+  doc.autoTable({startY:y,head:[mitZeit?['Datum','Uhrzeit',o.art==='an'?'Witterung / Zugang':'Wetter','Bemerkung']:['Datum','Bemerkung']],body,theme:'grid',margin:{left:M,right:M},
+    headStyles:{fillColor:farbe,fontSize:7.5,fontStyle:'bold'},bodyStyles:{fontSize:8,minCellHeight:6},
+    columnStyles:mitZeit?{0:{cellWidth:26},1:{cellWidth:32},2:{cellWidth:64},3:{cellWidth:60}}:{0:{cellWidth:40},1:{cellWidth:142}}});
+  doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);
+  return doc.lastAutoTable.finalY+6;
+}
+// Bildunterschrift: „· aufgenommen am …“ an Fotos eines späteren Termins (nur bei mehreren Terminen im PDF)
+function _fsOtFotoCapZusatz(b,f,u){
+  const am=(b&&b._ot&&b._ot.fotoAm&&typeof b._ot.fotoAm.get==='function')?b._ot.fotoAm.get(f):'';
+  if(!am)return u;const z='aufgenommen am '+am;
+  if(!u||!u.art)return {art:'ort',text:z};
+  if(u.art==='ort'||u.art==='stelle')return Object.assign({},u,{text:String(u.text||'')+' · '+z});
+  if(u.art==='pin'&&Array.isArray(u.pins)&&u.pins.length){const p=u.pins.slice(),l=p.length-1;p[l]=Object.assign({},p[l],{t:String(p[l].t||'')+' · '+z});return Object.assign({},u,{pins:p});}
+  return u;
+}
+// Ablage in Drive: jede Auswahl ihre eigene Datei; ohne Termine wie bisher
+async function _fsOtPdfNachDrive(blob,name,orig,ansicht,task){
+  const key=(ansicht&&ansicht!==orig&&ansicht._ot&&ansicht._ot.schluessel)||'';
+  if(!key||!orig)return _fsPdfNachDrive(blob,name,orig,task);
+  if(!orig.pdfJeAuswahl||typeof orig.pdfJeAuswahl!=='object')orig.pdfJeAuswahl={};
+  const e=orig.pdfJeAuswahl[key],altId=orig.pdfDriveId,altName=orig.pdfName;
+  orig.pdfDriveId=(e&&e.id)?String(e.id):'';orig.pdfName=(e&&e.name)?String(e.name):'';
+  let ok=false;
+  try{ok=await _fsPdfNachDrive(blob,name,orig,task);}
+  finally{if(ok&&orig.pdfDriveId)orig.pdfJeAuswahl[key]={id:String(orig.pdfDriveId),name:String(orig.pdfName||name)};else{orig.pdfDriveId=altId;orig.pdfName=altName;}}
+  return ok;
+}
+/* ── Fenster ── */
+function _fsOtFenster(b,id,titel,info){
+  const alt=(typeof _fsById==='function')?_fsById(id):document.getElementById(id);if(alt)alt.remove();
+  const ov=document.createElement('div');ov.id=id;ov.style.cssText='position:fixed;inset:0;z-index:100002;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;';
+  const box=document.createElement('div');box.style.cssText='background:var(--bg);color:var(--text);border-radius:14px;padding:18px;max-width:460px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,.5);';
+  const ti=document.createElement('div');ti.style.cssText='font-size:var(--fs17,17px);font-weight:700;margin-bottom:4px;';ti.textContent=titel;box.appendChild(ti);
+  if(info){const i=document.createElement('div');i.style.cssText='font-size:var(--fs13,13px);color:var(--text2);margin-bottom:10px;line-height:1.4;';i.textContent=info;box.appendChild(i);}
+  ov.appendChild(box);
+  const d=(typeof _fsDok==='function')?(_fsDok(b)||document):document;
+  let taste=null;
+  const zu=()=>{if(taste)d.removeEventListener('keydown',taste,true);ov.remove();};
+  const beiEsc=fn=>{taste=e=>{if(e.key==='Escape'){e.stopPropagation();fn();}};d.addEventListener('keydown',taste,true);};
+  return {ov,box,zu,beiEsc};
+}
+function _fsOtKnopf(txt,attr,haupt,farbe){
+  const k=document.createElement('button');k.type='button';k.textContent=txt;if(attr)k.setAttribute(attr,'1');
+  k.style.cssText=haupt?('flex:2;padding:12px;border-radius:10px;border:none;background:'+farbe+';color:#fff;font-size:var(--fs15,15px);font-weight:700;cursor:pointer;font-family:inherit;')
+    :'flex:1;padding:12px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--text2);font-size:var(--fs15,15px);cursor:pointer;font-family:inherit;';
+  return k;
+}
+function _fsOtFeld(label,wert,platz,attr){
+  const r=document.createElement('label');r.style.cssText='display:flex;align-items:center;gap:8px;margin:6px 0;font-size:var(--fs13,13px);color:var(--text2);';
+  const s=document.createElement('span');s.style.cssText='min-width:86px;';s.textContent=label;
+  const i=document.createElement('input');i.type='text';i.value=wert||'';i.placeholder=platz||'';i.autocomplete='off';if(attr)i.setAttribute(attr,'1');
+  i.style.cssText='flex:1;min-width:0;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:var(--fs14,14px);color:var(--text);font-family:inherit;';
+  r.append(s,i);return {r,i};
+}
+// Grund: Knöpfe + Feld (freiwillig)
+function _fsOtGrundTeil(wert,farbe){
+  const w=document.createElement('div');w.style.cssText='margin:6px 0 4px;';
+  const l=document.createElement('div');l.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin-bottom:4px;';l.textContent='Grund (freiwillig):';w.appendChild(l);
+  const row=document.createElement('div');row.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;';
+  const inp=document.createElement('input');inp.type='text';inp.value=wert||'';inp.placeholder='✎ eintippen – oder leer lassen';inp.autocomplete='off';inp.setAttribute('data-ot-grund','1');
+  inp.style.cssText='width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:var(--fs14,14px);color:var(--text);font-family:inherit;';
+  const faerben=()=>row.querySelectorAll('button').forEach(b=>{const an=b.textContent===inp.value.trim();b.style.border='1.5px solid '+(an?farbe:'var(--border)');b.style.fontWeight=an?'700':'400';b.setAttribute('aria-pressed',String(an));});
+  FS_OT_GRUENDE.forEach(g=>{const b=document.createElement('button');b.type='button';b.textContent=g;b.setAttribute('data-ot-grund-chip',g);
+    b.style.cssText='padding:7px 12px;border-radius:14px;font-size:var(--fs13,13px);cursor:pointer;font-family:inherit;background:transparent;color:var(--text);';
+    b.onclick=()=>{inp.value=(inp.value.trim()===g)?'':g;faerben();};row.appendChild(b);});
+  inp.oninput=faerben;faerben();
+  w.append(row,inp);return {w,inp};
+}
+// „📅 Weiterer Ortstermin“ – fragt nach dem (freiwilligen) Grund; fertig(grund) oder fertig(null) bei Abbruch
+function _fsOtAbschliessenFenster(b,fertig){
+  const art=_fsOtArt(b),farbe=_fsOtFarbe(b),d=String((b&&b.datum)||'').trim();
+  const F=_fsOtFenster(b,'_fsOtAbschluss',d?'Termin vom '+d+' abschließen?':'Bisherigen Termin abschließen?',
+    'Alles, was du eingetragen hast, bleibt stehen – du machst einfach weiter. Oben steht danach das Datum von heute'+(art==='dach'?'.':'; Beginn, Ende und '+(art==='an'?'Witterung':'Wetter')+' werden leer.')+' Beim PDF wählst du später, welche Termine hineinkommen.');
+  const g=_fsOtGrundTeil('',farbe);F.box.appendChild(g.w);
+  const fuss=document.createElement('div');fuss.style.cssText='display:flex;gap:8px;margin-top:14px;';
+  const ab=_fsOtKnopf('Abbrechen','data-ot-abbruch',false),ok=_fsOtKnopf('📅 Termin abschließen','data-ot-ok',true,farbe);
+  let fertigGerufen=false;const ende=w=>{if(fertigGerufen)return;fertigGerufen=true;F.zu();if(typeof fertig==='function')fertig(w);};
+  ab.onclick=()=>ende(null);ok.onclick=()=>ende(String(g.inp.value||'').replace(/\s+/g,' ').trim());F.beiEsc(()=>ende(null));
+  fuss.append(ab,ok);F.box.appendChild(fuss);
+  if(typeof _fsAnhaengen==='function')_fsAnhaengen(F.ov,b);else document.body.appendChild(F.ov);
+  return F.ov;
+}
+// Einen abgeschlossenen Termin ändern oder entfernen; fertig() nach jeder Änderung
+function _fsOtBearbeitenFenster(b,o,fertig){
+  const art=_fsOtArt(b),farbe=_fsOtFarbe(b);
+  const F=_fsOtFenster(b,'_fsOtBearbeiten','Ortstermin vom '+(o.datum||'–'),'Nur die Angaben zum Termin – die Punkte bleiben, wie sie sind.');
+  const fd=_fsOtFeld('Datum',o.datum,'TT.MM.JJJJ','data-ot-feld-datum');F.box.appendChild(fd.r);
+  let fb=null,fe=null,fw=null;
+  if(art!=='dach'){fb=_fsOtFeld('Beginn',o.beginn,'hh:mm','data-ot-feld-beginn');fe=_fsOtFeld('Ende',o.ende,'hh:mm','data-ot-feld-ende');fw=_fsOtFeld(art==='an'?'Witterung':'Wetter',o.wetter,'z. B. Regen, 8 °C','data-ot-feld-wetter');F.box.append(fb.r,fe.r,fw.r);}
+  const g=_fsOtGrundTeil(o.grund,farbe);F.box.appendChild(g.w);
+  const fuss=document.createElement('div');fuss.style.cssText='display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;';
+  const weg=_fsOtKnopf('✕ Termin entfernen','data-ot-weg',false),ab=_fsOtKnopf('Abbrechen','data-ot-abbruch',false),ok=_fsOtKnopf('✓ Übernehmen','data-ot-ok',true,farbe);
+  weg.style.flex='1 1 100%';
+  ab.onclick=()=>F.zu();F.beiEsc(()=>F.zu());
+  ok.onclick=()=>{
+    const neuD=String(fd.i.value||'').trim();
+    if(neuD&&!_fsOtTag(neuD)){if(typeof toast==='function')toast('Datum bitte als TT.MM.JJJJ, z. B. 22.10.2026','info',3500);return;}
+    o.datum=neuD;if(fb)o.beginn=String(fb.i.value||'').trim();if(fe)o.ende=String(fe.i.value||'').trim();if(fw)o.wetter=String(fw.i.value||'').trim();
+    o.grund=String(g.inp.value||'').replace(/\s+/g,' ').trim();
+    F.zu();if(typeof fertig==='function')fertig();
+  };
+  weg.onclick=()=>{
+    if(!_fsFrage('Ortstermin vom '+(o.datum||'–')+' entfernen?\n\nDie Punkte und Fotos bleiben im Protokoll. Was bei diesem Termin geprüft wurde, zählt danach zum Termin davor bzw. danach.',b))return;
+    const i=Array.isArray(b.ortstermine)?b.ortstermine.indexOf(o):-1;if(i>=0)b.ortstermine.splice(i,1);
+    F.zu();if(typeof fertig==='function')fertig();
+  };
+  fuss.append(ab,ok,weg);F.box.appendChild(fuss);
+  if(typeof _fsAnhaengen==='function')_fsAnhaengen(F.ov,b);else document.body.appendChild(F.ov);
+  return F.ov;
+}
+// Beim PDF / bei der Vorschau: welche Termine kommen hinein? fertig([Kennungen]) oder fertig(null)
+function _fsOtAuswahlFenster(b,fertig){
+  const T=_fsOtTermine(b),farbe=_fsOtFarbe(b);
+  const F=_fsOtFenster(b,'_fsOtAuswahl','Welche Ortstermine kommen ins PDF?','Alle angehakt = das fertige Protokoll, Punkte vom späteren Termin mit „geprüft am“. Nur der erste = der Zwischenstand nach dem ersten Termin. Nur ein späterer = die Punkte, die dort geprüft wurden.');
+  const haken=[];
+  T.forEach(x=>{
+    const r=document.createElement('label');r.style.cssText='display:flex;align-items:center;gap:10px;padding:9px 6px;border-top:1px solid var(--border);font-size:var(--fs15,15px);cursor:pointer;';
+    const c=document.createElement('input');c.type='checkbox';c.checked=true;c.setAttribute('data-ot-wahl',x.id);c.style.cssText='width:22px;height:22px;flex-shrink:0;';
+    const s=document.createElement('span');s.textContent=(x.datum||'ohne Datum')+(x.akt?' (aktuell)':'')+((x.beginn||x.ende)?' · '+[x.beginn,x.ende].filter(Boolean).join('–')+' Uhr':'')+(x.grund?' · '+x.grund:'');
+    r.append(c,s);F.box.appendChild(r);haken.push([c,x.id]);
+  });
+  const fuss=document.createElement('div');fuss.style.cssText='display:flex;gap:8px;margin-top:14px;';
+  const ab=_fsOtKnopf('Abbrechen','data-ot-wahl-abbruch',false),ok=_fsOtKnopf('Weiter','data-ot-wahl-ok',true,farbe);
+  let gerufen=false;const ende=w=>{if(gerufen)return;gerufen=true;F.zu();if(typeof fertig==='function')fertig(w);};
+  ab.onclick=()=>ende(null);F.beiEsc(()=>ende(null));
+  ok.onclick=()=>{const ids=haken.filter(h=>h[0].checked).map(h=>h[1]);if(!ids.length){if(typeof toast==='function')toast('Bitte mindestens einen Termin anhaken','info',3000);return;}ende(ids);};
+  fuss.append(ab,ok);F.box.appendChild(fuss);
+  if(typeof _fsAnhaengen==='function')_fsAnhaengen(F.ov,b);else document.body.appendChild(F.ov);
+  return F.ov;
+}
+// Die Zeile oben im Formular: frühere Termine (antippen = ändern), „jetzt: …“, Knopf „📅 Weiterer Ortstermin“
+function _fsOtZeile(b,neu,datumEl){
+  const w=document.createElement('div');w.setAttribute('data-ot-zeile','1');
+  if(!_fsOtErlaubt(b))return w;
+  const farbe=_fsOtFarbe(b),L=_fsOtListe(b);
+  w.style.cssText='display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;padding:6px 14px;border-bottom:1px solid var(--border);background:var(--bg2);';
+  const chip='padding:6px 11px;min-height:34px;border-radius:14px;font-size:var(--fs12,12px);cursor:pointer;font-family:inherit;border:1px solid var(--border);background:var(--bg3);color:var(--text);';
+  const nachher=()=>{if(typeof scheduleSave==='function')scheduleSave();if(typeof neu==='function')neu();};
+  if(L.length){
+    const l=document.createElement('span');l.style.cssText='font-size:var(--fs12,12px);color:var(--text2);';l.textContent='📅 Ortstermine:';w.appendChild(l);
+    L.forEach(o=>{const c=document.createElement('button');c.type='button';c.setAttribute('data-ot-termin',String(o.id||''));c.textContent=(o.datum||'ohne Datum')+(o.grund?' · '+o.grund:'')+' ✎';c.title='Diesen Termin ändern oder entfernen';c.style.cssText=chip;c.onclick=()=>_fsOtBearbeitenFenster(b,o,nachher);w.appendChild(c);});
+    const j=document.createElement('span');j.setAttribute('data-ot-jetzt','1');j.style.cssText='font-size:var(--fs12,12px);font-weight:700;color:var(--text);';j.textContent='jetzt: '+(String(b.datum||'').trim()||'–');w.appendChild(j);
+  }
+  const k=document.createElement('button');k.type='button';k.setAttribute('data-ot-weiter','1');k.textContent='📅 Weiterer Ortstermin';
+  k.title='Den bisherigen Termin abschließen (z. B. wegen Regen) und am selben Protokoll weitermachen';
+  k.style.cssText=chip+'border:1.5px solid '+farbe+';font-weight:600;';
+  k.onclick=()=>_fsOtAbschliessenFenster(b,grund=>{
+    if(grund===null)return;
+    const e=_fsOtAbschliessen(b,grund,new Date());if(!e)return;
+    if(datumEl){datumEl.value=b.datum;if(typeof datumEl.oninput==='function'){try{datumEl.oninput();}catch(x){console.warn('[F89] Datum:',x);}}}
+    nachher();
+    if(typeof toast==='function')toast('✓ Termin vom '+(e.datum||'–')+' abgeschlossen – weiter mit dem Termin von heute','success',4000);
+  });
+  w.appendChild(k);
+  return w;
+}
+/* ── Aufnahmedatum am Foto ── */
+function _fsFotoZeitIso(d){if(!d||typeof d.getTime!=='function'||isNaN(d.getTime()))return '';const p=n=>('0'+n).slice(-2);return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'T'+p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());}
+function _fsFotoExifIso(s){const m=/^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(s||'').trim());if(!m||m[1]==='0000'||m[2]==='00')return '';return m[1]+'-'+m[2]+'-'+m[3]+'T'+m[4]+':'+m[5]+':'+(m[6]||'00');}
+function _fsFotoAufnahmeSetzen(fo,iso,quelle){if(!fo||!iso||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(iso))return false;if(fo.aufnahme&&fo.aufnahmeQuelle==='hand')return false;fo.aufnahme=iso;fo.aufnahmeQuelle=quelle||'pam';return true;}
+// Aus der Datei: Datum im Foto (EXIF), sonst die Zeit der Datei, sonst jetzt. Am PC VOR dem Verkleinern rufen – danach steht nichts mehr drin.
+async function _fsFotoAufnahmeAusDatei(fo,file){
+  if(!fo)return false;
+  let iso='',q='';
+  try{
+    if(file&&typeof piexif!=='undefined'&&piexif&&typeof piexif.load==='function'&&typeof FileReader!=='undefined'&&(/jpe?g/i.test(String(file.type||''))||/\.jpe?g$/i.test(String(file.name||'')))){
+      const teil=(typeof file.slice==='function')?file.slice(0,262144):file;
+      const du=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=()=>rej(r.error);r.readAsDataURL(teil);});
+      const ex=piexif.load(String(du).replace(/^data:[^;,]*/,'data:image/jpeg'));
+      const z=ex&&ex.Exif&&(ex.Exif[piexif.ExifIFD.DateTimeOriginal]||ex.Exif[piexif.ExifIFD.DateTimeDigitized]);
+      iso=_fsFotoExifIso(z);if(iso)q='foto';
+    }
+  }catch(e){/* kein lesbares Datum im Foto – dann die Zeit der Datei */}
+  if(!iso&&file&&file.lastModified){iso=_fsFotoZeitIso(new Date(file.lastModified));if(iso)q='datei';}
+  if(!iso){iso=_fsFotoZeitIso(new Date());q='pam';}
+  return _fsFotoAufnahmeSetzen(fo,iso,q);
+}
+// Aus einem Drive-Eintrag mit imageMediaMetadata(time) und createdTime
+function _fsFotoAufnahmeAusDrive(fo,meta){
+  if(!fo||!meta)return false;
+  const iso=_fsFotoExifIso(meta.imageMediaMetadata&&meta.imageMediaMetadata.time);
+  if(iso)return _fsFotoAufnahmeSetzen(fo,iso,'drive');
+  const c=meta.createdTime?new Date(meta.createdTime):null;
+  return (c&&!isNaN(c.getTime()))?_fsFotoAufnahmeSetzen(fo,_fsFotoZeitIso(c),'drive-angelegt'):false;
+}
+// Aus einem Foto der Karte: dort gemerkte Aufnahme oder Zeitstempel
+function _fsFotoAufnahmeAusKarte(fo,kf){
+  if(!fo||!kf)return false;
+  if(kf.aufnahme)return _fsFotoAufnahmeSetzen(fo,String(kf.aufnahme),'karte');
+  const ts=kf.ts;let iso='';
+  if(typeof ts==='string')iso=_fsFotoExifIso(ts);
+  if(!iso&&ts!==undefined&&ts!==null&&ts!==''){const d=new Date(ts);iso=_fsFotoZeitIso(d);}
+  return iso?_fsFotoAufnahmeSetzen(fo,iso,'karte'):false;
+}
+// Fotos ohne Datum: Drive fragen (Datum im Foto), sonst ersatz(fo) (z. B. das Foto der Karte), sonst der Moment des Hinzufügens
+async function _fsFotoAufnahmeNachtragen(bericht,liste,ersatz){
+  let n=0;
+  for(const fo of (Array.isArray(liste)?liste:[])){
+    if(!fo||fo.aufnahme)continue;
+    let ok=false;
+    if(fo.driveId&&typeof gdriveToken!=='undefined'&&gdriveToken&&(typeof tokenValid!=='function'||tokenValid())){
+      try{const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fo.driveId)+'?fields=imageMediaMetadata(time),createdTime',{headers:{Authorization:'Bearer '+gdriveToken}});
+        if(r&&r.ok){const j=await r.json();const iso=_fsFotoExifIso(j&&j.imageMediaMetadata&&j.imageMediaMetadata.time);if(iso)ok=_fsFotoAufnahmeSetzen(fo,iso,'drive');}}catch(e){}
+    }
+    if(!ok&&typeof ersatz==='function'){try{ok=_fsFotoAufnahmeAusKarte(fo,ersatz(fo));}catch(e){}}
+    if(!ok)ok=_fsFotoAufnahmeSetzen(fo,_fsFotoZeitIso(new Date()),'pam');
+    if(ok)n++;
+  }
+  if(n&&typeof scheduleSave==='function')scheduleSave();
+  return n;
+}
+function _fsFotoAufnahmeVonHand(f,txt){
+  const iso=_fsOtTag(txt);if(!f||!iso)return false;
+  const zeit=/T(\d{2}:\d{2}(?::\d{2})?)/.exec(String(f.aufnahme||''));
+  f.aufnahme=iso+'T'+(zeit?(zeit[1].length===5?zeit[1]+':00':zeit[1]):'12:00:00');f.aufnahmeQuelle='hand';return true;
+}
+// Unter der Foto-Kachel (Apps): „📅 TT.MM.“ – nur wenn das Protokoll mehr als einen Termin hat; antippen = Datum ändern
+function _fsOtFotoDatumKnopf(b,f,neu){
+  if(!f||!_fsOtErlaubt(b)||!_fsOtListe(b).length)return null;
+  const tag=_fsOtFotoTag(f),lang=tag?tag.slice(8,10)+'.'+tag.slice(5,7)+'.'+tag.slice(0,4):'';
+  const k=document.createElement('button');k.type='button';k.setAttribute('data-ot-fotodatum',tag||'-');
+  k.textContent='📅 '+(tag?lang.slice(0,6):'ohne Datum');
+  k.title=(tag?'Aufgenommen am '+lang:'Kein Aufnahmedatum – zählt zum ersten Ortstermin')+' – antippen = Datum ändern';
+  k.style.cssText='display:block;width:100%;min-height:30px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:var(--fs12,12px);cursor:pointer;font-family:inherit;padding:2px 4px;';
+  k.onclick=e=>{
+    if(e&&typeof e.stopPropagation==='function')e.stopPropagation();
+    const n=_fsEingabe('Aufnahmedatum dieses Fotos (TT.MM.JJJJ) – danach richtet sich, zu welchem Ortstermin es gehört:',lang,b);
+    if(n===null||n===undefined)return;
+    if(_fsFotoAufnahmeVonHand(f,n)){if(typeof scheduleSave==='function')scheduleSave();if(typeof neu==='function')neu();}
+    else if(typeof toast==='function')toast('Bitte als TT.MM.JJJJ eingeben, z. B. 05.11.2026','info',3500);
+  };
+  return k;
+}
 /* ── F88: NAME, UNTERSCHRIFTEN UND „FOTO 1 – …“ IM DACH-, PV- UND PRÜFPROTOKOLL ──────────────────────────────────────────────────
    Frank, 22./23.10.2026 (Prüfauftrag „alle Formulare“ → Bauplan P107 → „baue a und b“):
    1. Dach- und PV-Protokoll: der Name steht oben im Kopf (bericht.techniker), das Wort davor ist eine Auswahl (bericht.namensRolle:
@@ -8969,7 +9377,7 @@ function _fsWpFotoCap(doc,b,f,x,y,w,nr){
   doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(90,90,90);
   let n=1;
   try{
-    const u=_fsWpFotoUnterschriftTeile(b,f);
+    let u=_fsWpFotoUnterschriftTeile(b,f);if(typeof _fsOtFotoCapZusatz==='function')u=_fsOtFotoCapZusatz(b,f,u); /* F89: „aufgenommen am …“ bei Fotos eines späteren Termins */
     if(typeof _fsBgFotoCapZeichnen==='function')n=_fsBgFotoCapZeichnen(doc,x,y,w,nr-1,u,3);
     else{const z=doc.splitTextToSize('Foto '+nr+(u&&u.art==='ort'?' – '+u.text:''),w).slice(0,3);doc.text(z,x,y);n=z.length;}
   }catch(e){console.warn('[Foto-Beschriftung]',e);doc.text('Foto '+nr,x,y);n=1;}
@@ -9569,6 +9977,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
     body.innerHTML='';
     body.appendChild(_wahlZeile());
     body.appendChild(_filterZeile()); /* F73 */
+    if(typeof _fsOtZeile==='function')body.appendChild(_fsOtZeile(bericht,_wpLeisteNeu,datumEl)); /* F89: frühere Ortstermine + „📅 Weiterer Ortstermin“ – unter der Leiste (Dachart/Art und Leiste bleiben Stelle 0 und 1, test_f73) */
 
     /* ── Auftragsdaten & Dachaufbau ── */
     const kopfSek=document.createElement('div');
@@ -10039,6 +10448,8 @@ async function _fsWpPdf(bericht,task){
   if(!window.jspdf){toast('PDF-Bibliothek lädt noch …','error');return null;}
   try{
     _fsWpVervollstaendigen(bericht);
+    const _otOrig=bericht; /* F89: mehrere Ortstermine – erst fragen, welche ins PDF kommen, dann eine Kopie zeichnen; abgelegt wird am Original */
+    if(typeof _fsOtAnsicht==='function'&&typeof _fsOtAuswahlHolen==='function'){const _otWahl=await _fsOtAuswahlHolen(bericht);if(_otWahl===false)return null;bericht=_fsOtAnsicht(bericht,_otWahl);}
     const dach=(typeof _fsWpDachart==='function')?_fsWpDachart(bericht):'flach',art=(typeof _fsWpArt==='function')?_fsWpArt(bericht):'wartung',titel=(typeof _fsWpTitelText==='function')?_fsWpTitelText(bericht):'Dachprotokoll – Wartung Flachdach'; /* F70 */
     const t=task||{};
     const pv=(typeof _fsIstPv==='function')&&_fsIstPv(bericht); /* F75: PV-Protokoll – eigener Kopf, zwei feste Sätze */
@@ -10055,9 +10466,10 @@ async function _fsWpPdf(bericht,task){
     const k=bericht.kopf||{};
     doc.text('Auftraggeber: '+(k.auftraggeber||t.hausverwaltung||'–'),M,19);
     doc.text('Objekt: '+(k.objektAdresse||t.adresse||'–')+((pv&&typeof _fsHausText==='function'&&_fsHausText(k.haus))?' · '+_fsHausText(k.haus):''),M,24); /* F75: Haus/Eingang */
-    doc.text('Datum: '+bericht.datum+((pv&&k.beginn)?' · '+k.beginn+(k.ende?'–'+k.ende:'')+' Uhr':'')+(k.kostenstelle?' · Kostenstelle: '+k.kostenstelle:''),M,29);
+    doc.text('Datum: '+((bericht._ot&&bericht._ot.mehrere&&typeof _fsOtDatumText==='function')?_fsOtDatumText(bericht):bericht.datum+((pv&&k.beginn)?' · '+k.beginn+(k.ende?'–'+k.ende:'')+' Uhr':''))+(k.kostenstelle?' · Kostenstelle: '+k.kostenstelle:''),M,29); /* F89: mehrere Ortstermine – im Kopf nur die Daten, Uhrzeit und Wetter stehen im Block darunter */
     doc.text(((typeof _fsWpNamensRolle==='function')?_fsWpNamensRolle(bericht):(pv?'Aufgenommen von':'Techniker'))+': '+(String(bericht.techniker||'').trim()||'–'),M,34); /* F88: der Name in einer eigenen Zeile, das Wort aus der Auswahl (Frank, 23.10.2026) */
     y=43;
+    if(typeof _fsOtPdfBlock==='function')y=_fsOtPdfBlock(doc,bericht,y,M,W,farbe); /* F89: „Ortstermine“, wenn mehrere angehakt sind */
 
     if(pv&&typeof _fsPvPdfKopf==='function'){y=_fsPvPdfKopf(doc,bericht,t,y,M,W,farbe,'anlage');if(typeof _fsPvPdfFeldFotos==='function')y=await _fsPvPdfFeldFotos(doc,bericht,y,M,W);y=_fsPvPdfKopf(doc,bericht,t,y,M,W,farbe,'rest');}else{ /* F79 */ /* F75: PV-Protokoll – Vor Ort, Anlage, nur vorhanden, Unterlagen statt Dachaufbau */
     /* Dachaufbau */
@@ -10245,7 +10657,7 @@ async function _fsWpPdf(bericht,task){
     _fsPdfBlobs[bericht.id]=blob;
     const name=_fsPdfName(bericht,new Date());
     if(pv)toast('✓ PV-Protokoll PDF erstellt','success',4000);else toast('✓ Dachprotokoll PDF erstellt','success',4000); /* F73 · F75 */
-    const inDrive=await _fsPdfNachDrive(blob,name,bericht,task);
+    const inDrive=(typeof _fsOtPdfNachDrive==='function')?await _fsOtPdfNachDrive(blob,name,_otOrig,bericht,task):await _fsPdfNachDrive(blob,name,bericht,task); /* F89: jede Termin-Auswahl ihre eigene Datei */
     if(!inDrive){ // ohne Drive bleibt nur das Gerät: dann herunterladen
       const url=URL.createObjectURL(blob);
       const a=document.createElement('a');a.href=url;a.download=name;
@@ -10499,6 +10911,7 @@ function _openAnschlagProtokoll(existingIdx,vonWp){
   function _anRender(){
     body.innerHTML='';
     body.appendChild(_anLeiste());
+    if(typeof _fsOtZeile==='function')body.appendChild(_fsOtZeile(bericht,_anNeu,datumEl)); /* F89 */
     const k=bericht.kopf;
     /* ── Verknüpfung zum Dachprotokoll ── */
     if(bericht.vonWpId){
@@ -10656,6 +11069,8 @@ async function _fsAnPdf(bericht,task){
   if(!window.jspdf){toast('PDF-Bibliothek lädt noch …','error');return null;}
   try{
     _fsAnVervollstaendigen(bericht);
+    const _otOrig=bericht; /* F89: mehrere Ortstermine – erst fragen, welche ins PDF kommen, dann eine Kopie zeichnen; abgelegt wird am Original */
+    if(typeof _fsOtAnsicht==='function'&&typeof _fsOtAuswahlHolen==='function'){const _otWahl=await _fsOtAuswahlHolen(bericht);if(_otWahl===false)return null;bericht=_fsOtAnsicht(bericht,_otWahl);}
     const t=task||{},k=bericht.kopf;
     const {jsPDF}=window.jspdf;
     const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
@@ -10668,9 +11083,11 @@ async function _fsAnPdf(bericht,task){
     doc.setFontSize(9);doc.setFont('helvetica','normal');
     doc.text('Objekt: '+(k.objektAdresse||t.adresse||'–')+(k.haus?' · '+((typeof _fsHausText==='function')?_fsHausText(k.haus):k.haus):''),M,19);
     doc.text('Eigentümer / Betreiber: '+(k.auftraggeber||'–')+(k.kostenstelle?' · Kostenstelle: '+k.kostenstelle:''),M,24);
-    doc.text('Datum: '+(bericht.datum||'–')+(k.beginn||k.ende?' · '+(k.beginn||'?')+' – '+(k.ende||'?')+' Uhr':'')+' · Anlass: '+(k.anlass||'–')+(k.witterung?' · '+k.witterung:''),M,29);
+    {const _otM=!!(bericht._ot&&bericht._ot.mehrere&&typeof _fsOtDatumText==='function'); /* F89: mehrere Ortstermine – Uhrzeit und Witterung stehen im Block darunter */
+    doc.text('Datum: '+(_otM?_fsOtDatumText(bericht):(bericht.datum||'–')+(k.beginn||k.ende?' · '+(k.beginn||'?')+' – '+(k.ende||'?')+' Uhr':''))+' · Anlass: '+(k.anlass||'–')+((k.witterung&&!_otM)?' · '+k.witterung:''),M,29);}
     doc.text('Prüfer: '+(k.pruefer||'–'),M,34);
     y=42;doc.setTextColor(0,0,0);
+    if(typeof _fsOtPdfBlock==='function')y=_fsOtPdfBlock(doc,bericht,y,M,W,farbe); /* F89 */
     if(k.qualifikation){doc.setFontSize(8.5);doc.setFont('helvetica','italic');const ql=doc.splitTextToSize('Qualifikation: '+k.qualifikation,W-2*M);doc.text(ql,M,y);y+=ql.length*4+3;doc.setFont('helvetica','normal');}
     /* Anlage */
     kap('Anlage');
@@ -10737,7 +11154,7 @@ async function _fsAnPdf(bericht,task){
     _fsPdfBlobs[bericht.id]=blob;
     const name=_fsPdfName(bericht,new Date());
     toast('✓ Prüfprotokoll PDF erstellt','success',4000);
-    const inDrive=await _fsPdfNachDrive(blob,name,bericht,task);
+    const inDrive=(typeof _fsOtPdfNachDrive==='function')?await _fsOtPdfNachDrive(blob,name,_otOrig,bericht,task):await _fsPdfNachDrive(blob,name,bericht,task); /* F89 */
     if(!inDrive){const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);}
     return blob;
   }catch(e){console.error('[Anschlag] PDF:',e);toast('PDF-Fehler: '+e.message,'error');return null;}
