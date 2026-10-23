@@ -69,7 +69,7 @@ async function _clearCacheAndReload(){
 try{var _cs=+(localStorage.getItem('pam_card_scale')||100);document.documentElement.style.setProperty('--card-scale',(_cs/100).toFixed(2));}catch(e){}
 </script>
 <script src="https://accounts.google.com/gsi/client" defer onload="typeof gdriveInit==='function'?gdriveInit():(window._gsiPending=true)" onerror="window._gsiLoadError=true;window._gsiPending=false;typeof _driveSetStatus==='function'&&_driveSetStatus('⚠ Google-Dienst nicht erreichbar – Netzwerk oder Adblocker prüfen',false)"></script>
-<script src="formulare.js?v=F90" charset="utf-8"></script>
+<script src="formulare.js?v=F91" charset="utf-8"></script>
 <script>
 // ── EMAIL DROP-ZONE – Inline-Handler am Element, kein addEventListener nötig ──
 
@@ -10723,7 +10723,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-23 · #1247'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-23-b1247) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-23 · #1248'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-23-b1248) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -33541,7 +33541,9 @@ function _pamVbListe(task){
   if(task&&!Array.isArray(task.ausserhausTermine))task.ausserhausTermine=[];
   return {liste:task?task.ausserhausTermine:[],fenster:false};
 }
-function _pamVbZeit(b){
+function _pamVbZeit(b,iso){
+  /* b1248 (F91): mehrere Ortstermine – für einen bestimmten Tag gilt die Zeit des Ortstermins an diesem Tag */
+  if(iso&&b&&Array.isArray(b.ortstermine)&&b.ortstermine.length&&typeof _fsVbIso==='function'&&_fsVbIso(b.datum)!==iso){const o=b.ortstermine.filter(function(x){return x&&_fsVbIso(x.datum)===iso;}).pop();if(o)b={datum:o.datum,kopf:{beginn:o.beginn,ende:o.ende}};}
   const st=(typeof _fsVbZeitStatus==='function')?_fsVbZeitStatus((b&&b.kopf)||{}):{art:'ohne'};
   return Object.assign({iso:(typeof _fsVbIso==='function')?_fsVbIso(b&&b.datum):''},st);
 }
@@ -33553,7 +33555,7 @@ function _pamVbSpanne(task,tm,dazu,iso){
   let von='',bis='';const mit=[],ohne=[];
   ids.forEach(function(id){
     const q=(dazu&&dazu.id===id)?dazu:_pamVbProt(task,id);if(!q)return;
-    const z=_pamVbZeit(q);if(z.iso!==iso)return;
+    const z=_pamVbZeit(q,iso);if(z.iso!==iso)return;
     if(z.art!=='ok'){ohne.push(q);return;}
     mit.push(q);if(!von||z.b<von)von=z.b;if(!bis||z.e>bis)bis=z.e;
   });
@@ -33561,14 +33563,19 @@ function _pamVbSpanne(task,tm,dazu,iso){
 }
 // Protokolle eines ANDEREN Tages, die schon an diesem Termin hängen (dann ist er nicht wählbar)
 function _pamVbFremdTag(task,tm,bericht,iso){
-  return _pamVbIds(tm).filter(function(id){return id!==bericht.id;}).map(function(id){return _pamVbProt(task,id);}).filter(function(q){return q&&_pamVbZeit(q).iso!==iso;});
+  const a=_pamVbIds(tm).filter(function(id){return id!==bericht.id;}).map(function(id){return _pamVbProt(task,id);}).filter(function(q){return q&&_pamVbZeit(q,iso).iso!==iso;});
+  /* b1248 (F91): auch ein Termin, der schon zu einem ANDEREN Ortstermin dieses Protokolls gehört, ist nicht wählbar */
+  const og=_pamVbProt(task,bericht.id)||bericht,d=String((tm&&tm.date)||'');
+  if(d&&d!==iso&&_pamVbIds(tm).indexOf(bericht.id)>=0&&og&&Array.isArray(og.ortstermine)&&typeof _fsVbIso==='function'){const o=og.ortstermine.concat([og]).filter(function(x){return x&&_fsVbIso(x.datum)===d;})[0];if(o)a.push({id:og.id,protName:og.protName,schlank:og.schlank,art:og.art,fassung:og.fassung,vorlage:og.vorlage,titel:og.titel,datum:o.datum,kopf:{beginn:o===og?(og.kopf||{}).beginn:o.beginn,ende:o===og?(og.kopf||{}).ende:o.ende}});}
+  return a;
 }
 function _pamVbTagKurz(iso){return (typeof _tzDatumKurz==='function'&&iso)?_tzDatumKurz(iso):String(iso||'');}
 // Beschriftung des Knopfs im Protokoll: neu · fertig (Termin trägt genau die Zeit) · erneut (Zeit seitdem geändert)
 function _pamVbZeitStand(bericht,task){
   task=task||((typeof currentTask==='function')?currentTask():null);
   if(!bericht||!task)return {art:'neu',txt:'📅 Zeit in Termin übertragen'};
-  const tm=_pamVbListe(task).liste.filter(function(x){return x&&!x.hiddenInPam&&_pamVbIds(x).indexOf(bericht.id)>=0;})[0];
+  const _otVerb=_pamVbListe(task).liste.filter(function(x){return x&&!x.hiddenInPam&&_pamVbIds(x).indexOf(bericht.id)>=0;}),_otIso=_pamVbZeit(bericht).iso; /* b1248 (F91): ein Termin an einem anderen Ortstermin-Tag zählt hier nicht */
+  const tm=_otVerb.filter(function(x){return (x.date||'')===_otIso;})[0]||_otVerb.filter(function(x){return !(Array.isArray(bericht.ortstermine)&&bericht.ortstermine.some(function(o){return o&&typeof _fsVbIso==='function'&&_fsVbIso(o.datum)===(x.date||'');}));})[0];
   if(!tm)return {art:'neu',txt:'📅 Zeit in Termin übertragen'};
   const z=_pamVbZeit(bericht),sp=_pamVbSpanne(task,tm,null,z.iso);
   const andere=_pamVbIds(tm).filter(function(id){return id!==bericht.id;}).map(function(id){return _pamVbProt(task,id);}).filter(Boolean).map(_pamVbName);
@@ -33577,9 +33584,11 @@ function _pamVbZeitStand(bericht,task){
   return {art:'erneut',txt:'↻ Zeit geändert – erneut übertragen'};
 }
 // Das Fenster: Zeit unvollständig → erst eintragen · Karte ohne Termin → anlegen · sonst Termin wählen, vorher/nachher, Übernehmen
-function _pamVbZeitUebertragen(bericht,task,nachher,zeitAuf){
+function _pamVbZeitUebertragen(bericht,task,nachher,zeitAuf,termin){
   task=task||((typeof currentTask==='function')?currentTask():null);
   if(!bericht||!task){showToast('⚠ Keine Karte offen','warning',4000);return;}
+  const _otTage=(Array.isArray(bericht.ortstermine)?bericht.ortstermine:[]).map(function(o){return o?o.datum:'';}).concat([bericht.datum]).map(function(d){return (typeof _fsVbIso==='function')?_fsVbIso(d):'';}).filter(Boolean); /* b1248 (F91): Tage aller Ortstermine dieses Protokolls */
+  if(termin&&typeof termin==='object')bericht={id:bericht.id,protName:bericht.protName,schlank:bericht.schlank,art:bericht.art,fassung:bericht.fassung,vorlage:bericht.vorlage,titel:bericht.titel,datum:termin.datum,kopf:Object.assign({},bericht.kopf||{},{beginn:termin.beginn||'',ende:termin.ende||''})}; /* b1248 (F91): ein früherer Ortstermin */
   const z=_pamVbZeit(bericht);
   const tagL=((typeof _tmTagLang==='function'&&z.iso)?_tmTagLang(z.iso):'')||String(bericht.datum||'ohne Datum');
   const alt=document.getElementById('_pamVbUebDlg');if(alt)alt.remove();
@@ -33618,9 +33627,10 @@ function _pamVbZeitUebertragen(bericht,task,nachher,zeitAuf){
   const kand=L.liste.map(function(x,i){return {x:x,i:i};}).filter(function(o){return o.x&&!o.x.hiddenInPam;})
     .sort(function(a,b){const p=String(a.x.date||'9')+' '+String(a.x.von||''),q=String(b.x.date||'9')+' '+String(b.x.von||'');return p<q?-1:(p>q?1:0);});
   // 2) Karte hat keinen Termin → auf Wunsch anlegen
-  if(!kand.length){
+  const _otKeinFreier=_otTage.length>1&&kand.length>0&&kand.every(function(o){return _pamVbFremdTag(task,o.x,bericht,z.iso).length>0;}); /* b1248 (F91): alle Termine der Karte gehören schon zu anderen Tagen */
+  if(!kand.length||_otKeinFreier){
     const text=(typeof _fsVbTerminText==='function')?_fsVbTerminText(bericht):'Besichtigung';
-    box.appendChild(el('div','margin-top:10px;','Diese Karte hat noch keinen Außer-Haus-Termin. Soll PAM einen anlegen?'));
+    box.appendChild(el('div','margin-top:10px;',_otKeinFreier?'Die Termine dieser Karte gehören schon zu anderen Tagen. Soll PAM für diesen Ortstermin einen neuen anlegen?':'Diese Karte hat noch keinen Außer-Haus-Termin. Soll PAM einen anlegen?'));
     box.appendChild(el('div','font-weight:700;margin-top:4px;',tagL+' · '+z.b+'–'+z.e+' Uhr · „'+text+'“'));
     box.appendChild(el('div',INFO,'ⓘ Weitere Protokolle vom selben Tag hängen sich später an diesen Termin. Geht wie jeder Termin nach Outlook. Abhaken machst du selbst.'));
     const nk=knopf('＋ Neuen Termin anlegen',KNH,function(){
@@ -33646,7 +33656,7 @@ function _pamVbZeitUebertragen(bericht,task,nachher,zeitAuf){
     L.liste.forEach(function(x){
       if(!x)return;
       if(x.vorabId){if(!Array.isArray(x.vorabIds))x.vorabIds=[];if(x.vorabIds.indexOf(x.vorabId)<0)x.vorabIds.push(x.vorabId);delete x.vorabId;}
-      if(x!==wahl.x&&Array.isArray(x.vorabIds))x.vorabIds=x.vorabIds.filter(function(id){return id!==bericht.id;});
+      if(x!==wahl.x&&Array.isArray(x.vorabIds)&&_otTage.filter(function(d){return d!==z.iso;}).indexOf(x.date||'')<0)x.vorabIds=x.vorabIds.filter(function(id){return id!==bericht.id;}); /* b1248 (F91): die Termine der anderen Ortstermin-Tage bleiben verbunden */
     });
     const t2=wahl.x;
     if(!Array.isArray(t2.vorabIds))t2.vorabIds=[];
@@ -77037,6 +77047,7 @@ async function _pamBesichtigungWord(bericht,t){
   try{
     if(typeof _fsWordAufbau!=='function'){toast('Word-Ausgabe: die Formular-Datei ist zu alt – bitte neu laden','error',5000);return null;}
     if(typeof _fsVervollstaendigen==='function')_fsVervollstaendigen(bericht);
+    if(typeof _fsOtBgVorbereiten==='function'){const _otV=await _fsOtBgVorbereiten(bericht);if(_otV===false)return null;bericht=_otV;} /* b1248 (F91): mehrere Ortstermine – welche ins Word kommen, wie beim PDF */
     const aufbau=_fsWordAufbau(bericht,t);
     toast('Word: Vorlage wird gesucht …','info',2000);
     const startBuf=await _besWordVorlageLaden();

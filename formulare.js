@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F90';
+const PAM_FORMULARE_VERSION='F91';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -1191,10 +1191,10 @@ function _fsWordSkizzeBild(b,sk){try{return _fsBgSkizzeBild(b,_fsAsPseudoRaum(sk
 function _fsWordAufbau(b,task){
   const k=(b&&b.kopf)||{},hat=v=>!(v===null||v===undefined||String(v).trim()==='');
   const out={titel:_fsB2Name(b),objekt:[String(k.objektAdresse||(task&&task.adresse)||'').trim(),(typeof _fsHausText==='function'?_fsHausText(k.haus):'')].filter(Boolean).join(' · '),auftraggeber:String((task&&task.rechnungsanschrift)||k.auftraggeber||'').trim(),
-    auftragNr:String(k.auftragNr||'').trim(),datum:String((b&&b.datum)||'').trim(),pruefer:String(k.pruefer||'').trim(),bloecke:[]};
+    auftragNr:String(k.auftragNr||'').trim(),datum:(b&&b._ot&&b._ot.mehrere&&typeof _fsOtDatumText==='function')?_fsOtDatumText(b):String((b&&b.datum)||'').trim(),pruefer:String(k.pruefer||'').trim(),bloecke:[]};
   if(!b)return out;
   const B=out.bloecke,alle=(Array.isArray(b.fotos)?b.fotos:[]).filter(f=>f&&f.inReport),drin=[];
-  const fotoText=f=>{const zu=_fsBgFotoZuordnung(b,f),fpl=_fsFpLegende(f);return (zu||'')+(fpl?(zu?'. ':'')+'Markiert: '+fpl:'');};
+  const fotoText=f=>{const zu=_fsBgFotoZuordnung(b,f),fpl=_fsFpLegende(f);return (zu||'')+(fpl?(zu?'. ':'')+'Markiert: '+fpl:'')+((b._ot&&b._ot.fotoAm&&b._ot.fotoAm.get(f))?((zu||fpl)?' · ':'')+'aufgenommen am '+b._ot.fotoAm.get(f):'');}; /* F91 */
   const fotosVon=refs=>{const l=[];(Array.isArray(refs)?refs:[]).forEach(r=>{const f=alle.find(x=>_fsRefPasst(x,r));if(f&&l.indexOf(f)<0)l.push(f);});return l;};
   { /* Vor Ort */
     const z=[],zt=_fsBgZeitText(k),aw=_fsBgAnwesendZeilen(b); /* F49: eine Zeile je Person · F53: getrennt in „Aufgenommen / gemessen von“ und „Vor Ort“ (aw bleibt für ältere Prüfungen) */
@@ -1204,6 +1204,7 @@ function _fsWordAufbau(b,task){
     if(hat(k.besuchBei))z.push(['Besichtigung bei',String(k.besuchBei).trim()]);
     if(b.wetterImPdf!==false){const wt=_fsWetterKurz(k),q=_fsBgWetterQuelle(k);if(wt)z.push([q?'Wetter laut Wetterdienst':'Wetter (von Hand eingetragen)',wt+(q?' ('+q.replace(/^Angabe des Wetterdienstes /,'').replace(/\.$/,'')+')':'')]);
      const vo=_fsVorOrtKurz(k);if(vo)z.push(['Außen vor Ort gemessen',vo]);if(hat(k.vorOrtWetter))z.push(['Wetter vor Ort gesehen',String(k.vorOrtWetter).trim()]);} /* F47 · F52: getrennt nach Herkunft */
+    if(b._ot&&b._ot.mehrere&&typeof _fsOtBgWordZeilen==='function')_fsOtBgWordZeilen(b,z); /* F91: je Ortstermin eine Zeile */
     if(z.length){B.push({a:'kapitel',t:'Vor Ort'});B.push({a:'tabelle',z:z});}
   }
   { /* Gemeldet und vorgefunden */
@@ -1225,6 +1226,7 @@ function _fsWordAufbau(b,task){
       if(hat(_fsVbWo(s)))z.push(['Wo',_fsVbWo(s)]); /* F59 */
       if(se)z.push(['Seite',se]);
       if(hat(s.text))z.push(['Festgestellt',String(s.text).trim()]);
+      if(s._otAm)z.push(['Festgestellt am',s._otAm]); /* F91 */
       if(z.length)teil.push({a:'tabelle',z:z});
       const fl=fotosVon(s.fotoRefs);
       if(fl.length){fl.forEach(f=>{if(drin.indexOf(f)<0)drin.push(f);});teil.push({a:'fotos',l:fl.map(f=>({foto:f,text:fotoText(f)}))});}
@@ -1253,7 +1255,7 @@ function _fsWordAufbau(b,task){
   if(hat(b.vorgeschichte)){B.push({a:'kapitel',t:'Vorgeschichte laut Auftraggeber (nicht selbst festgestellt)'});B.push({a:'text',t:String(b.vorgeschichte).trim()});} /* F47 */
   { /* F47: Bemerkungen – nur Notizen mit „im PDF“ */
     const nz=Array.isArray(b.notizen)?b.notizen.filter(n=>n&&n.pdf===true&&hat(n.text)):[];
-    if(nz.length){B.push({a:'kapitel',t:'Bemerkungen'});nz.forEach(n=>B.push({a:'text',t:String(n.text).trim()}));}
+    if(nz.length){B.push({a:'kapitel',t:'Bemerkungen'});nz.forEach(n=>B.push({a:'text',t:String(n.text).trim()+((typeof _fsOtAmText==='function')?_fsOtAmText(n):'')}));}
   }
   { /* Fotos im Protokoll, die an keiner Stelle hängen */
     const rest=alle.filter(f=>drin.indexOf(f)<0);
@@ -2250,6 +2252,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       return row;
     })();
     w.append(...(gk?[nameZeile,_vbKopfB2()].concat(_fsIstVorab(bericht)?[]:[_vbBereichZeile()]):[]).concat([bei],gk?[]:[_feld('Lage','lage','z. B. Wohnung darüber, Keller')],[zeitKn,zz],hinweisVb?[hinweisVb]:[],uebVb?[uebVb]:[])); // F23: Besichtigung 2 ohne Lage · F26: mit Name
+      if(gk&&typeof _fsOtZeile==='function'){const _otZ=_fsOtZeile(bericht,_neuBauen,{value:'',oninput:()=>{hdrS.textContent=(bericht.kopf.objektAdresse||t.adresse||t.title||'')+' · '+(bericht.datum||'');}});if(_otZ&&_otZ.children&&_otZ.children.length)w.insertBefore(_otZ,zz);} /* F91: frühere Ortstermine + „📅 Weiterer Ortstermin“ direkt unter 📍/🏁 */
       if(_vbZeitAuf){
       const datRow=document.createElement('div');datRow.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 14px;border-top:1px solid var(--border);';
       const dl=document.createElement('span');dl.style.cssText='font-size:var(--fs13,13px);color:var(--text2);width:112px;flex-shrink:0;';dl.textContent='Datum';
@@ -2775,6 +2778,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     };
     const tI=_inp(r.t,'°C',v=>{r.t=v;_fsWerteNeu();},true);
     const fI=_inp(r.rf,'%',v=>{r.rf=v;_fsWerteNeu();},true);
+    if(typeof _fsOtBgMessWache==='function'){_fsOtBgMessWache(bericht,'raeume',r,tI,_neuBauen);_fsOtBgMessWache(bericht,'raeume',r,fI,_neuBauen);} /* F91: Rückfrage bei Raumluft von einem früheren Termin */
     const td=document.createElement('span');td.setAttribute('data-fs-raum',String(ri));
     td.style.cssText='font-size:var(--fs14,14px);color:var(--text);text-align:center;';
     const x=document.createElement('button');x.type='button';x.textContent='✕';x.title='Raum entfernen';
@@ -3066,11 +3070,11 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const gr=document.createElement('div');gr.style.cssText='display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:8px;';
       const felder=[['Oberfläche °C','ts'],['Bauteil (Digits)','mf']];
       if(_fsZahl(st.mfVergleich)!==null)felder.push(['Vergleich trocken (alt)','mfVergleich']); // nur wenn aus früheren Eingaben vorhanden
-      felder.forEach(([lab,key])=>gr.appendChild(_bgLabelFeld(lab,_inp(st[key],'',v=>{st[key]=v;_fsWerteNeu();},true))));
+      felder.forEach(([lab,key])=>{const mi=_inp(st[key],'',v=>{st[key]=v;_fsWerteNeu();},true);if(typeof _fsOtBgMessWache==='function')_fsOtBgMessWache(bericht,'stellen',st,mi,_neuBauen);gr.appendChild(_bgLabelFeld(lab,mi));}); /* F91: Rückfrage bei Messwert von einem früheren Termin */
 
       const luftGr=document.createElement('div');luftGr.style.cssText='display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:8px;';
       [['Luft °C (Messung)','luftT'],['Luft % rF (Messung)','luftRf']].forEach(([lab,key])=>{
-        const li=_inp(st[key],'leer = Raumklima',v=>{st[key]=v;_fsWerteNeu();},true);li.setAttribute('data-fs-luft',key);
+        const li=_inp(st[key],'leer = Raumklima',v=>{st[key]=v;_fsWerteNeu();},true);li.setAttribute('data-fs-luft',key);if(typeof _fsOtBgMessWache==='function')_fsOtBgMessWache(bericht,'stellen',st,li,_neuBauen); /* F91 */
         luftGr.appendChild(_bgLabelFeld(lab,li));
       });
 
@@ -4072,7 +4076,7 @@ function _fsVbErgebnisZeilen(b){
   const out=[];
   const st=_fsVbStellenGefuellt(b).map(x=>'Stelle '+x.nr+' ('+(_fsVbOrtVoll(x.s)||'ohne Ort')+')');
   const z=_fsVbUmgebungZeilen(b);
-  const tx=r=>((b&&b.schlank&&r.bereich==='aussen')?'Außen: ':'')+String(r.text).trim(); // F28
+  const tx=r=>((b&&b.schlank&&r.bereich==='aussen')?'Außen: ':'')+String(r.text).trim()+((r&&r._otAm)?' (am '+r._otAm+')':''); // F28 · F91: Zeile vom späteren Termin
   const ok=z.filter(r=>r.status==='ok').map(tx),auff=z.filter(r=>r.status==='auff').map(tx),nicht=z.filter(r=>r.status==='nicht').map(r=>tx(r)+(String(r.grund||'').trim()?' ('+String(r.grund).trim()+')':''));
   if(st.length&&!(b&&b.schlank))out.push('Schaden zeigt sich an: '+st.join('; ')+'.'); // F23: bei Besichtigung 2 stehen die Stellen gleich darunter
   if(ok.length)out.push((b&&b.schlank?'Geprüft, nichts festgestellt: ':'Geprüft, ohne Auffälligkeit: ')+ok.join(', ')+'.'); // F47
@@ -5518,7 +5522,9 @@ function _fsBgStelleGefuellt(st){
 // ans Ende. nr = gedruckte Nummer: 1…n, Vergleichsstellen „R" (bei mehreren R1, R2 …). i = Platz im Formular.
 function _fsBgStellenSortiert(b){
   const alle=((b&&b.stellen)||[]).map((st,i)=>({st,i,z:_fsBgStellenZeit(st)})).filter(x=>_fsBgStelleGefuellt(x.st));
+  const _otNr=(typeof _fsOtBgStelleNr==='function')?_fsOtBgStelleNr(b):null; /* F91 */
   const vgl=(a,c)=>{
+    if(_otNr){const d=_otNr(a.st)-_otNr(c.st);if(d)return d;} /* F91: bei mehreren Ortsterminen erst nach Termin, dann nach Uhrzeit */
     if(a.z&&c.z)return a.z<c.z?-1:a.z>c.z?1:a.i-c.i;
     if(a.z)return -1;
     if(c.z)return 1;
@@ -7237,6 +7243,9 @@ async function _fsMobPdfBg(bericht,task){
   if(!window.jspdf){toast('PDF-Bibliothek lädt noch …','error');return null;}
   try{
     _fsVervollstaendigen(bericht);
+    const _otOrig=bericht; /* F91: mehrere Ortstermine – erst fragen, welche ins PDF kommen, dann eine Kopie zeichnen; abgelegt wird am Original */
+    if(typeof _fsOtBgVorbereiten==='function'){const _otV=await _fsOtBgVorbereiten(bericht);if(_otV===false)return null;bericht=_otV;}
+    const _otAm=(x,wort)=>(typeof _fsOtAmText==='function')?_fsOtAmText(x,wort):'';
     const {jsPDF}=window.jspdf;
     const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
     const W=210,M=14,farbe=[31,95,139];let y=M;
@@ -7283,7 +7292,7 @@ async function _fsMobPdfBg(bericht,task){
     doc.text(vorab?(bericht.schlank?'Feststellungen vor Ort':'Feststellungen vor der Schadenaufnahme'):(eigenerName?'Begehungsprotokoll '+(keller?'Keller':'Wohnung')+' · ':'')+'Feststellungen vor Ort – Feuchte '+(keller?'im Keller':'in der Wohnung'),M,18);
     const objekt=String(k.objektAdresse||(task&&task.adresse)||'').trim();
     if(objekt)doc.text(doc.splitTextToSize('Objekt: '+objekt,W-2*M)[0],M,24);
-    doc.text('Datum: '+(hat(bericht.datum)?bericht.datum:'–')+(k.auftragNr?' · Auftrag: '+k.auftragNr:''),M,29.5);
+    doc.text('Datum: '+((bericht._ot&&bericht._ot.mehrere&&typeof _fsOtDatumText==='function')?_fsOtDatumText(bericht):(hat(bericht.datum)?bericht.datum:'–'))+(k.auftragNr?' · Auftrag: '+k.auftragNr:''),M,29.5); /* F91: „22.10. und 05.11.2026“ */
     y=38;
 
     const fotoList=(bericht.fotos||[]).filter(f=>f&&f.inReport);
@@ -7312,7 +7321,11 @@ async function _fsMobPdfBg(bericht,task){
     }
 
     // 2 · Ortstermin
-    {
+    if(bericht._ot&&bericht._ot.mehrere&&typeof _fsOtBgOrtZeilen==='function'){ /* F91: mehrere Ortstermine – je Termin eine Zeile */
+      const _otO=_fsOtBgOrtZeilen(bericht);abschnitt('Ortstermine');if(_otO.vor.length)tabelle2(_otO.vor,40);
+      doc.autoTable({startY:y,theme:'grid',margin:{left:M,right:M},head:[_otO.kopf],body:_otO.zeilen,headStyles:{fillColor:farbe,fontSize:8},bodyStyles:{fontSize:8.5,minCellHeight:6},columnStyles:_otO.spalten});
+      y=doc.lastAutoTable.finalY+4;if(_otO.nach.length)tabelle2(_otO.nach,40);
+    }else{
       const rows=[];
       if(_fsGemeinsamerKopf(bericht)){ /* F53 (Frank 10.10.2026): erst die Beteiligten – du selbst immer, dann „Vor Ort“ –, danach Datum und Zeit */
         rows.push(['Durchgeführt von',_fsIchZeile(bericht)||'nicht eingetragen']); /* F54: kurz, bricht nicht um (Frank 10.10.2026) */
@@ -7362,8 +7375,8 @@ async function _fsMobPdfBg(bericht,task){
         if(luft.length){
           unterTitel('Raumluft');
           doc.autoTable({startY:y,theme:'grid',margin:{left:M,right:M},
-            head:[['Raum','Uhrzeit','Lufttemperatur','Luftfeuchte','Bedingungen']],
-            body:luft.map(r=>[hat(r.name)?String(r.name).trim():'–',_fsBgZeitNorm(r.zeit)||'–',zahlText(r.t,'°C'),zahlText(r.rf,'% r. F.'),hat(r.bedingung)?String(r.bedingung).trim():'–']),
+            head:[['Raum',(bericht._ot&&bericht._ot.mehrere)?'Datum, Uhrzeit':'Uhrzeit','Lufttemperatur','Luftfeuchte','Bedingungen']], /* F91: bei mehreren Ortsterminen das Datum bei jeder Zeile */
+            body:luft.map(r=>[hat(r.name)?String(r.name).trim():'–',((typeof _fsOtBgZeitZelle==='function')?_fsOtBgZeitZelle(bericht,r,_fsBgZeitNorm(r.zeit)):_fsBgZeitNorm(r.zeit))||'–',zahlText(r.t,'°C'),zahlText(r.rf,'% r. F.'),hat(r.bedingung)?String(r.bedingung).trim():'–']),
             headStyles:{fillColor:farbe,fontSize:8},bodyStyles:{fontSize:8.5,minCellHeight:6},
             columnStyles:{0:{cellWidth:44},1:{cellWidth:20,halign:'center'},2:{cellWidth:32,halign:'right'},3:{cellWidth:32,halign:'right'},4:{cellWidth:54}}});
           y=doc.lastAutoTable.finalY+5;
@@ -7397,14 +7410,14 @@ async function _fsMobPdfBg(bericht,task){
         if(stellen.length){
           unterTitel('Messstellen');
           doc.autoTable({startY:y,theme:'grid',margin:{left:M,right:M},
-            head:[['Nr','Messstelle (Raum – Wand, Höhe – Ort)','Uhrzeit','Luft\n°C','Luft\n% r. F.','Oberfläche\n°C','Bauteil\nDigits','Beobachtung','Foto']],
+            head:[['Nr','Messstelle (Raum – Wand, Höhe – Ort)',(bericht._ot&&bericht._ot.mehrere)?'Datum, Uhrzeit':'Uhrzeit','Luft\n°C','Luft\n% r. F.','Oberfläche\n°C','Bauteil\nDigits','Beobachtung','Foto']],
             body:stellen.map(x=>{
               const st=x.st;
               const ort=_fsBgOrt(bericht,st);
               const bef=(Array.isArray(st.befund)&&st.befund.length)?'Befund: '+st.befund.join(', '):'';
               const beob=[st.referenz?'Vergleichsstelle (trockene Stelle)':'',bef,String(st.notiz||'').trim()].filter(Boolean).join('\n');
               const fn=(Array.isArray(st.fotoRefs)?st.fotoRefs:[]).map(fotoNr).filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i);
-              return [x.nr,ort||'–',x.z||'–',_fsZahl(st.luftT)===null?'–':_fsEins(_fsZahl(st.luftT)),_fsZahl(st.luftRf)===null?'–':_fsEins(_fsZahl(st.luftRf)),
+              return [x.nr,ort||'–',((typeof _fsOtBgZeitZelle==='function')?_fsOtBgZeitZelle(bericht,st,x.z):x.z)||'–',_fsZahl(st.luftT)===null?'–':_fsEins(_fsZahl(st.luftT)),_fsZahl(st.luftRf)===null?'–':_fsEins(_fsZahl(st.luftRf)),
                 _fsZahl(st.ts)===null?'–':_fsEins(_fsZahl(st.ts)),_fsZahl(st.mf)===null?'–':_fsEins(_fsZahl(st.mf)),beob||'–',fn.join(', ')||'–'];
             }),
             headStyles:{fillColor:farbe,fontSize:7,fontStyle:'bold'},bodyStyles:{fontSize:7.5,minCellHeight:6},
@@ -7425,7 +7438,7 @@ async function _fsMobPdfBg(bericht,task){
       const gruppen=[];
       (bericht.sektionen||[]).forEach(sek=>{
         const zeilen=[];
-        ((sek&&sek.items)||[]).forEach(it=>{const s=_fsBgSatz(it,sek);if(s)zeilen.push(s+fotoHinweis(it.fotoRefs));});
+        ((sek&&sek.items)||[]).forEach(it=>{const s=_fsBgSatz(it,sek);if(s)zeilen.push(s+fotoHinweis(it.fotoRefs)+_otAm(it));});
         if(zeilen.length)gruppen.push({titel:String(sek.titel||'').replace(/^\d+\s*·\s*/,''),zeilen});
       });
       const sbText=(vorab&&hat(bericht.schadenbild))?String(bericht.schadenbild).trim():''; // F19
@@ -7435,7 +7448,7 @@ async function _fsMobPdfBg(bericht,task){
       if(gruppen.length||sbText||vbs.length||mzl||erg.length||bgs.length){
         abschnitt('Feststellungen vor Ort');
         if(mzl){absatz(mzl,{abstand:3});y+=1;} // F22
-        if(bgs.length){unterTitel('Stellen');bgs.forEach((s,i)=>absatz((i+1)+' · '+_fsBgFeuchtStelleSatz(bericht,s)+fotoHinweis(s.fotoRefs),{einzug:3,abstand:1.5}));y+=3;} /* F54 */
+        if(bgs.length){unterTitel('Stellen');bgs.forEach((s,i)=>absatz((i+1)+' · '+_fsBgFeuchtStelleSatz(bericht,s)+fotoHinweis(s.fotoRefs)+_otAm(s),{einzug:3,abstand:1.5}));y+=3;} /* F54 */
         if(erg.length&&!bericht.schlank){unterTitel('Eingrenzung');erg.forEach(z=>absatz(z,{einzug:3,abstand:1.5}));y+=3;} // F22
         if(sbText){unterTitel('Beschreibung des Schadenbildes');absatz(sbText,{einzug:3,abstand:3});y+=2;}
         if(vbs.length){
@@ -7447,7 +7460,7 @@ async function _fsMobPdfBg(bericht,task){
               _fsVbRaumGruppen(bericht,typ).forEach(g=>g.stellen.forEach(({s})=>{
                 const x=vbs.find(v=>v.s===s);if(!x)return;
                 const st=_fsVbStelleSatz(Object.assign({},s,{raum:''})),pk=lbp.find(q=>q.s===s),se=_fsSeiteText(s.seite);
-                zeilen.push(_fsVbBezeichnung(bericht,s,x.nr)+' · '+(st||'Stelle')+(se?' – '+_fsSeiteMitWort(s.seite):'')+fotoHinweis(s.fotoRefs)+(pk?' – Luftbild Nr. '+pk.n:'')+((_fsAsMarkeOk(s)&&_fsAsListe(bericht).some(k=>k.id===s.skz.k))?' – Skizze „'+(String((_fsAsListe(bericht).find(k=>k.id===s.skz.k)||{}).name||'').trim()||'Außen')+'“':'')); /* F33 */
+                zeilen.push(_fsVbBezeichnung(bericht,s,x.nr)+' · '+(st||'Stelle')+(se?' – '+_fsSeiteMitWort(s.seite):'')+fotoHinweis(s.fotoRefs)+(pk?' – Luftbild Nr. '+pk.n:'')+((_fsAsMarkeOk(s)&&_fsAsListe(bericht).some(k=>k.id===s.skz.k))?' – Skizze „'+(String((_fsAsListe(bericht).find(k=>k.id===s.skz.k)||{}).name||'').trim()||'Außen')+'“':'')+_otAm(s)); /* F33 · F91: „· festgestellt am …“ */
               }));
               if(zeilen.length){unterTitel(typ==='innen'?'Feststellungen innen':'Feststellungen außen');zeilen.forEach(z=>absatz(z,{einzug:3,abstand:1.5}));y+=3;}
             });
@@ -7501,7 +7514,7 @@ async function _fsMobPdfBg(bericht,task){
         if(vgText)absatz((vorab?'':'Laut Auftraggeber: ')+vgText,{abstand:3}); // F20 · F52: im Begehungsprotokoll mit Herkunft
         an.forEach(a=>{
           if(hat(a.q))absatz(String(a.q).trim(),{groesse:8,farbe:[100,100,100],abstand:0.5});
-          absatz('Laut '+(hat(a.von)?String(a.von).trim():(vorab?'Auftraggeber':'Nutzer'))+': '+String(a.text).trim(),{einzug:3,abstand:3});
+          absatz('Laut '+(hat(a.von)?String(a.von).trim():(vorab?'Auftraggeber':'Nutzer'))+': '+String(a.text).trim()+_otAm(a,'angegeben am'),{einzug:3,abstand:3});
         });
         y+=2;
       }
@@ -7510,7 +7523,7 @@ async function _fsMobPdfBg(bericht,task){
     // F47: Bemerkungen – nur Notizen mit „im PDF“ (Vorabbesichtigung)
     {
       const nz=(_fsGemeinsamerKopf(bericht)&&Array.isArray(bericht.notizen))?bericht.notizen.filter(n=>n&&n.pdf===true&&hat(n.text)):[]; /* F53: auch Begehungsprotokoll */
-      if(nz.length){abschnitt('Bemerkungen');nz.forEach(n=>absatz(String(n.text).trim(),{abstand:3}));y+=2;}
+      if(nz.length){abschnitt('Bemerkungen');nz.forEach(n=>absatz(String(n.text).trim()+_otAm(n),{abstand:3}));y+=2;}
     }
 
     // 7 · Zusammenfassung der Feststellungen
@@ -7537,6 +7550,7 @@ async function _fsMobPdfBg(bericht,task){
           const f=q.f,fi=q.fi,d=q.d,x=R.teile[i].x,w=R.teile[i].w,capW=R.teile[i].capW;
           try{doc.addImage(d.dataUrl,'JPEG',x,y,w,h);}catch(e){console.warn('[Feuchte] Bild:',e);}
           const ut=_fsBgFotoUnterschriftTeile(bericht,f); /* F57/F58: nur was der Pin sagt (mit Kreis und Nummer), sonst „Stelle: …“ – kein Datum, keine Uhrzeit */
+          if(bericht._ot&&typeof _fsOtFotoCapZusatz==='function'){const _otU=_fsOtFotoCapZusatz(bericht,f,ut);if(_otU!==ut)Object.keys(_otU).forEach(kk=>{ut[kk]=_otU[kk];});} /* F91: „aufgenommen am …“ bei Fotos eines späteren Termins */
           doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(90,90,90);
           const capZ=_fsBgFotoCapZeichnen(doc,x,y+h+3.5,capW,fi,ut,6);
           zeileH=Math.max(zeileH,h+(capZ-1)*3);
@@ -7578,7 +7592,7 @@ async function _fsMobPdfBg(bericht,task){
     _fsPdfBlobs[bericht.id]=blob;
     const name=_fsPdfName(bericht,new Date());
     toast('✓ PDF erstellt – mit „📂 Öffnen" ansehen','success',4000);
-    const inDrive=await _fsPdfNachDrive(blob,name,bericht,task);
+    const inDrive=(_otOrig!==bericht&&typeof _fsOtBgAblage==='function')?await _fsOtBgAblage(blob,name,_otOrig,bericht,task):await _fsPdfNachDrive(blob,name,bericht,task); /* F91: jede Termin-Auswahl ihre eigene Datei */
     if(!inDrive){
       const url=URL.createObjectURL(blob);
       const a=document.createElement('a');a.href=url;a.download=name;
@@ -8838,6 +8852,360 @@ async function _fsPvPdfFeldFotos(doc,b,y,M,W){
   doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);
   return y;
 }
+/* ── F91: MEHRERE ORTSTERMINE IN VORABBESICHTIGUNG UND BEGEHUNGSPROTOKOLL (P110 = P108 Schritt 2) ───────────────────────────────────────────
+   Frank, 23.10.2026 (Bauplan Claude-Code\Bauplan_P110_Schritt2_2026-10-23.html, „baue“): dieselbe Termin-Zeile wie im Dach-, PV- und Prüfprotokoll,
+   jetzt auch in der Vorabbesichtigung und im Begehungsprotokoll Wohnung/Keller (Kennzeichen _fsGemeinsamerKopf; die frühere Vorab-Fassung bleibt außen vor).
+   1. „📅 Weiterer Ortstermin“ steht im Abschnitt „Vor Ort“ unter 📍/🏁. Beim Abschließen wandern Beginn, Ende, beide Wetter-Teile (Wetterdienst und
+      selbst vor Ort) und die Anwesenden in den Termin; beim neuen Termin stehst unter „Anwesend“ nur du selbst. Fehlt das Ende, bietet das Fenster
+      „🏁 Ende jetzt“ an (nur am Tag des Termins).
+   2. Stand je Termin (_fsOtBgStand): Kennung + Kopie jedes Eintrags der Listen FS_OT_BG_LISTEN (ohne Raumskizze), Status der Abhak-Punkte, die freien Texte.
+      Ein Eintrag gehört zu dem Termin, an dem er zuerst ausgefüllt war; Messwerte (Raumluft, Messstellen), Umgebung (Status) und Angaben (Text) zu dem
+      Termin, seit dem ihr Wert so steht (FS_OT_BG_SCHL); Abhak-Punkte wie in Schritt 1 zum Termin, an dem sie beurteilt wurden.
+   3. PDF und Word: Termin-Auswahl wie in Schritt 1 (_fsOtBgVorbereiten); bei mehreren Terminen Kopf „Datum: 22.10. und 05.11.2026“, Abschnitt
+      „Ortstermine“, „· festgestellt am TT.MM.“ an Feststellungen vom späteren Termin, „· angegeben am“ bei Angaben, „(am TT.MM.)“ in der Umgebung,
+      Messwert-Tabellen mit „Datum, Uhrzeit“ bei jeder Zeile, Messstellen erst nach Termin, dann nach Uhrzeit (_fsOtBgStelleNr).
+   4. Ändert man einen Messwert, der von einem früheren Termin stammt, fragt PAM: überschreiben oder neue Messstelle (_fsOtBgMessWache).
+   5. Im ✎ eines früheren Termins: Wetter vom Wetterdienst holen (Datum und Beginn dieses Termins), selbst gemessen, Anwesende, am PC „Zeit in Termin übertragen“.
+   ⛔ Die alten Funktionen rufen die neuen nur mit typeof-Wache. Rückfragen nur über _fsFrage/_fsEingabe, Fenster über _fsAnhaengen. Der Wetterdienst
+      wird nur über eine Referenz gerufen (test_f47/f52 zählen die Aufrufe). */
+const FS_OT_BG_LISTEN=['vbStellen','vbUmgebung','raeume','stellen','bgStellen','angaben','notizen'];
+const FS_OT_BG_SCHL={raeume:['t','rf'],stellen:['luftT','luftRf','ts','mf'],vbUmgebung:['status'],angaben:['text']};
+const FS_OT_BG_MESS=['raeume','stellen'];
+const FS_OT_BG_TEXTE=['schadenbild','vorgeschichte','bemerkung'];
+const FS_OT_BG_WETTER=['wetterAbruf','wetterOrt','wetterOrtArt','wetterQuelle','wetterStunde','wetterTag','aussenT','aussenRf','letzterRegen','vorOrtWetter','vorOrtT','vorOrtRf','vorOrtUhr']; /* = FS_OT_WETTER_FELDER (F89, steht weiter unten) + selbst vor Ort */
+const _fsOtBgMessFrei=new WeakSet(); /* Messwerte, die in diesem Formular schon überschrieben werden dürfen (Antwort „Überschreiben“) */
+function _fsOtBgErlaubt(b){return !!b&&b.vorlage==='feuchte'&&(typeof _fsGemeinsamerKopf==='function')&&_fsGemeinsamerKopf(b);}
+// Kopie eines Eintrags für den Stand: alles außer Raumskizze und Laufzeit-Feldern
+function _fsOtBgKopie(x){
+  const c={};
+  Object.keys(x||{}).forEach(k=>{if(k==='skizze'||k==='oid'||k.charAt(0)==='_'||x[k]===undefined)return;try{c[k]=JSON.parse(JSON.stringify(x[k]));}catch(e){c[k]=null;}});
+  return c;
+}
+// Stand beim Abschließen: Listen (Kennung → Kopie), Abhak-Punkte (Kennung → [Status, Notiz, Text]), freie Texte
+function _fsOtBgStand(b){
+  const s={p:{},L:{},t:{}},dp=new Set();
+  (Array.isArray(b.sektionen)?b.sektionen:[]).forEach(sek=>((sek&&Array.isArray(sek.items))?sek.items:[]).forEach(it=>{
+    if(!it||typeof it!=='object')return;
+    if(it.oid&&dp.has(it.oid))delete it.oid; /* doppelte Kennung (kopierter Eintrag) – eine neue */
+    const id=_fsOtOid(it);dp.add(id);s.p[id]=[String(it.status||'offen'),String(it.notiz||''),String(it.text||'')];
+  }));
+  FS_OT_BG_LISTEN.forEach(n=>{
+    const m={},da=new Set();
+    (Array.isArray(b[n])?b[n]:[]).forEach(x=>{
+      if(!x||typeof x!=='object')return;
+      if(x.oid&&da.has(x.oid))delete x.oid;
+      const id=_fsOtOid(x);da.add(id);m[id]=_fsOtBgKopie(x);
+    });
+    s.L[n]=m;
+  });
+  FS_OT_BG_TEXTE.forEach(f=>{s.t[f]=String(b[f]==null?'':b[f]);});
+  return s;
+}
+// Abschließen (aus _fsOtAbschliessen): Zeit, Wetter, Anwesende in den Termin – oben leer, unter „Anwesend“ nur noch du
+function _fsOtBgAbschliessen(b,e){
+  if(!b.kopf||typeof b.kopf!=='object')b.kopf={};
+  const k=b.kopf;
+  e.beginn=String(k.beginn||'').trim();e.ende=String(k.ende||'').trim();e.wetter=String(k.wetter||'').trim();
+  const wd={};FS_OT_BG_WETTER.forEach(f=>{if(k[f]!==undefined&&k[f]!==null&&k[f]!=='')wd[f]=k[f];});
+  if(String(k.vorOrtGeraet||'').trim())wd.vorOrtGeraet=String(k.vorOrtGeraet);
+  if(Object.keys(wd).length)e.wetterDaten=wd;
+  FS_OT_BG_WETTER.forEach(f=>{k[f]='';});
+  k.beginn='';k.ende='';k.wetter='';
+  e.anwesende=(Array.isArray(b.anwesende)?b.anwesende:[]).filter(p=>p&&String(p.name||'').trim()).map(p=>({name:String(p.name||''),rolle:String(p.rolle||'')}));
+  if(Array.isArray(b.anwesende))b.anwesende=b.anwesende.filter(p=>p&&(typeof _fsIstIch==='function')&&_fsIstIch(b,p));
+  try{if(typeof _fsWetterWahlMerk!=='undefined'&&_fsWetterWahlMerk&&typeof _fsWetterWahlMerk.delete==='function')_fsWetterWahlMerk.delete(b);}catch(x){} /* „Wetter für den Tag“ wieder vom neuen Datum */
+  return e;
+}
+// Termine (aus _fsOtTermine): die Anwesenden je Termin dazu, der aktuelle mit den Anwesenden von jetzt
+function _fsOtBgTermine(b,l){
+  const L=_fsOtListe(b);
+  l.forEach((x,i)=>{x.anwesende=x.akt?((b&&Array.isArray(b.anwesende))?b.anwesende:[]):((L[i]&&Array.isArray(L[i].anwesende))?L[i].anwesende:[]);});
+  return l;
+}
+/* ── Zu welchem Termin gehört ein Eintrag? ── */
+function _fsOtBgGefuellt(b,n,v){
+  if(!v)return false;
+  if(n==='vbStellen'){const f=(b&&b.schlank)?_fsVbStelleGefuelltS:_fsVbStelleGefuellt;return (typeof f==='function')?f(v):true;}
+  if(n==='bgStellen')return (typeof _fsBgFeuchtStelleGefuellt==='function')?_fsBgFeuchtStelleGefuellt(v):true;
+  if(n==='stellen')return (typeof _fsBgStelleGefuellt==='function')?_fsBgStelleGefuellt(v):true;
+  if(n==='notizen'||n==='angaben')return !!String(v.text||'').trim();
+  if(n==='vbUmgebung')return !!String(v.status||'').trim()&&!!String(v.text||'').trim();
+  return true;
+}
+// Wert eines Eintrags bei Termin i (der aktuelle = der Eintrag selbst, frühere aus dem Stand)
+function _fsOtBgWert(T,n,x,i){
+  if(i===T.length-1)return x;
+  const s=T[i]&&T[i].stand,l=s&&s.L&&s.L[n];
+  return (l&&x&&x.oid&&Object.prototype.hasOwnProperty.call(l,x.oid))?l[x.oid]:null;
+}
+function _fsOtBgSchl(n,v){return v?(FS_OT_BG_SCHL[n]||[]).map(f=>String(v[f]==null?'':v[f]).trim()).join('|'):'';}
+// Termin eines Eintrags bis Termin m: zuerst ausgefüllt (k0); bei Messwerten/Status/Text: seit wann der Wert so steht
+function _fsOtBgTerminVon(b,T,n,x,m){
+  let k0=-1;for(let i=0;i<=m;i++){if(_fsOtBgGefuellt(b,n,_fsOtBgWert(T,n,x,i))){k0=i;break;}}
+  if(k0<0)return -1;
+  if(!FS_OT_BG_SCHL[n])return k0;
+  const s=_fsOtBgSchl(n,_fsOtBgWert(T,n,x,m));if(!s.replace(/\|/g,''))return k0;
+  let k=m;while(k>k0){const vk=_fsOtBgWert(T,n,x,k-1);if(!vk||_fsOtBgSchl(n,vk)!==s)break;k--;}
+  return k;
+}
+// Für das Sortieren der Messstellen (_fsBgStellenSortiert): Termin je Messstelle – in der PDF-Kopie gesetzt, sonst ausgerechnet; null = keine Termine
+function _fsOtBgStelleNr(b){
+  if(!b||!_fsOtBgErlaubt(b))return null;
+  if(b._ot)return st=>(st&&typeof st._otNr==='number')?st._otNr:0;
+  if(!_fsOtListe(b).length)return null;
+  const T=_fsOtTermine(b),n=T.length-1;
+  return st=>{const k=_fsOtBgTerminVon(b,T,'stellen',st,n);return k<0?n:k;};
+}
+/* ── Die Kopie fürs PDF/Word je Auswahl ── */
+function _fsOtBgAnsicht(b,auswahl){
+  const T=_fsOtTermine(b),n=T.length-1;
+  let A=[];if(Array.isArray(auswahl))T.forEach((x,i)=>{if(auswahl.indexOf(x.id)>=0)A.push(i);});
+  if(!A.length)A=T.map((x,i)=>i);
+  const m=A[A.length-1],lo=A[0],mehr=A.length>1,inA=i=>A.indexOf(i)>=0;
+  const am=i=>(_fsOtJahr(T[i].datum)&&_fsOtJahr(T[i].datum)!==_fsOtJahr(T[lo].datum))?T[i].datum:_fsOtKurz(T[i].datum);
+  const v=Object.assign({},b);v.kopf=Object.assign({},b.kopf||{});
+  const Tm=T[m];v.datum=Tm.datum;
+  if(!Tm.akt){
+    v.kopf.beginn=Tm.beginn;v.kopf.ende=Tm.ende;v.kopf.wetter=Tm.wetter;
+    FS_OT_BG_WETTER.forEach(f=>{v.kopf[f]=(Tm.wetterDaten&&Tm.wetterDaten[f]!=null)?Tm.wetterDaten[f]:'';});
+    if(Tm.wetterDaten&&Tm.wetterDaten.vorOrtGeraet)v.kopf.vorOrtGeraet=Tm.wetterDaten.vorOrtGeraet;
+    v.anwesende=(Array.isArray(Tm.anwesende)?Tm.anwesende:[]).map(p=>Object.assign({},p));
+    if(Tm.stand&&Tm.stand.t)FS_OT_BG_TEXTE.forEach(f=>{v[f]=String(Tm.stand.t[f]==null?'':Tm.stand.t[f]);});
+  }
+  FS_OT_BG_LISTEN.forEach(n0=>{
+    if(!Array.isArray(b[n0]))return;
+    v[n0]=b[n0].map(x=>{
+      if(!x||typeof x!=='object')return null;
+      const sv=_fsOtBgWert(T,n0,x,m);if(!sv)return null; /* gab es bei diesem Termin noch nicht */
+      const k=_fsOtBgTerminVon(b,T,n0,x,m);
+      const c=Object.assign({},x,(m===n)?{}:sv);
+      if(k<0){if(FS_OT_BG_MESS.indexOf(n0)>=0)return c;return null;}
+      if(!inA(k)){
+        if(n0!=='raeume')return null;
+        FS_OT_BG_SCHL.raeume.concat(['zeit','bedingung']).forEach(f=>{c[f]='';}); /* der Raum bleibt (Wände, Skizze), nur seine Raumluft ist von einem anderen Termin */
+      }
+      c._otNr=k;c._otAm=(mehr&&k!==lo)?am(k):'';
+      return c;
+    }).filter(x=>x!==null);
+  });
+  v.sektionen=(Array.isArray(b.sektionen)?b.sektionen:[]).map(sek=>{
+    const items=[];
+    ((sek&&Array.isArray(sek.items))?sek.items:[]).forEach(it=>{
+      if(!it)return;
+      const P=i=>{if(i===n)return [String(it.status||'offen'),String(it.notiz||''),String(it.text||'')];const s=T[i].stand;return (s&&s.p&&it.oid&&Object.prototype.hasOwnProperty.call(s.p,it.oid))?s.p[it.oid]:null;};
+      const frei=!!it.frei||it.typ==='notiz',sch=w=>w?(frei?w[1]+'|'+w[2]:w[0]):'';
+      const vm=P(m);if(!vm)return;
+      const c=Object.assign({},it,{status:vm[0],notiz:vm[1]});if(it.frei)c.text=vm[2];
+      if(frei?!!(vm[1]||vm[2]):vm[0]!=='offen'){
+        const s=sch(vm);let k=m;while(k>0){const vk=P(k-1);if(!vk||sch(vk)!==s)break;k--;}
+        if(!inA(k))return;c._otNr=k;c._otAm=(mehr&&k!==lo)?am(k):'';
+      }
+      items.push(c);
+    });
+    return Object.assign({},sek,{items});
+  });
+  const fotoAm=new Map();
+  v.fotos=(Array.isArray(b.fotos)?b.fotos:[]).filter(f=>{
+    if(!f)return false;
+    const ti=_fsOtFotoTermin(T,f);if(!inA(ti))return false;
+    if(mehr&&ti!==lo)fotoAm.set(f,am(ti));
+    return true;
+  });
+  v._ot={mehrere:mehr,art:'bg',termine:A.map(i=>T[i]),alle:T,schluessel:A.map(i=>T[i].id).join('+'),fotoAm};
+  return v;
+}
+// Vor PDF und Word: Termine wählen und die Kopie holen – false = abgebrochen; ohne Termine das Protokoll selbst
+async function _fsOtBgVorbereiten(b){
+  if(typeof _fsOtAuswahlHolen!=='function'||typeof _fsOtAnsicht!=='function')return b;
+  const w=await _fsOtAuswahlHolen(b);if(w===false)return false;
+  return _fsOtAnsicht(b,w);
+}
+function _fsOtBgAblage(blob,name,orig,ansicht,task){return _fsOtPdfNachDrive(blob,name,orig,ansicht,task);}
+// „· festgestellt am 05.11.“ (oder „· angegeben am …“) an Einträgen eines späteren Termins – nur in der Kopie
+function _fsOtAmText(x,wort){return (x&&x._otAm)?' · '+(wort||'festgestellt am')+' '+x._otAm:'';}
+// Messwert-Tabellen: bei mehreren Terminen das Datum bei jeder Zeile
+function _fsOtBgZeitZelle(b,x,z){
+  const o=b&&b._ot;if(!o||!o.mehrere||!x||typeof x._otNr!=='number'||!Array.isArray(o.alle)||!o.alle[x._otNr])return z;
+  const lo=o.termine[0],d=o.alle[x._otNr].datum;
+  const tag=(_fsOtJahr(d)&&lo&&_fsOtJahr(d)!==_fsOtJahr(lo.datum))?String(d||'').trim():_fsOtKurz(d);
+  return tag?tag+(z?' '+z:''):z;
+}
+// PDF: Abschnitt „Ortstermine“ – vorn „Durchgeführt von“, dann je Termin Datum · Uhrzeit · Anwesend · Wetter, hinten Bereich/Untersuchung
+function _fsOtBgOrtZeilen(b){
+  const o=b&&b._ot,k=(b&&b.kopf)||{},hat=v=>!(v===null||v===undefined||String(v).trim()==='');
+  const sauber=s=>(typeof _fsPdfOhneUngefaehr==='function')?_fsPdfOhneUngefaehr(String(s==null?'':s)):String(s==null?'':s);
+  const mitWetter=!!b&&b.wetterImPdf!==false;
+  const vor=[];
+  vor.push(['Durchgeführt von',((typeof _fsIchZeile==='function')&&_fsIchZeile(b))||'nicht eingetragen']);
+  const zeilen=((o&&Array.isArray(o.termine))?o.termine:[]).map(x=>{
+    const kd=x.akt?k:Object.assign({},x.wetterDaten||{},{wetter:x.wetter});
+    const pseudo={kopf:{pruefer:k.pruefer,anwesend:''},anwesende:Array.isArray(x.anwesende)?x.anwesende:[]};
+    const aw=((typeof _fsBgVorOrtZeilen==='function')?_fsBgVorOrtZeilen(pseudo):'')||'niemand weiter';
+    const zeit=(typeof _fsBgZeitText==='function')?_fsBgZeitText({beginn:x.beginn,ende:x.ende}):'';
+    const z=[(x.datum||'–')+((!x.akt&&x.grund)?'\nabgebrochen: '+x.grund:''),zeit||'–',aw];
+    if(mitWetter){
+      const w=[],wk=(typeof _fsWetterKurz==='function')?_fsWetterKurz(kd):'',q=(typeof _fsBgWetterQuelle==='function')?_fsBgWetterQuelle(kd):'';
+      if(wk)w.push((q?'laut Wetterdienst: ':'von Hand: ')+wk+(q?' ('+String(q).replace(/^Angabe des Wetterdienstes /,'').replace(/\.$/,'')+')':''));
+      const vo=(typeof _fsVorOrtKurz==='function')?_fsVorOrtKurz(kd):'';if(vo)w.push('selbst gemessen: '+vo);
+      if(hat(kd.vorOrtWetter))w.push('gesehen: '+String(kd.vorOrtWetter).trim());
+      z.push(w.join('\n')||'–');
+    }
+    return z.map(sauber);
+  });
+  const nach=[];
+  if(typeof _fsIstVorab==='function'&&!_fsIstVorab(b)){
+    const ber=(typeof _fsBgBereichText==='function')?_fsBgBereichText(b):'';if(ber)nach.push(['Besichtigter Bereich',ber]);
+    const unt=(typeof _fsBgUntersuchungText==='function')?_fsBgUntersuchungText(b):'';if(unt)nach.push(['Art der Untersuchung',unt]);
+  }
+  return {vor,kopf:['Datum','Uhrzeit','Anwesend'].concat(mitWetter?['Wetter']:[]),zeilen,
+    spalten:mitWetter?{0:{cellWidth:30},1:{cellWidth:30},2:{cellWidth:46},3:{cellWidth:76}}:{0:{cellWidth:40},1:{cellWidth:40},2:{cellWidth:102}},nach};
+}
+// Word (Vorabbesichtigung): „Anwesend“, „Datum, Zeit“ und die Wetter-Zeilen werden zu je einer Zeile pro Termin
+function _fsOtBgWordZeilen(b,z){
+  const o=b&&b._ot;if(!o||!o.mehrere||!Array.isArray(z))return z;
+  const weg=['Anwesend','Datum, Zeit','Wetter laut Wetterdienst','Wetter (von Hand eingetragen)','Außen vor Ort gemessen','Wetter vor Ort gesehen'];
+  const r=_fsOtBgOrtZeilen(b),neu=r.zeilen.map((x,i)=>{
+    const t=o.termine[i],teile=[];
+    if(x[1]&&x[1]!=='–')teile.push(x[1]);
+    if(!t.akt&&t.grund)teile.push('abgebrochen: '+t.grund);
+    teile.push('Anwesend: '+String(x[2]).split('\n').join(', '));
+    if(x[3]&&x[3]!=='–')teile.push(String(x[3]).split('\n').join(' · '));
+    return ['Ortstermin '+(t.datum||'–'),teile.join(' · ')];
+  });
+  for(let i=z.length-1;i>=0;i--){if(z[i]&&weg.indexOf(z[i][0])>=0)z.splice(i,1);}
+  const nach=z.findIndex(x=>x&&x[0]==='Durchgeführt von');
+  z.splice(nach>=0?nach+1:0,0,...neu);
+  return z;
+}
+/* ── Fenster „Weiterer Ortstermin“: fehlt das Ende, „🏁 Ende jetzt“ (nur am Tag des Termins) ── */
+function _fsOtBgEndeTeil(b,box,farbe){
+  const k=(b&&b.kopf)||{};
+  if(typeof _fsVbZeitStatus!=='function'||_fsVbZeitStatus(k).art!=='endeFehlt')return null;
+  const j=(typeof _fsVbJetzt==='function')?_fsVbJetzt():null,heute=!!j&&(typeof _fsVbIso==='function')&&_fsVbIso(b.datum)===_fsVbIso(j.datum);
+  const w=document.createElement('div');w.setAttribute('data-ot-ende','1');
+  w.style.cssText='margin:4px 0 8px;padding:8px 10px;border-radius:8px;background:rgba(230,126,34,.16);border-left:4px solid #b25e00;font-size:var(--fs13,13px);line-height:1.4;';
+  const tx=document.createElement('div');tx.textContent='⚠ Beim Termin fehlt das Ende (Beginn '+String(k.beginn||'').trim()+' Uhr).'+(heute?' Du kannst es jetzt eintragen oder leer lassen.':' Trag es später über ✎ am Termin nach – oder lass es leer.');w.appendChild(tx);
+  if(heute){
+    const kn=document.createElement('button');kn.type='button';kn.setAttribute('data-ot-ende-jetzt','1');kn.textContent='🏁 Ende jetzt: '+j.uhr;
+    kn.style.cssText='margin-top:6px;padding:8px 12px;border-radius:10px;border:1.5px solid '+(farbe||'var(--border)')+';background:transparent;color:var(--text);font-size:var(--fs14,14px);font-weight:600;cursor:pointer;font-family:inherit;';
+    kn.onclick=()=>{k.ende=j.uhr;if(typeof scheduleSave==='function')scheduleSave();kn.textContent='✓ Ende '+j.uhr+' Uhr eingetragen';kn.disabled=true;};
+    w.appendChild(kn);
+  }
+  box.appendChild(w);return w;
+}
+/* ── ✎ eines früheren Termins: Wetter, selbst vor Ort, Anwesende, (PC) Zeit in Termin übertragen ── */
+// Wetterdienst für genau diesen Termin (Datum und Beginn) – schreibt in den Termin, nicht in den Kopf des Protokolls
+function _fsOtBgWetterHolen(b,o,fertig){
+  const holen=(typeof _fsWetterHolen==='function')?_fsWetterHolen:null;if(!holen||!o)return false;
+  const pk={objektAdresse:String((b&&b.kopf&&b.kopf.objektAdresse)||''),beginn:String(o.beginn||'')};
+  const pseudo={fassung:'begehung',vorlage:'feuchte',datum:String(o.datum||''),kopf:pk};
+  holen(pseudo,()=>{
+    const wd=(o.wetterDaten&&typeof o.wetterDaten==='object')?o.wetterDaten:{};
+    FS_OT_BG_WETTER.forEach(f=>{if(f.indexOf('vorOrt')!==0&&pk[f]!==undefined)wd[f]=pk[f];}); /* nur der Wetterdienst – „selbst vor Ort“ bleibt */
+    o.wetter=String(pk.wetter||'');o.wetterDaten=wd;
+    if(typeof scheduleSave==='function')scheduleSave();
+    if(typeof fertig==='function')fertig();
+  },{datum:String(o.datum||''),uhr:String(o.beginn||'')});
+  return true;
+}
+function _fsOtBgBearbeitenTeil(b,o,F,farbe,fertig,felder){
+  const box=F.box,w=document.createElement('div');w.setAttribute('data-ot-bg','1');w.style.cssText='margin:6px 0;';
+  const klein=t2=>{const e=document.createElement('div');e.style.cssText='font-size:var(--fs12,12px);color:var(--text2);line-height:1.4;margin:6px 0 2px;';e.textContent=t2;return e;};
+  const kn=(t2,attr)=>{const k=document.createElement('button');k.type='button';k.textContent=t2;k.setAttribute(attr,'1');k.style.cssText='padding:7px 12px;border-radius:10px;border:1.5px solid '+(farbe||'var(--border)')+';background:transparent;color:var(--text);font-size:var(--fs13,13px);font-weight:600;cursor:pointer;font-family:inherit;margin:4px 6px 0 0;';return k;};
+  if(!o.wetterDaten||typeof o.wetterDaten!=='object')o.wetterDaten={};
+  const wd=o.wetterDaten;
+  const kurz=()=>(typeof _fsWetterKurz==='function')?_fsWetterKurz(Object.assign({},wd,{wetter:o.wetter})):String(o.wetter||'');
+  w.appendChild(klein('🌐 Wetterdienst (für '+(String(o.datum||'').trim()||'–')+', '+(String(o.beginn||'').trim()?String(o.beginn).trim()+' Uhr':'12:00 Uhr')+', Objekt-Adresse, bis ca. 2 Monate zurück):'));
+  const wt=document.createElement('div');wt.setAttribute('data-ot-wetterdienst','1');wt.style.cssText='font-size:var(--fs14,14px);color:var(--text);';wt.textContent=kurz()||'noch nicht geholt';w.appendChild(wt);
+  const wk=kn(kurz()?'↻ neu holen':'🌤 Wetter holen','data-ot-wetter-holen');
+  const wkZurueck=()=>{wk.disabled=false;wk.textContent=kurz()?'↻ neu holen':'🌤 Wetter holen';};
+  wk.onclick=()=>{wk.disabled=true;wk.textContent='⏳ …';const ok=_fsOtBgWetterHolen(b,o,()=>{wt.textContent=kurz()||'noch nicht geholt';wkZurueck();});if(!ok)wkZurueck();else setTimeout(()=>{if(wk.disabled)wkZurueck();},20000); /* ohne Antwort des Wetterdienstes wieder antippbar */};
+  w.appendChild(wk);
+  w.appendChild(klein('📏 Selbst vor Ort (freiwillig):'));
+  const fg=_fsOtFeld('gesehen',wd.vorOrtWetter,'z. B. Nieselregen','data-ot-feld-vorort-wetter'),ft=_fsOtFeld('Außen °C',wd.vorOrtT,'z. B. 11,8','data-ot-feld-vorort-t'),ff=_fsOtFeld('Außen % rF',wd.vorOrtRf,'z. B. 84','data-ot-feld-vorort-rf'),fu=_fsOtFeld('gemessen um',wd.vorOrtUhr,'hh:mm','data-ot-feld-vorort-uhr');
+  w.append(fg.r,ft.r,ff.r,fu.r);
+  w.appendChild(klein('👥 Anwesend (außer dir):'));
+  const pers=(Array.isArray(o.anwesende)?o.anwesende:[]).map(p=>({name:String((p&&p.name)||''),rolle:String((p&&p.rolle)||'')}));
+  const liste=document.createElement('div');liste.setAttribute('data-ot-anwesende','1');w.appendChild(liste);
+  const ich=p=>(typeof _fsIstIch==='function')&&_fsIstIch(b,p);
+  const zeigen=()=>{
+    liste.textContent='';
+    pers.forEach((p,i)=>{
+      if(ich(p))return;
+      const r=document.createElement('div');r.style.cssText='display:flex;align-items:center;gap:8px;margin:3px 0;font-size:var(--fs14,14px);';
+      const s=document.createElement('span');s.style.cssText='flex:1;min-width:0;';s.textContent=p.name+(p.rolle?' – '+p.rolle:'');
+      const x=document.createElement('button');x.type='button';x.textContent='✕';x.setAttribute('data-ot-anw-weg',String(i));x.title='Person entfernen';
+      x.style.cssText='padding:4px 10px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text2);font-size:var(--fs13,13px);cursor:pointer;font-family:inherit;';
+      x.onclick=()=>{pers.splice(i,1);zeigen();};
+      r.append(s,x);liste.appendChild(r);
+    });
+    if(!pers.some(p=>!ich(p))){const l=document.createElement('div');l.style.cssText='font-size:var(--fs13,13px);color:var(--text2);';l.textContent='niemand weiter';liste.appendChild(l);}
+  };
+  zeigen();
+  const pk=kn('＋ Person','data-ot-anw-neu');
+  pk.onclick=()=>{const nm=_fsEingabe('Name der Person','',b);if(nm===null||!String(nm).trim())return;const ro=_fsEingabe('Rolle (freiwillig), z. B. Mieterin','',b);pers.push({name:String(nm).replace(/\s+/g,' ').trim(),rolle:String(ro||'').replace(/\s+/g,' ').trim()});zeigen();};
+  w.appendChild(pk);
+  const uebernehmen=()=>{
+    [['vorOrtWetter',fg],['vorOrtT',ft],['vorOrtRf',ff],['vorOrtUhr',fu]].forEach(([f,e])=>{const v=String(e.i.value||'').trim();if(v)wd[f]=v;else delete wd[f];});
+    o.anwesende=pers.filter(p=>String(p.name||'').trim());
+  };
+  if(typeof _fsAmPc==='function'&&_fsAmPc()&&typeof _pamVbZeitUebertragen==='function'){
+    const zk=kn('📅 Zeit in Termin übertragen','data-ot-zeit-termin');
+    zk.title='Datum und Uhrzeit dieses Ortstermins in den passenden Termin der Karte übertragen';
+    zk.onclick=()=>{
+      if(felder){const d=String((felder.fd&&felder.fd.i.value)||'').trim();if(d&&_fsOtTag(d))o.datum=d;if(felder.fb)o.beginn=String(felder.fb.i.value||'').trim();if(felder.fe)o.ende=String(felder.fe.i.value||'').trim();}
+      uebernehmen();if(typeof scheduleSave==='function')scheduleSave();F.zu();
+      _pamVbZeitUebertragen(b,(typeof currentTask==='function')?currentTask():null,fertig,null,o);
+    };
+    w.appendChild(zk);
+  }
+  box.appendChild(w);
+  return {uebernehmen};
+}
+/* ── Rückfrage, wenn ein Messwert von einem früheren Termin geändert wird ── */
+// Datum des früheren Termins, von dem der jetzige Messwert stammt – '' = kein früherer (dann keine Rückfrage)
+function _fsOtBgMessAlt(b,n,x){
+  if(!x||!x.oid||!_fsOtBgErlaubt(b)||!_fsOtListe(b).length||FS_OT_BG_MESS.indexOf(n)<0)return '';
+  const T=_fsOtTermine(b),l=T.length-1;
+  if(!_fsOtBgSchl(n,x).replace(/\|/g,''))return '';
+  const k=_fsOtBgTerminVon(b,T,n,x,l);
+  return (k>=0&&k<l&&T[k])?(String(T[k].datum||'').trim()||'einem früheren Termin'):'';
+}
+function _fsOtBgMessNeu(b,n,x){
+  if(!b||!x)return null;if(!Array.isArray(b.stellen))b.stellen=[];
+  const st={text:'',raum:'',wand:'',hoehe:'',ts:'',luftT:'',luftRf:'',mf:'',mfVergleich:'',befund:[],notiz:'',fotoRefs:[],referenz:false,zeit:''};
+  if(n==='stellen'){st.text=String(x.text||'');st.raum=String(x.raum||'');st.wand=String(x.wand||'');st.hoehe=String(x.hoehe||'');st.referenz=!!x.referenz;}
+  else{st.raum=String(x.name||'');st.text='Raumluft';}
+  if(typeof _fsVbJetzt==='function')st.zeit=_fsVbJetzt().uhr;
+  b.stellen.push(st);return st;
+}
+function _fsOtBgMessFenster(b,n,x,datum,fertig){
+  const farbe=_fsOtFarbe(b),jetzt=_fsOtKurz(b&&b.datum)||'heute';
+  const F=_fsOtFenster(b,'_fsOtMesswert','Messwert vom '+datum,(n==='raeume'?'Die Raumluft von „'+(String(x.name||'').trim()||'diesem Raum')+'“ ist vom '+datum+'.':'Diese Messstelle ist vom '+datum+'.')+' Überschreibst du den Wert, ist der alte weg – im PDF steht dann der neue mit dem Datum dieses Termins. Eine neue Messstelle behält beide.');
+  const fuss=document.createElement('div');fuss.style.cssText='display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;';
+  const neu=_fsOtKnopf(n==='raeume'?'＋ Neue Messstelle in diesem Raum ('+jetzt+')':'＋ Neue Messstelle vom '+jetzt,'data-ot-mess-neu',true,farbe),ue=_fsOtKnopf('Überschreiben','data-ot-mess-ueber',false),ab=_fsOtKnopf('Abbrechen','data-ot-mess-abbruch',false);
+  neu.style.flex='1 1 100%';
+  let gerufen=false;const ende=w=>{if(gerufen)return;gerufen=true;F.zu();if(typeof fertig==='function')fertig(w);};
+  neu.onclick=()=>ende('neu');ue.onclick=()=>ende('ueber');ab.onclick=()=>ende(null);F.beiEsc(()=>ende(null));
+  fuss.append(neu,ue,ab);F.box.appendChild(fuss);
+  _fsAnhaengen(F.ov,b);
+  return F.ov;
+}
+// an ein Messwert-Feld hängen: beim ersten Antippen eines Werts vom früheren Termin die Rückfrage
+function _fsOtBgMessWache(b,n,x,inp,neu){
+  if(!inp||!x||typeof inp.addEventListener!=='function')return inp;
+  inp.setAttribute('data-ot-messwert',n);
+  inp.addEventListener('focus',()=>{
+    if(_fsOtBgMessFrei.has(x))return;
+    const alt=_fsOtBgMessAlt(b,n,x);if(!alt)return;
+    try{if(typeof inp.blur==='function')inp.blur();}catch(e){}
+    _fsOtBgMessFenster(b,n,x,alt,w=>{
+      if(w==='ueber'){_fsOtBgMessFrei.add(x);try{inp.focus();}catch(e){}}
+      else if(w==='neu'){const st=_fsOtBgMessNeu(b,n,x);if(st){if(typeof scheduleSave==='function')scheduleSave();if(typeof toast==='function')toast('✓ Neue Messstelle '+b.stellen.length+' angelegt – trag dort den neuen Wert ein','success',4500);if(typeof neu==='function')neu();}}
+    });
+  });
+  return inp;
+}
 /* ── F90: SPRÜNGE ZWISCHEN DACH-, PV- UND PRÜFPROTOKOLL OBEN IN DER TERMIN-ZEILE · NACHTRÄGLICH VERBINDEN ──────────────────────────────────────
    Frank, 23.10.2026 („baue a + b“): Der Rückweg vom PV-Protokoll stand ganz unten im Abschnitt „Vor Ort & Anlage“ als graue Zeile – „hätte ich auch
    nicht erkannt“. A: In der Zeile mit „📅 Weiterer Ortstermin“ stehen gleich große Knöpfe – im PV- und im Prüfprotokoll „🏠 Zurück zum Dachprotokoll“,
@@ -8921,9 +9289,9 @@ const FS_OT_AN_ERGEBNIS=['gesamt','maengel','plakette','plaketteNr','naechste'];
 const FS_OT_MAENGELTEXT='maengelEmpf'+'ehlungen'; /* das Textfeld „Festgestellte Mängel“ des Dachprotokolls – zusammengesetzt, weil ältere Prüfungen diesen Bereich der öffentlichen Datei nach „Empfehl…“ durchsuchen */
 var _fsOtAuswahlJetzt=null; /* Prüfungen setzen hier die Auswahl (Kennungen der Termine) – dann kommt kein Fenster */
 var _fsOtZaehler=0;
-function _fsOtErlaubt(b){return !!b&&b.vorlage==='wartungsprotokoll'&&b.art!=='rep';}
-function _fsOtArt(b){return ((typeof _fsIstAnschlag==='function')&&_fsIstAnschlag(b))?'an':((typeof _fsIstPv==='function')&&_fsIstPv(b))?'pv':'dach';}
-function _fsOtFarbe(b){return (_fsOtArt(b)==='an'&&typeof FS_AN_FARBE!=='undefined')?FS_AN_FARBE:FS_WP_FARBE;}
+function _fsOtErlaubt(b){return (!!b&&b.vorlage==='wartungsprotokoll'&&b.art!=='rep')||((typeof _fsOtBgErlaubt==='function')&&_fsOtBgErlaubt(b));} /* F91: auch Vorabbesichtigung und Begehungsprotokoll */
+function _fsOtArt(b){return ((typeof _fsOtBgErlaubt==='function')&&_fsOtBgErlaubt(b))?'bg':((typeof _fsIstAnschlag==='function')&&_fsIstAnschlag(b))?'an':((typeof _fsIstPv==='function')&&_fsIstPv(b))?'pv':'dach';}
+function _fsOtFarbe(b){const a=_fsOtArt(b);return (a==='an'&&typeof FS_AN_FARBE!=='undefined')?FS_AN_FARBE:(a==='bg'&&typeof FS_FARBE!=='undefined')?FS_FARBE:FS_WP_FARBE;} /* F91: blau wie das Begehungsprotokoll */
 function _fsOtListe(b){return (b&&Array.isArray(b.ortstermine))?b.ortstermine.filter(o=>o&&typeof o==='object'):[];}
 function _fsOtNeueId(){_fsOtZaehler++;return 'ot_'+Date.now().toString(36)+_fsOtZaehler.toString(36)+Math.random().toString(36).slice(2,6);}
 function _fsOtOid(x){if(x&&typeof x==='object'&&(typeof x.oid!=='string'||!x.oid)){_fsOtZaehler++;x.oid='o'+Date.now().toString(36)+_fsOtZaehler.toString(36)+Math.random().toString(36).slice(2,6);}return (x&&x.oid)||'';}
@@ -8939,6 +9307,7 @@ function _fsOtAnSchl(o){return o?FS_OT_AN_FELDER.map(k=>o[k]||'').join('|')+'|'+
 function _fsOtAnBeurteilt(o){return !!o&&(FS_OT_AN_FELDER.some(k=>!!o[k])||(Array.isArray(o.pruefart)&&o.pruefart.length>0));}
 // Stand beim Abschließen eines Termins: Punkte (über ihre Kennung), Abhakliste, Mängeltext bzw. beim Prüfprotokoll das Ergebnis
 function _fsOtStand(b){
+  if(_fsOtArt(b)==='bg'&&typeof _fsOtBgStand==='function')return _fsOtBgStand(b); /* F91 */
   const s={p:{}};
   if(_fsOtArt(b)==='an'){
     (Array.isArray(b.punkte)?b.punkte:[]).forEach(p=>{if(p&&typeof p==='object')s.p[_fsOtOid(p)]=_fsOtAnWert(p);});
@@ -8965,7 +9334,7 @@ function _fsOtAbschliessen(b,grund,jetzt){
   }else if(art==='an'){
     e.beginn=String(k.beginn||'').trim();e.ende=String(k.ende||'').trim();e.wetter=String(k.witterung||'').trim();
     k.beginn='';k.ende='';k.witterung='';
-  }
+  }else if(art==='bg'&&typeof _fsOtBgAbschliessen==='function')_fsOtBgAbschliessen(b,e); /* F91: Zeit, beide Wetter-Teile, Anwesende */
   /* Ein PDF, das VOR dem ersten Abschließen erstellt wurde, ist das PDF „nur dieser Termin“ – es bleibt als eigene Datei liegen */
   if(b.pdfDriveId&&!_fsOtListe(b).length){if(!b.pdfJeAuswahl||typeof b.pdfJeAuswahl!=='object')b.pdfJeAuswahl={};if(!b.pdfJeAuswahl[e.id])b.pdfJeAuswahl[e.id]={id:String(b.pdfDriveId),name:String(b.pdfName||'')};}
   b.ortstermine.push(e);
@@ -8977,7 +9346,8 @@ function _fsOtAbschliessen(b,grund,jetzt){
 function _fsOtTermine(b){
   const art=_fsOtArt(b),k=(b&&b.kopf)||{};
   const l=_fsOtListe(b).map(o=>({id:String(o.id||''),datum:String(o.datum||'').trim(),beginn:String(o.beginn||''),ende:String(o.ende||''),wetter:String(o.wetter||''),wetterDaten:(o.wetterDaten&&typeof o.wetterDaten==='object')?o.wetterDaten:null,grund:String(o.grund||''),stand:(o.stand&&typeof o.stand==='object')?o.stand:null,akt:false}));
-  l.push({id:String((b&&b.otAktuell)||'aktuell'),datum:String((b&&b.datum)||'').trim(),beginn:art==='dach'?'':String(k.beginn||''),ende:art==='dach'?'':String(k.ende||''),wetter:art==='pv'?String(k.wetter||''):art==='an'?String(k.witterung||''):'',wetterDaten:null,grund:'',stand:null,akt:true});
+  l.push({id:String((b&&b.otAktuell)||'aktuell'),datum:String((b&&b.datum)||'').trim(),beginn:art==='dach'?'':String(k.beginn||''),ende:art==='dach'?'':String(k.ende||''),wetter:(art==='pv'||art==='bg')?String(k.wetter||''):art==='an'?String(k.witterung||''):'',wetterDaten:null,grund:'',stand:null,akt:true});
+  if(art==='bg'&&typeof _fsOtBgTermine==='function')_fsOtBgTermine(b,l); /* F91: Anwesende je Termin */
   return l;
 }
 function _fsOtTag(datum){return (typeof _fsAnDatumIso==='function')?_fsAnDatumIso(datum):'';}
@@ -8999,6 +9369,7 @@ function _fsOtAuswahlHolen(b){
 // Die Kopie fürs PDF: Punkte, Abhakliste, Ergebnis und Fotos so, wie es zur Auswahl passt
 function _fsOtAnsicht(b,auswahl){
   if(!_fsOtErlaubt(b)||!_fsOtListe(b).length)return b;
+  if(_fsOtArt(b)==='bg'&&typeof _fsOtBgAnsicht==='function')return _fsOtBgAnsicht(b,auswahl); /* F91 */
   const T=_fsOtTermine(b),n=T.length-1,art=_fsOtArt(b);
   let A=[];if(Array.isArray(auswahl))T.forEach((x,i)=>{if(auswahl.indexOf(x.id)>=0)A.push(i);});
   if(!A.length)A=T.map((x,i)=>i);
@@ -9144,7 +9515,8 @@ function _fsOtGrundTeil(wert,farbe){
 function _fsOtAbschliessenFenster(b,fertig){
   const art=_fsOtArt(b),farbe=_fsOtFarbe(b),d=String((b&&b.datum)||'').trim();
   const F=_fsOtFenster(b,'_fsOtAbschluss',d?'Termin vom '+d+' abschließen?':'Bisherigen Termin abschließen?',
-    'Alles, was du eingetragen hast, bleibt stehen – du machst einfach weiter. Oben steht danach das Datum von heute'+(art==='dach'?'.':'; Beginn, Ende und '+(art==='an'?'Witterung':'Wetter')+' werden leer.')+' Beim PDF wählst du später, welche Termine hineinkommen.');
+    'Alles, was du eingetragen hast, bleibt stehen – du machst einfach weiter. Oben steht danach das Datum von heute'+(art==='dach'?'.':art==='bg'?'; Beginn, Ende und Wetter werden leer, unter „Anwesend“ stehst nur noch du.':'; Beginn, Ende und '+(art==='an'?'Witterung':'Wetter')+' werden leer.')+' Beim PDF wählst du später, welche Termine hineinkommen.');
+  if(art==='bg'&&typeof _fsOtBgEndeTeil==='function')_fsOtBgEndeTeil(b,F.box,farbe); /* F91: fehlt das Ende – „🏁 Ende jetzt“ */
   const g=_fsOtGrundTeil('',farbe);F.box.appendChild(g.w);
   const fuss=document.createElement('div');fuss.style.cssText='display:flex;gap:8px;margin-top:14px;';
   const ab=_fsOtKnopf('Abbrechen','data-ot-abbruch',false),ok=_fsOtKnopf('📅 Termin abschließen','data-ot-ok',true,farbe);
@@ -9160,7 +9532,8 @@ function _fsOtBearbeitenFenster(b,o,fertig){
   const F=_fsOtFenster(b,'_fsOtBearbeiten','Ortstermin vom '+(o.datum||'–'),'Nur die Angaben zum Termin – die Punkte bleiben, wie sie sind.');
   const fd=_fsOtFeld('Datum',o.datum,'TT.MM.JJJJ','data-ot-feld-datum');F.box.appendChild(fd.r);
   let fb=null,fe=null,fw=null;
-  if(art!=='dach'){fb=_fsOtFeld('Beginn',o.beginn,'hh:mm','data-ot-feld-beginn');fe=_fsOtFeld('Ende',o.ende,'hh:mm','data-ot-feld-ende');fw=_fsOtFeld(art==='an'?'Witterung':'Wetter',o.wetter,'z. B. Regen, 8 °C','data-ot-feld-wetter');F.box.append(fb.r,fe.r,fw.r);}
+  if(art!=='dach'){fb=_fsOtFeld('Beginn',o.beginn,'hh:mm','data-ot-feld-beginn');fe=_fsOtFeld('Ende',o.ende,'hh:mm','data-ot-feld-ende');fw=(art==='bg')?null:_fsOtFeld(art==='an'?'Witterung':'Wetter',o.wetter,'z. B. Regen, 8 °C','data-ot-feld-wetter');F.box.append(fb.r,fe.r);if(fw)F.box.appendChild(fw.r);}
+  const bgT=(art==='bg'&&typeof _fsOtBgBearbeitenTeil==='function')?_fsOtBgBearbeitenTeil(b,o,F,farbe,fertig,{fd,fb,fe}):null; /* F91: Wetterdienst, selbst vor Ort, Anwesende, Zeit übertragen */
   const g=_fsOtGrundTeil(o.grund,farbe);F.box.appendChild(g.w);
   const fuss=document.createElement('div');fuss.style.cssText='display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;';
   const weg=_fsOtKnopf('✕ Termin entfernen','data-ot-weg',false),ab=_fsOtKnopf('Abbrechen','data-ot-abbruch',false),ok=_fsOtKnopf('✓ Übernehmen','data-ot-ok',true,farbe);
@@ -9170,6 +9543,7 @@ function _fsOtBearbeitenFenster(b,o,fertig){
     const neuD=String(fd.i.value||'').trim();
     if(neuD&&!_fsOtTag(neuD)){if(typeof toast==='function')toast('Datum bitte als TT.MM.JJJJ, z. B. 22.10.2026','info',3500);return;}
     o.datum=neuD;if(fb)o.beginn=String(fb.i.value||'').trim();if(fe)o.ende=String(fe.i.value||'').trim();if(fw)o.wetter=String(fw.i.value||'').trim();
+    if(bgT&&typeof bgT.uebernehmen==='function')bgT.uebernehmen(); /* F91 */
     o.grund=String(g.inp.value||'').replace(/\s+/g,' ').trim();
     F.zu();if(typeof fertig==='function')fertig();
   };
@@ -9185,7 +9559,7 @@ function _fsOtBearbeitenFenster(b,o,fertig){
 // Beim PDF / bei der Vorschau: welche Termine kommen hinein? fertig([Kennungen]) oder fertig(null)
 function _fsOtAuswahlFenster(b,fertig){
   const T=_fsOtTermine(b),farbe=_fsOtFarbe(b);
-  const F=_fsOtFenster(b,'_fsOtAuswahl','Welche Ortstermine kommen ins PDF?','Alle angehakt = das fertige Protokoll, Punkte vom späteren Termin mit „geprüft am“. Nur der erste = der Zwischenstand nach dem ersten Termin. Nur ein späterer = die Punkte, die dort geprüft wurden.');
+  const F=_fsOtFenster(b,'_fsOtAuswahl','Welche Ortstermine kommen ins PDF?',(_fsOtArt(b)==='bg')?'Alle angehakt = das fertige Protokoll: was beim späteren Termin festgestellt wurde, steht mit „festgestellt am“, Messwerte mit ihrem Datum. Nur der erste = der Zwischenstand nach dem ersten Termin. Nur ein späterer = was dort festgestellt und gemessen wurde.':'Alle angehakt = das fertige Protokoll, Punkte vom späteren Termin mit „geprüft am“. Nur der erste = der Zwischenstand nach dem ersten Termin. Nur ein späterer = die Punkte, die dort geprüft wurden.'); /* F91 */
   const haken=[];
   T.forEach(x=>{
     const r=document.createElement('label');r.style.cssText='display:flex;align-items:center;gap:10px;padding:9px 6px;border-top:1px solid var(--border);font-size:var(--fs15,15px);cursor:pointer;';
