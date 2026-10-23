@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F89';
+const PAM_FORMULARE_VERSION='F90';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -8838,6 +8838,65 @@ async function _fsPvPdfFeldFotos(doc,b,y,M,W){
   doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);
   return y;
 }
+/* ── F90: SPRÜNGE ZWISCHEN DACH-, PV- UND PRÜFPROTOKOLL OBEN IN DER TERMIN-ZEILE · NACHTRÄGLICH VERBINDEN ──────────────────────────────────────
+   Frank, 23.10.2026 („baue a + b“): Der Rückweg vom PV-Protokoll stand ganz unten im Abschnitt „Vor Ort & Anlage“ als graue Zeile – „hätte ich auch
+   nicht erkannt“. A: In der Zeile mit „📅 Weiterer Ortstermin“ stehen gleich große Knöpfe – im PV- und im Prüfprotokoll „🏠 Zurück zum Dachprotokoll“,
+   im Dachprotokoll „☀ PV-Protokoll“ und „🪝 Prüfprotokoll“ (nur wenn es sie schon gibt). Die alten Verknüpfungszeilen fallen weg; „anlegen“ bleibt
+   unten beim Dachaufbau. B: Hängt an der Karte ein PV- oder Prüfprotokoll, das zu keinem Dachprotokoll gehört, bietet das Dachprotokoll dort auch
+   „🔗 mit … vom … verbinden“ an (mit Rückfrage) – danach kennen sich beide wie beim Anlegen aus dem Dachprotokoll. */
+// Ein Sprung-Knopf so groß wie „📅 Weiterer Ortstermin“
+function _fsOtSprungKnopf(txt,attr,titel,farbe,fn){
+  const k=document.createElement('button');k.type='button';k.textContent=txt;if(attr)k.setAttribute(attr,'1');if(titel)k.title=titel;
+  k.style.cssText='padding:6px 11px;min-height:34px;border-radius:14px;font-size:var(--fs12,12px);cursor:pointer;font-family:inherit;border:1.5px solid '+(farbe||FS_WP_FARBE)+';background:var(--bg3);color:var(--text);font-weight:600;';
+  k.onclick=fn;return k;
+}
+// Protokolle einer Art (pv | anschlag) an der Karte, die zu keinem vorhandenen Dachprotokoll gehören und von keinem Dachprotokoll gemeint sind
+function _fsOtFreieProtokolle(t,art){
+  const L=(t&&Array.isArray(t.pruefberichte))?t.pruefberichte:[];
+  const istDach=x=>!!x&&x.vorlage==='wartungsprotokoll'&&!x.art;
+  const feld=(art==='pv')?'pvId':'anschlagId';
+  const gemeint=new Set(L.filter(istDach).map(d=>String(d[feld]||'')).filter(Boolean));
+  const out=[];
+  L.forEach((x,i)=>{
+    if(!x||x.vorlage!=='wartungsprotokoll'||x.art!==art)return;
+    const zuDach=!!x.vonWpId&&L.some(d=>istDach(d)&&d.id===x.vonWpId);
+    if(zuDach||gemeint.has(String(x.id||'')))return;
+    out.push({b:x,idx:i});
+  });
+  return out;
+}
+// Dachprotokoll und PV-/Prüfprotokoll verbinden – wie beim Anlegen aus dem Dachprotokoll
+function _fsOtVerbinden(dach,x){
+  if(!dach||!x||!x.id||!dach.id)return false;
+  if(x.art==='pv')dach.pvId=String(x.id);else if(x.art==='anschlag')dach.anschlagId=String(x.id);else return false;
+  x.vonWpId=String(dach.id);
+  return true;
+}
+// „🔗 mit … vom … verbinden“ – ein Knopf je freies Protokoll; neu() nach dem Verbinden
+function _fsOtVerbindenKnoepfe(dach,t,art,stil,neu){
+  const name=(art==='pv')?'PV-Protokoll':'Prüfprotokoll';
+  return _fsOtFreieProtokolle(t,art).map(({b})=>{
+    const k=document.createElement('button');k.type='button';k.setAttribute(art==='pv'?'data-wp-pv-verbinden':'data-wp-anschlag-verbinden',String(b.id||''));
+    k.textContent='🔗 mit '+name+' vom '+(b.datum||'–')+' verbinden';k.style.cssText=stil;
+    k.title='Das '+name+' gibt es schon an dieser Karte – mit diesem Dachprotokoll verbinden, dann kommst du oben mit einem Knopf hin und zurück';
+    k.onclick=()=>{
+      if(!_fsFrage(name+' vom '+(b.datum||'–')+' mit diesem Dachprotokoll verbinden?\n\nDanach kommst du oben in der Zeile „📅 Weiterer Ortstermin“ mit einem Knopf hin und zurück. Inhalte ändern sich nicht.',dach))return;
+      if(_fsOtVerbinden(dach,b)){if(typeof scheduleSave==='function')scheduleSave();if(typeof toast==='function')toast('✓ '+name+' vom '+(b.datum||'–')+' verbunden','success',3500);if(typeof neu==='function')neu();}
+    };
+    return k;
+  });
+}
+/* P109 (in F90): „▸ Alles zu“ klappt auch die Blöcke unten zu – Wartungsarbeiten, Festgestellte Mängel, Ergebnis (Prüfprotokoll), Unterschriften, Fotos.
+   Zugeklappt bleibt der Inhalt im Formular stehen, nur unsichtbar (andere Teile ziehen z. B. das Foto-Raster über seine Kennung nach). */
+const FS_KLAPP_UNTEN=['arbeiten','maengel','ergebnis','sign','fotos'];
+function _fsKlappBlock(kopf,inhalt,zu,fn,attr,zusatz){
+  if(!kopf)return;
+  const titel=String(kopf.textContent||'').replace(/^[▸▾] /,'');
+  kopf.textContent=(zu?'▸ ':'▾ ')+titel+((zu&&zusatz)?' – '+zusatz:'');
+  kopf.style.cursor='pointer';if(attr)kopf.setAttribute(attr,'1');kopf.setAttribute('data-klapp-zu',zu?'1':'0');
+  kopf.onclick=fn;
+  if(zu)(Array.isArray(inhalt)?inhalt:[]).forEach(e=>{if(e&&e.style)e.style.display='none';});
+}
 /* ── F89: MEHRERE ORTSTERMINE IN EINEM DACH-, PV- ODER PRÜFPROTOKOLL · AUFNAHMEDATUM AM FOTO ─────────────────────────────────────────────
    Frank, 23.10.2026 (P108 Schritt 1, Bauplan Claude-Code\Bauplan_P108_Schritt1_2026-10-23.html, „baue Schritt 1“):
    1. „📅 Weiterer Ortstermin“ oben im Formular schließt den bisherigen Termin ab (Grund freiwillig). Alles Eingetragene bleibt stehen; der
@@ -9144,7 +9203,7 @@ function _fsOtAuswahlFenster(b,fertig){
   return F.ov;
 }
 // Die Zeile oben im Formular: frühere Termine (antippen = ändern), „jetzt: …“, Knopf „📅 Weiterer Ortstermin“
-function _fsOtZeile(b,neu,datumEl){
+function _fsOtZeile(b,neu,datumEl,sprung){ /* F90: sprung = Knöpfe, die hinter „📅 Weiterer Ortstermin“ stehen */
   const w=document.createElement('div');w.setAttribute('data-ot-zeile','1');
   if(!_fsOtErlaubt(b))return w;
   const farbe=_fsOtFarbe(b),L=_fsOtListe(b);
@@ -9167,6 +9226,7 @@ function _fsOtZeile(b,neu,datumEl){
     if(typeof toast==='function')toast('✓ Termin vom '+(e.datum||'–')+' abgeschlossen – weiter mit dem Termin von heute','success',4000);
   });
   w.appendChild(k);
+  (Array.isArray(sprung)?sprung:[]).forEach(x=>{if(x&&typeof x==='object')w.appendChild(x);}); /* F90 */
   return w;
 }
 /* ── Aufnahmedatum am Foto ── */
@@ -9297,9 +9357,10 @@ function _fsWpSignTitel(b){
   return [art,adr].filter(Boolean).join(' · ');
 }
 // Abschnitt „✍ Unterschriften“ im Formular; neu = das Formular neu zeichnen
-function _fsWpUnterschriftenTeil(bericht,t,neu,farbe){
+function _fsWpUnterschriftenTeil(bericht,t,neu,farbe,klapp){ /* P109: klapp = {zu, um} – Überschrift klappt den Abschnitt */
   const s=document.createElement('div');s.setAttribute('data-wp-unterschriften','1');s.style.cssText='padding:12px 14px 14px;border-top:1px solid var(--border);';
   const h=document.createElement('div');h.style.cssText='font-size:var(--fs12,12px);font-weight:700;color:'+(farbe||FS_WP_FARBE)+';margin-bottom:8px;';h.textContent='✍ Unterschriften';s.appendChild(h);
+  if(klapp&&typeof klapp.um==='function'){const n=['unterschriftIch','unterschriftAg'].filter(f=>_fsWpSignDa(bericht,f)).length;h.textContent=(klapp.zu?'▸ ':'▾ ')+'✍ Unterschriften'+(klapp.zu?' – '+n+' von 2':'');h.style.cursor='pointer';h.setAttribute('data-wp-sign-kopf','1');h.setAttribute('data-klapp-zu',klapp.zu?'1':'0');h.onclick=klapp.um;if(klapp.zu){h.style.marginBottom='0';return s;}} /* P109 */
   const KN='font-family:inherit;cursor:pointer;border-radius:8px;min-height:44px;padding:6px 14px;font-size:var(--fs14,14px);border:1.5px solid var(--border);background:var(--bg3);color:var(--text);';
   const kn=(txt,attr,wert,stil,fn)=>{const k=document.createElement('button');k.type='button';k.textContent=txt;k.setAttribute(attr,wert);k.style.cssText=KN+(stil||'');k.onclick=fn;return k;};
   const nachher=()=>{if(typeof neu==='function')neu();};
@@ -9881,7 +9942,8 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
     const w=document.createElement('div');w.setAttribute('data-wp-pv','1');w.style.cssText='padding:6px 14px 10px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:8px;align-items:center;';
     const idx=(bericht.pvId&&Array.isArray(t.pruefberichte))?t.pruefberichte.findIndex(x=>x&&x.id===bericht.pvId&&x.art==='pv'):-1;
     const stil='padding:8px 12px;min-height:36px;border-radius:10px;border:1px solid #b45309;background:rgba(180,83,9,.08);color:#b45309;font-size:var(--fs13,13px);font-weight:600;cursor:pointer;font-family:inherit;';
-    if(idx>=0){
+    if(idx>=0&&typeof _fsOtSprungKnopf==='function'){w.style.display='none';w.setAttribute('data-wp-oben','1');} /* F90: verknüpft – der Knopf „☀ PV-Protokoll“ steht oben in der Termin-Zeile */
+    else if(idx>=0){
       const pvB=t.pruefberichte[idx];const mz=(typeof _fsWpMaengel==='function')?_fsWpMaengel(pvB).length:0;
       const b=document.createElement('button');b.type='button';b.setAttribute('data-wp-pv-oeffnen','1');b.textContent='☀ PV-Protokoll vom '+(pvB.datum||'')+' · '+mz+' '+(mz===1?'Mangel':'Mängel')+' · öffnen';b.style.cssText=stil;
       b.onclick=()=>{ov.remove();_openWartungsprotokollMobil(idx);};w.appendChild(b);
@@ -9893,23 +9955,32 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
       };
       const h=document.createElement('span');h.style.cssText='font-size:var(--fs11,11px);color:var(--text2);';h.textContent='eigenes Formular, eigenes PDF – hier erscheint danach nur die Verknüpfung';
       w.append(b,h);
+      if(typeof _fsOtVerbindenKnoepfe==='function')_fsOtVerbindenKnoepfe(bericht,t,'pv',stil,_wpLeisteNeu).forEach(k=>w.appendChild(k)); /* F90 B: vorhandenes PV-Protokoll ohne Dachprotokoll verbinden */
     }
     return w;
   };
-  /* F81: im PV-Protokoll – zurück zum Dachprotokoll, aus dem es angelegt wurde */
-  const _wpDachVerknuepfung=()=>{
-    const idx=(bericht.vonWpId&&Array.isArray(t.pruefberichte))?t.pruefberichte.findIndex(x=>x&&x.id===bericht.vonWpId&&x.vorlage==='wartungsprotokoll'&&!x.art):-1;
-    const v=document.createElement('div');v.setAttribute('data-pv-vonwp','1');v.style.cssText='padding:8px 14px;font-size:var(--fs12,12px);color:var(--text2);display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--border);';
-    v.textContent=idx>=0?('zum Dachprotokoll vom '+(t.pruefberichte[idx].datum||'')):'das zugehörige Dachprotokoll gibt es an dieser Karte nicht mehr';
-    if(idx>=0){const b=document.createElement('button');b.type='button';b.textContent='🏠 öffnen';b.setAttribute('data-pv-vonwp-oeffnen','1');b.style.cssText='padding:6px 12px;min-height:32px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--text);font-size:var(--fs12,12px);cursor:pointer;font-family:inherit;';b.onclick=()=>{ov.remove();_openWartungsprotokollMobil(idx);};v.appendChild(b);}
-    return v;
+  /* F81 · F90: Sprünge oben in der Termin-Zeile – im PV-Protokoll „🏠 Zurück zum Dachprotokoll“, im Dachprotokoll „☀ PV-Protokoll“ / „🪝 Prüfprotokoll“ (nur vorhandene) – gleich groß wie „📅 Weiterer Ortstermin“ */
+  const _wpSprung=()=>{
+    if(typeof _fsOtSprungKnopf!=='function'||!Array.isArray(t.pruefberichte))return [];
+    const L=t.pruefberichte,out=[];
+    if(_istPv()){
+      const idx=bericht.vonWpId?L.findIndex(x=>x&&x.id===bericht.vonWpId&&x.vorlage==='wartungsprotokoll'&&!x.art):-1;
+      if(idx>=0)out.push(_fsOtSprungKnopf('🏠 Zurück zum Dachprotokoll','data-pv-vonwp-oeffnen','Dachprotokoll vom '+(L[idx].datum||'–')+' öffnen',FS_WP_FARBE,()=>{ov.remove();_openWartungsprotokollMobil(idx);}));
+      return out;
+    }
+    const iP=bericht.pvId?L.findIndex(x=>x&&x.id===bericht.pvId&&x.art==='pv'):-1;
+    if(iP>=0){const pvB=L[iP];const mz=(typeof _fsWpMaengel==='function')?_fsWpMaengel(pvB).length:0;out.push(_fsOtSprungKnopf('☀ PV-Protokoll','data-wp-pv-oeffnen','PV-Protokoll vom '+(pvB.datum||'–')+' · '+mz+' '+(mz===1?'Mangel':'Mängel')+' – öffnen','#b45309',()=>{ov.remove();_openWartungsprotokollMobil(iP);}));}
+    const iA=bericht.anschlagId?L.findIndex(x=>x&&x.id===bericht.anschlagId&&x.art==='anschlag'):-1;
+    if(iA>=0){const an=L[iA];let tot=0,frei=0;(an.punkte||[]).forEach(p=>{tot++;if(p&&p.ergebnis==='frei')frei++;});out.push(_fsOtSprungKnopf('🪝 Prüfprotokoll','data-wp-anschlag-oeffnen','Prüfprotokoll Anschlageinrichtung vom '+(an.datum||'–')+' · '+frei+' von '+tot+' freigegeben – öffnen',(typeof FS_AN_FARBE!=='undefined')?FS_AN_FARBE:'#1f4e79',()=>{if(typeof _openAnschlagProtokoll==='function'){ov.remove();_openAnschlagProtokoll(iA);}}));}
+    return out;
   };
   /* F74: unter „Prüfprotokoll Anschlageinrichtung“ – entweder „🪝 selbst prüfen“ (legt das eigene Prüfprotokoll an und öffnet es) oder die Verknüpfungszeile zum vorhandenen */
   const _anZeile=()=>{
     const w=document.createElement('div');w.setAttribute('data-wp-anschlag','1');w.style.cssText='padding:6px 14px 10px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:8px;align-items:center;';
     const idx=(bericht.anschlagId&&Array.isArray(t.pruefberichte))?t.pruefberichte.findIndex(x=>x&&x.id===bericht.anschlagId&&x.art==='anschlag'):-1;
     const stil='padding:8px 12px;min-height:36px;border-radius:10px;border:1px solid #1f4e79;background:rgba(31,78,121,.08);color:#1f4e79;font-size:var(--fs13,13px);font-weight:600;cursor:pointer;font-family:inherit;';
-    if(idx>=0){
+    if(idx>=0&&typeof _fsOtSprungKnopf==='function'){w.style.display='none';w.setAttribute('data-wp-oben','1');} /* F90: verknüpft – der Knopf „🪝 Prüfprotokoll“ steht oben in der Termin-Zeile */
+    else if(idx>=0){
       const an=t.pruefberichte[idx];let tot=0,frei=0;(an.punkte||[]).forEach(p=>{tot++;if(p&&p.ergebnis==='frei')frei++;});
       const b=document.createElement('button');b.type='button';b.setAttribute('data-wp-anschlag-oeffnen','1');b.textContent='📄 Prüfprotokoll vom '+(an.datum||'')+' · '+frei+' von '+tot+' freigegeben · öffnen';b.style.cssText=stil;
       b.onclick=()=>{if(typeof _openAnschlagProtokoll==='function'){ov.remove();_openAnschlagProtokoll(idx);}};w.appendChild(b);
@@ -9918,6 +9989,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
       b.onclick=()=>{if(typeof _openAnschlagProtokoll!=='function')return;ov.remove();_openAnschlagProtokoll(undefined,bericht);};
       const h=document.createElement('span');h.style.cssText='font-size:var(--fs11,11px);color:var(--text2);';h.textContent='eigenes Formular, eigenes PDF – hier erscheint danach nur die Verknüpfung';
       w.append(b,h);
+      if(typeof _fsOtVerbindenKnoepfe==='function')_fsOtVerbindenKnoepfe(bericht,t,'anschlag',stil,_wpLeisteNeu).forEach(k=>w.appendChild(k)); /* F90 B: vorhandenes Prüfprotokoll ohne Dachprotokoll verbinden */
     }
     return w;
   };
@@ -9927,10 +9999,10 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
     const mk=(txt,key,an,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute('data-wp-filter',key);b.setAttribute('aria-pressed',String(!!an));
       b.style.cssText='padding:7px 12px;min-height:34px;border-radius:14px;font-size:var(--fs12,12px);cursor:pointer;font-family:inherit;border:1px solid '+(an?FS_WP_FARBE:'var(--border)')+';background:'+(an?'rgba(26,92,58,.14)':'transparent')+';color:'+(an?FS_WP_FARBE:'var(--text2)')+';font-weight:'+(an?'700':'400')+';';
       b.onclick=fn;return b;};
-    const alleZu=wpKopfZu&&bericht.sektionen.every(s=>wpZu.has(s.titel));
+    const alleZu=wpKopfZu&&bericht.sektionen.every(s=>wpZu.has(s.titel))&&(typeof FS_KLAPP_UNTEN==='undefined'||['arbeiten','maengel','sign','fotos'].every(k=>wpZu.has('§'+k))); /* P109: auch die Blöcke unten */
     const setzFilter=f=>{wpFilter=(wpFilter===f)?'alle':f;wpZu.clear();_wpLeisteNeu();};
     w.append(
-      mk('▸ Alles zu','zu',alleZu,()=>{bericht.sektionen.forEach(s=>wpZu.add(s.titel));wpKopfZu=true;_wpLeisteNeu();}),
+      mk('▸ Alles zu','zu',alleZu,()=>{bericht.sektionen.forEach(s=>wpZu.add(s.titel));if(typeof FS_KLAPP_UNTEN!=='undefined')FS_KLAPP_UNTEN.forEach(k=>wpZu.add('§'+k)); /* P109 */wpKopfZu=true;_wpLeisteNeu();}),
       mk('▾ Alles auf','auf',false,()=>{wpZu.clear();wpKopfZu=false;wpFilter='alle';_wpLeisteNeu();}),
       mk('Nur offene','offen',wpFilter==='offen',()=>setzFilter('offen')),
       mk('Nur Mängel','maengel',wpFilter==='maengel',()=>setzFilter('maengel')),
@@ -9977,7 +10049,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
     body.innerHTML='';
     body.appendChild(_wahlZeile());
     body.appendChild(_filterZeile()); /* F73 */
-    if(typeof _fsOtZeile==='function')body.appendChild(_fsOtZeile(bericht,_wpLeisteNeu,datumEl)); /* F89: frühere Ortstermine + „📅 Weiterer Ortstermin“ – unter der Leiste (Dachart/Art und Leiste bleiben Stelle 0 und 1, test_f73) */
+    if(typeof _fsOtZeile==='function')body.appendChild(_fsOtZeile(bericht,_wpLeisteNeu,datumEl,_wpSprung())); /* F89: frühere Ortstermine + „📅 Weiterer Ortstermin“ – unter der Leiste (Dachart/Art und Leiste bleiben Stelle 0 und 1, test_f73) */
 
     /* ── Auftragsdaten & Dachaufbau ── */
     const kopfSek=document.createElement('div');
@@ -10153,7 +10225,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
       return teile;
     }
     if(!wpKopfZu){ /* F73: Kopf zugeklappt → nur die Kopfzeile */
-    if(_istPv()){kopfSek.append(..._pvKopfTeile());if(bericht.vonWpId)kopfSek.appendChild(_wpDachVerknuepfung());}else{ /* F81 */ /* F75: PV-Protokoll – eigener Kopf */
+    if(_istPv()){kopfSek.append(..._pvKopfTeile());/* F90: der Rückweg steht oben in der Termin-Zeile (_wpSprung) */}else{ /* F81 */ /* F75: PV-Protokoll – eigener Kopf */
     kopfSek.append(
       _mf('Auftraggeber','auftraggeber','aus Task'),
       _mf('Kostenstelle','kostenstelle','z.B. 250133'),
@@ -10344,6 +10416,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
       });
       klZeigen();
       arbSek.append(aHdr,aRow,klWrap);
+      if(typeof _fsKlappBlock==='function')_fsKlappBlock(aHdr,[aRow,klWrap],wpZu.has('§arbeiten'),()=>{const kk='§'+'arbeiten';if(wpZu.has(kk))wpZu.delete(kk);else wpZu.add(kk);_wpLeisteNeu();},'data-wp-arbeiten-kopf',bericht.wartArbeiten.filter(a=>a&&a.ok).length+' angehakt'); /* P109 */
       body.appendChild(arbSek);
     }
 
@@ -10358,10 +10431,11 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
     mTA.style.cssText='width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:var(--fs14,14px);color:var(--text);resize:vertical;font-family:inherit;';
     mTA.oninput=()=>{bericht.maengelEmpfehlungen=mTA.value;scheduleSave();};
     maengelSek.append(mHdr,mTA);
+    if(typeof _fsKlappBlock==='function')_fsKlappBlock(mHdr,[mTA],wpZu.has('§maengel'),()=>{const kk='§'+'maengel';if(wpZu.has(kk))wpZu.delete(kk);else wpZu.add(kk);_wpLeisteNeu();},'data-wp-maengel-kopf',String(mTA.value||'').trim()?'ausgefüllt':'leer'); /* P109 */
     body.appendChild(maengelSek);
 
     /* ── F88: Unterschriften (der Name steht jetzt oben im Kopf) ── */
-    body.appendChild(_fsWpUnterschriftenTeil(bericht,t,_wpLeisteNeu,FS_WP_FARBE));
+    body.appendChild(_fsWpUnterschriftenTeil(bericht,t,_wpLeisteNeu,FS_WP_FARBE,{zu:wpZu.has('§sign'),um:()=>{const kk='§'+'sign';if(wpZu.has(kk))wpZu.delete(kk);else wpZu.add(kk);_wpLeisteNeu();}})); /* P109: klappbar */
 
     /* ── Fotos (Raster und Knöpfe: am PC die PC-Werkzeuge, sonst Kamera · Galerie · Drive – dieselben Funktionsnamen wie beim Feuchteprotokoll) ── */
     const fotoSek=document.createElement('div');
@@ -10386,6 +10460,7 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
       mkF('🖼 Galerie','border:1.5px solid var(--border);background:var(--bg3);color:var(--text);',()=>_wpMobFotoAufnehmen(bericht,fotoGrid,false)),
       mkF('☁ Drive','border:1.5px dashed #34a853;background:rgba(52,168,83,.06);color:#1a7a40;',()=>_wpMobLadeDriveFotos(bericht,fotoGrid)));
     fotoSek.append(fHdr,fInfo,fotoGrid,fotoBtnRow);
+    if(typeof _fsKlappBlock==='function'){const nf=(bericht.fotos||[]).length;_fsKlappBlock(fHdr,[fInfo,fotoGrid,fotoBtnRow],wpZu.has('§fotos'),()=>{const kk='§'+'fotos';if(wpZu.has(kk))wpZu.delete(kk);else wpZu.add(kk);_wpLeisteNeu();},'data-wp-fotos-kopf',nf===1?'1 Foto':nf+' Fotos');} /* P109 */
     body.appendChild(fotoSek);
   }
   _wpMobRender();_wpMobStats();
@@ -10803,7 +10878,7 @@ function _openAnschlagProtokoll(existingIdx,vonWp){
   const body=document.createElement('div');
   body.style.cssText='flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:0 0 90px;';
   /* Leiste und Klappen – wie im Dachprotokoll (F73); nur im offenen Formular, nichts davon wird gespeichert */
-  let anFilter='alle';const anZu=new Set();let anKopfZu=false,anAnlageZu=false;
+  let anFilter='alle';const anZu=new Set();let anKopfZu=false,anAnlageZu=false;const anUnten=new Set(); /* P109: ergebnis · sign · fotos */
   const _anPasst=p=>anFilter==='offen'?!p.ergebnis:anFilter==='gesperrt'?(p.ergebnis==='gesperrt'||p.ergebnis==='np'):anFilter==='fotos'?(Array.isArray(p.fotoRefs)&&p.fotoRefs.length>0):true;
   const _anNeu=()=>{const sc=body.scrollTop;_anRender();body.scrollTop=sc;_anStats();};
   const FELD='flex:1;min-width:0;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 8px;font-size:var(--fs14,14px);color:var(--text);font-family:inherit;';
@@ -10839,11 +10914,11 @@ function _openAnschlagProtokoll(existingIdx,vonWp){
     const w=document.createElement('div');w.setAttribute('data-an-leiste','1');
     w.style.cssText='position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:6px;padding:6px 14px;background:var(--bg2);border-bottom:1px solid var(--border);';
     const mk=(txt,key,an,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=txt;b.setAttribute('data-an-filter',key);b.setAttribute('aria-pressed',String(!!an));b.style.cssText=chipStil(an);b.onclick=fn;return b;};
-    const alleZu=anKopfZu&&anAnlageZu&&bericht.punkte.length>0&&bericht.punkte.every(p=>anZu.has(p));
+    const alleZu=anKopfZu&&anAnlageZu&&bericht.punkte.every(p=>anZu.has(p))&&(typeof FS_KLAPP_UNTEN==='undefined'||['ergebnis','sign','fotos'].every(k=>anUnten.has(k))); /* P109: leuchtet auch ohne Punkte, die Blöcke unten zählen mit */
     const setz=f=>{anFilter=(anFilter===f)?'alle':f;anZu.clear();_anNeu();};
     w.append(
-      mk('▸ Alles zu','zu',alleZu,()=>{bericht.punkte.forEach(p=>anZu.add(p));anKopfZu=true;anAnlageZu=true;_anNeu();}),
-      mk('▾ Alles auf','auf',false,()=>{anZu.clear();anKopfZu=false;anAnlageZu=false;anFilter='alle';_anNeu();}),
+      mk('▸ Alles zu','zu',alleZu,()=>{bericht.punkte.forEach(p=>anZu.add(p));anKopfZu=true;anAnlageZu=true;if(typeof FS_KLAPP_UNTEN!=='undefined')FS_KLAPP_UNTEN.forEach(k=>anUnten.add(k)); /* P109 */_anNeu();}),
+      mk('▾ Alles auf','auf',false,()=>{anZu.clear();anKopfZu=false;anAnlageZu=false;anUnten.clear();anFilter='alle';_anNeu();}),
       mk('Nur offene','offen',anFilter==='offen',()=>setz('offen')),
       mk('Gesperrt / nicht prüfbar','gesperrt',anFilter==='gesperrt',()=>setz('gesperrt')),
       mk('Fotos','fotos',anFilter==='fotos',()=>setz('fotos'))
@@ -10908,19 +10983,19 @@ function _openAnschlagProtokoll(existingIdx,vonWp){
     return s;
   }
 
+  /* F90: „🏠 Zurück zum Dachprotokoll“ oben in der Termin-Zeile (vorher eine graue Zeile darunter) */
+  const _anSprung=()=>{
+    if(typeof _fsOtSprungKnopf!=='function'||!bericht.vonWpId||!Array.isArray(t.pruefberichte))return [];
+    const idx=t.pruefberichte.findIndex(x=>x&&x.id===bericht.vonWpId&&x.vorlage==='wartungsprotokoll'&&!x.art);
+    if(idx<0)return [];
+    return [_fsOtSprungKnopf('🏠 Zurück zum Dachprotokoll','data-an-vonwp-oeffnen','Dachprotokoll vom '+(t.pruefberichte[idx].datum||'–')+' öffnen',FS_AN_FARBE,()=>{if(typeof _openWartungsprotokollMobil==='function'){ov.remove();_openWartungsprotokollMobil(idx);}})];
+  };
   function _anRender(){
     body.innerHTML='';
     body.appendChild(_anLeiste());
-    if(typeof _fsOtZeile==='function')body.appendChild(_fsOtZeile(bericht,_anNeu,datumEl)); /* F89 */
+    if(typeof _fsOtZeile==='function')body.appendChild(_fsOtZeile(bericht,_anNeu,datumEl,_anSprung())); /* F89 */
     const k=bericht.kopf;
-    /* ── Verknüpfung zum Dachprotokoll ── */
-    if(bericht.vonWpId){
-      const idx=t.pruefberichte.findIndex(x=>x&&x.id===bericht.vonWpId&&x.vorlage==='wartungsprotokoll'&&x.art!=='anschlag');
-      const v=document.createElement('div');v.setAttribute('data-an-vonwp','1');v.style.cssText='padding:8px 14px;font-size:var(--fs12,12px);color:var(--text2);display:flex;gap:8px;align-items:center;flex-wrap:wrap;';
-      v.textContent=idx>=0?('zum Dachprotokoll vom '+(t.pruefberichte[idx].datum||'')):'das zugehörige Dachprotokoll gibt es an dieser Karte nicht mehr';
-      if(idx>=0){const b=document.createElement('button');b.type='button';b.textContent='🏠 öffnen';b.setAttribute('data-an-vonwp-oeffnen','1');b.style.cssText=chipStil(false);b.onclick=()=>{if(typeof _openWartungsprotokollMobil==='function'){ov.remove();_openWartungsprotokollMobil(idx);}};v.appendChild(b);}
-      body.appendChild(v);
-    }
+    /* ── Verknüpfung zum Dachprotokoll: F90 – als Knopf „🏠 Zurück zum Dachprotokoll“ oben in der Termin-Zeile (_anSprung) ── */
     /* ── Auftrag ── */
     const kS=abschnitt('Auftrag und Prüfer');klappKopf(kS,anKopfZu,()=>{anKopfZu=!anKopfZu;_anNeu();},'data-an-kopf');
     if(!anKopfZu){
@@ -11030,8 +11105,9 @@ function _openAnschlagProtokoll(existingIdx,vonWp){
         if(typeof _pamAnErinnerungAusSetzen==='function'&&e.status!=='kein'){const k=document.createElement('button');k.type='button';k.setAttribute('data-an-erinnerung-knopf',aus?'an':'aus');k.textContent=aus?'🔔 wieder einschalten':'🔕 nicht mehr erinnern';k.title=aus?'Die Prüfung steht wieder in „Heute“, sobald sie fällig wird':'Diese Prüfung nicht mehr in „Heute“ zeigen (z. B. Anlage abgebaut) – im Protokoll wieder einschaltbar';k.style.cssText=chipStil(false)+'margin-left:8px;';k.onclick=()=>{if(_pamAnErinnerungAusSetzen(bericht,!aus))erNeu();};er.appendChild(k);}};
       const ni=nz.querySelector('input');if(ni)ni.addEventListener('input',erNeu);erNeu();eS.appendChild(er);
     }
+    if(typeof _fsKlappBlock==='function')_fsKlappBlock(eS._kopf,Array.from(eS.children).filter(c=>c!==eS._kopf),anUnten.has('ergebnis'),()=>{if(anUnten.has('ergebnis'))anUnten.delete('ergebnis');else anUnten.add('ergebnis');_anNeu();},'data-an-ergebnis-kopf',bericht.gesamt?_fsAnWort(bericht.gesamt):''); /* P109 */
     body.appendChild(eS);
-    body.appendChild(_fsWpUnterschriftenTeil(bericht,t,_anNeu,FS_AN_FARBE)); /* F88: Unterschriften (P69 Schritt 3, Teil Unterschrift) – Prüfer und freiwillig Auftraggeber / Betreiber */
+    body.appendChild(_fsWpUnterschriftenTeil(bericht,t,_anNeu,FS_AN_FARBE,{zu:anUnten.has('sign'),um:()=>{if(anUnten.has('sign'))anUnten.delete('sign');else anUnten.add('sign');_anNeu();}})); /* P109: klappbar · F88: Unterschriften (P69 Schritt 3, Teil Unterschrift) – Prüfer und freiwillig Auftraggeber / Betreiber */
     /* ── Fotos (wie im Dachprotokoll: am PC die PC-Werkzeuge, sonst Kamera · Galerie · Drive) ── */
     const fotoSek=document.createElement('div');fotoSek.style.cssText='border-top:1px solid var(--border);';
     const fHdr=document.createElement('div');fHdr.style.cssText='padding:10px 14px 4px;font-size:var(--fs12,12px);font-weight:700;color:'+FS_AN_FARBE+';border-left:3px solid '+FS_AN_FARBE+';padding-left:17px;';fHdr.textContent='Fotos';
@@ -11044,7 +11120,9 @@ function _openAnschlagProtokoll(existingIdx,vonWp){
     if(_fsAmPc()){
       fotoBtnRow.append(mkF('📁 Fotos vom PC','border:1.5px solid var(--border);background:var(--bg3);color:var(--text);',()=>_wpMobFotoAufnehmen(bericht,fotoGrid,false)),mkF('🖼 Fotos der Karte','border:1.5px dashed #34a853;background:rgba(52,168,83,.06);color:var(--text);',()=>_wpMobLadeDriveFotos(bericht,fotoGrid)));
     }else fotoBtnRow.append(mkF('📷 Kamera','border:1.5px dashed var(--accent);background:rgba(108,99,255,.06);color:var(--accent);',()=>_wpMobFotoAufnehmen(bericht,fotoGrid,true)),mkF('🖼 Galerie','border:1.5px solid var(--border);background:var(--bg3);color:var(--text);',()=>_wpMobFotoAufnehmen(bericht,fotoGrid,false)),mkF('☁ Drive','border:1.5px dashed #34a853;background:rgba(52,168,83,.06);color:#1a7a40;',()=>_wpMobLadeDriveFotos(bericht,fotoGrid)));
-    fotoSek.append(fHdr,fInfo,fotoGrid,fotoBtnRow);body.appendChild(fotoSek);
+    fotoSek.append(fHdr,fInfo,fotoGrid,fotoBtnRow);
+    if(typeof _fsKlappBlock==='function'){const nf=(bericht.fotos||[]).length;_fsKlappBlock(fHdr,[fInfo,fotoGrid,fotoBtnRow],anUnten.has('fotos'),()=>{if(anUnten.has('fotos'))anUnten.delete('fotos');else anUnten.add('fotos');_anNeu();},'data-an-fotos-kopf',nf===1?'1 Foto':nf+' Fotos');} /* P109 */
+    body.appendChild(fotoSek);
   }
   _anRender();_anStats();
 
