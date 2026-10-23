@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F91';
+const PAM_FORMULARE_VERSION='F92';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -3528,7 +3528,7 @@ async function _fsMobPdf(bericht,task){
   try{
     _fsVervollstaendigen(bericht);
     const {jsPDF}=window.jspdf;
-    const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+    const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});if(typeof _fsPdfSicher==='function')_fsPdfSicher(doc); /* F92: Zeichen, die die PDF-Schrift nicht kennt (P111) */
     const W=210,M=14,farbe=[31,95,139];let y=M;
     const k=bericht.kopf;
     const leer=v=>(v===null||v===undefined||String(v).trim()==='')?'–':String(v);
@@ -4851,6 +4851,7 @@ function _fsVbAnlassAusKarte(t){
   let q=String((t&&t.schadensbild)||'').trim(); // F17: das saubere Feld der Karte zuerst
   if(!q)q=String((t&&t.desc)||'').split('[E-Mail-Import')[0]; // F17: Anhang „[E-Mail-Import …]: Von: …“ gehört nicht ins Protokoll
   let s=q.replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
+  s=s.replace(/^📅 \d{2}\.\d{2}\.\d{4} · \d{2}:\d{2} Uhr\s*/u,''); /* F92: der Zeitstempel, den PAM Mobil beim Schnell-Auftrag vorn in die Beschreibung schreibt, ist kein Anlass */
   if(!s)s=_fsVbAnlassAusMail(t); // F19
   return s.length>300?s.slice(0,297)+'...':s;
 }
@@ -4860,7 +4861,7 @@ function _fsVbAnlassAusKarte(t){
 // Woher der Anlass beim Anlegen kam – dieselbe Reihenfolge wie _fsVbAnlassAusKarte
 function _fsVbAnlassQuelle(t){
   if(String((t&&t.schadensbild)||'').trim())return 'aus der Karte: Schadensbild';
-  if(String((t&&t.desc)||'').split('[E-Mail-Import')[0].replace(/<[^>]*>/g,' ').trim())return 'aus der Karte: Beschreibung';
+  if(String((t&&t.desc)||'').split('[E-Mail-Import')[0].replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim().replace(/^📅 \d{2}\.\d{2}\.\d{4} · \d{2}:\d{2} Uhr\s*/u,''))return 'aus der Karte: Beschreibung'; /* F92: nur der Zeitstempel vom Handy zählt nicht */
   if(_fsVbAnlassAusMail(t))return 'aus der Anfrage-Mail';
   return '';
 }
@@ -7247,7 +7248,7 @@ async function _fsMobPdfBg(bericht,task){
     if(typeof _fsOtBgVorbereiten==='function'){const _otV=await _fsOtBgVorbereiten(bericht);if(_otV===false)return null;bericht=_otV;}
     const _otAm=(x,wort)=>(typeof _fsOtAmText==='function')?_fsOtAmText(x,wort):'';
     const {jsPDF}=window.jspdf;
-    const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+    const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});if(typeof _fsPdfSicher==='function')_fsPdfSicher(doc); /* F92: Zeichen, die die PDF-Schrift nicht kennt (P111) */
     const W=210,M=14,farbe=[31,95,139];let y=M;
     const k=bericht.kopf;
     const keller=_fsIstKeller(bericht);
@@ -8851,6 +8852,54 @@ async function _fsPvPdfFeldFotos(doc,b,y,M,W){
   }
   doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);
   return y;
+}
+/* ── F92: ZEICHEN, DIE DIE PDF-SCHRIFT NICHT KENNT (P111) ─────────────────────────────────────────────────────────────────────────────────────
+   Frank, 23.10.2026 (Entwurf Claude-Code\Entwurf_P111_PDF-Zeichen_2026-10-23.html; Antworten „Akzent-Buchstaben zum Grundbuchstaben, erst die
+   Formulare“, dann „bauen“): Die Standard-Schrift von jsPDF kennt nur Windows-1252. Ein anderes Zeichen – ein Bildzeichen wie 📅, ✓, →, ≤, das lange
+   Minus, Buchstaben wie č/ř/ł – wird zu Buchstabensalat, und die ganze Zeile wird gesperrt gedruckt („Ø=ÜÅ 2 2 . 1 0 …“, Versuch zu P110).
+   _fsPdfSicher(doc) hängt sich gleich nach dem Anlegen an jedes der 6 Formular-PDFs und schickt jeden Text durch _fsPdfZeichen: Zeilen (text),
+   Umbruch und Breite (splitTextToSize, getTextWidth, getStringUnitWidth) und Tabellen (autoTable: Kopf, Zellen, Fuß). Eine Tabellenzelle, die genau
+   „✓“ ist, bleibt – das Dachprotokoll zeichnet daraus das Häkchen (_fsWpHakenZeichnen). Im Protokoll selbst wird nichts umgeschrieben.
+   Ein Text nur aus Zeichen der PDF-Schrift kommt Zeichen für Zeichen unverändert zurück – PDFs ohne solche Zeichen bleiben gleich.
+   ⛔ Keine Rückstrich-u-Schreibweisen in diesem Block (das Schreibwerkzeug machte daraus schon echte Zeichen) – Bereiche als Zahlen. */
+const FS_PDF_W1252=new Set([8364,8218,402,8222,8230,8224,8225,710,8240,352,8249,338,381,8216,8217,8220,8221,8226,8211,8212,732,8482,353,8250,339,382,376]); /* die 27 Zeichen von Windows-1252 zwischen 128 und 159 (dieselbe Liste wie _mfRepCp1252Bytes in PAM Desktop) */
+const FS_PDF_ERSATZ={'≈':'ca.','✓':'ok','✔':'ok','☑':'ok','✅':'ok','✗':'x','✘':'x','❌':'x','✕':'x','✖':'x','→':'->','⇒':'->','➔':'->','➜':'->','➝':'->','➞':'->','⟶':'->','←':'<-','⇐':'<-','⟵':'<-','↔':'<->','≤':'<=','≥':'>=','−':'-','‑':'-','‒':'-','ł':'l','Ł':'L','đ':'d','Đ':'D','ı':'i'};
+const _fsPdfSicherDocs=(typeof WeakSet==='function')?new WeakSet():null;
+// Kennt die PDF-Schrift dieses Zeichen? (Tab, Zeilenende, ASCII, Latin-1 ab 160, die 27 Zeichen von Windows-1252)
+function _fsPdfZeichenOk(c){return c===9||c===10||c===13||(c>=32&&c<=126)||(c>=160&&c<=255)||FS_PDF_W1252.has(c);}
+// Ein Text fürs PDF: bekannte Zeichen ersetzen, Buchstaben mit Akzent zum Grundbuchstaben, Bildzeichen und Unbekanntes weg (mit dem Leerzeichen daneben)
+function _fsPdfZeichen(s){
+  if(typeof s!=='string')return s;
+  let alles=true;for(const ch of s){if(!_fsPdfZeichenOk(ch.codePointAt(0))){alles=false;break;}}
+  if(alles)return s;
+  let out='',weg=false;
+  for(const ch of s){
+    const c=ch.codePointAt(0);
+    if(_fsPdfZeichenOk(c)){if(c===32&&weg&&(out===''||out.slice(-1)===' ')){weg=false;continue;}out+=ch;weg=false;continue;}
+    if(Object.prototype.hasOwnProperty.call(FS_PDF_ERSATZ,ch)){out+=FS_PDF_ERSATZ[ch];weg=false;continue;}
+    if((c>=8194&&c<=8202)||c===8239||c===8287||c===12288){if(out.slice(-1)!==' ')out+=' ';weg=false;continue;} /* schmale und breite Leerzeichen */
+    let zerlegt='';try{zerlegt=ch.normalize('NFKD');}catch(e){zerlegt='';}
+    let grund='';for(const x of zerlegt){const k=x.codePointAt(0);if(k>=768&&k<=879)continue;if(_fsPdfZeichenOk(k))grund+=x;else{grund='';break;}}
+    if(grund&&grund!==ch){out+=grund;weg=false;continue;} /* ř → r, ő → o, ℃ → °C */
+    weg=true; /* Bildzeichen, Variationszeichen, Verbinder und alles andere fällt weg */
+  }
+  if(weg)out=out.replace(/ +$/,'');
+  return out;
+}
+// An ein frisch angelegtes jsPDF-Dokument hängen – einmal je Dokument
+function _fsPdfSicher(doc){
+  if(!doc||(typeof doc!=='object'&&typeof doc!=='function'))return doc;
+  if(_fsPdfSicherDocs){if(_fsPdfSicherDocs.has(doc))return doc;_fsPdfSicherDocs.add(doc);}
+  const z=v=>(typeof v==='string')?_fsPdfZeichen(v):Array.isArray(v)?v.map(z):v;
+  ['text','splitTextToSize','getTextWidth','getStringUnitWidth'].forEach(n=>{const o=doc[n];if(typeof o!=='function')return;doc[n]=function(a,...r){return o.call(this,z(a),...r);};});
+  const zelle=c=>(c==='✓')?c:(typeof c==='string')?_fsPdfZeichen(c):(c&&typeof c==='object'&&!Array.isArray(c)&&typeof c.content==='string'&&c.content!=='✓')?Object.assign({},c,{content:_fsPdfZeichen(c.content)}):c;
+  const zeilen=rows=>Array.isArray(rows)?rows.map(r=>Array.isArray(r)?r.map(zelle):(r&&typeof r==='object')?Object.keys(r).reduce((o,k)=>{o[k]=zelle(r[k]);return o;},{}):r):rows;
+  const at=doc.autoTable;
+  if(typeof at==='function')doc.autoTable=function(o,...r){
+    if(o&&typeof o==='object'&&!Array.isArray(o)){const n=Object.assign({},o);['head','body','foot'].forEach(k=>{if(Array.isArray(o[k]))n[k]=zeilen(o[k]);});return at.call(this,n,...r);}
+    return at.call(this,o,...r);
+  };
+  return doc;
 }
 /* ── F91: MEHRERE ORTSTERMINE IN VORABBESICHTIGUNG UND BEGEHUNGSPROTOKOLL (P110 = P108 Schritt 2) ───────────────────────────────────────────
    Frank, 23.10.2026 (Bauplan Claude-Code\Bauplan_P110_Schritt2_2026-10-23.html, „baue“): dieselbe Termin-Zeile wie im Dach-, PV- und Prüfprotokoll,
@@ -10903,7 +10952,7 @@ async function _fsWpPdf(bericht,task){
     const t=task||{};
     const pv=(typeof _fsIstPv==='function')&&_fsIstPv(bericht); /* F75: PV-Protokoll – eigener Kopf, zwei feste Sätze */
     const {jsPDF}=window.jspdf;
-    const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+    const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});if(typeof _fsPdfSicher==='function')_fsPdfSicher(doc); /* F92: Zeichen, die die PDF-Schrift nicht kennt (P111) */
     const W=210,M=14,farbe=[26,92,58];let y=M;
 
     /* Kopfzeile */
@@ -11525,7 +11574,7 @@ async function _fsAnPdf(bericht,task){
     if(typeof _fsOtAnsicht==='function'&&typeof _fsOtAuswahlHolen==='function'){const _otWahl=await _fsOtAuswahlHolen(bericht);if(_otWahl===false)return null;bericht=_fsOtAnsicht(bericht,_otWahl);}
     const t=task||{},k=bericht.kopf;
     const {jsPDF}=window.jspdf;
-    const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+    const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});if(typeof _fsPdfSicher==='function')_fsPdfSicher(doc); /* F92: Zeichen, die die PDF-Schrift nicht kennt (P111) */
     const W=210,M=14,farbe=[31,78,121];let y=M;
     const kap=txt=>{if(y>255){doc.addPage();y=M;}doc.setFillColor(230,238,247);doc.rect(M,y,W-2*M,7,'F');doc.setFontSize(9);doc.setFont('helvetica','bold');doc.setTextColor(31,78,121);doc.text(txt,M+2,y+5);y+=10;doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);};
     const w=_fsAnWort;
@@ -12103,7 +12152,7 @@ async function _fsRaPdf(bericht,task){
     _fsRaVervollstaendigen(bericht);
     const a=_fsRaPdfAufbau(bericht);
     const {jsPDF}=window.jspdf;
-    const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+    const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});if(typeof _fsPdfSicher==='function')_fsPdfSicher(doc); /* F92: Zeichen, die die PDF-Schrift nicht kennt (P111) */
     const W=210,M=20,B=W-2*M;let y=22;
     const platz=h=>{if(y+h>272){doc.addPage();y=22;}};
     doc.setTextColor(0,0,0);doc.setDrawColor(0,0,0);doc.setLineWidth(0.2);
@@ -12437,7 +12486,7 @@ async function _fsPbPdf(bericht,task){
     _fsPbVervollstaendigen(bericht);
     const t=task||{};
     const {jsPDF}=window.jspdf;
-    const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+    const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});if(typeof _fsPdfSicher==='function')_fsPdfSicher(doc); /* F92: Zeichen, die die PDF-Schrift nicht kennt (P111) */
     const W=210,M=14;let y=M;
     const farbe=[26,92,58];
     doc.setFillColor(...farbe);doc.rect(0,0,W,28,'F');
