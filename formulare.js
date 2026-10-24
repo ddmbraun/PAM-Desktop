@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F92';
+const PAM_FORMULARE_VERSION='F93';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -344,6 +344,7 @@ function _fsVervollstaendigen(b){
   ['auftraggeber','objektAdresse','auftragNr','nutzer','anwesend','uhrzeit','wetter','letzterRegen','aussenT','aussenRf','messgeraete','pruefer']
     .forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';});
   ['raeume','stellen','sektionen','fotos'].forEach(k=>{if(!Array.isArray(b[k]))b[k]=[];});
+  if(typeof _fsTestoBilderNachtragen==='function')_fsTestoBilderNachtragen(b); /* F93: Messbilder ohne Datum – die Messzeit ihrer Messstelle */
   b.stellen.forEach(st=>{if(!Array.isArray(st.befund))st.befund=[];if(!Array.isArray(st.fotoRefs))st.fotoRefs=[];if(st.text===undefined)st.text='';});
   if(typeof b.bemerkung!=='string')b.bemerkung='';
   if(typeof b.empfehlungen!=='string')b.empfehlungen='';
@@ -8009,7 +8010,7 @@ async function _fsTestoEinlesen(bericht,t,neuBauen){
             if(du){
               const localKey='photo_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
               const name='Messbild_'+(m.zeit?_fsZeitText(m.zeit).slice(11).split(':').join(''):String(Date.now()))+'.jpg';
-              const fo={name:name,inReport:true,localUrl:du,localKey:localKey,driveId:null,_uploading:false};
+              const fo={name:name,inReport:true,localUrl:du,localKey:localKey,driveId:null,_uploading:false};if(typeof _fsTestoBildAufnahme==='function')_fsTestoBildAufnahme(fo,m); /* F93: Messzeit = Aufnahmezeit – ohne Datum zählte das Messbild zum ersten Ortstermin */
               // ⛔ Gerätespeicher NICHT abwarten – in der Browser-Gegenprobe kam er nie zurück und das Einlesen stand still.
               //   Er ist nur die Reserve, falls der Upload unten scheitert (dann holt der Nachhol-Upload das Bild von dort).
               _mobPhotoSave(localKey,du,{taskId:t.id,name:name}).catch(e=>console.warn('[testo] Gerätespeicher:',e));
@@ -8271,7 +8272,7 @@ async function _fsTestoPlanZuordnen(bericht,t,neuBauen){
             if(du){
               const localKey='photo_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
               const name='Messbild_'+(m.zeit?_fsZeitText(m.zeit).slice(11).split(':').join(''):String(Date.now()))+'.jpg';
-              const fo={name:name,inReport:true,localUrl:du,localKey:localKey,driveId:null,_uploading:false};
+              const fo={name:name,inReport:true,localUrl:du,localKey:localKey,driveId:null,_uploading:false};if(typeof _fsTestoBildAufnahme==='function')_fsTestoBildAufnahme(fo,m); /* F93: Messzeit = Aufnahmezeit (Zuordnen nach Messplan) */
               // ⛔ Gerätespeicher NICHT abwarten (siehe _fsTestoEinlesen) – er ist nur die Reserve, falls der Upload unten scheitert.
               _mobPhotoSave(localKey,du,{taskId:t.id,name:name}).catch(e=>console.warn('[testo] Gerätespeicher:',e));
               bericht.fotos.push(fo);
@@ -8853,6 +8854,32 @@ async function _fsPvPdfFeldFotos(doc,b,y,M,W){
   doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);
   return y;
 }
+/* ── F93: FUNDE AUS DER FORMULAR-PRÜFUNG VOM 23.10.2026 (Nachtrag zu P110) ───────────────────────────────────────────────────────────────────────────
+   24.10.2026 („baue F93“, Bauvorschlag Claude-Code\Bauplan_F93_Funde_2026-10-24.html, Frage 1 und 2: ja):
+   1. testo-Messbilder bekommen beim Einlesen die Messzeit der testo-Datei als Aufnahmezeit (aufnahmeQuelle 'testo'; ohne Messzeit der Moment des
+      Einlesens, 'pam'). Vorher hatten sie keine – und _fsOtFotoTermin ordnet ein Foto ohne Datum dem ersten Ortstermin zu: das Messbild vom zweiten
+      Termin stand im PDF „nur erster Termin“ und fehlte in „nur zweiter Termin“. Schon eingelesene Messbilder („Messbild_…“) ohne Datum bekommen
+      in _fsVervollstaendigen die Messzeit ihrer Messstelle (st.testo.zeit). Ein von Hand gesetztes Datum bleibt (_fsFotoAufnahmeSetzen).
+   2. ✎ eines früheren Ortstermins (Vorabbesichtigung, Begehungsprotokoll): „📅 Zeit in Termin übertragen“ prüft das Datum und übernimmt den Grund
+      wie „✓ Übernehmen“; „✏ Zeit eintragen“ im PAM-Desktop-Fenster (Ende fehlt) öffnet wieder das ✎ dieses Termins – vorher tat der Knopf nichts. */
+// Messbild aus dem testo-Import: Messzeit der Datei (Millisekunden), sonst jetzt
+function _fsTestoBildAufnahme(fo,m){
+  if(!fo||typeof _fsFotoAufnahmeSetzen!=='function'||typeof _fsFotoZeitIso!=='function')return false;
+  const z=(m&&m.zeit)?new Date(Number(m.zeit)):null,iso=(z&&isFinite(z.getTime()))?_fsFotoZeitIso(z):'';
+  return iso?_fsFotoAufnahmeSetzen(fo,iso,'testo'):_fsFotoAufnahmeSetzen(fo,_fsFotoZeitIso(new Date()),'pam');
+}
+// Schon eingelesene Messbilder ohne Datum: die Messzeit der Messstelle, an der sie hängen – gibt die Zahl der nachgetragenen zurück
+function _fsTestoBilderNachtragen(b){
+  const fotos=(b&&Array.isArray(b.fotos))?b.fotos.filter(f=>f&&!f.aufnahme&&/^Messbild_/.test(String(f.name||''))):[];
+  if(!fotos.length||typeof _fsFotoAufnahmeSetzen!=='function'||typeof _fsFotoZeitIso!=='function')return 0;
+  let n=0;
+  ((b&&Array.isArray(b.stellen))?b.stellen:[]).forEach(st=>{
+    if(!st||!st.testo||!st.testo.zeit||!Array.isArray(st.fotoRefs))return;
+    const z=new Date(Number(st.testo.zeit));if(!isFinite(z.getTime()))return;
+    fotos.forEach(f=>{if(!f.aufnahme&&st.fotoRefs.some(r=>_fsRefPasst(f,r))&&_fsFotoAufnahmeSetzen(f,_fsFotoZeitIso(z),'testo'))n++;});
+  });
+  return n;
+}
 /* ── F92: ZEICHEN, DIE DIE PDF-SCHRIFT NICHT KENNT (P111) ─────────────────────────────────────────────────────────────────────────────────────
    Frank, 23.10.2026 (Entwurf Claude-Code\Entwurf_P111_PDF-Zeichen_2026-10-23.html; Antworten „Akzent-Buchstaben zum Grundbuchstaben, erst die
    Formulare“, dann „bauen“): Die Standard-Schrift von jsPDF kennt nur Windows-1252. Ein anderes Zeichen – ein Bildzeichen wie 📅, ✓, →, ≤, das lange
@@ -9202,9 +9229,10 @@ function _fsOtBgBearbeitenTeil(b,o,F,farbe,fertig,felder){
     const zk=kn('📅 Zeit in Termin übertragen','data-ot-zeit-termin');
     zk.title='Datum und Uhrzeit dieses Ortstermins in den passenden Termin der Karte übertragen';
     zk.onclick=()=>{
-      if(felder){const d=String((felder.fd&&felder.fd.i.value)||'').trim();if(d&&_fsOtTag(d))o.datum=d;if(felder.fb)o.beginn=String(felder.fb.i.value||'').trim();if(felder.fe)o.ende=String(felder.fe.i.value||'').trim();}
+      if(felder){const d=String((felder.fd&&felder.fd.i.value)||'').trim();if(d&&!_fsOtTag(d)){if(typeof toast==='function')toast('Datum bitte als TT.MM.JJJJ, z. B. 22.10.2026','info',3500);return;}if(d)o.datum=d;if(felder.fb)o.beginn=String(felder.fb.i.value||'').trim();if(felder.fe)o.ende=String(felder.fe.i.value||'').trim();}
+      {const gi=F.box.querySelector('[data-ot-grund="1"]');if(gi)o.grund=String(gi.value||'').replace(/\s+/g,' ').trim();} /* F93: der Grund geht mit, wie bei „✓ Übernehmen“ */
       uebernehmen();if(typeof scheduleSave==='function')scheduleSave();F.zu();
-      _pamVbZeitUebertragen(b,(typeof currentTask==='function')?currentTask():null,fertig,null,o);
+      _pamVbZeitUebertragen(b,(typeof currentTask==='function')?currentTask():null,fertig,()=>{if(typeof _fsOtBearbeitenFenster==='function')_fsOtBearbeitenFenster(b,o,fertig);},o); /* F93: „✏ Zeit eintragen“ öffnet wieder das ✎ dieses Termins */
     };
     w.appendChild(zk);
   }
