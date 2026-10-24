@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F93';
+const PAM_FORMULARE_VERSION='F94';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -8854,6 +8854,30 @@ async function _fsPvPdfFeldFotos(doc,b,y,M,W){
   doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);
   return y;
 }
+/* ── F94: FOTOS BEI MEHREREN ORTSTERMINEN AM SELBEN TAG (Nachtrag zu P110) ────────────────────────────────────────────────────────────────────
+   24.10.2026 („Baue F94“, Bauvorschlag Claude-Code\Bauplan_F94_Fotos-gleicher-Tag_2026-10-24.html; Frage Uhrzeit bei „am 23.10.“: nein, so lassen):
+   Gibt es am Aufnahmetag eines Fotos mehrere Ortstermine, entschied bisher deren Beginn (📍) – ohne Beginn (im Dachprotokoll immer) landeten alle
+   Fotos des Tages beim letzten Termin dieses Tages. Jetzt entscheidet, wann der spätere Termin begonnen hat: im Moment, in dem der Termin davor
+   abgeschlossen wurde. Diese Zeit steht schon in der Kennung jedes späteren Termins (_fsOtNeueId: 'ot_' + Date.now() in 36er-Schrift, 8 Stellen bis
+   2059) – deshalb gilt es auch für schon abgeschlossene Termine, ohne neues Feld. Fehlt einer der Termine dieses Tages eine lesbare Zeit oder dem Foto
+   die Uhrzeit, gilt die alte Regel. Termine an verschiedenen Tagen und Fotos ohne Datum: wie bisher.
+   ⛔ Suchmuster in diesem Block ohne Rückstriche ([0-9] statt Rückstrich-d) – beim Schreiben über die Kommandozeile gingen sie schon verloren. */
+// Beginn eines Termins aus seiner Kennung (Ortszeit 'JJJJ-MM-TTThh:mm:ss'); '' = nicht lesbar (fremde oder alte Kennung, außerhalb 2026–2059)
+function _fsOtStartAusId(id){
+  const m=/^ot_([0-9a-z]{8})/.exec(String(id||''));if(!m||typeof _fsFotoZeitIso!=='function')return '';
+  const d=new Date(parseInt(m[1],36));if(!isFinite(d.getTime())||d.getFullYear()<2026||d.getFullYear()>2059)return '';
+  return _fsFotoZeitIso(d);
+}
+// Mehrere Termine am Aufnahmetag: der letzte, der bei der Aufnahme schon begonnen hatte, sonst der erste davon – -1 = so nicht entscheidbar (alte Regel)
+function _fsOtTagStart(T,f,tag){
+  const L=Array.isArray(T)?T:[],foto=String((f&&f.aufnahme)||'');
+  if(!/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}/.test(foto)||typeof _fsOtTag!=='function')return -1;
+  const amTag=[];L.forEach((x,i)=>{if(x&&_fsOtTag(x.datum)===tag)amTag.push(i);});
+  if(amTag.length<2)return -1;
+  let best=amTag[0];
+  for(let j=1;j<amTag.length;j++){const i=amTag[j],st=_fsOtStartAusId(L[i].id);if(!st)return -1;if(st<=foto)best=i;}
+  return best;
+}
 /* ── F93: FUNDE AUS DER FORMULAR-PRÜFUNG VOM 23.10.2026 (Nachtrag zu P110) ───────────────────────────────────────────────────────────────────────────
    24.10.2026 („baue F93“, Bauvorschlag Claude-Code\Bauplan_F93_Funde_2026-10-24.html, Frage 1 und 2: ja):
    1. testo-Messbilder bekommen beim Einlesen die Messzeit der testo-Datei als Aufnahmezeit (aufnahmeQuelle 'testo'; ohne Messzeit der Moment des
@@ -9432,6 +9456,7 @@ function _fsOtFotoTag(f){const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String((f&&f.au
 // Zu welchem Termin gehört ein Foto: zum letzten Termin am oder vor dem Aufnahmetag (am selben Tag zählt die Uhrzeit, wenn es eine gibt); ohne Datum zum ersten
 function _fsOtFotoTermin(T,f){
   const tag=_fsOtFotoTag(f);if(!tag)return 0;
+  if(typeof _fsOtTagStart==='function'){const g=_fsOtTagStart(T,f,tag);if(g>=0)return g;} /* F94: mehrere Termine am Aufnahmetag – entscheidet, wann der spätere begann (aus seiner Kennung), nicht der Beginn (📍) */
   const zeit=(/T(\d{2}:\d{2})/.exec(String(f.aufnahme||''))||[])[1]||'99:99';
   const foto=tag+'T'+zeit;let best=0,bestS='';
   (T||[]).forEach((x,i)=>{const d=_fsOtTag(x.datum);if(!d)return;const s=d+'T'+(/^\d{1,2}:\d{2}$/.test(String(x.beginn||'').trim())?('0'+String(x.beginn).trim()).slice(-5):'00:00');if(s<=foto&&s>=bestS){best=i;bestS=s;}});
