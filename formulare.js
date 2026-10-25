@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F94';
+const PAM_FORMULARE_VERSION='F95';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -334,6 +334,7 @@ function _fsNeuerBericht(t,art){
     b.sektionen=FS_KELLER_SEKTIONEN.map(s=>({titel:s.titel,items:s.items.map(text=>({text,status:'offen',notiz:''}))}));
   }
   if(art==='vorab'||art==='besichtigung2'){b.art='vorab';b.titel='Vorabbesichtigung';if(art==='besichtigung2'){b.schlank=true;b.titel='Vorabbesichtigung';b.protName='';}} // F16: Inhalte setzt _fsBgUmstellen · F23: „Besichtigung 2“ = dieselbe Art, aber schlank (Kennzeichen schlank)
+  if(art==='ortstermin'){b.art='vorab';b.schlank=true;b.otp=true;b.titel='Ortsterminprotokoll';b.protName='';} /* F95: Ortsterminprotokoll – eine besondere Vorabbesichtigung (Rest: _fsOtpEinrichten) */
   return b;
 }
 // Altbestand/Fremdgerät: fehlende Teile ergänzen, nichts überschreiben
@@ -383,6 +384,7 @@ function _fsVervollstaendigen(b){
     }
     ['vorOrtWetter','vorOrtT','vorOrtRf','vorOrtUhr','vorOrtGeraet','wetterOrt','wetterOrtArt','wetterTag'].forEach(k=>{if(b.kopf[k]===undefined||b.kopf[k]===null)b.kopf[k]='';}); /* F52: Wetter „selbst vor Ort“ · wofür der Wetterdienst geholt wurde */
   }
+  if(typeof _fsOtpVervollstaendigen==='function')_fsOtpVervollstaendigen(b); /* F95 */
   return b;
 }
 function _fsPdfName(bericht,zeit){
@@ -416,6 +418,7 @@ function _fsPdfName(bericht,zeit){
     return 'Dachprotokoll_'+((typeof _fsWpArt==='function'&&_fsWpArt(bericht)==='inspektion')?'Inspektion':'Wartung')+(slug?'_'+slug:'')+(datum?'_'+datum:'')+uhr+'.pdf'; /* F70 · F73: Dachprotokoll_Wartung_… / Dachprotokoll_Inspektion_… */
   }
   if(bericht&&bericht.fassung==='begehung'&&bericht.art==='vorab'){ // F16, F17: mit der Rolle, bei wem es war (Eigentuemer, Mieter, …)
+    if(bericht.otp===true){const nr=_fsPnTeil((bericht.otpAkte&&bericht.otpAkte.nr)||'',/[^a-zA-Z0-9-]/g),slug=nr?'':_fsPnTeil(String((bericht.kopf&&bericht.kopf.objektAdresse)||'').split(',')[0],/[^a-zA-Z0-9]/g);return 'Ortsterminprotokoll'+(nr?'_'+nr:'')+(slug?'_'+slug:'')+(datum?'_'+datum:'')+uhr+'.pdf';} /* F95: Ortsterminprotokoll_26-011_… (Akte statt Straße, kurz wegen der Pfadlänge) */
     const rolle=String((bericht.kopf&&bericht.kopf.besuchBei)||'').split(':')[0].replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/Ä/g,'Ae').replace(/Ö/g,'Oe').replace(/Ü/g,'Ue').replace(/ß/g,'ss').replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,16);
     return (bericht.schlank?(_fsDateiSlug(bericht.protName,30)||'Vorabbesichtigung'):'Vorabbesichtigung')+(rolle?'_'+rolle:'')+(datum?'_'+datum:'')+uhr+'.pdf'; // F23, F26
   }
@@ -1347,6 +1350,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     else if(typeof _fsGemeinsamerKopf==='function'&&_fsGemeinsamerKopf(bericht)){ /* F52: Begehungsprotokoll – Anlass aus der Karte, Name aus dem Anlass, du selbst unter „Anwesend“ (wie die Vorabbesichtigung) */
       try{_fsKopfErgaenzen(bericht,t);_fsVbVorbelegen(bericht,t);}catch(e){console.warn('[Begehungsprotokoll] Start:',e);}
     }
+    if(art==='ortstermin'&&typeof _fsOtpEinrichten==='function'){try{_fsOtpEinrichten(bericht,t);}catch(e){console.warn('[Ortsterminprotokoll] Start:',e);}} /* F95 */
     t.pruefberichte.push(bericht);
     scheduleSave();
   }
@@ -1416,7 +1420,8 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   function _neuBauen(){
     const sc=body.scrollTop;
     body.innerHTML='';_vbUmgFuellen=null; // F23
-    if(_fsIstVorab(bericht)&&bericht.schlank&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_bgBlock('vorort',_teilVorOrtVb),_bgBlock('gemeldet',_teilGemeldetVb),_bgBlock('stellen',_teilFeststellungenB2),_bgBlock('notizen',_teilNotizenB2),_bgBlock('fotos',_teilFotos,'Fotos')); // F23: Besichtigung 2 · F38: ohne den Abschnitt „Räume“ (seit F36 sitzt die Skizze beim Raum; der Balken stand noch da und hieß „raeume“)
+    if(typeof _fsIstOtp==='function'&&_fsIstOtp(bericht)&&typeof _fsOtpBloecke==='function')body.append(_teilLeiste(),..._fsOtpBloecke(bericht,t,{bgBlock:_bgBlock,stellen:_teilVbStellenB2,notizen:_teilNotizenB2,fotos:_teilFotos,wetter:_vbWetterB2,inp:_inp,chip:_chip,info:_bgInfo,textFeld:_bgTextFeld,xKnopf:_bgXKnopf,neu:_neuBauen,body:body,hdrT:hdrT,hdrS:hdrS,S_INP:S_INP,S_KNOPF:S_KNOPF})); /* F95: Ortsterminprotokoll */
+    else if(_fsIstVorab(bericht)&&bericht.schlank&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_bgBlock('vorort',_teilVorOrtVb),_bgBlock('gemeldet',_teilGemeldetVb),_bgBlock('stellen',_teilFeststellungenB2),_bgBlock('notizen',_teilNotizenB2),_bgBlock('fotos',_teilFotos,'Fotos')); // F23: Besichtigung 2 · F38: ohne den Abschnitt „Räume“ (seit F36 sitzt die Skizze beim Raum; der Balken stand noch da und hieß „raeume“)
     else if(_fsIstVorab(bericht)&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_bgBlock('vorort',_teilVorOrtVb),_bgBlock('gemeldet',_teilGemeldetVb),_bgBlock('stellen',_teilStellenBlockVb),_bgBlock('umgebung',_teilUmgebungVb),_bgBlock('ergebnis',_teilErgebnisVb),_bgBlock('fotos',_teilFotos,'Fotos'),_bgBlock('vorgeschichte',_teilVorgeschichteVb),_bgBlock('karte',_teilKarteVb),_bgBlock('versich',_teilVersichVb),_bgBlock('fest',_teilChecklistenBg,'Feststellungen vor Ort'),...(_vbAltAngaben()?[_bgBlock('angaben',_teilAngabenBg,'Angaben der Nutzer (nicht selbst festgestellt)')]:[]),_bgBlock('termin',_teilTerminBg),_bgBlock('raeume',_teilRaeumeBg,'Räume')); // F20: „Vor Ort“ offen, der Rest zugeklappt
     else if(bericht.fassung==='begehung'&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_bgBlock('vorort',_teilVorOrtVb),_bgBlock('gemeldet',_teilGemeldetVb),_bgBlock('geraete',_teilGeraeteBg),_bgBlock('raeume',_teilRaeumeBg,'Räume'),_bgBlock('fest',_teilChecklistenBg,'Feststellungen vor Ort'),_bgBlock('angaben',_teilAngabenBg,'Angaben der Nutzer (nicht selbst festgestellt)'),_bgBlock('fazit',_teilZusammenfassungBg,'Zusammenfassung der Feststellungen'),_bgBlock('notizen',_teilNotizenB2),_bgBlock('fotos',_teilFotos,'Fotos')); // F53: Notizen · F2b: zuklappbar, Leiste oben · F52: oben derselbe Teil wie die Vorabbesichtigung („Vor Ort“, „Gemeldet / vorgefunden“) statt Auftrag/Ortstermin
     else{
@@ -1912,6 +1917,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   function _bgNurDieser(){try{return localStorage.getItem('pam_fs_nurDieser')==='1';}catch(e){return false;}}
   // Kurzfassung, die neben einem zugeklappten Abschnitt steht – nur Zahlen und Stichworte, keine Wertung
   function _bgKurz(k){
+    if(typeof _fsIstOtp==='function'&&_fsIstOtp(bericht)&&typeof _fsOtpKurz==='function'){const _oz=_fsOtpKurz(bericht,k);if(_oz!==null)return _oz;} /* F95 */
     const kf=bericht.kopf||{};
     const gef=arr=>arr.filter(x=>String(kf[x]||'').trim()).length;
     const plural=(n,e,m)=>n+' '+(n===1?e:m);
@@ -3432,6 +3438,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     wordBtn.onclick=async()=>{wordBtn.disabled=true;const alt=wordBtn.textContent;wordBtn.textContent='⏳ Word …';try{await window._pamBesichtigungWord(bericht,t);}finally{wordBtn.disabled=false;wordBtn.textContent=alt;}};
     footer.append(pdfBtn,wordBtn,openBtn,shareBtn);
   }else footer.append(pdfBtn,openBtn,shareBtn);
+  if(typeof _fsIstOtp==='function'&&_fsIstOtp(bericht)){const _wb=footer.querySelector?footer.querySelector('[data-fs-word]'):null;if(_wb)_wb.remove();} /* F95: Word fürs Ortsterminprotokoll kommt mit der Gutachtenvorlage */
   if(_fsIstBegehung(bericht)){ /* F49: „👁 Vorschau“ – das PDF ansehen, ohne es abzulegen */
     const vorBtn=document.createElement('button');vorBtn.type='button';vorBtn.textContent='👁 Vorschau';vorBtn.setAttribute('data-fs-vorschau','1');vorBtn.title='Das PDF ansehen – nichts kommt nach Drive, nichts wird ersetzt';
     vorBtn.style.cssText='padding:12px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:var(--fs15,15px);font-weight:600;cursor:pointer;color:var(--text);';
@@ -3895,7 +3902,7 @@ const FS_VB_TITEL='Vorabbesichtigung';
 const FS_B2_TITEL='Vorabbesichtigung'; /* F47: aus „Besichtigung 2“ wird die Vorabbesichtigung (Frank 09.10.2026) */
 /* F26: Besichtigung 2 hat einen NAMEN (b.protName, Frank 03.10.2026: „kann ich den Namen des Protokolls ändern – auch PDF und Namen“): Liste an der Karte, PDF-Titel, Dateiname.
    Leer = „Besichtigung“ (in der Liste dann wie bisher der Kartenname). Der Dateiname wird auf Buchstaben/Ziffern/Unterstrich gekürzt (Pfadlänge, ⛔ 218-Wächter). */
-function _fsB2Name(b){const n=String((b&&b.protName)||'').replace(/\s+/g,' ').trim();return n||FS_B2_TITEL;}
+function _fsB2Name(b){const n=String((b&&b.protName)||'').replace(/\s+/g,' ').trim();return n||((b&&b.otp===true)?'Ortsterminprotokoll':FS_B2_TITEL);} /* F95 */
 function _fsDateiSlug(text,max){
   return String(text||'').replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/Ä/g,'Ae').replace(/Ö/g,'Oe').replace(/Ü/g,'Ue').replace(/ß/g,'ss')
     .replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,max||30).replace(/_+$/g,'');
@@ -3958,7 +3965,7 @@ function _fsIstVorab(b){return !!b&&b.fassung==='begehung'&&b.art==='vorab';}
    Teil (_teilVorOrtVb, _teilGemeldetVb). Nur die frühere Vorab-Fassung (ohne schlank) bleibt, wie sie war. */
 function _fsGemeinsamerKopf(b){return !!b&&b.fassung==='begehung'&&(b.schlank===true||b.art!=='vorab');}
 function _fsStandardTitel(b){return (b&&b.art==='vorab')?'Vorabbesichtigung':'Begehungsprotokoll '+((b&&b.art==='keller')?'Keller':'Wohnung');} // ohne eigenen Namen
-function _fsTitelIcon(b){return _fsIstVorab(b)?'🔍 ':'💧 ';}
+function _fsTitelIcon(b){return (b&&b.otp===true&&_fsIstVorab(b))?'📝 ':_fsIstVorab(b)?'🔍 ':'💧 ';} /* F95: 📝 Ortsterminprotokoll */
 // F52: Außenwerte fürs Rechnen (Taupunkt außen): die eigene Messung vor Ort geht vor, sonst der Wetterdienst
 function _fsAussenWerte(k){
   k=k||{};const vt=_fsZahl(k.vorOrtT),vf=_fsZahl(k.vorOrtRf);
@@ -4508,7 +4515,7 @@ function _fsStelleNrText(b,s){
   return 'Stelle '+(_fsAsNummer(b,s)||1);
 }
 /* Abschnitte der Besichtigung 2: die Raumskizze gehört zu „Innen“ – ist Innen ausgeblendet, entfällt der Abschnitt (die Außenskizze sitzt beim Bereich) */
-function _fsB2Bloecke(b){return FS_B2_BLOECKE.filter(x=>x.k!=='raeume');} /* F36: die Skizze sitzt innen wie außen beim Raum/Bereich – der eigene Abschnitt entfällt in Besichtigung 2 */
+function _fsB2Bloecke(b){if(b&&b.otp===true&&typeof FS_OTP_BLOECKE!=='undefined')return FS_OTP_BLOECKE;return FS_B2_BLOECKE.filter(x=>x.k!=='raeume');} /* F95: Ortsterminprotokoll – eigene Abschnitte */ /* F36: die Skizze sitzt innen wie außen beim Raum/Bereich – der eigene Abschnitt entfällt in Besichtigung 2 */
 /* Auswahl „weiterer Raum/Bereich“: Namen, die es schon gibt, stehen nicht mehr in der Liste (dafür gibt es dort „＋ Stelle“) */
 function _fsWeitereNamen(namen,da){const d=Array.isArray(da)?da:[];return (Array.isArray(namen)?namen:[]).filter(n=>d.indexOf(n)<0);}
 /* ob die Auswahl gerade aufgeklappt ist – nur Anzeige, je Protokoll und Teil (innen/außen), nicht im Protokoll */
@@ -5235,6 +5242,7 @@ function _fsVbBeiText(k,objAdr){const a=String((k&&k.adr)||'').trim();return Str
    Umgebung, Anwesend) steht nie drin. „Ende fehlt“ erst ab dem Tag nach dem Protokoll (am selben Tag läuft es). amPc: am PC keine Meldung „nicht in Drive“. */
 function _fsNochOffen(b,t,amPc){
   const l=[];if(!b||b.fassung!=='begehung')return l;
+  if(typeof _fsIstOtp==='function'&&_fsIstOtp(b)&&typeof _fsOtpNochOffen==='function')return _fsOtpNochOffen(b,t,amPc); /* F95 */
   const k=b.kopf||{},hat=v=>!!String(v==null?'':v).trim(),vorab=_fsIstVorab(b),gk=vorab||_fsGemeinsamerKopf(b),zb=gk?'vorort':'termin',ab=gk?'vorort':'auftrag'; /* F52: Begehungsprotokoll hat denselben Kopf */
   const s=_fsVbZeitStatus(k);
   if(s.art==='ohne')l.push({k:'beginn',text:'Beginn fehlt',block:zb,sel:'[data-fs-zeitzeile]'});
@@ -7318,6 +7326,7 @@ async function _fsMobPdfBg(bericht,task){
         if(hat(k.zugang))rows.push(['Zugang',String(k.zugang).trim()]);
         if(hat(k.ansprechpartner)&&!_fsGemeinsamerKopf(bericht))rows.push(['Ansprechpartner',String(k.ansprechpartner).trim()]); /* F47: steht schon bei „Besichtigung bei“ */
       }
+      if(typeof _fsIstOtp==='function'&&_fsIstOtp(bericht)&&typeof _fsOtpPdfAkte==='function')_fsOtpPdfAkte(bericht,rows); /* F95: Gutachten-Nr., Kundenzeichen, Auftrag vom, Sache, Zweck */
       tabelle2(rows);
       if(!vorab)absatz('Umfang: '+FS_BG_UMFANG,{groesse:8.5,farbe:[70,70,70],abstand:5});
     }
@@ -7353,9 +7362,11 @@ async function _fsMobPdfBg(bericht,task){
       const vo=_fsVorOrtKurz(k);if(vo)rows.push(['Außen vor Ort gemessen',vo]);
       if(hat(k.vorOrtWetter))rows.push(['Wetter vor Ort gesehen',String(k.vorOrtWetter).trim()]);
       }
+      if(typeof _fsIstOtp==='function'&&_fsIstOtp(bericht)&&typeof _fsOtpPdfOrt==='function')_fsOtpPdfOrt(bericht,rows); /* F95: Personen mit Uhrzeit, eingeladen und nicht erschienen, Einladung, Tonaufnahme */
       if(rows.length){abschnitt('Ortstermin');tabelle2(rows,40);} /* F54 */
     }
 
+    if(typeof _fsIstOtp==='function'&&_fsIstOtp(bericht)&&typeof _fsOtpPdfTeile==='function')_fsOtpPdfTeile(bericht,{abschnitt,unterTitel,absatz,tabelle2},'vor'); /* F95: Fragen, Vorgaben, Zu Beginn, Unterlagen, Bereiche, Bauteilöffnung */
     // 3 · Messgeräte
     {
       const rows=[];
@@ -7507,12 +7518,14 @@ async function _fsMobPdfBg(bericht,task){
       }
     }
 
+    if(typeof _fsIstOtp==='function'&&_fsIstOtp(bericht)&&typeof _fsOtpPdfTeile==='function')_fsOtpPdfTeile(bericht,{abschnitt,unterTitel,absatz,tabelle2},'nach'); /* F95: Vorkommnisse, Zum Ende, Nachzureichen, Hinweis an den Auftraggeber */
     // 6 · Angaben der Nutzer
     {
       const an=(bericht.angaben||[]).filter(a=>a&&hat(a.text));
       const vgText=((vorab||_fsGemeinsamerKopf(bericht))&&hat(bericht.vorgeschichte))?String(bericht.vorgeschichte).trim():''; // F20 · F52: auch Begehungsprotokoll
       if(an.length||vgText){
-        abschnitt(vorab?'Vorgeschichte laut Auftraggeber (nicht selbst festgestellt)':'Angaben der Nutzer (nicht selbst festgestellt)');
+        if(bericht.otp===true)abschnitt('Angaben der Beteiligten (nicht selbst festgestellt)'); /* F95: Ortsterminprotokoll – die Zeile darunter steht wörtlich wie vorher (test_f16 verdirbt sie) */
+        else abschnitt(vorab?'Vorgeschichte laut Auftraggeber (nicht selbst festgestellt)':'Angaben der Nutzer (nicht selbst festgestellt)');
         if(vgText)absatz((vorab?'':'Laut Auftraggeber: ')+vgText,{abstand:3}); // F20 · F52: im Begehungsprotokoll mit Herkunft
         an.forEach(a=>{
           if(hat(a.q))absatz(String(a.q).trim(),{groesse:8,farbe:[100,100,100],abstand:0.5});
@@ -8853,6 +8866,632 @@ async function _fsPvPdfFeldFotos(doc,b,y,M,W){
   }
   doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);
   return y;
+}
+/* ── F95: ORTSTERMINPROTOKOLL ZUM PRIVATGUTACHTEN ──────────────────────────────────────────────────────────────
+   Entwurf Claude-Code\Entwurf_Ortsterminprotokoll_Privat_v3_2026-10-25.html (Fassung 3 abgenommen am 25.10.2026, dann „baue“).
+   Eine besondere Vorabbesichtigung: art 'vorab', schlank, otp:true. Stellen, Fotos, Pins, Skizzen, Wetter, Notizen und das PDF laufen über
+   die Wege der Vorabbesichtigung; dazu kommen Akte (am PC aus der GM-Akte über _pamOtpAkteHolen in PAM Desktop), Vorbereitung (Vorgaben,
+   vorab angeforderte Unterlagen), Haken bei Beginn und Ende, Personen mit Uhrzeit, Einladung, Tonaufnahme, Unterlagen, Angaben der
+   Beteiligten, Bereiche, Bauteilöffnung, Vorkommnisse, Nachzureichen und der Hinweis an den Auftraggeber.
+   Nur Feststellungen – keine Bewertung. Das Protokoll ist nur für die eigene Akte.
+   Noch nicht: „📅 Weiterer Ortstermin“ (die neuen Listen müssten je Termin mitgehen) und Word (kommt mit der Gutachtenvorlage).
+   Daten am Bericht: otpAkte{nr,kundenzeichen,auftragVom,sache,zweck,termin,geladenAm,fragen[],beteiligte[],stand} · otpVorgaben[{text}] ·
+   otpAngefordert[{id,was,bei,am,vorgelegt ja|nein|'',von,art,fundstelle,bis}] · otpUnterlagen[{was,von,art,fundstelle}] · otpHaken{k:true} ·
+   otpEinladungWie · otpTon ja|nein|'' · otpNichtDa[{name,rolle}] (anwesende[] behält die Anwesenden, dazu ab/bis) · otpBereiche{besichtigt,
+   zugang[],zugangEigen,nicht} · otpOeffnungen[{was,zugestimmt,von,verschlossen}] · otpVorkommnisse · otpNachzureichen[{was,wer,bis}] ·
+   otpHinweisAg{datum,wie,an,worauf} · Angaben der Beteiligten in angaben[{von,text}] (wie das Begehungsprotokoll). */
+const FS_OTP_TITEL='Ortsterminprotokoll';
+const FS_OTP_ROLLE_ICH='Sachverständiger';
+const FS_OTP_BLOECKE=[{k:'akte',t:'Akte',c:'Akte'},{k:'vorbereitung',t:'Vorbereitung',c:'Vorbereitung'},{k:'beginn',t:'Beginn – zum Abhaken',c:'Beginn'},{k:'termin',t:'Termin',c:'Termin'},{k:'unterlagen',t:'Unterlagen',c:'Unterlagen'},{k:'angaben',t:'Angaben der Beteiligten',c:'Angaben'},{k:'bereiche',t:'Besichtigte Bereiche',c:'Bereiche'},{k:'oeffnung',t:'Bauteilöffnung',c:'Öffnung'},{k:'stellen',t:'Feststellungen',c:'Feststellungen'},{k:'vorkommnisse',t:'Besondere Vorkommnisse',c:'Vorkommnisse'},{k:'ende',t:'Ende – zum Abhaken',c:'Ende'},{k:'nachzureichen',t:'Nachzureichen',c:'Nachzureichen'},{k:'hinweisag',t:'Hinweis an den Auftraggeber',c:'Hinweis'},{k:'notizen',t:'📝 Notizen',c:'Notizen'},{k:'fotos',t:'Fotos',c:'Fotos'}];
+const FS_OTP_STANDARD_ZU=['akte','oeffnung','vorkommnisse','nachzureichen','hinweisag'];
+const FS_OTP_HAKEN_BEGINN=[
+  {k:'begruesst',t:'Begrüßt, mich vorgestellt, alle Erwarteten da?',kurz:'Begrüßt?',p:'Begrüßung, Vorstellung, Anwesenheit festgestellt'},
+  {k:'ablauf',t:'Ablauf erklärt; Hinweis: vor Ort gebe ich keine Beurteilung ab',kurz:'Ablauf erklärt?',p:'Ablauf erklärt; Hinweis gegeben, dass vor Ort keine Beurteilung abgegeben wird'},
+  {k:'datenschutz',t:'Hinweis Datenschutz und Fotos (Personen nur mit Einverständnis)',kurz:'Datenschutz-Hinweis?',p:'Hinweis auf Datenschutz und Fotos gegeben'},
+  {k:'gewartet',t:'15 Minuten gewartet, weil jemand fehlte',kurz:'',p:'15 Minuten auf erwartete Beteiligte gewartet',frei:true}];
+const FS_OTP_HAKEN_ENDE=[
+  {k:'hinweise',t:'Den Anwesenden Gelegenheit für weitere Hinweise gegeben',kurz:'Hinweise erfragt?',p:'Gelegenheit für weitere Hinweise gegeben'},
+  {k:'ende',t:'Ende bekanntgegeben – trägt die Uhrzeit bei „Ende“ ein, wenn dort noch nichts steht',kurz:'Ende bekanntgegeben?',p:'Ende des Ortstermins bekanntgegeben'}];
+const FS_OTP_EINLADUNG=['Brief','E-Mail','Einschreiben','Telefon'];
+const FS_OTP_ZUGANG=['Leiter','Gerüst','Hubsteiger','Drohne'];
+const FS_OTP_VERSCHLOSSEN=['ja','nein','provisorisch'];
+const FS_OTP_HINWEIS_WIE=['mündlich','schriftlich'];
+const _fsOtpAkteNeu=new WeakSet();  // frisch angelegt: am PC die GM-Akte einmal von selbst holen – nur Anzeige, nicht im Protokoll
+const _fsOtpUhrAuf=new WeakSet();   // bei welcher Person die Uhrzeit-Zeile offen ist – nur Anzeige
+
+function _fsIstOtp(b){return !!b&&b.fassung==='begehung'&&b.art==='vorab'&&b.otp===true;}
+function _fsOtpText(v){return (v===null||v===undefined)?'':String(v);}
+function _fsOtpHat(v){return _fsOtpText(v).trim()!=='';}
+function _fsOtpNameGleich(a,b){return _fsOtpText(a).replace(/\s+/g,' ').trim().toLowerCase()===_fsOtpText(b).replace(/\s+/g,' ').trim().toLowerCase();}
+function _fsOtpIch(b){return _fsOtpText(b&&b.kopf&&b.kopf.pruefer).replace(/\s+/g,' ').trim();}
+/* „2026-10-26T11:45:00“ · „2026-10-26“ · „26.10.2026“ → „26.10.2026“; sonst leer */
+function _fsOtpDatum(v){
+  const x=_fsOtpText(v).trim();let m=/^(\d{4})-(\d{2})-(\d{2})/.exec(x);if(m)return m[3]+'.'+m[2]+'.'+m[1];
+  m=/^(\d{1,2})\.(\d{1,2})\.(\d{4})/.exec(x);if(m)return ('0'+m[1]).slice(-2)+'.'+('0'+m[2]).slice(-2)+'.'+m[3];
+  return '';
+}
+function _fsOtpWochentag(d){
+  const m=/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(_fsOtpText(d).trim());if(!m)return '';
+  const x=new Date(+m[3],+m[2]-1,+m[1]);if(!isFinite(x.getTime())||x.getDate()!==+m[1])return '';
+  return ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'][x.getDay()];
+}
+
+/* Fehlende Teile ergänzen, nichts überschreiben (auch für Protokolle von einem anderen Gerät) */
+function _fsOtpVervollstaendigen(b){
+  if(!_fsIstOtp(b))return b;
+  const s=_fsOtpText;
+  const liste=(k,fn)=>{if(!Array.isArray(b[k]))b[k]=[];b[k]=b[k].filter(x=>x&&typeof x==='object');b[k].forEach(fn);};
+  if(!b.otpAkte||typeof b.otpAkte!=='object')b.otpAkte={};
+  const a=b.otpAkte;['nr','kundenzeichen','auftragVom','sache','zweck','termin','geladenAm','stand'].forEach(k=>{a[k]=s(a[k]);});
+  a.fragen=(Array.isArray(a.fragen)?a.fragen:[]).map(s).filter(x=>x.trim());
+  a.beteiligte=(Array.isArray(a.beteiligte)?a.beteiligte:[]).filter(x=>x&&typeof x==='object'&&s(x.name).trim()).map(x=>({name:s(x.name).trim(),rolle:s(x.rolle).trim()}));
+  liste('otpVorgaben',x=>{x.text=s(x.text);});
+  liste('otpAngefordert',x=>{['was','bei','am','von','art','fundstelle','bis'].forEach(k=>{x[k]=s(x[k]);});if(x.vorgelegt!=='ja'&&x.vorgelegt!=='nein')x.vorgelegt='';if(typeof x.id!=='string'||!x.id)x.id='ua_'+Math.random().toString(36).slice(2,9);});
+  liste('otpUnterlagen',x=>{['was','von','art','fundstelle'].forEach(k=>{x[k]=s(x[k]);});});
+  if(!b.otpHaken||typeof b.otpHaken!=='object')b.otpHaken={};
+  Object.keys(b.otpHaken).forEach(k=>{b.otpHaken[k]=b.otpHaken[k]===true;});
+  b.otpEinladungWie=s(b.otpEinladungWie);
+  if(b.otpTon!=='ja'&&b.otpTon!=='nein')b.otpTon='';
+  liste('otpNichtDa',x=>{x.name=s(x.name);x.rolle=s(x.rolle);});
+  if(!b.otpBereiche||typeof b.otpBereiche!=='object')b.otpBereiche={};
+  const be=b.otpBereiche;['besichtigt','zugangEigen','nicht'].forEach(k=>{be[k]=s(be[k]);});
+  be.zugang=(Array.isArray(be.zugang)?be.zugang:[]).map(s).filter(Boolean);
+  liste('otpOeffnungen',x=>{['was','zugestimmt','von'].forEach(k=>{x[k]=s(x[k]);});if(FS_OTP_VERSCHLOSSEN.indexOf(x.verschlossen)<0)x.verschlossen='';});
+  b.otpVorkommnisse=s(b.otpVorkommnisse);
+  liste('otpNachzureichen',x=>{['was','wer','bis'].forEach(k=>{x[k]=s(x[k]);});});
+  if(!b.otpHinweisAg||typeof b.otpHinweisAg!=='object')b.otpHinweisAg={};
+  const h=b.otpHinweisAg;['datum','wie','an','worauf'].forEach(k=>{h[k]=s(h[k]);});
+  if(!Array.isArray(b.anwesende))b.anwesende=[];
+  b.anwesende.forEach(p=>{if(!p||typeof p!=='object')return;['ab','bis'].forEach(k=>{if(p[k]!==undefined)p[k]=s(p[k]);});});
+  if(!Array.isArray(b.angaben))b.angaben=[];
+  return b;
+}
+/* Neues Protokoll: nach _fsBgUmstellen/_fsKopfErgaenzen – Name und Anlass der Vorabbesichtigung weg, beide Teile (innen, außen) sichtbar,
+   du selbst als „Sachverständiger“ unter den Anwesenden; Abschnitte, die nur bei Bedarf gebraucht werden, starten zugeklappt (je Gerät). */
+function _fsOtpEinrichten(b,t){
+  if(!b)return b;
+  b.art='vorab';b.schlank=true;b.otp=true;b.titel=FS_OTP_TITEL;b.protName='';b.protNameAuto=false;
+  b.zeigeInnen=true;b.zeigeAussen=true;
+  if(b.kopf){b.kopf.anlass='';b.kopf.anlassVorschlag='';b.kopf.anlassQuelle='';}
+  _fsOtpVervollstaendigen(b);
+  const ich=_fsOtpIch(b);
+  if(ich){const p=b.anwesende.find(q=>q&&_fsOtpNameGleich(q.name,ich));if(p)p.rolle=FS_OTP_ROLLE_ICH;else b.anwesende.unshift({name:ich,rolle:FS_OTP_ROLLE_ICH});}
+  try{if(typeof _fsZuMehrere==='function'&&b.id)_fsZuMehrere(b.id,FS_OTP_STANDARD_ZU.map(k=>'b:'+k),true);}catch(e){}
+  _fsOtpAkteNeu.add(b);
+  return b;
+}
+/* Daten aus der GM-Akte (PAM Desktop _pamOtpAkteHolen) ins Protokoll: die Felder der Akte werden nachgezogen; Auftraggeber, Objekt und
+   Datum nur, wenn sie leer sind bzw. noch kein Beginn steht. Gibt zurück, was sich geändert hat. */
+function _fsOtpAkteUebernehmen(b,a){
+  if(!_fsIstOtp(b)||!a||typeof a!=='object')return [];
+  _fsOtpVervollstaendigen(b);
+  const o=b.otpAkte,neu=[],s=v=>_fsOtpText(v).replace(/\s+/g,' ').trim();
+  const setz=(k,v,name)=>{v=s(v);if(v&&o[k]!==v){o[k]=v;neu.push(name);}};
+  setz('nr',a.nr,'Gutachten-Nr.');setz('kundenzeichen',a.kundenzeichen,'Kundenzeichen');setz('auftragVom',_fsOtpDatum(a.auftragVom)||a.auftragVom,'Auftrag vom');
+  setz('sache',a.sache,'Sache');setz('zweck',a.zweck,'Zweck');setz('termin',a.termin,'Termin');setz('geladenAm',_fsOtpDatum(a.geladenAm),'eingeladen am');
+  const fr=(Array.isArray(a.fragen)?a.fragen:[]).map(s).filter(Boolean);
+  if(fr.length&&JSON.stringify(fr)!==JSON.stringify(o.fragen)){o.fragen=fr;neu.push(fr.length===1?'1 Frage':fr.length+' Fragen');}
+  const bt=(Array.isArray(a.beteiligte)?a.beteiligte:[]).map(x=>({name:s(x&&x.name),rolle:s(x&&x.rolle)})).filter(x=>x.name);
+  if(bt.length&&JSON.stringify(bt)!==JSON.stringify(o.beteiligte)){o.beteiligte=bt;neu.push(bt.length===1?'1 Beteiligter':bt.length+' Beteiligte');}
+  const k=b.kopf||(b.kopf={});
+  if(!s(k.auftraggeber)&&s(a.auftraggeber)){k.auftraggeber=s(a.auftraggeber);neu.push('Auftraggeber');}
+  if(!s(k.objektAdresse)&&s(a.objektZeile||a.objekt)){k.objektAdresse=s(a.objektZeile||a.objekt);neu.push('Objekt');}
+  const td=_fsOtpDatum(a.termin);
+  if(td&&!s(k.beginn)&&b.datum!==td){b.datum=td;neu.push('Datum '+td);} /* vor dem Termin gilt der geplante Tag; ab „📍 Beginn jetzt“ der echte */
+  if(typeof _fsVbJetzt==='function'){const j=_fsVbJetzt();o.stand=j.datum+' '+j.uhr;}
+  return neu;
+}
+
+/* ── Personen: Anwesende (anwesende[]), eingeladen und nicht gekommen (otpNichtDa[]), sonst nur Vorschläge (Beteiligte der Akte, Kontakte) ── */
+function _fsOtpPersonen(b,t){
+  const ich=_fsOtpIch(b),out=[];
+  const dazu=(name,rolle,status)=>{
+    name=_fsOtpText(name).replace(/\s+/g,' ').trim();if(!name||(ich&&_fsOtpNameGleich(name,ich)))return;
+    const x=out.find(q=>_fsOtpNameGleich(q.name,name));
+    if(x){if(!x.rolle&&rolle)x.rolle=_fsOtpText(rolle).trim();if(status&&!x.status)x.status=status;return;}
+    out.push({name,rolle:_fsOtpText(rolle).trim(),status:status||''});
+  };
+  (b.anwesende||[]).forEach(p=>{if(p)dazu(p.name,p.rolle,'da');});
+  (b.otpNichtDa||[]).forEach(p=>{if(p)dazu(p.name,p.rolle,'nichtda');});
+  ((b.otpAkte&&b.otpAkte.beteiligte)||[]).forEach(p=>dazu(p.name,p.rolle,''));
+  if(typeof _fsAnwesendWahl==='function')_fsAnwesendWahl(t,'').forEach(p=>dazu(p.name,p.rolle,''));
+  return out;
+}
+function _fsOtpPersonSetzen(b,p,status){ /* 'da' · 'nichtda' · '' (nicht eingeladen = steht nirgends) */
+  _fsOtpVervollstaendigen(b);
+  const weg=l=>{const i=l.findIndex(q=>q&&_fsOtpNameGleich(q.name,p.name));return i>=0?l.splice(i,1)[0]:null;};
+  const alt=weg(b.anwesende)||weg(b.otpNichtDa)||{};
+  const e={name:_fsOtpText(p.name).replace(/\s+/g,' ').trim(),rolle:_fsOtpText(p.rolle||alt.rolle).trim()};
+  if(!e.name)return b;
+  if(status==='da'){if(_fsOtpHat(alt.ab))e.ab=alt.ab;if(_fsOtpHat(alt.bis))e.bis=alt.bis;b.anwesende.push(e);}
+  else if(status==='nichtda')b.otpNichtDa.push(e);
+  return b;
+}
+function _fsOtpZeitSetzen(b,name,wann,uhr){
+  if(wann!=='ab'&&wann!=='bis')return false;
+  const p=(b.anwesende||[]).find(q=>q&&_fsOtpNameGleich(q.name,name));if(!p)return false;
+  const u=(typeof _fsVbUhr==='function')?_fsVbUhr(uhr):_fsOtpText(uhr).trim();
+  if(u)p[wann]=u;else delete p[wann];
+  return true;
+}
+function _fsOtpPersonText(p){
+  const r=_fsOtpText(p&&p.rolle).trim(),z=[];
+  if(_fsOtpHat(p&&p.ab))z.push('ab '+_fsOtpText(p.ab).trim()+' Uhr');
+  if(_fsOtpHat(p&&p.bis))z.push('bis '+_fsOtpText(p.bis).trim()+' Uhr');
+  return _fsOtpText(p&&p.name).trim()+(r?' ('+r+')':'')+(z.length?', anwesend '+z.join(' '):'');
+}
+
+/* ── Texte (Formular-Kurzzeilen und PDF) ── */
+function _fsOtpHakenText(b,L){const hk=(b&&b.otpHaken)||{};return L.filter(x=>hk[x.k]===true).map(x=>x.p);}
+function _fsOtpZugangText(b){const be=(b&&b.otpBereiche)||{};return (Array.isArray(be.zugang)?be.zugang:[]).concat(_fsOtpHat(be.zugangEigen)?[_fsOtpText(be.zugangEigen).trim()]:[]).join(', ');}
+function _fsOtpAngefordertText(x){
+  const t=[_fsOtpText(x.was).trim()],an=[];
+  if(_fsOtpHat(x.am))an.push('am '+_fsOtpText(x.am).trim());if(_fsOtpHat(x.bei))an.push('bei '+_fsOtpText(x.bei).trim());
+  if(an.length)t.push('angefordert '+an.join(' '));
+  if(x.vorgelegt==='ja'){const v=['vorgelegt'+(_fsOtpHat(x.von)?' von '+_fsOtpText(x.von).trim():'')];if(_fsOtpHat(x.art))v.push(_fsOtpText(x.art).trim());if(_fsOtpHat(x.fundstelle))v.push('Fundstelle: '+_fsOtpText(x.fundstelle).trim());t.push(v.join(', '));}
+  else if(x.vorgelegt==='nein')t.push('nicht vorgelegt');
+  return t.join(' – ');
+}
+function _fsOtpUnterlageText(x){
+  const v=[];if(_fsOtpHat(x.von))v.push('von '+_fsOtpText(x.von).trim());if(_fsOtpHat(x.art))v.push(_fsOtpText(x.art).trim());if(_fsOtpHat(x.fundstelle))v.push('Fundstelle: '+_fsOtpText(x.fundstelle).trim());
+  return _fsOtpText(x.was).trim()+(v.length?' – '+v.join(', '):'');
+}
+function _fsOtpOeffnungText(x){
+  const v=[_fsOtpText(x.was).trim()];
+  if(_fsOtpHat(x.zugestimmt))v.push('Zustimmung: '+_fsOtpText(x.zugestimmt).trim());
+  if(_fsOtpHat(x.von))v.push('ausgeführt von '+_fsOtpText(x.von).trim());
+  if(_fsOtpHat(x.verschlossen))v.push('wieder verschlossen: '+_fsOtpText(x.verschlossen).trim());
+  return v.join(' – ');
+}
+/* Nachzureichen: was vorab angefordert und nicht vorgelegt wurde (von selbst), dann die eigenen Einträge */
+function _fsOtpNachzureichen(b){
+  const out=[];
+  ((b&&b.otpAngefordert)||[]).forEach(x=>{if(x&&x.vorgelegt==='nein'&&_fsOtpHat(x.was))out.push({was:_fsOtpText(x.was).trim(),wer:_fsOtpText(x.bei).trim(),bis:_fsOtpText(x.bis).trim(),auto:true,ref:x});});
+  ((b&&b.otpNachzureichen)||[]).forEach(x=>{if(x&&_fsOtpHat(x.was))out.push({was:_fsOtpText(x.was).trim(),wer:_fsOtpText(x.wer).trim(),bis:_fsOtpText(x.bis).trim(),auto:false,ref:x});});
+  return out;
+}
+function _fsOtpNachText(x){return x.was+(x.wer?' – von '+x.wer:'')+(x.bis?' – bis '+x.bis:'');}
+function _fsOtpHinweisText(b){
+  const h=(b&&b.otpHinweisAg)||{},v=[];
+  let s='Hinweis auf eine Gefahr für Leib und Leben gegeben';
+  if(_fsOtpHat(h.datum))v.push('am '+_fsOtpText(h.datum).trim());if(_fsOtpHat(h.wie))v.push(_fsOtpText(h.wie).trim());if(_fsOtpHat(h.an))v.push('an '+_fsOtpText(h.an).trim());
+  if(v.length)s+=' '+v.join(', ');
+  return s+(_fsOtpHat(h.worauf)?': '+_fsOtpText(h.worauf).trim():'')+(/[.!?]$/.test(_fsOtpText(h.worauf).trim())?'':'.');
+}
+
+/* „📋 Noch offen“ fürs Ortsterminprotokoll (statt der Punkte der Vorabbesichtigung) – nur Erinnerung, PAM prüft nichts */
+function _fsOtpNochOffen(b,t,amPc){
+  const l=[];if(!_fsIstOtp(b))return l;
+  const k=b.kopf||{},hk=b.otpHaken||{};
+  if(!_fsOtpIch(b))l.push({k:'ich',text:'Dein Name',block:'termin',sel:'[data-otp-ich]'});
+  const zs=(typeof _fsVbZeitStatus==='function')?_fsVbZeitStatus(k):{art:''};
+  if(zs.art==='ohne')l.push({k:'beginn',text:'Beginn fehlt',block:'termin',sel:'[data-otp-zeit]'});
+  else if(zs.art==='endeFehlt'&&!(typeof _fsVbLaeuftHeute==='function'&&_fsVbLaeuftHeute(b)))l.push({k:'ende',text:'Ende fehlt',block:'termin',sel:'[data-otp-zeit]'});
+  FS_OTP_HAKEN_BEGINN.forEach(x=>{if(!x.frei&&hk[x.k]!==true)l.push({k:'h_'+x.k,text:x.kurz,block:'beginn',sel:'[data-otp-haken="'+x.k+'"]'});});
+  (b.otpAngefordert||[]).forEach(x=>{if(_fsOtpHat(x.was)&&!x.vorgelegt)l.push({k:'u_'+x.id,text:_fsOtpText(x.was).trim()+': vorgelegt?',block:'unterlagen',sel:'[data-otp-angefordert="'+x.id+'"]'});});
+  if(!(typeof _fsVbStellenGefuellt==='function'&&_fsVbStellenGefuellt(b).length))l.push({k:'stellen',text:'Noch keine Feststellung',block:'stellen',sel:''});
+  FS_OTP_HAKEN_ENDE.forEach(x=>{if(!x.frei&&hk[x.k]!==true)l.push({k:'h_'+x.k,text:x.kurz,block:'ende',sel:'[data-otp-haken="'+x.k+'"]'});});
+  const fotos=(Array.isArray(b.fotos)?b.fotos:[]).filter(Boolean);
+  if(fotos.length&&!fotos.some(f=>f.inReport))l.push({k:'fotopdf',text:'Kein Foto im PDF',block:'fotos',sel:'#_wpMobFotoGrid'});
+  if(!amPc){const n=fotos.filter(f=>!f.driveId).length;if(n)l.push({k:'drive',text:n+(n===1?' Foto':' Fotos')+' noch nicht in Drive',block:'fotos',sel:'#_wpMobFotoGrid'});}
+  return l;
+}
+/* Kurzfassung neben einem zugeklappten Abschnitt; null = Abschnitt der Vorabbesichtigung (Feststellungen, Notizen, Fotos) */
+function _fsOtpKurz(b,k){
+  const h=_fsOtpHat,n=(x,e,m)=>x+' '+(x===1?e:m);
+  if(k==='akte'){const a=b.otpAkte||{};return [_fsOtpText(a.nr).trim(),_fsOtpText(a.sache).trim()].filter(Boolean).join(' · ')||'noch leer';}
+  if(k==='vorbereitung'){const v=(b.otpVorgaben||[]).filter(x=>h(x.text)).length,u=(b.otpAngefordert||[]).filter(x=>h(x.was)).length;return [v?n(v,'Vorgabe','Vorgaben'):'',u?n(u,'Unterlage angefordert','Unterlagen angefordert'):''].filter(Boolean).join(' · ')||'noch leer';}
+  if(k==='beginn'||k==='ende'){const L=k==='beginn'?FS_OTP_HAKEN_BEGINN:FS_OTP_HAKEN_ENDE,hk=b.otpHaken||{};return L.filter(x=>!x.frei&&hk[x.k]===true).length+' von '+L.filter(x=>!x.frei).length+' abgehakt';}
+  if(k==='termin'){const z=(typeof _fsBgZeitText==='function')?_fsBgZeitText(b.kopf||{}):'',p=(b.anwesende||[]).filter(x=>x&&h(x.name)).length;return [_fsOtpText(b.datum).trim(),z,p?n(p,'Person','Personen'):''].filter(Boolean).join(' · ')||'noch leer';}
+  if(k==='unterlagen'){const a=(b.otpAngefordert||[]).filter(x=>h(x.was)),s=(b.otpUnterlagen||[]).filter(x=>h(x.was)).length;return [a.length?a.filter(x=>x.vorgelegt==='ja').length+' von '+a.length+' vorgelegt':'',s?n(s,'weitere','weitere'):''].filter(Boolean).join(' · ')||'keine';}
+  if(k==='angaben'){const x=(b.angaben||[]).filter(a=>a&&h(a.text)).length;return x?n(x,'Angabe','Angaben'):'noch leer';}
+  if(k==='bereiche'){const be=b.otpBereiche||{};return [h(be.besichtigt)?'besichtigt':'',_fsOtpZugangText(b),h(be.nicht)?'nicht zugänglich':''].filter(Boolean).join(' · ')||'noch leer';}
+  if(k==='oeffnung'){const x=(b.otpOeffnungen||[]).filter(o=>h(o.was)).length;return x?n(x,'Öffnung','Öffnungen'):'keine';}
+  if(k==='vorkommnisse')return h(b.otpVorkommnisse)?'eingetragen':'keine';
+  if(k==='nachzureichen'){const x=_fsOtpNachzureichen(b).length;return x?n(x,'Punkt','Punkte'):'nichts';}
+  if(k==='hinweisag'){const hw=b.otpHinweisAg||{};return (h(hw.datum)||h(hw.an)||h(hw.worauf))?'Hinweis gegeben':'nur wenn nötig';}
+  return null;
+}
+function _fsOtpListeZeile(b,t){
+  const kartenname=_fsOtpText(t&&(t.title||t.name)).trim(),a=b.otpAkte||{};
+  return {kurz:'OT-PRIVAT',lang:'Ortsterminprotokoll (Privatgutachten)',name:_fsOtpText(b.protName).trim()||kartenname||FS_OTP_TITEL,sub:[_fsOtpHat(a.nr)?'GM '+_fsOtpText(a.nr).trim():'',_fsOtpText(b.datum).trim()].filter(Boolean).join(' · ')};
+}
+
+/* ── PDF (aus _fsMobPdfBg): Akte im Abschnitt „Auftrag“, Personen/Einladung/Tonaufnahme im Abschnitt „Ortstermin“, die neuen Abschnitte davor und danach ── */
+function _fsOtpPdfAkte(b,rows){
+  const a=b.otpAkte||{},h=v=>_fsOtpText(v).trim();
+  if(h(a.nr))rows.unshift(['Gutachten-Nr.',h(a.nr)]);
+  const iAg=rows.findIndex(r=>r[0]==='Auftraggeber');let at=iAg>=0?iAg+1:(h(a.nr)?1:0);
+  const rein=r=>{rows.splice(at,0,r);at++;};
+  if(h(a.kundenzeichen))rein(['Kundenzeichen',h(a.kundenzeichen)]);
+  if(h(a.auftragVom))rein(['Auftrag vom',h(a.auftragVom)]);
+  if(h(a.sache))rows.push(['Sache',h(a.sache)]);
+  if(h(a.zweck))rows.push(['Zweck',h(a.zweck)]);
+  return rows;
+}
+function _fsOtpPdfOrt(b,rows){
+  const ich=_fsOtpIch(b),anw=(b.anwesende||[]).filter(p=>p&&_fsOtpHat(p.name));
+  const ichP=anw.find(p=>ich&&_fsOtpNameGleich(p.name,ich)),andere=anw.filter(p=>!(ich&&_fsOtpNameGleich(p.name,ich)));
+  const iD=rows.findIndex(r=>r[0]==='Durchgeführt von');
+  if(iD>=0&&ich)rows[iD]=['Durchgeführt von',_fsOtpPersonText({name:ich,rolle:(ichP&&_fsOtpText(ichP.rolle).trim())||FS_OTP_ROLLE_ICH,ab:ichP&&ichP.ab,bis:ichP&&ichP.bis})];
+  const iA=rows.findIndex(r=>r[0]==='Anwesend');
+  if(iA>=0)rows[iA]=['Anwesend',andere.length?andere.map(_fsOtpPersonText).join('\n'):'niemand weiter'];
+  let at=iA>=0?iA+1:rows.length;
+  const rein=r=>{rows.splice(at,0,r);at++;};
+  const nd=(b.otpNichtDa||[]).filter(p=>p&&_fsOtpHat(p.name));
+  if(nd.length)rein(['Eingeladen, nicht erschienen',nd.map(p=>_fsOtpText(p.name).trim()+(_fsOtpHat(p.rolle)?' ('+_fsOtpText(p.rolle).trim()+')':'')).join('\n')]);
+  const am=_fsOtpText(b.otpAkte&&b.otpAkte.geladenAm).trim(),wie=_fsOtpText(b.otpEinladungWie).trim();
+  if(am||wie)rein(['Eingeladen',[am?'am '+am:'',wie?'per '+wie:''].filter(Boolean).join(' ')]);
+  if(b.otpTon==='nein')rows.push(['Tonaufnahme','keine']);
+  else if(b.otpTon==='ja')rows.push(['Tonaufnahme','mit Einverständnis aller Anwesenden; wird nach der Abschrift gelöscht']);
+  return rows;
+}
+function _fsOtpPdfTeile(b,H,teil){
+  const h=v=>_fsOtpText(v).trim(),a=b.otpAkte||{};
+  if(teil==='vor'){
+    const fr=(a.fragen||[]).map(h).filter(Boolean);
+    if(fr.length){H.abschnitt('Fragen des Auftraggebers');fr.forEach((f,i)=>H.absatz((/^\d+[.)]\s/.test(f)?f:(i+1)+'. '+f),{einzug:3,abstand:1.5}));}
+    const vg=(b.otpVorgaben||[]).map(x=>h(x.text)).filter(Boolean);
+    if(vg.length){H.abschnitt('Vorgaben des Auftraggebers');vg.forEach(z=>H.absatz('- '+z,{einzug:3,abstand:1.5}));}
+    const hb=_fsOtpHakenText(b,FS_OTP_HAKEN_BEGINN);
+    if(hb.length){H.abschnitt('Zu Beginn');hb.forEach(z=>H.absatz('- '+z,{einzug:3,abstand:1.5}));}
+    const ang=(b.otpAngefordert||[]).filter(x=>h(x.was)),sonst=(b.otpUnterlagen||[]).filter(x=>h(x.was));
+    if(ang.length||sonst.length){
+      H.abschnitt('Unterlagen');
+      if(ang.length){H.unterTitel('Vorab angefordert');ang.forEach(x=>H.absatz('- '+_fsOtpAngefordertText(x),{einzug:3,abstand:1.5}));}
+      if(sonst.length){H.unterTitel(ang.length?'Außerdem übergeben':'Übergeben');sonst.forEach(x=>H.absatz('- '+_fsOtpUnterlageText(x),{einzug:3,abstand:1.5}));}
+    }
+    const be=b.otpBereiche||{},zg=_fsOtpZugangText(b),rb=[];
+    if(h(be.besichtigt))rb.push(['Besichtigt',h(be.besichtigt)]);if(zg)rb.push(['Zugang / Hilfsmittel',zg]);if(h(be.nicht))rb.push(['Nicht zugänglich',h(be.nicht)]);
+    if(rb.length){H.abschnitt('Besichtigte Bereiche');H.tabelle2(rb,40);}
+    const oe=(b.otpOeffnungen||[]).filter(x=>h(x.was));
+    if(oe.length){H.abschnitt('Bauteilöffnung');oe.forEach((x,i)=>H.absatz((oe.length>1?(i+1)+' · ':'')+_fsOtpOeffnungText(x),{einzug:3,abstand:1.5}));}
+    return true;
+  }
+  if(teil==='nach'){
+    if(h(b.otpVorkommnisse)){H.abschnitt('Besondere Vorkommnisse');H.absatz(h(b.otpVorkommnisse),{abstand:3});}
+    const he=_fsOtpHakenText(b,FS_OTP_HAKEN_ENDE);
+    if(he.length){H.abschnitt('Zum Ende');he.forEach(z=>H.absatz('- '+z,{einzug:3,abstand:1.5}));}
+    const nz=_fsOtpNachzureichen(b);
+    if(nz.length){H.abschnitt('Nachzureichen');nz.forEach(x=>H.absatz('- '+_fsOtpNachText(x),{einzug:3,abstand:1.5}));}
+    const hw=b.otpHinweisAg||{};
+    if(h(hw.datum)||h(hw.an)||h(hw.worauf)){H.abschnitt('Hinweis an den Auftraggeber');H.absatz(_fsOtpHinweisText(b),{abstand:3});}
+    return true;
+  }
+  return false;
+}
+
+/* ── Formular (aus _neuBauen der Vorabbesichtigung; H = die Helfer des Formulars) ── */
+function _fsOtpZeile(label,el){
+  const r=document.createElement('div');r.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 14px;border-top:1px solid var(--border);';
+  const l=document.createElement('span');l.style.cssText='font-size:var(--fs13,13px);color:var(--text2);width:112px;flex-shrink:0;';l.textContent=label;
+  r.append(l,el);return r;
+}
+function _fsOtpMini(label,el){
+  const d=document.createElement('div');d.style.cssText='margin-top:6px;';
+  const l=document.createElement('div');l.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin-bottom:3px;';l.textContent=label;
+  d.append(l,el);return d;
+}
+function _fsOtpUeber(text){const d=document.createElement('div');d.style.cssText='font-size:var(--fs14,14px);font-weight:700;color:var(--text);padding:10px 14px 2px;';d.textContent=text;return d;}
+function _fsOtpKarte(){const k=document.createElement('div');k.style.cssText='margin:8px 14px;padding:8px 10px 10px;border:1.5px solid var(--border);border-left:var(--fs-kante,4px) solid '+FS_FARBE+';border-radius:10px;background:var(--fs-karte,var(--bg2));';return k;}
+function _fsOtpPlus(H,txt,attr,fn){const c=H.chip(txt,false,fn);c.setAttribute(attr,'1');c.style.margin='4px 14px 8px';return c;}
+function _fsOtpFokus(H,sel){const e=H.body&&H.body.querySelector?H.body.querySelector(sel):null;if(e){try{e.scrollIntoView({block:'center'});}catch(_e){}if(typeof e.focus==='function')e.focus();}}
+function _fsOtpRechts(el){const z=document.createElement('div');z.style.cssText='display:flex;justify-content:flex-end;margin-top:6px;';z.appendChild(el);return z;}
+function _fsOtpVorgabenHinweis(vg){
+  const d=document.createElement('div');d.setAttribute('data-otp-vorgabenhinweis','1');
+  d.style.cssText='margin:6px 0 8px;padding:8px 10px;border-radius:8px;background:rgba(230,126,34,.16);border-left:4px solid #b25e00;font-size:var(--fs14,14px);color:var(--text);line-height:1.45;';
+  d.textContent='⚠ Vorgaben des Auftraggebers: '+vg.join(' · ');return d;
+}
+function _fsOtpBloecke(b,t,H){
+  _fsOtpVervollstaendigen(b);
+  if(H.hdrT){H.hdrT.textContent='📝 '+_fsTitel(b);H.hdrT.style.whiteSpace='nowrap';H.hdrT.style.overflow='hidden';H.hdrT.style.textOverflow='ellipsis';} /* am schmalen Handy lief der lange Name unter 👁 */
+  if(_fsOtpAkteNeu.has(b)){_fsOtpAkteNeu.delete(b);if(typeof _pamOtpAkteHolen==='function'&&_fsOtpHat(t&&t.gmAkte))_fsOtpAkteHolenKlick(b,t,H,true);}
+  return [H.bgBlock('akte',()=>_fsOtpTeilAkte(b,t,H)),H.bgBlock('vorbereitung',()=>_fsOtpTeilVorbereitung(b,t,H)),H.bgBlock('beginn',()=>_fsOtpTeilHaken(b,t,H,'beginn')),
+    H.bgBlock('termin',()=>_fsOtpTeilTermin(b,t,H)),H.bgBlock('unterlagen',()=>_fsOtpTeilUnterlagen(b,t,H)),H.bgBlock('angaben',()=>_fsOtpTeilAngaben(b,t,H)),
+    H.bgBlock('bereiche',()=>_fsOtpTeilBereiche(b,t,H)),H.bgBlock('oeffnung',()=>_fsOtpTeilOeffnung(b,t,H)),H.bgBlock('stellen',H.stellen),
+    H.bgBlock('vorkommnisse',()=>_fsOtpTeilVorkommnisse(b,t,H)),H.bgBlock('ende',()=>_fsOtpTeilHaken(b,t,H,'ende')),H.bgBlock('nachzureichen',()=>_fsOtpTeilNach(b,t,H)),
+    H.bgBlock('hinweisag',()=>_fsOtpTeilHinweis(b,t,H)),H.bgBlock('notizen',H.notizen),H.bgBlock('fotos',H.fotos,'Fotos')];
+}
+async function _fsOtpAkteHolenKlick(b,t,H,still){
+  let a=null;
+  try{a=await _pamOtpAkteHolen(t);}catch(e){console.warn('[Ortstermin] Akte:',e);}
+  if(!a||a.fehlt){if(!still)toast((a&&a.fehlt)?'Zur GM-Akte stehen in Drive noch keine Daten – am Büro-PC „GM-Daten auffrischen“ laufen lassen':'Die GM-Akte konnte nicht gelesen werden','info',6000);return null;}
+  const neu=_fsOtpAkteUebernehmen(b,a);
+  scheduleSave();
+  try{H.neu();}catch(e){}
+  if(!still||neu.length)toast(neu.length?'✓ Aus der GM-Akte: '+neu.join(', '):'GM-Akte gelesen – nichts Neues','success',5000);
+  return neu;
+}
+function _fsOtpTeilAkte(b,t,H){
+  const w=document.createElement('div');w.setAttribute('data-otp-akte','1');
+  const a=b.otpAkte,k=b.kopf;
+  const feldA=(label,key,ph)=>{const i=H.inp(a[key],ph,v=>{a[key]=v;});i.setAttribute('data-otp-aktefeld',key);return _fsOtpZeile(label,i);};
+  const feldK=(label,key,ph)=>{const i=H.inp(k[key],ph,v=>{k[key]=v;});i.setAttribute('data-otp-aktefeld',key);return _fsOtpZeile(label,i);};
+  w.append(feldA('Gutachten-Nr.','nr','z. B. 26-011'),feldK('Auftraggeber','auftraggeber','Name'),feldA('Kundenzeichen','kundenzeichen',''),feldA('Auftrag vom','auftragVom','TT.MM.JJJJ'),
+    feldA('Sache','sache','worum es geht'),feldA('Zweck','zweck','Zweck des Gutachtens'),feldK('Objekt','objektAdresse','Adresse der Besichtigung'));
+  const fk=document.createElement('div');fk.setAttribute('data-otp-fragen','1');fk.style.cssText='padding:6px 14px 8px;border-top:1px solid var(--border);';
+  fk.appendChild(_fsOtpMini('Fragen des Auftraggebers – zum Nachsehen vor Ort, eine Frage je Zeile',H.textFeld(a.fragen.join('\n'),'1. …',v=>{a.fragen=_fsOtpText(v).split('\n').map(x=>x.trim()).filter(Boolean);},Math.max(3,Math.min(8,a.fragen.length+1)))));
+  w.appendChild(fk);
+  const gz=document.createElement('div');gz.setAttribute('data-otp-gm','1');gz.style.cssText='display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 14px;';
+  const gm=_fsOtpText(t&&t.gmAkte).trim();
+  const gi=document.createElement('span');gi.style.cssText='flex:1 1 160px;min-width:0;font-size:var(--fs12,12px);color:var(--text2);line-height:1.4;';
+  gi.textContent=gm?('Karte verknüpft mit GM-Akte '+gm+(a.stand?' · zuletzt geholt '+a.stand:'')+((typeof _pamOtpAkteHolen==='function')?'':' · holen geht am PC')):'Die Karte ist mit keiner GM-Akte verknüpft – am PC die GM-Akte wählen oder die Felder von Hand ausfüllen.';
+  gz.appendChild(gi);
+  if(gm&&typeof _pamOtpAkteHolen==='function'){
+    const kb=document.createElement('button');kb.type='button';kb.textContent='↻ Aus der GM-Akte holen';kb.setAttribute('data-otp-gmholen','1');
+    kb.style.cssText=H.S_KNOPF+'min-height:var(--fsh,40px);border:1.5px solid '+FS_FARBE+';background:rgba(31,95,139,.12);color:var(--text);';
+    kb.onclick=async()=>{if(kb.disabled)return;kb.disabled=true;kb.textContent='⏳ …';try{await _fsOtpAkteHolenKlick(b,t,H,false);}finally{kb.disabled=false;kb.textContent='↻ Aus der GM-Akte holen';}};
+    gz.appendChild(kb);
+  }
+  w.appendChild(gz);
+  return w;
+}
+function _fsOtpTeilVorbereitung(b,t,H){
+  const w=document.createElement('div');w.setAttribute('data-otp-vorbereitung','1');
+  w.appendChild(_fsOtpUeber('Vorgaben des Auftraggebers'));
+  w.appendChild(H.info('Was der Auftraggeber vorgibt, z. B. keine Bauteilöffnung ohne Rücksprache. Steht vor Ort oben bei „Beginn“ und bei „Bauteilöffnung“.'));
+  b.otpVorgaben.forEach((x,i)=>{
+    const k=_fsOtpKarte();k.setAttribute('data-otp-vorgabe',String(i));
+    k.append(H.textFeld(x.text,'Vorgabe …',v=>{x.text=v;},2),_fsOtpRechts(H.xKnopf('Vorgabe entfernen',()=>{if(_fsOtpHat(x.text)&&!_fsFrage('Vorgabe entfernen?'))return;b.otpVorgaben.splice(i,1);scheduleSave();H.neu();})));
+    w.appendChild(k);
+  });
+  w.appendChild(_fsOtpPlus(H,'＋ Vorgabe','data-otp-vorgabe-neu',()=>{b.otpVorgaben.push({text:''});scheduleSave();H.neu();_fsOtpFokus(H,'[data-otp-vorgabe="'+(b.otpVorgaben.length-1)+'"] textarea');}));
+  w.appendChild(_fsOtpUeber('Vorab angeforderte Unterlagen'));
+  w.appendChild(H.info('Was du vor dem Termin angefordert hast oder was bereitliegen soll. Vor Ort hakst du bei „Unterlagen“ ab, was vorgelegt wurde – was fehlt, steht dann von selbst bei „Nachzureichen“.'));
+  b.otpAngefordert.forEach((x,i)=>{
+    const k=_fsOtpKarte();k.setAttribute('data-otp-anforderung',x.id);
+    k.append(_fsOtpMini('Was',H.inp(x.was,'z. B. Baugenehmigung mit Schnitt',v=>{x.was=v;})),_fsOtpMini('Bei wem',H.inp(x.bei,'z. B. Auftraggeber',v=>{x.bei=v;})),
+      _fsOtpMini('Angefordert am',H.inp(x.am,'TT.MM.JJJJ',v=>{x.am=v;})),
+      _fsOtpRechts(H.xKnopf('Unterlage entfernen',()=>{if(_fsOtpHat(x.was)&&!_fsFrage('„'+_fsOtpText(x.was).trim()+'“ aus der Liste nehmen?'))return;b.otpAngefordert.splice(i,1);scheduleSave();H.neu();})));
+    w.appendChild(k);
+  });
+  w.appendChild(_fsOtpPlus(H,'＋ Unterlage anfordern','data-otp-anforderung-neu',()=>{
+    const id='ua_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
+    b.otpAngefordert.push({id,was:'',bei:'',am:(typeof _fsVbJetzt==='function')?_fsVbJetzt().datum:'',vorgelegt:'',von:'',art:'',fundstelle:'',bis:''});
+    scheduleSave();H.neu();_fsOtpFokus(H,'[data-otp-anforderung="'+id+'"] input');
+  }));
+  return w;
+}
+function _fsOtpTeilHaken(b,t,H,teil){
+  const w=document.createElement('div');w.setAttribute('data-otp-'+teil,'1');w.style.cssText='padding:6px 14px 10px;';
+  const vg=(b.otpVorgaben||[]).map(x=>_fsOtpText(x.text).trim()).filter(Boolean);
+  if(teil==='beginn'&&vg.length)w.appendChild(_fsOtpVorgabenHinweis(vg));
+  (teil==='beginn'?FS_OTP_HAKEN_BEGINN:FS_OTP_HAKEN_ENDE).forEach(x=>{
+    const an=b.otpHaken[x.k]===true;
+    const btn=document.createElement('button');btn.type='button';btn.setAttribute('data-otp-haken',x.k);btn.setAttribute('aria-pressed',an?'true':'false');
+    btn.style.cssText='display:flex;align-items:center;gap:10px;width:100%;min-height:var(--fsh44,44px);margin:4px 0;padding:6px 10px;border-radius:10px;text-align:left;cursor:pointer;font-family:inherit;font-size:var(--fs14,14px);color:var(--text);border:1.5px solid '+(an?FS_FARBE:'var(--border)')+';background:'+(an?'rgba(31,95,139,.14)':'transparent')+';';
+    const kx=document.createElement('span');kx.textContent=an?'☑':'☐';kx.style.cssText='font-size:var(--fs18,18px);flex-shrink:0;';
+    const tx=document.createElement('span');tx.textContent=x.t+(x.frei?' (nur wenn nötig)':'');tx.style.cssText='flex:1;min-width:0;line-height:1.35;';
+    btn.append(kx,tx);
+    btn.onclick=()=>{b.otpHaken[x.k]=!an;let msg='';if(x.k==='ende'&&!an&&_fsOtpEndeJetzt(b))msg='✓ Ende '+b.kopf.ende+' Uhr eingetragen';scheduleSave();H.neu();if(msg)toast(msg,'success',3000);};
+    w.appendChild(btn);
+  });
+  if(teil==='ende'){
+    const l=_fsOtpNochOffen(b,t,(typeof _fsAmPc==='function')&&_fsAmPc());
+    const s=document.createElement('div');s.setAttribute('data-otp-nochoffen','1');
+    s.style.cssText='margin-top:8px;padding:8px 10px;border-radius:8px;background:var(--fs-karte,var(--bg2));border:1px solid var(--border);font-size:var(--fs13,13px);color:var(--text);line-height:1.45;';
+    s.textContent=l.length?'Vor dem Schluss noch offen: '+l.map(q=>q.text).join(' · '):'✓ Nichts offen';
+    w.appendChild(s);
+  }
+  return w;
+}
+/* „Ende bekanntgegeben“ angehakt: Ende = jetzt, wenn dort noch nichts steht und das Protokoll von heute ist */
+function _fsOtpEndeJetzt(b){
+  const k=b&&b.kopf;if(!k||_fsOtpHat(k.ende)||typeof _fsVbJetzt!=='function')return false;
+  const j=_fsVbJetzt(),tag=_fsOtpText(b.datum).trim();
+  if(tag&&typeof _fsVbIso==='function'&&_fsVbIso(tag)!==_fsVbIso(j.datum))return false;
+  k.ende=j.uhr;return true;
+}
+function _fsOtpTeilTermin(b,t,H){
+  const w=document.createElement('div');w.setAttribute('data-otp-termin','1');
+  const k=b.kopf;
+  const kopfZeile=()=>{if(H.hdrS)H.hdrS.textContent=_fsOtpText(k.objektAdresse||(t&&t.adresse)||(t&&t.title)).trim()+' · '+_fsOtpText(b.datum);};
+  const di=H.inp(b.datum,'TT.MM.JJJJ',v=>{b.datum=v;kopfZeile();});di.setAttribute('data-otp-datum','1');
+  const dz=_fsOtpZeile('Datum',di);const wt=_fsOtpWochentag(b.datum);
+  if(wt){const s=document.createElement('span');s.style.cssText='font-size:var(--fs12,12px);color:var(--text2);flex-shrink:0;';s.textContent=wt;dz.appendChild(s);}
+  w.appendChild(dz);
+  const gi=H.inp(b.otpAkte.geladenAm,'TT.MM.JJJJ',v=>{b.otpAkte.geladenAm=v;});gi.setAttribute('data-otp-geladen','1');
+  w.appendChild(_fsOtpZeile('Eingeladen am',gi));
+  const ch=document.createElement('div');ch.setAttribute('data-otp-einladung','1');ch.style.cssText='display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:2px 14px 8px;';
+  const cl=document.createElement('span');cl.style.cssText='font-size:var(--fs13,13px);color:var(--text2);width:112px;flex-shrink:0;';cl.textContent='eingeladen per';ch.appendChild(cl);
+  FS_OTP_EINLADUNG.forEach(x=>{const c=H.chip(x,b.otpEinladungWie===x,()=>{b.otpEinladungWie=b.otpEinladungWie===x?'':x;scheduleSave();H.neu();});c.setAttribute('data-otp-wie',x);ch.appendChild(c);});
+  w.appendChild(ch);
+  const zk=document.createElement('div');zk.setAttribute('data-otp-zeit','1');zk.style.cssText='display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 14px;border-top:1px solid var(--border);';
+  const knopf=(txt,attr,fn)=>{const x=document.createElement('button');x.type='button';x.textContent=txt;x.setAttribute(attr,'1');x.style.cssText=H.S_KNOPF+'min-height:var(--fsh44,44px);border:1.5px solid '+FS_FARBE+';background:rgba(31,95,139,.12);color:var(--text);';x.onclick=fn;return x;};
+  zk.append(
+    knopf('📍 Beginn jetzt','data-otp-beginnjetzt',()=>{const j=_fsVbJetzt();b.datum=j.datum;k.beginn=j.uhr;scheduleSave();kopfZeile();H.neu();toast('✓ Beginn '+j.uhr+' Uhr am '+j.datum+' – nur im Protokoll','success',3500);}),
+    knopf('🏁 Ende jetzt','data-otp-endejetzt',()=>{const j=_fsVbJetzt(),tag=_fsOtpText(b.datum).trim();
+      if(tag&&typeof _fsVbIso==='function'&&_fsVbIso(tag)!==_fsVbIso(j.datum)&&!_fsFrage((typeof _fsVbFertigFrage==='function')?_fsVbFertigFrage(tag,j):'Ende jetzt eintragen?')){toast('Bitte das Ende von Hand eintragen (Feld „Ende“)','info',4000);return;}
+      k.ende=j.uhr;scheduleSave();H.neu();toast('✓ Ende '+j.uhr+' Uhr – nur im Protokoll','success',3500);}));
+  w.appendChild(zk);
+  const zr=document.createElement('div');zr.style.cssText='display:flex;gap:10px;padding:0 14px 8px;align-items:center;';
+  const bi=H.inp(k.beginn,'Beginn hh:mm',v=>{k.beginn=v;});bi.setAttribute('data-otp-beginnfeld','1');
+  const ei=H.inp(k.ende,'Ende hh:mm',v=>{k.ende=v;});ei.setAttribute('data-otp-endefeld','1');
+  zr.append(bi,ei);w.appendChild(zr);
+  if(typeof H.wetter==='function')w.appendChild(H.wetter());
+  w.appendChild(_fsOtpTeilPersonen(b,t,H));
+  const tz=document.createElement('div');tz.setAttribute('data-otp-ton','1');tz.style.cssText='padding:6px 14px 4px;border-top:1px solid var(--border);';
+  const tl=document.createElement('div');tl.style.cssText='font-size:var(--fs13,13px);color:var(--text2);margin-bottom:6px;';tl.textContent='Tonaufnahme oder Diktat vor Ort';tz.appendChild(tl);
+  const tc=document.createElement('div');tc.style.cssText='display:flex;flex-wrap:wrap;gap:6px;';
+  [['nein','nein'],['ja','ja – alle einverstanden, wird nach der Abschrift gelöscht']].forEach(([v,txt])=>{const c=H.chip(txt,b.otpTon===v,()=>{b.otpTon=b.otpTon===v?'':v;scheduleSave();H.neu();});c.setAttribute('data-otp-tonwahl',v);tc.appendChild(c);});
+  tz.appendChild(tc);w.appendChild(tz);
+  w.appendChild(H.info('Besser nicht diktieren, während die Beteiligten zuhören.'));
+  return w;
+}
+function _fsOtpTeilPersonen(b,t,H){
+  const w=document.createElement('div');w.setAttribute('data-otp-personen','1');w.style.cssText='padding:6px 14px 8px;border-top:1px solid var(--border);';
+  const kopf=document.createElement('div');kopf.style.cssText='font-size:var(--fs13,13px);color:var(--text2);margin-bottom:6px;';kopf.textContent='Personen – wer da ist, wer eingeladen war und nicht kam';w.appendChild(kopf);
+  const ich=_fsOtpIch(b);
+  if(!ich){
+    const wb=document.createElement('div');wb.setAttribute('data-otp-ich','1');wb.style.cssText='margin:0 0 8px;padding:8px 10px;border-radius:8px;background:rgba(230,126,34,.16);border-left:4px solid #b25e00;';
+    const wt=document.createElement('div');wt.style.cssText='font-size:var(--fs14,14px);color:var(--text);line-height:1.4;';wt.textContent='⚠ Dein Name fehlt – einmal eintippen, das Gerät merkt ihn.';
+    const wz=document.createElement('div');wz.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;';
+    const wi=document.createElement('input');wi.type='text';wi.autocomplete='off';wi.placeholder='Dein Name';wi.style.cssText=H.S_INP+'flex:1 1 160px;width:auto;';wi.setAttribute('data-otp-ichname','1');
+    const wk=document.createElement('button');wk.type='button';wk.textContent='✓ merken';wk.setAttribute('data-otp-ichmerken','1');wk.style.cssText=H.S_KNOPF+'min-height:var(--fsh,40px);border:1.5px solid #b25e00;background:transparent;color:var(--text);';
+    wk.onclick=()=>{const n=_fsOtpText(wi.value).replace(/\s+/g,' ').trim();if(!n){toast('Bitte den Namen eintippen','info',3000);return;}
+      b.kopf.pruefer=n;if(typeof _fsBgMerkName==='function')_fsBgMerkName(n);
+      if(!b.anwesende.some(p=>p&&_fsOtpNameGleich(p.name,n)))b.anwesende.unshift({name:n,rolle:FS_OTP_ROLLE_ICH});
+      scheduleSave();H.neu();};
+    wz.append(wi,wk);wb.append(wt,wz);w.appendChild(wb);
+  }else{
+    const ip=b.anwesende.find(p=>p&&_fsOtpNameGleich(p.name,ich));
+    const r=document.createElement('div');r.setAttribute('data-otp-ich','1');r.style.cssText='display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px dashed var(--border);';
+    const n=document.createElement('span');n.style.cssText='flex:1;min-width:0;font-size:var(--fs14,14px);color:var(--text);';n.textContent=ich+' – '+((ip&&_fsOtpText(ip.rolle).trim())||FS_OTP_ROLLE_ICH);
+    r.appendChild(n);
+    if(!ip){const c=H.chip('＋ als anwesend eintragen',false,()=>{b.anwesende.unshift({name:ich,rolle:FS_OTP_ROLLE_ICH});scheduleSave();H.neu();});c.setAttribute('data-otp-ichdazu','1');r.appendChild(c);}
+    w.appendChild(r);
+  }
+  _fsOtpPersonen(b,t).forEach((p,pi)=>{
+    const r=document.createElement('div');r.setAttribute('data-otp-person',String(pi));r.style.cssText='padding:6px 0;border-bottom:1px dashed var(--border);';
+    const kz=document.createElement('div');kz.style.cssText='display:flex;flex-wrap:wrap;align-items:center;gap:6px;';
+    const ap=(b.anwesende||[]).find(q=>q&&_fsOtpNameGleich(q.name,p.name));
+    const zt=ap?[_fsOtpHat(ap.ab)?'ab '+ap.ab:'',_fsOtpHat(ap.bis)?'bis '+ap.bis:''].filter(Boolean).join(' '):'';
+    const n=document.createElement('span');n.setAttribute('data-otp-personname','1');n.style.cssText='flex:1 1 150px;min-width:0;font-size:var(--fs14,14px);color:var(--text);';
+    n.textContent=p.name+(p.rolle?' – '+p.rolle:'')+(zt?' · '+zt+' Uhr':'');
+    kz.appendChild(n);
+    [['da','da'],['nichtda','eingeladen, nicht da'],['','nicht eingeladen']].forEach(([st,txt])=>{
+      const c=H.chip(txt,p.status===st,()=>{if(p.status===st)return;_fsOtpPersonSetzen(b,p,st);scheduleSave();H.neu();});c.setAttribute('data-otp-status',st||'nicht');kz.appendChild(c);});
+    if(ap){const c=H.chip('🕐',_fsOtpUhrAuf.has(ap)||!!zt,()=>{if(_fsOtpUhrAuf.has(ap))_fsOtpUhrAuf.delete(ap);else _fsOtpUhrAuf.add(ap);H.neu();});c.setAttribute('data-otp-uhrknopf','1');c.title='früher gegangen oder später gekommen';kz.appendChild(c);}
+    r.appendChild(kz);
+    if(ap&&_fsOtpUhrAuf.has(ap)){
+      const u=document.createElement('div');u.setAttribute('data-otp-uhr','1');u.style.cssText='display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px;';
+      const jetzt=wann=>{const x=document.createElement('button');x.type='button';x.textContent=wann==='bis'?'🚪 gegangen – jetzt':'➜ gekommen – jetzt';x.setAttribute('data-otp-'+wann+'jetzt','1');
+        x.style.cssText=H.S_KNOPF+'min-height:var(--fsh,40px);border:1.5px solid '+FS_FARBE+';background:transparent;color:var(--text);';
+        x.onclick=()=>{_fsOtpZeitSetzen(b,p.name,wann,_fsVbJetzt().uhr);scheduleSave();H.neu();};return x;};
+      const ab=H.inp(ap.ab||'','ab hh:mm',v=>{_fsOtpZeitSetzen(b,p.name,'ab',v);});ab.style.width='110px';ab.style.flex='0 0 auto';ab.setAttribute('data-otp-abfeld','1');
+      const bis=H.inp(ap.bis||'','bis hh:mm',v=>{_fsOtpZeitSetzen(b,p.name,'bis',v);});bis.style.width='110px';bis.style.flex='0 0 auto';bis.setAttribute('data-otp-bisfeld','1');
+      u.append(jetzt('bis'),jetzt('ab'),ab,bis);r.appendChild(u);
+    }
+    w.appendChild(r);
+  });
+  const pl=document.createElement('div');pl.style.cssText='display:flex;flex-wrap:wrap;gap:6px;padding-top:8px;';
+  const p1=H.chip('＋ weitere Person',false,()=>{const n=_fsEingabe('Name der Person','');if(n===null||!_fsOtpHat(n))return;const r=_fsEingabe('Rolle, z. B. Mieterin, Handwerker, Vertreter','');_fsOtpPersonSetzen(b,{name:n,rolle:_fsOtpText(r).trim()},'da');scheduleSave();H.neu();});p1.setAttribute('data-otp-person-neu','1');
+  const p2=H.chip('＋ Helfer',false,()=>{const n=_fsEingabe('Name des Helfers, z. B. Mitarbeiter, Hubsteiger-Fahrer','');if(n===null||!_fsOtpHat(n))return;_fsOtpPersonSetzen(b,{name:n,rolle:'Helfer'},'da');scheduleSave();H.neu();});p2.setAttribute('data-otp-helfer-neu','1');
+  pl.append(p1,p2);w.appendChild(pl);
+  return w;
+}
+function _fsOtpArtChips(H,x){
+  const d=document.createElement('div');d.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;';
+  ['Original','Kopie'].forEach(v=>{const c=H.chip(v,x.art===v,()=>{x.art=x.art===v?'':v;scheduleSave();H.neu();});c.setAttribute('data-otp-art',v);d.appendChild(c);});
+  return d;
+}
+function _fsOtpTeilUnterlagen(b,t,H){
+  const w=document.createElement('div');w.setAttribute('data-otp-unterlagen','1');
+  const ang=b.otpAngefordert.filter(x=>_fsOtpHat(x.was));
+  if(ang.length){
+    w.appendChild(_fsOtpUeber('Vorab angefordert'));
+    ang.forEach(x=>{
+      const k=_fsOtpKarte();k.setAttribute('data-otp-angefordert',x.id);
+      const kt=document.createElement('div');kt.style.cssText='font-size:var(--fs14,14px);font-weight:700;color:var(--text);margin-bottom:6px;';kt.textContent=_fsOtpText(x.was).trim()+(_fsOtpHat(x.bei)?' · bei '+_fsOtpText(x.bei).trim():'');k.appendChild(kt);
+      const ch=document.createElement('div');ch.style.cssText='display:flex;flex-wrap:wrap;gap:6px;';
+      [['ja','✓ vorgelegt'],['nein','✗ nicht vorgelegt']].forEach(([v,txt])=>{const c=H.chip(txt,x.vorgelegt===v,()=>{x.vorgelegt=x.vorgelegt===v?'':v;scheduleSave();H.neu();});c.setAttribute('data-otp-vorgelegt',v);ch.appendChild(c);});
+      k.appendChild(ch);
+      if(x.vorgelegt==='ja')k.append(_fsOtpMini('Von wem',H.inp(x.von,'z. B. Auftraggeber',v=>{x.von=v;})),_fsOtpArtChips(H,x),_fsOtpMini('Fundstelle',H.inp(x.fundstelle,'z. B. Blatt 3, Schnitt A–A',v=>{x.fundstelle=v;})));
+      if(x.vorgelegt==='nein'){
+        k.appendChild(_fsOtpMini('Nachreichen bis',H.inp(x.bis,'TT.MM.JJJJ (freiwillig)',v=>{x.bis=v;})));
+        const hi=document.createElement('div');hi.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin-top:4px;';hi.textContent='→ steht von selbst bei „Nachzureichen“';k.appendChild(hi);
+      }
+      w.appendChild(k);
+    });
+  }
+  w.appendChild(_fsOtpUeber(ang.length?'Sonst übergeben (nicht angefordert)':'Übergeben'));
+  b.otpUnterlagen.forEach((x,i)=>{
+    const k=_fsOtpKarte();k.setAttribute('data-otp-unterlage',String(i));
+    k.append(_fsOtpMini('Was',H.inp(x.was,'z. B. Rechnung Dachdecker',v=>{x.was=v;})),_fsOtpMini('Von wem',H.inp(x.von,'',v=>{x.von=v;})),_fsOtpArtChips(H,x),_fsOtpMini('Fundstelle',H.inp(x.fundstelle,'freiwillig',v=>{x.fundstelle=v;})),
+      _fsOtpRechts(H.xKnopf('Unterlage entfernen',()=>{if(_fsOtpHat(x.was)&&!_fsFrage('Unterlage entfernen?'))return;b.otpUnterlagen.splice(i,1);scheduleSave();H.neu();})));
+    w.appendChild(k);
+  });
+  w.appendChild(_fsOtpPlus(H,'＋ Unterlage','data-otp-unterlage-neu',()=>{b.otpUnterlagen.push({was:'',von:'',art:'',fundstelle:''});scheduleSave();H.neu();_fsOtpFokus(H,'[data-otp-unterlage="'+(b.otpUnterlagen.length-1)+'"] input');}));
+  w.appendChild(H.info('Ohne Eintrag heißt es später: Bei der Ortsbesichtigung wurden keine Unterlagen übergeben.'));
+  return w;
+}
+function _fsOtpTeilAngaben(b,t,H){
+  const w=document.createElement('div');w.setAttribute('data-otp-angaben','1');
+  w.appendChild(H.info('Was dir gesagt wurde – getrennt von dem, was du selbst feststellst. Im PDF steht: „Laut …: …“.'));
+  const namen=_fsOtpPersonen(b,t).filter(p=>p.status==='da').map(p=>p.name);
+  b.angaben.forEach((a,i)=>{
+    if(!a||typeof a!=='object')return;
+    const k=_fsOtpKarte();k.setAttribute('data-otp-angabe',String(i));
+    const sel=document.createElement('select');sel.style.cssText=H.S_INP;sel.setAttribute('data-otp-angabevon','1');
+    const von=_fsOtpText(a.von).trim(),opts=[''].concat(namen);if(von&&opts.indexOf(von)<0)opts.push(von);
+    opts.forEach(nm=>{const o=document.createElement('option');o.value=nm;o.textContent=nm||'– Wer sagt das? –';sel.appendChild(o);});
+    {const o=document.createElement('option');o.value='__frei';o.textContent='✎ andere Person …';sel.appendChild(o);}
+    sel.value=von;
+    sel.onchange=()=>{if(sel.value==='__frei'){const nm=_fsEingabe('Wer sagt das?',von);if(nm!==null)a.von=_fsOtpText(nm).replace(/\s+/g,' ').trim();scheduleSave();H.neu();return;}a.von=sel.value;scheduleSave();};
+    const tf=H.textFeld(a.text,'z. B. Die Flecken seien zuerst im Februar aufgetreten.',v=>{a.text=v;},3);tf.style.marginTop='6px';
+    k.append(sel,tf,_fsOtpRechts(H.xKnopf('Angabe entfernen',()=>{if(_fsOtpHat(a.text)&&!_fsFrage('Angabe entfernen?'))return;b.angaben.splice(i,1);scheduleSave();H.neu();})));
+    w.appendChild(k);
+  });
+  w.appendChild(_fsOtpPlus(H,'＋ Angabe','data-otp-angabe-neu',()=>{b.angaben.push({von:'',text:''});scheduleSave();H.neu();_fsOtpFokus(H,'[data-otp-angabe="'+(b.angaben.length-1)+'"] textarea');}));
+  return w;
+}
+function _fsOtpTeilBereiche(b,t,H){
+  const w=document.createElement('div');w.setAttribute('data-otp-bereiche','1');w.style.cssText='padding:4px 14px 10px;';
+  const be=b.otpBereiche;
+  w.appendChild(_fsOtpMini('Besichtigt',H.textFeld(be.besichtigt,'z. B. Dachgeschoss Wohnung links, Dachfläche Süd',v=>{be.besichtigt=v;},2)));
+  const zl=document.createElement('div');zl.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin:10px 0 4px;';zl.textContent='Zugang / Hilfsmittel';w.appendChild(zl);
+  const zc=document.createElement('div');zc.style.cssText='display:flex;flex-wrap:wrap;gap:6px;';
+  FS_OTP_ZUGANG.forEach(x=>{const an=be.zugang.indexOf(x)>=0;const c=H.chip(x,an,()=>{if(an)be.zugang=be.zugang.filter(y=>y!==x);else be.zugang.push(x);scheduleSave();H.neu();});c.setAttribute('data-otp-zugang',x);zc.appendChild(c);});
+  w.appendChild(zc);
+  w.appendChild(_fsOtpMini('Sonst',H.inp(be.zugangEigen,'z. B. Dachluke im Treppenhaus',v=>{be.zugangEigen=v;})));
+  w.appendChild(_fsOtpMini('Nicht zugänglich',H.textFeld(be.nicht,'z. B. Spitzboden (kein Zugang)',v=>{be.nicht=v;},2)));
+  return w;
+}
+function _fsOtpTeilOeffnung(b,t,H){
+  const w=document.createElement('div');w.setAttribute('data-otp-oeffnungen','1');
+  const vg=(b.otpVorgaben||[]).map(x=>_fsOtpText(x.text).trim()).filter(Boolean);
+  if(vg.length){const d=_fsOtpVorgabenHinweis(vg);d.style.margin='8px 14px 0';w.appendChild(d);}
+  w.appendChild(H.info('Nur mit Einverständnis von Besitzer und Eigentümer – und besser nicht selbst öffnen.'));
+  b.otpOeffnungen.forEach((x,i)=>{
+    const k=_fsOtpKarte();k.setAttribute('data-otp-oeffnung',String(i));
+    const vl=document.createElement('div');vl.style.cssText='display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px;';
+    const vt=document.createElement('span');vt.style.cssText='font-size:var(--fs12,12px);color:var(--text2);';vt.textContent='Wieder verschlossen:';vl.appendChild(vt);
+    FS_OTP_VERSCHLOSSEN.forEach(v=>{const c=H.chip(v,x.verschlossen===v,()=>{x.verschlossen=x.verschlossen===v?'':v;scheduleSave();H.neu();});c.setAttribute('data-otp-verschlossen',v);vl.appendChild(c);});
+    k.append(_fsOtpMini('Was wurde geöffnet',H.textFeld(x.was,'z. B. Innenverkleidung Drempel, ca. 30 × 30 cm',v=>{x.was=v;},2)),_fsOtpMini('Zugestimmt haben',H.inp(x.zugestimmt,'z. B. Eigentümer und Mieterin',v=>{x.zugestimmt=v;})),
+      _fsOtpMini('Ausgeführt von',H.inp(x.von,'z. B. Firma …',v=>{x.von=v;})),vl,
+      _fsOtpRechts(H.xKnopf('Bauteilöffnung entfernen',()=>{if(_fsOtpHat(x.was)&&!_fsFrage('Bauteilöffnung entfernen?'))return;b.otpOeffnungen.splice(i,1);scheduleSave();H.neu();})));
+    w.appendChild(k);
+  });
+  w.appendChild(_fsOtpPlus(H,'＋ Bauteilöffnung','data-otp-oeffnung-neu',()=>{b.otpOeffnungen.push({was:'',zugestimmt:'',von:'',verschlossen:''});scheduleSave();H.neu();_fsOtpFokus(H,'[data-otp-oeffnung="'+(b.otpOeffnungen.length-1)+'"] textarea');}));
+  return w;
+}
+function _fsOtpTeilVorkommnisse(b,t,H){
+  const w=document.createElement('div');w.setAttribute('data-otp-vorkommnisse','1');w.style.cssText='padding:4px 14px 10px;';
+  w.appendChild(_fsOtpMini('Was ist vorgefallen',H.textFeld(b.otpVorkommnisse,'z. B. Zutritt zum Keller verweigert · Termin kurz unterbrochen · Baulärm von nebenan',v=>{b.otpVorkommnisse=v;},3)));
+  return w;
+}
+function _fsOtpTeilNach(b,t,H){
+  const w=document.createElement('div');w.setAttribute('data-otp-nachzureichen','1');
+  const auto=_fsOtpNachzureichen(b).filter(x=>x.auto);
+  if(auto.length){
+    w.appendChild(_fsOtpUeber('Von selbst – vorab angefordert, nicht vorgelegt'));
+    auto.forEach(x=>{const d=document.createElement('div');d.setAttribute('data-otp-nachauto','1');d.style.cssText='padding:4px 14px;font-size:var(--fs14,14px);color:var(--text);line-height:1.4;';d.textContent='– '+_fsOtpNachText(x);w.appendChild(d);});
+    w.appendChild(H.info('Ändern bei „Unterlagen“ (vorgelegt / nicht vorgelegt, bis wann).'));
+  }
+  w.appendChild(_fsOtpUeber('Weitere'));
+  b.otpNachzureichen.forEach((x,i)=>{
+    const k=_fsOtpKarte();k.setAttribute('data-otp-nach',String(i));
+    k.append(_fsOtpMini('Was',H.inp(x.was,'z. B. Fotos vom Schaden 2019',v=>{x.was=v;})),_fsOtpMini('Von wem',H.inp(x.wer,'',v=>{x.wer=v;})),_fsOtpMini('Bis wann',H.inp(x.bis,'TT.MM.JJJJ (freiwillig)',v=>{x.bis=v;})),
+      _fsOtpRechts(H.xKnopf('Eintrag entfernen',()=>{if(_fsOtpHat(x.was)&&!_fsFrage('Eintrag entfernen?'))return;b.otpNachzureichen.splice(i,1);scheduleSave();H.neu();})));
+    w.appendChild(k);
+  });
+  w.appendChild(_fsOtpPlus(H,'＋ Weiteres','data-otp-nach-neu',()=>{b.otpNachzureichen.push({was:'',wer:'',bis:''});scheduleSave();H.neu();_fsOtpFokus(H,'[data-otp-nach="'+(b.otpNachzureichen.length-1)+'"] input');}));
+  return w;
+}
+function _fsOtpTeilHinweis(b,t,H){
+  const w=document.createElement('div');w.setAttribute('data-otp-hinweisag','1');w.style.cssText='padding:4px 14px 10px;';
+  const h=b.otpHinweisAg;
+  w.appendChild(H.info('Beim Privatgutachten musst du den Auftraggeber auf eine Gefahr für Leib und Leben hinweisen. Hier steht nur, dass und wann du es getan hast – keine Bewertung.'));
+  const dz=document.createElement('div');dz.style.cssText='display:flex;gap:8px;align-items:center;';
+  const di=H.inp(h.datum,'TT.MM.JJJJ',v=>{h.datum=v;});di.setAttribute('data-otp-hinweisdatum','1');
+  const hb=H.chip('📅 heute',false,()=>{h.datum=_fsVbJetzt().datum;scheduleSave();H.neu();});hb.setAttribute('data-otp-hinweisheute','1');
+  dz.append(di,hb);w.appendChild(_fsOtpMini('Hinweis gegeben am',dz));
+  const wc=document.createElement('div');wc.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;';
+  FS_OTP_HINWEIS_WIE.forEach(v=>{const c=H.chip(v,h.wie===v,()=>{h.wie=h.wie===v?'':v;scheduleSave();H.neu();});c.setAttribute('data-otp-hinweiswie',v);wc.appendChild(c);});
+  w.appendChild(wc);
+  w.appendChild(_fsOtpMini('An wen',H.inp(h.an,'z. B. Auftraggeber',v=>{h.an=v;})));
+  w.appendChild(_fsOtpMini('Worauf',H.textFeld(h.worauf,'z. B. lose Absturzsicherung am Dachrand',v=>{h.worauf=v;},2)));
+  return w;
 }
 /* ── F94: FOTOS BEI MEHREREN ORTSTERMINEN AM SELBEN TAG (Nachtrag zu P110) ────────────────────────────────────────────────────────────────────
    24.10.2026 („Baue F94“, Bauvorschlag Claude-Code\Bauplan_F94_Fotos-gleicher-Tag_2026-10-24.html; Frage Uhrzeit bei „am 23.10.“: nein, so lassen):
@@ -12628,6 +13267,7 @@ function _fsListeZeile(b,t){
     const name=kartenname||adr||String(b.titel||'Wartungsprotokoll');
     return {kurz:'DP-'+(insp?'I-':'W-')+(steil?'STEIL':'FLADA'),lang:'Dachprotokoll – '+(insp?'Inspektion ':'Wartung ')+(steil?'Steildach':'Flachdach'),name,sub:(adr&&adr!==name)?adr:''}; /* F73: DP-W-FLADA · DP-I-FLADA · DP-W-STEIL · DP-I-STEIL (Franks Abkürzungen) */
   }
+  if(typeof _fsIstOtp==='function'&&_fsIstOtp(b)&&typeof _fsOtpListeZeile==='function')return _fsOtpListeZeile(b,t); /* F95: OT-PRIVAT */
   if(b.vorlage==='feuchte'&&b.fassung==='begehung'&&b.art==='vorab'){ // F16
     const bei=String((b.kopf&&b.kopf.besuchBei)||'').trim(),lg=String((b.kopf&&b.kopf.lage)||'').trim(); // F17: bei wem – so sind zwei Besuche an einer Karte zu unterscheiden
     return {kurz:'VORAB',lang:b.schlank?'Vorabbesichtigung':'Vorabbesichtigung (frühere Fassung)',name:(b.schlank&&String(b.protName||'').trim())||kartenname||String(b.titel||'Vorabbesichtigung'),sub:[(typeof _fsHausText==='function'?_fsHausText(b.kopf&&b.kopf.haus):''),bei,lg].filter(Boolean).join(' · ')}; /* F47 */
