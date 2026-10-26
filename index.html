@@ -10724,7 +10724,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-10-26 · #1258'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-26-b1258) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-10-26 · #1259'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-10-26-b1259) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -78550,7 +78550,8 @@ function _fdkListeAuffrischen(vorherKeys,insDok){
 
 
 /* Word-Dateien zur Auswahl: Gruppe „📄 Stammblatt" zuerst (nur ANGEBOTEN, nie vorausgewählt –
-   Franks Entscheidung 21.08.), dann Projekt- und Dokumente-Ordner, je eine Ebene Unterordner. */
+   Franks Entscheidung 21.08.), dann Projekt- und Dokumente-Ordner, je ZWEI Ebenen Unterordner
+   (Frank 26.10.2026: „Gutachten / Entwurf" liegt zwei Ebenen unter dem Projektordner). */
 async function _fdkStartListeLaden(){
   const sel=document.getElementById('fdkStartSel');if(!sel||!_fdkState)return;
   const sbId=await _fdkStammblattOrdner();
@@ -78559,27 +78560,36 @@ async function _fdkStartListeLaden(){
   if(sbId)gruppen.push({titel:'📄 Stammblatt'+(_fdkState.sbAuto?' (automatisch gefunden)':''),wurzeln:[sbId]});
   const auftrag=[_fdkState.projektOrdnerId,_fdkState.dokOrdnerId].filter((x,i,a)=>x&&a.indexOf(x)===i&&x!==sbId);
   if(auftrag.length)gruppen.push({titel:'📁 Auftragsordner',wurzeln:auftrag});
-  const h=document.getElementById('fdkSbHinweis');
-  if(h){
+  // Hinweis erst, wenn die Liste fertig gelesen ist (vorher stand er schon neben „⏳ Ordner werden gelesen…").
+  // Ohne Stammblatt-Ordner sagt er, wo PAM von selbst sucht – _Stammdaten ist nur EINER von drei Orten,
+  // verschieben muss Frank nichts (der frühere Satz klang, als ginge es nur über _Stammdaten).
+  const hinweis=function(){
+    const h=document.getElementById('fdkSbHinweis');if(!h||!_fdkState)return;
     if(_fdkState.sbAuto)h.innerHTML='Stammblatt-Ordner „_Stammdaten" neben dem Projektordner gefunden – am Auftrag noch nicht eingetragen.<button type="button" onclick="_fdkStammblattEintragen()">am Auftrag eintragen</button>';
-    else if(!sbId)h.textContent='Kein Stammblatt-Ordner am Auftrag und kein „_Stammdaten" neben dem Projektordner – Vorlage dort ablegen, dann erscheint sie hier.';
+    else if(!sbId)h.textContent='Word-Dateien aus Projekt- und Dokumente-Ordner des Auftrags erscheinen hier von selbst. Feste Vorlagen fürs ganze Objekt gehören in „_Stammdaten" neben dem Projektordner.';
     else h.textContent='';
-  }
-  if(!gruppen.length){sel.innerHTML='<option value="">(kein Drive-Ordner am Auftrag – Datei von Festplatte wählen)</option>';return;}
+  };
+  if(!gruppen.length){sel.innerHTML='<option value="">(kein Drive-Ordner am Auftrag – Datei von Festplatte wählen)</option>';hinweis();return;}
   try{
     const gesehen=new Set();let html='<option value="">– Word-Datei wählen –</option>';let gesamt=0;const alle=[];   // b1023: alle = Name, Ordner, Arbeitsdatei? je Eintrag
     for(const g of gruppen){
       const dateien=[];
       for(const fid of g.wurzeln){
+        // Liegt der Dokumente-Ordner im Projektordner, ist er dort schon samt Unterordnern gelesen worden.
+        if(gesehen.has('o:'+fid))continue;gesehen.add('o:'+fid);
         const erste=await _dokDriveListe("'"+fid+"' in parents and trashed=false and (mimeType='"+_FDK_MIME_DOCX+"' or mimeType='application/vnd.google-apps.folder')");
         // b1006: keine Word-Zwischendateien (~$…, ~WRL….tmp) in der Auswahl – Drive fuehrt sie als Word-Datei.
         erste.filter(f=>f.mimeType===_FDK_MIME_DOCX&&!(typeof _dokIstZwischendatei==='function'&&_dokIstZwischendatei(f.name))).forEach(f=>{if(!gesehen.has(f.id)){gesehen.add(f.id);dateien.push({id:f.id,name:f.name,datei:f.name,ordnerId:fid,arbeit:/_FotoDoku/i.test(f.name)});}});
-        const unter=erste.filter(f=>f.mimeType==='application/vnd.google-apps.folder'&&!(typeof _fdkIstSicherungsordner==='function'&&_fdkIstSicherungsordner(f.name))).slice(0,20);   // b1023: Sicherungen der Fotodoku nicht anbieten
-        for(const u of unter){
+        // Zwei Ebenen Unterordner: Ebene 1 liefert Word-Dateien UND ihre Unterordner (hinten angehängt),
+        // Ebene 2 nur noch Word-Dateien. Bremse: je Ordner 20 Unterordner, je Wurzel höchstens 60 Ordner.
+        const unter=erste.filter(f=>f.mimeType==='application/vnd.google-apps.folder'&&!(typeof _fdkIstSicherungsordner==='function'&&_fdkIstSicherungsordner(f.name))).slice(0,20).map(f=>({id:f.id,name:f.name,ebene:1}));   // b1023: Sicherungen der Fotodoku nicht anbieten
+        for(let ui=0;ui<unter.length&&ui<60;ui++){
+          const u=unter[ui];
           if(gesehen.has('o:'+u.id))continue;gesehen.add('o:'+u.id);
           try{
-            const l=await _dokDriveListe("'"+u.id+"' in parents and trashed=false and mimeType='"+_FDK_MIME_DOCX+"'");
-            l.filter(f=>!(typeof _dokIstZwischendatei==='function'&&_dokIstZwischendatei(f.name))).forEach(f=>{if(!gesehen.has(f.id)){gesehen.add(f.id);dateien.push({id:f.id,name:u.name+' / '+f.name,datei:f.name,ordnerId:u.id,arbeit:/_FotoDoku/i.test(f.name)});}});
+            const l=await _dokDriveListe("'"+u.id+"' in parents and trashed=false and (mimeType='"+_FDK_MIME_DOCX+"'"+(u.ebene<2?" or mimeType='application/vnd.google-apps.folder'":"")+")");
+            if(u.ebene<2)l.filter(f=>f.mimeType==='application/vnd.google-apps.folder'&&!(typeof _fdkIstSicherungsordner==='function'&&_fdkIstSicherungsordner(f.name))).slice(0,20).forEach(f=>unter.push({id:f.id,name:u.name+' / '+f.name,ebene:2}));
+            l.filter(f=>f.mimeType===_FDK_MIME_DOCX&&!(typeof _dokIstZwischendatei==='function'&&_dokIstZwischendatei(f.name))).forEach(f=>{if(!gesehen.has(f.id)){gesehen.add(f.id);dateien.push({id:f.id,name:u.name+' / '+f.name,datei:f.name,ordnerId:u.id,arbeit:/_FotoDoku/i.test(f.name)});}});
           }catch(e){console.warn('[FDK] Unterordner:',u.name,e);}
         }
       }
@@ -78594,6 +78604,7 @@ async function _fdkStartListeLaden(){
     sel.innerHTML=gesamt?html:'<option value="">(keine Word-Datei in Stammblatt-/Auftragsordner)</option>';
     sel.value='';   // nie vorausgewählt – Frank wählt selbst
   }catch(e){console.warn('[FDK] Ordnerliste:',e);sel.innerHTML='<option value="">(Ordner nicht lesbar)</option>';}
+  hinweis();
 }
 
 /* ── Erstellen: Startdokument holen → Bilder holen → Word bauen → ablegen ── */
