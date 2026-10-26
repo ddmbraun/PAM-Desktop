@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F95';
+const PAM_FORMULARE_VERSION='F96';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -2475,7 +2475,8 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       lb.style.cssText=S_KNOPF+'flex:1 1 120px;min-width:0;min-height:var(--fsh44,44px);border:1.5px solid '+farbe+';background:'+(pin?'rgba(46,125,79,.15)':'var(--fs-lbfl,rgba(217,72,15,.08))')+';color:var(--text);font-weight:700;';
       lb.onclick=()=>_fsLuftbildFenster(bericht,t,s,()=>_neuBauen());
       const se=_fsSeiteText(s.seite);
-      const fl=_fsFotoLeiste(bericht,{text:_fsVbBezeichnung(bericht,s,si+1)+(se?' – '+_fsSeiteMitWort(s.seite):'')+(_fsVbWo(s)?' – '+_fsVbWo(s):''),fotoRefs:s.fotoRefs},'Fotos zu dieser Stelle',false,lb); /* F59 */
+      const fl0=_fsFotoLeiste(bericht,{text:_fsVbBezeichnung(bericht,s,si+1)+(se?' – '+_fsSeiteMitWort(s.seite):'')+(_fsVbWo(s)?' – '+_fsVbWo(s):''),fotoRefs:s.fotoRefs},'Fotos zu dieser Stelle',false,lb); /* F59 */
+      const fl=(typeof _fsTbMitKasten==='function')?_fsTbMitKasten(fl0,tx,bericht,typ):fl0; /* F96: Textbausteine unter „Was siehst du?“ – nur im Ortsterminprotokoll */
       /* F59: Bauteil antippen statt tippen; „Ecke“ blendet die zweite Fläche ein */
       const bt=document.createElement('div');bt.setAttribute('data-fs-vbbauteil','1');bt.style.cssText='margin:8px 0 2px;';
       const btl=document.createElement('div');btl.style.cssText='font-size:var(--fs12,12px);color:var(--text2);';btl.textContent='Bauteil (freiwillig)';bt.appendChild(btl);
@@ -9419,7 +9420,8 @@ function _fsOtpTeilAngaben(b,t,H){
     sel.value=von;
     sel.onchange=()=>{if(sel.value==='__frei'){const nm=_fsEingabe('Wer sagt das?',von);if(nm!==null)a.von=_fsOtpText(nm).replace(/\s+/g,' ').trim();scheduleSave();H.neu();return;}a.von=sel.value;scheduleSave();};
     const tf=H.textFeld(a.text,'z. B. Die Flecken seien zuerst im Februar aufgetreten.',v=>{a.text=v;},3);tf.style.marginTop='6px';
-    k.append(sel,tf,_fsOtpRechts(H.xKnopf('Angabe entfernen',()=>{if(_fsOtpHat(a.text)&&!_fsFrage('Angabe entfernen?'))return;b.angaben.splice(i,1);scheduleSave();H.neu();})));
+    const tbk=(typeof _fsTbKastenSicher==='function')?_fsTbKastenSicher(tf,'angaben',b):null; /* F96: Textbausteine */
+    k.append(sel,tf,...(tbk?[tbk]:[]),_fsOtpRechts(H.xKnopf('Angabe entfernen',()=>{if(_fsOtpHat(a.text)&&!_fsFrage('Angabe entfernen?'))return;b.angaben.splice(i,1);scheduleSave();H.neu();})));
     w.appendChild(k);
   });
   w.appendChild(_fsOtpPlus(H,'＋ Angabe','data-otp-angabe-neu',()=>{b.angaben.push({von:'',text:''});scheduleSave();H.neu();_fsOtpFokus(H,'[data-otp-angabe="'+(b.angaben.length-1)+'"] textarea');}));
@@ -9492,6 +9494,374 @@ function _fsOtpTeilHinweis(b,t,H){
   w.appendChild(_fsOtpMini('An wen',H.inp(h.an,'z. B. Auftraggeber',v=>{h.an=v;})));
   w.appendChild(_fsOtpMini('Worauf',H.textFeld(h.worauf,'z. B. lose Absturzsicherung am Dachrand',v=>{h.worauf=v;},2)));
   return w;
+}
+/* ── F96: TEXTBAUSTEINE IM ORTSTERMINPROTOKOLL ─────────────────────────────────────────────────────────────────────
+   Entwurf Claude-Code\Entwurf_Textbausteine_Ortsterminprotokoll_2026-10-25.html (Antworten 1a 2a 3a am 25.10.2026, dann „baue“).
+   Unter „Was siehst du?“ (Feststellungen, innen und außen getrennt) und unter „Angaben der Beteiligten“ des Ortsterminprotokolls steht eine Reihe
+   Knöpfe mit den EIGENEN Sätzen des Sachverständigen: Antippen hängt den Satz als neue Zeile an, die erste Lücke „…“ ist markiert. „＋ merken“ legt einen
+   Satz an (Tablet und PC), „✎ Bausteine“ (nur am PC) sortiert, ändert und entfernt. Die Liste startet LEER – PAM schlägt nie etwas von selbst vor.
+   Nur im Ortsterminprotokoll (_fsIstOtp) – Vorabbesichtigung und Begehungsprotokoll bleiben, wie sie sind.
+   Ablage: eigene Drive-Datei pam_textbausteine.json nach dem Muster des Tageszettels (pam_zettel.json): je Satz eine Kennung, beim Abgleich gewinnt der
+   jüngere Stempel ts, „Entfernen“ = Vermerk weg (ein Gerät mit altem Stand brächte sonst Gelöschtes zurück), eine Kopie im Merkzettel des Geräts (Funkloch).
+   ⛔ NICHT über PAM_GETEILT_KEYS / pam_settings.json: PAM Mobil liest diese Datei nur, „＋ merken“ am Tablet könnte nie schreiben.
+   ⛔ Die Sätze stehen nie in dieser (öffentlichen) Datei und nie in einem Protokoll-Datensatz – im Protokoll steht nur der Text, der ins Feld eingefügt wurde.
+   Daten: Zeile {id, liste 'aussen'|'innen'|'angaben', text, pos, ang, ts, weg?}. Nur Anzeige (nichts davon wird gespeichert): _fsTbAnzeigen, _fsTbAlle, _fsTbRueck. */
+const FS_TB_DATEI='pam_textbausteine.json';
+const FS_TB_LS='pam_fs_textbausteine';
+const FS_TB_LISTEN=['aussen','innen','angaben'];
+const FS_TB_NAMEN={aussen:'Feststellungen – außen',innen:'Feststellungen – innen',angaben:'Angaben der Beteiligten'};
+const FS_TB_WEG_TAGE=60;
+const FS_TB_SICHTBAR=6;
+const FS_TB_LUECKE='…';
+const FS_TB_CHIP_CSS='padding:6px 12px;border-radius:16px;font-size:var(--fs14,14px);cursor:pointer;font-family:inherit;min-height:var(--fsh,38px);border:2px solid var(--border);background:var(--fs-cfl,transparent);color:var(--text);text-align:left;line-height:1.3;white-space:normal;';
+const FS_TB_CHIP_AN_CSS='border-color:var(--fs-krd,#1f5f8b);background:var(--fs-can,rgba(31,95,139,.18));font-weight:700;';
+const FS_TB_KNOPF_CSS='flex-shrink:0;min-height:var(--fsh,38px);padding:4px 12px;border-radius:10px;border:1.5px solid var(--fs-krd,#1f5f8b);background:var(--fs-kfl,transparent);color:var(--text);font-size:var(--fs14,14px);cursor:pointer;font-family:inherit;';
+const FS_TB_LEISE_CSS='flex-shrink:0;min-height:var(--fsh,38px);padding:4px 12px;border-radius:10px;border:1.5px solid var(--border);background:transparent;color:var(--text2);font-size:var(--fs14,14px);cursor:pointer;font-family:inherit;';
+const FS_TB_INP_CSS='width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:var(--fs14,14px);color:var(--text);font-family:inherit;';
+let _fsTbZeilen=null;          // die Liste dieses Geräts (Kopie im Merkzettel, die Wahrheit steht in der Drive-Datei)
+let _fsTbDateiId='';
+let _fsTbLaeuft=false;
+let _fsTbNochmal=false;        // während eines Abgleichs kam eine Änderung dazu – danach gleich noch einmal
+let _fsTbTimer=null;
+const _fsTbStand={zeit:0,fehler:'',fehlZeit:0};
+const _fsTbAnzeigen=[];        // offene Kästen und das PC-Fenster – damit sie sich nach einer Änderung neu zeichnen
+const _fsTbAlle=new Set();     // Listen, deren Knopf-Reihe ganz offen ist
+const _fsTbRueck=new WeakMap();// Textfeld → {vorher,nachher} für „↶ rückgängig“
+
+function _fsTbJetzt(){return new Date().toISOString();}
+function _fsTbId(){return 'tb'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,8);}
+function _fsTbText(v){return String(v==null?'':v).replace(/\s+/g,' ').trim();}
+function _fsTbGueltig(z){return !!(z&&typeof z==='object'&&typeof z.id==='string'&&z.id&&FS_TB_LISTEN.indexOf(z.liste)>=0&&typeof z.text==='string'&&_fsTbText(z.text)!=='');}
+function _fsTbPos(z){return (typeof z.pos==='number')?z.pos:(Date.parse(z.ang||'')||0);}
+/* Vereinigung zweier Stände: je Kennung gewinnt der jüngere ts (ISO-Texte vergleichen sich richtig); bei gleichem ts bleibt der erste (der eigene).
+   Ein Satz mit weg-Stempel fällt erst nach FS_TB_WEG_TAGE Tagen ganz heraus. Sortiert nach pos, dann nach Anlagezeit. */
+function _fsTbMerge(a,b,jetztIso){
+  const map={};
+  [].concat(a||[],b||[]).forEach(z=>{if(!_fsTbGueltig(z))return;const alt=map[z.id];if(!alt||String(z.ts||'')>String(alt.ts||''))map[z.id]=z;});
+  const grenze=new Date(new Date(jetztIso||_fsTbJetzt()).getTime()-FS_TB_WEG_TAGE*864e5).toISOString();
+  return Object.keys(map).map(k=>map[k]).filter(z=>!(z.weg&&String(z.weg)<grenze))
+    .sort((x,y)=>{const px=_fsTbPos(x),py=_fsTbPos(y);return px===py?(String(x.ang||'')<String(y.ang||'')?-1:1):(px-py);});
+}
+function _fsTbLaden(){
+  if(_fsTbZeilen)return _fsTbZeilen;
+  let z=[];
+  try{const r=(typeof localStorage!=='undefined')?localStorage.getItem(FS_TB_LS):null;if(r){const o=JSON.parse(r);if(o&&Array.isArray(o.zeilen))z=o.zeilen;}}catch(e){}
+  _fsTbZeilen=_fsTbMerge(z,[],_fsTbJetzt());
+  return _fsTbZeilen;
+}
+function _fsTbSpeichereLokal(){try{if(typeof localStorage!=='undefined')localStorage.setItem(FS_TB_LS,JSON.stringify({version:1,zeilen:_fsTbLaden()}));}catch(e){}}
+function _fsTbListe(liste){return _fsTbLaden().filter(z=>z.liste===liste&&!z.weg);}
+function _fsTbGibt(liste,text){const t=_fsTbText(text).toLowerCase();return !!t&&_fsTbListe(liste).some(z=>_fsTbText(z.text).toLowerCase()===t);}
+/* nach jeder Änderung: neu ordnen, im Gerät merken, Kästen neu zeichnen, bald mit Drive abgleichen */
+function _fsTbGespeichert(){
+  _fsTbZeilen=_fsTbMerge(_fsTbLaden(),[],_fsTbJetzt());
+  _fsTbSpeichereLokal();
+  _fsTbNeuZeichnen();
+  _fsTbSyncBald();
+}
+function _fsTbNeu(liste,text){
+  const t=_fsTbText(text);
+  if(!t||FS_TB_LISTEN.indexOf(liste)<0||_fsTbGibt(liste,t))return null;
+  const jetzt=_fsTbJetzt(),hoch=_fsTbListe(liste).reduce((m,z)=>Math.max(m,_fsTbPos(z)),0);
+  const z={id:_fsTbId(),liste:liste,text:t,pos:Math.max(Date.now(),hoch+1),ang:jetzt,ts:jetzt};
+  _fsTbLaden().push(z);
+  _fsTbGespeichert();
+  return z;
+}
+function _fsTbAendern(id,text){
+  const t=_fsTbText(text),z=_fsTbLaden().find(x=>x.id===id&&!x.weg);
+  if(!t||!z||_fsTbListe(z.liste).some(x=>x.id!==id&&_fsTbText(x.text).toLowerCase()===t.toLowerCase()))return false;
+  z.text=t;z.ts=_fsTbJetzt();
+  _fsTbGespeichert();
+  return true;
+}
+function _fsTbWeg(id){
+  const z=_fsTbLaden().find(x=>x.id===id&&!x.weg);if(!z)return false;
+  const jetzt=_fsTbJetzt();z.weg=jetzt;z.ts=jetzt;
+  _fsTbGespeichert();
+  return true;
+}
+/* -1 = eine Stelle nach vorn, +1 = eine nach hinten; die Plätze der Liste werden 1…n, geändert wird nur, was sich verschiebt */
+function _fsTbSchieben(id,richtung){
+  const z=_fsTbLaden().find(x=>x.id===id&&!x.weg);if(!z)return false;
+  const L=_fsTbListe(z.liste),i=L.findIndex(x=>x.id===id),j=i+(richtung<0?-1:1);
+  if(i<0||j<0||j>=L.length)return false;
+  const o=L.slice();o.splice(j,0,o.splice(i,1)[0]);
+  const jetzt=_fsTbJetzt();
+  o.forEach((x,k)=>{if(x.pos!==k+1){x.pos=k+1;x.ts=jetzt;}});
+  _fsTbGespeichert();
+  return true;
+}
+function _fsTbNeuZeichnen(){
+  for(let i=_fsTbAnzeigen.length-1;i>=0;i--){
+    const a=_fsTbAnzeigen[i];let weg=false;
+    try{weg=!a.box.isConnected;}catch(e){weg=true;}
+    if(weg){_fsTbAnzeigen.splice(i,1);continue;}
+    try{a.zeichne();}catch(e){console.warn('[Textbausteine] zeichnen:',e);}
+  }
+}
+function _fsTbMeldung(t){try{if(typeof toast==='function')toast(t,'info',3500);}catch(e){}}
+function _fsTbUhr(t){try{return new Date(t).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});}catch(e){return '';}}
+function _fsTbStandText(){
+  if(_fsTbStand.fehler)return '⚠ nicht abgeglichen'+(_fsTbStand.zeit?' seit '+_fsTbUhr(_fsTbStand.zeit):'');
+  if(_fsTbStand.zeit)return '☁ abgeglichen '+_fsTbUhr(_fsTbStand.zeit);
+  return '';
+}
+function _fsTbGut(){_fsTbStand.zeit=Date.now();_fsTbStand.fehler='';_fsTbNeuZeichnen();}
+function _fsTbSchlecht(e){
+  const m=String((e&&e.message)||e||'?');
+  _fsTbStand.fehler=m;_fsTbStand.fehlZeit=Date.now();
+  console.warn('[Textbausteine] Abgleich:',m);
+  _fsTbNeuZeichnen();
+}
+function _fsTbSyncBald(){clearTimeout(_fsTbTimer);_fsTbTimer=setTimeout(()=>{_fsTbSync();},1500);}
+/* Abgleich mit Drive: lesen, vereinigen, nur bei Unterschied schreiben. Liest nie „blind“: scheitert das Lesen oder ist die Datei unlesbar,
+   wird NICHTS geschrieben. Ohne Anmeldung (Funkloch, Notbetrieb) bleibt es still bei der Kopie im Gerät. */
+async function _fsTbSync(){
+  if(_fsTbLaeuft){_fsTbNochmal=true;return;}
+  if(!(typeof tokenValid==='function'&&tokenValid())||typeof gdriveToken==='undefined'||!gdriveToken||typeof fetch!=='function')return;
+  _fsTbLaeuft=true;
+  try{
+    const kopf={Authorization:'Bearer '+gdriveToken};
+    if(!_fsTbDateiId){
+      const q=encodeURIComponent("name='"+FS_TB_DATEI+"' and trashed=false");
+      const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,modifiedTime)&orderBy=modifiedTime desc&pageSize=5',{headers:kopf});
+      if(r.status===401){if(typeof _handleDrive401==='function')_handleDrive401();_fsTbSchlecht('Anmeldung abgelaufen');return;}
+      if(!r.ok){_fsTbSchlecht('Drive HTTP '+r.status);return;}
+      const d=await r.json();
+      if(d&&d.files&&d.files.length)_fsTbDateiId=d.files[0].id;
+    }
+    let fern=[],fernRoh='[]';
+    if(_fsTbDateiId){
+      const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(_fsTbDateiId)+'?alt=media&_='+Date.now(),{headers:{Authorization:'Bearer '+gdriveToken,'Cache-Control':'no-cache'},cache:'no-store'});
+      if(r.status===404){_fsTbDateiId='';_fsTbSchlecht('Datei nicht gefunden – neuer Versuch beim nächsten Abgleich');return;}
+      if(!r.ok){_fsTbSchlecht('Lesen HTTP '+r.status);return;}
+      const roh=String(await r.text()).trim();
+      if(roh){
+        const d=JSON.parse(roh);
+        if(!d||typeof d!=='object'||!Array.isArray(d.zeilen)){_fsTbSchlecht('Datei unlesbar – nichts überschrieben');return;}
+        fern=d.zeilen;fernRoh=JSON.stringify(fern);
+      }
+    }
+    const vorher=JSON.stringify(_fsTbLaden());
+    _fsTbZeilen=_fsTbMerge(_fsTbLaden(),fern,_fsTbJetzt());
+    const nachher=JSON.stringify(_fsTbZeilen);
+    if(nachher!==vorher){_fsTbSpeichereLokal();_fsTbNeuZeichnen();}
+    if(_fsTbDateiId?nachher===fernRoh:!_fsTbZeilen.length){_fsTbGut();return;}
+    const inhalt=JSON.stringify({version:1,zeilen:_fsTbZeilen,lastUpdated:_fsTbJetzt()});
+    if(_fsTbDateiId){
+      const w=await fetch('https://www.googleapis.com/upload/drive/v3/files/'+encodeURIComponent(_fsTbDateiId)+'?uploadType=media',{method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},body:inhalt});
+      if(!w.ok)throw new Error('Schreiben HTTP '+w.status);
+      _fsTbGut();
+    }else{
+      const g='tb_'+Date.now();
+      const meta={name:FS_TB_DATEI,mimeType:'application/json'};
+      if(typeof workspaceFolderId!=='undefined'&&workspaceFolderId)meta.parents=[workspaceFolderId];
+      const body='--'+g+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify(meta)+'\r\n--'+g+'\r\nContent-Type: application/json\r\n\r\n'+inhalt+'\r\n--'+g+'--';
+      const r=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',{method:'POST',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'multipart/related; boundary='+g},body});
+      if(!r.ok)throw new Error('Anlegen HTTP '+r.status);
+      const f=await r.json();_fsTbDateiId=f.id;_fsTbGut();
+    }
+  }catch(e){_fsTbSchlecht(e);}
+  finally{_fsTbLaeuft=false;if(_fsTbNochmal){_fsTbNochmal=false;_fsTbSyncBald();}}
+}
+
+/* ── Einfügen, Lücken, rückgängig ── */
+function _fsTbLuecken(ta){return String((ta&&ta.value)||'').split(FS_TB_LUECKE).length-1;}
+/* hängt den Satz als neue Zeile an und markiert die erste Lücke; das Feld meldet die Änderung wie bei Tipp-Eingabe (Speichern läuft über sein oninput) */
+function _fsTbEinfuegen(ta,text){
+  const v=String(ta.value||''),sep=(v.length&&!/\n$/.test(v))?'\n':'',start=v.length+sep.length;
+  ta.value=v+sep+text;
+  _fsTbRueck.set(ta,{vorher:v,nachher:ta.value});
+  try{if(typeof ta.oninput==='function')ta.oninput();}catch(e){}
+  try{ta.focus();}catch(e){}
+  const i=ta.value.indexOf(FS_TB_LUECKE,start);
+  try{if(typeof ta.setSelectionRange==='function'){if(i>=0)ta.setSelectionRange(i,i+1);else ta.setSelectionRange(ta.value.length,ta.value.length);}}catch(e){}
+  try{ta.scrollTop=ta.scrollHeight;}catch(e){}
+}
+function _fsTbNaechsteLuecke(ta){
+  const v=String(ta.value||'');
+  let i=v.indexOf(FS_TB_LUECKE,(typeof ta.selectionEnd==='number')?ta.selectionEnd:0);
+  if(i<0)i=v.indexOf(FS_TB_LUECKE);
+  if(i<0)return false;
+  try{ta.focus();if(typeof ta.setSelectionRange==='function')ta.setSelectionRange(i,i+1);}catch(e){}
+  return true;
+}
+function _fsTbRueckgaengig(ta){
+  const r=_fsTbRueck.get(ta);
+  if(!r||String(ta.value||'')!==r.nachher)return false;
+  ta.value=r.vorher;_fsTbRueck.delete(ta);
+  try{if(typeof ta.oninput==='function')ta.oninput();}catch(e){}
+  return true;
+}
+/* Zahlen im Satz werden zu Lücken: aus „ca. 30 cm“ wird „ca. … cm“ */
+function _fsTbZahlenZuLuecken(t){return String(t||'').replace(/\d+(?:[.,]\d+)?/g,FS_TB_LUECKE);}
+
+/* ── Die Knopf-Reihe unter einem Textfeld ── */
+function _fsTbKnopf(txt,attr,css,fn){
+  const k=document.createElement('button');k.type='button';k.textContent=txt;if(attr)k.setAttribute(attr,'1');k.style.cssText=css;
+  if(fn)k.onclick=fn;
+  return k;
+}
+function _fsTbKasten(ta,liste,b){
+  if(!ta||FS_TB_LISTEN.indexOf(liste)<0)return null;
+  const box=document.createElement('div');box.setAttribute('data-fs-tb',liste);
+  box.style.cssText='margin-top:8px;padding:8px 8px 6px;border:1.5px dashed var(--fs-krd,var(--border));border-radius:10px;background:var(--bg2);';
+  const kopf=document.createElement('div');kopf.style.cssText='display:flex;flex-wrap:wrap;align-items:center;gap:2px 8px;margin:0 0 6px;font-size:var(--fs12,12px);color:var(--text2);';
+  const kt=document.createElement('span');kt.style.cssText='flex:1 1 auto;min-width:0;';
+  const kb=document.createElement('b');kb.style.color='var(--text)';kb.textContent='📋 Deine Bausteine';
+  kt.append(kb,document.createTextNode(' – antippen fügt ein'+(liste==='angaben'?'':' · '+(liste==='aussen'?'außen':'innen'))));
+  const st=document.createElement('span');st.setAttribute('data-fs-tb-stand','1');st.style.cssText='font-size:var(--fs12,12px);white-space:nowrap;';
+  kopf.append(kt,st);
+  const reihe=document.createElement('div');reihe.setAttribute('data-fs-tb-reihe','1');reihe.style.cssText='display:flex;flex-wrap:wrap;gap:6px;';
+  /* Knöpfe unter dem Textfeld: der Fokus bleibt im Feld, die Tastatur klappt nicht zu */
+  const behalten=k=>{k.addEventListener('mousedown',e=>{try{e.preventDefault();}catch(_e){}});return k;};
+  const akt=document.createElement('div');akt.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;';
+  const nl=behalten(_fsTbKnopf('⇥ nächste Lücke','data-fs-tb-luecke',FS_TB_KNOPF_CSS,()=>{if(!_fsTbNaechsteLuecke(ta))_fsTbMeldung('Keine Lücke mehr im Feld');}));
+  const rz=behalten(_fsTbKnopf('↶ rückgängig','data-fs-tb-rueck',FS_TB_LEISE_CSS,()=>{if(_fsTbRueckgaengig(ta)){aktualisiere();_fsTbMeldung('Letzten Baustein wieder herausgenommen');}}));
+  const mk=behalten(_fsTbKnopf('＋ merken','data-fs-tb-merken',FS_TB_KNOPF_CSS,()=>{if(merk.style.display==='none'){merkOeffnen();}else{merk.style.display='none';}}));
+  akt.append(nl,rz,mk);
+  if(typeof _fsAmPc==='function'&&_fsAmPc()){const pc=_fsTbKnopf('✎ Bausteine','data-fs-tb-pc',FS_TB_LEISE_CSS,()=>_fsTbFenster(b,liste));pc.title='Bausteine sortieren, ändern, entfernen';akt.appendChild(pc);}
+  /* „＋ merken“: der markierte Text, sonst die letzte Zeile – hier noch ändern, dann „✓ Merken“ */
+  const merk=document.createElement('div');merk.setAttribute('data-fs-tb-merkbox','1');merk.style.cssText='margin-top:8px;padding:8px 10px;border:1.5px solid var(--fs-krd,var(--border));border-radius:10px;background:var(--bg3);';merk.style.display='none';
+  const mi=document.createElement('div');mi.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin-bottom:4px;line-height:1.4;';mi.textContent='Als Baustein merken – der markierte Text, sonst die letzte Zeile. Hier noch ändern, dann „✓ Merken“.';
+  const mt=document.createElement('textarea');mt.rows=2;mt.setAttribute('data-fs-tb-merktext','1');mt.style.cssText=FS_TB_INP_CSS+'resize:vertical;';
+  const mz=document.createElement('div');mz.style.cssText='display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px;';
+  let ziel=liste;
+  const zielChips=[];
+  const zielZeigen=()=>zielChips.forEach(c=>{const an=c.getAttribute('data-fs-tb-ablegen')===ziel;c.style.cssText=FS_TB_CHIP_CSS+(an?FS_TB_CHIP_AN_CSS:'');c.setAttribute('aria-pressed',String(an));});
+  mz.appendChild(_fsTbKnopf('123 → …  Zahlen zu Lücken','data-fs-tb-zahlen',FS_TB_LEISE_CSS,()=>{mt.value=_fsTbZahlenZuLuecken(mt.value);}));
+  if(liste!=='angaben'){
+    const al=document.createElement('span');al.style.cssText='font-size:var(--fs12,12px);color:var(--text2);';al.textContent='ablegen unter:';mz.appendChild(al);
+    [['aussen','außen'],['innen','innen']].forEach(p=>{const c=_fsTbKnopf(p[1],'',FS_TB_CHIP_CSS,()=>{ziel=p[0];zielZeigen();});c.setAttribute('data-fs-tb-ablegen',p[0]);zielChips.push(c);mz.appendChild(c);});
+    zielZeigen();
+  }
+  const mf=document.createElement('div');mf.style.cssText='display:flex;gap:8px;margin-top:8px;';
+  const ok=_fsTbKnopf('✓ Merken','data-fs-tb-ok','flex:2;'+FS_TB_KNOPF_CSS,()=>{
+    const t=_fsTbText(mt.value);
+    if(!t){_fsTbMeldung('Erst einen Satz eintragen');return;}
+    if(_fsTbGibt(ziel,t)){_fsTbMeldung('Den Satz gibt es schon');return;}
+    if(!_fsTbNeu(ziel,t))return;
+    _fsTbAlle.add(ziel);merk.style.display='none';mt.value='';
+    _fsTbMeldung('✓ Als Baustein gemerkt');
+  });
+  const ab=_fsTbKnopf('Abbrechen','data-fs-tb-abbruch','flex:1;'+FS_TB_LEISE_CSS,()=>{merk.style.display='none';});
+  mf.append(ok,ab);
+  merk.append(mi,mt,mz,mf);
+  const merkOeffnen=()=>{
+    let s='';
+    try{if(typeof ta.selectionStart==='number'&&ta.selectionEnd>ta.selectionStart)s=String(ta.value||'').slice(ta.selectionStart,ta.selectionEnd);}catch(e){}
+    if(!_fsTbText(s)||s===FS_TB_LUECKE){const z=String(ta.value||'').split('\n').map(x=>x.trim()).filter(Boolean);s=z.length?z[z.length-1]:'';}
+    mt.value=_fsTbText(s);ziel=liste;zielZeigen();merk.style.display='';
+    try{mt.focus();}catch(e){}
+  };
+  /* die Reihe der Knöpfe */
+  const kette=()=>{
+    reihe.textContent='';
+    const L=_fsTbListe(liste),auf=_fsTbAlle.has(liste);
+    if(!L.length){
+      const h=document.createElement('span');h.setAttribute('data-fs-tb-leer','1');h.style.cssText='font-size:var(--fs13,13px);color:var(--text2);line-height:1.4;';
+      h.textContent='Noch keine Bausteine – „＋ merken“ legt den ersten an'+((typeof _fsAmPc==='function'&&_fsAmPc())?', oder unter „✎ Bausteine“ in Ruhe anlegen.':' (am PC geht es in Ruhe unter „✎ Bausteine“).');
+      reihe.appendChild(h);return;
+    }
+    L.forEach((z,i)=>{
+      if(!auf&&i>=FS_TB_SICHTBAR)return;
+      reihe.appendChild(behalten(_fsTbKnopf(z.text,'data-fs-tb-chip',FS_TB_CHIP_CSS,()=>{_fsTbEinfuegen(ta,z.text);aktualisiere();}))).setAttribute('data-fs-tb-chip',z.id);
+    });
+    if(L.length>FS_TB_SICHTBAR){
+      const m=behalten(_fsTbKnopf(auf?'▾ weniger':'▸ alle '+L.length,'data-fs-tb-alle',FS_TB_CHIP_CSS,()=>{if(auf)_fsTbAlle.delete(liste);else _fsTbAlle.add(liste);kette();}));
+      reihe.appendChild(m);
+    }
+  };
+  const aktualisiere=()=>{
+    const n=_fsTbLuecken(ta);nl.style.display=n?'':'none';nl.textContent='⇥ nächste Lücke ('+n+')';
+    const r=_fsTbRueck.get(ta);rz.style.display=(r&&String(ta.value||'')===r.nachher)?'':'none';
+    st.textContent=_fsTbStandText();st.title=_fsTbStand.fehler?('Abgleich fehlgeschlagen: '+_fsTbStand.fehler+' – Tablet und PC können abweichen'):'';
+  };
+  ta.addEventListener('input',aktualisiere);
+  _fsTbAnzeigen.push({box:box,zeichne:()=>{kette();aktualisiere();}});
+  kette();aktualisiere();
+  box.append(kopf,reihe,akt,merk);
+  if(Date.now()-(_fsTbStand.zeit||0)>60000&&!_fsTbLaeuft)_fsTbSyncBald(); // beim Öffnen einmal mit Drive abgleichen (höchstens alle 60 s)
+  return box;
+}
+function _fsTbKastenSicher(ta,liste,b){try{return _fsTbKasten(ta,liste,b);}catch(e){console.warn('[Textbausteine] Kasten:',e);return null;}}
+/* in der Stellen-Karte: die Knopf-Reihe sitzt zwischen „Was siehst du?“ und der Foto-Leiste – nur im Ortsterminprotokoll */
+function _fsTbMitKasten(fl,tx,b,typ){
+  try{
+    if(typeof _fsIstOtp!=='function'||!_fsIstOtp(b))return fl;
+    const k=_fsTbKastenSicher(tx,typ==='aussen'?'aussen':'innen',b);
+    if(!k)return fl;
+    const w=document.createElement('div');w.setAttribute('data-fs-tbstelle','1');w.append(k,fl);
+    return w;
+  }catch(e){console.warn('[Textbausteine] Stelle:',e);return fl;}
+}
+
+/* ── Das Fenster „✎ Bausteine“ – nur am PC: sortieren, ändern, entfernen, in Ruhe neue anlegen ── */
+function _fsTbFenster(b,start){
+  const F=_fsOtFenster(b,'_fsTbFenster','✎ Bausteine – deine Sätze','Antippen im Protokoll fügt den Satz ein. Oben in der Liste = vorn in der Knopf-Reihe. „…“ ist eine Lücke für Zahlen und Namen. Hier stehen nur Sätze, die du selbst angelegt hast.');
+  F.box.style.maxWidth='640px';F.box.setAttribute('data-fs-tbf','1');
+  let liste=(FS_TB_LISTEN.indexOf(start)>=0)?start:'aussen',schmutzig=false;
+  const tabs=document.createElement('div');tabs.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;';
+  const zeilen=document.createElement('div');zeilen.setAttribute('data-fs-tbf-liste','1');
+  const neu=document.createElement('div');neu.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;align-items:center;';
+  const ni=document.createElement('input');ni.type='text';ni.autocomplete='off';ni.placeholder='Neuer Satz – tippen oder diktieren, Zahlen als „…“ offen lassen';ni.setAttribute('data-fs-tbf-neu','1');
+  ni.style.cssText=FS_TB_INP_CSS+'flex:1 1 260px;width:auto;min-width:0;';
+  const aufnehmen=()=>{
+    const t=_fsTbText(ni.value);
+    if(!t){_fsTbMeldung('Erst einen Satz eintragen');return;}
+    if(_fsTbGibt(liste,t)){_fsTbMeldung('Den Satz gibt es schon');return;}
+    if(!_fsTbNeu(liste,t))return;
+    ni.value='';try{ni.focus();}catch(e){}
+  };
+  ni.onkeydown=e=>{if(e&&e.key==='Enter'){try{e.preventDefault();}catch(_e){}aufnehmen();}};
+  const lk=_fsTbKnopf('… Lücke','data-fs-tbf-luecke',FS_TB_LEISE_CSS,()=>{
+    const p=(typeof ni.selectionStart==='number')?ni.selectionStart:ni.value.length,q=(typeof ni.selectionEnd==='number')?ni.selectionEnd:p;
+    ni.value=ni.value.slice(0,p)+FS_TB_LUECKE+ni.value.slice(q);
+    try{ni.focus();ni.setSelectionRange(p+1,p+1);}catch(e){}
+  });
+  const an=_fsTbKnopf('＋ aufnehmen','data-fs-tbf-aufnehmen',FS_TB_KNOPF_CSS,aufnehmen);
+  neu.append(ni,lk,an);
+  const stand=document.createElement('div');stand.setAttribute('data-fs-tbf-stand','1');stand.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin-top:10px;';
+  const fuss=document.createElement('div');fuss.style.cssText='display:flex;gap:8px;margin-top:14px;';
+  const zu=_fsOtKnopf('Schließen','data-fs-tbf-zu',true,(typeof FS_FARBE!=='undefined')?FS_FARBE:'#1f5f8b');
+  zu.onclick=()=>F.zu();F.beiEsc(()=>F.zu());
+  fuss.appendChild(zu);
+  const bau=()=>{
+    schmutzig=false;
+    tabs.textContent='';
+    FS_TB_LISTEN.forEach(l=>{
+      const c=_fsTbKnopf(FS_TB_NAMEN[l]+' · '+_fsTbListe(l).length,'',FS_TB_CHIP_CSS+(l===liste?FS_TB_CHIP_AN_CSS:''),()=>{liste=l;bau();});
+      c.setAttribute('data-fs-tbf-tab',l);tabs.appendChild(c);
+    });
+    zeilen.textContent='';
+    const L=_fsTbListe(liste);
+    if(!L.length){const h=document.createElement('div');h.setAttribute('data-fs-tbf-leer','1');h.style.cssText='font-size:var(--fs13,13px);color:var(--text2);padding:8px 0;';h.textContent='Noch keine Sätze in dieser Liste.';zeilen.appendChild(h);}
+    L.forEach((z,i)=>{
+      const r=document.createElement('div');r.setAttribute('data-fs-tbf-zeile',z.id);r.style.cssText='display:flex;align-items:center;gap:6px;padding:6px 0;border-top:1px solid var(--border);';
+      const hoch=_fsTbKnopf('↑','data-fs-tbf-hoch',FS_TB_KNOPF_CSS+'min-width:40px;padding:4px 6px;',()=>{_fsTbSchieben(z.id,-1);});hoch.title='nach vorn';if(i===0)hoch.disabled=true;
+      const runter=_fsTbKnopf('↓','data-fs-tbf-runter',FS_TB_KNOPF_CSS+'min-width:40px;padding:4px 6px;',()=>{_fsTbSchieben(z.id,1);});runter.title='nach hinten';if(i===L.length-1)runter.disabled=true;
+      const inp=document.createElement('input');inp.type='text';inp.value=z.text;inp.autocomplete='off';inp.setAttribute('data-fs-tbf-text',z.id);inp.style.cssText=FS_TB_INP_CSS+'flex:1;width:auto;min-width:0;';
+      inp.oninput=()=>{schmutzig=true;};
+      inp.onchange=()=>{
+        const t=_fsTbText(inp.value);schmutzig=false;
+        if(t===_fsTbText(z.text))return;
+        if(!_fsTbAendern(z.id,t)){_fsTbMeldung(t?'Den Satz gibt es schon':'Ein Baustein braucht einen Text – zum Entfernen das ✕');bau();}
+      };
+      const weg=_fsTbKnopf('✕','data-fs-tbf-weg',FS_TB_LEISE_CSS+'min-width:40px;padding:4px 6px;',()=>{
+        if(!_fsFrage('„'+_fsTbText(z.text)+'“ aus den Bausteinen entfernen?\n\nWas schon in Protokollen steht, bleibt.',b))return;
+        _fsTbWeg(z.id);
+      });weg.title='entfernen';
+      r.append(hoch,runter,inp,weg);zeilen.appendChild(r);
+    });
+    stand.textContent=_fsTbStandText()||'Der Abgleich mit Drive läuft nach dem Öffnen von selbst.';
+  };
+  F.box.append(tabs,zeilen,neu,stand,fuss);
+  _fsTbAnzeigen.push({box:F.ov,zeichne:()=>{if(!schmutzig)bau();}});
+  bau();
+  _fsAnhaengen(F.ov,b);
+  _fsTbSyncBald();
+  return F.ov;
 }
 /* ── F94: FOTOS BEI MEHREREN ORTSTERMINEN AM SELBEN TAG (Nachtrag zu P110) ────────────────────────────────────────────────────────────────────
    24.10.2026 („Baue F94“, Bauvorschlag Claude-Code\Bauplan_F94_Fotos-gleicher-Tag_2026-10-24.html; Frage Uhrzeit bei „am 23.10.“: nein, so lassen):
