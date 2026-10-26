@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F96';
+const PAM_FORMULARE_VERSION='F97';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -1990,6 +1990,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     if(q.block)_bgSpringe(q.block);
     const el=q.sel?body.querySelector(q.sel):null;
     if(el){try{el.scrollIntoView({block:'center'});}catch(e){}el.style.outline='3px dashed #b25e00';el.style.outlineOffset='2px';setTimeout(()=>{el.style.outline='';el.style.outlineOffset='';},1600);}
+    if(el&&q.luecke&&typeof _fsOtpLueckeMarkieren==='function')_fsOtpLueckeMarkieren(el); /* F97: Lücken-Punkt – Fokus ins Feld, erste Lücke markiert */
   }
   function _teilNochOffen(){
     const w=document.createElement('div');w.setAttribute('data-fs-nochoffen','1');
@@ -2008,6 +2009,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       l.forEach(q=>{
         const b=document.createElement('button');b.type='button';b.textContent=q.text;b.setAttribute('data-fs-offenpunkt',q.k);
         b.style.cssText='padding:5px 11px;min-height:var(--fsh,36px);border-radius:16px;border:1.5px solid '+FS_FARBE+';background:var(--bg);color:var(--text);font-size:var(--fs13,13px);cursor:pointer;font-family:inherit;';
+        if(q.luecke)b.style.borderStyle='dashed'; /* F97 */
         b.onclick=()=>_nochOffenSpringe(q);z.appendChild(b);
       });
       const h=document.createElement('div');h.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin:6px 0 0 2px;';h.textContent='Nur zur Erinnerung – PAM prüft nichts, im PDF steht das nicht.';
@@ -9070,7 +9072,9 @@ function _fsOtpNochOffen(b,t,amPc){
   else if(zs.art==='endeFehlt'&&!(typeof _fsVbLaeuftHeute==='function'&&_fsVbLaeuftHeute(b)))l.push({k:'ende',text:'Ende fehlt',block:'termin',sel:'[data-otp-zeit]'});
   FS_OTP_HAKEN_BEGINN.forEach(x=>{if(!x.frei&&hk[x.k]!==true)l.push({k:'h_'+x.k,text:x.kurz,block:'beginn',sel:'[data-otp-haken="'+x.k+'"]'});});
   (b.otpAngefordert||[]).forEach(x=>{if(_fsOtpHat(x.was)&&!x.vorgelegt)l.push({k:'u_'+x.id,text:_fsOtpText(x.was).trim()+': vorgelegt?',block:'unterlagen',sel:'[data-otp-angefordert="'+x.id+'"]'});});
+  (typeof _fsOtpLuecken==='function'?_fsOtpLuecken(b,'angaben'):[]).forEach(x=>l.push(x)); /* F97: übrig gebliebene Lücken „…“ in den Angaben */
   if(!(typeof _fsVbStellenGefuellt==='function'&&_fsVbStellenGefuellt(b).length))l.push({k:'stellen',text:'Noch keine Feststellung',block:'stellen',sel:''});
+  (typeof _fsOtpLuecken==='function'?_fsOtpLuecken(b,'stellen'):[]).forEach(x=>l.push(x)); /* F97: … und in „Was siehst du?“ je Stelle */
   FS_OTP_HAKEN_ENDE.forEach(x=>{if(!x.frei&&hk[x.k]!==true)l.push({k:'h_'+x.k,text:x.kurz,block:'ende',sel:'[data-otp-haken="'+x.k+'"]'});});
   const fotos=(Array.isArray(b.fotos)?b.fotos:[]).filter(Boolean);
   if(fotos.length&&!fotos.some(f=>f.inReport))l.push({k:'fotopdf',text:'Kein Foto im PDF',block:'fotos',sel:'#_wpMobFotoGrid'});
@@ -9862,6 +9866,45 @@ function _fsTbFenster(b,start){
   _fsAnhaengen(F.ov,b);
   _fsTbSyncBald();
   return F.ov;
+}
+/* ── F97: HINWEIS AUF ÜBRIG GEBLIEBENE LÜCKEN „…“ ─────────────────────────────────────────────────────────────────────
+   Entwurf Claude-Code\Entwurf_Noch-offen-Luecken_Ortsterminprotokoll_2026-10-26.html (Antworten: je Feld ein Knopf, Antippen springt ins Feld und markiert die erste Lücke,
+   keine Rückfrage beim PDF – „bau wie vorgeschlagen“ am 26.10.2026).
+   „📋 Noch offen“ (oben und im Kasten „Ende“) des Ortsterminprotokolls meldet je Stelle („Was siehst du?“) und je Angabe der Beteiligten, in deren Text noch ein „…“ steht –
+   die Lücke eines Bausteins (F96), in die keine Zahl kam. Nur diese zwei Felder (dort gibt es die Bausteine); Notizen und alle anderen Felder zählen nicht.
+   Nur eine Erinnerung wie die anderen Punkte: PAM prüft nichts, sperrt nichts, fragt beim PDF nicht nach, und das PDF bleibt, wie es ist.
+   Eintrag wie bei allen Punkten: {k, text, block, sel, typ?, si?, luecke:true} – _nochOffenSpringe klappt die Stelle auf und scrollt hin, _fsOtpLueckeMarkieren setzt den Fokus in das Feld
+   und markiert die erste Lücke. Die Zeile zieht sich alle 1,5 s nach: ist keine Lücke mehr im Feld, verschwindet der Knopf von selbst. */
+/* art 'angaben' = Angaben der Beteiligten (stehen im Formular vor den Feststellungen), 'stellen' = „Was siehst du?“ je Stelle */
+function _fsOtpLuecken(b,art){
+  const l=[];if(!b)return l;
+  const zahl=t=>String(t==null?'':t).split(FS_TB_LUECKE).length-1,wort=c=>c===1?'1 Lücke …':c+' Lücken …';
+  if(art==='angaben'){
+    (Array.isArray(b.angaben)?b.angaben:[]).forEach((a,i)=>{
+      if(!a||typeof a!=='object')return;
+      const c=zahl(a.text);if(!c)return;
+      const von=String(a.von==null?'':a.von).trim();
+      l.push({k:'luecke_a'+i,text:'Angabe'+(von?' von '+von:'')+': '+wort(c),block:'angaben',sel:'[data-otp-angabe="'+i+'"] textarea',luecke:true});
+    });
+    return l;
+  }
+  const st=(typeof _fsVbStellenGefuellt==='function')?_fsVbStellenGefuellt(b):[];
+  st.forEach(x=>{
+    const sx=x.s,c=zahl(sx&&sx.text);if(!c)return;
+    const si=(Array.isArray(b.vbStellen)?b.vbStellen:[]).indexOf(sx);
+    l.push({k:'luecke_s'+si,text:_fsVbBezeichnung(b,sx,x.nr)+': '+wort(c),block:'stellen',typ:_fsVbTyp(sx),si:si,sel:'[data-fs-vbstelle="'+si+'"] textarea',luecke:true});
+  });
+  return l;
+}
+/* Fokus in das Feld, erste Lücke markiert (der Tipp auf den Knopf ist die Bedienung, die Tastatur darf aufgehen); false = keine Lücke da */
+function _fsOtpLueckeMarkieren(el){
+  try{
+    if(!el||typeof el.value!=='string')return false;
+    const i=el.value.indexOf(FS_TB_LUECKE);if(i<0)return false;
+    try{el.focus({preventScroll:true});}catch(e){el.focus();}
+    if(typeof el.setSelectionRange==='function')el.setSelectionRange(i,i+FS_TB_LUECKE.length);
+    return true;
+  }catch(e){return false;}
 }
 /* ── F94: FOTOS BEI MEHREREN ORTSTERMINEN AM SELBEN TAG (Nachtrag zu P110) ────────────────────────────────────────────────────────────────────
    24.10.2026 („Baue F94“, Bauvorschlag Claude-Code\Bauplan_F94_Fotos-gleicher-Tag_2026-10-24.html; Frage Uhrzeit bei „am 23.10.“: nein, so lassen):
