@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F99';
+const PAM_FORMULARE_VERSION='F100';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -4904,6 +4904,7 @@ function _fsVbIso(datum){
 }
 // F18: Beschreibung des Termins in der Karte (und damit des Outlook-Betreffs): „Vorabbesichtigung – Eigentümer“
 function _fsVbTerminText(bericht){
+  if(bericht&&bericht.vorlage==='wartungsprotokoll'&&bericht.art==='rep'){const a=String((bericht.kopf&&bericht.kopf.ansprechpartner)||'').replace(/\s+/g,' ').trim();return 'REP-Auftrag'+(a?' – '+a:'');} /* F100: neuer Termin aus dem REP-Auftrag – „REP-Auftrag – Name (Lage)“ */
   const rolle=String((bericht&&bericht.kopf&&bericht.kopf.besuchBei)||'').split(':')[0].trim();
   return ((bericht&&bericht.fassung==='begehung'&&bericht.art!=='vorab')?'Begehung '+(bericht.art==='keller'?'Keller':'Wohnung'):'Vorabbesichtigung')+(rolle?' – '+rolle:''); // F23 · F47: seit der Vereinigung heißen beide so · F52: auch Begehungsprotokoll
 }
@@ -12915,9 +12916,41 @@ async function _fsAnPdf(bericht,task){
    ⛔ Die alten Funktionen (_fsPdfName, _fsListeZeile, _openWartungsprotokollMobil, _fsWpPdf) prüfen art==='rep' INLINE und rufen die neuen nur mit typeof-Wache. */
 const FS_RA_FELDER=[['objektAdresse','Objekt'],['auftraggeber','Auftraggeber'],['kostenstelle','Kostenstelle'],['repNr','Rep.-Nr.'],['kundenNr','Kunden-Nr.'],['ansprechpartner','Ansprechpartner vor Ort'],['telefon','Telefon'],['schadensbild','Baustelle / Schadensbild']];
 function _fsIstRep(b){return !!b&&b.vorlage==='wartungsprotokoll'&&b.art==='rep';}
-/* Was die Karte für den Kopf hergibt (reine Funktion). Ansprechpartner: der Anruf-Kontakt, sonst der Mieter, sonst der erste Kontakt mit Namen. */
+/* ── F100: „ZU WEM GEHST DU?“ – die Personen vor Ort aus der Karte ──
+   Frank 06.11.2026: zwei Ansprechpartner an der Karte (Mieter im 1. OG, Eigentümer im EG) – „wie unterscheidet mein REP-Auftrag, zu welchem ich gehe?“
+   → Entwurf Claude-Code\Entwurf_REP-Auftrag_Zu-wem-und-Zeit-in-Termin_2026-11-06.md → „baue“.
+   Nicht vor Ort sind Hausverwaltung, AG-Kontakt und Subunternehmer. Bei einer Firma zählt die Person (Feld „Ansprechpartner“ am Kontakt).
+   Die Lage im Haus (an der Karte nur bei Mieter und Eigentümer) steht in Klammern hinter dem Namen – so auch im Feld und im PDF.
+   Die Karte wird nie verändert (der 📞-Haken bleibt, wo er ist). */
+const FS_RA_NICHT_VOR_ORT=['hausverwaltung','ag','subunternehmer'];
+const FS_RA_ROLLEN={mieter:'Mieter',eigentuemer:'Eigentümer',privatkunde:'Privatkunde',sonstiges:'Sonstiges'};
+function _fsRaApPerson(k){return k?(String(k.ansprechpartner||'').replace(/\s+/g,' ').trim()||String(k.name||'').replace(/\s+/g,' ').trim()):'';}
+function _fsRaApName(k){const p=_fsRaApPerson(k),l=k?String(k.lage||'').replace(/\s+/g,' ').trim():'';return p?p+(l?' ('+l+')':''):'';}
+function _fsRaApTel(k){return k?String(k.tel||k.tel2||'').trim():'';}
+/* Die Knöpfe: [{text (so kommt es ins Feld), person, firma, rolle, lage, tel}] in der Reihenfolge der Karte */
+function _fsRaVorOrt(t){
+  const l=(t&&Array.isArray(t.kontakte))?t.kontakte:[];
+  return l.filter(k=>k&&_fsRaApPerson(k)&&FS_RA_NICHT_VOR_ORT.indexOf(String(k.rolle||''))<0).map(k=>{
+    const person=_fsRaApPerson(k),name=String(k.name||'').replace(/\s+/g,' ').trim();
+    return {text:_fsRaApName(k),person:person,firma:(name&&name!==person)?name:'',rolle:FS_RA_ROLLEN[k.rolle]||String(k.rolle||'').trim()||'Kontakt',lage:String(k.lage||'').replace(/\s+/g,' ').trim(),tel:_fsRaApTel(k)};
+  });
+}
+/* Ist dieser Knopf gewählt? Gleich dem Feld – oder (REP-Aufträge von vor F100) gleich dem Namen ohne Lage */
+function _fsRaVorOrtGewaehlt(b,p){
+  const a=String((b&&b.kopf&&b.kopf.ansprechpartner)||'').replace(/\s+/g,' ').trim();
+  return !!a&&!!p&&(a===p.text||a===p.person);
+}
+function _fsRaVorOrtSetzen(b,p){
+  if(!b||!p)return false;
+  if(!b.kopf||typeof b.kopf!=='object')b.kopf={};
+  b.kopf.ansprechpartner=p.text;b.kopf.telefon=p.tel; /* auch leer: die Nummer der vorigen Person soll nicht stehen bleiben */
+  return true;
+}
+function _fsRaBeiText(b){const a=String((b&&b.kopf&&b.kopf.ansprechpartner)||'').replace(/\s+/g,' ').trim();return a?'bei '+a:'';}
+/* Was die Karte für den Kopf hergibt (reine Funktion). Ansprechpartner: der Anruf-Kontakt, sonst der Mieter, sonst der erste Kontakt mit Namen.
+   F100: Name = die Person (bei einer Firma der Ansprechpartner) + Lage im Haus in Klammern – wie die Knöpfe „Zu wem gehst du?“. */
 function _fsRaAusKarte(t){
-  const kontakte=(t&&Array.isArray(t.kontakte))?t.kontakte.filter(k=>k&&String(k.name||'').trim()):[];
+  const kontakte=(t&&Array.isArray(t.kontakte))?t.kontakte.filter(k=>k&&_fsRaApPerson(k)):[];
   const ap=kontakte.find(k=>k.anrufKontakt)||kontakte.find(k=>k.rolle==='mieter')||kontakte[0]||null;
   const tags=((t&&Array.isArray(t.tags))?t.tags:[]).map(x=>String(x||'').trim()).filter(Boolean);
   const ausTitel=/(?:^|\D)(2\d{5})(?!\d)/.exec(String((t&&t.title)||''));
@@ -12928,8 +12961,8 @@ function _fsRaAusKarte(t){
     kostenstelle:tags.length?tags.join(', '):(ausTitel?ausTitel[1]:''),
     repNr:String((t&&t.repNr)||'').trim(),
     kundenNr:String((t&&t.kundenNr)||'').trim(),
-    ansprechpartner:ap?String(ap.name).trim():'',
-    telefon:ap?String(ap.tel||ap.tel2||'').trim():'',
+    ansprechpartner:ap?_fsRaApName(ap):'',
+    telefon:ap?_fsRaApTel(ap):'',
     schadensbild:String((t&&t.schadensbild)||'').trim()
   };
 }
@@ -13036,6 +13069,38 @@ function _fsRaDatumNachziehen(b){
   if(b.datum===d)return false;
   b.datum=d;return true;
 }
+/* ── F100: ZEIT IN DEN TERMIN – je Tag der erste Start und das letzte Ende ──
+   Wie bei Vorab-, Begehungs-, Ortstermin- und Wartungsprotokoll überträgt Frank am PC die Zeit in den Außer-Haus-Termin der Karte („📅 Zeit in Termin
+   übertragen“, Fenster _pamVbZeitUebertragen in PAM Desktop). Der REP-Auftrag hat mehrere Zeilen, auch über mehrere Tage: je Tag EIN Termin, vom ersten
+   Start bis zum letzten Ende (Pausen sind darin; die echte Arbeitszeit bleibt die Summe im REP-Auftrag).
+   Gibt die Tage sortiert zurück: [{iso, datum, von, bis, art, fehlerId}] – art wie _fsVbZeitStatus (ok · ohne · endeFehlt · endeVor · endeGleich).
+   Eine Zeile ohne Ende (oder ohne Start) macht den ganzen Tag unvollständig; eine Zeile mit Ende vor dem Start zeigt der Tag mit genau dieser Zeile. */
+function _fsRaTage(b){
+  const tage={};
+  ((b&&Array.isArray(b.zeiten))?b.zeiten:[]).forEach(z=>{
+    if(!z)return;
+    const iso=_fsRaDatumIso(z.datum),von=_fsRaUhr(z.von),bis=_fsRaUhr(z.bis);
+    if(!iso||(!von&&!bis))return;
+    const d=tage[iso]||(tage[iso]={iso:iso,datum:_fsRaDatumAusIso(iso),von:'',bis:'',fehlt:null,falsch:null});
+    if(!von){if(!d.fehlt)d.fehlt={z:z,art:'ohne'};return;}
+    if(!bis){if(!d.fehlt)d.fehlt={z:z,art:'endeFehlt'};return;}
+    if(bis<=von){if(!d.falsch)d.falsch=z;return;}
+    if(!d.von||von<d.von)d.von=von;
+    if(!d.bis||bis>d.bis)d.bis=bis;
+  });
+  return Object.keys(tage).sort().map(iso=>{
+    const d=tage[iso];
+    if(d.fehlt){const z=d.fehlt.z;return {iso:iso,datum:d.datum,von:d.fehlt.art==='ohne'?'':_fsRaUhr(z.von),bis:'',art:d.fehlt.art,fehlerId:String(z.id||'')};}
+    if(d.falsch){const z=d.falsch,v=_fsRaUhr(z.von),e=_fsRaUhr(z.bis);return {iso:iso,datum:d.datum,von:v,bis:e,art:e===v?'endeGleich':'endeVor',fehlerId:String(z.id||'')};}
+    return {iso:iso,datum:d.datum,von:d.von,bis:d.bis,art:'ok',fehlerId:''};
+  });
+}
+/* Ein Tag als „Protokoll mit Beginn/Ende“ – so liest ihn das Fenster in PAM Desktop (wie einen früheren Ortstermin) */
+function _fsRaTagBericht(b,d){
+  return {id:b&&b.id,vorlage:b&&b.vorlage,art:b&&b.art,titel:b&&b.titel,datum:d?d.datum:'',kopf:Object.assign({},(b&&b.kopf)||{},{beginn:d?d.von:'',ende:d?d.bis:''})};
+}
+/* Kurzer Tag für die Knöpfe: „Di 03.11.“ */
+function _fsRaTagKurz(d){const wt=_fsRaWochentag(d&&d.datum);return [wt,String((d&&d.datum)||'').slice(0,6)].filter(Boolean).join(' ');}
 /* ── F43: UNTERSCHRIFT DES KUNDEN ──
    Frank 05.10.2026: „ich möchte doch ein Feld Unterschrift für den Kunden … dann kann ich ihm das per PDF schicken“ · „das Feld vergrößern, dass er Platz hat“ → „baue“.
    bericht.unterschrift = {striche:[[[x,y],…],…], v, name, zeit} oder null. Die Punkte sind Anteile 0…1 des Rahmens UM die Unterschrift, v ist Breite : Höhe
@@ -13129,7 +13194,8 @@ function _openRepAuftrag(existingIdx){
   const hdrMeta=document.createElement('div');hdrMeta.style.cssText='flex:1;min-width:0;';
   const hdrT=document.createElement('div');hdrT.style.cssText='font-size:var(--fs16,16px);font-weight:700;color:#fff;';hdrT.textContent='🔧 REP-Auftrag';
   const hdrS=document.createElement('div');hdrS.style.cssText='font-size:var(--fs12,12px);color:rgba(255,255,255,.8);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-  hdrMeta.append(hdrT,hdrS);
+  const hdrB=document.createElement('div');hdrB.setAttribute('data-fs-ra-bei','1');hdrB.style.cssText='font-size:var(--fs12,12px);color:#fff;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'; /* F100: eigene Zeile „bei Name (Lage)“ – am Handy wäre sie hinter der Adresse abgeschnitten */
+  hdrMeta.append(hdrT,hdrS,hdrB);
   hdr.append(closeBtn,hdrMeta);
 
   const body=document.createElement('div');
@@ -13142,10 +13208,83 @@ function _openRepAuftrag(existingIdx){
     const h=document.createElement('div');h.style.cssText='font-size:var(--fs13,13px);font-weight:700;color:var(--fs-hfa,'+FS_FARBE+');border-left:4px solid '+FS_FARBE+';padding-left:8px;margin-bottom:8px;';h.textContent=titel;
     s.appendChild(h);return s;
   };
-  const kopfzeile=()=>{hdrS.textContent=_fsRaKurz(bericht)||t.adresse||t.title||'';};
+  const kopfzeile=()=>{hdrS.textContent=_fsRaKurz(bericht)||t.adresse||t.title||'';const bt=_fsRaBeiText(bericht);hdrB.textContent=bt;hdrB.style.display=bt?'':'none';}; /* F100: zweite Zeile „bei Name (Lage)“ */
+
+  /* ── F100: „Zu wem gehst du?“ – ein Knopf je Person vor Ort; ein Tipp füllt „Ansprechpartner vor Ort“ und „Telefon“ ── */
+  function _raVorOrtTeil(){
+    const personen=_fsRaVorOrt(currentTask()||t);
+    if(!personen.length)return null;
+    const w=document.createElement('div');w.setAttribute('data-fs-ra-vorort','1');
+    w.style.cssText='margin:14px 14px 0;border:2px solid '+FS_FARBE+';border-radius:10px;padding:10px 12px;background:rgba(31,95,139,.06);';
+    const h=document.createElement('div');h.style.cssText='font-size:var(--fs13,13px);font-weight:700;color:var(--fs-hfa,'+FS_FARBE+');margin-bottom:8px;';
+    h.textContent='Zu wem gehst du? – eins antippen';
+    w.appendChild(h);
+    const liste=document.createElement('div');liste.style.cssText='display:flex;flex-direction:column;gap:6px;';
+    personen.forEach((p,i)=>{
+      const an=_fsRaVorOrtGewaehlt(bericht,p);
+      const k=document.createElement('button');k.type='button';k.setAttribute('data-fs-ra-person',String(i));k.setAttribute('data-an',an?'1':'0');
+      /* gewählt: kräftig blau mit weißer Schrift – hell wie dunkel gut zu sehen (ein blasser Ton war im Dunkelmodus dunkler als die anderen Knöpfe) */
+      k.style.cssText='display:flex;gap:10px;align-items:center;width:100%;text-align:left;font-family:inherit;cursor:pointer;border-radius:10px;min-height:var(--fsh44,44px);padding:8px 12px;'
+        +(an?'border:2px solid '+FS_FARBE+';background:'+FS_FARBE+';color:#fff;':'border:2px solid var(--border);background:var(--bg3);color:var(--text);');
+      const mark=document.createElement('span');mark.textContent=an?'✓':'○';mark.style.cssText='flex:0 0 auto;width:20px;text-align:center;font-size:var(--fs16,16px);font-weight:700;color:'+(an?'#fff':'var(--text2)')+';';
+      const txt=document.createElement('span');txt.style.cssText='flex:1;min-width:0;';
+      const z1=document.createElement('span');z1.style.cssText='display:block;font-size:var(--fs15,15px);';
+      const nm=document.createElement('b');nm.textContent=p.person;z1.appendChild(nm);
+      z1.appendChild(document.createTextNode(' · '+p.rolle+(p.lage?' · ':'')));
+      if(p.lage){const lg=document.createElement('b');lg.textContent=p.lage;z1.appendChild(lg);}
+      const z2=document.createElement('span');z2.style.cssText='display:block;font-size:var(--fs13,13px);color:'+(an?'rgba(255,255,255,.88)':'var(--text2)')+';';
+      z2.textContent=[p.tel||'keine Telefonnummer an der Karte',p.firma].filter(Boolean).join(' · ');
+      txt.append(z1,z2);k.append(mark,txt);
+      k.onclick=()=>{if(_fsRaVorOrtGewaehlt(bericht,p))return;_fsRaVorOrtSetzen(bericht,p);scheduleSave();_raRender();};
+      liste.appendChild(k);
+    });
+    w.appendChild(liste);
+    const hw=document.createElement('div');hw.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin-top:8px;';
+    hw.textContent='Hausverwaltung und Auftraggeber stehen hier nicht – die sind nicht vor Ort. Die Karte bleibt, wie sie ist.';
+    w.appendChild(hw);
+    return w;
+  }
+  /* ── F100: am PC je Tag „📅 … in Termin übertragen“ (Fenster aus PAM Desktop, dasselbe wie bei den anderen Formularen) ── */
+  function _raTerminTeil(){
+    if(!_fsAmPc()||typeof _pamVbZeitStand!=='function'||typeof _pamVbZeitUebertragen!=='function')return null;
+    const w=document.createElement('div');w.setAttribute('data-fs-ra-termine','1');
+    w.style.cssText='margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:6px;';
+    const neu=()=>{
+      w.innerHTML='';
+      const tage=_fsRaTage(bericht);
+      if(!tage.length){w.style.display='none';return;}
+      w.style.display='flex';
+      const l=document.createElement('div');l.style.cssText='font-size:var(--fs12,12px);color:var(--text2);';
+      l.textContent='In den Außer-Haus-Termin der Karte – je Tag ein Termin, vom ersten Start bis zum letzten Ende';
+      w.appendChild(l);
+      tage.forEach(d=>{
+        const tag=_fsRaTagKurz(d),ct=currentTask()||t;
+        let txt,art;
+        if(d.art!=='ok'){art='fehlt';txt='⚠ '+tag+': '+(d.art==='ohne'?'Start fehlt':(d.art==='endeFehlt'?'Ende fehlt':'Ende liegt vor Start'))+' – erst eintragen';}
+        else{
+          let st={art:'neu',txt:''};try{st=_pamVbZeitStand(_fsRaTagBericht(bericht,d),ct)||st;}catch(e){console.warn('[REP-Auftrag] Termin-Stand:',e);}
+          art=st.art;
+          txt=st.art==='fertig'?st.txt:(st.art==='erneut'?'↻ '+tag+': Zeit geändert – erneut übertragen':'📅 '+tag+': '+d.von+'–'+d.bis+' in Termin übertragen');
+        }
+        const k=document.createElement('button');k.type='button';k.textContent=txt;k.setAttribute('data-fs-ra-termin',art);k.setAttribute('data-tag',d.iso);
+        k.style.cssText=KNOPF+'width:100%;text-align:left;font-weight:600;'+(art==='fehlt'?'border-color:#d9480f;':(art==='fertig'?'border-color:'+FS_FARBE+';':''));
+        k.onclick=()=>{
+          _pamVbZeitUebertragen(bericht,currentTask()||t,()=>{_raRender();},()=>{ /* „✏ Zeit eintragen“: zur Zeile, die fehlt */
+            const zl=d.fehlerId?body.querySelector('[data-fs-ra-zeit="'+d.fehlerId+'"]'):null;
+            const fe=zl?zl.querySelector('[data-fs-ra-z="'+(d.art==='ohne'?'von':'bis')+'"]'):null;
+            if(zl&&zl.scrollIntoView)zl.scrollIntoView({block:'center'});if(fe&&fe.focus)fe.focus();
+          },{datum:d.datum,beginn:d.von,ende:d.bis});
+        };
+        w.appendChild(k);
+      });
+    };
+    w._neu=neu;neu();
+    return w;
+  }
 
   function _raRender(){
     body.innerHTML='';kopfzeile();
+    {const vo=_raVorOrtTeil();if(vo)body.appendChild(vo);} /* F100 */
 
     /* ── Zeiten (F43): je Tag oder Einsatz eine Zeile – Datum (Kalender), von, bis; Dauer und Summe rechnen sich ── */
     const zSek=abschnitt('Zeiten');
@@ -13198,7 +13337,9 @@ function _openRepAuftrag(existingIdx){
         if(!_fsRaZeitNeu(bericht,_fsRaJetzt().datum,'')){voll();return;}
         _fsRaDatumNachziehen(bericht);scheduleSave();_raRender();
       }));
-    zSek.appendChild(zKnoepfe);body.appendChild(zSek);
+    zSek.appendChild(zKnoepfe);
+    {const tt=_raTerminTeil();if(tt){zSek.appendChild(tt);zSek.addEventListener('change',()=>{if(tt._neu)tt._neu();});}} /* F100: Zeit von Hand geändert → Knöpfe rechnen neu */
+    body.appendChild(zSek);
 
     /* ── Ausgeführte Arbeiten ── */
     const aSek=abschnitt('Ausgeführte Arbeiten');
