@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F100';
+const PAM_FORMULARE_VERSION='F101';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -13940,8 +13940,12 @@ function _fsListeZeile(b,t){
   if(!b)return null;
   const kartenname=String((t&&(t.title||t.name))||'').trim();
   if(b.vorlage==='wartungsprotokoll'&&b.art==='rep'){ /* F42: REP-Auftrag – Kürzel REP, klein darunter Rep.-Nr. und der Anfang der Arbeiten */
+    /* F101 (Frank 06.11.2026: „wenn ich da 5 mal hingehe … dass ich das später wiederfinde“): dazu „bei Name (Lage)“ aus „Ansprechpartner vor Ort“ –
+       so sind mehrere REP-Aufträge einer Karte zu unterscheiden (wie „bei wem“ der Vorabbesichtigung). Vor den Arbeiten, damit es am PC beim Kürzen bleibt.
+       ⛔ Bewusst HIER ausgeschrieben, nicht über _fsRaBeiText: Prüfungen schneiden Funktionen einzeln aus (wie bei _fsPdfName). */
     const adr=String((b.kopf&&b.kopf.objektAdresse)||'').trim(),rn=String((b.kopf&&b.kopf.repNr)||'').trim(),arb=String(b.arbeiten||'').replace(/\s+/g,' ').trim();
-    return {kurz:'REP',lang:'REP-Auftrag',name:kartenname||adr||'REP-Auftrag',sub:[rn?'Rep.-Nr. '+rn:'',arb.length>50?arb.slice(0,50)+' …':arb,(b.unterschrift&&Array.isArray(b.unterschrift.striche)&&b.unterschrift.striche.length)?'unterschrieben':''].filter(Boolean).join(' · ')};
+    const bei=String((b.kopf&&b.kopf.ansprechpartner)||'').replace(/\s+/g,' ').trim();
+    return {kurz:'REP',lang:'REP-Auftrag',name:kartenname||adr||'REP-Auftrag',sub:[rn?'Rep.-Nr. '+rn:'',bei?'bei '+bei:'',arb.length>50?arb.slice(0,50)+' …':arb,(b.unterschrift&&Array.isArray(b.unterschrift.striche)&&b.unterschrift.striche.length)?'unterschrieben':''].filter(Boolean).join(' · ')};
   }
   if(b.vorlage==='wartungsprotokoll'&&b.art==='anschlag'){ /* F74: Prüfprotokoll Anschlageinrichtung – Kürzel PP-ANSCHLAG, klein: Hersteller, Punkte, Gesamtergebnis */
     const k=b.kopf||{};let tot=0,frei=0,ges=0;(Array.isArray(b.punkte)?b.punkte:[]).forEach(p=>{tot++;if(p&&p.ergebnis==='frei')frei++;else if(p&&p.ergebnis==='gesperrt')ges++;});
