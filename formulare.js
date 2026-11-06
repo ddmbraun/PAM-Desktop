@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F97';
+const PAM_FORMULARE_VERSION='F98';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -867,6 +867,35 @@ async function _fsFpEinbrennen(d,f){
     return {dataUrl:c.toDataURL('image/jpeg',0.9),w:c.width,h:c.height};
   }catch(e){console.warn('[Foto-Pins] PDF:',e);return d;}
 }
+/* ── F98: 📌 FREIE PINS IN DER SKIZZE – wie „Foto markieren“, nur in der Skizze ─────────────────────────────────────────────────────────
+   Frank 06.11.2026 („Ich möchte den roten Pin ändern, nicht den Namen der Stelle“ → Entwurf Claude-Code\Entwurf_Pins-in-der-Skizze_2026-11-06.html
+   → „baue alle formulare“): ein Pin mit EIGENER Beschriftung, der KEINE Stelle ist – blauer Kreis mit Buchstabe A, B, C …, Pfeil auf den Ort im Bild.
+   Gespeichert an der Skizze selbst (sk.pins, dieselbe Form wie foto.pins; dieselben Helfer _fsFpNeu/_fsFpBewegen/_fsFpRingSetzen/_fsFpText/
+   _fsFpWeg/_fsFpTreffer/_fsFpLage – die Skizzenfläche ist 900 × 640 wie die Foto-Fläche, Maßstab 1). In jeder Skizze mit Zeichenfenster:
+   Vorabbesichtigung und Ortsterminprotokoll (innen und außen), Dach-, PV- und Anschlag-Skizze und die Raumskizze des Begehungsprotokolls.
+   Der Text steht in der Liste unter der Skizze und im PDF („A = Fallrohr“), nie im Kreis. Nur Feststellungen, keine Bewertung. */
+function _fsSkPinName(i){return String.fromCharCode(65+Math.max(0,Math.min(25,+i||0)));} /* A, B, C … (höchstens FS_FP_MAX Pins = A…T) */
+const FS_SK_PIN_FARBE='#1f5f8b';
+function _fsSkPinLegende(sk){return _fsFpListe(sk).map((p,i)=>_fsSkPinName(i)+' = '+(String(p.t||'').trim()||'ohne Text'));}
+/* Zeichnet die freien Pins auf die W×H-Skizzenfläche; sel = gewählter Pin, lose = er lässt sich verschieben (beides nur im Zeichenfenster, nie im gespeicherten Bild) */
+function _fsSkPinsZeichnen(g,sk,W,H,sel,lose){
+  _fsFpListe(sk).forEach((p,i)=>{
+    const L=_fsFpLage(p,W,H),s=L.s,R=L.R,dx=Math.cos(L.ang*Math.PI/180),dy=-Math.sin(L.ang*Math.PI/180),nx=-dy,ny=dx;
+    const sx=L.x-dx*R,sy=L.y-dy*R,ex=L.px+dx*22*s,ey=L.py+dy*22*s;
+    g.lineCap='round';g.lineJoin='round';
+    g.lineWidth=13*s;g.strokeStyle='#ffffff';g.beginPath();g.moveTo(sx,sy);g.lineTo(ex,ey);g.stroke();
+    g.lineWidth=7*s;g.strokeStyle=FS_SK_PIN_FARBE;g.beginPath();g.moveTo(sx,sy);g.lineTo(ex,ey);g.stroke();
+    g.beginPath();g.moveTo(L.px,L.py);g.lineTo(L.px+(dx*32+nx*14)*s,L.py+(dy*32+ny*14)*s);g.lineTo(L.px+(dx*32-nx*14)*s,L.py+(dy*32-ny*14)*s);g.closePath();g.fillStyle=FS_SK_PIN_FARBE;g.fill();g.lineWidth=3*s;g.strokeStyle='#ffffff';g.stroke();
+    if(sel===i){
+      g.strokeStyle='#d9480f';g.lineWidth=4*s;g.beginPath();g.arc(L.x,L.y,R+10*s,0,Math.PI*2);g.stroke();
+      if(lose){g.lineWidth=3*s;if(typeof g.setLineDash==='function')g.setLineDash([8*s,6*s]);g.beginPath();g.arc(L.px,L.py,30*s,0,Math.PI*2);g.stroke();if(typeof g.setLineDash==='function')g.setLineDash([]);}
+    }
+    g.fillStyle=FS_SK_PIN_FARBE;g.beginPath();g.arc(L.x,L.y,R,0,Math.PI*2);g.fill();
+    g.strokeStyle='#ffffff';g.lineWidth=4*s;g.beginPath();g.arc(L.x,L.y,R,0,Math.PI*2);g.stroke();
+    g.fillStyle='#ffffff';g.font='bold '+Math.round(28*s)+'px sans-serif';g.textAlign='center';g.textBaseline='middle';
+    g.fillText(_fsSkPinName(i),L.x,L.y+1*s);
+  });
+}
 /* Das Fenster „Foto markieren“: Foto groß, „📌 Pin setzen“ → ins Foto tippen → Beschriftung. Ein gesetzter Pin ist fest; „✥ Verschieben“ macht den gewählten lose
    (Pfeilspitze oder Kreis ziehen, oder an die richtige Stelle tippen). Darunter die Liste „1 = Schaden …“. Dasselbe Fenster am Tablet und am PC. fertig() beim Schließen. */
 function _fsFotoPinsFenster(bericht,f,fertig){
@@ -1238,7 +1267,8 @@ function _fsWordAufbau(b,task){
     _fsAsListe(b).forEach(sk=>{ /* Skizzen des Teils – nur, wenn etwas eingezeichnet ist */
       if(_fsAsTyp(sk)!==typ||!_fsAsBenutzt(b,sk))return;
       const mk=_fsAsMarken(b,sk),nm=hat(sk.name)?String(sk.name).trim():(typ==='innen'?'Raum':'Außen');
-      const tx='Skizze '+nm+', Ansicht '+_fsAsAnsicht(sk)+' (nicht maßstäblich).'+(_fsUmZeile(sk)?' '+_fsUmZeile(sk)+'.':'')+(mk.length?' '+mk.map(q=>q.n+' = '+q.label+(hat(_fsVbWo(q.s))?' ('+_fsVbWo(q.s)+')':'')).join(' · '):''); /* F60: mit Bauteil */
+      const pz=(typeof _fsSkPinLegende==='function')?_fsSkPinLegende(sk):[]; /* F98 */
+      const tx='Skizze '+nm+', Ansicht '+_fsAsAnsicht(sk)+' (nicht maßstäblich).'+(_fsUmZeile(sk)?' '+_fsUmZeile(sk)+'.':'')+(mk.length?' '+mk.map(q=>q.n+' = '+q.label+(hat(_fsVbWo(q.s))?' ('+_fsVbWo(q.s)+')':'')).join(' · '):'')+(pz.length?' '+pz.join(' · '):''); /* F60: mit Bauteil · F98: freie Pins */
       teil.push({a:'unter',t:'Skizze '+(typ==='innen'?'innen':'außen')+' – '+nm});
       teil.push({a:'skizze',sk:sk,t:tx,ersatz:'Die Skizze „'+nm+'“ konnte nicht als Bild eingefügt werden.'});
     });
@@ -2542,6 +2572,8 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
         const mk=_fsAsMarken(bericht,sk);
         if(mk.length){const lg=document.createElement('div');lg.setAttribute('data-fs-aslegende',sk.id);lg.style.cssText='font-size:var(--fs14,14px);color:var(--text);margin:6px 0 2px;';mk.forEach(q=>{const z=document.createElement('div');z.style.cssText='padding:2px 0;';const nf=(Array.isArray(q.s.fotoRefs)?q.s.fotoRefs:[]).filter(r=>(bericht.fotos||[]).some(f=>_fsRefPasst(f,r))).length;z.textContent=q.n+' = '+q.label+(_fsVbWo(q.s)?' · '+_fsVbWo(q.s):'')+(nf?' · 📷 '+nf:'');lg.appendChild(z);});k.appendChild(lg);}
         else{const hi=document.createElement('div');hi.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin:4px 0;';hi.textContent='Noch keine Stelle in der Skizze – „Einzeichnen“ antippen, oben eine Stelle wählen und in die Skizze tippen.';k.appendChild(hi);}
+        const pz=(typeof _fsSkPinLegende==='function')?_fsSkPinLegende(sk):[]; /* F98: freie Pins (A, B, C …) unter den Stellen */
+        if(pz.length){const pl=document.createElement('div');pl.setAttribute('data-fs-aspins',sk.id);pl.style.cssText='font-size:var(--fs14,14px);color:var(--text);margin:2px 0;';pz.forEach(s2=>{const z2=document.createElement('div');z2.style.cssText='padding:2px 0;';z2.textContent='📌 '+s2;pl.appendChild(z2);});k.appendChild(pl);}
         const nh=document.createElement('div');nh.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin:4px 0;line-height:1.4;';nh.textContent='Nicht maßstäblich. Die Nummern sind die Stellen dieses Bereichs – ihre Fotos hängen an der Stelle. Im PDF steht die Skizze nur, wenn etwas eingezeichnet ist.';k.appendChild(nh);
         const weg=document.createElement('button');weg.type='button';weg.setAttribute('data-fs-asweg',sk.id);weg.textContent='✕ Skizze entfernen';
         weg.style.cssText=S_KNOPF+'display:block;width:100%;margin-top:6px;border:1px solid var(--border);background:transparent;color:var(--text2);';
@@ -3178,7 +3210,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const dreh=document.createElement('button');dreh.type='button';dreh.setAttribute('data-fs-skizze-dreh','1');dreh.textContent='↻ Drehen';
     dreh.style.cssText=S_KNOPF+'min-height:var(--fsh44,44px);border:1.5px solid var(--fs-krd,'+FS_FARBE+');background:var(--fs-kfl,transparent);color:var(--text);';
     dreh.onclick=()=>{
-      if((_fsBgStricheAnzahl(sk)||_fsBgStempelAnzahl(sk))&&!_fsFrage('Die eingezeichneten Striche und Stempel drehen nicht mit. Trotzdem drehen?'))return; // F5/F7
+      if((_fsBgStricheAnzahl(sk)||_fsBgStempelAnzahl(sk)||(typeof _fsFpListe==='function'&&_fsFpListe(sk).length))&&!_fsFrage('Die eingezeichneten Striche und Stempel drehen nicht mit. Trotzdem drehen?'))return; // F5/F7 · F98: auch Pins drehen nicht mit
       sk.dreh=((parseInt(sk.dreh,10)||0)+1)%4;scheduleSave();neuZeichnen();
     };
     masse.append(_bgLabelFeld('Länge W1/W3 (m)',_inp(sk.l,'z. B. 4,5',v=>{sk.l=v;neuZeichnen();},true)),_bgLabelFeld('Breite W2/W4 (m)',_inp(sk.b,'z. B. 3,2',v=>{sk.b=v;neuZeichnen();},true)),dreh);
@@ -3191,6 +3223,8 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     ez.style.cssText=S_KNOPF+'display:block;width:calc(100% - 28px);margin:6px 14px 2px;min-height:48px;border:1.5px solid '+FS_FARBE+';background:rgba(31,95,139,.10);color:var(--text);text-align:left;';
     ez.onclick=()=>_fsBgEinzeichnenZeigen(bericht,r,()=>{_neuBauen();}); // F5: danach neu aufbauen, damit Bild und Strichzahl stimmen
     w.appendChild(ez);
+    { const pz=(typeof _fsSkPinLegende==='function')?_fsSkPinLegende(sk):[]; /* F98: freie Pins (A, B, C …) */
+      if(pz.length){const pd=document.createElement('div');pd.setAttribute('data-fs-skizze-pins','1');pd.style.cssText='font-size:var(--fs14,14px);color:var(--text);padding:2px 14px;';pz.forEach(s2=>{const d=document.createElement('div');d.style.padding='2px 0';d.textContent='📌 '+s2;pd.appendChild(d);});w.appendChild(pd);} }
     w.appendChild(_bgInfo('Stempel setzt du in die Mitte, ziehst sie an die richtige Stelle und drehst sie; Striche zeichnest du frei. Beides dreht NICHT mit, wenn du die Skizze später drehst – stelle erst Länge, Breite und Drehung ein. Beides kommt auch ins PDF.'));
     w.appendChild(_bgInfo('Blau = Fenster, Bogen = Tür. Die Punkte sind deine Messstellen (Nummern wie im PDF); sie zeigen die Wand, nicht die genaue Stelle und Höhe. „Drehen" legt fest, welche Wand unten liegt.'));
     const zeilen=document.createElement('div');zeilen.style.cssText='padding:2px 14px;';
@@ -4612,7 +4646,7 @@ function _fsAsWeg(b,sk){
   if(typeof _fsAsIstWp==='function'&&_fsAsIstWp(b))_fsWpAlleItems(b).forEach(it=>{if(_fsAsMarkeOk(it)&&it.skz.k===sk.id)it.skz=null;}); /* F82: auch die Mängel-Marken */
   return true;
 }
-function _fsAsBenutzt(b,sk){return _fsBgStempelAnzahl(sk)>0||_fsBgStricheAnzahl(sk)>0||_fsAsMarken(b,sk).length>0||_fsUmDa(sk);} /* F62: auch mit Umriss */
+function _fsAsBenutzt(b,sk){return _fsBgStempelAnzahl(sk)>0||_fsBgStricheAnzahl(sk)>0||_fsAsMarken(b,sk).length>0||_fsUmDa(sk)||(typeof _fsFpListe==='function'&&_fsFpListe(sk).length>0);} /* F62: auch mit Umriss · F98: auch mit freien Pins */
 /* Beschriftung der vier Ränder [oben, rechts, unten, links]: Wand fest; Dach nur, wenn „oben ist …“ gewählt wurde (dann im Uhrzeigersinn weiter) */
 function _fsAsRaender(sk){
   if(sk&&(sk.aussen==='raum'||sk.aussen==='decke'))return ['Wand 3','Wand 4','Wand 1','Wand 2']; /* F36: Raum von oben / Decke von unten – Wand 1 liegt unten */
@@ -4629,6 +4663,7 @@ function _fsAsKurz(b,sk){
   if(nm)t.push(nm+' Stelle'+(nm===1?'':'n'));
   if(ns)t.push(ns+' Stempel');
   if(nl)t.push(nl+' Strich'+(nl===1?'':'e'));
+  const np=(typeof _fsFpListe==='function')?_fsFpListe(sk).length:0;if(np)t.push(np+' Pin'+(np===1?'':'s')); /* F98 */
   if(_fsUmDa(sk))t.push(_fsUmKurz(sk)); /* F62 */
   if(t.length===1)t.push('noch leer');
   return t.join(' · ');
@@ -4715,6 +4750,7 @@ function _fsAsZeichnen(g,b,sk,opt){
   _fsBgStricheZeichnen(g,r);
   _fsStempelLegende(g,sk,W,H); /* F65: Legende der Stempel unten links */
   if(!(opt&&opt.ohneMarken))_fsAsMarkenZeichnen(g,b,sk,null);
+  if(typeof _fsSkPinsZeichnen==='function')_fsSkPinsZeichnen(g,sk,W,H,-1,false); /* F98: freie Pins (A, B, C …) obenauf */
 }
 const _fsKompass={grad:null,zeit:0,laeuft:false,h:null};
 function _fsKompassStart(){
@@ -6118,6 +6154,7 @@ function _fsBgSkizzeZeichnen(g,b,r,opt){
   });
   _fsBgStempelZeichnen(g,r); // F7: Stempel (Tür, Fenster, Schrank, Heizkörper) – unter den Strichen
   _fsBgStricheZeichnen(g,r); // F5: von Hand Eingezeichnetes ganz obenauf
+  if(typeof _fsSkPinsZeichnen==='function')_fsSkPinsZeichnen(g,(r&&r.skizze)||null,W,H,-1,false); /* F98: freie Pins (A, B, C …) obenauf */
 }
 /* ── F5: Freihand einzeichnen (Tür, Fenster, Möbel … mit Finger oder Stift) ──────────────────────────────────────────
    Frank (01.10.2026): „Ich zeichne das einfach per Hand ein.“ Die Striche liegen beim Raum: raum.skizze.striche = [{f:Farbe, p:[[x,y],…]}], x/y als
@@ -6830,7 +6867,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig,opt){ /* F82: opt.stelle = diesen Man
   const alt=_fsById('_fsEinzeichnen');if(alt){alt.remove();return;}
   const dk=_fsDok(b),dw=_fsWin(b); /* F69: Tasten und Fenstergröße des Fensters, in dem das Protokoll steht */
   const M=_fsSkMasse(sk),W=M.W,H=M.H; // F50: quer oder hoch
-  const unterlage=_fsBgSkizzeBild(b,Object.assign({},r,{skizze:Object.assign({},sk,{striche:[],stempel:[],umriss:null})}),{ohneMarken:true}); // die Zeichnung ohne Striche und Stempel (F33: und ohne Stellen-Nummern), die kommen live darüber
+  const unterlage=_fsBgSkizzeBild(b,Object.assign({},r,{skizze:Object.assign({},sk,{striche:[],stempel:[],umriss:null,pins:[]})}),{ohneMarken:true}); // die Zeichnung ohne Striche und Stempel (F33: und ohne Stellen-Nummern; F98: und ohne freie Pins), die kommen live darüber
   if(!unterlage){toast('Einzeichnen geht hier nicht (kein Zeichenbereich)','error',4000);return;}
   const ov=document.createElement('div');ov.id='_fsEinzeichnen';_fsSichtAn(ov);
   ov.style.cssText='position:fixed;inset:0;z-index:99999;background:var(--bg);color:var(--text);display:flex;flex-direction:column;';
@@ -6859,7 +6896,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig,opt){ /* F82: opt.stelle = diesen Man
   const pinchStart=()=>{ /* zweiter Finger: alles Angefangene fallen lassen, ab jetzt nur Zoom und Schieben */
     const p=[...zeiger.values()],rc=cv.getBoundingClientRect(),m=[(p[0][0]+p[1][0])/2,(p[0][1]+p[1][1])/2];
     pinch={d0:Math.max(1,Math.hypot(p[0][0]-p[1][0],p[0][1]-p[1][1])),z0:zoomF,fx:(m[0]-rc.left)/Math.max(1,rc.width),fy:(m[1]-rc.top)/Math.max(1,rc.height)};
-    aktiv=null;entwurf=null;ziehT=null;zieh=null;griffZieh=null;ziehS=null;ziehU=null;neuU=null;mausU=null;neu();
+    aktiv=null;entwurf=null;ziehT=null;zieh=null;griffZieh=null;ziehS=null;ziehU=null;neuU=null;mausU=null;ziehP=null;neu(); /* F98: auch der Pin-Zug endet */
   };
   const pinchMove=()=>{
     if(!pinch||zeiger.size<2)return;
@@ -6881,7 +6918,8 @@ function _fsBgEinzeichnenZeigen(b,r,fertig,opt){ /* F82: opt.stelle = diesen Man
   const bild=new Image();let bildDa=false;
   let werkzeug='frei',selT=-1,ziehT=null,entwurf=null,griffZieh=null;const verlauf=[]; /* F50: Werkzeug · angetipptes Teil · Teil verschieben · Vorschau der Form · Stempel-Griff · Rückgängig-Verlauf (nur in diesem Fenster) */
   let modus=sk.aussen?'stelle':'zeichnen',farbe=FS_BG_STRICH_FARBEN[0],aktiv=null,zieh=null,sel=-1,stiftGesehen=false,selS=null,ziehS=null,loseS=false,festGesagtS=false,neuText=null;
-  let selU=-1,ziehU=null,neuU=null,mausU=null,eckeNeuU=false; /* F62: Umriss – angetippte Ecke · Ecke wird gezogen · neue Ecke wird gezogen · Vorschau-Punkt · „＋ Ecke auf Kante“ wartet */ /* F34: loseS = gewählte Nummer lässt sich verschieben; neuText = Beschreibung einer neuen Stelle, die auf den Tipp in die Skizze wartet */ /* F33: Außenskizze beginnt bei „Stellen“; selS = gewählte Stelle, ziehS = Marke wird gezogen */
+  let selU=-1,ziehU=null,neuU=null,mausU=null,eckeNeuU=false; /* F62: Umriss – angetippte Ecke · Ecke wird gezogen · neue Ecke wird gezogen · Vorschau-Punkt · „＋ Ecke auf Kante“ wartet */
+  let selP=-1,ziehP=null,loseP=false,setzenP=false,festGesagtP=false; /* F98: freie Pins – gewählter Pin · Pin wird gezogen · lose · „📌 Pin setzen“ wartet */ /* F34: loseS = gewählte Nummer lässt sich verschieben; neuText = Beschreibung einer neuen Stelle, die auf den Tipp in die Skizze wartet */ /* F33: Außenskizze beginnt bei „Stellen“; selS = gewählte Stelle, ziehS = Marke wird gezogen */
   const wp=(typeof _fsAsIstWp==='function')&&_fsAsIstWp(b); /* F82: Dach-/PV-Protokoll – die Marken sind die Mängel M1, M2 …; „＋ neue Stelle“ und „Beschreibung ändern“ gibt es dort nicht */
   const anP=(typeof _fsIstAnschlag==='function')&&_fsIstAnschlag(b); /* F84: Prüfprotokoll Anschlageinrichtung – die Marken sind die Anschlagpunkte 1, 2, 3 … (⛔ nicht „an“: so heißt in der Stellen-Leiste schon der gewählte Knopf) */
   if(opt&&opt.stelle&&sk.aussen){modus='stelle';selS=opt.stelle;} /* F82 */
@@ -6894,6 +6932,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig,opt){ /* F82: opt.stelle = diesen Man
     _fsBgStricheZeichnen(g,r);
     if(sk.aussen)_fsStempelLegende(g,sk,W,H); /* F65 */
     if(sk.aussen)_fsAsMarkenZeichnen(g,b,sk,modus==='stelle'?selS:null,modus==='stelle'&&loseS); /* F33, F34 */
+    if(typeof _fsSkPinsZeichnen==='function')_fsSkPinsZeichnen(g,sk,W,H,modus==='pin'?selP:-1,modus==='pin'&&loseP); /* F98 */
     const st=(modus==='stempel'&&sel>=0&&Array.isArray(sk.stempel))?sk.stempel[sel]:null,m=st?_fsBgStempelBox(st):null; /* F41 */
     if(st&&m){ // Auswahlrahmen – nur hier im Fenster, nicht im gespeicherten Bild
       g.save();g.translate(st.x*W,st.y*H);g.rotate(((+st.r)||0)*Math.PI/180);
@@ -6918,12 +6957,13 @@ function _fsBgEinzeichnenZeigen(b,r,fertig,opt){ /* F82: opt.stelle = diesen Man
   const merken=()=>{verlauf.push(JSON.stringify(Array.isArray(sk.striche)?sk.striche:[]));if(verlauf.length>40)verlauf.shift();};
   const rueck=()=>{if(verlauf.length){sk.striche=JSON.parse(verlauf.pop());selT=-1;return true;}if(_fsBgStrichZurueck(sk)){selT=-1;return true;}return false;};
   const radieren=p=>{const i=_fsBgStrichTreffer(sk,p[0],p[1]);if(i<0)return;merken();if(_fsBgStrichWeg(sk,i)){selT=-1;scheduleSave();neu();leisteBauen();}};
+  const pinBeschriften=i=>{const q=_fsFpListe(sk)[i];if(!q)return;const tx=_fsEingabe('Beschriftung für Pin '+_fsSkPinName(i)+'\n(z. B. Fallrohr, Türschwelle)',String(q.t||''));if(tx===null)return;_fsFpText(q,tx);scheduleSave();neu();leisteBauen();}; /* F98 */
   const leisteBauen=()=>{
     try{const fst=dk.getElementById('_fsEzFotos');if(fst)fst.remove();}catch(e){} /* F83: der Foto-Streifen geht zu, sobald sich die Leiste ändert */
     leiste.innerHTML='';
-    (sk.aussen?[['stelle','① Stellen'],['stempel','▣ Stempel'],['zeichnen','✏ Zeichnen']].concat(sk.aussen==='dach'?[['umriss','⬠ Umriss']]:[]):[['zeichnen','✏ Zeichnen'],['stempel','▣ Stempel']]).forEach(([k,txt])=>{ /* F62: Umriss nur in der Draufsicht */
+    (sk.aussen?[['stelle','① Stellen'],['stempel','▣ Stempel'],['zeichnen','✏ Zeichnen']].concat(sk.aussen==='dach'?[['umriss','⬠ Umriss']]:[]).concat([['pin','📌 Pin']]):[['zeichnen','✏ Zeichnen'],['stempel','▣ Stempel'],['pin','📌 Pin']]).forEach(([k,txt])=>{ /* F62: Umriss nur in der Draufsicht · F98: 📌 Pin überall */
       const an=modus===k;
-      leiste.appendChild(knopf(txt,'border:3px solid '+(an?'var(--fs-krd,'+FS_FARBE+')':'var(--border)')+';background:'+(an?'var(--fs-can,rgba(31,95,139,.18))':'var(--fs-cfl,transparent)')+';',()=>{modus=k;sel=-1;selT=-1;loseS=false;neuText=null;selU=-1;neuU=null;mausU=null;eckeNeuU=false;neu();leisteBauen();},['data-fs-ez-modus',k]));
+      leiste.appendChild(knopf(txt,'border:3px solid '+(an?'var(--fs-krd,'+FS_FARBE+')':'var(--border)')+';background:'+(an?'var(--fs-can,rgba(31,95,139,.18))':'var(--fs-cfl,transparent)')+';',()=>{modus=k;sel=-1;selT=-1;loseS=false;neuText=null;selU=-1;neuU=null;mausU=null;eckeNeuU=false;selP=-1;ziehP=null;loseP=false;setzenP=false;neu();leisteBauen();},['data-fs-ez-modus',k]));
     });
     const trenn=document.createElement('span');trenn.style.cssText='width:1px;align-self:stretch;background:var(--border);';leiste.appendChild(trenn);
     if(modus==='stelle'){ /* F33: Stellen des Bereichs als Nummern in die Skizze setzen */
@@ -6951,6 +6991,26 @@ function _fsBgEinzeichnenZeigen(b,r,fertig,opt){ /* F82: opt.stelle = diesen Man
         :!selHier?selName+': in die Skizze tippen, wo sie ist'
         :loseS?selName+' ist lose: Pfeilspitze oder Kreis ziehen oder an die richtige Stelle tippen – dann „✓ Fest“'
         :selName+' ist fest (🔒) – „✥ Verschieben“ macht sie lose';
+      leiste.appendChild(z);
+    }else if(modus==='pin'){ /* F98: freie Pins mit eigener Beschriftung – wie „📌 Foto markieren“, nur in der Skizze; KEINE Stelle */
+      leiste.appendChild(knopf('📌 Pin setzen','border:3px solid '+(setzenP?FS_SK_PIN_FARBE:'var(--border)')+';background:'+(setzenP?'rgba(31,95,139,.18)':'var(--fs-cfl,transparent)')+';',()=>{setzenP=!setzenP;if(setzenP){selP=-1;loseP=false;}neu();leisteBauen();},['data-fs-ez-pinsetzen','1']));
+      const lp=_fsFpListe(sk);
+      if(selP>=lp.length)selP=-1;
+      lp.forEach((q,i)=>{
+        const an2=selP===i;
+        leiste.appendChild(knopf(_fsSkPinName(i),'border:3px solid '+(an2?'#d9480f':'var(--border)')+';background:'+(an2?'rgba(217,72,15,.16)':'var(--fs-cfl,transparent)')+';',()=>{selP=i;loseP=false;setzenP=false;neu();leisteBauen();},['data-fs-ez-pin',_fsSkPinName(i)]));
+      });
+      const pSel=selP>=0?lp[selP]:null;
+      if(pSel){
+        leiste.appendChild(knopf('Beschriftung ändern',RAND,()=>pinBeschriften(selP),['data-fs-ez-pintext','1']));
+        leiste.appendChild(knopf(loseP?'✓ Fest':'✥ Verschieben','border:3px solid '+(loseP?'#2e7d4f':'var(--border)')+';background:'+(loseP?'rgba(46,125,79,.16)':'var(--fs-cfl,transparent)')+';',()=>{loseP=!loseP;neu();leisteBauen();},['data-fs-ez-pinlose','1']));
+        leiste.appendChild(knopf('Entfernen',RAND+'color:var(--red);',()=>{if(String(pSel.t||'').trim()&&!_fsFrage('Pin '+_fsSkPinName(selP)+' („'+String(pSel.t).trim()+'“) entfernen?'))return;if(_fsFpWeg(sk,selP)){selP=-1;loseP=false;scheduleSave();neu();leisteBauen();}},['data-fs-ez-pinweg','1']));
+      }
+      const z=document.createElement('span');z.setAttribute('data-fs-ez-zaehler','1');z.style.cssText='font-size:var(--fs13,13px);color:var(--text2);';
+      z.textContent=setzenP?'Jetzt in die Skizze tippen, wo der Pin hin soll – die Beschriftung kommt danach'
+        :!pSel?(lp.length?'Pin antippen zum Ändern – oder „📌 Pin setzen“ für einen weiteren. Ein Pin ist nur eine Beschriftung im Bild, keine Stelle.':'„📌 Pin setzen“ antippen, dann in die Skizze tippen. Ein Pin ist nur eine Beschriftung im Bild (z. B. Fallrohr), keine Stelle.')
+        :loseP?'Pin '+_fsSkPinName(selP)+' ist lose: Pfeilspitze oder Kreis ziehen oder an die richtige Stelle tippen – dann „✓ Fest“'
+        :'Pin '+_fsSkPinName(selP)+(String(pSel.t||'').trim()?' („'+_fsBgSkizzeKuerzen(String(pSel.t||''),30)+'“)':'')+' ist fest (🔒) – „✥ Verschieben“ macht ihn lose';
       leiste.appendChild(z);
     }else if(modus==='zeichnen'){ /* F50: Werkzeuge wie beim Foto-Malen; jedes Teil bleibt einzeln */
       FS_SK_WERKZEUGE.forEach(x=>{
@@ -7047,6 +7107,24 @@ function _fsBgEinzeichnenZeigen(b,r,fertig,opt){ /* F82: opt.stelle = diesen Man
       neu();
       return;
     }
+    if(modus==='pin'){ /* F98: Pin setzen, wählen, ziehen – wie im Fenster „📌 Foto markieren“ */
+      if(setzenP){
+        const i=_fsFpNeu(sk,p[0]/W,p[1]/H,'');
+        if(i<0){toast('Genug Pins in dieser Skizze – bitte einen entfernen','info',3500);return;}
+        setzenP=false;selP=i;loseP=false;scheduleSave();neu();leisteBauen();
+        setTimeout(()=>{if(_fsById('_fsEinzeichnen')===ov)pinBeschriften(i);},80); /* erst die Stelle, dann die Beschriftung */
+        return;
+      }
+      const tr=_fsFpTreffer(sk,p[0],p[1],W,H);
+      if(tr&&tr.i!==selP){selP=tr.i;loseP=false;neu();leisteBauen();return;} /* anderen Pin angetippt = auswählen, nichts bewegen */
+      const q=selP>=0?_fsFpListe(sk)[selP]:null;
+      if(!q){toast('Erst „📌 Pin setzen“ antippen – oder einen Pin antippen','info',3000);return;}
+      if(!loseP){if(!festGesagtP){festGesagtP=true;toast('Der Pin ist fest – zum Ändern „✥ Verschieben“ antippen','info',3500);}return;}
+      ziehP={id:e.pointerId,i:selP,teil:(tr&&tr.teil==='ring')?'ring':'ziel'};
+      if(!tr)_fsFpBewegen(q,p[0]/W,p[1]/H);
+      neu();
+      return;
+    }
     if(modus==='umriss'){ /* F62: Umriss – offen: Ecke setzen / nachziehen / schließen; geschlossen: Ecke anfassen, Kante antippen = Maß, „＋ Ecke auf Kante“ */
       const u=_fsUmHolen(sk);
       if(!u.zu){
@@ -7093,6 +7171,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig,opt){ /* F82: opt.stelle = diesen Man
       return;
     }
     if(ziehS&&e.pointerId===ziehS.id){e.preventDefault();const p=pos(e),zs=ziehS.s;if(ziehS.teil==='ring'){const tx=zs.skz.x*W,ty=zs.skz.y*H;if(_fsAsRingSetzen(zs,Math.atan2(-(p[1]-ty),p[0]-tx)*180/Math.PI,Math.hypot(p[0]-tx,p[1]-ty)))neu();}else if(_fsAsMarkeSetzen(sk,zs,p[0]/W,p[1]/H))neu();return;} /* F33, F34: Kreis ziehen = Richtung/Länge, sonst die Stelle */
+    if(ziehP&&e.pointerId===ziehP.id){e.preventDefault();const p=pos(e),q=_fsFpListe(sk)[ziehP.i];if(q){if(ziehP.teil==='ring'){const tx=q.x*W,ty=q.y*H,s=_fsFpMass(W,H);if(_fsFpRingSetzen(q,Math.atan2(-(p[1]-ty),p[0]-tx)*180/Math.PI,Math.hypot(p[0]-tx,p[1]-ty)/Math.max(s,0.0001)))neu();}else if(_fsFpBewegen(q,p[0]/W,p[1]/H))neu();}return;} /* F98 */
     if(griffZieh&&e.pointerId===griffZieh.id){ /* F50: Stempel an einem Griff in Breite/Höhe ziehen */
       e.preventDefault();
       const p=pos(e),st=sk.stempel[sel];
@@ -7138,6 +7217,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig,opt){ /* F82: opt.stelle = diesen Man
       return;
     }
     if(ziehS&&e.pointerId===ziehS.id){ziehS=null;scheduleSave();neu();leisteBauen();return;} /* F33 */
+    if(ziehP&&e.pointerId===ziehP.id){ziehP=null;scheduleSave();neu();leisteBauen();return;} /* F98 */
     if(zieh&&e.pointerId===zieh.id){const z=zieh;zieh=null;if(z.bewegt)scheduleSave();neu();return;}
     if(griffZieh&&e.pointerId===griffZieh.id){const z=griffZieh;griffZieh=null;if(z.bewegt)scheduleSave();neu();return;} /* F50 */
     if(ziehT&&e.pointerId===ziehT.id){const z=ziehT;ziehT=null;if(z.bewegt){verlauf.push(z.vorher);if(verlauf.length>40)verlauf.shift();scheduleSave();}neu();leisteBauen();return;} /* F50 */
@@ -7172,6 +7252,7 @@ function _fsBgEinzeichnenZeigen(b,r,fertig,opt){ /* F82: opt.stelle = diesen Man
     if(modus==='zeichnen'&&selT>=0){merken();if(_fsBgStrichWeg(sk,selT)){selT=-1;scheduleSave();neu();leisteBauen();}e.preventDefault();}
     else if(modus==='stempel'&&sel>=0){if(_fsBgStempelWeg(sk,sel)){sel=-1;scheduleSave();neu();leisteBauen();}e.preventDefault();}
     else if(modus==='umriss'&&selU>=0){const u=_fsUmLesen(sk);if(u&&_fsUmEckeWeg(u,selU)){selU=-1;_fsUmNachziehen(sk,W,H);scheduleSave();neu();leisteBauen();}e.preventDefault();} /* F62 */
+    else if(modus==='pin'&&selP>=0){if(_fsFpWeg(sk,selP)){selP=-1;loseP=false;scheduleSave();neu();leisteBauen();}e.preventDefault();} /* F98 */
   };
   document.addEventListener('keydown',taste,true);if(dk!==document)dk.addEventListener('keydown',taste,true); /* F69 */
   const schliessen=()=>{try{const fst=dk.getElementById('_fsEzFotos');if(fst)fst.remove();}catch(e){} /* F83: der Foto-Streifen geht mit zu (vor den F66/F69-Lauschern – test_f50/f66 ankern den Rest der Zeile) */window.removeEventListener('resize',groesse); /* F66 */document.removeEventListener('keydown',taste,true);if(dw!==window)dw.removeEventListener('resize',groesse);if(dk!==document)dk.removeEventListener('keydown',taste,true); /* F69 */ov.remove();if(typeof fertig==='function'){try{fertig();}catch(x){console.warn('[Feuchte] Einzeichnen:',x);}}};
@@ -7420,6 +7501,7 @@ async function _fsMobPdfBg(bericht,task){
             unterTitel('Skizze '+(hat(r.name)?String(r.name).trim():'Raum'));
             try{doc.addImage(url,'JPEG',M,y,sw,sh);}catch(e){console.warn('[Feuchte] Skizze:',e);}
             y+=sh+2;
+            if(typeof _fsSkPinLegende==='function')_fsSkPinLegende(r.skizze).forEach(s2=>absatz(s2,{groesse:9,einzug:3,abstand:0.8})); /* F98: freie Pins (A, B, C …) */
             absatz('Nicht maßstäblich. Blau = Fenster, Bogen = Tür. Die Nummern sind die der Messstellen-Tabelle; ein Punkt zeigt die Wand, nicht die genaue Stelle und Höhe.',{groesse:7.5,farbe:[100,100,100],abstand:4});
           }
         }
@@ -7506,6 +7588,7 @@ async function _fsMobPdfBg(bericht,task){
               y+=sh+2;
               const mk=_fsAsMarken(bericht,sk);
               mk.forEach(q=>absatz(q.n+' = '+q.label+(hat(_fsVbWo(q.s))?' – '+_fsVbWo(q.s):''),{groesse:9,einzug:3,abstand:0.8})); /* F49: je Nummer eine Zeile, 9 pt schwarz, direkt unter der Skizze */
+              if(typeof _fsSkPinLegende==='function')_fsSkPinLegende(sk).forEach(s2=>absatz(s2,{groesse:9,einzug:3,abstand:0.8})); /* F98: freie Pins (A, B, C …) */
               if(_fsUmZeile(sk))absatz((typeof _fsPdfOhneUngefaehr==='function')?_fsPdfOhneUngefaehr(_fsUmZeile(sk)):_fsUmZeile(sk),{groesse:9,einzug:3,abstand:0.8}); /* F62: Fläche und Umfang des Umrisses · F88: „≈“ → „ca.“ – die PDF-Schrift kennt das Zeichen nicht (P79) */
               absatz('Nicht maßstäblich, Ansicht '+_fsAsAnsicht(sk)+'.',{groesse:7.5,farbe:[100,100,100],abstand:4});
             }
@@ -11266,6 +11349,7 @@ function _fsWpPdfSkizze(doc,b,y,M,W){
   y+=sh+2;
   doc.setFont('helvetica','normal');doc.setFontSize(8);
   const zeilen=_fsWpSkizzeLegende(b,sk);
+  if(typeof _fsSkPinLegende==='function')_fsSkPinLegende(sk).forEach(z2=>zeilen.push(z2)); /* F98: freie Pins (A, B, C …) */
   const uz=_fsUmZeile(sk);if(uz)zeilen.push(uz);
   const pvA=_fsPvFelderFlaeche(b);if(pvA)zeilen.push('PV-Felder: ca. '+_fsUmFmt(pvA.A)+' m² ('+pvA.n+' Feld'+(pvA.n===1?'':'er')+', aus Länge × Breite)');
   zeilen.map(_fsPdfOhneUngefaehr).forEach(z=>{const zl=doc.splitTextToSize(z,W-2*M-3);if(y+zl.length*3.6>285){doc.addPage();y=M;}doc.text(zl,M+3,y+2);y+=zl.length*3.6+0.8;});
@@ -11449,6 +11533,8 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
     else if(lg.length)lg.forEach(s=>{const d=document.createElement('div');d.style.padding='1px 0';d.textContent=s;ld.appendChild(d);});
     else{ld.style.color='var(--text2)';ld.textContent='Noch kein Mangel in der Skizze – am Mangel-Punkt „📍 markieren“ antippen.';}
     w.appendChild(ld);
+    { const pz=(typeof _fsSkPinLegende==='function')?_fsSkPinLegende(sk):[]; /* F98: freie Pins (A, B, C …) */
+      if(pz.length){const pd=document.createElement('div');pd.setAttribute('data-wp-skizze-pins','1');pd.style.cssText='font-size:var(--fs12,12px);color:var(--text);margin:2px 0 4px;';pz.forEach(s2=>{const d=document.createElement('div');d.style.padding='1px 0';d.textContent='📌 '+s2;pd.appendChild(d);});w.appendChild(pd);} }
     const ez=document.createElement('button');ez.type='button';ez.setAttribute('data-wp-skizze-zeichnen','1');ez.textContent='✏ Einzeichnen – Umriss, ☀ PV-Feld und andere Stempel, Striche, Mängel-Nummern';ez.style.cssText=KN+'border:1.5px solid #d9480f;background:rgba(217,72,15,.08);color:var(--text);';
     ez.onclick=()=>_wpSkizzeOeffnen(sk,null);w.appendChild(ez);
     { /* „oben ist …“ wie in der Vorabbesichtigung – freiwillig, beschriftet die Ränder */
@@ -12498,6 +12584,8 @@ function _openAnschlagProtokoll(existingIdx,vonWp){
       d.onclick=()=>_anZumPunkt(e.it);ld.appendChild(d);});
     else{ld.style.color='var(--text2)';ld.textContent='Noch kein Anschlagpunkt in der Skizze – an der Zeile des Punkts „📍 markieren“ antippen.';}
     s.appendChild(ld);
+    { const pz=(typeof _fsSkPinLegende==='function')?_fsSkPinLegende(sk):[]; /* F98: freie Pins (A, B, C …) */
+      if(pz.length){const pd=document.createElement('div');pd.setAttribute('data-an-skizze-pins','1');pd.style.cssText='font-size:var(--fs12,12px);color:var(--text);margin:2px 0 4px;';pz.forEach(s2=>{const d=document.createElement('div');d.style.padding='1px 0';d.textContent='📌 '+s2;pd.appendChild(d);});s.appendChild(pd);} }
     const ez=document.createElement('button');ez.type='button';ez.setAttribute('data-an-skizze-zeichnen','1');ez.textContent='✏ Einzeichnen – Umriss, Stempel, Striche, Nummern der Anschlagpunkte';ez.style.cssText=KN+'border:1.5px solid '+FS_AN_FARBE+';background:rgba(31,78,121,.08);color:var(--text);';
     ez.onclick=()=>_anSkizzeOeffnen(sk,null);s.appendChild(ez);
     { const oc=document.createElement('div');oc.style.cssText='display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0;';
