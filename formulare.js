@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F98';
+const PAM_FORMULARE_VERSION='F99';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -876,7 +876,36 @@ async function _fsFpEinbrennen(d,f){
    Der Text steht in der Liste unter der Skizze und im PDF („A = Fallrohr“), nie im Kreis. Nur Feststellungen, keine Bewertung. */
 function _fsSkPinName(i){return String.fromCharCode(65+Math.max(0,Math.min(25,+i||0)));} /* A, B, C … (höchstens FS_FP_MAX Pins = A…T) */
 const FS_SK_PIN_FARBE='#1f5f8b';
-function _fsSkPinLegende(sk){return _fsFpListe(sk).map((p,i)=>_fsSkPinName(i)+' = '+(String(p.t||'').trim()||'ohne Text'));}
+function _fsSkPinLegende(sk){return _fsSkPinEintraege(sk).map(e=>e.k+' = '+(e.t||'ohne Text'));}
+/* ── F99: LEGENDE MIT SYMBOL – Frank 06.11.2026 („das mit den Bezeichnungen ist unübersichtlich“ · „nicht im Bild, sondern auch darunter“ →
+   Entwurf Claude-Code\Entwurf_Skizzen-Legende_2026-11-06.html → „Baue wie vorgeschlagen“): Unter der Skizze beginnt jede Legendenzeile mit dem
+   Symbol aus der Zeichnung (oranger Kreis mit Zahl bzw. „M1“, blauer Kreis mit Buchstabe) statt der Wiederholung „1 = Außen – Terrasse, Stelle 1 · …“.
+   Im Formular ein runder span (_fsLegSymbol/_fsLegZeile), im PDF ein gemalter Kreis (_fsPdfLegendenKreis, wie die farbigen Haken in _fsWpHakenZeichnen).
+   In die Zeichnung selbst wird nichts gemalt. Nur Feststellungen, keine Bewertung. */
+function _fsSkPinEintraege(sk){return _fsFpListe(sk).map((p,i)=>({k:_fsSkPinName(i),t:String(p.t||'').trim()}));}
+function _fsLegSymbol(txt,farbe){
+  const t=String(txt==null?'':txt),s=document.createElement('span');
+  s.setAttribute('data-fs-leg-sym',t);s.textContent=t;
+  s.style.cssText='display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;padding:0 3px;border-radius:11px;background:'+farbe+';color:#fff;font-weight:700;font-size:'+(t.length>2?'10px':t.length>1?'11px':'13px')+';margin-right:6px;vertical-align:middle;flex-shrink:0;box-sizing:border-box;line-height:1;';
+  return s;
+}
+function _fsLegZeile(sym,farbe,text){
+  const d=document.createElement('div');d.style.cssText='padding:2px 0;display:flex;align-items:flex-start;';
+  d.appendChild(_fsLegSymbol(sym,farbe));
+  const t=document.createElement('span');t.style.cssText='min-width:0;align-self:center;';t.textContent=String(text==null?'':text);d.appendChild(t);
+  return d;
+}
+/* Fürs PDF: gefüllter Kreis (Durchmesser ~4,2 mm) mit weißer Kennung in der Mitte; stellt Schrift und Farbe danach auf Schwarz/normal zurück */
+function _fsPdfLegendenKreis(doc,cx,cy,farbe,txt){
+  try{
+    const t=String(txt==null?'':txt);
+    doc.setFillColor(farbe[0],farbe[1],farbe[2]);doc.circle(cx,cy,2.1,'F');
+    doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(t.length>2?4.2:t.length>1?5:6.2);
+    const w=(typeof doc.getTextWidth==='function'&&isFinite(+doc.getTextWidth(t)))?+doc.getTextWidth(t):t.length*1.1;
+    doc.text(t,cx-w/2,cy+0.75);
+  }catch(e){console.warn('[Legende] Kreis:',e);}
+  try{doc.setTextColor(0,0,0);doc.setFont('helvetica','normal');}catch(e){}
+}
 /* Zeichnet die freien Pins auf die W×H-Skizzenfläche; sel = gewählter Pin, lose = er lässt sich verschieben (beides nur im Zeichenfenster, nie im gespeicherten Bild) */
 function _fsSkPinsZeichnen(g,sk,W,H,sel,lose){
   _fsFpListe(sk).forEach((p,i)=>{
@@ -1268,7 +1297,7 @@ function _fsWordAufbau(b,task){
       if(_fsAsTyp(sk)!==typ||!_fsAsBenutzt(b,sk))return;
       const mk=_fsAsMarken(b,sk),nm=hat(sk.name)?String(sk.name).trim():(typ==='innen'?'Raum':'Außen');
       const pz=(typeof _fsSkPinLegende==='function')?_fsSkPinLegende(sk):[]; /* F98 */
-      const tx='Skizze '+nm+', Ansicht '+_fsAsAnsicht(sk)+' (nicht maßstäblich).'+(_fsUmZeile(sk)?' '+_fsUmZeile(sk)+'.':'')+(mk.length?' '+mk.map(q=>q.n+' = '+q.label+(hat(_fsVbWo(q.s))?' ('+_fsVbWo(q.s)+')':'')).join(' · '):'')+(pz.length?' '+pz.join(' · '):''); /* F60: mit Bauteil · F98: freie Pins */
+      const tx='Skizze '+nm+', Ansicht '+_fsAsAnsicht(sk)+' (nicht maßstäblich).'+(_fsUmZeile(sk)?' '+_fsUmZeile(sk)+'.':'')+(mk.length?' '+mk.map(q=>'Stelle '+q.n+' = '+(hat(_fsVbWo(q.s))?_fsVbWo(q.s):'(ohne Beschreibung)')).join(' · '):'')+(pz.length?' '+pz.map(s2=>'Pin '+s2).join(' · '):''); /* F60 · F99: ohne die Wiederholung „Außen – Terrasse, Stelle 1“; in Word gibt es keine gemalten Kreise, darum die Wörter „Stelle“/„Pin“ */
       teil.push({a:'unter',t:'Skizze '+(typ==='innen'?'innen':'außen')+' – '+nm});
       teil.push({a:'skizze',sk:sk,t:tx,ersatz:'Die Skizze „'+nm+'“ konnte nicht als Bild eingefügt werden.'});
     });
@@ -2570,11 +2599,11 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
         ez.style.cssText=S_KNOPF+'display:block;width:100%;min-height:48px;margin:4px 0;border:1.5px solid #d9480f;background:rgba(217,72,15,.08);color:var(--text);text-align:left;';
         ez.onclick=oeffnen;k.appendChild(ez);
         const mk=_fsAsMarken(bericht,sk);
-        if(mk.length){const lg=document.createElement('div');lg.setAttribute('data-fs-aslegende',sk.id);lg.style.cssText='font-size:var(--fs14,14px);color:var(--text);margin:6px 0 2px;';mk.forEach(q=>{const z=document.createElement('div');z.style.cssText='padding:2px 0;';const nf=(Array.isArray(q.s.fotoRefs)?q.s.fotoRefs:[]).filter(r=>(bericht.fotos||[]).some(f=>_fsRefPasst(f,r))).length;z.textContent=q.n+' = '+q.label+(_fsVbWo(q.s)?' · '+_fsVbWo(q.s):'')+(nf?' · 📷 '+nf:'');lg.appendChild(z);});k.appendChild(lg);}
+        if(mk.length){const lg=document.createElement('div');lg.setAttribute('data-fs-aslegende',sk.id);lg.style.cssText='font-size:var(--fs14,14px);color:var(--text);margin:6px 0 2px;';mk.forEach(q=>{const nf=(Array.isArray(q.s.fotoRefs)?q.s.fotoRefs:[]).filter(r=>(bericht.fotos||[]).some(f=>_fsRefPasst(f,r))).length;lg.appendChild(_fsLegZeile(q.kurz,'#d9480f',(_fsVbWo(q.s)||'(ohne Beschreibung)')+(nf?' · 📷 '+nf:'')));});k.appendChild(lg);} /* F99: Symbol wie in der Skizze statt „1 = Außen – Terrasse, Stelle 1 · …“ */
         else{const hi=document.createElement('div');hi.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin:4px 0;';hi.textContent='Noch keine Stelle in der Skizze – „Einzeichnen“ antippen, oben eine Stelle wählen und in die Skizze tippen.';k.appendChild(hi);}
-        const pz=(typeof _fsSkPinLegende==='function')?_fsSkPinLegende(sk):[]; /* F98: freie Pins (A, B, C …) unter den Stellen */
-        if(pz.length){const pl=document.createElement('div');pl.setAttribute('data-fs-aspins',sk.id);pl.style.cssText='font-size:var(--fs14,14px);color:var(--text);margin:2px 0;';pz.forEach(s2=>{const z2=document.createElement('div');z2.style.cssText='padding:2px 0;';z2.textContent='📌 '+s2;pl.appendChild(z2);});k.appendChild(pl);}
-        const nh=document.createElement('div');nh.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin:4px 0;line-height:1.4;';nh.textContent='Nicht maßstäblich. Die Nummern sind die Stellen dieses Bereichs – ihre Fotos hängen an der Stelle. Im PDF steht die Skizze nur, wenn etwas eingezeichnet ist.';k.appendChild(nh);
+        const pz=(typeof _fsSkPinEintraege==='function')?_fsSkPinEintraege(sk):[]; /* F98: freie Pins (A, B, C …) unter den Stellen · F99: mit Symbol */
+        if(pz.length){const pl=document.createElement('div');pl.setAttribute('data-fs-aspins',sk.id);pl.style.cssText='font-size:var(--fs14,14px);color:var(--text);margin:2px 0;';pz.forEach(e=>pl.appendChild(_fsLegZeile(e.k,FS_SK_PIN_FARBE,e.t||'ohne Text')));k.appendChild(pl);}
+        const nh=document.createElement('div');nh.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin:4px 0;line-height:1.4;';nh.textContent='Nicht maßstäblich. Die Nummern sind die Stellen dieses Bereichs – ihre Fotos hängen an der Stelle. Buchstaben sind Pins – nur eine Beschriftung im Bild. Im PDF steht die Skizze nur, wenn etwas eingezeichnet ist.';k.appendChild(nh);
         const weg=document.createElement('button');weg.type='button';weg.setAttribute('data-fs-asweg',sk.id);weg.textContent='✕ Skizze entfernen';
         weg.style.cssText=S_KNOPF+'display:block;width:100%;margin-top:6px;border:1px solid var(--border);background:transparent;color:var(--text2);';
         weg.onclick=()=>{if(_fsAsBenutzt(bericht,sk)&&!_fsFrage('Skizze „'+(String(sk.name||'').trim()||'Außen')+'“ entfernen? Stempel, Striche und die Nummern in der Skizze gehen verloren. Die Stellen und ihre Fotos bleiben.'))return;_fsAsWeg(bericht,sk);scheduleSave();_neuBauen();};
@@ -3223,8 +3252,8 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     ez.style.cssText=S_KNOPF+'display:block;width:calc(100% - 28px);margin:6px 14px 2px;min-height:48px;border:1.5px solid '+FS_FARBE+';background:rgba(31,95,139,.10);color:var(--text);text-align:left;';
     ez.onclick=()=>_fsBgEinzeichnenZeigen(bericht,r,()=>{_neuBauen();}); // F5: danach neu aufbauen, damit Bild und Strichzahl stimmen
     w.appendChild(ez);
-    { const pz=(typeof _fsSkPinLegende==='function')?_fsSkPinLegende(sk):[]; /* F98: freie Pins (A, B, C …) */
-      if(pz.length){const pd=document.createElement('div');pd.setAttribute('data-fs-skizze-pins','1');pd.style.cssText='font-size:var(--fs14,14px);color:var(--text);padding:2px 14px;';pz.forEach(s2=>{const d=document.createElement('div');d.style.padding='2px 0';d.textContent='📌 '+s2;pd.appendChild(d);});w.appendChild(pd);} }
+    { const pz=(typeof _fsSkPinEintraege==='function')?_fsSkPinEintraege(sk):[]; /* F98: freie Pins (A, B, C …) · F99: mit Symbol */
+      if(pz.length){const pd=document.createElement('div');pd.setAttribute('data-fs-skizze-pins','1');pd.style.cssText='font-size:var(--fs14,14px);color:var(--text);padding:2px 14px;';pz.forEach(e=>pd.appendChild(_fsLegZeile(e.k,FS_SK_PIN_FARBE,e.t||'ohne Text')));w.appendChild(pd);} }
     w.appendChild(_bgInfo('Stempel setzt du in die Mitte, ziehst sie an die richtige Stelle und drehst sie; Striche zeichnest du frei. Beides dreht NICHT mit, wenn du die Skizze später drehst – stelle erst Länge, Breite und Drehung ein. Beides kommt auch ins PDF.'));
     w.appendChild(_bgInfo('Blau = Fenster, Bogen = Tür. Die Punkte sind deine Messstellen (Nummern wie im PDF); sie zeigen die Wand, nicht die genaue Stelle und Höhe. „Drehen" legt fest, welche Wand unten liegt.'));
     const zeilen=document.createElement('div');zeilen.style.cssText='padding:2px 14px;';
@@ -7369,6 +7398,15 @@ async function _fsMobPdfBg(bericht,task){
       doc.text(zeilen,M+ein,y+3);
       y+=zeilen.length*lh+(opt.abstand===undefined?2:opt.abstand);
     };
+    const symbolZeile=(farbe,sym,text)=>{ /* F99: Legendenzeile unter der Skizze mit dem Kreis-Symbol aus der Zeichnung (wie im Formular) */
+      doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(0,0,0);
+      const zeilen=doc.splitTextToSize(String(text),W-2*M-10);
+      if(y+zeilen.length*4.3+2>285){doc.addPage();y=M;}
+      if(typeof _fsPdfLegendenKreis==='function')_fsPdfLegendenKreis(doc,M+5.2,y+1.9,farbe,sym);
+      doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(0,0,0);
+      doc.text(zeilen,M+9,y+3);
+      y+=zeilen.length*4.3+0.8;
+    };
     const tabelle2=(rows,b0)=>{ /* F54: b0 = Breite der linken Spalte (Ortstermin 40 mm, damit „Art der Untersuchung“ nicht umbricht) */
       if(!rows.length)return;b0=b0||34;
       doc.autoTable({startY:y,theme:'grid',margin:{left:M,right:M},bodyStyles:{fontSize:8.5,minCellHeight:6},
@@ -7501,7 +7539,7 @@ async function _fsMobPdfBg(bericht,task){
             unterTitel('Skizze '+(hat(r.name)?String(r.name).trim():'Raum'));
             try{doc.addImage(url,'JPEG',M,y,sw,sh);}catch(e){console.warn('[Feuchte] Skizze:',e);}
             y+=sh+2;
-            if(typeof _fsSkPinLegende==='function')_fsSkPinLegende(r.skizze).forEach(s2=>absatz(s2,{groesse:9,einzug:3,abstand:0.8})); /* F98: freie Pins (A, B, C …) */
+            if(typeof _fsSkPinEintraege==='function')_fsSkPinEintraege(r.skizze).forEach(e=>symbolZeile([31,95,139],e.k,e.t||'ohne Text')); /* F98: freie Pins (A, B, C …) · F99: mit Symbol */
             absatz('Nicht maßstäblich. Blau = Fenster, Bogen = Tür. Die Nummern sind die der Messstellen-Tabelle; ein Punkt zeigt die Wand, nicht die genaue Stelle und Höhe.',{groesse:7.5,farbe:[100,100,100],abstand:4});
           }
         }
@@ -7587,8 +7625,8 @@ async function _fsMobPdfBg(bericht,task){
               try{doc.addImage(url,'JPEG',M,y,sw,sh);}catch(e){console.warn('[Skizze außen]',e);}
               y+=sh+2;
               const mk=_fsAsMarken(bericht,sk);
-              mk.forEach(q=>absatz(q.n+' = '+q.label+(hat(_fsVbWo(q.s))?' – '+_fsVbWo(q.s):''),{groesse:9,einzug:3,abstand:0.8})); /* F49: je Nummer eine Zeile, 9 pt schwarz, direkt unter der Skizze */
-              if(typeof _fsSkPinLegende==='function')_fsSkPinLegende(sk).forEach(s2=>absatz(s2,{groesse:9,einzug:3,abstand:0.8})); /* F98: freie Pins (A, B, C …) */
+              mk.forEach(q=>symbolZeile([217,72,15],q.kurz,hat(_fsVbWo(q.s))?_fsVbWo(q.s):'(ohne Beschreibung)')); /* F49: je Nummer eine Zeile · F99: Symbol wie in der Skizze statt „1 = Außen – Terrasse, Stelle 1 – …“ */
+              if(typeof _fsSkPinEintraege==='function')_fsSkPinEintraege(sk).forEach(e=>symbolZeile([31,95,139],e.k,e.t||'ohne Text')); /* F98: freie Pins (A, B, C …) · F99: mit Symbol */
               if(_fsUmZeile(sk))absatz((typeof _fsPdfOhneUngefaehr==='function')?_fsPdfOhneUngefaehr(_fsUmZeile(sk)):_fsUmZeile(sk),{groesse:9,einzug:3,abstand:0.8}); /* F62: Fläche und Umfang des Umrisses · F88: „≈“ → „ca.“ – die PDF-Schrift kennt das Zeichen nicht (P79) */
               absatz('Nicht maßstäblich, Ansicht '+_fsAsAnsicht(sk)+'.',{groesse:7.5,farbe:[100,100,100],abstand:4});
             }
@@ -11348,8 +11386,20 @@ function _fsWpPdfSkizze(doc,b,y,M,W){
   try{doc.addImage(url,'JPEG',M,y,sw,sh);}catch(e){console.warn('[Dachskizze]',e);}
   y+=sh+2;
   doc.setFont('helvetica','normal');doc.setFontSize(8);
-  const zeilen=_fsWpSkizzeLegende(b,sk);
-  if(typeof _fsSkPinLegende==='function')_fsSkPinLegende(sk).forEach(z2=>zeilen.push(z2)); /* F98: freie Pins (A, B, C …) */
+  { /* F99: Marken- und Pin-Zeilen mit dem Kreis-Symbol aus der Skizze (oranger Kreis „M1“ bzw. Nummer, blauer Kreis mit Buchstabe) */
+    const anB=(typeof _fsIstAnschlag==='function')&&_fsIstAnschlag(b);
+    const symZeile=(farbe,sym,text)=>{
+      const z=_fsPdfOhneUngefaehr(String(text||'').trim()||'(ohne Beschreibung)');
+      const zl=doc.splitTextToSize(z,W-2*M-10);
+      if(y+zl.length*3.6+1>285){doc.addPage();y=M;}
+      if(typeof _fsPdfLegendenKreis==='function')_fsPdfLegendenKreis(doc,M+5.2,y+0.9,farbe,sym);
+      doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(0,0,0);
+      doc.text(zl,M+9,y+2);y+=zl.length*3.6+0.8;
+    };
+    ((typeof _fsWpSkizzeLegendeEintraege==='function')?_fsWpSkizzeLegendeEintraege(b,sk):[]).forEach(e=>symZeile([217,72,15],anB?String(e.nr):'M'+e.nr,e.text));
+    if(typeof _fsSkPinEintraege==='function')_fsSkPinEintraege(sk).forEach(e=>symZeile([31,95,139],e.k,e.t||'ohne Text')); /* F98: freie Pins (A, B, C …) */
+  }
+  const zeilen=[];
   const uz=_fsUmZeile(sk);if(uz)zeilen.push(uz);
   const pvA=_fsPvFelderFlaeche(b);if(pvA)zeilen.push('PV-Felder: ca. '+_fsUmFmt(pvA.A)+' m² ('+pvA.n+' Feld'+(pvA.n===1?'':'er')+', aus Länge × Breite)');
   zeilen.map(_fsPdfOhneUngefaehr).forEach(z=>{const zl=doc.splitTextToSize(z,W-2*M-3);if(y+zl.length*3.6>285){doc.addPage();y=M;}doc.text(zl,M+3,y+2);y+=zl.length*3.6+0.8;});
@@ -11527,14 +11577,14 @@ function _openWartungsprotokollMobil(existingIdx,wahl){
     const lg=(typeof _fsWpSkizzeLegende==='function')?_fsWpSkizzeLegende(bericht,sk):[];
     const ld=document.createElement('div');ld.setAttribute('data-wp-skizze-legende','1');ld.style.cssText='font-size:var(--fs12,12px);color:var(--text);margin:2px 0 4px;';
     const lgE=(typeof _fsWpSkizzeLegendeEintraege==='function')?_fsWpSkizzeLegendeEintraege(bericht,sk):null; /* F83: jede Zeile ein Knopf → zum Punkt, dahinter die Foto-Zahl */
-    if(lgE&&lgE.length)lgE.forEach(e=>{const d=document.createElement('button');d.type='button';d.setAttribute('data-wp-skizze-legende-m',String(e.nr));d._wpItem=e.it;d.textContent='M'+e.nr+' = '+e.text+(e.fotos?' · 📷 '+e.fotos:'');d.title='Zum Punkt im Protokoll springen (dort Bemerkung und Fotos)';
-      d.style.cssText='display:block;width:100%;text-align:left;padding:5px 8px;margin:2px 0;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:var(--fs12,12px);cursor:pointer;font-family:inherit;line-height:1.35;';
+    if(lgE&&lgE.length)lgE.forEach(e=>{const d=document.createElement('button');d.type='button';d.setAttribute('data-wp-skizze-legende-m',String(e.nr));d._wpItem=e.it;d.appendChild(_fsLegSymbol('M'+e.nr,'#d9480f'));const t2=document.createElement('span');t2.style.cssText='min-width:0;align-self:center;';t2.textContent=(e.text||'')+(e.fotos?' · 📷 '+e.fotos:'');d.appendChild(t2);d.title='Zum Punkt im Protokoll springen (dort Bemerkung und Fotos)'; /* F99: Symbol wie in der Skizze */
+      d.style.cssText='display:flex;align-items:flex-start;width:100%;text-align:left;padding:5px 8px;margin:2px 0;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:var(--fs12,12px);cursor:pointer;font-family:inherit;line-height:1.35;';
       d.onclick=()=>_wpZumPunkt(e.it);ld.appendChild(d);});
     else if(lg.length)lg.forEach(s=>{const d=document.createElement('div');d.style.padding='1px 0';d.textContent=s;ld.appendChild(d);});
     else{ld.style.color='var(--text2)';ld.textContent='Noch kein Mangel in der Skizze – am Mangel-Punkt „📍 markieren“ antippen.';}
     w.appendChild(ld);
-    { const pz=(typeof _fsSkPinLegende==='function')?_fsSkPinLegende(sk):[]; /* F98: freie Pins (A, B, C …) */
-      if(pz.length){const pd=document.createElement('div');pd.setAttribute('data-wp-skizze-pins','1');pd.style.cssText='font-size:var(--fs12,12px);color:var(--text);margin:2px 0 4px;';pz.forEach(s2=>{const d=document.createElement('div');d.style.padding='1px 0';d.textContent='📌 '+s2;pd.appendChild(d);});w.appendChild(pd);} }
+    { const pz=(typeof _fsSkPinEintraege==='function')?_fsSkPinEintraege(sk):[]; /* F98: freie Pins (A, B, C …) · F99: mit Symbol */
+      if(pz.length){const pd=document.createElement('div');pd.setAttribute('data-wp-skizze-pins','1');pd.style.cssText='font-size:var(--fs12,12px);color:var(--text);margin:2px 0 4px;';pz.forEach(e=>pd.appendChild(_fsLegZeile(e.k,FS_SK_PIN_FARBE,e.t||'ohne Text')));w.appendChild(pd);} }
     const ez=document.createElement('button');ez.type='button';ez.setAttribute('data-wp-skizze-zeichnen','1');ez.textContent='✏ Einzeichnen – Umriss, ☀ PV-Feld und andere Stempel, Striche, Mängel-Nummern';ez.style.cssText=KN+'border:1.5px solid #d9480f;background:rgba(217,72,15,.08);color:var(--text);';
     ez.onclick=()=>_wpSkizzeOeffnen(sk,null);w.appendChild(ez);
     { /* „oben ist …“ wie in der Vorabbesichtigung – freiwillig, beschriftet die Ränder */
@@ -12579,13 +12629,13 @@ function _openAnschlagProtokoll(existingIdx,vonWp){
     const uz=_fsUmZeile(sk);if(uz){const uzd=document.createElement('div');uzd.setAttribute('data-an-skizze-umriss','1');uzd.style.cssText='font-size:var(--fs13,13px);color:var(--text);margin:2px 0 4px;';uzd.textContent=uz;s.appendChild(uzd);}
     const ld=document.createElement('div');ld.setAttribute('data-an-skizze-legende','1');ld.style.cssText='font-size:var(--fs12,12px);color:var(--text);margin:2px 0 4px;';
     const lgE=_fsAnSkizzeLegendeEintraege(bericht,sk);
-    if(lgE.length)lgE.forEach(e=>{const d=document.createElement('button');d.type='button';d.setAttribute('data-an-skizze-legende-p',String(e.nr));d.textContent='Punkt '+e.nr+' = '+e.text+(e.fotos?' · 📷 '+e.fotos:'');d.title='Zur Zeile dieses Anschlagpunkts springen';
-      d.style.cssText='display:block;width:100%;text-align:left;padding:5px 8px;margin:2px 0;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:var(--fs12,12px);cursor:pointer;font-family:inherit;line-height:1.35;';
+    if(lgE.length)lgE.forEach(e=>{const d=document.createElement('button');d.type='button';d.setAttribute('data-an-skizze-legende-p',String(e.nr));d.appendChild(_fsLegSymbol(String(e.nr),'#d9480f'));const t2=document.createElement('span');t2.style.cssText='min-width:0;align-self:center;';t2.textContent=(e.text||'')+(e.fotos?' · 📷 '+e.fotos:'');d.appendChild(t2);d.title='Zur Zeile dieses Anschlagpunkts springen'; /* F99: Symbol wie in der Skizze statt „Punkt 1 = …“ */
+      d.style.cssText='display:flex;align-items:flex-start;width:100%;text-align:left;padding:5px 8px;margin:2px 0;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:var(--fs12,12px);cursor:pointer;font-family:inherit;line-height:1.35;';
       d.onclick=()=>_anZumPunkt(e.it);ld.appendChild(d);});
     else{ld.style.color='var(--text2)';ld.textContent='Noch kein Anschlagpunkt in der Skizze – an der Zeile des Punkts „📍 markieren“ antippen.';}
     s.appendChild(ld);
-    { const pz=(typeof _fsSkPinLegende==='function')?_fsSkPinLegende(sk):[]; /* F98: freie Pins (A, B, C …) */
-      if(pz.length){const pd=document.createElement('div');pd.setAttribute('data-an-skizze-pins','1');pd.style.cssText='font-size:var(--fs12,12px);color:var(--text);margin:2px 0 4px;';pz.forEach(s2=>{const d=document.createElement('div');d.style.padding='1px 0';d.textContent='📌 '+s2;pd.appendChild(d);});s.appendChild(pd);} }
+    { const pz=(typeof _fsSkPinEintraege==='function')?_fsSkPinEintraege(sk):[]; /* F98: freie Pins (A, B, C …) · F99: mit Symbol */
+      if(pz.length){const pd=document.createElement('div');pd.setAttribute('data-an-skizze-pins','1');pd.style.cssText='font-size:var(--fs12,12px);color:var(--text);margin:2px 0 4px;';pz.forEach(e=>pd.appendChild(_fsLegZeile(e.k,FS_SK_PIN_FARBE,e.t||'ohne Text')));s.appendChild(pd);} }
     const ez=document.createElement('button');ez.type='button';ez.setAttribute('data-an-skizze-zeichnen','1');ez.textContent='✏ Einzeichnen – Umriss, Stempel, Striche, Nummern der Anschlagpunkte';ez.style.cssText=KN+'border:1.5px solid '+FS_AN_FARBE+';background:rgba(31,78,121,.08);color:var(--text);';
     ez.onclick=()=>_anSkizzeOeffnen(sk,null);s.appendChild(ez);
     { const oc=document.createElement('div');oc.style.cssText='display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0;';
