@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F101';
+const PAM_FORMULARE_VERSION='F102';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -1275,6 +1275,11 @@ function _fsWordAufbau(b,task){
     if(z.length&&b.meldungStatus==='wie')z.push(['Vorgefunden','wie gemeldet']);
     if(z.length&&b.meldungStatus==='abw'){const w=String(b.meldungAbw||'').trim().replace(/\s+/g,' ');z.push(['Vorgefunden','abweichend'+(w?': '+w:'')]);}
     if(z.length&&b.meldungStatus==='nein'){const w=String(b.meldungNein||'').trim().replace(/\s+/g,' ');z.push(['Vorgefunden','Prüfung konnte nicht erfolgen'+(w?': '+w:'')]);} /* F56 */
+    if(!z.length&&typeof _fsVbMeldungOhneAnlass==='function'&&_fsVbMeldungOhneAnlass(b)){ /* F102: auch ohne Anlass, so wie angetippt */
+      const w1=String((b.meldungStatus==='abw'?b.meldungAbw:(b.meldungStatus==='nein'?b.meldungNein:''))||'').trim().replace(/\s+/g,' ');
+      const v1=b.meldungStatus==='wie'?'wie gemeldet':(b.meldungStatus==='abw'?'abweichend von der Meldung':'Prüfung konnte nicht erfolgen');
+      z.push(['Vorgefunden',v1+(w1?': '+w1:'')]);
+    }
     if(z.length){B.push({a:'kapitel',t:'Gemeldet und vorgefunden'});B.push({a:'tabelle',z:z});}
   }
   const vbs=_fsVbStellenGefuellt(b);
@@ -1589,7 +1594,11 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       chips.appendChild(_chip('＋ '+n,false,()=>{bericht.raeume.push({name:n,t:'',rf:''});scheduleSave();_neuBauen();}));
     });
     chips.appendChild(_chip('＋ anderer Raum',false,()=>{
-      const n=_fsEingabe('Name des Raums:');
+      let n=_fsEingabe('Name des Raums:');
+      if(n&&n.trim()&&typeof _fsRaumNameVergeben==='function'){ /* F102: kein Raumname doppelt (auch im alten Protokoll) */
+        n=n.replace(/\s+/g,' ').trim();
+        if(_fsRaumNameVergeben(bericht.raeume,n)){const v=_fsRaumNameVorschlag(bericht.raeume,n);if(!_fsFrage('„'+n+'“ gibt es schon. Als „'+v+'“ anlegen?',bericht))return;n=v;}
+      }
       if(n&&n.trim()){bericht.raeume.push({name:n.trim(),t:'',rf:''});scheduleSave();_neuBauen();}
     }));
     w.appendChild(chips);
@@ -2843,8 +2852,16 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     let altName=r.name;
     nameI.onfocus=()=>{altName=r.name;};
     nameI.onchange=()=>{
-      const neu=r.name;
-      if(altName&&neu!==altName)bericht.stellen.forEach(st=>{if(st.raum===altName)st.raum=neu;});
+      let neu=r.name;
+      if(typeof _fsRaumNameVergeben==='function'){ /* F102: Leerzeichen am Anfang und Ende weg; einen Namen, den ein anderer Raum schon hat, nimmt PAM nicht */
+        neu=String(neu==null?'':neu).replace(/\s+/g,' ').trim();
+        if(neu&&_fsRaumNameVergeben(bericht.raeume,neu,r)){r.name=altName;toast('„'+neu+'“ gibt es schon – bitte anders nennen, z. B. „'+_fsRaumNameVorschlag(bericht.raeume,neu)+'“.','info',6000);_neuBauen();return;}
+        r.name=neu;
+      }
+      if(altName&&neu!==altName){
+        bericht.stellen.forEach(st=>{if(st.raum===altName)st.raum=neu;});
+        if(typeof _fsRaumNameVergeben==='function')(Array.isArray(bericht.bgStellen)?bericht.bgStellen:[]).forEach(st=>{if(st&&st.raum===altName)st.raum=neu;}); /* F102: auch die Feuchtestellen ziehen mit */
+      }
       scheduleSave();_neuBauen();
     };
     const tI=_inp(r.t,'°C',v=>{r.t=v;_fsWerteNeu();},true);
@@ -2916,6 +2933,12 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const w=document.createElement('div');
     w.appendChild(_bgInfo('Tippe einen Raum an: darin findest du Klima, Wände mit Fotos, Skizze und Messplan. Neue Räume legst du hier an, wenn du im Raum stehst. Ein neuer Raum hat gleich W1 (Außenwand) und W2–W4 (Innenwand).'));
     w.appendChild(_bgSchrittHinweis('Vor Ort am Handy – Raum für Raum vorbereiten','Zu jedem Raum: Wände mit Fotos, Messplan (Höhen je Wand). Dann testo-Durchgang, dann die Trotec-Werte in der „Messliste“. Am PC ordnest du die Messungen zu – die erste je Raum wird das Raumklima.')); /* F55 */
+    if(typeof _fsRaumNamenDoppelt==='function'){const dz=_fsRaumNamenDoppelt(bericht.raeume);if(dz.length){ /* F102: ältere Protokolle mit gleichem Raumnamen – PAM ändert nichts von selbst */
+      const h=document.createElement('div');h.setAttribute('data-fs-raum-doppelt','1');
+      h.style.cssText='margin:6px 10px;padding:8px 12px;border-radius:10px;background:var(--bg2);border:1px solid var(--border);border-left:6px solid var(--orange);font-size:var(--fs13,13px);color:var(--text);line-height:1.45;';
+      h.textContent='⚠ '+dz.map(n=>'Mehrere Räume heißen „'+n+'“').join(' · ')+' – die Messwerte werden vermischt. Bitte einen umbenennen und die Messstellen prüfen.';
+      w.appendChild(h);
+    }}
     const plan=_fsBgMessplan(bericht);
     const erl=plan.filter(p=>_fsBgPlanErledigt(bericht,p)).length;
     const kn=document.createElement('div');kn.style.cssText='display:flex;flex-wrap:wrap;gap:8px;padding:2px 10px 8px;';
@@ -2955,7 +2978,11 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       chips.appendChild(_chip('＋ '+n,false,()=>{bericht.raeume.push(_fsBgRaumMitWaenden(n));_bgRaumSel=bericht.raeume.length-1;_bgRaumTab='klima';scheduleSave();_neuBauen();}));
     });
     chips.appendChild(_chip('＋ anderer Raum',false,()=>{
-      const n=_fsEingabe('Name des Raums:');
+      let n=_fsEingabe('Name des Raums:');
+      if(n&&n.trim()&&typeof _fsRaumNameVergeben==='function'){ /* F102: kein Raumname doppelt – gleiche Namen vermischten die Messwerte */
+        n=n.replace(/\s+/g,' ').trim();
+        if(_fsRaumNameVergeben(bericht.raeume,n)){const v=_fsRaumNameVorschlag(bericht.raeume,n);if(!_fsFrage('„'+n+'“ gibt es schon. Als „'+v+'“ anlegen?',bericht))return;n=v;}
+      }
       if(n&&n.trim()){bericht.raeume.push(_fsBgRaumMitWaenden(n.trim()));_bgRaumSel=bericht.raeume.length-1;_bgRaumTab='klima';scheduleSave();_neuBauen();}
     }));
     w.appendChild(chips);
@@ -3774,7 +3801,9 @@ async function _fsMobPdf(bericht,task){
         const lines=doc.splitTextToSize(text,W-2*M);
         if(y+6+lines.length*4.3>285){doc.addPage();y=M;}
         doc.setFont('helvetica','bold');doc.text(label,M,y+4);y+=6;
-        doc.setFont('helvetica','normal');doc.text(lines,M,y+3);y+=lines.length*4.3+4;
+        doc.setFont('helvetica','normal');
+        if(y+lines.length*4.3>285&&typeof _fsPdfZeilenDruck==='function'){y=_fsPdfZeilenDruck(doc,lines,M,y+3,{schritt:4.3,oben:M+3})-3+4;return;} /* F102: länger als eine Seite – geht Seite für Seite weiter */
+        doc.text(lines,M,y+3);y+=lines.length*4.3+4;
       };
       if(bw)block('Einschätzung',bw.k+' – '+bw.text);
       block('Begründung',bericht.bemerkung);
@@ -4161,6 +4190,7 @@ function _fsVbErgebnisZeilen(b){
 // Meldung (Anlass) und was vorgefunden wurde – nur wenn „wie gemeldet“ oder „abweichend“ gewählt ist
 function _fsVbMeldungZeile(b){
   const a=String((b&&b.kopf&&b.kopf.anlass)||'').trim().replace(/\s+/g,' ');
+  if(b&&!a&&typeof _fsVbMeldungOhneAnlass==='function')return _fsVbMeldungOhneAnlass(b); /* F102: ohne Anlass trotzdem, was angetippt ist */
   if(!b||!a)return '';
   if(b.meldungStatus==='wie')return 'Gemeldet: '+a+(/[.!?]$/.test(a)?'':'.')+' Vorgefunden wie gemeldet.';
   if(b.meldungStatus==='abw'){const w=String(b.meldungAbw||'').trim().replace(/\s+/g,' ');return 'Gemeldet: '+a+(/[.!?]$/.test(a)?'':'.')+' Abweichend vorgefunden'+(w?': '+w:'.');}
@@ -7395,6 +7425,10 @@ async function _fsMobPdfBg(bericht,task){
       const gr=opt.groesse||9,ein=opt.einzug||0,c=opt.farbe||[0,0,0],lh=4.3*gr/9;
       doc.setFont('helvetica',opt.fett?'bold':'normal');doc.setFontSize(gr);doc.setTextColor(c[0],c[1],c[2]);
       const zeilen=doc.splitTextToSize(String(text),W-2*M-ein);
+      if(y+zeilen.length*lh+2>285&&zeilen.length*lh+2>285-M&&typeof _fsPdfZeilenDruck==='function'){ /* F102: länger als eine ganze Seite – geht Seite für Seite weiter */
+        y=_fsPdfZeilenDruck(doc,zeilen,M+ein,y+3,{schritt:lh,oben:M+3})-3+(opt.abstand===undefined?2:opt.abstand);
+        return;
+      }
       if(y+zeilen.length*lh+2>285){doc.addPage();y=M;}
       doc.text(zeilen,M+ein,y+3);
       y+=zeilen.length*lh+(opt.abstand===undefined?2:opt.abstand);
@@ -8971,6 +9005,7 @@ async function _fsPvPdfFeldFotos(doc,b,y,M,W){
   const felder=(Array.isArray(k.pvFelder)?k.pvFelder:[]).filter(f=>f&&Array.isArray(f.fotoRefs)&&f.fotoRefs.length);
   for(const f of felder){
     const liste=_fsZeilenFotos(fotos,f.fotoRefs).map(z=>z.f);
+    if(typeof _fsPdfNurMitHaken==='function')_fsPdfNurMitHaken(liste); /* F102: am Modulfeld nur Fotos mit ✓ */
     if(!liste.length)continue;
     if(y>265){doc.addPage();y=M;}
     doc.setFontSize(8);doc.setFont('helvetica','italic');doc.setTextColor(100,100,100);
@@ -10028,6 +10063,90 @@ function _fsOtpLueckeMarkieren(el){
     return true;
   }catch(e){return false;}
 }
+/* ── F102: DIE 6 WICHTIGEN FUNDE DER FORMULAR-PRÜFUNG VOM 07.11.2026 ─────────────────────────────────────────────────────────────────────────
+   Prüfauftrag 07.11.2026 („alle Formulare vorurteilsfrei überprüfen“ → Bericht Claude-Code\Pruefung_Formulare_2026-11-07.html → Bauplan
+   Claude-Code\Bauplan_F102_Formular-Funde_2026-11-07.html → „Ja, nur Fotos mit ✓“ · „ja beide“ · „Baue F102“). Reine Helfer ohne Bildschirm; die
+   Aufrufstellen fragen sie mit typeof ab (ältere Prüfungen schneiden Funktionen einzeln aus) und machen sonst weiter wie bisher.
+   ⛔ In diesem Block kein Personenname (test_f78/f95/f96/f97 durchsuchen ihn mit – er steht vor F94).
+   (1) jsPDF bricht doc.text(zeilen) NIE selbst auf eine neue Seite um – was unter den Blattrand ging, fehlte still. _fsPdfZeilenDruck druckt wie bisher
+       in EINEM Aufruf, wenn alles passt (gleiches PDF), sonst Stück für Stück mit Seitenwechsel.
+   (2) Dach-, PV- und Prüfprotokoll: EINE Nummer je Foto = sein Platz in der Fotodokumentation (Fotos mit ✓ und Quelle). Die Nummern hängen am
+       PDF-Dokument (doc._fsFotoNr), damit die Markiert-Zeile sie findet. Ein Foto ohne ✓ kommt auch am Punkt nicht mehr ins PDF.
+   (4) Begehungsprotokoll: PAM erkennt Räume am Namen – zwei gleiche Namen vermischten die Messwerte. Verglichen wird ohne Groß/Klein und Leerraum.
+   (6) Vorab/Begehung: was bei „Gemeldet“ angetippt ist, steht auch ohne Anlass im PDF und im Word. */
+function _fsPdfZeilenHoehe(doc){
+  try{
+    const gr=(doc&&typeof doc.getFontSize==='function')?Number(doc.getFontSize()):9;
+    const fa=(doc&&typeof doc.getLineHeightFactor==='function')?Number(doc.getLineHeightFactor()):1.15;
+    const k=(doc&&doc.internal&&Number(doc.internal.scaleFactor))||(72/25.4);
+    const h=gr*fa/k;return (isFinite(h)&&h>0)?h:3.65;
+  }catch(e){return 3.65;}
+}
+/* zeilen = Ergebnis von splitTextToSize · y = Grundlinie der ersten Zeile · o.schritt = so weit rückt die Aufrufstelle je Zeile weiter ·
+   o.unten = tiefste Grundlinie (285) · o.oben = Grundlinie oben auf der neuen Seite · o.neueSeite() = eigene neue Seite, gibt die Grundlinie zurück.
+   Rückgabe: Grundlinie des letzten Stücks + Zeilen × schritt – so rückten die Aufrufstellen bisher weiter. Passt keine zweite Zeile mehr auf die
+   Seite, beginnt der Text gleich oben auf der neuen. */
+function _fsPdfZeilenDruck(doc,zeilen,x,y,o){
+  o=o||{};
+  const L=Array.isArray(zeilen)?zeilen:[zeilen];
+  if(!L.length)return y;
+  const lh=(Number(o.lh)>0)?Number(o.lh):_fsPdfZeilenHoehe(doc);
+  const schritt=(Number(o.schritt)>0)?Number(o.schritt):lh;
+  const unten=(Number(o.unten)>0)?Number(o.unten):285;
+  const neu=(typeof o.neueSeite==='function')?o.neueSeite:(()=>{doc.addPage();return (Number(o.oben)>0)?Number(o.oben):18;});
+  if(y+(L.length-1)*lh<=unten+0.01){doc.text(zeilen,x,y);return y+L.length*schritt;} /* passt – genau wie bisher */
+  const rest=L.slice();let frisch=false;
+  for(let runde=0;rest.length&&runde<2000;runde++){
+    const n=Math.floor((unten-y)/lh+1e-6)+1;
+    if(n<2&&!frisch){y=neu();frisch=true;continue;}
+    const teil=rest.splice(0,Math.max(1,n));
+    doc.text(teil,x,y);
+    if(!rest.length)return y+teil.length*schritt;
+    y=neu();frisch=true;
+  }
+  return y;
+}
+/* Nummern der Fotodokumentation: Map Foto → 1, 2, 3 … in der Reihenfolge der Fotoliste; imPdf(f) = kommt ins PDF (✓) – ohne Angabe f.inReport */
+function _fsPdfFotoNummern(fotos,imPdf){
+  const m=new Map();let n=0;
+  (Array.isArray(fotos)?fotos:[]).forEach(f=>{if(f&&(typeof imPdf==='function'?imPdf(f):!!f.inReport)&&(f.editedDriveId||f.driveId||f.localUrl||f.localKey)){n++;m.set(f,n);}});
+  return m;
+}
+/* Fotodokumentation: ein Foto, das sich nicht laden lässt (z. B. in Drive gelöscht), bekommt einen Rahmen statt des Bilds – die Nummern rutschen nicht */
+function _fsPdfBildFehlt(doc,x,y,kasten){ /* kasten = {w,h} in mm – Breite und Höhe nicht als zwei lose Werte (test_f87 sucht nach festen Foto-Kästen) */
+  const w=(kasten&&+kasten.w>0)?+kasten.w:85,h=(kasten&&+kasten.h>0)?+kasten.h:62;
+  try{doc.setDrawColor(150,150,150);doc.setLineWidth(0.3);doc.rect(x,y,w,h);doc.setFont('helvetica','italic');doc.setFontSize(8);doc.setTextColor(110,110,110);doc.text('Bild konnte nicht geladen werden',x+w/2,y+h/2,{align:'center'});}catch(e){}
+  try{doc.setDrawColor(0,0,0);doc.setLineWidth(0.2);doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);}catch(e){}
+}
+/* Fotos an einem Prüfpunkt, Anschlagpunkt oder Modulfeld: nur die mit ✓ – die Liste wird an Ort und Stelle gekürzt (streng: nur inReport===true wie im Prüfprotokoll) */
+function _fsPdfNurMitHaken(liste,streng){
+  if(!Array.isArray(liste))return liste;
+  for(let i=liste.length-1;i>=0;i--){const f=liste[i];if(!f||!(streng?f.inReport===true:!!f.inReport))liste.splice(i,1);}
+  return liste;
+}
+/* Raumnamen: gleich ist, was ohne Groß/Klein und Leerraum gleich ist („kinderzimmer “ = „Kinderzimmer“) */
+function _fsRaumNameKey(n){return String(n==null?'':n).replace(/\s+/g,' ').trim().toLowerCase();}
+function _fsRaumNameVergeben(raeume,name,ausser){const k=_fsRaumNameKey(name);return !!k&&(Array.isArray(raeume)?raeume:[]).some(r=>r&&r!==ausser&&_fsRaumNameKey(r.name)===k);}
+function _fsRaumNameVorschlag(raeume,name){
+  const k=_fsRaumNameKey(name),da=(Array.isArray(raeume)?raeume:[]).find(r=>r&&_fsRaumNameKey(r.name)===k);
+  const basis=String((da&&da.name)||name||'').replace(/\s+/g,' ').trim()||'Raum';
+  for(let i=2;i<1000;i++){const v=basis+' '+i;if(!_fsRaumNameVergeben(raeume,v))return v;}
+  return basis+' (neu)';
+}
+function _fsRaumNamenDoppelt(raeume){
+  const z=new Map();
+  (Array.isArray(raeume)?raeume:[]).forEach(r=>{const k=r?_fsRaumNameKey(r.name):'';if(!k)return;if(!z.has(k))z.set(k,{name:String(r.name).replace(/\s+/g,' ').trim(),n:0});z.get(k).n++;});
+  return [...z.values()].filter(x=>x.n>1).map(x=>x.name);
+}
+/* „Gemeldet und vorgefunden“ ohne Anlass: nur, was angetippt ist */
+function _fsVbMeldungOhneAnlass(b){
+  if(!b)return '';
+  const w=x=>String(x||'').trim().replace(/\s+/g,' '),p=s=>s+(/[.!?]$/.test(s)?'':'.');
+  if(b.meldungStatus==='wie')return 'Vorgefunden wie gemeldet.';
+  if(b.meldungStatus==='abw'){const a=w(b.meldungAbw);return a?'Abweichend von der Meldung vorgefunden: '+p(a):'Abweichend von der Meldung vorgefunden.';}
+  if(b.meldungStatus==='nein'){const a=w(b.meldungNein);return a?'Prüfung konnte nicht erfolgen: '+p(a):'Prüfung konnte nicht erfolgen.';}
+  return '';
+}
 /* ── F94: FOTOS BEI MEHREREN ORTSTERMINEN AM SELBEN TAG (Nachtrag zu P110) ────────────────────────────────────────────────────────────────────
    24.10.2026 („Baue F94“, Bauvorschlag Claude-Code\Bauplan_F94_Fotos-gleicher-Tag_2026-10-24.html; Frage Uhrzeit bei „am 23.10.“: nein, so lassen):
    Gibt es am Aufnahmetag eines Fotos mehrere Ortstermine, entschied bisher deren Beginn (📍) – ohne Beginn (im Dachprotokoll immer) landeten alle
@@ -10088,7 +10207,11 @@ function _fsTestoBilderNachtragen(b){
    Ein Text nur aus Zeichen der PDF-Schrift kommt Zeichen für Zeichen unverändert zurück – PDFs ohne solche Zeichen bleiben gleich.
    ⛔ Keine Rückstrich-u-Schreibweisen in diesem Block (das Schreibwerkzeug machte daraus schon echte Zeichen) – Bereiche als Zahlen. */
 const FS_PDF_W1252=new Set([8364,8218,402,8222,8230,8224,8225,710,8240,352,8249,338,381,8216,8217,8220,8221,8226,8211,8212,732,8482,353,8250,339,382,376]); /* die 27 Zeichen von Windows-1252 zwischen 128 und 159 (dieselbe Liste wie _mfRepCp1252Bytes in PAM Desktop) */
-const FS_PDF_ERSATZ={'≈':'ca.','✓':'ok','✔':'ok','☑':'ok','✅':'ok','✗':'x','✘':'x','❌':'x','✕':'x','✖':'x','→':'->','⇒':'->','➔':'->','➜':'->','➝':'->','➞':'->','⟶':'->','←':'<-','⇐':'<-','⟵':'<-','↔':'<->','≤':'<=','≥':'>=','−':'-','‑':'-','‒':'-','ł':'l','Ł':'L','đ':'d','Đ':'D','ı':'i'};
+const FS_PDF_ERSATZ={'≈':'ca.','✓':'ok','✔':'ok','☑':'ok','✅':'ok','✗':'x','✘':'x','❌':'x','✕':'x','✖':'x','→':'->','⇒':'->','➔':'->','➜':'->','➝':'->','➞':'->','⟶':'->','←':'<-','⇐':'<-','⟵':'<-','↔':'<->','≤':'<=','≥':'>=','−':'-','‑':'-','‒':'-','ł':'l','Ł':'L','đ':'d','Đ':'D','ı':'i',
+  /* F102: nie das Gegenteil („≠“ wurde „=“), Brüche, Durchmesser, griechische Buchstaben als Wort (µ kann die Schrift) */
+  '≠':'ungleich','≢':'ungleich','⁄':'/','∕':'/','⅓':'1/3','⅔':'2/3','⅕':'1/5','⅖':'2/5','⅗':'3/5','⅘':'4/5','⅙':'1/6','⅚':'5/6','⅛':'1/8','⅜':'3/8','⅝':'5/8','⅞':'7/8','⌀':'Ø',
+  'μ':'µ','λ':'Lambda','Λ':'Lambda','Δ':'Delta','∆':'Delta','δ':'delta','φ':'phi','ϕ':'phi','Φ':'Phi','θ':'theta','ϑ':'theta','α':'alpha','β':'beta','γ':'gamma','ε':'epsilon',
+  'ρ':'rho','σ':'sigma','Σ':'Sigma','τ':'tau','π':'pi','ω':'omega','Ω':'Ohm'};
 const _fsPdfSicherDocs=(typeof WeakSet==='function')?new WeakSet():null;
 // Kennt die PDF-Schrift dieses Zeichen? (Tab, Zeilenende, ASCII, Latin-1 ab 160, die 27 Zeichen von Windows-1252)
 function _fsPdfZeichenOk(c){return c===9||c===10||c===13||(c>=32&&c<=126)||(c>=160&&c<=255)||FS_PDF_W1252.has(c);}
@@ -10097,6 +10220,8 @@ function _fsPdfZeichen(s){
   if(typeof s!=='string')return s;
   let alles=true;for(const ch of s){if(!_fsPdfZeichenOk(ch.codePointAt(0))){alles=false;break;}}
   if(alles)return s;
+  try{const nfc=s.normalize('NFC');if(nfc!==s){s=nfc;alles=true;for(const ch of s){if(!_fsPdfZeichenOk(ch.codePointAt(0))){alles=false;break;}}if(alles)return s;}}catch(e){} /* F102: am Gerät zerlegt gespeichertes „u“ + „¨“ wird wieder „ü“ */
+  s=s.replace(/(\d)(?=[⅓⅔⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞])/g,'$1 ').replace(/([λΛΔ∆δφϕΦθϑαβγερσΣτπω])(?=[0-9A-Za-zÄÖÜäöüß])/g,'$1 '); /* F102: „1⅓“ → „1 1/3“, „ΔT“ → „Delta T“ */
   let out='',weg=false;
   for(const ch of s){
     const c=ch.codePointAt(0);
@@ -10104,7 +10229,7 @@ function _fsPdfZeichen(s){
     if(Object.prototype.hasOwnProperty.call(FS_PDF_ERSATZ,ch)){out+=FS_PDF_ERSATZ[ch];weg=false;continue;}
     if((c>=8194&&c<=8202)||c===8239||c===8287||c===12288){if(out.slice(-1)!==' ')out+=' ';weg=false;continue;} /* schmale und breite Leerzeichen */
     let zerlegt='';try{zerlegt=ch.normalize('NFKD');}catch(e){zerlegt='';}
-    let grund='';for(const x of zerlegt){const k=x.codePointAt(0);if(k>=768&&k<=879)continue;if(_fsPdfZeichenOk(k))grund+=x;else{grund='';break;}}
+    let grund='';for(const x of zerlegt){const k=x.codePointAt(0);if(k===823||k===824||k===8402){grund='';break;} /* F102: Durchstrich = Verneinung – lieber weg als das Gegenteil („≮“ nie „<“) */if(k>=768&&k<=879)continue;if(_fsPdfZeichenOk(k))grund+=x;else{grund='';break;}}
     if(grund&&grund!==ch){out+=grund;weg=false;continue;} /* ř → r, ő → o, ℃ → °C */
     weg=true; /* Bildzeichen, Variationszeichen, Verbinder und alles andere fällt weg */
   }
@@ -11170,10 +11295,11 @@ async function _fsWpPdfPlan(doc,b,y,M,W){
 }
 // PDF: unter den Fotos eines Punkts die Markiert-Zeile je Foto mit Pins („Foto 2 – Markiert: 1 = …“; bei nur einem Foto ohne „Foto 1 –“). Gibt das neue y zurück.
 function _fsFpPdfLegende(doc,liste,y,M,W){
-  const l=Array.isArray(liste)?liste:[],mit=l.map((f,i)=>({i:i,lg:_fsFpLegende(f)})).filter(x=>x.lg);
+  const l=Array.isArray(liste)?liste:[],mit=l.map((f,i)=>({i:i,f:f,lg:_fsFpLegende(f)})).filter(x=>x.lg);
   if(!mit.length)return y;
+  const nrK=(doc&&doc._fsFotoNr&&typeof doc._fsFotoNr.get==='function')?doc._fsFotoNr:null; /* F102: dieselbe Nummer wie in der Fotodokumentation */
   doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(90,90,90);
-  mit.forEach(x=>{const zl=doc.splitTextToSize((l.length>1?'Foto '+(x.i+1)+' – ':'')+'Markiert: '+x.lg,W-2*M-3);if(y+zl.length*3.2>285){doc.addPage();y=M;}doc.text(zl,M+3,y);y+=zl.length*3.2+0.6;});
+  mit.forEach(x=>{const zl=doc.splitTextToSize((l.length>1?'Foto '+((nrK&&nrK.get(x.f))||(x.i+1))+' – ':'')+'Markiert: '+x.lg,W-2*M-3);if(y+zl.length*3.2>285){doc.addPage();y=M;}doc.text(zl,M+3,y);y+=zl.length*3.2+0.6;});
   y+=2;doc.setTextColor(0,0,0);doc.setFontSize(8);
   return y;
 }
@@ -11413,14 +11539,14 @@ function _fsWpPdfSkizze(doc,b,y,M,W){
    (bei Fragen „Ja“) oder „Rep.“ bekommt von selbst eine Nummer in der Reihenfolge der Liste – im Formular als Marke „M1“ vor dem Text, im PDF als eigener
    Block „Mängel (nummeriert)“ nach der Sichtprüfung. Die Nummer wird nie gespeichert, sondern immer aus dem Stand gerechnet (ändert sich ein Status, rücken
    die Nummern nach). Dieselben Nummern kommen in F82 auf die Dachskizze. Nur Feststellungen, keine Bewertung. Reine Rechnung ohne Bildschirm. */
-function _fsWpMaengel(b){
+function _fsWpMaengel(b,fotoNr){ /* F102: fotoNr (Map Foto → Nummer der Fotodokumentation) nur im PDF – ohne sie wie bisher der Platz in der Fotoliste */
   const out=[];let nr=0;
   const fotos=(b&&Array.isArray(b.fotos))?b.fotos:[];
   ((b&&Array.isArray(b.sektionen))?b.sektionen:[]).forEach(sek=>((sek&&Array.isArray(sek.items))?sek.items:[]).forEach(it=>{
     if(!it||(it.status!=='mangel'&&it.status!=='repariert'))return;
     nr++;
     const frage=/\?\s*$/.test(String(it.text||''));
-    const nrs=(typeof _fsZeilenFotos==='function')?_fsZeilenFotos(fotos,it.fotoRefs).map(z=>z.nr):[];
+    const nrs=(typeof _fsZeilenFotos==='function')?_fsZeilenFotos(fotos,it.fotoRefs).map(z=>(fotoNr&&typeof fotoNr.get==='function')?(fotoNr.get(z.f)||0):z.nr).filter(n=>n>0):[];
     out.push({nr,it,sek:String((sek&&sek.titel)||'').trim(),text:String(it.text||'').trim(),frage,status:it.status,bem:String(it.massnahmen||'').trim(),fotoNrs:nrs});
   }));
   return out;
@@ -12196,6 +12322,7 @@ async function _fsWpPdf(bericht,task){
     const {jsPDF}=window.jspdf;
     const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});if(typeof _fsPdfSicher==='function')_fsPdfSicher(doc); /* F92: Zeichen, die die PDF-Schrift nicht kennt (P111) */
     const W=210,M=14,farbe=[26,92,58];let y=M;
+    if(typeof _fsPdfFotoNummern==='function')doc._fsFotoNr=_fsPdfFotoNummern(bericht.fotos,f=>!!f.inReport); /* F102: eine Foto-Nummer überall = Platz in der Fotodokumentation */
 
     /* Kopfzeile */
     doc.setFillColor(...farbe);doc.rect(0,0,W,37,'F'); /* F88: eine Zeile mehr (Name) */
@@ -12294,6 +12421,7 @@ async function _fsWpPdf(bericht,task){
       const mangelItems=sek.items.filter(it=>it.fotoRefs&&it.fotoRefs.length); /* F72: Fotos zu JEDEM Punkt mit Fotos, auch OK / N/V (Frank: „OK plus Foto“) */
       for(const it of mangelItems){
         const liste=_fsZeilenFotos(fotos,it.fotoRefs).map(z=>z.f);
+        if(typeof _fsPdfNurMitHaken==='function')_fsPdfNurMitHaken(liste); /* F102: am Punkt nur Fotos mit ✓ (Antwort 07.11.2026: „nur Fotos mit ✓“) */
         if(!liste.length)continue;
         if(y>265){doc.addPage();y=M;}
         doc.setFontSize(8);doc.setFont('helvetica','italic');doc.setTextColor(100,100,100);
@@ -12322,7 +12450,7 @@ async function _fsWpPdf(bericht,task){
     /* F70: Nicht geprüft (mit Grund) – es steht schwarz auf weiß, was nicht beurteilt werden konnte */
     const kap=txt=>{if(y>255){doc.addPage();y=M;}doc.setFillColor(230,244,235);doc.rect(M,y,W-2*M,7,'F');doc.setFontSize(9);doc.setFont('helvetica','bold');doc.setTextColor(26,92,58);doc.text(txt,M+2,y+5);y+=10;doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);};
     { /* F81: nummerierte Mängelliste – dieselben Nummern wie im Formular (und ab F82 auf der Dachskizze); nur Feststellungen */
-      const ml=(typeof _fsWpMaengel==='function')?_fsWpMaengel(bericht):[];
+      const ml=(typeof _fsWpMaengel==='function')?_fsWpMaengel(bericht,doc._fsFotoNr):[]; /* F102: Foto-Nummern wie in der Fotodokumentation */
       kap('Mängel (nummeriert)');
       if(ml.length&&typeof _fsWpMangelZeile==='function'){
         doc.autoTable({startY:y,head:[['Nr.','Prüfpunkt','Bemerkung','Fotos']],body:ml.map(_fsWpMangelZeile),theme:'grid',margin:{left:M,right:M},headStyles:{fillColor:farbe,fontSize:7.5,fontStyle:'bold'},bodyStyles:{fontSize:8,minCellHeight:7},columnStyles:{0:{cellWidth:12},1:{cellWidth:82},2:{cellWidth:68},3:{cellWidth:20}}});
@@ -12352,7 +12480,8 @@ async function _fsWpPdf(bericht,task){
       doc.text('Festgestellte Mängel',M+2,y+5);y+=10;
       doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);doc.setFontSize(9);
       const lines=doc.splitTextToSize(bericht.maengelEmpfehlungen,W-2*M);
-      doc.text(lines,M,y);y+=lines.length*4.5+4;
+      if(typeof _fsPdfZeilenDruck==='function')y=_fsPdfZeilenDruck(doc,lines,M,y,{schritt:4.5,oben:M+4})+4; /* F102: langer Text geht auf der nächsten Seite weiter */
+      else{doc.text(lines,M,y);y+=lines.length*4.5+4;}
     }
 
     if(typeof _fsWpPdfUnterschriften==='function')y=_fsWpPdfUnterschriften(doc,bericht,y,M,W); /* F88: Unterschriften vor den Fotos (Frank, 23.10.2026: beide) */
@@ -12365,16 +12494,19 @@ async function _fsWpPdf(bericht,task){
       for(let fi=0;fi<fotoList.length;fi++){
         const f=fotoList[fi];
         const pf=await bildLaden(f);
-        if(!pf||!pf.dataUrl){console.warn('[Wartung] Foto übersprungen:',f.name);continue;}
+        const nrFest=(doc._fsFotoNr&&typeof doc._fsFotoNr.get==='function')?(doc._fsFotoNr.get(f)||0):0,pfOk=!!(pf&&pf.dataUrl); /* F102: die Nummer steht vorher fest – ein Foto, das nicht lädt, behält sie */
+        if(!pfOk&&!nrFest){console.warn('[Wartung] Foto übersprungen:',f.name);continue;}
         const iW=85,iH=62,bm=(typeof _fsPdfBildMass==='function')?_fsPdfBildMass(pf,iW,iH):{w:iW,h:iH,dx:0,dy:0}; /* F87: Seitenverhältnis bleibt */
-        nr++;
+        nr=nrFest||(nr+1);
         const cap=x=>(typeof _fsWpFotoCap==='function')?_fsWpFotoCap(doc,bericht,f,x,y+iH+3,iW,nr):(doc.setFont('helvetica','normal'),doc.setFontSize(7),doc.setTextColor(100,100,100),doc.text(doc.splitTextToSize(f.name||'',iW),x,y+iH+3),1); /* F88 */
         if(col===0){
           if(y+iH+12>285){doc.addPage();y=M;}
           if(erstes){doc.setFillColor(230,244,235);doc.rect(M,y,W-2*M,7,'F');doc.setFontSize(9);doc.setFont('helvetica','bold');doc.setTextColor(26,92,58);doc.text('Fotodokumentation',M+2,y+5);y+=10;erstes=false;}
+          if(!pfOk){if(typeof _fsPdfBildFehlt==='function')_fsPdfBildFehlt(doc,M,y,{w:iW,h:iH});}else /* F102: Platzhalter statt Bild */
           doc.addImage(pf.dataUrl,'JPEG',M+bm.dx,y+bm.dy,bm.w,bm.h); /* F87 */
           zl=cap(M);
         }else{
+          if(!pfOk){if(typeof _fsPdfBildFehlt==='function')_fsPdfBildFehlt(doc,M+iW+6,y,{w:iW,h:iH});}else /* F102: Platzhalter statt Bild */
           doc.addImage(pf.dataUrl,'JPEG',M+iW+6+bm.dx,y+bm.dy,bm.w,bm.h); /* F87 */
           zl=Math.max(zl,cap(M+iW+6));
           y+=iH+7+zl*3;
@@ -12869,13 +13001,14 @@ async function _fsAnPdf(bericht,task){
     if(bericht.folgeVonDatum)erg.push(['Folgeprüfung zu','Prüfprotokoll vom '+bericht.folgeVonDatum+' (dessen Erinnerung ist damit erledigt)']); /* F84 */
     doc.autoTable({startY:y,theme:'grid',margin:{left:M,right:M},bodyStyles:{fontSize:8,minCellHeight:6},columnStyles:{0:{fontStyle:'bold',cellWidth:55,fillColor:[245,245,245]},1:{cellWidth:127}},body:erg});
     y=doc.lastAutoTable.finalY+6;
-    if(bericht.maengel){kap('Festgestellte Mängel');doc.setFontSize(9);const ml=doc.splitTextToSize(bericht.maengel,W-2*M);doc.text(ml,M,y);y+=ml.length*4.5+4;}
+    if(bericht.maengel){kap('Festgestellte Mängel');doc.setFontSize(9);const ml=doc.splitTextToSize(bericht.maengel,W-2*M);if(typeof _fsPdfZeilenDruck==='function')y=_fsPdfZeilenDruck(doc,ml,M,y,{schritt:4.5,oben:M+4})+4;else{doc.text(ml,M,y);y+=ml.length*4.5+4;}} /* F102: langer Text geht auf der nächsten Seite weiter */
     if(typeof _fsWpPdfUnterschriften==='function')y=_fsWpPdfUnterschriften(doc,bericht,y,M,W); /* F88: Unterschriften (Prüfer und freiwillig Auftraggeber / Betreiber) vor den Fotos */
     /* Fotos je Punkt, dann Fotodokumentation */
     const fotos=bericht.fotos||[];const bildCache=new Map();
     const bildLaden=async f=>{if(!bildCache.has(f)){const d=await _fsFotoFuerPdf(f);bildCache.set(f,(typeof _fsFpEinbrennen==='function')?await _fsFpEinbrennen(d,f):d);} /* F85: Pins daraufgezeichnet (Anschlagpunkt) */return bildCache.get(f);};
+    if(typeof _fsPdfFotoNummern==='function')doc._fsFotoNr=_fsPdfFotoNummern(fotos,f=>f.inReport===true); /* F102: eine Foto-Nummer überall = Platz in der Fotodokumentation */
     for(const p of bericht.punkte.filter(q=>q.fotoRefs&&q.fotoRefs.length)){
-      const liste=_fsZeilenFotos(fotos,p.fotoRefs).map(x=>x.f);if(!liste.length)continue;
+      const liste=_fsZeilenFotos(fotos,p.fotoRefs).map(x=>x.f);if(typeof _fsPdfNurMitHaken==='function')_fsPdfNurMitHaken(liste,true); /* F102: nur Fotos mit ✓ */if(!liste.length)continue;
       if(y>265){doc.addPage();y=M;}
       doc.setFontSize(8);doc.setFont('helvetica','italic');doc.setTextColor(100,100,100);doc.text('Fotos zu: Anschlagpunkt '+p.nr+(p.typ?' · '+p.typ:''),M,y);y+=4;doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);
       let col=0;for(const f of liste){const pf=await bildLaden(f);if(!pf||!pf.dataUrl)continue;if(y+42+8>285){doc.addPage();y=M;}{const bm=(typeof _fsPdfBildMass==='function')?_fsPdfBildMass(pf,55,42):{w:55,h:42,dx:0,dy:0};doc.addImage(pf.dataUrl,'JPEG',M+(col*59)+bm.dx,y+bm.dy,bm.w,bm.h);} /* F87: Seitenverhältnis bleibt */col++;if(col>=3){y+=48;col=0;}}
@@ -12885,10 +13018,12 @@ async function _fsAnPdf(bericht,task){
     const fotoList=fotos.filter(f=>f&&f.inReport===true&&(f.editedDriveId||f.driveId||f.localUrl||f.localKey)); /* F74: eigene Schreibweise – test_f10 ankert die Zeile des Dachprotokolls */
     if(fotoList.length){
       let col=0,erstes=true,nr=0,zl=1; /* F88: „Foto N – …“ statt des Dateinamens; N zählt nur hier */
-      for(const f of fotoList){const pf=await bildLaden(f);if(!pf||!pf.dataUrl)continue;const iW=85,iH=62,bm=(typeof _fsPdfBildMass==='function')?_fsPdfBildMass(pf,iW,iH):{w:iW,h:iH,dx:0,dy:0}; /* F87: Seitenverhältnis bleibt */
-        nr++;const cap=x=>(typeof _fsWpFotoCap==='function')?_fsWpFotoCap(doc,bericht,f,x,y+iH+3,iW,nr):(doc.setFontSize(7),doc.setTextColor(100,100,100),doc.text(doc.splitTextToSize(f.name||'',iW),x,y+iH+3),1); /* F88 */
-        if(col===0){if(y+iH+12>285){doc.addPage();y=M;}if(erstes){kap('Fotodokumentation');erstes=false;}doc.addImage(pf.dataUrl,'JPEG',M+bm.dx,y+bm.dy,bm.w,bm.h);zl=cap(M);}
-        else{doc.addImage(pf.dataUrl,'JPEG',M+iW+6+bm.dx,y+bm.dy,bm.w,bm.h);zl=Math.max(zl,cap(M+iW+6));doc.setTextColor(0,0,0);y+=iH+7+zl*3;}
+      for(const f of fotoList){const pf=await bildLaden(f);const nrFest=(doc._fsFotoNr&&typeof doc._fsFotoNr.get==='function')?(doc._fsFotoNr.get(f)||0):0,pfOk=!!(pf&&pf.dataUrl); /* F102: die Nummer steht vorher fest – ein Foto, das nicht lädt, behält sie */
+        if(!pfOk&&!nrFest)continue;const iW=85,iH=62,bm=(typeof _fsPdfBildMass==='function')?_fsPdfBildMass(pf,iW,iH):{w:iW,h:iH,dx:0,dy:0}; /* F87: Seitenverhältnis bleibt */
+        const bild=x=>{if(pfOk)doc.addImage(pf.dataUrl,'JPEG',x+bm.dx,y+bm.dy,bm.w,bm.h);else if(typeof _fsPdfBildFehlt==='function')_fsPdfBildFehlt(doc,x,y,{w:iW,h:iH});};
+        nr=nrFest||(nr+1);const cap=x=>(typeof _fsWpFotoCap==='function')?_fsWpFotoCap(doc,bericht,f,x,y+iH+3,iW,nr):(doc.setFontSize(7),doc.setTextColor(100,100,100),doc.text(doc.splitTextToSize(f.name||'',iW),x,y+iH+3),1); /* F88 */
+        if(col===0){if(y+iH+12>285){doc.addPage();y=M;}if(erstes){kap('Fotodokumentation');erstes=false;}bild(M);zl=cap(M);}
+        else{bild(M+iW+6);zl=Math.max(zl,cap(M+iW+6));doc.setTextColor(0,0,0);y+=iH+7+zl*3;}
         col=(col+1)%2;}
       if(col===1){doc.setTextColor(0,0,0);y+=62+7+zl*3;}
     }
@@ -12951,7 +13086,9 @@ function _fsRaBeiText(b){const a=String((b&&b.kopf&&b.kopf.ansprechpartner)||'')
    F100: Name = die Person (bei einer Firma der Ansprechpartner) + Lage im Haus in Klammern – wie die Knöpfe „Zu wem gehst du?“. */
 function _fsRaAusKarte(t){
   const kontakte=(t&&Array.isArray(t.kontakte))?t.kontakte.filter(k=>k&&_fsRaApPerson(k)):[];
-  const ap=kontakte.find(k=>k.anrufKontakt)||kontakte.find(k=>k.rolle==='mieter')||kontakte[0]||null;
+  const nichtVorOrt=(typeof FS_RA_NICHT_VOR_ORT!=='undefined'&&Array.isArray(FS_RA_NICHT_VOR_ORT))?FS_RA_NICHT_VOR_ORT:['hausverwaltung','ag','subunternehmer'];
+  const vorOrt=kontakte.filter(k=>nichtVorOrt.indexOf(String(k.rolle||''))<0); /* F102: zuerst eine Person vor Ort – nicht die Hausverwaltung oder den AG */
+  const ap=vorOrt.find(k=>k.anrufKontakt)||vorOrt.find(k=>k.rolle==='mieter')||vorOrt[0]||kontakte.find(k=>k.anrufKontakt)||kontakte[0]||null;
   const tags=((t&&Array.isArray(t.tags))?t.tags:[]).map(x=>String(x||'').trim()).filter(Boolean);
   const ausTitel=/(?:^|\D)(2\d{5})(?!\d)/.exec(String((t&&t.title)||''));
   const allg=(typeof _fsKopfAusKarte==='function')?_fsKopfAusKarte(t):{};
@@ -12983,7 +13120,9 @@ function _fsRaVervollstaendigen(b){
 function _fsRaErgaenzen(b,t,alles){
   if(!b||!b.kopf)return 0;
   const v=_fsRaAusKarte(t);let n=0;
-  FS_RA_FELDER.forEach(f=>{const k=f[0],neu=String(v[k]||'').trim(),alt=String(b.kopf[k]||'').trim();if(neu&&neu!==alt&&(alles||!alt)){b.kopf[k]=neu;n++;}});
+  const apVorher=String(b.kopf.ansprechpartner||'').replace(/\s+/g,' ').trim(); /* F102: ein leeres Telefon bekommt nur die Nummer der Person, die im Feld steht */
+  const telVon=name=>{const l=(t&&Array.isArray(t.kontakte))?t.kontakte:[];const p=l.find(x=>x&&_fsRaApPerson(x)&&(_fsRaApName(x)===name||_fsRaApPerson(x)===name));return p?_fsRaApTel(p):'';};
+  FS_RA_FELDER.forEach(f=>{const k=f[0],neu=String((k==='telefon'&&!alles&&apVorher)?telVon(apVorher):(v[k]||'')).trim(),alt=String(b.kopf[k]||'').trim();if(neu&&neu!==alt&&(alles||!alt)){b.kopf[k]=neu;n++;}});
   return n;
 }
 function _fsRaAbweichungen(b,t){
@@ -13898,7 +14037,7 @@ async function _fsPbPdf(bericht,task){
       });
       y=doc.lastAutoTable.finalY+5;
     });
-    if(bericht.bemerkung){if(y>255){doc.addPage();y=M;}doc.setFontSize(9);doc.setFont('helvetica','bold');doc.setTextColor(0,0,0);doc.text('Bemerkungen:',M,y);y+=5;doc.setFont('helvetica','normal');const lines=doc.splitTextToSize(bericht.bemerkung,W-2*M);doc.text(lines,M,y);}
+    if(bericht.bemerkung){if(y>255){doc.addPage();y=M;}doc.setFontSize(9);doc.setFont('helvetica','bold');doc.setTextColor(0,0,0);doc.text('Bemerkungen:',M,y);y+=5;doc.setFont('helvetica','normal');const lines=doc.splitTextToSize(bericht.bemerkung,W-2*M);if(typeof _fsPdfZeilenDruck==='function')_fsPdfZeilenDruck(doc,lines,M,y,{oben:M+4});else doc.text(lines,M,y);} /* F102: lange Bemerkung geht auf der nächsten Seite weiter */
     const pages=doc.internal.getNumberOfPages();
     for(let p=1;p<=pages;p++){doc.setPage(p);doc.setFontSize(8);doc.setTextColor(150,150,150);doc.text('Seite '+p+' von '+pages,W/2,292,{align:'center'});}
 
