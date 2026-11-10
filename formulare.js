@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F102';
+const PAM_FORMULARE_VERSION='F103';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -2246,6 +2246,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       i2.append(feld2('Wetter gesehen','vorOrtWetter','z. B. Nieselregen, Fassade nass'),feld2('Außen °C','vorOrtT','z. B. 11,8',true),feld2('Außen % rF','vorOrtRf','z. B. 84',true));
       const ur=feld2('gemessen um','vorOrtUhr','hh:mm');const ui=ur.querySelector?ur.querySelector('input'):null;
       const jetzt=kn('jetzt','data-fs-vorortjetzt',()=>{k.vorOrtUhr=_fsVbJetzt().uhr;if(ui)ui.value=k.vorOrtUhr;scheduleSave();});jetzt.style.minHeight='var(--fsh,36px)';jetzt.style.flexShrink='0';ur.appendChild(jetzt);
+      if(ui&&typeof _fsUhrFeld==='function')_fsUhrFeld(ui,u=>{k.vorOrtUhr=u;},{hinter:ur}); /* F103 */
       i2.appendChild(ur);
       i2.appendChild(feld2('Gerät','vorOrtGeraet','z. B. testo 605i'));
       const td=document.createElement('div');td.setAttribute('data-fs-aussen','1');td.style.cssText='padding:2px 0 0 122px;font-size:var(--fs13,13px);color:var(--text2);';i2.appendChild(td);
@@ -2874,7 +2875,9 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     x.onclick=()=>{if(!_fsFrage('Raum „'+(r.name||'ohne Namen')+'" mit allen Wänden entfernen?'))return;bericht.raeume.splice(ri,1);_bgRaumSel=null;scheduleSave();_neuBauen();};
     row.append(nameI,tI,fI,td,x);
     const r2=document.createElement('div');r2.style.cssText='display:grid;grid-template-columns:96px minmax(0,1fr);gap:6px;padding:0 14px 6px;align-items:center;';
-    r2.append(_inp(r.zeit,'hh:mm',v=>{r.zeit=v;},false),_inp(r.bedingung,'Bedingungen, z. B. Heizlüfter in Betrieb',v=>{r.bedingung=v;},false));
+    const zeitI=_inp(r.zeit,'hh:mm',v=>{r.zeit=v;},false);zeitI.setAttribute('data-fs-raumzeit',String(ri));
+    if(typeof _fsUhrFeld==='function')_fsUhrFeld(zeitI,u=>{r.zeit=u;},{wo:r2}); /* F103: „9.30“ wird beim Verlassen „09:30“, sonst oranger Hinweis */
+    r2.append(zeitI,_inp(r.bedingung,'Bedingungen, z. B. Heizlüfter in Betrieb',v=>{r.bedingung=v;},false));
     card.append(row,r2);
     return card;
   }
@@ -3127,18 +3130,25 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     w.appendChild(_bgInfo('Raum und Wand wählen, Höhe in cm, Uhrzeit. Oberfläche mit dem Infrarot-Thermometer, Bauteilfeuchte in Digits. Jede Höhe an einer Wand ist eine eigene Stelle.'));
     const raumNamen=bericht.raeume.map(r=>r.name).filter(Boolean);
     const druck=_fsBgStellenSortiert(bericht);
+    const auffrischen=()=>{ /* F103: nach einer Eingabe Kreis und „Im PDF“-Zeile neu rechnen, ohne das Formular neu zu bauen (sonst springt der Fokus) */
+      const d=_fsBgStellenSortiert(bericht);
+      w.querySelectorAll('[data-fs-stellenr]').forEach(e=>{const q=d.find(z=>z.i===+e.getAttribute('data-fs-stellenr'));e.textContent=q?q.nr:'·';});
+      w.querySelectorAll('[data-fs-impdf]').forEach(e=>{const i=+e.getAttribute('data-fs-impdf'),q=d.find(z=>z.i===i),s0=bericht.stellen[i];e.textContent=q?'Im PDF: '+(s0&&s0.referenz?'Vergleichsstelle ':'Nr ')+q.nr:'Kommt ins PDF, sobald etwas eingetragen ist.';});
+    };
     bericht.stellen.forEach((st,si)=>{
       if(!_bgStelleGehoertZu(st,raumName))return; // F6: nur die Stellen dieses Raums
       const card=document.createElement('div');
       card.style.cssText='margin:8px 10px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--bg2);';
+      card.addEventListener('focusout',auffrischen); /* F103 */
       const top=document.createElement('div');top.style.cssText='display:flex;align-items:center;gap:8px;';
-      const nr=document.createElement('span');nr.textContent=String(si+1);
+      const dr=druck.find(q=>q.i===si); /* F103: der Kreis zeigt die Nummer aus dem PDF (nach Uhrzeit sortiert, Vergleichsstelle „R“); eine Stelle ohne Messwert „·“ */
+      const nr=document.createElement('span');nr.textContent=dr?dr.nr:'·';nr.setAttribute('data-fs-stellenr',String(si));
       nr.style.cssText='width:30px;height:30px;border-radius:50%;background:'+FS_FARBE+';color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0;';
       const txtI=_inp(st.text,'Ort im Raum, z. B. Ecke oben',v=>{st.text=v;},false);
       txtI.setAttribute('data-fs-stellentext',String(si));
       const x=document.createElement('button');x.type='button';x.textContent='✕';x.title='Messstelle entfernen';
       x.style.cssText='width:var(--fsh,40px);height:var(--fsh,40px);border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--red);font-size:var(--fs15,15px);cursor:pointer;flex-shrink:0;';
-      x.onclick=()=>{if(!_fsFrage('Messstelle '+(si+1)+' entfernen?'))return;bericht.stellen.splice(si,1);scheduleSave();_neuBauen();};
+      x.onclick=()=>{const d2=_fsBgStellenSortiert(bericht).find(q=>q.i===si);if(!_fsFrage(d2?'Messstelle '+d2.nr+' entfernen?':'Messstelle ohne Messwert entfernen?'))return;bericht.stellen.splice(si,1);scheduleSave();_neuBauen();}; /* F103: Frage mit der PDF-Nummer */
       top.append(nr,txtI,x);
 
       const sel=document.createElement('select');
@@ -3163,7 +3173,9 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       wandSel.value=st.wand||'';wandSel.disabled=!ws.length&&!st.wand;
       wandSel.onchange=()=>{st.wand=wandSel.value;scheduleSave();_neuBauen();};
       const ortRow=document.createElement('div');ortRow.style.cssText='display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,.75fr) minmax(0,.9fr);gap:6px;margin-top:8px;';
-      ortRow.append(_bgLabelFeld('Wand',wandSel),_bgLabelFeld('Höhe cm',_inp(st.hoehe,'10',v=>{st.hoehe=v;},true)),_bgLabelFeld('Uhrzeit',_inp(st.zeit,'hh:mm',v=>{st.zeit=v;},false)));
+      const zeitI=_inp(st.zeit,'hh:mm',v=>{st.zeit=v;},false);zeitI.setAttribute('data-fs-stellenzeit',String(si));
+      if(typeof _fsUhrFeld==='function')_fsUhrFeld(zeitI,u=>{st.zeit=u;},{hinter:ortRow}); /* F103: „9.30“ wird beim Verlassen „09:30“, sonst oranger Hinweis unter der Zeile */
+      ortRow.append(_bgLabelFeld('Wand',wandSel),_bgLabelFeld('Höhe cm',_inp(st.hoehe,'10',v=>{st.hoehe=v;},true)),_bgLabelFeld('Uhrzeit',zeitI));
 
       const gr=document.createElement('div');gr.style.cssText='display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:8px;';
       const felder=[['Oberfläche °C','ts'],['Bauteil (Digits)','mf']];
@@ -3205,11 +3217,11 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
           if(!ziele.length){toast('Keine andere Stelle ohne testo-Messung – erst die Stelle (z. B. Trotec) anlegen','info',4500);return;}
           const s2=document.createElement('select');s2.style.cssText=S_INP+'margin-top:6px;';
           const o0=document.createElement('option');o0.value='';o0.textContent='– in welche Stelle übernehmen? –';s2.appendChild(o0);
-          ziele.forEach(q=>{const o=document.createElement('option');o.value=String(q.zi);const ort=_fsBgOrt(bericht,q.z);o.textContent='Stelle '+(q.zi+1)+(ort?' – '+ort:' (noch leer)');s2.appendChild(o);});
+          ziele.forEach(q=>{const o=document.createElement('option');o.value=String(q.zi);const ort=_fsBgOrt(bericht,q.z);const d=druck.find(z2=>z2.i===q.zi);o.textContent=(d?'Stelle '+d.nr:'Stelle ohne Messwert')+(ort?' – '+ort:'') /* F103: Nummer wie im Kreis und im PDF */;s2.appendChild(o);});
           s2.onchange=()=>{
             if(s2.value==='')return;
             const zi=+s2.value;
-            if(!_fsFrage('Die testo-Messung in Stelle '+(zi+1)+' übernehmen? Diese Zeile entfällt, leere Felder der Stelle werden gefüllt, als Uhrzeit gilt die der testo-Messung.')){s2.value='';return;}
+            if(!_fsFrage('Die testo-Messung in „'+((s2.options[s2.selectedIndex]||{}).textContent||('Stelle '+(zi+1)))+'“ übernehmen? Diese Zeile entfällt, leere Felder der Stelle werden gefüllt, als Uhrzeit gilt die der testo-Messung.')){s2.value='';return;}
             if(_fsBgZusammenfuehren(bericht,si,zi)){scheduleSave();_neuBauen();toast('✓ Zusammengeführt','success',3000);}
           };
           zusammen.appendChild(s2);
@@ -3356,12 +3368,14 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const w=document.createElement('div');w.setAttribute('data-fs-bgstellen','1');w.style.cssText='padding:8px 14px 4px;';
     const raeume=(bericht.raeume||[]).map(r=>String((r&&r.name)||'').trim()).filter(Boolean);
     const zeile=lab=>{const z=document.createElement('div');z.style.cssText='display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:4px 0;';const l=document.createElement('span');l.style.cssText='font-size:var(--fs13,13px);color:var(--text2);width:72px;flex-shrink:0;';l.textContent=lab;z.appendChild(l);return z;};
+    const fnr=(typeof _fsBgFeuchtNummern==='function')?_fsBgFeuchtNummern(bericht):null; /* F103: Nummer wie in der PDF-Liste – nur ausgefüllte Stellen zählen; eine leere Karte heißt „Neue Stelle“ */
     bericht.bgStellen.forEach((s,si)=>{
+      const nrS=fnr?fnr.get(s):String(si+1),titel=nrS?'Stelle '+nrS:'Neue Stelle';
       const k=document.createElement('div');k.setAttribute('data-fs-bgstelle',String(si));
       k.style.cssText='margin:6px 0 10px;padding:8px 10px 10px;border:1.5px solid var(--border);border-left:var(--fs-kante,4px) solid '+FS_FARBE+';border-radius:10px;background:var(--fs-karte,var(--bg2));';
       const kopf=document.createElement('div');kopf.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:4px;';
-      const tt=document.createElement('span');tt.style.cssText='font-weight:700;flex:1;';tt.textContent='Stelle '+(si+1);
-      kopf.append(tt,_bgXKnopf('Stelle entfernen',()=>{if(_fsBgFeuchtStelleGefuellt(s)&&!_fsFrage('Stelle '+(si+1)+' entfernen?'))return;bericht.bgStellen.splice(si,1);scheduleSave();_neuBauen();}));
+      const tt=document.createElement('span');tt.style.cssText='font-weight:700;flex:1;';tt.textContent=titel;tt.setAttribute('data-fs-bgstellenr',nrS||'');
+      kopf.append(tt,_bgXKnopf('Stelle entfernen',()=>{if(_fsBgFeuchtStelleGefuellt(s)&&!_fsFrage(titel+' entfernen?'))return;bericht.bgStellen.splice(si,1);scheduleSave();_neuBauen();}));
       k.appendChild(kopf);
       const zArt=zeile('Was');
       FS_BG_STELLE_ARTEN.forEach(a=>{const c=_chip(a.t,s.art===a.k,()=>{s.art=s.art===a.k?'':a.k;scheduleSave();_neuBauen();});c.setAttribute('data-fs-bgart',a.k);zArt.appendChild(c);});
@@ -3397,7 +3411,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       zM.appendChild(_chip('✎ anderes …',false,()=>{const t2=_fsEingabe('Merkmal:');if(t2&&t2.trim()){s.merkmale.push(t2.replace(/\s+/g,' ').trim());scheduleSave();_neuBauen();}}));
       k.appendChild(zM);
       const nz=_inp(s.notiz,'Anmerkung (freiwillig)',v=>{s.notiz=v;},false);nz.style.marginTop='4px';nz.setAttribute('data-fs-bgnotiz','1');k.appendChild(nz);
-      k.appendChild(_fsFotoLeiste(bericht,{text:'Stelle '+(si+1),fotoRefs:s.fotoRefs},'Fotos zu dieser Stelle',false));
+      k.appendChild(_fsFotoLeiste(bericht,{text:titel,fotoRefs:s.fotoRefs},'Fotos zu dieser Stelle',false)); /* F103: dieselbe Nummer wie an der Karte */
       const satz=_fsBgFeuchtStelleSatz(bericht,s);
       if(satz){const vor=document.createElement('div');vor.setAttribute('data-fs-bgsatz','1');vor.style.cssText='font-size:var(--fs12,12px);color:var(--text2);margin-top:6px;line-height:1.4;';vor.textContent='Im PDF: '+satz;k.appendChild(vor);}
       w.appendChild(k);
@@ -5522,8 +5536,10 @@ function _fsBgAnwesendText(b){
   if(l.length)return l.map(p=>String(p.name).trim()+(String(p.rolle||'').trim()?' ('+String(p.rolle).trim()+')':'')).join(' · ');
   return String((b&&b.kopf&&b.kopf.anwesend)||'').trim();
 }
-/* F45: Uhrzeit lesen – „9:30“, „09.30“ → „09:30“; keine gültige Uhrzeit → leer */
-function _fsVbUhr(s){const m=/^(\d{1,2})[:.](\d{2})$/.exec(String(s==null?'':s).trim());if(!m||+m[1]>23||+m[2]>59)return '';return ('0'+(+m[1])).slice(-2)+':'+m[2];}
+/* F45: Uhrzeit lesen – „9:30“, „09.30“ → „09:30“; keine gültige Uhrzeit → leer.
+   F103: die EINE Regel für alle Uhrzeitfelder – auch „0930“, „930“, „9 30“, „9:30 Uhr“ und nur die Stunde („9“, „9 Uhr“ → 09:00); „8:5“, „24:00“, „1x“ bleiben keine Uhrzeit.
+   ⛔ Die Funktion bleibt EINE Zeile – test_b1141 (PAM Desktop) schneidet genau diese Zeile aus. */
+function _fsVbUhr(s){const m=/^(\d{1,2})(?:[:. ]?(\d{2}))?\s*(?:uhr)?$/i.exec(String(s==null?'':s).trim());if(!m||+m[1]>23||(m[2]&&+m[2]>59))return '';return ('0'+(+m[1])).slice(-2)+':'+(m[2]||'00');}
 /* F45: Zustand der Zeit im Protokoll – ohne (kein Beginn) · endeFehlt · endeUngueltig · endeVor (Ende vor oder gleich Beginn) · ok */
 function _fsVbZeitStatus(k){
   const b=_fsVbUhr(k&&k.beginn),roh=String((k&&k.ende)||'').trim(),e=_fsVbUhr(roh);
@@ -5607,8 +5623,9 @@ function _fsBgOrt(b,st){
   const mitte=wand?(h?wand+', '+h+' cm':wand):(h?h+' cm':'');
   return [String((st&&st.raum)||'').trim(),mitte,String((st&&st.text)||'').trim()].filter(Boolean).join(' – ');
 }
-// Uhrzeit „8:5" / „08:14" → „08:14"; sonst leer
+// Uhrzeit „8:5" / „08:14" → „08:14"; sonst leer. F103: dieselbe Regel wie bei Beginn/Ende (_fsVbUhr – auch „9.30“, „0930“, „9:30 Uhr“); ohne sie wie bisher
 function _fsBgZeitNorm(z){
+  if(typeof _fsVbUhr==='function')return _fsVbUhr(z);
   const m=/^(\d{1,2}):(\d{2})$/.exec(String(z||'').trim());
   if(!m||+m[1]>23||+m[2]>59)return '';
   return ('0'+m[1]).slice(-2)+':'+m[2];
@@ -5640,8 +5657,8 @@ function _fsBgStellenSortiert(b){
     return a.i-c.i;
   };
   const reg=alle.filter(x=>!x.st.referenz).sort(vgl),ref=alle.filter(x=>x.st.referenz).sort(vgl);
-  reg.forEach((x,n)=>{x.nr=String(n+1);});
-  ref.forEach((x,n)=>{x.nr=ref.length>1?'R'+(n+1):'R';});
+  reg.forEach((x,n)=>{x.nr=(x.st&&x.st._fsNr)?String(x.st._fsNr):String(n+1);}); /* F103: in der Kopie eines Nachtrags (_fsOtBgAnsicht) die Nummer des ganzen Protokolls */
+  ref.forEach((x,n)=>{x.nr=(x.st&&x.st._fsNr)?String(x.st._fsNr):(ref.length>1?'R'+(n+1):'R');});
   return reg.concat(ref);
 }
 // Frische Messstelle im Begehungsprotokoll: Uhrzeit „jetzt", Wand wie bei der letzten Stelle (gleiche Wand, andere Höhe), keine Vergleichsstelle
@@ -6030,7 +6047,8 @@ function _fsBgMessfensterZeigen(b,tab0){
 // Bildunterschrift im PDF: wozu gehört das Foto – Raum, Wand, Messstelle (mit der gedruckten Nummer), Feststellung
 function _fsBgFotoZuordnung(b,f,kurz){ /* F57: kurz = nur das Objekt der Stelle (ihr eigener Text), ohne Bereich, Seite und Blickrichtung – für die Unterschrift im PDF */
   const teile=[];
-  ((b&&Array.isArray(b.bgStellen))?b.bgStellen:[]).forEach((s,i)=>{if(s&&(s.fotoRefs||[]).some(x=>_fsRefPasst(f,x)))teile.push('Stelle '+(i+1)+(String(s.raum||'').trim()?' ('+String(s.raum).trim()+')':''));}); /* F54 */
+  const fnr=(typeof _fsBgFeuchtNummern==='function')?_fsBgFeuchtNummern(b):null; /* F103: dieselbe Nummer wie in der PDF-Liste – nur ausgefüllte Stellen zählen */
+  ((b&&Array.isArray(b.bgStellen))?b.bgStellen:[]).forEach((s,i)=>{if(s&&(s.fotoRefs||[]).some(x=>_fsRefPasst(f,x))){const nr=fnr?fnr.get(s):String(i+1);teile.push((nr?'Stelle '+nr:'Stelle ohne Angaben')+(String(s.raum||'').trim()?' ('+String(s.raum).trim()+')':''));}}); /* F54 · F103 */
   if(typeof _fsVbStellenGefuellt==='function')_fsVbStellenGefuellt(b).forEach(x=>{if((x.s.fotoRefs||[]).some(r=>_fsRefPasst(f,r))){const o=b.schlank?_fsVbWo(x.s):_fsVbOrtVoll(x.s); /* F59 */teile.push(kurz?(o||_fsVbBezeichnung(b,x.s,x.nr)):_fsVbBezeichnung(b,x.s,x.nr)+((b.schlank&&_fsSeiteText(x.s.seite))?' – '+_fsSeiteMitWort(x.s.seite):'')+(o?' – '+o:''));}}); // F21, F22, F24, F28
   ((b&&b.raeume)||[]).forEach(r=>{
     if(!r)return;
@@ -7619,7 +7637,7 @@ async function _fsMobPdfBg(bericht,task){
       if(gruppen.length||sbText||vbs.length||mzl||erg.length||bgs.length){
         abschnitt('Feststellungen vor Ort');
         if(mzl){absatz(mzl,{abstand:3});y+=1;} // F22
-        if(bgs.length){unterTitel('Stellen');bgs.forEach((s,i)=>absatz((i+1)+' · '+_fsBgFeuchtStelleSatz(bericht,s)+fotoHinweis(s.fotoRefs)+_otAm(s),{einzug:3,abstand:1.5}));y+=3;} /* F54 */
+        if(bgs.length){const fnr=(typeof _fsBgFeuchtNummern==='function')?_fsBgFeuchtNummern(bericht):null;unterTitel('Stellen');bgs.forEach((s,i)=>absatz(((fnr&&fnr.get(s))||(i+1))+' · '+_fsBgFeuchtStelleSatz(bericht,s)+fotoHinweis(s.fotoRefs)+_otAm(s),{einzug:3,abstand:1.5}));y+=3;} /* F54 · F103: Nummer wie an der Karte und unter dem Foto */
         if(erg.length&&!bericht.schlank){unterTitel('Eingrenzung');erg.forEach(z=>absatz(z,{einzug:3,abstand:1.5}));y+=3;} // F22
         if(sbText){unterTitel('Beschreibung des Schadenbildes');absatz(sbText,{einzug:3,abstand:3});y+=2;}
         if(vbs.length){
@@ -8168,17 +8186,16 @@ async function _fsTestoEinlesen(bericht,t,neuBauen){
         _fsRaumAuffuellen(bericht,raumName,m);
         scheduleSave();
         n++;
-        const nr=bericht.stellen.length;
         if(m.bildDatei){
           try{
             const blob=await _fsDriveBlob(m.bildDatei.id);
             m.bildBlob=blob;
             const bu=URL.createObjectURL(blob);
             ov.style.display='none';
-            const punkt=await _fsMesspunktWaehlen(bu,'Stelle '+nr);
+            const punkt=await _fsMesspunktWaehlen(bu,(typeof _fsBgMessbildOrt==='function')?_fsBgMessbildOrt(bericht,st):'Messstelle'); /* F103: Ort statt Nummer – die PDF-Nummer richtet sich nach der Uhrzeit und kann sich noch ändern */
             ov.style.display='flex';
             URL.revokeObjectURL(bu);
-            const du=await _fsMessbildErstellen(blob,_fsStelleWerte(bericht,st),punkt,(m.zeit?_fsZeitText(m.zeit)+' · ':'')+'Stelle '+nr);
+            const du=await _fsMessbildErstellen(blob,_fsStelleWerte(bericht,st),punkt,(m.zeit?_fsZeitText(m.zeit)+' · ':'')+((typeof _fsBgMessbildOrt==='function')?_fsBgMessbildOrt(bericht,st):'Messstelle')); /* F103: Ort statt „Stelle N“ im Bild */
             if(du){
               const localKey='photo_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
               const name='Messbild_'+(m.zeit?_fsZeitText(m.zeit).slice(11).split(':').join(''):String(Date.now()))+'.jpg';
@@ -8430,17 +8447,16 @@ async function _fsTestoPlanZuordnen(bericht,t,neuBauen){
         bericht.stellen.push(st);
         scheduleSave();
         n++;
-        const nr=bericht.stellen.length;
         if(m.bildDatei&&mitBild&&amGeraet){
           try{
             const blob=await _fsDriveBlob(m.bildDatei.id);
             m.bildBlob=blob;
             const bu=URL.createObjectURL(blob);
             ov.style.display='none';
-            const punkt=await _fsMesspunktWaehlen(bu,'Stelle '+nr+' · '+_fsBgOrt(bericht,st));
+            const punkt=await _fsMesspunktWaehlen(bu,(typeof _fsBgMessbildOrt==='function')?_fsBgMessbildOrt(bericht,st):_fsBgOrt(bericht,st)); /* F103: Ort statt Nummer */
             ov.style.display='flex';
             URL.revokeObjectURL(bu);
-            const du=await _fsMessbildErstellen(blob,_fsStelleWerte(bericht,st),punkt,(m.zeit?_fsZeitText(m.zeit)+' · ':'')+'Stelle '+nr);
+            const du=await _fsMessbildErstellen(blob,_fsStelleWerte(bericht,st),punkt,(m.zeit?_fsZeitText(m.zeit)+' · ':'')+((typeof _fsBgMessbildOrt==='function')?_fsBgMessbildOrt(bericht,st):'Messstelle')); /* F103: Ort statt „Stelle N“ im Bild */
             if(du){
               const localKey='photo_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
               const name='Messbild_'+(m.zeit?_fsZeitText(m.zeit).slice(11).split(':').join(''):String(Date.now()))+'.jpg';
@@ -9522,6 +9538,7 @@ function _fsOtpTeilPersonen(b,t,H){
         x.onclick=()=>{_fsOtpZeitSetzen(b,p.name,wann,_fsVbJetzt().uhr);scheduleSave();H.neu();};return x;};
       const ab=H.inp(ap.ab||'','ab hh:mm',v=>{_fsOtpZeitSetzen(b,p.name,'ab',v);});ab.style.width='110px';ab.style.flex='0 0 auto';ab.setAttribute('data-otp-abfeld','1');
       const bis=H.inp(ap.bis||'','bis hh:mm',v=>{_fsOtpZeitSetzen(b,p.name,'bis',v);});bis.style.width='110px';bis.style.flex='0 0 auto';bis.setAttribute('data-otp-bisfeld','1');
+      if(typeof _fsUhrFeld==='function'){_fsUhrFeld(ab,z=>{_fsOtpZeitSetzen(b,p.name,'ab',z);},{wo:u});_fsUhrFeld(bis,z=>{_fsOtpZeitSetzen(b,p.name,'bis',z);},{wo:u});} /* F103: „1015“ wird beim Verlassen „10:15“ statt still zu verschwinden */
       u.append(jetzt('bis'),jetzt('ab'),ab,bis);r.appendChild(u);
     }
     w.appendChild(r);
@@ -10147,6 +10164,44 @@ function _fsVbMeldungOhneAnlass(b){
   if(b.meldungStatus==='nein'){const a=w(b.meldungNein);return a?'Prüfung konnte nicht erfolgen: '+p(a):'Prüfung konnte nicht erfolgen.';}
   return '';
 }
+/* ── F103: UHRZEIT UND NUMMERN IM BEGEHUNGSPROTOKOLL (Fund 7 und 11 der Formular-Prüfung vom 07.11.2026) ──────────────────────────────────────────
+   Bauplan Claude-Code\Bauplan_F103_Uhrzeit-und-Nummern_2026-11-08.html, Antworten 08.11.2026: Messbild mit Ort statt Nummer · ein Nachtrag zählt weiter ·
+   „9“ wird 09:00. Reine Helfer; die Aufrufstellen fragen sie mit typeof ab (ältere Prüfungen schneiden Funktionen einzeln aus) und machen sonst weiter wie bisher.
+   ⛔ In diesem Block kein Personenname (test_f78/f95/f96/f97 durchsuchen ihn mit – er steht vor F94).
+   (1) _fsVbUhr (F45, weiter oben) ist jetzt die EINE Uhrzeit-Regel, _fsBgZeitNorm ruft sie. _fsUhrFeld schreibt beim Verlassen eines Feldes „9.30“ als „09:30“
+       ins Feld und in den Bericht – oder zeigt darunter einen orangen Hinweis; der Text bleibt stehen, gelöscht wird nichts.
+   (2) _fsBgFeuchtNummern: EINE Nummer je Feuchtestelle (nur ausgefüllte, Reihenfolge wie im Formular) – Karte, Löschfrage, Fotoleiste, Bildunterschrift und
+       PDF-Liste nehmen dieselbe. In der Kopie eines Nachtrags (_fsOtBgAnsicht) steht die Nummer des ganzen Protokolls in _fsNr (auch an Messstellen).
+   (3) _fsBgMessbildOrt: ins testo-Messbild kommt der Ort (Raum – Wand, Höhe) statt „Stelle N“ – die PDF-Nummer hängt von der Uhrzeit ab und kann sich ändern. */
+function _fsUhrFeld(inp,setzen,o){
+  if(!inp||typeof inp.addEventListener!=='function'||typeof _fsVbUhr!=='function')return inp;
+  o=o||{};
+  const weg=()=>{const h=inp._fsUhrHinweis;if(h&&h.parentNode)h.parentNode.removeChild(h);};
+  inp.addEventListener('blur',()=>{
+    const roh=String(inp.value==null?'':inp.value).trim();
+    if(!roh){weg();return;}
+    const u=_fsVbUhr(roh);
+    if(u){
+      weg();
+      if(u!==inp.value){inp.value=u;if(typeof setzen==='function')setzen(u);if(typeof scheduleSave==='function')scheduleSave();if(typeof o.nach==='function')o.nach();}
+      return;
+    }
+    let h=inp._fsUhrHinweis;
+    if(!h){h=document.createElement('div');h.setAttribute('data-fs-uhrhinweis','1');h.style.cssText='grid-column:1/-1;flex-basis:100%;width:100%;margin-top:4px;font-size:var(--fs12,12px);line-height:1.35;color:var(--orange,#b4540a);';inp._fsUhrHinweis=h;}
+    h.textContent='⚠ „'+roh+'“ ist keine Uhrzeit (z. B. 09:30) – steht so nicht im PDF.';
+    if(!h.parentNode){if(o.wo&&typeof o.wo.appendChild==='function')o.wo.appendChild(h);else if(o.hinter&&o.hinter.parentNode)o.hinter.insertAdjacentElement('afterend',h);else if(inp.parentNode)inp.insertAdjacentElement('afterend',h);}
+  });
+  return inp;
+}
+function _fsBgFeuchtNummern(b){
+  const m=new Map();let n=0;
+  ((b&&Array.isArray(b.bgStellen))?b.bgStellen:[]).forEach(s=>{if(!s||typeof _fsBgFeuchtStelleGefuellt!=='function'||!_fsBgFeuchtStelleGefuellt(s))return;n++;m.set(s,s._fsNr?String(s._fsNr):String(n));});
+  return m;
+}
+function _fsBgMessbildOrt(b,st){
+  const o=(typeof _fsBgOrt==='function'&&st)?_fsBgOrt(b,Object.assign({},st,{text:''})):'';
+  return o||'Messstelle';
+}
 /* ── F94: FOTOS BEI MEHREREN ORTSTERMINEN AM SELBEN TAG (Nachtrag zu P110) ────────────────────────────────────────────────────────────────────
    24.10.2026 („Baue F94“, Bauvorschlag Claude-Code\Bauplan_F94_Fotos-gleicher-Tag_2026-10-24.html; Frage Uhrzeit bei „am 23.10.“: nein, so lassen):
    Gibt es am Aufnahmetag eines Fotos mehrere Ortstermine, entschied bisher deren Beginn (📍) – ohne Beginn (im Dachprotokoll immer) landeten alle
@@ -10373,11 +10428,12 @@ function _fsOtBgAnsicht(b,auswahl){
   }
   FS_OT_BG_LISTEN.forEach(n0=>{
     if(!Array.isArray(b[n0]))return;
-    v[n0]=b[n0].map(x=>{
+    v[n0]=b[n0].map((x,xi)=>{
       if(!x||typeof x!=='object')return null;
       const sv=_fsOtBgWert(T,n0,x,m);if(!sv)return null; /* gab es bei diesem Termin noch nicht */
       const k=_fsOtBgTerminVon(b,T,n0,x,m);
       const c=Object.assign({},x,(m===n)?{}:sv);
+      c._fsIdx=xi; /* F103: Platz in der Liste – für die Nummern des ganzen Protokolls (unten); Felder mit „_“ kommen nie in den gespeicherten Stand */
       if(k<0){if(FS_OT_BG_MESS.indexOf(n0)>=0)return c;return null;}
       if(!inA(k)){
         if(n0!=='raeume')return null;
@@ -10410,6 +10466,15 @@ function _fsOtBgAnsicht(b,auswahl){
     if(mehr&&ti!==lo)fotoAm.set(f,am(ti));
     return true;
   });
+  /* F103 (Antwort 08.11.2026 „weiterzählen“): Mess- und Feuchtestellen behalten in einem Nachtrag die Nummer des ganzen Protokolls (4, 5, 6 statt wieder 1, 2, 3).
+     Dazu einmal die Kopie mit ALLEN Terminen bauen und ihre Nummern über den Listenplatz (_fsIdx) an diese Kopie hängen. */
+  if(A.length<T.length&&typeof _fsBgStellenSortiert==='function'&&typeof _fsBgFeuchtNummern==='function'){
+    const voll=_fsOtBgAnsicht(b,T.map(x=>x.id)),nrS=new Map(),nrF=new Map();
+    _fsBgStellenSortiert(voll).forEach(x=>{if(x.st&&typeof x.st._fsIdx==='number')nrS.set(x.st._fsIdx,x.nr);});
+    _fsBgFeuchtNummern(voll).forEach((nr,s)=>{if(s&&typeof s._fsIdx==='number')nrF.set(s._fsIdx,nr);});
+    (Array.isArray(v.stellen)?v.stellen:[]).forEach(st=>{if(st&&nrS.has(st._fsIdx))st._fsNr=nrS.get(st._fsIdx);});
+    (Array.isArray(v.bgStellen)?v.bgStellen:[]).forEach(s=>{if(s&&nrF.has(s._fsIdx))s._fsNr=nrF.get(s._fsIdx);});
+  }
   v._ot={mehrere:mehr,art:'bg',termine:A.map(i=>T[i]),alle:T,schluessel:A.map(i=>T[i].id).join('+'),fotoAm};
   return v;
 }
@@ -10523,6 +10588,7 @@ function _fsOtBgBearbeitenTeil(b,o,F,farbe,fertig,felder){
   w.appendChild(klein('📏 Selbst vor Ort (freiwillig):'));
   const fg=_fsOtFeld('gesehen',wd.vorOrtWetter,'z. B. Nieselregen','data-ot-feld-vorort-wetter'),ft=_fsOtFeld('Außen °C',wd.vorOrtT,'z. B. 11,8','data-ot-feld-vorort-t'),ff=_fsOtFeld('Außen % rF',wd.vorOrtRf,'z. B. 84','data-ot-feld-vorort-rf'),fu=_fsOtFeld('gemessen um',wd.vorOrtUhr,'hh:mm','data-ot-feld-vorort-uhr');
   w.append(fg.r,ft.r,ff.r,fu.r);
+  if(typeof _fsUhrFeld==='function')_fsUhrFeld(fu.i,null,{hinter:fu.r}); /* F103: „gemessen um“ – „9.30“ wird „09:30“; übernommen wird beim OK */
   w.appendChild(klein('👥 Anwesend (außer dir):'));
   const pers=(Array.isArray(o.anwesende)?o.anwesende:[]).map(p=>({name:String((p&&p.name)||''),rolle:String((p&&p.rolle)||'')}));
   const liste=document.createElement('div');liste.setAttribute('data-ot-anwesende','1');w.appendChild(liste);
@@ -10601,7 +10667,7 @@ function _fsOtBgMessWache(b,n,x,inp,neu){
     try{if(typeof inp.blur==='function')inp.blur();}catch(e){}
     _fsOtBgMessFenster(b,n,x,alt,w=>{
       if(w==='ueber'){_fsOtBgMessFrei.add(x);try{inp.focus();}catch(e){}}
-      else if(w==='neu'){const st=_fsOtBgMessNeu(b,n,x);if(st){if(typeof scheduleSave==='function')scheduleSave();if(typeof toast==='function')toast('✓ Neue Messstelle '+b.stellen.length+' angelegt – trag dort den neuen Wert ein','success',4500);if(typeof neu==='function')neu();}}
+      else if(w==='neu'){const st=_fsOtBgMessNeu(b,n,x);if(st){if(typeof scheduleSave==='function')scheduleSave();if(typeof toast==='function')toast('✓ Neue Messstelle angelegt – trag dort den neuen Wert ein','success',4500);if(typeof neu==='function')neu();}}
     });
   });
   return inp;
