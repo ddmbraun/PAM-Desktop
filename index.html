@@ -10724,7 +10724,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-11-08 · #1269'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-11-08-b1269) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-11-10 · #1270'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-11-10-b1270) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -11038,6 +11038,8 @@ var _ztlAnhOrdnerId=null,_ztlAnhLaeuft={},_ztlAnhWegVersucht={}; // b1029/v302: 
 var zettelFileId=null;
 var _ztlSyncTimer=null,_ztlSyncLaeuft=false;
 var _ztlSyncStand={zeit:0,fehler:'',fehlZeit:0}; // b904: letzter gelungener Abgleich / letzter Fehler – der Kasten zeigt es an
+var ZETTEL_NB_ALT_KEY='pam_zettel_nb_aussortiert'; // Ablagefach im Browser für Zeilen, die der Notbetrieb beim Start nicht zurückschreibt
+var _ztlNbErsterAbgleich=true; // nur der ERSTE Notbetrieb-Abgleich nach dem Laden sortiert Veraltetes aus
 var _ztlZeilen=[];
 try{if(typeof localStorage!=='undefined'){var _zLade=JSON.parse(localStorage.getItem(ZETTEL_LS_KEY)||'null');if(_zLade&&Array.isArray(_zLade.zeilen))_ztlZeilen=_zLade.zeilen;}}catch(e){}
 var _ztlEditId=null; // b804: Zeile, die gerade bearbeitet wird (null = keine)
@@ -73298,6 +73300,33 @@ function _ztlSyncStandHtml(){
   if(_ztlSyncStand.zeit)return '<span title="Zeitpunkt, seit dem Handy und PC denselben Zettel haben" style="font-size:11px;color:var(--text2);white-space:nowrap;">☁ abgeglichen '+hm(_ztlSyncStand.zeit)+'</span>';
   return '<span title="Der Abgleich mit Drive läuft nach dem Start von selbst" style="font-size:11px;color:var(--text2);white-space:nowrap;">☁ noch nicht abgeglichen</span>';
 }
+// Notbetrieb – der Browser-Speicher unter 127.0.0.1 kann Wochen alt sein. Zeilen, die dort noch stehen, in der
+// Zettel-Datei aber fehlen und zuletzt VOR dem Stand der Datei geändert wurden, sind anderswo gelöscht worden (der
+// Lösch-Vermerk fällt nach ZETTEL_WEG_TAGE aus der Datei, danach hielte _ztlMerge sie für neu). Sie werden beim
+// ERSTEN Abgleich nach dem Start nicht zurückgeschrieben, sondern im Browser unter ZETTEL_NB_ALT_KEY aufgehoben.
+// Ohne Datei-Stand (lastUpdated) oder bei leerer Datei wird NICHTS aussortiert. Reine Funktion, ändert nichts.
+function _ztlNbAltAussortieren(lokal,fern,fernStand){
+  const alle=Array.isArray(lokal)?lokal:[];
+  const stand=String(fernStand||'');
+  if(!stand||!Array.isArray(fern)||!fern.length)return {behalten:alle,alt:[]};
+  const da={};
+  fern.forEach(function(z){if(z&&typeof z.id==='string')da[z.id]=1;});
+  const behalten=[],alt=[];
+  alle.forEach(function(z){
+    if(z&&typeof z.id==='string'&&z.id&&!da[z.id]&&String(z.ts||'')<stand)alt.push(z);else behalten.push(z);
+  });
+  return {behalten:behalten,alt:alt};
+}
+function _ztlNbAltAufheben(alt,jetztIso){
+  try{
+    if(typeof localStorage==='undefined'||!alt||!alt.length)return;
+    let liste=[];
+    try{const v=JSON.parse(localStorage.getItem(ZETTEL_NB_ALT_KEY)||'[]');if(Array.isArray(v))liste=v;}catch(e){}
+    liste.push({am:jetztIso,zeilen:alt});
+    while(liste.length>20)liste.shift();
+    localStorage.setItem(ZETTEL_NB_ALT_KEY,JSON.stringify(liste));
+  }catch(e){}
+}
 async function _ztlSync(){
   if(_ztlSyncLaeuft)return;
   // typeof-Wache: ausschneidende Suiten (b802/b886) kennen die Melder nicht – dann stumm wie vor b904, nie abstürzen
@@ -73309,12 +73338,23 @@ async function _ztlSync(){
   if(typeof PAM_NOTBETRIEB!=='undefined'&&PAM_NOTBETRIEB){
     _ztlSyncLaeuft=true;
     try{
-      let fern=[],fernRoh='[]',leseOk=false;
+      let fern=[],fernRoh='[]',leseOk=false,fernStand='';
       const r=await fetch('/api/datei?name='+ZETTEL_FILE_NAME,{cache:'no-store'});
-      if(r.ok){const d=await r.json();if(d&&Array.isArray(d.zeilen)){fern=d.zeilen;fernRoh=JSON.stringify(fern);}leseOk=true;}
+      if(r.ok){const d=await r.json();if(d&&Array.isArray(d.zeilen)){fern=d.zeilen;fernRoh=JSON.stringify(fern);fernStand=String(d.lastUpdated||'');}leseOk=true;}
       else if(r.status===404){leseOk=true;}
       if(!leseOk){_ztlSchlecht('Helfer HTTP '+r.status);return;}
       const vorher=JSON.stringify(_ztlZeilen);
+      // Notbetrieb, erster Abgleich nach dem Start – Veraltetes aus dem Browser-Speicher nicht zurückschreiben
+      // (typeof-Wachen wie oben: ausschneidende Suiten kennen Schalter und Helfer nicht)
+      if(typeof _ztlNbErsterAbgleich!=='undefined'&&_ztlNbErsterAbgleich&&typeof _ztlNbAltAussortieren==='function'){
+        _ztlNbErsterAbgleich=false;
+        const sortiert=_ztlNbAltAussortieren(_ztlZeilen,fern,fernStand);
+        if(sortiert.alt.length){
+          if(typeof _ztlNbAltAufheben==='function')_ztlNbAltAufheben(sortiert.alt,_ztlJetzt());
+          _ztlZeilen=sortiert.behalten;
+          if(typeof _ztlMeldung==='function')_ztlMeldung(sortiert.alt.length+' alte Zettel-Punkte aus dem Speicher dieses Fensters nicht übernommen – sie stehen nicht mehr in der Zettel-Datei.','info');
+        }
+      }
       _ztlZeilen=_ztlMerge(_ztlZeilen,fern,_ztlJetzt());
       const nachher=JSON.stringify(_ztlZeilen);
       if(nachher!==vorher){_ztlSpeichereLokal();_ztlZeichne();}
