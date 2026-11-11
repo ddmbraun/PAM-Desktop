@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F104';
+const PAM_FORMULARE_VERSION='F105';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -1256,7 +1256,7 @@ function _fsWordAufbau(b,task){
     auftragNr:String(k.auftragNr||'').trim(),datum:(b&&b._ot&&b._ot.mehrere&&typeof _fsOtDatumText==='function')?_fsOtDatumText(b):String((b&&b.datum)||'').trim(),pruefer:String(k.pruefer||'').trim(),bloecke:[]};
   if(!b)return out;
   const B=out.bloecke,alle=(Array.isArray(b.fotos)?b.fotos:[]).filter(f=>f&&f.inReport),drin=[];
-  const fotoText=f=>{const zu=_fsBgFotoZuordnung(b,f),fpl=_fsFpLegende(f);return (zu||'')+(fpl?(zu?'. ':'')+'Markiert: '+fpl:'')+((b._ot&&b._ot.fotoAm&&b._ot.fotoAm.get(f))?((zu||fpl)?' · ':'')+'aufgenommen am '+b._ot.fotoAm.get(f):'');}; /* F91 */
+  const fotoText=f=>{const zu=_fsBgFotoZuordnung(b,f),fpl=_fsFpLegende(f);return (zu||'')+(fpl?(zu?'. ':'')+'Markiert: '+fpl:'')+((b._ot&&b._ot.fotoAm&&b._ot.fotoAm.get(f))?((zu||fpl)?' · ':'')+'Termin '+b._ot.fotoAm.get(f):'');}; /* F91 · F105: „Termin“ statt „aufgenommen am“ */
   const fotosVon=refs=>{const l=[];(Array.isArray(refs)?refs:[]).forEach(r=>{const f=alle.find(x=>_fsRefPasst(x,r));if(f&&l.indexOf(f)<0)l.push(f);});return l;};
   { /* Vor Ort */
     const z=[],zt=_fsBgZeitText(k),aw=_fsBgAnwesendZeilen(b); /* F49: eine Zeile je Person · F53: getrennt in „Aufgenommen / gemessen von“ und „Vor Ort“ (aw bleibt für ältere Prüfungen) */
@@ -10478,7 +10478,7 @@ function _fsOtBgAnsicht(b,auswahl){
   v.fotos=(Array.isArray(b.fotos)?b.fotos:[]).filter(f=>{
     if(!f)return false;
     const ti=_fsOtFotoTermin(T,f);if(!inA(ti))return false;
-    if(mehr&&ti!==lo)fotoAm.set(f,am(ti));
+    if(mehr)fotoAm.set(f,am(ti)); /* F105: bei mehreren Terminen im PDF trägt JEDES Foto seinen Termin, auch das vom ersten */
     return true;
   });
   /* F103 (Antwort 08.11.2026 „weiterzählen“): Mess- und Feuchtestellen behalten in einem Nachtrag die Nummer des ganzen Protokolls (4, 5, 6 statt wieder 1, 2, 3).
@@ -10901,7 +10901,7 @@ function _fsOtAnsicht(b,auswahl){
     if(!f)return false;
     if(ganz.some(r=>_fsRefPasst(f,r)))return true;
     const i=_fsOtFotoTermin(T,f);if(!inA(i))return false;
-    if(mehr&&i!==lo)fotoAm.set(f,am(i));
+    if(mehr)fotoAm.set(f,am(i)); /* F105: auch das Foto vom ersten Termin */
     return true;
   });
   v._ot={mehrere:mehr,art,termine:A.map(i=>T[i]),schluessel:A.map(i=>T[i].id).join('+'),fotoAm};
@@ -10931,10 +10931,10 @@ function _fsOtPdfBlock(doc,b,y,M,W,farbe){
   doc.setFont('helvetica','normal');doc.setTextColor(0,0,0);
   return doc.lastAutoTable.finalY+6;
 }
-// Bildunterschrift: „· aufgenommen am …“ an Fotos eines späteren Termins (nur bei mehreren Terminen im PDF)
+// Bildunterschrift: „· Termin TT.MM.“ an jedem Foto, das zu einem Termin gehört (nur bei mehreren Terminen im PDF) – F105: das Wort „Termin“, weil das Foto einem Termin zugeordnet ist; der Aufnahmetag ist nicht immer bekannt
 function _fsOtFotoCapZusatz(b,f,u){
   const am=(b&&b._ot&&b._ot.fotoAm&&typeof b._ot.fotoAm.get==='function')?b._ot.fotoAm.get(f):'';
-  if(!am)return u;const z='aufgenommen am '+am;
+  if(!am)return u;const z='Termin '+am;
   if(!u||!u.art)return {art:'ort',text:z};
   if(u.art==='ort'||u.art==='stelle')return Object.assign({},u,{text:String(u.text||'')+' · '+z});
   if(u.art==='pin'&&Array.isArray(u.pins)&&u.pins.length){const p=u.pins.slice(),l=p.length-1;p[l]=Object.assign({},p[l],{t:String(p[l].t||'')+' · '+z});return Object.assign({},u,{pins:p});}
