@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F106';
+const PAM_FORMULARE_VERSION='F107';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -41,6 +41,18 @@ function _fsSichtCss(){
     +'.fs-sicht.fs-hell.fs-grau2{--bg:#dcdfe5;--fs-karte:#eceef2;--bg2:#f4f5f7;--bg3:#f4f5f7;--fs-cfl:#f4f5f7;--fs-hdr:#c3d1e0;--fs-kfl:#cde0f2;--text2:#4f5064;}'
     +'.fs-sicht.fs-hell.fs-grau3{--bg:#c8cbd2;--fs-karte:#dadce1;--bg2:#e8e9ed;--bg3:#e8e9ed;--fs-cfl:#e8e9ed;--fs-hdr:#b3c4d7;--fs-kfl:#c2d8ee;--border:#737790;--text2:#41424f;}'
     +'.fs-sicht.fs-hell.fs-grau4{--bg:#b3b7bf;--fs-karte:#c6c9d0;--bg2:#d9dbe0;--bg3:#d9dbe0;--fs-cfl:#d9dbe0;--fs-hdr:#a5b7cb;--fs-kfl:#b5cde6;--border:#5f637a;--fs-ph:#50536a;--text2:#33343f;}'
+    +'.fs-sicht.fs-wohn{--fsw-kopf:#2b6fa3;--fsw-fbg:#f2a04a;--fsw-frd:#ffcf9a;--fsw-ftx:#1a1000;}.fs-sicht.fs-hell.fs-wohn{--fsw-kopf:#14507a;--fsw-fbg:#ffc27a;--fsw-frd:#b4540a;}'
+    +'.fs-wohn [data-fs-blockkopf]{background:var(--fsw-kopf)!important;color:#fff!important;font-size:calc(var(--fs13,13px) + 3px)!important;font-weight:800!important;padding:11px 14px!important;border-left:none!important;border-bottom:none!important;border-top:2px solid var(--bg)!important;gap:10px!important;}'
+    +'.fs-wohn [data-fs-blockkopf][data-fs-nr]::before{content:attr(data-fs-nr);flex:0 0 30px;width:30px;height:30px;border-radius:50%;background:#fff;color:#14507a;font-weight:900;display:flex;align-items:center;justify-content:center;}'
+    +'.fs-wohn [data-fs-blockkurz]{color:#fff!important;}'
+    +'.fs-wohn [data-fs-sek],.fs-wohn [data-fs-unterkopf]{background:transparent!important;border-top:none!important;border-left:none!important;border-bottom:2px solid var(--fsw-kopf)!important;font-size:calc(var(--fs13,13px) + 1px)!important;font-weight:800!important;padding:12px 14px 5px!important;}'
+    +'.fs-wohn [data-fs-punkt][data-fs-stand]{border-left:9px solid var(--border)!important;padding-left:10px!important;}'
+    +'.fs-wohn [data-fs-punkt][data-fs-stand="ok"]{border-left-color:var(--fs-krd,#1f5f8b)!important;}.fs-wohn [data-fs-punkt][data-fs-stand="mangel"]{border-left-color:var(--fsw-frd)!important;}'
+    +'.fs-wohn [data-fs-thema]{font-size:calc(var(--fs14,14px) + 1px)!important;font-weight:800!important;}'
+    +'.fs-wohn [data-fs-stand="offen"] [data-fs-thema]::before{content:"○ ";}.fs-wohn [data-fs-stand="ok"] [data-fs-thema]::before{content:"✓ ";}.fs-wohn [data-fs-stand="mangel"] [data-fs-thema]::before{content:"▲ ";}'
+    +'.fs-wohn [data-fs-satz]{font-size:calc(var(--fs13,13px) + 1px)!important;}'
+    +'.fs-wohn [data-fs-satz][data-fs-an]::before{font-weight:900;}.fs-wohn [data-fs-satz="ok"][data-fs-an]::before{content:"✓ ";}.fs-wohn [data-fs-satz="mangel"][data-fs-an]::before{content:"▲ ";}'
+    +'.fs-wohn [data-fs-satz="mangel"][data-fs-an]{background:var(--fsw-fbg)!important;border:3px solid var(--fsw-frd)!important;color:var(--fsw-ftx)!important;}'
     +'[data-fs-grauwahl]{display:flex;gap:4px;flex-shrink:0;margin-left:auto;}.fs-sicht:not(.fs-hell) [data-fs-grauwahl]{display:none!important;}'
     +'[data-fs-grauwahl] button{width:38px;height:40px;padding:0;border:none;border-radius:8px;background:rgba(255,255,255,.2);color:#fff;font-size:var(--fs15,15px);font-weight:700;font-family:inherit;cursor:pointer;}'
     +'[data-fs-grauwahl] button[aria-pressed="true"]{background:#fff;color:#1f5f8b;}'
@@ -1425,7 +1437,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   const ov=document.createElement('div');ov.id=GID;
   ov.style.cssText='position:fixed;inset:0;z-index:99998;display:flex;flex-direction:column;background:var(--bg);';
   _fsSichtAn(ov); /* F38 */
-  ov._fsBericht=bericht; // F2a: „📘 So geht's" liest daraus, welches Protokoll offen ist
+  ov._fsBericht=bericht;try{if(ov.classList&&typeof ov.classList.toggle==='function')ov.classList.toggle('fs-wohn',_fsIstBgWohnung(bericht));}catch(e){} // F2a: „📘 So geht's" liest daraus, welches Protokoll offen ist
 
   const S_INP='width:100%;box-sizing:border-box;background:var(--bg3);border:var(--fs-frb,1px) solid var(--border);border-radius:6px;padding:var(--fs-fpad,8px);font-size:var(--fs16,16px);color:var(--text);font-family:inherit;min-width:0;';
   const S_HDR='padding:10px 14px;font-size:var(--fs13,13px);font-weight:700;color:var(--text);background:var(--fs-hdr,var(--bg2));border-top:1px solid var(--border);border-bottom:1px solid var(--border);border-left:var(--fs-kante,4px) solid var(--fs-hfa,'+FS_FARBE+');';
@@ -1459,7 +1471,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   const body=document.createElement('div');
   body.style.cssText='flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:0 0 96px;';
 
-  function _kopfZeile(text){const h=document.createElement('div');h.style.cssText=S_HDR;h.textContent=text;return h;}
+  function _kopfZeile(text){const h=document.createElement('div');h.style.cssText=S_HDR;h.textContent=text;h.setAttribute('data-fs-unterkopf','1');return h;}
   function _inp(wert,ph,onIn,zahl){
     const i=document.createElement('input');i.type='text';i.autocomplete='off';
     i.value=(wert===null||wert===undefined)?'':String(wert);i.placeholder=ph||'';
@@ -1484,6 +1496,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
   }
   function _neuBauen(){
     const sc=body.scrollTop;
+    try{if(ov.classList&&typeof ov.classList.toggle==='function')ov.classList.toggle('fs-wohn',_fsIstBgWohnung(bericht));}catch(e){}
     body.innerHTML='';_vbUmgFuellen=null; // F23
     if(typeof _fsIstOtp==='function'&&_fsIstOtp(bericht)&&typeof _fsOtpBloecke==='function')body.append(_teilLeiste(),..._fsOtpBloecke(bericht,t,{bgBlock:_bgBlock,stellen:_teilVbStellenB2,notizen:_teilNotizenB2,fotos:_teilFotos,wetter:_vbWetterB2,inp:_inp,chip:_chip,info:_bgInfo,textFeld:_bgTextFeld,xKnopf:_bgXKnopf,neu:_neuBauen,body:body,hdrT:hdrT,hdrS:hdrS,S_INP:S_INP,S_KNOPF:S_KNOPF})); /* F95: Ortsterminprotokoll */
     else if(_fsIstVorab(bericht)&&bericht.schlank&&typeof _teilKopfBg==='function')body.append(_teilLeiste(),_bgBlock('vorort',_teilVorOrtVb),_bgBlock('gemeldet',_teilGemeldetVb),_bgBlock('stellen',_teilFeststellungenB2),_bgBlock('notizen',_teilNotizenB2),_bgBlock('fotos',_teilFotos,'Fotos')); // F23: Besichtigung 2 · F38: ohne den Abschnitt „Räume“ (seit F36 sitzt die Skizze beim Raum; der Balken stand noch da und hieß „raeume“)
@@ -2025,7 +2038,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const def=_bgBloecke().find(b=>b.k===k)||{t:k};
     const zu=_bgZu(k);
     const w=document.createElement('div');w.setAttribute('data-fs-block',k);w.style.scrollMarginTop='56px';
-    const kopf=document.createElement('button');kopf.type='button';kopf.setAttribute('data-fs-blockkopf',k);kopf.setAttribute('aria-expanded',zu?'false':'true');
+    const kopf=document.createElement('button');kopf.type='button';kopf.setAttribute('data-fs-blockkopf',k);kopf.setAttribute('aria-expanded',zu?'false':'true');{const nr=_bgBloecke().findIndex(q=>q.k===k)+1;if(nr>0)kopf.setAttribute('data-fs-nr',String(nr));}
     kopf.style.cssText=S_HDR+'display:flex;align-items:center;gap:8px;width:100%;text-align:left;cursor:pointer;font-family:inherit;border-right:none;';
     const pfeil=document.createElement('span');pfeil.textContent=zu?'▸':'▾';pfeil.style.cssText='width:16px;flex-shrink:0;';
     const kt=document.createElement('span');kt.textContent=def.t;kt.style.cssText='flex:1;min-width:0;';
@@ -3340,7 +3353,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       return row;
     }
     const st=it.status||'offen';
-    const q=document.createElement('div');q.style.cssText='font-size:var(--fs14,14px);font-weight:600;color:var(--text);margin-bottom:6px;';q.textContent=it.text||'';
+    const q=document.createElement('div');q.style.cssText='font-size:var(--fs14,14px);font-weight:600;color:var(--text);margin-bottom:6px;';q.textContent=it.text||'';row.setAttribute('data-fs-stand',(st==='ok'||st==='mangel')?st:'offen');q.setAttribute('data-fs-thema','1');
     if(it.neuAnsehen&&st==='offen'){
       const hw=document.createElement('span');hw.setAttribute('data-fs-neuansehen','1');hw.textContent='  · bitte neu beantworten';hw.style.cssText='font-weight:600;font-size:var(--fs12,12px);color:var(--orange);';q.appendChild(hw);
     }
@@ -3349,7 +3362,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     [['ok',it.ok],['mangel',kurz]].forEach(([k,text])=>{
       if(!text)return;
       const an=st===k;
-      const b=document.createElement('button');b.type='button';b.textContent=text;b.setAttribute('data-fs-satz',k);
+      const b=document.createElement('button');b.type='button';b.textContent=text;b.setAttribute('data-fs-satz',k);if(an)b.setAttribute('data-fs-an','1');
       b.style.cssText='padding:8px 8px;min-height:var(--fsh44,44px);border-radius:8px;font-size:var(--fs13,13px);line-height:1.35;text-align:left;cursor:pointer;font-family:inherit;'
         +'border:2px solid '+(an?'var(--fs-krd,'+FS_FARBE+')':'var(--border)')+';background:'+(an?'var(--fs-can,rgba(31,95,139,.18))':'var(--fs-cfl,transparent)')+';color:var(--text);font-weight:'+(an?'700':'400')+';';
       b.onclick=()=>{it.status=an?'offen':k;scheduleSave();_neuBauen();};
@@ -4072,6 +4085,7 @@ const FS_VB_ANGABEN=[
   {k:'V5.5',q:'Was hat sich zuletzt geändert?'}
 ];
 function _fsIstVorab(b){return !!b&&b.fassung==='begehung'&&b.art==='vorab';}
+function _fsIstBgWohnung(b){return !!b&&b.fassung==='begehung'&&b.art!=='vorab'&&b.art!=='keller'&&!(typeof _fsIstOtp==='function'&&_fsIstOtp(b));} /* F107: nur dieses Protokoll bekommt die Klasse fs-wohn (kräftige Abschnitte, ▲/✓/○ an den Sätzen) */
 /* F52 (Frank 09.10.2026: „die ersten Sachen genau so wie bei der Vorabbesichtigung“): Vorabbesichtigung UND Begehungsprotokoll Wohnung/Keller haben oben
    denselben Teil – „Vor Ort“ (Name, Auftraggeber, Objekt, Besichtigung bei, 📍/🏁, Wetter, Anwesend) und „Gemeldet / vorgefunden“. Im Programm ist es derselbe
    Teil (_teilVorOrtVb, _teilGemeldetVb). Nur die frühere Vorab-Fassung (ohne schlank) bleibt, wie sie war. */
