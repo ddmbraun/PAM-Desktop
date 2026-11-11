@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F105';
+const PAM_FORMULARE_VERSION='F106';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -1473,6 +1473,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     row.style.cssText='display:flex;align-items:center;gap:10px;padding:6px 14px;border-top:1px solid var(--border);';
     const l=document.createElement('span');l.style.cssText='font-size:var(--fs13,13px);color:var(--text2);width:112px;flex-shrink:0;';l.textContent=label;
     const i=_inp(bericht.kopf[key],ph,v=>{bericht.kopf[key]=v;if(key==='aussenT'||key==='aussenRf'||key==='vorOrtT'||key==='vorOrtRf')_fsWerteNeu();if(key==='vorOrtGeraet'&&typeof _fsVorOrtGeraetMerk==='function')_fsVorOrtGeraetMerk(v);if(key==='pruefer'&&bericht.fassung==='begehung'&&typeof _fsBgMerkName==='function')_fsBgMerkName(v);},zahl);
+    if((key==='beginn'||key==='ende')&&typeof _fsUhrFeld==='function')_fsUhrFeld(i,u=>{bericht.kopf[key]=u;},{hinter:row}); /* F106: dieselbe Uhrzeit-Regel wie an Raumluft und Messstelle – beim Verlassen „16:00“, sonst der Hinweis */
     row.append(l,(key==='anlass'&&typeof _fsKlappFeld==='function')?_fsKlappFeld(bericht.kopf[key],ph,v=>{bericht.kopf[key]=v;if(key==='anlass'&&_fsVbNameNachAnlass(bericht,v)){hdrT.textContent=_fsTitelIcon(bericht)+_fsTitel(bericht);const ni=body.querySelector('[data-fs-protname] input');if(ni)ni.value=bericht.protName;}scheduleSave();},S_INP,['data-fs-klappfeld',key]):i);return row; /* F44: „Anlass“ bleibt eine Zeile und klappt beim Antippen auf */
   }
   function _chip(label,an,fn){
@@ -3134,6 +3135,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const d=_fsBgStellenSortiert(bericht);
       w.querySelectorAll('[data-fs-stellenr]').forEach(e=>{const q=d.find(z=>z.i===+e.getAttribute('data-fs-stellenr'));e.textContent=q?q.nr:'·';});
       w.querySelectorAll('[data-fs-impdf]').forEach(e=>{const i=+e.getAttribute('data-fs-impdf'),q=d.find(z=>z.i===i),s0=bericht.stellen[i];e.textContent=q?'Im PDF: '+(s0&&s0.referenz?'Vergleichsstelle ':'Nr ')+q.nr:'Kommt ins PDF, sobald etwas eingetragen ist.';});
+      w.querySelectorAll('[data-fs-impdf]').forEach(e=>{const s0=bericht.stellen[+e.getAttribute('data-fs-impdf')];if(s0&&typeof _fsBgIstRaumluftStelle==='function'&&_fsBgIstRaumluftStelle(s0))e.textContent='Im PDF: Tabelle „Raumluft“ – ohne Nummer';}); /* F106 */
     };
     bericht.stellen.forEach((st,si)=>{
       if(!_bgStelleGehoertZu(st,raumName))return; // F6: nur die Stellen dieses Raums
@@ -3235,6 +3237,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       const pdfNr=(druck.find(q=>q.i===si)||{}).nr;
       const pl=document.createElement('div');pl.setAttribute('data-fs-impdf',String(si));pl.style.cssText='margin-top:6px;font-size:var(--fs12,12px);color:var(--text2);';
       pl.textContent=pdfNr?'Im PDF: '+(st.referenz?'Vergleichsstelle ':'Nr ')+pdfNr:'Kommt ins PDF, sobald etwas eingetragen ist.';
+      if(typeof _fsBgIstRaumluftStelle==='function'&&_fsBgIstRaumluftStelle(st))pl.textContent='Im PDF: Tabelle „Raumluft“ – ohne Nummer'; /* F106: Raumluft eines weiteren Termins */
 
       card.append(top,sel,ortRow,gr,luftGr,bf,werte);
       if(zusammen)card.appendChild(zusammen);
@@ -5564,7 +5567,8 @@ function _fsVbFertigFrage(tag,j){
   return 'Das Protokoll ist vom '+tag+', heute ist der '+j.datum+'.\n\n„Fertig“ würde '+j.uhr+' Uhr als Ende eintragen – das passt dann nicht zum Beginn.\n\nOK = trotzdem '+j.uhr+' Uhr eintragen\nAbbrechen = Ende von Hand eintragen';
 }
 function _fsBgZeitText(k){
-  const a=String((k&&k.beginn)||'').trim(),e=String((k&&k.ende)||'').trim();
+  const uz=v=>{const s=String(v==null?'':v).trim(),u=(s&&typeof _fsVbUhr==='function')?_fsVbUhr(s):'';return u||s;}; /* F106: „1600“ und „08.30“ werden als 16:00 und 08:30 gedruckt – auch aus schon gespeicherten Protokollen; was keine Uhrzeit ist, bleibt wie getippt */
+  const a=uz(k&&k.beginn),e=uz(k&&k.ende);
   if(a&&e)return a+' bis '+e+' Uhr';
   if(a)return 'ab '+a+' Uhr';
   if(e)return 'bis '+e+' Uhr';
@@ -5644,10 +5648,24 @@ function _fsBgStelleGefuellt(st){
   return !!(String(st.text||'').trim()||_fsZahl(st.ts)!==null||_fsZahl(st.mf)!==null||_fsZahl(st.luftT)!==null||_fsZahl(st.luftRf)!==null
     ||String(st.notiz||'').trim()||(Array.isArray(st.befund)&&st.befund.length)||(Array.isArray(st.fotoRefs)&&st.fotoRefs.length));
 }
+/* F106: Raumluft eines Raums an einem WEITEREN Termin. Der Raum selbst hat nur ein Wertepaar (t, rf); die Rückfrage „＋ Neue Messstelle in diesem
+   Raum“ (_fsOtBgMessNeu) legt deshalb eine Messstelle mit dem Text „Raumluft“ an – ohne Wand, ohne Höhe. So eine Stelle gehört im PDF in die
+   Tabelle „Raumluft“, nicht zu den Messstellen, und bekommt keine Nummer. Erkannt am Inhalt, damit auch schon gespeicherte Stellen passen. */
+function _fsBgIstRaumluftStelle(st){
+  if(!st||st.referenz)return false;
+  const leer=v=>!String(v==null?'':v).trim();
+  return String(st.text||'').trim()==='Raumluft'&&!leer(st.raum)&&leer(st.wand)&&leer(st.hoehe)&&_fsZahl(st.ts)===null&&_fsZahl(st.mf)===null;
+}
+// die Raumluft-Stellen mit Inhalt (Temperatur, Feuchte oder Notiz), nach Termin, dann Uhrzeit, dann Platz im Formular
+function _fsBgRaumluftStellen(b){
+  const l=((b&&b.stellen)||[]).map((st,i)=>({st,i,z:_fsBgStellenZeit(st)})).filter(x=>_fsBgIstRaumluftStelle(x.st)&&(_fsZahl(x.st.luftT)!==null||_fsZahl(x.st.luftRf)!==null||String(x.st.notiz||'').trim()));
+  const nr=(typeof _fsOtBgStelleNr==='function')?_fsOtBgStelleNr(b):null;
+  return l.sort((a,c)=>{if(nr){const d=nr(a.st)-nr(c.st);if(d)return d;}if(a.z&&c.z&&a.z!==c.z)return a.z<c.z?-1:1;if(a.z&&!c.z)return -1;if(c.z&&!a.z)return 1;return a.i-c.i;});
+}
 // Messstellen für das PDF: nur ausgefüllte; reguläre nach Uhrzeit (ohne Uhrzeit hinten, dort bleibt die Reihenfolge), Vergleichsstellen
 // ans Ende. nr = gedruckte Nummer: 1…n, Vergleichsstellen „R" (bei mehreren R1, R2 …). i = Platz im Formular.
 function _fsBgStellenSortiert(b){
-  const alle=((b&&b.stellen)||[]).map((st,i)=>({st,i,z:_fsBgStellenZeit(st)})).filter(x=>_fsBgStelleGefuellt(x.st));
+  const alle=((b&&b.stellen)||[]).map((st,i)=>({st,i,z:_fsBgStellenZeit(st)})).filter(x=>_fsBgStelleGefuellt(x.st)&&!((typeof _fsBgIstRaumluftStelle==='function')&&_fsBgIstRaumluftStelle(x.st))); /* F106: Raumluft-Stellen zählen nicht mit */
   const _otNr=(typeof _fsOtBgStelleNr==='function')?_fsOtBgStelleNr(b):null; /* F91 */
   const vgl=(a,c)=>{
     if(_otNr){const d=_otNr(a.st)-_otNr(c.st);if(d)return d;} /* F91: bei mehreren Ortsterminen erst nach Termin, dann nach Uhrzeit */
@@ -7568,13 +7586,28 @@ async function _fsMobPdfBg(bericht,task){
       const stellen=_fsBgStellenSortiert(bericht);
       const hatWaende=(bericht.raeume||[]).some(r=>_fsBgRaumBenutzt(bericht,r)); // F3a: vorbelegte Wände allein zählen nicht
       const hatSkizze=(bericht.raeume||[]).some(r=>r&&r.skizze&&r.skizze.an);
-      if(luft.length||stellen.length||hatWaende||hatSkizze){
+      /* F106: Raumluft eines weiteren Termins (Messstelle „Raumluft“ ohne Wand und Höhe) steht als eigene Zeile in der Tabelle „Raumluft“, direkt unter ihrem Raum */
+      const rlStellen=(typeof _fsBgRaumluftStellen==='function')?_fsBgRaumluftStellen(bericht):[];
+      const rlZeilen=[];
+      {
+        const zeitZ=(x,z)=>((typeof _fsOtBgZeitZelle==='function')?_fsOtBgZeitZelle(bericht,x,z):z)||'–';
+        const stZeile=q=>[String(q.st.raum).trim(),zeitZ(q.st,q.z),zahlText(q.st.luftT,'°C'),zahlText(q.st.luftRf,'% r. F.'),hat(q.st.notiz)?String(q.st.notiz).trim():'–'];
+        const offen=rlStellen.slice();
+        (bericht.raeume||[]).forEach(r=>{
+          if(!r)return;
+          const name=String(r.name||'').trim();
+          if(luft.indexOf(r)>=0)rlZeilen.push([name||'–',zeitZ(r,_fsBgZeitNorm(r.zeit)),zahlText(r.t,'°C'),zahlText(r.rf,'% r. F.'),hat(r.bedingung)?String(r.bedingung).trim():'–']);
+          for(let i=0;i<offen.length;){if(name&&String(offen[i].st.raum).trim()===name)rlZeilen.push(stZeile(offen.splice(i,1)[0]));else i++;}
+        });
+        offen.forEach(q=>rlZeilen.push(stZeile(q))); // Raum umbenannt oder entfernt: die Werte gehen nicht verloren
+      }
+      if(luft.length||rlStellen.length||stellen.length||hatWaende||hatSkizze){
         abschnitt('Messwerte');
-        if(luft.length){
+        if(rlZeilen.length){
           unterTitel('Raumluft');
           const rlT=ohneLeereSpalten( /* F104: „Raum“ bleibt, die anderen Spalten nur mit Wert */
             ['Raum',(bericht._ot&&bericht._ot.mehrere)?'Datum, Uhrzeit':'Uhrzeit','Lufttemperatur','Luftfeuchte','Bedingungen'], /* F91: bei mehreren Ortsterminen das Datum bei jeder Zeile */
-            luft.map(r=>[hat(r.name)?String(r.name).trim():'–',((typeof _fsOtBgZeitZelle==='function')?_fsOtBgZeitZelle(bericht,r,_fsBgZeitNorm(r.zeit)):_fsBgZeitNorm(r.zeit))||'–',zahlText(r.t,'°C'),zahlText(r.rf,'% r. F.'),hat(r.bedingung)?String(r.bedingung).trim():'–']),
+            rlZeilen,
             {0:{cellWidth:44},1:{cellWidth:20,halign:'center'},2:{cellWidth:32,halign:'right'},3:{cellWidth:32,halign:'right'},4:{cellWidth:54}},[0],[0,4]);
           doc.autoTable({startY:y,theme:'grid',margin:{left:M,right:M},
             head:[rlT.head],body:rlT.body,
@@ -11015,6 +11048,8 @@ function _fsOtBearbeitenFenster(b,o,fertig){
   const fd=_fsOtFeld('Datum',o.datum,'TT.MM.JJJJ','data-ot-feld-datum');F.box.appendChild(fd.r);
   let fb=null,fe=null,fw=null;
   if(art!=='dach'){fb=_fsOtFeld('Beginn',o.beginn,'hh:mm','data-ot-feld-beginn');fe=_fsOtFeld('Ende',o.ende,'hh:mm','data-ot-feld-ende');fw=(art==='bg')?null:_fsOtFeld(art==='an'?'Witterung':'Wetter',o.wetter,'z. B. Regen, 8 °C','data-ot-feld-wetter');F.box.append(fb.r,fe.r);if(fw)F.box.appendChild(fw.r);}
+  if(fb&&fe&&typeof _fsUhrFeld==='function'){_fsUhrFeld(fb.i,null,{hinter:fb.r});_fsUhrFeld(fe.i,null,{hinter:fe.r});} /* F106: auch im Fenster des früheren Termins – übernommen wird beim OK */
+  const _otUhr=v=>{const s=String(v==null?'':v).trim(),u=(s&&typeof _fsVbUhr==='function')?_fsVbUhr(s):'';return u||s;}; /* F106 */
   const bgT=(art==='bg'&&typeof _fsOtBgBearbeitenTeil==='function')?_fsOtBgBearbeitenTeil(b,o,F,farbe,fertig,{fd,fb,fe}):null; /* F91: Wetterdienst, selbst vor Ort, Anwesende, Zeit übertragen */
   const g=_fsOtGrundTeil(o.grund,farbe);F.box.appendChild(g.w);
   const fuss=document.createElement('div');fuss.style.cssText='display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;';
@@ -11024,7 +11059,7 @@ function _fsOtBearbeitenFenster(b,o,fertig){
   ok.onclick=()=>{
     const neuD=String(fd.i.value||'').trim();
     if(neuD&&!_fsOtTag(neuD)){if(typeof toast==='function')toast('Datum bitte als TT.MM.JJJJ, z. B. 22.10.2026','info',3500);return;}
-    o.datum=neuD;if(fb)o.beginn=String(fb.i.value||'').trim();if(fe)o.ende=String(fe.i.value||'').trim();if(fw)o.wetter=String(fw.i.value||'').trim();
+    o.datum=neuD;if(fb)o.beginn=_otUhr(fb.i.value);if(fe)o.ende=_otUhr(fe.i.value);if(fw)o.wetter=String(fw.i.value||'').trim();
     if(bgT&&typeof bgT.uebernehmen==='function')bgT.uebernehmen(); /* F91 */
     o.grund=String(g.inp.value||'').replace(/\s+/g,' ').trim();
     F.zu();if(typeof fertig==='function')fertig();
