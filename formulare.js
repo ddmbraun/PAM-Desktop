@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F103';
+const PAM_FORMULARE_VERSION='F104';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -7425,6 +7425,16 @@ async function _fsMobPdfBg(bericht,task){
     const keller=_fsIstKeller(bericht);
     const hat=v=>!(v===null||v===undefined||String(v).trim()==='');
     const zahlText=(v,einheit)=>{const n=_fsZahl(v);return n===null?'–':_fsEins(n)+(einheit?' '+einheit:'');};
+    /* F104: eine Spalte, die in jeder Zeile leer ist („–“), fällt weg – ihre Breite geht an die Spalten in „dehnen“. Spalten in „fest“ bleiben immer. */
+    const ohneLeereSpalten=(kopf,zeilen,stile,fest,dehnen)=>{
+      const leer=v=>{const s=String(v===null||v===undefined?'':v).trim();return !s||s==='–';};
+      const bleibt=kopf.map((k0,i)=>fest.indexOf(i)>=0||zeilen.some(z=>!leer(z[i])));
+      if(bleibt.every(Boolean))return {head:kopf,body:zeilen,stile:stile};
+      let frei=0;kopf.forEach((k0,i)=>{if(!bleibt[i])frei+=(stile[i]&&stile[i].cellWidth)||0;});
+      const ziel=dehnen.filter(i=>bleibt[i]),neu={};let n=0;
+      kopf.forEach((k0,i)=>{if(!bleibt[i])return;const s=Object.assign({},stile[i]||{});if(ziel.indexOf(i)>=0&&s.cellWidth)s.cellWidth+=frei/ziel.length;neu[n++]=s;});
+      return {head:kopf.filter((k0,i)=>bleibt[i]),body:zeilen.map(z=>z.filter((v,i)=>bleibt[i])),stile:neu};
+    };
     let nr=0;
     const abschnitt=titel=>{
       if(y>262){doc.addPage();y=M;}
@@ -7562,11 +7572,14 @@ async function _fsMobPdfBg(bericht,task){
         abschnitt('Messwerte');
         if(luft.length){
           unterTitel('Raumluft');
+          const rlT=ohneLeereSpalten( /* F104: „Raum“ bleibt, die anderen Spalten nur mit Wert */
+            ['Raum',(bericht._ot&&bericht._ot.mehrere)?'Datum, Uhrzeit':'Uhrzeit','Lufttemperatur','Luftfeuchte','Bedingungen'], /* F91: bei mehreren Ortsterminen das Datum bei jeder Zeile */
+            luft.map(r=>[hat(r.name)?String(r.name).trim():'–',((typeof _fsOtBgZeitZelle==='function')?_fsOtBgZeitZelle(bericht,r,_fsBgZeitNorm(r.zeit)):_fsBgZeitNorm(r.zeit))||'–',zahlText(r.t,'°C'),zahlText(r.rf,'% r. F.'),hat(r.bedingung)?String(r.bedingung).trim():'–']),
+            {0:{cellWidth:44},1:{cellWidth:20,halign:'center'},2:{cellWidth:32,halign:'right'},3:{cellWidth:32,halign:'right'},4:{cellWidth:54}},[0],[0,4]);
           doc.autoTable({startY:y,theme:'grid',margin:{left:M,right:M},
-            head:[['Raum',(bericht._ot&&bericht._ot.mehrere)?'Datum, Uhrzeit':'Uhrzeit','Lufttemperatur','Luftfeuchte','Bedingungen']], /* F91: bei mehreren Ortsterminen das Datum bei jeder Zeile */
-            body:luft.map(r=>[hat(r.name)?String(r.name).trim():'–',((typeof _fsOtBgZeitZelle==='function')?_fsOtBgZeitZelle(bericht,r,_fsBgZeitNorm(r.zeit)):_fsBgZeitNorm(r.zeit))||'–',zahlText(r.t,'°C'),zahlText(r.rf,'% r. F.'),hat(r.bedingung)?String(r.bedingung).trim():'–']),
+            head:[rlT.head],body:rlT.body,
             headStyles:{fillColor:farbe,fontSize:8},bodyStyles:{fontSize:8.5,minCellHeight:6},
-            columnStyles:{0:{cellWidth:44},1:{cellWidth:20,halign:'center'},2:{cellWidth:32,halign:'right'},3:{cellWidth:32,halign:'right'},4:{cellWidth:54}}});
+            columnStyles:rlT.stile});
           y=doc.lastAutoTable.finalY+5;
         }
         { // F2c: Wände und Fotos je Raum
@@ -7598,9 +7611,9 @@ async function _fsMobPdfBg(bericht,task){
         }
         if(stellen.length){
           unterTitel('Messstellen');
-          doc.autoTable({startY:y,theme:'grid',margin:{left:M,right:M},
-            head:[['Nr','Messstelle (Raum – Wand, Höhe – Ort)',(bericht._ot&&bericht._ot.mehrere)?'Datum, Uhrzeit':'Uhrzeit','Luft\n°C','Luft\n% r. F.','Oberfläche\n°C','Bauteil\nDigits','Beobachtung','Foto']],
-            body:stellen.map(x=>{
+          const msT=ohneLeereSpalten( /* F104: Nr, Messstelle und Beobachtung bleiben, die anderen Spalten nur mit Wert */
+            ['Nr','Messstelle (Raum – Wand, Höhe – Ort)',(bericht._ot&&bericht._ot.mehrere)?'Datum, Uhrzeit':'Uhrzeit','Luft\n°C','Luft\n% r. F.','Oberfläche\n°C','Bauteil\nDigits','Beobachtung','Foto'],
+            stellen.map(x=>{
               const st=x.st;
               const ort=_fsBgOrt(bericht,st);
               const bef=(Array.isArray(st.befund)&&st.befund.length)?'Befund: '+st.befund.join(', '):'';
@@ -7609,9 +7622,12 @@ async function _fsMobPdfBg(bericht,task){
               return [x.nr,ort||'–',((typeof _fsOtBgZeitZelle==='function')?_fsOtBgZeitZelle(bericht,st,x.z):x.z)||'–',_fsZahl(st.luftT)===null?'–':_fsEins(_fsZahl(st.luftT)),_fsZahl(st.luftRf)===null?'–':_fsEins(_fsZahl(st.luftRf)),
                 _fsZahl(st.ts)===null?'–':_fsEins(_fsZahl(st.ts)),_fsZahl(st.mf)===null?'–':_fsEins(_fsZahl(st.mf)),beob||'–',fn.join(', ')||'–'];
             }),
+            {0:{cellWidth:8,halign:'center'},1:{cellWidth:46},2:{cellWidth:13,halign:'center'},3:{cellWidth:13,halign:'right'},4:{cellWidth:15,halign:'right'},
+              5:{cellWidth:19,halign:'right'},6:{cellWidth:16,halign:'right'},7:{cellWidth:40},8:{cellWidth:12,halign:'center'}},[0,1,7],[1,7]);
+          doc.autoTable({startY:y,theme:'grid',margin:{left:M,right:M},
+            head:[msT.head],body:msT.body,
             headStyles:{fillColor:farbe,fontSize:7,fontStyle:'bold'},bodyStyles:{fontSize:7.5,minCellHeight:6},
-            columnStyles:{0:{cellWidth:8,halign:'center'},1:{cellWidth:46},2:{cellWidth:13,halign:'center'},3:{cellWidth:13,halign:'right'},4:{cellWidth:15,halign:'right'},
-              5:{cellWidth:19,halign:'right'},6:{cellWidth:16,halign:'right'},7:{cellWidth:40},8:{cellWidth:12,halign:'center'}}});
+            columnStyles:msT.stile});
           y=doc.lastAutoTable.finalY+3;
           const vgl=[];
           if(!stellen.some(x=>x.st.referenz))(bericht.stellen||[]).forEach(st=>{const v=_fsZahl(st&&st.mfVergleich);if(v!==null){const s=_fsEins(v);if(vgl.indexOf(s)<0)vgl.push(s);}});
@@ -7771,12 +7787,11 @@ async function _fsMobPdfBg(bericht,task){
     doc.setFontSize(7.5);doc.setTextColor(90,90,90);doc.setFont('helvetica','normal');
     doc.text('Ort, Datum',M,y+12);doc.text('Unterschrift'+(hat(k.pruefer)?' ('+String(k.pruefer).trim()+')':''),W-M-70,y+12);
 
-    const pages=doc.internal.getNumberOfPages(),jetzt=_fsVbJetzt(); // F49: „erstellt TT.MM.JJJJ hh:mm“ links in der Fußzeile
+    const pages=doc.internal.getNumberOfPages(); // F104: links unten steht kein Erstelldatum mehr – nur Seitenzahl und Adresse
     for(let p=1;p<=pages;p++){
       doc.setPage(p);doc.setFontSize(8);doc.setTextColor(150,150,150);
       doc.text('Seite '+p+' von '+pages,W/2,292,{align:'center'});
       doc.text('sv-fb.de',W-M,292,{align:'right'});
-      doc.text('erstellt '+jetzt.datum+' '+jetzt.uhr,M,292);
     }
 
     const blob=doc.output('blob');
