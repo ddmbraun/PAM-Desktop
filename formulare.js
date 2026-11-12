@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F108';
+const PAM_FORMULARE_VERSION='F109';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -45,6 +45,7 @@ function _fsSichtCss(){
     +'.fs-wohn [data-fs-blockkopf]{background:var(--fsw-kopf)!important;color:#fff!important;font-size:calc(var(--fs13,13px) + 3px)!important;font-weight:800!important;padding:11px 14px!important;border-left:none!important;border-bottom:none!important;border-top:2px solid var(--bg)!important;gap:10px!important;}'
     +'.fs-wohn [data-fs-blockkopf][data-fs-nr]::before{content:attr(data-fs-nr);flex:0 0 30px;width:30px;height:30px;border-radius:50%;background:#fff;color:#14507a;font-weight:900;display:flex;align-items:center;justify-content:center;}'
     +'.fs-wohn [data-fs-blockkurz]{color:#fff!important;}'
+    +'.fs-wohn [data-fs-signkopf]{background:var(--fsw-kopf)!important;color:#fff!important;font-size:calc(var(--fs13,13px) + 3px)!important;font-weight:800!important;padding:11px 14px!important;border-left:none!important;border-bottom:none!important;border-top:2px solid var(--bg)!important;}'
     +'.fs-wohn [data-fs-sek],.fs-wohn [data-fs-unterkopf]{background:transparent!important;border-top:none!important;border-left:none!important;border-bottom:2px solid var(--fsw-kopf)!important;font-size:calc(var(--fs13,13px) + 1px)!important;font-weight:800!important;padding:12px 14px 5px!important;}'
     +'.fs-wohn [data-fs-punkt][data-fs-stand]{border-left:9px solid var(--border)!important;padding-left:10px!important;}'
     +'.fs-wohn [data-fs-punkt][data-fs-stand="ok"]{border-left-color:var(--fs-krd,#1f5f8b)!important;}.fs-wohn [data-fs-punkt][data-fs-stand="mangel"]{border-left-color:var(--fsw-frd)!important;}'
@@ -1507,6 +1508,7 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
       if(typeof _teilUmwandeln==='function'&&body.firstChild&&typeof body.insertBefore==='function')body.insertBefore(_teilUmwandeln(),body.firstChild); // F2a: Hinweis zum Umwandeln ganz oben
     }
     if(bericht.fassung==='begehung'&&body.firstChild&&typeof body.insertBefore==='function'){try{body.insertBefore(_teilNochOffen(),body.firstChild.nextSibling);}catch(e){console.warn('[Noch offen]',e);}} /* F51: gleich unter der Leiste */
+    if(typeof _teilUnterschriftBg==='function'&&typeof _fsBgSignErlaubt==='function'&&_fsBgSignErlaubt(bericht)){try{body.appendChild(_teilUnterschriftBg());}catch(e){console.warn('[Unterschrift]',e);}} /* F109: ganz unten, nach „Fotos“ */
     body.scrollTop=sc;
     _fsWerteNeu();
   }
@@ -3435,6 +3437,62 @@ function _openFeuchteprotokollMobil(existingIdx,art,teil){
     const plus=_chip('＋ Stelle',false,()=>{bericht.bgStellen.push(_fsBgFeuchtStelleNeu());scheduleSave();_neuBauen();const el=body.querySelector('[data-fs-bgstelle="'+(bericht.bgStellen.length-1)+'"]');if(el){try{el.scrollIntoView({block:'center'});}catch(e){}}});
     plus.setAttribute('data-fs-bgstelleneu','1');w.appendChild(plus);
     if(!bericht.bgStellen.length)w.appendChild(_bgInfo('Feuchte oder nasse Stelle, alte Verfärbung, Schimmel – je Stelle eine Karte mit Wo, Größe und Merkmalen. Darunter die Sätze zum Antippen.'));
+    return w;
+  }
+  /* F109: Abschnitt „✍ Unterschrift“ – Ort, Datum, hinterlegte Unterschrift einsetzen (nur Begehungsprotokoll Wohnung/Keller) */
+  function _teilUnterschriftBg(){
+    const w=document.createElement('div');w.setAttribute('data-fs-bgsign','1');
+    const h=document.createElement('div');h.setAttribute('data-fs-signkopf','1');h.style.cssText=S_HDR;h.textContent='✍ Unterschrift';w.appendChild(h);
+    const inn=document.createElement('div');inn.style.cssText='padding:10px 14px 16px;';w.appendChild(inn);
+    const KN='font-family:inherit;cursor:pointer;border-radius:8px;min-height:44px;padding:6px 14px;font-size:var(--fs14,14px);border:1.5px solid var(--border);background:var(--bg3);color:var(--text);';
+    const HAUPT='border:none;background:'+FS_FARBE+';color:#fff;font-weight:700;';
+    const kn=(txt,attr,stil,fn)=>{const k=document.createElement('button');k.type='button';k.textContent=txt;k.setAttribute(attr,'1');k.style.cssText=KN+(stil||'');k.onclick=fn;return k;};
+    const klein=(txt,attr)=>{const e=document.createElement('div');if(attr)e.setAttribute(attr,'1');e.style.cssText='font-size:var(--fs12,12px);color:var(--text2);line-height:1.4;margin:4px 0 8px;';e.textContent=txt;return e;};
+    const reihe=()=>{const r=document.createElement('div');r.style.cssText='display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0;';return r;};
+    const bild=(u,attr,breit)=>{const c=document.createElement('canvas');c.width=600;c.height=180;c.setAttribute(attr,'1');c.style.cssText='display:block;width:100%;max-width:'+breit+'px;height:auto;background:#ffffff;border:2px solid var(--border);border-radius:8px;';
+      try{const g=c.getContext('2d');if(g){g.fillStyle='#ffffff';g.fillRect(0,0,600,180);_fsRaSignZeichnen(g,u,20,12,560,156);}}catch(e){console.warn('[Unterschrift] zeigen:',e);}return c;};
+    const neu=()=>{scheduleSave();_neuBauen();};
+    const ich=String((bericht.kopf&&bericht.kopf.pruefer)||'').replace(/\s+/g,' ').trim();
+    inn.appendChild(klein('Im PDF steht am Ende links „Ort, Datum“ und rechts die Unterschrift. Ohne Eintrag bleiben dort zwei leere Linien (zum Unterschreiben auf Papier).'));
+    const zo=reihe(),gemerkt=_fsUsOrt();
+    const ort=_inp(bericht.unterschriftOrt,gemerkt?'Ort – leer = '+gemerkt:'Ort, z. B. Erfurt',v=>{bericht.unterschriftOrt=String(v||'').replace(/\s+/g,' ').trim().slice(0,60);if(bericht.unterschriftOrt)_fsUsOrt(bericht.unterschriftOrt);},false);
+    const dat=_inp(bericht.unterschriftDatum,'Datum – leer = heute',v=>{bericht.unterschriftDatum=String(v||'').replace(/\s+/g,' ').trim().slice(0,20);},false);
+    ort.setAttribute('data-fs-sign-ort','1');ort.style.flex='2 1 180px';ort.style.width='auto';
+    dat.setAttribute('data-fs-sign-datum','1');dat.style.flex='1 1 130px';dat.style.width='auto';
+    zo.append(ort,dat);inn.appendChild(zo);
+    const hinterlegen=()=>_fsRaSignFenster(bericht,()=>{const u=bericht._fsUsNeu;delete bericht._fsUsNeu;if(_fsUsSetzen(u))toast('✓ Unterschrift hinterlegt','success',3000);_neuBauen();},
+      {feld:'_fsUsNeu',titel:'Unterschrift hinterlegen',unter:'Einmal unterschreiben – danach an jedem Gerät mit einem Tipp einsetzen',name:(_fsUsHinterlegt()&&_fsUsHinterlegt().name)||ich});
+    if(_fsBgSignDa(bericht)){
+      const u=bericht.unterschriftIch;
+      inn.appendChild(bild(u,'data-fs-sign-bild',360));
+      inn.appendChild(klein([u.name,(typeof _fsRaSignZeitText==='function'&&_fsRaSignZeitText(u))?'eingesetzt am '+_fsRaSignZeitText(u):''].filter(Boolean).join(' · ')||'Unterschrift eingesetzt','data-fs-sign-text'));
+      const r=reihe();
+      r.appendChild(kn('Unterschrift aus diesem Protokoll entfernen','data-fs-sign-weg','color:var(--text2);',()=>{if(!_fsFrage('Die Unterschrift aus diesem Protokoll entfernen? Ort und Datum bleiben stehen.',bericht))return;_fsBgSignEntfernen(bericht);neu();}));
+      inn.appendChild(r);
+    }else{
+      const r=reihe(),hu=_fsUsHinterlegt();
+      if(hu)r.appendChild(kn('✍ Meine Unterschrift einsetzen','data-fs-sign-einsetzen',HAUPT+'flex:1 1 220px;',()=>{if(_fsBgSignEinsetzen(bericht,_fsUsHinterlegt(),ort.value,dat.value)){neu();toast('✓ Unterschrift eingesetzt','success',3000);}}));
+      r.appendChild(kn('✍ Jetzt unterschreiben (nur dieses Protokoll)','data-fs-sign-jetzt','flex:1 1 220px;',()=>_fsRaSignFenster(bericht,()=>{if(_fsBgSignDa(bericht))_fsBgSignEinsetzen(bericht,bericht.unterschriftIch,ort.value,dat.value);neu();},
+        {feld:'unterschriftIch',titel:'Unterschrift',unter:(ich?ich+' · ':'')+_fsTitel(bericht),name:ich})));
+      inn.appendChild(r);
+    }
+    const hb=document.createElement('div');hb.setAttribute('data-fs-sign-hinterlegt','1');hb.style.cssText='margin-top:12px;padding:8px 10px 10px;border:1.5px solid var(--border);border-radius:10px;background:var(--fs-karte,var(--bg2));';
+    const ht=document.createElement('div');ht.style.cssText='font-size:var(--fs13,13px);font-weight:700;margin-bottom:4px;';ht.textContent='Hinterlegte Unterschrift';hb.appendChild(ht);
+    const hu=_fsUsHinterlegt(),hr=reihe();
+    if(hu){
+      hb.appendChild(bild(hu,'data-fs-sign-hbild',240));
+      hb.appendChild(klein([hu.name,(typeof _fsRaSignZeitText==='function'&&_fsRaSignZeitText(hu))?'hinterlegt am '+_fsRaSignZeitText(hu):''].filter(Boolean).join(' · ')||'hinterlegt','data-fs-sign-htext'));
+      hr.appendChild(kn('Neu hinterlegen','data-fs-sign-hneu','',()=>{if(_fsFrage('Die hinterlegte Unterschrift ersetzen? Schon unterschriebene Protokolle behalten ihre Unterschrift.',bericht))hinterlegen();}));
+      hr.appendChild(kn('Hinterlegte Unterschrift löschen','data-fs-sign-hweg','color:var(--text2);',()=>{if(!_fsFrage('Die hinterlegte Unterschrift löschen – auf allen Geräten? Schon unterschriebene Protokolle behalten ihre Unterschrift.',bericht))return;_fsUsLoeschen();_neuBauen();}));
+    }else{
+      hb.appendChild(klein('Noch keine Unterschrift hinterlegt. Einmal unterschreiben – am besten am Tablet mit dem Stift. Sie liegt dann in deinem Drive, und du setzt sie an jedem Gerät mit einem Tipp ein.','data-fs-sign-hleer'));
+      hr.appendChild(kn('✍ Unterschrift hinterlegen','data-fs-sign-hneu','border-color:'+FS_FARBE+';font-weight:700;',hinterlegen));
+    }
+    const st=klein(_fsUsStandText(),'data-fs-sign-stand');st.style.margin='8px 0 0';
+    hr.appendChild(kn('🔄 Mit Drive abgleichen','data-fs-sign-sync','color:var(--text2);',()=>{st.textContent='Abgleich läuft …';Promise.resolve(_fsUsSync()).then(ok=>{if(!ok&&!_fsUsInfo.fehler)st.textContent='Kein Abgleich möglich – nicht bei Google angemeldet';}).catch(()=>{});}));
+    hb.append(hr,st);inn.appendChild(hb);
+    _fsUsNeuFn=geaendert=>{if(!w.isConnected)return;if(geaendert)_neuBauen();else st.textContent=_fsUsStandText();};
+    if(Date.now()-(_fsUsInfo.versuch||0)>60000&&!_fsUsLaeuft)_fsUsSyncBald(); // beim Öffnen einmal mit Drive abgleichen (höchstens alle 60 s)
     return w;
   }
   function _teilChecklistenBg(){
@@ -7827,10 +7885,12 @@ async function _fsMobPdfBg(bericht,task){
       setSaveInd('saved','');
     }
 
-    // Unterschrift
-    if(y+24>285){doc.addPage();y=M;}
-    y+=12;
+    // Unterschrift (F109: mit eingesetzter Unterschrift 10 mm mehr Platz darüber)
+    const _usDa=(typeof _fsBgSignDa==='function')&&_fsBgSignDa(bericht);
+    if(y+(_usDa?34:24)>285){doc.addPage();y=M;}
+    y+=_usDa?22:12;
     doc.setDrawColor(120,120,120);doc.line(M,y+8,M+70,y+8);doc.line(W-M-70,y+8,W-M,y+8);
+    if(typeof _fsBgPdfUnterschrift==='function')_fsBgPdfUnterschrift(doc,bericht,M,W,y);
     doc.setFontSize(7.5);doc.setTextColor(90,90,90);doc.setFont('helvetica','normal');
     doc.text('Ort, Datum',M,y+12);doc.text('Unterschrift'+(hat(k.pruefer)?' ('+String(k.pruefer).trim()+')':''),W-M-70,y+12);
 
@@ -9734,6 +9794,137 @@ function _fsOtpTeilHinweis(b,t,H){
   w.appendChild(_fsOtpMini('An wen',H.inp(h.an,'z. B. Auftraggeber',v=>{h.an=v;})));
   w.appendChild(_fsOtpMini('Worauf',H.textFeld(h.worauf,'z. B. lose Absturzsicherung am Dachrand',v=>{h.worauf=v;},2)));
   return w;
+}
+/* ── F109: UNTERSCHRIFT IM BEGEHUNGSPROTOKOLL (Wohnung/Keller) ─────────────────────────────────────────────────────
+   Die eigene Unterschrift wird EINMAL hinterlegt (Stiftstriche wie beim REP-Auftrag: {striche, v, name, zeit}) und je Protokoll mit einem Tipp
+   eingesetzt – nie von allein. Ablage: eigene Drive-Datei pam_unterschrift.json ({version, u, ts}; der jüngere Stempel ts gewinnt, „löschen“ = u:null
+   mit neuem Stempel) und eine Kopie im Merkzettel des Geräts. Wie bei den Textbausteinen NICHT über pam_settings.json (PAM Mobil liest die nur).
+   ⛔ Die Striche stehen nie in dieser (öffentlichen) Datei. Im Protokoll: unterschriftIch (Kopie der Striche), unterschriftOrt, unterschriftDatum. */
+const FS_US_DATEI='pam_unterschrift.json';
+const FS_US_LS='pam_fs_unterschrift';
+const FS_US_ORT_LS='pam_fs_unterschrift_ort';
+let _fsUsStandJetzt=null;      // {u, ts} – die hinterlegte Unterschrift dieses Geräts
+let _fsUsDateiId='';
+let _fsUsLaeuft=false;
+let _fsUsNochmal=false;
+let _fsUsTimer=null;
+let _fsUsNeuFn=null;           // der offene Abschnitt – damit er sich nach einem Abgleich nachzieht
+const _fsUsInfo={zeit:0,versuch:0,fehler:''};
+function _fsUsGueltig(u){return !!u&&typeof u==='object'&&Array.isArray(u.striche)&&u.striche.some(s=>Array.isArray(s)&&s.length>0);}
+function _fsUsSauber(o){
+  const ts=(o&&typeof o.ts==='string')?o.ts:'';
+  const u=(o&&_fsUsGueltig(o.u))?{striche:o.u.striche,v:+o.u.v||3,name:String(o.u.name||'').slice(0,60),zeit:String(o.u.zeit||'')}:null;
+  return {u:u,ts:ts};
+}
+function _fsUsStand(){
+  if(_fsUsStandJetzt)return _fsUsStandJetzt;
+  let o=null;try{const r=(typeof localStorage!=='undefined')?localStorage.getItem(FS_US_LS):null;if(r)o=JSON.parse(r);}catch(e){}
+  _fsUsStandJetzt=_fsUsSauber(o);return _fsUsStandJetzt;
+}
+function _fsUsHinterlegt(){return _fsUsStand().u;}
+function _fsUsMerken(){try{if(typeof localStorage!=='undefined')localStorage.setItem(FS_US_LS,JSON.stringify({version:1,u:_fsUsStand().u,ts:_fsUsStand().ts}));}catch(e){}}
+function _fsUsSetzen(u){if(!_fsUsGueltig(u))return false;_fsUsStandJetzt=_fsUsSauber({u:u,ts:new Date().toISOString()});_fsUsMerken();_fsUsSyncBald();return true;}
+function _fsUsLoeschen(){_fsUsStandJetzt={u:null,ts:new Date().toISOString()};_fsUsMerken();_fsUsSyncBald();return true;}
+function _fsUsOrt(neu){
+  try{
+    if(typeof localStorage==='undefined')return '';
+    if(neu!==undefined){const v=String(neu||'').replace(/\s+/g,' ').trim().slice(0,60);if(v)localStorage.setItem(FS_US_ORT_LS,v);return v;}
+    return String(localStorage.getItem(FS_US_ORT_LS)||'').trim();
+  }catch(e){return '';}
+}
+function _fsUsHeute(){const d=new Date(),p=n=>('0'+n).slice(-2);return p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear();}
+function _fsUsGezeichnet(geaendert){if(typeof _fsUsNeuFn==='function'){try{_fsUsNeuFn(!!geaendert);}catch(e){}}}
+function _fsUsStandText(){
+  if(_fsUsInfo.fehler)return 'Drive: '+_fsUsInfo.fehler;
+  if(_fsUsInfo.zeit){const d=new Date(_fsUsInfo.zeit),p=n=>('0'+n).slice(-2);return 'Mit Drive abgeglichen um '+p(d.getHours())+':'+p(d.getMinutes())+' Uhr';}
+  return 'Noch nicht mit Drive abgeglichen – gilt bis dahin nur auf diesem Gerät';
+}
+function _fsUsSyncBald(){if(typeof setTimeout!=='function'||typeof clearTimeout!=='function')return;clearTimeout(_fsUsTimer);_fsUsTimer=setTimeout(()=>{_fsUsSync();},1500);}
+/* Abgleich mit Drive: lesen, der jüngere Stempel gewinnt, nur bei Unterschied schreiben. Scheitert das Lesen oder ist die Datei unlesbar,
+   wird NICHTS geschrieben. Ohne Anmeldung bleibt es still bei der Kopie im Gerät. Gibt true zurück, wenn der Abgleich gelang. */
+async function _fsUsSync(){
+  if(_fsUsLaeuft){_fsUsNochmal=true;return false;}
+  _fsUsInfo.versuch=Date.now();
+  if(!(typeof tokenValid==='function'&&tokenValid())||typeof gdriveToken==='undefined'||!gdriveToken||typeof fetch!=='function')return false;
+  _fsUsLaeuft=true;
+  const schlecht=m=>{_fsUsInfo.fehler=String(m);console.warn('[Unterschrift] Abgleich:',m);_fsUsGezeichnet(false);return false;};
+  const gut=geaendert=>{_fsUsInfo.zeit=Date.now();_fsUsInfo.fehler='';_fsUsGezeichnet(geaendert);return true;};
+  try{
+    const kopf={Authorization:'Bearer '+gdriveToken};
+    if(!_fsUsDateiId){
+      const q=encodeURIComponent("name='"+FS_US_DATEI+"' and trashed=false");
+      const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,modifiedTime)&orderBy=modifiedTime desc&pageSize=5',{headers:kopf});
+      if(r.status===401){if(typeof _handleDrive401==='function')_handleDrive401();return schlecht('Anmeldung abgelaufen');}
+      if(!r.ok)return schlecht('Drive HTTP '+r.status);
+      const d=await r.json();
+      if(d&&d.files&&d.files.length)_fsUsDateiId=d.files[0].id;
+    }
+    let fern=null;
+    if(_fsUsDateiId){
+      const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(_fsUsDateiId)+'?alt=media&_='+Date.now(),{headers:{Authorization:'Bearer '+gdriveToken,'Cache-Control':'no-cache'},cache:'no-store'});
+      if(r.status===404){_fsUsDateiId='';return schlecht('Datei nicht gefunden – neuer Versuch beim nächsten Abgleich');}
+      if(!r.ok)return schlecht('Lesen HTTP '+r.status);
+      const text=String(await r.text()).trim();
+      if(text){
+        let d=null;try{d=JSON.parse(text);}catch(e){d=null;}
+        if(!d||typeof d!=='object'||typeof d.ts!=='string'||!d.ts)return schlecht('Datei unlesbar – nichts überschrieben');
+        fern=_fsUsSauber(d);
+      }
+    }
+    const lokal=_fsUsStand();
+    if(fern&&fern.ts>lokal.ts){_fsUsStandJetzt=fern;_fsUsMerken();return gut(true);}
+    if(!lokal.ts||(fern&&fern.ts===lokal.ts))return gut(false);
+    const inhalt=JSON.stringify({version:1,u:lokal.u,ts:lokal.ts});
+    if(_fsUsDateiId){
+      const w=await fetch('https://www.googleapis.com/upload/drive/v3/files/'+encodeURIComponent(_fsUsDateiId)+'?uploadType=media',{method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},body:inhalt});
+      if(!w.ok)return schlecht('Schreiben HTTP '+w.status);
+    }else{
+      const g='us_'+Date.now();
+      const meta={name:FS_US_DATEI,mimeType:'application/json'};
+      if(typeof workspaceFolderId!=='undefined'&&workspaceFolderId)meta.parents=[workspaceFolderId];
+      const body='--'+g+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify(meta)+'\r\n--'+g+'\r\nContent-Type: application/json\r\n\r\n'+inhalt+'\r\n--'+g+'--';
+      const r=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',{method:'POST',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'multipart/related; boundary='+g},body});
+      if(!r.ok)return schlecht('Anlegen HTTP '+r.status);
+      const f=await r.json();_fsUsDateiId=f.id;
+    }
+    return gut(false);
+  }catch(e){return schlecht((e&&e.message)||e||'?');}
+  finally{_fsUsLaeuft=false;if(_fsUsNochmal){_fsUsNochmal=false;_fsUsSyncBald();}}
+}
+/* ── Unterschrift im Protokoll ── */
+function _fsBgSignErlaubt(b){return !!b&&b.vorlage==='feuchte'&&b.fassung==='begehung'&&b.art!=='vorab';}
+function _fsBgSignDa(b){return _fsBgSignErlaubt(b)&&_fsUsGueltig(b.unterschriftIch);}
+function _fsBgSignOrtDatum(b){return [String((b&&b.unterschriftOrt)||'').replace(/\s+/g,' ').trim(),String((b&&b.unterschriftDatum)||'').replace(/\s+/g,' ').trim()].filter(Boolean).join(', ');}
+// Setzt eine Unterschrift (die hinterlegte oder eine eben gezeichnete) als KOPIE ins Protokoll; Ort leer = der gemerkte, Datum leer = heute
+function _fsBgSignEinsetzen(b,u,ort,datum){
+  if(!_fsBgSignErlaubt(b)||!_fsUsGueltig(u))return false;
+  b.unterschriftIch={striche:JSON.parse(JSON.stringify(u.striche)),v:+u.v||3,name:String(u.name||'').slice(0,60),zeit:new Date().toISOString()};
+  const o=String(ort==null?'':ort).replace(/\s+/g,' ').trim().slice(0,60)||String(b.unterschriftOrt||'').replace(/\s+/g,' ').trim()||_fsUsOrt();
+  b.unterschriftOrt=o;if(o)_fsUsOrt(o);
+  b.unterschriftDatum=String(datum==null?'':datum).replace(/\s+/g,' ').trim().slice(0,20)||String(b.unterschriftDatum||'').trim()||_fsUsHeute();
+  return true;
+}
+function _fsBgSignEntfernen(b){if(!b||!b.unterschriftIch)return false;b.unterschriftIch=null;return true;}
+// Im PDF über den zwei Linien am Ende: links „Ort, Datum“ ausgefüllt, rechts die Unterschrift. y wie dort: die Linien liegen bei y+8. Ohne Eintrag zeichnet sie nichts.
+function _fsBgPdfUnterschrift(doc,b,M,W,y){
+  if(!doc||!_fsBgSignErlaubt(b))return false;
+  const od=_fsBgSignOrtDatum(b);let etwas=false;
+  if(od){doc.setFont('helvetica','normal');doc.setFontSize(10);doc.setTextColor(0,0,0);doc.text(od,M+1,y+6.5);etwas=true;}
+  if(_fsBgSignDa(b)&&typeof _fsRaSignLage==='function'&&typeof _fsRaSignPunkte==='function'){
+    const u=b.unterschriftIch,L=_fsRaSignLage(u,W-M-70+2,y-11,66,18.5);
+    if(typeof doc.setLineCap==='function')doc.setLineCap('round');
+    if(typeof doc.setLineJoin==='function')doc.setLineJoin('round');
+    doc.setDrawColor(0,0,0);doc.setLineWidth(0.4);
+    u.striche.forEach(st=>{
+      const p=_fsRaSignPunkte(st);
+      if(p.length===1){const a=L(p[0]);doc.line(a[0],a[1],a[0]+0.2,a[1]);}
+      for(let i=1;i<p.length;i++){const a=L(p[i-1]),c=L(p[i]);doc.line(a[0],a[1],c[0],c[1]);}
+    });
+    if(typeof doc.setLineCap==='function')doc.setLineCap('butt');
+    if(typeof doc.setLineJoin==='function')doc.setLineJoin('miter');
+    doc.setLineWidth(0.2);etwas=true;
+  }
+  return etwas;
 }
 /* ── F96: TEXTBAUSTEINE IM ORTSTERMINPROTOKOLL ─────────────────────────────────────────────────────────────────────
    Entwurf Claude-Code\Entwurf_Textbausteine_Ortsterminprotokoll_2026-10-25.html (Antworten 1a 2a 3a am 25.10.2026, dann „baue“).
