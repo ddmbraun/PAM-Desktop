@@ -1,7 +1,7 @@
 // PAM – Formulare: gemeinsame Datei für PAM Mobil und PAM Desktop.
 // ⛔ Nicht in einer App-Kopie ändern – beim Bau wird diese Datei in die Apps kopiert und muss dort gleich sein.
 // Inhalt: Feuchte- und Schimmelprotokoll (auch Keller). Wird von index.html VOR dem Hauptprogramm geladen.
-const PAM_FORMULARE_VERSION='F107';
+const PAM_FORMULARE_VERSION='F108';
 // F9: Handy und Tablet erfassen, der PC prüft und erstellt das PDF. PAM Desktop setzt window._FS_AM_PC=true (Block „FORMULAR-UMGEBUNG PC").
 function _fsAmPc(){return typeof window!=='undefined'&&window._FS_AM_PC===true;}
 /* ── F69: WO STEHT DAS FORMULAR? ───────────────────────────────────────────────────────────────────────────────────
@@ -11107,6 +11107,115 @@ function _fsOtAuswahlFenster(b,fertig){
   if(typeof _fsAnhaengen==='function')_fsAnhaengen(F.ov,b);else document.body.appendChild(F.ov);
   return F.ov;
 }
+/* ── F108: Den laufenden Termin verwerfen (nur Begehungsprotokoll Wohnung/Keller) – zurück auf den Stand, den _fsOtBgStand beim Abschließen des Termins davor festgehalten hat.
+   Nicht im Stand und deshalb unberührt: Raumskizzen, Messgeräte, Auftragsdaten im Kopf, Fotos (b.fotos). ── */
+const FS_OT_BG_VW_NAMEN={raeume:['Raum','Räume'],stellen:['Messstelle','Messstellen'],bgStellen:['Stelle','Stellen'],angaben:['Angabe der Nutzer','Angaben der Nutzer'],notizen:['Notiz','Notizen'],vbStellen:['Stelle (Vor Ort)','Stellen (Vor Ort)'],vbUmgebung:['Punkt der Umgebung','Punkte der Umgebung']};
+const FS_OT_BG_VW_TEXTE={schadenbild:'Beschreibung',vorgeschichte:'Vorgeschichte',bemerkung:'Zusammenfassung'};
+function _fsOtBgVerwerfenLetzter(b){const l=(b&&Array.isArray(b.ortstermine))?b.ortstermine:[];for(let i=l.length-1;i>=0;i--){if(l[i]&&typeof l[i]==='object')return l[i];}return null;}
+function _fsOtBgVerwerfenErlaubt(b){
+  if(!b||typeof _fsOtBgErlaubt!=='function'||!_fsOtBgErlaubt(b)||b.fassung!=='begehung'||b.art==='vorab')return false;
+  const e=_fsOtBgVerwerfenLetzter(b),s=e&&e.stand;
+  return !!(s&&typeof s==='object'&&s.L&&typeof s.L==='object'&&s.p&&typeof s.p==='object');
+}
+// Was unterscheidet das Protokoll von heute vom festgehaltenen Stand? (ändert nichts)
+function _fsOtBgVerwerfenPlan(b){
+  const e=_fsOtBgVerwerfenLetzter(b),s=(e&&e.stand&&typeof e.stand==='object')?e.stand:{},hat=(o,k)=>!!o&&Object.prototype.hasOwnProperty.call(o,k);
+  const P={e:e,listen:{},punkte:[],punkteNeu:[],texte:[]};
+  FS_OT_BG_LISTEN.forEach(n=>{
+    const alt=(s.L&&s.L[n]&&typeof s.L[n]==='object')?s.L[n]:null,jetzt=Array.isArray(b[n])?b[n]:[];
+    if(!alt)return; /* diese Liste kannte der Stand nicht – sie bleibt, wie sie ist */
+    const da=new Map(),neu=[];
+    jetzt.forEach(x=>{if(!x||typeof x!=='object')return;const id=(typeof x.oid==='string')?x.oid:'';if(id&&hat(alt,id)&&!da.has(id))da.set(id,x);else neu.push(x);});
+    const geaendert=[],zurueck=[];
+    Object.keys(alt).forEach(id=>{const x=da.get(id);if(!x)zurueck.push(id);else if(JSON.stringify(_fsOtBgKopie(x))!==JSON.stringify(alt[id]))geaendert.push(x);});
+    P.listen[n]={alt:alt,da:da,neu:neu,geaendert:geaendert,zurueck:zurueck};
+  });
+  (Array.isArray(b.sektionen)?b.sektionen:[]).forEach(sek=>((sek&&Array.isArray(sek.items))?sek.items:[]).forEach(it=>{
+    if(!it||typeof it!=='object')return;
+    const v=(typeof it.oid==='string'&&hat(s.p,it.oid))?s.p[it.oid]:null;
+    if(!v){P.punkteNeu.push([sek,it]);return;}
+    if(String(it.status||'offen')!==String(v[0]||'offen')||String(it.notiz||'')!==String(v[1]||'')||String(it.text||'')!==String(v[2]||''))P.punkte.push([it,v]);
+  }));
+  FS_OT_BG_TEXTE.forEach(f=>{if(hat(s.t,f)&&String(b[f]==null?'':b[f])!==String(s.t[f]==null?'':s.t[f]))P.texte.push(f);});
+  return P;
+}
+// Die Zeilen für das Fenster „Das geht verloren“
+function _fsOtBgVerwerfenListe(b){
+  const P=_fsOtBgVerwerfenPlan(b),z=[];if(!P.e)return z;
+  const d=String(P.e.datum||'').trim()||'davor',pl=(n,w)=>n+' '+(n===1?w[0]:w[1]),vb=(n,a,m)=>(n===1?a:m);
+  FS_OT_BG_LISTEN.forEach(n=>{
+    const l=P.listen[n],w=FS_OT_BG_VW_NAMEN[n]||['Eintrag','Einträge'];if(!l)return;
+    let nn=l.neu.length;
+    if(n==='stellen'&&typeof _fsBgIstRaumluftStelle==='function'){const rl=l.neu.filter(x=>_fsBgIstRaumluftStelle(x)).length;if(rl){z.push(pl(rl,['Raumluft-Wert','Raumluft-Werte'])+' – neu bei diesem Termin, '+vb(rl,'wird','werden')+' entfernt');nn-=rl;}}
+    if(nn)z.push(pl(nn,w)+' – neu bei diesem Termin, '+vb(nn,'wird','werden')+' entfernt');
+    if(l.geaendert.length)z.push(pl(l.geaendert.length,w)+' – geändert, '+vb(l.geaendert.length,'steht','stehen')+' wieder wie am '+d);
+    if(l.zurueck.length)z.push(pl(l.zurueck.length,w)+' – bei diesem Termin gelöscht, '+vb(l.zurueck.length,'ist','sind')+' wieder da');
+  });
+  const pn=P.punkte.length+P.punkteNeu.filter(q=>!q[1].frei&&(String(q[1].status||'offen')!=='offen'||String(q[1].notiz||'').trim())).length;
+  if(pn)z.push(pl(pn,['Satz','Sätze'])+' unter „Feststellungen vor Ort“ – '+vb(pn,'steht','stehen')+' wieder wie am '+d);
+  const fr=P.punkteNeu.filter(q=>q[1].frei).length;
+  if(fr)z.push(pl(fr,['eigener Satz','eigene Sätze'])+' – neu bei diesem Termin, '+vb(fr,'wird','werden')+' entfernt');
+  P.texte.forEach(f=>z.push('Text „'+(FS_OT_BG_VW_TEXTE[f]||f)+'“ – wieder wie am '+d));
+  return z;
+}
+// Verwerfen: gibt den Termin zurück, der wieder der laufende ist (oder null)
+function _fsOtBgVerwerfen(b){
+  if(!_fsOtBgVerwerfenErlaubt(b))return null;
+  const P=_fsOtBgVerwerfenPlan(b),e=P.e,s=e.stand,kop=v=>JSON.parse(JSON.stringify(v));
+  FS_OT_BG_LISTEN.forEach(n=>{
+    const l=P.listen[n];if(!l)return;
+    if(!Array.isArray(b[n])&&!Object.keys(l.alt).length)return;
+    b[n]=Object.keys(l.alt).map(id=>{
+      const x=l.da.get(id)||{};
+      Object.keys(x).forEach(k=>{if(k!=='skizze'&&k!=='oid'&&k.charAt(0)!=='_')delete x[k];});
+      const c=kop(l.alt[id]);Object.keys(c).forEach(k=>{x[k]=c[k];});x.oid=id;return x;
+    });
+  });
+  P.punkte.forEach(q=>{const it=q[0],v=q[1];if(String(it.status||'offen')!==String(v[0]||'offen'))it.status=String(v[0]||'offen');if(String(it.notiz||'')!==String(v[1]||''))it.notiz=String(v[1]||'');if(String(it.text||'')!==String(v[2]||''))it.text=String(v[2]||'');});
+  P.punkteNeu.forEach(q=>{const sek=q[0],it=q[1];if(it.frei){const i=sek.items.indexOf(it);if(i>=0)sek.items.splice(i,1);}else{if(String(it.status||'offen')!=='offen')it.status='offen';if(String(it.notiz||''))it.notiz='';}});
+  P.texte.forEach(f=>{b[f]=String(s.t[f]==null?'':s.t[f]);});
+  if(!b.kopf||typeof b.kopf!=='object')b.kopf={};
+  const k=b.kopf,wd=(e.wetterDaten&&typeof e.wetterDaten==='object')?e.wetterDaten:{};
+  k.beginn=String(e.beginn||'');k.ende=String(e.ende||'');k.wetter=String(e.wetter||'');
+  FS_OT_BG_WETTER.forEach(f=>{k[f]=(wd[f]!==undefined&&wd[f]!==null)?wd[f]:'';});
+  if(String(wd.vorOrtGeraet||'').trim())k.vorOrtGeraet=String(wd.vorOrtGeraet);
+  const ichFn=p=>(typeof _fsIstIch==='function')&&_fsIstIch(b,p),ichJetzt=(Array.isArray(b.anwesende)?b.anwesende:[]).find(p=>p&&ichFn(p))||null;
+  b.anwesende=(Array.isArray(e.anwesende)?e.anwesende:[]).filter(p=>p&&String(p.name||'').trim()).map(p=>(ichJetzt&&ichFn(p))?ichJetzt:{name:String(p.name||''),rolle:String(p.rolle||'')});
+  if(ichJetzt&&b.anwesende.indexOf(ichJetzt)<0)b.anwesende.unshift(ichJetzt);
+  b.datum=String(e.datum||'');
+  b.otAktuell=(typeof e.id==='string'&&e.id)?e.id:_fsOtNeueId();
+  const i=b.ortstermine.indexOf(e);if(i>=0)b.ortstermine.splice(i,1);
+  try{if(typeof _fsWetterWahlMerk!=='undefined'&&_fsWetterWahlMerk&&typeof _fsWetterWahlMerk.delete==='function')_fsWetterWahlMerk.delete(b);}catch(x){}
+  return e;
+}
+// Rückfrage mit der Liste „Das geht verloren“; fertig() nur nach „↩ Termin verwerfen“
+function _fsOtVerwerfenFenster(b,fertig){
+  const e=_fsOtBgVerwerfenLetzter(b),farbe=_fsOtFarbe(b),dj=String((b&&b.datum)||'').trim()||'–',dv=String((e&&e.datum)||'').trim()||'–';
+  const F=_fsOtFenster(b,'_fsOtVerwerfen','Termin vom '+dj+' verwerfen?','Das Protokoll steht danach wieder so da wie beim Abschließen des Termins vom '+dv+'. Der Termin vom '+dv+' ist dann wieder der laufende – mit seinem Datum, Beginn, Ende, Wetter und seinen Anwesenden. Das lässt sich nicht zurücknehmen.');
+  const kopf=t2=>{const h=document.createElement('div');h.style.cssText='font-size:var(--fs14,14px);font-weight:700;margin:10px 0 4px;';h.textContent=t2;return h;};
+  const zeile=(t2,attr)=>{const r=document.createElement('div');if(attr)r.setAttribute(attr,'1');r.style.cssText='font-size:var(--fs14,14px);line-height:1.4;margin:3px 0;padding-left:10px;border-left:4px solid '+farbe+';';r.textContent=t2;return r;};
+  F.box.appendChild(kopf('Das geht verloren:'));
+  const liste=document.createElement('div');liste.setAttribute('data-ot-vw-liste','1');
+  liste.appendChild(zeile('Datum, Beginn, Ende, Wetter und Anwesende des Termins vom '+dj,'data-ot-vw-zeile'));
+  const z=_fsOtBgVerwerfenListe(b);
+  z.forEach(x=>liste.appendChild(zeile(x,'data-ot-vw-zeile')));
+  if(!z.length)liste.appendChild(zeile('sonst nichts – seit dem Abschließen ist nichts eingetragen oder geändert','data-ot-vw-leer'));
+  F.box.appendChild(liste);
+  F.box.appendChild(kopf('Das bleibt:'));
+  const bl=document.createElement('div');bl.setAttribute('data-ot-vw-bleibt','1');
+  bl.appendChild(zeile('alle Fotos – im Protokoll und im Ordner'));
+  bl.appendChild(zeile('Raumskizzen, Messgeräte und die Auftragsdaten im Kopf – so, wie sie jetzt sind'));
+  F.box.appendChild(bl);
+  const tipp=document.createElement('div');tipp.style.cssText='font-size:var(--fs13,13px);color:var(--text2);line-height:1.4;margin-top:10px;';tipp.textContent='Brauchst du die Werte dieses Termins noch? Dann vorher das PDF erstellen.';F.box.appendChild(tipp);
+  const fuss=document.createElement('div');fuss.style.cssText='display:flex;gap:8px;margin-top:14px;';
+  const ab=_fsOtKnopf('Abbrechen','data-ot-abbruch',false),ok=_fsOtKnopf('↩ Termin verwerfen','data-ot-vw-ok',true,farbe);
+  let gerufen=false;
+  ab.onclick=()=>F.zu();F.beiEsc(()=>F.zu());
+  ok.onclick=()=>{if(gerufen)return;gerufen=true;F.zu();if(typeof fertig==='function')fertig();};
+  fuss.append(ab,ok);F.box.appendChild(fuss);
+  if(typeof _fsAnhaengen==='function')_fsAnhaengen(F.ov,b);else document.body.appendChild(F.ov);
+  return F.ov;
+}
 // Die Zeile oben im Formular: frühere Termine (antippen = ändern), „jetzt: …“, Knopf „📅 Weiterer Ortstermin“
 function _fsOtZeile(b,neu,datumEl,sprung){ /* F90: sprung = Knöpfe, die hinter „📅 Weiterer Ortstermin“ stehen */
   const w=document.createElement('div');w.setAttribute('data-ot-zeile','1');
@@ -11119,6 +11228,7 @@ function _fsOtZeile(b,neu,datumEl,sprung){ /* F90: sprung = Knöpfe, die hinter 
     const l=document.createElement('span');l.style.cssText='font-size:var(--fs12,12px);color:var(--text2);';l.textContent='📅 Ortstermine:';w.appendChild(l);
     L.forEach(o=>{const c=document.createElement('button');c.type='button';c.setAttribute('data-ot-termin',String(o.id||''));c.textContent=(o.datum||'ohne Datum')+(o.grund?' · '+o.grund:'')+' ✎';c.title='Diesen Termin ändern oder entfernen';c.style.cssText=chip;c.onclick=()=>_fsOtBearbeitenFenster(b,o,nachher);w.appendChild(c);});
     const j=document.createElement('span');j.setAttribute('data-ot-jetzt','1');j.style.cssText='font-size:var(--fs12,12px);font-weight:700;color:var(--text);';j.textContent='jetzt: '+(String(b.datum||'').trim()||'–');w.appendChild(j);
+    if(typeof _fsOtBgVerwerfenErlaubt==='function'&&_fsOtBgVerwerfenErlaubt(b)&&typeof _fsOtVerwerfenFenster==='function'){const v=document.createElement('button');v.type='button';v.setAttribute('data-ot-verwerfen','1');v.textContent='↩ Diesen Termin verwerfen';v.title='Den laufenden Termin mit seinen Eintragungen entfernen – zurück auf den Stand beim Abschließen des Termins davor';v.style.cssText=chip;v.onclick=()=>_fsOtVerwerfenFenster(b,()=>{const e=_fsOtBgVerwerfen(b);if(!e)return;if(datumEl){datumEl.value=b.datum;if(typeof datumEl.oninput==='function'){try{datumEl.oninput();}catch(x){console.warn('[F108] Datum:',x);}}}nachher();if(typeof toast==='function')toast('✓ Termin verworfen – weiter mit dem Termin vom '+(b.datum||'–'),'success',4000);});w.appendChild(v);} /* F108 */
   }
   const k=document.createElement('button');k.type='button';k.setAttribute('data-ot-weiter','1');k.textContent='📅 Weiterer Ortstermin';
   k.title='Den bisherigen Termin abschließen (z. B. wegen Regen) und am selben Protokoll weitermachen';
