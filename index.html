@@ -10724,7 +10724,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-11-13 · #1278'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-11-13-b1278) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-11-18 · #1279'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-11-18-b1279) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -56540,6 +56540,49 @@ function _kLageSync(selEl){
   if(!an&&String(inp.value||'').trim()){inp.value='';return true;}
   return false;
 }
+/* Zweite Zeile der Kontaktzeile, damit jedes Feld sagt, was es ist, und nichts Leeres herumsteht:
+   – „Lage im Haus" hat eine eigene Beschriftung (vorher stand das Feld namenlos unter „Ansprechpartner").
+   – Der Ansprechpartner nennt, zu wem er gehoert („Ansprechpartner Hausverwaltung"). Bei Mieter und Eigentuemer steht die Person
+     schon im Namen – dort ist das Feld zu, solange es leer ist, und kommt ueber „＋ Ansprechpartner".
+   – „Tel. 2" ist zu, solange es leer ist, und kommt ueber „＋ Zweite Nummer".
+   ⛔ Ein AUSGEFUELLTES Feld ist nie zu – was man nicht sieht, pflegt niemand (dieselbe Falle steht ueber #tRaField).
+   ⛔ Nur Anzeige: hier wird kein Wert geaendert und nichts gespeichert. Das Abraeumen der Lage bleibt in _kLageSync.
+   ⛔ EINE Regel fuer BEIDE Kontakt-Wege (Task und E-Mail). Die zwei Zeilen-Bauer schreiben denselben Anfangszustand selbst ins
+      Markup, damit er auch ohne diese Funktionen stimmt (Pruefsuiten fuehren die Bauer allein aus).
+   ⛔ Fehlt eine Huelle im DOM (aeltere Kontaktzeile), wird still nichts getan. */
+function _kAnspLabel(rolle){
+  var m={hausverwaltung:'Ansprechpartner Hausverwaltung',eigentuemer:'Ansprechpartner Eigentümer',mieter:'Ansprechpartner Mieter',ag:'Ansprechpartner Auftraggeber',privatkunde:'Ansprechpartner Privatkunde',subunternehmer:'Ansprechpartner Subunternehmer'};
+  var r=String(rolle==null?'':rolle);
+  return Object.prototype.hasOwnProperty.call(m,r)?m[r]:'Ansprechpartner';
+}
+function _kFelderSync(el){
+  var e=(el&&el.closest)?el.closest('.kontakt-entry'):null; if(!e)return;
+  var rs=e.querySelector('.k-rolle'),rolle=rs?rs.value:'';
+  var person=(rolle==='mieter'||rolle==='eigentuemer');
+  var gefuellt=function(s){var i=e.querySelector(s);return !!(i&&String(i.value||'').trim());};
+  var lbl=e.querySelector('.k-ansp-lbl'); if(lbl)lbl.textContent=_kAnspLabel(rolle);
+  var lBox=e.querySelector('.k-lage-box'); if(lBox)lBox.style.display=person?'':'none';
+  var aBox=e.querySelector('.k-ansp-box'),aPlus=e.querySelector('.k-ansp-plus');
+  if(aBox){
+    var aAuf=!person||gefuellt('.k-ansp')||aBox.getAttribute('data-auf')==='1';
+    aBox.style.display=aAuf?'':'none';
+    if(aPlus)aPlus.style.display=aAuf?'none':'';
+  }
+  var tBox=e.querySelector('.k-tel2-box'),tPlus=e.querySelector('.k-tel2-plus');
+  if(tBox){
+    var tAuf=gefuellt('.k-tel2')||tBox.getAttribute('data-auf')==='1';
+    tBox.style.display=tAuf?'':'none';
+    if(tPlus)tPlus.style.display=tAuf?'none':'';
+  }
+}
+function _kFeldAuf(btn,was){
+  var e=(btn&&btn.closest)?btn.closest('.kontakt-entry'):null; if(!e)return;
+  var box=e.querySelector(was==='tel2'?'.k-tel2-box':'.k-ansp-box'); if(!box)return;
+  box.setAttribute('data-auf','1');
+  _kFelderSync(btn);
+  var inp=e.querySelector(was==='tel2'?'.k-tel2':'.k-ansp');
+  if(inp&&inp.focus)inp.focus();
+}
 function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2,adr,wohntImObjekt,lage,ansprechpartner){
   const c=document.getElementById('tKontakteContainer');if(!c)return;
   const rolleLabel={ag:'👔 AG Kontakt',mieter:'🏠 Mieter',eigentuemer:'👤 Eigentümer',hausverwaltung:'🏢 Hausverwaltung',privatkunde:'🧍 Privatkunde',subunternehmer:'🔨 Subunternehmer',sonstiges:'👥 Sonstiges'};
@@ -56549,6 +56592,12 @@ function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2,adr,wohntImObjekt,
   const lageAn=(rolle==='mieter'||rolle==='eigentuemer');
   // Ansprechpartner bei JEDER Rolle (Frank 26.10.2026: „ein Kasten je Verwaltung" – Name = Firma, hier die Person)
   ansprechpartner=(ansprechpartner==null)?'':String(ansprechpartner);
+  // Anfangszustand der zweiten Zeile – dieselbe Regel wie in _kFelderSync, hier ausgeschrieben (Pruefsuiten fuehren diese Funktion
+  // ohne Umgebung aus): Ansprechpartner zu nur bei Mieter/Eigentuemer UND leer · Tel. 2 zu, wenn leer.
+  const anspAuf=!lageAn||!!ansprechpartner.trim();
+  const tel2Auf=!!String(tel2).trim();
+  const anspLbl=(typeof _kAnspLabel==='function')?_kAnspLabel(rolle):'Ansprechpartner';
+  const pb='padding:3px 6px;font-size:11px;border:1px dashed var(--border);background:transparent;color:var(--text2);border-radius:5px;cursor:pointer;white-space:nowrap;max-width:100%;';
   adr=adr||{};
   const aStr=(adr.strasse||'').toString(),aPlz=(adr.plz||'').toString(),aOrt=(adr.ort||'').toString();
   const hatAdr=!!(aStr.trim()||aPlz.trim()||aOrt.trim());
@@ -56568,7 +56617,7 @@ function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2,adr,wohntImObjekt,
   const selVal=isCustom?'_custom_':rolle;
   div.innerHTML='<div class="kontakt-entry-header">'
     +'<div style="display:flex;flex-direction:column;gap:2px;flex:1;">'
-    +'<select class="k-rolle" style="font-size:11px;padding:2px 4px;width:100%;" onchange="var ci=this.parentNode.querySelector(\'.k-rolle-custom\');if(ci){ci.style.display=this.value===\'_custom_\'?\'\':\' none\';if(this.value===\'_custom_\')ci.focus();}_kLageSync(this);_kWioSync(this);scheduleTaskFieldSave();">'
+    +'<select class="k-rolle" style="font-size:11px;padding:2px 4px;width:100%;" onchange="var ci=this.parentNode.querySelector(\'.k-rolle-custom\');if(ci){ci.style.display=this.value===\'_custom_\'?\'\':\' none\';if(this.value===\'_custom_\')ci.focus();}_kFelderSync(this);_kLageSync(this);_kWioSync(this);scheduleTaskFieldSave();">'
     +rolleOpts.map(r=>'<option value="'+r+'"'+(r===selVal?' selected':'')+'>'+(rolleLabel[r]||r)+'</option>').join('')
     +'<option value="_custom_"'+(isCustom?' selected':'')+'>✏️ Andere…</option>'
     +'</select>'
@@ -56592,21 +56641,29 @@ function addKontaktPTP(rolle,name,tel,email,anrufKontakt,tel2,adr,wohntImObjekt,
     +'</div></div>'
     // Zeile 2 links: Ansprechpartner (+ Lage beim Mieter/Eigentuemer) als eigene Zeile UNTER dem Namen, damit der Firmenname die
     // volle Spaltenbreite hat (Frank 26.10.2026: „Koennen wir den Namen da runterschreiben? Das Telefonkaestchen ist ja doppelt so breit").
-    // Reihenfolge der Zellen: Name | Telefon · Ansprechpartner | Tel. 2 · E-Mail ueber beide Spalten.
-    +'<div class="modal-field" style="margin:0"><label style="font-size:10px">Ansprechpartner</label><div style="display:flex;gap:3px;">'
+    // Reihenfolge der Zellen: Name | Telefon · Ansprechpartner + Lage | Tel. 2 · E-Mail ueber beide Spalten.
+    // Jedes Feld der zweiten Zeile steckt in einer eigenen Huelle mit eigener Beschriftung; welche Huelle offen ist, regelt _kFelderSync.
+    +'<div class="modal-field" style="margin:0;display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap;min-width:0;">'
+    +'<div class="k-ansp-box" style="'+(anspAuf?'':'display:none;')+'flex:2 1 120px;min-width:0;"><label class="k-ansp-lbl" style="font-size:10px">'+anspLbl+'</label>'
     /* Ansprechpartner unter dem Namen, bei jeder Rolle (Frank 26.10.2026, nach dem Bau der Objekt-Kontakte: „ich bin nicht
        zufrieden damit, dann habe ich ja noch einen Kasten mehr – koennen wir das nicht in das Hausverwaltungsfenster integrieren").
        Name = Firma, hier die Person. Ist er ausgefuellt, nimmt die Terminmail ihre Anrede von ihm (_tmEmpfaenger, _kMailNeu),
        und der gruene Haken legt ihn im Adressbuch als Name, die Firma als Firma ab (_adrBookAddFromKontakt). Zuerst stand er NEBEN
        dem Namen – dann war der Firmenname abgeschnitten; seit dem Umbau der Zeile steht er darunter, die Lage daneben. */
-    +'<input type="text" class="k-ansp" value="'+ansprechpartner.replace(/"/g,'&quot;')+'" placeholder="Ansprechpartner" title="Ansprechpartner bei dieser Firma – steht in der Anrede der Terminmail, wenn ausgefüllt" style="flex:1;min-width:0;'+fs+'" oninput="scheduleTaskFieldSave()" autocomplete="off">'
-    // Lage im Haus neben dem Namen – eigenes Feld, damit sie nie in die Anrede der Terminmail rutscht
-    +'<input type="text" class="k-lage" value="'+lage.replace(/"/g,'&quot;')+'" placeholder="DG links" title="Lage im Haus: Geschoss, Seite oder Wohnungsnummer – nur bei Mieter und Eigentümer; kommt nicht in die Anrede" style="'+(lageAn?'':'display:none;')+'width:84px;flex-shrink:0;'+fs+'" oninput="scheduleTaskFieldSave()" autocomplete="off">'
-    +'</div></div>'
-    +'<div class="modal-field" style="margin:0"><label style="font-size:10px">Tel. 2</label><div style="display:flex;gap:3px;">'
+    +'<input type="text" class="k-ansp" value="'+ansprechpartner.replace(/"/g,'&quot;')+'" placeholder="Ansprechpartner" title="Ansprechpartner bei dieser Firma – steht in der Anrede der Terminmail, wenn ausgefüllt" style="flex:1;min-width:0;'+fs+'" oninput="scheduleTaskFieldSave()" autocomplete="off"></div>'
+    // Lage im Haus – eigenes Feld mit eigener Beschriftung, damit sie nie in die Anrede der Terminmail rutscht
+    +'<div class="k-lage-box" style="'+(lageAn?'':'display:none;')+'flex:1 1 84px;min-width:84px;"><label style="font-size:10px">Lage im Haus</label>'
+    +'<input type="text" class="k-lage" value="'+lage.replace(/"/g,'&quot;')+'" placeholder="DG links" title="Lage im Haus: Geschoss, Seite oder Wohnungsnummer – nur bei Mieter und Eigentümer; kommt nicht in die Anrede" style="'+(lageAn?'':'display:none;')+'width:100%;'+fs+'" oninput="scheduleTaskFieldSave()" autocomplete="off"></div>'
+    +'</div>'
+    // Rechte Zelle: Tel. 2 (zu, solange leer) und die Knoepfe „＋ …" fuer das, was gerade zu ist – unten buendig mit den Feldern links
+    +'<div class="modal-field" style="margin:0;display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap;min-width:0;">'
+    +'<div class="k-tel2-box" style="'+(tel2Auf?'':'display:none;')+'flex:1 1 140px;min-width:0;"><label style="font-size:10px">Tel. 2</label><div style="display:flex;gap:3px;">'
     +'<input type="tel" class="k-tel2" value="'+tel2.replace(/"/g,'&quot;')+'" style="flex:1;'+fs+'" placeholder="0172 / 123456" oninput="scheduleTaskFieldSave()" autocomplete="off">'
     +'<a class="tel2-call-btn'+(tel2?'':' disabled')+'" href="'+(tel2?'tel:'+tel2:'#')+'" onclick="_pamWahlAusKasten(this,\'.k-tel2\')"><span style="font-size:15px">📞</span></a>'
     +'</div></div>'
+    +'<button type="button" class="k-tel2-plus" style="'+(tel2Auf?'display:none;':'')+pb+'" onclick="_kFeldAuf(this,\'tel2\')" title="Zweite Telefonnummer eintragen">＋ Zweite Nummer</button>'
+    +'<button type="button" class="k-ansp-plus" style="'+(anspAuf?'display:none;':'')+pb+'" onclick="_kFeldAuf(this,\'ansp\')" title="Ansprechpartner eintragen – eine weitere Person, die für diesen Kontakt spricht">＋ Ansprechpartner</button>'
+    +'</div>'
     // E-Mail als dritte Zeile ueber beide Spalten (seit dem Umbau der Kontaktzeile) – das ✉ bleibt direkt daneben (b1164)
     +'<div class="modal-field" style="margin:0;grid-column:1/-1"><label style="font-size:10px">E-Mail</label><div style="display:flex;gap:3px;">'   // b1164: ✉ daneben
     +'<input type="email" class="k-email" value="'+email.replace(/"/g,'&quot;')+'" placeholder="max@beispiel.de" style="flex:1;'+fs+'" oninput="scheduleTaskFieldSave()" autocomplete="off">'
@@ -56691,6 +56748,7 @@ function _kontaktSchonDa(name,tel,email){
   try{vorhanden=(typeof getKontaktePTP==='function')?getKontaktePTP():[];}catch(err){return false;}
   return vorhanden.some(k=>{
     if(n&&norm(k.name)===n)return true;
+    if(n&&norm(k.ansprechpartner)===n)return true;   // Name = Firma, die Person steht im Feld Ansprechpartner – sie ist trotzdem schon da
     if(t&&nr(k.tel)===t)return true;
     if(t&&nr(k.tel2)===t)return true;
     if(e&&norm(k.email)===e)return true;
@@ -60722,6 +60780,20 @@ function openNewTaskModal(){
   const _gu=document.getElementById('newGmailLinkUrl');if(_gu)_gu.value='';
   const _gl=document.getElementById('newGmailLinkLabel');if(_gl)_gl.value='';
   _applyBoardType(currentBoard);
+  // Anzeigen abräumen, die sonst nur openEditTaskModal setzt – im Fenster einer NEUEN Karte stand sonst der Stand der zuvor
+  // geöffneten: das Objekt samt Knöpfen („Gehört zum Objekt“), das GM-Schild im Kopf, der Handy-Standort und die Zähler im
+  // E-Mail-Block. Gespeichert wurde davon nie etwas (saveTaskData kennt bei einer neuen Karte kein Objekt) – es war nur zu sehen.
+  // Steht NACH _applyBoardType: die Objekt-Zeile richtet sich nach ptp-immo-mode (wie in openEditTaskModal).
+  try{if(typeof _objZuordnungAnzeige==='function')_objZuordnungAnzeige();}catch(e){console.warn('[Neu] Objekt-Anzeige:',e);}
+  {const _gmHNeu=document.getElementById('_hdrGmAkte');if(_gmHNeu){_gmHNeu.textContent='';_gmHNeu.style.display='none';}}
+  {const _sfNeu=document.getElementById('tStandortField');if(_sfNeu)_sfNeu.style.display='none';
+   const _siNeu=document.getElementById('tStandortInfo');if(_siNeu)_siNeu.textContent='';}
+  [['pamIconEml','E-Mail Originale'],['pamIconPdf','E-Mail PDFs'],['pamIconFoto','Fotos']].forEach(function(p){
+    const _icNeu=document.getElementById(p[0]);if(!_icNeu)return;
+    _icNeu.style.opacity='0.35';_icNeu.style.pointerEvents='none';_icNeu.title=p[1];
+    const _lbNeu=_icNeu.querySelector('.pam-icon-lbl');if(_lbNeu)_lbNeu.textContent='0';
+  });
+  {const _dbNeu=document.getElementById('pamDriveEmailBtn');if(_dbNeu)_dbNeu.style.display='none';}
   openModal();
   // Header-Chips zurücksetzen: Status-Chip, Absender-Chip, Datum-Chips, Meta-Badges
   // (openEditTaskModal setzt diese per setTimeout – ohne expliziten Reset bleiben Altdaten sichtbar)
@@ -64011,8 +64083,11 @@ function _openVbsNewTask(data){
       try{addKontaktPTP('mieter',data.mieter||'',data.miet_tel||'',data.miet_email||'');}catch(e){console.warn('[VBS] Kontakt Mieter:',e);}
     }
     // Ansprechpartner – HV-Kontakt (Name, Tel, E-Mail aus ASCII) · b1241: auch ohne Namen, Rolle nach Ablageort
+    // Sind Verwaltung UND Person bekannt, steht die Verwaltung im Namen und die Person im Feld „Ansprechpartner“ – so wie der
+    // Kasten sonst überall gefüllt wird (Name = Firma). Privatkunden und alle Fälle mit nur einer der beiden Angaben bleiben wie bisher.
+    const _vbsAnspGetrennt=!_b1241Privat&&!!data.agname&&!!hvClean2&&data.agname.toLowerCase()!==hvClean2.toLowerCase();
     if(_b1241AgDa&&typeof addKontaktPTP==='function'){
-      try{addKontaktPTP(_b1241Privat?'privatkunde':'hausverwaltung',_b1241AgName,data.agtel||'',data.agemail||'');}catch(e){console.warn('[VBS] Kontakt HV:',e);}
+      try{addKontaktPTP(_b1241Privat?'privatkunde':'hausverwaltung',_vbsAnspGetrennt?hvClean2:_b1241AgName,data.agtel||'',data.agemail||'',false,'',{},false,'',_vbsAnspGetrennt?data.agname:'');}catch(e){console.warn('[VBS] Kontakt HV:',e);}
     }
     // Drive-Felder leeren (werden durch Suche gefüllt)
     ['tGD','tGDOrdner','tEmailOrdner','tDokOrdner'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
@@ -69588,9 +69663,15 @@ function _emBuildKontaktRow(k,i){
   var escOpt=function(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');};
   var fs='font-size:11px;padding:3px 6px;';
   var esc=function(s){return String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;');};
+  // Anfangszustand der zweiten Zeile wie im Task-Fenster (addKontaktPTP) – Regel und Gruende stehen bei _kFelderSync
+  var lageAn=(kRolle==='mieter'||kRolle==='eigentuemer');
+  var anspAuf=!lageAn||!!String(k.ansprechpartner||'').trim();
+  var tel2Auf=!!String(k.tel2||'').trim();
+  var anspLbl=(typeof _kAnspLabel==='function')?_kAnspLabel(kRolle):'Ansprechpartner';
+  var pb='padding:3px 6px;font-size:11px;border:1px dashed var(--border);background:transparent;color:var(--text2);border-radius:5px;cursor:pointer;white-space:nowrap;max-width:100%;';
   var div=document.createElement('div');div.className='kontakt-entry';
   div.innerHTML='<div class="kontakt-entry-header">'
-    +'<select class="k-rolle" style="font-size:11px;padding:2px 4px;" onchange="_emKontaktChange('+i+',\'rolle\',this.value);if(_kLageSync(this))_emKontaktChange('+i+',\'lage\',\'\');if(_kWioSync(this))_emKontaktChange('+i+',\'wohntImObjekt\',false)">'
+    +'<select class="k-rolle" style="font-size:11px;padding:2px 4px;" onchange="_emKontaktChange('+i+',\'rolle\',this.value);if(_kLageSync(this))_emKontaktChange('+i+',\'lage\',\'\');if(_kWioSync(this))_emKontaktChange('+i+',\'wohntImObjekt\',false);_kFelderSync(this)">'
     /* b842: `esc` um Wert UND Beschriftung. Bis b841 standen dort nur feste Wörter
        aus der Liste; seit b842 kann eine eigene Rolle darunter sein, und die kommt
        aus einem Eingabefeld. */
@@ -69606,14 +69687,21 @@ function _emBuildKontaktRow(k,i){
     +'<div class="modal-field" style="margin:0"><label style="font-size:10px">Name</label><input type="text" class="k-name" value="'+esc(k.name)+'" placeholder="Max Mustermann" style="'+fs+'" oninput="_emKontaktChange('+i+',\'name\',this.value)" autocomplete="off"></div>'
     +'<div class="modal-field" style="margin:0"><label style="font-size:10px">Telefon</label><input type="tel" class="k-tel" value="'+esc(k.tel)+'" placeholder="0361 / 123456" style="'+fs+'" oninput="_emKontaktChange('+i+',\'tel\',this.value)" autocomplete="off"></div>'
     // Zeile 2 links: Ansprechpartner (+ Lage) als eigene Zeile UNTER dem Namen – Zellen wie im Task-Fenster (addKontaktPTP):
-    // Name | Telefon · Ansprechpartner | Tel. 2 · E-Mail ueber beide Spalten
-    +'<div class="modal-field" style="margin:0"><label style="font-size:10px">Ansprechpartner</label><div style="display:flex;gap:3px;">'
-    // Ansprechpartner wie im Task-Fenster (addKontaktPTP): bei jeder Rolle, Name = Firma, hier die Person
-    +'<input type="text" class="k-ansp" value="'+esc(k.ansprechpartner)+'" placeholder="Ansprechpartner" title="Ansprechpartner bei dieser Firma – steht in der Anrede der Terminmail, wenn ausgefüllt" style="flex:1;min-width:0;'+fs+'" oninput="_emKontaktChange('+i+',\'ansprechpartner\',this.value)" autocomplete="off">'
-    // Lage im Haus wie im Task-Fenster (addKontaktPTP): nur bei Mieter/Eigentuemer, eigenes Feld, nie in der Anrede
-    +'<input type="text" class="k-lage" value="'+esc(k.lage)+'" placeholder="DG links" title="Lage im Haus: Geschoss, Seite oder Wohnungsnummer – nur bei Mieter und Eigentümer; kommt nicht in die Anrede" style="'+((kRolle==='mieter'||kRolle==='eigentuemer')?'':'display:none;')+'width:84px;flex-shrink:0;'+fs+'" oninput="_emKontaktChange('+i+',\'lage\',this.value)" autocomplete="off">'
-    +'</div></div>'
-    +'<div class="modal-field" style="margin:0"><label style="font-size:10px">Tel. 2</label><input type="tel" class="k-tel2" value="'+esc(k.tel2)+'" placeholder="0172 / 123456" style="'+fs+'" oninput="_emKontaktChange('+i+',\'tel2\',this.value)" autocomplete="off"></div>'
+    // Name | Telefon · Ansprechpartner + Lage | Tel. 2 · E-Mail ueber beide Spalten – jedes Feld der zweiten Zeile in eigener Huelle
+    +'<div class="modal-field" style="margin:0;display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap;min-width:0;">'
+    // Ansprechpartner wie im Task-Fenster (addKontaktPTP): Name = Firma, hier die Person; die Beschriftung nennt die Rolle
+    +'<div class="k-ansp-box" style="'+(anspAuf?'':'display:none;')+'flex:2 1 120px;min-width:0;"><label class="k-ansp-lbl" style="font-size:10px">'+anspLbl+'</label>'
+    +'<input type="text" class="k-ansp" value="'+esc(k.ansprechpartner)+'" placeholder="Ansprechpartner" title="Ansprechpartner bei dieser Firma – steht in der Anrede der Terminmail, wenn ausgefüllt" style="flex:1;min-width:0;'+fs+'" oninput="_emKontaktChange('+i+',\'ansprechpartner\',this.value)" autocomplete="off"></div>'
+    // Lage im Haus wie im Task-Fenster (addKontaktPTP): nur bei Mieter/Eigentuemer, eigenes Feld mit eigener Beschriftung, nie in der Anrede
+    +'<div class="k-lage-box" style="'+(lageAn?'':'display:none;')+'flex:1 1 84px;min-width:84px;"><label style="font-size:10px">Lage im Haus</label>'
+    +'<input type="text" class="k-lage" value="'+esc(k.lage)+'" placeholder="DG links" title="Lage im Haus: Geschoss, Seite oder Wohnungsnummer – nur bei Mieter und Eigentümer; kommt nicht in die Anrede" style="'+(lageAn?'':'display:none;')+'width:100%;'+fs+'" oninput="_emKontaktChange('+i+',\'lage\',this.value)" autocomplete="off"></div>'
+    +'</div>'
+    // Rechte Zelle wie im Task-Fenster: Tel. 2 (zu, solange leer) und die Knoepfe „＋ …"
+    +'<div class="modal-field" style="margin:0;display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap;min-width:0;">'
+    +'<div class="k-tel2-box" style="'+(tel2Auf?'':'display:none;')+'flex:1 1 140px;min-width:0;"><label style="font-size:10px">Tel. 2</label><input type="tel" class="k-tel2" value="'+esc(k.tel2)+'" placeholder="0172 / 123456" style="'+fs+'" oninput="_emKontaktChange('+i+',\'tel2\',this.value)" autocomplete="off"></div>'
+    +'<button type="button" class="k-tel2-plus" style="'+(tel2Auf?'display:none;':'')+pb+'" onclick="_kFeldAuf(this,\'tel2\')" title="Zweite Telefonnummer eintragen">＋ Zweite Nummer</button>'
+    +'<button type="button" class="k-ansp-plus" style="'+(anspAuf?'display:none;':'')+pb+'" onclick="_kFeldAuf(this,\'ansp\')" title="Ansprechpartner eintragen – eine weitere Person, die für diesen Kontakt spricht">＋ Ansprechpartner</button>'
+    +'</div>'
     +'<div class="modal-field" style="margin:0;grid-column:1/-1"><label style="font-size:10px">E-Mail</label><input type="email" class="k-email" value="'+esc(k.email)+'" placeholder="max@beispiel.de" style="'+fs+'" oninput="_emKontaktChange('+i+',\'email\',this.value)" autocomplete="off"></div>'
     +'<div style="grid-column:1/-1;display:flex;justify-content:flex-end;"><button type="button" class="k-mfkb-btn" style="padding:2px 8px;font-size:11px;background:transparent;color:var(--text);border:1px solid var(--border);border-radius:4px;cursor:pointer;white-space:nowrap;" onclick="_mfKbAusKontakt(this)" title="In MF dach nachsehen: steht dieser Kontakt mit dieser Nummer schon im Kundenstamm? Nur am Büro-PC – die Kunden-Brücke muss laufen.">🔎 In MF dach nachsehen</button></div>'
     +'</div>';
@@ -71589,11 +71677,37 @@ function _emMergeArbeitsstaende(src,tt){
   });
   if(!tt.due&&src.due)tt.due=src.due;
   if(!Array.isArray(tt.kontakte))tt.kontakte=[];
+  // Dieselbe Person nicht als zweiten Kasten: „schon da“ heißt gleicher Name (auch gegen das Feld Ansprechpartner), gleiche Nummer
+  // (auf Ziffern gekürzt) oder gleiche Mail-Adresse – OHNE die Rolle, wie in _kontaktSchonDa. Der Absender einer Mail kommt als
+  // „AG Kontakt“, am Auftrag steht dieselbe Person meist schon im Kasten der Hausverwaltung.
+  // ⛔ Nur ergänzen, nie überschreiben: was der Mail-Kontakt mehr weiß (Nummer, Mail), kommt in LEERE Felder des vorhandenen Kastens.
+  // Steht dort schon etwas anderes, bleibt es bei zwei Kästen – so geht keine Angabe verloren.
+  // ⛔ Ohne Hilfsfunktion von außen: Prüfsuiten schneiden diese Funktion aus und führen sie allein aus.
+  var kNorm=function(s){return String(s==null?'':s).trim().toLowerCase();};
+  var kNr=function(s){return kNorm(s).replace(/[^0-9+]/g,'');};
   (src.kontakte||[]).forEach(function(k){
     if(!k||!(k.name||k.tel||k.tel2||k.email))return;
     var kk=k.id||((k.rolle||'')+'|'+(k.name||''));
-    if(!tt.kontakte.some(function(x){return x&&(x.id||((x.rolle||'')+'|'+(x.name||'')))===kk;}))
-      tt.kontakte.push(k);
+    if(tt.kontakte.some(function(x){return x&&(x.id||((x.rolle||'')+'|'+(x.name||'')))===kk;}))return;
+    var n=kNorm(k.name),e=kNorm(k.email),nrn=[k.tel,k.tel2].filter(function(v){return kNr(v)!=='';});
+    var da=null;
+    tt.kontakte.some(function(x){
+      if(!x)return false;
+      var gleich=(n&&(kNorm(x.name)===n||kNorm(x.ansprechpartner)===n))||(e&&kNorm(x.email)===e)
+        ||nrn.some(function(v){return kNr(x.tel)===kNr(v)||kNr(x.tel2)===kNr(v);});
+      if(gleich)da=x;
+      return !!gleich;
+    });
+    if(!da){tt.kontakte.push(k);return;}
+    // Was fehlt dem vorhandenen Kasten? Erst planen, dann eintragen – passt etwas nicht in ein leeres Feld, wird nichts angefasst.
+    var tel=da.tel||'',tel2=da.tel2||'',mail=da.email||'',passt=true;
+    nrn.forEach(function(v){
+      if(kNr(tel)===kNr(v)||kNr(tel2)===kNr(v))return;
+      if(kNr(tel)==='')tel=v;else if(kNr(tel2)==='')tel2=v;else passt=false;
+    });
+    if(e&&kNorm(mail)!==e){if(kNorm(mail)==='')mail=k.email;else passt=false;}
+    if(!passt){tt.kontakte.push(k);return;}
+    da.tel=tel;da.tel2=tel2;da.email=mail;
   });
 }
 
