@@ -10724,7 +10724,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-11-19 · #1286'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-11-19-b1286) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-11-19 · #1287'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-11-19-b1287) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -17707,6 +17707,7 @@ async function gdriveSaveData() {
                   mergedTask.notizVerlauf=_mergeNotizen(remoteTask&&remoteTask.notizVerlauf,lt.notizVerlauf);
                   // b996: Wahl-Vermerke werden nur angehängt, nie gelöscht – beide Seiten vereinigen
                   if(Array.isArray(lt.anrufWahlen)||(remoteTask&&Array.isArray(remoteTask.anrufWahlen)))mergedTask.anrufWahlen=_mergeListByKey(remoteTask&&remoteTask.anrufWahlen,lt.anrufWahlen,_pamWahlKennung);
+                  if(typeof _pamAnrufAlteZeilenRaus==='function')mergedTask.notizVerlauf=_pamAnrufAlteZeilenRaus(mergedTask,mergedTask.notizVerlauf); // berichtigte Uhrzeit eines Anrufs: die frühere Fassung der Zeile kommt über die Vereinigung nicht zurück
                   // b1012: beim selben Eintrag gewinnt der jünger geänderte Standort (bis b1011 immer die Drive-Fassung)
                   mergedTask.zeitEntries=(typeof _zeitZeilenMerge==='function')?_zeitZeilenMerge(remoteTask&&remoteTask.zeitEntries,lt.zeitEntries):_mergeListByKey(remoteTask&&remoteTask.zeitEntries,lt.zeitEntries,e=>((e.date||'')+'|'+(e.von||'')+'|'+(e.bis||'')+'|'+(e.beschreibung||'')));
                   // b1013: Löschvermerke beider Seiten vereinigen, gelöschte Uhr-Zeilen herausnehmen
@@ -17837,6 +17838,7 @@ async function gdriveSaveData() {
                       if(Array.isArray(lt.pruefberichteGeloescht)||Array.isArray(rt.pruefberichteGeloescht)){mt.pruefberichteGeloescht=_pbGeloeschtMerge(rt.pruefberichteGeloescht,lt.pruefberichteGeloescht);if(Array.isArray(mt.pruefberichte))mt.pruefberichte=_pbOhneGeloeschte(mt.pruefberichte,mt.pruefberichteGeloescht);}
                     }
                     mt.notizVerlauf=_mergeNotizen(rt.notizVerlauf,lt.notizVerlauf);
+                    if(typeof _pamAnrufAlteZeilenRaus==='function')mt.notizVerlauf=_pamAnrufAlteZeilenRaus(mt,mt.notizVerlauf); // wie im offenen Fenster: die frühere Fassung einer berichtigten Anruf-Zeile kommt nicht zurück
                     merged[rk][idx]=mt;
                     break;
                   }
@@ -26412,6 +26414,13 @@ function updateNotizTs(i,val){
   const neu=_btbTsAusEingabe(n.ts,val);
   if(neu===null){if(typeof showToast==='function')showToast('Zeit nicht erkannt – bitte so eintragen: TT.MM.JJJJ, HH:MM','warning',4000);renderTaskNotizen();return;}
   if(neu===String(n.ts==null?'':n.ts))return; // nichts geändert → die Zeile bleibt unberührt
+  // Zeile eines eigenen Anrufs, die an einer gewählten Nummer hängt: die Uhrzeit des ANRUFS wird berichtigt, die Anrufliste zieht mit.
+  if(typeof _pamAnrufZeitAusBtb==='function'){
+    let az=null;
+    try{az=_pamAnrufZeitAusBtb(n,neu);}catch(e){console.warn('[Anruf-Uhrzeit] Zeitfeld:',e);az=null;}
+    if(az&&az.fehler){if(typeof showToast==='function')showToast(az.fehler,'warning',4500);renderTaskNotizen();return;}
+    if(az&&az.ts){n.ts=az.ts;renderTaskNotizen();scheduleTaskFieldSave();return;}
+  }
   n.ts=neu;scheduleTaskFieldSave();
 }
 function updateNotizText(i,val){
@@ -66700,7 +66709,8 @@ function _pamWahlAusKasten(a,feld){
 }
 // Wahlen einer Karte, die neueste zuerst. ISO-Zeiten (toISOString) lassen sich als Text sortieren.
 function _pamWahlenListe(t){
-  return ((t&&Array.isArray(t.anrufWahlen))?t.anrufWahlen:[]).filter(function(w){return w&&w.ts;})
+  const ers=(typeof _pamWahlErsetzt==='function')?_pamWahlErsetzt(t):null; // Uhrzeit eines Anrufs berichtigt: die ersetzte Wahl bleibt in den Daten, wird aber nicht mehr gezeigt
+  return ((t&&Array.isArray(t.anrufWahlen))?t.anrufWahlen:[]).filter(function(w){return w&&w.ts&&!(ers&&ers[String(w.ts)+'|'+_pamWahlNorm(w.nr)]);})
     .slice().sort(function(a,b){return a.ts<b.ts?1:(a.ts>b.ts?-1:0);});
 }
 function _pamWahlLetzte(t,nr){
@@ -66813,8 +66823,9 @@ function _pamAnrufErgListe(t,nr){
   });
   out.sort(function(a,b){return a.ts<b.ts?1:(a.ts>b.ts?-1:0);});
   // dieselbe Zeit und dieselbe Nummer zweimal (eine nachträglich geänderte Zeile kann nach einem Abgleich doppelt dastehen) zählt als EIN Anruf – die Fassung mit Notiz gilt.
+  const liste=(typeof _pamAnrufListeBerichtigt==='function')?_pamAnrufListeBerichtigt(t,out):out; // berichtigte Uhrzeit eines Anrufs: die frühere Fassung der Zeile nicht doppelt zählen · eine lose, minutengenaue Zeile gehört zur Wahl ihrer Minute
   const eind=[],platz={};
-  out.forEach(function(r){
+  liste.forEach(function(r){
     const kk=r.ts+'|'+_pamWahlNorm(r.nr),i=platz[kk];
     if(i===undefined){platz[kk]=eind.length;eind.push(r);}
     else if(!eind[i].notiz&&r.notiz)eind[i]=r;
@@ -66908,6 +66919,40 @@ function _pamAnrufErgDialog(taskId,nr,name,rolle,vorWahlTs,aendern){
   const zeigeUnter=function(){unter.textContent=nr+' · '+(t.title||'(kein Titel)')+(_nurRueck?' · ↩ Rückruf':' · Gerät: '+_pamAnrufErgGeraet(t,nr,sel.value));};
   sel.onchange=zeigeUnter; zeigeUnter();
   if(!_nurRueck){box.appendChild(lab); box.appendChild(sel);}
+  // „Wann war der Anruf?“ – Tag und Uhrzeit des eigenen Anrufs, vorbelegt mit der Zeit des gewählten Anrufs (bei „jetzt“ mit jetzt).
+  // Bleiben die Felder unberührt, bleibt alles, wie es war; sonst gilt die eingetragene Zeit (siehe Speichern). Nicht beim Rückruf – der hat seine eigenen Felder.
+  let azKasten=null,azTag=null,azUhr=null,azHin=null,azVorTag='',azVorUhr='';
+  const azSetzen=function(){
+    if(!azKasten)return;
+    const w0=sel.value?new Date(sel.value):new Date(),d0=isNaN(w0.getTime())?new Date():w0;
+    const zz=function(n){return String(n).padStart(2,'0');};
+    azVorTag=d0.getFullYear()+'-'+zz(d0.getMonth()+1)+'-'+zz(d0.getDate()); azVorUhr=zz(d0.getHours())+':'+zz(d0.getMinutes());
+    azTag.value=azVorTag; azUhr.value=azVorUhr;
+    azHin.textContent=sel.value?'Die Uhrzeit dieses Anrufs – hier berichtigen, wenn sie nicht stimmt.':'Steht auf jetzt. Nur ändern, wenn du den Anruf später einträgst.';
+  };
+  if(typeof _pamAnrufZeitAendern==='function'&&!_nurRueck){
+    azKasten=document.createElement('div');
+    azKasten.id='pamAnrufErgAnrufZeit';
+    azKasten.style.cssText='margin:0 0 8px;';
+    const azLab=document.createElement('div');
+    azLab.style.cssText='font-size:11px;font-weight:600;margin:2px 0 3px;';
+    azLab.textContent='Wann war der Anruf?';
+    const azReihe=document.createElement('div');
+    azReihe.style.cssText='display:flex;gap:8px;';
+    azTag=document.createElement('input');
+    azTag.type='date'; azTag.id='pamAnrufErgAnrufTag';
+    azTag.style.cssText='flex:1;box-sizing:border-box;padding:6px 8px;font-size:12px;';
+    azUhr=document.createElement('input');
+    azUhr.type='time'; azUhr.id='pamAnrufErgAnrufUhr';
+    azUhr.style.cssText='flex:1;box-sizing:border-box;padding:6px 8px;font-size:12px;';
+    azHin=document.createElement('div');
+    azHin.style.cssText='font-size:11px;color:var(--text2);margin-top:3px;';
+    azReihe.appendChild(azTag); azReihe.appendChild(azUhr);
+    azKasten.appendChild(azLab); azKasten.appendChild(azReihe); azKasten.appendChild(azHin); box.appendChild(azKasten);
+    azSetzen();
+    const azVorher=sel.onchange;
+    sel.onchange=function(){if(typeof azVorher==='function')azVorher();azSetzen();}; // anderer Anruf gewählt → seine Uhrzeit steht in den Feldern
+  }
   // Häkchen „hat mich zurückgerufen“ – kein eigener Anruf: der Rückruf bekommt seine eigene Uhrzeit, in Liste und Bautagebuch steht „Rückruf“.
   // Beim Ändern einer vorhandenen Zeile gibt es das Häkchen auch: angekreuzt bleibt die Zeile des Anrufs unberührt, der Rückruf kommt als eigene Zeile dazu.
   let rueckCb=null;
@@ -66983,6 +67028,7 @@ function _pamAnrufErgDialog(taskId,nr,name,rolle,vorWahlTs,aendern){
       if(!aendern)sel.value='';
       sel.disabled=true;
       unter.textContent=nr+' · '+(t.title||'(kein Titel)')+' · ↩ Rückruf'+(rzKasten?'':', jetzige Uhrzeit');
+      if(azKasten)azKasten.style.display='none'; // mit dem Häkchen gilt die Uhrzeit des Rückrufs – die des eigenen Anrufs steht dann nicht zur Wahl
       if(rzKasten){rzSetzen(new Date());rzKasten.style.display='';} // die Felder für die Uhrzeit des Rückrufs erscheinen, vorbelegt mit jetzt
       if(aendern){ // die Zeile des Anrufs bleibt unberührt: der Titel sagt es, „erreicht, kein Termin“ ist vorgeschlagen, die Notiz des Anrufs verlässt das Feld
         kopf.textContent='↩ Rückruf eintragen: '+wer;
@@ -66993,6 +67039,7 @@ function _pamAnrufErgDialog(taskId,nr,name,rolle,vorWahlTs,aendern){
     }else{
       sel.disabled=!!aendern; zeigeUnter();
       if(rzKasten)rzKasten.style.display='none';
+      if(azKasten){azKasten.style.display='';azSetzen();}
       if(aendern){ // Häkchen wieder weg: zurück zum Stand der Zeile
         kopf.textContent='📞 Ergebnis ändern: '+wer;
         const vz=knoepfe.find(function(x){return x.getAttribute('data-erg')===aendern.erg;}); if(vz)vz.onclick();
@@ -67022,6 +67069,29 @@ function _pamAnrufErgDialog(taskId,nr,name,rolle,vorWahlTs,aendern){
       if(typeof _pamAnrufRueckAendernSpeichern==='function')_pamAnrufRueckAendernSpeichern(taskId,nr,aendern.ts,gewaehlt.k,notiz.value,_rz);
       ov.remove();
       return;
+    }
+    // Uhrzeit des eigenen Anrufs: unberührte Felder = alles wie bisher. Sonst gilt die eingetragene Zeit – ein vermerkter Anruf wird berichtigt, bei „jetzt“
+    // wird der Anruf mit dieser Zeit vermerkt (wie „＋ gewählt“). Eine unmögliche Zeit lässt das Fenster offen.
+    // Danach steht die neue Zeit in der Auswahl „Welcher Anruf?“ (und beim Ändern in aendern.ts) – die Zeilen darunter speichern wie bisher.
+    if(azKasten&&!(rueckCb&&rueckCb.checked)&&!(azTag.value===azVorTag&&azUhr.value===azVorUhr)){
+      const _wts=aendern?String(aendern.ts):sel.value;
+      const _ad=(typeof _pamWahlHandZeit==='function')?_pamWahlHandZeit(azTag.value,azUhr.value):null;
+      const _az=!_ad?{fehler:'Bitte Datum und Uhrzeit des Anrufs eintragen'}:(_wts?_pamAnrufZeitAendern(taskId,nr,_wts,_ad,true):((typeof _pamAnrufHandWahl==='function')?_pamAnrufHandWahl(taskId,nr,name,_ad):{fehler:'Die Uhrzeit ließ sich nicht eintragen'}));
+      if(_az.fehler){if(typeof showToast==='function')showToast(_az.fehler,'warning',4500);return;}
+      if(!_az.gleich){
+        const _azOpt=document.createElement('option');
+        _azOpt.value=String(_az.ts); _azOpt.textContent=_pamWahlZeit(_az.ts,false);
+        sel.appendChild(_azOpt); sel.value=String(_az.ts);
+        if(aendern){
+          const _nurZeit=gewaehlt.k===aendern.erg&&String(notiz.value||'').trim()===String(aendern.notiz||'').trim();
+          aendern.ts=String(_az.ts);
+          if(_nurZeit){ // nur die Uhrzeit berichtigt, Ergebnis und Notiz sind geblieben – die Zeile ist schon gespeichert
+            if(typeof showToast==='function')showToast('📞 Uhrzeit des Anrufs geändert: '+_pamWahlZeit(_az.ts,true),'success',3000);
+            ov.remove();
+            return;
+          }
+        }
+      }
     }
     if(aendern&&typeof _pamAnrufErgAendernSpeichern==='function'&&!(rueckCb&&rueckCb.checked))_pamAnrufErgAendernSpeichern(taskId,nr,aendern.ts,gewaehlt.k,notiz.value); // vorhandene Zeile ändern – mit dem Häkchen „Rückruf“ bleibt sie unberührt, dann schreibt die nächste Zeile den Rückruf als eigene Zeile
     else _pamAnrufErgSpeichern(taskId,nr,name,rolle,gewaehlt.k,notiz.value,sel.value,!!(rueckCb&&rueckCb.checked),_rz);
@@ -67101,7 +67171,7 @@ function _pamAnrufErgZeile(t,nr,ts){
   ((t&&Array.isArray(t.notizVerlauf))?t.notizVerlauf:[]).forEach(function(n){
     if(!n)return;
     const genau=String(n.ts)===String(ts);
-    if(!genau&&!(typeof _pamAnrufTsGleicheMinute==='function'&&_pamAnrufTsGleicheMinute(n.ts,ts)))return; // sonst nur eine Zeile derselben Minute, deren Zeit früher als Text gespeichert wurde
+    if(!genau&&!(typeof _pamAnrufTsGleicheMinute==='function'&&_pamAnrufTsGleicheMinute(n.ts,ts))&&!(typeof _pamAnrufZeileZuWahl==='function'&&_pamAnrufZeileZuWahl(t,n,k,ts)))return; // sonst nur eine Zeile derselben Minute, deren Zeit früher als Text gespeichert wurde
     const r=_pamAnrufErgLesen(n.text); if(!r||_pamWahlNorm(r.nr)!==k)return;
     if(!genau&&typeof _pamAnrufRueckTeile==='function'&&_pamAnrufRueckTeile(r.notiz,r.rueck).rueck)return; // ein Rückruf gehört nie zu einer Wahl
     if(!treffer||(genau&&!treffer.genau)||(genau===treffer.genau&&!treffer.r.notiz&&r.notiz))treffer={n:n,r:r,genau:genau};
@@ -67201,6 +67271,200 @@ function _pamAnrufGrobZuWahl(l,wahlTs){
     const a=Date.parse(x.ts);
     return !isNaN(a)&&Math.floor(a/60000)===Math.floor(b/60000);
   })||null;
+}
+// ── Uhrzeit eines eigenen Anrufs eintragen und berichtigen ──
+// Eine gewählte Nummer wird nie gelöscht – die Liste wird nur ergänzt, die Vereinigung beim Speicherkonflikt brächte Gelöschtes zurück. Wird die
+// Uhrzeit eines Anrufs berichtigt, kommt deshalb eine NEUE Wahl mit der richtigen Zeit dazu; an ihr steht in „statt“, welche Zeiten sie ersetzt.
+// Die ersetzten bleiben in den Daten, werden aber nirgends mehr gezeigt (_pamWahlenListe, _pamWahlSammle). PAM Mobil kennt dieselbe Regel (_wahlErsetzt).
+// Die Bautagebuch-Zeile des Anrufs bekommt die neue Zeit an Ort und Stelle. Bringt ein Abgleich ihre frühere Fassung zurück, zählt die nicht mit
+// (_pamAnrufListeBerichtigt) und wird beim Zusammenführen und beim Öffnen der Karte wieder herausgenommen (_pamAnrufAlteZeilenRaus).
+// ⛔ Keine Regex-Literale: die Prüfsuiten schneiden mit einem Zeichenketten-Zähler aus.
+// Ersetzte Wahlen einer Karte: „Zeit|Nummer“ → Zeit der Wahl, die sie ersetzt. null, wenn an der Karte nichts berichtigt wurde.
+function _pamWahlErsetzt(t){
+  const aus={}; let n=0;
+  ((t&&Array.isArray(t.anrufWahlen))?t.anrufWahlen:[]).forEach(function(w){
+    if(!w||!w.ts||!Array.isArray(w.statt))return;
+    const k=_pamWahlNorm(w.nr);
+    w.statt.forEach(function(s){if(s&&String(s)!==String(w.ts)){aus[String(s)+'|'+k]=String(w.ts);n++;}});
+  });
+  return n?aus:null;
+}
+// Die Zeit der Wahl, die heute für eine ersetzte Zeit gilt – oder '' wenn diese Zeit nicht ersetzt ist.
+function _pamWahlKopf(t,nr,ts,ers){
+  const m=ers||_pamWahlErsetzt(t); if(!m)return '';
+  const k=_pamWahlNorm(nr);
+  let z=String(ts),n=0;
+  while(m[z+'|'+k]&&n<50){z=m[z+'|'+k];n++;}
+  return z===String(ts)?'':z;
+}
+// Freie Zeit für eine neue Wahl dieser Nummer: die gewünschte – trägt sie schon eine Wahl (auch eine ersetzte), eine Millisekunde später, bis sie frei ist.
+function _pamWahlFreieTs(t,nr,ts){
+  const k=_pamWahlNorm(nr),da={};
+  ((t&&Array.isArray(t.anrufWahlen))?t.anrufWahlen:[]).forEach(function(w){if(w&&w.ts&&_pamWahlNorm(w.nr)===k)da[String(w.ts)]=true;});
+  let ms=Date.parse(ts); if(isNaN(ms))return String(ts);
+  let z=new Date(ms).toISOString(),n=0;
+  while(da[z]&&n<999){ms++;z=new Date(ms).toISOString();n++;}
+  return z;
+}
+// Innere Zeit genau auf die Minute (Sekunden und Millisekunden null)? So schreibt sie das Zeitfeld im Bautagebuch.
+function _pamAnrufTsMinutengenau(ts){
+  const s=String(ts==null?'':ts);
+  return s.length===24&&s.charAt(4)==='-'&&s.charAt(10)==='T'&&s.slice(16)===':00.000Z'&&!isNaN(Date.parse(s));
+}
+// Gehört die Bautagebuch-Zeile n (Nummer k), deren Zeit NICHT genau die der Wahl ist, trotzdem zu dieser Wahl?
+// (a) Ihre Zeit ist die einer ersetzten Wahl, deren Nachfolger diese Wahl ist (die Uhrzeit des Anrufs wurde berichtigt, die Zeile trägt noch die frühere).
+// (b) Ihre Zeit ist minutengenau, liegt in der Minute dieser Wahl, und keine Wahl dieser Nummer trägt genau diese Zeit – das Zeitfeld im Bautagebuch
+//     hatte die Zeile von ihrer Wahl gelöst (auch nach dem Zurückstellen auf die alte Uhrzeit).
+function _pamAnrufZeileZuWahl(t,n,k,wahlTs){
+  if(!n||!n.ts||!wahlTs)return false;
+  const zs=_pamAnrufTsLesen(n.ts).ts;
+  const ers=_pamWahlErsetzt(t);
+  if(ers&&ers[zs+'|'+k]){let z=zs,i=0;while(ers[z+'|'+k]&&i<50){z=ers[z+'|'+k];i++;}return z===String(wahlTs);}
+  if(!_pamAnrufTsMinutengenau(zs))return false;
+  const a=Date.parse(zs),b=Date.parse(wahlTs);
+  if(isNaN(a)||isNaN(b)||Math.floor(a/60000)!==Math.floor(b/60000))return false;
+  return !_pamWahlenListe(t).some(function(w){return _pamWahlNorm(w.nr)===k&&String(w.ts)===zs;});
+}
+// Die Anruf-Zeilen aus _pamAnrufErgListe (neueste zuerst) nach einer berichtigten Uhrzeit richtigstellen:
+// – Die Zeile eines eigenen Anrufs zur Zeit einer ERSETZTEN Wahl ist die frühere Fassung. Steht die berichtigte Zeile da, zählt die frühere nicht mit
+//   (nach einem Abgleich kann sie wieder dastehen); fehlt sie, gilt die frühere für den Nachfolger – ein Ergebnis verschwindet nie.
+// – Eine lose, minutengenaue Zeile eines eigenen Anrufs (keine Wahl trägt genau ihre Zeit) gilt als „nur minutengenau“ und gehört damit zur Wahl
+//   ihrer Minute (_pamAnrufGrobZuWahl). Rückrufe bleiben, wie sie sind.
+function _pamAnrufListeBerichtigt(t,out){
+  const ers=_pamWahlErsetzt(t);
+  const wahlDa={}; _pamWahlenListe(t).forEach(function(w){wahlDa[String(w.ts)+'|'+_pamWahlNorm(w.nr)]=true;});
+  const istRueck=function(r){return typeof _pamAnrufRueckTeile==='function'&&_pamAnrufRueckTeile(r.notiz,r.rueck).rueck;};
+  const da={}; out.forEach(function(r){da[r.ts+'|'+_pamWahlNorm(r.nr)]=true;});
+  const liste=[]; let umgestellt=false;
+  out.forEach(function(r){
+    const k=_pamWahlNorm(r.nr);
+    if(istRueck(r)){liste.push(r);return;}
+    if(ers&&ers[r.ts+'|'+k]){
+      const kopf=_pamWahlKopf(t,r.nr,r.ts,ers);
+      if(!kopf||da[kopf+'|'+k])return;
+      da[kopf+'|'+k]=true; r.ts=kopf; umgestellt=true; liste.push(r); return;
+    }
+    if(!r.tsGrob&&!wahlDa[r.ts+'|'+k]&&_pamAnrufTsMinutengenau(r.ts))r.tsGrob=true;
+    liste.push(r);
+  });
+  if(umgestellt)liste.sort(function(a,b){return a.ts<b.ts?1:(a.ts>b.ts?-1:0);});
+  return liste;
+}
+// Nach der Vereinigung beim Speicherkonflikt und beim Öffnen einer Karte: die frühere Fassung einer Anruf-Zeile, deren Uhrzeit berichtigt wurde,
+// wieder herausnehmen – aber nur, wenn die berichtigte Zeile dasteht. karte = wo die gewählten Nummern stehen, liste = die Bautagebuch-Liste.
+// Liefert die Liste ohne solche Zeilen; ohne berichtigte Anrufe dieselbe Liste unverändert.
+function _pamAnrufAlteZeilenRaus(karte,liste){
+  if(!Array.isArray(liste))return liste;
+  const ers=_pamWahlErsetzt(karte); if(!ers)return liste;
+  const eigener=function(n){
+    const r=(n&&n.ts)?_pamAnrufErgLesen(n.text):null; if(!r)return null;
+    if(typeof _pamAnrufRueckTeile==='function'&&_pamAnrufRueckTeile(r.notiz,r.rueck).rueck)return null;
+    return {k:_pamWahlNorm(r.nr),nr:r.nr,ts:_pamAnrufTsLesen(n.ts).ts};
+  };
+  const da={}; liste.forEach(function(n){const e=eigener(n);if(e)da[e.ts+'|'+e.k]=true;});
+  const bleibt=liste.filter(function(n){
+    const e=eigener(n); if(!e||!ers[e.ts+'|'+e.k])return true;
+    const kopf=_pamWahlKopf(karte,e.nr,e.ts,ers);
+    return !(kopf&&da[kopf+'|'+e.k]);
+  });
+  return bleibt.length===liste.length?liste:bleibt;
+}
+// Prüft die neue Uhrzeit eines eigenen Anrufs. w = die Wahl, deren Zeit berichtigt wird; d = die gewünschte Zeit (Date).
+// Liefert {ts} in der inneren Schreibweise, {ts,gleich:true} wenn es die Minute dieser Wahl ist (nichts zu berichtigen) oder {fehler} mit dem Hinweis für Frank.
+function _pamAnrufZeitPruefen(t,w,d){
+  if(!w||!w.ts||!d||typeof d.getTime!=='function'||isNaN(d.getTime()))return {fehler:'Bitte Datum und Uhrzeit des Anrufs eintragen'};
+  const alt=Date.parse(w.ts),min=Math.floor(d.getTime()/60000);
+  if(!isNaN(alt)&&Math.floor(alt/60000)===min)return {ts:String(w.ts),gleich:true};
+  if(d.getTime()>Date.now()+60000)return {fehler:'Diese Uhrzeit liegt in der Zukunft – bitte prüfen'};
+  const k=_pamWahlNorm(w.nr);
+  const inMin=function(ts){const ms=Date.parse(ts);return !isNaN(ms)&&Math.floor(ms/60000)===min;};
+  const belegt=_pamWahlenListe(t).some(function(x){return x!==w&&_pamWahlNorm(x.nr)===k&&inMin(x.ts);})
+    ||_pamAnrufErgListe(t,w.nr).some(function(x){return inMin(x.ts);});
+  if(belegt)return {fehler:'Zu dieser Minute ist bei dieser Nummer schon ein Anruf vermerkt – bitte eine Minute früher oder später eintragen'};
+  const rr=(typeof _pamAnrufRueckZuWahl==='function')?_pamAnrufRueckZuWahl(t,w):[];
+  if(rr.length){const rms=Date.parse(rr[0].ts);if(!isNaN(rms)&&min>=Math.floor(rms/60000))return {fehler:'Der Anruf muss vor dem Rückruf von '+_pamWahlZeit(rr[0].ts,false)+' liegen – bitte prüfen'};}
+  return {ts:d.toISOString()};
+}
+// Berichtigt die Uhrzeit eines eigenen Anrufs (alteTs = die Zeit der Wahl, wie die Anrufliste sie zeigt; d = die neue Zeit, Date oder innere Schreibweise):
+// eine neue Wahl mit der richtigen Zeit ersetzt die bisherige, die Bautagebuch-Zeile zieht mit – in der Karte und, ist sie gerade offen, in der Liste
+// des Fensters. Trägt „✓ erledigt“ die bisherige Zeit, zieht auch das mit. Es entsteht keine zweite Zeile, PAM hakt nichts ab.
+// Liefert {ts} (die neue Zeit der Wahl), {ts,gleich:true} oder {fehler}. still = ohne eigene Meldung (das Fenster meldet selbst).
+function _pamAnrufZeitAendern(taskId,nr,alteTs,d,still){
+  try{
+    const t=_pamWahlKarte(taskId); if(!t)return {fehler:'Karte nicht gefunden'};
+    const k=_pamWahlNorm(nr);
+    const w=_pamWahlenListe(t).find(function(x){return _pamWahlNorm(x.nr)===k&&String(x.ts)===String(alteTs);});
+    if(!w)return {fehler:'Dieser Anruf steht nicht mehr an der Karte'};
+    const dd=(d&&typeof d.getTime==='function')?d:new Date(d);
+    const pz=_pamAnrufZeitPruefen(t,w,dd); if(pz.fehler||pz.gleich)return pz;
+    const z=_pamAnrufErgZeile(t,nr,w.ts); // die Zeile mit dem Ergebnis – fehlt, solange keins eingetragen ist
+    const neuTs=_pamWahlFreieTs(t,nr,pz.ts);
+    const nw={}; Object.keys(w).forEach(function(f){nw[f]=w[f];});
+    const statt=[String(w.ts)]; (Array.isArray(w.statt)?w.statt:[]).forEach(function(s){if(s&&statt.indexOf(String(s))<0)statt.push(String(s));});
+    nw.ts=neuTs; nw.statt=statt;
+    t.anrufWahlen.push(nw);
+    const altZeit=z?String(z.n.ts):'';
+    if(z)z.n.ts=neuTs;
+    if(String(t.anrufErledigtAm||'')===String(w.ts))t.anrufErledigtAm=neuTs;
+    // Ist die Karte gerade offen, hält das Fenster eine eigene Liste – dort dieselbe Zeile nachziehen, sonst schreibt das Fenster beim Speichern die alte Zeit zurück.
+    try{
+      const offen=(document.getElementById('taskId')||{}).value||'';
+      if(offen&&offen===t.id){
+        if(typeof taskNotizVerlauf!=='undefined'&&Array.isArray(taskNotizVerlauf)){
+          taskNotizVerlauf.forEach(function(m){
+            if(!m||(z&&m===z.n))return;
+            if(!(String(m.ts)===String(w.ts)||(altZeit&&String(m.ts)===altZeit)))return;
+            const r=_pamAnrufErgLesen(m.text); if(!r||_pamWahlNorm(r.nr)!==k)return;
+            if(typeof _pamAnrufRueckTeile==='function'&&_pamAnrufRueckTeile(r.notiz,r.rueck).rueck)return;
+            m.ts=neuTs;
+          });
+          if(typeof renderTaskNotizen==='function')renderTaskNotizen();
+        }
+        if(typeof _pamWahlKastenZeigen==='function')_pamWahlKastenZeigen();
+      }
+    }catch(err){console.warn('[Anruf-Uhrzeit] offene Karte:',err);}
+    if(typeof autoSave==='function')autoSave();
+    if(typeof _pamAnrufRender==='function')_pamAnrufRender();
+    if(!still&&typeof showToast==='function')showToast('📞 Uhrzeit des Anrufs geändert: '+_pamWahlZeit(neuTs,true),'success',3000);
+    return {ts:neuTs};
+  }catch(err){console.warn('[Anruf-Uhrzeit]:',err);return {fehler:'Die Uhrzeit ließ sich nicht ändern'};}
+}
+// Zeitfeld im Bautagebuch an der Zeile eines eigenen Anrufs (n = die Zeile in der Liste des offenen Fensters, neu = die neue Zeit): hängt die Zeile an einer
+// gewählten Nummer der offenen Karte, wird die Uhrzeit des ANRUFS berichtigt – sonst stünde er in der Anrufliste mit der alten Zeit und ohne Ergebnis da.
+// Liefert {ts} / {fehler} – oder null, wenn die Zeile an keiner Wahl hängt oder ein Rückruf ist (dann ändert das Feld nur die Zeile).
+function _pamAnrufZeitAusBtb(n,neu){
+  const r=_pamAnrufErgLesen(n&&n.text); if(!r)return null;
+  if(typeof _pamAnrufRueckTeile==='function'&&_pamAnrufRueckTeile(r.notiz,r.rueck).rueck)return null;
+  const tid=(document.getElementById('taskId')||{}).value||''; if(!tid)return null;
+  const t=_pamWahlKarte(tid); if(!t)return null;
+  const k=_pamWahlNorm(r.nr);
+  const w=_pamWahlenListe(t).find(function(x){
+    if(_pamWahlNorm(x.nr)!==k)return false;
+    return String(x.ts)===String(n.ts)||_pamAnrufTsGleicheMinute(n.ts,x.ts)||_pamAnrufZeileZuWahl(t,n,k,x.ts);
+  });
+  if(!w)return null;
+  return _pamAnrufZeitAendern(tid,r.nr,w.ts,neu);
+}
+// Fenster „Ergebnis“ bei „jetzt“ mit eingetragener Uhrzeit: vermerkt den eigenen Anruf mit dieser Zeit – dieselbe Art Vermerk wie „＋ gewählt“ (Gerät
+// „von Hand“), ohne eigene Meldung: gleich danach schreibt das Fenster das Ergebnis mit dieser Zeit. Liefert {ts} oder {fehler}.
+function _pamAnrufHandWahl(taskId,nr,name,d){
+  const k=_pamWahlNorm(nr),t=_pamWahlKarte(taskId);
+  if(!k||!t)return {fehler:'Karte nicht gefunden'};
+  if(!d||typeof d.getTime!=='function'||isNaN(d.getTime()))return {fehler:'Bitte Datum und Uhrzeit des Anrufs eintragen'};
+  if(d.getTime()>Date.now()+60000)return {fehler:'Diese Uhrzeit liegt in der Zukunft – bitte prüfen'};
+  const min=Math.floor(d.getTime()/60000);
+  const inMin=function(ts){const ms=Date.parse(ts);return !isNaN(ms)&&Math.floor(ms/60000)===min;};
+  if(_pamWahlenListe(t).some(function(w){return _pamWahlNorm(w.nr)===k&&inMin(w.ts);})||_pamAnrufErgListe(t,nr).some(function(x){return inMin(x.ts);}))
+    return {fehler:'Zu dieser Minute ist bei dieser Nummer schon ein Anruf vermerkt – bitte eine Minute früher oder später eintragen'};
+  if(!Array.isArray(t.anrufWahlen))t.anrufWahlen=[];
+  let wer=String(name||'').trim();
+  if(!wer){
+    (t.kontakte||[]).forEach(function(c){if(!wer&&c&&(_pamWahlNorm(c.tel)===k||_pamWahlNorm(c.tel2)===k))wer=String(c.name||'').trim();});
+    (((t._aufEinenBlick||{}).kontakte)||[]).forEach(function(p){if(!wer&&p&&_pamWahlNorm(p.nr)===k)wer=String(p.name||'').trim();});
+  }
+  const ts=_pamWahlFreieTs(t,nr,d.toISOString());
+  t.anrufWahlen.push({ts:ts,nr:String(nr).trim(),name:wer,von:'von Hand'});
+  return {ts:ts};
 }
 // Prüft die im Fenster eingetragene Zeit eines Rückrufs. anrufTs = der eigene Anruf, auf den er folgt (leer = unbekannt); eigeneTs = die
 // bisherige Zeit dieses Rückrufs beim Ändern. Liefert {ts} in der inneren Schreibweise oder {fehler} mit dem Hinweis für Frank.
@@ -67380,8 +67644,12 @@ function _pamWahlHandMerken(taskId,nr,name,tag,zeit){
     const d=_pamWahlHandZeit(tag,zeit);
     if(!d){sag('Bitte Datum und Uhrzeit eintragen');return false;}
     if(d.getTime()>Date.now()+60000){sag('Diese Uhrzeit liegt in der Zukunft – bitte prüfen');return false;}
-    const ts=d.toISOString();
+    let ts=d.toISOString();
     if(!Array.isArray(t.anrufWahlen))t.anrufWahlen=[];
+    if(typeof _pamWahlErsetzt==='function'&&typeof _pamWahlFreieTs==='function'){ // diese Zeit trägt nur noch eine ersetzte Wahl (berichtigte Uhrzeit, nicht mehr zu sehen) und in der Minute steht kein anderer Anruf: eine Millisekunde daneben, die Kennung bleibt eindeutig
+      const _ers=_pamWahlErsetzt(t),_min=Math.floor(d.getTime()/60000);
+      if(_ers&&_ers[ts+'|'+k]&&!_pamWahlenListe(t).some(function(w){return _pamWahlNorm(w.nr)===k&&Math.floor(Date.parse(w.ts)/60000)===_min;}))ts=_pamWahlFreieTs(t,nr,ts);
+    }
     if(t.anrufWahlen.some(function(w){return w&&String(w.ts)===ts&&_pamWahlNorm(w.nr)===k;})){sag('Diese Wahl steht schon da: '+_pamWahlZeit(ts,false),'info');return false;}
     let wer=String(name||'').trim();
     if(!wer){
@@ -67471,7 +67739,8 @@ function _pamWahlSammle(){
   const nimm=function(t,board,archiv){
     if(!t||!t.id||gesehen[t.id]||!Array.isArray(t.anrufWahlen))return;
     gesehen[t.id]=true;
-    t.anrufWahlen.forEach(function(w){if(w&&w.ts)out.push({w:w,t:t,board:board,archiv:archiv});});
+    const ers=(typeof _pamWahlErsetzt==='function')?_pamWahlErsetzt(t):null; // ersetzte Wahlen (berichtigte Uhrzeit) stehen nicht in der Liste
+    t.anrufWahlen.forEach(function(w){if(w&&w.ts&&!(ers&&ers[String(w.ts)+'|'+_pamWahlNorm(w.nr)]))out.push({w:w,t:t,board:board,archiv:archiv});});
   };
   const b=(typeof boards!=='undefined'&&boards)?boards:{};
   Object.keys(b).forEach(function(bn){
@@ -72581,6 +72850,7 @@ function openEditTaskModal(id){
   // Zurücksetzen außer Neuladen). Gilt nur, solange Frank ihn selbst setzt.
   _fotoJahrFilter='';
   taskNotizVerlauf=JSON.parse(JSON.stringify(task.notizVerlauf||[]));
+  try{if(typeof _pamAnrufAlteZeilenRaus==='function')taskNotizVerlauf=_pamAnrufAlteZeilenRaus(task,taskNotizVerlauf);}catch(e){console.warn('[PAM] Anruf-Zeilen:',e);} // frühere Fassung einer Anruf-Zeile, deren Uhrzeit berichtigt wurde, nicht wieder zeigen
   taskFotos=JSON.parse(JSON.stringify(task.fotos||[]));
   taskCheckliste=JSON.parse(JSON.stringify(task.checkliste||[]));
   taskDachzugang=JSON.parse(JSON.stringify(task.dachzugang||[])); // b1193
