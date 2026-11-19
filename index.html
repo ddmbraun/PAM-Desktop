@@ -10724,7 +10724,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-11-19 · #1282'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-11-19-b1282) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-11-19 · #1283'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-11-19-b1283) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -25624,6 +25624,7 @@ function _btbIstPamZeile(text){
   const t=String(text||'');
   if(_btbIsSystemNotiz(t))return true;
   return /^📞 Anruf · /.test(t)
+    ||/^↩ Rückruf · /.test(t)
     ||/^✉ /.test(t)
     ||/^🔁 Leistung (erledigt|übersprungen): /.test(t)
     ||/^RE (Rechnung|Teilrechnung|ohne Berechnung) /.test(t)
@@ -25636,7 +25637,7 @@ function _btbIstPamZeile(text){
     ||/^📄 Rep\.-Datei für MF dach /.test(t); // b1229
 }
 // b1178: Art einer Bautagebuch-Zeile – für die Knöpfe und den Tageskopf. sys = „✓ …“/„… entfernt: …“ (das ⚙) ·
-// anruf = Anruf-Ergebnis („📞 Anruf · …“) · pam = alles andere, was PAM selbst schreibt (✉, Leistung, Rechnung, Dateien …) · notiz = Franks eigene.
+// anruf = Anruf-Ergebnis („📞 Anruf · …“) oder Rückruf („↩ Rückruf · …“) · pam = alles andere, was PAM selbst schreibt (✉, Leistung, Rechnung, Dateien …) · notiz = Franks eigene.
 function _btbZeilenArt(text){
   if(_btbIsSystemNotiz(text))return 'sys';
   if(typeof _pamAnrufErgLesen==='function'&&_pamAnrufErgLesen(text))return 'anruf';
@@ -66790,7 +66791,8 @@ function _pamWahlKastenZeigen(){
    ⛔ Die Wahrheit steht in der BAUTAGEBUCH-ZEILE (task.notizVerlauf), kein eigenes Kartenfeld: Notizen werden schon
       zusammengeführt, stehen im Filter und in der Druckansicht, und löscht Frank die Zeile, verschwindet auch der Status
       an der Nummer – nichts widerspricht sich.
-   ⛔ Zeilenform: „📞 Anruf · Name · Nummer · Gerät · Ergebnis[ · Notiz]“. _pamAnrufErgLesen zerlegt sie wieder; ein
+   ⛔ Zeilenform: „📞 Anruf · Name · Nummer · Gerät · Ergebnis[ · Notiz]“ (eigener Anruf) und „↩ Rückruf · Name · Nummer ·
+      Ergebnis[ · Notiz]“ (die Person hat zurückgerufen – ohne Gerät, _pamRueckrufText). _pamAnrufErgLesen zerlegt beide wieder; ein
       „ · “ im Namen oder in der Notiz wird beim Schreiben zu „ – “. Die Zeile beginnt NICHT mit „✓ “ – solche Zeilen gelten
       als Systemzeilen und sind im Bautagebuch ausgeblendet (_btbIsSystemNotiz).
    ⛔ Das Gerät kommt aus der letzten Wahl dieser Nummer an der Karte (von:'PC'/'Handy'), sonst „–“. Alte Wahlen ohne
@@ -66813,12 +66815,32 @@ function _pamAnrufErgText(name,nr,geraet,ergZ,notiz){
 }
 function _pamAnrufErgLesen(text){
   const s=String(text||'');
-  if(s.indexOf(_PAM_ANRUF_PRAEFIX)!==0)return null;
+  if(s.indexOf(_PAM_ANRUF_PRAEFIX)!==0)return (typeof _pamRueckrufLesen==='function')?_pamRueckrufLesen(s):null; // keine Zeile eines eigenen Anrufs – vielleicht ein Rückruf („↩ Rückruf · …“)
   const p=s.slice(_PAM_ANRUF_PRAEFIX.length).split(' · ');
   if(p.length<4)return null;
   const e=_PAM_ANRUF_ERG.find(function(x){return x.z===p[3];});
   if(!e)return null;
   return {name:p[0],nr:p[1],geraet:p[2],erg:e,notiz:p.slice(4).join(' · ')};
+}
+// Rückruf-Zeile: „↩ Rückruf · Name · Nummer · Ergebnis[ · Notiz]“ – kein Gerät (PAM weiß nicht, wo der Rückruf ankam), kein Zusatz in der Notiz.
+// Geschrieben wird sie von _pamAnrufErgSpeichern(…,rueck). Gelesen kommt dasselbe heraus wie bei einem eigenen Anruf, dazu rueck:true.
+// Ältere Rückruf-Zeilen („📞 Anruf · … · – · Ergebnis · Rückruf: Notiz“) bleiben, wie sie sind – _pamAnrufRueckTeile erkennt sie am Wort vorn in der Notiz.
+// PAM Mobil liest dieselbe Form (_rueckrufLesen). ⛔ Keine Regex-Literale: die Prüfsuiten schneiden mit einem Zeichenketten-Zähler aus.
+const _PAM_RUECKRUF_PRAEFIX='↩ Rückruf · ';
+function _pamRueckrufText(name,nr,ergZ,notiz){
+  const teile=[_pamAnrufErgSauber(name)||'–',_pamAnrufErgSauber(nr),ergZ];
+  const n=_pamAnrufErgSauber(notiz);
+  if(n)teile.push(n);
+  return _PAM_RUECKRUF_PRAEFIX+teile.join(' · ');
+}
+function _pamRueckrufLesen(text){
+  const s=String(text||'');
+  if(s.indexOf(_PAM_RUECKRUF_PRAEFIX)!==0)return null;
+  const p=s.slice(_PAM_RUECKRUF_PRAEFIX.length).split(' · ');
+  if(p.length<3)return null;
+  const e=_PAM_ANRUF_ERG.find(function(x){return x.z===p[2];});
+  if(!e)return null;
+  return {name:p[0],nr:p[1],geraet:'–',erg:e,notiz:p.slice(3).join(' · '),rueck:true};
 }
 // Alle Anruf-Zeilen einer Karte (optional nur zu einer Nummer), die neueste zuerst.
 function _pamAnrufErgListe(t,nr){
@@ -66845,7 +66867,7 @@ function _pamAnrufErgStatus(t,nr){
   const l=_pamAnrufErgListe(t,nr); if(!l.length)return null;
   const neu=l[0],kurz=_pamWahlZeit(neu.ts,true);
   // b1121: kurz/zeit/notiz = dieselbe Aussage in Teilen, für das Schild rechts am Namen (text bleibt, wie er war)
-  const _rt=(typeof _pamAnrufRueckTeile==='function')?_pamAnrufRueckTeile(neu.notiz):{rueck:false,notiz:neu.notiz||''}; // bei einem Rückruf steht „Rückruf“ vorn in der Notiz
+  const _rt=(typeof _pamAnrufRueckTeile==='function')?_pamAnrufRueckTeile(neu.notiz,neu.rueck):{rueck:false,notiz:neu.notiz||''}; // Rückruf: eigene Zeilenform („↩ Rückruf · …“), in älteren Zeilen das Wort „Rückruf“ vorn in der Notiz
   if(neu.erg.ok)return {ok:true,k:neu.erg.k,ts:neu.ts,text:'✓ '+neu.erg.z+(_rt.rueck?' · Rückruf am ':' · Anruf vom ')+kurz+(_rt.notiz?' · '+_rt.notiz:''),kurz:'✓ '+neu.erg.z,zeit:kurz,notiz:_rt.notiz,rueck:_rt.rueck};
   let z=0; for(let i=0;i<l.length&&!l[i].erg.ok;i++)z++;
   return {ok:false,text:'✗ '+z+' × nicht erreicht · zuletzt '+kurz,kurz:'✗ '+z+' × nicht erreicht',zeit:kurz,notiz:''};
@@ -66871,10 +66893,9 @@ function _pamAnrufErgOffeneWahlen(t,nr){
 function _pamAnrufErgWahlZelle(t,w,sid){
   const z=_pamAnrufErgZuWahl(t,w);
   if(z){
-    // Das Ergebnis lässt sich anklicken – dasselbe Fenster wie „✎ Ergebnis“, Ergebnis und Notiz stehen schon drin. Die Notiz steht grau dahinter.
+    // Das Ergebnis lässt sich anklicken – dasselbe Fenster wie „✎ Ergebnis“, Ergebnis und Notiz stehen schon drin. Die Notiz steht in einer eigenen Zeile des Kastens (_pamAnrufKastenZeilen).
     const _kl=(typeof _pamAnrufErgAendern==='function');
-    return '<span class="pam-wahl-erg"'+(_kl?' onclick="_pamAnrufErgAendern(\''+sid+'\',\''+_jsa(w.nr||'')+'\',\''+_jsa(w.ts||'')+'\')" title="Ergebnis oder Notiz zu diesem Anruf ändern"':'')+' style="font-size:11px;font-weight:600;white-space:nowrap;color:'+(z.erg.ok?'#0F6E56':'#A32D2D')+';'+(_kl?'cursor:pointer;border:1px solid var(--border);border-radius:4px;padding:0 6px;background:var(--bg2);':'')+'">'+(z.erg.ok?'✓ ':'✗ ')+esc(z.erg.z)+(_kl?' ✎':'')+'</span>'
-      +((_kl&&z.notiz)?'<span class="pam-wahl-erg-notiz" style="font-size:11px;color:var(--text2);overflow-wrap:anywhere;">'+esc(z.notiz)+'</span>':'');
+    return '<span class="pam-wahl-erg"'+(_kl?' onclick="_pamAnrufErgAendern(\''+sid+'\',\''+_jsa(w.nr||'')+'\',\''+_jsa(w.ts||'')+'\')" title="Ergebnis oder Notiz zu diesem Anruf ändern"':'')+' style="font-size:11px;font-weight:600;white-space:nowrap;color:'+(z.erg.ok?'#0F6E56':'#A32D2D')+';'+(_kl?'cursor:pointer;border:1px solid var(--border);border-radius:4px;padding:0 6px;background:var(--bg2);':'')+'">'+(z.erg.ok?'✓ ':'✗ ')+esc(z.erg.z)+(_kl?' ✎':'')+'</span>';
   }
   return '<button type="button" class="pam-wahl-erg-btn" onclick="_pamAnrufErgDialog(\''+sid+'\',\''+_jsa(w.nr||'')+'\',\''+_jsa(w.name||'')+'\',\'\',\''+_jsa(w.ts||'')+'\')" title="Ergebnis zu diesem Anruf ins Bautagebuch eintragen – mit der Uhrzeit dieser Wahl" style="font-size:10px;padding:1px 7px;border-radius:4px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;">✎ Ergebnis</button>';
 }
@@ -67005,9 +67026,9 @@ function _pamAnrufErgSpeichern(taskId,nr,name,rolle,erg,notiz,wahlTs,rueck){
     const t=_pamWahlKarte(taskId); if(!t)return false;
     const e=_PAM_ANRUF_ERG.find(function(x){return x.k===erg;}); if(!e)return false;
     const wer=[name,rolle].filter(Boolean).join(' (')+(rolle&&name?')':'');
-    if(rueck){wahlTs='';if(typeof _pamAnrufRueckNotiz==='function')notiz=_pamAnrufRueckNotiz(true,notiz);} // Rückruf = kein eigener Anruf → jetzige Uhrzeit, „Rückruf“ vorn in der Notiz, Gerät „–“
+    if(rueck){wahlTs='';} // Rückruf = kein eigener Anruf → jetzige Uhrzeit, eigene Zeilenform („↩ Rückruf · Name · Nummer · Ergebnis · Notiz“)
     const ts=wahlTs?String(wahlTs):''; // b1080: Zeit der Wahl; leer = jetzt
-    const text=_pamAnrufErgText(wer||name,nr,rueck?'–':_pamAnrufErgGeraet(t,nr,ts),e.z,notiz);
+    const text=rueck?_pamRueckrufText(wer||name,nr,e.z,notiz):_pamAnrufErgText(wer||name,nr,_pamAnrufErgGeraet(t,nr,ts),e.z,notiz);
     if(typeof _tuBtbZeile==='function')_tuBtbZeile(t,text,ts);
     else{if(!Array.isArray(t.notizVerlauf))t.notizVerlauf=[];t.notizVerlauf.push({ts:ts||new Date().toISOString(),text:text});}
     if(typeof autoSave==='function')autoSave();
@@ -67032,20 +67053,25 @@ function _pamAnrufErreicht(taskId,nr,name,rolle){
 // ══ Anrufliste: Ergebnis nachträglich ändern (Notiz nachtragen) · Rückruf · Anrufe im Reiter „Erledigt“ ═══════════════
 /* (1) Ein eingetragenes Ergebnis lässt sich in den Reitern „Gewählt“ und „Erledigt“ anklicken: dasselbe Fenster wie „✎ Ergebnis“,
        Ergebnis und Notiz stehen schon drin. Speichern ändert DIESE Bautagebuch-Zeile – es entsteht keine zweite.
-   (2) Rückruf: Häkchen im Ergebnis-Fenster. Die Zeile behält ihre Form (📞 Anruf · Name · Nummer · Gerät · Ergebnis · Notiz);
-       „Rückruf“ steht vorn in der Notiz, als Gerät „–“. PAM Mobil liest die Zeile damit unverändert.
+   (2) Rückruf: Häkchen im Ergebnis-Fenster. Die Zeile hat ihre eigene Form (↩ Rückruf · Name · Nummer · Ergebnis · Notiz, siehe
+       _pamRueckrufText) – PC und Handy lesen beide Formen. Ältere Rückruf-Zeilen tragen noch die Form des eigenen Anrufs mit „Rückruf“
+       vorn in der Notiz und „–“ als Gerät; sie werden nicht umgeschrieben und weiter als Rückruf erkannt (_pamAnrufRueckTeile).
    (3) Reiter „Erledigt“: die bis zu drei neuesten Wahlen der Karte mit derselben Zelle wie im Reiter „Gewählt“.
    (4) Rückruf zu einem Anruf, der schon ein Ergebnis trägt: dasselbe Häkchen im Fenster „Ergebnis ändern“. Angekreuzt bleibt die Zeile
        des Anrufs, wie sie ist; der Rückruf wird eine eigene Zeile (jetzige Uhrzeit) und steht in den Reitern „Gewählt“ und „Erledigt“
-       in einer eigenen Zeile unter dem Anruf, auf den er folgte.
+       im Kasten des Anrufs, auf den er folgte.
+   (5) Reiter „Gewählt“ und „Erledigt“: jeder eigene Anruf steht in einem umrandeten Kasten mit zwei Spalten – links, was es ist
+       (Zeit des Anrufs · „Notiz“ · „↩ Rückruf“), rechts der Inhalt. Die Zeilen unter der Kopfzeile liefert _pamAnrufKastenZeilen.
    ⛔ Kein neues Kartenfeld. ⛔ PAM hakt dabei nichts ab. ⛔ Keine Regex-Literale: die Prüfsuiten schneiden mit einem Zeichenketten-Zähler aus. */
 const _PAM_ANRUF_RUECK='Rückruf';
-function _pamAnrufRueckTeile(notiz){
+function _pamAnrufRueckTeile(notiz,istRueck){
   const s=String(notiz==null?'':notiz);
+  if(istRueck)return {rueck:true,notiz:s}; // Zeile in der eigenen Rückruf-Form („↩ Rückruf · …“, gelesen mit rueck:true): die Notiz steht ohne Zusatz da
   if(s===_PAM_ANRUF_RUECK)return {rueck:true,notiz:''};
   if(s.indexOf(_PAM_ANRUF_RUECK+': ')===0)return {rueck:true,notiz:s.slice(_PAM_ANRUF_RUECK.length+2)};
   return {rueck:false,notiz:s};
 }
+// Frühere Schreibweise (das Wort vorn in der Notiz). Neue Rückruf-Zeilen schreibt _pamRueckrufText; das Ergebnis-Fenster fragt hier nur noch ab, ob es das Häkchen zeigen darf.
 function _pamAnrufRueckNotiz(rueck,notiz){
   const n=String(notiz==null?'':notiz).trim();
   if(!rueck)return n;
@@ -67080,7 +67106,7 @@ function _pamAnrufErgAendernSpeichern(taskId,nr,ts,erg,notiz){
     const e=_PAM_ANRUF_ERG.find(function(x){return x.k===erg;}); if(!e)return false;
     const z=_pamAnrufErgZeile(t,nr,ts); if(!z)return false;
     const alt=String(z.n.text||'');
-    const neu=_pamAnrufErgText(z.r.name,z.r.nr,z.r.geraet,e.z,notiz);
+    const neu=(z.r.rueck&&typeof _pamRueckrufText==='function')?_pamRueckrufText(z.r.name,z.r.nr,e.z,notiz):_pamAnrufErgText(z.r.name,z.r.nr,z.r.geraet,e.z,notiz); // eine Rückruf-Zeile behält beim Ändern ihre Form
     if(neu===alt){if(typeof showToast==='function')showToast('Nichts geändert','info',2000);return true;}
     z.n.text=neu;
     // Ist die Karte gerade offen, hält das Fenster eine eigene Liste – dort dieselbe Zeile nachziehen, sonst schreibt das Fenster beim Speichern den alten Text zurück.
@@ -67111,21 +67137,33 @@ function _pamAnrufRueckZuWahl(t,w){
   });
   const out=[];
   _pamAnrufErgListe(t,w.nr).forEach(function(r){
-    const rt=_pamAnrufRueckTeile(r.notiz); if(!rt.rueck)return;
+    const rt=_pamAnrufRueckTeile(r.notiz,r.rueck); if(!rt.rueck)return;
     const ms=Date.parse(r.ts);
     if(isNaN(ms)||ms<=ab||ms>=bis)return;
     out.push({ts:r.ts,erg:r.erg,notiz:rt.notiz});
   });
   return out.reverse();
 }
-// Dieselben Rückrufe als eigene Zeile UNTER der Zeile der Wahl (Reiter „Gewählt“ und „Erledigt“), eingerückt bis unter den Namen:
-// „↩ Rückruf am <Zeit> · ✓ Ergebnis · Notiz“. Eine eigene Zeile, weil der Text in der Zeile der Wahl die anderen Felder zusammendrückt.
+// Dieselben Rückrufe als Zeilen IM Kasten des Anrufs (Reiter „Gewählt“ und „Erledigt“): eine gestrichelte Linie über beide Spalten,
+// links „↩ Rückruf“, rechts „<Zeit> · ✓ Ergebnis · Notiz“ – an derselben Kante wie Name und Notiz des Anrufs.
 // Nur Anzeige, nichts zum Anklicken – die Zeile selbst steht im Bautagebuch der Karte.
 function _pamAnrufRueckMarke(t,w){
   const l=_pamAnrufRueckZuWahl(t,w); if(!l.length)return '';
   return l.map(function(r){
-    return '<div class="pam-wahl-rueck" title="Rückruf – steht als eigene Zeile im Bautagebuch der Karte" style="font-size:11px;color:var(--text);padding:0 0 3px 124px;overflow-wrap:anywhere;">↩ Rückruf am '+esc(_pamWahlZeit(r.ts,true))+' · '+(r.erg.ok?'✓ ':'✗ ')+esc(r.erg.z)+(r.notiz?' · '+esc(r.notiz):'')+'</div>';
+    return '<div class="pam-wahl-trenn" style="grid-column:1/-1;border-top:1px dashed var(--border);margin:1px 0;"></div>'
+      +'<div class="pam-wahl-links" style="font-size:11px;font-weight:600;color:var(--text2);white-space:nowrap;">↩ Rückruf</div>'
+      +'<div class="pam-wahl-rueck" title="Rückruf – steht als eigene Zeile im Bautagebuch der Karte" style="min-width:0;overflow-wrap:anywhere;"><b>'+esc(_pamWahlZeit(r.ts,true))+'</b> · '+(r.erg.ok?'✓ ':'✗ ')+esc(r.erg.z)+(r.notiz?' · '+esc(r.notiz):'')+'</div>';
   }).join('');
+}
+// Die Zeilen UNTER der Kopfzeile im Kasten eines Anrufs: links „Notiz“ und rechts die Notiz des Anrufs (nur wenn eine eingetragen ist),
+// danach die Rückrufe. Zwei Spalten wie die Kopfzeile – links, was es ist, rechts der Inhalt; ein langer Text bricht in seiner Spalte um
+// und rutscht nicht unter das Datum. Nur Anzeige.
+function _pamAnrufKastenZeilen(t,w){
+  const z=(typeof _pamAnrufErgZuWahl==='function')?_pamAnrufErgZuWahl(t,w):null;
+  let h='';
+  if(z&&z.notiz)h+='<div class="pam-wahl-links" style="font-size:11px;color:var(--text2);white-space:nowrap;">Notiz</div>'
+    +'<div class="pam-wahl-erg-notiz" style="min-width:0;overflow-wrap:anywhere;">'+esc(z.notiz)+'</div>';
+  return h+((typeof _pamAnrufRueckMarke==='function')?_pamAnrufRueckMarke(t,w):'');
 }
 // Reiter „Erledigt“: die bis zu drei neuesten Wahlen der Karte – Zeit, Name, Nummer und dieselbe Zelle wie im Reiter „Gewählt“
 // (eingetragenes Ergebnis zum Anklicken, sonst der Knopf „✎ Ergebnis“). So lässt sich die Notiz nachtragen, ohne die Karte wieder zu öffnen.
@@ -67134,12 +67172,14 @@ function _pamErledigtWahlZeilen(t,sid){
   if(!wl.length||typeof _pamAnrufErgWahlZelle!=='function')return '';
   let h='';
   wl.slice(0,3).forEach(function(w){
-    h+='<div class="pam-erledigt-wahl" style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;font-size:12px;padding:1px 0;color:var(--text);">'
-      +'<span style="font-weight:600;white-space:nowrap;min-width:112px;">'+esc(_pamWahlZeit(w.ts,false))+'</span>'
-      +'<span>📞 '+(w.name?esc(w.name)+' · ':'')+'<b>'+esc(w.nr||'')+'</b>'+esc(typeof _pamWahlGeraet==='function'?_pamWahlGeraet(w):'')+'</span>'
+    // Jeder Anruf in einem eigenen Kasten (Rahmen, links ein dunkelblauer Strich, heller Grund – wie die Einträge im Bautagebuch); dieselbe Form wie im Reiter „Gewählt“ (_pamWahlRender).
+    h+='<div class="pam-erledigt-wahl" style="display:grid;grid-template-columns:118px minmax(0,1fr);column-gap:10px;row-gap:3px;align-items:baseline;font-size:12px;border:1px solid var(--border);border-left:3px solid #185FA5;border-radius:6px;background:var(--bg2);padding:6px 10px 7px;margin:6px 0;color:var(--text);">'
+      +'<div style="font-weight:600;white-space:nowrap;">'+esc(_pamWahlZeit(w.ts,false))+'</div>'
+      +'<div class="pam-wahl-kopf" style="display:flex;gap:3px 10px;align-items:baseline;flex-wrap:wrap;min-width:0;"><span>📞 '+(w.name?esc(w.name)+' · ':'')+'<b>'+esc(w.nr||'')+'</b>'+esc(typeof _pamWahlGeraet==='function'?_pamWahlGeraet(w):'')+'</span>'
       +_pamAnrufErgWahlZelle(t,w,sid)
       +'</div>'
-      +((typeof _pamAnrufRueckMarke==='function')?_pamAnrufRueckMarke(t,w):''); // Rückrufe, die auf diesen Anruf folgten – eigene Zeile darunter, eingerückt
+      +((typeof _pamAnrufKastenZeilen==='function')?_pamAnrufKastenZeilen(t,w):'') // Notiz des Anrufs und Rückrufe, die auf ihn folgten – im selben Kasten, an derselben Kante
+      +'</div>';
   });
   return '<div class="pam-erledigt-wahlen" style="margin-bottom:6px;">'+h
     +(wl.length>3?'<div style="font-size:11px;color:var(--text2);">+ '+(wl.length-3)+' weitere im Reiter „Gewählt“</div>':'')+'</div>';
@@ -67436,12 +67476,15 @@ function _pamWahlRender(el,cnt){
       +'<div style="font-size:11px;color:var(--text2);">'+(g.archiv?'📦 im Archiv':esc(g.board)+(t.status?' · '+esc(t.status):''))+'</div>'
       +'<div style="font-size:13px;font-weight:600;color:var(--text);margin:2px 0 5px;">'+esc(t.title||'(kein Titel)')+'</div>';
     zeig.forEach(function(x){
-      html+='<div class="pam-wahl-zeile" style="display:flex;gap:12px;align-items:baseline;font-size:12px;padding:1px 0;'+(x.aus?'color:var(--text2);':'color:var(--text);')+'">'
-        +'<span style="font-weight:600;white-space:nowrap;min-width:112px;">'+esc(_pamWahlZeit(x.w.ts,false))+'</span>'
-        +'<span>📞 '+(x.w.name?esc(x.w.name)+' · ':'')+'<b>'+esc(x.w.nr||'')+'</b>'+esc(typeof _pamWahlGeraet==='function'?_pamWahlGeraet(x.w):'')+(x.aus?' <span style="font-size:10px;">(ausgeblendet)</span>':'')+'</span>'
+      // Jeder Anruf in einem eigenen Kasten (Rahmen, links ein dunkelblauer Strich, heller Grund – wie die Einträge im Bautagebuch). Darin zwei Spalten:
+      // links, was es ist (Zeit des Anrufs · „Notiz“ · „↩ Rückruf“), rechts der Inhalt – alles beginnt an derselben Kante. Dieselbe Form im Reiter „Erledigt“ (_pamErledigtWahlZeilen).
+      html+='<div class="pam-wahl-zeile" style="display:grid;grid-template-columns:118px minmax(0,1fr);column-gap:10px;row-gap:3px;align-items:baseline;font-size:12px;border:1px solid var(--border);border-left:3px solid #185FA5;border-radius:6px;background:var(--bg2);padding:6px 10px 7px;margin:6px 0;'+(x.aus?'color:var(--text2);':'color:var(--text);')+'">'
+        +'<div style="font-weight:600;white-space:nowrap;">'+esc(_pamWahlZeit(x.w.ts,false))+'</div>'
+        +'<div class="pam-wahl-kopf" style="display:flex;gap:3px 10px;align-items:baseline;flex-wrap:wrap;min-width:0;"><span>📞 '+(x.w.name?esc(x.w.name)+' · ':'')+'<b>'+esc(x.w.nr||'')+'</b>'+esc(typeof _pamWahlGeraet==='function'?_pamWahlGeraet(x.w):'')+(x.aus?' <span style="font-size:10px;">(ausgeblendet)</span>':'')+'</span>'
         +((typeof _pamAnrufErgWahlZelle==='function')?_pamAnrufErgWahlZelle(t,x.w,sid):'') // b1080: Ergebnis oder Knopf
         +'</div>'
-        +((typeof _pamAnrufRueckMarke==='function')?_pamAnrufRueckMarke(t,x.w):''); // Rückrufe, die auf diesen Anruf folgten – eigene Zeile darunter, eingerückt
+        +((typeof _pamAnrufKastenZeilen==='function')?_pamAnrufKastenZeilen(t,x.w):'') // Notiz des Anrufs und Rückrufe, die auf ihn folgten – im selben Kasten, an derselben Kante
+        +'</div>';
     });
     if(g.wahlen.length>3)html+='<div style="font-size:11px;margin-top:2px;"><span class="pam-wahl-mehr" onclick="_pamWahlAufklappen(\''+sid+'\')" style="color:#1a56c4;cursor:pointer;">'+(offen[t.id]?'weniger':'+ '+(g.wahlen.length-3)+' weitere')+'</span></div>';
     html+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">'
