@@ -8469,7 +8469,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
          _zipRestoreDrop bleibt im Code; zum Zurueckholen den Knopf aus
          index.html.bak_vor_b930_2026-09-07 kopieren. -->
     <button class="topbar-btn" onclick="_adrBookOpenPicker('manage')" title="Adressbuch öffnen – ansehen, neu anlegen, bearbeiten" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);">📇<span class="tb-wort"> Adressbuch</span></button>
-    <button class="topbar-btn btn-primary" onclick="openNewTaskModal()">+ Neuer Task</button>
+    <button class="topbar-btn btn-primary" onclick="openNewTaskModal();if(typeof _objNeuSpalteFragen==='function')_objNeuSpalteFragen()">+ Neuer Task</button>
   </div>
   <input type="file" id="auftragFileInput" accept=".txt" style="display:none" onchange="readAuftragDatei(event)" autocomplete="off">
 </div>
@@ -10724,7 +10724,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-11-19 · #1287'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-11-19-b1287) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-11-20 · #1293'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-11-20-b1293) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -40225,6 +40225,23 @@ function _dfbPickItem(id,name){
       });
     }
   }catch(e){console.warn('[IMMO] Felder spiegeln:',e);}
+  // Am Objekt: zeigen andere Ordner-Felder auf einen ANDEREN Ordner, einmal fragen statt sie still stehen zu lassen.
+  // ⛔ Nie still angleichen: Projekt = Objektordner neben Fotos/Dokumente = Unterordner ist ein gewollter Stand.
+  try{
+    const FELDER={tGD:'📷 Foto-Ordner',tGDOrdner:'📁 Projektordner',tDokOrdner:'📄 Dokumente-Ordner',tEmailOrdner:'📧 E-Mail-Ablageordner'};
+    if(FELDER[_dfbTargetField]&&typeof confirm==='function'&&(boardTypes[currentBoard]||'baustelle')==='immobilie'){
+      const andere=Object.keys(FELDER).filter(function(fid){
+        if(fid===_dfbTargetField)return false;
+        const f=document.getElementById(fid); if(!f)return false;
+        const jetztId=_extractFolderIdFromUrl((f.value||'').trim());
+        return !!jetztId&&jetztId!==id;
+      });
+      if(andere.length&&confirm('An diesem Objekt '+(andere.length===1?'zeigt':'zeigen')+' auf einen ANDEREN Ordner:\n\n'+andere.map(function(fid){return '   '+FELDER[fid];}).join('\n')+'\n\nAuch auf „'+name+'“ umstellen?\n\nOK = umstellen · Abbrechen = bleibt, wie es ist')){
+        andere.forEach(function(fid){const f=document.getElementById(fid); if(!f)return; f.value=url; f.dispatchEvent(new Event('input'));});
+        showToast('✓ Auch umgestellt: '+andere.map(function(fid){return FELDER[fid];}).join(' · '),'success',5000);
+      }
+    }
+  }catch(e){console.warn('[IMMO] Ordner-Frage:',e);}
 }
 function _dfbPickCurrent(){
   _dfbPickItem(_dfbCurrentId,_dfbCurrentName);
@@ -41235,8 +41252,14 @@ async function _pamAnhaengeNachholen(){
   }
   if(fehler)showToast('⚠ '+fehler+' Mail/Anhang konnte nicht gelesen werden – siehe Konsole','warning',6000);
   try{renderEmailSection();}catch(e){}
-  if(typeof _dokSyncOrdner==='function'){try{_dokSyncOrdner();}catch(e){}}
-  if(typeof _fotoSyncOrdner==='function'){try{_fotoSyncOrdner();}catch(e){}}
+  /* Die Ordner nur abgleichen, wenn wirklich etwas dazugekommen ist UND ein Ordner eingetragen ist.
+     Sonst kam nach „nichts nachzuholen" die rote Meldung „Kein Dokumente-Ordner verknüpft". */
+  if(dateien&&typeof renderAttachList==='function'){try{renderAttachList();}catch(e){}}
+  if(bilder&&typeof renderFotoListDesktop==='function'){try{renderFotoListDesktop();}catch(e){}}
+  const _anhDopDokDa=!!((typeof _ezFolderId==='function')&&_ezFolderId(((document.getElementById('tDokOrdner')||{}).value||'')));
+  const _anhDopFotDa=!!((typeof _getDriveFotoFolderId==='function')&&_getDriveFotoFolderId());
+  if(dateien&&_anhDopDokDa&&typeof _dokSyncOrdner==='function'){try{_dokSyncOrdner();}catch(e){}}
+  if(bilder&&_anhDopFotDa&&typeof _fotoSyncOrdner==='function'){try{_fotoSyncOrdner();}catch(e){}}
   scheduleTaskFieldSave();
 }
 
@@ -41560,7 +41583,7 @@ function _getActiveTaskId(){
   const titleVal=(document.getElementById('taskTitleInput')||{}).value||'';
   if(titleVal&&typeof boards!=='undefined'){
     for(const bk of Object.keys(boards||{})){
-      const found=(boards[bk]||[]).find(t=>t.title&&t.title.replace(/[-_]+/g,' ').trim()===titleVal.trim());
+      const found=(boards[bk]||[]).find(t=>t.title&&t.title.replace(/_+/g,' ').replace(/\s+/g,' ').trim()===titleVal.trim());
       if(found){_pamActiveTaskId=found.id;return found.id;}
     }
   }
@@ -42259,6 +42282,34 @@ function _pamMsSuchZeile(e,myAddrs,sentFolderId){
     conversationId:m.conversationId||''   // b1056: eigene Unterhaltung → erscheint im Verlauf als eigener Vorgang
   };
 }
+// Kennungen von Outlook-Mails an der Karte merken. WARUM: _msLoadEmailThread sucht bei jedem Nachsehen nur über
+// msMessageIds (+ msConversationId) und ERSETZT die Liste – eine Mail aus einer anderen Unterhaltung fällt sonst
+// beim nächsten Nachsehen wieder heraus. Je Unterhaltung reicht EINE Kennung (jede kostet beim Nachsehen eine Abfrage);
+// die eigene Unterhaltung der Karte braucht keine. Geschrieben wird in die Karte in boards UND in die übergebene
+// Fassung (Fenster mit eigener Kopie). ⛔ Kein Speichern hier – das macht der Aufrufer.
+// mails: Zeilen wie in msThreadMessages ({internetMessageId,conversationId}) oder blanke Kennungen. Rückgabe: Anzahl neuer Kennungen.
+function _pamKennungenMerken(task,mails){
+  if(!task||!task.id)return 0;
+  const live=((typeof findTaskById==='function')&&findTaskById(task.id))||task;
+  const eigene=String(live.msConversationId||task.msConversationId||'');
+  const gesehen={};
+  let n=0;
+  (mails||[]).forEach(function(m){
+    const k=String(typeof m==='string'?m:((m&&(m.internetMessageId||m.messageId))||'')).replace(/^<|>$/g,'').trim();
+    if(!k)return;
+    const conv=String((m&&typeof m==='object'&&m.conversationId)||'');
+    if(conv&&(conv===eigene||gesehen[conv]))return;
+    let neu=false;
+    [live,task].forEach(function(x){
+      if(!x)return;
+      if(!Array.isArray(x.msMessageIds))x.msMessageIds=[];
+      if(x.msMessageIds.indexOf(k)<0){x.msMessageIds.push(k);neu=true;}
+    });
+    if(conv)gesehen[conv]=true;
+    if(neu)n++;
+  });
+  return n;
+}
 var _pamMsSuchStand=null;
 async function _pamMsMehrSuchen(tage){
   const taskId=_getActiveTaskId();
@@ -42373,6 +42424,8 @@ async function _pamMsMehrUebernehmen(){
   const vorh=task.msThreadMessages||[];
   const zusatz=neu.filter(function(n){return !vorh.some(function(v){return _pamGleicheMail(v,n);});});
   task.msThreadMessages=vorh.concat(zusatz).sort(function(a,b){return new Date(b.date)-new Date(a.date);});
+  // Kennungen merken – auch für Mails, die schon in der Liste standen (holt nach, was früher nicht gemerkt wurde)
+  if(typeof _pamKennungenMerken==='function')_pamKennungenMerken(task,neu);
   const ov=document.getElementById('_pamMsSuchOv');if(ov)ov.remove();
   showToast('⏳ '+zusatz.length+' Mail(s) werden übernommen…','info',8000);
   try{
@@ -42677,8 +42730,27 @@ async function _msSaveThreadAttachments(task,threadMsgs){
     if(x.messageId)bekannt.add(x.messageId+'::'+s);
     else ohneKennung.add(s);
   };
-  (task.attachments||[]).forEach(merken);
-  (task.fotos||[]).forEach(merken);
+  /* Bei GEOEFFNETER Karte zaehlt auch die Arbeitskopie im Fenster (siehe _pamBeideListen) - wer nur
+     die Karte liest, haelt eine eben abgelegte Datei fuer neu. */
+  const _anhDopDok=(typeof _pamBeideListen==='function')?_pamBeideListen(task,'attachments',typeof taskAttachments!=='undefined'?taskAttachments:null):(task.attachments||[]);
+  const _anhDopFot=(typeof _pamBeideListen==='function')?_pamBeideListen(task,'fotos',typeof taskFotos!=='undefined'?taskFotos:null):(task.fotos||[]);
+  _anhDopDok.forEach(merken);
+  _anhDopFot.forEach(merken);
+  /* Dieselbe Datei unter dem sprechenden Namen: Der andere Weg (_pamAnhaengeAusEmlText) legt ein
+     Dokument als „JJJJ.MM.TT_<Betreff>_<Original>" ab (_olAnhangName, Original auf 40 Zeichen gekuerzt).
+     Liegt aus DERSELBEN Mail schon eine Datei, deren Name auf „_<Original>" endet, ist es dieselbe.
+     ⛔ Das haengt bewusst NICHT an der Marke anhGeholt: mehrere Eingangswege setzen sie nicht. */
+  const _anhDopKenn=function(k){return String(k||'').replace(/^<|>$/g,'');};
+  const _anhDopNamen=[];
+  _anhDopDok.forEach(function(x){if(x&&x.name&&x.messageId)_anhDopNamen.push({mid:_anhDopKenn(x.messageId),name:String(x.name).toLowerCase()});});
+  const _anhDopSchonDa=function(mid,name){
+    const k=_anhDopKenn(mid);
+    if(!k||!name)return false;
+    let o=String(name).replace(/[\/\\:*?\u0022<>|]/g,'-').trim();
+    if(o.length>40){const e=/\.[A-Za-z0-9]{1,5}$/.exec(o);const ext=e?e[0]:'';o=o.slice(0,40-ext.length)+ext;}
+    const ende=('_'+o).toLowerCase();
+    return _anhDopNamen.some(function(x){return x.mid===k&&x.name.length>ende.length&&x.name.slice(-ende.length)===ende;});
+  };
   for(const m of mitAnhang){
     const mid=m.internetMessageId||m.messageId||'';
     if(_b1057AnhaengeSchonAusEml(task,mid)){erg.uebersprungen++;continue;}   // b1057: Weg 1 hat die Anhänge dieser Mail schon geholt
@@ -42713,6 +42785,7 @@ async function _msSaveThreadAttachments(task,threadMsgs){
       const schlHand0=_b852Schluessel(att.name,0);
       if(bekannt.has(schl)||bekannt.has(schlAlt)
          ||ohneKennung.has(schlHand)||ohneKennung.has(schlHand0)){erg.uebersprungen++;continue;}
+      if(_anhDopSchonDa(mid,att.name)){erg.uebersprungen++;continue;}   // liegt aus dieser Mail schon unter dem sprechenden Namen da
       try{
         const ra=await _msGetMsgDual(task,'https://graph.microsoft.com/v1.0/me/messages/'+encodeURIComponent(m.id)
           +'/attachments/'+encodeURIComponent(att.id),false);
@@ -42737,13 +42810,15 @@ async function _msSaveThreadAttachments(task,threadMsgs){
         if(!res||!res.id){erg.fehler++;continue;}
         const heute=new Date().toLocaleDateString('de-DE');
         if(pr.art==='bild'){
-          if(!task.fotos)task.fotos=[];
-          task.fotos.push({driveId:res.id,name:att.name,mimeType:att.contentType||'image/jpeg',caption:'',
-            thumbnailLink:res.thumbnailLink||'',size:bytes.length,messageId:mid,fromEmail:true});
+          const _anhDopF={driveId:res.id,name:att.name,mimeType:att.contentType||'image/jpeg',caption:'',
+            thumbnailLink:res.thumbnailLink||'',size:bytes.length,messageId:mid,fromEmail:true};
+          if(typeof _pamFotoEintragen==='function')_pamFotoEintragen(task,_anhDopF);
+          else{if(!task.fotos)task.fotos=[];task.fotos.push(_anhDopF);}
         }else{
-          if(!task.attachments)task.attachments=[];
-          task.attachments.push({name:att.name,fileId:res.id,url:'https://drive.google.com/file/d/'+res.id+'/view',
-            uploadedAt:heute,size:bytes.length,messageId:mid,fromEmail:true});
+          const _anhDopD={name:att.name,fileId:res.id,url:'https://drive.google.com/file/d/'+res.id+'/view',
+            uploadedAt:heute,size:bytes.length,messageId:mid,fromEmail:true};
+          if(typeof _pamDateiEintragen==='function')_pamDateiEintragen(task,_anhDopD);
+          else{if(!task.attachments)task.attachments=[];task.attachments.push(_anhDopD);}
         }
         bekannt.add(schl);
         erg.geholt++;
@@ -47038,7 +47113,11 @@ function _abAnhangSaeubern(roh){
       erlaubt, damit fiel eine Verwaltungs-Durchwahl aus der Signatur heraus - und uebrig blieb
       eine Zahlengruppe aus der IBAN darunter, die faelschlich als Rufnummer galt.
    ⛔ Der Punkt bleibt draussen: sonst waeren Datumsangaben wie `01.06.2026` Rufnummern. */
-const AB_NR=/(\((?:\+49|0)\s?\d{1,5}\)\s?\d{2,9}(?:[\s\/-]{0,3}\d{1,6}){0,3}|(?:\+49[\s\/-]{0,3}|0)\d{2,5}[\s\/\-]{0,3}\d{2,9}(?:[\s\/-]{0,3}\d{1,6}){0,3})/g;
+/* Eine Rufnummer steht FUER SICH: davor weder Ziffer noch Buchstabe - sonst gilt das hintere
+   Stueck einer laengeren Vorgangsnummer als Rufnummer. Und sie endet am Zeilenende: zwischen
+   den Zifferngruppen sind nur Leerzeichen, Tabulator, Schraegstrich und Bindestrich erlaubt,
+   kein Zeilenumbruch - sonst wachsen zwei Zahlen aus zwei Zeilen zu einer zusammen. */
+const AB_NR=/(?<![\dA-Za-zÄÖÜäöüß])(\((?:\+49|0)[ \t\u00a0]?\d{1,5}\)[ \t\u00a0]?\d{2,9}(?:[ \t\u00a0\/-]{0,3}\d{1,6}){0,3}|(?:\+49[ \t\u00a0\/-]{0,3}|0)\d{2,5}[ \t\u00a0\/\-]{0,3}\d{2,9}(?:[ \t\u00a0\/-]{0,3}\d{1,6}){0,3})/g;
 /* b966: „Hr." ist in Franks Post die HAEUFIGSTE Anrede - gemessen ueber alle Karten: 7x „Hr.",
    6x „Frau", 3x „Herr", 3x „Herrn". Bis b965 kannte PAM sie nicht, und ein so eingefuehrter
    Ansprechpartner fiel aus der Tabelle. „Fr." braucht den Zwischenraum dahinter, sonst faengt
@@ -47166,6 +47245,32 @@ function _abNameAusFirmenzeile(zeile){
 function _abKontakte(text,eigeneNr){
   const raus=[];let m;AB_NR.lastIndex=0;
   const eigen=(eigeneNr===undefined)?_abEigeneNr():eigeneNr;
+  /* Eine Faxnummer ist keine Rufnummer zum Anrufen. Zwei Formen:
+     1. „Fax: …" in derselben Zeile vor der Nummer. „Tel./Fax: …" bleibt eine Rufnummer.
+     2. Formulare, in denen erst alle Bezeichnungen untereinander stehen („Telefonnummer:",
+        „Faxnummer:" – jede allein in ihrer Zeile) und die Werte erst weiter unten. Dort gehoert
+        die erste Zeile, die nur aus einer Rufnummer besteht, zur ersten Bezeichnung, die zweite
+        zur zweiten und so weiter. Andere Bezeichnungen und andere Werte zaehlen dabei nicht mit.
+     ⛔ Die Muster stehen ABSICHTLICH in der Funktion, damit eine Pruefung, die nur diese
+     Funktion ausschneidet, nicht abstuerzt. */
+  const FAX_VOR=/(?:^|[^A-Za-zÄÖÜäöüß])(?:Tele?)?fax(?:nummer|[\s\-]?nr)?[\s.:\-\/(]*$/i;
+  const TELFAX_VOR=/Tel(?:efon)?\.?\s*(?:\/|und|u\.|\+|&)\s*(?:Tele?)?fax(?:nummer|[\s\-]?nr)?[\s.:\-\/(]*$/i;
+  const faxZeilen=new Set();
+  try{
+    const BEZ=/^[ \t]*(?:(?:Ihre|Unsere|Meine)[ \t]+)?(?:((?:Tele?)?fax(?:nummer|[ \t\-]?Nr\.?)?)|(Telefon(?:nummer|[ \t\-]?Nr\.?)?|Tel\.?|Mobil(?:nummer|telefon)?|Handy(?:nummer)?|Rufnummer|Durchwahl|Fon))[ \t]*:?[ \t]*$/i;
+    const NURNR=new RegExp('^[ \\t]*(?:'+AB_NR.source+')[ \\t]*$');
+    const zl=String(text||'').split('\n'),bez=[],nrn=[];let pos=0;
+    for(let i=0;i<zl.length;i++){
+      const b=BEZ.exec(zl[i]);
+      if(b)bez.push({i:i,fax:!!b[1]});
+      else if(bez.length&&NURNR.test(zl[i]))nrn.push({i:i,pos:pos});
+      pos+=zl[i].length+1;
+    }
+    for(let k=0;k<bez.length&&k<nrn.length;k++){
+      if(nrn[k].i<bez[k].i)break;
+      if(bez[k].fax)faxZeilen.add(nrn[k].pos);
+    }
+  }catch(e){}
   while((m=AB_NR.exec(text))){
     const nr=m[1].trim(),ziffern=nr.replace(/\D/g,'');
     if(ziffern.length<9||ziffern.length>15)continue;
@@ -47173,6 +47278,10 @@ function _abKontakte(text,eigeneNr){
     if(_abIstUnsereNr(nr,eigen))continue;
     /* b978: Bank- und Vorgangsnummern sind keine Rufnummern. */
     if(AB_KEINE_NR.test(_abZeileUm(text,m.index)))continue;
+    /* Faxnummern – siehe oben. */
+    {const zAnf=text.lastIndexOf('\n',m.index-1)+1,vorNr=text.substring(zAnf,m.index);
+      if(faxZeilen.has(zAnf)&&!vorNr.trim())continue;
+      if(FAX_VOR.test(vorNr)&&!TELFAX_VOR.test(vorNr))continue;}
     /* ⛔ Deutsche Rufnummern beginnen mit 0 oder +49. "049 174 307254" aus einem
        Fließtext ist keine - an einer echten Karte aufgefallen. */
     if(!/^\(?(\+49|0)/.test(nr.replace(/\s/g,''))||/^0[04-9]{2}/.test(ziffern))continue;
@@ -47465,7 +47574,7 @@ const AB_STR=new RegExp('('+AB_STR_VOR+'?'+AB_STR_ADJ+'(?:'
   +'|'+AB_STR_KEINNAME+'[A-ZÄÖÜ][\\wäöüß.\\-]+\\s+'+AB_STR_ENDE                     /* Berliner Straße · Musterhausener Weg */
   +'|(?:Stra(?:ß|ss)e|Platz|Weg|Allee|Ring)\\s+(?:des|der)\\s+[A-ZÄÖÜ][\\wäöüß\\-]+(?:\\s+[A-ZÄÖÜ][\\wäöüß\\-]+)?'   /* Straße des Friedens */
   +'|'+AB_STR_VOR+AB_STR_ENDE                                                       /* Am Markt · Zum Hof */
-  +'))[\\s,]+(\\d{1,4}(?:\\s?[a-zA-Z]\\b|\\s?[-–/]\\s?\\d{1,4})?)(?![\\wäöüß])');
+  +'))(?:[\\s,]+|(?<=\\.))(\\d{1,4}(?:\\s?[a-zA-Z]\\b|\\s?[-–/]\\s?\\d{1,4})?)(?![\\wäöüß])');   /* „Str.49" ohne Leerzeichen hinter dem Punkt zaehlt auch */
 const AB_PROBLEMWORT=/^(?:Fallrohr|Dachrinnen?\w*|Rinne|Regensammler|Regenrinne|Regenfallrohr|Dach\w*|Balkon\w*|Wasserschaden|Wasserfleck|Feuchtigkeit|Feuchte\w*|Schimmel\w*|Leck\w*|Regenwasser\w*|M(?:ä|ae)ngel\w*|Schaden|Reparatur|Undicht\w*|Verstopf\w*|Sturmschaden|Notdienst|Angebot|Rechnung|Auftrag|Anfrage|Wartung|Reinigung|Mieterin|Mieter|Eigent(?:ü|ue)mer(?:in)?|Hausmeister|Objekt|Lage|BVH|WEG)\b[\s:,\-]*/i;
 /* b961: „GmbH & Co. KG" oder „Beispiel UG" im Betreff sind keine Lage im Haus – KG und UG
    zählen nur noch, wenn davor kein Firmenkürzel und kein großgeschriebenes Wort steht. */
@@ -47488,13 +47597,13 @@ function _abAdresse(text){
    des Absenders. Sie kommt gleich hinter dem Kartentitel, den Frank selbst vergeben hat.
    ⛔ Das Muster steht ABSICHTLICH hier und nicht im Anhang-Block: sonst stürzt jede Prüfung ab,
    die nur den Objekt-Block ausschneidet und ausführt (genau so ist test_b970 aufgelaufen). */
-const AB_OBJ_WORT=/(?:^|\s)(Objekt|Bauvorhaben|Liegenschaft|Baustelle)\b/i;
+const AB_OBJ_WORT=/(?:^|\s)(Objekt(?:beschreibung|adresse|anschrift|bezeichnung)?|Bauvorhaben|Liegenschaft|Baustelle)\b/i;
 function _abObjektAusZeile(schritte){
   for(const s of (schritte||[])){
     const zeilen=String(s&&s.text||'').split('\n');
     for(let i=0;i<zeilen.length;i++){
       if(!AB_OBJ_WORT.test(zeilen[i]))continue;
-      const nach=zeilen[i].replace(/^[\s\S]*?(Objekt|Bauvorhaben|Liegenschaft|Baustelle)\b[\s:.\-]*/i,'');
+      const nach=zeilen[i].replace(/^[\s\S]*?(Objekt(?:beschreibung|adresse|anschrift|bezeichnung)?|Bauvorhaben|Liegenschaft|Baustelle)\b[\s:.\-]*/i,'');
       /* Steht die Bezeichnung allein, zählt die Zeile darunter. */
       const a=_abAdresse(nach)||(nach.trim()?'':_abAdresse(zeilen[i+1]||''));
       if(a)return a;
@@ -47743,9 +47852,15 @@ function _abGenannte(text){
     const rolle=/mieter/i.test(m[1])&&!/vermieter/i.test(m[1])?'Mieter'
       :/eigent|vermieter/i.test(m[1])?'Eigentümer'
       :/hausmeister|hausw/i.test(m[1])?'Hausmeister':'';
-    String(m[2]).split(/\s*(?:\/|\bund\b|&|,)\s*/).forEach(t=>{
+    /* Folgt auf das letzte Wort ein Doppelpunkt, ist es die naechste Bezeichnung eines Formulars
+       („Ansprechpartner:" / „Telefonnummer:"); folgt ein Strassenwort, ist es ein Strassenname. */
+    const danach=String(text).substring(re.lastIndex,re.lastIndex+30);
+    const letztesKeinName=/^[ \t]*:/.test(danach)||/^[ \t]+(?:Str\.|Str\b|Stra(?:ß|ss)e|Weg|Platz|Allee|Ring|Gasse|Damm|Ufer|Chaussee)/.test(danach);
+    String(m[2]).split(/\s*(?:\/|\bund\b|&|,)\s*/).forEach((t,i,alle)=>{
       const teil=t.trim();
       if(!teil)return;
+      if(letztesKeinName&&i===alle.length-1)return;
+      if(/nummer$|^(?:Fax|Telefax|E-?Mail|Email|Durchwahl|Rufnummer)$/i.test(teil))return;
       const mitAnrede=new RegExp('^('+AB_GEN_ANREDE+')\\s+('+AB_GEN_WORT+')$').exec(teil);
       let name='';
       if(mitAnrede)name=_abAnredeLang(mitAnrede[1])+' '+mitAnrede[2];
@@ -51141,13 +51256,23 @@ async function _pamTaskZuAuftrag(task,vonBoard){
   if(_objZiel&&_objZiel.obj){
     const _o=_objZiel.obj;
     const _erbe=[];
-    if(!String(task.adresse||'').trim()&&_o.adresse){
+    // Zeigt das Fenster DIESE Karte, zählt der Feldinhalt dort – nicht der zuletzt gespeicherte Stand.
+    const _feldLeer=function(feldId,gespeichert){
+      try{
+        if(typeof document!=='undefined'&&((document.getElementById('taskId')||{}).value||'')===task.id){
+          const el=document.getElementById(feldId);
+          if(el&&typeof el.value==='string')return !el.value.trim();
+        }
+      }catch(e){}
+      return !String(gespeichert||'').trim();
+    };
+    if(_feldLeer('tAdr',task.adresse)&&_o.adresse){
       task.adresse=_o.adresse;_b659FeldNachziehen(task.id,'tAdr',_o.adresse);_erbe.push('Adresse');
     }
-    if(!String(task.hausverwaltung||'').trim()&&_o.hausverwaltung){
+    if(_feldLeer('tHV',task.hausverwaltung)&&_o.hausverwaltung){
       task.hausverwaltung=_o.hausverwaltung;_b659FeldNachziehen(task.id,'tHV',_o.hausverwaltung);_erbe.push('Auftraggeber');
     }
-    if(!String(task.nas||'').trim()&&_o.nas){
+    if(_feldLeer('tNAS',task.nas)&&_o.nas){
       task.nas=_o.nas;_b659FeldNachziehen(task.id,'tNAS',_o.nas);_erbe.push('NAS-Pfad');
     }
     if(_erbe.length)showToast('↳ Vom Objekt übernommen: '+_erbe.join(' · '),'info',5000);
@@ -51992,6 +52117,25 @@ function _immoOrdnerFrage(title){
       if(typeof _pickDriveFolder==='function')setTimeout(function(){_pickDriveFolder('tGD');},150);
     });
     ov.querySelector('#_iodNeu').addEventListener('click',async function(){
+      // Erst in Drive nachsehen, ob es einen passenden Ordner schon gibt. ⛔ Nur anbieten, nie still nehmen.
+      // typeof-Wache: Prüfsuiten führen diese Funktion ohne die Such-Funktionen aus – dann gilt der bisherige Weg.
+      if(typeof _immoOrdnerSuchen==='function'&&typeof _immoOrdnerTrefferFrage==='function'&&typeof _immoOrdnerUebernehmen==='function'){
+        const knopf=ov.querySelector('#_iodNeu');
+        if(knopf&&knopf._sucht)return;
+        let wahl='neu';
+        const altInhalt=knopf?knopf.innerHTML:'';
+        try{
+          if(knopf){knopf._sucht=true;knopf.disabled=true;knopf.textContent='🔍 Suche in Drive nach vorhandenen Ordnern …';}
+          const erg=await _immoOrdnerSuchen(title);
+          if(knopf){knopf.innerHTML=altInhalt;knopf.disabled=false;knopf._sucht=false;}
+          if(erg&&erg.treffer&&erg.treffer.length)wahl=await _immoOrdnerTrefferFrage(title,erg);
+        }catch(e){
+          console.warn('[IMMO] Ordnersuche:',e);wahl='neu';
+          if(knopf){knopf.innerHTML=altInhalt;knopf.disabled=false;knopf._sucht=false;}
+        }
+        if(wahl===null)return;   // Abbrechen: die Frage darunter bleibt offen
+        if(wahl!=='neu'){zu('treffer');_immoOrdnerUebernehmen(wahl);return;}
+      }
       /* b841: Ohne Sammelordner wird der Ort erfragt statt geraten. Aufgelöst wird
          SOFORT – wie beim 📂-Knopf darüber: der Drive-Browser läuft außerhalb dieses
          Dialogs weiter, und `_autoFolderCreating` darf nicht so lange klemmen. */
@@ -52018,6 +52162,95 @@ function _immoOrdnerFrage(title){
    greift VOR dem Feldzugriff, ein Feld waere tote Kulisse. */
 const IMMO_NEU_ELTERN_ZIEL='_immoNeuerOrdnerEltern';
 let _immoNeuOrdnerTitel='';
+
+// Suchwort für die Ordnersuche: das längste Wort des Straßennamens vorn im Kartentitel –
+// ohne Hausnummern, ohne „Straße/Str.“ (auch angehängt), ohne Füllwörter. Leer = nicht suchen.
+function _immoOrdnerSuchwort(title){
+  const kopf=String(title||'').split(',')[0];
+  const worte=kopf.split(/[\s\-\/]+/).map(function(w){
+    return w.replace(/[()„“".]+/g,'').replace(/(stra(ß|ss)e|str)$/i,'');
+  }).filter(function(w){
+    return w.length>=3&&!/\d/.test(w)&&!/^(weg|platz|allee|gasse|ring|damm|ufer|der|die|das|dem|den|von|vor|zum|zur|und|bad|sankt)$/i.test(w);
+  });
+  let best='';
+  worte.forEach(function(w){if(w.length>best.length)best=w;});
+  return best;
+}
+// Sucht in Drive nach Ordnern, deren Name das Suchwort enthält. Rückgabe {wort,treffer:[{id,name,ort}],mehr}.
+// Ordner, die auch eine Hausnummer aus dem Titel tragen, stehen vorn. Höchstens 12, der Rest wird nur gezählt.
+// ⛔ Jeder Fehler (nicht verbunden, Drive antwortet nicht) ergibt „keine Treffer“ – dann legt der Aufrufer an wie bisher.
+async function _immoOrdnerSuchen(title){
+  const leer={wort:'',treffer:[],mehr:0};
+  try{
+    if(typeof gdriveToken==='undefined'||!gdriveToken)return leer;
+    const wort=_immoOrdnerSuchwort(title);
+    if(!wort)return leer;
+    const q=encodeURIComponent("name contains '"+wort.replace(/\\/g,'\\\\').replace(/'/g,"\\'")+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+    const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name,parents)&spaces=drive&pageSize=100',{headers:{Authorization:'Bearer '+gdriveToken}});
+    if(!r.ok)return leer;
+    const klein=wort.toLowerCase();
+    const nummern=(String(title||'').split(',')[0].match(/\d+/g))||[];
+    const punkte=function(name){return nummern.filter(function(n){return new RegExp('(^|\\D)'+n+'(\\D|$)').test(name);}).length;};
+    const alle=((await r.json()).files||[]).filter(function(f){return f&&f.id&&String(f.name||'').toLowerCase().indexOf(klein)>=0;})
+      .map(function(f){return {id:f.id,name:String(f.name||''),eltern:(f.parents&&f.parents[0])||'',punkte:punkte(String(f.name||''))};})
+      .sort(function(a,b){return (b.punkte-a.punkte)||a.name.localeCompare(b.name,'de');});
+    const zeigen=alle.slice(0,12);
+    // Wo liegt der Ordner? Je Elternordner EINE Namensabfrage; schlägt sie fehl, bleibt die Zeile ohne Ort.
+    const namen={};
+    const eltern=zeigen.map(function(f){return f.eltern;}).filter(function(e,i,a){return e&&a.indexOf(e)===i;});
+    await Promise.all(eltern.map(async function(e){
+      try{
+        const re=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(e)+'?fields=name&supportsAllDrives=true',{headers:{Authorization:'Bearer '+gdriveToken}});
+        if(re.ok)namen[e]=String((await re.json()).name||'');
+      }catch(_e){}
+    }));
+    return {wort:wort,treffer:zeigen.map(function(f){return {id:f.id,name:f.name,ort:namen[f.eltern]||''};}),mehr:alle.length-zeigen.length};
+  }catch(e){console.warn('[IMMO] Ordnersuche:',e);return leer;}
+}
+// Zeigt die gefundenen Ordner. Antwort: der gewählte Treffer · „neu“ (trotzdem anlegen) · null (Abbrechen).
+function _immoOrdnerTrefferFrage(title,erg){
+  return new Promise(function(resolve){
+    const alt=document.getElementById('_immoTrefferDlg'); if(alt)alt.remove();
+    const ov=document.createElement('div');
+    ov.id='_immoTrefferDlg';
+    ov.style.cssText='position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;';
+    const knopfStil='padding:9px 14px;border-radius:8px;border:1px solid var(--border,#ccc);background:var(--bg3,#f5f5f5);color:var(--text,#111);cursor:pointer;font-size:13px;font-weight:600;text-align:left;';
+    ov.innerHTML='<div style="background:var(--bg,#fff);border-radius:14px;padding:22px 24px;max-width:520px;width:94%;max-height:86vh;overflow:auto;box-shadow:0 8px 40px rgba(0,0,0,.35);">'
+      +'<div style="font-size:15px;font-weight:800;color:var(--text,#111);margin-bottom:6px;">📂 Diese Ordner gibt es in Drive schon</div>'
+      +'<div style="font-size:12px;color:var(--text2,#666);margin-bottom:12px;line-height:1.6;">Gesucht nach „'+esc(erg.wort)+'“. Ist der richtige dabei, klick ihn an – dann entsteht kein zweiter.</div>'
+      +'<div style="display:flex;flex-direction:column;gap:6px;">'
+      +erg.treffer.map(function(f,i){return '<button type="button" data-treffer="'+i+'" style="'+knopfStil+'">📁 '+esc(f.name)+(f.ort?'<div style="font-size:11px;font-weight:400;color:var(--text2,#666);margin-top:2px;">liegt in: '+esc(f.ort)+'</div>':'')+'</button>';}).join('')
+      +'</div>'
+      +(erg.mehr>0?'<div style="font-size:11px;color:var(--text2,#666);margin-top:8px;">… und '+erg.mehr+' weitere. Selbst suchen geht über „📂 Vorhandenen Objektordner wählen“.</div>':'')
+      +'<div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;flex-wrap:wrap;">'
+      +'<button type="button" data-treffer="abbruch" style="'+knopfStil+'font-weight:400;">Abbrechen</button>'
+      +'<button type="button" data-treffer="neu" style="'+knopfStil+'">➕ Trotzdem neuen Ordner anlegen</button>'
+      +'</div></div>';
+    document.body.appendChild(ov);
+    const zu=function(v){try{ov.remove();}catch(e){} resolve(v);};
+    ov.addEventListener('click',function(e){
+      if(e.target===ov){zu(null);return;}
+      const b=(e.target&&e.target.closest)?e.target.closest('button[data-treffer]'):null;
+      if(!b)return;
+      const v=b.getAttribute('data-treffer');
+      if(v==='abbruch')zu(null); else if(v==='neu')zu('neu'); else zu(erg.treffer[Number(v)]||null);
+    });
+  });
+}
+// Den gewählten vorhandenen Ordner eintragen – alle vier Felder, genau wie beim neu angelegten Ordner.
+function _immoOrdnerUebernehmen(f){
+  try{
+    if(!f||!f.id)return false;
+    const url='https://drive.google.com/drive/folders/'+f.id;
+    ['tGD','tGDOrdner','tDokOrdner','tEmailOrdner'].forEach(function(fid){
+      const el=document.getElementById(fid); if(el)el.value=url;
+    });
+    if(typeof _updateFotoOrdnerHint==='function')_updateFotoOrdnerHint();
+    if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
+    showToast('✓ Vorhandenen Ordner verknüpft: '+String(f.name||'').substring(0,40),'success',4000);
+    return true;
+  }catch(e){console.warn('[IMMO] Ordner übernehmen:',e);return false;}
+}
 
 async function _immoNeuenOrdnerAnlegen(title,parentFidWahl){
   try{
@@ -60643,6 +60876,42 @@ function saveTaskAndBack(){
   saveTask(); // speichert (wenn Titel vorhanden) und schließt
 }
 
+// Spalten, in die eine NEUE Objektkarte gehören kann: alle des Objekt-Boards außer der Auftragsspalte.
+// Leer bei anderen Board-Arten – dort bleibt es bei der ersten Spalte.
+function _objNeuSpalten(board){
+  try{
+    if((boardTypes[board]||'baustelle')!=='immobilie')return [];
+    const auf=(typeof AUFTRAG_SPALTE!=='undefined')?AUFTRAG_SPALTE:'🛠 Aufträge';
+    return getBoardStatuses(board).filter(function(s){return !!s&&s!==auf;});
+  }catch(e){return [];}
+}
+// Fragt nach „+ Neuer Task“ auf einem Objekt-Board, in welche Spalte die Karte soll. Ohne Wahl bleibt die Vorbelegung.
+function _objNeuSpalteFragen(){
+  try{
+    const spalten=_objNeuSpalten(currentBoard);
+    if(spalten.length<2)return false;
+    const alt=document.getElementById('_objNeuSpalteDlg'); if(alt)alt.remove();
+    const ov=document.createElement('div');
+    ov.id='_objNeuSpalteDlg';
+    ov.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;';
+    ov.innerHTML='<div style="background:var(--bg,#fff);border-radius:14px;padding:24px 26px;max-width:420px;width:94%;box-shadow:0 8px 40px rgba(0,0,0,.35);">'
+      +'<div style="font-size:15px;font-weight:800;color:var(--text,#111);margin-bottom:6px;">🏠 In welche Spalte soll das neue Objekt?</div>'
+      +'<div style="font-size:12px;color:var(--text2,#666);margin-bottom:14px;line-height:1.6;">Board „'+esc(currentBoard)+'“ · umhängen geht danach wie gewohnt.</div>'
+      +'<div style="display:flex;flex-direction:column;gap:8px;">'
+      +spalten.map(function(s,i){return '<button type="button" data-spalte="'+i+'" style="padding:10px 14px;border-radius:8px;border:1px solid var(--border,#ccc);background:var(--bg3,#f5f5f5);color:var(--text,#111);cursor:pointer;font-size:13px;font-weight:600;text-align:left;">'+esc(s)+'</button>';}).join('')
+      +'</div></div>';
+    document.body.appendChild(ov);
+    const zu=function(){try{ov.remove();}catch(e){} try{document.getElementById('taskTitleInput').focus();}catch(e){}};
+    ov.addEventListener('click',function(e){
+      if(e.target===ov){zu();return;}
+      const b=(e.target&&e.target.closest)?e.target.closest('button[data-spalte]'):null;
+      if(!b)return;
+      _setTaskStatusSelect(spalten[Number(b.getAttribute('data-spalte'))]);
+      zu();
+    });
+    return true;
+  }catch(e){console.warn('[Objekt] Spaltenfrage:',e);return false;}
+}
 function openNewTaskModal(){
   clearTimeout(autoSaveTimer); // Ausstehende Saves vom letzten Task stoppen
   _taskModalDirty = false;     // Dirty-Flag zurücksetzen
@@ -60654,7 +60923,7 @@ function openNewTaskModal(){
   document.getElementById('taskOwnerInput').value='Braun';
   document.getElementById('taskDueInput').value='';
   updateStatusSelect(); // b622: Liste erst auf dieses Board bringen …
-  _setTaskStatusSelect(getBoardStatuses(currentBoard)[0]||''); // … dann die erste Spalte wählen
+  _setTaskStatusSelect((typeof _objNeuSpalten==='function'&&_objNeuSpalten(currentBoard)[0])||getBoardStatuses(currentBoard)[0]||''); // … dann die erste Spalte wählen (am Objekt-Board nie die Auftragsspalte)
   document.getElementById('taskAmpelInput').value='grün';
   document.getElementById('taskAusfInput').value='';
   const _aktEl=document.getElementById('taskAktivitaetInput');if(_aktEl)_aktEl.value='';
@@ -62161,8 +62430,9 @@ function _objImpVorhandene(){
   return s;
 }
 function _objImpTitelWieGespeichert(n){
-  // Wie die Karte nach dem ersten Oeffnen heissen WIRD (b763-Regel), damit die
-  // Dublettenpruefung beim zweiten Lauf nicht danebengreift.
+  // Vergleichsform fuer die Dublettenpruefung: der Titel ohne Binde- und Unterstriche.
+  // So heissen Karten, die frueher beim Oeffnen ihre Striche verloren haben - sie muessen
+  // weiter als vorhanden erkannt werden. Der Titel selbst behaelt seine Bindestriche.
   return String(n||"").replace(/[-_]+/g," ").replace(/\s+/g," ").trim();
 }
 async function _objImpLesen(fidDirekt,name){
@@ -62361,8 +62631,9 @@ function _objImpZeichnen(mehrDa,nurListe){
     /* b843: Fehlt der Straßenname, fällt es hier auf – nicht erst im Kundenschreiben. */
     const _ohneStr=(!x.schonDa&&!_objImpStrasseFeld()&&_objImpWieHausnummer(x.name))
       ?"<span style=\"font-size:10px;color:#a04000;font-weight:700;\" title=\"Dieser Ordner heißt nur nach der Hausnummer. Ohne Straße stünde sie so im Titel, in der Adresse und in {Objekt} der Word-Vorlagen.\"> \u00b7 \u26a0 ohne Straßenname</span>":"";
+    const _heisst=String(x.voll||x.wird||"").replace(/_+/g," ").replace(/\s+/g," ").trim();
     const hinweis=x.schonDa?"<span style=\"font-size:10px;color:var(--text2);\">\u00b7 schon vorhanden</span>":
-      (x.wird!==x.name?"<span style=\"font-size:10px;color:#a04000;\" title=\"So heißt die Karte nach dem Anlegen – Straße, Ort und PLZ kommen dazu, Binde- und Unterstriche werden zu Leerzeichen\">\u00b7 hei\u00dft dann: "+esc(x.wird)+"</span>":"")+_ohneStr+_plzHin;
+      (_heisst!==x.name?"<span style=\"font-size:10px;color:#a04000;\" title=\"So heißt die Karte nach dem Anlegen – Straße, Ort und PLZ kommen dazu, Unterstriche werden zu Leerzeichen\">\u00b7 hei\u00dft dann: "+esc(_heisst)+"</span>":"")+_ohneStr+_plzHin;
     /* b824: Der Zeilenrahmen ist kein <label> mehr. Ein Klick irgendwo im Label setzt
        das Haekchen - der Hineingehen-Knopf haette dabei IMMER auch an-/abgehakt.
        Jetzt: Haekchen und Name schalten das Haekchen, der Pfeil rechts geht hinein. */
@@ -63350,9 +63621,19 @@ async function _objZuordnenSetzen(objektId){
   t.objektId=obj.id;
   t.objektName=obj.title||"";
   const geerbt=[];
-  if(!(t.adresse||"").trim()&&(obj.adresse||"").trim()){t.adresse=obj.adresse;_b659FeldNachziehen(t.id,"tAdr",obj.adresse);geerbt.push("Adresse");}
-  if(!(t.hausverwaltung||"").trim()&&(obj.hausverwaltung||"").trim()){t.hausverwaltung=obj.hausverwaltung;_b659FeldNachziehen(t.id,"tHV",obj.hausverwaltung);geerbt.push("Auftraggeber");}
-  if(!(t.nas||"").trim()&&(obj.nas||"").trim()){t.nas=obj.nas;_b659FeldNachziehen(t.id,"tNAS",obj.nas);geerbt.push("NAS-Pfad");}
+  // Zeigt das Fenster DIESE Karte, zählt der Feldinhalt dort – nicht der zuletzt gespeicherte Stand (wie bei den Kontakten unten).
+  const feldLeer=function(feldId,gespeichert){
+    try{
+      if(((document.getElementById("taskId")||{}).value||"")===t.id){
+        const el=document.getElementById(feldId);
+        if(el&&typeof el.value==="string")return !el.value.trim();
+      }
+    }catch(e){}
+    return !String(gespeichert||"").trim();
+  };
+  if(feldLeer("tAdr",t.adresse)&&(obj.adresse||"").trim()){t.adresse=obj.adresse;_b659FeldNachziehen(t.id,"tAdr",obj.adresse);geerbt.push("Adresse");}
+  if(feldLeer("tHV",t.hausverwaltung)&&(obj.hausverwaltung||"").trim()){t.hausverwaltung=obj.hausverwaltung;_b659FeldNachziehen(t.id,"tHV",obj.hausverwaltung);geerbt.push("Auftraggeber");}
+  if(feldLeer("tNAS",t.nas)&&(obj.nas||"").trim()){t.nas=obj.nas;_b659FeldNachziehen(t.id,"tNAS",obj.nas);geerbt.push("NAS-Pfad");}
   /* b834: Rechnungsanschrift genauso - nur wenn am Auftrag noch nichts steht. */
   if(!(t.rechnungsanschrift||"").trim()&&(obj.rechnungsanschrift||"").trim()){
     t.rechnungsanschrift=obj.rechnungsanschrift;
@@ -72383,6 +72664,13 @@ function _emInAuftragEinglieder(){
           if(!tt.msThreadMessages.some(function(x){return _pamGleicheMail(x,m);}))   // b926: Kennung statt Outlook-id
             tt.msThreadMessages.push(m);
         });
+        // Die Listen der Kennungen werden weiter unten vereinigt. Hier die Lücke: eine Quellkarte, die nur die EINE Kennung
+        // (msMessageId) oder gar keine trägt – ihre Mails fielen sonst beim nächsten Nachsehen aus der Liste.
+        if(typeof _pamKennungenMerken==='function'){
+          const _quellK=src.msMessageId?[src.msMessageId]:[];
+          if(!_quellK.length&&!(src.msMessageIds||[]).length&&(src.msThreadMessages||[]).length)_quellK.push(src.msThreadMessages[0]);
+          _pamKennungenMerken(tt,_quellK);
+        }
         if(!tt.attachments)tt.attachments=[];
         (src.attachments||[]).forEach(function(a){
           if(!tt.attachments.some(function(x){return x.fileId&&x.fileId===a.fileId;}))
@@ -72688,7 +72976,7 @@ function openEditTaskModal(id){
   _pamHighlightTaskId=task.id; // zuletzt geöffneter Task bleibt auf dem Board markiert, bis ein anderer geöffnet wird
   _pamCurrentTask=task;     // Fallback-Task-Objekt wenn findTaskById fehlschlägt
   if(typeof _b1220PapierkorbPruefen==='function')_b1220PapierkorbPruefen(task); // b1220: Ordner im Drive-Papierkorb? → Band
-  document.getElementById('taskTitleInput').value=(task.title||'').replace(/[-_]+/g,' ').replace(/\s+/g,' ').trim();
+  document.getElementById('taskTitleInput').value=(task.title||'').replace(/_+/g,' ').replace(/\s+/g,' ').trim();
   document.getElementById('taskDescInput').value=task.desc||'';
   _kiSetzen(task.kurzinfo||''); // b946: Kurzinfo füllen + Zeile in den richtigen Zustand bringen
   document.getElementById('taskOwnerInput').value=task.owner||'Braun';
