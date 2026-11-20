@@ -8582,6 +8582,7 @@ body.pam-popup-mode #taskModalBox{position:fixed!important;inset:0!important;max
         <span class="filter-flabel">Objekte</span>
         <button class="filter-btn pamf-aktion" id="pamFObjImpBtn" onclick="_objImpOeffnen()">🏠 aus Ordnern …</button>
         <button class="filter-btn pamf-aktion" id="pamFPlzNachBtn" onclick="_plzNachOeffnen()" title="Fehlende Postleitzahlen an den Objekten dieses Boards erg&auml;nzen">📮 PLZ nachtragen …</button>
+        <button class="filter-btn pamf-aktion" id="pamFObjUmBtn" onclick="_objUmOeffnen()" title="Bestehende Objektkarten dieses Boards umstellen: Fotos, Dokumente und E-Mail gehen nach „_Objekt“ im Hausordner. Mit Liste vorab, nichts wird gelöscht.">📁 → _Objekt …</button>
       </span>
       <span class="filter-fgroup" id="pamFMobAktGroup" style="display:none;align-items:center;gap:5px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:2px 6px;" title="Handy-Haken für alle Objekte dieses Boards setzen oder lösen">
         <span class="filter-flabel">Handy</span>
@@ -10735,7 +10736,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-11-20 · #1295'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-11-20-b1295) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-11-20 · #1296'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-11-20-b1296) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -52437,6 +52438,273 @@ async function _immoObjektNachziehen(gewaehltFid,gewaehltName){
     return false;
   }
 }
+// ── Bestand auf „_Objekt“ umstellen (P154 Schritt C) ─────────────────────────
+// Einmal-Werkzeug am Objekt-Board (Knopf „📁 → _Objekt …“). Für BESTEHENDE Objektkarten, die noch mit allen vier
+// Ordnerfeldern auf den Hausordner zeigen: „_Objekt“ im Hausordner nehmen oder anlegen, Fotos / Dokumente / E-Mail
+// dorthin stellen; der Projektordner bleibt der Hausordner. Auf Wunsch wandert ein vorhandener „_Stammdaten“ mit.
+// ⛔ Es wird nichts gelöscht und sonst nichts verschoben. Angefasst wird nur, was in der Liste angekreuzt ist.
+// ⛔ Der Rückweg steht im Merkzettel OBJUM_KEY (je Karte: Hausordner, „_Objekt“, alter Platz von „_Stammdaten“) –
+//    geschrieben, BEVOR in Drive etwas geschieht. Bewusst nicht in der Karte: das Handy kennt das Feld nicht.
+const OBJUM_KEY='pam_objekt_umstellung_v1';
+let _objUmZeilen=[];
+let _objUmLaeuft=false;
+function _objUmFid(u){return _extractFolderIdFromUrl(String(u||'').trim())||'';}
+// 'haus' = alle vier Felder auf dem Hausordner (umstellbar) · 'fertig' = Projekt ≠ Fotos = Dokumente = E-Mail
+// 'ohne' = kein Projektordner · 'gemischt' = alles andere (z. B. WBG mit Wartungsordner) – wird nie angefasst
+function _objUmArt(t){
+  const P=_objUmFid(t&&t.gdriveOrdner),F=_objUmFid(t&&t.gdrive),D=_objUmFid(t&&t.dokOrdner),M=_objUmFid(t&&t.emailOrdner);
+  if(!P)return 'ohne';
+  if(F===P&&D===P&&M===P)return 'haus';
+  if(F&&F!==P&&D===F&&M===F)return 'fertig';
+  return 'gemischt';
+}
+function _objUmProtLies(){
+  try{const p=JSON.parse(localStorage.getItem(OBJUM_KEY)||'{}');return (p&&typeof p==='object'&&!Array.isArray(p))?p:{};}catch(e){return {};}
+}
+// true nur, wenn der Merkzettel danach wirklich so dasteht
+function _objUmProtSchreib(p){
+  try{const s=JSON.stringify(p);localStorage.setItem(OBJUM_KEY,s);return localStorage.getItem(OBJUM_KEY)===s;}catch(e){return false;}
+}
+function _objUmKarteOffen(id){
+  try{const m=document.getElementById('taskModal');return !!(m&&m.classList.contains('open')&&(((document.getElementById('taskId')||{}).value)||'')===id);}catch(e){return false;}
+}
+function _objUmSammle(board){
+  const prot=_objUmProtLies();
+  const aufSp=(typeof AUFTRAG_SPALTE!=='undefined')?AUFTRAG_SPALTE:null;
+  return ((typeof boards!=='undefined'&&boards[board])||[]).filter(function(t){return t&&t.id&&!(aufSp&&t.status===aufSp);}).map(function(t){
+    return {id:t.id,titel:String(t.title||''),art:_objUmArt(t),haus:_objUmFid(t.gdriveOrdner),an:false,prot:prot[t.id]||null,lage:null,meldung:'',stand:''};
+  });
+}
+// Eine Datei / einen Ordner umhängen. Wirft, wenn Drive es nicht ausdrücklich bestätigt.
+async function _objUmVerschiebe(fid,von,nach){
+  if(!fid||!von||!nach)throw new Error('Verschieben: Angabe fehlt');
+  const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fid)
+    +'?addParents='+encodeURIComponent(nach)+'&removeParents='+encodeURIComponent(von)+'&fields=id,parents',
+    {method:'PATCH',headers:{Authorization:'Bearer '+gdriveToken,'Content-Type':'application/json'},body:'{}'});
+  if(r.status===401&&typeof _handleDrive401==='function')_handleDrive401();
+  if(!r.ok)throw new Error('Verschieben: HTTP '+r.status);
+  const j=await r.json();
+  if(((j&&j.parents)||[]).indexOf(nach)<0)throw new Error('Verschieben nicht bestätigt');
+  return true;
+}
+// EIN Haus umstellen. Reihenfolge: Protokoll → „_Objekt“ → (Stammdaten) → erst ganz zuletzt die Karte.
+// Wirft bei jedem Zweifel; die Karte ist dann unverändert.
+async function _objUmEinHaus(t,mitStamm){
+  if(!t||_objUmArt(t)!=='haus')throw new Error('die Karte zeigt nicht mehr mit allen vier Feldern auf den Hausordner');
+  if(_objUmKarteOffen(t.id))throw new Error('die Karte ist gerade geöffnet – erst schließen');
+  if(typeof gdriveToken==='undefined'||!gdriveToken)throw new Error('Drive nicht verbunden');
+  const haus=_objUmFid(t.gdriveOrdner);
+  const vorher=await _immoUnterordnerListe(haus);
+  const stammAlt=vorher.filter(function(f){return _immoIstStammName(f.name);});
+  const prot=_objUmProtLies();
+  const alt=prot[t.id];
+  const eintrag={am:new Date().toISOString(),titel:String(t.title||''),haus:haus,objekt:'',objektNeu:false,
+    stamm:(alt&&alt.haus===haus&&alt.stamm&&alt.stamm.id)?alt.stamm:null,stand:'begonnen'};
+  prot[t.id]=eintrag;
+  if(!_objUmProtSchreib(prot))throw new Error('das Protokoll für den Rückweg ließ sich nicht schreiben');
+  const erg=await _immoObjektOrdner(haus);
+  if(!erg||!erg.id||erg.id===haus)throw new Error('„'+IMMO_OBJEKT_NAME+'“ ohne Kennung');
+  eintrag.objekt=erg.id;eintrag.objektNeu=!!erg.neu;
+  _objUmProtSchreib(prot);
+  let zusatz='';
+  if(stammAlt.length){
+    if(!mitStamm)zusatz=' · „'+IMMO_STAMM_NAME+'“ bleibt am alten Platz';
+    else if(stammAlt.length>1)zusatz=' · „'+IMMO_STAMM_NAME+'“ NICHT verschoben: im Hausordner liegen '+stammAlt.length+' davon';
+    else{
+      const drin=await _immoUnterordnerListe(erg.id);
+      if(drin.some(function(f){return _immoIstStammName(f.name);}))zusatz=' · „'+IMMO_STAMM_NAME+'“ NICHT verschoben: in „'+IMMO_OBJEKT_NAME+'“ liegt schon einer';
+      else{
+        await _objUmVerschiebe(stammAlt[0].id,haus,erg.id);
+        eintrag.stamm={id:stammAlt[0].id,von:haus};
+        _objUmProtSchreib(prot);
+        zusatz=' · „'+IMMO_STAMM_NAME+'“ nach „'+IMMO_OBJEKT_NAME+'“ verschoben';
+      }
+    }
+  }
+  if(_objUmArt(t)!=='haus'||_objUmFid(t.gdriveOrdner)!==haus)throw new Error('die Karte wurde währenddessen geändert');
+  if(_objUmKarteOffen(t.id))throw new Error('die Karte wurde währenddessen geöffnet – erst schließen, dann noch einmal');
+  const url='https://drive.google.com/drive/folders/'+erg.id;
+  t.gdrive=url;t.dokOrdner=url;t.emailOrdner=url;
+  eintrag.stand='fertig';
+  _objUmProtSchreib(prot);
+  return {eintrag:eintrag,text:'„'+IMMO_OBJEKT_NAME+'“ '+(erg.neu?'angelegt':'war schon da')+zusatz};
+}
+// Was liegt heute im Hausordner? Nur die oberste Ebene, nur für die umstellbaren Karten, vier gleichzeitig.
+async function _objUmLageLaden(nur){
+  const offen=_objUmZeilen.filter(function(z){return z.art==='haus'&&z.haus&&(!nur||z.id===nur);});
+  for(let i=0;i<offen.length;i+=4){
+    await Promise.all(offen.slice(i,i+4).map(async function(z){
+      try{
+        const k=await _immoUnterordnerListe(z.haus);
+        z.lage={objekt:k.some(function(f){return _immoIstObjektName(f.name);}),stamm:k.filter(function(f){return _immoIstStammName(f.name);}).length};
+      }catch(e){z.lage={fehler:String((e&&e.message)||e)};}
+    }));
+    _objUmZeichnen();
+  }
+}
+function _objUmSchliessen(){
+  if(_objUmLaeuft){showToast('Die Umstellung läuft noch – bitte kurz warten','info',4000);return;}
+  const o=document.getElementById('_objUmDlg');if(o)try{o.remove();}catch(e){}
+}
+function _objUmHaken(id,an){
+  if(_objUmLaeuft)return;
+  const z=_objUmZeilen.find(function(x){return x.id===id;});
+  if(z&&z.art==='haus'&&!(z.lage&&z.lage.fehler))z.an=!!an;
+  _objUmZeichnen();
+}
+function _objUmAlle(an){
+  if(_objUmLaeuft)return;
+  _objUmZeilen.forEach(function(z){if(z.art==='haus'&&!(z.lage&&z.lage.fehler))z.an=!!an;});
+  _objUmZeichnen();
+}
+function _objUmZeichnen(){
+  const box=document.getElementById('_objUmListe');if(!box)return;
+  const klein='font-size:11px;color:var(--text2);margin-top:2px;line-height:1.45;';
+  const kn='font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;';
+  const zeile=function(z){
+    let links='<span style="display:inline-block;width:18px;"></span>',unten='';
+    if(z.art==='haus'){
+      const sperre=_objUmLaeuft||!!(z.lage&&z.lage.fehler);
+      links='<input type="checkbox" data-objum="'+esc(z.id)+'"'+(z.an?' checked':'')+(sperre?' disabled':'')+' onclick="_objUmHaken(\''+_jsa(z.id)+'\',this.checked)" style="width:16px;height:16px;margin:0 2px 0 0;cursor:pointer;">';
+      if(!z.lage)unten='Hausordner wird gelesen …';
+      else if(z.lage.fehler)unten='⚠ Hausordner nicht lesbar ('+esc(z.lage.fehler)+') – nicht wählbar';
+      else unten='heute: alle vier Felder = Hausordner · „'+IMMO_OBJEKT_NAME+'“ '+(z.lage.objekt?'ist schon da':'wird angelegt')
+        +' · „'+IMMO_STAMM_NAME+'“ im Hausordner: '+(z.lage.stamm===0?'keiner':(z.lage.stamm===1?'vorhanden':z.lage.stamm+' Stück'));
+    }else if(z.art==='fertig'){
+      unten=(z.prot&&z.prot.stand==='fertig')
+        ?('✓ umgestellt'+(z.prot.am?' am '+esc(new Date(z.prot.am).toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})):'')
+          +(z.prot.stamm?' · „'+IMMO_STAMM_NAME+'“ mit verschoben':'')
+          +' &nbsp;<button type="button" data-objumzur="'+esc(z.id)+'"'+(_objUmLaeuft?' disabled':'')+' onclick="_objUmZurueck(\''+_jsa(z.id)+'\')" style="'+kn+'">↩ zurückstellen</button>')
+        :'✓ zeigt schon auf einen eigenen Ordner – wird nicht angefasst';
+    }else if(z.art==='ohne')unten='– kein Projektordner eingetragen – wird nicht angefasst';
+    else unten='– die Felder zeigen auf verschiedene Ordner – wird nicht angefasst';
+    return '<div data-objumzeile="'+esc(z.id)+'" style="display:flex;gap:8px;align-items:flex-start;padding:7px 14px;border-bottom:1px solid var(--border);">'
+      +'<div style="padding-top:1px;">'+links+'</div>'
+      +'<div style="flex:1;min-width:0;"><div style="font-size:13px;color:var(--text);'+(z.art==='haus'?'font-weight:600;':'')+'">'+esc(z.titel||'(ohne Titel)')+(z.stand?' <span style="font-weight:400;color:var(--text2);">· '+esc(z.stand)+'</span>':'')+'</div>'
+      +'<div style="'+klein+'">'+unten+'</div>'
+      +(z.meldung?'<div data-objummeldung="1" style="'+klein+'color:var(--text);">'+esc(z.meldung)+'</div>':'')
+      +'</div></div>';
+  };
+  const reihe=['haus','fertig','gemischt','ohne'];
+  const sortiert=_objUmZeilen.slice().sort(function(a,b){return reihe.indexOf(a.art)-reihe.indexOf(b.art);});
+  box.innerHTML=sortiert.length?sortiert.map(zeile).join(''):'<div style="padding:16px 14px;font-size:12px;color:var(--text2);">Auf diesem Board gibt es keine Objektkarten.</div>';
+  const nHaus=_objUmZeilen.filter(function(z){return z.art==='haus';}).length;
+  const nAn=_objUmZeilen.filter(function(z){return z.art==='haus'&&z.an;}).length;
+  const kopf=document.getElementById('_objUmKopf');
+  if(kopf)kopf.textContent=nHaus+' Karte(n) zeigen noch ganz auf den Hausordner · '+_objUmZeilen.filter(function(z){return z.art==='fertig';}).length+' schon mit eigenem Ordner · '
+    +_objUmZeilen.filter(function(z){return z.art==='gemischt'||z.art==='ohne';}).length+' werden nicht angefasst';
+  const ok=document.getElementById('_objUmOkBtn');
+  if(ok){ok.textContent=_objUmLaeuft?'läuft …':(nAn?(nAn+(nAn===1?' Haus':' Häuser')+' umstellen'):'Nichts angekreuzt');ok.disabled=_objUmLaeuft||!nAn;ok.style.opacity=(_objUmLaeuft||!nAn)?'.5':'1';}
+}
+function _objUmOeffnen(){
+  if(_objUmLaeuft){showToast('Die Umstellung läuft noch – bitte kurz warten','info',4000);return;}
+  _objUmSchliessen();
+  const board=currentBoard;
+  if(((typeof boardTypes!=='undefined'&&boardTypes[board])||'baustelle')!=='immobilie'){showToast('⚠ Das geht nur an einem Board vom Typ 🏠 Objekt','warning',6000);return;}
+  if(typeof gdriveToken==='undefined'||!gdriveToken){showToast('⚠ Google Drive ist nicht verbunden – erst verbinden','warning',7000);return;}
+  _objUmZeilen=_objUmSammle(board);
+  const kn='font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;';
+  const ov=document.createElement('div');
+  ov.id='_objUmDlg';
+  ov.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;';
+  ov.innerHTML='<div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;width:min(640px,94vw);max-height:86vh;display:flex;flex-direction:column;overflow:hidden;">'
+    +'<div style="padding:12px 14px;border-bottom:1px solid var(--border);">'
+    +'<div style="font-size:14px;font-weight:600;color:var(--text);">📁 Bestand auf „'+IMMO_OBJEKT_NAME+'“ umstellen</div>'
+    +'<div id="_objUmKopf" style="font-size:11px;color:var(--text2);margin-top:3px;"></div>'
+    +'<div style="font-size:10px;color:var(--text2);margin-top:5px;line-height:1.5;">Board „'+esc(board)+'“ · Der Projektordner bleibt der Hausordner; Fotos, Dokumente und E-Mail gehen nach „'+IMMO_OBJEKT_NAME+'“. '
+    +'Es wird nichts gelöscht. Auftragsordner, Jahresordner und lose Dateien im Hausordner bleiben, wo sie sind.</div>'
+    +'</div>'
+    +'<div style="padding:8px 14px;border-bottom:1px solid var(--border);">'
+    +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
+    +'<button type="button" onclick="_objUmAlle(true)" style="'+kn+'">alle</button>'
+    +'<button type="button" onclick="_objUmAlle(false)" style="'+kn+'">keine</button>'
+    +'<label style="font-size:12px;color:var(--text);display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin-left:6px;"><input type="checkbox" id="_objUmStamm" style="width:15px;height:15px;margin:0;"> vorhandenen „'+IMMO_STAMM_NAME+'“ mit nach „'+IMMO_OBJEKT_NAME+'“ verschieben</label>'
+    +'</div>'
+    +'<div style="font-size:10px;color:var(--text2);margin-top:5px;line-height:1.5;">Ohne Haken bleibt „'+IMMO_STAMM_NAME+'“ im Hausordner; PAM findet das Stammblatt an beiden Plätzen. '
+    +'Mit Haken: Das Auftrags-Skript im Hausordner („Senden an“) sucht nur direkt im Hausordner – es schreibt dann „Stammblatt_Link: (noch offen)“ in die Akte.</div>'
+    +'</div>'
+    +'<div id="_objUmListe" style="flex:1;overflow-y:auto;min-height:80px;"></div>'
+    +'<div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;">'
+    +'<button type="button" onclick="_objUmSchliessen()" style="padding:7px 14px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:13px;cursor:pointer;">Schließen</button>'
+    +'<button type="button" id="_objUmOkBtn" onclick="_objUmAnwenden()" style="padding:7px 14px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:13px;font-weight:600;cursor:pointer;"></button>'
+    +'</div></div>';
+  ov.addEventListener('click',function(e){if(e.target===ov)_objUmSchliessen();});
+  document.body.appendChild(ov);
+  _objUmZeichnen();
+  _objUmLageLaden().catch(function(e){console.warn('[ObjUm] Lage lesen:',e);});
+}
+async function _objUmAnwenden(){
+  if(_objUmLaeuft)return;
+  const gew=_objUmZeilen.filter(function(z){return z.an&&z.art==='haus';});
+  if(!gew.length){showToast('Nichts angekreuzt','info');return;}
+  if(typeof gdriveToken==='undefined'||!gdriveToken){showToast('⚠ Google Drive ist nicht verbunden','warning',6000);return;}
+  const mitStamm=!!((document.getElementById('_objUmStamm')||{}).checked);
+  if(!confirm(gew.length+(gew.length===1?' Haus':' Häuser')+' auf „'+IMMO_OBJEKT_NAME+'“ umstellen?\n\n'
+    +'• Projektordner bleibt der Hausordner\n• Fotos, Dokumente und E-Mail gehen nach „'+IMMO_OBJEKT_NAME+'“\n'
+    +(mitStamm?'• ein vorhandener „'+IMMO_STAMM_NAME+'“ wird nach „'+IMMO_OBJEKT_NAME+'“ verschoben\n':'• „'+IMMO_STAMM_NAME+'“ bleibt, wo er ist\n')
+    +'\nEs wird nichts gelöscht. Jedes Haus lässt sich in diesem Fenster wieder zurückstellen.'))return;
+  _objUmLaeuft=true;
+  let gut=0,nicht=0;
+  try{
+    for(const z of gew){
+      z.stand='wird umgestellt …';z.meldung='';_objUmZeichnen();
+      try{
+        const t=(typeof findTaskById==='function')?findTaskById(z.id):null;
+        if(!t)throw new Error('die Karte gibt es nicht mehr');
+        const r=await _objUmEinHaus(t,mitStamm);
+        z.art='fertig';z.an=false;z.prot=r.eintrag;z.meldung='✓ '+r.text;gut++;
+        try{await autoSave();}catch(e){console.warn('[ObjUm] Speichern:',e);}
+      }catch(e){
+        nicht++;z.an=false;z.meldung='⚠ nicht umgestellt: '+((e&&e.message)||e);
+        console.warn('[ObjUm]',z.titel,e);
+      }
+      z.stand='';_objUmZeichnen();
+    }
+  }finally{_objUmLaeuft=false;}
+  try{pushToSync();}catch(e){}
+  try{render();}catch(e){}
+  _objUmZeichnen();
+  showToast((gut?'✓ '+gut+(gut===1?' Haus':' Häuser')+' umgestellt':'Nichts umgestellt')+(nicht?' · ⚠ '+nicht+' nicht – Grund steht in der Liste':''),nicht?'warning':'success',nicht?12000:6000);
+}
+// Ein umgestelltes Haus zurückstellen – nur mit Protokoll und nur, wenn die Karte seither nicht verändert wurde.
+// „_Objekt“ und alles, was inzwischen darin liegt, bleibt.
+async function _objUmZurueck(id){
+  if(_objUmLaeuft)return;
+  const z=_objUmZeilen.find(function(x){return x.id===id;});
+  const t=(typeof findTaskById==='function')?findTaskById(id):null;
+  const prot=_objUmProtLies();const e=prot[id];
+  if(!z||!t||!e||!e.haus||!e.objekt){showToast('⚠ Für diese Karte gibt es kein Protokoll – nicht zurückgestellt','warning',7000);return;}
+  if(_objUmKarteOffen(id)){showToast('⚠ Die Karte ist gerade geöffnet – erst schließen','warning',6000);return;}
+  if(_objUmFid(t.gdriveOrdner)!==e.haus||_objUmFid(t.gdrive)!==e.objekt||_objUmFid(t.dokOrdner)!==e.objekt||_objUmFid(t.emailOrdner)!==e.objekt){
+    showToast('⚠ Die Ordner dieser Karte wurden seither geändert – nicht zurückgestellt','warning',8000);return;
+  }
+  if(typeof gdriveToken==='undefined'||!gdriveToken){showToast('⚠ Google Drive ist nicht verbunden','warning',6000);return;}
+  if(!confirm('„'+String(t.title||'')+'“ zurückstellen?\n\nFotos, Dokumente und E-Mail zeigen danach wieder auf den Hausordner.'
+    +(e.stamm&&e.stamm.id?'\n„'+IMMO_STAMM_NAME+'“ wandert zurück in den Hausordner.':'')
+    +'\n\nDer Ordner „'+IMMO_OBJEKT_NAME+'“ und alles, was inzwischen darin liegt, bleibt.'))return;
+  _objUmLaeuft=true;
+  let gut=false;
+  try{
+    z.stand='wird zurückgestellt …';z.meldung='';_objUmZeichnen();
+    if(e.stamm&&e.stamm.id){
+      const drin=await _immoUnterordnerListe(e.objekt);
+      if(drin.some(function(f){return f.id===e.stamm.id;}))await _objUmVerschiebe(e.stamm.id,e.objekt,e.haus);
+    }
+    const url='https://drive.google.com/drive/folders/'+e.haus;
+    t.gdrive=url;t.dokOrdner=url;t.emailOrdner=url;
+    delete prot[id];_objUmProtSchreib(prot);
+    z.art='haus';z.prot=null;z.lage=null;z.an=false;z.meldung='↩ zurückgestellt – alle vier Felder zeigen wieder auf den Hausordner';
+    gut=true;
+    try{await autoSave();}catch(err){console.warn('[ObjUm] Speichern:',err);}
+  }catch(err){
+    z.meldung='⚠ nicht zurückgestellt: '+((err&&err.message)||err);
+    console.warn('[ObjUm] zurück:',z.titel,err);
+  }finally{_objUmLaeuft=false;z.stand='';}
+  try{pushToSync();}catch(err){}
+  try{render();}catch(err){}
+  _objUmZeichnen();
+  if(gut)_objUmLageLaden(id).catch(function(err){console.warn('[ObjUm] Lage lesen:',err);});
+}
 // Den gewählten vorhandenen Ordner eintragen – alle vier Felder, genau wie beim neu angelegten Ordner.
 function _immoOrdnerUebernehmen(f){
   try{
@@ -75191,7 +75459,8 @@ const PAM_GETEILT_KEYS=[
   'pam_an_erinnerung_aus',                                                                       // C6 „🔕 nicht mehr erinnern“ je Prüfprotokoll Anschlageinrichtung (b1230/F84: beide Rechner gleich, nie in der Karte)
   'pam_anrede_wahl_v1'                                                                           // D Anrede je Person in den Mail-Fenstern (b1165)
   ,'pam_gal_schild_v1'                                                                           // E „🏷 Info an/aus“ in Galerie + Foto-Fenster (b1175, Frank: beide Rechner)
-  ,'pam_ao_haken_v1'                                                                            // F „💾 In Ordner …“: was immer mit angehakt ist (b1238, Frank 19.10.2026: beide Rechner gleich)
+  ,'pam_ao_haken_v1'                                                                            // F „💾 In Ordner …“: was im
+  ,'pam_objekt_umstellung_v1'                                                                  // H Protokoll „Bestand auf _Objekt umstellen“ (Rückweg je Karte; an beiden Rechnern gleich, nie in der Karte)mer mit angehakt ist (b1238, Frank 19.10.2026: beide Rechner gleich)
   ,'pam_fs_wp_rolle'                                                                           // G Wort vor dem Namen im Dach-/PV-Protokoll (b1245/F88, Frank 23.10.2026: Auswahl, an beiden Rechnern gleich)
 ];
 let _pamGeteiltOffen={};       // Schlüssel → Wert (null = entfernt), wartet aufs Speichern
