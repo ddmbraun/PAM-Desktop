@@ -10724,7 +10724,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-11-20 · #1293'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-11-20-b1293) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-11-20 · #1294'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-11-20-b1294) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -13260,6 +13260,7 @@ function _tuHakenPdf(lId,datum){
     ||_extractFolderIdFromUrl((document.getElementById('tDokOrdner')||{}).value||'')
     ||_extractFolderIdFromUrl((document.getElementById('tGDOrdner')||{}).value||'');
   if(!fid){showToast('⚠ Am Objekt ist kein Ordner verlinkt – Rechnung später über 📎 nachtragen','warning',5000);return;}
+  try{_tuAblage={haus:_extractFolderIdFromUrl((document.getElementById('tGDOrdner')||{}).value||''),e:e};}catch(err){}
   var nach=function(){renderTurnusListe();scheduleTaskFieldSave();};
   _tuFotoMenue(function(){
     _tuUploadDateien(fid,l,e,function(ok){
@@ -14062,6 +14063,7 @@ function _tuRgPdfFrage(e,l,t){
     :(_getDriveFotoFolderId()||_extractFolderIdFromUrl((document.getElementById('tDokOrdner')||{}).value||'')
       ||_extractFolderIdFromUrl((document.getElementById('tGDOrdner')||{}).value||''));
   if(!fid){showToast('⚠ Kein Ordner am Objekt verlinkt – Rechnung bitte später über 📎 nachtragen','warning',5000);return;}
+  try{_tuAblage={haus:(t?_extractFolderIdFromUrl(t.gdriveOrdner||''):_extractFolderIdFromUrl((document.getElementById('tGDOrdner')||{}).value||'')),e:e};}catch(err){}
   var nach=function(){
     if(t){
       try{
@@ -14413,7 +14415,65 @@ function _tuRefSpringen(lId){
 // Ordner chronologisch und bleibt ohne PAM lesbar. Nur die Zuordnungs-Uploads
 // bekommen diesen Namen; der normale Foto-Drop behält bewusst den Originalnamen.
 // b629: `zusatz` schiebt ein Wort in den Dateinamen (z.B. „Rechnung")
+// ── Wartungsordner je Jahr ──────────────────────────────────────────────────
+// Dateien an einem Termin der wiederkehrenden Leistungen gehören in den
+// Wartungsordner des Jahres, in dem der TERMIN liegt (nicht der Tag des
+// Hochladens). Gesucht wird im Hausordner (Projektordner der Karte) ein Ordner,
+// dessen Name mit „<Jahr>_Wartung" oder „<Jahr> Wartung" beginnt. Nur mit
+// `anlegen` entsteht „<Jahr>_Wartung", wenn es keinen gibt.
+// Rückgabe {id,name,neu} oder null. Wirft bei einem Drive-Fehler – die
+// aufrufende Stelle nimmt dann den bisherigen Ordner.
+// `_tuAblage` reicht Hausordner + Eintrag von den Knöpfen an Upload und
+// Auswahlfenster weiter; beide lesen es EINMAL und leeren es.
+let _tuAblage=null;
+const _tuWoMerk={};
+async function _tuWartungsOrdner(hausFid,datum,anlegen){
+  var jahr=String(datum||'').substring(0,4);
+  if(!hausFid||!/^(19|20)\d\d$/.test(jahr))return null;
+  if(typeof gdriveToken==='undefined'||!gdriveToken)return null;
+  var key=hausFid+'|'+jahr;
+  if(_tuWoMerk[key])return _tuWoMerk[key];
+  var alle=[],seite='';
+  do{
+    var q="'"+hausFid+"' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false";
+    var r=await fetch('https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q)
+      +'&fields=nextPageToken,files(id,name)&orderBy=name&spaces=drive&pageSize=1000'+(seite?'&pageToken='+encodeURIComponent(seite):''),
+      {headers:{Authorization:'Bearer '+gdriveToken}});
+    if(r.status===401&&typeof _handleDrive401==='function')_handleDrive401();
+    if(!r.ok)throw new Error('Wartungsordner suchen: HTTP '+r.status);
+    var j=await r.json();
+    alle=alle.concat(j.files||[]);
+    seite=j.nextPageToken||'';
+  }while(seite);
+  var muster=new RegExp('^'+jahr+'[_ ]wartung','i');
+  var treffer=alle.filter(function(f){return f&&f.id&&muster.test(String(f.name||'').trim());});
+  treffer.sort(function(a,b){return String(a.name||'').localeCompare(String(b.name||''));});
+  if(treffer.length){
+    _tuWoMerk[key]={id:treffer[0].id,name:treffer[0].name||'',neu:false};
+    return _tuWoMerk[key];
+  }
+  if(!anlegen)return null;
+  var nm=jahr+'_Wartung';
+  var id=await _driveCreateFolder(nm,hausFid);
+  if(!id)return null;
+  _tuWoMerk[key]={id:id,name:nm,neu:false};
+  return {id:id,name:nm,neu:true};
+}
+// 📂: Wartungsordner des laufenden Jahres öffnen, wenn es ihn gibt – sonst den
+// bisherigen Ordner. Legt nichts an. Antwortet Drive nicht zügig, gilt der
+// bisherige Ordner (ein Fenster darf nur kurz nach dem Klick aufgehen).
+function _tuJahresOrdnerAuf(u,haus){
+  if(!haus||typeof gdriveToken==='undefined'||!gdriveToken){window.open(u,'_blank');return;}
+  var offen=false;
+  var auf=function(ziel){if(offen)return;offen=true;window.open(ziel,'_blank');};
+  var uhr=setTimeout(function(){auf(u);},2500);
+  _tuWartungsOrdner(haus,String(new Date().getFullYear()),false).then(function(wo){
+    clearTimeout(uhr);auf(wo&&wo.id?('https://drive.google.com/drive/folders/'+wo.id):u);
+  }).catch(function(err){console.warn('[TU] Wartungsordner öffnen:',err);clearTimeout(uhr);auf(u);});
+}
 function _tuUploadDateien(fid,l,e,fertig,zusatz){
+  var abl=(typeof _tuAblage!=='undefined'&&_tuAblage&&_tuAblage.e===e)?_tuAblage:null;
+  try{_tuAblage=null;}catch(err){}
   var inp=document.createElement('input');
   inp.type='file'; inp.accept='image/*,application/pdf'; inp.multiple=true;
   inp.onchange=async function(){
@@ -14422,6 +14482,11 @@ function _tuUploadDateien(fid,l,e,fertig,zusatz){
     showToast('⏳ '+files.length+' Datei(en) werden hochgeladen…','info',4000);
     if(!Array.isArray(e.dateien))e.dateien=[];
     var basis=_tuNameBasis(l,e)+(zusatz?'_'+String(zusatz).replace(/[\\/:*?"<>|\s]/g,'-'):''); // b629
+    var zielFid=fid, zielName='';
+    if(abl&&abl.haus&&typeof _tuWartungsOrdner==='function'){
+      try{var wo=await _tuWartungsOrdner(abl.haus,e.datum,true);if(wo&&wo.id){zielFid=wo.id;zielName=wo.name||'';}}
+      catch(err){console.warn('[TU] Wartungsordner – es gilt der bisherige Ordner:',err);}
+    }
     var ok=0;
     for(var i=0;i<files.length;i++){
       try{
@@ -14429,11 +14494,11 @@ function _tuUploadDateien(fid,l,e,fertig,zusatz){
         var ext=((f.name||'').split('.').pop()||'dat').toLowerCase();
         var nm=basis+'_'+(e.dateien.length+1)+'.'+ext;
         var buf=await f.arrayBuffer();
-        var res=await _driveUploadGeneric(buf,nm,f.type||'application/octet-stream',fid);
+        var res=await _driveUploadGeneric(buf,nm,f.type||'application/octet-stream',zielFid);
         if(res&&res.id){e.dateien.push({id:res.id,name:nm});ok++;}
       }catch(err){console.warn('[TU] Datei-Upload:',err);}
     }
-    if(ok)showToast('✓ '+ok+' Datei(en) am Eintrag '+_tuDe(e.datum)+' abgelegt','success',3500);
+    if(ok)showToast('✓ '+ok+' Datei(en) am Eintrag '+_tuDe(e.datum)+' abgelegt'+(zielName?' – Ordner „'+zielName+'"':''),'success',zielName?5000:3500);
     else showToast('⚠ Hochladen fehlgeschlagen','error',5000);
     if(fertig)fertig(ok);
   };
@@ -14484,6 +14549,17 @@ function _tuFotoPickerOeffnen(fid,uebernahme,mitDok){
   _dfpSelected=new Map();     // leer starten – nichts vorausgewählt
   _dfpHistory=[];
   _dfpOpenOverlay();
+  var abl=(typeof _tuAblage!=='undefined')?_tuAblage:null;
+  try{_tuAblage=null;}catch(err){}
+  if(abl&&abl.haus&&abl.e&&abl.e.datum&&typeof _tuWartungsOrdner==='function'){
+    // Start im Wartungsordner des Termin-Jahres, „← Zurück" führt in den Hausordner.
+    // Gibt es den Jahresordner nicht: Hausordner. Angelegt wird hier nichts.
+    _tuWartungsOrdner(abl.haus,abl.e.datum,false).then(function(wo){
+      if(wo&&wo.id){_dfpHistory=[{id:abl.haus,name:'Hausordner'}];_dfpLoadFolder(wo.id,wo.name||'Wartung');}
+      else _dfpLoadFolder(abl.haus,'Hausordner');
+    }).catch(function(err){console.warn('[TU] Wartungsordner – es gilt der bisherige Ordner:',err);_dfpLoadFolder(fid,'Objektordner');});
+    return;
+  }
   _dfpLoadFolder(fid,'Objektordner');
 }
 // 📂 Wartungsordner öffnen – aus dem Task-Fenster (Sektions-Kopf)
@@ -14492,6 +14568,7 @@ function _tuOrdnerOeffnen(){
     ||((document.getElementById('tDokOrdner')||{}).value||'').trim()
     ||((document.getElementById('tGDOrdner')||{}).value||'').trim();
   if(!u){showToast('Kein Ordner am Objekt verlinkt – unter „Ordner & Links" setzen','warning',4000);return;}
+  if(typeof _tuJahresOrdnerAuf==='function'){_tuJahresOrdnerAuf(u,_extractFolderIdFromUrl((document.getElementById('tGDOrdner')||{}).value||''));return;}
   window.open(u,'_blank');
 }
 // 📂 aus dem Reiter „Objekte" – am gespeicherten Task
@@ -14499,6 +14576,7 @@ function _objOrdnerOeffnen(taskId){
   var t=findTaskById(taskId); if(!t)return;
   var u=(t.gdrive||'').trim()||(t.dokOrdner||'').trim()||(t.gdriveOrdner||'').trim();
   if(!u){showToast('Kein Ordner an diesem Objekt verlinkt','warning',3500);return;}
+  if(typeof _tuJahresOrdnerAuf==='function'){_tuJahresOrdnerAuf(u,_extractFolderIdFromUrl(t.gdriveOrdner||''));return;}
   window.open(u,'_blank');
 }
 
@@ -14513,6 +14591,7 @@ function _tuDateiKnopf(lId,datum){
     ||_extractFolderIdFromUrl((document.getElementById('tDokOrdner')||{}).value||'')
     ||_extractFolderIdFromUrl((document.getElementById('tGDOrdner')||{}).value||'');
   if(!fid){showToast('⚠ Kein Ordner am Objekt verlinkt – erst unter „Ordner & Links" den 📷 Foto-Ordner setzen','error',6000);return;}
+  try{_tuAblage={haus:_extractFolderIdFromUrl((document.getElementById('tGDOrdner')||{}).value||''),e:e};}catch(err){}
   // 🔴 b688: Dieser Knopf war der allgemeine Foto-Weg – er konnte Rechnungen
   // NICHT richtig behandeln (Befund Frank 17.08.2026, Einzelheiten in CHANGES.md):
   //   · der Ordner-Picker zeigte keine PDFs (in b685 nur an den beiden
@@ -14554,6 +14633,7 @@ function _tuDateiZuEintrag(taskId,lId,datum){
   var e=(l.eintraege||[]).find(function(x){return x&&x.datum===datum;}); if(!e)return;
   var fid=_extractFolderIdFromUrl(t.gdrive||'')||_extractFolderIdFromUrl(t.dokOrdner||'')||_extractFolderIdFromUrl(t.gdriveOrdner||'');
   if(!fid){showToast('⚠ Kein Ordner am Objekt verlinkt – im Task unter „Ordner & Links" setzen','error',6000);return;}
+  try{_tuAblage={haus:_extractFolderIdFromUrl(t.gdriveOrdner||''),e:e};}catch(err){}
   // Gemeinsamer Abschluss: gespeicherten Task sichern + offenes Fenster nachziehen (b624-Muster)
   var fertig=function(ok){
     if(!ok)return;
@@ -21024,6 +21104,7 @@ function _rglDateiAnhaengen(taskId,lId,datum){
   if(!gdriveToken){showToast('⚠ Bitte zuerst mit Google Drive verbinden','error',4000);return;}
   var fid=_extractFolderIdFromUrl(t.gdrive||'')||_extractFolderIdFromUrl(t.dokOrdner||'')||_extractFolderIdFromUrl(t.gdriveOrdner||'');
   if(!fid){showToast('⚠ Am Objekt „'+(t.title||'')+'" ist kein Ordner verlinkt','warning',6000);return;}
+  try{_tuAblage={haus:_extractFolderIdFromUrl(t.gdriveOrdner||''),e:e};}catch(err){}
   var nach=function(){_bjmNachSchreiben([{t:t,l:l,e:e}]);};
   _tuFotoMenue(function(){                       // hochladen
     _tuUploadDateien(fid,l,e,function(ok){
@@ -21276,6 +21357,7 @@ function _bjmPdfFrage(pos){
   var p0=pos[0];
   var fid=_extractFolderIdFromUrl(p0.t.gdrive||'')||_extractFolderIdFromUrl(p0.t.dokOrdner||'')||_extractFolderIdFromUrl(p0.t.gdriveOrdner||'');
   if(!fid){showToast('⚠ Am Objekt „'+(p0.t.title||'')+'" ist kein Ordner verlinkt – Rechnung bitte über 📎 nachtragen','warning',6000);return;}
+  try{_tuAblage={haus:_extractFolderIdFromUrl(p0.t.gdriveOrdner||''),e:p0.e};}catch(err){}
   var vorher=((p0.e.dateien)||[]).length;
   var verteilen=function(){
     var neue=((p0.e.dateien)||[]).slice(vorher);
