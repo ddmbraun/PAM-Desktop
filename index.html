@@ -1600,7 +1600,18 @@ async function _doMoveTaskFolder(mainFolderId,targetFid){
     const sbEl1=document.getElementById('tSbPdfOrdner');
     const sbEl2=document.getElementById('tSbPdfOrdnerVerk');
     const sbLeer=!(sbEl1&&sbEl1.value.trim());
-    if(sbLeer){
+    // Neuer Platz zuerst: Hausordner › „_Objekt“ › „_Stammdaten“. Danach wie bisher direkt im neuen Oberordner.
+    let sbNeuerPlatz='';
+    if(sbLeer&&typeof _immoStammInObjekt==='function'){
+      sbNeuerPlatz=await _immoStammInObjekt(targetFid);
+      if(sbNeuerPlatz){
+        const sbUrlNeu='https://drive.google.com/drive/folders/'+sbNeuerPlatz;
+        if(sbEl1)sbEl1.value=sbUrlNeu;
+        if(sbEl2)sbEl2.value=sbUrlNeu;
+        showToast('📁 Stammdaten in „_Objekt“ gefunden → Stammblatt-Ordner eingetragen','success',4000);
+      }
+    }
+    if(sbLeer&&!sbNeuerPlatz){
       try{
         const q=encodeURIComponent("'"+targetFid+"' in parents and name='_Stammdaten' and mimeType='application/vnd.google-apps.folder' and trashed=false");
         const srR=await fetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name)&pageSize=1',
@@ -10724,7 +10735,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-11-20 · #1294'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-11-20-b1294) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-11-20 · #1295'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-11-20-b1295) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -40160,6 +40171,7 @@ let _dfbCurrentId='root';
 let _dfbCurrentName='Mein Drive';
 
 async function _pickDriveFolder(fieldId){
+  if(typeof _immoHausWahlOffen!=='undefined')_immoHausWahlOffen=false;   // gilt nur für das eine Öffnen aus der Ordner-Frage
   if(!gdriveToken){showToast('Bitte zuerst mit Google Drive verbinden','error');return;}
   // Token-Ablauf prüfen: abgelaufener Token → 401 auf alle Drive-Requests → leerer Explorer
   if(gdriveTokenExpires && Date.now() >= gdriveTokenExpires){
@@ -40307,6 +40319,13 @@ function _dfbPickItem(id,name){
       });
     }
   }catch(e){console.warn('[IMMO] Felder spiegeln:',e);}
+  // Hausordner-Wahl aus der Ordner-Frage einer NEUEN Objektkarte: „_Objekt“ nachziehen (typeof-Wachen für die Prüfsuiten).
+  try{
+    if(typeof _immoHausWahlOffen!=='undefined'&&_immoHausWahlOffen&&_dfbTargetField==='tGD'){
+      _immoHausWahlOffen=false;
+      if(typeof _immoObjektNachziehen==='function')_immoObjektNachziehen(id,name);
+    }
+  }catch(e){console.warn('[IMMO] „_Objekt“ nachziehen:',e);}
   // Am Objekt: zeigen andere Ordner-Felder auf einen ANDEREN Ordner, einmal fragen statt sie still stehen zu lassen.
   // ⛔ Nie still angleichen: Projekt = Objektordner neben Fotos/Dokumente = Unterordner ist ein gewollter Stand.
   try{
@@ -52196,7 +52215,7 @@ function _immoOrdnerFrage(title){
     ov.querySelector('#_iodSpaeter').addEventListener('click',function(){zu(null);});
     ov.querySelector('#_iodWahl').addEventListener('click',function(){
       zu('wahl');
-      if(typeof _pickDriveFolder==='function')setTimeout(function(){_pickDriveFolder('tGD');},150);
+      if(typeof _pickDriveFolder==='function')setTimeout(function(){_pickDriveFolder('tGD');if(typeof _immoHausWahlOffen!=='undefined')_immoHausWahlOffen=true;},150);
     });
     ov.querySelector('#_iodNeu').addEventListener('click',async function(){
       // Erst in Drive nachsehen, ob es einen passenden Ordner schon gibt. ⛔ Nur anbieten, nie still nehmen.
@@ -52319,6 +52338,105 @@ function _immoOrdnerTrefferFrage(title,erg){
     });
   });
 }
+// ── „_Objekt“ im Hausordner (P154 Bau B) ─────────────────────────────────────
+// Eine NEUE Objektkarte bekommt: Projektordner = Hausordner · Fotos / Dokumente / E-Mail = „_Objekt“ darin.
+// In „_Objekt“ liegt „_Stammdaten“ (dort gehört das Stammblatt hin). Bestehende Karten und Ordner bleiben, wie sie sind.
+const IMMO_OBJEKT_NAME='_Objekt';
+const IMMO_STAMM_NAME='_Stammdaten';
+let _immoHausWahlOffen=false;   // true nur zwischen „📂 Vorhandenen Objektordner wählen“ und der Wahl im Ordner-Fenster
+const _immoObjektLauf={};       // laufende Anlagen je Hausordner – zwei gleichzeitige Aufrufe ergeben EINEN Ordner
+function _immoIstStammName(n){return /^_?stammdaten$/i.test(String(n||'').trim());}
+function _immoIstObjektName(n){return String(n||'').trim().toLowerCase()===IMMO_OBJEKT_NAME.toLowerCase();}
+// Alle Unterordner eines Ordners. ⛔ Wirft bei JEDEM Drive-Fehler: sonst sähe „Drive antwortet nicht“ aus wie
+// „gibt es nicht“ – und neben einem vorhandenen „_Objekt“ entstünde ein zweiter.
+async function _immoUnterordnerListe(fid){
+  if(!fid)throw new Error('kein Ordner');
+  if(typeof gdriveToken==='undefined'||!gdriveToken)throw new Error('Drive nicht verbunden');
+  let alle=[],seite='';
+  do{
+    const q="'"+fid+"' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false";
+    const r=await fetch('https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q)
+      +'&fields=nextPageToken,files(id,name)&orderBy=name&spaces=drive&pageSize=1000'+(seite?'&pageToken='+encodeURIComponent(seite):''),
+      {headers:{Authorization:'Bearer '+gdriveToken}});
+    if(r.status===401&&typeof _handleDrive401==='function')_handleDrive401();
+    if(!r.ok)throw new Error('Unterordner lesen: HTTP '+r.status);
+    const j=await r.json();
+    alle=alle.concat(j.files||[]);
+    seite=j.nextPageToken||'';
+  }while(seite);
+  return alle.filter(function(f){return f&&f.id;});
+}
+// „_Objekt“ im Hausordner: vorhandenen nehmen, sonst anlegen. Rückgabe {id,neu}. Wirft, wenn Drive nicht mitspielt.
+// „_Stammdaten“ darin entsteht nur, wenn weder dort noch am alten Platz (direkt im Hausordner) einer liegt.
+// Scheitert NUR das, gilt „_Objekt“ trotzdem.
+async function _immoObjektOrdner(hausFid){
+  if(!hausFid)throw new Error('kein Hausordner');
+  if(_immoObjektLauf[hausFid])return _immoObjektLauf[hausFid];
+  const lauf=(async function(){
+    const kinder=await _immoUnterordnerListe(hausFid);
+    const da=kinder.find(function(f){return _immoIstObjektName(f.name);});
+    const id=da?da.id:await _driveCreateFolder(IMMO_OBJEKT_NAME,hausFid);
+    if(!id)throw new Error('Ordner ohne Kennung');
+    try{
+      if(!kinder.some(function(f){return _immoIstStammName(f.name);})){
+        const drin=da?await _immoUnterordnerListe(id):[];
+        if(!drin.some(function(f){return _immoIstStammName(f.name);}))await _driveCreateFolder(IMMO_STAMM_NAME,id);
+      }
+    }catch(e){console.warn('[IMMO] Stammdaten-Ordner in „_Objekt“:',e);}
+    return {id:id,neu:!da};
+  })();
+  _immoObjektLauf[hausFid]=lauf;
+  try{return await lauf;}finally{delete _immoObjektLauf[hausFid];}
+}
+// Stammblatt am NEUEN Platz: Hausordner › „_Objekt“ › „_Stammdaten“ (auch „Stammdaten“). Rückgabe Kennung oder ''.
+// Wirft nie – die Suchstellen fragen danach wie bisher den alten Platz direkt im Hausordner.
+async function _immoStammInObjekt(hausFid){
+  try{
+    if(!hausFid||typeof gdriveToken==='undefined'||!gdriveToken)return '';
+    const obj=(await _immoUnterordnerListe(hausFid)).find(function(f){return _immoIstObjektName(f.name);});
+    if(!obj)return '';
+    const st=(await _immoUnterordnerListe(obj.id)).filter(function(f){return _immoIstStammName(f.name);});
+    const mitStrich=st.find(function(f){return String(f.name||'').trim().charAt(0)==='_';});
+    return ((mitStrich||st[0]||{}).id)||'';
+  }catch(e){console.warn('[IMMO] Stammblatt in „_Objekt“:',e);return '';}
+}
+// Nach dem Verknüpfen eines Hausordners: Fotos / Dokumente / E-Mail auf „_Objekt“ umstellen; der Projektordner
+// bleibt der Hausordner. Umgestellt wird nur ein Feld, das (noch) auf den gewählten Ordner zeigt.
+// ⛔ Bei einem Drive-Fehler bleibt alles auf dem Hausordner – die Karte ist dann vollständig, nur ohne „_Objekt“.
+async function _immoObjektNachziehen(gewaehltFid,gewaehltName){
+  const basis='https://drive.google.com/drive/folders/';
+  const feldId=function(fid){const el=document.getElementById(fid);return el?_extractFolderIdFromUrl((el.value||'').trim()):'';};
+  const setze=function(fid,kennung){const el=document.getElementById(fid);if(el)el.value=basis+kennung;};
+  try{
+    if(!gewaehltFid||typeof gdriveToken==='undefined'||!gdriveToken)return false;
+    if(feldId('tGDOrdner')!==gewaehltFid)return false;
+    if(_immoIstObjektName(gewaehltName)){
+      // Gewählt wurde „_Objekt“ selbst: der Hausordner ist der Ordner darüber – kein „_Objekt“ in „_Objekt“.
+      const r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(gewaehltFid)+'?fields=parents&supportsAllDrives=true',{headers:{Authorization:'Bearer '+gdriveToken}});
+      if(!r.ok)throw new Error('Ordner darüber lesen: HTTP '+r.status);
+      const eltern=((await r.json()).parents||[])[0]||'';
+      if(!eltern||feldId('tGDOrdner')!==gewaehltFid)return false;
+      setze('tGDOrdner',eltern);
+      if(typeof _updateFotoOrdnerHint==='function')_updateFotoOrdnerHint();
+      if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
+      showToast('✓ Projektordner = Hausordner · Fotos, Dokumente und E-Mail bleiben in „'+IMMO_OBJEKT_NAME+'“','success',5000);
+      return true;
+    }
+    const erg=await _immoObjektOrdner(gewaehltFid);
+    if(feldId('tGDOrdner')!==gewaehltFid)return false;   // inzwischen eine andere Karte oder ein anderer Ordner
+    let n=0;
+    ['tGD','tDokOrdner','tEmailOrdner'].forEach(function(fid){if(feldId(fid)===gewaehltFid){setze(fid,erg.id);n++;}});
+    if(!n)return false;
+    if(typeof _updateFotoOrdnerHint==='function')_updateFotoOrdnerHint();
+    if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
+    showToast('✓ Fotos, Dokumente und E-Mail gehen nach „'+IMMO_OBJEKT_NAME+'“ ('+(erg.neu?'neu angelegt':'war schon da')+') · Projektordner bleibt der Hausordner','success',6000);
+    return true;
+  }catch(e){
+    console.warn('[IMMO] „_Objekt“ nachziehen:',e);
+    showToast('⚠ „'+IMMO_OBJEKT_NAME+'“ ließ sich nicht einrichten ('+((e&&e.message)||e)+') – Fotos und Dokumente gehen vorerst in den Hausordner. Ändern unter „Ordner & Links“.','warning',10000);
+    return false;
+  }
+}
 // Den gewählten vorhandenen Ordner eintragen – alle vier Felder, genau wie beim neu angelegten Ordner.
 function _immoOrdnerUebernehmen(f){
   try{
@@ -52330,6 +52448,8 @@ function _immoOrdnerUebernehmen(f){
     if(typeof _updateFotoOrdnerHint==='function')_updateFotoOrdnerHint();
     if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
     showToast('✓ Vorhandenen Ordner verknüpft: '+String(f.name||'').substring(0,40),'success',4000);
+    // Projektordner bleibt dieser Ordner; Fotos / Dokumente / E-Mail gehen gleich danach auf „_Objekt“ (typeof-Wache für die Prüfsuiten).
+    if(typeof _immoObjektNachziehen==='function')_immoObjektNachziehen(f.id,f.name);
     return true;
   }catch(e){console.warn('[IMMO] Ordner übernehmen:',e);return false;}
 }
@@ -52354,6 +52474,8 @@ async function _immoNeuenOrdnerAnlegen(title,parentFidWahl){
     if(typeof _updateFotoOrdnerHint==='function')_updateFotoOrdnerHint();
     if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
     showToast('✓ Ordner angelegt: '+safeName.substring(0,40),'success',4000);
+    // Der neue Ordner ist der Hausordner; „_Objekt“ entsteht darin. await hält die Sperre des Aufrufers bis zum Ende.
+    if(typeof _immoObjektNachziehen==='function')await _immoObjektNachziehen(id,'');
   }catch(e){
     console.warn('[IMMO] Neuer Ordner:',e);
     showToast('⚠ Ordner anlegen fehlgeschlagen: '+e.message,'error',6000);
@@ -61571,7 +61693,7 @@ function _showImmoBoardDialog(data,immoBoards){
     +'<div style="font-size:12px;color:var(--text2,#666);margin-bottom:14px;line-height:1.7;">'
     +'📍 <b>'+esc(data.nasParent||'(unbekannt)')+'</b><br>'
     +(data.nasGrand?'🏢 '+esc(data.nasGrand)+'<br>':'')
-    +'📁 Ordner für die Dateien: <b>'+esc(data.unterordner||'Wartungen')+'</b>'
+    +'📁 Ordner für die Dateien: <b>'+esc((typeof IMMO_OBJEKT_NAME!=='undefined')?IMMO_OBJEKT_NAME:(data.unterordner||'Wartungen'))+'</b>'
     +'</div>'
     // b669: Name der Karte gleich hier abfragen. Vorher setzte _openImmoNewTask ihn
     // stumm auf den Ordnernamen – wer die Karte anders nennen wollte (z.B.
@@ -61680,12 +61802,19 @@ async function _openImmoNewTask(data){
     if(!objFid){
       // Nicht raten. Der Ordner-Browser geht direkt auf das Foto-Feld auf; was Frank
       // dort wählt, wird durch die Spiegelung in _dfbPickItem auch das Dokumente-Feld.
-      showToast('📂 Objektordner in Drive nicht eindeutig gefunden – bitte „'+unter+'" selbst wählen','warning',8000);
-      if(typeof _pickDriveFolder==='function')setTimeout(()=>_pickDriveFolder('tGD'),400);
+      showToast('📂 Objektordner in Drive nicht eindeutig gefunden – bitte '+((typeof _immoObjektOrdner==='function')?'den Hausordner':('„'+unter+'"'))+' selbst wählen','warning',8000);
+      if(typeof _pickDriveFolder==='function')setTimeout(()=>{_pickDriveFolder('tGD');if(typeof _immoHausWahlOffen!=='undefined')_immoHausWahlOffen=true;},400);
       return;
     }
     // Vorhandenen Unterordner verwenden statt einen zweiten danebenzustellen
-    const zielId=await _driveGetOrCreateFolder(unter,objFid);
+    // Neue Objektkarte: „_Objekt“ im Hausordner. Der Name aus dem Skript gilt dann nicht mehr.
+    // Lässt sich „_Objekt“ nicht einrichten, zeigt die Karte ganz auf den Hausordner – vollständig, nur ohne „_Objekt“.
+    let zielId='',zielName=unter;
+    const objektWeg=(typeof _immoObjektOrdner==='function');
+    if(objektWeg){
+      try{zielId=(await _immoObjektOrdner(objFid)).id;zielName=IMMO_OBJEKT_NAME;}
+      catch(eO){console.warn('[IMMO] „_Objekt“:',eO);zielId=objFid;zielName='';}
+    }else zielId=await _driveGetOrCreateFolder(unter,objFid);
     const b='https://drive.google.com/drive/folders/';
     setV('tGDOrdner',b+objFid);
     setV('tGD',b+zielId);        // Fotos
@@ -61695,9 +61824,11 @@ async function _openImmoNewTask(data){
     // hat das bei Frank nicht überlebt (Befund: zeigte auf „Projektordner_Aufträge").
     // Ursache ungeklärt – diese Zeile wirkt unabhängig davon.
     setV('tEmailOrdner','');
+    if(objektWeg)setV('tEmailOrdner',b+zielId);   // neue Objektkarte: E-Mail geht mit nach „_Objekt“
     if(typeof _updateFotoOrdnerHint==='function')_updateFotoOrdnerHint();
     if(typeof scheduleTaskFieldSave==='function')scheduleTaskFieldSave();
-    showToast('✅ Objekt verknüpft – Dateien gehen nach „'+unter+'"','success',5000);
+    if(zielName)showToast('✅ Objekt verknüpft – Dateien gehen nach „'+zielName+'"','success',5000);
+    else showToast('⚠ Objekt verknüpft, aber „_Objekt“ ließ sich nicht einrichten – Dateien gehen vorerst in den Hausordner. Ändern unter „Ordner & Links“.','warning',10000);
   }catch(e){
     console.warn('[IMMO] Anlage:',e);
     showToast('⚠ Ordner konnte nicht verknüpft werden: '+e.message,'warning',7000);
@@ -61825,10 +61956,12 @@ async function _objektNeuerAuftrag(objektId){
     tags:[],links:[],attachments:[],aufgaben:[],turnusListe:[],notizVerlauf:[],fotos:[],checkliste:[],
     createdAt:new Date().toISOString()};
   boards[board].push(t);
-  // Eigener Unterordner im Jahresordner des Objekts (gdrive des Objekts).
+  // Eigener Unterordner im HAUSORDNER des Objekts (Projektordner der Objektkarte) – je Schaden ein Auftragsordner.
+  // Früher: im Foto-Ordner des Objekts. Der zeigt bei neuen Objektkarten auf „_Objekt“ – dort gehört kein Auftrag hinein.
+  // Nur ohne Projektordner gilt die alte Reihenfolge (Foto-Ordner, dann Dokumente).
   // Bewusst NICHT der Objektordner selbst: der gehört dem Objekt, nicht der Auftragskarte.
   try{
-    const parentFid=_extractFolderIdFromUrl(obj.gdrive||'')||_extractFolderIdFromUrl(obj.dokOrdner||'')||_extractFolderIdFromUrl(obj.gdriveOrdner||'');
+    const parentFid=_extractFolderIdFromUrl(obj.gdriveOrdner||'')||_extractFolderIdFromUrl(obj.gdrive||'')||_extractFolderIdFromUrl(obj.dokOrdner||'');
     if(parentFid&&gdriveToken){
       // b654: bewusst `kurz` statt `titel` – der Ordner liegt schon IM Objektordner,
       // Kürzel und Adresse stehen also im Pfad. Der Vorspann gehört auf die Karte,
@@ -63268,10 +63401,26 @@ async function _objImpAnlegen(){
   const _po2=_objImpOrtFeld();
   const _ueber=_po2?gew.filter(function(x){return _plzFinden(_po2,_objImpBasisName(x.name)).ueber;}).length:0;
   const _warnU=_ueber?("\n\n\u26a0 Bei "+_ueber+" Karte(n) stammt die Postleitzahl aus einem Nachbarort mit derselben Zahl.\nIn der Liste steht, aus welchem."):"";
-  if(!confirm(gew.length+" Objektkarte(n) im Board \u201e"+board+"\u201c anlegen?"+_warn+_warnU+"\n\nEs wird nichts \u00fcberschrieben und nichts verschoben \u2013 es kommen nur neue Karten dazu."))return;
+  if(!confirm(gew.length+" Objektkarte(n) im Board \u201e"+board+"\u201c anlegen?"+_warn+_warnU+"\n\nEs wird nichts \u00fcberschrieben und nichts verschoben \u2013 es kommen nur neue Karten dazu.\nIn jedem dieser Hausordner entsteht der Unterordner \u201e_Objekt\u201c, wenn er fehlt."))return;
   const base="https://drive.google.com/drive/folders/";
   if(!Array.isArray(boards[board]))boards[board]=[];
   let n=0;
+  // „_Objekt“ je Hausordner – VOR den Karten, damit keine Karte halb entsteht. Vier Häuser gleichzeitig.
+  // Wo es nicht klappt, zeigt die Karte wie früher ganz auf den Hausordner; die Zahl steht in der Schlussmeldung.
+  const _objO={};let _objFehl=0;
+  if(typeof _immoObjektOrdner==='function'&&typeof gdriveToken!=='undefined'&&gdriveToken){
+    if(_objImpAnlegen._laeuft){showToast('Die Anlage läuft noch – bitte kurz warten','info',4000);return;}
+    _objImpAnlegen._laeuft=true;
+    try{
+      showToast('📁 Richte „_Objekt“ in '+gew.length+' Hausordner(n) ein …','info',Math.min(60000,4000+gew.length*400));
+      for(let i=0;i<gew.length;i+=4){
+        await Promise.all(gew.slice(i,i+4).map(async function(x){
+          try{_objO[x.id]=(await _immoObjektOrdner(x.id)).id;}
+          catch(e){_objFehl++;console.warn('[IMMO] „_Objekt“ beim Import:',x.name,e);}
+        }));
+      }
+    }finally{_objImpAnlegen._laeuft=false;}
+  }
   gew.forEach(function(x){
     const url=base+x.id;
     /* b843: mit Straße, ohne Ort – „WEG {Objekt}" wird zu „WEG " + Straße und
@@ -63291,6 +63440,8 @@ async function _objImpAnlegen(){
       gdrive:url,gdriveOrdner:url,dokOrdner:url,emailOrdner:url,
       tags:[],source:"",links:[],attachments:[],aufgaben:[],turnusListe:[],notizVerlauf:[],fotos:[],checkliste:[],
       createdAt:new Date().toISOString()};
+    // Projektordner bleibt der Hausordner; die drei anderen Felder gehen auf „_Objekt“, wenn es eingerichtet ist.
+    if(_objO[x.id]){const _ou=base+_objO[x.id];t.gdrive=_ou;t.dokOrdner=_ou;t.emailOrdner=_ou;}
     boards[board].push(t);n++;
   });
   try{_auftragSpalteSicher(board);}catch(e){console.warn('[b904] Auftrags-Spalte:',e);showToast('⚠ Die Auftrags-Spalte am neuen Objekt-Board konnte nicht gesichert werden – bitte im Board prüfen','warning',7000);}
@@ -63306,7 +63457,7 @@ async function _objImpAnlegen(){
   _objImpSchliessen();
   try{render();}catch(e){}
   // b851: Was nebenbei ins Adressbuch ging, steht in der Meldung - sonst merkt es niemand.
-  showToast("✓ "+n+" Objekt(e) angelegt in „"+board+"“"+(_adrNeu?(" · "+_adrNeu+" Objektadresse(n) ins Adressbuch übernommen"):""),"success",_adrNeu?9000:6000);
+  showToast("✓ "+n+" Objekt(e) angelegt in „"+board+"“"+(_adrNeu?(" · "+_adrNeu+" Objektadresse(n) ins Adressbuch übernommen"):"")+(_objFehl?(" · ⚠ bei "+_objFehl+" Hausordner(n) ließ sich „_Objekt“ nicht einrichten – diese Karten zeigen ganz auf den Hausordner"):""),_objFehl?"warning":"success",_objFehl?12000:(_adrNeu?9000:6000));
 }
 function _objImpBoardWechsel(){
   const b=((document.getElementById("_objImpBoard")||{}).value)||"";
@@ -64682,6 +64833,8 @@ async function _vbsFindStammdaten(startFolderId){
     const jP=await rP.json();
     if(!jP.parents||!jP.parents[0])return null;
     const parentId=jP.parents[0];
+    // Neuer Platz zuerst: Hausordner › „_Objekt“ › „_Stammdaten“. Danach wie bisher direkt im Hausordner.
+    if(typeof _immoStammInObjekt==='function'){const neuId=await _immoStammInObjekt(parentId);if(neuId)return neuId;}
     const qS=encodeURIComponent("'"+parentId+"' in parents and (name='_Stammdaten' or name='Stammdaten') and mimeType='application/vnd.google-apps.folder' and trashed=false");
     const rS=await fetch('https://www.googleapis.com/drive/v3/files?q='+qS+'&fields=files(id,name)&spaces=drive&pageSize=5',
       {headers:{Authorization:'Bearer '+gdriveToken}});
@@ -79387,6 +79540,11 @@ async function _fdkStammblattOrdner(){
     if(!r.ok)return '';
     const eltern=((await r.json()).parents||[]);
     if(!eltern.length)return '';
+    // Neuer Platz zuerst: Hausordner › „_Objekt“ › „_Stammdaten“. Danach wie bisher neben dem Projektordner.
+    if(typeof _immoStammInObjekt==='function'){
+      const neuId=await _immoStammInObjekt(eltern[0]);
+      if(neuId){if(!_fdkState)return '';S.sbOrdnerId=neuId;S.sbAuto=true;return S.sbOrdnerId;}
+    }
     const l=await _dokDriveListe("'"+eltern[0]+"' in parents and name='_Stammdaten' and mimeType='application/vnd.google-apps.folder' and trashed=false");
     if(!l.length||!_fdkState)return '';
     S.sbOrdnerId=l[0].id;S.sbAuto=true;
