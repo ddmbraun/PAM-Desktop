@@ -10736,7 +10736,7 @@ function _pamGuestSubmit(){
 
 <script>
 // ── VERSION ── (bei jeder Änderung: PAM_BUILD erhöhen + sw.js CACHE_NAME synchron hochzählen)
-const PAM_BUILD = 'v2026-11-20 · #1302'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-11-20-b1302) – MERKE: bei jedem Build mit hochzählen!
+const PAM_BUILD = 'v2026-11-20 · #1303'; // sync mit sw.js CACHE_NAME (pam-desktop-2026-11-20-b1303) – MERKE: bei jedem Build mit hochzählen!
 // ══════════════════════════════════════════════════════════════════════════
 // ── NOTBETRIEB (b886) – Speicher-Weiche für den Helfer auf dem eigenen PC ──
 // Aktiv NUR, wenn die Seite vom Notbetriebs-Helfer (Ordner 32) auf 127.0.0.1
@@ -52531,7 +52531,7 @@ async function _objUmEinHaus(t,mitStamm){
 }
 // Was liegt heute im Hausordner? Nur die oberste Ebene, nur für die umstellbaren Karten, vier gleichzeitig.
 async function _objUmLageLaden(nur){
-  const offen=_objUmZeilen.filter(function(z){return z.art==='haus'&&z.haus&&(!nur||z.id===nur);});
+  const offen=_objUmZeilen.filter(function(z){return z.haus&&(z.art==='haus'||_objUmNachMoeglich(z))&&(!nur||z.id===nur);});
   for(let i=0;i<offen.length;i+=4){
     await Promise.all(offen.slice(i,i+4).map(async function(z){
       try{
@@ -52573,7 +52573,8 @@ function _objUmZeichnen(){
     }else if(z.art==='fertig'){
       unten=(z.prot&&z.prot.stand==='fertig')
         ?('✓ umgestellt'+(z.prot.am?' am '+esc(new Date(z.prot.am).toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})):'')
-          +(z.prot.stamm?' · „'+IMMO_STAMM_NAME+'“ mit verschoben':'')
+          +(z.prot.stamm?' · „'+IMMO_STAMM_NAME+'“ mit verschoben':((_objUmNachMoeglich(z)&&z.lage&&z.lage.stamm>0)?' · „'+IMMO_STAMM_NAME+'“ liegt noch im Hausordner':''))
+          +((_objUmNachMoeglich(z)&&z.lage&&z.lage.stamm>0)?' &nbsp;<button type="button" data-objumnach="'+esc(z.id)+'"'+(_objUmLaeuft?' disabled':'')+' onclick="_objUmNachziehen(\''+_jsa(z.id)+'\')" style="'+kn+'">„'+IMMO_STAMM_NAME+'“ nachziehen</button>':'')
           +' &nbsp;<button type="button" data-objumzur="'+esc(z.id)+'"'+(_objUmLaeuft?' disabled':'')+' onclick="_objUmZurueck(\''+_jsa(z.id)+'\')" style="'+kn+'">↩ zurückstellen</button>')
         :'✓ zeigt schon auf einen eigenen Ordner – wird nicht angefasst';
     }else if(z.art==='ohne')unten='– kein Projektordner eingetragen – wird nicht angefasst';
@@ -52621,7 +52622,7 @@ function _objUmOeffnen(){
     +'<label style="font-size:12px;color:var(--text);display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin-left:6px;"><input type="checkbox" id="_objUmStamm" style="width:15px;height:15px;margin:0;"> vorhandenen „'+IMMO_STAMM_NAME+'“ mit nach „'+IMMO_OBJEKT_NAME+'“ verschieben</label>'
     +'</div>'
     +'<div style="font-size:10px;color:var(--text2);margin-top:5px;line-height:1.5;">Ohne Haken bleibt „'+IMMO_STAMM_NAME+'“ im Hausordner; PAM findet das Stammblatt an beiden Plätzen. '
-    +'Mit Haken: Das Auftrags-Skript im Hausordner („Senden an“) sucht nur direkt im Hausordner – es schreibt dann „Stammblatt_Link: (noch offen)“ in die Akte.</div>'
+    +'Das Auftrags-Skript („Senden an“) findet ihn ebenfalls an beiden Plätzen. Bei einem schon umgestellten Haus lässt er sich in der Liste nachziehen.</div>'
     +'</div>'
     +'<div id="_objUmListe" style="flex:1;overflow-y:auto;min-height:80px;"></div>'
     +'<div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;">'
@@ -52704,6 +52705,59 @@ async function _objUmZurueck(id){
   try{render();}catch(err){}
   _objUmZeichnen();
   if(gut)_objUmLageLaden(id).catch(function(err){console.warn('[ObjUm] Lage lesen:',err);});
+}
+// Schon umgestelltes Haus, dessen „_Stammdaten“ laut Protokoll noch nicht mit umgezogen ist?
+function _objUmNachMoeglich(z){
+  return !!(z&&z.art==='fertig'&&z.prot&&z.prot.stand==='fertig'&&z.prot.haus&&z.prot.haus===z.haus&&z.prot.objekt&&!(z.prot.stamm&&z.prot.stamm.id));
+}
+// Bei einem schon umgestellten Haus den „_Stammdaten“-Ordner aus dem Hausordner nach „_Objekt“ holen.
+// ⛔ Nur dieser eine Ordner wird umgehängt; die Karte bleibt, wie sie ist. Der Rückweg steht im Merkzettel,
+//    BEVOR in Drive etwas geschieht – „↩ zurückstellen“ holt den Ordner wieder in den Hausordner.
+async function _objUmNachziehen(id){
+  if(_objUmLaeuft)return;
+  const z=_objUmZeilen.find(function(x){return x.id===id;});
+  const t=(typeof findTaskById==='function')?findTaskById(id):null;
+  const prot=_objUmProtLies();const e=prot[id];
+  if(!z||!t||!e||!e.haus||!e.objekt||e.stand!=='fertig'){showToast('⚠ Für diese Karte gibt es kein Protokoll – nichts verschoben','warning',7000);return;}
+  if(e.stamm&&e.stamm.id){showToast('„'+IMMO_STAMM_NAME+'“ ist bei diesem Haus schon verschoben','info',5000);return;}
+  if(_objUmFid(t.gdriveOrdner)!==e.haus||_objUmFid(t.gdrive)!==e.objekt||_objUmFid(t.dokOrdner)!==e.objekt||_objUmFid(t.emailOrdner)!==e.objekt){
+    showToast('⚠ Die Ordner dieser Karte wurden seither geändert – nichts verschoben','warning',8000);return;
+  }
+  if(typeof gdriveToken==='undefined'||!gdriveToken){showToast('⚠ Google Drive ist nicht verbunden','warning',6000);return;}
+  if(!confirm('„'+IMMO_STAMM_NAME+'“ von „'+String(t.title||'')+'“ nach „'+IMMO_OBJEKT_NAME+'“ verschieben?\n\n'
+    +'Der Ordner wird als Ganzes umgehängt, sein Inhalt bleibt. Es wird nichts gelöscht.\n'
+    +'Über „↩ zurückstellen“ kommt er wieder in den Hausordner.'))return;
+  _objUmLaeuft=true;
+  let gut=false;
+  try{
+    z.stand='„'+IMMO_STAMM_NAME+'“ wird verschoben …';z.meldung='';_objUmZeichnen();
+    const imHaus=(await _immoUnterordnerListe(e.haus)).filter(function(f){return _immoIstStammName(f.name);});
+    if(!imHaus.length)throw new Error('im Hausordner liegt kein „'+IMMO_STAMM_NAME+'“');
+    if(imHaus.length>1)throw new Error('im Hausordner liegen '+imHaus.length+' davon');
+    const drin=await _immoUnterordnerListe(e.objekt);
+    if(drin.some(function(f){return _immoIstStammName(f.name);}))throw new Error('in „'+IMMO_OBJEKT_NAME+'“ liegt schon einer');
+    const sid=imHaus[0].id;
+    e.stamm={id:sid,von:e.haus};
+    if(!_objUmProtSchreib(prot)){e.stamm=null;throw new Error('das Protokoll für den Rückweg ließ sich nicht schreiben');}
+    try{await _objUmVerschiebe(sid,e.haus,e.objekt);}
+    catch(err){
+      // Nur wenn Drive bestätigt, dass der Ordner NICHT in „_Objekt“ hängt, verschwindet der Rückweg wieder.
+      let dort=null;
+      try{dort=(await _immoUnterordnerListe(e.objekt)).some(function(f){return f.id===sid;});}catch(err2){}
+      if(dort===false){e.stamm=null;_objUmProtSchreib(prot);throw err;}
+      if(dort===null)throw new Error('unklar, ob verschoben wurde ('+((err&&err.message)||err)+') – Fenster schließen und neu öffnen');
+    }
+    z.prot=e;z.lage={objekt:true,stamm:0};
+    z.meldung='✓ „'+IMMO_STAMM_NAME+'“ nach „'+IMMO_OBJEKT_NAME+'“ verschoben';
+    gut=true;
+    try{await autoSave();}catch(err){console.warn('[ObjUm] Speichern:',err);}
+  }catch(err){
+    z.meldung='⚠ nicht verschoben: '+((err&&err.message)||err);
+    console.warn('[ObjUm] nachziehen:',z.titel,err);
+  }finally{_objUmLaeuft=false;z.stand='';}
+  try{pushToSync();}catch(err){}
+  _objUmZeichnen();
+  showToast(gut?'✓ „'+IMMO_STAMM_NAME+'“ nach „'+IMMO_OBJEKT_NAME+'“ verschoben':'⚠ Nicht verschoben – Grund steht in der Liste',gut?'success':'warning',gut?6000:10000);
 }
 // Den gewählten vorhandenen Ordner eintragen – alle vier Felder, genau wie beim neu angelegten Ordner.
 function _immoOrdnerUebernehmen(f){
